@@ -76,6 +76,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     color picker APIs now use `ColorPickerFlags`, and color button APIs now use
     `ColorButtonFlags`. Migrate picker-only flags such as `NO_SIDE_PREVIEW` to
     `ColorPickerFlags`, and button-only flags such as `NO_BORDER` to `ColorButtonFlags`.
+  - Input widget flags are split by call-site domain: single-line text inputs keep
+    `InputTextFlags`, multiline text inputs now use `InputTextMultilineFlags`, and numeric
+    input/scalar builders now use `InputScalarFlags`. The resize callback bit is crate-owned
+    plumbing and is no longer accepted as a public input flag.
   - `StateStorageToken` now carries both the active `Ui` lifetime and the pushed storage lifetime.
 - Extensions
   - `dear-file-browser` scan request/batch/status generations now use `ScanGeneration`,

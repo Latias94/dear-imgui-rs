@@ -1,55 +1,44 @@
-use crate::InputTextFlags;
+use crate::{InputScalarFlags, InputTextFlags, InputTextMultilineFlags};
 
-pub(in crate::widget::input) fn validate_input_text_flags(
-    caller: &str,
-    flags: InputTextFlags,
-    multiline: bool,
-) {
-    let unsupported = flags.bits() & !InputTextFlags::all().bits();
+fn assert_no_unsupported_bits(caller: &str, ty: &str, bits: i32, all: i32) {
+    let unsupported = bits & !all;
     assert!(
         unsupported == 0,
-        "{caller} received unsupported ImGuiInputTextFlags bits: 0x{unsupported:X}"
+        "{caller} received unsupported {ty} bits: 0x{unsupported:X}"
+    );
+}
+
+pub(in crate::widget::input) fn validate_input_text_flags(caller: &str, flags: InputTextFlags) {
+    assert_no_unsupported_bits(
+        caller,
+        "InputTextFlags",
+        flags.bits(),
+        InputTextFlags::all().bits(),
     );
     assert!(
         !flags.contains(InputTextFlags::CALLBACK_COMPLETION)
             || !flags.contains(InputTextFlags::ALLOW_TAB_INPUT),
         "{caller} cannot combine CALLBACK_COMPLETION with ALLOW_TAB_INPUT"
     );
-    assert!(
-        !flags.contains(InputTextFlags::WORD_WRAP) || !flags.contains(InputTextFlags::PASSWORD),
-        "{caller} cannot combine WORD_WRAP with PASSWORD"
-    );
-    if multiline {
-        assert!(
-            !flags.contains(InputTextFlags::CALLBACK_HISTORY),
-            "{caller} cannot combine CALLBACK_HISTORY with multiline inputs"
-        );
-        assert!(
-            !flags.contains(InputTextFlags::ELIDE_LEFT),
-            "{caller} cannot combine ELIDE_LEFT with multiline inputs"
-        );
-    } else {
-        assert!(
-            !flags.contains(InputTextFlags::WORD_WRAP),
-            "{caller} cannot use WORD_WRAP with single-line inputs"
-        );
-    }
 }
 
-pub(in crate::widget::input) fn validate_input_scalar_flags(caller: &str, flags: InputTextFlags) {
-    validate_input_text_flags(caller, flags, false);
-    assert!(
-        !flags.contains(InputTextFlags::ENTER_RETURNS_TRUE),
-        "{caller} does not support ENTER_RETURNS_TRUE"
+pub(in crate::widget::input) fn validate_input_multiline_flags(
+    caller: &str,
+    flags: InputTextMultilineFlags,
+) {
+    assert_no_unsupported_bits(
+        caller,
+        "InputTextMultilineFlags",
+        flags.bits(),
+        InputTextMultilineFlags::all().bits(),
     );
-    let callback_flags = InputTextFlags::CALLBACK_COMPLETION
-        | InputTextFlags::CALLBACK_HISTORY
-        | InputTextFlags::CALLBACK_ALWAYS
-        | InputTextFlags::CALLBACK_CHAR_FILTER
-        | InputTextFlags::CALLBACK_RESIZE
-        | InputTextFlags::CALLBACK_EDIT;
-    assert!(
-        !flags.intersects(callback_flags),
-        "{caller} does not support input text callback flags"
+}
+
+pub(in crate::widget::input) fn validate_input_scalar_flags(caller: &str, flags: InputScalarFlags) {
+    assert_no_unsupported_bits(
+        caller,
+        "InputScalarFlags",
+        flags.bits(),
+        InputScalarFlags::all().bits(),
     );
 }

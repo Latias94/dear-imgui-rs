@@ -24,4 +24,4 @@ pub use shortcut::{
     InputFlags, ItemKeyOwnerFlags, NextItemShortcutFlags, NextItemShortcutOptions, ShortcutFlags,
     ShortcutGlobalRouteFlags, ShortcutOptions, ShortcutRoute,
 };
-pub use text_flags::InputTextFlags;
+pub use text_flags::{InputScalarFlags, InputTextFlags, InputTextMultilineFlags};

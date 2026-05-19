@@ -1,5 +1,5 @@
 use super::validation::validate_input_scalar_flags;
-use crate::InputTextFlags;
+use crate::InputScalarFlags;
 use crate::internal::{DataTypeKind, component_count_i32};
 use crate::sys;
 use crate::ui::Ui;
@@ -15,7 +15,7 @@ pub struct InputInt<'ui> {
     label: Cow<'ui, str>,
     step: i32,
     step_fast: i32,
-    flags: InputTextFlags,
+    flags: InputScalarFlags,
 }
 
 impl<'ui> InputInt<'ui> {
@@ -26,7 +26,7 @@ impl<'ui> InputInt<'ui> {
             label: label.into(),
             step: 1,
             step_fast: 100,
-            flags: InputTextFlags::NONE,
+            flags: InputScalarFlags::NONE,
         }
     }
 
@@ -43,7 +43,7 @@ impl<'ui> InputInt<'ui> {
     }
 
     /// Sets the flags for the input
-    pub fn flags(mut self, flags: InputTextFlags) -> Self {
+    pub fn flags(mut self, flags: InputScalarFlags) -> Self {
         self.flags = flags;
         self
     }
@@ -73,7 +73,7 @@ pub struct InputFloat<'ui> {
     step: f32,
     step_fast: f32,
     format: Option<Cow<'ui, str>>,
-    flags: InputTextFlags,
+    flags: InputScalarFlags,
 }
 
 impl<'ui> InputFloat<'ui> {
@@ -85,7 +85,7 @@ impl<'ui> InputFloat<'ui> {
             step: 0.0,
             step_fast: 0.0,
             format: None,
-            flags: InputTextFlags::NONE,
+            flags: InputScalarFlags::NONE,
         }
     }
 
@@ -108,7 +108,7 @@ impl<'ui> InputFloat<'ui> {
     }
 
     /// Sets the flags for the input
-    pub fn flags(mut self, flags: InputTextFlags) -> Self {
+    pub fn flags(mut self, flags: InputScalarFlags) -> Self {
         self.flags = flags;
         self
     }
@@ -141,7 +141,7 @@ pub struct InputDouble<'ui> {
     step: f64,
     step_fast: f64,
     format: Option<Cow<'ui, str>>,
-    flags: InputTextFlags,
+    flags: InputScalarFlags,
 }
 
 impl<'ui> InputDouble<'ui> {
@@ -153,7 +153,7 @@ impl<'ui> InputDouble<'ui> {
             step: 0.0,
             step_fast: 0.0,
             format: None,
-            flags: InputTextFlags::NONE,
+            flags: InputScalarFlags::NONE,
         }
     }
 
@@ -176,7 +176,7 @@ impl<'ui> InputDouble<'ui> {
     }
 
     /// Sets the flags for the input
-    pub fn flags(mut self, flags: InputTextFlags) -> Self {
+    pub fn flags(mut self, flags: InputScalarFlags) -> Self {
         self.flags = flags;
         self
     }
@@ -208,7 +208,7 @@ pub struct InputScalar<'ui, 'p, T, L, F = &'static str> {
     step: Option<T>,
     step_fast: Option<T>,
     display_format: Option<F>,
-    flags: InputTextFlags,
+    flags: InputScalarFlags,
     ui: &'ui Ui,
 }
 
@@ -222,7 +222,7 @@ impl<'ui, 'p, L: AsRef<str>, T: DataTypeKind> InputScalar<'ui, 'p, T, L> {
             step: None,
             step_fast: None,
             display_format: None,
-            flags: InputTextFlags::empty(),
+            flags: InputScalarFlags::empty(),
             ui,
         }
     }
@@ -261,7 +261,7 @@ impl<'ui, 'p, L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> InputScalar<'ui, 'p
 
     /// Sets the input text flags
     #[inline]
-    pub fn flags(mut self, flags: InputTextFlags) -> Self {
+    pub fn flags(mut self, flags: InputScalarFlags) -> Self {
         self.flags = flags;
         self
     }
@@ -303,7 +303,7 @@ pub struct InputScalarN<'ui, 'p, T, L, F = &'static str> {
     step: Option<T>,
     step_fast: Option<T>,
     display_format: Option<F>,
-    flags: InputTextFlags,
+    flags: InputScalarFlags,
     ui: &'ui Ui,
 }
 
@@ -317,7 +317,7 @@ impl<'ui, 'p, L: AsRef<str>, T: DataTypeKind> InputScalarN<'ui, 'p, T, L> {
             step: None,
             step_fast: None,
             display_format: None,
-            flags: InputTextFlags::empty(),
+            flags: InputScalarFlags::empty(),
             ui,
         }
     }
@@ -356,7 +356,7 @@ impl<'ui, 'p, L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> InputScalarN<'ui, '
 
     /// Sets the input text flags
     #[inline]
-    pub fn flags(mut self, flags: InputTextFlags) -> Self {
+    pub fn flags(mut self, flags: InputScalarFlags) -> Self {
         self.flags = flags;
         self
     }
@@ -398,7 +398,7 @@ pub struct InputFloat2<'ui, 'p, L, F = &'static str> {
     label: L,
     value: &'p mut [f32; 2],
     display_format: Option<F>,
-    flags: InputTextFlags,
+    flags: InputScalarFlags,
     ui: &'ui Ui,
 }
 
@@ -410,7 +410,7 @@ impl<'ui, 'p, L: AsRef<str>> InputFloat2<'ui, 'p, L> {
             label,
             value,
             display_format: None,
-            flags: InputTextFlags::empty(),
+            flags: InputScalarFlags::empty(),
             ui,
         }
     }
@@ -430,7 +430,7 @@ impl<'ui, 'p, L: AsRef<str>, F: AsRef<str>> InputFloat2<'ui, 'p, L, F> {
 
     /// Sets the input text flags
     #[inline]
-    pub fn flags(mut self, flags: InputTextFlags) -> Self {
+    pub fn flags(mut self, flags: InputScalarFlags) -> Self {
         self.flags = flags;
         self
     }
@@ -456,7 +456,7 @@ pub struct InputFloat3<'ui, 'p, L, F = &'static str> {
     label: L,
     value: &'p mut [f32; 3],
     display_format: Option<F>,
-    flags: InputTextFlags,
+    flags: InputScalarFlags,
     ui: &'ui Ui,
 }
 
@@ -468,7 +468,7 @@ impl<'ui, 'p, L: AsRef<str>> InputFloat3<'ui, 'p, L> {
             label,
             value,
             display_format: None,
-            flags: InputTextFlags::empty(),
+            flags: InputScalarFlags::empty(),
             ui,
         }
     }
@@ -488,7 +488,7 @@ impl<'ui, 'p, L: AsRef<str>, F: AsRef<str>> InputFloat3<'ui, 'p, L, F> {
 
     /// Sets the input text flags
     #[inline]
-    pub fn flags(mut self, flags: InputTextFlags) -> Self {
+    pub fn flags(mut self, flags: InputScalarFlags) -> Self {
         self.flags = flags;
         self
     }
@@ -514,7 +514,7 @@ pub struct InputFloat4<'ui, 'p, L, F = &'static str> {
     label: L,
     value: &'p mut [f32; 4],
     display_format: Option<F>,
-    flags: InputTextFlags,
+    flags: InputScalarFlags,
     ui: &'ui Ui,
 }
 
@@ -526,7 +526,7 @@ impl<'ui, 'p, L: AsRef<str>> InputFloat4<'ui, 'p, L> {
             label,
             value,
             display_format: None,
-            flags: InputTextFlags::empty(),
+            flags: InputScalarFlags::empty(),
             ui,
         }
     }
@@ -546,7 +546,7 @@ impl<'ui, 'p, L: AsRef<str>, F: AsRef<str>> InputFloat4<'ui, 'p, L, F> {
 
     /// Sets the input text flags
     #[inline]
-    pub fn flags(mut self, flags: InputTextFlags) -> Self {
+    pub fn flags(mut self, flags: InputScalarFlags) -> Self {
         self.flags = flags;
         self
     }
@@ -571,7 +571,7 @@ impl<'ui, 'p, L: AsRef<str>, F: AsRef<str>> InputFloat4<'ui, 'p, L, F> {
 pub struct InputInt2<'ui, 'p, L> {
     label: L,
     value: &'p mut [i32; 2],
-    flags: InputTextFlags,
+    flags: InputScalarFlags,
     ui: &'ui Ui,
 }
 
@@ -582,14 +582,14 @@ impl<'ui, 'p, L: AsRef<str>> InputInt2<'ui, 'p, L> {
         InputInt2 {
             label,
             value,
-            flags: InputTextFlags::empty(),
+            flags: InputScalarFlags::empty(),
             ui,
         }
     }
 
     /// Sets the input text flags
     #[inline]
-    pub fn flags(mut self, flags: InputTextFlags) -> Self {
+    pub fn flags(mut self, flags: InputScalarFlags) -> Self {
         self.flags = flags;
         self
     }
@@ -612,7 +612,7 @@ impl<'ui, 'p, L: AsRef<str>> InputInt2<'ui, 'p, L> {
 pub struct InputInt3<'ui, 'p, L> {
     label: L,
     value: &'p mut [i32; 3],
-    flags: InputTextFlags,
+    flags: InputScalarFlags,
     ui: &'ui Ui,
 }
 
@@ -623,14 +623,14 @@ impl<'ui, 'p, L: AsRef<str>> InputInt3<'ui, 'p, L> {
         InputInt3 {
             label,
             value,
-            flags: InputTextFlags::empty(),
+            flags: InputScalarFlags::empty(),
             ui,
         }
     }
 
     /// Sets the input text flags
     #[inline]
-    pub fn flags(mut self, flags: InputTextFlags) -> Self {
+    pub fn flags(mut self, flags: InputScalarFlags) -> Self {
         self.flags = flags;
         self
     }
@@ -653,7 +653,7 @@ impl<'ui, 'p, L: AsRef<str>> InputInt3<'ui, 'p, L> {
 pub struct InputInt4<'ui, 'p, L> {
     label: L,
     value: &'p mut [i32; 4],
-    flags: InputTextFlags,
+    flags: InputScalarFlags,
     ui: &'ui Ui,
 }
 
@@ -664,14 +664,14 @@ impl<'ui, 'p, L: AsRef<str>> InputInt4<'ui, 'p, L> {
         InputInt4 {
             label,
             value,
-            flags: InputTextFlags::empty(),
+            flags: InputScalarFlags::empty(),
             ui,
         }
     }
 
     /// Sets the input text flags
     #[inline]
-    pub fn flags(mut self, flags: InputTextFlags) -> Self {
+    pub fn flags(mut self, flags: InputScalarFlags) -> Self {
         self.flags = flags;
         self
     }

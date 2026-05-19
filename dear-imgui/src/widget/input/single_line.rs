@@ -125,15 +125,15 @@ impl<'ui, 'p, L: AsRef<str>, H: AsRef<str>, T> InputTextImStr<'ui, 'p, L, H, T> 
             0
         }
 
-        let flags = self.flags | InputTextFlags::CALLBACK_RESIZE;
-        validate_input_text_flags("InputTextImStr::build()", flags, false);
+        validate_input_text_flags("InputTextImStr::build()", self.flags);
+        let flags = self.flags.raw() | sys::ImGuiInputTextFlags_CallbackResize as i32;
         let result = unsafe {
             if hint_ptr.is_null() {
                 sys::igInputText(
                     label_ptr,
                     buf_ptr,
                     buf_size,
-                    flags.raw(),
+                    flags,
                     Some(resize_cb_imstr),
                     user_ptr,
                 )
@@ -143,7 +143,7 @@ impl<'ui, 'p, L: AsRef<str>, H: AsRef<str>, T> InputTextImStr<'ui, 'p, L, H, T> 
                     hint_ptr,
                     buf_ptr,
                     buf_size,
-                    flags.raw(),
+                    flags,
                     Some(resize_cb_imstr),
                     user_ptr,
                 )
@@ -216,7 +216,7 @@ impl<'ui, 'p, L, H, T> InputText<'ui, 'p, L, H, T> {
 
     /// Sets callback flags for the input text
     pub fn callback_flags(mut self, callback_flags: InputTextCallback) -> Self {
-        self.flags |= InputTextFlags::from_bits_truncate(callback_flags.bits() as i32);
+        self.flags |= InputTextFlags::from_bits_retain(callback_flags.bits() as i32);
         self
     }
 
@@ -311,20 +311,19 @@ where
                     return 0;
                 }
 
-                let event_flag =
-                    unsafe { InputTextFlags::from_bits_truncate((*data).EventFlag as i32) };
+                let event_flag = unsafe { (*data).EventFlag as i32 };
                 match event_flag {
-                    InputTextFlags::CALLBACK_RESIZE => unsafe {
+                    value if value == sys::ImGuiInputTextFlags_CallbackResize as i32 => unsafe {
                         let buffer = &mut *user.buffer;
                         debug_assert_eq!(buffer.as_ptr() as *const _, (*data).Buf);
                         resize_string_input_buffer(buffer, (*data).BufSize, data)
                     },
-                    InputTextFlags::CALLBACK_COMPLETION => {
+                    value if value == InputTextFlags::CALLBACK_COMPLETION.bits() => {
                         let info = unsafe { TextCallbackData::new(data) };
                         user.handler.on_completion(info);
                         0
                     }
-                    InputTextFlags::CALLBACK_HISTORY => {
+                    value if value == InputTextFlags::CALLBACK_HISTORY.bits() => {
                         let key = unsafe { (*data).EventKey };
                         let dir = if key == sys::ImGuiKey_UpArrow {
                             HistoryDirection::Up
@@ -335,17 +334,17 @@ where
                         user.handler.on_history(dir, info);
                         0
                     }
-                    InputTextFlags::CALLBACK_ALWAYS => {
+                    value if value == InputTextFlags::CALLBACK_ALWAYS.bits() => {
                         let info = unsafe { TextCallbackData::new(data) };
                         user.handler.on_always(info);
                         0
                     }
-                    InputTextFlags::CALLBACK_EDIT => {
+                    value if value == InputTextFlags::CALLBACK_EDIT.bits() => {
                         let info = unsafe { TextCallbackData::new(data) };
                         user.handler.on_edit(info);
                         0
                     }
-                    InputTextFlags::CALLBACK_CHAR_FILTER => {
+                    value if value == InputTextFlags::CALLBACK_CHAR_FILTER.bits() => {
                         let ch = unsafe {
                             std::char::from_u32((*data).EventChar as u32).unwrap_or('\0')
                         };
@@ -375,15 +374,15 @@ where
         };
         let user_ptr = &mut user_data as *mut _ as *mut c_void;
 
-        let flags = self.flags | InputTextFlags::CALLBACK_RESIZE;
-        validate_input_text_flags("InputText::build()", flags, false);
+        validate_input_text_flags("InputText::build()", self.flags);
+        let flags = self.flags.raw() | sys::ImGuiInputTextFlags_CallbackResize as i32;
         let result = unsafe {
             if hint_ptr.is_null() {
                 sys::igInputText(
                     label_ptr,
                     buf_ptr,
                     capacity,
-                    flags.raw(),
+                    flags,
                     Some(callback_router::<T>),
                     user_ptr,
                 )
@@ -393,7 +392,7 @@ where
                     hint_ptr,
                     buf_ptr,
                     capacity,
-                    flags.raw(),
+                    flags,
                     Some(callback_router::<T>),
                     user_ptr,
                 )

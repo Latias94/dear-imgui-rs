@@ -4,8 +4,8 @@ use super::buffers::{
 use super::callbacks::{
     HistoryDirection, InputTextCallback, InputTextCallbackHandler, TextCallbackData,
 };
-use super::validation::validate_input_text_flags;
-use crate::InputTextFlags;
+use super::validation::validate_input_multiline_flags;
+use crate::InputTextMultilineFlags;
 use crate::string::ImString;
 use crate::sys;
 use crate::ui::Ui;
@@ -20,7 +20,7 @@ pub struct InputTextMultiline<'ui, 'p> {
     label: Cow<'ui, str>,
     buf: &'p mut String,
     size: [f32; 2],
-    flags: InputTextFlags,
+    flags: InputTextMultilineFlags,
     capacity_hint: Option<usize>,
 }
 
@@ -32,7 +32,7 @@ pub struct InputTextMultilineImStr<'ui, 'p> {
     label: Cow<'ui, str>,
     buf: &'p mut ImString,
     size: [f32; 2],
-    flags: InputTextFlags,
+    flags: InputTextMultilineFlags,
 }
 
 impl<'ui, 'p> InputTextMultilineImStr<'ui, 'p> {
@@ -47,15 +47,15 @@ impl<'ui, 'p> InputTextMultilineImStr<'ui, 'p> {
             label: label.into(),
             buf,
             size: size.into(),
-            flags: InputTextFlags::NONE,
+            flags: InputTextMultilineFlags::NONE,
         }
     }
-    pub fn flags(mut self, flags: InputTextFlags) -> Self {
+    pub fn flags(mut self, flags: InputTextMultilineFlags) -> Self {
         self.flags = flags;
         self
     }
     pub fn read_only(mut self, v: bool) -> Self {
-        self.flags.set(InputTextFlags::READ_ONLY, v);
+        self.flags.set(InputTextMultilineFlags::READ_ONLY, v);
         self
     }
     pub fn build(self) -> bool {
@@ -95,15 +95,15 @@ impl<'ui, 'p> InputTextMultilineImStr<'ui, 'p> {
             0
         }
 
-        let flags = self.flags | InputTextFlags::CALLBACK_RESIZE;
-        validate_input_text_flags("InputTextMultilineImStr::build()", flags, true);
+        validate_input_multiline_flags("InputTextMultilineImStr::build()", self.flags);
+        let flags = self.flags.raw() | sys::ImGuiInputTextFlags_CallbackResize as i32;
         let result = unsafe {
             sys::igInputTextMultiline(
                 label_ptr,
                 buf_ptr,
                 buf_size,
                 size_vec,
-                flags.raw(),
+                flags,
                 Some(resize_cb_imstr),
                 user_ptr,
             )
@@ -126,13 +126,13 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
             label: label.into(),
             buf,
             size: size.into(),
-            flags: InputTextFlags::NONE,
+            flags: InputTextMultilineFlags::NONE,
             capacity_hint: None,
         }
     }
 
     /// Sets the flags for the input
-    pub fn flags(mut self, flags: InputTextFlags) -> Self {
+    pub fn flags(mut self, flags: InputTextMultilineFlags) -> Self {
         self.flags = flags;
         self
     }
@@ -145,7 +145,8 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
 
     /// Makes the input read-only
     pub fn read_only(mut self, read_only: bool) -> Self {
-        self.flags.set(InputTextFlags::READ_ONLY, read_only);
+        self.flags
+            .set(InputTextMultilineFlags::READ_ONLY, read_only);
         self
     }
 
@@ -168,9 +169,9 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
             }
 
             let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
-                let event_flag = InputTextFlags::from_bits_truncate((*data).EventFlag as i32);
+                let event_flag = (*data).EventFlag as i32;
                 match event_flag {
-                    InputTextFlags::CALLBACK_RESIZE => {
+                    value if value == sys::ImGuiInputTextFlags_CallbackResize as i32 => {
                         let user_ptr = (*data).UserData as *mut UserData;
                         if user_ptr.is_null() {
                             return 0;
@@ -203,15 +204,15 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
         let user_ptr = &mut user_data as *mut _ as *mut c_void;
 
         let size_vec: sys::ImVec2 = self.size.into();
-        let flags = self.flags | InputTextFlags::CALLBACK_RESIZE;
-        validate_input_text_flags("InputTextMultiline::build()", flags, true);
+        validate_input_multiline_flags("InputTextMultiline::build()", self.flags);
+        let flags = self.flags.raw() | sys::ImGuiInputTextFlags_CallbackResize as i32;
         let result = unsafe {
             sys::igInputTextMultiline(
                 label_ptr,
                 buf_ptr,
                 capacity,
                 size_vec,
-                flags.raw(),
+                flags,
                 Some(callback_router),
                 user_ptr,
             )
@@ -230,13 +231,19 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
         // Note: ImGui forbids CallbackHistory/Completion with Multiline.
         // We intentionally do NOT enable them here to avoid assertions.
         if callbacks.contains(InputTextCallback::ALWAYS) {
-            self.flags.insert(InputTextFlags::CALLBACK_ALWAYS);
+            self.flags |= InputTextMultilineFlags::from_bits_retain(
+                sys::ImGuiInputTextFlags_CallbackAlways as i32,
+            );
         }
         if callbacks.contains(InputTextCallback::CHAR_FILTER) {
-            self.flags.insert(InputTextFlags::CALLBACK_CHAR_FILTER);
+            self.flags |= InputTextMultilineFlags::from_bits_retain(
+                sys::ImGuiInputTextFlags_CallbackCharFilter as i32,
+            );
         }
         if callbacks.contains(InputTextCallback::EDIT) {
-            self.flags.insert(InputTextFlags::CALLBACK_EDIT);
+            self.flags |= InputTextMultilineFlags::from_bits_retain(
+                sys::ImGuiInputTextFlags_CallbackEdit as i32,
+            );
         }
 
         InputTextMultilineWithCb {
@@ -257,7 +264,7 @@ pub struct InputTextMultilineWithCb<'ui, 'p, T> {
     label: Cow<'ui, str>,
     buf: &'p mut String,
     size: [f32; 2],
-    flags: InputTextFlags,
+    flags: InputTextMultilineFlags,
     capacity_hint: Option<usize>,
     handler: T,
 }
@@ -293,20 +300,19 @@ impl<'ui, 'p, T: InputTextCallbackHandler> InputTextMultilineWithCb<'ui, 'p, T> 
                     return 0;
                 }
 
-                let event_flag =
-                    unsafe { InputTextFlags::from_bits_truncate((*data).EventFlag as i32) };
+                let event_flag = unsafe { (*data).EventFlag as i32 };
                 match event_flag {
-                    InputTextFlags::CALLBACK_RESIZE => unsafe {
+                    value if value == sys::ImGuiInputTextFlags_CallbackResize as i32 => unsafe {
                         let buffer = &mut *user.buffer;
                         debug_assert_eq!(buffer.as_ptr() as *const _, (*data).Buf);
                         resize_string_input_buffer(buffer, (*data).BufSize, data)
                     },
-                    InputTextFlags::CALLBACK_COMPLETION => {
+                    value if value == sys::ImGuiInputTextFlags_CallbackCompletion as i32 => {
                         let info = unsafe { TextCallbackData::new(data) };
                         user.handler.on_completion(info);
                         0
                     }
-                    InputTextFlags::CALLBACK_HISTORY => {
+                    value if value == sys::ImGuiInputTextFlags_CallbackHistory as i32 => {
                         let key = unsafe { (*data).EventKey };
                         let dir = if key == sys::ImGuiKey_UpArrow {
                             HistoryDirection::Up
@@ -317,17 +323,17 @@ impl<'ui, 'p, T: InputTextCallbackHandler> InputTextMultilineWithCb<'ui, 'p, T> 
                         user.handler.on_history(dir, info);
                         0
                     }
-                    InputTextFlags::CALLBACK_ALWAYS => {
+                    value if value == InputTextMultilineFlags::CALLBACK_ALWAYS.bits() => {
                         let info = unsafe { TextCallbackData::new(data) };
                         user.handler.on_always(info);
                         0
                     }
-                    InputTextFlags::CALLBACK_EDIT => {
+                    value if value == InputTextMultilineFlags::CALLBACK_EDIT.bits() => {
                         let info = unsafe { TextCallbackData::new(data) };
                         user.handler.on_edit(info);
                         0
                     }
-                    InputTextFlags::CALLBACK_CHAR_FILTER => {
+                    value if value == InputTextMultilineFlags::CALLBACK_CHAR_FILTER.bits() => {
                         let ch = unsafe {
                             std::char::from_u32((*data).EventChar as u32).unwrap_or('\0')
                         };
@@ -358,15 +364,15 @@ impl<'ui, 'p, T: InputTextCallbackHandler> InputTextMultilineWithCb<'ui, 'p, T> 
         let user_ptr = &mut user_data as *mut _ as *mut c_void;
 
         let size_vec: sys::ImVec2 = self.size.into();
-        let flags = self.flags | InputTextFlags::CALLBACK_RESIZE;
-        validate_input_text_flags("InputTextMultilineWithCb::build()", flags, true);
+        validate_input_multiline_flags("InputTextMultilineWithCb::build()", self.flags);
+        let flags = self.flags.raw() | sys::ImGuiInputTextFlags_CallbackResize as i32;
         let result = unsafe {
             sys::igInputTextMultiline(
                 label_ptr,
                 buf_ptr,
                 capacity,
                 size_vec,
-                flags.raw(),
+                flags,
                 Some(callback_router::<T>),
                 user_ptr,
             )

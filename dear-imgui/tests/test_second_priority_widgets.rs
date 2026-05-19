@@ -16,6 +16,8 @@ fn test_api_types_exist() {
 
     // Input text flags
     let _flags = InputTextFlags::READ_ONLY | InputTextFlags::PASSWORD;
+    let _multiline_flags = InputTextMultilineFlags::READ_ONLY | InputTextMultilineFlags::WORD_WRAP;
+    let _scalar_flags = InputScalarFlags::READ_ONLY | InputScalarFlags::PARSE_EMPTY_REF_VAL;
 
     // Popup flags
     let _popup_flags = PopupFlags::NO_OPEN_OVER_EXISTING_POPUP;
