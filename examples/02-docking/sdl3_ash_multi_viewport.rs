@@ -880,11 +880,7 @@ impl App {
         let tex_w: u32 = 128;
         let tex_h: u32 = 128;
         let mut img_tex = dear_imgui_rs::texture::TextureData::new();
-        img_tex.create(
-            dear_imgui_rs::texture::TextureFormat::RGBA32,
-            tex_w as i32,
-            tex_h as i32,
-        );
+        img_tex.create(dear_imgui_rs::texture::TextureFormat::RGBA32, tex_w, tex_h);
         let mut pixels = vec![0u8; (tex_w * tex_h * 4) as usize];
         for y in 0..tex_h {
             for x in 0..tex_w {

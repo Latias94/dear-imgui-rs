@@ -85,6 +85,7 @@ pub fn default_surface_config(
 }
 
 /// Update and reconfigure the surface when the window size changes.
+#[allow(dead_code)]
 pub fn reconfigure_surface(
     surface: &wgpu::Surface<'static>,
     device: &wgpu::Device,

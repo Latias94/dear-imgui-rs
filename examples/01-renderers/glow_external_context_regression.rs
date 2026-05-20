@@ -145,8 +145,8 @@ impl AppWindow {
         let mut managed_texture = OwnedTextureData::new();
         managed_texture.create(
             dear_imgui_rs::texture::TextureFormat::RGBA32,
-            TEXTURE_WIDTH as i32,
-            TEXTURE_HEIGHT as i32,
+            TEXTURE_WIDTH,
+            TEXTURE_HEIGHT,
         );
         fill_texture_pixels(&mut managed_texture, 0);
         managed_texture.set_status(TextureStatus::WantCreate);

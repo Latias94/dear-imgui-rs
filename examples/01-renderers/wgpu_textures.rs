@@ -18,6 +18,7 @@ use winit::{
 
 struct ImguiState {
     // Ensure registered textures are unregistered before the ImGui context is destroyed.
+    #[allow(dead_code)]
     registered_user_textures: Vec<dear_imgui_rs::RegisteredUserTexture>,
     context: Context,
     platform: WinitPlatform,
@@ -109,11 +110,7 @@ impl AppWindow {
         let tex_w: u32 = 128;
         let tex_h: u32 = 128;
         let mut img_tex = dear_imgui_rs::texture::TextureData::new();
-        img_tex.create(
-            dear_imgui_rs::texture::TextureFormat::RGBA32,
-            tex_w as i32,
-            tex_h as i32,
-        );
+        img_tex.create(dear_imgui_rs::texture::TextureFormat::RGBA32, tex_w, tex_h);
 
         // Seed pixels (gradient)
         let mut pixels = vec![0u8; (tex_w * tex_h * 4) as usize];
@@ -196,11 +193,7 @@ impl AppWindow {
                     let (w, h) = rgba.dimensions();
                     let data = rgba.into_raw();
                     let mut t = dear_imgui_rs::texture::TextureData::new();
-                    t.create(
-                        dear_imgui_rs::texture::TextureFormat::RGBA32,
-                        w as i32,
-                        h as i32,
-                    );
+                    t.create(dear_imgui_rs::texture::TextureFormat::RGBA32, w, h);
                     t.set_data(&data);
                     println!("Loaded image for WGPU demo from {:?} ({}x{})", path, w, h);
                     Some(t)
