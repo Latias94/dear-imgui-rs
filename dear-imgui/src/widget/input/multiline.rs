@@ -1,16 +1,16 @@
-use super::buffers::{
-    finish_string_input_buffer, make_string_input_buffer, resize_string_input_buffer,
+use super::buffers::{finish_string_input_buffer, make_string_input_buffer};
+use super::callback_bridge::{
+    StringCallbackState, StringResizeCallbackState, im_string_multiline_resize_callback,
+    string_multiline_callback_router, string_multiline_resize_callback,
 };
-use super::callbacks::{
-    HistoryDirection, InputTextCallback, InputTextCallbackHandler, TextCallbackData,
-};
+use super::callbacks::{InputTextCallback, InputTextCallbackHandler};
 use super::validation::validate_input_multiline_flags;
 use crate::InputTextMultilineFlags;
 use crate::string::ImString;
 use crate::sys;
 use crate::ui::Ui;
 use std::borrow::Cow;
-use std::ffi::{c_int, c_void};
+use std::ffi::c_void;
 
 /// Builder for multiline text input widget
 #[derive(Debug)]
@@ -66,35 +66,6 @@ impl<'ui, 'p> InputTextMultilineImStr<'ui, 'p> {
         let user_ptr = self.buf as *mut ImString as *mut c_void;
         let size_vec: sys::ImVec2 = self.size.into();
 
-        extern "C" fn resize_cb_imstr(data: *mut sys::ImGuiInputTextCallbackData) -> c_int {
-            if data.is_null() {
-                return 0;
-            }
-            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
-                if ((*data).EventFlag as i32) == (sys::ImGuiInputTextFlags_CallbackResize as i32) {
-                    let user_data = (*data).UserData as *mut ImString;
-                    if user_data.is_null() {
-                        return;
-                    }
-
-                    let im = &mut *user_data;
-                    let requested_i32 = (*data).BufSize;
-                    if requested_i32 < 0 {
-                        return;
-                    }
-                    let requested = requested_i32 as usize;
-                    im.ensure_buf_size(requested);
-                    (*data).Buf = im.as_mut_ptr();
-                    (*data).BufDirty = true;
-                }
-            }));
-            if res.is_err() {
-                eprintln!("dear-imgui-rs: panic in ImString multiline resize callback");
-                std::process::abort();
-            }
-            0
-        }
-
         validate_input_multiline_flags("InputTextMultilineImStr::build()", self.flags);
         let flags = self.flags.raw() | sys::ImGuiInputTextFlags_CallbackResize as i32;
         let result = unsafe {
@@ -104,7 +75,7 @@ impl<'ui, 'p> InputTextMultilineImStr<'ui, 'p> {
                 buf_size,
                 size_vec,
                 flags,
-                Some(resize_cb_imstr),
+                Some(im_string_multiline_resize_callback),
                 user_ptr,
             )
         };
@@ -158,50 +129,8 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
         let capacity = input_buffer.len();
         let buf_ptr = input_buffer.as_mut_ptr() as *mut std::os::raw::c_char;
 
-        #[repr(C)]
-        struct UserData {
-            buffer: *mut Vec<u8>,
-        }
-
-        extern "C" fn callback_router(data: *mut sys::ImGuiInputTextCallbackData) -> c_int {
-            if data.is_null() {
-                return 0;
-            }
-
-            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
-                let event_flag = (*data).EventFlag as i32;
-                match event_flag {
-                    value if value == sys::ImGuiInputTextFlags_CallbackResize as i32 => {
-                        let user_ptr = (*data).UserData as *mut UserData;
-                        if user_ptr.is_null() {
-                            return 0;
-                        }
-
-                        let user = &mut *user_ptr;
-                        if user.buffer.is_null() {
-                            return 0;
-                        }
-                        let buffer = &mut *user.buffer;
-                        debug_assert_eq!(buffer.as_ptr() as *const _, (*data).Buf);
-                        resize_string_input_buffer(buffer, (*data).BufSize, data)
-                    }
-                    _ => 0,
-                }
-            }));
-
-            match res {
-                Ok(v) => v,
-                Err(_) => {
-                    eprintln!("dear-imgui-rs: panic in multiline InputText resize callback");
-                    std::process::abort();
-                }
-            }
-        }
-
-        let mut user_data = UserData {
-            buffer: &mut input_buffer as *mut Vec<u8>,
-        };
-        let user_ptr = &mut user_data as *mut _ as *mut c_void;
+        let mut callback_state = StringResizeCallbackState::new(&mut input_buffer);
+        let user_ptr = callback_state.user_ptr();
 
         let size_vec: sys::ImVec2 = self.size.into();
         validate_input_multiline_flags("InputTextMultiline::build()", self.flags);
@@ -213,7 +142,7 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
                 capacity,
                 size_vec,
                 flags,
-                Some(callback_router),
+                Some(string_multiline_resize_callback),
                 user_ptr,
             )
         };
@@ -277,91 +206,8 @@ impl<'ui, 'p, T: InputTextCallbackHandler> InputTextMultilineWithCb<'ui, 'p, T> 
         let capacity = input_buffer.len();
         let buf_ptr = input_buffer.as_mut_ptr() as *mut std::os::raw::c_char;
 
-        #[repr(C)]
-        struct UserData<T> {
-            buffer: *mut Vec<u8>,
-            handler: T,
-        }
-
-        extern "C" fn callback_router<T: InputTextCallbackHandler>(
-            data: *mut sys::ImGuiInputTextCallbackData,
-        ) -> c_int {
-            if data.is_null() {
-                return 0;
-            }
-
-            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let user_ptr = unsafe { (*data).UserData as *mut UserData<T> };
-                if user_ptr.is_null() {
-                    return 0;
-                }
-                let user = unsafe { &mut *user_ptr };
-                if user.buffer.is_null() {
-                    return 0;
-                }
-
-                let event_flag = unsafe { (*data).EventFlag as i32 };
-                match event_flag {
-                    value if value == sys::ImGuiInputTextFlags_CallbackResize as i32 => unsafe {
-                        let buffer = &mut *user.buffer;
-                        debug_assert_eq!(buffer.as_ptr() as *const _, (*data).Buf);
-                        resize_string_input_buffer(buffer, (*data).BufSize, data)
-                    },
-                    value if value == sys::ImGuiInputTextFlags_CallbackCompletion as i32 => {
-                        let info = unsafe { TextCallbackData::new(data) };
-                        user.handler.on_completion(info);
-                        0
-                    }
-                    value if value == sys::ImGuiInputTextFlags_CallbackHistory as i32 => {
-                        let key = unsafe { (*data).EventKey };
-                        let dir = if key == sys::ImGuiKey_UpArrow {
-                            HistoryDirection::Up
-                        } else {
-                            HistoryDirection::Down
-                        };
-                        let info = unsafe { TextCallbackData::new(data) };
-                        user.handler.on_history(dir, info);
-                        0
-                    }
-                    value if value == InputTextMultilineFlags::CALLBACK_ALWAYS.bits() => {
-                        let info = unsafe { TextCallbackData::new(data) };
-                        user.handler.on_always(info);
-                        0
-                    }
-                    value if value == InputTextMultilineFlags::CALLBACK_EDIT.bits() => {
-                        let info = unsafe { TextCallbackData::new(data) };
-                        user.handler.on_edit(info);
-                        0
-                    }
-                    value if value == InputTextMultilineFlags::CALLBACK_CHAR_FILTER.bits() => {
-                        let ch = unsafe {
-                            std::char::from_u32((*data).EventChar as u32).unwrap_or('\0')
-                        };
-                        let new_ch = user.handler.char_filter(ch).map(|c| c as u32).unwrap_or(0);
-                        unsafe {
-                            (*data).EventChar =
-                                sys::ImWchar::try_from(new_ch).unwrap_or(0 as sys::ImWchar);
-                        }
-                        0
-                    }
-                    _ => 0,
-                }
-            }));
-
-            match res {
-                Ok(v) => v,
-                Err(_) => {
-                    eprintln!("dear-imgui-rs: panic in InputText multiline callback");
-                    std::process::abort();
-                }
-            }
-        }
-
-        let mut user_data = UserData {
-            buffer: &mut input_buffer as *mut Vec<u8>,
-            handler: self.handler,
-        };
-        let user_ptr = &mut user_data as *mut _ as *mut c_void;
+        let mut callback_state = StringCallbackState::new(&mut input_buffer, self.handler);
+        let user_ptr = callback_state.user_ptr();
 
         let size_vec: sys::ImVec2 = self.size.into();
         validate_input_multiline_flags("InputTextMultilineWithCb::build()", self.flags);
@@ -373,7 +219,7 @@ impl<'ui, 'p, T: InputTextCallbackHandler> InputTextMultilineWithCb<'ui, 'p, T> 
                 capacity,
                 size_vec,
                 flags,
-                Some(callback_router::<T>),
+                Some(string_multiline_callback_router::<T>),
                 user_ptr,
             )
         };

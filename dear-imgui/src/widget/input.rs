@@ -34,6 +34,7 @@
 // types across platforms/toolchains; our wrappers intentionally pin the expected width/sign at
 // the FFI call sites.
 mod buffers;
+mod callback_bridge;
 mod callbacks;
 mod entry;
 mod multiline;

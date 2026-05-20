@@ -1,17 +1,15 @@
-use super::buffers::{
-    finish_string_input_buffer, make_string_input_buffer, resize_string_input_buffer,
+use super::buffers::{finish_string_input_buffer, make_string_input_buffer};
+use super::callback_bridge::{
+    StringCallbackState, im_string_resize_callback, string_callback_router,
 };
-use super::callbacks::{
-    HistoryDirection, InputTextCallback, InputTextCallbackHandler, PassthroughCallback,
-    TextCallbackData,
-};
+use super::callbacks::{InputTextCallback, InputTextCallbackHandler, PassthroughCallback};
 use super::validation::validate_input_text_flags;
 use crate::InputTextFlags;
 use crate::string::ImString;
 use crate::sys;
 use crate::ui::Ui;
 use std::borrow::Cow;
-use std::ffi::{c_int, c_void};
+use std::ffi::c_void;
 use std::marker::PhantomData;
 
 /// Builder for a text input widget
@@ -96,35 +94,6 @@ impl<'ui, 'p, L: AsRef<str>, H: AsRef<str>, T> InputTextImStr<'ui, 'p, L, H, T> 
         let buf_ptr = self.buf.as_mut_ptr();
         let user_ptr = self.buf as *mut ImString as *mut c_void;
 
-        extern "C" fn resize_cb_imstr(data: *mut sys::ImGuiInputTextCallbackData) -> c_int {
-            if data.is_null() {
-                return 0;
-            }
-            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
-                if ((*data).EventFlag as i32) == (sys::ImGuiInputTextFlags_CallbackResize as i32) {
-                    let user_data = (*data).UserData as *mut ImString;
-                    if user_data.is_null() {
-                        return;
-                    }
-
-                    let im = &mut *user_data;
-                    let requested_i32 = (*data).BufSize;
-                    if requested_i32 < 0 {
-                        return;
-                    }
-                    let requested = requested_i32 as usize;
-                    im.ensure_buf_size(requested);
-                    (*data).Buf = im.as_mut_ptr();
-                    (*data).BufDirty = true;
-                }
-            }));
-            if res.is_err() {
-                eprintln!("dear-imgui-rs: panic in ImString resize callback");
-                std::process::abort();
-            }
-            0
-        }
-
         validate_input_text_flags("InputTextImStr::build()", self.flags);
         let flags = self.flags.raw() | sys::ImGuiInputTextFlags_CallbackResize as i32;
         let result = unsafe {
@@ -134,7 +103,7 @@ impl<'ui, 'p, L: AsRef<str>, H: AsRef<str>, T> InputTextImStr<'ui, 'p, L, H, T> 
                     buf_ptr,
                     buf_size,
                     flags,
-                    Some(resize_cb_imstr),
+                    Some(im_string_resize_callback),
                     user_ptr,
                 )
             } else {
@@ -144,7 +113,7 @@ impl<'ui, 'p, L: AsRef<str>, H: AsRef<str>, T> InputTextImStr<'ui, 'p, L, H, T> 
                     buf_ptr,
                     buf_size,
                     flags,
-                    Some(resize_cb_imstr),
+                    Some(im_string_resize_callback),
                     user_ptr,
                 )
             }
@@ -288,91 +257,8 @@ where
         let capacity = input_buffer.len();
         let buf_ptr = input_buffer.as_mut_ptr() as *mut std::os::raw::c_char;
 
-        #[repr(C)]
-        struct UserData<T> {
-            buffer: *mut Vec<u8>,
-            handler: T,
-        }
-
-        extern "C" fn callback_router<T: InputTextCallbackHandler>(
-            data: *mut sys::ImGuiInputTextCallbackData,
-        ) -> c_int {
-            if data.is_null() {
-                return 0;
-            }
-
-            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let user_ptr = unsafe { (*data).UserData as *mut UserData<T> };
-                if user_ptr.is_null() {
-                    return 0;
-                }
-                let user = unsafe { &mut *user_ptr };
-                if user.buffer.is_null() {
-                    return 0;
-                }
-
-                let event_flag = unsafe { (*data).EventFlag as i32 };
-                match event_flag {
-                    value if value == sys::ImGuiInputTextFlags_CallbackResize as i32 => unsafe {
-                        let buffer = &mut *user.buffer;
-                        debug_assert_eq!(buffer.as_ptr() as *const _, (*data).Buf);
-                        resize_string_input_buffer(buffer, (*data).BufSize, data)
-                    },
-                    value if value == InputTextFlags::CALLBACK_COMPLETION.bits() => {
-                        let info = unsafe { TextCallbackData::new(data) };
-                        user.handler.on_completion(info);
-                        0
-                    }
-                    value if value == InputTextFlags::CALLBACK_HISTORY.bits() => {
-                        let key = unsafe { (*data).EventKey };
-                        let dir = if key == sys::ImGuiKey_UpArrow {
-                            HistoryDirection::Up
-                        } else {
-                            HistoryDirection::Down
-                        };
-                        let info = unsafe { TextCallbackData::new(data) };
-                        user.handler.on_history(dir, info);
-                        0
-                    }
-                    value if value == InputTextFlags::CALLBACK_ALWAYS.bits() => {
-                        let info = unsafe { TextCallbackData::new(data) };
-                        user.handler.on_always(info);
-                        0
-                    }
-                    value if value == InputTextFlags::CALLBACK_EDIT.bits() => {
-                        let info = unsafe { TextCallbackData::new(data) };
-                        user.handler.on_edit(info);
-                        0
-                    }
-                    value if value == InputTextFlags::CALLBACK_CHAR_FILTER.bits() => {
-                        let ch = unsafe {
-                            std::char::from_u32((*data).EventChar as u32).unwrap_or('\0')
-                        };
-                        let new_ch = user.handler.char_filter(ch).map(|c| c as u32).unwrap_or(0);
-                        unsafe {
-                            (*data).EventChar =
-                                sys::ImWchar::try_from(new_ch).unwrap_or(0 as sys::ImWchar);
-                        }
-                        0
-                    }
-                    _ => 0,
-                }
-            }));
-
-            match res {
-                Ok(v) => v,
-                Err(_) => {
-                    eprintln!("dear-imgui-rs: panic in InputText callback");
-                    std::process::abort();
-                }
-            }
-        }
-
-        let mut user_data = UserData {
-            buffer: &mut input_buffer as *mut Vec<u8>,
-            handler: self.callback_handler,
-        };
-        let user_ptr = &mut user_data as *mut _ as *mut c_void;
+        let mut callback_state = StringCallbackState::new(&mut input_buffer, self.callback_handler);
+        let user_ptr = callback_state.user_ptr();
 
         validate_input_text_flags("InputText::build()", self.flags);
         let flags = self.flags.raw() | sys::ImGuiInputTextFlags_CallbackResize as i32;
@@ -383,7 +269,7 @@ where
                     buf_ptr,
                     capacity,
                     flags,
-                    Some(callback_router::<T>),
+                    Some(string_callback_router::<T>),
                     user_ptr,
                 )
             } else {
@@ -393,7 +279,7 @@ where
                     buf_ptr,
                     capacity,
                     flags,
-                    Some(callback_router::<T>),
+                    Some(string_callback_router::<T>),
                     user_ptr,
                 )
             }
