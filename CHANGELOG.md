@@ -174,6 +174,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before entering FFI.
 - `OwnedDrawData::from(&mut DrawData)` remains available as a non-thread-safe migration bridge, but
   detached texture-request workflows should use `render::snapshot::FrameSnapshot`.
+- Public flag wrapper serde deserialization now preserves unknown/raw bits instead of truncating
+  them, keeping later validation and diagnostics consistent with direct `from_bits_retain` use.
 - `dear-imgui-sdl3` manual init/new-frame/shutdown helpers now bind the provided `Context` before
   calling the official SDL3 backend. For new code, prefer the RAII backend owner types.
 

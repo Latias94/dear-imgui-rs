@@ -492,7 +492,7 @@ impl<'de> Deserialize<'de> for TableFlags {
         D: serde::Deserializer<'de>,
     {
         let bits = i32::deserialize(deserializer)?;
-        Ok(TableFlags::from_bits_truncate(bits))
+        Ok(TableFlags::from_bits_retain(bits))
     }
 }
 
@@ -711,7 +711,7 @@ impl<'de> Deserialize<'de> for TableColumnFlags {
         D: serde::Deserializer<'de>,
     {
         let bits = i32::deserialize(deserializer)?;
-        Ok(TableColumnFlags::from_bits_truncate(bits))
+        Ok(TableColumnFlags::from_bits_retain(bits))
     }
 }
 
@@ -732,6 +732,6 @@ impl<'de> Deserialize<'de> for TableColumnStateFlags {
         D: serde::Deserializer<'de>,
     {
         let bits = i32::deserialize(deserializer)?;
-        Ok(TableColumnStateFlags::from_bits_truncate(bits))
+        Ok(TableColumnStateFlags::from_bits_retain(bits))
     }
 }

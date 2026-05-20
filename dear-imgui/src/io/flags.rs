@@ -20,7 +20,7 @@ impl<'de> Deserialize<'de> for ConfigFlags {
         D: serde::Deserializer<'de>,
     {
         let bits = i32::deserialize(deserializer)?;
-        Ok(ConfigFlags::from_bits_truncate(bits))
+        Ok(ConfigFlags::from_bits_retain(bits))
     }
 }
 
@@ -41,7 +41,7 @@ impl<'de> Deserialize<'de> for BackendFlags {
         D: serde::Deserializer<'de>,
     {
         let bits = i32::deserialize(deserializer)?;
-        Ok(BackendFlags::from_bits_truncate(bits))
+        Ok(BackendFlags::from_bits_retain(bits))
     }
 }
 
@@ -62,7 +62,7 @@ impl<'de> Deserialize<'de> for ViewportFlags {
         D: serde::Deserializer<'de>,
     {
         let bits = i32::deserialize(deserializer)?;
-        Ok(ViewportFlags::from_bits_truncate(bits))
+        Ok(ViewportFlags::from_bits_retain(bits))
     }
 }
 

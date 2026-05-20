@@ -31,7 +31,7 @@ impl<'de> Deserialize<'de> for TableRowFlags {
         D: serde::Deserializer<'de>,
     {
         let bits = i32::deserialize(deserializer)?;
-        Ok(TableRowFlags::from_bits_truncate(bits))
+        Ok(TableRowFlags::from_bits_retain(bits))
     }
 }
 

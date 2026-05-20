@@ -147,7 +147,7 @@ impl<'de> Deserialize<'de> for WindowFlags {
         D: serde::Deserializer<'de>,
     {
         let bits = i32::deserialize(deserializer)?;
-        Ok(WindowFlags::from_bits_truncate(bits))
+        Ok(WindowFlags::from_bits_retain(bits))
     }
 }
 
