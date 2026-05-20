@@ -632,7 +632,7 @@ pub fn colormap_scale(
     let label = if label.contains('\0') { "" } else { label };
     let size = sys::ImVec2_c { x: 0.0, y: height };
     let fmt_ptr: *const c_char = std::ptr::null();
-    let flags = sys::ImPlotColormapScaleFlags_None;
+    let flags = sys::ImPlotColormapScaleFlags_None as sys::ImPlotColormapScaleFlags;
     let cmap = cmap.into().raw();
     with_scratch_txt(label, |ptr| unsafe {
         sys::ImPlot_ColormapScale(ptr, scale_min, scale_max, size, fmt_ptr, flags, cmap)

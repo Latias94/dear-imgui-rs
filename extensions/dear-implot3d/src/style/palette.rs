@@ -26,7 +26,7 @@ pub fn style_colors_auto() {
 pub fn push_style_color(element: Plot3DColorElement, col: [f32; 4]) -> StyleColorToken {
     unsafe {
         sys::ImPlot3D_PushStyleColor_Vec4(
-            element as sys::ImPlot3DCol_,
+            element as sys::ImPlot3DCol,
             crate::imvec4(col[0], col[1], col[2], col[3]),
         );
     }

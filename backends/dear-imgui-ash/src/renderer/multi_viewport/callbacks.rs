@@ -390,40 +390,6 @@ pub unsafe extern "C" fn renderer_set_window_size(
     }
 }
 
-#[cfg(feature = "dynamic-rendering")]
-fn transition_swapchain_image(
-    device: &Device,
-    cmd: vk::CommandBuffer,
-    image: vk::Image,
-    old: vk::ImageLayout,
-    new: vk::ImageLayout,
-) {
-    let barrier = vk::ImageMemoryBarrier::default()
-        .old_layout(old)
-        .new_layout(new)
-        .image(image)
-        .subresource_range(vk::ImageSubresourceRange {
-            aspect_mask: vk::ImageAspectFlags::COLOR,
-            base_mip_level: 0,
-            level_count: 1,
-            base_array_layer: 0,
-            layer_count: 1,
-        })
-        .src_access_mask(vk::AccessFlags::empty())
-        .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE);
-    unsafe {
-        device.cmd_pipeline_barrier(
-            cmd,
-            vk::PipelineStageFlags::TOP_OF_PIPE,
-            vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
-            vk::DependencyFlags::empty(),
-            &[],
-            &[],
-            std::slice::from_ref(&barrier),
-        );
-    }
-}
-
 /// Renderer: render viewport draw data into its swapchain.
 ///
 /// # Safety
