@@ -84,14 +84,11 @@ fn style_setters_reject_invalid_direction_and_tree_line_values() {
     style.set_window_menu_button_position(imgui::Direction::None);
     style.set_window_menu_button_position(imgui::Direction::Right);
     style.set_color_button_position(imgui::Direction::Left);
-    style.set_tree_lines_flags(imgui::TreeNodeFlags::DRAW_LINES_FULL);
+    style.set_tree_lines_mode(imgui::TreeLineMode::FULL);
 
     assert_eq!(style.window_menu_button_position(), imgui::Direction::Right);
     assert_eq!(style.color_button_position(), imgui::Direction::Left);
-    assert_eq!(
-        style.tree_lines_flags(),
-        imgui::TreeNodeFlags::DRAW_LINES_FULL
-    );
+    assert_eq!(style.tree_lines_mode(), imgui::TreeLineMode::FULL);
 
     assert_panics!({
         style.set_window_menu_button_position(imgui::Direction::Up);
@@ -102,32 +99,27 @@ fn style_setters_reject_invalid_direction_and_tree_line_values() {
         style.set_color_button_position(imgui::Direction::None);
     });
     assert_eq!(style.color_button_position(), imgui::Direction::Left);
-
-    assert_panics!({
-        style.set_tree_lines_flags(imgui::TreeNodeFlags::SELECTED);
-    });
-    assert_eq!(
-        style.tree_lines_flags(),
-        imgui::TreeNodeFlags::DRAW_LINES_FULL
-    );
 }
 
 #[test]
-fn style_tree_lines_getter_preserves_unknown_raw_bits() {
+fn style_tree_lines_mode_getter_preserves_unknown_raw_bits() {
     let _guard = test_guard();
 
     let mut ctx = imgui::Context::create();
-    let unknown = first_unknown_bit(imgui::TreeNodeFlags::all().bits());
+    let known_bits = imgui::TreeLineMode::NONE.bits()
+        | imgui::TreeLineMode::FULL.bits()
+        | imgui::TreeLineMode::TO_NODES.bits();
+    let unknown = first_unknown_bit(known_bits);
 
     let style = ctx.style_mut();
     unsafe {
-        style.raw_mut().TreeLinesFlags = (imgui::TreeNodeFlags::DRAW_LINES_FULL.bits() | unknown)
-            as imgui::sys::ImGuiTreeNodeFlags;
+        style.raw_mut().TreeLinesFlags =
+            (imgui::TreeLineMode::FULL.bits() | unknown) as imgui::sys::ImGuiTreeNodeFlags;
     }
 
     assert_eq!(
-        style.tree_lines_flags().bits(),
-        imgui::TreeNodeFlags::DRAW_LINES_FULL.bits() | unknown
+        style.tree_lines_mode().bits(),
+        imgui::TreeLineMode::FULL.bits() | unknown
     );
 }
 

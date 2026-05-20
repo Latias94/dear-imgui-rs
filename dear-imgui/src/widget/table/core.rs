@@ -1,16 +1,13 @@
 use crate::ui::Ui;
 use crate::widget::table::{
-    SortDirection, TABLE_MAX_COLUMNS, TableBgTarget, TableBuilder, TableColumnIndex,
-    TableColumnRef, TableColumnSetup, TableHoveredColumn, TableHoveredRow, TableRowFlags,
+    SortDirection, TABLE_MAX_COLUMNS, TableBgTarget, TableBuilder, TableColumnFlags,
+    TableColumnIndent, TableColumnIndex, TableColumnRef, TableColumnSetup, TableColumnStateFlags,
+    TableColumnWidth, TableFlags, TableHoveredColumn, TableHoveredRow, TableOptions, TableRowFlags,
     TableRowIndex, TableSortSpecs, TableToken, assert_current_table, assert_current_table_cell,
     assert_current_table_has_flags, assert_current_table_row, assert_non_negative_finite_f32,
     assert_table_column_width_phase, assert_table_setup_phase, assert_valid_table_column,
     assert_valid_table_column_raw_in, current_table_if_any, optional_user_id_raw,
     resolve_table_column, table_column_count_to_i32, table_freeze_count_to_i32,
-};
-use crate::widget::{
-    TableColumnFlags, TableColumnIndent, TableColumnStateFlags, TableColumnWidth, TableFlags,
-    TableOptions,
 };
 use crate::{Id, sys};
 use std::borrow::Cow;

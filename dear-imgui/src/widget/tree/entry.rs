@@ -1,9 +1,8 @@
 use crate::Id;
 use crate::sys;
 use crate::ui::Ui;
-use crate::widget::TreeNodeFlags;
 
-use super::{TreeNode, TreeNodeId, TreeNodeToken};
+use super::{TreeNode, TreeNodeFlags, TreeNodeId, TreeNodeToken};
 
 /// # Tree Node Widgets
 impl Ui {

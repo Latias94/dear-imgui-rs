@@ -1,9 +1,8 @@
 use crate::Condition;
 use crate::sys;
 use crate::ui::Ui;
-use crate::widget::TreeNodeFlags;
 
-use super::{TreeNodeId, TreeNodeToken};
+use super::{TreeNodeFlags, TreeNodeId, TreeNodeToken};
 
 /// Builder for a tree node widget
 #[derive(Clone, Debug)]

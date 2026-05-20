@@ -1,9 +1,9 @@
 use crate::Id;
 use crate::ui::Ui;
-use crate::widget::table::{TableColumnSetup, assert_explicit_user_id};
-use crate::widget::{
-    TableColumnFlags, TableColumnIndent, TableColumnWidth, TableFlags, TableOptions,
-    TableSizingPolicy,
+
+use super::{
+    TableColumnFlags, TableColumnIndent, TableColumnSetup, TableColumnWidth, TableFlags,
+    TableOptions, TableSizingPolicy, assert_explicit_user_id,
 };
 use std::borrow::Cow;
 

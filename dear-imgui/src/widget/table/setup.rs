@@ -1,6 +1,6 @@
 use crate::Id;
-use crate::widget::table::assert_explicit_user_id;
-use crate::widget::{TableColumnFlags, TableColumnIndent, TableColumnWidth};
+
+use super::{TableColumnFlags, TableColumnIndent, TableColumnWidth, assert_explicit_user_id};
 
 /// Table column setup information
 #[derive(Clone, Debug)]

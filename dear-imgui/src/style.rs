@@ -55,6 +55,7 @@ pub use color::StyleColor;
 pub use core::Style;
 pub use direction::Direction;
 pub use theme::{ColorOverride, StyleTweaks, TableTheme, Theme, ThemePreset, WindowTheme};
+pub use tree::TreeLineMode;
 pub use var::StyleVar;
 
 pub(crate) use validation::{validate_style_color, validate_style_var};

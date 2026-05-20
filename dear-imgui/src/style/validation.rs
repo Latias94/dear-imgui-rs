@@ -1,5 +1,4 @@
 use super::{Direction, StyleVar};
-use crate::widget::TreeNodeFlags;
 
 const TABLE_ANGLED_HEADERS_MAX_ANGLE: f32 = 50.0 * std::f32::consts::PI / 180.0;
 
@@ -93,18 +92,6 @@ pub(super) fn validate_color_button_position(caller: &str, direction: Direction)
     assert!(
         matches!(direction, Direction::Left | Direction::Right),
         "{caller} accepts only Direction::Left or Direction::Right"
-    );
-}
-
-pub(super) fn validate_tree_lines_flags(caller: &str, flags: TreeNodeFlags) {
-    assert!(
-        matches!(
-            flags,
-            TreeNodeFlags::DRAW_LINES_NONE
-                | TreeNodeFlags::DRAW_LINES_FULL
-                | TreeNodeFlags::DRAW_LINES_TO_NODES
-        ),
-        "{caller} accepts only TreeNodeFlags::DRAW_LINES_NONE, DRAW_LINES_FULL, or DRAW_LINES_TO_NODES"
     );
 }
 

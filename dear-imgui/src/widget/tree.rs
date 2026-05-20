@@ -10,9 +10,11 @@
 )]
 mod builder;
 mod entry;
+mod flags;
 mod id;
 mod token;
 
 pub use builder::TreeNode;
+pub use flags::TreeNodeFlags;
 pub use id::TreeNodeId;
 pub use token::TreeNodeToken;

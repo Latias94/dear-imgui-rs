@@ -42,6 +42,7 @@ mod core;
 mod flags;
 mod headers;
 mod indices;
+mod options;
 mod setup;
 mod sort;
 #[cfg(test)]
@@ -55,6 +56,10 @@ pub use headers::TableHeaderData;
 pub use indices::{
     TableColumnIndex, TableColumnRef, TableContextMenuTarget, TableHoveredColumn, TableHoveredRow,
     TableRowIndex,
+};
+pub use options::{
+    TableColumnFlags, TableColumnIndent, TableColumnStateFlags, TableColumnWidth, TableFlags,
+    TableOptions, TableSizingPolicy,
 };
 pub use setup::TableColumnSetup;
 pub use sort::{SortDirection, TableColumnSortSpec, TableSortSpecs, TableSortSpecsIter};

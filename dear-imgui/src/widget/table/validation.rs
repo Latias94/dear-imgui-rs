@@ -1,5 +1,4 @@
-use crate::widget::TableFlags;
-use crate::widget::table::{TABLE_MAX_COLUMNS, TableColumnIndex, TableColumnRef};
+use crate::widget::table::{TABLE_MAX_COLUMNS, TableColumnIndex, TableColumnRef, TableFlags};
 use crate::{Id, sys};
 
 pub(crate) fn table_column_count_to_i32(column_count: usize) -> i32 {

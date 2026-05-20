@@ -85,6 +85,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     use `PopupQueryFlags`.
   - Drag builders no longer accept `SliderFlags` through an implicit conversion; use `DragFlags`
     directly for drag widgets.
+  - Style tree-line configuration now uses the dedicated `TreeLineMode` type:
+    `Style::tree_lines_mode()` / `Style::set_tree_lines_mode(...)` replace
+    `Style::tree_lines_flags()` / `Style::set_tree_lines_flags(...)`.
   - `StateStorageToken` now carries both the active `Ui` lifetime and the pushed storage lifetime.
 - Extensions
   - `dear-file-browser` scan request/batch/status generations now use `ScanGeneration`,
@@ -180,6 +183,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Dear ImGui state back through safe flag wrappers.
 - Combo box flags/options now live in the `widget::combo` module implementation while preserving
   the existing public re-exports.
+- Tree node flags and table option/column flag types now live in their domain modules
+  (`widget::tree` and `widget::table`) while preserving the existing public re-exports.
 - `dear-imgui-sdl3` manual init/new-frame/shutdown helpers now bind the provided `Context` before
   calling the official SDL3 backend. For new code, prefer the RAII backend owner types.
 
