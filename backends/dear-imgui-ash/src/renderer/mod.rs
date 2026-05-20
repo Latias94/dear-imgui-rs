@@ -35,13 +35,13 @@ use self::draw::Frames;
 #[cfg(feature = "dynamic-rendering")]
 pub use self::options::DynamicRendering;
 pub use self::options::Options;
-#[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
-use self::pipeline::{ViewportPipeline, is_srgb_format};
 #[cfg(all(
     any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"),
     not(feature = "dynamic-rendering")
 ))]
 use self::pipeline::create_viewport_render_pass;
+#[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+use self::pipeline::{ViewportPipeline, is_srgb_format};
 use self::texture::{PendingTextureCreate, PendingTextureUpdate, TextureManager};
 use self::uploads::InFlightUpload;
 use self::vulkan::*;

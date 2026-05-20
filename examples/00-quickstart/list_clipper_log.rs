@@ -56,7 +56,6 @@ impl Level {
 struct LogEntry {
     lvl: Level,
     msg: String,
-    ts_ms: u64,
 }
 
 struct ImguiState {
@@ -176,7 +175,7 @@ impl AppWindow {
     fn generate_lines(&mut self, count: usize) {
         for _ in 0..count {
             self.gen_seq += 1;
-            let lvl = match (self.gen_seq % 17) {
+            let lvl = match self.gen_seq % 17 {
                 0 | 1 => Level::Warn,
                 2 => Level::Error,
                 3 | 4 => Level::Debug,
@@ -187,8 +186,7 @@ impl AppWindow {
                 self.gen_seq,
                 self.gen_seq % 97
             );
-            let ts_ms = self.gen_seq * 16;
-            self.logs.push(LogEntry { lvl, msg, ts_ms });
+            self.logs.push(LogEntry { lvl, msg });
         }
     }
 

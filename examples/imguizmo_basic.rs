@@ -913,9 +913,9 @@ fn orthographic(l: f32, r: f32, b: f32, t: f32, zn: f32, zf: f32) -> Mat4 {
 }
 
 fn look_at(eye: Vec3, at: Vec3, up: Vec3) -> Mat4 {
-    let mut z = (eye - at).normalize_or_zero();
+    let z = (eye - at).normalize_or_zero();
     let mut y = up.normalize_or_zero();
-    let mut x = y.cross(z).normalize_or_zero();
+    let x = y.cross(z).normalize_or_zero();
     y = z.cross(x).normalize_or_zero();
 
     Mat4::from_cols_array(&[

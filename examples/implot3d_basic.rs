@@ -658,10 +658,6 @@ impl ScrollingBuffer1D {
             self.offset = (self.offset + 1) % self.max_size;
         }
     }
-    fn clear(&mut self) {
-        self.data.clear();
-        self.offset = 0;
-    }
 }
 
 fn demo_realtime_plots(ui: &Ui, plot_ui: &Plot3DUi) {
@@ -1101,8 +1097,8 @@ fn demo_nan_values(ui: &Ui, plot_ui: &Plot3DUi) {
     FLAGS.with(|f| f.set(flags));
 
     let mut xs = [0.0f32, 0.25, 0.5, 0.75, 1.0];
-    let mut ys = [0.0f32, 0.25, 0.5, 0.75, 1.0];
-    let mut zs = [0.0f32, 0.25, 0.5, 0.75, 1.0];
+    let ys = [0.0f32, 0.25, 0.5, 0.75, 1.0];
+    let zs = [0.0f32, 0.25, 0.5, 0.75, 1.0];
     if include_nan {
         xs[2] = f32::NAN;
     }

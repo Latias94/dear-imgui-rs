@@ -2163,7 +2163,16 @@ fn render_scene_view(ui: &Ui, game_state: &mut GameEngineState, scene_tex_id: Op
             ui.separator_vertical();
             ui.same_line();
 
-            ui.checkbox("Wireframe", &mut game_state.show_wireframe);
+            if ui.checkbox("Wireframe", &mut game_state.show_wireframe) {
+                let mode = if game_state.show_wireframe {
+                    "enabled"
+                } else {
+                    "disabled"
+                };
+                game_state
+                    .console_logs
+                    .push(format!("[INFO] Scene wireframe preview {mode}"));
+            }
             ui.same_line();
             ui.checkbox("Grid", &mut game_state.show_grid);
 

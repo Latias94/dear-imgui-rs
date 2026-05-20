@@ -366,8 +366,10 @@ fn sanitize_cpp_wrapped_wgsl(src: &str) -> String {
 
 struct OffscreenRtt {
     size: (u32, u32),
+    #[allow(dead_code)] // Keep the color texture alive for the registered view.
     texture: wgpu::Texture,
     view: wgpu::TextureView,
+    #[allow(dead_code)] // Keep the depth texture alive for the depth view.
     depth: wgpu::Texture,
     depth_view: wgpu::TextureView,
     texture_id: dear_imgui_rs::TextureId,
@@ -446,6 +448,8 @@ impl OffscreenRtt {
 
 struct ScenePipeline {
     pipeline: wgpu::RenderPipeline,
+    #[allow(dead_code)]
+    // Keep the layout alive for documentation/debugging of the bind group shape.
     bind_layout: wgpu::BindGroupLayout,
     ubo: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
