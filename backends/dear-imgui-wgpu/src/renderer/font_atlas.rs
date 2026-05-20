@@ -1,7 +1,9 @@
 // Renderer font atlas handling (prepare & fallback upload)
 
 use super::*;
+use crate::wgpu;
 use dear_imgui_rs::Context;
+use wgpu::{Device, Queue};
 
 impl WgpuRenderer {
     /// Load font texture from Dear ImGui context

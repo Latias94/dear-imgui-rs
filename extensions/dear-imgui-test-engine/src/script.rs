@@ -1,0 +1,1166 @@
+use dear_imgui_rs::{
+    ImGuiError, ImGuiResult, KeyChord, KeyMods, MouseButton, TableColumnIndex, TableColumnRef,
+    with_scratch_txt, with_scratch_txt_two,
+};
+use dear_imgui_test_engine_sys as sys;
+
+use crate::{InputMode, ScriptCount, ScriptLimit};
+
+pub(crate) struct Script {
+    pub(super) raw: *mut sys::ImGuiTestEngineScript,
+}
+
+impl Script {
+    pub(super) fn create() -> ImGuiResult<Self> {
+        let raw = unsafe { sys::imgui_test_engine_script_create() };
+        if raw.is_null() {
+            return Err(ImGuiError::invalid_operation(
+                "imgui_test_engine_script_create returned null",
+            ));
+        }
+        Ok(Self { raw })
+    }
+
+    pub(super) fn into_raw(mut self) -> *mut sys::ImGuiTestEngineScript {
+        let raw = self.raw;
+        self.raw = std::ptr::null_mut();
+        raw
+    }
+}
+
+impl Drop for Script {
+    fn drop(&mut self) {
+        if !self.raw.is_null() {
+            unsafe { sys::imgui_test_engine_script_destroy(self.raw) };
+            self.raw = std::ptr::null_mut();
+        }
+    }
+}
+
+pub struct ScriptTest<'a> {
+    pub(super) script: &'a mut Script,
+}
+
+impl ScriptTest<'_> {
+    pub fn set_ref(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "set_ref contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_set_ref(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn item_click(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "item_click contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_item_click(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn item_click_with_button(&mut self, r#ref: &str, button: MouseButton) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "item_click_with_button contained interior NUL",
+            ));
+        }
+        let button = button as i32;
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_item_click_with_button(self.script.raw, ptr, button)
+        });
+        Ok(())
+    }
+
+    pub fn item_double_click(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "item_double_click contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_item_double_click(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn item_open(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "item_open contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_item_open(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn item_close(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "item_close contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_item_close(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn item_set_opened(&mut self, r#ref: &str, opened: bool) -> ImGuiResult<()> {
+        if opened {
+            self.item_open(r#ref)
+        } else {
+            self.item_close(r#ref)
+        }
+    }
+
+    pub fn item_check(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "item_check contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_item_check(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn item_set_checked(&mut self, r#ref: &str, checked: bool) -> ImGuiResult<()> {
+        if checked {
+            self.item_check(r#ref)
+        } else {
+            self.item_uncheck(r#ref)
+        }
+    }
+
+    pub fn item_uncheck(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "item_uncheck contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_item_uncheck(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn item_input_int(&mut self, r#ref: &str, v: i32) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "item_input_int contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_item_input_int(self.script.raw, ptr, v)
+        });
+        Ok(())
+    }
+
+    pub fn item_input_str(&mut self, r#ref: &str, v: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') || v.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "item_input_str contained interior NUL",
+            ));
+        }
+        with_scratch_txt_two(r#ref, v, |ref_ptr, v_ptr| unsafe {
+            sys::imgui_test_engine_script_item_input_str(self.script.raw, ref_ptr, v_ptr)
+        });
+        Ok(())
+    }
+
+    pub fn mouse_move(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "mouse_move contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_mouse_move(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn mouse_move_to_pos(&mut self, x: f32, y: f32) -> ImGuiResult<()> {
+        if !x.is_finite() || !y.is_finite() {
+            return Err(ImGuiError::invalid_operation(
+                "mouse_move_to_pos requires finite values",
+            ));
+        }
+        unsafe { sys::imgui_test_engine_script_mouse_move_to_pos(self.script.raw, x, y) };
+        Ok(())
+    }
+
+    pub fn mouse_teleport_to_pos(&mut self, x: f32, y: f32) -> ImGuiResult<()> {
+        if !x.is_finite() || !y.is_finite() {
+            return Err(ImGuiError::invalid_operation(
+                "mouse_teleport_to_pos requires finite values",
+            ));
+        }
+        unsafe { sys::imgui_test_engine_script_mouse_teleport_to_pos(self.script.raw, x, y) };
+        Ok(())
+    }
+
+    pub fn mouse_move_to_void(&mut self) {
+        unsafe { sys::imgui_test_engine_script_mouse_move_to_void(self.script.raw) };
+    }
+
+    pub fn mouse_click(&mut self, button: MouseButton) {
+        let button = button as i32;
+        unsafe { sys::imgui_test_engine_script_mouse_click(self.script.raw, button) };
+    }
+
+    pub fn mouse_click_multi(
+        &mut self,
+        button: MouseButton,
+        count: impl Into<ScriptCount>,
+    ) -> ImGuiResult<()> {
+        let count = count.into().raw();
+        let button = button as i32;
+        unsafe { sys::imgui_test_engine_script_mouse_click_multi(self.script.raw, button, count) };
+        Ok(())
+    }
+
+    pub fn mouse_double_click(&mut self, button: MouseButton) {
+        let button = button as i32;
+        unsafe { sys::imgui_test_engine_script_mouse_double_click(self.script.raw, button) };
+    }
+
+    pub fn mouse_down(&mut self, button: MouseButton) {
+        let button = button as i32;
+        unsafe { sys::imgui_test_engine_script_mouse_down(self.script.raw, button) };
+    }
+
+    pub fn mouse_up(&mut self, button: MouseButton) {
+        let button = button as i32;
+        unsafe { sys::imgui_test_engine_script_mouse_up(self.script.raw, button) };
+    }
+
+    pub fn mouse_lift_drag_threshold(&mut self, button: MouseButton) {
+        let button = button as i32;
+        unsafe { sys::imgui_test_engine_script_mouse_lift_drag_threshold(self.script.raw, button) };
+    }
+
+    pub fn mouse_drag_with_delta(
+        &mut self,
+        dx: f32,
+        dy: f32,
+        button: MouseButton,
+    ) -> ImGuiResult<()> {
+        if !dx.is_finite() || !dy.is_finite() {
+            return Err(ImGuiError::invalid_operation(
+                "mouse_drag_with_delta requires finite values",
+            ));
+        }
+        let button = button as i32;
+        unsafe {
+            sys::imgui_test_engine_script_mouse_drag_with_delta(self.script.raw, dx, dy, button)
+        };
+        Ok(())
+    }
+
+    pub fn mouse_click_on_void(
+        &mut self,
+        button: MouseButton,
+        count: impl Into<ScriptCount>,
+    ) -> ImGuiResult<()> {
+        let count = count.into().raw();
+        let button = button as i32;
+        unsafe {
+            sys::imgui_test_engine_script_mouse_click_on_void(self.script.raw, button, count)
+        };
+        Ok(())
+    }
+
+    pub fn mouse_wheel(&mut self, dx: f32, dy: f32) -> ImGuiResult<()> {
+        if !dx.is_finite() || !dy.is_finite() {
+            return Err(ImGuiError::invalid_operation(
+                "mouse_wheel requires finite values",
+            ));
+        }
+        unsafe { sys::imgui_test_engine_script_mouse_wheel(self.script.raw, dx, dy) };
+        Ok(())
+    }
+
+    pub fn key_down(&mut self, key_chord: KeyChord) {
+        unsafe { sys::imgui_test_engine_script_key_down(self.script.raw, key_chord.raw()) };
+    }
+
+    pub fn key_up(&mut self, key_chord: KeyChord) {
+        unsafe { sys::imgui_test_engine_script_key_up(self.script.raw, key_chord.raw()) };
+    }
+
+    pub fn key_press(
+        &mut self,
+        key_chord: KeyChord,
+        count: impl Into<ScriptCount>,
+    ) -> ImGuiResult<()> {
+        let count = count.into().raw();
+        unsafe { sys::imgui_test_engine_script_key_press(self.script.raw, key_chord.raw(), count) };
+        Ok(())
+    }
+
+    pub fn key_hold(&mut self, key_chord: KeyChord, seconds: f32) -> ImGuiResult<()> {
+        if !seconds.is_finite() || seconds < 0.0 {
+            return Err(ImGuiError::invalid_operation(
+                "key_hold requires a finite non-negative value",
+            ));
+        }
+        unsafe {
+            sys::imgui_test_engine_script_key_hold(self.script.raw, key_chord.raw(), seconds)
+        };
+        Ok(())
+    }
+
+    pub fn key_chars(&mut self, chars: &str) -> ImGuiResult<()> {
+        if chars.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "key_chars contained interior NUL",
+            ));
+        }
+        with_scratch_txt(chars, |ptr| unsafe {
+            sys::imgui_test_engine_script_key_chars(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn key_chars_append(&mut self, chars: &str) -> ImGuiResult<()> {
+        if chars.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "key_chars_append contained interior NUL",
+            ));
+        }
+        with_scratch_txt(chars, |ptr| unsafe {
+            sys::imgui_test_engine_script_key_chars_append(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn key_chars_append_enter(&mut self, chars: &str) -> ImGuiResult<()> {
+        if chars.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "key_chars_append_enter contained interior NUL",
+            ));
+        }
+        with_scratch_txt(chars, |ptr| unsafe {
+            sys::imgui_test_engine_script_key_chars_append_enter(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn key_chars_replace(&mut self, chars: &str) -> ImGuiResult<()> {
+        if chars.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "key_chars_replace contained interior NUL",
+            ));
+        }
+        with_scratch_txt(chars, |ptr| unsafe {
+            sys::imgui_test_engine_script_key_chars_replace(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn key_chars_replace_enter(&mut self, chars: &str) -> ImGuiResult<()> {
+        if chars.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "key_chars_replace_enter contained interior NUL",
+            ));
+        }
+        with_scratch_txt(chars, |ptr| unsafe {
+            sys::imgui_test_engine_script_key_chars_replace_enter(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn item_hold(&mut self, r#ref: &str, seconds: f32) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "item_hold contained interior NUL",
+            ));
+        }
+        if !seconds.is_finite() || seconds < 0.0 {
+            return Err(ImGuiError::invalid_operation(
+                "item_hold requires a finite non-negative value",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_item_hold(self.script.raw, ptr, seconds)
+        });
+        Ok(())
+    }
+
+    pub fn item_hold_for_frames(
+        &mut self,
+        r#ref: &str,
+        frames: impl Into<ScriptCount>,
+    ) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "item_hold_for_frames contained interior NUL",
+            ));
+        }
+        let frames = frames.into().raw();
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_item_hold_for_frames(self.script.raw, ptr, frames)
+        });
+        Ok(())
+    }
+
+    pub fn item_drag_over_and_hold(&mut self, src_ref: &str, dst_ref: &str) -> ImGuiResult<()> {
+        if src_ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "item_drag_over_and_hold src_ref contained interior NUL",
+            ));
+        }
+        if dst_ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "item_drag_over_and_hold dst_ref contained interior NUL",
+            ));
+        }
+        with_scratch_txt_two(src_ref, dst_ref, |src_ptr, dst_ptr| unsafe {
+            sys::imgui_test_engine_script_item_drag_over_and_hold(self.script.raw, src_ptr, dst_ptr)
+        });
+        Ok(())
+    }
+
+    pub fn item_drag_and_drop(
+        &mut self,
+        src_ref: &str,
+        dst_ref: &str,
+        button: MouseButton,
+    ) -> ImGuiResult<()> {
+        if src_ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "item_drag_and_drop src_ref contained interior NUL",
+            ));
+        }
+        if dst_ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "item_drag_and_drop dst_ref contained interior NUL",
+            ));
+        }
+        let button = button as i32;
+        with_scratch_txt_two(src_ref, dst_ref, |src_ptr, dst_ptr| unsafe {
+            sys::imgui_test_engine_script_item_drag_and_drop(
+                self.script.raw,
+                src_ptr,
+                dst_ptr,
+                button,
+            )
+        });
+        Ok(())
+    }
+
+    pub fn item_drag_with_delta(&mut self, r#ref: &str, dx: f32, dy: f32) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "item_drag_with_delta contained interior NUL",
+            ));
+        }
+        if !dx.is_finite() || !dy.is_finite() {
+            return Err(ImGuiError::invalid_operation(
+                "item_drag_with_delta requires finite values",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_item_drag_with_delta(self.script.raw, ptr, dx, dy)
+        });
+        Ok(())
+    }
+
+    pub fn scroll_to_x(&mut self, r#ref: &str, scroll_x: f32) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "scroll_to_x contained interior NUL",
+            ));
+        }
+        if !scroll_x.is_finite() {
+            return Err(ImGuiError::invalid_operation(
+                "scroll_to_x requires a finite value",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_scroll_to_x(self.script.raw, ptr, scroll_x)
+        });
+        Ok(())
+    }
+
+    pub fn scroll_to_y(&mut self, r#ref: &str, scroll_y: f32) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "scroll_to_y contained interior NUL",
+            ));
+        }
+        if !scroll_y.is_finite() {
+            return Err(ImGuiError::invalid_operation(
+                "scroll_to_y requires a finite value",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_scroll_to_y(self.script.raw, ptr, scroll_y)
+        });
+        Ok(())
+    }
+
+    pub fn scroll_to_pos_x(&mut self, window_ref: &str, pos_x: f32) -> ImGuiResult<()> {
+        if window_ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "scroll_to_pos_x window_ref contained interior NUL",
+            ));
+        }
+        if !pos_x.is_finite() {
+            return Err(ImGuiError::invalid_operation(
+                "scroll_to_pos_x requires a finite value",
+            ));
+        }
+        with_scratch_txt(window_ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_scroll_to_pos_x(self.script.raw, ptr, pos_x)
+        });
+        Ok(())
+    }
+
+    pub fn scroll_to_pos_y(&mut self, window_ref: &str, pos_y: f32) -> ImGuiResult<()> {
+        if window_ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "scroll_to_pos_y window_ref contained interior NUL",
+            ));
+        }
+        if !pos_y.is_finite() {
+            return Err(ImGuiError::invalid_operation(
+                "scroll_to_pos_y requires a finite value",
+            ));
+        }
+        with_scratch_txt(window_ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_scroll_to_pos_y(self.script.raw, ptr, pos_y)
+        });
+        Ok(())
+    }
+
+    pub fn scroll_to_item_x(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "scroll_to_item_x contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_scroll_to_item_x(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn scroll_to_item_y(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "scroll_to_item_y contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_scroll_to_item_y(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn scroll_to_top(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "scroll_to_top contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_scroll_to_top(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn scroll_to_bottom(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "scroll_to_bottom contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_scroll_to_bottom(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn tab_close(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "tab_close contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_tab_close(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn combo_click(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "combo_click contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_combo_click(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn combo_click_all(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "combo_click_all contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_combo_click_all(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn item_open_all(
+        &mut self,
+        parent_ref: &str,
+        depth: impl Into<ScriptLimit>,
+        passes: impl Into<ScriptLimit>,
+    ) -> ImGuiResult<()> {
+        if parent_ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "item_open_all parent_ref contained interior NUL",
+            ));
+        }
+        let depth = depth.into().raw();
+        let passes = passes.into().raw();
+        with_scratch_txt(parent_ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_item_open_all(self.script.raw, ptr, depth, passes)
+        });
+        Ok(())
+    }
+
+    pub fn item_close_all(
+        &mut self,
+        parent_ref: &str,
+        depth: impl Into<ScriptLimit>,
+        passes: impl Into<ScriptLimit>,
+    ) -> ImGuiResult<()> {
+        if parent_ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "item_close_all parent_ref contained interior NUL",
+            ));
+        }
+        let depth = depth.into().raw();
+        let passes = passes.into().raw();
+        with_scratch_txt(parent_ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_item_close_all(self.script.raw, ptr, depth, passes)
+        });
+        Ok(())
+    }
+
+    pub fn table_click_header(
+        &mut self,
+        table_ref: &str,
+        label: &str,
+        key_mods: KeyMods,
+    ) -> ImGuiResult<()> {
+        if table_ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "table_click_header table_ref contained interior NUL",
+            ));
+        }
+        if label.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "table_click_header label contained interior NUL",
+            ));
+        }
+        let key_mods = key_mods.bits();
+        with_scratch_txt_two(table_ref, label, |table_ptr, label_ptr| unsafe {
+            sys::imgui_test_engine_script_table_click_header(
+                self.script.raw,
+                table_ptr,
+                label_ptr,
+                key_mods,
+            )
+        });
+        Ok(())
+    }
+
+    pub fn table_open_context_menu(
+        &mut self,
+        table_ref: &str,
+        column: impl Into<TableColumnRef>,
+    ) -> ImGuiResult<()> {
+        if table_ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "table_open_context_menu table_ref contained interior NUL",
+            ));
+        }
+        let column_n = match column.into() {
+            TableColumnRef::Current => -1,
+            TableColumnRef::Index(index) => index.get().try_into().map_err(|_| {
+                ImGuiError::invalid_operation(
+                    "table_open_context_menu column index exceeded i32::MAX",
+                )
+            })?,
+        };
+        with_scratch_txt(table_ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_table_open_context_menu(self.script.raw, ptr, column_n)
+        });
+        Ok(())
+    }
+
+    pub fn table_set_column_enabled(
+        &mut self,
+        table_ref: &str,
+        column: impl Into<TableColumnIndex>,
+        enabled: bool,
+    ) -> ImGuiResult<()> {
+        if table_ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "table_set_column_enabled table_ref contained interior NUL",
+            ));
+        }
+        let column_n = column.into().get().try_into().map_err(|_| {
+            ImGuiError::invalid_operation("table_set_column_enabled column index exceeded i32::MAX")
+        })?;
+        with_scratch_txt(table_ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_table_set_column_enabled(
+                self.script.raw,
+                ptr,
+                column_n,
+                enabled,
+            )
+        });
+        Ok(())
+    }
+
+    pub fn table_set_column_enabled_by_label(
+        &mut self,
+        table_ref: &str,
+        label: &str,
+        enabled: bool,
+    ) -> ImGuiResult<()> {
+        if table_ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "table_set_column_enabled_by_label table_ref contained interior NUL",
+            ));
+        }
+        if label.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "table_set_column_enabled_by_label label contained interior NUL",
+            ));
+        }
+        with_scratch_txt_two(table_ref, label, |table_ptr, label_ptr| unsafe {
+            sys::imgui_test_engine_script_table_set_column_enabled_by_label(
+                self.script.raw,
+                table_ptr,
+                label_ptr,
+                enabled,
+            )
+        });
+        Ok(())
+    }
+
+    pub fn table_resize_column(
+        &mut self,
+        table_ref: &str,
+        column: impl Into<TableColumnIndex>,
+        width: f32,
+    ) -> ImGuiResult<()> {
+        if table_ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "table_resize_column table_ref contained interior NUL",
+            ));
+        }
+        if !width.is_finite() || width < 0.0 {
+            return Err(ImGuiError::invalid_operation(
+                "table_resize_column requires a finite non-negative value",
+            ));
+        }
+        let column_n = column.into().get().try_into().map_err(|_| {
+            ImGuiError::invalid_operation("table_resize_column column index exceeded i32::MAX")
+        })?;
+        with_scratch_txt(table_ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_table_resize_column(self.script.raw, ptr, column_n, width)
+        });
+        Ok(())
+    }
+
+    pub fn menu_click(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "menu_click contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_menu_click(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn menu_check(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "menu_check contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_menu_check(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn menu_uncheck(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "menu_uncheck contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_menu_uncheck(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn menu_check_all(&mut self, parent_ref: &str) -> ImGuiResult<()> {
+        if parent_ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "menu_check_all parent_ref contained interior NUL",
+            ));
+        }
+        with_scratch_txt(parent_ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_menu_check_all(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn menu_uncheck_all(&mut self, parent_ref: &str) -> ImGuiResult<()> {
+        if parent_ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "menu_uncheck_all parent_ref contained interior NUL",
+            ));
+        }
+        with_scratch_txt(parent_ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_menu_uncheck_all(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn set_input_mode(&mut self, mode: InputMode) {
+        unsafe { sys::imgui_test_engine_script_set_input_mode(self.script.raw, mode as i32) };
+    }
+
+    pub fn nav_move_to(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "nav_move_to contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_nav_move_to(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn nav_activate(&mut self) {
+        unsafe { sys::imgui_test_engine_script_nav_activate(self.script.raw) };
+    }
+
+    pub fn nav_input(&mut self) {
+        unsafe { sys::imgui_test_engine_script_nav_input(self.script.raw) };
+    }
+
+    pub fn window_close(&mut self, window_ref: &str) -> ImGuiResult<()> {
+        if window_ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "window_close window_ref contained interior NUL",
+            ));
+        }
+        with_scratch_txt(window_ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_window_close(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn window_collapse(&mut self, window_ref: &str, collapsed: bool) -> ImGuiResult<()> {
+        if window_ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "window_collapse window_ref contained interior NUL",
+            ));
+        }
+        with_scratch_txt(window_ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_window_collapse(self.script.raw, ptr, collapsed)
+        });
+        Ok(())
+    }
+
+    pub fn window_focus(&mut self, window_ref: &str) -> ImGuiResult<()> {
+        if window_ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "window_focus window_ref contained interior NUL",
+            ));
+        }
+        with_scratch_txt(window_ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_window_focus(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn window_bring_to_front(&mut self, window_ref: &str) -> ImGuiResult<()> {
+        if window_ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "window_bring_to_front window_ref contained interior NUL",
+            ));
+        }
+        with_scratch_txt(window_ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_window_bring_to_front(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn window_move(&mut self, window_ref: &str, x: f32, y: f32) -> ImGuiResult<()> {
+        if window_ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "window_move window_ref contained interior NUL",
+            ));
+        }
+        if !x.is_finite() || !y.is_finite() {
+            return Err(ImGuiError::invalid_operation(
+                "window_move requires finite values",
+            ));
+        }
+        with_scratch_txt(window_ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_window_move(self.script.raw, ptr, x, y)
+        });
+        Ok(())
+    }
+
+    pub fn window_resize(&mut self, window_ref: &str, w: f32, h: f32) -> ImGuiResult<()> {
+        if window_ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "window_resize window_ref contained interior NUL",
+            ));
+        }
+        if !w.is_finite() || !h.is_finite() || w < 0.0 || h < 0.0 {
+            return Err(ImGuiError::invalid_operation(
+                "window_resize requires finite non-negative values",
+            ));
+        }
+        with_scratch_txt(window_ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_window_resize(self.script.raw, ptr, w, h)
+        });
+        Ok(())
+    }
+
+    pub fn sleep_seconds(&mut self, seconds: f32) -> ImGuiResult<()> {
+        if !seconds.is_finite() || seconds < 0.0 {
+            return Err(ImGuiError::invalid_operation(
+                "sleep_seconds requires a finite non-negative value",
+            ));
+        }
+        unsafe { sys::imgui_test_engine_script_sleep(self.script.raw, seconds) };
+        Ok(())
+    }
+
+    pub fn assert_item_exists(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "assert_item_exists contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_assert_item_exists(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn assert_item_visible(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "assert_item_visible contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_assert_item_visible(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn assert_item_read_int_eq(&mut self, r#ref: &str, expected: i32) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "assert_item_read_int_eq contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_assert_item_read_int_eq(self.script.raw, ptr, expected)
+        });
+        Ok(())
+    }
+
+    pub fn assert_item_read_str_eq(&mut self, r#ref: &str, expected: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') || expected.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "assert_item_read_str_eq contained interior NUL",
+            ));
+        }
+        with_scratch_txt_two(r#ref, expected, |ref_ptr, expected_ptr| unsafe {
+            sys::imgui_test_engine_script_assert_item_read_str_eq(
+                self.script.raw,
+                ref_ptr,
+                expected_ptr,
+            )
+        });
+        Ok(())
+    }
+
+    pub fn assert_item_read_float_eq(
+        &mut self,
+        r#ref: &str,
+        expected: f32,
+        epsilon: f32,
+    ) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "assert_item_read_float_eq contained interior NUL",
+            ));
+        }
+        if !expected.is_finite() || !epsilon.is_finite() || epsilon < 0.0 {
+            return Err(ImGuiError::invalid_operation(
+                "assert_item_read_float_eq requires finite expected and finite non-negative epsilon",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_assert_item_read_float_eq(
+                self.script.raw,
+                ptr,
+                expected,
+                epsilon,
+            )
+        });
+        Ok(())
+    }
+
+    pub fn assert_item_checked(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "assert_item_checked contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_assert_item_checked(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn assert_item_opened(&mut self, r#ref: &str) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "assert_item_opened contained interior NUL",
+            ));
+        }
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_assert_item_opened(self.script.raw, ptr)
+        });
+        Ok(())
+    }
+
+    pub fn wait_for_item(
+        &mut self,
+        r#ref: &str,
+        max_frames: impl Into<ScriptCount>,
+    ) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "wait_for_item contained interior NUL",
+            ));
+        }
+        let max_frames = max_frames.into().raw();
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_wait_for_item(self.script.raw, ptr, max_frames)
+        });
+        Ok(())
+    }
+
+    pub fn wait_for_item_visible(
+        &mut self,
+        r#ref: &str,
+        max_frames: impl Into<ScriptCount>,
+    ) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "wait_for_item_visible contained interior NUL",
+            ));
+        }
+        let max_frames = max_frames.into().raw();
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_wait_for_item_visible(self.script.raw, ptr, max_frames)
+        });
+        Ok(())
+    }
+
+    pub fn wait_for_item_checked(
+        &mut self,
+        r#ref: &str,
+        max_frames: impl Into<ScriptCount>,
+    ) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "wait_for_item_checked contained interior NUL",
+            ));
+        }
+        let max_frames = max_frames.into().raw();
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_wait_for_item_checked(self.script.raw, ptr, max_frames)
+        });
+        Ok(())
+    }
+
+    pub fn wait_for_item_opened(
+        &mut self,
+        r#ref: &str,
+        max_frames: impl Into<ScriptCount>,
+    ) -> ImGuiResult<()> {
+        if r#ref.contains('\0') {
+            return Err(ImGuiError::invalid_operation(
+                "wait_for_item_opened contained interior NUL",
+            ));
+        }
+        let max_frames = max_frames.into().raw();
+        with_scratch_txt(r#ref, |ptr| unsafe {
+            sys::imgui_test_engine_script_wait_for_item_opened(self.script.raw, ptr, max_frames)
+        });
+        Ok(())
+    }
+
+    pub fn input_text_replace(
+        &mut self,
+        r#ref: &str,
+        text: &str,
+        submit_enter: bool,
+    ) -> ImGuiResult<()> {
+        self.item_click(r#ref)?;
+        if submit_enter {
+            self.key_chars_replace_enter(text)?;
+        } else {
+            self.key_chars_replace(text)?;
+        }
+        Ok(())
+    }
+
+    pub fn yield_frames(&mut self, frames: impl Into<ScriptCount>) {
+        let frames = frames.into().raw();
+        unsafe { sys::imgui_test_engine_script_yield(self.script.raw, frames) };
+    }
+}

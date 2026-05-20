@@ -1,6 +1,7 @@
 // Renderer draw helpers: frame resources, setup state, draw lists traversal
 
 use super::*;
+use crate::wgpu;
 use dear_imgui_rs::TextureId;
 use dear_imgui_rs::render::{DrawData, DrawIdx};
 

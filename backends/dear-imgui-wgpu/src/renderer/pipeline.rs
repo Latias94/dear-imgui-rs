@@ -1,6 +1,8 @@
 // Renderer pipeline and device-objects creation
 
 use super::*;
+use crate::wgpu;
+use wgpu::*;
 
 impl WgpuRenderer {
     /// Create device objects (pipeline, etc.)
