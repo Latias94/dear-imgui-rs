@@ -2,9 +2,8 @@ use std::borrow::Cow;
 
 use crate::sys;
 use crate::ui::Ui;
-use crate::widget::{ComboBoxFlags, ComboBoxOptions, ComboBoxPreviewMode};
 
-use super::ComboBoxToken;
+use super::{ComboBoxFlags, ComboBoxOptions, ComboBoxPreviewMode, ComboBoxToken};
 
 /// # Combo Box Widgets
 impl Ui {

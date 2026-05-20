@@ -1,8 +1,7 @@
 use crate::sys;
 use crate::ui::Ui;
-use crate::widget::{ComboBoxFlags, ComboBoxHeight, ComboBoxOptions, ComboBoxPreviewMode};
 
-use super::ComboBoxToken;
+use super::{ComboBoxFlags, ComboBoxHeight, ComboBoxOptions, ComboBoxPreviewMode, ComboBoxToken};
 
 /// Builder for a combo box widget
 #[derive(Clone, Debug)]

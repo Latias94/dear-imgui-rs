@@ -178,6 +178,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   them, keeping later validation and diagnostics consistent with direct `from_bits_retain` use.
 - Raw-state flag getters now preserve unknown/raw bits instead of truncating them when reading
   Dear ImGui state back through safe flag wrappers.
+- Combo box flags/options now live in the `widget::combo` module implementation while preserving
+  the existing public re-exports.
 - `dear-imgui-sdl3` manual init/new-frame/shutdown helpers now bind the provided `Context` before
   calling the official SDL3 backend. For new code, prefer the RAII backend owner types.
 
