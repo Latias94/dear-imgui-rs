@@ -185,6 +185,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the existing public re-exports.
 - Tree node flags and table option/column flag types now live in their domain modules
   (`widget::tree` and `widget::table`) while preserving the existing public re-exports.
+- Refactored internal module organization across core APIs, extensions, and backends to improve
+  maintainability while preserving public API compatibility.
 - `dear-imgui-sdl3` manual init/new-frame/shutdown helpers now bind the provided `Context` before
   calling the official SDL3 backend. For new code, prefer the RAII backend owner types.
 
