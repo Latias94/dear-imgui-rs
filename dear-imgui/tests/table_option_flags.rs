@@ -6,6 +6,13 @@ fn test_guard() -> std::sync::MutexGuard<'static, ()> {
     GUARD.get_or_init(|| Mutex::new(())).lock().unwrap()
 }
 
+fn first_unknown_bit(known_bits: i32) -> i32 {
+    (0..31)
+        .map(|shift| 1_i32 << shift)
+        .find(|candidate| known_bits & candidate == 0)
+        .expect("test requires at least one spare positive flag bit")
+}
+
 #[test]
 fn table_options_reject_non_independent_bits_before_ffi() {
     let _guard = test_guard();
@@ -137,6 +144,52 @@ fn table_column_options_reject_non_independent_bits_before_ffi() {
             Some(imgui::TableColumnWidth::Fixed(48.0)),
             Some(imgui::TableColumnIndent::Disable),
             None,
+        );
+    });
+}
+
+#[test]
+fn table_column_flag_getter_preserves_unknown_raw_bits() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    {
+        let io = ctx.io_mut();
+        io.set_display_size([800.0, 600.0]);
+        io.set_delta_time(1.0 / 60.0);
+    }
+    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
+
+    let ui = ctx.frame();
+    let unknown = first_unknown_bit(imgui::TableColumnStateFlags::all().bits());
+
+    let _ = ui.window("Table raw column flags").build(|| {
+        let Some(_table) = ui.begin_table_with_flags(
+            "columns",
+            1,
+            imgui::TableOptions::new().sizing_policy(imgui::TableSizingPolicy::FixedFit),
+        ) else {
+            return;
+        };
+
+        ui.table_setup_column("raw", imgui::TableColumnFlags::DEFAULT_SORT, None, None);
+        ui.table_next_row();
+        ui.table_set_column_index(imgui::TableColumnIndex::ZERO);
+
+        unsafe {
+            let table = imgui::sys::igGetCurrentTable();
+            assert!(!table.is_null());
+            let column = (*table).Columns.Data;
+            assert!(!column.is_null());
+            (*column).Flags |= unknown;
+        }
+
+        assert_eq!(
+            ui.table_get_column_flags(imgui::TableColumnIndex::ZERO)
+                .bits()
+                & unknown,
+            unknown
         );
     });
 }

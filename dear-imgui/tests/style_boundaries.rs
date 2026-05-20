@@ -1,4 +1,5 @@
 use dear_imgui_rs as imgui;
+use imgui::internal::RawWrapper;
 use std::sync::{Mutex, OnceLock};
 
 fn test_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -13,6 +14,13 @@ fn prepare_context(ctx: &mut imgui::Context) {
 
     let _ = ctx.font_atlas_mut().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
+}
+
+fn first_unknown_bit(known_bits: i32) -> i32 {
+    (0..31)
+        .map(|shift| 1_i32 << shift)
+        .find(|candidate| known_bits & candidate == 0)
+        .expect("test requires at least one spare positive flag bit")
 }
 
 macro_rules! assert_panics {
@@ -101,6 +109,25 @@ fn style_setters_reject_invalid_direction_and_tree_line_values() {
     assert_eq!(
         style.tree_lines_flags(),
         imgui::TreeNodeFlags::DRAW_LINES_FULL
+    );
+}
+
+#[test]
+fn style_tree_lines_getter_preserves_unknown_raw_bits() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    let unknown = first_unknown_bit(imgui::TreeNodeFlags::all().bits());
+
+    let style = ctx.style_mut();
+    unsafe {
+        style.raw_mut().TreeLinesFlags = (imgui::TreeNodeFlags::DRAW_LINES_FULL.bits() | unknown)
+            as imgui::sys::ImGuiTreeNodeFlags;
+    }
+
+    assert_eq!(
+        style.tree_lines_flags().bits(),
+        imgui::TreeNodeFlags::DRAW_LINES_FULL.bits() | unknown
     );
 }
 

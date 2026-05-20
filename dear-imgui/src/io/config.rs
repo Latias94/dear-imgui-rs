@@ -5,7 +5,7 @@ use crate::io::{
 impl Io {
     /// Configuration flags
     pub fn config_flags(&self) -> ConfigFlags {
-        ConfigFlags::from_bits_truncate(self.inner().ConfigFlags)
+        ConfigFlags::from_bits_retain(self.inner().ConfigFlags)
     }
 
     /// Set configuration flags

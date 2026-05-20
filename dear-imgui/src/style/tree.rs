@@ -11,7 +11,7 @@ use crate::widget::TreeNodeFlags;
 
 impl Style {
     pub fn tree_lines_flags(&self) -> TreeNodeFlags {
-        TreeNodeFlags::from_bits_truncate(self.inner().TreeLinesFlags as i32)
+        TreeNodeFlags::from_bits_retain(self.inner().TreeLinesFlags as i32)
     }
     pub fn set_tree_lines_flags(&mut self, flags: TreeNodeFlags) {
         validate_tree_lines_flags("Style::set_tree_lines_flags()", flags);

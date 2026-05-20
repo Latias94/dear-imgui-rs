@@ -58,7 +58,7 @@ impl Io {
 
     /// Backend flags
     pub fn backend_flags(&self) -> BackendFlags {
-        BackendFlags::from_bits_truncate(self.inner().BackendFlags)
+        BackendFlags::from_bits_retain(self.inner().BackendFlags)
     }
 
     /// Set backend flags

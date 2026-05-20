@@ -352,7 +352,7 @@ impl Ui {
                 "Ui::table_get_column_flags() column index {resolved_column} is outside the current table column range 0..{column_count}"
             );
         }
-        unsafe { TableColumnStateFlags::from_bits_truncate(sys::igTableGetColumnFlags(column_n)) }
+        unsafe { TableColumnStateFlags::from_bits_retain(sys::igTableGetColumnFlags(column_n)) }
     }
 
     /// Enable/disable a column by index.

@@ -176,6 +176,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   detached texture-request workflows should use `render::snapshot::FrameSnapshot`.
 - Public flag wrapper serde deserialization now preserves unknown/raw bits instead of truncating
   them, keeping later validation and diagnostics consistent with direct `from_bits_retain` use.
+- Raw-state flag getters now preserve unknown/raw bits instead of truncating them when reading
+  Dear ImGui state back through safe flag wrappers.
 - `dear-imgui-sdl3` manual init/new-frame/shutdown helpers now bind the provided `Context` before
   calling the official SDL3 backend. For new code, prefer the RAII backend owner types.
 

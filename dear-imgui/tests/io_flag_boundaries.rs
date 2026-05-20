@@ -6,6 +6,13 @@ fn test_guard() -> std::sync::MutexGuard<'static, ()> {
     GUARD.get_or_init(|| Mutex::new(())).lock().unwrap()
 }
 
+fn first_unknown_bit(known_bits: i32) -> i32 {
+    (0..31)
+        .map(|shift| 1_i32 << shift)
+        .find(|candidate| known_bits & candidate == 0)
+        .expect("test requires at least one spare positive flag bit")
+}
+
 #[test]
 fn io_flag_types_include_current_public_upstream_bits() {
     assert_eq!(
@@ -51,4 +58,29 @@ fn io_flag_setters_reject_unsupported_bits_before_storing_them() {
         .is_err()
     );
     assert_eq!(io.backend_flags(), backend_flags);
+}
+
+#[test]
+fn io_flag_getters_preserve_unknown_raw_bits() {
+    let _guard = test_guard();
+
+    let ctx = imgui::Context::create();
+    let config_unknown = first_unknown_bit(imgui::ConfigFlags::all().bits());
+    let backend_unknown = first_unknown_bit(imgui::BackendFlags::all().bits());
+
+    unsafe {
+        let io = imgui::sys::igGetIO_ContextPtr(ctx.as_raw());
+        (*io).ConfigFlags = imgui::ConfigFlags::NO_KEYBOARD.bits() | config_unknown;
+        (*io).BackendFlags = imgui::BackendFlags::RENDERER_HAS_TEXTURES.bits() | backend_unknown;
+    }
+
+    let io = ctx.io();
+    assert_eq!(
+        io.config_flags().bits(),
+        imgui::ConfigFlags::NO_KEYBOARD.bits() | config_unknown
+    );
+    assert_eq!(
+        io.backend_flags().bits(),
+        imgui::BackendFlags::RENDERER_HAS_TEXTURES.bits() | backend_unknown
+    );
 }

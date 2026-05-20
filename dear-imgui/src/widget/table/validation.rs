@@ -81,7 +81,7 @@ pub(crate) fn resolve_table_column(column: TableColumnRef, caller: &str) -> i32 
 
 pub(crate) fn assert_current_table_has_flags(flags: TableFlags, caller: &str) {
     let table = assert_current_table(caller);
-    let table_flags = TableFlags::from_bits_truncate(unsafe { (*table).Flags });
+    let table_flags = TableFlags::from_bits_retain(unsafe { (*table).Flags });
     assert!(
         table_flags.contains(flags),
         "{caller} requires the current table to have {flags:?}"
