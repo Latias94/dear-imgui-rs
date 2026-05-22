@@ -1,15 +1,27 @@
 #![cfg(feature = "render")]
 
 use bevy_app::App;
+use bevy_asset::Assets;
 use bevy_camera::{Camera, NormalizedRenderTarget, RenderTarget};
 use bevy_ecs::prelude::*;
-use bevy_render::{RenderApp, extract_plugin::ExtractPlugin};
+use bevy_ecs::schedule::ScheduleLabel;
+use bevy_render::{
+    Render, RenderApp,
+    extract_plugin::ExtractPlugin,
+    render_resource::{BlendState, SpecializedRenderPipeline, TextureFormat},
+};
+use bevy_shader::Shader;
 use bevy_window::{PrimaryWindow, Window, WindowRef, WindowResolution};
 use dear_imgui_bevy::{
     ImguiContext, ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass,
-    render::ImguiExtractedRenderFrame,
+    render::{
+        IMGUI_FRAGMENT_ENTRY_POINT, IMGUI_SHADER_HANDLE, IMGUI_SHADER_SOURCE,
+        IMGUI_VERTEX_ENTRY_POINT, ImguiExtractedRenderFrame, ImguiPipelineKey,
+        ImguiPreparedRenderFrame, ImguiQueuedPipelines, ImguiRenderPipeline,
+        ImguiTextureBindGroups, imgui_vertex_buffer_layout,
+    },
 };
-use dear_imgui_rs as imgui;
+use dear_imgui_rs::{self as imgui, render::TextureBinding};
 use std::sync::{Mutex, OnceLock};
 
 fn imgui_context_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -28,6 +40,7 @@ fn app_with_primary_window() -> (
     let mut app = App::new();
     app.add_plugins(ExtractPlugin::default());
     app.add_plugins(ImguiPlugin::default());
+    app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
 
     let mut window = Window {
         resolution: WindowResolution::new(1280, 720),
@@ -118,4 +131,93 @@ fn render_extract_clones_snapshot_texture_requests_and_camera_targets() {
         targets[0].target,
         NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap())
     );
+}
+
+#[test]
+fn renderer_prepare_flattens_extracted_snapshot_for_pipeline_consumption() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary_window, _camera, texture_id) = app_with_primary_window();
+    app.add_systems(ImguiPrimaryContextPass, draw_managed_texture);
+
+    app.update();
+
+    let prepared = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<ImguiPreparedRenderFrame>();
+    assert_eq!(prepared.frame_index(), Some(1));
+    assert!(!prepared.vertices().is_empty());
+    assert!(!prepared.indices().is_empty());
+    assert!(
+        prepared.texture_request_count() >= 1,
+        "managed texture requests stay associated with prepared renderer data"
+    );
+
+    let draw = prepared
+        .draws()
+        .iter()
+        .find(|draw| matches!(draw.texture, TextureBinding::Managed(id) if id == texture_id))
+        .expect("the managed texture draw should be prepared");
+    assert_eq!(
+        draw.target,
+        NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap())
+    );
+    assert!(draw.index_range.end > draw.index_range.start);
+    assert!(draw.scissor.width > 0);
+    assert!(draw.scissor.height > 0);
+
+    let layout = imgui_vertex_buffer_layout();
+    assert_eq!(
+        layout.array_stride,
+        std::mem::size_of::<dear_imgui_bevy::render::ImguiGpuVertex>() as u64
+    );
+    assert_eq!(layout.attributes.len(), 3);
+    assert!(IMGUI_SHADER_SOURCE.contains(IMGUI_VERTEX_ENTRY_POINT));
+    assert!(IMGUI_SHADER_SOURCE.contains(IMGUI_FRAGMENT_ENTRY_POINT));
+}
+
+#[test]
+fn renderer_pipeline_resources_and_descriptors_are_installed() {
+    let _guard = imgui_context_guard();
+    let (app, _, _, _) = app_with_primary_window();
+
+    let shaders = app.world().resource::<Assets<Shader>>();
+    assert!(
+        shaders.get(IMGUI_SHADER_HANDLE.id()).is_some(),
+        "ImguiPlugin should register the embedded ImGui shader asset"
+    );
+
+    let render_world = app.sub_app(RenderApp).world();
+    assert!(render_world.contains_resource::<ImguiRenderPipeline>());
+    assert!(render_world.contains_resource::<ImguiTextureBindGroups>());
+    assert!(render_world.contains_resource::<ImguiQueuedPipelines>());
+
+    let pipeline = render_world.resource::<ImguiRenderPipeline>();
+    let descriptor = pipeline.specialize(ImguiPipelineKey {
+        target_format: TextureFormat::Rgba8UnormSrgb,
+        sample_count: 4,
+    });
+
+    assert_eq!(descriptor.layout.len(), 2);
+    assert_eq!(descriptor.vertex.shader, IMGUI_SHADER_HANDLE);
+    assert_eq!(
+        descriptor.vertex.entry_point.as_deref(),
+        Some(IMGUI_VERTEX_ENTRY_POINT)
+    );
+    assert_eq!(descriptor.vertex.buffers.len(), 1);
+    assert_eq!(descriptor.multisample.count, 4);
+
+    let fragment = descriptor
+        .fragment
+        .expect("Imgui pipeline should have a fragment stage");
+    assert_eq!(fragment.shader, IMGUI_SHADER_HANDLE);
+    assert_eq!(
+        fragment.entry_point.as_deref(),
+        Some(IMGUI_FRAGMENT_ENTRY_POINT)
+    );
+    let target = fragment.targets[0]
+        .as_ref()
+        .expect("Imgui pipeline should write one color target");
+    assert_eq!(target.format, TextureFormat::Rgba8UnormSrgb);
+    assert_eq!(target.blend, Some(BlendState::ALPHA_BLENDING));
 }

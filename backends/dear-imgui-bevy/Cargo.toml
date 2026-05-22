@@ -26,6 +26,7 @@ bevy_window = { version = "=0.19.0-rc.2", default-features = false, features = [
 bevy_asset = { version = "=0.19.0-rc.2", default-features = false, optional = true }
 bevy_camera = { version = "=0.19.0-rc.2", default-features = false, optional = true }
 bevy_color = { version = "=0.19.0-rc.2", default-features = false, optional = true }
+bevy_core_pipeline = { version = "=0.19.0-rc.2", default-features = false, optional = true }
 bevy_derive = "=0.19.0-rc.2"
 bevy_ecs_macro_logic = "=0.19.0-rc.2"
 bevy_ecs_macros = "=0.19.0-rc.2"
@@ -36,9 +37,11 @@ bevy_platform = { version = "=0.19.0-rc.2", default-features = false }
 bevy_ptr = "=0.19.0-rc.2"
 bevy_reflect = { version = "=0.19.0-rc.2", default-features = false, optional = true }
 bevy_render = { version = "=0.19.0-rc.2", default-features = false, optional = true }
+bevy_shader = { version = "=0.19.0-rc.2", default-features = false, optional = true }
 bevy_tasks = { version = "=0.19.0-rc.2", default-features = false }
 bevy_transform = { version = "=0.19.0-rc.2", default-features = false, optional = true }
 bevy_utils = { version = "=0.19.0-rc.2", default-features = false }
+bytemuck = { workspace = true, features = ["derive"], optional = true }
 
 [features]
 default = []
@@ -47,9 +50,12 @@ render = [
     "dep:bevy_asset",
     "dep:bevy_camera",
     "dep:bevy_color",
+    "dep:bevy_core_pipeline",
     "dep:bevy_image",
     "dep:bevy_mesh",
     "dep:bevy_reflect",
     "dep:bevy_render",
+    "dep:bevy_shader",
     "dep:bevy_transform",
+    "dep:bytemuck",
 ]

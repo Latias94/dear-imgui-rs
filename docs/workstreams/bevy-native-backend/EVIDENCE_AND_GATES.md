@@ -1,7 +1,7 @@
 # Bevy Native Backend Workstream — Evidence And Gates
 
 Status: Active
-Last updated: 2026-05-22
+Last updated: 2026-05-23
 
 ## Smallest Current Repro
 
@@ -198,6 +198,30 @@ Run `review-workstream` before accepting task or lane completion. Record blockin
   - Note: `cargo +stable nextest run -p dear-imgui-bevy render_extract` without `--features render` intentionally discovers zero tests because `tests/render_extract.rs` is gated behind the `render` feature; BEVY-080 evidence uses the render-enabled command above.
   - Review: no blocking BEVY-080 findings. Residual risk for BEVY-090: renderer integration may need to map the stored main-world camera entity to Bevy render entities / `ExtractedView`; this does not block extraction proof completion.
   - Final verification rerun before completion: `cargo +stable nextest run -p dear-imgui-bevy --features render render_extract && cargo +stable check -p dear-imgui-bevy --features render && cargo +stable fmt --all --check && python3 -m json.tool docs/workstreams/bevy-native-backend/WORKSTREAM.json >/tmp/workstream-json-check.txt` — PASS.
+
+- 2026-05-22: BEVY-090 first renderer-preparation slice implemented and verified.
+  - `cargo +stable nextest run -p dear-imgui-bevy --features render renderer_prepare` — PASS, 1 test. Proves render-world preparation flattens extracted `FrameSnapshot` data into renderer-ready vertices, indices, per-camera draw commands, texture bindings, scissor rectangles, and validates the local ImGui WGSL entry points plus vertex layout.
+  - `cargo +stable nextest run -p dear-imgui-bevy --features render renderer_pipeline` — PASS, 1 test. Proves the embedded shader asset, specialized pipeline descriptor, bind group layouts, texture-bind-group map resource, queued-pipeline resource, and render-world pipeline resources are installed.
+  - `cargo +stable check -p dear-imgui-bevy --features render` — PASS.
+  - `cargo +stable nextest run -p dear-imgui-bevy --features render` — PASS, 16 tests. Re-ran the backend package set with BEVY-090 preparation and pipeline scaffold included.
+  - `cargo +stable nextest run -p dear-imgui-bevy` — PASS, 13 tests. Re-ran the default backend package set without the render feature after the pipeline scaffold landed.
+  - `cargo +stable check -p dear-imgui-bevy --no-default-features` — PASS.
+  - `cargo +stable clippy -p dear-imgui-bevy --all-targets --features render --no-deps -- -D warnings` — PASS for the backend crate.
+  - `cargo +stable fmt --all --check` — PASS.
+  - Status: BEVY-090 remains IN_PROGRESS. The next required slice is concrete texture-map population / fallback handling and any final camera/render-target integration polish before BEVY-100.
+
+- 2026-05-23: BEVY-090 Bevy-native WGPU renderer proof completed and verified.
+  - Added managed texture bind-group population for `TextureOp::Create`, row updates for `TextureOp::Update`, removal for `TextureOp::Destroy`, and a 1x1 white fallback bind group in `ImguiPipelineGpuResources` for draw commands whose texture binding is not yet registered.
+  - The overlay pass now draws prepared commands with registered texture bind groups or the fallback bind group, while still consuming only owned `FrameSnapshot` / `ImguiPreparedRenderFrame` data from the Bevy render world.
+  - `cargo +stable nextest run -p dear-imgui-bevy --features render renderer` — PASS, 2 tests. Proves renderer preparation and pipeline descriptors/resources remain wired after texture-map/fallback completion.
+  - `cargo +stable check -p dear-imgui-bevy --features render` — PASS.
+  - `cargo +stable nextest run -p dear-imgui-bevy --features render` — PASS, 18 tests. Re-ran the render-enabled backend package set with texture conversion unit tests included.
+  - `cargo +stable nextest run -p dear-imgui-bevy` — PASS, 13 tests.
+  - `cargo +stable check -p dear-imgui-bevy --no-default-features` — PASS.
+  - `cargo +stable clippy -p dear-imgui-bevy --all-targets --features render --no-deps -- -D warnings` — PASS for the backend crate.
+  - `cargo +stable fmt --all --check` — PASS.
+  - Review: no blocking BEVY-090 findings. Residual risk is intentionally moved to BEVY-100: applying texture feedback on the main/UI context and exposing Bevy `Handle<Image>` user textures.
+  - Status: BEVY-090 DONE. BEVY-100 remains responsible for applying texture feedback back to the main/UI context and exposing Bevy `Handle<Image>` user textures.
 
 ## Notes
 

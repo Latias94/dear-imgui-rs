@@ -1,7 +1,7 @@
 # Bevy Native Backend Workstream — TODO
 
 Status: Active
-Last updated: 2026-05-22
+Last updated: 2026-05-23
 
 ## Task Status Legend
 
@@ -81,12 +81,12 @@ Last updated: 2026-05-22
   Evidence: `backends/dear-imgui-bevy/src/render.rs`, `backends/dear-imgui-bevy/tests/render_extract.rs`, fresh `cargo +stable nextest run -p dear-imgui-bevy --features render render_extract`, `cargo +stable nextest run -p dear-imgui-bevy --features render`, `cargo +stable check -p dear-imgui-bevy --features render`, and Bevy rc.2 dependency-tree pin check.
   Handoff: DONE 2026-05-22. Added `render::ImguiExtractedRenderFrame` and `render::ImguiCameraTarget`, installed extraction into Bevy `RenderApp` / `ExtractSchedule`, cloned `FrameSnapshot` plus texture requests across the boundary, and recorded active camera normalized render targets sorted by camera order. Raw ImGui draw data remains on the main/UI thread. Continue with BEVY-090 for the Bevy-native WGPU pipeline.
 
-- [ ] BEVY-090 [owner=unassigned] [deps=BEVY-080] [scope=backends/dear-imgui-bevy/src/render]
+- [x] BEVY-090 [owner=codex] [deps=BEVY-080] [scope=backends/dear-imgui-bevy/src/render]
   Goal: Implement the Bevy-native WGPU pipeline: shader, specialized pipeline, buffers, bind groups, texture map, and draw pass inserted into Bevy camera rendering.
   Validation: `cargo check -p dear-imgui-bevy --features render` plus targeted renderer tests where possible.
   Review: `review-workstream` before accepting completion.
-  Evidence: render pipeline code, shader, and compile gates.
-  Handoff: Prefer Bevy `Core2d`/`Core3d` camera-driven schedules for Bevy `0.19-dev`; document any compatibility shim if needed.
+  Evidence: `backends/dear-imgui-bevy/src/render.rs`, `backends/dear-imgui-bevy/tests/render_extract.rs`, fresh `cargo +stable nextest run -p dear-imgui-bevy --features render renderer`, `cargo +stable nextest run -p dear-imgui-bevy --features render`, `cargo +stable nextest run -p dear-imgui-bevy`, `cargo +stable check -p dear-imgui-bevy --features render`, `cargo +stable check -p dear-imgui-bevy --no-default-features`, `cargo +stable clippy -p dear-imgui-bevy --all-targets --features render --no-deps -- -D warnings`, and `cargo +stable fmt --all --check`.
+  Handoff: DONE 2026-05-23. Added the Bevy-native WGPU renderer proof: local WGSL shader, ImGui vertex layout, extracted snapshot flattening into `ImguiPreparedRenderFrame`, per-camera draw commands and scissor rectangles, GPU vertex/index/uniform buffers, specialized render pipeline descriptors, managed texture create/update/destroy bind-group population, 1x1 white fallback texture binding, queued camera pipelines, and Core2d/Core3d overlay pass insertion. BEVY-100 remains responsible for full texture feedback application and Bevy `Handle<Image>` user-image interop.
 
 - [ ] BEVY-100 [owner=unassigned] [deps=BEVY-090] [scope=backends/dear-imgui-bevy/src/texture.rs,backends/dear-imgui-bevy/src/render]
   Goal: Close the texture loop for ImGui-managed textures and Bevy user images, including `Handle<Image>` registration and render-to-texture viewport display.

@@ -3,7 +3,7 @@
   "slug": "bevy-native-backend",
   "title": "Bevy Native Backend Workstream",
   "status": "active",
-  "updated": "2026-05-22",
+  "updated": "2026-05-23",
   "scope_kind": "execution",
   "problem": "Build a Bevy-native Dear ImGui backend that fits Bevy ECS/render lifecycles and preserves extension ecosystem composition.",
   "authoritative_docs": [
@@ -55,15 +55,16 @@
     "BEVY rc.2 target-train follow-up: repo-ref/bevy tag v0.19.0-rc.2 commit a389b928aee5906928a16a7d4e66cb02c7362901, Rust 1.95.0, WGPU 29.0.3; BEVY-050 gates rerun and PASS",
     "BEVY-060 input proof: cargo +stable nextest run -p dear-imgui-bevy input PASS (9 tests); cargo +stable nextest run -p dear-imgui-bevy PASS (11 tests); cargo +stable check -p dear-imgui-bevy --no-default-features PASS; cargo +stable check -p dear-imgui-bevy --features render PASS; cargo fmt --all --check PASS",
     "BEVY-070 lifecycle proof: cargo +stable nextest run -p dear-imgui-bevy lifecycle PASS (2 tests); cargo +stable nextest run -p dear-imgui-bevy PASS (13 tests); cargo +stable check -p dear-imgui-bevy --no-default-features PASS; cargo +stable check -p dear-imgui-bevy --features render PASS; cargo +stable clippy -p dear-imgui-bevy --all-targets --features render --no-deps -- -D warnings PASS; cargo fmt --all --check PASS",
-    "BEVY-080 render extraction proof: cargo +stable nextest run -p dear-imgui-bevy --features render render_extract PASS (1 test); cargo +stable nextest run -p dear-imgui-bevy --features render PASS (14 tests); cargo +stable nextest run -p dear-imgui-bevy PASS (13 tests); cargo +stable check -p dear-imgui-bevy --no-default-features PASS; cargo +stable check -p dear-imgui-bevy --features render PASS; cargo +stable clippy -p dear-imgui-bevy --all-targets --features render --no-deps -- -D warnings PASS; Bevy render dependency tree remains pinned to 0.19.0-rc.2"
+    "BEVY-080 render extraction proof: cargo +stable nextest run -p dear-imgui-bevy --features render render_extract PASS (1 test); cargo +stable nextest run -p dear-imgui-bevy --features render PASS (14 tests); cargo +stable nextest run -p dear-imgui-bevy PASS (13 tests); cargo +stable check -p dear-imgui-bevy --no-default-features PASS; cargo +stable check -p dear-imgui-bevy --features render PASS; cargo +stable clippy -p dear-imgui-bevy --all-targets --features render --no-deps -- -D warnings PASS; Bevy render dependency tree remains pinned to 0.19.0-rc.2",
+    "BEVY-090 renderer proof: cargo +stable nextest run -p dear-imgui-bevy --features render renderer PASS (2 tests); cargo +stable nextest run -p dear-imgui-bevy --features render PASS (18 tests); cargo +stable nextest run -p dear-imgui-bevy PASS (13 tests); cargo +stable check -p dear-imgui-bevy --no-default-features PASS; cargo +stable check -p dear-imgui-bevy --features render PASS; cargo +stable clippy -p dear-imgui-bevy --all-targets --features render --no-deps -- -D warnings PASS; renderer owns Bevy-native shader/pipeline/buffers/texture bind groups/fallback overlay pass"
   ],
   "adr_refs": [
     "docs/adr/0001-bevy-native-imgui-backend.md"
   ],
-  "current_task": "BEVY-090",
-  "next_recommended_task": "BEVY-090",
+  "current_task": "BEVY-100",
+  "next_recommended_task": "BEVY-100",
   "continue_policy": {
     "default_action": "continue",
-    "notes": "BEVY-011/020/030/040/050/060/070/080 are complete. Continue with the Bevy-native WGPU pipeline work in BEVY-090, then texture/user-image interop in BEVY-100."
+    "notes": "BEVY-011/020/030/040/050/060/070/080/090 are complete. Continue with texture/user-image interop in BEVY-100."
   }
 }
