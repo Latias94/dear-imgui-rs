@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "slug": "bevy-native-backend",
+  "title": "Bevy Native Backend Workstream",
+  "status": "active",
+  "updated": "2026-05-22",
+  "scope_kind": "execution",
+  "problem": "Build a Bevy-native Dear ImGui backend that fits Bevy ECS/render lifecycles and preserves extension ecosystem composition.",
+  "authoritative_docs": [
+    {
+      "role": "adr",
+      "path": "docs/adr/0001-bevy-native-imgui-backend.md"
+    },
+    {
+      "role": "design",
+      "path": "docs/workstreams/bevy-native-backend/DESIGN.md"
+    },
+    {
+      "role": "execution",
+      "path": "docs/workstreams/bevy-native-backend/TODO.md"
+    },
+    {
+      "role": "gates",
+      "path": "docs/workstreams/bevy-native-backend/EVIDENCE_AND_GATES.md"
+    },
+    {
+      "role": "milestones",
+      "path": "docs/workstreams/bevy-native-backend/MILESTONES.md"
+    },
+    {
+      "role": "handoff",
+      "path": "docs/workstreams/bevy-native-backend/HANDOFF.md"
+    }
+  ],
+  "gates": [
+    "cargo nextest run -p dear-imgui-rs <frame-lifecycle-or-snapshot-filter>",
+    "cargo nextest run -p dear-implot -p dear-imnodes -p dear-node-editor -p dear-imguizmo",
+    "cargo check -p dear-imgui-bevy --no-default-features",
+    "cargo check -p dear-imgui-bevy --features render",
+    "cargo nextest run -p dear-imgui-bevy",
+    "cargo check -p dear-imgui-bevy --example simple",
+    "cargo check -p dear-imgui-bevy --example editor_shell",
+    "cargo check -p dear-imgui-bevy --example ecosystem"
+  ],
+  "evidence": [
+    "docs/adr/0001-bevy-native-imgui-backend.md",
+    "docs/workstreams/bevy-native-backend/DESIGN.md",
+    "docs/workstreams/bevy-native-backend/TODO.md",
+    "docs/workstreams/bevy-native-backend/EVIDENCE_AND_GATES.md",
+    "BEVY-011 target train pinned: repo-ref/bevy tag v0.19.0-rc.2 commit a389b928aee5906928a16a7d4e66cb02c7362901, Bevy 0.19.0-rc.2, Rust 1.95.0, WGPU 29.0.3",
+    "BEVY-020 lifecycle proof: cargo nextest run -p dear-imgui-rs --test frame_lifecycle PASS (6 tests); cargo fmt --all --check PASS; cargo check -p dear-imgui-rs PASS",
+    "BEVY-030 snapshot contract proof: cargo nextest run -p dear-imgui-rs --test snapshot_contract PASS (5 tests); texture feedback backend-user-data cleanup test PASS",
+    "BEVY-040 ecosystem proof: cargo nextest run -p dear-implot -p dear-imnodes -p dear-node-editor -p dear-imguizmo PASS (84 tests); extensions/dear-imguizmo/tests/ecosystem_frame.rs proves shared FrameToken composition",
+    "BEVY-050 backend skeleton: cargo +stable check -p dear-imgui-bevy --no-default-features PASS; cargo +stable check -p dear-imgui-bevy --features render PASS; cargo +stable nextest run -p dear-imgui-bevy PASS (2 tests); Bevy app/ECS dependency tree updated and pinned to 0.19.0-rc.2",
+    "BEVY rc.2 target-train follow-up: repo-ref/bevy tag v0.19.0-rc.2 commit a389b928aee5906928a16a7d4e66cb02c7362901, Rust 1.95.0, WGPU 29.0.3; BEVY-050 gates rerun and PASS",
+    "BEVY-060 input proof: cargo +stable nextest run -p dear-imgui-bevy input PASS (9 tests); cargo +stable nextest run -p dear-imgui-bevy PASS (11 tests); cargo +stable check -p dear-imgui-bevy --no-default-features PASS; cargo +stable check -p dear-imgui-bevy --features render PASS; cargo fmt --all --check PASS",
+    "BEVY-070 lifecycle proof: cargo +stable nextest run -p dear-imgui-bevy lifecycle PASS (2 tests); cargo +stable nextest run -p dear-imgui-bevy PASS (13 tests); cargo +stable check -p dear-imgui-bevy --no-default-features PASS; cargo +stable check -p dear-imgui-bevy --features render PASS; cargo +stable clippy -p dear-imgui-bevy --all-targets --features render --no-deps -- -D warnings PASS; cargo fmt --all --check PASS",
+    "BEVY-080 render extraction proof: cargo +stable nextest run -p dear-imgui-bevy --features render render_extract PASS (1 test); cargo +stable nextest run -p dear-imgui-bevy --features render PASS (14 tests); cargo +stable nextest run -p dear-imgui-bevy PASS (13 tests); cargo +stable check -p dear-imgui-bevy --no-default-features PASS; cargo +stable check -p dear-imgui-bevy --features render PASS; cargo +stable clippy -p dear-imgui-bevy --all-targets --features render --no-deps -- -D warnings PASS; Bevy render dependency tree remains pinned to 0.19.0-rc.2"
+  ],
+  "adr_refs": [
+    "docs/adr/0001-bevy-native-imgui-backend.md"
+  ],
+  "current_task": "BEVY-090",
+  "next_recommended_task": "BEVY-090",
+  "continue_policy": {
+    "default_action": "continue",
+    "notes": "BEVY-011/020/030/040/050/060/070/080 are complete. Continue with the Bevy-native WGPU pipeline work in BEVY-090, then texture/user-image interop in BEVY-100."
+  }
+}

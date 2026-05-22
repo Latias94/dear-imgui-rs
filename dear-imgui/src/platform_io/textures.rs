@@ -93,6 +93,9 @@ impl PlatformIo {
                 if let Some(tex_id) = fb.tex_id {
                     tex.set_tex_id(tex_id);
                 }
+                if let Some(backend_user_data) = fb.backend_user_data {
+                    tex.set_backend_user_data(backend_user_data as *mut std::ffi::c_void);
+                }
                 tex.set_status(fb.status);
             }
 

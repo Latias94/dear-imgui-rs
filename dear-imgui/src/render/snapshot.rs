@@ -121,6 +121,36 @@ pub struct TextureFeedback {
     pub id: ManagedTextureId,
     pub status: TextureStatus,
     pub tex_id: Option<TextureId>,
+    pub backend_user_data: Option<usize>,
+}
+
+impl TextureFeedback {
+    /// Feedback for a created/updated GPU texture handle.
+    pub fn with_tex_id(id: ManagedTextureId, status: TextureStatus, tex_id: TextureId) -> Self {
+        Self {
+            id,
+            status,
+            tex_id: Some(tex_id),
+            backend_user_data: None,
+        }
+    }
+
+    /// Feedback for status-only transitions such as `Destroyed`.
+    pub fn status(id: ManagedTextureId, status: TextureStatus) -> Self {
+        Self {
+            id,
+            status,
+            tex_id: None,
+            backend_user_data: None,
+        }
+    }
+
+    /// Attach renderer-owned backend user data to apply alongside status/TexID.
+    #[must_use]
+    pub fn backend_user_data(mut self, backend_user_data: usize) -> Self {
+        self.backend_user_data = Some(backend_user_data);
+        self
+    }
 }
 
 /// A managed texture operation requested by ImGui.
@@ -222,7 +252,7 @@ fn snapshot_draw_list(
 
         let texture = snapshot_texture_binding(cmd.TexRef);
         commands.push(DrawCmdSnapshot::Elements {
-            count: cmd.ElemCount as usize,
+            count: count_from_u32("DrawCmdSnapshot::Elements::count", cmd.ElemCount),
             clip_rect: [
                 cmd.ClipRect.x,
                 cmd.ClipRect.y,
@@ -230,12 +260,16 @@ fn snapshot_draw_list(
                 cmd.ClipRect.w,
             ],
             texture,
-            vtx_offset: cmd.VtxOffset as usize,
-            idx_offset: cmd.IdxOffset as usize,
+            vtx_offset: count_from_u32("DrawCmdSnapshot::Elements::vtx_offset", cmd.VtxOffset),
+            idx_offset: count_from_u32("DrawCmdSnapshot::Elements::idx_offset", cmd.IdxOffset),
         });
     }
 
     Ok(DrawListSnapshot { vtx, idx, commands })
+}
+
+fn count_from_u32(caller: &str, raw: u32) -> usize {
+    usize::try_from(raw).unwrap_or_else(|_| panic!("{caller} exceeded usize range"))
 }
 
 fn snapshot_texture_binding(tex_ref: sys::ImTextureRef) -> TextureBinding {

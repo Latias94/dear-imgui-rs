@@ -8,6 +8,7 @@ members = [
     "backends/dear-imgui-glow",
     "backends/dear-imgui-sdl3",
     "backends/dear-imgui-ash",
+    "backends/dear-imgui-bevy",
     "dear-app",
     "extensions/dear-file-browser",
     "extensions/dear-implot-sys",
@@ -33,7 +34,8 @@ members = [
 ]
 
 exclude = [
-    # keep empty
+    # Reference clones used by workstream planning and version-gated backend crates.
+    "repo-ref/bevy",
 ]
 
 [workspace.package]

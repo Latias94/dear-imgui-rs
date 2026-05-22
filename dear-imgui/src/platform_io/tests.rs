@@ -63,15 +63,58 @@ fn apply_texture_feedback_matches_typed_managed_texture_ids() {
     let mut pio = PlatformIo {
         raw: UnsafeCell::new(raw),
     };
-    let applied = pio.apply_texture_feedback(&[crate::render::snapshot::TextureFeedback {
-        id,
-        status: crate::texture::TextureStatus::OK,
-        tex_id: Some(crate::texture::TextureId::new(99)),
-    }]);
+    let applied =
+        pio.apply_texture_feedback(&[crate::render::snapshot::TextureFeedback::with_tex_id(
+            id,
+            crate::texture::TextureStatus::OK,
+            crate::texture::TextureId::new(99),
+        )]);
 
     assert_eq!(applied, 1);
     assert_eq!(texture.status(), crate::texture::TextureStatus::OK);
     assert_eq!(texture.tex_id(), crate::texture::TextureId::new(99));
+}
+
+#[test]
+fn apply_texture_feedback_can_set_backend_user_data_and_clear_on_destroy() {
+    let mut texture = crate::texture::TextureData::new();
+    unsafe {
+        (*texture.as_raw_mut()).UniqueID = 2718;
+    }
+    texture.set_status(crate::texture::TextureStatus::WantCreate);
+    let id = texture.unique_id();
+
+    let mut texture_ptr = texture.as_mut().as_raw_mut();
+    let mut raw: sys::ImGuiPlatformIO = new_platform_io();
+    raw.Textures.Size = 1;
+    raw.Textures.Capacity = 1;
+    raw.Textures.Data = &mut texture_ptr;
+
+    let mut pio = PlatformIo {
+        raw: UnsafeCell::new(raw),
+    };
+    let applied =
+        pio.apply_texture_feedback(&[crate::render::snapshot::TextureFeedback::with_tex_id(
+            id,
+            crate::texture::TextureStatus::OK,
+            crate::texture::TextureId::new(123),
+        )
+        .backend_user_data(0xCAFE)]);
+
+    assert_eq!(applied, 1);
+    assert_eq!(texture.status(), crate::texture::TextureStatus::OK);
+    assert_eq!(texture.tex_id(), crate::texture::TextureId::new(123));
+    assert_eq!(texture.backend_user_data() as usize, 0xCAFE);
+
+    let applied = pio.apply_texture_feedback(&[crate::render::snapshot::TextureFeedback::status(
+        id,
+        crate::texture::TextureStatus::Destroyed,
+    )]);
+
+    assert_eq!(applied, 1);
+    assert_eq!(texture.status(), crate::texture::TextureStatus::Destroyed);
+    assert!(texture.tex_id().is_null());
+    assert!(texture.backend_user_data().is_null());
 }
 
 #[test]

@@ -18,6 +18,7 @@ mod tests;
 mod texture_registry;
 
 pub use self::core::{Context, ContextAliveToken};
+pub use self::frame::{FrameLifecycleState, FramePrepareOptions, FrameResult, FrameToken};
 pub use self::suspended::SuspendedContext;
 pub use self::texture_registry::RegisteredUserTexture;
 

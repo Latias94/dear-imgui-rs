@@ -1,0 +1,583 @@
+//! Primary-window input mapping for the Bevy backend.
+//!
+//! This module deliberately handles one Bevy [`PrimaryWindow`] and one Dear ImGui context. It
+//! translates Bevy's window/input messages into Dear ImGui IO events without consuming or rewriting
+//! Bevy's messages. Gameplay systems should use Dear ImGui's capture flags as policy hints instead
+//! of expecting this backend to stop Bevy input propagation.
+
+use crate::ImguiContext;
+use bevy_app::{App, PreUpdate};
+use bevy_ecs::message::MessageReader;
+use bevy_ecs::prelude::*;
+use bevy_ecs::schedule::{IntoScheduleConfigs, SystemSet};
+use bevy_input::ButtonState;
+use bevy_input::keyboard::{KeyCode, KeyboardFocusLost, KeyboardInput};
+use bevy_input::mouse::{
+    MouseButton as BevyMouseButton, MouseButtonInput, MouseScrollUnit, MouseWheel,
+};
+use bevy_input::touch::{TouchInput, TouchPhase};
+use bevy_window::{
+    CursorLeft, CursorMoved, Ime, PrimaryWindow, Window, WindowBackendScaleFactorChanged,
+    WindowFocused, WindowResized, WindowScaleFactorChanged,
+};
+use dear_imgui_rs as imgui;
+use std::collections::HashSet;
+
+const INVALID_MOUSE_POS: [f32; 2] = [-f32::MAX, -f32::MAX];
+
+/// System set that injects Bevy primary-window input into Dear ImGui IO.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ImguiInputSystems;
+
+/// Runtime state needed to map Bevy input streams into Dear ImGui events.
+#[derive(Resource, Debug, Default)]
+pub struct ImguiInputState {
+    active_touch_id: Option<u64>,
+    ime_enabled: bool,
+    primary_window_focused: Option<bool>,
+    pressed_keys: HashSet<imgui::Key>,
+    pressed_mouse_buttons: HashSet<imgui::MouseButton>,
+}
+
+impl ImguiInputState {
+    /// Currently selected touch id for touch-to-mouse translation.
+    #[must_use]
+    pub fn active_touch_id(&self) -> Option<u64> {
+        self.active_touch_id
+    }
+
+    /// Whether the last primary-window IME message left IME enabled.
+    #[must_use]
+    pub fn ime_enabled(&self) -> bool {
+        self.ime_enabled
+    }
+
+    /// Last focus state observed for the primary window.
+    #[must_use]
+    pub fn primary_window_focused(&self) -> Option<bool> {
+        self.primary_window_focused
+    }
+}
+
+/// Last-known Dear ImGui capture intent exposed as a Bevy resource.
+///
+/// Dear ImGui computes these flags while processing a frame. The backend records the latest values
+/// seen in IO; game/editor systems can use them to decide whether to act on Bevy input, but the
+/// backend itself does not remove or stop Bevy messages.
+#[derive(Resource, Debug, Clone, Copy, Default, Eq, PartialEq)]
+pub struct ImguiInputCapture {
+    /// Dear ImGui wants mouse input.
+    pub want_capture_mouse: bool,
+    /// Dear ImGui wants mouse input, except when a popup close should be allowed through.
+    pub want_capture_mouse_unless_popup_close: bool,
+    /// Dear ImGui wants keyboard input.
+    pub want_capture_keyboard: bool,
+    /// Dear ImGui wants text input / IME.
+    pub want_text_input: bool,
+}
+
+impl ImguiInputCapture {
+    fn update_from_io(&mut self, io: &imgui::Io) {
+        self.want_capture_mouse = io.want_capture_mouse();
+        self.want_capture_mouse_unless_popup_close = io.want_capture_mouse_unless_popup_close();
+        self.want_capture_keyboard = io.want_capture_keyboard();
+        self.want_text_input = io.want_text_input();
+    }
+}
+
+pub(crate) fn install_input_mapping(app: &mut App) {
+    app.add_message::<WindowResized>()
+        .add_message::<WindowScaleFactorChanged>()
+        .add_message::<WindowBackendScaleFactorChanged>()
+        .add_message::<WindowFocused>()
+        .add_message::<CursorMoved>()
+        .add_message::<CursorLeft>()
+        .add_message::<Ime>()
+        .add_message::<MouseButtonInput>()
+        .add_message::<MouseWheel>()
+        .add_message::<KeyboardInput>()
+        .add_message::<KeyboardFocusLost>()
+        .add_message::<TouchInput>()
+        .init_resource::<ImguiInputState>()
+        .init_resource::<ImguiInputCapture>()
+        .add_systems(
+            PreUpdate,
+            primary_window_input_system.in_set(ImguiInputSystems),
+        );
+}
+
+/// Translate primary-window Bevy messages into Dear ImGui IO events.
+#[allow(clippy::too_many_arguments)]
+pub fn primary_window_input_system(
+    primary_window: Query<(Entity, &Window), With<PrimaryWindow>>,
+    mut imgui_context: NonSendMut<ImguiContext>,
+    mut input_state: ResMut<ImguiInputState>,
+    mut capture: ResMut<ImguiInputCapture>,
+    mut window_resized: MessageReader<WindowResized>,
+    mut window_scale_factor_changed: MessageReader<WindowScaleFactorChanged>,
+    mut window_backend_scale_factor_changed: MessageReader<WindowBackendScaleFactorChanged>,
+    mut window_focused: MessageReader<WindowFocused>,
+    mut cursor_moved: MessageReader<CursorMoved>,
+    mut cursor_left: MessageReader<CursorLeft>,
+    mut mouse_button_input: MessageReader<MouseButtonInput>,
+    mut mouse_wheel: MessageReader<MouseWheel>,
+    mut keyboard_input: MessageReader<KeyboardInput>,
+    mut keyboard_focus_lost: MessageReader<KeyboardFocusLost>,
+    mut touch_input: MessageReader<TouchInput>,
+    mut ime: MessageReader<Ime>,
+) {
+    let Ok((primary_window_entity, window)) = primary_window.single() else {
+        discard_unread_messages(
+            &mut window_resized,
+            &mut window_scale_factor_changed,
+            &mut window_backend_scale_factor_changed,
+            &mut window_focused,
+            &mut cursor_moved,
+            &mut cursor_left,
+            &mut mouse_button_input,
+            &mut mouse_wheel,
+            &mut keyboard_input,
+            &mut keyboard_focus_lost,
+            &mut touch_input,
+            &mut ime,
+        );
+        return;
+    };
+
+    let context = imgui_context.context_mut();
+    sync_window_metrics(context, window);
+    sync_initial_focus(context, &mut input_state, window.focused);
+
+    for event in window_resized
+        .read()
+        .filter(|event| event.window == primary_window_entity)
+    {
+        context
+            .io_mut()
+            .set_display_size([event.width, event.height]);
+    }
+
+    for event in window_scale_factor_changed
+        .read()
+        .filter(|event| event.window == primary_window_entity)
+    {
+        set_framebuffer_scale(context, event.scale_factor as f32);
+    }
+
+    for event in window_backend_scale_factor_changed
+        .read()
+        .filter(|event| event.window == primary_window_entity)
+    {
+        set_framebuffer_scale(context, event.scale_factor as f32);
+    }
+
+    for event in window_focused
+        .read()
+        .filter(|event| event.window == primary_window_entity)
+    {
+        apply_focus_event(context, &mut input_state, event.focused);
+    }
+
+    if !keyboard_focus_lost.is_empty() {
+        keyboard_focus_lost.clear();
+        apply_focus_event(context, &mut input_state, false);
+    }
+
+    for event in cursor_moved
+        .read()
+        .filter(|event| event.window == primary_window_entity)
+    {
+        let io = context.io_mut();
+        io.add_mouse_source_event(imgui::MouseSource::Mouse);
+        io.add_mouse_pos_event([event.position.x, event.position.y]);
+    }
+
+    for event in cursor_left
+        .read()
+        .filter(|event| event.window == primary_window_entity)
+    {
+        let _ = event;
+        let io = context.io_mut();
+        io.add_mouse_source_event(imgui::MouseSource::Mouse);
+        io.add_mouse_pos_event(INVALID_MOUSE_POS);
+    }
+
+    for event in mouse_button_input
+        .read()
+        .filter(|event| event.window == primary_window_entity)
+    {
+        if let Some(button) = map_bevy_mouse_button(event.button) {
+            let pressed = event.state.is_pressed();
+            if pressed {
+                input_state.pressed_mouse_buttons.insert(button);
+            } else {
+                input_state.pressed_mouse_buttons.remove(&button);
+            }
+            let io = context.io_mut();
+            io.add_mouse_source_event(imgui::MouseSource::Mouse);
+            io.add_mouse_button_event(button, pressed);
+        }
+    }
+
+    for event in mouse_wheel
+        .read()
+        .filter(|event| event.window == primary_window_entity)
+    {
+        let io = context.io_mut();
+        io.add_mouse_source_event(imgui::MouseSource::Mouse);
+        io.add_mouse_wheel_event(normalize_wheel(event.unit, event.x, event.y));
+    }
+
+    for event in keyboard_input
+        .read()
+        .filter(|event| event.window == primary_window_entity)
+    {
+        apply_keyboard_input(context, &mut input_state, event);
+    }
+
+    for event in touch_input
+        .read()
+        .filter(|event| event.window == primary_window_entity)
+    {
+        apply_touch_input(context, &mut input_state, event);
+    }
+
+    for event in ime.read() {
+        let window = match event {
+            Ime::Preedit { window, .. }
+            | Ime::Commit { window, .. }
+            | Ime::Enabled { window }
+            | Ime::Disabled { window } => *window,
+        };
+        if window == primary_window_entity {
+            apply_ime_event(context, &mut input_state, event);
+        }
+    }
+
+    capture.update_from_io(context.io());
+}
+
+/// Convert a Bevy mouse button into Dear ImGui's button space.
+#[must_use]
+pub fn map_bevy_mouse_button(button: BevyMouseButton) -> Option<imgui::MouseButton> {
+    match button {
+        BevyMouseButton::Left => Some(imgui::MouseButton::Left),
+        BevyMouseButton::Right => Some(imgui::MouseButton::Right),
+        BevyMouseButton::Middle => Some(imgui::MouseButton::Middle),
+        BevyMouseButton::Back => Some(imgui::MouseButton::Extra1),
+        BevyMouseButton::Forward => Some(imgui::MouseButton::Extra2),
+        BevyMouseButton::Other(_) => None,
+    }
+}
+
+/// Convert a Bevy physical key code into Dear ImGui's key space.
+#[must_use]
+pub fn map_bevy_key_code(key_code: KeyCode) -> Option<imgui::Key> {
+    use KeyCode as B;
+    use imgui::Key as I;
+
+    match key_code {
+        B::Backquote => Some(I::GraveAccent),
+        B::Backslash => Some(I::Backslash),
+        B::BracketLeft => Some(I::LeftBracket),
+        B::BracketRight => Some(I::RightBracket),
+        B::Comma => Some(I::Comma),
+        B::Digit0 => Some(I::Key0),
+        B::Digit1 => Some(I::Key1),
+        B::Digit2 => Some(I::Key2),
+        B::Digit3 => Some(I::Key3),
+        B::Digit4 => Some(I::Key4),
+        B::Digit5 => Some(I::Key5),
+        B::Digit6 => Some(I::Key6),
+        B::Digit7 => Some(I::Key7),
+        B::Digit8 => Some(I::Key8),
+        B::Digit9 => Some(I::Key9),
+        B::Equal => Some(I::Equal),
+        B::IntlBackslash | B::IntlRo | B::IntlYen => Some(I::Oem102),
+        B::KeyA => Some(I::A),
+        B::KeyB => Some(I::B),
+        B::KeyC => Some(I::C),
+        B::KeyD => Some(I::D),
+        B::KeyE => Some(I::E),
+        B::KeyF => Some(I::F),
+        B::KeyG => Some(I::G),
+        B::KeyH => Some(I::H),
+        B::KeyI => Some(I::I),
+        B::KeyJ => Some(I::J),
+        B::KeyK => Some(I::K),
+        B::KeyL => Some(I::L),
+        B::KeyM => Some(I::M),
+        B::KeyN => Some(I::N),
+        B::KeyO => Some(I::O),
+        B::KeyP => Some(I::P),
+        B::KeyQ => Some(I::Q),
+        B::KeyR => Some(I::R),
+        B::KeyS => Some(I::S),
+        B::KeyT => Some(I::T),
+        B::KeyU => Some(I::U),
+        B::KeyV => Some(I::V),
+        B::KeyW => Some(I::W),
+        B::KeyX => Some(I::X),
+        B::KeyY => Some(I::Y),
+        B::KeyZ => Some(I::Z),
+        B::Minus => Some(I::Minus),
+        B::Period => Some(I::Period),
+        B::Quote => Some(I::Apostrophe),
+        B::Semicolon => Some(I::Semicolon),
+        B::Slash => Some(I::Slash),
+        B::AltLeft => Some(I::LeftAlt),
+        B::AltRight => Some(I::RightAlt),
+        B::Backspace | B::NumpadBackspace => Some(I::Backspace),
+        B::CapsLock => Some(I::CapsLock),
+        B::ContextMenu => Some(I::Menu),
+        B::ControlLeft => Some(I::LeftCtrl),
+        B::ControlRight => Some(I::RightCtrl),
+        B::Enter => Some(I::Enter),
+        B::SuperLeft | B::Meta => Some(I::LeftSuper),
+        B::SuperRight => Some(I::RightSuper),
+        B::ShiftLeft => Some(I::LeftShift),
+        B::ShiftRight => Some(I::RightShift),
+        B::Space => Some(I::Space),
+        B::Tab => Some(I::Tab),
+        B::Delete => Some(I::Delete),
+        B::End => Some(I::End),
+        B::Home => Some(I::Home),
+        B::Insert => Some(I::Insert),
+        B::PageDown => Some(I::PageDown),
+        B::PageUp => Some(I::PageUp),
+        B::ArrowDown => Some(I::DownArrow),
+        B::ArrowLeft => Some(I::LeftArrow),
+        B::ArrowRight => Some(I::RightArrow),
+        B::ArrowUp => Some(I::UpArrow),
+        B::NumLock => Some(I::NumLock),
+        B::Numpad0 => Some(I::Keypad0),
+        B::Numpad1 => Some(I::Keypad1),
+        B::Numpad2 => Some(I::Keypad2),
+        B::Numpad3 => Some(I::Keypad3),
+        B::Numpad4 => Some(I::Keypad4),
+        B::Numpad5 => Some(I::Keypad5),
+        B::Numpad6 => Some(I::Keypad6),
+        B::Numpad7 => Some(I::Keypad7),
+        B::Numpad8 => Some(I::Keypad8),
+        B::Numpad9 => Some(I::Keypad9),
+        B::NumpadAdd => Some(I::KeypadAdd),
+        B::NumpadDecimal | B::NumpadComma => Some(I::KeypadDecimal),
+        B::NumpadDivide => Some(I::KeypadDivide),
+        B::NumpadEnter => Some(I::KeypadEnter),
+        B::NumpadEqual => Some(I::KeypadEqual),
+        B::NumpadMultiply | B::NumpadStar => Some(I::KeypadMultiply),
+        B::NumpadSubtract => Some(I::KeypadSubtract),
+        B::Escape => Some(I::Escape),
+        B::PrintScreen => Some(I::PrintScreen),
+        B::ScrollLock => Some(I::ScrollLock),
+        B::Pause => Some(I::Pause),
+        B::F1 => Some(I::F1),
+        B::F2 => Some(I::F2),
+        B::F3 => Some(I::F3),
+        B::F4 => Some(I::F4),
+        B::F5 => Some(I::F5),
+        B::F6 => Some(I::F6),
+        B::F7 => Some(I::F7),
+        B::F8 => Some(I::F8),
+        B::F9 => Some(I::F9),
+        B::F10 => Some(I::F10),
+        B::F11 => Some(I::F11),
+        B::F12 => Some(I::F12),
+        _ => None,
+    }
+}
+
+fn sync_window_metrics(context: &mut imgui::Context, window: &Window) {
+    let io = context.io_mut();
+    io.set_display_size([window.width(), window.height()]);
+    io.set_display_framebuffer_scale([window.scale_factor(), window.scale_factor()]);
+}
+
+fn set_framebuffer_scale(context: &mut imgui::Context, scale_factor: f32) {
+    context
+        .io_mut()
+        .set_display_framebuffer_scale([scale_factor, scale_factor]);
+}
+
+fn sync_initial_focus(context: &mut imgui::Context, state: &mut ImguiInputState, focused: bool) {
+    if state.primary_window_focused != Some(focused) {
+        apply_focus_event(context, state, focused);
+    }
+}
+
+fn apply_focus_event(context: &mut imgui::Context, state: &mut ImguiInputState, focused: bool) {
+    context.io_mut().add_focus_event(focused);
+    state.primary_window_focused = Some(focused);
+    if !focused {
+        release_sticky_input(context, state);
+    }
+}
+
+fn apply_keyboard_input(
+    context: &mut imgui::Context,
+    state: &mut ImguiInputState,
+    event: &KeyboardInput,
+) {
+    let pressed = event.state == ButtonState::Pressed;
+
+    if pressed && let Some(text) = &event.text {
+        for ch in text.chars().filter(|ch| *ch != '\u{7f}') {
+            context.io_mut().add_input_character(ch);
+        }
+    }
+
+    if let Some(key) = map_bevy_key_code(event.key_code) {
+        if pressed {
+            state.pressed_keys.insert(key);
+        } else {
+            state.pressed_keys.remove(&key);
+        }
+        let io = context.io_mut();
+        sync_modifier_events(io, state);
+        io.add_key_event(key, pressed);
+    }
+}
+
+fn sync_modifier_events(io: &mut imgui::Io, state: &ImguiInputState) {
+    io.add_key_event(imgui::Key::ModCtrl, state.any_ctrl_down());
+    io.add_key_event(imgui::Key::ModShift, state.any_shift_down());
+    io.add_key_event(imgui::Key::ModAlt, state.any_alt_down());
+    io.add_key_event(imgui::Key::ModSuper, state.any_super_down());
+}
+
+impl ImguiInputState {
+    fn any_ctrl_down(&self) -> bool {
+        self.pressed_keys.contains(&imgui::Key::LeftCtrl)
+            || self.pressed_keys.contains(&imgui::Key::RightCtrl)
+    }
+
+    fn any_shift_down(&self) -> bool {
+        self.pressed_keys.contains(&imgui::Key::LeftShift)
+            || self.pressed_keys.contains(&imgui::Key::RightShift)
+    }
+
+    fn any_alt_down(&self) -> bool {
+        self.pressed_keys.contains(&imgui::Key::LeftAlt)
+            || self.pressed_keys.contains(&imgui::Key::RightAlt)
+    }
+
+    fn any_super_down(&self) -> bool {
+        self.pressed_keys.contains(&imgui::Key::LeftSuper)
+            || self.pressed_keys.contains(&imgui::Key::RightSuper)
+    }
+}
+
+fn apply_touch_input(
+    context: &mut imgui::Context,
+    state: &mut ImguiInputState,
+    event: &TouchInput,
+) {
+    match event.phase {
+        TouchPhase::Started => {
+            if state.active_touch_id.is_none() {
+                state.active_touch_id = Some(event.id);
+                let io = context.io_mut();
+                io.add_mouse_source_event(imgui::MouseSource::TouchScreen);
+                io.add_mouse_pos_event([event.position.x, event.position.y]);
+                io.add_mouse_button_event(imgui::MouseButton::Left, true);
+            }
+        }
+        TouchPhase::Moved => {
+            if state.active_touch_id == Some(event.id) {
+                let io = context.io_mut();
+                io.add_mouse_source_event(imgui::MouseSource::TouchScreen);
+                io.add_mouse_pos_event([event.position.x, event.position.y]);
+            }
+        }
+        TouchPhase::Ended | TouchPhase::Canceled => {
+            if state.active_touch_id == Some(event.id) {
+                state.active_touch_id = None;
+                let io = context.io_mut();
+                io.add_mouse_source_event(imgui::MouseSource::TouchScreen);
+                io.add_mouse_pos_event([event.position.x, event.position.y]);
+                io.add_mouse_button_event(imgui::MouseButton::Left, false);
+            }
+        }
+    }
+}
+
+fn apply_ime_event(context: &mut imgui::Context, state: &mut ImguiInputState, event: &Ime) {
+    match event {
+        Ime::Commit { value, .. } => {
+            for ch in value.chars().filter(|ch| !ch.is_control()) {
+                context.io_mut().add_input_character(ch);
+            }
+        }
+        Ime::Enabled { .. } => {
+            state.ime_enabled = true;
+        }
+        Ime::Disabled { .. } => {
+            state.ime_enabled = false;
+        }
+        Ime::Preedit { .. } => {}
+    }
+}
+
+fn normalize_wheel(unit: MouseScrollUnit, x: f32, y: f32) -> [f32; 2] {
+    match unit {
+        MouseScrollUnit::Line => [x, y],
+        MouseScrollUnit::Pixel => [pixel_wheel_step(x), pixel_wheel_step(y)],
+    }
+}
+
+fn pixel_wheel_step(value: f32) -> f32 {
+    match value.partial_cmp(&0.0) {
+        Some(std::cmp::Ordering::Greater) => 1.0,
+        Some(std::cmp::Ordering::Less) => -1.0,
+        _ => 0.0,
+    }
+}
+
+fn release_sticky_input(context: &mut imgui::Context, state: &mut ImguiInputState) {
+    let io = context.io_mut();
+    for key in state.pressed_keys.drain() {
+        io.add_key_event(key, false);
+    }
+    io.add_key_event(imgui::Key::ModCtrl, false);
+    io.add_key_event(imgui::Key::ModShift, false);
+    io.add_key_event(imgui::Key::ModAlt, false);
+    io.add_key_event(imgui::Key::ModSuper, false);
+
+    for button in state.pressed_mouse_buttons.drain() {
+        io.add_mouse_button_event(button, false);
+    }
+
+    if state.active_touch_id.take().is_some() {
+        io.add_mouse_source_event(imgui::MouseSource::TouchScreen);
+        io.add_mouse_button_event(imgui::MouseButton::Left, false);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn discard_unread_messages(
+    window_resized: &mut MessageReader<WindowResized>,
+    window_scale_factor_changed: &mut MessageReader<WindowScaleFactorChanged>,
+    window_backend_scale_factor_changed: &mut MessageReader<WindowBackendScaleFactorChanged>,
+    window_focused: &mut MessageReader<WindowFocused>,
+    cursor_moved: &mut MessageReader<CursorMoved>,
+    cursor_left: &mut MessageReader<CursorLeft>,
+    mouse_button_input: &mut MessageReader<MouseButtonInput>,
+    mouse_wheel: &mut MessageReader<MouseWheel>,
+    keyboard_input: &mut MessageReader<KeyboardInput>,
+    keyboard_focus_lost: &mut MessageReader<KeyboardFocusLost>,
+    touch_input: &mut MessageReader<TouchInput>,
+    ime: &mut MessageReader<Ime>,
+) {
+    window_resized.clear();
+    window_scale_factor_changed.clear();
+    window_backend_scale_factor_changed.clear();
+    window_focused.clear();
+    cursor_moved.clear();
+    cursor_left.clear();
+    mouse_button_input.clear();
+    mouse_wheel.clear();
+    keyboard_input.clear();
+    keyboard_focus_lost.clear();
+    touch_input.clear();
+    ime.clear();
+}

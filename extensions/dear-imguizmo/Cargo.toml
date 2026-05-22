@@ -29,3 +29,8 @@ freetype = ["dear-imgui-rs/freetype", "dear-imguizmo-sys/freetype"]
 glam = ["dep:glam"]
 mint = ["dep:mint"]
 wasm = ["dear-imgui-rs/wasm", "dear-imguizmo-sys/wasm"]
+
+[dev-dependencies]
+dear-imnodes = { path = "../dear-imnodes", version = "0.13" }
+dear-implot = { path = "../dear-implot", version = "0.13" }
+dear-node-editor = { path = "../dear-node-editor", version = "0.13" }
