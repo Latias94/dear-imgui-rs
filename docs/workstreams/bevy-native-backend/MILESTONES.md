@@ -1,7 +1,7 @@
 # Bevy Native Backend Workstream — Milestones
 
-Status: Draft
-Last updated: 2026-05-22
+Status: Closed
+Last updated: 2026-05-23
 
 ## M0 — Scope And Evidence Freeze
 
@@ -88,3 +88,10 @@ Primary gates:
 
 - targeted package gates for changed crates;
 - broader workspace gate if feasible, otherwise a documented narrower closeout gate with rationale.
+
+Result:
+
+- DONE 2026-05-23.
+- Fresh closeout gates are recorded in `EVIDENCE_AND_GATES.md`.
+- The lane closed with all BEVY-010 through BEVY-140 tasks complete.
+- The full workspace gate remains intentionally deferred because `dear-imgui-bevy` targets Bevy `0.19.0-rc.2`, which requires Rust `1.95.0`, while the root workspace still targets Rust `1.92.0`. Dedicated `cargo +stable` Bevy gates are the authoritative closeout evidence.

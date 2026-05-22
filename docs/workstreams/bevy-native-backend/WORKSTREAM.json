@@ -2,7 +2,7 @@
   "schema_version": 1,
   "slug": "bevy-native-backend",
   "title": "Bevy Native Backend Workstream",
-  "status": "active",
+  "status": "closed",
   "updated": "2026-05-23",
   "scope_kind": "execution",
   "problem": "Build a Bevy-native Dear ImGui backend that fits Bevy ECS/render lifecycles and preserves extension ecosystem composition.",
@@ -35,12 +35,13 @@
   "gates": [
     "cargo nextest run -p dear-imgui-rs <frame-lifecycle-or-snapshot-filter>",
     "cargo nextest run -p dear-implot -p dear-imnodes -p dear-node-editor -p dear-imguizmo",
-    "cargo check -p dear-imgui-bevy --no-default-features",
-    "cargo check -p dear-imgui-bevy --features render",
-    "cargo nextest run -p dear-imgui-bevy",
-    "cargo check -p dear-imgui-bevy --example simple",
-    "cargo check -p dear-imgui-bevy --features render --example editor_shell",
-    "cargo check -p dear-imgui-bevy --example ecosystem"
+    "cargo +stable check -p dear-imgui-bevy --no-default-features",
+    "cargo +stable check -p dear-imgui-bevy --features render",
+    "cargo +stable nextest run -p dear-imgui-bevy",
+    "cargo +stable nextest run -p dear-imgui-bevy --features render",
+    "cargo +stable check -p dear-imgui-bevy --example simple",
+    "cargo +stable check -p dear-imgui-bevy --features render --example editor_shell",
+    "cargo +stable check -p dear-imgui-bevy --example ecosystem"
   ],
   "evidence": [
     "docs/adr/0001-bevy-native-imgui-backend.md",
@@ -60,15 +61,16 @@
     "BEVY-100 texture interop proof: cargo +stable nextest run -p dear-imgui-bevy --features render texture PASS (6 tests); cargo +stable nextest run -p dear-imgui-bevy --features render PASS (21 tests); cargo +stable nextest run -p dear-imgui-bevy PASS (13 tests); cargo +stable check -p dear-imgui-bevy --features render PASS; cargo +stable check -p dear-imgui-bevy --no-default-features PASS; cargo +stable clippy -p dear-imgui-bevy --all-targets --features render --no-deps -- -D warnings PASS; cargo +stable fmt --all --check PASS; managed texture feedback applies on main/UI thread and Handle<Image> registers/extracts as stable ImGui TextureId",
     "BEVY-110 simple example proof: cargo +stable check -p dear-imgui-bevy --example simple PASS; cargo +stable fmt --all --check PASS; simple example installs ImguiPlugin and draws overlay UI from ImguiPrimaryContextPass",
     "BEVY-120 editor shell proof: cargo +stable check -p dear-imgui-bevy --features render --example editor_shell PASS; cargo +stable fmt --all PASS; editor shell registers a Bevy render-target Image through ImguiBevyTextures and displays it in a dockspace-driven UI",
-    "BEVY-130 ecosystem example proof: cargo +stable check -p dear-imgui-bevy --example ecosystem PASS; cargo +stable nextest run -p dear-implot -p dear-imnodes -p dear-node-editor -p dear-imguizmo PASS (84 tests); ImPlot, ImNodes, and ImGuizmo draw from one Bevy-managed ImguiPrimaryContextPass frame"
+    "BEVY-130 ecosystem example proof: cargo +stable check -p dear-imgui-bevy --example ecosystem PASS; cargo +stable nextest run -p dear-implot -p dear-imnodes -p dear-node-editor -p dear-imguizmo PASS (84 tests); ImPlot, ImNodes, and ImGuizmo draw from one Bevy-managed ImguiPrimaryContextPass frame",
+    "BEVY-140 closeout proof: cargo +stable check -p dear-imgui-bevy --no-default-features PASS; cargo +stable check -p dear-imgui-bevy --features render PASS; cargo +stable nextest run -p dear-imgui-bevy PASS (13 tests); cargo +stable nextest run -p dear-imgui-bevy --features render PASS (21 tests); simple/editor_shell/ecosystem example checks PASS; extension ecosystem nextest PASS (84 tests); clippy/fmt/json gates PASS; workstream closed with follow-ons split"
   ],
   "adr_refs": [
     "docs/adr/0001-bevy-native-imgui-backend.md"
   ],
-  "current_task": "BEVY-140",
-  "next_recommended_task": "BEVY-140",
+  "current_task": null,
+  "next_recommended_task": null,
   "continue_policy": {
-    "default_action": "continue",
-    "notes": "BEVY-011/020/030/040/050/060/070/080/090/100/110/120/130 are complete. Continue with closeout in BEVY-140."
+    "default_action": "closed",
+    "notes": "BEVY-011/020/030/040/050/060/070/080/090/100/110/120/130/140 are complete. Open a new follow-on workstream for multi-window routing, docking multi-viewport OS windows, cursor/IME polish, wasm/mobile support, a full editor/helper crate, or runtime renderer harnesses."
   }
 }

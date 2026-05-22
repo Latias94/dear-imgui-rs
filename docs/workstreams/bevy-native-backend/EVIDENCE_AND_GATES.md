@@ -1,6 +1,6 @@
 # Bevy Native Backend Workstream — Evidence And Gates
 
-Status: Active
+Status: Closed
 Last updated: 2026-05-23
 
 ## Smallest Current Repro
@@ -258,9 +258,26 @@ Run `review-workstream` before accepting task or lane completion. Record blockin
   - Added `backends/dear-imgui-bevy/examples/ecosystem.rs`, a shared-frame Bevy example that initializes ImPlot, ImNodes, and ImGuizmo as non-send resources and drives them from the same `ImguiPrimaryContextPass`.
   - Updated the backend README with the ecosystem example run command.
   - `cargo +stable check -p dear-imgui-bevy --example ecosystem` — PASS.
-  - Targeted extension crate checks during implementation remained green, including the existing `dear-implot`, `dear-imnodes`, and `dear-imguizmo` ecosystem proof path.
-  - Review: no blocking BEVY-130 findings. The example proves shared-frame composition rather than separate-crate compilation; BEVY-140 can now decide closeout or follow-on split.
+  - `cargo +stable nextest run -p dear-implot -p dear-imnodes -p dear-node-editor -p dear-imguizmo` — PASS, 84 tests.
+  - Review: no blocking BEVY-130 findings. The example proves shared-frame composition rather than a full editor product.
   - Status: BEVY-130 DONE. Continue with BEVY-140 closeout.
+
+- 2026-05-23: BEVY-140 closeout verified and the lane closed.
+  - `cargo +stable check -p dear-imgui-bevy --no-default-features` — PASS.
+  - `cargo +stable check -p dear-imgui-bevy --features render` — PASS.
+  - `cargo +stable nextest run -p dear-imgui-bevy` — PASS, 13 tests.
+  - `cargo +stable nextest run -p dear-imgui-bevy --features render` — PASS, 21 tests.
+  - `cargo +stable check -p dear-imgui-bevy --example simple` — PASS.
+  - `cargo +stable check -p dear-imgui-bevy --features render --example editor_shell` — PASS after fixing example clippy findings.
+  - `cargo +stable check -p dear-imgui-bevy --example ecosystem` — PASS.
+  - `cargo +stable nextest run -p dear-implot -p dear-imnodes -p dear-node-editor -p dear-imguizmo` — PASS, 84 tests.
+  - `cargo +stable clippy -p dear-imgui-bevy --all-targets --features render --no-deps -- -D warnings` — PASS after removing an unnecessary conversion and collapsing a nested menu `if let` in `editor_shell`.
+  - `cargo +stable fmt --all --check` — PASS.
+  - `python3 -m json.tool docs/workstreams/bevy-native-backend/WORKSTREAM.json` — PASS.
+  - Review: no blocking workstream-compliance or code-quality findings remain. The target state is satisfied by the backend crate, lifecycle/snapshot APIs, texture interop, renderer proof, and three public examples.
+  - Broader `cargo nextest run --workspace` was not run for closeout because the Bevy backend intentionally targets Bevy `0.19.0-rc.2`, whose MSRV is Rust `1.95.0`, while the root workspace still advertises Rust `1.92.0`. The dedicated `cargo +stable` Bevy gates above are the authoritative closeout gates for this lane.
+  - Residual follow-ons: multi-window input routing, cursor icon feedback, platform IME positioning, docking multi-viewport OS-window support, wasm/mobile support, a full editor product/helper crate, and runtime screenshot/GPU-device harness coverage for render-target and bind-group rendering.
+  - Status: BEVY-140 DONE. Workstream closed.
 
 ## Notes
 

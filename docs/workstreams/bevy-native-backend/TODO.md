@@ -1,6 +1,6 @@
 # Bevy Native Backend Workstream — TODO
 
-Status: Active
+Status: Closed
 Last updated: 2026-05-23
 
 ## Task Status Legend
@@ -120,12 +120,12 @@ Last updated: 2026-05-23
 
 ## M5 — Closeout
 
-- [ ] BEVY-140 [owner=planner] [deps=BEVY-110,BEVY-130] [scope=docs/workstreams/bevy-native-backend,docs,CHANGELOG.md]
+- [x] BEVY-140 [owner=planner] [deps=BEVY-110,BEVY-130] [scope=docs/workstreams/bevy-native-backend,docs,CHANGELOG.md]
   Goal: Finalize docs, record fresh gates, split remaining risks, and decide whether the lane closes or continues into multi-window/editor-product follow-ons.
   Validation: `verify-rust-workstream` records final fresh evidence.
   Review: `review-workstream` has no blocking findings.
-  Evidence: `EVIDENCE_AND_GATES.md`, `WORKSTREAM.json`, closeout notes.
-  Handoff: Split docking multi-viewport, wasm/mobile, and full editor product into follow-on workstreams if they remain open.
+  Evidence: `EVIDENCE_AND_GATES.md`, `WORKSTREAM.json`, `docs/workstreams/bevy-native-backend/JOURNAL/2026-05-23-bevy-140.md`.
+  Handoff: DONE 2026-05-23. The lane closes. Docking multi-viewport, multi-window input routing, cursor/IME polish, wasm/mobile support, full editor product work, and runtime screenshot/GPU-device harnesses are explicit follow-ons rather than unfinished scope in this workstream.
 
 ## Parallelization Notes
 

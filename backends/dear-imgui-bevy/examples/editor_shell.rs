@@ -86,7 +86,7 @@ fn setup(
         TextureFormat::Rgba8UnormSrgb,
         None,
     );
-    image.texture_descriptor.label = Some("dear_imgui_bevy_editor_scene".into());
+    image.texture_descriptor.label = Some("dear_imgui_bevy_editor_scene");
     image.texture_descriptor.usage |=
         TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT;
     let image = images.add(image);
@@ -158,16 +158,15 @@ fn editor_ui(
 }
 
 fn render_menu_bar(ui: &dear_imgui_rs::Ui, state: &mut EditorState) {
-    if let Some(_bar) = ui.begin_main_menu_bar() {
-        if let Some(_menu) = ui.begin_menu("Window") {
-            let _ =
-                ui.menu_item_toggle_no_shortcut("Inspector", &mut state.show_demo_inspector, true);
-            let _ = ui.menu_item_toggle_no_shortcut(
-                "Route shortcuts to ImGui",
-                &mut state.route_shortcuts_to_imgui,
-                true,
-            );
-        }
+    if let Some(_bar) = ui.begin_main_menu_bar()
+        && let Some(_menu) = ui.begin_menu("Window")
+    {
+        let _ = ui.menu_item_toggle_no_shortcut("Inspector", &mut state.show_demo_inspector, true);
+        let _ = ui.menu_item_toggle_no_shortcut(
+            "Route shortcuts to ImGui",
+            &mut state.route_shortcuts_to_imgui,
+            true,
+        );
     }
 }
 

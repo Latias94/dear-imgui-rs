@@ -1,7 +1,7 @@
 # Bevy Native Backend Workstream
 
-Status: Draft
-Last updated: 2026-05-22
+Status: Closed
+Last updated: 2026-05-23
 
 ## Why This Lane Exists
 
@@ -237,3 +237,23 @@ This lane can close when:
 - at least one ecosystem interop example uses an extension crate inside the Bevy ImGui pass;
 - targeted gates and broader gates are recorded with fresh evidence;
 - remaining multi-window, docking viewport, wasm/mobile, and editor-product scope is completed, deferred, or split.
+
+## Closeout Result
+
+Closed on 2026-05-23.
+
+The lane delivered the first Bevy-native backend proof:
+
+- `backends/dear-imgui-bevy` exists as an experimental Bevy `0.19.0-rc.2` backend crate.
+- The backend owns Bevy ECS lifecycle integration while Bevy remains the owner of window/input, render-world, camera, WGPU device, queue, and render targets.
+- Core `dear-imgui-rs` exposes engine-managed frame lifecycle and owned render snapshot/texture feedback contracts.
+- Bevy input, main-world frame scheduling, render-world extraction, Bevy-native WGPU rendering, managed texture feedback, and `Handle<Image>` texture interop are implemented.
+- The proof examples cover embedded overlay UI, an editor shell with a render-to-texture scene viewport, and shared-frame extension composition with ImPlot, ImNodes, and ImGuizmo.
+
+Deferred follow-ons:
+
+- Multi-window input routing and docking multi-viewport OS-window support.
+- Cursor icon feedback and platform IME positioning.
+- WASM/mobile Bevy backend support.
+- A full editor product or optional editor-helper crate.
+- Runtime screenshot/GPU-device harnesses for render-target and bind-group rendering.

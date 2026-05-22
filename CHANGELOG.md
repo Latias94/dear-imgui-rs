@@ -193,6 +193,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Backends
+  - Added the experimental `dear-imgui-bevy` backend proof for Bevy `0.19.0-rc.2`, including
+    engine-managed ImGui frame scheduling, Bevy input mapping, Bevy-native WGPU rendering,
+    texture feedback and `Handle<Image>` interop, plus simple, editor-shell, and ecosystem
+    composition examples.
   - `dear-imgui-sdl3` now provides `Sdl3PlatformBackend`, `Sdl3OpenGl3Backend`, and
     `Sdl3RendererBackend` owner types that pair official backend initialization and shutdown,
     bind per-frame/event/device calls to the captured `Context`, and skip drop-time FFI if the

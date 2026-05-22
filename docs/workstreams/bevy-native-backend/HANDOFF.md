@@ -1,13 +1,13 @@
 # Bevy Native Backend Workstream — Handoff
 
-Status: Active
+Status: Closed
 Last updated: 2026-05-23
 
 ## Current State
 
-The workstream is open. The Bevy-native direction is recorded in ADR `docs/adr/0001-bevy-native-imgui-backend.md`. Design, milestones, task ledger, and gate plan exist under `docs/workstreams/bevy-native-backend/`.
+The workstream is closed. The Bevy-native direction is recorded in ADR `docs/adr/0001-bevy-native-imgui-backend.md`. Design, milestones, task ledger, and gate evidence live under `docs/workstreams/bevy-native-backend/`.
 
-Implementation has completed the first core proof slice and the backend skeleton:
+Implementation completed the first Bevy-native backend proof:
 
 - BEVY-020 lifecycle: explicit engine-managed Dear ImGui frame APIs.
 - BEVY-030 snapshot/texture feedback: render-world handoff contract, including sampler callback preservation and texture feedback cleanup.
@@ -26,12 +26,8 @@ Submodule/symbol investigation is closed: after `git submodule update --init --r
 
 ## Active Task
 
-- Task ID: BEVY-140
-- Owner: codex
-- Files: `docs/workstreams/bevy-native-backend`, `CHANGELOG.md`, closeout notes
-- Validation: `verify-rust-workstream` and `review-workstream` with fresh evidence.
-- Status: TODO
-- Evidence: BEVY-130 completed with `cargo +stable check -p dear-imgui-bevy --example ecosystem` and targeted extension crate checks.
+- None. BEVY-140 is complete and the lane is closed.
+- Closeout evidence: `docs/workstreams/bevy-native-backend/EVIDENCE_AND_GATES.md` and `docs/workstreams/bevy-native-backend/JOURNAL/2026-05-23-bevy-140.md`.
 
 ## Decisions Since Last Update
 
@@ -61,6 +57,6 @@ Submodule/symbol investigation is closed: after `git submodule update --init --r
 
 ## Next Recommended Action
 
-1. Run BEVY-140 closeout with fresh evidence and a review gate.
-2. Decide whether the lane closes or splits follow-ons for multi-window, full editor product, or other risks.
-3. Record any remaining open work as follow-on workstreams rather than leaving it implicit.
+1. Start a new follow-on workstream for whichever product slice is next.
+2. Recommended follow-on choices: multi-window/input-routing polish, docking multi-viewport OS windows, runtime renderer harnesses, wasm/mobile support, or a full editor/helper crate.
+3. Keep this lane closed unless a regression is found in the shipped Bevy-native proof.
