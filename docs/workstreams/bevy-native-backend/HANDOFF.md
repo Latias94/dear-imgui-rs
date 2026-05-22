@@ -20,17 +20,18 @@ Implementation has completed the first core proof slice and the backend skeleton
 - BEVY-100 texture interop: managed texture feedback is queued from render-world systems and applied on the main/UI thread before the next `ImguiBeginFrame`; Bevy `Handle<Image>` values register through `ImguiBevyTextures`, extract into render world, and resolve through `RenderAssets<GpuImage>` as legacy ImGui texture bind groups.
 - BEVY-110 simple example: `backends/dear-imgui-bevy/examples/simple.rs` demonstrates installing `ImguiPlugin`, creating a primary window entity, and drawing overlay UI from `ImguiPrimaryContextPass`.
 - BEVY-120 editor shell example: `backends/dear-imgui-bevy/examples/editor_shell.rs` shows a Bevy render-target `Image` inside a dockspace-driven editor shell and documents the input routing policy expected for editor tools.
+- BEVY-130 ecosystem example: `backends/dear-imgui-bevy/examples/ecosystem.rs` initializes ImPlot, ImNodes, and ImGuizmo as non-send Bevy resources and draws them through the same Bevy-managed ImGui frame.
 
 Submodule/symbol investigation is closed: after `git submodule update --init --recursive`, current cimgui exports `ImDrawList_AddLineH/V` and `ImGuiViewport_GetDebugName`; clean rebuild links safe APIs successfully. No CHANGELOG entry was added because the failure was stale local build state.
 
 ## Active Task
 
-- Task ID: BEVY-130
+- Task ID: BEVY-140
 - Owner: codex
-- Files: `backends/dear-imgui-bevy/examples/ecosystem.rs`, `backends/dear-imgui-bevy/README.md`, docs as needed
-- Validation: `cargo +stable check -p dear-imgui-bevy --features render --example ecosystem` plus targeted extension crate checks.
+- Files: `docs/workstreams/bevy-native-backend`, `CHANGELOG.md`, closeout notes
+- Validation: `verify-rust-workstream` and `review-workstream` with fresh evidence.
 - Status: TODO
-- Evidence: BEVY-120 completed with `cargo +stable check -p dear-imgui-bevy --features render --example editor_shell` and `cargo +stable fmt --all`.
+- Evidence: BEVY-130 completed with `cargo +stable check -p dear-imgui-bevy --example ecosystem` and targeted extension crate checks.
 
 ## Decisions Since Last Update
 
@@ -50,7 +51,7 @@ Submodule/symbol investigation is closed: after `git submodule update --init --r
 - BEVY-100 uses a cloned `ImguiTextureFeedbackQueue` resource to share a mutex-backed feedback list between Bevy main and render worlds. Render systems push `TextureFeedback`; the next main-world begin-frame drains and applies it via `PlatformIo::apply_texture_feedback`.
 - BEVY-100 treats Bevy images as legacy ImGui texture ids derived from `AssetId<Image>`. `ImguiBevyTextures::register(&Handle<Image>)` is idempotent and render-world code resolves the extracted asset id through `RenderAssets<GpuImage>`.
 - BEVY-110 intentionally uses `ScheduleRunnerPlugin::run_once()` and split Bevy crates instead of `DefaultPlugins` to keep the backend crate's dependency surface aligned with the current exact-pinned proof. A fully windowed/editor shell belongs in BEVY-120.
-- BEVY-120 keeps the editor shell proof focused on render-target display and input policy. The ecosystem composition proof in BEVY-130 should reuse that shell rather than invent a separate one.
+- BEVY-120 keeps the editor shell proof focused on render-target display and input policy. The ecosystem composition proof in BEVY-130 reuses the same Bevy-managed frame boundary rather than inventing separate extension loops.
 
 ## Blockers / Constraints
 
@@ -60,6 +61,6 @@ Submodule/symbol investigation is closed: after `git submodule update --init --r
 
 ## Next Recommended Action
 
-1. Start BEVY-130 with an ecosystem composition example that demonstrates ImPlot, ImNodes, or ImGuizmo drawing through the same Bevy-managed frame.
-2. Keep extension-specific contexts/resources as Bevy ECS data, not ad hoc global singletons.
-3. Re-run `cargo +stable check -p dear-imgui-bevy --features render --example ecosystem` before marking BEVY-130 done.
+1. Run BEVY-140 closeout with fresh evidence and a review gate.
+2. Decide whether the lane closes or splits follow-ons for multi-window, full editor product, or other risks.
+3. Record any remaining open work as follow-on workstreams rather than leaving it implicit.

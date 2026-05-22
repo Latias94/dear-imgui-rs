@@ -1769,6 +1769,9 @@ dependencies = [
  "bevy_window",
  "bytemuck",
  "dear-imgui-rs",
+ "dear-imguizmo",
+ "dear-imnodes",
+ "dear-implot",
 ]
 
 [[package]]

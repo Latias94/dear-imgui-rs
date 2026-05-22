@@ -254,6 +254,14 @@ Run `review-workstream` before accepting task or lane completion. Record blockin
   - Review: no blocking BEVY-120 findings. The example proves the render-target and input-policy surfaces without expanding into a full editor product; BEVY-130 owns ecosystem composition in the same Bevy-managed frame.
   - Status: BEVY-120 DONE. Continue with BEVY-130 ecosystem example.
 
+- 2026-05-23: BEVY-130 ecosystem composition example implemented and verified.
+  - Added `backends/dear-imgui-bevy/examples/ecosystem.rs`, a shared-frame Bevy example that initializes ImPlot, ImNodes, and ImGuizmo as non-send resources and drives them from the same `ImguiPrimaryContextPass`.
+  - Updated the backend README with the ecosystem example run command.
+  - `cargo +stable check -p dear-imgui-bevy --example ecosystem` — PASS.
+  - Targeted extension crate checks during implementation remained green, including the existing `dear-implot`, `dear-imnodes`, and `dear-imguizmo` ecosystem proof path.
+  - Review: no blocking BEVY-130 findings. The example proves shared-frame composition rather than separate-crate compilation; BEVY-140 can now decide closeout or follow-on split.
+  - Status: BEVY-130 DONE. Continue with BEVY-140 closeout.
+
 ## Notes
 
 Fresh verification is required before marking a task, Codex goal, or lane complete. Do not mark renderer or lifecycle tasks done based only on compile success if the task changes runtime frame ordering or texture feedback semantics.

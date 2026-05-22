@@ -97,6 +97,13 @@ routing policy expected for editor tools:
 cargo +stable run -p dear-imgui-bevy --features render --example editor_shell
 ```
 
+See `examples/ecosystem.rs` for a shared-frame ecosystem example that drives ImPlot, ImNodes, and
+ImGuizmo from the same Bevy-managed `ImguiPrimaryContextPass`:
+
+```bash
+cargo +stable run -p dear-imgui-bevy --example ecosystem
+```
+
 ## Render extraction
 
 With the `render` feature enabled, `ImguiPlugin` installs a Bevy `RenderApp` extraction system when
