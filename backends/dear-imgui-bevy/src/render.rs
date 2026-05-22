@@ -12,9 +12,11 @@ use bevy_camera::{Camera, NormalizedRenderTarget, RenderTarget};
 use bevy_core_pipeline::{Core2d, Core2dSystems, Core3d, Core3dSystems};
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
+use bevy_image::Image;
 use bevy_mesh::VertexBufferLayout;
 use bevy_render::{
     Extract, ExtractSchedule, GpuResourceAppExt, Render, RenderApp, RenderSystems,
+    render_asset::RenderAssets,
     render_resource::{
         BindGroup, BindGroupEntry, BindGroupLayoutDescriptor, BindingResource, BindingType,
         BlendState, Buffer, BufferAddress, BufferBindingType, BufferDescriptor, BufferSize,
@@ -29,6 +31,7 @@ use bevy_render::{
         VertexStepMode,
     },
     renderer::{RenderContext, RenderDevice, RenderQueue, ViewQuery},
+    texture::GpuImage,
     view::{ExtractedView, Msaa, ViewTarget},
 };
 use bevy_shader::Shader;
@@ -37,7 +40,10 @@ use bytemuck::{Pod, Zeroable};
 use dear_imgui_rs as imgui;
 use imgui::render::{DrawCmdSnapshot, DrawIdx, TextureBinding};
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::mem::size_of;
+
+pub use crate::texture::ImguiBevyTextures;
 
 /// Stable handle for the embedded Dear ImGui Bevy renderer shader.
 pub const IMGUI_SHADER_HANDLE: Handle<Shader> =
@@ -632,6 +638,36 @@ impl ImguiTextureBindGroups {
     }
 }
 
+/// Render-world copy of main-world Bevy image texture registrations.
+#[derive(Resource, Clone, Debug, Default)]
+pub struct ImguiExtractedBevyTextures {
+    textures: Vec<(imgui::TextureId, bevy_asset::AssetId<Image>)>,
+}
+
+impl ImguiExtractedBevyTextures {
+    /// Registered Dear ImGui texture id to Bevy image asset id mappings.
+    #[must_use]
+    pub fn textures(&self) -> &[(imgui::TextureId, bevy_asset::AssetId<Image>)] {
+        &self.textures
+    }
+
+    /// Number of extracted Bevy image texture mappings.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.textures.len()
+    }
+
+    /// Whether no Bevy image texture mappings are extracted.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.textures.is_empty()
+    }
+
+    fn replace(&mut self, textures: Vec<(imgui::TextureId, bevy_asset::AssetId<Image>)>) {
+        self.textures = textures;
+    }
+}
+
 /// Pipeline ids queued for the current render frame, keyed by main-world camera entity.
 #[derive(Resource, Default)]
 pub struct ImguiQueuedPipelines {
@@ -708,6 +744,11 @@ struct ImguiRenderExtractionInstalled;
 
 pub(crate) fn install_render_extraction(app: &mut App) {
     install_imgui_shader_asset(app);
+    app.init_resource::<crate::ImguiTextureFeedbackQueue>();
+    let texture_feedback = app
+        .world()
+        .resource::<crate::ImguiTextureFeedbackQueue>()
+        .clone();
 
     let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
         return;
@@ -722,6 +763,7 @@ pub(crate) fn install_render_extraction(app: &mut App) {
 
     render_app
         .init_resource::<ImguiExtractedRenderFrame>()
+        .init_resource::<ImguiExtractedBevyTextures>()
         .init_resource::<ImguiPreparedRenderFrame>()
         .init_resource::<ImguiGpuBuffers>()
         .init_resource::<ImguiRenderPipeline>()
@@ -729,8 +771,12 @@ pub(crate) fn install_render_extraction(app: &mut App) {
         .init_resource::<ImguiTextureBindGroups>()
         .init_resource::<ImguiQueuedPipelines>()
         .init_gpu_resource::<ImguiPipelineGpuResources>()
+        .insert_resource(texture_feedback)
         .insert_resource(ImguiRenderExtractionInstalled)
-        .add_systems(ExtractSchedule, extract_imgui_render_frame)
+        .add_systems(
+            ExtractSchedule,
+            (extract_imgui_bevy_textures, extract_imgui_render_frame).chain(),
+        )
         .add_systems(
             Render,
             (prepare_imgui_render_frame, queue_imgui_pipelines)
@@ -764,6 +810,17 @@ fn install_imgui_shader_asset(app: &mut App) {
             Shader::from_wgsl(IMGUI_SHADER_SOURCE, "dear_imgui_bevy/imgui.wgsl"),
         )
         .expect("UUID shader handles are always valid asset ids");
+}
+
+fn extract_imgui_bevy_textures(
+    registry: Extract<Option<Res<crate::ImguiBevyTextures>>>,
+    mut extracted: ResMut<ImguiExtractedBevyTextures>,
+) {
+    let textures = registry
+        .as_ref()
+        .map(|registry| registry.iter().collect::<Vec<_>>())
+        .unwrap_or_default();
+    extracted.replace(textures);
 }
 
 fn extract_imgui_render_frame(
@@ -844,21 +901,39 @@ fn upload_imgui_buffers(
     }
 }
 
+#[derive(SystemParam)]
+struct ImguiTextureBindGroupParams<'w> {
+    extracted: Res<'w, ImguiExtractedRenderFrame>,
+    extracted_bevy_textures: Res<'w, ImguiExtractedBevyTextures>,
+    gpu_images: Option<Res<'w, RenderAssets<GpuImage>>>,
+    render_device: Option<Res<'w, RenderDevice>>,
+    render_queue: Option<Res<'w, RenderQueue>>,
+    pipeline_cache: Option<Res<'w, PipelineCache>>,
+    pipeline: Res<'w, ImguiRenderPipeline>,
+    texture_feedback: Res<'w, crate::ImguiTextureFeedbackQueue>,
+}
+
 fn prepare_imgui_texture_bind_groups(
-    extracted: Res<ImguiExtractedRenderFrame>,
-    render_device: Option<Res<RenderDevice>>,
-    render_queue: Option<Res<RenderQueue>>,
-    pipeline_cache: Option<Res<PipelineCache>>,
-    pipeline: Res<ImguiRenderPipeline>,
+    params: ImguiTextureBindGroupParams,
     mut texture_bind_groups: ResMut<ImguiTextureBindGroups>,
 ) {
-    let (Some(render_device), Some(render_queue), Some(pipeline_cache)) =
-        (render_device, render_queue, pipeline_cache)
-    else {
+    let (Some(render_device), Some(render_queue), Some(pipeline_cache)) = (
+        params.render_device,
+        params.render_queue,
+        params.pipeline_cache,
+    ) else {
         return;
     };
 
-    let Some(snapshot) = extracted.snapshot() else {
+    let Some(snapshot) = params.extracted.snapshot() else {
+        prepare_bevy_image_texture_bind_groups(
+            params.gpu_images.as_deref(),
+            &params.extracted_bevy_textures,
+            &render_device,
+            &pipeline_cache,
+            &params.pipeline,
+            &mut texture_bind_groups,
+        );
         return;
     };
 
@@ -875,7 +950,7 @@ fn prepare_imgui_texture_bind_groups(
                     &render_device,
                     &render_queue,
                     &pipeline_cache,
-                    &pipeline,
+                    &params.pipeline,
                     ImguiTextureUpload {
                         format: *format,
                         width: *width,
@@ -884,8 +959,20 @@ fn prepare_imgui_texture_bind_groups(
                         pixels,
                     },
                 ) {
+                    let tex_id = managed_texture_id(request.id);
+                    texture_bind_groups.insert(
+                        TextureBinding::Legacy(tex_id),
+                        render_texture.bind_group.clone(),
+                    );
                     texture_bind_groups
                         .insert_render_texture(TextureBinding::Managed(request.id), render_texture);
+                    params.texture_feedback.push(
+                        imgui::render::snapshot::TextureFeedback::with_tex_id(
+                            request.id,
+                            imgui::texture::TextureStatus::OK,
+                            tex_id,
+                        ),
+                    );
                 }
             }
             imgui::render::TextureOp::Update { format, rects, .. } => {
@@ -917,13 +1004,46 @@ fn prepare_imgui_texture_bind_groups(
                             );
                         }
                     }
+                    params
+                        .texture_feedback
+                        .push(imgui::render::snapshot::TextureFeedback::status(
+                            request.id,
+                            imgui::texture::TextureStatus::OK,
+                        ));
                 }
             }
             imgui::render::TextureOp::Destroy => {
                 texture_bind_groups.remove(&TextureBinding::Managed(request.id));
+                texture_bind_groups.remove(&TextureBinding::Legacy(managed_texture_id(request.id)));
+                params
+                    .texture_feedback
+                    .push(imgui::render::snapshot::TextureFeedback::status(
+                        request.id,
+                        imgui::texture::TextureStatus::Destroyed,
+                    ));
             }
         }
     }
+
+    prepare_bevy_image_texture_bind_groups(
+        params.gpu_images.as_deref(),
+        &params.extracted_bevy_textures,
+        &render_device,
+        &pipeline_cache,
+        &params.pipeline,
+        &mut texture_bind_groups,
+    );
+}
+
+fn managed_texture_id(id: imgui::render::snapshot::ManagedTextureId) -> imgui::TextureId {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    "dear-imgui-bevy-managed".hash(&mut hasher);
+    id.hash(&mut hasher);
+    let mut raw = hasher.finish();
+    if raw == 0 {
+        raw = 1;
+    }
+    imgui::TextureId::new(raw)
 }
 
 fn create_imgui_render_texture(
@@ -978,6 +1098,62 @@ fn create_imgui_render_texture(
         _view: Some(view),
         bind_group,
     })
+}
+
+fn prepare_bevy_image_texture_bind_groups(
+    gpu_images: Option<&RenderAssets<GpuImage>>,
+    extracted_bevy_textures: &ImguiExtractedBevyTextures,
+    render_device: &RenderDevice,
+    pipeline_cache: &PipelineCache,
+    pipeline: &ImguiRenderPipeline,
+    texture_bind_groups: &mut ImguiTextureBindGroups,
+) {
+    let Some(gpu_images) = gpu_images else {
+        return;
+    };
+
+    for (texture_id, asset_id) in extracted_bevy_textures.textures() {
+        let binding = TextureBinding::Legacy(*texture_id);
+        let Some(gpu_image) = gpu_images.get(*asset_id) else {
+            texture_bind_groups.remove(&binding);
+            continue;
+        };
+        let Some(bind_group) = create_bevy_image_texture_bind_group(
+            render_device,
+            pipeline_cache,
+            pipeline,
+            gpu_image,
+        ) else {
+            texture_bind_groups.remove(&binding);
+            continue;
+        };
+        texture_bind_groups.insert(binding, bind_group);
+    }
+}
+
+fn create_bevy_image_texture_bind_group(
+    render_device: &RenderDevice,
+    pipeline_cache: &PipelineCache,
+    pipeline: &ImguiRenderPipeline,
+    gpu_image: &GpuImage,
+) -> Option<BindGroup> {
+    if !gpu_image
+        .texture_descriptor
+        .usage
+        .contains(TextureUsages::TEXTURE_BINDING)
+    {
+        return None;
+    }
+
+    let layout = pipeline_cache.get_bind_group_layout(pipeline.texture_layout());
+    Some(render_device.create_bind_group(
+        Some("dear_imgui_bevy_image_texture_bind_group"),
+        &layout,
+        &[BindGroupEntry {
+            binding: 0,
+            resource: BindingResource::TextureView(&gpu_image.texture_view),
+        }],
+    ))
 }
 
 fn convert_imgui_texture_pixels(

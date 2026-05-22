@@ -223,6 +223,20 @@ Run `review-workstream` before accepting task or lane completion. Record blockin
   - Review: no blocking BEVY-090 findings. Residual risk is intentionally moved to BEVY-100: applying texture feedback on the main/UI context and exposing Bevy `Handle<Image>` user textures.
   - Status: BEVY-090 DONE. BEVY-100 remains responsible for applying texture feedback back to the main/UI context and exposing Bevy `Handle<Image>` user textures.
 
+- 2026-05-23: BEVY-100 texture feedback and Bevy user-image interop implemented and verified.
+  - Added `ImguiTextureFeedbackQueue`, installed it in the main-world lifecycle, shared it with the render world, and applied queued `TextureFeedback` through `PlatformIo::apply_texture_feedback` before each new `ImguiBeginFrame`.
+  - Added `ImguiBevyTextures` for stable, idempotent `Handle<Image>` to Dear ImGui `TextureId` registration, plus render-world extraction into `ImguiExtractedBevyTextures`.
+  - Render bind-group preparation now queues managed texture feedback after create/update/destroy, preserves managed texture bindings, registers a legacy TexID alias for created managed textures, and resolves extracted Bevy image registrations through `RenderAssets<GpuImage>`.
+  - `cargo +stable nextest run -p dear-imgui-bevy --features render texture` — PASS, 6 tests. Proves managed texture requests cross the render boundary, render-world feedback is applied on the next main-world frame, and Bevy image handles register/extract as stable ImGui texture ids.
+  - `cargo +stable nextest run -p dear-imgui-bevy --features render` — PASS, 21 tests.
+  - `cargo +stable nextest run -p dear-imgui-bevy` — PASS, 13 tests.
+  - `cargo +stable check -p dear-imgui-bevy --features render` — PASS.
+  - `cargo +stable check -p dear-imgui-bevy --no-default-features` — PASS.
+  - `cargo +stable clippy -p dear-imgui-bevy --all-targets --features render --no-deps -- -D warnings` — PASS.
+  - `cargo +stable fmt --all --check` — PASS.
+  - Review: no blocking BEVY-100 findings. Residual risk: current tests do not instantiate a real `RenderDevice`, so Bevy image bind-group creation is compile- and integration-path covered but not screenshot/runtime-rendered until the example harnesses in BEVY-110/120.
+  - Status: BEVY-100 DONE. Continue with BEVY-110 simple embedded Bevy example.
+
 ## Notes
 
 Fresh verification is required before marking a task, Codex goal, or lane complete. Do not mark renderer or lifecycle tasks done based only on compile success if the task changes runtime frame ordering or texture feedback semantics.

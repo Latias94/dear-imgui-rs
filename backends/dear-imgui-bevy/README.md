@@ -25,7 +25,8 @@ cargo +stable nextest run -p dear-imgui-bevy --features render
 ## Current scope
 
 The crate currently installs the experimental plugin/resource surface from BEVY-050 plus the
-primary-window input, lifecycle, and render extraction slices from BEVY-060/BEVY-070/BEVY-080:
+primary-window input, lifecycle, render extraction, renderer, and texture interop slices from
+BEVY-060 through BEVY-100:
 
 - `ImguiPlugin`
 - `ImguiBackendConfig`
@@ -40,8 +41,12 @@ primary-window input, lifecycle, and render extraction slices from BEVY-060/BEVY
 - `ImguiFrameOutput`
 - `render::ImguiExtractedRenderFrame`
 - `render::ImguiCameraTarget`
+- `render::ImguiPreparedRenderFrame`
+- `render::ImguiTextureBindGroups`
+- `ImguiTextureFeedbackQueue`
+- `ImguiBevyTextures` with the `render` feature
 
-Renderer pipelines, texture interop, and examples are later workstream tasks.
+Examples are later workstream tasks.
 
 ## ECS frame lifecycle
 
@@ -88,8 +93,35 @@ The extracted frame also records active camera associations as `render::ImguiCam
 the main-world camera entity, camera order, and normalized render target. Raw Dear ImGui draw-data
 pointers never cross the extract boundary; only the owned `FrameSnapshot` and its texture requests do.
 
-BEVY-080 intentionally stops at this boundary. The Bevy-native WGPU pipeline, GPU texture feedback,
-and Bevy `Handle<Image>` user-texture interop are follow-up renderer tasks.
+The renderer consumes only the owned snapshot and prepared render data. It does not borrow raw
+Dear ImGui draw pointers across the Bevy main/render-world boundary and does not wrap
+`dear-imgui-wgpu`.
+
+## Texture interop
+
+With the `render` feature enabled, ImGui-managed texture requests are handled in Bevy render-world
+code and renderer feedback is queued through `ImguiTextureFeedbackQueue`. The queue is applied on
+the main world before the next `ImguiBeginFrame`, which updates ImGui texture status/TexID from the
+UI thread.
+
+Bevy user images are registered through `ImguiBevyTextures`:
+
+```rust
+use bevy_ecs::system::ResMut;
+use bevy_image::Image;
+use bevy_asset::Handle;
+use dear_imgui_bevy::ImguiBevyTextures;
+use dear_imgui_rs::TextureId;
+
+fn register_image(mut textures: ResMut<ImguiBevyTextures>, image: Handle<Image>) -> TextureId {
+    textures.register(&image)
+}
+```
+
+The returned `TextureId` can be passed to `ui.image(texture_id, size)`. Render-world code extracts
+the registry and resolves the underlying `Handle<Image>` through Bevy `RenderAssets<GpuImage>` when
+the GPU image is available. Missing images keep using the renderer fallback bind group until the
+asset is prepared by Bevy.
 
 ## Primary-window input policy
 

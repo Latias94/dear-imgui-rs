@@ -23,12 +23,16 @@
 pub mod context;
 pub mod input;
 pub mod schedule;
+pub mod texture;
 
 use bevy_app::{App, Plugin};
 use bevy_ecs::resource::Resource;
 
 pub use self::context::{ImguiContexts, ImguiFrameOutput, ImguiFrameState};
 pub use self::schedule::{ImguiBeginFrame, ImguiEndFrame, ImguiPrimaryContextPass};
+#[cfg(feature = "render")]
+pub use self::texture::ImguiBevyTextures;
+pub use self::texture::ImguiTextureFeedbackQueue;
 
 /// Bevy plugin that installs the minimal Dear ImGui resources.
 ///

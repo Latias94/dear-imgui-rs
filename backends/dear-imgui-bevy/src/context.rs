@@ -4,7 +4,7 @@
 //! systems should be added to [`crate::ImguiPrimaryContextPass`] and request [`ImguiContexts`]
 //! instead of calling `Context::frame()` / `Context::render()` directly.
 
-use crate::ImguiContext;
+use crate::{ImguiContext, ImguiTextureFeedbackQueue};
 use bevy_app::App;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::{NonSendMarker, SystemParam};
@@ -131,6 +131,7 @@ impl<'w> ImguiContexts<'w> {
 pub(crate) fn install_context_lifecycle(app: &mut App) {
     app.init_non_send::<ImguiFrameState>()
         .init_resource::<ImguiFrameOutput>()
+        .init_resource::<ImguiTextureFeedbackQueue>()
         .add_systems(crate::ImguiBeginFrame, begin_primary_frame_system)
         .add_systems(crate::ImguiEndFrame, end_primary_frame_system);
 }
@@ -139,6 +140,7 @@ fn begin_primary_frame_system(
     primary_window: Query<&Window, With<PrimaryWindow>>,
     mut imgui_context: NonSendMut<ImguiContext>,
     mut frame_state: NonSendMut<ImguiFrameState>,
+    mut texture_feedback: ResMut<ImguiTextureFeedbackQueue>,
 ) {
     if frame_state.is_frame_open() {
         return;
@@ -149,6 +151,12 @@ fn begin_primary_frame_system(
     };
 
     let context = imgui_context.context_mut();
+    let feedback = texture_feedback.drain();
+    if !feedback.is_empty() {
+        let applied = context.platform_io_mut().apply_texture_feedback(&feedback);
+        texture_feedback.set_last_applied(applied);
+    }
+
     context.prepare_frame(
         imgui::FramePrepareOptions::new(
             [window.width(), window.height()],
