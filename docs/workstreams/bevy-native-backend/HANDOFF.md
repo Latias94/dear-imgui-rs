@@ -19,17 +19,18 @@ Implementation has completed the first core proof slice and the backend skeleton
 - BEVY-090 renderer proof: the render app now prepares extracted snapshots into Bevy-native WGPU batches, uploads vertex/index/uniform buffers, specializes an ImGui overlay pipeline, populates managed texture bind groups from snapshot texture requests, falls back to a 1x1 white texture for missing bindings, queues per-camera pipelines, and inserts Core2d/Core3d overlay passes.
 - BEVY-100 texture interop: managed texture feedback is queued from render-world systems and applied on the main/UI thread before the next `ImguiBeginFrame`; Bevy `Handle<Image>` values register through `ImguiBevyTextures`, extract into render world, and resolve through `RenderAssets<GpuImage>` as legacy ImGui texture bind groups.
 - BEVY-110 simple example: `backends/dear-imgui-bevy/examples/simple.rs` demonstrates installing `ImguiPlugin`, creating a primary window entity, and drawing overlay UI from `ImguiPrimaryContextPass`.
+- BEVY-120 editor shell example: `backends/dear-imgui-bevy/examples/editor_shell.rs` shows a Bevy render-target `Image` inside a dockspace-driven editor shell and documents the input routing policy expected for editor tools.
 
 Submodule/symbol investigation is closed: after `git submodule update --init --recursive`, current cimgui exports `ImDrawList_AddLineH/V` and `ImGuiViewport_GetDebugName`; clean rebuild links safe APIs successfully. No CHANGELOG entry was added because the failure was stale local build state.
 
 ## Active Task
 
-- Task ID: BEVY-120
+- Task ID: BEVY-130
 - Owner: codex
-- Files: `backends/dear-imgui-bevy/examples/editor_shell.rs`, `backends/dear-imgui-bevy/README.md`, docs as needed
-- Validation: `cargo +stable check -p dear-imgui-bevy --example editor_shell` plus relevant backend/example gates.
+- Files: `backends/dear-imgui-bevy/examples/ecosystem.rs`, `backends/dear-imgui-bevy/README.md`, docs as needed
+- Validation: `cargo +stable check -p dear-imgui-bevy --features render --example ecosystem` plus targeted extension crate checks.
 - Status: TODO
-- Evidence: BEVY-110 completed with `cargo +stable check -p dear-imgui-bevy --example simple`, `cargo +stable fmt --all --check`, and `python3 -m json.tool docs/workstreams/bevy-native-backend/WORKSTREAM.json`.
+- Evidence: BEVY-120 completed with `cargo +stable check -p dear-imgui-bevy --features render --example editor_shell` and `cargo +stable fmt --all`.
 
 ## Decisions Since Last Update
 
@@ -49,6 +50,7 @@ Submodule/symbol investigation is closed: after `git submodule update --init --r
 - BEVY-100 uses a cloned `ImguiTextureFeedbackQueue` resource to share a mutex-backed feedback list between Bevy main and render worlds. Render systems push `TextureFeedback`; the next main-world begin-frame drains and applies it via `PlatformIo::apply_texture_feedback`.
 - BEVY-100 treats Bevy images as legacy ImGui texture ids derived from `AssetId<Image>`. `ImguiBevyTextures::register(&Handle<Image>)` is idempotent and render-world code resolves the extracted asset id through `RenderAssets<GpuImage>`.
 - BEVY-110 intentionally uses `ScheduleRunnerPlugin::run_once()` and split Bevy crates instead of `DefaultPlugins` to keep the backend crate's dependency surface aligned with the current exact-pinned proof. A fully windowed/editor shell belongs in BEVY-120.
+- BEVY-120 keeps the editor shell proof focused on render-target display and input policy. The ecosystem composition proof in BEVY-130 should reuse that shell rather than invent a separate one.
 
 ## Blockers / Constraints
 
@@ -58,6 +60,6 @@ Submodule/symbol investigation is closed: after `git submodule update --init --r
 
 ## Next Recommended Action
 
-1. Start BEVY-120 with an editor-oriented example that demonstrates dockspace-style layout and a Bevy render-target `Handle<Image>` displayed through `ImguiBevyTextures`.
-2. Keep full editor product features such as inspector/assets/console as follow-ons unless they are needed for the proof.
-3. Re-run `cargo +stable check -p dear-imgui-bevy --example editor_shell` before marking BEVY-120 done.
+1. Start BEVY-130 with an ecosystem composition example that demonstrates ImPlot, ImNodes, or ImGuizmo drawing through the same Bevy-managed frame.
+2. Keep extension-specific contexts/resources as Bevy ECS data, not ad hoc global singletons.
+3. Re-run `cargo +stable check -p dear-imgui-bevy --features render --example ecosystem` before marking BEVY-130 done.

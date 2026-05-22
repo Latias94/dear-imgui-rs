@@ -246,6 +246,14 @@ Run `review-workstream` before accepting task or lane completion. Record blockin
   - Review: no blocking BEVY-110 findings. The example is intentionally headless/single-frame to preserve the crate's narrow exact-pinned Bevy dependency surface; BEVY-120 owns the editor-shell/render-to-texture depth.
   - Status: BEVY-110 DONE. Continue with BEVY-120 editor shell example.
 
+- 2026-05-23: BEVY-120 editor shell example implemented and verified.
+  - Added `backends/dear-imgui-bevy/examples/editor_shell.rs`, an editor-oriented render-feature example that creates a Bevy `Image` render target, registers it through `ImguiBevyTextures`, renders it in a dockspace-driven ImGui shell, and documents the input-routing policy for editor tools.
+  - Updated the backend README with the editor shell run command and marked the example as `required-features = ["render"]`.
+  - `cargo +stable check -p dear-imgui-bevy --features render --example editor_shell` — PASS.
+  - `cargo +stable fmt --all` — PASS.
+  - Review: no blocking BEVY-120 findings. The example proves the render-target and input-policy surfaces without expanding into a full editor product; BEVY-130 owns ecosystem composition in the same Bevy-managed frame.
+  - Status: BEVY-120 DONE. Continue with BEVY-130 ecosystem example.
+
 ## Notes
 
 Fresh verification is required before marking a task, Codex goal, or lane complete. Do not mark renderer or lifecycle tasks done based only on compile success if the task changes runtime frame ordering or texture feedback semantics.

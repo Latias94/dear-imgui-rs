@@ -89,6 +89,14 @@ draws an overlay from `ImguiPrimaryContextPass`:
 cargo +stable run -p dear-imgui-bevy --example simple
 ```
 
+See `examples/editor_shell.rs` for an editor-oriented shell that registers a Bevy render-target
+`Handle<Image>` through `ImguiBevyTextures`, displays it as an ImGui image, and documents the input
+routing policy expected for editor tools:
+
+```bash
+cargo +stable run -p dear-imgui-bevy --features render --example editor_shell
+```
+
 ## Render extraction
 
 With the `render` feature enabled, `ImguiPlugin` installs a Bevy `RenderApp` extraction system when
