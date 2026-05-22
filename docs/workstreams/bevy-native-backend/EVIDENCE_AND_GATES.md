@@ -237,6 +237,15 @@ Run `review-workstream` before accepting task or lane completion. Record blockin
   - Review: no blocking BEVY-100 findings. Residual risk: current tests do not instantiate a real `RenderDevice`, so Bevy image bind-group creation is compile- and integration-path covered but not screenshot/runtime-rendered until the example harnesses in BEVY-110/120.
   - Status: BEVY-100 DONE. Continue with BEVY-110 simple embedded Bevy example.
 
+- 2026-05-23: BEVY-110 simple embedded Bevy example implemented and verified.
+  - Added `backends/dear-imgui-bevy/examples/simple.rs`, a minimal one-frame Bevy app that installs `ScheduleRunnerPlugin::run_once`, `ImguiPlugin`, creates a primary window entity, initializes the ImGui context, and draws an overlay in `ImguiPrimaryContextPass`.
+  - Updated the backend README with the simple example command.
+  - `cargo +stable check -p dear-imgui-bevy --example simple` — PASS.
+  - `cargo +stable fmt --all --check` — PASS.
+  - `python3 -m json.tool docs/workstreams/bevy-native-backend/WORKSTREAM.json` — PASS.
+  - Review: no blocking BEVY-110 findings. The example is intentionally headless/single-frame to preserve the crate's narrow exact-pinned Bevy dependency surface; BEVY-120 owns the editor-shell/render-to-texture depth.
+  - Status: BEVY-110 DONE. Continue with BEVY-120 editor shell example.
+
 ## Notes
 
 Fresh verification is required before marking a task, Codex goal, or lane complete. Do not mark renderer or lifecycle tasks done based only on compile success if the task changes runtime frame ordering or texture feedback semantics.

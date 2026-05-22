@@ -18,17 +18,18 @@ Implementation has completed the first core proof slice and the backend skeleton
 - BEVY-080 render extraction: the render feature installs extraction into Bevy `RenderApp` / `ExtractSchedule`, clones `ImguiFrameOutput` snapshots into `render::ImguiExtractedRenderFrame`, preserves texture requests through the owned `FrameSnapshot`, and records active camera normalized render targets.
 - BEVY-090 renderer proof: the render app now prepares extracted snapshots into Bevy-native WGPU batches, uploads vertex/index/uniform buffers, specializes an ImGui overlay pipeline, populates managed texture bind groups from snapshot texture requests, falls back to a 1x1 white texture for missing bindings, queues per-camera pipelines, and inserts Core2d/Core3d overlay passes.
 - BEVY-100 texture interop: managed texture feedback is queued from render-world systems and applied on the main/UI thread before the next `ImguiBeginFrame`; Bevy `Handle<Image>` values register through `ImguiBevyTextures`, extract into render world, and resolve through `RenderAssets<GpuImage>` as legacy ImGui texture bind groups.
+- BEVY-110 simple example: `backends/dear-imgui-bevy/examples/simple.rs` demonstrates installing `ImguiPlugin`, creating a primary window entity, and drawing overlay UI from `ImguiPrimaryContextPass`.
 
 Submodule/symbol investigation is closed: after `git submodule update --init --recursive`, current cimgui exports `ImDrawList_AddLineH/V` and `ImGuiViewport_GetDebugName`; clean rebuild links safe APIs successfully. No CHANGELOG entry was added because the failure was stale local build state.
 
 ## Active Task
 
-- Task ID: BEVY-110
+- Task ID: BEVY-120
 - Owner: codex
-- Files: `backends/dear-imgui-bevy/examples/simple.rs`, `backends/dear-imgui-bevy/README.md`
-- Validation: `cargo +stable check -p dear-imgui-bevy --example simple` plus narrow backend gates if public API changes.
+- Files: `backends/dear-imgui-bevy/examples/editor_shell.rs`, `backends/dear-imgui-bevy/README.md`, docs as needed
+- Validation: `cargo +stable check -p dear-imgui-bevy --example editor_shell` plus relevant backend/example gates.
 - Status: TODO
-- Evidence: BEVY-100 completed with `cargo +stable nextest run -p dear-imgui-bevy --features render texture` (6 tests), `cargo +stable nextest run -p dear-imgui-bevy --features render` (21 tests), `cargo +stable nextest run -p dear-imgui-bevy` (13 tests), `cargo +stable check -p dear-imgui-bevy --features render`, `cargo +stable check -p dear-imgui-bevy --no-default-features`, `cargo +stable clippy -p dear-imgui-bevy --all-targets --features render --no-deps -- -D warnings`, and `cargo +stable fmt --all --check`.
+- Evidence: BEVY-110 completed with `cargo +stable check -p dear-imgui-bevy --example simple`, `cargo +stable fmt --all --check`, and `python3 -m json.tool docs/workstreams/bevy-native-backend/WORKSTREAM.json`.
 
 ## Decisions Since Last Update
 
@@ -47,6 +48,7 @@ Submodule/symbol investigation is closed: after `git submodule update --init --r
 - BEVY-090 keeps the renderer Bevy-native: it consumes owned `FrameSnapshot` / prepared data, never `dear-imgui-wgpu::WgpuRenderer`, and never borrows raw ImGui draw data across the main/render-world boundary. Missing texture bindings render through a white fallback bind group; BEVY-100 should replace that stopgap for real user-image interop where appropriate.
 - BEVY-100 uses a cloned `ImguiTextureFeedbackQueue` resource to share a mutex-backed feedback list between Bevy main and render worlds. Render systems push `TextureFeedback`; the next main-world begin-frame drains and applies it via `PlatformIo::apply_texture_feedback`.
 - BEVY-100 treats Bevy images as legacy ImGui texture ids derived from `AssetId<Image>`. `ImguiBevyTextures::register(&Handle<Image>)` is idempotent and render-world code resolves the extracted asset id through `RenderAssets<GpuImage>`.
+- BEVY-110 intentionally uses `ScheduleRunnerPlugin::run_once()` and split Bevy crates instead of `DefaultPlugins` to keep the backend crate's dependency surface aligned with the current exact-pinned proof. A fully windowed/editor shell belongs in BEVY-120.
 
 ## Blockers / Constraints
 
@@ -56,6 +58,6 @@ Submodule/symbol investigation is closed: after `git submodule update --init --r
 
 ## Next Recommended Action
 
-1. Start BEVY-110 with a minimal embedded Bevy example that runs `ImguiPlugin` and draws ordinary overlay UI from `ImguiPrimaryContextPass`.
-2. Keep editor/render-to-texture details for BEVY-120.
-3. Re-run the example check gate before marking BEVY-110 done.
+1. Start BEVY-120 with an editor-oriented example that demonstrates dockspace-style layout and a Bevy render-target `Handle<Image>` displayed through `ImguiBevyTextures`.
+2. Keep full editor product features such as inspector/assets/console as follow-ons unless they are needed for the proof.
+3. Re-run `cargo +stable check -p dear-imgui-bevy --example editor_shell` before marking BEVY-120 done.

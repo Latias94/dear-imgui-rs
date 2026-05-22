@@ -97,12 +97,12 @@ Last updated: 2026-05-23
 
 ## M4 — Examples And Ecosystem Composition
 
-- [ ] BEVY-110 [owner=unassigned] [deps=BEVY-070,BEVY-090] [scope=examples,backends/dear-imgui-bevy/examples]
+- [x] BEVY-110 [owner=codex] [deps=BEVY-070,BEVY-090] [scope=examples,backends/dear-imgui-bevy/examples]
   Goal: Add an embedded Bevy example showing Dear ImGui overlay usage inside a normal Bevy app.
   Validation: `cargo check -p dear-imgui-bevy --example simple` or matching example gate.
   Review: `review-workstream` before accepting completion.
-  Evidence: simple example and README usage snippet.
-  Handoff: Keep this example minimal; editor features belong in BEVY-120.
+  Evidence: `backends/dear-imgui-bevy/examples/simple.rs`, `backends/dear-imgui-bevy/README.md`, fresh `cargo +stable check -p dear-imgui-bevy --example simple`.
+  Handoff: DONE 2026-05-23. Added a minimal embedded Bevy example that installs `ScheduleRunnerPlugin::run_once`, `ImguiPlugin`, creates a primary window entity, prepares the ImGui context, and draws an overlay through `ImguiPrimaryContextPass`. It intentionally stays headless/single-frame to preserve the crate's narrow Bevy dependency surface; BEVY-120 owns editor/windowed render-to-texture viewport depth.
 
 - [ ] BEVY-120 [owner=unassigned] [deps=BEVY-100,BEVY-110] [scope=backends/dear-imgui-bevy/examples,docs]
   Goal: Add an editor-oriented example with dockspace, scene/game viewport via Bevy render-to-texture, and documented editor input policy.

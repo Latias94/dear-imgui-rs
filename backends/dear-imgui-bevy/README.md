@@ -82,6 +82,13 @@ The important invariant is that user systems draw into an already-open frame; th
 `Context::frame()` or `Context::render()` themselves. Extension crates can be used from the same
 pass by taking the shared `&Ui` returned by `ImguiContexts`.
 
+See `examples/simple.rs` for a minimal embedded Bevy app that creates a primary window entity and
+draws an overlay from `ImguiPrimaryContextPass`:
+
+```bash
+cargo +stable run -p dear-imgui-bevy --example simple
+```
+
 ## Render extraction
 
 With the `render` feature enabled, `ImguiPlugin` installs a Bevy `RenderApp` extraction system when
