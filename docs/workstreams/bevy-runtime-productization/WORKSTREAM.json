@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "slug": "bevy-runtime-productization",
+  "title": "Bevy Runtime Productization Workstream",
+  "status": "active",
+  "updated": "2026-05-23",
+  "scope_kind": "execution",
+  "problem": "Turn the Bevy backend proof into runtime-backed examples, renderer harness coverage, and a richer editor shell surface.",
+  "authoritative_docs": [
+    {
+      "role": "adr",
+      "path": "docs/adr/0001-bevy-native-imgui-backend.md"
+    },
+    {
+      "role": "design",
+      "path": "docs/workstreams/bevy-runtime-productization/DESIGN.md"
+    },
+    {
+      "role": "execution",
+      "path": "docs/workstreams/bevy-runtime-productization/TODO.md"
+    },
+    {
+      "role": "gates",
+      "path": "docs/workstreams/bevy-runtime-productization/EVIDENCE_AND_GATES.md"
+    },
+    {
+      "role": "milestones",
+      "path": "docs/workstreams/bevy-runtime-productization/MILESTONES.md"
+    },
+    {
+      "role": "handoff",
+      "path": "docs/workstreams/bevy-runtime-productization/HANDOFF.md"
+    }
+  ],
+  "gates": [
+    "cargo +stable check -p dear-imgui-bevy --features render --example windowed_overlay",
+    "cargo +stable nextest run -p dear-imgui-bevy --features render",
+    "cargo +stable check -p dear-imgui-bevy --features render --example editor_shell"
+  ],
+  "evidence": [
+    "docs/workstreams/bevy-runtime-productization/DESIGN.md",
+    "docs/workstreams/bevy-runtime-productization/TODO.md",
+    "docs/workstreams/bevy-runtime-productization/EVIDENCE_AND_GATES.md",
+    "BRP-010 scope opened on 2026-05-23",
+    "BRP-020 windowed runtime proof: cargo +stable check -p dear-imgui-bevy --features render --example windowed_overlay PASS; manual run command documented"
+  ],
+  "adr_refs": [
+    "docs/adr/0001-bevy-native-imgui-backend.md"
+  ],
+  "current_task": "BRP-030",
+  "next_recommended_task": "BRP-030",
+  "continue_policy": {
+    "default_action": "continue",
+    "notes": "BRP-010 and BRP-020 are complete. Continue with BRP-030 runtime renderer harness, then BRP-040 editor shell productization."
+  }
+}

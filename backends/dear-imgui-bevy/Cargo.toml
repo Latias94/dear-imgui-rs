@@ -44,6 +44,7 @@ bevy_utils = { version = "=0.19.0-rc.2", default-features = false }
 bytemuck = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
+bevy = { version = "=0.19.0-rc.2", default-features = false, features = ["2d", "default_platform"] }
 dear-imguizmo = { path = "../../extensions/dear-imguizmo", version = "0.13" }
 dear-imnodes = { path = "../../extensions/dear-imnodes", version = "0.13" }
 dear-implot = { path = "../../extensions/dear-implot", version = "0.13" }
@@ -77,3 +78,8 @@ required-features = ["render"]
 [[example]]
 name = "ecosystem"
 path = "examples/ecosystem.rs"
+
+[[example]]
+name = "windowed_overlay"
+path = "examples/windowed_overlay.rs"
+required-features = ["render"]

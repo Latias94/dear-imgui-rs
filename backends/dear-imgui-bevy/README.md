@@ -89,6 +89,14 @@ draws an overlay from `ImguiPrimaryContextPass`:
 cargo +stable run -p dear-imgui-bevy --example simple
 ```
 
+See `examples/windowed_overlay.rs` for a persistent runtime smoke app that uses Bevy's normal
+windowed runner, `DefaultPlugins`, and the render feature. It opens a real window, draws an ImGui
+overlay for multiple frames, and exits when Escape is pressed:
+
+```bash
+cargo +stable run -p dear-imgui-bevy --features render --example windowed_overlay
+```
+
 See `examples/editor_shell.rs` for an editor-oriented shell that registers a Bevy render-target
 `Handle<Image>` through `ImguiBevyTextures`, displays it as an ImGui image, and documents the input
 routing policy expected for editor tools:
