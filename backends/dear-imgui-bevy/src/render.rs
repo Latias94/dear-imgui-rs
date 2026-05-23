@@ -1543,6 +1543,8 @@ fn scissor_from_clip_rect(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy_asset::AssetId;
+    use bevy_render::{renderer::initialize_renderer, settings::WgpuSettings};
 
     #[test]
     fn texture_conversion_repackages_padded_rgba_rows() {
@@ -1575,5 +1577,146 @@ mod tests {
                 255, 255, 255, 255, 255, 255, 255, 64,
             ]
         );
+    }
+
+    #[test]
+    #[ignore = "requires DEAR_IMGUI_BEVY_GPU_HARNESS=1 and a working native wgpu adapter"]
+    fn bevy_image_texture_bind_groups_use_real_render_assets_when_gpu_harness_is_enabled() {
+        if std::env::var_os("DEAR_IMGUI_BEVY_GPU_HARNESS").is_none() {
+            return;
+        }
+
+        let RenderHarnessResources {
+            render_device,
+            pipeline_cache,
+        } = initialize_render_harness_resources();
+        let pipeline = ImguiRenderPipeline::default();
+        let mut extracted = ImguiExtractedBevyTextures::default();
+        let mut gpu_images = RenderAssets::<GpuImage>::default();
+        let mut texture_bind_groups = ImguiTextureBindGroups::default();
+        let texture_id = imgui::TextureId::new(42);
+        let image_id = AssetId::<Image>::default();
+        let binding = TextureBinding::Legacy(texture_id);
+
+        extracted.replace(vec![(texture_id, image_id)]);
+        gpu_images.insert(
+            image_id,
+            gpu_image(&render_device, TextureUsages::TEXTURE_BINDING),
+        );
+
+        prepare_bevy_image_texture_bind_groups(
+            Some(&gpu_images),
+            &extracted,
+            &render_device,
+            &pipeline_cache,
+            &pipeline,
+            &mut texture_bind_groups,
+        );
+
+        assert_eq!(texture_bind_groups.len(), 1);
+        assert!(
+            texture_bind_groups.get(&binding).is_some(),
+            "registered Bevy image handles should resolve to a real bind group"
+        );
+
+        gpu_images.remove(image_id);
+        prepare_bevy_image_texture_bind_groups(
+            Some(&gpu_images),
+            &extracted,
+            &render_device,
+            &pipeline_cache,
+            &pipeline,
+            &mut texture_bind_groups,
+        );
+        assert!(
+            texture_bind_groups.is_empty(),
+            "missing RenderAssets<GpuImage> entries should remove stale bind groups"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires DEAR_IMGUI_BEVY_GPU_HARNESS=1 and a working native wgpu adapter"]
+    fn bevy_image_texture_bind_groups_ignore_non_sampled_gpu_images_when_gpu_harness_is_enabled() {
+        if std::env::var_os("DEAR_IMGUI_BEVY_GPU_HARNESS").is_none() {
+            return;
+        }
+
+        let RenderHarnessResources {
+            render_device,
+            pipeline_cache,
+        } = initialize_render_harness_resources();
+        let pipeline = ImguiRenderPipeline::default();
+        let mut extracted = ImguiExtractedBevyTextures::default();
+        let mut gpu_images = RenderAssets::<GpuImage>::default();
+        let mut texture_bind_groups = ImguiTextureBindGroups::default();
+        let texture_id = imgui::TextureId::new(99);
+        let image_id = AssetId::<Image>::default();
+        let binding = TextureBinding::Legacy(texture_id);
+
+        extracted.replace(vec![(texture_id, image_id)]);
+        gpu_images.insert(image_id, gpu_image(&render_device, TextureUsages::COPY_DST));
+
+        prepare_bevy_image_texture_bind_groups(
+            Some(&gpu_images),
+            &extracted,
+            &render_device,
+            &pipeline_cache,
+            &pipeline,
+            &mut texture_bind_groups,
+        );
+
+        assert_eq!(texture_bind_groups.len(), 0);
+        assert!(texture_bind_groups.get(&binding).is_none());
+    }
+
+    struct RenderHarnessResources {
+        render_device: RenderDevice,
+        pipeline_cache: PipelineCache,
+    }
+
+    fn initialize_render_harness_resources() -> RenderHarnessResources {
+        let settings = WgpuSettings::default();
+
+        let resources = bevy_platform::future::block_on(initialize_renderer(
+            settings
+                .backends
+                .expect("render harness should configure an explicit backend"),
+            None,
+            &settings,
+        ));
+        let render_device = resources.0.clone();
+        let render_adapter = resources.3.clone();
+        RenderHarnessResources {
+            render_device: render_device.clone(),
+            pipeline_cache: PipelineCache::new(render_device, render_adapter, true),
+        }
+    }
+
+    fn gpu_image(render_device: &RenderDevice, usage: TextureUsages) -> GpuImage {
+        let texture_descriptor = TextureDescriptor {
+            label: Some("dear_imgui_bevy_harness_image"),
+            size: Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8Unorm,
+            usage,
+            view_formats: &[],
+        };
+        let texture = render_device.create_texture(&texture_descriptor);
+        let texture_view = texture.create_view(&TextureViewDescriptor::default());
+        let sampler = render_device.create_sampler(&SamplerDescriptor::default());
+        GpuImage {
+            texture,
+            texture_view,
+            sampler,
+            texture_descriptor,
+            texture_view_descriptor: None,
+            had_data: true,
+        }
     }
 }

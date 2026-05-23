@@ -27,11 +27,12 @@ Proves the real windowed example compiles against the selected Bevy target train
 ### Runtime Renderer Harness Gate
 
 ```bash
-cargo +stable nextest run -p dear-imgui-bevy --features render <runtime-renderer-filter>
+DEAR_IMGUI_BEVY_GPU_HARNESS=1 cargo +stable test -p dear-imgui-bevy --features render --lib bevy_image_texture_bind_groups -- --ignored --nocapture
 ```
 
-If the harness requires a real GPU/device that is not stable in default CI, record an opt-in command
-and keep a deterministic package gate below as the default gate.
+The harness is intentionally `#[ignore]` by default because it initializes a real native
+Bevy/wgpu adapter. The default package gate below must show those tests as skipped rather than
+silently passing through an early return.
 
 ### Backend Package Gate
 
@@ -81,6 +82,23 @@ gates, and residual risks here or link to the review note.
   - Review: no blocking BRP-020 findings. The example is intentionally a runtime smoke app, not a
     deterministic CI execution gate, because it opens a real OS window and exits on Escape.
   - Status: BRP-020 DONE. Continue with BRP-030 runtime renderer harness.
+- 2026-05-23: BRP-030 runtime renderer harness implemented and verified.
+  - Added ignored opt-in harness tests in `backends/dear-imgui-bevy/src/render.rs`:
+    `bevy_image_texture_bind_groups_use_real_render_assets_when_gpu_harness_is_enabled` and
+    `bevy_image_texture_bind_groups_ignore_non_sampled_gpu_images_when_gpu_harness_is_enabled`.
+  - The harness initializes Bevy renderer resources with `initialize_renderer`, constructs a real
+    `PipelineCache`, creates `GpuImage` entries inside `RenderAssets<GpuImage>`, and calls the
+    production Bevy image bind-group preparation path.
+  - Positive path proves `TextureUsages::TEXTURE_BINDING` images register a real
+    `TextureBinding::Legacy` bind group.
+  - Negative/stale paths prove non-sampled GPU images and missing render assets do not leave stale
+    bind groups.
+  - `cargo +stable fmt --all --check` — PASS.
+  - `cargo +stable nextest run -p dear-imgui-bevy --features render` — PASS: 21 passed, 2 skipped
+    ignored GPU harness tests.
+  - `DEAR_IMGUI_BEVY_GPU_HARNESS=1 cargo +stable test -p dear-imgui-bevy --features render --lib bevy_image_texture_bind_groups -- --ignored --nocapture`
+    — PASS: 2 passed.
+  - Status: BRP-030 DONE. Continue with BRP-040 editor shell productization.
 
 ## Notes
 

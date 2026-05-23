@@ -22,12 +22,12 @@ Last updated: 2026-05-23
 
 ## M2 — Runtime Renderer Harness
 
-- [ ] BRP-030 [owner=codex] [deps=BRP-020] [scope=backends/dear-imgui-bevy/src/render.rs,backends/dear-imgui-bevy/tests,backends/dear-imgui-bevy/examples]
+- [x] BRP-030 [owner=codex] [deps=BRP-020] [scope=backends/dear-imgui-bevy/src/render.rs,backends/dear-imgui-bevy/tests,backends/dear-imgui-bevy/examples]
   Goal: Add a runtime renderer harness or smoke test that covers real `RenderDevice`, `RenderAssets<GpuImage>`, and texture bind-group preparation for Bevy `Handle<Image>` user textures.
   Validation: targeted render harness gate plus `cargo +stable nextest run -p dear-imgui-bevy --features render`.
   Review: `review-workstream` before accepting completion.
   Evidence: harness path and `EVIDENCE_AND_GATES.md`.
-  Handoff: If GPU availability requires opt-in execution, document the skipped default gate and provide a reliable manual command.
+  Handoff: DONE 2026-05-23. Added ignored opt-in GPU harness tests in `backends/dear-imgui-bevy/src/render.rs` that initialize a real Bevy/wgpu `RenderDevice`, build `RenderAssets<GpuImage>`, and exercise Bevy image texture bind-group preparation. Default package gate skips the GPU harness; manual opt-in command is recorded in evidence.
 
 ## M3 — Editor Shell Productization
 
