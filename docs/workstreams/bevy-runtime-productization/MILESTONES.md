@@ -1,6 +1,6 @@
 # Bevy Runtime Productization Workstream — Milestones
 
-Status: Active
+Status: Closed
 Last updated: 2026-05-23
 
 ## M0 — Scope And Evidence Freeze
@@ -63,3 +63,10 @@ Exit criteria:
 - Workstream docs match shipped behavior.
 - Remaining work is completed, explicitly deferred, or split into follow-ons.
 - `WORKSTREAM.json` status is updated.
+
+Result:
+
+- DONE 2026-05-23.
+- BRP-020, BRP-030, BRP-040, and BRP-050 are complete.
+- Fresh `cargo +stable` Bevy gates are recorded in `EVIDENCE_AND_GATES.md`, and the lane is
+  closed with any future runtime/editor expansion deferred to a new follow-on workstream.

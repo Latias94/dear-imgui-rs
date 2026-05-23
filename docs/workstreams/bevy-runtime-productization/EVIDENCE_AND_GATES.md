@@ -1,18 +1,20 @@
 # Bevy Runtime Productization Workstream — Evidence And Gates
 
-Status: Active
+Status: Closed
 Last updated: 2026-05-23
 
-## Smallest Current Repro
+## Shipped Proof Set
 
-The current gap is that existing examples compile as one-frame proofs but do not prove a normal
-windowed Bevy runtime app:
+The lane now ships the runtime/editor proof set as dedicated Bevy `cargo +stable` gates:
 
 ```bash
-cargo +stable run -p dear-imgui-bevy --example simple
+cargo +stable check -p dear-imgui-bevy --features render --example windowed_overlay
+cargo +stable check -p dear-imgui-bevy --features render --example editor_shell
+cargo +stable nextest run -p dear-imgui-bevy --features render
 ```
 
-This exits after one update because it uses `ScheduleRunnerPlugin::run_once()`.
+`simple.rs` remains the minimal compile proof. `windowed_overlay.rs` is the persistent runtime
+smoke app, and `editor_shell.rs` is the richer editor productization example.
 
 ## Gate Set
 
@@ -99,6 +101,39 @@ gates, and residual risks here or link to the review note.
   - `DEAR_IMGUI_BEVY_GPU_HARNESS=1 cargo +stable test -p dear-imgui-bevy --features render --lib bevy_image_texture_bind_groups -- --ignored --nocapture`
     — PASS: 2 passed.
   - Status: BRP-030 DONE. Continue with BRP-040 editor shell productization.
+- 2026-05-23: BRP-040 editor shell productization implemented and verified.
+  - Converted `backends/dear-imgui-bevy/examples/editor_shell.rs` from a one-frame
+    `ScheduleRunnerPlugin::run_once()` proof to a persistent windowed app using Bevy
+    `DefaultPlugins`.
+  - Added a live offscreen Bevy 2D scene rendered into a target `Handle<Image>`, registered through
+    `ImguiBevyTextures`, and displayed as an ImGui scene viewport.
+  - Added docked hierarchy, inspector, input-policy, and diagnostics panels with viewport zoom,
+    playback state, selection state, capture flags, and frame/snapshot diagnostics.
+  - Added `render::ImguiOverlayDisabled` for cameras that should not receive the global ImGui
+    overlay pass, and used it on the editor scene camera to avoid feedback into the scene viewport.
+  - Updated `tests/render_extract.rs` so disabled cameras are excluded from extracted overlay
+    camera targets.
+  - Updated `backends/dear-imgui-bevy/README.md` with the persistent editor shell behavior and
+    `ImguiOverlayDisabled` guidance.
+  - `cargo +stable fmt --all --check` — PASS.
+  - `cargo +stable check -p dear-imgui-bevy --features render --example editor_shell` — PASS.
+  - `cargo +stable test -p dear-imgui-bevy --features render render_extract_clones_snapshot_texture_requests_and_camera_targets -- --nocapture`
+    — PASS: 1 passed.
+  - `cargo +stable nextest run -p dear-imgui-bevy --features render` — PASS: 21 passed, 2 skipped
+    ignored GPU harness tests.
+  - Status: BRP-040 DONE. Continue with BRP-050 closeout.
+- 2026-05-23: BRP-050 closeout completed.
+  - `cargo +stable fmt --all --check` — PASS.
+  - `cargo +stable check -p dear-imgui-bevy --features render --example windowed_overlay` — PASS.
+  - `cargo +stable nextest run -p dear-imgui-bevy --features render` — PASS: 21 passed, 2 skipped
+    ignored GPU harness tests.
+  - `cargo +stable check -p dear-imgui-bevy --features render --example editor_shell` — PASS.
+  - `cargo +stable test -p dear-imgui-bevy --features render render_extract_clones_snapshot_texture_requests_and_camera_targets -- --nocapture`
+    — PASS: 1 passed.
+  - `cargo +stable clippy -p dear-imgui-bevy --all-targets --features render --no-deps -- -D warnings`
+    — PASS.
+  - Status: Closed. The lane now ships the persistent windowed example, runtime renderer harness
+    coverage, and richer editor shell surface.
 
 ## Notes
 

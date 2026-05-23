@@ -97,9 +97,10 @@ overlay for multiple frames, and exits when Escape is pressed:
 cargo +stable run -p dear-imgui-bevy --features render --example windowed_overlay
 ```
 
-See `examples/editor_shell.rs` for an editor-oriented shell that registers a Bevy render-target
-`Handle<Image>` through `ImguiBevyTextures`, displays it as an ImGui image, and documents the input
-routing policy expected for editor tools:
+See `examples/editor_shell.rs` for a persistent editor-oriented shell that registers a Bevy
+render-target `Handle<Image>` through `ImguiBevyTextures`, displays the live scene as an ImGui
+viewport image, uses `render::ImguiOverlayDisabled` on the offscreen scene camera, and exposes
+docked hierarchy, inspector, diagnostics, and input-routing policy panels:
 
 ```bash
 cargo +stable run -p dear-imgui-bevy --features render --example editor_shell
@@ -152,6 +153,10 @@ The returned `TextureId` can be passed to `ui.image(texture_id, size)`. Render-w
 the registry and resolves the underlying `Handle<Image>` through Bevy `RenderAssets<GpuImage>` when
 the GPU image is available. Missing images keep using the renderer fallback bind group until the
 asset is prepared by Bevy.
+
+Editor-style render targets that are shown inside ImGui viewports can add
+`render::ImguiOverlayDisabled` to their Bevy camera to prevent the global ImGui overlay pass from
+drawing back into the offscreen scene image.
 
 ## Primary-window input policy
 

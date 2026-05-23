@@ -16,8 +16,8 @@ use dear_imgui_bevy::{
     ImguiContext, ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass,
     render::{
         IMGUI_FRAGMENT_ENTRY_POINT, IMGUI_SHADER_HANDLE, IMGUI_SHADER_SOURCE,
-        IMGUI_VERTEX_ENTRY_POINT, ImguiExtractedRenderFrame, ImguiPipelineKey,
-        ImguiPreparedRenderFrame, ImguiQueuedPipelines, ImguiRenderPipeline,
+        IMGUI_VERTEX_ENTRY_POINT, ImguiExtractedRenderFrame, ImguiOverlayDisabled,
+        ImguiPipelineKey, ImguiPreparedRenderFrame, ImguiQueuedPipelines, ImguiRenderPipeline,
         ImguiTextureBindGroups, imgui_vertex_buffer_layout,
     },
 };
@@ -67,6 +67,15 @@ fn app_with_primary_window() -> (
             ..Default::default()
         },
         RenderTarget::Window(WindowRef::Primary),
+    ));
+
+    app.world_mut().spawn((
+        Camera {
+            order: -10,
+            ..Default::default()
+        },
+        RenderTarget::Window(WindowRef::Primary),
+        ImguiOverlayDisabled,
     ));
 
     let mut texture = imgui::texture::TextureData::new();

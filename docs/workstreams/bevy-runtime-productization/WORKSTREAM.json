@@ -2,7 +2,7 @@
   "schema_version": 1,
   "slug": "bevy-runtime-productization",
   "title": "Bevy Runtime Productization Workstream",
-  "status": "active",
+  "status": "closed",
   "updated": "2026-05-23",
   "scope_kind": "execution",
   "problem": "Turn the Bevy backend proof into runtime-backed examples, renderer harness coverage, and a richer editor shell surface.",
@@ -43,15 +43,17 @@
     "docs/workstreams/bevy-runtime-productization/EVIDENCE_AND_GATES.md",
     "BRP-010 scope opened on 2026-05-23",
     "BRP-020 windowed runtime proof: cargo +stable check -p dear-imgui-bevy --features render --example windowed_overlay PASS; manual run command documented",
-    "BRP-030 runtime renderer harness: cargo +stable nextest run -p dear-imgui-bevy --features render PASS with 2 skipped ignored GPU harness tests; DEAR_IMGUI_BEVY_GPU_HARNESS=1 cargo +stable test -p dear-imgui-bevy --features render --lib bevy_image_texture_bind_groups -- --ignored --nocapture PASS"
+    "BRP-030 runtime renderer harness: cargo +stable nextest run -p dear-imgui-bevy --features render PASS with 2 skipped ignored GPU harness tests; DEAR_IMGUI_BEVY_GPU_HARNESS=1 cargo +stable test -p dear-imgui-bevy --features render --lib bevy_image_texture_bind_groups -- --ignored --nocapture PASS",
+    "BRP-040 editor shell productization: cargo +stable check -p dear-imgui-bevy --features render --example editor_shell PASS; cargo +stable nextest run -p dear-imgui-bevy --features render PASS with 2 skipped ignored GPU harness tests",
+    "BRP-050 closeout: cargo +stable fmt --all --check PASS; cargo +stable check -p dear-imgui-bevy --features render --example windowed_overlay PASS; cargo +stable check -p dear-imgui-bevy --features render --example editor_shell PASS; cargo +stable nextest run -p dear-imgui-bevy --features render PASS with 2 skipped ignored GPU harness tests; cargo +stable test -p dear-imgui-bevy --features render render_extract_clones_snapshot_texture_requests_and_camera_targets -- --nocapture PASS; cargo +stable clippy -p dear-imgui-bevy --all-targets --features render --no-deps -- -D warnings PASS"
   ],
   "adr_refs": [
     "docs/adr/0001-bevy-native-imgui-backend.md"
   ],
-  "current_task": "BRP-040",
-  "next_recommended_task": "BRP-040",
+  "current_task": null,
+  "next_recommended_task": null,
   "continue_policy": {
-    "default_action": "continue",
-    "notes": "BRP-010, BRP-020, and BRP-030 are complete. Continue with BRP-040 editor shell productization."
+    "default_action": "closed",
+    "notes": "BRP-010, BRP-020, BRP-030, BRP-040, and BRP-050 are complete. Open a new follow-on workstream for any future runtime/editor slices."
   }
 }

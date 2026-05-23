@@ -49,6 +49,17 @@ pub use crate::texture::ImguiBevyTextures;
 pub const IMGUI_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("2c893cad-60d2-4e92-8544-4ab807ed9c5a");
 
+type OverlayCameraQuery<'w> = Query<
+    'w,
+    'w,
+    (
+        Entity,
+        &'w Camera,
+        &'w RenderTarget,
+        Option<&'w ImguiOverlayDisabled>,
+    ),
+>;
+
 const COPY_BYTES_PER_ROW_ALIGNMENT: u32 = 256;
 
 /// Vertex shader entry point used by the Bevy-native ImGui pipeline.
@@ -148,6 +159,14 @@ pub struct ImguiCameraTarget {
     /// Normalized render target resolved from the camera and current primary window.
     pub target: NormalizedRenderTarget,
 }
+
+/// Marker component for cameras that should not receive Dear ImGui overlay rendering.
+///
+/// This is useful for editor shell scene cameras that render to a `Handle<Image>` later shown
+/// inside an ImGui viewport. Without this marker, the global overlay pass would also draw ImGui into
+/// that offscreen scene target.
+#[derive(Component, Debug, Clone, Copy, Default, Eq, PartialEq)]
+pub struct ImguiOverlayDisabled;
 
 /// GPU vertex layout used by the Bevy-native ImGui renderer.
 #[repr(C)]
@@ -827,7 +846,7 @@ fn extract_imgui_render_frame(
     mut extracted: ResMut<ImguiExtractedRenderFrame>,
     output: Extract<Res<crate::ImguiFrameOutput>>,
     primary_window: Extract<Query<Entity, With<PrimaryWindow>>>,
-    cameras: Extract<Query<(Entity, &Camera, &RenderTarget)>>,
+    cameras: Extract<OverlayCameraQuery<'_>>,
 ) {
     let Some(snapshot) = output.snapshot().cloned() else {
         extracted.clear(output.frame_index());
@@ -840,11 +859,18 @@ fn extract_imgui_render_frame(
 
 fn collect_camera_targets<'w>(
     primary_window: Option<Entity>,
-    cameras: impl Iterator<Item = (Entity, &'w Camera, &'w RenderTarget)>,
+    cameras: impl Iterator<
+        Item = (
+            Entity,
+            &'w Camera,
+            &'w RenderTarget,
+            Option<&'w ImguiOverlayDisabled>,
+        ),
+    >,
 ) -> Vec<ImguiCameraTarget> {
     let mut targets = cameras
-        .filter(|(_, camera, _)| camera.is_active)
-        .filter_map(|(entity, camera, target)| {
+        .filter(|(_, camera, _, overlay_disabled)| camera.is_active && overlay_disabled.is_none())
+        .filter_map(|(entity, camera, target, _)| {
             target
                 .normalize(primary_window)
                 .map(|target| ImguiCameraTarget {

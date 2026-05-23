@@ -1,21 +1,16 @@
 # Bevy Runtime Productization Workstream — Handoff
 
-Status: Active
+Status: Closed
 Last updated: 2026-05-23
 
 ## Current State
 
-The workstream is open. It follows the closed `docs/workstreams/bevy-native-backend/` lane, which
+The workstream is closed. It follows the closed `docs/workstreams/bevy-native-backend/` lane, which
 proved the Bevy-native backend architecture and one-frame examples.
 
 ## Active Task
 
-- Task ID: BRP-040
-- Owner: codex
-- Files: `backends/dear-imgui-bevy/examples`, `backends/dear-imgui-bevy/src`,
-  `backends/dear-imgui-bevy/README.md`
-- Validation: `cargo +stable check -p dear-imgui-bevy --features render --example editor_shell`
-- Status: TODO
+- None. BRP-050 is complete and the lane is closed.
 
 ## Decisions
 
@@ -26,6 +21,11 @@ proved the Bevy-native backend architecture and one-frame examples.
   Bevy/wgpu adapter. The default package gate must show those tests skipped; use
   `DEAR_IMGUI_BEVY_GPU_HARNESS=1 cargo +stable test -p dear-imgui-bevy --features render --lib bevy_image_texture_bind_groups -- --ignored --nocapture`
   to run the GPU path.
+- BRP-040 keeps editor productization inside the backend example plus one small backend helper
+  marker. `render::ImguiOverlayDisabled` marks offscreen scene cameras that should not receive the
+  global ImGui overlay pass.
+- BRP-050 closes the lane after fresh gate evidence, status updates, and changelog coverage are
+  recorded.
 
 ## Blockers / Constraints
 
@@ -34,5 +34,5 @@ proved the Bevy-native backend architecture and one-frame examples.
 
 ## Next Recommended Action
 
-Implement BRP-040: productize the editor shell into a richer example and/or helper layer with scene
-viewport, panels, input policy, and extension-friendly composition.
+Start a new follow-on workstream if future runtime/editor product work is needed; otherwise keep
+this lane closed.

@@ -1,6 +1,6 @@
 # Bevy Runtime Productization Workstream — TODO
 
-Status: Active
+Status: Closed
 Last updated: 2026-05-23
 
 ## M0 — Scope And Evidence Freeze
@@ -31,21 +31,21 @@ Last updated: 2026-05-23
 
 ## M3 — Editor Shell Productization
 
-- [ ] BRP-040 [owner=codex] [deps=BRP-020,BRP-030] [scope=backends/dear-imgui-bevy/examples,backends/dear-imgui-bevy/src,backends/dear-imgui-bevy/README.md]
+- [x] BRP-040 [owner=codex] [deps=BRP-020,BRP-030] [scope=backends/dear-imgui-bevy/examples,backends/dear-imgui-bevy/src,backends/dear-imgui-bevy/README.md]
   Goal: Productize the editor shell into a richer example and/or helper layer with scene viewport, panels, input policy, and extension-friendly composition.
   Validation: `cargo +stable check -p dear-imgui-bevy --features render --example editor_shell` and any helper tests added by the task.
   Review: `review-workstream` before accepting completion.
   Evidence: updated editor shell/helper paths and fresh gates.
-  Handoff: Split a separate editor crate if helper scope grows beyond backend-local policy.
+  Handoff: DONE 2026-05-23. Converted `editor_shell` from one-frame proof to persistent Bevy `DefaultPlugins` windowed app with live offscreen scene viewport, docked hierarchy/inspector/input-policy/diagnostics panels, and Escape exit. Added `render::ImguiOverlayDisabled` helper marker so editor scene cameras can opt out of the global ImGui overlay pass, with extraction test coverage.
 
 ## M4 — Closeout
 
-- [ ] BRP-050 [owner=planner] [deps=BRP-020,BRP-030,BRP-040] [scope=docs/workstreams/bevy-runtime-productization,CHANGELOG.md]
+- [x] BRP-050 [owner=planner] [deps=BRP-020,BRP-030,BRP-040] [scope=docs/workstreams/bevy-runtime-productization,CHANGELOG.md]
   Goal: Finalize docs, record fresh gates, split remaining risks, and close or continue this runtime productization lane.
   Validation: `verify-rust-workstream` records final fresh evidence.
   Review: `review-workstream` has no blocking findings.
   Evidence: `EVIDENCE_AND_GATES.md`, `WORKSTREAM.json`, closeout journal.
-  Handoff: Summarize remaining risks in `HANDOFF.md`.
+  Handoff: DONE 2026-05-23. Recorded fresh closeout gates, updated the workstream docs and changelog, and closed the lane. Any future runtime/editor product work should open a new follow-on workstream.
 
 ## Parallelization Notes
 

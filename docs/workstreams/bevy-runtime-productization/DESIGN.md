@@ -1,6 +1,6 @@
 # Bevy Runtime Productization Workstream
 
-Status: Active
+Status: Closed
 Last updated: 2026-05-23
 
 ## Why This Lane Exists
@@ -90,3 +90,10 @@ This lane can close when:
 - the editor shell is materially richer or backed by a reusable helper surface;
 - fresh gates are recorded in `EVIDENCE_AND_GATES.md`;
 - follow-ons are explicit rather than hidden in handoff notes.
+
+## Result
+
+- Closed 2026-05-23.
+- The lane ships the persistent windowed example, runtime renderer harness coverage, and richer
+  editor shell surface described above.
+- Any future runtime/editor expansion should open a new follow-on workstream.

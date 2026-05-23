@@ -197,6 +197,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     engine-managed ImGui frame scheduling, Bevy input mapping, Bevy-native WGPU rendering,
     texture feedback and `Handle<Image>` interop, plus simple, editor-shell, and ecosystem
     composition examples.
+  - Expanded `dear-imgui-bevy` with a persistent `windowed_overlay` runtime example, an opt-in
+    runtime renderer harness for `RenderDevice` / `RenderAssets<GpuImage>` texture bind groups,
+    and a richer `editor_shell` example with `ImguiOverlayDisabled` for offscreen scene cameras.
   - `dear-imgui-sdl3` now provides `Sdl3PlatformBackend`, `Sdl3OpenGl3Backend`, and
     `Sdl3RendererBackend` owner types that pair official backend initialization and shutdown,
     bind per-frame/event/device calls to the captured `Context`, and skip drop-time FFI if the
