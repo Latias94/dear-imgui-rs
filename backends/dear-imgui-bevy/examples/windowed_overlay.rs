@@ -11,8 +11,9 @@ use bevy::{
 };
 use dear_imgui_bevy::{
     ImguiContext, ImguiContexts, ImguiFrameOutput, ImguiPlugin, ImguiPrimaryContextPass,
+    configure_example_context,
 };
-use dear_imgui_rs::{Condition, ConfigFlags};
+use dear_imgui_rs::Condition;
 
 #[derive(Resource, Debug)]
 struct RuntimeOverlayState {
@@ -53,13 +54,7 @@ fn main() {
 
 fn setup_imgui(mut commands: Commands, mut imgui: NonSendMut<ImguiContext>) {
     commands.spawn(Camera2d);
-
-    let context = imgui.context_mut();
-    context.io_mut().set_config_input_trickle_event_queue(false);
-    let flags = context.io().config_flags() | ConfigFlags::DOCKING_ENABLE;
-    context.io_mut().set_config_flags(flags);
-    let _ = context.font_atlas_mut().build();
-    let _ = context.set_ini_filename::<std::path::PathBuf>(None);
+    configure_example_context(&mut imgui, true);
 }
 
 fn close_on_escape(input: Res<ButtonInput<KeyCode>>, mut exit: MessageWriter<AppExit>) {

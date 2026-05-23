@@ -4,11 +4,12 @@
 //! systems should be added to [`crate::ImguiPrimaryContextPass`] and request [`ImguiContexts`]
 //! instead of calling `Context::frame()` / `Context::render()` directly.
 
-use crate::{ImguiContext, ImguiTextureFeedbackQueue};
+use crate::{ImguiContext, ImguiTextureFeedbackQueue, input::map_imgui_mouse_cursor};
 use bevy_app::App;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::{NonSendMarker, SystemParam};
-use bevy_window::{PrimaryWindow, Window};
+use bevy_math::Vec2;
+use bevy_window::{CursorIcon, CursorOptions, PrimaryWindow, Window};
 use dear_imgui_rs as imgui;
 use std::ptr::NonNull;
 
@@ -170,12 +171,31 @@ fn begin_primary_frame_system(
 }
 
 pub(crate) fn end_primary_frame_system(
+    mut commands: Commands,
     mut imgui_context: NonSendMut<ImguiContext>,
     mut frame_state: NonSendMut<ImguiFrameState>,
+    mut primary_window: Query<
+        (
+            Entity,
+            &mut Window,
+            &mut CursorOptions,
+            Option<&mut CursorIcon>,
+        ),
+        With<PrimaryWindow>,
+    >,
     mut output: ResMut<ImguiFrameOutput>,
 ) {
     if !frame_state.is_frame_open() {
         return;
+    }
+
+    if let Some(ui) = frame_state.ui() {
+        sync_primary_window_platform_feedback(
+            ui,
+            &imgui_context,
+            &mut commands,
+            &mut primary_window,
+        );
     }
 
     let frame_index = frame_state.end();
@@ -185,4 +205,55 @@ pub(crate) fn end_primary_frame_system(
         imgui::render::snapshot::SnapshotOptions::default(),
     );
     output.set_snapshot(frame_index, snapshot);
+}
+
+fn sync_primary_window_platform_feedback(
+    ui: &imgui::Ui,
+    imgui_context: &ImguiContext,
+    commands: &mut Commands,
+    primary_window: &mut Query<
+        (
+            Entity,
+            &mut Window,
+            &mut CursorOptions,
+            Option<&mut CursorIcon>,
+        ),
+        With<PrimaryWindow>,
+    >,
+) {
+    let Ok((window_entity, mut window, mut cursor_options, cursor_icon)) =
+        primary_window.single_mut()
+    else {
+        return;
+    };
+
+    let mouse_cursor = ui.mouse_cursor();
+    let draw_cursor = ui.io().mouse_draw_cursor();
+    let hide_os_cursor = draw_cursor || mouse_cursor.is_none();
+    cursor_options.visible = !hide_os_cursor;
+
+    let has_cursor_icon = cursor_icon.is_some();
+    if hide_os_cursor {
+        if has_cursor_icon {
+            commands.entity(window_entity).remove::<CursorIcon>();
+        }
+    } else if let Some(mouse_cursor) = mouse_cursor {
+        if let Some(cursor_icon_value) = map_imgui_mouse_cursor(mouse_cursor) {
+            match cursor_icon {
+                Some(mut current_cursor_icon) => {
+                    *current_cursor_icon = cursor_icon_value;
+                }
+                None => {
+                    commands.entity(window_entity).insert(cursor_icon_value);
+                }
+            }
+        }
+    }
+
+    let raw_context = imgui_context.context().as_raw();
+    // SAFETY: `ImguiContext` owns this live Dear ImGui context for the lifetime of the Bevy
+    // resource, and the frame is still open while platform feedback is synchronized.
+    let ime_data = unsafe { &(*raw_context).PlatformImeData };
+    window.ime_enabled = ime_data.WantTextInput;
+    window.ime_position = Vec2::new(ime_data.InputPos.x, ime_data.InputPos.y);
 }

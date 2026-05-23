@@ -71,6 +71,11 @@ name = "simple"
 path = "examples/simple.rs"
 
 [[example]]
+name = "bevy_plot_controls"
+path = "examples/bevy_plot_controls.rs"
+required-features = ["render"]
+
+[[example]]
 name = "editor_shell"
 path = "examples/editor_shell.rs"
 required-features = ["render"]

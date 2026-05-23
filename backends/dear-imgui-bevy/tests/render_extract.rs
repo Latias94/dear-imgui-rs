@@ -143,6 +143,69 @@ fn render_extract_clones_snapshot_texture_requests_and_camera_targets() {
 }
 
 #[test]
+fn render_extract_routes_overlay_to_primary_and_secondary_windows() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary_window, primary_camera, _texture_id) = app_with_primary_window();
+    let secondary_window = app.world_mut().spawn(Window::default()).id();
+    let secondary_camera = app
+        .world_mut()
+        .spawn((
+            Camera {
+                order: 7,
+                ..Default::default()
+            },
+            RenderTarget::Window(WindowRef::Entity(secondary_window)),
+        ))
+        .id();
+    app.add_systems(ImguiPrimaryContextPass, draw_managed_texture);
+
+    app.update();
+
+    let extracted = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<ImguiExtractedRenderFrame>();
+    let targets = extracted.camera_targets();
+    let expected_primary_target =
+        NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap());
+    let expected_secondary_target = NormalizedRenderTarget::Window(
+        WindowRef::Entity(secondary_window).normalize(None).unwrap(),
+    );
+    assert_eq!(targets.len(), 2);
+    assert_eq!(targets[0].camera, primary_camera);
+    assert_eq!(targets[0].target, expected_primary_target);
+    assert_eq!(targets[1].camera, secondary_camera);
+    assert_eq!(targets[1].target, expected_secondary_target);
+
+    let prepared = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<ImguiPreparedRenderFrame>();
+    let primary_draws = prepared
+        .draws()
+        .iter()
+        .filter(|draw| draw.camera == primary_camera)
+        .collect::<Vec<_>>();
+    let secondary_draws = prepared
+        .draws()
+        .iter()
+        .filter(|draw| draw.camera == secondary_camera)
+        .collect::<Vec<_>>();
+    assert!(!primary_draws.is_empty());
+    assert!(!secondary_draws.is_empty());
+    assert!(
+        primary_draws
+            .iter()
+            .all(|draw| draw.target == expected_primary_target)
+    );
+    assert!(
+        secondary_draws
+            .iter()
+            .all(|draw| draw.target == expected_secondary_target)
+    );
+}
+
+#[test]
 fn renderer_prepare_flattens_extracted_snapshot_for_pipeline_consumption() {
     let _guard = imgui_context_guard();
     let (mut app, primary_window, _camera, texture_id) = app_with_primary_window();

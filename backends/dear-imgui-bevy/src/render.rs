@@ -20,9 +20,9 @@ use bevy_render::{
     render_resource::{
         BindGroup, BindGroupEntry, BindGroupLayoutDescriptor, BindingResource, BindingType,
         BlendState, Buffer, BufferAddress, BufferBindingType, BufferDescriptor, BufferSize,
-        BufferUsages, CachedRenderPipelineId, ColorTargetState, ColorWrites, Extent3d,
-        FragmentState, IndexFormat, LoadOp, MultisampleState, Operations, Origin3d, PipelineCache,
-        PrimitiveState, PrimitiveTopology, RawBufferVec, RenderPassColorAttachment,
+        BufferUsages, COPY_BUFFER_ALIGNMENT, CachedRenderPipelineId, ColorTargetState, ColorWrites,
+        Extent3d, FragmentState, IndexFormat, LoadOp, MultisampleState, Operations, Origin3d,
+        PipelineCache, PrimitiveState, PrimitiveTopology, RawBufferVec, RenderPassColorAttachment,
         RenderPassDescriptor, RenderPipelineDescriptor, SamplerBindingType, SamplerDescriptor,
         ShaderStages, SpecializedRenderPipeline, SpecializedRenderPipelines, StoreOp,
         TexelCopyBufferLayout, TexelCopyTextureInfo, Texture, TextureAspect, TextureDescriptor,
@@ -87,6 +87,8 @@ struct VertexOutput {
 
 struct ImguiUniforms {
     mvp: mat4x4<f32>,
+    gamma: f32,
+    _padding: vec3<f32>,
 };
 
 @group(0) @binding(0)
@@ -109,7 +111,9 @@ fn vs_main(in: VertexInput) -> VertexOutput {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return in.color * textureSample(imgui_texture, imgui_sampler, in.uv);
+    let color = in.color * textureSample(imgui_texture, imgui_sampler, in.uv);
+    let corrected = pow(color.rgb, vec3<f32>(uniforms.gamma));
+    return vec4<f32>(corrected, color.a);
 }
 "#;
 
@@ -119,6 +123,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 pub struct ImguiUniforms {
     /// Orthographic projection matrix that maps ImGui display coordinates to clip space.
     pub mvp: [[f32; 4]; 4],
+    /// Gamma used to linearize colors before writing into the render target.
+    pub gamma: f32,
+    /// Padding to satisfy WGSL uniform layout.
+    pub _padding: [f32; 7],
 }
 
 impl ImguiUniforms {
@@ -141,7 +149,22 @@ impl ImguiUniforms {
                     1.0,
                 ],
             ],
+            gamma: 1.0,
+            _padding: [0.0; 7],
         }
+    }
+
+    /// Set the gamma value used by the fragment shader.
+    #[must_use]
+    pub fn with_gamma(mut self, gamma: f32) -> Self {
+        self.gamma = gamma;
+        self
+    }
+
+    /// Gamma correction value for a given render target format.
+    #[must_use]
+    pub fn gamma_for_format(format: TextureFormat) -> f32 {
+        if format.is_srgb() { 2.2 } else { 1.0 }
     }
 }
 
@@ -377,9 +400,20 @@ impl ImguiGpuBuffers {
         for index in prepared.indices() {
             self.indices.push(*index);
         }
+        pad_index_buffer_for_copy_alignment(&mut self.indices);
         self.vertices.write_buffer(render_device, render_queue);
         self.indices.write_buffer(render_device, render_queue);
     }
+}
+
+fn pad_index_buffer_for_copy_alignment(indices: &mut RawBufferVec<DrawIdx>) {
+    let byte_len = indices.len() * size_of::<DrawIdx>();
+    if byte_len % COPY_BUFFER_ALIGNMENT as usize == 0 {
+        return;
+    }
+
+    debug_assert_eq!(size_of::<DrawIdx>(), 2);
+    indices.push(DrawIdx::default());
 }
 
 /// Pipeline specialization key for one Bevy view target.
@@ -424,7 +458,7 @@ impl Default for ImguiRenderPipeline {
             &[
                 bevy_render::render_resource::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: ShaderStages::VERTEX,
+                    visibility: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -857,6 +891,10 @@ fn extract_imgui_render_frame(
     extracted.replace(output.frame_index(), snapshot, camera_targets);
 }
 
+/// Normalize every active overlay camera target, including secondary windows.
+///
+/// The primary window is only special when a camera target uses `WindowRef::Primary`; any camera
+/// that already points at a specific window entity keeps that route intact.
 fn collect_camera_targets<'w>(
     primary_window: Option<Entity>,
     cameras: impl Iterator<
@@ -917,12 +955,8 @@ fn upload_imgui_buffers(
     mut gpu_buffers: ResMut<ImguiGpuBuffers>,
     render_device: Option<Res<RenderDevice>>,
     render_queue: Option<Res<RenderQueue>>,
-    gpu_resources: Option<Res<ImguiPipelineGpuResources>>,
 ) {
     if let (Some(render_device), Some(render_queue)) = (render_device, render_queue) {
-        if let (Some(gpu_resources), Some(uniforms)) = (gpu_resources, prepared.uniforms()) {
-            gpu_resources.update_uniforms(&render_queue, uniforms);
-        }
         gpu_buffers.upload(&prepared, &render_device, &render_queue);
     }
 }
@@ -1362,6 +1396,7 @@ fn queue_imgui_pipelines(
 #[derive(SystemParam)]
 struct ImguiRenderPassParams<'w> {
     pipeline_cache: Option<Res<'w, PipelineCache>>,
+    render_queue: Option<Res<'w, RenderQueue>>,
     queued: Res<'w, ImguiQueuedPipelines>,
     prepared: Res<'w, ImguiPreparedRenderFrame>,
     gpu_buffers: Res<'w, ImguiGpuBuffers>,
@@ -1378,6 +1413,9 @@ fn render_imgui_overlay(
         return;
     };
     let Some(gpu_resources) = params.gpu_resources else {
+        return;
+    };
+    let Some(render_queue) = params.render_queue else {
         return;
     };
     if !params.gpu_buffers.has_uploaded_buffers() {
@@ -1402,6 +1440,14 @@ fn render_imgui_overlay(
     if drawable.is_empty() {
         return;
     }
+
+    let Some(uniforms) = params.prepared.uniforms() else {
+        return;
+    };
+    gpu_resources.update_uniforms(
+        &render_queue,
+        uniforms.with_gamma(ImguiUniforms::gamma_for_format(view.target_format)),
+    );
 
     let color_attachment = view_target.get_color_attachment();
     let mut render_pass =
@@ -1602,6 +1648,31 @@ mod tests {
                 255, 255, 255, 0, 255, 255, 255, 128, //
                 255, 255, 255, 255, 255, 255, 255, 64,
             ]
+        );
+    }
+
+    #[test]
+    fn index_buffer_upload_pads_to_copy_alignment() {
+        let mut indices = RawBufferVec::new(BufferUsages::INDEX);
+        indices.push(1);
+        indices.push(2);
+        indices.push(3);
+
+        pad_index_buffer_for_copy_alignment(&mut indices);
+
+        assert_eq!(indices.len(), 4);
+        assert_eq!(indices.values(), &vec![1, 2, 3, 0]);
+    }
+
+    #[test]
+    fn gamma_helper_uses_srgb_for_srgb_targets() {
+        assert_eq!(
+            ImguiUniforms::gamma_for_format(TextureFormat::Rgba8UnormSrgb),
+            2.2
+        );
+        assert_eq!(
+            ImguiUniforms::gamma_for_format(TextureFormat::Rgba8Unorm),
+            1.0
         );
     }
 

@@ -1,4 +1,5 @@
-//! Persistent editor-oriented Dear ImGui shell with a Bevy scene render target shown as an ImGui image.
+//! Persistent editor-oriented Dear ImGui shell with a seeded split dock layout and a Bevy scene
+//! render target shown as an ImGui image.
 //!
 //! Run:
 //! `cargo run -p dear-imgui-bevy --features render --example editor_shell`
@@ -11,9 +12,11 @@ use bevy::{
 };
 use dear_imgui_bevy::{
     ImguiBevyTextures, ImguiContext, ImguiContexts, ImguiFrameOutput, ImguiPlugin,
-    ImguiPrimaryContextPass, render::ImguiOverlayDisabled,
+    ImguiPrimaryContextPass, configure_example_context, render::ImguiOverlayDisabled,
 };
-use dear_imgui_rs::{Condition, ConfigFlags, DockNodeFlags, TextureId, WindowFlags};
+use dear_imgui_rs::{
+    Condition, DockBuilder, DockNodeFlags, SplitDirection, TextureId, WindowFlags,
+};
 
 const SCENE_WIDTH: u32 = 960;
 const SCENE_HEIGHT: u32 = 540;
@@ -38,6 +41,7 @@ struct EditorState {
     show_hierarchy: bool,
     show_input_policy: bool,
     show_diagnostics: bool,
+    dock_layout_seeded: bool,
     route_shortcuts_to_imgui: bool,
     route_scene_camera_when_hovered: bool,
     scene_hovered: bool,
@@ -55,6 +59,7 @@ impl Default for EditorState {
             show_hierarchy: true,
             show_input_policy: true,
             show_diagnostics: true,
+            dock_layout_seeded: false,
             route_shortcuts_to_imgui: true,
             route_scene_camera_when_hovered: true,
             scene_hovered: false,
@@ -96,6 +101,10 @@ fn setup(
     mut textures: ResMut<ImguiBevyTextures>,
     mut imgui: NonSendMut<ImguiContext>,
 ) {
+    // Render the Dear ImGui overlay into the primary window, while the offscreen scene keeps its
+    // own image target for the editor viewport.
+    commands.spawn(Camera2d);
+
     let mut image = Image::new_target_texture(
         SCENE_WIDTH,
         SCENE_HEIGHT,
@@ -157,12 +166,7 @@ fn setup(
         },
     ));
 
-    let context = imgui.context_mut();
-    context.io_mut().set_config_input_trickle_event_queue(false);
-    let config_flags = context.io().config_flags() | ConfigFlags::DOCKING_ENABLE;
-    context.io_mut().set_config_flags(config_flags);
-    let _ = context.font_atlas_mut().build();
-    let _ = context.set_ini_filename::<std::path::PathBuf>(None);
+    configure_example_context(&mut imgui, true);
 }
 
 fn close_on_escape(input: Res<ButtonInput<KeyCode>>, mut exit: MessageWriter<AppExit>) {
@@ -206,10 +210,10 @@ fn editor_ui(
         ui.get_id("DearImguiBevyEditorDockspace"),
         DockNodeFlags::PASSTHRU_CENTRAL_NODE,
     );
+    seed_editor_dock_layout(ui, dockspace_id, &mut state);
 
     render_menu_bar(ui, &mut state);
 
-    ui.set_next_window_dock_id_with_cond(dockspace_id, Condition::FirstUseEver);
     ui.window("Scene")
         .size([820.0, 560.0], Condition::FirstUseEver)
         .build(|| {
@@ -217,7 +221,6 @@ fn editor_ui(
         });
 
     if state.show_hierarchy {
-        ui.set_next_window_dock_id_with_cond(dockspace_id, Condition::FirstUseEver);
         ui.window("Hierarchy")
             .size([260.0, 420.0], Condition::FirstUseEver)
             .build(|| {
@@ -226,7 +229,6 @@ fn editor_ui(
     }
 
     if state.show_inspector {
-        ui.set_next_window_dock_id_with_cond(dockspace_id, Condition::FirstUseEver);
         ui.window("Inspector")
             .size([340.0, 520.0], Condition::FirstUseEver)
             .build(|| {
@@ -235,7 +237,6 @@ fn editor_ui(
     }
 
     if state.show_input_policy {
-        ui.set_next_window_dock_id_with_cond(dockspace_id, Condition::FirstUseEver);
         ui.window("Input Policy")
             .size([420.0, 260.0], Condition::FirstUseEver)
             .flags(WindowFlags::NO_COLLAPSE)
@@ -245,7 +246,6 @@ fn editor_ui(
     }
 
     if state.show_diagnostics {
-        ui.set_next_window_dock_id_with_cond(dockspace_id, Condition::FirstUseEver);
         ui.window("Diagnostics")
             .size([340.0, 220.0], Condition::FirstUseEver)
             .build(|| {
@@ -263,6 +263,39 @@ fn render_menu_bar(ui: &dear_imgui_rs::Ui, state: &mut EditorState) {
         let _ = ui.menu_item_toggle_no_shortcut("Input Policy", &mut state.show_input_policy, true);
         let _ = ui.menu_item_toggle_no_shortcut("Diagnostics", &mut state.show_diagnostics, true);
     }
+}
+
+fn seed_editor_dock_layout(
+    ui: &dear_imgui_rs::Ui,
+    dockspace_id: dear_imgui_rs::Id,
+    state: &mut EditorState,
+) {
+    if state.dock_layout_seeded {
+        return;
+    }
+
+    let viewport = ui.main_viewport();
+    let viewport_pos = viewport.pos();
+    let viewport_size = viewport.size();
+
+    DockBuilder::remove_node(dockspace_id);
+    let root = DockBuilder::add_node(dockspace_id, DockNodeFlags::PASSTHRU_CENTRAL_NODE);
+    DockBuilder::set_node_pos(root, viewport_pos);
+    DockBuilder::set_node_size(root, viewport_size);
+
+    let (hierarchy_id, center_stack) = DockBuilder::split_node(root, SplitDirection::Left, 0.20);
+    let (inspector_id, scene_stack) =
+        DockBuilder::split_node(center_stack, SplitDirection::Right, 0.24);
+    let (bottom_id, scene_id) = DockBuilder::split_node(scene_stack, SplitDirection::Down, 0.28);
+
+    DockBuilder::dock_window("Hierarchy", hierarchy_id);
+    DockBuilder::dock_window("Scene", scene_id);
+    DockBuilder::dock_window("Inspector", inspector_id);
+    DockBuilder::dock_window("Input Policy", bottom_id);
+    DockBuilder::dock_window("Diagnostics", bottom_id);
+    DockBuilder::finish(root);
+
+    state.dock_layout_seeded = true;
 }
 
 fn render_scene_view(ui: &dear_imgui_rs::Ui, viewport: &SceneViewport, state: &mut EditorState) {

@@ -6,8 +6,10 @@
 use bevy_app::{App, ScheduleRunnerPlugin, Startup};
 use bevy_ecs::prelude::*;
 use bevy_window::{PrimaryWindow, Window, WindowResolution};
-use dear_imgui_bevy::{ImguiContext, ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass};
-use dear_imgui_rs::{Condition, ConfigFlags, DockNodeFlags};
+use dear_imgui_bevy::{
+    ImguiContext, ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, configure_example_context,
+};
+use dear_imgui_rs::{Condition, DockNodeFlags};
 use dear_imguizmo::{DrawListTarget, GuizmoExt, Mat4Like};
 use dear_imnodes::ImNodesExt;
 use dear_implot::ImPlotExt;
@@ -65,12 +67,8 @@ fn install_ecosystem_contexts(app: &mut App) {
             .world_mut()
             .get_non_send_mut::<ImguiContext>()
             .expect("ImguiPlugin should install ImguiContext before examples create extensions");
+        configure_example_context(&mut imgui, true);
         let context = imgui.context_mut();
-        context.io_mut().set_config_input_trickle_event_queue(false);
-        let flags = context.io().config_flags() | ConfigFlags::DOCKING_ENABLE;
-        context.io_mut().set_config_flags(flags);
-        let _ = context.font_atlas_mut().build();
-        let _ = context.set_ini_filename::<std::path::PathBuf>(None);
 
         let plot = dear_implot::PlotContext::create(context);
         let nodes = dear_imnodes::Context::create(context);

@@ -14,13 +14,21 @@
 //! ```text
 //! cargo +stable check -p dear-imgui-bevy --no-default-features
 //! cargo +stable check -p dear-imgui-bevy --features render
+//! cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --no-default-features
+//! cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --features render
 //! cargo +stable nextest run -p dear-imgui-bevy
 //! ```
 //!
 //! Core workspace gates should not silently rely on this crate until the repository-wide MSRV is
-//! intentionally raised or CI has a dedicated Rust 1.95+ Bevy lane.
+//! intentionally raised or CI has a dedicated Rust 1.95+ Bevy lane. The crate currently compiles
+//! on `wasm32-unknown-unknown` for both the core and `render` feature sets; mobile targets remain a
+//! platform-specific follow-on if a future Bevy target train needs a dedicated gate.
+//!
+//! The crate also exposes `configure_example_context` for the shared example/editor ImGui setup
+//! pattern so the backend examples do not repeat the same initialization boilerplate.
 
 pub mod context;
+pub mod helpers;
 pub mod input;
 pub mod schedule;
 pub mod texture;
@@ -29,6 +37,7 @@ use bevy_app::{App, Plugin};
 use bevy_ecs::resource::Resource;
 
 pub use self::context::{ImguiContexts, ImguiFrameOutput, ImguiFrameState};
+pub use self::helpers::configure_example_context;
 pub use self::schedule::{ImguiBeginFrame, ImguiEndFrame, ImguiPrimaryContextPass};
 #[cfg(feature = "render")]
 pub use self::texture::ImguiBevyTextures;

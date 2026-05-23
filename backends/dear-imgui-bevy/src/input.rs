@@ -17,8 +17,8 @@ use bevy_input::mouse::{
 };
 use bevy_input::touch::{TouchInput, TouchPhase};
 use bevy_window::{
-    CursorLeft, CursorMoved, Ime, PrimaryWindow, Window, WindowBackendScaleFactorChanged,
-    WindowFocused, WindowResized, WindowScaleFactorChanged,
+    CursorIcon, CursorLeft, CursorMoved, Ime, PrimaryWindow, SystemCursorIcon, Window,
+    WindowBackendScaleFactorChanged, WindowFocused, WindowResized, WindowScaleFactorChanged,
 };
 use dear_imgui_rs as imgui;
 use std::collections::HashSet;
@@ -268,6 +268,27 @@ pub fn map_bevy_mouse_button(button: BevyMouseButton) -> Option<imgui::MouseButt
         BevyMouseButton::Forward => Some(imgui::MouseButton::Extra2),
         BevyMouseButton::Other(_) => None,
     }
+}
+
+/// Convert a Dear ImGui mouse cursor into a Bevy window cursor icon.
+#[must_use]
+pub(crate) fn map_imgui_mouse_cursor(cursor: imgui::MouseCursor) -> Option<CursorIcon> {
+    use imgui::MouseCursor as ImguiMouseCursor;
+
+    let system_cursor = match cursor {
+        ImguiMouseCursor::None => return None,
+        ImguiMouseCursor::Arrow => SystemCursorIcon::Default,
+        ImguiMouseCursor::TextInput => SystemCursorIcon::Text,
+        ImguiMouseCursor::ResizeAll => SystemCursorIcon::Move,
+        ImguiMouseCursor::ResizeNS => SystemCursorIcon::NsResize,
+        ImguiMouseCursor::ResizeEW => SystemCursorIcon::EwResize,
+        ImguiMouseCursor::ResizeNESW => SystemCursorIcon::NeswResize,
+        ImguiMouseCursor::ResizeNWSE => SystemCursorIcon::NwseResize,
+        ImguiMouseCursor::Hand => SystemCursorIcon::Pointer,
+        ImguiMouseCursor::NotAllowed => SystemCursorIcon::NotAllowed,
+    };
+
+    Some(CursorIcon::from(system_cursor))
 }
 
 /// Convert a Bevy physical key code into Dear ImGui's key space.

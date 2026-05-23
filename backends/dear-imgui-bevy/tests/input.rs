@@ -9,11 +9,11 @@ use bevy_input::mouse::{
 use bevy_input::touch::{TouchInput, TouchPhase};
 use bevy_math::Vec2;
 use bevy_window::{
-    CursorLeft, CursorMoved, Ime, PrimaryWindow, Window, WindowFocused, WindowResized,
-    WindowResolution, WindowScaleFactorChanged,
+    CursorIcon, CursorLeft, CursorMoved, CursorOptions, Ime, PrimaryWindow, SystemCursorIcon,
+    Window, WindowFocused, WindowResized, WindowResolution, WindowScaleFactorChanged,
 };
 use dear_imgui_bevy::{
-    ImguiContext, ImguiPlugin,
+    ImguiContext, ImguiFrameState, ImguiPlugin, ImguiPrimaryContextPass,
     input::{ImguiInputState, map_bevy_key_code},
 };
 use dear_imgui_rs as imgui;
@@ -79,6 +79,60 @@ fn begin_frame_and_assert(app: &mut App, assert_ui: impl FnOnce(&imgui::Ui)) {
 
 fn run_input_systems(app: &mut App) {
     app.world_mut().run_schedule(PreUpdate);
+}
+
+fn request_text_cursor_and_ime(
+    mut imgui_context: NonSendMut<ImguiContext>,
+    frame_state: NonSend<ImguiFrameState>,
+) {
+    let ui = frame_state.ui().expect("Dear ImGui frame should be open");
+    ui.set_mouse_cursor(Some(imgui::MouseCursor::TextInput));
+    imgui_context
+        .context_mut()
+        .io_mut()
+        .set_mouse_draw_cursor(false);
+
+    let raw_context = imgui_context.context().as_raw();
+    // SAFETY: This test owns the backend context resource and mutates the live frame's platform IME
+    // data to simulate Dear ImGui output that normally comes from an active text widget.
+    unsafe {
+        let ime_data = &mut (*raw_context).PlatformImeData;
+        ime_data.WantTextInput = true;
+        ime_data.InputPos = imgui::sys::ImVec2_c { x: 222.0, y: 333.0 };
+    }
+}
+
+fn request_software_cursor(
+    mut imgui_context: NonSendMut<ImguiContext>,
+    frame_state: NonSend<ImguiFrameState>,
+) {
+    let ui = frame_state.ui().expect("Dear ImGui frame should be open");
+    ui.set_mouse_cursor(Some(imgui::MouseCursor::Hand));
+    imgui_context
+        .context_mut()
+        .io_mut()
+        .set_mouse_draw_cursor(true);
+
+    let raw_context = imgui_context.context().as_raw();
+    // SAFETY: This test owns the backend context resource and mutates the live frame's platform IME
+    // data to keep the assertion focused on cursor visibility.
+    unsafe {
+        let ime_data = &mut (*raw_context).PlatformImeData;
+        ime_data.WantTextInput = false;
+        ime_data.InputPos = imgui::sys::ImVec2_c { x: 0.0, y: 0.0 };
+    }
+}
+
+fn request_hidden_cursor(
+    mut imgui_context: NonSendMut<ImguiContext>,
+    frame_state: NonSend<ImguiFrameState>,
+) {
+    let ui = frame_state.ui().expect("Dear ImGui frame should be open");
+    ui.set_mouse_cursor(None);
+    imgui_context
+        .context_mut()
+        .io_mut()
+        .set_mouse_draw_cursor(false);
 }
 
 fn key_input(
@@ -269,6 +323,67 @@ fn input_resize_dpi_and_cursor_leave_messages_update_imgui_io() {
             "CursorLeft should move the Dear ImGui mouse position outside every window"
         );
     });
+}
+
+#[test]
+fn input_platform_feedback_updates_primary_window_cursor_and_ime_state() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary) = app_with_primary_window();
+    app.add_systems(ImguiPrimaryContextPass, request_text_cursor_and_ime);
+
+    app.update();
+
+    let entity = app.world().entity(primary);
+    assert!(
+        entity.get::<CursorOptions>().unwrap().visible,
+        "OS cursor should stay visible when Dear ImGui is not drawing a software cursor"
+    );
+    assert_eq!(
+        entity.get::<CursorIcon>(),
+        Some(&CursorIcon::System(SystemCursorIcon::Text))
+    );
+    let window = entity.get::<Window>().unwrap();
+    assert!(window.ime_enabled);
+    assert_eq!(window.ime_position, Vec2::new(222.0, 333.0));
+}
+
+#[test]
+fn input_platform_feedback_hides_os_cursor_when_imgui_draws_software_cursor() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary) = app_with_primary_window();
+    app.world_mut()
+        .entity_mut(primary)
+        .insert(CursorIcon::from(SystemCursorIcon::Pointer));
+    app.add_systems(ImguiPrimaryContextPass, request_software_cursor);
+
+    app.update();
+
+    let entity = app.world().entity(primary);
+    assert!(
+        !entity.get::<CursorOptions>().unwrap().visible,
+        "OS cursor should be hidden while Dear ImGui draws the software cursor"
+    );
+    assert!(entity.get::<CursorIcon>().is_none());
+    assert!(!entity.get::<Window>().unwrap().ime_enabled);
+}
+
+#[test]
+fn input_platform_feedback_hides_os_cursor_when_imgui_requests_no_cursor() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary) = app_with_primary_window();
+    app.world_mut()
+        .entity_mut(primary)
+        .insert(CursorIcon::from(SystemCursorIcon::Pointer));
+    app.add_systems(ImguiPrimaryContextPass, request_hidden_cursor);
+
+    app.update();
+
+    let entity = app.world().entity(primary);
+    assert!(
+        !entity.get::<CursorOptions>().unwrap().visible,
+        "OS cursor should be hidden when Dear ImGui reports no cursor"
+    );
+    assert!(entity.get::<CursorIcon>().is_none());
 }
 
 #[test]

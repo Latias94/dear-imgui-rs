@@ -6,7 +6,9 @@
 use bevy_app::{App, ScheduleRunnerPlugin, Startup};
 use bevy_ecs::prelude::*;
 use bevy_window::{PrimaryWindow, Window, WindowResolution};
-use dear_imgui_bevy::{ImguiContext, ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass};
+use dear_imgui_bevy::{
+    ImguiContext, ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, configure_example_context,
+};
 
 #[derive(Resource, Default)]
 struct OverlayState {
@@ -34,10 +36,7 @@ fn setup(mut commands: Commands, mut imgui: NonSendMut<ImguiContext>) {
         PrimaryWindow,
     ));
 
-    let context = imgui.context_mut();
-    context.io_mut().set_config_input_trickle_event_queue(false);
-    let _ = context.font_atlas_mut().build();
-    let _ = context.set_ini_filename::<std::path::PathBuf>(None);
+    configure_example_context(&mut imgui, false);
 }
 
 fn overlay_ui(mut contexts: ImguiContexts, mut state: ResMut<OverlayState>) {

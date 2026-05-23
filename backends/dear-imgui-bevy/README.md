@@ -18,9 +18,15 @@ Recommended Bevy-backend gates:
 ```bash
 cargo +stable check -p dear-imgui-bevy --no-default-features
 cargo +stable check -p dear-imgui-bevy --features render
+cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --no-default-features
+cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --features render
 cargo +stable nextest run -p dear-imgui-bevy
 cargo +stable nextest run -p dear-imgui-bevy --features render
 ```
+
+The current backend shape is verified on `wasm32-unknown-unknown` for both the core and `render`
+feature sets. Mobile-specific targets are not split out yet; if Bevy's mobile support matrix needs a
+different gate, keep it as a separate follow-on instead of widening the current lane.
 
 ## Current scope
 
@@ -97,10 +103,17 @@ overlay for multiple frames, and exits when Escape is pressed:
 cargo +stable run -p dear-imgui-bevy --features render --example windowed_overlay
 ```
 
+See `examples/bevy_plot_controls.rs` for a small Bevy scene that uses ImPlot to graph frame timing
+and a moving marker's position while Dear ImGui controls pause, speed, and direction:
+
+```bash
+cargo +stable run -p dear-imgui-bevy --features render --example bevy_plot_controls
+```
+
 See `examples/editor_shell.rs` for a persistent editor-oriented shell that registers a Bevy
 render-target `Handle<Image>` through `ImguiBevyTextures`, displays the live scene as an ImGui
-viewport image, uses `render::ImguiOverlayDisabled` on the offscreen scene camera, and exposes
-docked hierarchy, inspector, diagnostics, and input-routing policy panels:
+viewport image, uses `render::ImguiOverlayDisabled` on the offscreen scene camera, and seeds a
+split dock layout with hierarchy, inspector, diagnostics, and input-routing policy panels:
 
 ```bash
 cargo +stable run -p dear-imgui-bevy --features render --example editor_shell
@@ -112,6 +125,12 @@ ImGuizmo from the same Bevy-managed `ImguiPrimaryContextPass`:
 ```bash
 cargo +stable run -p dear-imgui-bevy --example ecosystem
 ```
+
+The shared example setup lives in `configure_example_context`. It disables input trickling, can
+toggle docking, builds the default font atlas, and disables `.ini` persistence so the examples do
+not repeat the same initialization boilerplate. `ImguiBevyTextures` and
+`render::ImguiOverlayDisabled` remain the reusable editor-facing backend helpers for texture
+binding and offscreen scene cameras.
 
 ## Render extraction
 

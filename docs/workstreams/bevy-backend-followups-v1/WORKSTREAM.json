@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "slug": "bevy-backend-followups-v1",
+  "title": "Bevy Backend Follow-Ups Workstream",
+  "status": "closed",
+  "updated": "2026-05-23",
+  "scope_kind": "execution",
+  "problem": "Extend the shipped Bevy-native Dear ImGui backend into the remaining multi-window, input, platform, runtime, and editor follow-ups without reopening the closed proof lanes.",
+  "authoritative_docs": [
+    {
+      "role": "design",
+      "path": "docs/workstreams/bevy-backend-followups-v1/DESIGN.md"
+    },
+    {
+      "role": "execution",
+      "path": "docs/workstreams/bevy-backend-followups-v1/TODO.md"
+    },
+    {
+      "role": "gates",
+      "path": "docs/workstreams/bevy-backend-followups-v1/EVIDENCE_AND_GATES.md"
+    },
+    {
+      "role": "milestones",
+      "path": "docs/workstreams/bevy-backend-followups-v1/MILESTONES.md"
+    },
+    {
+      "role": "handoff",
+      "path": "docs/workstreams/bevy-backend-followups-v1/HANDOFF.md"
+    }
+  ],
+  "gates": [
+    "cargo +stable nextest run -p dear-imgui-bevy --features render",
+    "DEAR_IMGUI_BEVY_GPU_HARNESS=1 cargo +stable test -p dear-imgui-bevy --features render --lib bevy_image_texture_bind_groups -- --ignored --nocapture",
+    "cargo +stable check -p dear-imgui-bevy --examples --features render",
+    "cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --no-default-features",
+    "cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --features render",
+    "cargo +stable check -p dear-imgui-bevy --features render --example windowed_overlay",
+    "cargo +stable check -p dear-imgui-bevy --features render --example editor_shell"
+  ],
+  "evidence": [
+    "docs/adr/0001-bevy-native-imgui-backend.md",
+    "docs/workstreams/bevy-native-backend/WORKSTREAM.json",
+    "docs/workstreams/bevy-runtime-productization/WORKSTREAM.json",
+    "backends/dear-imgui-bevy/src/lib.rs",
+    "backends/dear-imgui-bevy/README.md",
+    "backends/dear-imgui-bevy/src/helpers.rs",
+    "backends/dear-imgui-bevy/src/context.rs",
+    "backends/dear-imgui-bevy/src/input.rs",
+    "backends/dear-imgui-bevy/src/render.rs",
+    "backends/dear-imgui-bevy/tests/input.rs",
+    "backends/dear-imgui-bevy/tests/texture.rs",
+    "backends/dear-imgui-bevy/tests/helpers.rs",
+    "backends/dear-imgui-bevy/tests/render_extract.rs",
+    "backends/dear-imgui-bevy/examples/simple.rs",
+    "backends/dear-imgui-bevy/examples/ecosystem.rs",
+    "backends/dear-imgui-bevy/examples/windowed_overlay.rs",
+    "backends/dear-imgui-bevy/examples/editor_shell.rs"
+  ],
+  "adr_refs": [
+    "docs/adr/0001-bevy-native-imgui-backend.md"
+  ],
+  "current_task": null,
+  "next_recommended_task": null,
+  "continue_policy": {
+    "default_action": "closed",
+    "notes": "All five follow-up targets are complete. Open a new follow-on workstream if future Bevy backend polish or product work appears."
+  }
+}
