@@ -347,7 +347,7 @@ impl ImguiPreparedRenderFrame {
 
     fn replace(&mut self, frame: PreparedFrameData) {
         self.frame_index = Some(frame.frame_index);
-        self.uniforms = Some(frame.uniforms);
+        self.uniforms = frame.uniforms;
         self.uniforms_by_camera = frame.uniforms_by_camera;
         self.vertices = frame.vertices;
         self.indices = frame.indices;
@@ -368,7 +368,7 @@ impl ImguiPreparedRenderFrame {
 
 struct PreparedFrameData {
     frame_index: u64,
-    uniforms: ImguiUniforms,
+    uniforms: Option<ImguiUniforms>,
     uniforms_by_camera: HashMap<Entity, ImguiUniforms>,
     vertices: Vec<ImguiGpuVertex>,
     indices: Vec<DrawIdx>,
@@ -1274,8 +1274,9 @@ fn prepare_imgui_render_frame(
         return;
     };
 
-    let primary_uniforms =
-        ImguiUniforms::from_display_rect(snapshot.draw.display_pos, snapshot.draw.display_size);
+    let primary_uniforms = valid_display_rect(&snapshot.draw).map(|_| {
+        ImguiUniforms::from_display_rect(snapshot.draw.display_pos, snapshot.draw.display_size)
+    });
     let (vertices, indices, draws, uniforms_by_camera) =
         prepare_snapshot_draw_data(snapshot, extracted.camera_targets());
     prepared.replace(PreparedFrameData {
@@ -1965,6 +1966,9 @@ fn prepare_snapshot_draw_data(
         if target_cameras.is_empty() {
             continue;
         }
+        if valid_display_rect(draw).is_none() {
+            continue;
+        }
 
         let uniforms = ImguiUniforms::from_display_rect(draw.display_pos, draw.display_size);
         for target in &target_cameras {
@@ -2010,6 +2014,14 @@ fn prepare_snapshot_draw_data(
                 if index_end > list_index_base + list.idx.len()
                     || vertex_offset > list_vertex_base + list.vtx.len()
                 {
+                    continue;
+                }
+                let local_index_end = index_end - list_index_base;
+                if draw_indices_reference_out_of_bounds(
+                    &list.idx[idx_offset..local_index_end],
+                    vertex_offset,
+                    vertices.len(),
+                ) {
                     continue;
                 }
                 let Ok(index_start) = u32::try_from(index_start) else {
@@ -2067,14 +2079,22 @@ fn scissor_from_clip_rect(
     draw: &imgui::render::DrawDataSnapshot,
     clip_rect: [f32; 4],
 ) -> Option<ImguiScissorRect> {
+    let valid_rect = valid_display_rect(draw)?;
+    if !clip_rect.iter().all(|value| value.is_finite()) {
+        return None;
+    }
+    if clip_rect[2] <= clip_rect[0] || clip_rect[3] <= clip_rect[1] {
+        return None;
+    }
+
     let scale = draw.framebuffer_scale;
     let min_x = ((clip_rect[0] - draw.display_pos[0]) * scale[0]).floor();
     let min_y = ((clip_rect[1] - draw.display_pos[1]) * scale[1]).floor();
     let max_x = ((clip_rect[2] - draw.display_pos[0]) * scale[0]).ceil();
     let max_y = ((clip_rect[3] - draw.display_pos[1]) * scale[1]).ceil();
 
-    let framebuffer_width = (draw.display_size[0] * scale[0]).ceil().max(0.0);
-    let framebuffer_height = (draw.display_size[1] * scale[1]).ceil().max(0.0);
+    let framebuffer_width = valid_rect.framebuffer_width;
+    let framebuffer_height = valid_rect.framebuffer_height;
 
     let min_x = min_x.clamp(0.0, framebuffer_width);
     let min_y = min_y.clamp(0.0, framebuffer_height);
@@ -2092,6 +2112,63 @@ fn scissor_from_clip_rect(
         y: min_y as u32,
         width: width as u32,
         height: height as u32,
+    })
+}
+
+fn draw_indices_reference_out_of_bounds(
+    indices: &[DrawIdx],
+    vertex_offset: usize,
+    vertex_count: usize,
+) -> bool {
+    indices.iter().copied().max().is_some_and(|max_index| {
+        usize::from(max_index)
+            .checked_add(vertex_offset)
+            .is_none_or(|absolute_index| absolute_index >= vertex_count)
+    })
+}
+
+#[derive(Clone, Copy)]
+struct ValidDisplayRect {
+    framebuffer_width: f32,
+    framebuffer_height: f32,
+}
+
+fn valid_display_rect(draw: &imgui::render::DrawDataSnapshot) -> Option<ValidDisplayRect> {
+    let [display_x, display_y] = draw.display_pos;
+    let [display_width, display_height] = draw.display_size;
+    let [scale_x, scale_y] = draw.framebuffer_scale;
+    if ![
+        display_x,
+        display_y,
+        display_width,
+        display_height,
+        scale_x,
+        scale_y,
+    ]
+    .iter()
+    .all(|value| value.is_finite())
+    {
+        return None;
+    }
+    if display_width <= 0.0 || display_height <= 0.0 || scale_x <= 0.0 || scale_y <= 0.0 {
+        return None;
+    }
+
+    let framebuffer_width = (display_width * scale_x).ceil();
+    let framebuffer_height = (display_height * scale_y).ceil();
+    if !framebuffer_width.is_finite()
+        || !framebuffer_height.is_finite()
+        || framebuffer_width <= 0.0
+        || framebuffer_height <= 0.0
+        || framebuffer_width > u32::MAX as f32
+        || framebuffer_height > u32::MAX as f32
+    {
+        return None;
+    }
+
+    Some(ValidDisplayRect {
+        framebuffer_width,
+        framebuffer_height,
     })
 }
 
@@ -2332,8 +2409,15 @@ mod tests {
                         imgui::render::DrawVert::new([1.0, 0.0], [1.0, 0.0], 0xFFFF_FFFF),
                         imgui::render::DrawVert::new([0.0, 1.0], [0.0, 1.0], 0xFFFF_FFFF),
                     ],
-                    idx: vec![0, 1, 2],
+                    idx: vec![0, 1, 2, 3, 1, 2],
                     commands: vec![
+                        DrawCmdSnapshot::Elements {
+                            count: 1,
+                            clip_rect: [0.0, 0.0, 16.0, 16.0],
+                            texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
+                            vtx_offset: 0,
+                            idx_offset: 6,
+                        },
                         DrawCmdSnapshot::Elements {
                             count: 1,
                             clip_rect: [0.0, 0.0, 16.0, 16.0],
@@ -2346,7 +2430,7 @@ mod tests {
                             clip_rect: [0.0, 0.0, 16.0, 16.0],
                             texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
                             vtx_offset: 4,
-                            idx_offset: 0,
+                            idx_offset: 3,
                         },
                         DrawCmdSnapshot::Elements {
                             count: 3,
@@ -2377,6 +2461,74 @@ mod tests {
         assert_eq!(draws.len(), 1);
         assert_eq!(draws[0].index_range, 0..3);
         assert_eq!(draws[0].vertex_offset, 0);
+    }
+
+    #[test]
+    fn draw_index_validation_rejects_absolute_indices_outside_uploaded_vertices() {
+        assert!(!draw_indices_reference_out_of_bounds(&[0, 1, 2], 0, 3));
+        assert!(!draw_indices_reference_out_of_bounds(&[0, 1, 2], 3, 6));
+        assert!(draw_indices_reference_out_of_bounds(&[3], 0, 3));
+        assert!(draw_indices_reference_out_of_bounds(&[0], 3, 3));
+    }
+
+    #[test]
+    fn scissor_rejects_non_finite_or_invalid_display_rects() {
+        let mut draw = imgui::render::DrawDataSnapshot {
+            display_pos: [0.0, 0.0],
+            display_size: [32.0, 32.0],
+            framebuffer_scale: [1.0, 1.0],
+            draw_lists: Vec::new(),
+        };
+
+        assert!(scissor_from_clip_rect(&draw, [0.0, 0.0, 16.0, 16.0]).is_some());
+        assert!(scissor_from_clip_rect(&draw, [f32::NAN, 0.0, 16.0, 16.0]).is_none());
+        assert!(scissor_from_clip_rect(&draw, [8.0, 0.0, 8.0, 16.0]).is_none());
+
+        draw.display_size = [0.0, 32.0];
+        assert!(scissor_from_clip_rect(&draw, [0.0, 0.0, 16.0, 16.0]).is_none());
+
+        draw.display_size = [32.0, 32.0];
+        draw.framebuffer_scale = [f32::INFINITY, 1.0];
+        assert!(scissor_from_clip_rect(&draw, [0.0, 0.0, 16.0, 16.0]).is_none());
+
+        draw.framebuffer_scale = [-1.0, 1.0];
+        assert!(scissor_from_clip_rect(&draw, [0.0, 0.0, 16.0, 16.0]).is_none());
+    }
+
+    #[test]
+    fn prepared_draws_skip_only_viewports_with_invalid_display_rects() {
+        let primary_camera = Entity::from_raw_u32(10).expect("test entity index should be valid");
+        let secondary_camera = Entity::from_raw_u32(11).expect("test entity index should be valid");
+        let secondary_viewport = imgui::Id::from(0xBEEF);
+        let snapshot = imgui::render::FrameSnapshot {
+            draw: imgui::render::DrawDataSnapshot {
+                display_pos: [0.0, 0.0],
+                display_size: [f32::NAN, 32.0],
+                framebuffer_scale: [1.0, 1.0],
+                draw_lists: vec![draw_list_for_test()],
+            },
+            viewports: vec![imgui::render::ViewportDrawDataSnapshot {
+                viewport_id: secondary_viewport,
+                draw: imgui::render::DrawDataSnapshot {
+                    display_pos: [0.0, 0.0],
+                    display_size: [32.0, 32.0],
+                    framebuffer_scale: [1.0, 1.0],
+                    draw_lists: vec![draw_list_for_test()],
+                },
+            }],
+            texture_requests: Vec::new(),
+        };
+        let targets = [
+            camera_target_for_test(primary_camera, None),
+            camera_target_for_test(secondary_camera, Some(secondary_viewport)),
+        ];
+
+        let (_, _, draws, uniforms_by_camera) = prepare_snapshot_draw_data(&snapshot, &targets);
+
+        assert_eq!(draws.len(), 1);
+        assert_eq!(draws[0].camera, secondary_camera);
+        assert!(!uniforms_by_camera.contains_key(&primary_camera));
+        assert!(uniforms_by_camera.contains_key(&secondary_camera));
     }
 
     #[test]
@@ -2715,6 +2867,37 @@ mod tests {
             texture_descriptor,
             texture_view_descriptor: None,
             had_data: true,
+        }
+    }
+
+    fn draw_list_for_test() -> imgui::render::DrawListSnapshot {
+        imgui::render::DrawListSnapshot {
+            vtx: vec![
+                imgui::render::DrawVert::new([0.0, 0.0], [0.0, 0.0], 0xFFFF_FFFF),
+                imgui::render::DrawVert::new([1.0, 0.0], [1.0, 0.0], 0xFFFF_FFFF),
+                imgui::render::DrawVert::new([0.0, 1.0], [0.0, 1.0], 0xFFFF_FFFF),
+            ],
+            idx: vec![0, 1, 2],
+            commands: vec![DrawCmdSnapshot::Elements {
+                count: 3,
+                clip_rect: [0.0, 0.0, 16.0, 16.0],
+                texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
+                vtx_offset: 0,
+                idx_offset: 0,
+            }],
+        }
+    }
+
+    fn camera_target_for_test(camera: Entity, viewport_id: Option<imgui::Id>) -> ImguiCameraTarget {
+        ImguiCameraTarget {
+            camera,
+            order: 0,
+            target: NormalizedRenderTarget::Window(
+                bevy_window::WindowRef::Entity(camera)
+                    .normalize(None)
+                    .expect("entity window target should normalize"),
+            ),
+            viewport_id,
         }
     }
 }
