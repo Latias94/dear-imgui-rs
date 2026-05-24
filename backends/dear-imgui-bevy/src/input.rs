@@ -181,7 +181,7 @@ pub fn primary_window_input_system(
     {
         context
             .io_mut()
-            .set_display_size([event.width, event.height]);
+            .set_display_size(finite_non_negative_size([event.width, event.height]));
     }
 
     for event in messages
@@ -189,7 +189,7 @@ pub fn primary_window_input_system(
         .read()
         .filter(|event| event.window == primary_window_entity)
     {
-        set_framebuffer_scale(context, event.scale_factor as f32);
+        set_framebuffer_scale(context, positive_finite_or(event.scale_factor as f32, 1.0));
     }
 
     for event in messages
@@ -197,7 +197,7 @@ pub fn primary_window_input_system(
         .read()
         .filter(|event| event.window == primary_window_entity)
     {
-        set_framebuffer_scale(context, event.scale_factor as f32);
+        set_framebuffer_scale(context, positive_finite_or(event.scale_factor as f32, 1.0));
     }
 
     let focus_events = messages
@@ -586,14 +586,38 @@ pub fn map_bevy_key_code(key_code: KeyCode) -> Option<imgui::Key> {
 
 fn sync_window_metrics(context: &mut imgui::Context, window: &Window) {
     let io = context.io_mut();
-    io.set_display_size([window.width(), window.height()]);
-    io.set_display_framebuffer_scale([window.scale_factor(), window.scale_factor()]);
+    io.set_display_size(sanitized_window_display_size(window));
+    io.set_display_framebuffer_scale(sanitized_window_framebuffer_scale(window));
 }
 
 fn set_framebuffer_scale(context: &mut imgui::Context, scale_factor: f32) {
     context
         .io_mut()
         .set_display_framebuffer_scale([scale_factor, scale_factor]);
+}
+
+pub(crate) fn sanitized_window_display_size(window: &Window) -> [f32; 2] {
+    finite_non_negative_size([window.width(), window.height()])
+}
+
+pub(crate) fn sanitized_window_framebuffer_scale(window: &Window) -> [f32; 2] {
+    let scale_factor = positive_finite_or(window.scale_factor(), 1.0);
+    [scale_factor, scale_factor]
+}
+
+fn finite_non_negative_size(size: [f32; 2]) -> [f32; 2] {
+    [
+        if size[0].is_finite() && size[0] >= 0.0 {
+            size[0]
+        } else {
+            0.0
+        },
+        if size[1].is_finite() && size[1] >= 0.0 {
+            size[1]
+        } else {
+            0.0
+        },
+    ]
 }
 
 fn sync_initial_focus(

@@ -172,6 +172,40 @@ fn lifecycle_uses_bevy_real_delta_time_when_available() {
 }
 
 #[test]
+fn lifecycle_invalid_window_scale_factor_falls_back_before_begin_frame() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_primary_window();
+    let mut primary_query = app
+        .world_mut()
+        .query_filtered::<Entity, With<PrimaryWindow>>();
+    let primary = primary_query
+        .single(app.world())
+        .expect("test app should have one primary window");
+    {
+        let mut window = app
+            .world_mut()
+            .get_mut::<Window>(primary)
+            .expect("primary window should exist");
+        window.resolution.set(f32::NAN, -10.0);
+        window.resolution.set_scale_factor(f32::NAN);
+    }
+    app.init_resource::<LifecycleTrace>();
+    app.add_systems(ImguiPrimaryContextPass, capture_delta_time);
+
+    app.update();
+
+    let context = app
+        .world()
+        .get_non_send::<ImguiContext>()
+        .expect("ImguiContext should still exist");
+    assert_eq!(context.context().io().display_size(), [0.0, 0.0]);
+    assert_eq!(
+        context.context().io().display_framebuffer_scale(),
+        [1.0, 1.0]
+    );
+}
+
+#[test]
 fn lifecycle_multi_viewport_request_does_not_advertise_viewports_without_render_app() {
     let _guard = imgui_context_guard();
     let mut app = app_with_primary_window_and_config(ImguiBackendConfig {
@@ -192,21 +226,24 @@ fn lifecycle_multi_viewport_request_does_not_advertise_viewports_without_render_
         !flags.contains(ConfigFlags::VIEWPORTS_ENABLE),
         "Bevy backend should not advertise Dear ImGui OS-level viewports until render routing is actually installed"
     );
-    assert!(
-        !io.backend_flags()
-            .contains(imgui::BackendFlags::PLATFORM_HAS_VIEWPORTS),
-        "Platform viewport backend capability should not be advertised before full routing support"
-    );
-    assert!(
-        !io.backend_flags()
-            .contains(imgui::BackendFlags::RENDERER_HAS_VIEWPORTS),
-        "Renderer viewport backend capability should not be advertised before full routing support"
-    );
-    assert!(
-        !io.backend_flags()
-            .contains(imgui::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT),
-        "Hovered viewport feedback should not be advertised while viewports are disabled"
-    );
+    #[cfg(feature = "multi-viewport")]
+    {
+        assert!(
+            !io.backend_flags()
+                .contains(imgui::BackendFlags::PLATFORM_HAS_VIEWPORTS),
+            "Platform viewport backend capability should not be advertised before full routing support"
+        );
+        assert!(
+            !io.backend_flags()
+                .contains(imgui::BackendFlags::RENDERER_HAS_VIEWPORTS),
+            "Renderer viewport backend capability should not be advertised before full routing support"
+        );
+        assert!(
+            !io.backend_flags()
+                .contains(imgui::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT),
+            "Hovered viewport feedback should not be advertised while viewports are disabled"
+        );
+    }
 }
 
 #[cfg(all(

@@ -8,7 +8,10 @@
 use crate::{ImguiBackendStatus, ImguiViewportBridge};
 use crate::{
     ImguiContext, ImguiTextureFeedbackQueue, ImguiViewportWindow,
-    input::{ImguiInputState, map_imgui_mouse_cursor},
+    input::{
+        ImguiInputState, map_imgui_mouse_cursor, sanitized_window_display_size,
+        sanitized_window_framebuffer_scale,
+    },
 };
 use bevy_app::App;
 use bevy_ecs::prelude::*;
@@ -247,10 +250,10 @@ fn begin_primary_frame_system(mut params: BeginFrameParams) {
 
     context.prepare_frame(
         imgui::FramePrepareOptions::new(
-            [window.width(), window.height()],
+            sanitized_window_display_size(window),
             imgui_delta_time(context, params.real_time.as_deref()),
         )
-        .framebuffer_scale([window.scale_factor(), window.scale_factor()]),
+        .framebuffer_scale(sanitized_window_framebuffer_scale(window)),
     );
 
     let frame = context.begin_frame();

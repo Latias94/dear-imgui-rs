@@ -403,6 +403,41 @@ fn input_resize_dpi_and_cursor_leave_messages_update_imgui_io() {
 }
 
 #[test]
+fn input_invalid_window_metrics_are_sanitized_before_reaching_imgui_io() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary) = app_with_primary_window();
+    app.world_mut()
+        .get_mut::<Window>(primary)
+        .unwrap()
+        .resolution
+        .set_scale_factor(f32::NAN);
+
+    app.world_mut()
+        .resource_mut::<Messages<WindowResized>>()
+        .write(WindowResized {
+            window: primary,
+            width: f32::NAN,
+            height: -10.0,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<WindowScaleFactorChanged>>()
+        .write(WindowScaleFactorChanged {
+            window: primary,
+            scale_factor: f64::INFINITY,
+        });
+
+    run_input_systems(&mut app);
+
+    let context = app
+        .world()
+        .get_non_send::<ImguiContext>()
+        .unwrap()
+        .context();
+    assert_eq!(context.io().display_size(), [0.0, 0.0]);
+    assert_eq!(context.io().display_framebuffer_scale(), [1.0, 1.0]);
+}
+
+#[test]
 fn input_platform_feedback_updates_primary_window_cursor_and_ime_state() {
     let _guard = imgui_context_guard();
     let (mut app, primary) = app_with_primary_window();
