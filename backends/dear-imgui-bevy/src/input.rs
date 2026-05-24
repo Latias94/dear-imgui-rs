@@ -163,6 +163,13 @@ pub fn primary_window_input_system(
         viewport_id: primary_viewport_id,
         is_primary: true,
     };
+    prune_stale_window_state(
+        context,
+        &mut input_state,
+        primary_window,
+        &viewport_windows,
+        window.focused,
+    );
 
     for event in messages
         .window_resized
@@ -360,6 +367,14 @@ fn imgui_window_for_event(
         viewport_id: viewport_window.viewport_id,
         is_primary: false,
     })
+}
+
+fn is_mapped_imgui_window(
+    entity: Entity,
+    primary_window: ImguiInputWindow,
+    viewport_windows: &Query<(Entity, &Window, &ImguiViewportWindow), Without<PrimaryWindow>>,
+) -> bool {
+    entity == primary_window.entity || viewport_windows.get(entity).is_ok()
 }
 
 fn add_mouse_viewport_event(io: &mut imgui::Io, viewport_id: Option<imgui::Id>) {
@@ -584,9 +599,56 @@ fn sync_initial_focus(
     window: ImguiInputWindow,
     focused: bool,
 ) {
-    if state.primary_window_focused != Some(focused) {
-        apply_focus_event(context, state, window, focused);
+    if state.primary_window_focused == Some(focused) {
+        return;
     }
+    if !focused
+        && state
+            .focused_window
+            .is_some_and(|entity| entity != window.entity)
+    {
+        if window.is_primary {
+            state.primary_window_focused = Some(false);
+        }
+        return;
+    }
+    apply_focus_event(context, state, window, focused);
+}
+
+fn prune_stale_window_state(
+    context: &mut imgui::Context,
+    state: &mut ImguiInputState,
+    primary_window: ImguiInputWindow,
+    viewport_windows: &Query<(Entity, &Window, &ImguiViewportWindow), Without<PrimaryWindow>>,
+    primary_focused: bool,
+) {
+    let focused_was_stale = state
+        .focused_window
+        .is_some_and(|entity| !is_mapped_imgui_window(entity, primary_window, viewport_windows));
+    if focused_was_stale {
+        state.focused_window = primary_focused.then_some(primary_window.entity);
+        if !primary_focused {
+            state.primary_window_focused = Some(false);
+            context.io_mut().add_focus_event(false);
+            release_sticky_input(context, state);
+        }
+    }
+
+    if state
+        .mouse_hovered_window
+        .is_some_and(|entity| !is_mapped_imgui_window(entity, primary_window, viewport_windows))
+    {
+        state.mouse_hovered_window = None;
+        let io = context.io_mut();
+        io.add_mouse_source_event(imgui::MouseSource::Mouse);
+        add_mouse_viewport_event(io, None);
+        io.add_mouse_pos_event(INVALID_MOUSE_POS);
+        clear_mouse_hovered_viewport(io);
+    }
+}
+
+fn clear_mouse_hovered_viewport(io: &mut imgui::Io) {
+    io.set_mouse_hovered_viewport(imgui::Id::from(0));
 }
 
 fn apply_focus_event(

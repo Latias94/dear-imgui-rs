@@ -48,3 +48,14 @@ fn metrics_counts_are_usize_and_reject_negative_raw_values() {
         .is_err()
     );
 }
+
+#[test]
+fn mouse_hovered_viewport_round_trips_through_io() {
+    let mut ctx = crate::Context::create();
+    let io = ctx.io_mut();
+    let viewport_id = crate::Id::from(0x1234);
+
+    io.set_mouse_hovered_viewport(viewport_id);
+
+    assert_eq!(io.mouse_hovered_viewport(), viewport_id);
+}

@@ -50,6 +50,12 @@ impl Io {
         crate::Id::from(self.inner().MouseHoveredViewport)
     }
 
+    /// Set the viewport id hovered by the OS mouse.
+    #[doc(alias = "MouseHoveredViewport")]
+    pub fn set_mouse_hovered_viewport(&mut self, viewport_id: crate::Id) {
+        self.inner_mut().MouseHoveredViewport = viewport_id.raw();
+    }
+
     /// Returns whether Ctrl+LeftClick should be treated as RightClick.
     #[doc(alias = "MouseCtrlLeftAsRightClick")]
     pub fn mouse_ctrl_left_as_right_click(&self) -> bool {

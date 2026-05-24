@@ -680,6 +680,129 @@ fn input_focus_switch_between_viewport_windows_keeps_sticky_input_pressed() {
 }
 
 #[test]
+fn input_primary_focus_sync_does_not_blur_while_secondary_viewport_is_focused() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary) = app_with_primary_window();
+    app.world_mut().get_mut::<Window>(primary).unwrap().focused = true;
+    let secondary = app
+        .world_mut()
+        .spawn((
+            Window::default(),
+            ImguiViewportWindow {
+                viewport_id: imgui::Id::from(0x561),
+            },
+        ))
+        .id();
+
+    app.world_mut()
+        .resource_mut::<Messages<KeyboardInput>>()
+        .write(key_input(
+            primary,
+            KeyCode::KeyA,
+            BevyKey::Character("a".into()),
+            ButtonState::Pressed,
+            None,
+        ));
+    app.world_mut()
+        .resource_mut::<Messages<MouseButtonInput>>()
+        .write(MouseButtonInput {
+            button: BevyMouseButton::Left,
+            state: ButtonState::Pressed,
+            window: primary,
+        });
+    run_input_systems(&mut app);
+
+    app.world_mut()
+        .resource_mut::<Messages<WindowFocused>>()
+        .write(WindowFocused {
+            window: secondary,
+            focused: true,
+        });
+    run_input_systems(&mut app);
+
+    app.world_mut().get_mut::<Window>(primary).unwrap().focused = false;
+    run_input_systems(&mut app);
+
+    let input_state = app.world().resource::<ImguiInputState>();
+    assert_eq!(input_state.primary_window_focused(), Some(false));
+    assert_eq!(input_state.focused_window(), Some(secondary));
+    begin_frame_and_assert(&mut app, |ui| {
+        assert!(
+            ui.is_key_down(imgui::Key::A),
+            "primary focus sync must not release keys while a secondary ImGui viewport is focused"
+        );
+        assert!(
+            ui.is_mouse_down(imgui::MouseButton::Left),
+            "primary focus sync must not release mouse buttons while a secondary ImGui viewport is focused"
+        );
+    });
+}
+
+#[test]
+fn input_stale_focused_viewport_window_releases_sticky_input() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary) = app_with_primary_window();
+    app.world_mut().get_mut::<Window>(primary).unwrap().focused = true;
+    let secondary = app
+        .world_mut()
+        .spawn((
+            Window::default(),
+            ImguiViewportWindow {
+                viewport_id: imgui::Id::from(0x562),
+            },
+        ))
+        .id();
+
+    app.world_mut()
+        .resource_mut::<Messages<KeyboardInput>>()
+        .write(key_input(
+            primary,
+            KeyCode::KeyA,
+            BevyKey::Character("a".into()),
+            ButtonState::Pressed,
+            None,
+        ));
+    app.world_mut()
+        .resource_mut::<Messages<MouseButtonInput>>()
+        .write(MouseButtonInput {
+            button: BevyMouseButton::Left,
+            state: ButtonState::Pressed,
+            window: primary,
+        });
+    run_input_systems(&mut app);
+
+    app.world_mut()
+        .resource_mut::<Messages<WindowFocused>>()
+        .write(WindowFocused {
+            window: primary,
+            focused: false,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<WindowFocused>>()
+        .write(WindowFocused {
+            window: secondary,
+            focused: true,
+        });
+    run_input_systems(&mut app);
+    app.world_mut().get_mut::<Window>(primary).unwrap().focused = false;
+    app.world_mut().despawn(secondary);
+    run_input_systems(&mut app);
+
+    let input_state = app.world().resource::<ImguiInputState>();
+    assert_eq!(input_state.focused_window(), None);
+    begin_frame_and_assert(&mut app, |ui| {
+        assert!(
+            !ui.is_key_down(imgui::Key::A),
+            "destroying the focused secondary viewport must release sticky keys"
+        );
+        assert!(
+            !ui.is_mouse_down(imgui::MouseButton::Left),
+            "destroying the focused secondary viewport must release sticky mouse buttons"
+        );
+    });
+}
+
+#[test]
 fn input_keyboard_focus_lost_releases_tracked_state_without_window_message() {
     let _guard = imgui_context_guard();
     let (mut app, primary) = app_with_primary_window();
@@ -949,6 +1072,65 @@ fn input_cursor_left_from_previous_window_does_not_clear_new_hovered_viewport_po
         assert_eq!(ui.mouse_pos(), [230.0, 340.0]);
         assert_eq!(ui.io().mouse_hovered_viewport(), viewport_id);
     });
+}
+
+#[test]
+fn input_stale_hovered_viewport_window_clears_imgui_mouse_hover() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary) = app_with_primary_window();
+    let viewport_id = imgui::Id::from(0x551);
+    let secondary = app
+        .world_mut()
+        .spawn((
+            Window {
+                position: WindowPosition::At(IVec2::new(200, 300)),
+                resolution: WindowResolution::new(640, 480),
+                ..Default::default()
+            },
+            ImguiViewportWindow { viewport_id },
+        ))
+        .id();
+    {
+        let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
+        let io = context.context_mut().io_mut();
+        io.set_config_flags(io.config_flags() | imgui::ConfigFlags::VIEWPORTS_ENABLE);
+    }
+
+    app.world_mut()
+        .resource_mut::<Messages<CursorMoved>>()
+        .write(CursorMoved {
+            window: secondary,
+            position: Vec2::new(30.0, 40.0),
+            delta: None,
+        });
+    run_input_systems(&mut app);
+    begin_frame_and_assert(&mut app, |ui| {
+        assert_eq!(ui.mouse_pos(), [230.0, 340.0]);
+        assert_eq!(ui.io().mouse_hovered_viewport(), viewport_id);
+    });
+
+    app.world_mut().despawn(secondary);
+    run_input_systems(&mut app);
+
+    assert_eq!(
+        app.world()
+            .resource::<ImguiInputState>()
+            .mouse_hovered_window(),
+        None
+    );
+    begin_frame_and_assert(&mut app, |ui| {
+        assert!(
+            ui.mouse_pos()[0] < -1.0e30 && ui.mouse_pos()[1] < -1.0e30,
+            "destroying the hovered secondary viewport must clear the ImGui mouse position"
+        );
+        assert_eq!(
+            ui.io().mouse_hovered_viewport(),
+            imgui::Id::from(0),
+            "destroying the hovered secondary viewport must clear the hovered viewport id"
+        );
+    });
+
+    assert!(app.world().get::<Window>(primary).is_some());
 }
 
 #[test]
