@@ -123,6 +123,26 @@ fn request_text_cursor_and_secondary_viewport_ime(
     }
 }
 
+fn request_primary_cursor_and_secondary_viewport_ime(
+    mut imgui_context: NonSendMut<ImguiContext>,
+    frame_state: NonSend<ImguiFrameState>,
+) {
+    let ui = frame_state.ui().expect("Dear ImGui frame should be open");
+    ui.set_mouse_cursor(Some(imgui::MouseCursor::TextInput));
+    imgui_context
+        .context_mut()
+        .io_mut()
+        .set_mouse_draw_cursor(false);
+
+    let raw_context = imgui_context.context().as_raw();
+    unsafe {
+        let ime_data = &mut (*raw_context).PlatformImeData;
+        ime_data.WantTextInput = true;
+        ime_data.InputPos = imgui::sys::ImVec2_c { x: 77.0, y: 88.0 };
+        ime_data.ViewportId = 0x502;
+    }
+}
+
 fn request_software_cursor(
     mut imgui_context: NonSendMut<ImguiContext>,
     frame_state: NonSend<ImguiFrameState>,
@@ -419,6 +439,13 @@ fn input_platform_feedback_updates_secondary_viewport_window_cursor_and_ime_stat
             ImguiViewportWindow { viewport_id },
         ))
         .id();
+    app.world_mut()
+        .resource_mut::<Messages<CursorMoved>>()
+        .write(CursorMoved {
+            window: secondary,
+            position: Vec2::new(10.0, 20.0),
+            delta: None,
+        });
     app.add_systems(
         ImguiPrimaryContextPass,
         request_text_cursor_and_secondary_viewport_ime,
@@ -444,6 +471,56 @@ fn input_platform_feedback_updates_secondary_viewport_window_cursor_and_ime_stat
     let window = entity.get::<Window>().unwrap();
     assert!(window.ime_enabled);
     assert_eq!(window.ime_position, Vec2::new(44.0, 55.0));
+}
+
+#[test]
+fn input_platform_feedback_routes_cursor_independently_from_ime_viewport() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary) = app_with_primary_window();
+    let viewport_id = imgui::Id::from(0x502);
+    let secondary = app
+        .world_mut()
+        .spawn((
+            Window {
+                resolution: WindowResolution::new(640, 480),
+                ..Default::default()
+            },
+            ImguiViewportWindow { viewport_id },
+        ))
+        .id();
+    app.world_mut()
+        .resource_mut::<Messages<CursorMoved>>()
+        .write(CursorMoved {
+            window: primary,
+            position: Vec2::new(11.0, 22.0),
+            delta: None,
+        });
+    app.add_systems(
+        ImguiPrimaryContextPass,
+        request_primary_cursor_and_secondary_viewport_ime,
+    );
+
+    app.update();
+
+    let primary_entity = app.world().entity(primary);
+    assert_eq!(
+        primary_entity.get::<CursorIcon>(),
+        Some(&CursorIcon::System(SystemCursorIcon::Text)),
+        "cursor feedback should follow the hovered Bevy window"
+    );
+    assert!(
+        !primary_entity.get::<Window>().unwrap().ime_enabled,
+        "IME feedback for a secondary viewport should not be applied to the primary window"
+    );
+
+    let secondary_entity = app.world().entity(secondary);
+    assert!(
+        secondary_entity.get::<CursorIcon>().is_none(),
+        "IME viewport must not pull cursor feedback onto a non-hovered window"
+    );
+    let secondary_window = secondary_entity.get::<Window>().unwrap();
+    assert!(secondary_window.ime_enabled);
+    assert_eq!(secondary_window.ime_position, Vec2::new(77.0, 88.0));
 }
 
 #[test]

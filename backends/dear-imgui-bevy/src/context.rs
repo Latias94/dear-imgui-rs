@@ -7,7 +7,8 @@
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use crate::{ImguiBackendStatus, ImguiViewportBridge};
 use crate::{
-    ImguiContext, ImguiTextureFeedbackQueue, ImguiViewportWindow, input::map_imgui_mouse_cursor,
+    ImguiContext, ImguiTextureFeedbackQueue, ImguiViewportWindow,
+    input::{ImguiInputState, map_imgui_mouse_cursor},
 };
 use bevy_app::App;
 use bevy_ecs::prelude::*;
@@ -267,6 +268,7 @@ pub(crate) fn end_primary_frame_system(
     mut commands: Commands,
     mut imgui_context: NonSendMut<ImguiContext>,
     mut frame_state: NonSendMut<ImguiFrameState>,
+    input_state: Res<ImguiInputState>,
     mut primary_window: PrimaryFeedbackWindowQuery,
     mut viewport_windows: ViewportFeedbackWindowQuery,
     mut output: ResMut<ImguiFrameOutput>,
@@ -279,6 +281,7 @@ pub(crate) fn end_primary_frame_system(
         sync_primary_window_platform_feedback(
             ui,
             &imgui_context,
+            &input_state,
             &mut commands,
             &mut primary_window,
             &mut viewport_windows,
@@ -313,12 +316,17 @@ fn render_frame_snapshot(
 fn sync_primary_window_platform_feedback(
     ui: &imgui::Ui,
     imgui_context: &ImguiContext,
+    input_state: &ImguiInputState,
     commands: &mut Commands,
     primary_window: &mut PrimaryFeedbackWindowQuery,
     viewport_windows: &mut ViewportFeedbackWindowQuery,
 ) {
-    let Ok((primary_entity, mut primary_window, mut primary_cursor_options, primary_cursor_icon)) =
-        primary_window.single_mut()
+    let Ok((
+        primary_entity,
+        mut primary_window,
+        mut primary_cursor_options,
+        mut primary_cursor_icon,
+    )) = primary_window.single_mut()
     else {
         return;
     };
@@ -327,23 +335,34 @@ fn sync_primary_window_platform_feedback(
     // SAFETY: `ImguiContext` owns this live Dear ImGui context for the lifetime of the Bevy
     // resource, and the frame is still open while platform feedback is synchronized.
     let ime_data = unsafe { &(*raw_context).PlatformImeData };
-    if ime_data.ViewportId == 0 {
+    let ime_target_viewport = (ime_data.ViewportId != 0).then_some(ime_data.ViewportId);
+    let ime_position = Vec2::new(ime_data.InputPos.x, ime_data.InputPos.y);
+    let hovered_window = input_state.mouse_hovered_window();
+
+    let mut cursor_applied = false;
+    if hovered_window.is_none_or(|entity| entity == primary_entity) {
         apply_window_cursor_feedback(
             ui,
             commands,
             primary_entity,
             &mut primary_cursor_options,
-            primary_cursor_icon,
+            primary_cursor_icon.take(),
         );
-        primary_window.ime_enabled = ime_data.WantTextInput;
-        primary_window.ime_position = Vec2::new(ime_data.InputPos.x, ime_data.InputPos.y);
-        return;
+        cursor_applied = true;
+    }
+
+    let mut ime_applied = false;
+    if ime_target_viewport.is_none() {
+        apply_window_ime_feedback(&mut primary_window, ime_data.WantTextInput, ime_position);
+        ime_applied = true;
+    } else {
+        primary_window.ime_enabled = false;
     }
 
     for (window_entity, mut window, mut cursor_options, cursor_icon, viewport_window) in
         viewport_windows.iter_mut()
     {
-        if viewport_window.viewport_id.raw() == ime_data.ViewportId {
+        if !cursor_applied && hovered_window == Some(window_entity) {
             apply_window_cursor_feedback(
                 ui,
                 commands,
@@ -351,22 +370,35 @@ fn sync_primary_window_platform_feedback(
                 &mut cursor_options,
                 cursor_icon,
             );
-            window.ime_enabled = ime_data.WantTextInput;
-            window.ime_position = Vec2::new(ime_data.InputPos.x, ime_data.InputPos.y);
-            primary_window.ime_enabled = false;
-            return;
+            cursor_applied = true;
+        }
+
+        if ime_target_viewport == Some(viewport_window.viewport_id.raw()) {
+            apply_window_ime_feedback(&mut window, ime_data.WantTextInput, ime_position);
+            ime_applied = true;
+        } else {
+            window.ime_enabled = false;
         }
     }
 
-    apply_window_cursor_feedback(
-        ui,
-        commands,
-        primary_entity,
-        &mut primary_cursor_options,
-        primary_cursor_icon,
-    );
-    primary_window.ime_enabled = ime_data.WantTextInput;
-    primary_window.ime_position = Vec2::new(ime_data.InputPos.x, ime_data.InputPos.y);
+    if !cursor_applied {
+        apply_window_cursor_feedback(
+            ui,
+            commands,
+            primary_entity,
+            &mut primary_cursor_options,
+            primary_cursor_icon.take(),
+        );
+    }
+
+    if !ime_applied {
+        apply_window_ime_feedback(&mut primary_window, ime_data.WantTextInput, ime_position);
+    }
+}
+
+fn apply_window_ime_feedback(window: &mut Window, want_text_input: bool, ime_position: Vec2) {
+    window.ime_enabled = want_text_input;
+    window.ime_position = ime_position;
 }
 
 fn apply_window_cursor_feedback(
