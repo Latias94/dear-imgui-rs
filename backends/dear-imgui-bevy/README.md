@@ -23,6 +23,8 @@ cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --no-defa
 cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --features render
 cargo +stable nextest run -p dear-imgui-bevy
 cargo +stable nextest run -p dear-imgui-bevy --features render
+cargo +stable nextest run -p dear-imgui-bevy --features render,multi-viewport
+cargo +stable check -p dear-imgui-bevy --features render,multi-viewport,ecosystem --examples
 ```
 
 These gates are intended for a dedicated Bevy backend CI lane. The root workspace workflow does not

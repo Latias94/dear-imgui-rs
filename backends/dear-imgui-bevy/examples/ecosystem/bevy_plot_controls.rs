@@ -1,7 +1,7 @@
 //! Small Bevy runtime demo with an ImPlot profiler and motion controls.
 //!
 //! Run:
-//! `cargo run -p dear-imgui-bevy --features render --example bevy_plot_controls`
+//! `cargo run -p dear-imgui-bevy --features render,implot --example bevy_plot_controls`
 
 use bevy::{
     app::AppExit,

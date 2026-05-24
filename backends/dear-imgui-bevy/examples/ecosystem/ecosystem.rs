@@ -1,7 +1,7 @@
 //! Extension ecosystem composition inside one Bevy-managed Dear ImGui frame.
 //!
 //! Run:
-//! `cargo run -p dear-imgui-bevy --example ecosystem`
+//! `cargo run -p dear-imgui-bevy --features ecosystem --example ecosystem`
 
 use bevy_app::{App, ScheduleRunnerPlugin, Startup};
 use bevy_ecs::prelude::*;
