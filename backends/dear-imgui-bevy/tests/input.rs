@@ -849,6 +849,99 @@ fn input_keyboard_focus_lost_releases_tracked_state_without_window_message() {
 }
 
 #[test]
+fn input_missing_primary_window_releases_tracked_state_and_clears_window_state() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary) = app_with_primary_window();
+    let main_viewport_id = {
+        let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
+        let context = context.context_mut();
+        context
+            .io_mut()
+            .set_config_flags(imgui::ConfigFlags::VIEWPORTS_ENABLE);
+        context.main_viewport().id()
+    };
+
+    app.world_mut()
+        .resource_mut::<Messages<CursorMoved>>()
+        .write(CursorMoved {
+            window: primary,
+            position: Vec2::new(12.0, 34.0),
+            delta: None,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<KeyboardInput>>()
+        .write(key_input(
+            primary,
+            KeyCode::KeyA,
+            BevyKey::Character("a".into()),
+            ButtonState::Pressed,
+            None,
+        ));
+    app.world_mut()
+        .resource_mut::<Messages<MouseButtonInput>>()
+        .write(MouseButtonInput {
+            button: BevyMouseButton::Right,
+            state: ButtonState::Pressed,
+            window: primary,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<TouchInput>>()
+        .write(TouchInput {
+            phase: TouchPhase::Started,
+            position: Vec2::new(56.0, 78.0),
+            window: primary,
+            force: None,
+            id: 9,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<Ime>>()
+        .write(Ime::Enabled { window: primary });
+    run_input_systems(&mut app);
+
+    assert_eq!(
+        app.world()
+            .resource::<ImguiInputState>()
+            .mouse_hovered_window(),
+        Some(primary)
+    );
+    assert_eq!(
+        app.world().resource::<ImguiInputState>().active_touch_id(),
+        Some(9)
+    );
+    assert!(app.world().resource::<ImguiInputState>().ime_enabled());
+    begin_frame_and_assert(&mut app, |ui| {
+        assert_eq!(ui.io().mouse_hovered_viewport(), main_viewport_id);
+        assert!(ui.is_key_down(imgui::Key::A));
+        assert!(ui.is_mouse_down(imgui::MouseButton::Right));
+        assert!(ui.is_mouse_down(imgui::MouseButton::Left));
+    });
+
+    app.world_mut().despawn(primary);
+    run_input_systems(&mut app);
+
+    let input_state = app.world().resource::<ImguiInputState>();
+    assert_eq!(input_state.primary_window_focused(), Some(false));
+    assert_eq!(input_state.focused_window(), None);
+    assert_eq!(input_state.mouse_hovered_window(), None);
+    assert_eq!(input_state.active_touch_id(), None);
+    assert!(!input_state.ime_enabled());
+    begin_frame_and_assert(&mut app, |ui| {
+        assert!(!ui.is_key_down(imgui::Key::A));
+        assert!(!ui.is_mouse_down(imgui::MouseButton::Right));
+        assert!(!ui.is_mouse_down(imgui::MouseButton::Left));
+        assert!(
+            ui.mouse_pos()[0] < -1.0e30 && ui.mouse_pos()[1] < -1.0e30,
+            "removing the primary window must clear the ImGui mouse position"
+        );
+        assert_eq!(
+            ui.io().mouse_hovered_viewport(),
+            imgui::Id::from(0),
+            "removing the primary window must clear the hovered viewport id"
+        );
+    });
+}
+
+#[test]
 fn input_touch_events_drive_first_active_finger_as_touchscreen_mouse() {
     let _guard = imgui_context_guard();
     let (mut app, primary) = app_with_primary_window();

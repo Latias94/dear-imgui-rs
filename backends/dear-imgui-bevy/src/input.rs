@@ -135,6 +135,9 @@ pub fn primary_window_input_system(
     mut messages: ImguiInputMessageReaders,
 ) {
     let Ok((primary_window_entity, window)) = primary_window.single() else {
+        let context = imgui_context.context_mut();
+        release_input_for_missing_primary_window(context, &mut input_state);
+        *capture = ImguiInputCapture::default();
         discard_unread_messages(
             &mut messages.window_resized,
             &mut messages.window_scale_factor_changed,
@@ -647,6 +650,37 @@ fn prune_stale_window_state(
     }
 }
 
+fn release_input_for_missing_primary_window(
+    context: &mut imgui::Context,
+    state: &mut ImguiInputState,
+) {
+    let had_focus = state.primary_window_focused != Some(false) || state.focused_window.is_some();
+    let had_mouse_window = state.mouse_hovered_window.is_some();
+    let had_pointer_input = had_mouse_window
+        || !state.pressed_mouse_buttons.is_empty()
+        || state.active_touch_id.is_some();
+
+    if had_focus {
+        context.io_mut().add_focus_event(false);
+    }
+    state.primary_window_focused = Some(false);
+    state.focused_window = None;
+    state.ime_enabled = false;
+
+    if state.has_sticky_input() {
+        release_sticky_input(context, state);
+    }
+
+    if had_pointer_input {
+        state.mouse_hovered_window = None;
+        let io = context.io_mut();
+        io.add_mouse_source_event(imgui::MouseSource::Mouse);
+        add_mouse_viewport_event(io, None);
+        io.add_mouse_pos_event(INVALID_MOUSE_POS);
+        clear_mouse_hovered_viewport(io);
+    }
+}
+
 fn clear_mouse_hovered_viewport(io: &mut imgui::Io) {
     io.set_mouse_hovered_viewport(imgui::Id::from(0));
 }
@@ -735,6 +769,12 @@ fn sync_modifier_events(io: &mut imgui::Io, state: &ImguiInputState) {
 }
 
 impl ImguiInputState {
+    fn has_sticky_input(&self) -> bool {
+        !self.pressed_keys.is_empty()
+            || !self.pressed_mouse_buttons.is_empty()
+            || self.active_touch_id.is_some()
+    }
+
     fn any_ctrl_down(&self) -> bool {
         self.pressed_keys.contains(&imgui::Key::LeftCtrl)
             || self.pressed_keys.contains(&imgui::Key::RightCtrl)
