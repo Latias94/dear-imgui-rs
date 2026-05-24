@@ -2,17 +2,24 @@
 use bevy_app::App;
 #[cfg(all(feature = "multi-viewport", feature = "render"))]
 use bevy_camera::{Camera, Camera2d, RenderTarget, visibility::RenderLayers};
-#[cfg(all(feature = "multi-viewport", feature = "render"))]
+#[cfg(feature = "multi-viewport")]
 use bevy_ecs::message::Messages;
 #[cfg(all(feature = "multi-viewport", feature = "render"))]
 use bevy_ecs::prelude::Entity;
 #[cfg(feature = "multi-viewport")]
+use bevy_math::IVec2;
+#[cfg(feature = "multi-viewport")]
 use bevy_window::Monitor;
 #[cfg(feature = "multi-viewport")]
 use bevy_window::WindowCloseRequested;
+use bevy_window::WindowLevel;
+#[cfg(feature = "multi-viewport")]
+use bevy_window::WindowMoved;
 use bevy_window::WindowPosition;
 #[cfg(all(feature = "multi-viewport", feature = "render"))]
 use bevy_window::WindowRef;
+#[cfg(feature = "multi-viewport")]
+use bevy_window::WindowResized;
 #[cfg(feature = "multi-viewport")]
 use bevy_window::{PrimaryWindow, Window};
 #[cfg(all(feature = "multi-viewport", feature = "render"))]
@@ -59,6 +66,48 @@ fn app_with_multi_viewport_bridge(name: &str) -> App {
         let _ = context.context_mut().font_atlas_mut().build();
     }
     app
+}
+
+#[cfg(feature = "multi-viewport")]
+fn with_test_platform_viewport(
+    app: &mut App,
+    id: imgui::Id,
+    f: impl FnOnce(&mut App, *mut sys::ImGuiViewport),
+) {
+    let raw_viewport = unsafe { sys::ImGuiViewport_ImGuiViewport() };
+    assert!(
+        !raw_viewport.is_null(),
+        "ImGuiViewport_ImGuiViewport() returned null"
+    );
+    unsafe {
+        (*raw_viewport).ID = id.raw();
+    }
+
+    let mut viewport_ptrs = [raw_viewport];
+    let original = {
+        let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
+        let platform_io = context.context_mut().platform_io_mut().as_raw_mut();
+        unsafe {
+            let original = (*platform_io).Viewports;
+            (*platform_io).Viewports = sys::ImVector_ImGuiViewportPtr {
+                Size: 1,
+                Capacity: 1,
+                Data: viewport_ptrs.as_mut_ptr(),
+            };
+            original
+        }
+    };
+
+    f(app, raw_viewport);
+
+    {
+        let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
+        let platform_io = context.context_mut().platform_io_mut().as_raw_mut();
+        unsafe {
+            (*platform_io).Viewports = original;
+            sys::ImGuiViewport_destroy(raw_viewport);
+        }
+    }
 }
 
 #[cfg(feature = "multi-viewport")]
@@ -165,6 +214,7 @@ fn viewport_window_factory_maps_snapshot_to_hidden_secondary_window() {
         flags: imgui::ViewportFlags::IS_PLATFORM_WINDOW
             | imgui::ViewportFlags::NO_DECORATION
             | imgui::ViewportFlags::NO_TASK_BAR_ICON
+            | imgui::ViewportFlags::TOP_MOST
             | imgui::ViewportFlags::NO_FOCUS_ON_APPEARING,
         ..viewport_snapshot(0x42)
     };
@@ -181,6 +231,7 @@ fn viewport_window_factory_maps_snapshot_to_hidden_secondary_window() {
     assert_eq!(window.resolution.scale_factor(), 2.0);
     assert!(!window.decorations);
     assert!(window.skip_taskbar);
+    assert_eq!(window.window_level, WindowLevel::AlwaysOnTop);
     assert!(!window.visible);
     assert!(!window.focused);
 }
@@ -490,6 +541,75 @@ fn viewport_platform_feedback_queries_return_mapped_bevy_window_state() {
         assert!(!get_window_minimized(raw_viewport));
         sys::ImGuiViewport_destroy(raw_viewport);
     }
+}
+
+#[cfg(feature = "multi-viewport")]
+#[test]
+fn viewport_os_move_and_resize_events_request_imgui_platform_sync() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_multi_viewport_bridge("viewport-os-window-events");
+    app.world_mut().spawn((Window::default(), PrimaryWindow));
+
+    let id = imgui::Id::from(0x202);
+    app.world_mut()
+        .get_non_send_mut::<ImguiViewportBridge>()
+        .expect("bridge should be installed")
+        .queue(ImguiViewportCommand::Create(viewport_snapshot(id.raw())));
+    app.update();
+
+    let entity = app
+        .world()
+        .get_non_send::<ImguiViewportBridge>()
+        .expect("bridge should still exist")
+        .viewport_window(id)
+        .expect("create command should spawn a secondary Bevy window");
+    {
+        let mut window = app
+            .world_mut()
+            .get_mut::<Window>(entity)
+            .expect("spawned entity should contain Window");
+        window.position = WindowPosition::At(IVec2::new(420, 630));
+        window.resolution.set_scale_factor(1.5);
+        window.resolution.set(420.0, 240.0);
+    }
+
+    app.world_mut()
+        .resource_mut::<Messages<WindowMoved>>()
+        .write(WindowMoved {
+            window: entity,
+            position: IVec2::new(420, 630),
+        });
+    app.world_mut()
+        .resource_mut::<Messages<WindowResized>>()
+        .write(WindowResized {
+            window: entity,
+            width: 420.0,
+            height: 240.0,
+        });
+
+    with_test_platform_viewport(&mut app, id, |app, raw_viewport| {
+        app.world_mut().run_schedule(bevy_app::PreUpdate);
+
+        let feedback = app
+            .world()
+            .get_non_send::<ImguiViewportBridge>()
+            .expect("bridge should still exist")
+            .viewport_feedback(id)
+            .expect("OS move/resize events should refresh viewport feedback");
+        assert_eq!(feedback.pos, [280.0, 420.0]);
+        assert_eq!(feedback.size, [420.0, 240.0]);
+
+        unsafe {
+            assert!(
+                (*raw_viewport).PlatformRequestMove,
+                "OS window moves must tell Dear ImGui to pull the platform position instead of fighting the drag"
+            );
+            assert!(
+                (*raw_viewport).PlatformRequestResize,
+                "OS window resizes must tell Dear ImGui to pull the platform size instead of fighting the resize"
+            );
+        }
+    });
 }
 
 #[cfg(feature = "multi-viewport")]

@@ -14,7 +14,9 @@ use bevy_app::App;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::{NonSendMarker, SystemParam};
 use bevy_math::Vec2;
-use bevy_window::{CursorIcon, CursorOptions, Monitor, PrimaryMonitor, PrimaryWindow, Window};
+use bevy_window::{CursorIcon, CursorOptions, PrimaryWindow, Window};
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+use bevy_window::{Monitor, PrimaryMonitor};
 use dear_imgui_rs as imgui;
 use std::ptr::NonNull;
 
@@ -184,6 +186,7 @@ fn begin_primary_frame_system(
                     entity,
                     viewport_window.viewport_id,
                     crate::viewport::viewport_feedback_from_window(
+                        entity,
                         window,
                         viewport_bridge.viewport_feedback(viewport_window.viewport_id),
                     ),

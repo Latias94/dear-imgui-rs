@@ -3,7 +3,9 @@
 //! PlatformIO callbacks installed here only capture intent into an engine-owned queue. Bevy systems
 //! drain that queue and mutate ECS-owned [`Window`] entities outside the C ABI callback boundary.
 
-use bevy_app::{App, Last};
+use bevy_app::App;
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+use bevy_app::{Last, PreUpdate};
 #[cfg(all(
     feature = "render",
     feature = "multi-viewport",
@@ -22,10 +24,13 @@ use bevy_math::IVec2;
     not(target_arch = "wasm32")
 ))]
 use bevy_window::WindowRef;
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_window::{
-    ExitSystems, Monitor, PrimaryWindow, Window, WindowCloseRequested, WindowPosition,
-    WindowResolution,
+    ExitSystems, Monitor, PrimaryWindow, WindowCloseRequested, WindowMoved, WindowResized,
 };
+use bevy_window::{Window, WindowLevel, WindowPosition, WindowResolution};
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+use bevy_winit::WINIT_WINDOWS;
 use dear_imgui_rs as imgui;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use dear_imgui_rs::sys;
@@ -299,7 +304,13 @@ pub(crate) fn install_viewport_bridge(_app: &mut App) {
         if app.world().get_non_send::<ImguiViewportBridge>().is_none() {
             app.insert_non_send(ImguiViewportBridge::default());
         }
+        app.add_message::<WindowMoved>();
+        app.add_message::<WindowResized>();
         app.add_message::<WindowCloseRequested>();
+        app.add_systems(
+            PreUpdate,
+            sync_os_viewport_window_events.before(crate::input::ImguiInputSystems),
+        );
         attach_bridge_to_imgui_context(app.world_mut());
         app.add_systems(
             crate::ImguiEndFrame,
@@ -542,6 +553,75 @@ fn feedback_for_viewport(viewport: *mut imgui::Viewport) -> Option<ImguiViewport
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn sync_os_viewport_window_events(
+    mut moved: MessageReader<WindowMoved>,
+    mut resized: MessageReader<WindowResized>,
+    windows: Query<&Window>,
+    viewport_windows: Query<(Entity, &ImguiViewportWindow)>,
+    mut imgui_context: NonSendMut<crate::ImguiContext>,
+    mut bridge: NonSendMut<ImguiViewportBridge>,
+) {
+    let window_to_viewport = viewport_windows.iter().collect::<HashMap<_, _>>();
+    let mut moved_viewports = HashSet::new();
+    let mut resized_viewports = HashSet::new();
+
+    for event in moved.read() {
+        if let Some(viewport_window) = window_to_viewport.get(&event.window).copied() {
+            moved_viewports.insert(viewport_window.viewport_id);
+            if let Ok(window) = windows.get(event.window) {
+                let previous = bridge.viewport_feedback(viewport_window.viewport_id);
+                bridge.set_viewport_feedback(
+                    viewport_window.viewport_id,
+                    feedback_from_window_for_entity(event.window, window, previous),
+                );
+            }
+        }
+    }
+
+    for event in resized.read() {
+        if let Some(viewport_window) = window_to_viewport.get(&event.window).copied() {
+            resized_viewports.insert(viewport_window.viewport_id);
+            if let Ok(window) = windows.get(event.window) {
+                let previous = bridge.viewport_feedback(viewport_window.viewport_id);
+                bridge.set_viewport_feedback(
+                    viewport_window.viewport_id,
+                    feedback_from_window_for_entity(event.window, window, previous),
+                );
+            }
+        }
+    }
+
+    mark_platform_viewport_requests(
+        imgui_context.context_mut(),
+        moved_viewports.iter().copied(),
+        resized_viewports.iter().copied(),
+    );
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn mark_platform_viewport_requests(
+    context: &mut imgui::Context,
+    moved_viewports: impl IntoIterator<Item = ImguiViewportId>,
+    resized_viewports: impl IntoIterator<Item = ImguiViewportId>,
+) {
+    let moved = moved_viewports.into_iter().collect::<HashSet<_>>();
+    let resized = resized_viewports.into_iter().collect::<HashSet<_>>();
+    if moved.is_empty() && resized.is_empty() {
+        return;
+    }
+
+    for viewport in context.platform_io_mut().viewports_iter_mut() {
+        let id = viewport.id();
+        if moved.contains(&id) {
+            viewport.set_platform_request_move(true);
+        }
+        if resized.contains(&id) {
+            viewport.set_platform_request_resize(true);
+        }
+    }
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 fn apply_viewport_commands_system(
     mut ecs_commands: Commands,
     mut bridge: NonSendMut<ImguiViewportBridge>,
@@ -585,7 +665,7 @@ fn apply_viewport_commands_system(
                     &mut pending_cameras,
                 );
                 if let Ok(mut window) = windows.get_mut(entity) {
-                    apply_snapshot_to_window(&snapshot, &mut window);
+                    apply_snapshot_to_window(&snapshot, entity, &mut window);
                 } else {
                     pending_windows.insert(snapshot.id, window_from_snapshot(&snapshot));
                 }
@@ -633,9 +713,13 @@ fn apply_viewport_commands_system(
                 if let Some(window) = pending_windows.get_mut(&id) {
                     window.position = WindowPosition::At(physical_pos_for_window(pos, window));
                 } else {
-                    with_window_mut(&mut windows, &bridge, id, |window| {
-                        window.position = WindowPosition::At(physical_pos_for_window(pos, window));
-                    });
+                    if let Some(entity) = bridge.viewport_window(id)
+                        && let Ok(mut window) = windows.get_mut(entity)
+                    {
+                        window.position = WindowPosition::At(physical_outer_pos_for_client_pos(
+                            entity, pos, &window,
+                        ));
+                    }
                 }
                 feedback_candidates.insert(id);
             }
@@ -677,7 +761,10 @@ fn apply_viewport_commands_system(
     for (viewport_id, window) in pending_windows {
         if let Some(entity) = bridge.viewport_window(viewport_id) {
             let previous = bridge.viewport_feedback(viewport_id);
-            bridge.set_viewport_feedback(viewport_id, feedback_from_window(&window, previous));
+            bridge.set_viewport_feedback(
+                viewport_id,
+                feedback_from_window_for_entity(entity, &window, previous),
+            );
             ecs_commands.entity(entity).insert(window);
         }
     }
@@ -689,7 +776,10 @@ fn apply_viewport_commands_system(
         if let Some(entity) = bridge.viewport_window(viewport_id) {
             if let Ok(window) = windows.get(entity) {
                 let previous = bridge.viewport_feedback(viewport_id);
-                bridge.set_viewport_feedback(viewport_id, feedback_from_window(window, previous));
+                bridge.set_viewport_feedback(
+                    viewport_id,
+                    feedback_from_window_for_entity(entity, window, previous),
+                );
             }
         }
     }
@@ -769,7 +859,11 @@ pub(crate) fn prepare_platform_viewports_for_frame(
     bridge.set_viewport_window(main_viewport_id, primary_window);
     bridge.set_viewport_feedback(
         main_viewport_id,
-        feedback_from_window(window, bridge.viewport_feedback(main_viewport_id)),
+        feedback_from_window_for_entity(
+            primary_window,
+            window,
+            bridge.viewport_feedback(main_viewport_id),
+        ),
     );
     live_feedback.insert(main_viewport_id);
 
@@ -967,24 +1061,23 @@ fn platform_monitor_from_bevy_monitor(monitor: &Monitor) -> sys::ImGuiPlatformMo
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(crate) fn viewport_feedback_from_window(
+    entity: Entity,
     window: &Window,
     previous: Option<ImguiViewportFeedback>,
 ) -> ImguiViewportFeedback {
-    feedback_from_window(window, previous)
+    feedback_from_window_for_entity(entity, window, previous)
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-fn feedback_from_window(
+fn feedback_from_window_for_entity(
+    entity: Entity,
     window: &Window,
     previous: Option<ImguiViewportFeedback>,
 ) -> ImguiViewportFeedback {
-    let pos = match window.position {
-        WindowPosition::At(pos) => logical_pos(pos, window),
-        WindowPosition::Automatic | WindowPosition::Centered(_) => {
-            previous.map(|feedback| feedback.pos).unwrap_or([0.0, 0.0])
-        }
-    };
-    let scale_factor = positive_finite_or(window.scale_factor(), 1.0);
+    let pos = window_client_origin_logical(entity, &window.position, window.scale_factor())
+        .or_else(|| previous.map(|feedback| feedback.pos))
+        .unwrap_or([0.0, 0.0]);
+    let scale_factor = window_client_scale_factor(entity, window);
     ImguiViewportFeedback {
         pos,
         size: [window.width().max(0.0), window.height().max(0.0)],
@@ -993,6 +1086,64 @@ fn feedback_from_window(
         focused: window.focused,
         minimized: false,
     }
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+pub(crate) fn window_client_origin_logical(
+    entity: Entity,
+    position: &WindowPosition,
+    scale_factor: f32,
+) -> Option<[f32; 2]> {
+    if let Some(pos) = winit_window_client_origin_logical(entity) {
+        return Some(pos);
+    }
+    match *position {
+        WindowPosition::At(pos) => Some(logical_pos_with_scale(pos, scale_factor)),
+        WindowPosition::Automatic | WindowPosition::Centered(_) => None,
+    }
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn window_client_scale_factor(entity: Entity, window: &Window) -> f32 {
+    winit_window_scale_factor(entity)
+        .unwrap_or_else(|| positive_finite_or(window.scale_factor(), 1.0))
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn winit_window_client_origin_logical(entity: Entity) -> Option<[f32; 2]> {
+    WINIT_WINDOWS.with_borrow(|windows| {
+        let window = windows.get_window(entity)?;
+        let scale = window.scale_factor();
+        if let Ok(pos_phys) = window.inner_position() {
+            let pos_logical = pos_phys.to_logical::<f64>(scale);
+            Some([pos_logical.x as f32, pos_logical.y as f32])
+        } else if let Ok(pos_phys) = window.outer_position() {
+            let pos_logical = pos_phys.to_logical::<f64>(scale);
+            Some([pos_logical.x as f32, pos_logical.y as f32])
+        } else {
+            None
+        }
+    })
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn winit_window_decoration_offset_logical(entity: Entity) -> Option<[f32; 2]> {
+    WINIT_WINDOWS.with_borrow(|windows| {
+        let window = windows.get_window(entity)?;
+        let scale = window.scale_factor();
+        let inner = window.inner_position().ok()?.to_logical::<f64>(scale);
+        let outer = window.outer_position().ok()?.to_logical::<f64>(scale);
+        Some([(inner.x - outer.x) as f32, (inner.y - outer.y) as f32])
+    })
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn winit_window_scale_factor(entity: Entity) -> Option<f32> {
+    WINIT_WINDOWS.with_borrow(|windows| {
+        windows
+            .get_window(entity)
+            .map(|window| positive_finite_or(window.scale_factor() as f32, 1.0))
+    })
 }
 
 fn positive_finite_or(value: f32, fallback: f32) -> f32 {
@@ -1032,6 +1183,11 @@ pub fn window_from_snapshot(snapshot: &ImguiViewportSnapshot) -> Window {
         skip_taskbar: snapshot
             .flags
             .contains(imgui::ViewportFlags::NO_TASK_BAR_ICON),
+        window_level: if snapshot.flags.contains(imgui::ViewportFlags::TOP_MOST) {
+            WindowLevel::AlwaysOnTop
+        } else {
+            WindowLevel::Normal
+        },
         visible: false,
         focused: false,
         ..Default::default()
@@ -1044,9 +1200,13 @@ pub fn window_from_snapshot(snapshot: &ImguiViewportSnapshot) -> Window {
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-fn apply_snapshot_to_window(snapshot: &ImguiViewportSnapshot, window: &mut Window) {
+fn apply_snapshot_to_window(snapshot: &ImguiViewportSnapshot, entity: Entity, window: &mut Window) {
     let next = window_from_snapshot(snapshot);
-    window.position = next.position;
+    window.position = WindowPosition::At(physical_outer_pos_for_client_pos(
+        entity,
+        snapshot.pos,
+        &next,
+    ));
     window.resolution = next.resolution;
     window.decorations = next.decorations;
     window.skip_taskbar = next.skip_taskbar;
@@ -1058,6 +1218,16 @@ fn physical_pos_for_window(pos: [f32; 2], window: &Window) -> IVec2 {
     physical_pos(pos, positive_finite_or(window.scale_factor(), 1.0))
 }
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn physical_outer_pos_for_client_pos(entity: Entity, pos: [f32; 2], window: &Window) -> IVec2 {
+    let pos = if let Some(offset) = winit_window_decoration_offset_logical(entity) {
+        [pos[0] - offset[0], pos[1] - offset[1]]
+    } else {
+        pos
+    };
+    physical_pos(pos, window_client_scale_factor(entity, window))
+}
+
 fn physical_pos(pos: [f32; 2], scale_factor: f32) -> IVec2 {
     IVec2::new(
         (pos[0] * scale_factor).round() as i32,
@@ -1067,7 +1237,12 @@ fn physical_pos(pos: [f32; 2], scale_factor: f32) -> IVec2 {
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 fn logical_pos(pos: IVec2, window: &Window) -> [f32; 2] {
-    let scale_factor = positive_finite_or(window.scale_factor(), 1.0);
+    logical_pos_with_scale(pos, window.scale_factor())
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn logical_pos_with_scale(pos: IVec2, scale_factor: f32) -> [f32; 2] {
+    let scale_factor = positive_finite_or(scale_factor, 1.0);
     [pos.x as f32 / scale_factor, pos.y as f32 / scale_factor]
 }
 

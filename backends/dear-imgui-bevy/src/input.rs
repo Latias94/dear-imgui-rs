@@ -341,6 +341,17 @@ fn mouse_pos_for_window(
         return pos;
     }
 
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    if let Some(origin) = crate::viewport::window_client_origin_logical(
+        window.entity,
+        &window.position,
+        window.scale_factor,
+    ) {
+        pos[0] += origin[0];
+        pos[1] += origin[1];
+        return pos;
+    }
+
     let WindowPosition::At(window_pos) = window.position else {
         return pos;
     };
