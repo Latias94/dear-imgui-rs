@@ -4,7 +4,7 @@ This guide explains how to publish new versions of the dear-imgui-rs workspace c
 
 ## Overview
 
-The workspace uses a **unified release train** model where all published crates share the same version number (e.g., 0.13.0). This simplifies dependency management and ensures compatibility across the ecosystem.
+The workspace uses a **unified release train** model where all published crates share the same version number (e.g., 0.14.0). This simplifies dependency management and ensures compatibility across the ecosystem.
 
 ## Prerequisites
 
@@ -207,8 +207,8 @@ After successful publishing:
 Tag the release in git:
 
 ```bash
-git tag -a v0.4.0 -m "Release v0.4.0"
-git push origin v0.4.0
+git tag -a v0.14.0 -m "Release v0.14.0"
+git push origin v0.14.0
 ```
 
 ### 2. Create GitHub Release
@@ -225,7 +225,7 @@ If you want to provide prebuilt binaries for the `-sys` crates:
 
 1. Go to Actions → "Prebuilt Binaries" workflow
 2. Click "Run workflow"
-3. Select the tag (e.g., `v0.4.0`)
+3. Select the tag (e.g., `v0.14.0`)
 4. Select crates to build (or `all`)
 5. Run the workflow
 
@@ -259,7 +259,7 @@ If a crate version is already published, you have two options:
 1. **Skip it**: The script will detect this and ask if you want to skip
 2. **Yank and republish**: 
    ```bash
-   cargo yank --vers 0.4.0 dear-imgui-sys
+   cargo yank --vers 0.14.0 dear-imgui-sys
    cargo publish -p dear-imgui-sys
    ```
    **Warning**: Only do this immediately after publishing if you found a critical issue.
@@ -327,7 +327,7 @@ The project follows a **release train** model:
 
 - **Major versions** (0.x → 1.0, 1.x → 2.0): Breaking changes, major upstream updates
 - **Minor versions** (0.4 → 0.5): New features, non-breaking changes, upstream updates
-- **Patch versions** (0.4.0 → 0.4.1): Bug fixes, documentation updates
+- **Patch versions** (0.14.0 → 0.14.1): Bug fixes, documentation updates
 
 All crates in the workspace are versioned together, even if some crates haven't changed.
 

@@ -114,7 +114,7 @@ These checks generate/use bindings only and won’t build/link native code.
 
 > **Tip**: Use the automated publishing script for easier workflow:
 > ```bash
-> python3 tools/tasks.py release-prep 0.9.0  # Prepare release
+> python3 tools/tasks.py release-prep 0.14.0  # Prepare release
 > python3 tools/tasks.py publish             # Publish all crates
 > ```
 > See [PUBLISHING.md](./PUBLISHING.md) for details.

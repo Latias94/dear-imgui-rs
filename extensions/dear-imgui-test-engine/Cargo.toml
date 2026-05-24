@@ -1,19 +1,20 @@
 [package]
 name = "dear-imgui-test-engine"
-version = "0.13.0"
+version = "0.14.0"
 edition.workspace = true
 description = "Safe Rust wrapper for Dear ImGui Test Engine"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
+authors.workspace = true
 documentation = "https://docs.rs/dear-imgui-test-engine"
 categories.workspace = true
 keywords.workspace = true
 readme = "README.md"
 
 [dependencies]
-dear-imgui-rs = { path = "../../dear-imgui", version = "0.13", features = ["test-engine"] }
-dear-imgui-test-engine-sys = { path = "../dear-imgui-test-engine-sys", version = "0.13", default-features = false }
+dear-imgui-rs = { path = "../../dear-imgui", version = "0.14", features = ["test-engine"] }
+dear-imgui-test-engine-sys = { path = "../dear-imgui-test-engine-sys", version = "0.14", default-features = false }
 bitflags.workspace = true
 
 [features]

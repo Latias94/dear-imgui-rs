@@ -1,19 +1,20 @@
 [package]
 name = "dear-app"
-version = "0.13.0"
+version = "0.14.0"
 edition.workspace = true
 description = "Convenient Dear ImGui application runner for dear-imgui-rs (Winit + WGPU, docking, themes, add-ons)"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
+authors.workspace = true
 categories.workspace = true
 keywords.workspace = true
 readme = "README.md"
 
 [dependencies]
-dear-imgui-rs = { path = "../dear-imgui", version = "0.13" }
-dear-imgui-winit = { path = "../backends/dear-imgui-winit", version = "0.13" }
-dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu", version = "0.13" }
+dear-imgui-rs = { path = "../dear-imgui", version = "0.14" }
+dear-imgui-winit = { path = "../backends/dear-imgui-winit", version = "0.14" }
+dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu", version = "0.14" }
 wgpu.workspace = true
 winit.workspace = true
 pollster.workspace = true
@@ -21,9 +22,9 @@ tracing.workspace = true
 thiserror.workspace = true
 
 # Optional add-ons
-dear-implot = { path = "../extensions/dear-implot", version = "0.13", optional = true }
-dear-imnodes = { path = "../extensions/dear-imnodes", version = "0.13", optional = true }
-dear-implot3d = { path = "../extensions/dear-implot3d", version = "0.13", optional = true }
+dear-implot = { path = "../extensions/dear-implot", version = "0.14", optional = true }
+dear-imnodes = { path = "../extensions/dear-imnodes", version = "0.14", optional = true }
+dear-implot3d = { path = "../extensions/dear-implot3d", version = "0.14", optional = true }
 
 [features]
 default = []

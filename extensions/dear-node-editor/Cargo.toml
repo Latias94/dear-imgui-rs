@@ -1,17 +1,18 @@
 [package]
 name = "dear-node-editor"
-version = "0.13.0"
+version = "0.14.0"
 edition.workspace = true
 description = "Safe Rust bindings for imgui-node-editor for Dear ImGui"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
+authors.workspace = true
 categories.workspace = true
 keywords.workspace = true
 
 [dependencies]
-dear-imgui-rs = { path = "../../dear-imgui", version = "0.13" }
-dear-node-editor-sys = { path = "../dear-node-editor-sys", version = "0.13" }
+dear-imgui-rs = { path = "../../dear-imgui", version = "0.14" }
+dear-node-editor-sys = { path = "../dear-node-editor-sys", version = "0.14" }
 bitflags.workspace = true
 thiserror.workspace = true
 

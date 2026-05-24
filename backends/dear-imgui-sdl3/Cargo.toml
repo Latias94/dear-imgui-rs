@@ -1,11 +1,12 @@
 [package]
 name = "dear-imgui-sdl3"
-version = "0.13.0"
+version = "0.14.0"
 edition.workspace = true
 description = "SDL3 platform backend with optional OpenGL3 renderer for dear-imgui-rs"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
+authors.workspace = true
 documentation = "https://docs.rs/dear-imgui-sdl3"
 categories.workspace = true
 keywords.workspace = true
@@ -13,8 +14,8 @@ build = "build.rs"
 links = "dear-imgui-sdl3-backend"
 
 [dependencies]
-dear-imgui-rs = { path = "../../dear-imgui", version = "0.13" }
-dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.13" }
+dear-imgui-rs = { path = "../../dear-imgui", version = "0.14" }
+dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.14" }
 sdl3-sys = "0.6"
 thiserror.workspace = true
 

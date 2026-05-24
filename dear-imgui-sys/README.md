@@ -131,10 +131,10 @@ This is a low-level sys crate providing unsafe FFI bindings. Most users should u
 
 ```toml
 [dependencies]
-dear-imgui-sys = "0.13.0"
+dear-imgui-sys = "0.14.0"
 
 # Enable features as needed
-dear-imgui-sys = { version = "0.13.0", features = ["freetype", "wasm"] }
+dear-imgui-sys = { version = "0.14.0", features = ["freetype", "wasm"] }
 ```
 
 ### Direct FFI Usage (Advanced)
@@ -167,7 +167,7 @@ can expose optional backend shim modules behind `backend-shim-*` features:
 
 ```toml
 [dependencies]
-dear-imgui-sys = { version = "0.13.0", features = ["backend-shim-opengl3"] }
+dear-imgui-sys = { version = "0.14.0", features = ["backend-shim-opengl3"] }
 ```
 
 These features expose modules such as:
@@ -290,8 +290,8 @@ There are two first-class Android directions.
 
    ```toml
    [dependencies]
-   dear-imgui-rs = "0.13.0"
-   dear-imgui-sys = { version = "0.13.0", features = ["backend-shim-android", "backend-shim-opengl3"] }
+   dear-imgui-rs = "0.14.0"
+   dear-imgui-sys = { version = "0.14.0", features = ["backend-shim-android", "backend-shim-opengl3"] }
    ```
 
    Use `dear-imgui-rs` for the safe core (`Context`, IO, frame lifecycle,

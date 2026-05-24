@@ -1,11 +1,12 @@
 [package]
 name = "dear-imgui-test-engine-sys"
-version = "0.13.0"
+version = "0.14.0"
 edition.workspace = true
 description = "Low-level FFI bindings for Dear ImGui Test Engine"
 license-file = "LICENSE.txt"
 repository.workspace = true
 homepage.workspace = true
+authors.workspace = true
 documentation = "https://docs.rs/dear-imgui-test-engine-sys"
 categories.workspace = true
 keywords.workspace = true
@@ -28,7 +29,7 @@ features = []
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.13", features = ["test-engine"] }
+dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.14", features = ["test-engine"] }
 
 [build-dependencies]
 bindgen = { workspace = true, optional = true }

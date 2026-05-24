@@ -21,9 +21,9 @@ For native build/link options (source, system/prebuilt, remote prebuilt), see `e
 
 | Item              | Version |
 |-------------------|---------|
-| Crate             | 0.13.0   |
-| dear-imgui-rs     | 0.13.0   |
-| dear-implot-sys   | 0.13.0   |
+| Crate             | 0.14.0   |
+| dear-imgui-rs     | 0.14.0   |
+| dear-implot-sys   | 0.14.0   |
 
 ### WASM (WebAssembly) support
 
@@ -66,8 +66,8 @@ This crate integrates with `dear-imgui-rs` directly — add both crates, then bu
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.13.0"
-dear-implot = "0.13.0"
+dear-imgui-rs = "0.14.0"
+dear-implot = "0.14.0"
 ```
 
 ```rust
@@ -118,8 +118,8 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.13.0"
-dear-implot = "0.13.0"
+dear-imgui-rs = "0.14.0"
+dear-implot = "0.14.0"
 ```
 
 Basic usage:

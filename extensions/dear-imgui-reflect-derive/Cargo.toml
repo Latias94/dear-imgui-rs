@@ -1,11 +1,12 @@
 [package]
 name = "dear-imgui-reflect-derive"
-version = "0.13.0"
+version = "0.14.0"
 edition.workspace = true
 description = "Derive macro for dear-imgui-reflect"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
+authors.workspace = true
 categories.workspace = true
 keywords.workspace = true
 

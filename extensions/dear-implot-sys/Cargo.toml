@@ -1,11 +1,12 @@
 [package]
 name = "dear-implot-sys"
-version = "0.13.0"
+version = "0.14.0"
 edition.workspace = true
 description = "Low-level FFI bindings for ImPlot via cimplot (C API)"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
+authors.workspace = true
 categories.workspace = true
 keywords.workspace = true
 build = "build.rs"
@@ -29,12 +30,12 @@ features = []
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.13" }
+dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.14" }
 #mint.workspace = true
 #cfg-if.workspace = true
 flate2 = { workspace = true, optional = true }
 tar = { workspace = true, optional = true }
-build-support = { package = "dear-imgui-build-support", version = "0.13", path = "../../tools/build-support", optional = true }
+build-support = { package = "dear-imgui-build-support", version = "0.14", path = "../../tools/build-support", optional = true }
 
 [build-dependencies]
 bindgen = { workspace = true, optional = true }
@@ -42,7 +43,7 @@ cc.workspace = true
 xshell = "0.2"
 pkg-config = "0.3"
 cmake = "0.1"
-build-support = { package = "dear-imgui-build-support", version = "0.13", path = "../../tools/build-support" }
+build-support = { package = "dear-imgui-build-support", version = "0.14", path = "../../tools/build-support" }
 
 [[bin]]
 name = "package"

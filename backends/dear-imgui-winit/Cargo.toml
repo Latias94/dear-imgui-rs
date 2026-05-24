@@ -1,17 +1,18 @@
 [package]
 name = "dear-imgui-winit"
-version = "0.13.0"
+version = "0.14.0"
 edition.workspace = true
 description = "Winit platform backend for dear-imgui-rs"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
+authors.workspace = true
 documentation = "https://docs.rs/dear-imgui-winit"
 categories.workspace = true
 keywords.workspace = true
 
 [dependencies]
-dear-imgui-rs = { path = "../../dear-imgui", version = "0.13" }
+dear-imgui-rs = { path = "../../dear-imgui", version = "0.14" }
 winit.workspace = true
 #cfg-if.workspace = true
 

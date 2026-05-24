@@ -1,9 +1,10 @@
 # dear-imgui-bevy
 
-Experimental Bevy-native backend for `dear-imgui-rs`.
+Experimental Bevy-native backend for `dear-imgui-rs` on Bevy `0.19.0-rc.2`.
 
-This crate targets Bevy `0.19.0-rc.2` first and follows the workstream in
-`docs/workstreams/bevy-native-backend/`. It is intentionally **not** a wrapper around
+This crate targets Bevy `0.19.0-rc.2` first. See
+`docs/workstreams/bevy-backend-product-followups-v1/` for the current integration notes and
+follow-up scope. It is intentionally **not** a wrapper around
 `dear-imgui-winit` plus `dear-imgui-wgpu`: Bevy owns winit, input events, WGPU resources, render
 schedules, and camera targets.
 
@@ -42,6 +43,10 @@ both the `render` and `multi-viewport` Cargo features. The backend installs a qu
 lifecycle bridge, maps input/focus/cursor/IME messages for secondary viewport windows, feeds Bevy
 window position/size/focus/DPI state back through Dear ImGui's PlatformIO query callbacks, and
 routes each viewport's draw data to the matching Bevy `Window` render target.
+
+This path is still experimental. A few z-order and dock-target edge cases remain around detached
+windows, so treat multi-viewport as preview-grade rather than a fully polished window-manager
+experience.
 
 | Target / feature set | `multi_viewport_requested` | Lifecycle bridge | Input / platform feedback | Full `multi_viewport_supported` |
 | --- | --- | --- | --- | --- |

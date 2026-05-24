@@ -2,6 +2,7 @@
 name = "dear-imgui-examples"
 version = "0.1.0"
 edition.workspace = true
+authors.workspace = true
 publish = false
 
 [features]
@@ -264,13 +265,13 @@ path = "imgui_test_engine_basic.rs"
 required-features = ["test-engine"]
 
 [dependencies]
-dear-imgui-rs = { path = "../dear-imgui", version = "0.13" }
-dear-imgui-winit = { path = "../backends/dear-imgui-winit", version = "0.13" }
-dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu", version = "0.13" }
-dear-imgui-glow = { path = "../backends/dear-imgui-glow", version = "0.13" }
-dear-imgui-sdl3 = { path = "../backends/dear-imgui-sdl3", version = "0.13", optional = true }
-dear-imgui-ash = { path = "../backends/dear-imgui-ash", version = "0.13" }
-dear-app = { path = "../dear-app", version = "0.13" }
+dear-imgui-rs = { path = "../dear-imgui", version = "0.14" }
+dear-imgui-winit = { path = "../backends/dear-imgui-winit", version = "0.14" }
+dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu", version = "0.14" }
+dear-imgui-glow = { path = "../backends/dear-imgui-glow", version = "0.14" }
+dear-imgui-sdl3 = { path = "../backends/dear-imgui-sdl3", version = "0.14", optional = true }
+dear-imgui-ash = { path = "../backends/dear-imgui-ash", version = "0.14" }
+dear-app = { path = "../dear-app", version = "0.14" }
 arboard = "3"
 dear-implot = { path = "../extensions/dear-implot", optional = true }
 dear-imguizmo = { path = "../extensions/dear-imguizmo", optional = true }

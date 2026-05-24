@@ -2498,7 +2498,7 @@ checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 
 [[package]]
 name = "dear-app"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "dear-imgui-rs",
  "dear-imgui-wgpu",
@@ -2515,7 +2515,7 @@ dependencies = [
 
 [[package]]
 name = "dear-file-browser"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "chrono",
  "dear-imgui-rs",
@@ -2530,7 +2530,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-ash"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "ash",
  "ash-window",
@@ -2544,7 +2544,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-bevy"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "bevy",
  "bevy_app",
@@ -2580,7 +2580,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-build-support"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "flate2",
  "tar",
@@ -2629,7 +2629,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-glow"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "dear-imgui-rs",
  "env_logger",
@@ -2642,7 +2642,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-reflect"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "dear-imgui-reflect-derive",
  "dear-imgui-rs",
@@ -2652,7 +2652,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-reflect-derive"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2661,7 +2661,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-rs"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "approx",
  "bitflags 2.11.1",
@@ -2681,7 +2681,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-sdl3"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "cc",
  "dear-imgui-rs",
@@ -2694,7 +2694,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-sys"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -2710,7 +2710,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-test-engine"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "bitflags 2.11.1",
  "dear-imgui-rs",
@@ -2719,7 +2719,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-test-engine-sys"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -2754,7 +2754,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-wgpu"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "bytemuck",
  "dear-imgui-rs",
@@ -2771,7 +2771,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-winit"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "dear-imgui-rs",
  "web-sys",
@@ -2781,7 +2781,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imguizmo"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "bitflags 2.11.1",
  "dear-imgui-rs",
@@ -2797,7 +2797,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imguizmo-quat"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "bitflags 2.11.1",
  "dear-imgui-rs",
@@ -2810,7 +2810,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imguizmo-quat-sys"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -2825,7 +2825,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imguizmo-sys"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -2841,7 +2841,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imnodes"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "bitflags 2.11.1",
  "dear-imgui-rs",
@@ -2852,7 +2852,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imnodes-sys"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -2867,7 +2867,7 @@ dependencies = [
 
 [[package]]
 name = "dear-implot"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "approx",
  "bitflags 2.11.1",
@@ -2880,7 +2880,7 @@ dependencies = [
 
 [[package]]
 name = "dear-implot-sys"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -2895,7 +2895,7 @@ dependencies = [
 
 [[package]]
 name = "dear-implot3d"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "bitflags 2.11.1",
  "dear-imgui-rs",
@@ -2907,7 +2907,7 @@ dependencies = [
 
 [[package]]
 name = "dear-implot3d-sys"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -2922,7 +2922,7 @@ dependencies = [
 
 [[package]]
 name = "dear-node-editor"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "bitflags 2.11.1",
  "dear-imgui-rs",
@@ -2933,7 +2933,7 @@ dependencies = [
 
 [[package]]
 name = "dear-node-editor-sys"
-version = "0.13.0"
+version = "0.14.0"
 dependencies = [
  "bindgen",
  "cc",
@@ -3149,7 +3149,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5797,7 +5797,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5877,9 +5877,9 @@ dependencies = [
 
 [[package]]
 name = "sdl3"
-version = "0.18.3"
+version = "0.18.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3febf4ebcd9e34b25b182ea6812d26f7d575d47134cc508aa1beb89f63e2ae6"
+checksum = "25bd22eb1bbc9137e914022b4994ed35591eea0884e9e3e98e6d9895cad6e1d2"
 dependencies = [
  "bitflags 2.11.1",
  "libc",
@@ -6276,9 +6276,9 @@ dependencies = [
 
 [[package]]
 name = "tar"
-version = "0.4.45"
+version = "0.4.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22692a6476a21fa75fdfc11d452fda482af402c008cdbaf3476414e122040973"
+checksum = "3f6221d9a6003c78398e3b239969f352578258df48c8eb051caadae0015bc840"
 dependencies = [
  "filetime",
  "libc",
@@ -7495,7 +7495,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
