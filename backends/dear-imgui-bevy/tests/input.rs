@@ -9,8 +9,8 @@ use bevy_input::mouse::{
 use bevy_input::touch::{TouchInput, TouchPhase};
 use bevy_math::{IVec2, Vec2};
 use bevy_window::{
-    CursorIcon, CursorLeft, CursorMoved, CursorOptions, Ime, PrimaryWindow, SystemCursorIcon,
-    Window, WindowFocused, WindowPosition, WindowResized, WindowResolution,
+    CursorEntered, CursorIcon, CursorLeft, CursorMoved, CursorOptions, Ime, PrimaryWindow,
+    SystemCursorIcon, Window, WindowFocused, WindowPosition, WindowResized, WindowResolution,
     WindowScaleFactorChanged,
 };
 use dear_imgui_bevy::{
@@ -745,6 +745,85 @@ fn input_secondary_viewport_window_messages_use_imgui_platform_coordinates_when_
         assert!(chars.contains(&('x' as u32)));
         assert!(chars.contains(&('界' as u32)));
     });
+}
+
+#[test]
+fn input_cursor_left_from_previous_window_does_not_clear_new_hovered_viewport_position() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary) = app_with_primary_window();
+    let viewport_id = imgui::Id::from(0x550);
+    let secondary = app
+        .world_mut()
+        .spawn((
+            Window {
+                position: WindowPosition::At(IVec2::new(200, 300)),
+                resolution: WindowResolution::new(640, 480),
+                ..Default::default()
+            },
+            ImguiViewportWindow { viewport_id },
+        ))
+        .id();
+    {
+        let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
+        let io = context.context_mut().io_mut();
+        io.set_config_flags(io.config_flags() | imgui::ConfigFlags::VIEWPORTS_ENABLE);
+    }
+
+    app.world_mut()
+        .resource_mut::<Messages<CursorMoved>>()
+        .write(CursorMoved {
+            window: primary,
+            position: Vec2::new(10.0, 20.0),
+            delta: None,
+        });
+    run_input_systems(&mut app);
+    assert_eq!(
+        app.world()
+            .resource::<ImguiInputState>()
+            .mouse_hovered_window(),
+        Some(primary)
+    );
+
+    app.world_mut()
+        .resource_mut::<Messages<CursorMoved>>()
+        .write(CursorMoved {
+            window: secondary,
+            position: Vec2::new(30.0, 40.0),
+            delta: None,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<CursorLeft>>()
+        .write(CursorLeft { window: primary });
+    run_input_systems(&mut app);
+
+    assert_eq!(
+        app.world()
+            .resource::<ImguiInputState>()
+            .mouse_hovered_window(),
+        Some(secondary)
+    );
+    begin_frame_and_assert(&mut app, |ui| {
+        assert_eq!(ui.mouse_pos(), [230.0, 340.0]);
+        assert_eq!(ui.io().mouse_hovered_viewport(), viewport_id);
+    });
+}
+
+#[test]
+fn input_cursor_entered_tracks_hovered_window_without_requiring_motion() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary) = app_with_primary_window();
+
+    app.world_mut()
+        .resource_mut::<Messages<CursorEntered>>()
+        .write(CursorEntered { window: primary });
+    run_input_systems(&mut app);
+
+    assert_eq!(
+        app.world()
+            .resource::<ImguiInputState>()
+            .mouse_hovered_window(),
+        Some(primary)
+    );
 }
 
 #[test]

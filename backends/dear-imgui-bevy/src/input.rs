@@ -19,8 +19,8 @@ use bevy_input::mouse::{
 use bevy_input::touch::{TouchInput, TouchPhase};
 use bevy_math::Vec2;
 use bevy_window::{
-    CursorIcon, CursorLeft, CursorMoved, Ime, PrimaryWindow, SystemCursorIcon, Window,
-    WindowBackendScaleFactorChanged, WindowFocused, WindowPosition, WindowResized,
+    CursorEntered, CursorIcon, CursorLeft, CursorMoved, Ime, PrimaryWindow, SystemCursorIcon,
+    Window, WindowBackendScaleFactorChanged, WindowFocused, WindowPosition, WindowResized,
     WindowScaleFactorChanged,
 };
 use dear_imgui_rs as imgui;
@@ -39,6 +39,7 @@ pub struct ImguiInputState {
     ime_enabled: bool,
     primary_window_focused: Option<bool>,
     focused_window: Option<Entity>,
+    mouse_hovered_window: Option<Entity>,
     pressed_keys: HashSet<imgui::Key>,
     pressed_mouse_buttons: HashSet<imgui::MouseButton>,
 }
@@ -66,6 +67,12 @@ impl ImguiInputState {
     #[must_use]
     pub fn focused_window(&self) -> Option<Entity> {
         self.focused_window
+    }
+
+    /// Last Bevy window entity reported as hovered by the OS mouse.
+    #[must_use]
+    pub fn mouse_hovered_window(&self) -> Option<Entity> {
+        self.mouse_hovered_window
     }
 }
 
@@ -100,6 +107,7 @@ pub(crate) fn install_input_mapping(app: &mut App) {
         .add_message::<WindowScaleFactorChanged>()
         .add_message::<WindowBackendScaleFactorChanged>()
         .add_message::<WindowFocused>()
+        .add_message::<CursorEntered>()
         .add_message::<CursorMoved>()
         .add_message::<CursorLeft>()
         .add_message::<Ime>()
@@ -132,6 +140,7 @@ pub fn primary_window_input_system(
             &mut messages.window_scale_factor_changed,
             &mut messages.window_backend_scale_factor_changed,
             &mut messages.window_focused,
+            &mut messages.cursor_entered,
             &mut messages.cursor_moved,
             &mut messages.cursor_left,
             &mut messages.mouse_button_input,
@@ -194,11 +203,22 @@ pub fn primary_window_input_system(
         apply_focus_event(context, &mut input_state, primary_window, false);
     }
 
+    for (_event, window) in messages.cursor_entered.read().filter_map(|event| {
+        imgui_window_for_event(event.window, primary_window, &viewport_windows)
+            .map(|window| (event, window))
+    }) {
+        input_state.mouse_hovered_window = Some(window.entity);
+        let io = context.io_mut();
+        io.add_mouse_source_event(imgui::MouseSource::Mouse);
+        add_mouse_viewport_event(io, Some(window.viewport_id));
+    }
+
     for event in messages.cursor_moved.read().filter_map(|event| {
         imgui_window_for_event(event.window, primary_window, &viewport_windows)
             .map(|window| (event, window))
     }) {
         let (event, window) = event;
+        input_state.mouse_hovered_window = Some(window.entity);
         let mouse_pos = mouse_pos_for_window(context, window, event.position);
         let io = context.io_mut();
         io.add_mouse_source_event(imgui::MouseSource::Mouse);
@@ -206,9 +226,18 @@ pub fn primary_window_input_system(
         io.add_mouse_pos_event(mouse_pos);
     }
 
-    for _event in messages.cursor_left.read().filter(|event| {
-        imgui_window_for_event(event.window, primary_window, &viewport_windows).is_some()
-    }) {
+    for window in messages
+        .cursor_left
+        .read()
+        .filter_map(|event| imgui_window_for_event(event.window, primary_window, &viewport_windows))
+    {
+        if input_state
+            .mouse_hovered_window
+            .is_some_and(|entity| entity != window.entity)
+        {
+            continue;
+        }
+        input_state.mouse_hovered_window = None;
         let io = context.io_mut();
         io.add_mouse_source_event(imgui::MouseSource::Mouse);
         add_mouse_viewport_event(io, None);
@@ -282,6 +311,7 @@ pub struct ImguiInputMessageReaders<'w, 's> {
     window_scale_factor_changed: MessageReader<'w, 's, WindowScaleFactorChanged>,
     window_backend_scale_factor_changed: MessageReader<'w, 's, WindowBackendScaleFactorChanged>,
     window_focused: MessageReader<'w, 's, WindowFocused>,
+    cursor_entered: MessageReader<'w, 's, CursorEntered>,
     cursor_moved: MessageReader<'w, 's, CursorMoved>,
     cursor_left: MessageReader<'w, 's, CursorLeft>,
     mouse_button_input: MessageReader<'w, 's, MouseButtonInput>,
@@ -718,6 +748,7 @@ fn discard_unread_messages(
     window_scale_factor_changed: &mut MessageReader<WindowScaleFactorChanged>,
     window_backend_scale_factor_changed: &mut MessageReader<WindowBackendScaleFactorChanged>,
     window_focused: &mut MessageReader<WindowFocused>,
+    cursor_entered: &mut MessageReader<CursorEntered>,
     cursor_moved: &mut MessageReader<CursorMoved>,
     cursor_left: &mut MessageReader<CursorLeft>,
     mouse_button_input: &mut MessageReader<MouseButtonInput>,
@@ -731,6 +762,7 @@ fn discard_unread_messages(
     window_scale_factor_changed.clear();
     window_backend_scale_factor_changed.clear();
     window_focused.clear();
+    cursor_entered.clear();
     cursor_moved.clear();
     cursor_left.clear();
     mouse_button_input.clear();
