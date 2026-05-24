@@ -1025,6 +1025,56 @@ fn input_touch_events_drive_first_active_finger_as_touchscreen_mouse() {
 }
 
 #[test]
+fn input_stale_touched_viewport_window_clears_touch_mouse_state() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary) = app_with_primary_window();
+    let viewport_id = imgui::Id::from(0x563);
+    let secondary = app
+        .world_mut()
+        .spawn((
+            Window {
+                position: WindowPosition::At(IVec2::new(120, 180)),
+                resolution: WindowResolution::new(640, 480),
+                ..Default::default()
+            },
+            ImguiViewportWindow { viewport_id },
+        ))
+        .id();
+
+    app.world_mut()
+        .resource_mut::<Messages<TouchInput>>()
+        .write(TouchInput {
+            phase: TouchPhase::Started,
+            position: Vec2::new(15.0, 25.0),
+            window: secondary,
+            force: None,
+            id: 7,
+        });
+    run_input_systems(&mut app);
+    begin_frame_and_assert(&mut app, |ui| {
+        assert_eq!(ui.mouse_pos(), [15.0, 25.0]);
+        assert_eq!(ui.io().mouse_source(), imgui::MouseSource::TouchScreen);
+        assert!(ui.is_mouse_down(imgui::MouseButton::Left));
+    });
+
+    app.world_mut().despawn(secondary);
+    run_input_systems(&mut app);
+
+    let input_state = app.world().resource::<ImguiInputState>();
+    assert_eq!(input_state.active_touch_id(), None);
+    begin_frame_and_assert(&mut app, |ui| {
+        assert!(
+            ui.mouse_pos()[0] < -1.0e30 && ui.mouse_pos()[1] < -1.0e30,
+            "destroying the touched secondary viewport must clear the ImGui mouse position"
+        );
+        assert!(!ui.is_mouse_down(imgui::MouseButton::Left));
+        assert_eq!(ui.io().mouse_hovered_viewport(), imgui::Id::from(0));
+    });
+
+    assert!(app.world().get::<Window>(primary).is_some());
+}
+
+#[test]
 fn input_non_primary_window_messages_are_ignored() {
     let _guard = imgui_context_guard();
     let (mut app, _primary) = app_with_primary_window();

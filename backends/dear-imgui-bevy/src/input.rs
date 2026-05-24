@@ -36,6 +36,7 @@ pub struct ImguiInputSystems;
 #[derive(Resource, Debug, Default)]
 pub struct ImguiInputState {
     active_touch_id: Option<u64>,
+    active_touch_window: Option<Entity>,
     ime_enabled: bool,
     primary_window_focused: Option<bool>,
     focused_window: Option<Entity>,
@@ -672,6 +673,20 @@ fn prune_stale_window_state(
         io.add_mouse_pos_event(INVALID_MOUSE_POS);
         clear_mouse_hovered_viewport(io);
     }
+
+    if state
+        .active_touch_window
+        .is_some_and(|entity| !is_mapped_imgui_window(entity, primary_window, viewport_windows))
+    {
+        state.active_touch_id = None;
+        state.active_touch_window = None;
+        let io = context.io_mut();
+        io.add_mouse_source_event(imgui::MouseSource::TouchScreen);
+        io.add_mouse_pos_event(INVALID_MOUSE_POS);
+        io.add_mouse_button_event(imgui::MouseButton::Left, false);
+        add_mouse_viewport_event(io, None);
+        clear_mouse_hovered_viewport(io);
+    }
 }
 
 fn release_input_for_missing_primary_window(
@@ -830,6 +845,7 @@ fn apply_touch_input(
         TouchPhase::Started => {
             if state.active_touch_id.is_none() {
                 state.active_touch_id = Some(event.id);
+                state.active_touch_window = Some(window.entity);
                 let mouse_pos = mouse_pos_for_window(context, window, event.position);
                 let io = context.io_mut();
                 io.add_mouse_source_event(imgui::MouseSource::TouchScreen);
@@ -840,6 +856,7 @@ fn apply_touch_input(
         }
         TouchPhase::Moved => {
             if state.active_touch_id == Some(event.id) {
+                state.active_touch_window = Some(window.entity);
                 let mouse_pos = mouse_pos_for_window(context, window, event.position);
                 let io = context.io_mut();
                 io.add_mouse_source_event(imgui::MouseSource::TouchScreen);
@@ -850,6 +867,7 @@ fn apply_touch_input(
         TouchPhase::Ended | TouchPhase::Canceled => {
             if state.active_touch_id == Some(event.id) {
                 state.active_touch_id = None;
+                state.active_touch_window = None;
                 let mouse_pos = mouse_pos_for_window(context, window, event.position);
                 let io = context.io_mut();
                 io.add_mouse_source_event(imgui::MouseSource::TouchScreen);
@@ -908,6 +926,7 @@ fn release_sticky_input(context: &mut imgui::Context, state: &mut ImguiInputStat
     }
 
     if state.active_touch_id.take().is_some() {
+        state.active_touch_window = None;
         io.add_mouse_source_event(imgui::MouseSource::TouchScreen);
         io.add_mouse_button_event(imgui::MouseButton::Left, false);
     }
