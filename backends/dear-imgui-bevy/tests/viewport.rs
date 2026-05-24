@@ -275,6 +275,26 @@ fn viewport_window_factory_maps_snapshot_to_hidden_secondary_window() {
     assert!(!window.focused);
 }
 
+#[test]
+fn viewport_window_factory_sanitizes_non_finite_platform_values() {
+    let snapshot = ImguiViewportSnapshot {
+        pos: [f32::NAN, f32::INFINITY],
+        size: [f32::NAN, f32::NEG_INFINITY],
+        dpi_scale: f32::INFINITY,
+        ..viewport_snapshot(0x43)
+    };
+
+    let window = dear_imgui_bevy::viewport::window_from_snapshot(&snapshot);
+
+    assert_eq!(
+        window.position,
+        WindowPosition::At(bevy_math::IVec2::new(0, 0))
+    );
+    assert_eq!(window.resolution.width(), 1.0);
+    assert_eq!(window.resolution.height(), 1.0);
+    assert_eq!(window.resolution.scale_factor(), 1.0);
+}
+
 #[cfg(feature = "multi-viewport")]
 #[test]
 fn viewport_platform_monitors_use_real_monitor_space_not_primary_window_space() {

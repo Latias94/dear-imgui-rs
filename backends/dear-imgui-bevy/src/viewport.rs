@@ -760,10 +760,10 @@ fn apply_viewport_commands_system(
             }
             ImguiViewportCommand::SetSize { id, size } => {
                 if let Some(window) = pending_windows.get_mut(&id) {
-                    window.resolution.set(size[0].max(1.0), size[1].max(1.0));
+                    set_window_logical_size(window, size);
                 } else {
                     with_window_mut(&mut windows, &bridge, id, |window| {
-                        window.resolution.set(size[0].max(1.0), size[1].max(1.0));
+                        set_window_logical_size(window, size);
                     });
                 }
                 feedback_candidates.insert(id);
@@ -1218,12 +1218,13 @@ fn with_window_mut(
 #[must_use]
 pub fn window_from_snapshot(snapshot: &ImguiViewportSnapshot) -> Window {
     let scale_factor = positive_finite_or(snapshot.dpi_scale, 1.0);
+    let logical_size = finite_logical_size(snapshot.size);
     let mut window = Window {
         title: format!("Dear ImGui Viewport {}", snapshot.id.raw()),
         position: WindowPosition::At(physical_pos(snapshot.pos, scale_factor)),
         resolution: WindowResolution::new(
-            physical_extent(snapshot.size[0]),
-            physical_extent(snapshot.size[1]),
+            physical_extent(logical_size[0]),
+            physical_extent(logical_size[1]),
         ),
         decorations: !snapshot.flags.contains(imgui::ViewportFlags::NO_DECORATION),
         skip_taskbar: snapshot
@@ -1239,9 +1240,7 @@ pub fn window_from_snapshot(snapshot: &ImguiViewportSnapshot) -> Window {
         ..Default::default()
     };
     window.resolution.set_scale_factor(scale_factor);
-    window
-        .resolution
-        .set(snapshot.size[0].max(1.0), snapshot.size[1].max(1.0));
+    set_window_logical_size(&mut window, logical_size);
     window
 }
 
@@ -1276,6 +1275,7 @@ fn physical_outer_pos_for_client_pos(entity: Entity, pos: [f32; 2], window: &Win
 }
 
 fn physical_pos(pos: [f32; 2], scale_factor: f32) -> IVec2 {
+    let pos = finite_logical_pos(pos);
     IVec2::new(
         (pos[0] * scale_factor).round() as i32,
         (pos[1] * scale_factor).round() as i32,
@@ -1295,6 +1295,26 @@ fn logical_pos_with_scale(pos: IVec2, scale_factor: f32) -> [f32; 2] {
 
 fn physical_extent(value: f32) -> u32 {
     value.round().max(1.0) as u32
+}
+
+fn finite_logical_pos(pos: [f32; 2]) -> [f32; 2] {
+    [finite_or(pos[0], 0.0), finite_or(pos[1], 0.0)]
+}
+
+fn finite_logical_size(size: [f32; 2]) -> [f32; 2] {
+    [
+        positive_finite_or(size[0], 1.0),
+        positive_finite_or(size[1], 1.0),
+    ]
+}
+
+fn finite_or(value: f32, fallback: f32) -> f32 {
+    if value.is_finite() { value } else { fallback }
+}
+
+fn set_window_logical_size(window: &mut Window, size: [f32; 2]) {
+    let [width, height] = finite_logical_size(size);
+    window.resolution.set(width, height);
 }
 
 #[cfg(all(test, feature = "multi-viewport", not(target_arch = "wasm32")))]
