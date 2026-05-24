@@ -858,6 +858,7 @@ fn cleanup_secondary_viewports_when_primary_is_unavailable(
     primary_windows: Query<Entity, With<PrimaryWindow>>,
     viewport_windows: Query<Entity, With<ImguiViewportWindow>>,
     viewport_cameras: Query<Entity, With<ImguiViewportCamera>>,
+    mut imgui_context: NonSendMut<crate::ImguiContext>,
     mut bridge: NonSendMut<ImguiViewportBridge>,
 ) {
     let primary_window = primary_windows.single().ok();
@@ -874,7 +875,33 @@ fn cleanup_secondary_viewports_when_primary_is_unavailable(
     for entity in viewport_windows.iter().chain(viewport_cameras.iter()) {
         ecs_commands.entity(entity).despawn();
     }
+    clear_imgui_viewport_platform_handles(imgui_context.context_mut(), &bridge);
     bridge.clear_viewport_state();
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn clear_imgui_viewport_platform_handles(
+    context: &mut imgui::Context,
+    bridge: &ImguiViewportBridge,
+) {
+    let owned_handles = bridge
+        .inner
+        .viewport_handles
+        .values()
+        .map(|handle| (&**handle as *const ImguiViewportPlatformHandle).cast::<c_void>())
+        .collect::<HashSet<_>>();
+    if owned_handles.is_empty() {
+        return;
+    }
+
+    for viewport in context.platform_io_mut().viewports_iter_mut() {
+        if owned_handles.contains(&(viewport.platform_handle() as *const c_void))
+            || owned_handles.contains(&(viewport.platform_user_data() as *const c_void))
+        {
+            viewport.set_platform_handle(std::ptr::null_mut());
+            viewport.set_platform_user_data(std::ptr::null_mut());
+        }
+    }
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]

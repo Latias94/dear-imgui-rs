@@ -247,6 +247,51 @@ fn viewport_prepare_refreshes_main_platform_user_data_to_live_handle() {
     );
 }
 
+#[cfg(feature = "multi-viewport")]
+#[test]
+fn viewport_primary_cleanup_clears_imgui_platform_handles() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_multi_viewport_bridge("viewport-primary-cleanup-handles");
+    let primary = app
+        .world_mut()
+        .spawn((Window::default(), PrimaryWindow))
+        .id();
+
+    app.update();
+
+    {
+        let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
+        let main_viewport = context.context_mut().main_viewport();
+        assert!(!main_viewport.platform_handle().is_null());
+        assert_eq!(
+            main_viewport.platform_handle(),
+            main_viewport.platform_user_data()
+        );
+    }
+
+    app.world_mut()
+        .resource_mut::<Messages<WindowCloseRequested>>()
+        .write(WindowCloseRequested { window: primary });
+    app.update();
+
+    let (handle, user_data) = {
+        let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
+        let main_viewport = context.context_mut().main_viewport();
+        (
+            main_viewport.platform_handle(),
+            main_viewport.platform_user_data(),
+        )
+    };
+    assert!(
+        handle.is_null(),
+        "primary cleanup must clear ImGui's main viewport PlatformHandle before releasing backend handles"
+    );
+    assert!(
+        user_data.is_null(),
+        "primary cleanup must clear ImGui's main viewport PlatformUserData before releasing backend handles"
+    );
+}
+
 #[test]
 fn viewport_window_factory_maps_snapshot_to_hidden_secondary_window() {
     let snapshot = ImguiViewportSnapshot {
