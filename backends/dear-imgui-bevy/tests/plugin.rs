@@ -1,4 +1,8 @@
 use bevy_app::App;
+#[cfg(feature = "render")]
+use bevy_ecs::schedule::ScheduleLabel;
+#[cfg(feature = "render")]
+use bevy_render::{Render, RenderApp, extract_plugin::ExtractPlugin};
 use dear_imgui_bevy::{
     BEVY_TARGET_COMMIT, BEVY_TARGET_VERSION, ImguiBackendConfig, ImguiBackendStatus, ImguiContext,
     ImguiPlugin, RUST_TARGET_VERSION, WGPU_TARGET_VERSION,
@@ -25,6 +29,8 @@ fn plugin_registers_minimal_imgui_resources() {
     let status = app.world().resource::<ImguiBackendStatus>();
     assert_eq!(status.bevy_target, BEVY_TARGET_VERSION);
     assert_eq!(status.rust_target, RUST_TARGET_VERSION);
+    assert_eq!(status.render_feature_enabled, cfg!(feature = "render"));
+    assert!(!status.render_integration_installed);
     assert!(!status.multi_viewport_requested);
     assert_eq!(
         status.multi_viewport_feature_enabled,
@@ -66,6 +72,8 @@ fn plugin_preserves_existing_config_and_context() {
 
     let status = app.world().resource::<ImguiBackendStatus>();
     assert!(status.multi_viewport_requested);
+    assert_eq!(status.render_feature_enabled, cfg!(feature = "render"));
+    assert!(!status.render_integration_installed);
     assert_eq!(
         status.multi_viewport_feature_enabled,
         cfg!(feature = "multi-viewport")
@@ -79,22 +87,8 @@ fn plugin_preserves_existing_config_and_context() {
         status.viewport_input_feedback_enabled,
         cfg!(all(feature = "multi-viewport", not(target_arch = "wasm32")))
     );
-    assert_eq!(
-        status.viewport_render_routing_enabled,
-        cfg!(all(
-            feature = "render",
-            feature = "multi-viewport",
-            not(target_arch = "wasm32")
-        ))
-    );
-    assert_eq!(
-        status.multi_viewport_supported,
-        cfg!(all(
-            feature = "render",
-            feature = "multi-viewport",
-            not(target_arch = "wasm32")
-        ))
-    );
+    assert_eq!(status.viewport_render_routing_enabled, false);
+    assert!(!status.multi_viewport_supported);
     assert!(app.world().get_non_send::<ImguiContext>().is_some());
 }
 
@@ -111,6 +105,8 @@ fn status_multi_viewport_request_reports_exact_enablement_boundary() {
 
     let status = app.world().resource::<ImguiBackendStatus>();
     assert!(status.multi_viewport_requested);
+    assert_eq!(status.render_feature_enabled, cfg!(feature = "render"));
+    assert!(!status.render_integration_installed);
     assert_eq!(
         status.multi_viewport_feature_enabled,
         cfg!(feature = "multi-viewport")
@@ -126,20 +122,35 @@ fn status_multi_viewport_request_reports_exact_enablement_boundary() {
         "DMV-050 proves all-window input/focus/DPI/IME feedback for native multi-viewport builds"
     );
     assert_eq!(
+        status.viewport_render_routing_enabled, false,
+        "Render routing should not be advertised until the Bevy RenderApp integration is installed"
+    );
+    assert!(!status.multi_viewport_supported);
+}
+
+#[cfg(feature = "render")]
+#[test]
+fn status_reports_render_routing_only_after_render_app_installation() {
+    let _guard = imgui_context_guard();
+
+    let mut app = App::new();
+    app.add_plugins(ExtractPlugin::default());
+    app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
+    app.add_plugins(ImguiPlugin::new(ImguiBackendConfig {
+        name: "render-status".to_owned(),
+        docking: true,
+        multi_viewport: true,
+    }));
+
+    let status = app.world().resource::<ImguiBackendStatus>();
+    assert!(status.render_feature_enabled);
+    assert!(status.render_integration_installed);
+    assert_eq!(
         status.viewport_render_routing_enabled,
-        cfg!(all(
-            feature = "render",
-            feature = "multi-viewport",
-            not(target_arch = "wasm32")
-        )),
-        "DMV-060 enables secondary viewport render routing for native render,multi-viewport builds"
+        cfg!(all(feature = "multi-viewport", not(target_arch = "wasm32")))
     );
     assert_eq!(
         status.multi_viewport_supported,
-        cfg!(all(
-            feature = "render",
-            feature = "multi-viewport",
-            not(target_arch = "wasm32")
-        ))
+        cfg!(all(feature = "multi-viewport", not(target_arch = "wasm32")))
     );
 }

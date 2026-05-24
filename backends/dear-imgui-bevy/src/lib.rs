@@ -86,8 +86,6 @@ impl Plugin for ImguiPlugin {
         if !app.world().contains_resource::<ImguiBackendConfig>() {
             app.insert_resource(self.config.clone());
         }
-        let effective_config = app.world().resource::<ImguiBackendConfig>().clone();
-        app.insert_resource(ImguiBackendStatus::from_config(&effective_config));
         if app.world().get_non_send::<ImguiContext>().is_none() {
             app.insert_non_send(ImguiContext::new(dear_imgui_rs::Context::create()));
         }
@@ -96,13 +94,27 @@ impl Plugin for ImguiPlugin {
         context::install_context_lifecycle(app);
         viewport::install_viewport_bridge(app);
         #[cfg(feature = "render")]
-        render::install_render_extraction(app);
+        let render_integration_installed = render::install_render_extraction(app);
+        #[cfg(not(feature = "render"))]
+        let render_integration_installed = false;
+        refresh_backend_status(app, render_integration_installed);
     }
 
     fn finish(&self, _app: &mut App) {
         #[cfg(feature = "render")]
-        render::install_render_extraction(_app);
+        {
+            let render_integration_installed = render::install_render_extraction(_app);
+            refresh_backend_status(_app, render_integration_installed);
+        }
     }
+}
+
+fn refresh_backend_status(app: &mut App, render_integration_installed: bool) {
+    let effective_config = app.world().resource::<ImguiBackendConfig>().clone();
+    app.insert_resource(ImguiBackendStatus::from_config(
+        &effective_config,
+        render_integration_installed,
+    ));
 }
 
 /// Static configuration for the Bevy backend.
@@ -139,6 +151,8 @@ pub struct ImguiBackendStatus {
     pub rust_target: &'static str,
     /// Whether render integration has been compiled in.
     pub render_feature_enabled: bool,
+    /// Whether render-world extraction and overlay systems were installed into Bevy's `RenderApp`.
+    pub render_integration_installed: bool,
     /// Whether the current backend configuration requested Dear ImGui platform windows.
     pub multi_viewport_requested: bool,
     /// Whether the Cargo feature needed to compile PlatformIO viewport callbacks is enabled.
@@ -160,7 +174,7 @@ pub struct ImguiBackendStatus {
 }
 
 impl ImguiBackendStatus {
-    fn from_config(config: &ImguiBackendConfig) -> Self {
+    fn from_config(config: &ImguiBackendConfig, render_integration_installed: bool) -> Self {
         let viewport_lifecycle_bridge_enabled =
             config.multi_viewport && MULTI_VIEWPORT_FEATURE_ENABLED && NATIVE_PLATFORM_TARGET;
         let viewport_input_feedback_enabled =
@@ -168,12 +182,13 @@ impl ImguiBackendStatus {
         let viewport_render_routing_enabled = config.multi_viewport
             && MULTI_VIEWPORT_FEATURE_ENABLED
             && NATIVE_PLATFORM_TARGET
-            && cfg!(feature = "render");
+            && render_integration_installed;
 
         Self {
             bevy_target: BEVY_TARGET_VERSION,
             rust_target: RUST_TARGET_VERSION,
             render_feature_enabled: cfg!(feature = "render"),
+            render_integration_installed,
             multi_viewport_requested: config.multi_viewport,
             multi_viewport_feature_enabled: MULTI_VIEWPORT_FEATURE_ENABLED,
             native_platform_target: NATIVE_PLATFORM_TARGET,
@@ -189,7 +204,7 @@ impl ImguiBackendStatus {
 
 impl Default for ImguiBackendStatus {
     fn default() -> Self {
-        Self::from_config(&ImguiBackendConfig::default())
+        Self::from_config(&ImguiBackendConfig::default(), false)
     }
 }
 

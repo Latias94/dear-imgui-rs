@@ -1,5 +1,6 @@
 use bevy_app::App;
 use bevy_ecs::prelude::*;
+use bevy_time::{Real, Time};
 use bevy_window::{PrimaryWindow, Window, WindowResolution};
 use dear_imgui_bevy::{
     ImguiBackendConfig, ImguiContext, ImguiContexts, ImguiFrameOutput, ImguiFrameState,
@@ -7,6 +8,7 @@ use dear_imgui_bevy::{
 };
 use dear_imgui_rs::{self as imgui, ConfigFlags};
 use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
 fn imgui_context_guard() -> std::sync::MutexGuard<'static, ()> {
     static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
@@ -17,6 +19,7 @@ fn imgui_context_guard() -> std::sync::MutexGuard<'static, ()> {
 struct LifecycleTrace {
     entries: Vec<&'static str>,
     frame_indices: Vec<u64>,
+    delta_times: Vec<f32>,
 }
 
 fn app_with_primary_window() -> App {
@@ -87,6 +90,13 @@ fn second_ui_system(mut contexts: ImguiContexts, mut trace: ResMut<LifecycleTrac
     trace.frame_indices.push(frame_index);
 }
 
+fn capture_delta_time(mut contexts: ImguiContexts, mut trace: ResMut<LifecycleTrace>) {
+    let ui = contexts
+        .primary_ui_mut()
+        .expect("ImguiPrimaryContextPass should run inside an open frame");
+    trace.delta_times.push(ui.io().delta_time());
+}
+
 #[test]
 fn lifecycle_primary_context_pass_opens_shared_frame_and_snapshots_once() {
     let _guard = imgui_context_guard();
@@ -142,7 +152,27 @@ fn lifecycle_ui_access_is_unavailable_outside_primary_context_pass() {
 }
 
 #[test]
-fn lifecycle_multi_viewport_request_enables_platform_windows_when_support_is_complete() {
+fn lifecycle_uses_bevy_real_delta_time_when_available() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_primary_window();
+    let mut real_time = Time::<Real>::default();
+    real_time.advance_by(Duration::from_millis(42));
+    app.insert_resource(real_time);
+    app.init_resource::<LifecycleTrace>();
+    app.add_systems(ImguiPrimaryContextPass, capture_delta_time);
+
+    app.update();
+
+    let trace = app.world().resource::<LifecycleTrace>();
+    assert_eq!(trace.delta_times.len(), 1);
+    assert!(
+        (trace.delta_times[0] - 0.042).abs() < f32::EPSILON,
+        "Dear ImGui delta time should come from Bevy Time<Real>"
+    );
+}
+
+#[test]
+fn lifecycle_multi_viewport_request_does_not_advertise_viewports_without_render_app() {
     let _guard = imgui_context_guard();
     let mut app = app_with_primary_window_and_config(ImguiBackendConfig {
         name: "viewport-request".to_owned(),
@@ -157,9 +187,8 @@ fn lifecycle_multi_viewport_request_enables_platform_windows_when_support_is_com
         .get_non_send::<ImguiContext>()
         .expect("ImguiContext should still exist");
     let flags = context.context().io().config_flags();
-    assert_eq!(
-        flags.contains(ConfigFlags::VIEWPORTS_ENABLE),
-        cfg!(all(feature = "render", feature = "multi-viewport")),
-        "Bevy backend should advertise Dear ImGui OS-level viewports only after lifecycle, input feedback, and render routing are wired"
+    assert!(
+        !flags.contains(ConfigFlags::VIEWPORTS_ENABLE),
+        "Bevy backend should not advertise Dear ImGui OS-level viewports until render routing is actually installed"
     );
 }

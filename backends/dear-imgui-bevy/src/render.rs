@@ -9,7 +9,9 @@
 use bevy_app::App;
 use bevy_asset::{Assets, Handle, uuid_handle};
 use bevy_camera::{Camera, NormalizedRenderTarget, RenderTarget};
-use bevy_core_pipeline::{Core2d, Core2dSystems, Core3d, Core3dSystems};
+use bevy_core_pipeline::{
+    Core2d, Core2dSystems, Core3d, Core3dSystems, tonemapping::tonemapping, upscaling::upscaling,
+};
 use bevy_ecs::entity::ContainsEntity;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
@@ -40,7 +42,7 @@ use bevy_window::PrimaryWindow;
 use bytemuck::{Pod, Zeroable};
 use dear_imgui_rs as imgui;
 use imgui::render::{DrawCmdSnapshot, DrawIdx, TextureBinding};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::mem::size_of;
 
@@ -733,11 +735,13 @@ struct ImguiViewportTarget {
 #[derive(Resource, Default)]
 pub struct ImguiTextureBindGroups {
     textures: HashMap<TextureBinding, ImguiRenderTexture>,
+    bevy_image_bindings: HashSet<TextureBinding>,
 }
 
 impl ImguiTextureBindGroups {
     /// Register or replace a texture bind group for an ImGui texture binding.
     pub fn insert(&mut self, texture: TextureBinding, bind_group: BindGroup) {
+        self.bevy_image_bindings.remove(&texture);
         self.textures.insert(
             texture,
             ImguiRenderTexture {
@@ -751,6 +755,7 @@ impl ImguiTextureBindGroups {
     /// Remove a texture bind group.
     pub fn remove(&mut self, texture: &TextureBinding) {
         self.textures.remove(texture);
+        self.bevy_image_bindings.remove(texture);
     }
 
     /// Number of registered texture bind groups.
@@ -776,7 +781,31 @@ impl ImguiTextureBindGroups {
         texture: TextureBinding,
         render_texture: ImguiRenderTexture,
     ) {
+        self.bevy_image_bindings.remove(&texture);
         self.textures.insert(texture, render_texture);
+    }
+
+    fn insert_bevy_image(&mut self, texture: TextureBinding, bind_group: BindGroup) {
+        self.textures.insert(
+            texture,
+            ImguiRenderTexture {
+                texture: None,
+                _view: None,
+                bind_group,
+            },
+        );
+        self.bevy_image_bindings.insert(texture);
+    }
+
+    fn retain_bevy_image_bindings(&mut self, active_bindings: &HashSet<TextureBinding>) {
+        let stale_bindings = self
+            .bevy_image_bindings
+            .difference(active_bindings)
+            .copied()
+            .collect::<Vec<_>>();
+        for binding in stale_bindings {
+            self.remove(&binding);
+        }
     }
 }
 
@@ -884,7 +913,7 @@ impl ImguiExtractedRenderFrame {
 #[derive(Resource, Default)]
 struct ImguiRenderExtractionInstalled;
 
-pub(crate) fn install_render_extraction(app: &mut App) {
+pub(crate) fn install_render_extraction(app: &mut App) -> bool {
     install_imgui_shader_asset(app);
     app.init_resource::<crate::ImguiTextureFeedbackQueue>();
     let texture_feedback = app
@@ -893,14 +922,14 @@ pub(crate) fn install_render_extraction(app: &mut App) {
         .clone();
 
     let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
-        return;
+        return false;
     };
 
     if render_app
         .world()
         .contains_resource::<ImguiRenderExtractionInstalled>()
     {
-        return;
+        return true;
     }
 
     render_app
@@ -939,12 +968,19 @@ pub(crate) fn install_render_extraction(app: &mut App) {
         )
         .add_systems(
             Core2d,
-            render_imgui_overlay.in_set(Core2dSystems::PostProcess),
+            render_imgui_overlay
+                .after(tonemapping)
+                .before(upscaling)
+                .in_set(Core2dSystems::PostProcess),
         )
         .add_systems(
             Core3d,
-            render_imgui_overlay.in_set(Core3dSystems::PostProcess),
+            render_imgui_overlay
+                .after(tonemapping)
+                .before(upscaling)
+                .in_set(Core3dSystems::PostProcess),
         );
+    true
 }
 
 fn install_imgui_shader_asset(app: &mut App) {
@@ -1326,6 +1362,13 @@ fn prepare_bevy_image_texture_bind_groups(
         return;
     };
 
+    let active_bindings = extracted_bevy_textures
+        .textures()
+        .iter()
+        .map(|(texture_id, _)| TextureBinding::Legacy(*texture_id))
+        .collect::<HashSet<_>>();
+    texture_bind_groups.retain_bevy_image_bindings(&active_bindings);
+
     for (texture_id, asset_id) in extracted_bevy_textures.textures() {
         let binding = TextureBinding::Legacy(*texture_id);
         let Some(gpu_image) = gpu_images.get(*asset_id) else {
@@ -1341,7 +1384,7 @@ fn prepare_bevy_image_texture_bind_groups(
             texture_bind_groups.remove(&binding);
             continue;
         };
-        texture_bind_groups.insert(binding, bind_group);
+        texture_bind_groups.insert_bevy_image(binding, bind_group);
     }
 }
 
@@ -1873,6 +1916,29 @@ mod tests {
     }
 
     #[test]
+    fn bevy_image_binding_tracking_prunes_unregistered_legacy_ids() {
+        let mut texture_bind_groups = ImguiTextureBindGroups::default();
+        let registered = TextureBinding::Legacy(imgui::TextureId::new(42));
+        let still_active = TextureBinding::Legacy(imgui::TextureId::new(43));
+
+        texture_bind_groups.bevy_image_bindings.insert(registered);
+        texture_bind_groups.bevy_image_bindings.insert(still_active);
+
+        texture_bind_groups.retain_bevy_image_bindings(&HashSet::from([still_active]));
+
+        assert!(
+            !texture_bind_groups
+                .bevy_image_bindings
+                .contains(&registered)
+        );
+        assert!(
+            texture_bind_groups
+                .bevy_image_bindings
+                .contains(&still_active)
+        );
+    }
+
+    #[test]
     #[ignore = "requires DEAR_IMGUI_BEVY_GPU_HARNESS=1 and a working native wgpu adapter"]
     fn bevy_image_texture_bind_groups_use_real_render_assets_when_gpu_harness_is_enabled() {
         if std::env::var_os("DEAR_IMGUI_BEVY_GPU_HARNESS").is_none() {
@@ -1924,6 +1990,35 @@ mod tests {
         assert!(
             texture_bind_groups.is_empty(),
             "missing RenderAssets<GpuImage> entries should remove stale bind groups"
+        );
+
+        gpu_images.insert(
+            image_id,
+            gpu_image(&render_device, TextureUsages::TEXTURE_BINDING),
+        );
+        extracted.replace(vec![(texture_id, image_id)]);
+        prepare_bevy_image_texture_bind_groups(
+            Some(&gpu_images),
+            &extracted,
+            &render_device,
+            &pipeline_cache,
+            &pipeline,
+            &mut texture_bind_groups,
+        );
+        assert_eq!(texture_bind_groups.len(), 1);
+
+        extracted.replace(Vec::new());
+        prepare_bevy_image_texture_bind_groups(
+            Some(&gpu_images),
+            &extracted,
+            &render_device,
+            &pipeline_cache,
+            &pipeline,
+            &mut texture_bind_groups,
+        );
+        assert!(
+            texture_bind_groups.is_empty(),
+            "unregistered Bevy image handles should remove stale bind groups"
         );
     }
 

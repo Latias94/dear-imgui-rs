@@ -39,10 +39,11 @@ Docking inside the primary Bevy window is supported by enabling Dear ImGui docki
 the examples use `configure_example_context` for that setup.
 
 Dear ImGui docking multi-viewport OS windows are enabled only when requested on native targets with
-both the `render` and `multi-viewport` Cargo features. The backend installs a queued PlatformIO
-lifecycle bridge, maps input/focus/cursor/IME messages for secondary viewport windows, feeds Bevy
-window position/size/focus/DPI state back through Dear ImGui's PlatformIO query callbacks, and
-routes each viewport's draw data to the matching Bevy `Window` render target.
+both the `render` and `multi-viewport` Cargo features and an installed Bevy `RenderApp` from the
+render plugin stack. The backend installs a queued PlatformIO lifecycle bridge, maps
+input/focus/cursor/IME messages for secondary viewport windows, feeds Bevy window
+position/size/focus/DPI state back through Dear ImGui's PlatformIO query callbacks, and routes each
+viewport's draw data to the matching Bevy `Window` render target.
 
 This path is still experimental. A few z-order and dock-target edge cases remain around detached
 windows, so treat multi-viewport as preview-grade rather than a fully polished window-manager
@@ -51,7 +52,8 @@ experience.
 | Target / feature set | `multi_viewport_requested` | Lifecycle bridge | Input / platform feedback | Full `multi_viewport_supported` |
 | --- | --- | --- | --- | --- |
 | Native, no `multi-viewport` feature | Matches config | No | No | No |
-| Native, `render,multi-viewport` features | Matches config | Yes, when requested | Yes, when requested | Yes, when requested |
+| Native, `render,multi-viewport` features and Bevy `RenderApp` | Matches config | Yes, when requested | Yes, when requested | Yes, when requested |
+| Native, `render,multi-viewport` features without Bevy `RenderApp` | Matches config | Yes, when requested | Yes, when requested | No |
 | `wasm32-unknown-unknown` | Matches config | No | No | No |
 
 Bevy `0.19.0-rc.2` does not expose a current minimized-window state in `Window`; the PlatformIO

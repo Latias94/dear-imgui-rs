@@ -14,6 +14,7 @@ use bevy_app::App;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::{NonSendMarker, SystemParam};
 use bevy_math::Vec2;
+use bevy_time::{Real, Time};
 use bevy_window::{CursorIcon, CursorOptions, PrimaryWindow, Window};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_window::{Monitor, PrimaryMonitor};
@@ -161,6 +162,7 @@ fn begin_primary_frame_system(
     mut frame_state: NonSendMut<ImguiFrameState>,
     mut texture_feedback: ResMut<ImguiTextureFeedbackQueue>,
     backend_status: Res<ImguiBackendStatus>,
+    real_time: Option<Res<Time<Real>>>,
 ) {
     if frame_state.is_frame_open() {
         return;
@@ -212,13 +214,20 @@ fn begin_primary_frame_system(
     context.prepare_frame(
         imgui::FramePrepareOptions::new(
             [window.width(), window.height()],
-            context.io().delta_time().max(f32::EPSILON),
+            imgui_delta_time(context, real_time.as_deref()),
         )
         .framebuffer_scale([window.scale_factor(), window.scale_factor()]),
     );
 
     let frame = context.begin_frame();
     frame_state.begin(frame.ui());
+}
+
+fn imgui_delta_time(context: &imgui::Context, real_time: Option<&Time<Real>>) -> f32 {
+    real_time
+        .map(Time::delta_secs)
+        .unwrap_or_else(|| context.io().delta_time())
+        .max(f32::EPSILON)
 }
 
 pub(crate) fn end_primary_frame_system(

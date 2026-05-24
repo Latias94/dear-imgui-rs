@@ -137,6 +137,12 @@ jobs:
       - name: Run Bevy backend tests
         run: cargo +stable nextest run -p dear-imgui-bevy --features render
 
+      - name: Check Bevy backend native multi-viewport
+        run: cargo +stable check -p dear-imgui-bevy --features render,multi-viewport
+
+      - name: Run Bevy backend native multi-viewport tests
+        run: cargo +stable nextest run -p dear-imgui-bevy --features render,multi-viewport
+
       - name: Check Bevy backend wasm (core)
         run: cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --no-default-features
 

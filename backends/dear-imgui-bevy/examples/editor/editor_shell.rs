@@ -1133,6 +1133,10 @@ fn render_diagnostics(
         backend_status.multi_viewport_requested
     ));
     ui.text(format!(
+        "Render integration installed: {}",
+        backend_status.render_integration_installed
+    ));
+    ui.text(format!(
         "Multi-viewport supported: {}",
         backend_status.multi_viewport_supported
     ));

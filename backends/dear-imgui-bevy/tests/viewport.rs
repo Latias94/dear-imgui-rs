@@ -201,11 +201,10 @@ fn multi_viewport_feature_installs_bridge_but_does_not_advertise_full_support_ye
     assert!(status.native_platform_target);
     assert!(status.viewport_lifecycle_bridge_enabled);
     assert!(status.viewport_input_feedback_enabled);
-    assert_eq!(
-        status.viewport_render_routing_enabled,
-        cfg!(feature = "render")
-    );
-    assert_eq!(status.multi_viewport_supported, cfg!(feature = "render"));
+    assert_eq!(status.render_feature_enabled, cfg!(feature = "render"));
+    assert!(!status.render_integration_installed);
+    assert!(!status.viewport_render_routing_enabled);
+    assert!(!status.multi_viewport_supported);
 }
 
 #[test]
