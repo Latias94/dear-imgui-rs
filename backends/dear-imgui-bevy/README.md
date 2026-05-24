@@ -195,6 +195,9 @@ thread-safe `FrameSnapshot` from main-world `ImguiFrameOutput`, and stores it in
 The extracted frame also records active camera associations as `render::ImguiCameraTarget`, including
 the main-world camera entity, camera order, and normalized render target. Raw Dear ImGui draw-data
 pointers never cross the extract boundary; only the owned `FrameSnapshot` and its texture requests do.
+If multiple active cameras target the same Bevy render target, the backend uses the highest-order
+non-disabled camera for the ImGui overlay so the same immediate-mode frame is not drawn repeatedly
+onto one window or image.
 
 The renderer consumes only the owned snapshot and prepared render data. It does not borrow raw
 Dear ImGui draw pointers across the Bevy main/render-world boundary and does not wrap

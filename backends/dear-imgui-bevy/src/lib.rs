@@ -111,10 +111,33 @@ impl Plugin for ImguiPlugin {
 
 fn refresh_backend_status(app: &mut App, render_integration_installed: bool) {
     let effective_config = app.world().resource::<ImguiBackendConfig>().clone();
+    sync_backend_context_config(app, &effective_config, render_integration_installed);
     app.insert_resource(ImguiBackendStatus::from_config(
         &effective_config,
         render_integration_installed,
     ));
+}
+
+fn sync_backend_context_config(
+    app: &mut App,
+    config: &ImguiBackendConfig,
+    render_integration_installed: bool,
+) {
+    let Some(mut imgui_context) = app.world_mut().get_non_send_mut::<ImguiContext>() else {
+        return;
+    };
+    let context = imgui_context.context_mut();
+    let mut config_flags = context.io().config_flags();
+    if config.docking {
+        config_flags.insert(dear_imgui_rs::ConfigFlags::DOCKING_ENABLE);
+    } else {
+        config_flags.remove(dear_imgui_rs::ConfigFlags::DOCKING_ENABLE);
+    }
+    context.io_mut().set_config_flags(config_flags);
+
+    let _ = context.set_platform_name(Some(config.name.clone()));
+    let renderer_name = render_integration_installed.then(|| config.name.clone());
+    let _ = context.set_renderer_name(renderer_name);
 }
 
 /// Static configuration for the Bevy backend.

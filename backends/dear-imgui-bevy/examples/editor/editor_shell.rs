@@ -45,6 +45,17 @@ const VIEWPORT_PROBE_EXIT_GRACE_FRAMES: u64 = 24;
 const VIEWPORT_PROBE_DOCK_BACK_FRAME: u64 = 75;
 const VIEWPORT_PROBE_DOCK_BACK_VERIFY_FRAME: u64 = 120;
 
+type SceneEntityQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Option<&'static Name>,
+        Option<&'static Transform>,
+        Option<&'static Children>,
+        Option<&'static EditorSceneObject>,
+    ),
+>;
+
 #[derive(Component)]
 struct EditorSceneObject {
     base_position: Vec3,
@@ -372,6 +383,7 @@ fn animate_scene(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn viewport_probe_drive_windows(
     mut probe: ResMut<ViewportProbe>,
     state: Res<EditorState>,
@@ -524,7 +536,7 @@ fn viewport_probe_report(
     viewport_cameras: Query<(Entity, &ImguiViewportCamera)>,
 ) {
     let frame = state.last_frame_index;
-    if frame == 0 || frame % 15 != 0 {
+    if frame == 0 || !frame.is_multiple_of(15) {
         return;
     }
 
@@ -642,16 +654,12 @@ fn env_flag(name: &str) -> bool {
         .unwrap_or(false)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn editor_ui(
     mut contexts: ImguiContexts,
     viewport: Res<SceneViewport>,
     scene_root: Res<EditorSceneRoot>,
-    scene_entities: Query<(
-        Option<&Name>,
-        Option<&Transform>,
-        Option<&Children>,
-        Option<&EditorSceneObject>,
-    )>,
+    scene_entities: SceneEntityQuery,
     mut commands: Commands,
     mut state: ResMut<EditorState>,
     output: Res<ImguiFrameOutput>,
@@ -716,11 +724,12 @@ fn editor_ui(
                 .position(hierarchy_pos, Condition::Appearing)
                 .focused(true);
         }
-        if force_dock_back_hierarchy && let Some(probe) = viewport_probe.as_deref_mut() {
-            if !probe.dock_back_requested {
-                probe.dock_back_requested = true;
-                println!("[viewport-probe] dock-back-requested frame={frame_index}");
-            }
+        if force_dock_back_hierarchy
+            && let Some(probe) = viewport_probe.as_deref_mut()
+            && !probe.dock_back_requested
+        {
+            probe.dock_back_requested = true;
+            println!("[viewport-probe] dock-back-requested frame={frame_index}");
         }
         hierarchy.build(|| {
             render_hierarchy(
@@ -865,12 +874,7 @@ fn render_scene_view(ui: &dear_imgui_rs::Ui, viewport: &SceneViewport, state: &m
 fn render_hierarchy_branch(
     ui: &dear_imgui_rs::Ui,
     state: &mut EditorState,
-    scene_entities: &Query<(
-        Option<&Name>,
-        Option<&Transform>,
-        Option<&Children>,
-        Option<&EditorSceneObject>,
-    )>,
+    scene_entities: &SceneEntityQuery,
     entity: Entity,
     is_root: bool,
     mut viewport_probe: Option<&mut ViewportProbe>,
@@ -912,18 +916,18 @@ fn render_hierarchy_branch(
         select_entity(state, entity);
     }
 
-    if let Some(_node) = opened {
-        if let Some(children) = children {
-            for child in children.iter() {
-                render_hierarchy_branch(
-                    ui,
-                    state,
-                    scene_entities,
-                    child,
-                    false,
-                    viewport_probe.as_deref_mut(),
-                );
-            }
+    if let Some(_node) = opened
+        && let Some(children) = children
+    {
+        for child in children.iter() {
+            render_hierarchy_branch(
+                ui,
+                state,
+                scene_entities,
+                child,
+                false,
+                viewport_probe.as_deref_mut(),
+            );
         }
     }
 }
@@ -932,12 +936,7 @@ fn render_hierarchy(
     ui: &dear_imgui_rs::Ui,
     state: &mut EditorState,
     root: Entity,
-    scene_entities: &Query<(
-        Option<&Name>,
-        Option<&Transform>,
-        Option<&Children>,
-        Option<&EditorSceneObject>,
-    )>,
+    scene_entities: &SceneEntityQuery,
     viewport_probe: Option<&mut ViewportProbe>,
 ) {
     ui.text("Scene Graph");
@@ -990,12 +989,7 @@ fn render_inspector(
     viewport: &SceneViewport,
     state: &mut EditorState,
     output: &ImguiFrameOutput,
-    scene_entities: &Query<(
-        Option<&Name>,
-        Option<&Transform>,
-        Option<&Children>,
-        Option<&EditorSceneObject>,
-    )>,
+    scene_entities: &SceneEntityQuery,
     commands: &mut Commands,
 ) {
     ui.text("Entity Inspector");

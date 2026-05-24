@@ -17,6 +17,8 @@ use bevy_ecs::message::MessageReader;
 use bevy_ecs::prelude::*;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_ecs::schedule::IntoScheduleConfigs;
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+use bevy_ecs::system::SystemParam;
 use bevy_math::IVec2;
 #[cfg(all(
     feature = "render",
@@ -26,7 +28,8 @@ use bevy_math::IVec2;
 use bevy_window::WindowRef;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_window::{
-    ExitSystems, Monitor, PrimaryWindow, WindowCloseRequested, WindowMoved, WindowResized,
+    ExitSystems, Monitor, PrimaryWindow, WindowCloseRequested, WindowMoved, WindowOccluded,
+    WindowResized,
 };
 use bevy_window::{Window, WindowLevel, WindowPosition, WindowResolution};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -104,6 +107,7 @@ pub struct ImguiViewportCamera {
 }
 
 /// Backend-local queue and viewport-to-window map for Dear ImGui platform windows.
+#[derive(Default)]
 pub struct ImguiViewportBridge {
     inner: Box<ImguiViewportBridgeState>,
 }
@@ -146,14 +150,6 @@ impl ImguiViewportBridgeState {
 
     fn set_viewport_flags(&mut self, viewport_id: ImguiViewportId, flags: imgui::ViewportFlags) {
         self.viewport_flags.insert(viewport_id, flags);
-    }
-}
-
-impl Default for ImguiViewportBridge {
-    fn default() -> Self {
-        Self {
-            inner: Box::default(),
-        }
     }
 }
 
@@ -307,6 +303,7 @@ pub(crate) fn install_viewport_bridge(_app: &mut App) {
         app.add_message::<WindowMoved>();
         app.add_message::<WindowResized>();
         app.add_message::<WindowCloseRequested>();
+        app.add_message::<WindowOccluded>();
         app.add_systems(
             PreUpdate,
             sync_os_viewport_window_events.before(crate::input::ImguiInputSystems),
@@ -552,10 +549,18 @@ fn feedback_for_viewport(viewport: *mut imgui::Viewport) -> Option<ImguiViewport
     bridge.viewport_feedback.get(&viewport.id()).copied()
 }
 
+#[derive(SystemParam)]
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+struct OsViewportWindowEvents<'w, 's> {
+    moved: MessageReader<'w, 's, WindowMoved>,
+    resized: MessageReader<'w, 's, WindowResized>,
+    close_requests: MessageReader<'w, 's, WindowCloseRequested>,
+    occluded: MessageReader<'w, 's, WindowOccluded>,
+}
+
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 fn sync_os_viewport_window_events(
-    mut moved: MessageReader<WindowMoved>,
-    mut resized: MessageReader<WindowResized>,
+    mut events: OsViewportWindowEvents,
     windows: Query<&Window>,
     viewport_windows: Query<(Entity, &ImguiViewportWindow)>,
     mut imgui_context: NonSendMut<crate::ImguiContext>,
@@ -564,30 +569,54 @@ fn sync_os_viewport_window_events(
     let window_to_viewport = viewport_windows.iter().collect::<HashMap<_, _>>();
     let mut moved_viewports = HashSet::new();
     let mut resized_viewports = HashSet::new();
+    let mut closed_viewports = HashSet::new();
 
-    for event in moved.read() {
+    for event in events.moved.read() {
         if let Some(viewport_window) = window_to_viewport.get(&event.window).copied() {
             moved_viewports.insert(viewport_window.viewport_id);
             if let Ok(window) = windows.get(event.window) {
                 let previous = bridge.viewport_feedback(viewport_window.viewport_id);
                 bridge.set_viewport_feedback(
                     viewport_window.viewport_id,
-                    feedback_from_window_for_entity(event.window, window, previous),
+                    feedback_from_window_for_entity(event.window, window, previous, None),
                 );
             }
         }
     }
 
-    for event in resized.read() {
+    for event in events.resized.read() {
         if let Some(viewport_window) = window_to_viewport.get(&event.window).copied() {
             resized_viewports.insert(viewport_window.viewport_id);
             if let Ok(window) = windows.get(event.window) {
                 let previous = bridge.viewport_feedback(viewport_window.viewport_id);
                 bridge.set_viewport_feedback(
                     viewport_window.viewport_id,
-                    feedback_from_window_for_entity(event.window, window, previous),
+                    feedback_from_window_for_entity(event.window, window, previous, None),
                 );
             }
+        }
+    }
+
+    for event in events.close_requests.read() {
+        if let Some(viewport_window) = window_to_viewport.get(&event.window).copied() {
+            closed_viewports.insert(viewport_window.viewport_id);
+        }
+    }
+
+    for event in events.occluded.read() {
+        if let Some(viewport_window) = window_to_viewport.get(&event.window).copied()
+            && let Ok(window) = windows.get(event.window)
+        {
+            let previous = bridge.viewport_feedback(viewport_window.viewport_id);
+            bridge.set_viewport_feedback(
+                viewport_window.viewport_id,
+                feedback_from_window_for_entity(
+                    event.window,
+                    window,
+                    previous,
+                    Some(event.occluded),
+                ),
+            );
         }
     }
 
@@ -595,6 +624,7 @@ fn sync_os_viewport_window_events(
         imgui_context.context_mut(),
         moved_viewports.iter().copied(),
         resized_viewports.iter().copied(),
+        closed_viewports.iter().copied(),
     );
 }
 
@@ -603,10 +633,12 @@ fn mark_platform_viewport_requests(
     context: &mut imgui::Context,
     moved_viewports: impl IntoIterator<Item = ImguiViewportId>,
     resized_viewports: impl IntoIterator<Item = ImguiViewportId>,
+    closed_viewports: impl IntoIterator<Item = ImguiViewportId>,
 ) {
     let moved = moved_viewports.into_iter().collect::<HashSet<_>>();
     let resized = resized_viewports.into_iter().collect::<HashSet<_>>();
-    if moved.is_empty() && resized.is_empty() {
+    let closed = closed_viewports.into_iter().collect::<HashSet<_>>();
+    if moved.is_empty() && resized.is_empty() && closed.is_empty() {
         return;
     }
 
@@ -617,6 +649,9 @@ fn mark_platform_viewport_requests(
         }
         if resized.contains(&id) {
             viewport.set_platform_request_resize(true);
+        }
+        if closed.contains(&id) {
+            viewport.set_platform_request_close(true);
         }
     }
 }
@@ -763,7 +798,7 @@ fn apply_viewport_commands_system(
             let previous = bridge.viewport_feedback(viewport_id);
             bridge.set_viewport_feedback(
                 viewport_id,
-                feedback_from_window_for_entity(entity, &window, previous),
+                feedback_from_window_for_entity(entity, &window, previous, None),
             );
             ecs_commands.entity(entity).insert(window);
         }
@@ -773,14 +808,14 @@ fn apply_viewport_commands_system(
         if pending_viewport_ids.contains(&viewport_id) {
             continue;
         }
-        if let Some(entity) = bridge.viewport_window(viewport_id) {
-            if let Ok(window) = windows.get(entity) {
-                let previous = bridge.viewport_feedback(viewport_id);
-                bridge.set_viewport_feedback(
-                    viewport_id,
-                    feedback_from_window_for_entity(entity, window, previous),
-                );
-            }
+        if let Some(entity) = bridge.viewport_window(viewport_id)
+            && let Ok(window) = windows.get(entity)
+        {
+            let previous = bridge.viewport_feedback(viewport_id);
+            bridge.set_viewport_feedback(
+                viewport_id,
+                feedback_from_window_for_entity(entity, window, previous, None),
+            );
         }
     }
 
@@ -863,6 +898,7 @@ pub(crate) fn prepare_platform_viewports_for_frame(
             primary_window,
             window,
             bridge.viewport_feedback(main_viewport_id),
+            None,
         ),
     );
     live_feedback.insert(main_viewport_id);
@@ -913,11 +949,16 @@ pub(crate) fn prepare_platform_viewports_for_frame(
     context.platform_io_mut().set_monitors(monitors);
 
     let io = context.io_mut();
-    let mut backend_flags = io.backend_flags()
-        | imgui::BackendFlags::PLATFORM_HAS_VIEWPORTS
-        | imgui::BackendFlags::RENDERER_HAS_VIEWPORTS;
+    let mut backend_flags = io.backend_flags();
+    backend_flags.remove(
+        imgui::BackendFlags::PLATFORM_HAS_VIEWPORTS
+            | imgui::BackendFlags::RENDERER_HAS_VIEWPORTS
+            | imgui::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT,
+    );
     if enable_viewports {
-        backend_flags |= imgui::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT;
+        backend_flags |= imgui::BackendFlags::PLATFORM_HAS_VIEWPORTS
+            | imgui::BackendFlags::RENDERER_HAS_VIEWPORTS
+            | imgui::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT;
     }
     io.set_backend_flags(backend_flags);
 
@@ -1065,7 +1106,7 @@ pub(crate) fn viewport_feedback_from_window(
     window: &Window,
     previous: Option<ImguiViewportFeedback>,
 ) -> ImguiViewportFeedback {
-    feedback_from_window_for_entity(entity, window, previous)
+    feedback_from_window_for_entity(entity, window, previous, None)
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -1073,6 +1114,7 @@ fn feedback_from_window_for_entity(
     entity: Entity,
     window: &Window,
     previous: Option<ImguiViewportFeedback>,
+    minimized: Option<bool>,
 ) -> ImguiViewportFeedback {
     let pos = window_client_origin_logical(entity, &window.position, window.scale_factor())
         .or_else(|| previous.map(|feedback| feedback.pos))
@@ -1084,7 +1126,9 @@ fn feedback_from_window_for_entity(
         framebuffer_scale: [scale_factor, scale_factor],
         dpi_scale: scale_factor,
         focused: window.focused,
-        minimized: false,
+        minimized: minimized
+            .or_else(|| previous.map(|feedback| feedback.minimized))
+            .unwrap_or(false),
     }
 }
 

@@ -24,14 +24,14 @@ use bevy_render::{
         BindGroup, BindGroupEntry, BindGroupLayoutDescriptor, BindingResource, BindingType,
         BlendState, Buffer, BufferAddress, BufferBindingType, BufferDescriptor, BufferSize,
         BufferUsages, COPY_BUFFER_ALIGNMENT, CachedRenderPipelineId, ColorTargetState, ColorWrites,
-        Extent3d, FragmentState, IndexFormat, LoadOp, MultisampleState, Operations, Origin3d,
-        PipelineCache, PrimitiveState, PrimitiveTopology, RawBufferVec, RenderPassColorAttachment,
-        RenderPassDescriptor, RenderPipelineDescriptor, SamplerBindingType, SamplerDescriptor,
-        ShaderStages, SpecializedRenderPipeline, SpecializedRenderPipelines, StoreOp,
-        TexelCopyBufferLayout, TexelCopyTextureInfo, Texture, TextureAspect, TextureDescriptor,
-        TextureDimension, TextureFormat, TextureSampleType, TextureUsages, TextureView,
-        TextureViewDescriptor, TextureViewDimension, VertexAttribute, VertexFormat, VertexState,
-        VertexStepMode,
+        Extent3d, FilterMode, FragmentState, IndexFormat, LoadOp, MipmapFilterMode,
+        MultisampleState, Operations, Origin3d, PipelineCache, PrimitiveState, PrimitiveTopology,
+        RawBufferVec, RenderPassColorAttachment, RenderPassDescriptor, RenderPipelineDescriptor,
+        SamplerBindingType, SamplerDescriptor, ShaderStages, SpecializedRenderPipeline,
+        SpecializedRenderPipelines, StoreOp, TexelCopyBufferLayout, TexelCopyTextureInfo, Texture,
+        TextureAspect, TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType,
+        TextureUsages, TextureView, TextureViewDescriptor, TextureViewDimension, VertexAttribute,
+        VertexFormat, VertexState, VertexStepMode,
     },
     renderer::{RenderContext, RenderDevice, RenderQueue, ViewQuery},
     texture::GpuImage,
@@ -254,6 +254,16 @@ pub struct ImguiScissorRect {
     pub height: u32,
 }
 
+/// Sampler state requested by Dear ImGui standard sampler callbacks.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ImguiSampler {
+    /// Linear filtering, matching Dear ImGui's default WGPU backend sampler.
+    #[default]
+    Linear,
+    /// Nearest filtering for pixel-art or explicitly nearest-sampled draw ranges.
+    Nearest,
+}
+
 /// Renderer-ready draw command prepared from an extracted [`FrameSnapshot`](imgui::render::FrameSnapshot).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ImguiPreparedDraw {
@@ -267,6 +277,8 @@ pub struct ImguiPreparedDraw {
     pub viewport_id: Option<imgui::Id>,
     /// Texture binding requested by the ImGui draw command.
     pub texture: TextureBinding,
+    /// Sampler requested by the active ImGui standard sampler callback state.
+    pub sampler: ImguiSampler,
     /// Scissor rectangle after applying display position and framebuffer scale.
     pub scissor: ImguiScissorRect,
     /// Global index range inside [`ImguiPreparedRenderFrame::indices`].
@@ -333,23 +345,14 @@ impl ImguiPreparedRenderFrame {
         self.texture_request_count
     }
 
-    fn replace(
-        &mut self,
-        frame_index: u64,
-        uniforms: ImguiUniforms,
-        uniforms_by_camera: HashMap<Entity, ImguiUniforms>,
-        vertices: Vec<ImguiGpuVertex>,
-        indices: Vec<DrawIdx>,
-        draws: Vec<ImguiPreparedDraw>,
-        texture_request_count: usize,
-    ) {
-        self.frame_index = Some(frame_index);
-        self.uniforms = Some(uniforms);
-        self.uniforms_by_camera = uniforms_by_camera;
-        self.vertices = vertices;
-        self.indices = indices;
-        self.draws = draws;
-        self.texture_request_count = texture_request_count;
+    fn replace(&mut self, frame: PreparedFrameData) {
+        self.frame_index = Some(frame.frame_index);
+        self.uniforms = Some(frame.uniforms);
+        self.uniforms_by_camera = frame.uniforms_by_camera;
+        self.vertices = frame.vertices;
+        self.indices = frame.indices;
+        self.draws = frame.draws;
+        self.texture_request_count = frame.texture_request_count;
     }
 
     fn clear(&mut self, frame_index: Option<u64>) {
@@ -361,6 +364,16 @@ impl ImguiPreparedRenderFrame {
         self.draws.clear();
         self.texture_request_count = 0;
     }
+}
+
+struct PreparedFrameData {
+    frame_index: u64,
+    uniforms: ImguiUniforms,
+    uniforms_by_camera: HashMap<Entity, ImguiUniforms>,
+    vertices: Vec<ImguiGpuVertex>,
+    indices: Vec<DrawIdx>,
+    draws: Vec<ImguiPreparedDraw>,
+    texture_request_count: usize,
 }
 
 /// Optional GPU buffers populated when a real Bevy renderer has `RenderDevice` / `RenderQueue`.
@@ -429,7 +442,7 @@ impl ImguiGpuBuffers {
 
 fn pad_index_buffer_for_copy_alignment(indices: &mut RawBufferVec<DrawIdx>) {
     let byte_len = indices.len() * size_of::<DrawIdx>();
-    if byte_len % COPY_BUFFER_ALIGNMENT as usize == 0 {
+    if byte_len.is_multiple_of(COPY_BUFFER_ALIGNMENT as usize) {
         return;
     }
 
@@ -557,6 +570,7 @@ impl SpecializedRenderPipeline for ImguiRenderPipeline {
 #[derive(Resource)]
 pub struct ImguiPipelineGpuResources {
     sampler: bevy_render::render_resource::Sampler,
+    nearest_sampler: bevy_render::render_resource::Sampler,
     uniforms_by_camera: HashMap<Entity, ImguiCameraUniformResources>,
     _fallback_texture: Texture,
     _fallback_view: TextureView,
@@ -565,7 +579,8 @@ pub struct ImguiPipelineGpuResources {
 
 struct ImguiCameraUniformResources {
     buffer: Buffer,
-    bind_group: BindGroup,
+    linear_bind_group: BindGroup,
+    nearest_bind_group: BindGroup,
 }
 
 impl FromWorld for ImguiPipelineGpuResources {
@@ -577,6 +592,16 @@ impl FromWorld for ImguiPipelineGpuResources {
         let texture_layout = pipeline_cache.get_bind_group_layout(pipeline.texture_layout());
         let sampler = render_device.create_sampler(&SamplerDescriptor {
             label: Some("dear_imgui_bevy_sampler"),
+            mag_filter: FilterMode::Linear,
+            min_filter: FilterMode::Linear,
+            mipmap_filter: MipmapFilterMode::Linear,
+            ..Default::default()
+        });
+        let nearest_sampler = render_device.create_sampler(&SamplerDescriptor {
+            label: Some("dear_imgui_bevy_nearest_sampler"),
+            mag_filter: FilterMode::Nearest,
+            min_filter: FilterMode::Nearest,
+            mipmap_filter: MipmapFilterMode::Nearest,
             ..Default::default()
         });
         let fallback_texture = render_device.create_texture(&TextureDescriptor {
@@ -613,6 +638,7 @@ impl FromWorld for ImguiPipelineGpuResources {
         );
         Self {
             sampler,
+            nearest_sampler,
             uniforms_by_camera: HashMap::new(),
             _fallback_texture: fallback_texture,
             _fallback_view: fallback_view,
@@ -649,6 +675,7 @@ impl ImguiPipelineGpuResources {
                     pipeline_cache,
                     pipeline,
                     &self.sampler,
+                    &self.nearest_sampler,
                 )
             });
             render_queue.write_buffer(&resources.buffer, 0, bytemuck::bytes_of(&uniforms));
@@ -660,10 +687,14 @@ impl ImguiPipelineGpuResources {
         camera: Entity,
         render_queue: &RenderQueue,
         uniforms: ImguiUniforms,
+        sampler: ImguiSampler,
     ) -> Option<&BindGroup> {
         let resources = self.uniforms_by_camera.get(&camera)?;
         render_queue.write_buffer(&resources.buffer, 0, bytemuck::bytes_of(&uniforms));
-        Some(&resources.bind_group)
+        Some(match sampler {
+            ImguiSampler::Linear => &resources.linear_bind_group,
+            ImguiSampler::Nearest => &resources.nearest_bind_group,
+        })
     }
 
     #[must_use]
@@ -682,6 +713,7 @@ fn create_camera_uniform_resources(
     pipeline_cache: &PipelineCache,
     pipeline: &ImguiRenderPipeline,
     sampler: &bevy_render::render_resource::Sampler,
+    nearest_sampler: &bevy_render::render_resource::Sampler,
 ) -> ImguiCameraUniformResources {
     let common_layout = pipeline_cache.get_bind_group_layout(pipeline.common_layout());
     let _ = camera;
@@ -691,7 +723,7 @@ fn create_camera_uniform_resources(
         usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
-    let bind_group = render_device.create_bind_group(
+    let linear_bind_group = render_device.create_bind_group(
         Some("dear_imgui_bevy_common_bind_group"),
         &common_layout,
         &[
@@ -705,9 +737,24 @@ fn create_camera_uniform_resources(
             },
         ],
     );
+    let nearest_bind_group = render_device.create_bind_group(
+        Some("dear_imgui_bevy_common_bind_group_nearest"),
+        &common_layout,
+        &[
+            BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 1,
+                resource: BindingResource::Sampler(nearest_sampler),
+            },
+        ],
+    );
     ImguiCameraUniformResources {
         buffer: uniform_buffer,
-        bind_group,
+        linear_bind_group,
+        nearest_bind_group,
     }
 }
 
@@ -921,9 +968,14 @@ pub(crate) fn install_render_extraction(app: &mut App) -> bool {
         .resource::<crate::ImguiTextureFeedbackQueue>()
         .clone();
 
-    let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
+    if app.get_sub_app_mut(RenderApp).is_none() {
         return false;
-    };
+    }
+
+    install_standard_draw_callbacks(app);
+    let render_app = app
+        .get_sub_app_mut(RenderApp)
+        .expect("RenderApp availability was checked before installing callbacks");
 
     if render_app
         .world()
@@ -981,6 +1033,34 @@ pub(crate) fn install_render_extraction(app: &mut App) -> bool {
                 .in_set(Core3dSystems::PostProcess),
         );
     true
+}
+
+fn install_standard_draw_callbacks(app: &mut App) {
+    let Some(mut imgui_context) = app.world_mut().get_non_send_mut::<crate::ImguiContext>() else {
+        return;
+    };
+    let platform_io = imgui_context.context_mut().platform_io_mut();
+    platform_io.set_draw_callback_reset_render_state_raw(Some(imgui_bevy_draw_callback_reset));
+    platform_io.set_draw_callback_set_sampler_linear_raw(Some(imgui_bevy_draw_callback_linear));
+    platform_io.set_draw_callback_set_sampler_nearest_raw(Some(imgui_bevy_draw_callback_nearest));
+}
+
+unsafe extern "C" fn imgui_bevy_draw_callback_reset(
+    _parent_list: *const imgui::sys::ImDrawList,
+    _cmd: *const imgui::sys::ImDrawCmd,
+) {
+}
+
+unsafe extern "C" fn imgui_bevy_draw_callback_linear(
+    _parent_list: *const imgui::sys::ImDrawList,
+    _cmd: *const imgui::sys::ImDrawCmd,
+) {
+}
+
+unsafe extern "C" fn imgui_bevy_draw_callback_nearest(
+    _parent_list: *const imgui::sys::ImDrawList,
+    _cmd: *const imgui::sys::ImDrawCmd,
+) {
 }
 
 fn install_imgui_shader_asset(app: &mut App) {
@@ -1043,7 +1123,7 @@ fn collect_camera_targets<'w>(
         ),
     >,
 ) -> Vec<ImguiCameraTarget> {
-    let mut targets = cameras
+    let targets = cameras
         .filter(|(_, camera, _, overlay_disabled)| camera.is_active && overlay_disabled.is_none())
         .filter_map(|(entity, camera, target, _)| {
             target
@@ -1056,8 +1136,27 @@ fn collect_camera_targets<'w>(
                 })
         })
         .collect::<Vec<_>>();
-    targets.sort_by_key(|target| target.order);
+    let mut targets = highest_order_camera_per_target(targets);
+    targets.sort_by_key(|target| (target.order, target.camera));
     targets
+}
+
+fn highest_order_camera_per_target(targets: Vec<ImguiCameraTarget>) -> Vec<ImguiCameraTarget> {
+    let mut by_render_target = HashMap::<NormalizedRenderTarget, ImguiCameraTarget>::new();
+    for target in targets {
+        match by_render_target.entry(target.target.clone()) {
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(target);
+            }
+            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                let current = entry.get();
+                if (target.order, target.camera) >= (current.order, current.camera) {
+                    entry.insert(target);
+                }
+            }
+        }
+    }
+    by_render_target.into_values().collect()
 }
 
 fn collect_viewport_targets<'w>(
@@ -1103,15 +1202,15 @@ fn prepare_imgui_render_frame(
         ImguiUniforms::from_display_rect(snapshot.draw.display_pos, snapshot.draw.display_size);
     let (vertices, indices, draws, uniforms_by_camera) =
         prepare_snapshot_draw_data(snapshot, extracted.camera_targets());
-    prepared.replace(
+    prepared.replace(PreparedFrameData {
         frame_index,
-        primary_uniforms,
+        uniforms: primary_uniforms,
         uniforms_by_camera,
         vertices,
         indices,
         draws,
-        snapshot.texture_requests.len(),
-    );
+        texture_request_count: snapshot.texture_requests.len(),
+    });
 }
 
 fn upload_imgui_buffers(
@@ -1641,11 +1740,11 @@ fn render_imgui_overlay(
     let Some(uniforms) = params.prepared.uniforms_for_camera(camera) else {
         return;
     };
-    let Some(common_bind_group) = gpu_resources.update_camera_uniforms(
-        camera,
-        &render_queue,
-        uniforms.with_gamma(ImguiUniforms::gamma_for_format(view.target_format)),
-    ) else {
+    let uniforms = uniforms.with_gamma(ImguiUniforms::gamma_for_format(view.target_format));
+    let mut active_sampler = ImguiSampler::Linear;
+    let Some(mut common_bind_group) =
+        gpu_resources.update_camera_uniforms(camera, &render_queue, uniforms, active_sampler)
+    else {
         return;
     };
 
@@ -1684,6 +1783,19 @@ fn render_imgui_overlay(
     }
 
     for draw in drawable {
+        if draw.sampler != active_sampler {
+            active_sampler = draw.sampler;
+            let Some(next_common_bind_group) = gpu_resources.update_camera_uniforms(
+                camera,
+                &render_queue,
+                uniforms,
+                active_sampler,
+            ) else {
+                return;
+            };
+            common_bind_group = next_common_bind_group;
+            render_pass.set_bind_group(0, common_bind_group, &[]);
+        }
         let texture_bind_group = params
             .texture_bind_groups
             .get(&draw.texture)
@@ -1744,29 +1856,37 @@ fn prepare_snapshot_draw_data(
         for list in &draw.draw_lists {
             vertices.extend(list.vtx.iter().copied().map(ImguiGpuVertex::from));
             indices.extend(list.idx.iter().copied());
+            let mut active_sampler = ImguiSampler::Linear;
 
             for command in &list.commands {
-                let DrawCmdSnapshot::Elements {
-                    count,
-                    clip_rect,
-                    texture,
-                    vtx_offset,
-                    idx_offset,
-                } = command
-                else {
-                    continue;
+                let (count, clip_rect, texture, vtx_offset, idx_offset) = match command {
+                    DrawCmdSnapshot::Elements {
+                        count,
+                        clip_rect,
+                        texture,
+                        vtx_offset,
+                        idx_offset,
+                    } => (*count, *clip_rect, *texture, *vtx_offset, *idx_offset),
+                    DrawCmdSnapshot::ResetRenderState | DrawCmdSnapshot::SetSamplerLinear => {
+                        active_sampler = ImguiSampler::Linear;
+                        continue;
+                    }
+                    DrawCmdSnapshot::SetSamplerNearest => {
+                        active_sampler = ImguiSampler::Nearest;
+                        continue;
+                    }
                 };
 
-                let Some(scissor) = scissor_from_clip_rect(draw, *clip_rect) else {
+                let Some(scissor) = scissor_from_clip_rect(draw, clip_rect) else {
                     continue;
                 };
-                let Some(index_start) = list_index_base.checked_add(*idx_offset) else {
+                let Some(index_start) = list_index_base.checked_add(idx_offset) else {
                     continue;
                 };
-                let Some(index_end) = index_start.checked_add(*count) else {
+                let Some(index_end) = index_start.checked_add(count) else {
                     continue;
                 };
-                let Some(vertex_offset) = list_vertex_base.checked_add(*vtx_offset) else {
+                let Some(vertex_offset) = list_vertex_base.checked_add(vtx_offset) else {
                     continue;
                 };
                 let Ok(index_start) = u32::try_from(index_start) else {
@@ -1785,7 +1905,8 @@ fn prepare_snapshot_draw_data(
                         order: target.order,
                         target: target.target.clone(),
                         viewport_id,
-                        texture: *texture,
+                        texture,
+                        sampler: active_sampler,
                         scissor,
                         index_range: index_start..index_end,
                         vertex_offset,
@@ -1855,7 +1976,18 @@ fn scissor_from_clip_rect(
 mod tests {
     use super::*;
     use bevy_asset::AssetId;
+    use bevy_ecs::schedule::ScheduleLabel;
     use bevy_render::{renderer::initialize_renderer, settings::WgpuSettings};
+
+    type RawDrawCallback =
+        unsafe extern "C" fn(*const imgui::sys::ImDrawList, *const imgui::sys::ImDrawCmd);
+
+    fn assert_fn_ptr_eq(actual: imgui::sys::ImDrawCallback, expected: RawDrawCallback) {
+        assert_eq!(
+            actual.map(|callback| std::ptr::fn_addr_eq(callback, expected) as u8),
+            Some(1)
+        );
+    }
 
     #[test]
     fn texture_conversion_repackages_padded_rgba_rows() {
@@ -1913,6 +2045,89 @@ mod tests {
             ImguiUniforms::gamma_for_format(TextureFormat::Rgba8Unorm),
             1.0
         );
+    }
+
+    #[test]
+    fn render_installation_exposes_standard_sampler_callbacks() {
+        let mut app = App::new();
+        app.add_plugins(bevy_render::extract_plugin::ExtractPlugin::default());
+        app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
+        app.add_plugins(crate::ImguiPlugin::default());
+
+        let context = app
+            .world()
+            .get_non_send::<crate::ImguiContext>()
+            .expect("ImguiPlugin should install the context");
+        let platform_io = context.context().platform_io();
+
+        assert_fn_ptr_eq(
+            platform_io.draw_callback_reset_render_state_raw(),
+            imgui_bevy_draw_callback_reset,
+        );
+        assert_fn_ptr_eq(
+            platform_io.draw_callback_set_sampler_linear_raw(),
+            imgui_bevy_draw_callback_linear,
+        );
+        assert_fn_ptr_eq(
+            platform_io.draw_callback_set_sampler_nearest_raw(),
+            imgui_bevy_draw_callback_nearest,
+        );
+    }
+
+    #[test]
+    fn prepared_draws_preserve_standard_sampler_callback_state() {
+        let camera = Entity::from_raw_u32(7).expect("test entity index should be valid");
+        let snapshot = imgui::render::FrameSnapshot {
+            draw: imgui::render::DrawDataSnapshot {
+                display_pos: [0.0, 0.0],
+                display_size: [32.0, 32.0],
+                framebuffer_scale: [1.0, 1.0],
+                draw_lists: vec![imgui::render::DrawListSnapshot {
+                    vtx: vec![
+                        imgui::render::DrawVert::new([0.0, 0.0], [0.0, 0.0], 0xFFFF_FFFF),
+                        imgui::render::DrawVert::new([1.0, 0.0], [1.0, 0.0], 0xFFFF_FFFF),
+                        imgui::render::DrawVert::new([0.0, 1.0], [0.0, 1.0], 0xFFFF_FFFF),
+                    ],
+                    idx: vec![0, 1, 2],
+                    commands: vec![
+                        DrawCmdSnapshot::SetSamplerNearest,
+                        DrawCmdSnapshot::Elements {
+                            count: 3,
+                            clip_rect: [0.0, 0.0, 16.0, 16.0],
+                            texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
+                            vtx_offset: 0,
+                            idx_offset: 0,
+                        },
+                        DrawCmdSnapshot::ResetRenderState,
+                        DrawCmdSnapshot::Elements {
+                            count: 3,
+                            clip_rect: [0.0, 0.0, 16.0, 16.0],
+                            texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
+                            vtx_offset: 0,
+                            idx_offset: 0,
+                        },
+                    ],
+                }],
+            },
+            viewports: Vec::new(),
+            texture_requests: Vec::new(),
+        };
+        let targets = [ImguiCameraTarget {
+            camera,
+            order: 0,
+            target: NormalizedRenderTarget::Window(
+                bevy_window::WindowRef::Entity(camera)
+                    .normalize(None)
+                    .expect("entity window target should normalize"),
+            ),
+            viewport_id: None,
+        }];
+
+        let (_, _, draws, _) = prepare_snapshot_draw_data(&snapshot, &targets);
+
+        assert_eq!(draws.len(), 2);
+        assert_eq!(draws[0].sampler, ImguiSampler::Nearest);
+        assert_eq!(draws[1].sampler, ImguiSampler::Linear);
     }
 
     #[test]

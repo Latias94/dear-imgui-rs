@@ -5,10 +5,9 @@
 //! instead of calling `Context::frame()` / `Context::render()` directly.
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-use crate::ImguiViewportBridge;
+use crate::{ImguiBackendStatus, ImguiViewportBridge};
 use crate::{
-    ImguiBackendStatus, ImguiContext, ImguiTextureFeedbackQueue, ImguiViewportWindow,
-    input::map_imgui_mouse_cursor,
+    ImguiContext, ImguiTextureFeedbackQueue, ImguiViewportWindow, input::map_imgui_mouse_cursor,
 };
 use bevy_app::App;
 use bevy_ecs::prelude::*;
@@ -20,6 +19,52 @@ use bevy_window::{CursorIcon, CursorOptions, PrimaryWindow, Window};
 use bevy_window::{Monitor, PrimaryMonitor};
 use dear_imgui_rs as imgui;
 use std::ptr::NonNull;
+
+type PrimaryInputWindowQuery<'w, 's> =
+    Query<'w, 's, (Entity, &'static Window), With<PrimaryWindow>>;
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+type ViewportInputWindowQuery<'w, 's> =
+    Query<'w, 's, (Entity, &'static Window, &'static ImguiViewportWindow), Without<PrimaryWindow>>;
+type PrimaryFeedbackWindowQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static mut Window,
+        &'static mut CursorOptions,
+        Option<&'static mut CursorIcon>,
+    ),
+    With<PrimaryWindow>,
+>;
+type ViewportFeedbackWindowQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static mut Window,
+        &'static mut CursorOptions,
+        Option<&'static mut CursorIcon>,
+        &'static ImguiViewportWindow,
+    ),
+    Without<PrimaryWindow>,
+>;
+
+#[derive(SystemParam)]
+struct BeginFrameParams<'w, 's> {
+    primary_window: PrimaryInputWindowQuery<'w, 's>,
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    viewport_windows: ViewportInputWindowQuery<'w, 's>,
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    monitors: Query<'w, 's, (&'static Monitor, Option<&'static PrimaryMonitor>)>,
+    imgui_context: NonSendMut<'w, ImguiContext>,
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    viewport_bridge: Option<NonSendMut<'w, ImguiViewportBridge>>,
+    frame_state: NonSendMut<'w, ImguiFrameState>,
+    texture_feedback: ResMut<'w, ImguiTextureFeedbackQueue>,
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    backend_status: Res<'w, ImguiBackendStatus>,
+    real_time: Option<Res<'w, Time<Real>>>,
+}
 
 /// Output produced by the last completed Dear ImGui frame.
 #[derive(Resource, Debug, Default)]
@@ -149,39 +194,26 @@ pub(crate) fn install_context_lifecycle(app: &mut App) {
     not(all(feature = "multi-viewport", not(target_arch = "wasm32"))),
     allow(unused_variables)
 )]
-fn begin_primary_frame_system(
-    primary_window: Query<(Entity, &Window), With<PrimaryWindow>>,
-    viewport_windows: Query<(Entity, &Window, &ImguiViewportWindow), Without<PrimaryWindow>>,
-    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))] monitors: Query<(
-        &Monitor,
-        Option<&PrimaryMonitor>,
-    )>,
-    mut imgui_context: NonSendMut<ImguiContext>,
-    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-    mut viewport_bridge: Option<NonSendMut<ImguiViewportBridge>>,
-    mut frame_state: NonSendMut<ImguiFrameState>,
-    mut texture_feedback: ResMut<ImguiTextureFeedbackQueue>,
-    backend_status: Res<ImguiBackendStatus>,
-    real_time: Option<Res<Time<Real>>>,
-) {
-    if frame_state.is_frame_open() {
+fn begin_primary_frame_system(mut params: BeginFrameParams) {
+    if params.frame_state.is_frame_open() {
         return;
     }
 
-    let Ok((primary_window_entity, window)) = primary_window.single() else {
+    let Ok((primary_window_entity, window)) = params.primary_window.single() else {
         return;
     };
 
-    let context = imgui_context.context_mut();
-    let feedback = texture_feedback.drain();
+    let context = params.imgui_context.context_mut();
+    let feedback = params.texture_feedback.drain();
     if !feedback.is_empty() {
         let applied = context.platform_io_mut().apply_texture_feedback(&feedback);
-        texture_feedback.set_last_applied(applied);
+        params.texture_feedback.set_last_applied(applied);
     }
 
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-    if let Some(viewport_bridge) = viewport_bridge.as_deref_mut() {
-        let viewport_feedback = viewport_windows
+    if let Some(viewport_bridge) = params.viewport_bridge.as_deref_mut() {
+        let viewport_feedback = params
+            .viewport_windows
             .iter()
             .map(|(entity, window, viewport_window)| {
                 (
@@ -196,7 +228,8 @@ fn begin_primary_frame_system(
             })
             .collect::<Vec<_>>();
         let monitors = crate::viewport::platform_monitors_from_bevy_monitors(
-            monitors
+            params
+                .monitors
                 .iter()
                 .map(|(monitor, primary)| (monitor.clone(), primary.is_some())),
         );
@@ -207,20 +240,20 @@ fn begin_primary_frame_system(
             window,
             &monitors,
             viewport_feedback.into_iter(),
-            backend_status.multi_viewport_supported,
+            params.backend_status.multi_viewport_supported,
         );
     }
 
     context.prepare_frame(
         imgui::FramePrepareOptions::new(
             [window.width(), window.height()],
-            imgui_delta_time(context, real_time.as_deref()),
+            imgui_delta_time(context, params.real_time.as_deref()),
         )
         .framebuffer_scale([window.scale_factor(), window.scale_factor()]),
     );
 
     let frame = context.begin_frame();
-    frame_state.begin(frame.ui());
+    params.frame_state.begin(frame.ui());
 }
 
 fn imgui_delta_time(context: &imgui::Context, real_time: Option<&Time<Real>>) -> f32 {
@@ -234,25 +267,8 @@ pub(crate) fn end_primary_frame_system(
     mut commands: Commands,
     mut imgui_context: NonSendMut<ImguiContext>,
     mut frame_state: NonSendMut<ImguiFrameState>,
-    mut primary_window: Query<
-        (
-            Entity,
-            &mut Window,
-            &mut CursorOptions,
-            Option<&mut CursorIcon>,
-        ),
-        With<PrimaryWindow>,
-    >,
-    mut viewport_windows: Query<
-        (
-            Entity,
-            &mut Window,
-            &mut CursorOptions,
-            Option<&mut CursorIcon>,
-            &ImguiViewportWindow,
-        ),
-        Without<PrimaryWindow>,
-    >,
+    mut primary_window: PrimaryFeedbackWindowQuery,
+    mut viewport_windows: ViewportFeedbackWindowQuery,
     mut output: ResMut<ImguiFrameOutput>,
 ) {
     if !frame_state.is_frame_open() {
@@ -298,25 +314,8 @@ fn sync_primary_window_platform_feedback(
     ui: &imgui::Ui,
     imgui_context: &ImguiContext,
     commands: &mut Commands,
-    primary_window: &mut Query<
-        (
-            Entity,
-            &mut Window,
-            &mut CursorOptions,
-            Option<&mut CursorIcon>,
-        ),
-        With<PrimaryWindow>,
-    >,
-    viewport_windows: &mut Query<
-        (
-            Entity,
-            &mut Window,
-            &mut CursorOptions,
-            Option<&mut CursorIcon>,
-            &ImguiViewportWindow,
-        ),
-        Without<PrimaryWindow>,
-    >,
+    primary_window: &mut PrimaryFeedbackWindowQuery,
+    viewport_windows: &mut ViewportFeedbackWindowQuery,
 ) {
     let Ok((primary_entity, mut primary_window, mut primary_cursor_options, primary_cursor_icon)) =
         primary_window.single_mut()
@@ -387,15 +386,15 @@ fn apply_window_cursor_feedback(
         if has_cursor_icon {
             commands.entity(window_entity).remove::<CursorIcon>();
         }
-    } else if let Some(mouse_cursor) = mouse_cursor {
-        if let Some(cursor_icon_value) = map_imgui_mouse_cursor(mouse_cursor) {
-            match cursor_icon {
-                Some(mut current_cursor_icon) => {
-                    *current_cursor_icon = cursor_icon_value;
-                }
-                None => {
-                    commands.entity(window_entity).insert(cursor_icon_value);
-                }
+    } else if let Some(mouse_cursor) = mouse_cursor
+        && let Some(cursor_icon_value) = map_imgui_mouse_cursor(mouse_cursor)
+    {
+        match cursor_icon {
+            Some(mut current_cursor_icon) => {
+                *current_cursor_icon = cursor_icon_value;
+            }
+            None => {
+                commands.entity(window_entity).insert(cursor_icon_value);
             }
         }
     }

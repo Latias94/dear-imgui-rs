@@ -153,6 +153,42 @@ fn render_extract_clones_snapshot_texture_requests_and_camera_targets() {
 }
 
 #[test]
+fn render_extract_uses_one_overlay_camera_per_render_target() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary_window, _camera, _texture_id) = app_with_primary_window();
+    let overlay_camera = app
+        .world_mut()
+        .spawn((
+            Camera {
+                order: 12,
+                ..Default::default()
+            },
+            RenderTarget::Window(WindowRef::Primary),
+        ))
+        .id();
+    app.add_systems(ImguiPrimaryContextPass, draw_managed_texture);
+
+    app.update();
+
+    let extracted = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<ImguiExtractedRenderFrame>();
+    let targets = extracted.camera_targets();
+    assert_eq!(
+        targets.len(),
+        1,
+        "the same ImGui overlay must not be drawn once for every active Bevy camera on a target"
+    );
+    assert_eq!(targets[0].camera, overlay_camera);
+    assert_eq!(targets[0].order, 12);
+    assert_eq!(
+        targets[0].target,
+        NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap())
+    );
+}
+
+#[test]
 fn render_extract_routes_overlay_to_primary_and_secondary_windows() {
     let _guard = imgui_context_guard();
     let (mut app, primary_window, primary_camera, _texture_id) = app_with_primary_window();

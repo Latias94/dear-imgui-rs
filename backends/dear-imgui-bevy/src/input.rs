@@ -149,7 +149,7 @@ pub fn primary_window_input_system(
     let primary_viewport_id = context.main_viewport().id();
     let primary_window = ImguiInputWindow {
         entity: primary_window_entity,
-        position: window.position.clone(),
+        position: window.position,
         scale_factor: window.scale_factor(),
         viewport_id: primary_viewport_id,
         is_primary: true,
@@ -315,7 +315,7 @@ fn imgui_window_for_event(
     };
     Some(ImguiInputWindow {
         entity,
-        position: window.position.clone(),
+        position: window.position,
         scale_factor: window.scale_factor(),
         viewport_id: viewport_window.viewport_id,
         is_primary: false,
@@ -323,6 +323,12 @@ fn imgui_window_for_event(
 }
 
 fn add_mouse_viewport_event(io: &mut imgui::Io, viewport_id: Option<imgui::Id>) {
+    if !io
+        .config_flags()
+        .contains(imgui::ConfigFlags::VIEWPORTS_ENABLE)
+    {
+        return;
+    }
     io.set_backend_flags(io.backend_flags() | imgui::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT);
     io.add_mouse_viewport_event(viewport_id.unwrap_or_default());
 }

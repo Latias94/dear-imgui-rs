@@ -186,9 +186,85 @@ fn lifecycle_multi_viewport_request_does_not_advertise_viewports_without_render_
         .world()
         .get_non_send::<ImguiContext>()
         .expect("ImguiContext should still exist");
-    let flags = context.context().io().config_flags();
+    let io = context.context().io();
+    let flags = io.config_flags();
     assert!(
         !flags.contains(ConfigFlags::VIEWPORTS_ENABLE),
         "Bevy backend should not advertise Dear ImGui OS-level viewports until render routing is actually installed"
+    );
+    assert!(
+        !io.backend_flags()
+            .contains(imgui::BackendFlags::PLATFORM_HAS_VIEWPORTS),
+        "Platform viewport backend capability should not be advertised before full routing support"
+    );
+    assert!(
+        !io.backend_flags()
+            .contains(imgui::BackendFlags::RENDERER_HAS_VIEWPORTS),
+        "Renderer viewport backend capability should not be advertised before full routing support"
+    );
+    assert!(
+        !io.backend_flags()
+            .contains(imgui::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT),
+        "Hovered viewport feedback should not be advertised while viewports are disabled"
+    );
+}
+
+#[cfg(all(
+    feature = "render",
+    feature = "multi-viewport",
+    not(target_arch = "wasm32")
+))]
+#[test]
+fn lifecycle_multi_viewport_request_advertises_viewports_after_render_app_installation() {
+    use bevy_ecs::schedule::ScheduleLabel;
+    use bevy_render::{Render, RenderApp, extract_plugin::ExtractPlugin};
+
+    let _guard = imgui_context_guard();
+    let mut app = App::new();
+    app.add_plugins(ExtractPlugin::default());
+    app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
+    app.add_plugins(ImguiPlugin::new(ImguiBackendConfig {
+        name: "viewport-supported".to_owned(),
+        docking: true,
+        multi_viewport: true,
+    }));
+
+    let mut window = Window {
+        resolution: WindowResolution::new(1280, 720),
+        ..Default::default()
+    };
+    window.resolution.set_scale_factor(2.0);
+    app.world_mut().spawn((window, PrimaryWindow));
+
+    {
+        let mut context = app
+            .world_mut()
+            .get_non_send_mut::<ImguiContext>()
+            .expect("ImguiPlugin should install an ImGui context");
+        let ctx = context.context_mut();
+        ctx.io_mut().set_config_input_trickle_event_queue(false);
+        let _ = ctx.font_atlas_mut().build();
+        let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
+    }
+
+    app.update();
+
+    let context = app
+        .world()
+        .get_non_send::<ImguiContext>()
+        .expect("ImguiContext should still exist");
+    let io = context.context().io();
+    assert!(io.config_flags().contains(ConfigFlags::VIEWPORTS_ENABLE));
+    assert!(
+        io.backend_flags()
+            .contains(imgui::BackendFlags::PLATFORM_HAS_VIEWPORTS)
+    );
+    assert!(
+        io.backend_flags()
+            .contains(imgui::BackendFlags::RENDERER_HAS_VIEWPORTS)
+    );
+    assert!(
+        io.backend_flags()
+            .contains(imgui::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT)
     );
 }

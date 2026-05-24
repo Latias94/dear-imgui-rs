@@ -15,6 +15,8 @@ use bevy_window::WindowCloseRequested;
 use bevy_window::WindowLevel;
 #[cfg(feature = "multi-viewport")]
 use bevy_window::WindowMoved;
+#[cfg(feature = "multi-viewport")]
+use bevy_window::WindowOccluded;
 use bevy_window::WindowPosition;
 #[cfg(all(feature = "multi-viewport", feature = "render"))]
 use bevy_window::WindowRef;
@@ -613,6 +615,127 @@ fn viewport_os_move_and_resize_events_request_imgui_platform_sync() {
 
 #[cfg(feature = "multi-viewport")]
 #[test]
+fn viewport_secondary_window_close_requests_imgui_platform_close() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_multi_viewport_bridge("viewport-secondary-close-request");
+    app.world_mut().spawn((Window::default(), PrimaryWindow));
+
+    let id = imgui::Id::from(0x203);
+    app.world_mut()
+        .get_non_send_mut::<ImguiViewportBridge>()
+        .expect("bridge should be installed")
+        .queue(ImguiViewportCommand::Create(viewport_snapshot(id.raw())));
+    app.update();
+
+    let entity = app
+        .world()
+        .get_non_send::<ImguiViewportBridge>()
+        .expect("bridge should still exist")
+        .viewport_window(id)
+        .expect("create command should spawn a secondary Bevy window");
+
+    app.world_mut()
+        .resource_mut::<Messages<WindowCloseRequested>>()
+        .write(WindowCloseRequested { window: entity });
+
+    with_test_platform_viewport(&mut app, id, |app, raw_viewport| {
+        app.world_mut().run_schedule(bevy_app::PreUpdate);
+
+        unsafe {
+            assert!(
+                (*raw_viewport).PlatformRequestClose,
+                "closing a detached Bevy window must ask Dear ImGui to close the matching platform viewport"
+            );
+        }
+    });
+}
+
+#[cfg(feature = "multi-viewport")]
+#[test]
+fn viewport_occlusion_events_update_imgui_minimized_feedback() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_multi_viewport_bridge("viewport-occlusion-feedback");
+    app.world_mut().spawn((Window::default(), PrimaryWindow));
+
+    let id = imgui::Id::from(0x204);
+    app.world_mut()
+        .get_non_send_mut::<ImguiViewportBridge>()
+        .expect("bridge should be installed")
+        .queue(ImguiViewportCommand::Create(viewport_snapshot(id.raw())));
+    app.update();
+
+    let entity = app
+        .world()
+        .get_non_send::<ImguiViewportBridge>()
+        .expect("bridge should still exist")
+        .viewport_window(id)
+        .expect("create command should spawn a secondary Bevy window");
+
+    app.world_mut()
+        .resource_mut::<Messages<WindowOccluded>>()
+        .write(WindowOccluded {
+            window: entity,
+            occluded: true,
+        });
+
+    with_test_platform_viewport(&mut app, id, |app, raw_viewport| {
+        app.world_mut().run_schedule(bevy_app::PreUpdate);
+
+        let minimized = {
+            let context = app
+                .world()
+                .get_non_send::<ImguiContext>()
+                .expect("plugin should install ImGui context");
+            let platform_io = context.context().platform_io().as_raw();
+            unsafe {
+                (*platform_io)
+                    .Platform_GetWindowMinimized
+                    .expect("bridge should install Platform_GetWindowMinimized")
+            }
+        };
+
+        unsafe {
+            assert!(
+                minimized(raw_viewport),
+                "occluded detached windows should be reported as minimized to Dear ImGui"
+            );
+        }
+    });
+
+    app.world_mut()
+        .resource_mut::<Messages<WindowOccluded>>()
+        .write(WindowOccluded {
+            window: entity,
+            occluded: false,
+        });
+
+    with_test_platform_viewport(&mut app, id, |app, raw_viewport| {
+        app.world_mut().run_schedule(bevy_app::PreUpdate);
+
+        let minimized = {
+            let context = app
+                .world()
+                .get_non_send::<ImguiContext>()
+                .expect("plugin should install ImGui context");
+            let platform_io = context.context().platform_io().as_raw();
+            unsafe {
+                (*platform_io)
+                    .Platform_GetWindowMinimized
+                    .expect("bridge should install Platform_GetWindowMinimized")
+            }
+        };
+
+        unsafe {
+            assert!(
+                !minimized(raw_viewport),
+                "unoccluded detached windows should clear minimized feedback"
+            );
+        }
+    });
+}
+
+#[cfg(feature = "multi-viewport")]
+#[test]
 fn viewport_commands_spawn_update_show_and_destroy_window_entities() {
     let _guard = imgui_context_guard();
     let mut app = App::new();
@@ -655,24 +778,25 @@ fn viewport_commands_spawn_update_show_and_destroy_window_entities() {
         .expect("spawned entity should be marked as an ImGui viewport window");
     assert_eq!(marker.viewport_id, id);
 
-    let mut bridge = app
-        .world_mut()
-        .get_non_send_mut::<ImguiViewportBridge>()
-        .expect("bridge should still exist");
-    bridge.queue(ImguiViewportCommand::SetPos {
-        id,
-        pos: [80.0, 96.0],
-    });
-    bridge.queue(ImguiViewportCommand::SetSize {
-        id,
-        size: [320.0, 200.0],
-    });
-    bridge.queue(ImguiViewportCommand::SetTitle {
-        id,
-        title: "Detached Tools".to_owned(),
-    });
-    bridge.queue(ImguiViewportCommand::Show { id });
-    drop(bridge);
+    {
+        let mut bridge = app
+            .world_mut()
+            .get_non_send_mut::<ImguiViewportBridge>()
+            .expect("bridge should still exist");
+        bridge.queue(ImguiViewportCommand::SetPos {
+            id,
+            pos: [80.0, 96.0],
+        });
+        bridge.queue(ImguiViewportCommand::SetSize {
+            id,
+            size: [320.0, 200.0],
+        });
+        bridge.queue(ImguiViewportCommand::SetTitle {
+            id,
+            title: "Detached Tools".to_owned(),
+        });
+        bridge.queue(ImguiViewportCommand::Show { id });
+    }
     app.update();
 
     let window = app

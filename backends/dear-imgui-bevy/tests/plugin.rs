@@ -48,7 +48,26 @@ fn plugin_registers_minimal_imgui_resources() {
     );
     assert_eq!(WGPU_TARGET_VERSION, "29.0.3");
 
-    assert!(app.world().get_non_send::<ImguiContext>().is_some());
+    let context = app
+        .world()
+        .get_non_send::<ImguiContext>()
+        .expect("plugin should install the Dear ImGui context");
+    let io = context.context().io();
+    assert!(
+        io.config_flags()
+            .contains(dear_imgui_rs::ConfigFlags::DOCKING_ENABLE)
+    );
+    assert_eq!(
+        io.backend_platform_name()
+            .expect("plugin should set BackendPlatformName")
+            .to_str()
+            .expect("backend name should be valid UTF-8"),
+        "dear-imgui-bevy"
+    );
+    assert!(
+        io.backend_renderer_name().is_none(),
+        "renderer name should stay unset until render integration is installed"
+    );
 }
 
 #[test]
@@ -87,9 +106,24 @@ fn plugin_preserves_existing_config_and_context() {
         status.viewport_input_feedback_enabled,
         cfg!(all(feature = "multi-viewport", not(target_arch = "wasm32")))
     );
-    assert_eq!(status.viewport_render_routing_enabled, false);
+    assert!(!status.viewport_render_routing_enabled);
     assert!(!status.multi_viewport_supported);
-    assert!(app.world().get_non_send::<ImguiContext>().is_some());
+    let context = app
+        .world()
+        .get_non_send::<ImguiContext>()
+        .expect("plugin should preserve the existing Dear ImGui context");
+    let io = context.context().io();
+    assert!(
+        !io.config_flags()
+            .contains(dear_imgui_rs::ConfigFlags::DOCKING_ENABLE)
+    );
+    assert_eq!(
+        io.backend_platform_name()
+            .expect("plugin should set BackendPlatformName")
+            .to_str()
+            .expect("backend name should be valid UTF-8"),
+        "custom-imgui"
+    );
 }
 
 #[test]
@@ -121,8 +155,8 @@ fn status_multi_viewport_request_reports_exact_enablement_boundary() {
         cfg!(all(feature = "multi-viewport", not(target_arch = "wasm32"))),
         "DMV-050 proves all-window input/focus/DPI/IME feedback for native multi-viewport builds"
     );
-    assert_eq!(
-        status.viewport_render_routing_enabled, false,
+    assert!(
+        !status.viewport_render_routing_enabled,
         "Render routing should not be advertised until the Bevy RenderApp integration is installed"
     );
     assert!(!status.multi_viewport_supported);
@@ -152,5 +186,20 @@ fn status_reports_render_routing_only_after_render_app_installation() {
     assert_eq!(
         status.multi_viewport_supported,
         cfg!(all(feature = "multi-viewport", not(target_arch = "wasm32")))
+    );
+
+    let context = app
+        .world()
+        .get_non_send::<ImguiContext>()
+        .expect("plugin should install the Dear ImGui context");
+    assert_eq!(
+        context
+            .context()
+            .io()
+            .backend_renderer_name()
+            .expect("render integration should set BackendRendererName")
+            .to_str()
+            .expect("backend name should be valid UTF-8"),
+        "render-status"
     );
 }
