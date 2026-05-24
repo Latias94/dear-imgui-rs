@@ -1256,6 +1256,7 @@ fn apply_snapshot_to_window(snapshot: &ImguiViewportSnapshot, entity: Entity, wi
     window.resolution = next.resolution;
     window.decorations = next.decorations;
     window.skip_taskbar = next.skip_taskbar;
+    window.window_level = next.window_level;
     window.focused = false;
 }
 

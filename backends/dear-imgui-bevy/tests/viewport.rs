@@ -927,6 +927,49 @@ fn viewport_commands_spawn_update_show_and_destroy_window_entities() {
 
 #[cfg(feature = "multi-viewport")]
 #[test]
+fn viewport_recreate_updates_window_level_from_latest_flags() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_multi_viewport_bridge("viewport-level-refresh");
+
+    let id = imgui::Id::from(0x106);
+    app.world_mut()
+        .get_non_send_mut::<ImguiViewportBridge>()
+        .expect("bridge should be installed")
+        .queue(ImguiViewportCommand::Create(ImguiViewportSnapshot {
+            flags: imgui::ViewportFlags::IS_PLATFORM_WINDOW | imgui::ViewportFlags::TOP_MOST,
+            ..viewport_snapshot(id.raw())
+        }));
+    app.update();
+
+    let entity = app
+        .world()
+        .get_non_send::<ImguiViewportBridge>()
+        .expect("bridge should still exist")
+        .viewport_window(id)
+        .expect("create command should spawn a secondary Bevy window");
+    assert_eq!(
+        app.world().get::<Window>(entity).unwrap().window_level,
+        WindowLevel::AlwaysOnTop
+    );
+
+    app.world_mut()
+        .get_non_send_mut::<ImguiViewportBridge>()
+        .expect("bridge should still exist")
+        .queue(ImguiViewportCommand::Create(ImguiViewportSnapshot {
+            flags: imgui::ViewportFlags::IS_PLATFORM_WINDOW,
+            ..viewport_snapshot(id.raw())
+        }));
+    app.update();
+
+    assert_eq!(
+        app.world().get::<Window>(entity).unwrap().window_level,
+        WindowLevel::Normal,
+        "refreshing an existing viewport should apply the latest TOP_MOST flag state"
+    );
+}
+
+#[cfg(feature = "multi-viewport")]
+#[test]
 fn viewport_show_respects_no_focus_on_appearing() {
     let _guard = imgui_context_guard();
     let mut app = App::new();
