@@ -336,7 +336,7 @@ fn sync_primary_window_platform_feedback(
     // resource, and the frame is still open while platform feedback is synchronized.
     let ime_data = unsafe { &(*raw_context).PlatformImeData };
     let ime_target_viewport = (ime_data.ViewportId != 0).then_some(ime_data.ViewportId);
-    let ime_position = Vec2::new(ime_data.InputPos.x, ime_data.InputPos.y);
+    let ime_position = [ime_data.InputPos.x, ime_data.InputPos.y];
     let hovered_window = input_state.mouse_hovered_window();
 
     let mut cursor_applied = false;
@@ -353,7 +353,12 @@ fn sync_primary_window_platform_feedback(
 
     let mut ime_applied = false;
     if ime_target_viewport.is_none() {
-        apply_window_ime_feedback(&mut primary_window, ime_data.WantTextInput, ime_position);
+        apply_window_ime_feedback(
+            primary_entity,
+            &mut primary_window,
+            ime_data.WantTextInput,
+            ime_position,
+        );
         ime_applied = true;
     } else {
         primary_window.ime_enabled = false;
@@ -374,7 +379,12 @@ fn sync_primary_window_platform_feedback(
         }
 
         if ime_target_viewport == Some(viewport_window.viewport_id.raw()) {
-            apply_window_ime_feedback(&mut window, ime_data.WantTextInput, ime_position);
+            apply_window_ime_feedback(
+                window_entity,
+                &mut window,
+                ime_data.WantTextInput,
+                ime_position,
+            );
             ime_applied = true;
         } else {
             window.ime_enabled = false;
@@ -392,13 +402,37 @@ fn sync_primary_window_platform_feedback(
     }
 
     if !ime_applied {
-        apply_window_ime_feedback(&mut primary_window, ime_data.WantTextInput, ime_position);
+        apply_window_ime_feedback(
+            primary_entity,
+            &mut primary_window,
+            ime_data.WantTextInput,
+            ime_position,
+        );
     }
 }
 
-fn apply_window_ime_feedback(window: &mut Window, want_text_input: bool, ime_position: Vec2) {
+fn apply_window_ime_feedback(
+    entity: Entity,
+    window: &mut Window,
+    want_text_input: bool,
+    ime_position: [f32; 2],
+) {
     window.ime_enabled = want_text_input;
-    window.ime_position = ime_position;
+    window.ime_position = ime_position_for_window(entity, window, ime_position);
+}
+
+fn ime_position_for_window(entity: Entity, window: &Window, ime_position: [f32; 2]) -> Vec2 {
+    let mut position = Vec2::new(ime_position[0], ime_position[1]);
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    if let Some(origin) = crate::viewport::window_client_origin_logical(
+        entity,
+        &window.position,
+        window.scale_factor(),
+    ) {
+        position.x -= origin[0];
+        position.y -= origin[1];
+    }
+    position
 }
 
 fn apply_window_cursor_feedback(

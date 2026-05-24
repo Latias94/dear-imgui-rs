@@ -118,7 +118,7 @@ fn request_text_cursor_and_secondary_viewport_ime(
     unsafe {
         let ime_data = &mut (*raw_context).PlatformImeData;
         ime_data.WantTextInput = true;
-        ime_data.InputPos = imgui::sys::ImVec2_c { x: 44.0, y: 55.0 };
+        ime_data.InputPos = imgui::sys::ImVec2_c { x: 144.0, y: 205.0 };
         ime_data.ViewportId = 0x501;
     }
 }
@@ -433,6 +433,7 @@ fn input_platform_feedback_updates_secondary_viewport_window_cursor_and_ime_stat
         .world_mut()
         .spawn((
             Window {
+                position: WindowPosition::At(IVec2::new(100, 150)),
                 resolution: WindowResolution::new(640, 480),
                 ..Default::default()
             },
