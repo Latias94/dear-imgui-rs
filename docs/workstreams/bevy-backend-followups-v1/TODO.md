@@ -68,10 +68,10 @@ Last updated: 2026-05-23
   and any new helper tests added by the task.
   Review: `review-workstream` before accepting completion.
   Evidence: `backends/dear-imgui-bevy/src/helpers.rs`, `backends/dear-imgui-bevy/tests/helpers.rs`,
-  `backends/dear-imgui-bevy/examples/simple.rs`,
-  `backends/dear-imgui-bevy/examples/windowed_overlay.rs`,
-  `backends/dear-imgui-bevy/examples/editor_shell.rs`,
-  `backends/dear-imgui-bevy/examples/ecosystem.rs`,
+  `backends/dear-imgui-bevy/examples/basic/simple.rs`,
+  `backends/dear-imgui-bevy/examples/runtime/windowed_overlay.rs`,
+  `backends/dear-imgui-bevy/examples/editor/editor_shell.rs`,
+  `backends/dear-imgui-bevy/examples/ecosystem/ecosystem.rs`,
   `backends/dear-imgui-bevy/README.md`, fresh
   `cargo +stable nextest run -p dear-imgui-bevy configure_example_context`, fresh
   `cargo +stable check -p dear-imgui-bevy --examples --features render`, and fresh

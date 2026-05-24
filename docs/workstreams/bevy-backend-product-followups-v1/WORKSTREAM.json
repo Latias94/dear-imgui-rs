@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "slug": "bevy-backend-product-followups-v1",
+  "title": "Bevy Backend Product Follow-Ups Workstream",
+  "status": "split",
+  "updated": "2026-05-23",
+  "scope_kind": "execution",
+  "problem": "Advance the next Bevy backend product-facing follow-ups: organized examples, docking multi-viewport OS windows, editor product surface, and platform/CI stabilization.",
+  "authoritative_docs": [
+    {
+      "role": "design",
+      "path": "docs/workstreams/bevy-backend-product-followups-v1/DESIGN.md"
+    },
+    {
+      "role": "execution",
+      "path": "docs/workstreams/bevy-backend-product-followups-v1/TODO.md"
+    },
+    {
+      "role": "gates",
+      "path": "docs/workstreams/bevy-backend-product-followups-v1/EVIDENCE_AND_GATES.md"
+    },
+    {
+      "role": "milestones",
+      "path": "docs/workstreams/bevy-backend-product-followups-v1/MILESTONES.md"
+    },
+    {
+      "role": "handoff",
+      "path": "docs/workstreams/bevy-backend-product-followups-v1/HANDOFF.md"
+    }
+  ],
+  "gates": [
+    "cargo +stable fmt --all --check",
+    "cargo +stable check -p dear-imgui-bevy --examples --features render",
+    "cargo +stable nextest run -p dear-imgui-bevy --features render",
+    "cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --no-default-features",
+    "cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --features render"
+  ],
+  "evidence": [
+    "docs/adr/0001-bevy-native-imgui-backend.md",
+    "docs/workstreams/bevy-native-backend/WORKSTREAM.json",
+    "docs/workstreams/bevy-runtime-productization/WORKSTREAM.json",
+    "docs/workstreams/bevy-backend-followups-v1/WORKSTREAM.json",
+    "docs/workstreams/bevy-docking-multi-viewport-v1/WORKSTREAM.json",
+    "backends/dear-imgui-bevy/Cargo.toml",
+    "backends/dear-imgui-bevy/README.md",
+    "backends/dear-imgui-bevy/examples/",
+    "backends/dear-imgui-bevy/src/"
+  ],
+  "adr_refs": [
+    "docs/adr/0001-bevy-native-imgui-backend.md"
+  ],
+  "current_task": null,
+  "next_recommended_task": "DMV-020",
+  "continue_policy": {
+    "default_action": "switch_workstream",
+    "notes": "Continue real Dear ImGui docking multi-viewport implementation in docs/workstreams/bevy-docking-multi-viewport-v1/. This lane remains as the product follow-up record and split point."
+  }
+}

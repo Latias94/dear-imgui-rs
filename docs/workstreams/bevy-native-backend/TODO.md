@@ -101,21 +101,21 @@ Last updated: 2026-05-23
   Goal: Add an embedded Bevy example showing Dear ImGui overlay usage inside a normal Bevy app.
   Validation: `cargo check -p dear-imgui-bevy --example simple` or matching example gate.
   Review: `review-workstream` before accepting completion.
-  Evidence: `backends/dear-imgui-bevy/examples/simple.rs`, `backends/dear-imgui-bevy/README.md`, fresh `cargo +stable check -p dear-imgui-bevy --example simple`.
+  Evidence: `backends/dear-imgui-bevy/examples/basic/simple.rs`, `backends/dear-imgui-bevy/README.md`, fresh `cargo +stable check -p dear-imgui-bevy --example simple`.
   Handoff: DONE 2026-05-23. Added a minimal embedded Bevy example that installs `ScheduleRunnerPlugin::run_once`, `ImguiPlugin`, creates a primary window entity, prepares the ImGui context, and draws an overlay through `ImguiPrimaryContextPass`. It intentionally stays headless/single-frame to preserve the crate's narrow Bevy dependency surface; BEVY-120 owns editor/windowed render-to-texture viewport depth.
 
 - [x] BEVY-120 [owner=codex] [deps=BEVY-100,BEVY-110] [scope=backends/dear-imgui-bevy/examples,docs]
   Goal: Add an editor-oriented example with dockspace, scene/game viewport via Bevy render-to-texture, and documented editor input policy.
   Validation: `cargo check -p dear-imgui-bevy --example editor_shell` or matching example gate.
   Review: `review-workstream` before accepting completion.
-  Evidence: `backends/dear-imgui-bevy/examples/editor_shell.rs`, `backends/dear-imgui-bevy/README.md`, fresh `cargo +stable check -p dear-imgui-bevy --features render --example editor_shell`.
+  Evidence: `backends/dear-imgui-bevy/examples/editor/editor_shell.rs`, `backends/dear-imgui-bevy/README.md`, fresh `cargo +stable check -p dear-imgui-bevy --features render --example editor_shell`.
   Handoff: DONE 2026-05-23. Added an editor-oriented render-feature example that creates a Bevy render-target `Image`, registers it through `ImguiBevyTextures`, shows it in a dockspace-driven ImGui shell, and documents editor input routing policy. This is still a proof example, not a full editor product; keep inspector/assets/console as follow-ons if needed.
 
 - [x] BEVY-130 [owner=codex] [deps=BEVY-040,BEVY-120] [scope=backends/dear-imgui-bevy/examples,extensions]
   Goal: Add an ecosystem composition example using at least ImPlot and one graph/gizmo extension in the same Bevy-managed ImGui frame.
   Validation: `cargo check -p dear-imgui-bevy --example ecosystem` and targeted extension crate checks.
   Review: `review-workstream` before accepting completion.
-  Evidence: `backends/dear-imgui-bevy/examples/ecosystem.rs`, `backends/dear-imgui-bevy/README.md`, fresh `cargo +stable check -p dear-imgui-bevy --example ecosystem`, and targeted extension crate checks.
+  Evidence: `backends/dear-imgui-bevy/examples/ecosystem/ecosystem.rs`, `backends/dear-imgui-bevy/README.md`, fresh `cargo +stable check -p dear-imgui-bevy --example ecosystem`, and targeted extension crate checks.
   Handoff: DONE 2026-05-23. Added a shared-frame ecosystem example that initializes ImPlot, ImNodes, and ImGuizmo as non-send Bevy resources and drives them from the same `ImguiPrimaryContextPass`. The example proves frame composition rather than just compiling separate crates.
 
 ## M5 — Closeout

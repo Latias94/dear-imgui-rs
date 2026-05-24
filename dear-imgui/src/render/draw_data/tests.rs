@@ -173,6 +173,7 @@ fn owned_draw_data_rejects_user_callbacks() {
 
 #[test]
 fn platform_io_standard_draw_callbacks_are_classified() {
+    let _guard = crate::test_support::imgui_context_guard();
     unsafe extern "C" fn reset(_parent_list: *const sys::ImDrawList, _cmd: *const sys::ImDrawCmd) {}
     unsafe extern "C" fn linear(_parent_list: *const sys::ImDrawList, _cmd: *const sys::ImDrawCmd) {
     }

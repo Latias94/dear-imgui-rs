@@ -18,9 +18,9 @@ a reusable product surface instead of a minimal proof.
   - `docs/workstreams/bevy-native-backend/`
 - Code:
   - `backends/dear-imgui-bevy/`
-  - `backends/dear-imgui-bevy/examples/simple.rs`
-  - `backends/dear-imgui-bevy/examples/editor_shell.rs`
-  - `backends/dear-imgui-bevy/examples/ecosystem.rs`
+  - `backends/dear-imgui-bevy/examples/basic/simple.rs`
+  - `backends/dear-imgui-bevy/examples/editor/editor_shell.rs`
+  - `backends/dear-imgui-bevy/examples/ecosystem/ecosystem.rs`
 
 ## Problem
 

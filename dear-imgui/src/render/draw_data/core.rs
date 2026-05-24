@@ -109,6 +109,16 @@ impl DrawData {
         self.framebuffer_scale
     }
 
+    /// Raw owner viewport pointer for this draw data.
+    ///
+    /// This is primarily useful for integrations that snapshot multiple Dear ImGui platform
+    /// viewports. The pointer belongs to the current ImGui context and must not be stored beyond
+    /// the draw data lifetime.
+    #[inline]
+    pub fn owner_viewport(&self) -> *mut sys::ImGuiViewport {
+        self.owner_viewport
+    }
+
     #[inline]
     pub(crate) unsafe fn cmd_lists(&self) -> &[*mut sys::ImDrawList] {
         unsafe {

@@ -140,17 +140,17 @@ fn platform_io_standard_draw_callback_accessors_roundtrip() {
     assert_eq!(
         pio.draw_callback_reset_render_state_raw()
             .map(|f| f as usize),
-        Some(draw_callback_marker as usize)
+        Some(draw_callback_marker as *const () as usize)
     );
     assert_eq!(
         pio.draw_callback_set_sampler_linear_raw()
             .map(|f| f as usize),
-        Some(draw_callback_marker as usize)
+        Some(draw_callback_marker as *const () as usize)
     );
     assert_eq!(
         pio.draw_callback_set_sampler_nearest_raw()
             .map(|f| f as usize),
-        Some(draw_callback_marker as usize)
+        Some(draw_callback_marker as *const () as usize)
     );
 }
 
@@ -186,6 +186,7 @@ fn platform_io_clear_handlers_resets_platform_and_renderer_callbacks() {
 #[cfg(feature = "multi-viewport")]
 #[test]
 fn clear_platform_handlers_clears_typed_get_window_callbacks() {
+    let _guard = crate::test_support::imgui_context_guard();
     unsafe extern "C" fn get_pos(_viewport: *mut sys::ImGuiViewport, out: *mut sys::ImVec2) {
         if let Some(out) = unsafe { out.as_mut() } {
             *out = sys::ImVec2 { x: 41.0, y: 42.0 };
@@ -245,6 +246,7 @@ fn clear_platform_handlers_clears_typed_get_window_callbacks() {
 #[cfg(feature = "multi-viewport")]
 #[test]
 fn get_window_pos_and_size_callbacks_are_context_local() {
+    let _guard = crate::test_support::imgui_context_guard();
     unsafe extern "C" fn get_pos_a(_viewport: *mut sys::ImGuiViewport, out: *mut sys::ImVec2) {
         if let Some(out) = unsafe { out.as_mut() } {
             *out = sys::ImVec2 { x: 11.0, y: 12.0 };
@@ -393,7 +395,107 @@ fn get_window_pos_and_size_callbacks_are_context_local() {
 
 #[cfg(feature = "multi-viewport")]
 #[test]
+fn typed_platform_callbacks_can_queue_engine_viewport_intent_via_backend_user_data() {
+    let _guard = crate::test_support::imgui_context_guard();
+    #[derive(Debug, PartialEq)]
+    enum Command {
+        Create {
+            id: crate::Id,
+            pos: [f32; 2],
+            size: [f32; 2],
+        },
+        Move {
+            id: crate::Id,
+            pos: [f32; 2],
+        },
+    }
+
+    #[derive(Default)]
+    struct Queue {
+        commands: Vec<Command>,
+    }
+
+    unsafe fn queue_from_current_io() -> &'static mut Queue {
+        let io = unsafe { sys::igGetIO_Nil() };
+        assert!(!io.is_null(), "test requires an active ImGui context");
+        let user_data = unsafe { (*io).BackendPlatformUserData };
+        assert!(
+            !user_data.is_null(),
+            "backend platform user data should point at the engine queue"
+        );
+        unsafe { &mut *(user_data as *mut Queue) }
+    }
+
+    unsafe extern "C" fn create_window(viewport: *mut Viewport) {
+        let viewport = unsafe { viewport.as_ref() }.expect("viewport should be non-null");
+        let queue = unsafe { queue_from_current_io() };
+        queue.commands.push(Command::Create {
+            id: viewport.id(),
+            pos: viewport.pos(),
+            size: viewport.size(),
+        });
+    }
+
+    unsafe extern "C" fn set_window_pos(viewport: *mut Viewport, pos: sys::ImVec2) {
+        let viewport = unsafe { viewport.as_ref() }.expect("viewport should be non-null");
+        let queue = unsafe { queue_from_current_io() };
+        queue.commands.push(Command::Move {
+            id: viewport.id(),
+            pos: [pos.x, pos.y],
+        });
+    }
+
+    let mut ctx = crate::Context::create();
+    let mut queue = Queue::default();
+    ctx.io_mut()
+        .set_backend_platform_user_data((&mut queue as *mut Queue).cast());
+    unsafe {
+        ctx.platform_io_mut()
+            .set_platform_create_window(Some(create_window));
+        ctx.platform_io_mut()
+            .set_platform_set_window_pos(Some(set_window_pos));
+    }
+
+    let raw_viewport = unsafe { sys::ImGuiViewport_ImGuiViewport() };
+    assert!(
+        !raw_viewport.is_null(),
+        "ImGuiViewport_ImGuiViewport() returned null"
+    );
+    unsafe {
+        let viewport = Viewport::from_raw_mut(raw_viewport);
+        viewport.set_pos([32.0, 48.0]);
+        viewport.set_size([640.0, 360.0]);
+        (*raw_viewport).ID = 0xDEAD_BEEF;
+
+        trampolines::platform_create_window(raw_viewport);
+        trampolines::platform_set_window_pos(raw_viewport, sys::ImVec2 { x: 80.0, y: 96.0 });
+
+        sys::ImGuiViewport_destroy(raw_viewport);
+    }
+
+    assert_eq!(
+        queue.commands,
+        [
+            Command::Create {
+                id: crate::Id::from(0xDEAD_BEEF),
+                pos: [32.0, 48.0],
+                size: [640.0, 360.0],
+            },
+            Command::Move {
+                id: crate::Id::from(0xDEAD_BEEF),
+                pos: [80.0, 96.0],
+            },
+        ]
+    );
+
+    ctx.io_mut()
+        .set_backend_platform_user_data(std::ptr::null_mut());
+}
+
+#[cfg(feature = "multi-viewport")]
+#[test]
 fn typed_callback_setters_reject_non_current_platform_io() {
+    let _guard = crate::test_support::imgui_context_guard();
     unsafe extern "C" fn create_window(_viewport: *mut Viewport) {}
 
     let mut ctx_a = crate::Context::create();
@@ -414,6 +516,7 @@ fn typed_callback_setters_reject_non_current_platform_io() {
 #[cfg(feature = "multi-viewport")]
 #[test]
 fn out_param_callback_setters_reject_non_current_platform_io() {
+    let _guard = crate::test_support::imgui_context_guard();
     unsafe extern "C" fn get_pos(_viewport: *mut sys::ImGuiViewport, out: *mut sys::ImVec2) {
         if let Some(out) = unsafe { out.as_mut() } {
             *out = sys::ImVec2 { x: 41.0, y: 42.0 };
@@ -438,6 +541,7 @@ fn out_param_callback_setters_reject_non_current_platform_io() {
 #[cfg(feature = "multi-viewport")]
 #[test]
 fn clear_handlers_target_receiver_platform_io_not_current_context() {
+    let _guard = crate::test_support::imgui_context_guard();
     unsafe extern "C" fn get_pos(_viewport: *mut sys::ImGuiViewport, out: *mut sys::ImVec2) {
         if let Some(out) = unsafe { out.as_mut() } {
             *out = sys::ImVec2 { x: 41.0, y: 42.0 };
@@ -501,6 +605,7 @@ fn clear_handlers_target_receiver_platform_io_not_current_context() {
 #[cfg(feature = "multi-viewport")]
 #[test]
 fn raw_setters_clear_receiver_typed_callback_slots() {
+    let _guard = crate::test_support::imgui_context_guard();
     unsafe extern "C" fn create_window(_viewport: *mut Viewport) {
         CREATE_WINDOW_CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }

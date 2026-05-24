@@ -4,12 +4,17 @@
 //! systems should be added to [`crate::ImguiPrimaryContextPass`] and request [`ImguiContexts`]
 //! instead of calling `Context::frame()` / `Context::render()` directly.
 
-use crate::{ImguiContext, ImguiTextureFeedbackQueue, input::map_imgui_mouse_cursor};
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+use crate::ImguiViewportBridge;
+use crate::{
+    ImguiBackendStatus, ImguiContext, ImguiTextureFeedbackQueue, ImguiViewportWindow,
+    input::map_imgui_mouse_cursor,
+};
 use bevy_app::App;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::{NonSendMarker, SystemParam};
 use bevy_math::Vec2;
-use bevy_window::{CursorIcon, CursorOptions, PrimaryWindow, Window};
+use bevy_window::{CursorIcon, CursorOptions, Monitor, PrimaryMonitor, PrimaryWindow, Window};
 use dear_imgui_rs as imgui;
 use std::ptr::NonNull;
 
@@ -137,17 +142,29 @@ pub(crate) fn install_context_lifecycle(app: &mut App) {
         .add_systems(crate::ImguiEndFrame, end_primary_frame_system);
 }
 
+#[cfg_attr(
+    not(all(feature = "multi-viewport", not(target_arch = "wasm32"))),
+    allow(unused_variables)
+)]
 fn begin_primary_frame_system(
-    primary_window: Query<&Window, With<PrimaryWindow>>,
+    primary_window: Query<(Entity, &Window), With<PrimaryWindow>>,
+    viewport_windows: Query<(Entity, &Window, &ImguiViewportWindow), Without<PrimaryWindow>>,
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))] monitors: Query<(
+        &Monitor,
+        Option<&PrimaryMonitor>,
+    )>,
     mut imgui_context: NonSendMut<ImguiContext>,
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    mut viewport_bridge: Option<NonSendMut<ImguiViewportBridge>>,
     mut frame_state: NonSendMut<ImguiFrameState>,
     mut texture_feedback: ResMut<ImguiTextureFeedbackQueue>,
+    backend_status: Res<ImguiBackendStatus>,
 ) {
     if frame_state.is_frame_open() {
         return;
     }
 
-    let Ok(window) = primary_window.single() else {
+    let Ok((primary_window_entity, window)) = primary_window.single() else {
         return;
     };
 
@@ -156,6 +173,37 @@ fn begin_primary_frame_system(
     if !feedback.is_empty() {
         let applied = context.platform_io_mut().apply_texture_feedback(&feedback);
         texture_feedback.set_last_applied(applied);
+    }
+
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    if let Some(viewport_bridge) = viewport_bridge.as_deref_mut() {
+        let viewport_feedback = viewport_windows
+            .iter()
+            .map(|(entity, window, viewport_window)| {
+                (
+                    entity,
+                    viewport_window.viewport_id,
+                    crate::viewport::viewport_feedback_from_window(
+                        window,
+                        viewport_bridge.viewport_feedback(viewport_window.viewport_id),
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        let monitors = crate::viewport::platform_monitors_from_bevy_monitors(
+            monitors
+                .iter()
+                .map(|(monitor, primary)| (monitor.clone(), primary.is_some())),
+        );
+        crate::viewport::prepare_platform_viewports_for_frame(
+            context,
+            viewport_bridge,
+            primary_window_entity,
+            window,
+            &monitors,
+            viewport_feedback.into_iter(),
+            backend_status.multi_viewport_supported,
+        );
     }
 
     context.prepare_frame(
@@ -183,6 +231,16 @@ pub(crate) fn end_primary_frame_system(
         ),
         With<PrimaryWindow>,
     >,
+    mut viewport_windows: Query<
+        (
+            Entity,
+            &mut Window,
+            &mut CursorOptions,
+            Option<&mut CursorIcon>,
+            &ImguiViewportWindow,
+        ),
+        Without<PrimaryWindow>,
+    >,
     mut output: ResMut<ImguiFrameOutput>,
 ) {
     if !frame_state.is_frame_open() {
@@ -195,16 +253,33 @@ pub(crate) fn end_primary_frame_system(
             &imgui_context,
             &mut commands,
             &mut primary_window,
+            &mut viewport_windows,
         );
     }
 
     let frame_index = frame_state.end();
-    let draw_data = imgui_context.context_mut().render();
-    let snapshot = imgui::render::snapshot::FrameSnapshot::from_draw_data(
-        draw_data,
-        imgui::render::snapshot::SnapshotOptions::default(),
-    );
+    let snapshot = render_frame_snapshot(imgui_context.context_mut());
     output.set_snapshot(frame_index, snapshot);
+}
+
+fn render_frame_snapshot(
+    context: &mut imgui::Context,
+) -> Result<imgui::render::snapshot::FrameSnapshot, imgui::render::snapshot::SnapshotError> {
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    {
+        let _ = context.render();
+        context.update_platform_windows();
+        context.platform_viewport_snapshot(imgui::render::snapshot::SnapshotOptions::default())
+    }
+
+    #[cfg(not(all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
+    {
+        let draw_data = context.render();
+        imgui::render::snapshot::FrameSnapshot::from_draw_data(
+            draw_data,
+            imgui::render::snapshot::SnapshotOptions::default(),
+        )
+    }
 }
 
 fn sync_primary_window_platform_feedback(
@@ -220,13 +295,76 @@ fn sync_primary_window_platform_feedback(
         ),
         With<PrimaryWindow>,
     >,
+    viewport_windows: &mut Query<
+        (
+            Entity,
+            &mut Window,
+            &mut CursorOptions,
+            Option<&mut CursorIcon>,
+            &ImguiViewportWindow,
+        ),
+        Without<PrimaryWindow>,
+    >,
 ) {
-    let Ok((window_entity, mut window, mut cursor_options, cursor_icon)) =
+    let Ok((primary_entity, mut primary_window, mut primary_cursor_options, primary_cursor_icon)) =
         primary_window.single_mut()
     else {
         return;
     };
 
+    let raw_context = imgui_context.context().as_raw();
+    // SAFETY: `ImguiContext` owns this live Dear ImGui context for the lifetime of the Bevy
+    // resource, and the frame is still open while platform feedback is synchronized.
+    let ime_data = unsafe { &(*raw_context).PlatformImeData };
+    if ime_data.ViewportId == 0 {
+        apply_window_cursor_feedback(
+            ui,
+            commands,
+            primary_entity,
+            &mut primary_cursor_options,
+            primary_cursor_icon,
+        );
+        primary_window.ime_enabled = ime_data.WantTextInput;
+        primary_window.ime_position = Vec2::new(ime_data.InputPos.x, ime_data.InputPos.y);
+        return;
+    }
+
+    for (window_entity, mut window, mut cursor_options, cursor_icon, viewport_window) in
+        viewport_windows.iter_mut()
+    {
+        if viewport_window.viewport_id.raw() == ime_data.ViewportId {
+            apply_window_cursor_feedback(
+                ui,
+                commands,
+                window_entity,
+                &mut cursor_options,
+                cursor_icon,
+            );
+            window.ime_enabled = ime_data.WantTextInput;
+            window.ime_position = Vec2::new(ime_data.InputPos.x, ime_data.InputPos.y);
+            primary_window.ime_enabled = false;
+            return;
+        }
+    }
+
+    apply_window_cursor_feedback(
+        ui,
+        commands,
+        primary_entity,
+        &mut primary_cursor_options,
+        primary_cursor_icon,
+    );
+    primary_window.ime_enabled = ime_data.WantTextInput;
+    primary_window.ime_position = Vec2::new(ime_data.InputPos.x, ime_data.InputPos.y);
+}
+
+fn apply_window_cursor_feedback(
+    ui: &imgui::Ui,
+    commands: &mut Commands,
+    window_entity: Entity,
+    cursor_options: &mut CursorOptions,
+    cursor_icon: Option<Mut<CursorIcon>>,
+) {
     let mouse_cursor = ui.mouse_cursor();
     let draw_cursor = ui.io().mouse_draw_cursor();
     let hide_os_cursor = draw_cursor || mouse_cursor.is_none();
@@ -249,11 +387,4 @@ fn sync_primary_window_platform_feedback(
             }
         }
     }
-
-    let raw_context = imgui_context.context().as_raw();
-    // SAFETY: `ImguiContext` owns this live Dear ImGui context for the lifetime of the Bevy
-    // resource, and the frame is still open while platform feedback is synchronized.
-    let ime_data = unsafe { &(*raw_context).PlatformImeData };
-    window.ime_enabled = ime_data.WantTextInput;
-    window.ime_position = Vec2::new(ime_data.InputPos.x, ime_data.InputPos.y);
 }

@@ -24,7 +24,15 @@ pub enum TextureBinding {
 #[derive(Clone, Debug)]
 pub struct FrameSnapshot {
     pub draw: DrawDataSnapshot,
+    pub viewports: Vec<ViewportDrawDataSnapshot>,
     pub texture_requests: Vec<TextureRequest>,
+}
+
+/// Thread-safe draw data snapshot for one Dear ImGui viewport.
+#[derive(Clone, Debug)]
+pub struct ViewportDrawDataSnapshot {
+    pub viewport_id: crate::Id,
+    pub draw: DrawDataSnapshot,
 }
 
 /// Options controlling snapshot behavior.
@@ -194,10 +202,188 @@ impl FrameSnapshot {
         } else {
             Vec::new()
         };
+        let viewports = viewport_draw_data_snapshots_from_draw_data(draw_data, &draw);
         Ok(Self {
             draw,
+            viewports,
             texture_requests,
         })
+    }
+
+    /// Build a `FrameSnapshot` from all current Dear ImGui platform viewport draw data.
+    ///
+    /// This must be called on the UI thread while the `Context` is current and after
+    /// `Context::render()` has produced valid draw data.
+    #[cfg(feature = "multi-viewport")]
+    pub(crate) fn from_platform_io(
+        platform_io: &crate::platform_io::PlatformIo,
+        options: SnapshotOptions,
+    ) -> Result<Self, SnapshotError> {
+        let mut viewports = Vec::new();
+        let mut first_draw_data = None;
+        for viewport in platform_io.viewports_iter() {
+            let Some(draw_data) = viewport.draw_data_ref() else {
+                continue;
+            };
+            let draw_data = draw_data_from_sys(draw_data);
+            if !draw_data.valid() {
+                continue;
+            }
+            if first_draw_data.is_none() {
+                first_draw_data = Some(draw_data);
+            }
+            viewports.push(ViewportDrawDataSnapshot {
+                viewport_id: viewport.id(),
+                draw: snapshot_draw_data(draw_data, options)?,
+            });
+        }
+
+        let Some(main) = viewports.first().cloned() else {
+            return Ok(Self {
+                draw: DrawDataSnapshot {
+                    display_pos: [0.0, 0.0],
+                    display_size: [0.0, 0.0],
+                    framebuffer_scale: [1.0, 1.0],
+                    draw_lists: Vec::new(),
+                },
+                viewports: Vec::new(),
+                texture_requests: Vec::new(),
+            });
+        };
+
+        let texture_requests = if options.capture_texture_requests {
+            snapshot_texture_requests(first_draw_data.expect("valid viewport draw data exists"))?
+        } else {
+            Vec::new()
+        };
+
+        Ok(Self {
+            draw: main.draw.clone(),
+            viewports,
+            texture_requests,
+        })
+    }
+
+    /// Draw data for a specific viewport, if it was captured in this snapshot.
+    #[must_use]
+    pub fn viewport_draw(&self, viewport_id: crate::Id) -> Option<&DrawDataSnapshot> {
+        self.viewports
+            .iter()
+            .find(|viewport| viewport.viewport_id == viewport_id)
+            .map(|viewport| &viewport.draw)
+    }
+}
+
+fn viewport_draw_data_snapshots_from_draw_data(
+    draw_data: &DrawData,
+    draw: &DrawDataSnapshot,
+) -> Vec<ViewportDrawDataSnapshot> {
+    let Some(viewport_id) = owner_viewport_id(draw_data) else {
+        return Vec::new();
+    };
+    vec![ViewportDrawDataSnapshot {
+        viewport_id,
+        draw: draw.clone(),
+    }]
+}
+
+fn owner_viewport_id(draw_data: &DrawData) -> Option<crate::Id> {
+    let owner_viewport = draw_data.owner_viewport();
+    if owner_viewport.is_null() {
+        return None;
+    }
+    let raw = unsafe { (*owner_viewport).ID };
+    (raw != 0).then_some(crate::Id::from(raw))
+}
+
+#[cfg(feature = "multi-viewport")]
+fn draw_data_from_sys(draw_data: &sys::ImDrawData) -> &DrawData {
+    unsafe { <DrawData as crate::internal::RawCast<sys::ImDrawData>>::from_raw(draw_data) }
+}
+
+#[cfg(all(test, feature = "multi-viewport"))]
+mod tests {
+    use super::*;
+
+    fn empty_draw_data(
+        viewport: *mut sys::ImGuiViewport,
+        display_pos: [f32; 2],
+        display_size: [f32; 2],
+    ) -> *mut sys::ImDrawData {
+        let draw_data = unsafe { sys::ImDrawData_ImDrawData() };
+        assert!(!draw_data.is_null());
+        unsafe {
+            (*draw_data).Valid = true;
+            (*draw_data).DisplayPos = sys::ImVec2 {
+                x: display_pos[0],
+                y: display_pos[1],
+            };
+            (*draw_data).DisplaySize = sys::ImVec2 {
+                x: display_size[0],
+                y: display_size[1],
+            };
+            (*draw_data).FramebufferScale = sys::ImVec2 { x: 1.0, y: 1.0 };
+            (*draw_data).OwnerViewport = viewport;
+            (*draw_data).Textures = std::ptr::null_mut();
+        }
+        draw_data
+    }
+
+    fn viewport(id: u32, draw_data: *mut sys::ImDrawData) -> *mut sys::ImGuiViewport {
+        let viewport = unsafe { sys::ImGuiViewport_ImGuiViewport() };
+        assert!(!viewport.is_null());
+        unsafe {
+            (*viewport).ID = id;
+            (*viewport).DrawData = draw_data;
+        }
+        viewport
+    }
+
+    #[test]
+    fn platform_io_snapshot_captures_draw_data_per_viewport() {
+        let main = viewport(0x111, std::ptr::null_mut());
+        let secondary = viewport(0x222, std::ptr::null_mut());
+        let main_draw = empty_draw_data(main, [0.0, 0.0], [640.0, 360.0]);
+        let secondary_draw = empty_draw_data(secondary, [100.0, 50.0], [320.0, 200.0]);
+        unsafe {
+            (*main).DrawData = main_draw;
+            (*secondary).DrawData = secondary_draw;
+        }
+
+        let mut viewport_ptrs = [main, secondary];
+        let mut raw = sys::ImGuiPlatformIO {
+            Viewports: sys::ImVector_ImGuiViewportPtr {
+                Size: 2,
+                Capacity: 2,
+                Data: viewport_ptrs.as_mut_ptr(),
+            },
+            ..Default::default()
+        };
+        let platform_io = unsafe {
+            crate::platform_io::PlatformIo::from_raw(
+                (&mut raw as *mut sys::ImGuiPlatformIO).cast_const(),
+            )
+        };
+
+        let snapshot = FrameSnapshot::from_platform_io(&platform_io, SnapshotOptions::default())
+            .expect("valid viewport draw data should snapshot");
+
+        assert_eq!(snapshot.draw.display_size, [640.0, 360.0]);
+        assert_eq!(snapshot.viewports.len(), 2);
+        assert_eq!(
+            snapshot
+                .viewport_draw(crate::Id::from(0x222))
+                .expect("secondary viewport should be captured")
+                .display_pos,
+            [100.0, 50.0]
+        );
+
+        unsafe {
+            sys::ImDrawData_destroy(main_draw);
+            sys::ImDrawData_destroy(secondary_draw);
+            sys::ImGuiViewport_destroy(main);
+            sys::ImGuiViewport_destroy(secondary);
+        }
     }
 }
 

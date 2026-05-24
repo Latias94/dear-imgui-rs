@@ -1,31 +1,34 @@
-//! Primary-window input mapping for the Bevy backend.
+//! Window input mapping for the Bevy backend.
 //!
-//! This module deliberately handles one Bevy [`PrimaryWindow`] and one Dear ImGui context. It
-//! translates Bevy's window/input messages into Dear ImGui IO events without consuming or rewriting
-//! Bevy's messages. Gameplay systems should use Dear ImGui's capture flags as policy hints instead
-//! of expecting this backend to stop Bevy input propagation.
+//! This module maps the Bevy [`PrimaryWindow`] and any Dear ImGui secondary viewport windows into
+//! one Dear ImGui context. It translates Bevy's window/input messages into Dear ImGui IO events
+//! without consuming or rewriting Bevy's messages. Gameplay systems should use Dear ImGui's capture
+//! flags as policy hints instead of expecting this backend to stop Bevy input propagation.
 
-use crate::ImguiContext;
+use crate::{ImguiContext, ImguiViewportWindow};
 use bevy_app::{App, PreUpdate};
 use bevy_ecs::message::MessageReader;
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::{IntoScheduleConfigs, SystemSet};
+use bevy_ecs::system::SystemParam;
 use bevy_input::ButtonState;
 use bevy_input::keyboard::{KeyCode, KeyboardFocusLost, KeyboardInput};
 use bevy_input::mouse::{
     MouseButton as BevyMouseButton, MouseButtonInput, MouseScrollUnit, MouseWheel,
 };
 use bevy_input::touch::{TouchInput, TouchPhase};
+use bevy_math::Vec2;
 use bevy_window::{
     CursorIcon, CursorLeft, CursorMoved, Ime, PrimaryWindow, SystemCursorIcon, Window,
-    WindowBackendScaleFactorChanged, WindowFocused, WindowResized, WindowScaleFactorChanged,
+    WindowBackendScaleFactorChanged, WindowFocused, WindowPosition, WindowResized,
+    WindowScaleFactorChanged,
 };
 use dear_imgui_rs as imgui;
 use std::collections::HashSet;
 
 const INVALID_MOUSE_POS: [f32; 2] = [-f32::MAX, -f32::MAX];
 
-/// System set that injects Bevy primary-window input into Dear ImGui IO.
+/// System set that injects Bevy window input into Dear ImGui IO.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ImguiInputSystems;
 
@@ -35,6 +38,7 @@ pub struct ImguiInputState {
     active_touch_id: Option<u64>,
     ime_enabled: bool,
     primary_window_focused: Option<bool>,
+    focused_window: Option<Entity>,
     pressed_keys: HashSet<imgui::Key>,
     pressed_mouse_buttons: HashSet<imgui::MouseButton>,
 }
@@ -46,7 +50,7 @@ impl ImguiInputState {
         self.active_touch_id
     }
 
-    /// Whether the last primary-window IME message left IME enabled.
+    /// Whether the last mapped-window IME message left IME enabled.
     #[must_use]
     pub fn ime_enabled(&self) -> bool {
         self.ime_enabled
@@ -56,6 +60,12 @@ impl ImguiInputState {
     #[must_use]
     pub fn primary_window_focused(&self) -> Option<bool> {
         self.primary_window_focused
+    }
+
+    /// Last Bevy window entity reported as focused by the backend.
+    #[must_use]
+    pub fn focused_window(&self) -> Option<Entity> {
+        self.focused_window
     }
 }
 
@@ -110,45 +120,44 @@ pub(crate) fn install_input_mapping(app: &mut App) {
 #[allow(clippy::too_many_arguments)]
 pub fn primary_window_input_system(
     primary_window: Query<(Entity, &Window), With<PrimaryWindow>>,
+    viewport_windows: Query<(Entity, &Window, &ImguiViewportWindow), Without<PrimaryWindow>>,
     mut imgui_context: NonSendMut<ImguiContext>,
     mut input_state: ResMut<ImguiInputState>,
     mut capture: ResMut<ImguiInputCapture>,
-    mut window_resized: MessageReader<WindowResized>,
-    mut window_scale_factor_changed: MessageReader<WindowScaleFactorChanged>,
-    mut window_backend_scale_factor_changed: MessageReader<WindowBackendScaleFactorChanged>,
-    mut window_focused: MessageReader<WindowFocused>,
-    mut cursor_moved: MessageReader<CursorMoved>,
-    mut cursor_left: MessageReader<CursorLeft>,
-    mut mouse_button_input: MessageReader<MouseButtonInput>,
-    mut mouse_wheel: MessageReader<MouseWheel>,
-    mut keyboard_input: MessageReader<KeyboardInput>,
-    mut keyboard_focus_lost: MessageReader<KeyboardFocusLost>,
-    mut touch_input: MessageReader<TouchInput>,
-    mut ime: MessageReader<Ime>,
+    mut messages: ImguiInputMessageReaders,
 ) {
     let Ok((primary_window_entity, window)) = primary_window.single() else {
         discard_unread_messages(
-            &mut window_resized,
-            &mut window_scale_factor_changed,
-            &mut window_backend_scale_factor_changed,
-            &mut window_focused,
-            &mut cursor_moved,
-            &mut cursor_left,
-            &mut mouse_button_input,
-            &mut mouse_wheel,
-            &mut keyboard_input,
-            &mut keyboard_focus_lost,
-            &mut touch_input,
-            &mut ime,
+            &mut messages.window_resized,
+            &mut messages.window_scale_factor_changed,
+            &mut messages.window_backend_scale_factor_changed,
+            &mut messages.window_focused,
+            &mut messages.cursor_moved,
+            &mut messages.cursor_left,
+            &mut messages.mouse_button_input,
+            &mut messages.mouse_wheel,
+            &mut messages.keyboard_input,
+            &mut messages.keyboard_focus_lost,
+            &mut messages.touch_input,
+            &mut messages.ime,
         );
         return;
     };
 
     let context = imgui_context.context_mut();
     sync_window_metrics(context, window);
-    sync_initial_focus(context, &mut input_state, window.focused);
+    let primary_viewport_id = context.main_viewport().id();
+    let primary_window = ImguiInputWindow {
+        entity: primary_window_entity,
+        position: window.position.clone(),
+        scale_factor: window.scale_factor(),
+        viewport_id: primary_viewport_id,
+        is_primary: true,
+    };
+    sync_initial_focus(context, &mut input_state, primary_window, window.focused);
 
-    for event in window_resized
+    for event in messages
+        .window_resized
         .read()
         .filter(|event| event.window == primary_window_entity)
     {
@@ -157,55 +166,58 @@ pub fn primary_window_input_system(
             .set_display_size([event.width, event.height]);
     }
 
-    for event in window_scale_factor_changed
+    for event in messages
+        .window_scale_factor_changed
         .read()
         .filter(|event| event.window == primary_window_entity)
     {
         set_framebuffer_scale(context, event.scale_factor as f32);
     }
 
-    for event in window_backend_scale_factor_changed
+    for event in messages
+        .window_backend_scale_factor_changed
         .read()
         .filter(|event| event.window == primary_window_entity)
     {
         set_framebuffer_scale(context, event.scale_factor as f32);
     }
 
-    for event in window_focused
-        .read()
-        .filter(|event| event.window == primary_window_entity)
-    {
-        apply_focus_event(context, &mut input_state, event.focused);
+    for (event, window) in messages.window_focused.read().filter_map(|event| {
+        imgui_window_for_event(event.window, primary_window, &viewport_windows)
+            .map(|window| (event, window))
+    }) {
+        apply_focus_event(context, &mut input_state, window, event.focused);
     }
 
-    if !keyboard_focus_lost.is_empty() {
-        keyboard_focus_lost.clear();
-        apply_focus_event(context, &mut input_state, false);
+    if !messages.keyboard_focus_lost.is_empty() {
+        messages.keyboard_focus_lost.clear();
+        apply_focus_event(context, &mut input_state, primary_window, false);
     }
 
-    for event in cursor_moved
-        .read()
-        .filter(|event| event.window == primary_window_entity)
-    {
+    for event in messages.cursor_moved.read().filter_map(|event| {
+        imgui_window_for_event(event.window, primary_window, &viewport_windows)
+            .map(|window| (event, window))
+    }) {
+        let (event, window) = event;
+        let mouse_pos = mouse_pos_for_window(context, window, event.position);
         let io = context.io_mut();
         io.add_mouse_source_event(imgui::MouseSource::Mouse);
-        io.add_mouse_pos_event([event.position.x, event.position.y]);
+        add_mouse_viewport_event(io, Some(window.viewport_id));
+        io.add_mouse_pos_event(mouse_pos);
     }
 
-    for event in cursor_left
-        .read()
-        .filter(|event| event.window == primary_window_entity)
-    {
-        let _ = event;
+    for _event in messages.cursor_left.read().filter(|event| {
+        imgui_window_for_event(event.window, primary_window, &viewport_windows).is_some()
+    }) {
         let io = context.io_mut();
         io.add_mouse_source_event(imgui::MouseSource::Mouse);
+        add_mouse_viewport_event(io, None);
         io.add_mouse_pos_event(INVALID_MOUSE_POS);
     }
 
-    for event in mouse_button_input
-        .read()
-        .filter(|event| event.window == primary_window_entity)
-    {
+    for event in messages.mouse_button_input.read().filter(|event| {
+        imgui_window_for_event(event.window, primary_window, &viewport_windows).is_some()
+    }) {
         if let Some(button) = map_bevy_mouse_button(event.button) {
             let pressed = event.state.is_pressed();
             if pressed {
@@ -215,46 +227,135 @@ pub fn primary_window_input_system(
             }
             let io = context.io_mut();
             io.add_mouse_source_event(imgui::MouseSource::Mouse);
+            if let Some(window) =
+                imgui_window_for_event(event.window, primary_window, &viewport_windows)
+            {
+                add_mouse_viewport_event(io, Some(window.viewport_id));
+            }
             io.add_mouse_button_event(button, pressed);
         }
     }
 
-    for event in mouse_wheel
-        .read()
-        .filter(|event| event.window == primary_window_entity)
-    {
+    for event in messages.mouse_wheel.read().filter_map(|event| {
+        imgui_window_for_event(event.window, primary_window, &viewport_windows)
+            .map(|window| (event, window))
+    }) {
+        let (event, window) = event;
         let io = context.io_mut();
         io.add_mouse_source_event(imgui::MouseSource::Mouse);
+        add_mouse_viewport_event(io, Some(window.viewport_id));
         io.add_mouse_wheel_event(normalize_wheel(event.unit, event.x, event.y));
     }
 
-    for event in keyboard_input
-        .read()
-        .filter(|event| event.window == primary_window_entity)
-    {
+    for event in messages.keyboard_input.read().filter(|event| {
+        imgui_window_for_event(event.window, primary_window, &viewport_windows).is_some()
+    }) {
         apply_keyboard_input(context, &mut input_state, event);
     }
 
-    for event in touch_input
-        .read()
-        .filter(|event| event.window == primary_window_entity)
-    {
-        apply_touch_input(context, &mut input_state, event);
+    for event in messages.touch_input.read().filter_map(|event| {
+        imgui_window_for_event(event.window, primary_window, &viewport_windows)
+            .map(|window| (event, window))
+    }) {
+        let (event, window) = event;
+        apply_touch_input(context, &mut input_state, event, window);
     }
 
-    for event in ime.read() {
+    for event in messages.ime.read() {
         let window = match event {
             Ime::Preedit { window, .. }
             | Ime::Commit { window, .. }
             | Ime::Enabled { window }
             | Ime::Disabled { window } => *window,
         };
-        if window == primary_window_entity {
+        if imgui_window_for_event(window, primary_window, &viewport_windows).is_some() {
             apply_ime_event(context, &mut input_state, event);
         }
     }
 
     capture.update_from_io(context.io());
+}
+
+#[derive(SystemParam)]
+pub struct ImguiInputMessageReaders<'w, 's> {
+    window_resized: MessageReader<'w, 's, WindowResized>,
+    window_scale_factor_changed: MessageReader<'w, 's, WindowScaleFactorChanged>,
+    window_backend_scale_factor_changed: MessageReader<'w, 's, WindowBackendScaleFactorChanged>,
+    window_focused: MessageReader<'w, 's, WindowFocused>,
+    cursor_moved: MessageReader<'w, 's, CursorMoved>,
+    cursor_left: MessageReader<'w, 's, CursorLeft>,
+    mouse_button_input: MessageReader<'w, 's, MouseButtonInput>,
+    mouse_wheel: MessageReader<'w, 's, MouseWheel>,
+    keyboard_input: MessageReader<'w, 's, KeyboardInput>,
+    keyboard_focus_lost: MessageReader<'w, 's, KeyboardFocusLost>,
+    touch_input: MessageReader<'w, 's, TouchInput>,
+    ime: MessageReader<'w, 's, Ime>,
+}
+
+#[derive(Clone, Copy)]
+struct ImguiInputWindow {
+    entity: Entity,
+    position: WindowPosition,
+    scale_factor: f32,
+    viewport_id: imgui::Id,
+    is_primary: bool,
+}
+
+fn imgui_window_for_event(
+    entity: Entity,
+    primary_window: ImguiInputWindow,
+    viewport_windows: &Query<(Entity, &Window, &ImguiViewportWindow), Without<PrimaryWindow>>,
+) -> Option<ImguiInputWindow> {
+    if entity == primary_window.entity {
+        return Some(primary_window);
+    }
+
+    let Ok((entity, window, viewport_window)) = viewport_windows.get(entity) else {
+        return None;
+    };
+    Some(ImguiInputWindow {
+        entity,
+        position: window.position.clone(),
+        scale_factor: window.scale_factor(),
+        viewport_id: viewport_window.viewport_id,
+        is_primary: false,
+    })
+}
+
+fn add_mouse_viewport_event(io: &mut imgui::Io, viewport_id: Option<imgui::Id>) {
+    io.set_backend_flags(io.backend_flags() | imgui::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT);
+    io.add_mouse_viewport_event(viewport_id.unwrap_or_default());
+}
+
+fn mouse_pos_for_window(
+    context: &imgui::Context,
+    window: ImguiInputWindow,
+    local_pos: Vec2,
+) -> [f32; 2] {
+    let mut pos = [local_pos.x, local_pos.y];
+    if !context
+        .io()
+        .config_flags()
+        .contains(imgui::ConfigFlags::VIEWPORTS_ENABLE)
+    {
+        return pos;
+    }
+
+    let WindowPosition::At(window_pos) = window.position else {
+        return pos;
+    };
+    let scale_factor = positive_finite_or(window.scale_factor, 1.0);
+    pos[0] += window_pos.x as f32 / scale_factor;
+    pos[1] += window_pos.y as f32 / scale_factor;
+    pos
+}
+
+fn positive_finite_or(value: f32, fallback: f32) -> f32 {
+    if value.is_finite() && value > 0.0 {
+        value
+    } else {
+        fallback
+    }
 }
 
 /// Convert a Bevy mouse button into Dear ImGui's button space.
@@ -420,15 +521,28 @@ fn set_framebuffer_scale(context: &mut imgui::Context, scale_factor: f32) {
         .set_display_framebuffer_scale([scale_factor, scale_factor]);
 }
 
-fn sync_initial_focus(context: &mut imgui::Context, state: &mut ImguiInputState, focused: bool) {
+fn sync_initial_focus(
+    context: &mut imgui::Context,
+    state: &mut ImguiInputState,
+    window: ImguiInputWindow,
+    focused: bool,
+) {
     if state.primary_window_focused != Some(focused) {
-        apply_focus_event(context, state, focused);
+        apply_focus_event(context, state, window, focused);
     }
 }
 
-fn apply_focus_event(context: &mut imgui::Context, state: &mut ImguiInputState, focused: bool) {
+fn apply_focus_event(
+    context: &mut imgui::Context,
+    state: &mut ImguiInputState,
+    window: ImguiInputWindow,
+    focused: bool,
+) {
     context.io_mut().add_focus_event(focused);
-    state.primary_window_focused = Some(focused);
+    if window.is_primary {
+        state.primary_window_focused = Some(focused);
+    }
+    state.focused_window = focused.then_some(window.entity);
     if !focused {
         release_sticky_input(context, state);
     }
@@ -492,30 +606,37 @@ fn apply_touch_input(
     context: &mut imgui::Context,
     state: &mut ImguiInputState,
     event: &TouchInput,
+    window: ImguiInputWindow,
 ) {
     match event.phase {
         TouchPhase::Started => {
             if state.active_touch_id.is_none() {
                 state.active_touch_id = Some(event.id);
+                let mouse_pos = mouse_pos_for_window(context, window, event.position);
                 let io = context.io_mut();
                 io.add_mouse_source_event(imgui::MouseSource::TouchScreen);
-                io.add_mouse_pos_event([event.position.x, event.position.y]);
+                add_mouse_viewport_event(io, Some(window.viewport_id));
+                io.add_mouse_pos_event(mouse_pos);
                 io.add_mouse_button_event(imgui::MouseButton::Left, true);
             }
         }
         TouchPhase::Moved => {
             if state.active_touch_id == Some(event.id) {
+                let mouse_pos = mouse_pos_for_window(context, window, event.position);
                 let io = context.io_mut();
                 io.add_mouse_source_event(imgui::MouseSource::TouchScreen);
-                io.add_mouse_pos_event([event.position.x, event.position.y]);
+                add_mouse_viewport_event(io, Some(window.viewport_id));
+                io.add_mouse_pos_event(mouse_pos);
             }
         }
         TouchPhase::Ended | TouchPhase::Canceled => {
             if state.active_touch_id == Some(event.id) {
                 state.active_touch_id = None;
+                let mouse_pos = mouse_pos_for_window(context, window, event.position);
                 let io = context.io_mut();
                 io.add_mouse_source_event(imgui::MouseSource::TouchScreen);
-                io.add_mouse_pos_event([event.position.x, event.position.y]);
+                add_mouse_viewport_event(io, Some(window.viewport_id));
+                io.add_mouse_pos_event(mouse_pos);
                 io.add_mouse_button_event(imgui::MouseButton::Left, false);
             }
         }

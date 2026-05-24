@@ -17,7 +17,7 @@ Last updated: 2026-05-23
   Goal: Add a persistent windowed Bevy example or smoke app that uses Bevy's normal windowed runner and demonstrates ImGui overlay interaction in a real window.
   Validation: `cargo +stable check -p dear-imgui-bevy --features render --example windowed_overlay` plus the documented manual run command.
   Review: `review-workstream` before accepting completion.
-  Evidence: `backends/dear-imgui-bevy/examples/windowed_overlay.rs`, README command, fresh gate output.
+  Evidence: `backends/dear-imgui-bevy/examples/runtime/windowed_overlay.rs`, README command, fresh gate output.
   Handoff: DONE 2026-05-23. Added `windowed_overlay.rs` using Bevy `DefaultPlugins` and a dev-only top-level `bevy` dependency. The example opens a persistent runtime window, draws ImGui overlay state across frames, and exits on Escape.
 
 ## M2 — Runtime Renderer Harness

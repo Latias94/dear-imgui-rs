@@ -13,8 +13,9 @@ cargo +stable check -p dear-imgui-bevy --features render --example editor_shell
 cargo +stable nextest run -p dear-imgui-bevy --features render
 ```
 
-`simple.rs` remains the minimal compile proof. `windowed_overlay.rs` is the persistent runtime
-smoke app, and `editor_shell.rs` is the richer editor productization example.
+`examples/basic/simple.rs` remains the minimal compile proof. `examples/runtime/windowed_overlay.rs`
+is the persistent runtime smoke app, and `examples/editor/editor_shell.rs` is the richer editor
+productization example.
 
 ## Gate Set
 
@@ -65,7 +66,7 @@ gates, and residual risks here or link to the review note.
 - `docs/workstreams/bevy-runtime-productization/TODO.md`
 - `docs/workstreams/bevy-runtime-productization/MILESTONES.md`
 - `docs/workstreams/bevy-runtime-productization/WORKSTREAM.json`
-- `backends/dear-imgui-bevy/examples/windowed_overlay.rs`
+- `backends/dear-imgui-bevy/examples/runtime/windowed_overlay.rs`
 - runtime renderer harness path added by BRP-030
 - editor helper/example paths updated by BRP-040
 
@@ -75,7 +76,7 @@ gates, and residual risks here or link to the review note.
   renderer harness coverage, and editor shell productization. Implementation gates not yet run for
   BRP-020+.
 - 2026-05-23: BRP-020 persistent windowed runtime proof implemented and verified.
-  - Added `backends/dear-imgui-bevy/examples/windowed_overlay.rs`.
+  - Added `backends/dear-imgui-bevy/examples/runtime/windowed_overlay.rs`.
   - Added a dev-only top-level `bevy = "=0.19.0-rc.2"` dependency with `2d` and `default_platform`
     features so the example can use `DefaultPlugins` and Bevy's normal windowed runner.
   - Updated `backends/dear-imgui-bevy/README.md` with the manual run command:
@@ -102,7 +103,7 @@ gates, and residual risks here or link to the review note.
     — PASS: 2 passed.
   - Status: BRP-030 DONE. Continue with BRP-040 editor shell productization.
 - 2026-05-23: BRP-040 editor shell productization implemented and verified.
-  - Converted `backends/dear-imgui-bevy/examples/editor_shell.rs` from a one-frame
+  - Converted `backends/dear-imgui-bevy/examples/editor/editor_shell.rs` from a one-frame
     `ScheduleRunnerPlugin::run_once()` proof to a persistent windowed app using Bevy
     `DefaultPlugins`.
   - Added a live offscreen Bevy 2D scene rendered into a target `Handle<Image>`, registered through

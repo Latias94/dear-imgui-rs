@@ -10,6 +10,7 @@ use bevy_app::App;
 use bevy_asset::{Assets, Handle, uuid_handle};
 use bevy_camera::{Camera, NormalizedRenderTarget, RenderTarget};
 use bevy_core_pipeline::{Core2d, Core2dSystems, Core3d, Core3dSystems};
+use bevy_ecs::entity::ContainsEntity;
 use bevy_ecs::prelude::*;
 use bevy_ecs::system::SystemParam;
 use bevy_image::Image;
@@ -44,6 +45,7 @@ use std::hash::{Hash, Hasher};
 use std::mem::size_of;
 
 pub use crate::texture::ImguiBevyTextures;
+use crate::{ImguiBackendStatus, ImguiViewportWindow};
 
 /// Stable handle for the embedded Dear ImGui Bevy renderer shader.
 pub const IMGUI_SHADER_HANDLE: Handle<Shader> =
@@ -181,6 +183,8 @@ pub struct ImguiCameraTarget {
     pub order: isize,
     /// Normalized render target resolved from the camera and current primary window.
     pub target: NormalizedRenderTarget,
+    /// Dear ImGui viewport whose draw data should be rendered into this target.
+    pub viewport_id: Option<imgui::Id>,
 }
 
 /// Marker component for cameras that should not receive Dear ImGui overlay rendering.
@@ -257,6 +261,8 @@ pub struct ImguiPreparedDraw {
     pub order: isize,
     /// Normalized render target associated with the camera.
     pub target: NormalizedRenderTarget,
+    /// Dear ImGui viewport that produced this draw command.
+    pub viewport_id: Option<imgui::Id>,
     /// Texture binding requested by the ImGui draw command.
     pub texture: TextureBinding,
     /// Scissor rectangle after applying display position and framebuffer scale.
@@ -272,6 +278,7 @@ pub struct ImguiPreparedDraw {
 pub struct ImguiPreparedRenderFrame {
     frame_index: Option<u64>,
     uniforms: Option<ImguiUniforms>,
+    uniforms_by_camera: HashMap<Entity, ImguiUniforms>,
     vertices: Vec<ImguiGpuVertex>,
     indices: Vec<DrawIdx>,
     draws: Vec<ImguiPreparedDraw>,
@@ -289,6 +296,15 @@ impl ImguiPreparedRenderFrame {
     #[must_use]
     pub fn uniforms(&self) -> Option<ImguiUniforms> {
         self.uniforms
+    }
+
+    /// Uniforms for a camera's routed viewport draw data.
+    #[must_use]
+    pub fn uniforms_for_camera(&self, camera: Entity) -> Option<ImguiUniforms> {
+        self.uniforms_by_camera
+            .get(&camera)
+            .copied()
+            .or(self.uniforms)
     }
 
     /// Flattened ImGui vertices for the current extracted frame.
@@ -319,6 +335,7 @@ impl ImguiPreparedRenderFrame {
         &mut self,
         frame_index: u64,
         uniforms: ImguiUniforms,
+        uniforms_by_camera: HashMap<Entity, ImguiUniforms>,
         vertices: Vec<ImguiGpuVertex>,
         indices: Vec<DrawIdx>,
         draws: Vec<ImguiPreparedDraw>,
@@ -326,6 +343,7 @@ impl ImguiPreparedRenderFrame {
     ) {
         self.frame_index = Some(frame_index);
         self.uniforms = Some(uniforms);
+        self.uniforms_by_camera = uniforms_by_camera;
         self.vertices = vertices;
         self.indices = indices;
         self.draws = draws;
@@ -335,6 +353,7 @@ impl ImguiPreparedRenderFrame {
     fn clear(&mut self, frame_index: Option<u64>) {
         self.frame_index = frame_index;
         self.uniforms = None;
+        self.uniforms_by_camera.clear();
         self.vertices.clear();
         self.indices.clear();
         self.draws.clear();
@@ -535,11 +554,16 @@ impl SpecializedRenderPipeline for ImguiRenderPipeline {
 /// GPU resources shared by all ImGui overlay draws.
 #[derive(Resource)]
 pub struct ImguiPipelineGpuResources {
-    uniform_buffer: Buffer,
-    common_bind_group: BindGroup,
+    sampler: bevy_render::render_resource::Sampler,
+    uniforms_by_camera: HashMap<Entity, ImguiCameraUniformResources>,
     _fallback_texture: Texture,
     _fallback_view: TextureView,
     fallback_bind_group: BindGroup,
+}
+
+struct ImguiCameraUniformResources {
+    buffer: Buffer,
+    bind_group: BindGroup,
 }
 
 impl FromWorld for ImguiPipelineGpuResources {
@@ -548,32 +572,11 @@ impl FromWorld for ImguiPipelineGpuResources {
         let render_queue = world.resource::<RenderQueue>();
         let pipeline_cache = world.resource::<PipelineCache>();
         let pipeline = world.resource::<ImguiRenderPipeline>();
-        let common_layout = pipeline_cache.get_bind_group_layout(pipeline.common_layout());
         let texture_layout = pipeline_cache.get_bind_group_layout(pipeline.texture_layout());
-        let uniform_buffer = render_device.create_buffer(&BufferDescriptor {
-            label: Some("dear_imgui_bevy_uniforms"),
-            size: size_of::<ImguiUniforms>() as BufferAddress,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
         let sampler = render_device.create_sampler(&SamplerDescriptor {
             label: Some("dear_imgui_bevy_sampler"),
             ..Default::default()
         });
-        let common_bind_group = render_device.create_bind_group(
-            Some("dear_imgui_bevy_common_bind_group"),
-            &common_layout,
-            &[
-                BindGroupEntry {
-                    binding: 0,
-                    resource: uniform_buffer.as_entire_binding(),
-                },
-                BindGroupEntry {
-                    binding: 1,
-                    resource: BindingResource::Sampler(&sampler),
-                },
-            ],
-        );
         let fallback_texture = render_device.create_texture(&TextureDescriptor {
             label: Some("dear_imgui_bevy_fallback_texture"),
             size: Extent3d {
@@ -607,8 +610,8 @@ impl FromWorld for ImguiPipelineGpuResources {
             }],
         );
         Self {
-            uniform_buffer,
-            common_bind_group,
+            sampler,
+            uniforms_by_camera: HashMap::new(),
             _fallback_texture: fallback_texture,
             _fallback_view: fallback_view,
             fallback_bind_group,
@@ -617,12 +620,92 @@ impl FromWorld for ImguiPipelineGpuResources {
 }
 
 impl ImguiPipelineGpuResources {
-    fn update_uniforms(&self, render_queue: &RenderQueue, uniforms: ImguiUniforms) {
-        render_queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
+    fn prepare_camera_uniforms(
+        &mut self,
+        prepared: &ImguiPreparedRenderFrame,
+        render_device: &RenderDevice,
+        render_queue: &RenderQueue,
+        pipeline_cache: &PipelineCache,
+        pipeline: &ImguiRenderPipeline,
+    ) {
+        let active_cameras = prepared
+            .draws()
+            .iter()
+            .map(|draw| draw.camera)
+            .collect::<std::collections::HashSet<_>>();
+        self.uniforms_by_camera
+            .retain(|camera, _| active_cameras.contains(camera));
+
+        for camera in active_cameras {
+            let Some(uniforms) = prepared.uniforms_for_camera(camera) else {
+                continue;
+            };
+            let resources = self.uniforms_by_camera.entry(camera).or_insert_with(|| {
+                create_camera_uniform_resources(
+                    camera,
+                    render_device,
+                    pipeline_cache,
+                    pipeline,
+                    &self.sampler,
+                )
+            });
+            render_queue.write_buffer(&resources.buffer, 0, bytemuck::bytes_of(&uniforms));
+        }
+    }
+
+    fn update_camera_uniforms(
+        &self,
+        camera: Entity,
+        render_queue: &RenderQueue,
+        uniforms: ImguiUniforms,
+    ) -> Option<&BindGroup> {
+        let resources = self.uniforms_by_camera.get(&camera)?;
+        render_queue.write_buffer(&resources.buffer, 0, bytemuck::bytes_of(&uniforms));
+        Some(&resources.bind_group)
+    }
+
+    #[must_use]
+    pub fn uniform_bind_group_count(&self) -> usize {
+        self.uniforms_by_camera.len()
     }
 
     fn fallback_bind_group(&self) -> &BindGroup {
         &self.fallback_bind_group
+    }
+}
+
+fn create_camera_uniform_resources(
+    camera: Entity,
+    render_device: &RenderDevice,
+    pipeline_cache: &PipelineCache,
+    pipeline: &ImguiRenderPipeline,
+    sampler: &bevy_render::render_resource::Sampler,
+) -> ImguiCameraUniformResources {
+    let common_layout = pipeline_cache.get_bind_group_layout(pipeline.common_layout());
+    let _ = camera;
+    let uniform_buffer = render_device.create_buffer(&BufferDescriptor {
+        label: Some("dear_imgui_bevy_uniforms_camera"),
+        size: size_of::<ImguiUniforms>() as BufferAddress,
+        usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let bind_group = render_device.create_bind_group(
+        Some("dear_imgui_bevy_common_bind_group"),
+        &common_layout,
+        &[
+            BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            },
+            BindGroupEntry {
+                binding: 1,
+                resource: BindingResource::Sampler(sampler),
+            },
+        ],
+    );
+    ImguiCameraUniformResources {
+        buffer: uniform_buffer,
+        bind_group,
     }
 }
 
@@ -638,6 +721,12 @@ struct ImguiTextureUpload<'a> {
     height: u32,
     row_pitch: usize,
     pixels: &'a [u8],
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ImguiViewportTarget {
+    viewport_id: imgui::Id,
+    window: Entity,
 }
 
 /// Texture bind groups currently known to the Bevy-native ImGui renderer.
@@ -845,6 +934,10 @@ pub(crate) fn install_render_extraction(app: &mut App) {
             prepare_imgui_texture_bind_groups.in_set(RenderSystems::PrepareBindGroups),
         )
         .add_systems(
+            Render,
+            prepare_imgui_uniform_bind_groups.in_set(RenderSystems::PrepareBindGroups),
+        )
+        .add_systems(
             Core2d,
             render_imgui_overlay.in_set(Core2dSystems::PostProcess),
         )
@@ -879,7 +972,9 @@ fn extract_imgui_bevy_textures(
 fn extract_imgui_render_frame(
     mut extracted: ResMut<ImguiExtractedRenderFrame>,
     output: Extract<Res<crate::ImguiFrameOutput>>,
+    backend_status: Extract<Res<ImguiBackendStatus>>,
     primary_window: Extract<Query<Entity, With<PrimaryWindow>>>,
+    viewport_windows: Extract<Query<(Entity, &ImguiViewportWindow)>>,
     cameras: Extract<OverlayCameraQuery<'_>>,
 ) {
     let Some(snapshot) = output.snapshot().cloned() else {
@@ -887,7 +982,12 @@ fn extract_imgui_render_frame(
         return;
     };
     let primary_window = primary_window.single().ok();
-    let camera_targets = collect_camera_targets(primary_window, cameras.iter());
+    let viewport_targets = if backend_status.multi_viewport_supported {
+        collect_viewport_targets(viewport_windows.iter())
+    } else {
+        Vec::new()
+    };
+    let camera_targets = collect_camera_targets(primary_window, &viewport_targets, cameras.iter());
     extracted.replace(output.frame_index(), snapshot, camera_targets);
 }
 
@@ -897,6 +997,7 @@ fn extract_imgui_render_frame(
 /// that already points at a specific window entity keeps that route intact.
 fn collect_camera_targets<'w>(
     primary_window: Option<Entity>,
+    viewport_targets: &[ImguiViewportTarget],
     cameras: impl Iterator<
         Item = (
             Entity,
@@ -914,12 +1015,38 @@ fn collect_camera_targets<'w>(
                 .map(|target| ImguiCameraTarget {
                     camera: entity,
                     order: camera.order,
+                    viewport_id: viewport_id_for_target(&target, viewport_targets),
                     target,
                 })
         })
         .collect::<Vec<_>>();
     targets.sort_by_key(|target| target.order);
     targets
+}
+
+fn collect_viewport_targets<'w>(
+    viewport_windows: impl Iterator<Item = (Entity, &'w ImguiViewportWindow)>,
+) -> Vec<ImguiViewportTarget> {
+    viewport_windows
+        .map(|(window, viewport_window)| ImguiViewportTarget {
+            viewport_id: viewport_window.viewport_id,
+            window,
+        })
+        .collect()
+}
+
+fn viewport_id_for_target(
+    target: &NormalizedRenderTarget,
+    viewport_targets: &[ImguiViewportTarget],
+) -> Option<imgui::Id> {
+    let NormalizedRenderTarget::Window(window) = target else {
+        return None;
+    };
+    let entity = window.entity();
+    viewport_targets
+        .iter()
+        .find(|target| target.window == entity)
+        .map(|target| target.viewport_id)
 }
 
 fn prepare_imgui_render_frame(
@@ -936,13 +1063,14 @@ fn prepare_imgui_render_frame(
         return;
     };
 
-    let uniforms =
+    let primary_uniforms =
         ImguiUniforms::from_display_rect(snapshot.draw.display_pos, snapshot.draw.display_size);
-    let (vertices, indices, draws) =
+    let (vertices, indices, draws, uniforms_by_camera) =
         prepare_snapshot_draw_data(snapshot, extracted.camera_targets());
     prepared.replace(
         frame_index,
-        uniforms,
+        primary_uniforms,
+        uniforms_by_camera,
         vertices,
         indices,
         draws,
@@ -959,6 +1087,32 @@ fn upload_imgui_buffers(
     if let (Some(render_device), Some(render_queue)) = (render_device, render_queue) {
         gpu_buffers.upload(&prepared, &render_device, &render_queue);
     }
+}
+
+fn prepare_imgui_uniform_bind_groups(
+    prepared: Res<ImguiPreparedRenderFrame>,
+    render_device: Option<Res<RenderDevice>>,
+    render_queue: Option<Res<RenderQueue>>,
+    pipeline_cache: Option<Res<PipelineCache>>,
+    pipeline: Res<ImguiRenderPipeline>,
+    mut gpu_resources: Option<ResMut<ImguiPipelineGpuResources>>,
+) {
+    let (Some(render_device), Some(render_queue), Some(pipeline_cache), Some(gpu_resources)) = (
+        render_device,
+        render_queue,
+        pipeline_cache,
+        gpu_resources.as_deref_mut(),
+    ) else {
+        return;
+    };
+
+    gpu_resources.prepare_camera_uniforms(
+        &prepared,
+        &render_device,
+        &render_queue,
+        &pipeline_cache,
+        &pipeline,
+    );
 }
 
 #[derive(SystemParam)]
@@ -1441,13 +1595,16 @@ fn render_imgui_overlay(
         return;
     }
 
-    let Some(uniforms) = params.prepared.uniforms() else {
+    let Some(uniforms) = params.prepared.uniforms_for_camera(camera) else {
         return;
     };
-    gpu_resources.update_uniforms(
+    let Some(common_bind_group) = gpu_resources.update_camera_uniforms(
+        camera,
         &render_queue,
         uniforms.with_gamma(ImguiUniforms::gamma_for_format(view.target_format)),
-    );
+    ) else {
+        return;
+    };
 
     let color_attachment = view_target.get_color_attachment();
     let mut render_pass =
@@ -1471,7 +1628,7 @@ fn render_imgui_overlay(
             });
 
     render_pass.set_pipeline(pipeline);
-    render_pass.set_bind_group(0, &gpu_resources.common_bind_group, &[]);
+    render_pass.set_bind_group(0, common_bind_group, &[]);
     if let Some(vertex_buffer) = params.gpu_buffers.vertex_buffer() {
         render_pass.set_vertex_buffer(0, *vertex_buffer.slice(..));
     } else {
@@ -1502,82 +1659,121 @@ fn render_imgui_overlay(
 fn prepare_snapshot_draw_data(
     snapshot: &imgui::render::FrameSnapshot,
     camera_targets: &[ImguiCameraTarget],
-) -> (Vec<ImguiGpuVertex>, Vec<DrawIdx>, Vec<ImguiPreparedDraw>) {
-    let vertex_count = snapshot
-        .draw
-        .draw_lists
+) -> (
+    Vec<ImguiGpuVertex>,
+    Vec<DrawIdx>,
+    Vec<ImguiPreparedDraw>,
+    HashMap<Entity, ImguiUniforms>,
+) {
+    let viewport_draws = snapshot_viewport_draws(snapshot);
+    let vertex_count = viewport_draws
         .iter()
+        .flat_map(|(_, draw)| &draw.draw_lists)
         .map(|list| list.vtx.len())
         .sum();
-    let index_count = snapshot
-        .draw
-        .draw_lists
+    let index_count = viewport_draws
         .iter()
+        .flat_map(|(_, draw)| &draw.draw_lists)
         .map(|list| list.idx.len())
         .sum();
     let mut vertices = Vec::with_capacity(vertex_count);
     let mut indices = Vec::with_capacity(index_count);
     let mut draws = Vec::new();
+    let mut uniforms_by_camera = HashMap::new();
 
     let mut list_vertex_base = 0usize;
     let mut list_index_base = 0usize;
 
-    for list in &snapshot.draw.draw_lists {
-        vertices.extend(list.vtx.iter().copied().map(ImguiGpuVertex::from));
-        indices.extend(list.idx.iter().copied());
-
-        for command in &list.commands {
-            let DrawCmdSnapshot::Elements {
-                count,
-                clip_rect,
-                texture,
-                vtx_offset,
-                idx_offset,
-            } = command
-            else {
-                continue;
-            };
-
-            let Some(scissor) = scissor_from_clip_rect(&snapshot.draw, *clip_rect) else {
-                continue;
-            };
-            let Some(index_start) = list_index_base.checked_add(*idx_offset) else {
-                continue;
-            };
-            let Some(index_end) = index_start.checked_add(*count) else {
-                continue;
-            };
-            let Some(vertex_offset) = list_vertex_base.checked_add(*vtx_offset) else {
-                continue;
-            };
-            let Ok(index_start) = u32::try_from(index_start) else {
-                continue;
-            };
-            let Ok(index_end) = u32::try_from(index_end) else {
-                continue;
-            };
-            let Ok(vertex_offset) = i32::try_from(vertex_offset) else {
-                continue;
-            };
-
-            for target in camera_targets {
-                draws.push(ImguiPreparedDraw {
-                    camera: target.camera,
-                    order: target.order,
-                    target: target.target.clone(),
-                    texture: *texture,
-                    scissor,
-                    index_range: index_start..index_end,
-                    vertex_offset,
-                });
-            }
+    for (viewport_id, draw) in viewport_draws {
+        let target_cameras = camera_targets
+            .iter()
+            .filter(|target| target.viewport_id == viewport_id)
+            .collect::<Vec<_>>();
+        if target_cameras.is_empty() {
+            continue;
         }
 
-        list_vertex_base += list.vtx.len();
-        list_index_base += list.idx.len();
+        let uniforms = ImguiUniforms::from_display_rect(draw.display_pos, draw.display_size);
+        for target in &target_cameras {
+            uniforms_by_camera.insert(target.camera, uniforms);
+        }
+
+        for list in &draw.draw_lists {
+            vertices.extend(list.vtx.iter().copied().map(ImguiGpuVertex::from));
+            indices.extend(list.idx.iter().copied());
+
+            for command in &list.commands {
+                let DrawCmdSnapshot::Elements {
+                    count,
+                    clip_rect,
+                    texture,
+                    vtx_offset,
+                    idx_offset,
+                } = command
+                else {
+                    continue;
+                };
+
+                let Some(scissor) = scissor_from_clip_rect(draw, *clip_rect) else {
+                    continue;
+                };
+                let Some(index_start) = list_index_base.checked_add(*idx_offset) else {
+                    continue;
+                };
+                let Some(index_end) = index_start.checked_add(*count) else {
+                    continue;
+                };
+                let Some(vertex_offset) = list_vertex_base.checked_add(*vtx_offset) else {
+                    continue;
+                };
+                let Ok(index_start) = u32::try_from(index_start) else {
+                    continue;
+                };
+                let Ok(index_end) = u32::try_from(index_end) else {
+                    continue;
+                };
+                let Ok(vertex_offset) = i32::try_from(vertex_offset) else {
+                    continue;
+                };
+
+                for target in &target_cameras {
+                    draws.push(ImguiPreparedDraw {
+                        camera: target.camera,
+                        order: target.order,
+                        target: target.target.clone(),
+                        viewport_id,
+                        texture: *texture,
+                        scissor,
+                        index_range: index_start..index_end,
+                        vertex_offset,
+                    });
+                }
+            }
+
+            list_vertex_base += list.vtx.len();
+            list_index_base += list.idx.len();
+        }
     }
 
-    (vertices, indices, draws)
+    (vertices, indices, draws, uniforms_by_camera)
+}
+
+fn snapshot_viewport_draws(
+    snapshot: &imgui::render::FrameSnapshot,
+) -> Vec<(Option<imgui::Id>, &imgui::render::DrawDataSnapshot)> {
+    if snapshot.viewports.is_empty() {
+        return vec![(None, &snapshot.draw)];
+    }
+
+    let mut draws = snapshot
+        .viewports
+        .iter()
+        .map(|viewport| (Some(viewport.viewport_id), &viewport.draw))
+        .collect::<Vec<_>>();
+    if !draws.iter().any(|(viewport_id, _)| viewport_id.is_none()) {
+        draws.insert(0, (None, &snapshot.draw));
+    }
+    draws
 }
 
 fn scissor_from_clip_rect(

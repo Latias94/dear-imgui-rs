@@ -409,6 +409,16 @@ mod columns;
 // Logging utilities
 pub mod logging;
 
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
+    pub(crate) fn imgui_context_guard() -> MutexGuard<'static, ()> {
+        static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+        GUARD.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
+}
+
 // Re-export public API
 pub use colors::*;
 pub use dock_builder::*;

@@ -26,12 +26,20 @@
 //!
 //! The crate also exposes `configure_example_context` for the shared example/editor ImGui setup
 //! pattern so the backend examples do not repeat the same initialization boilerplate.
+//!
+//! # Multi-viewport status
+//!
+//! `ImguiBackendConfig::multi_viewport` records an explicit request for Dear ImGui platform
+//! windows. With the `multi-viewport` and `render` features on native targets, the backend installs
+//! the PlatformIO lifecycle bridge, all-window input/platform feedback, and per-window render
+//! routing before advertising full multi-viewport support.
 
 pub mod context;
 pub mod helpers;
 pub mod input;
 pub mod schedule;
 pub mod texture;
+pub mod viewport;
 
 use bevy_app::{App, Plugin};
 use bevy_ecs::resource::Resource;
@@ -42,6 +50,13 @@ pub use self::schedule::{ImguiBeginFrame, ImguiEndFrame, ImguiPrimaryContextPass
 #[cfg(feature = "render")]
 pub use self::texture::ImguiBevyTextures;
 pub use self::texture::ImguiTextureFeedbackQueue;
+pub use self::viewport::{
+    ImguiViewportBridge, ImguiViewportCamera, ImguiViewportCommand, ImguiViewportFeedback,
+    ImguiViewportId, ImguiViewportSnapshot, ImguiViewportWindow,
+};
+
+const MULTI_VIEWPORT_FEATURE_ENABLED: bool = cfg!(feature = "multi-viewport");
+const NATIVE_PLATFORM_TARGET: bool = !cfg!(target_arch = "wasm32");
 
 /// Bevy plugin that installs the minimal Dear ImGui resources.
 ///
@@ -71,13 +86,15 @@ impl Plugin for ImguiPlugin {
         if !app.world().contains_resource::<ImguiBackendConfig>() {
             app.insert_resource(self.config.clone());
         }
-        app.init_resource::<ImguiBackendStatus>();
+        let effective_config = app.world().resource::<ImguiBackendConfig>().clone();
+        app.insert_resource(ImguiBackendStatus::from_config(&effective_config));
         if app.world().get_non_send::<ImguiContext>().is_none() {
             app.insert_non_send(ImguiContext::new(dear_imgui_rs::Context::create()));
         }
         schedule::install_imgui_schedules(app);
         input::install_input_mapping(app);
         context::install_context_lifecycle(app);
+        viewport::install_viewport_bridge(app);
         #[cfg(feature = "render")]
         render::install_render_extraction(app);
     }
@@ -95,7 +112,11 @@ pub struct ImguiBackendConfig {
     pub name: String,
     /// Whether the backend should request docking support when lifecycle code wires IO flags.
     pub docking: bool,
-    /// Whether the backend should eventually wire multi-viewport support.
+    /// Whether the user requested Dear ImGui docking multi-viewport OS windows.
+    ///
+    /// This is recorded in [`ImguiBackendStatus::multi_viewport_requested`]. Full support is only
+    /// advertised after the native PlatformIO lifecycle bridge, all-window input feedback, and
+    /// secondary viewport render routing are all available.
     pub multi_viewport: bool,
 }
 
@@ -118,15 +139,57 @@ pub struct ImguiBackendStatus {
     pub rust_target: &'static str,
     /// Whether render integration has been compiled in.
     pub render_feature_enabled: bool,
+    /// Whether the current backend configuration requested Dear ImGui platform windows.
+    pub multi_viewport_requested: bool,
+    /// Whether the Cargo feature needed to compile PlatformIO viewport callbacks is enabled.
+    pub multi_viewport_feature_enabled: bool,
+    /// Whether the current target can use native Bevy OS windows for Dear ImGui platform windows.
+    pub native_platform_target: bool,
+    /// Whether PlatformIO lifecycle callbacks can be connected to Bevy-owned window entities.
+    pub viewport_lifecycle_bridge_enabled: bool,
+    /// Whether input, focus, cursor, DPI, and IME feedback covers all Dear ImGui platform windows.
+    pub viewport_input_feedback_enabled: bool,
+    /// Whether secondary Dear ImGui viewport draw data is routed to matching Bevy window targets.
+    pub viewport_render_routing_enabled: bool,
+    /// Whether the backend currently wires the required Bevy OS-window platform callbacks.
+    ///
+    /// This remains `false` until lifecycle, input feedback, and renderer routing are all wired.
+    /// The `multi-viewport` feature may install an internal lifecycle bridge before the backend is
+    /// ready to advertise full Dear ImGui OS-level viewport support.
+    pub multi_viewport_supported: bool,
 }
 
-impl Default for ImguiBackendStatus {
-    fn default() -> Self {
+impl ImguiBackendStatus {
+    fn from_config(config: &ImguiBackendConfig) -> Self {
+        let viewport_lifecycle_bridge_enabled =
+            config.multi_viewport && MULTI_VIEWPORT_FEATURE_ENABLED && NATIVE_PLATFORM_TARGET;
+        let viewport_input_feedback_enabled =
+            config.multi_viewport && MULTI_VIEWPORT_FEATURE_ENABLED && NATIVE_PLATFORM_TARGET;
+        let viewport_render_routing_enabled = config.multi_viewport
+            && MULTI_VIEWPORT_FEATURE_ENABLED
+            && NATIVE_PLATFORM_TARGET
+            && cfg!(feature = "render");
+
         Self {
             bevy_target: BEVY_TARGET_VERSION,
             rust_target: RUST_TARGET_VERSION,
             render_feature_enabled: cfg!(feature = "render"),
+            multi_viewport_requested: config.multi_viewport,
+            multi_viewport_feature_enabled: MULTI_VIEWPORT_FEATURE_ENABLED,
+            native_platform_target: NATIVE_PLATFORM_TARGET,
+            viewport_lifecycle_bridge_enabled,
+            viewport_input_feedback_enabled,
+            viewport_render_routing_enabled,
+            multi_viewport_supported: viewport_lifecycle_bridge_enabled
+                && viewport_input_feedback_enabled
+                && viewport_render_routing_enabled,
         }
+    }
+}
+
+impl Default for ImguiBackendStatus {
+    fn default() -> Self {
+        Self::from_config(&ImguiBackendConfig::default())
     }
 }
 
@@ -160,8 +223,29 @@ impl ImguiContext {
 
     /// Consume the wrapper and return the Dear ImGui context.
     #[must_use]
-    pub fn into_inner(self) -> dear_imgui_rs::Context {
-        self.context
+    pub fn into_inner(mut self) -> dear_imgui_rs::Context {
+        self.clear_platform_backend_data();
+        let this = std::mem::ManuallyDrop::new(self);
+        // SAFETY: `this` will not run `Drop`, and we return ownership of the inner context to the
+        // caller exactly once.
+        unsafe { std::ptr::read(&this.context) }
+    }
+
+    fn clear_platform_backend_data(&mut self) {
+        #[cfg(feature = "multi-viewport")]
+        {
+            self.context.destroy_platform_windows();
+            self.context
+                .io_mut()
+                .set_backend_platform_user_data(std::ptr::null_mut());
+            self.context.platform_io_mut().clear_platform_handlers();
+        }
+    }
+}
+
+impl Drop for ImguiContext {
+    fn drop(&mut self) {
+        self.clear_platform_backend_data();
     }
 }
 

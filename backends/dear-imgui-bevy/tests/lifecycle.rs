@@ -2,10 +2,10 @@ use bevy_app::App;
 use bevy_ecs::prelude::*;
 use bevy_window::{PrimaryWindow, Window, WindowResolution};
 use dear_imgui_bevy::{
-    ImguiContext, ImguiContexts, ImguiFrameOutput, ImguiFrameState, ImguiPlugin,
-    ImguiPrimaryContextPass,
+    ImguiBackendConfig, ImguiContext, ImguiContexts, ImguiFrameOutput, ImguiFrameState,
+    ImguiPlugin, ImguiPrimaryContextPass,
 };
-use dear_imgui_rs as imgui;
+use dear_imgui_rs::{self as imgui, ConfigFlags};
 use std::sync::{Mutex, OnceLock};
 
 fn imgui_context_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -22,6 +22,29 @@ struct LifecycleTrace {
 fn app_with_primary_window() -> App {
     let mut app = App::new();
     app.add_plugins(ImguiPlugin::default());
+
+    let mut window = Window {
+        resolution: WindowResolution::new(1280, 720),
+        ..Default::default()
+    };
+    window.resolution.set_scale_factor(2.0);
+    app.world_mut().spawn((window, PrimaryWindow));
+
+    let mut context = app
+        .world_mut()
+        .get_non_send_mut::<ImguiContext>()
+        .expect("ImguiPlugin should install an ImGui context");
+    let ctx = context.context_mut();
+    ctx.io_mut().set_config_input_trickle_event_queue(false);
+    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
+
+    app
+}
+
+fn app_with_primary_window_and_config(config: ImguiBackendConfig) -> App {
+    let mut app = App::new();
+    app.add_plugins(ImguiPlugin::new(config));
 
     let mut window = Window {
         resolution: WindowResolution::new(1280, 720),
@@ -116,4 +139,27 @@ fn lifecycle_ui_access_is_unavailable_outside_primary_context_pass() {
         .expect("frame state should be installed");
     assert!(!state.is_frame_open());
     assert!(state.ui().is_none());
+}
+
+#[test]
+fn lifecycle_multi_viewport_request_enables_platform_windows_when_support_is_complete() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_primary_window_and_config(ImguiBackendConfig {
+        name: "viewport-request".to_owned(),
+        docking: true,
+        multi_viewport: true,
+    });
+
+    app.update();
+
+    let context = app
+        .world()
+        .get_non_send::<ImguiContext>()
+        .expect("ImguiContext should still exist");
+    let flags = context.context().io().config_flags();
+    assert_eq!(
+        flags.contains(ConfigFlags::VIEWPORTS_ENABLE),
+        cfg!(all(feature = "render", feature = "multi-viewport")),
+        "Bevy backend should advertise Dear ImGui OS-level viewports only after lifecycle, input feedback, and render routing are wired"
+    );
 }

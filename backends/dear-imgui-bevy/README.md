@@ -24,9 +24,36 @@ cargo +stable nextest run -p dear-imgui-bevy
 cargo +stable nextest run -p dear-imgui-bevy --features render
 ```
 
+These gates are intended for a dedicated Bevy backend CI lane. The root workspace workflow does not
+substitute for them, because this crate sits on a different Rust and Bevy release train than the
+rest of the workspace.
+
 The current backend shape is verified on `wasm32-unknown-unknown` for both the core and `render`
 feature sets. Mobile-specific targets are not split out yet; if Bevy's mobile support matrix needs a
 different gate, keep it as a separate follow-on instead of widening the current lane.
+
+## Docking and multi-viewport status
+
+Docking inside the primary Bevy window is supported by enabling Dear ImGui docking on the context;
+the examples use `configure_example_context` for that setup.
+
+Dear ImGui docking multi-viewport OS windows are enabled only when requested on native targets with
+both the `render` and `multi-viewport` Cargo features. The backend installs a queued PlatformIO
+lifecycle bridge, maps input/focus/cursor/IME messages for secondary viewport windows, feeds Bevy
+window position/size/focus/DPI state back through Dear ImGui's PlatformIO query callbacks, and
+routes each viewport's draw data to the matching Bevy `Window` render target.
+
+| Target / feature set | `multi_viewport_requested` | Lifecycle bridge | Input / platform feedback | Full `multi_viewport_supported` |
+| --- | --- | --- | --- | --- |
+| Native, no `multi-viewport` feature | Matches config | No | No | No |
+| Native, `render,multi-viewport` features | Matches config | Yes, when requested | Yes, when requested | Yes, when requested |
+| `wasm32-unknown-unknown` | Matches config | No | No | No |
+
+Bevy `0.19.0-rc.2` does not expose a current minimized-window state in `Window`; the PlatformIO
+minimized query currently returns `false` until Bevy provides observable minimized feedback.
+
+This is separate from the existing multi-window camera/render-target routing, which can draw the
+same ImGui overlay to multiple Bevy window targets but does not create Dear ImGui platform windows.
 
 ## Current scope
 
@@ -52,7 +79,8 @@ BEVY-060 through BEVY-100:
 - `ImguiTextureFeedbackQueue`
 - `ImguiBevyTextures` with the `render` feature
 
-Examples are later workstream tasks.
+Examples live under `examples/` and are grouped by the integration question they answer. Cargo
+example names stay stable even when source files move between categories.
 
 ## ECS frame lifecycle
 
@@ -88,42 +116,60 @@ The important invariant is that user systems draw into an already-open frame; th
 `Context::frame()` or `Context::render()` themselves. Extension crates can be used from the same
 pass by taking the shared `&Ui` returned by `ImguiContexts`.
 
-See `examples/simple.rs` for a minimal embedded Bevy app that creates a primary window entity and
-draws an overlay from `ImguiPrimaryContextPass`:
+## Examples
+
+Use the examples as a progression instead of a flat grab bag:
+
+| Category | Example | Source | Purpose |
+| --- | --- | --- | --- |
+| Basic | `simple` | `examples/basic/simple.rs` | Minimal embedded Bevy app with a primary window entity and one ImGui pass. |
+| Runtime | `windowed_overlay` | `examples/runtime/windowed_overlay.rs` | Real Bevy window, `DefaultPlugins`, render feature, and overlay loop. |
+| Ecosystem | `ecosystem` | `examples/ecosystem/ecosystem.rs` | Shared-frame ImPlot, ImNodes, and ImGuizmo integration. |
+| Ecosystem | `bevy_plot_controls` | `examples/ecosystem/bevy_plot_controls.rs` | Bevy scene with ImPlot frame graphs and motion controls. |
+| Editor | `editor_shell` | `examples/editor/editor_shell.rs` | Docked editor shell with scene texture interop and policy panels. |
+
+Run the basic example for the smallest backend integration:
 
 ```bash
 cargo +stable run -p dear-imgui-bevy --example simple
 ```
 
-See `examples/windowed_overlay.rs` for a persistent runtime smoke app that uses Bevy's normal
-windowed runner, `DefaultPlugins`, and the render feature. It opens a real window, draws an ImGui
-overlay for multiple frames, and exits when Escape is pressed:
+Run the runtime smoke app to exercise Bevy's normal windowed runner, `DefaultPlugins`, and the
+render feature:
 
 ```bash
 cargo +stable run -p dear-imgui-bevy --features render --example windowed_overlay
 ```
 
-See `examples/bevy_plot_controls.rs` for a small Bevy scene that uses ImPlot to graph frame timing
-and a moving marker's position while Dear ImGui controls pause, speed, and direction:
+Run the plot controls demo when checking a practical Bevy plus ImPlot workflow:
 
 ```bash
-cargo +stable run -p dear-imgui-bevy --features render --example bevy_plot_controls
+cargo +stable run -p dear-imgui-bevy --features render,implot --example bevy_plot_controls
 ```
 
-See `examples/editor_shell.rs` for a persistent editor-oriented shell that registers a Bevy
-render-target `Handle<Image>` through `ImguiBevyTextures`, displays the live scene as an ImGui
-viewport image, uses `render::ImguiOverlayDisabled` on the offscreen scene camera, and seeds a
-split dock layout with hierarchy, inspector, diagnostics, and input-routing policy panels:
+Run the editor shell when checking scene texture interop, dock layout, and editor-facing helper
+surfaces:
 
 ```bash
 cargo +stable run -p dear-imgui-bevy --features render --example editor_shell
 ```
 
-See `examples/ecosystem.rs` for a shared-frame ecosystem example that drives ImPlot, ImNodes, and
-ImGuizmo from the same Bevy-managed `ImguiPrimaryContextPass`:
+Run the same editor shell with native Dear ImGui docking multi-viewport OS windows enabled:
 
 ```bash
-cargo +stable run -p dear-imgui-bevy --example ecosystem
+cargo +stable run -p dear-imgui-bevy --features render,multi-viewport --example editor_shell
+```
+
+The `editor_shell` example requests `multi_viewport = true` only when the `multi-viewport` Cargo
+feature is compiled in. This keeps the normal `render` example gate available while making the
+native OS-window path visible in the same product-facing example. The `multi-viewport` feature is
+native-only today; `wasm32-unknown-unknown` should use the plain `render` command above.
+
+Run the ecosystem composition example when checking multiple extension crates inside the same
+Bevy-managed `ImguiPrimaryContextPass`:
+
+```bash
+cargo +stable run -p dear-imgui-bevy --features ecosystem --example ecosystem
 ```
 
 The shared example setup lives in `configure_example_context`. It disables input trickling, can

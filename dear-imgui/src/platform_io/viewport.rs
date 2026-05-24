@@ -589,6 +589,7 @@ mod tests {
 
     #[test]
     fn main_viewport_exposes_debug_name() {
+        let _guard = crate::test_support::imgui_context_guard();
         let mut ctx = Context::create();
         let viewport = ctx.main_viewport();
         assert!(!viewport.debug_name().is_empty());

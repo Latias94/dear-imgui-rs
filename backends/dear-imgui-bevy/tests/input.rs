@@ -7,13 +7,14 @@ use bevy_input::mouse::{
     MouseButton as BevyMouseButton, MouseButtonInput, MouseScrollUnit, MouseWheel,
 };
 use bevy_input::touch::{TouchInput, TouchPhase};
-use bevy_math::Vec2;
+use bevy_math::{IVec2, Vec2};
 use bevy_window::{
     CursorIcon, CursorLeft, CursorMoved, CursorOptions, Ime, PrimaryWindow, SystemCursorIcon,
-    Window, WindowFocused, WindowResized, WindowResolution, WindowScaleFactorChanged,
+    Window, WindowFocused, WindowPosition, WindowResized, WindowResolution,
+    WindowScaleFactorChanged,
 };
 use dear_imgui_bevy::{
-    ImguiContext, ImguiFrameState, ImguiPlugin, ImguiPrimaryContextPass,
+    ImguiContext, ImguiFrameState, ImguiPlugin, ImguiPrimaryContextPass, ImguiViewportWindow,
     input::{ImguiInputState, map_bevy_key_code},
 };
 use dear_imgui_rs as imgui;
@@ -99,6 +100,26 @@ fn request_text_cursor_and_ime(
         let ime_data = &mut (*raw_context).PlatformImeData;
         ime_data.WantTextInput = true;
         ime_data.InputPos = imgui::sys::ImVec2_c { x: 222.0, y: 333.0 };
+    }
+}
+
+fn request_text_cursor_and_secondary_viewport_ime(
+    mut imgui_context: NonSendMut<ImguiContext>,
+    frame_state: NonSend<ImguiFrameState>,
+) {
+    let ui = frame_state.ui().expect("Dear ImGui frame should be open");
+    ui.set_mouse_cursor(Some(imgui::MouseCursor::TextInput));
+    imgui_context
+        .context_mut()
+        .io_mut()
+        .set_mouse_draw_cursor(false);
+
+    let raw_context = imgui_context.context().as_raw();
+    unsafe {
+        let ime_data = &mut (*raw_context).PlatformImeData;
+        ime_data.WantTextInput = true;
+        ime_data.InputPos = imgui::sys::ImVec2_c { x: 44.0, y: 55.0 };
+        ime_data.ViewportId = 0x501;
     }
 }
 
@@ -199,6 +220,42 @@ fn primary_window_input_maps_window_mouse_and_scroll_into_imgui_io() {
         assert_eq!(ui.io().mouse_source(), imgui::MouseSource::Mouse);
         assert_eq!(ui.io().mouse_wheel_h(), 1.0);
         assert_eq!(ui.io().mouse_wheel(), -2.0);
+    });
+}
+
+#[test]
+fn primary_window_input_reports_main_hovered_viewport_when_viewports_are_enabled() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary) = app_with_primary_window();
+    let main_viewport_id = {
+        let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
+        let context = context.context_mut();
+        context
+            .io_mut()
+            .set_config_flags(imgui::ConfigFlags::VIEWPORTS_ENABLE);
+        context.main_viewport().id()
+    };
+
+    app.world_mut()
+        .resource_mut::<Messages<CursorMoved>>()
+        .write(CursorMoved {
+            window: primary,
+            position: Vec2::new(123.0, 45.0),
+            delta: None,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<MouseButtonInput>>()
+        .write(MouseButtonInput {
+            button: BevyMouseButton::Left,
+            state: ButtonState::Pressed,
+            window: primary,
+        });
+    run_input_systems(&mut app);
+
+    begin_frame_and_assert(&mut app, |ui| {
+        assert_eq!(ui.mouse_pos(), [123.0, 45.0]);
+        assert_eq!(ui.io().mouse_hovered_viewport(), main_viewport_id);
+        assert!(ui.is_mouse_down(imgui::MouseButton::Left));
     });
 }
 
@@ -345,6 +402,48 @@ fn input_platform_feedback_updates_primary_window_cursor_and_ime_state() {
     let window = entity.get::<Window>().unwrap();
     assert!(window.ime_enabled);
     assert_eq!(window.ime_position, Vec2::new(222.0, 333.0));
+}
+
+#[test]
+fn input_platform_feedback_updates_secondary_viewport_window_cursor_and_ime_state() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary) = app_with_primary_window();
+    let viewport_id = imgui::Id::from(0x501);
+    let secondary = app
+        .world_mut()
+        .spawn((
+            Window {
+                resolution: WindowResolution::new(640, 480),
+                ..Default::default()
+            },
+            ImguiViewportWindow { viewport_id },
+        ))
+        .id();
+    app.add_systems(
+        ImguiPrimaryContextPass,
+        request_text_cursor_and_secondary_viewport_ime,
+    );
+
+    app.update();
+
+    let primary_window = app.world().entity(primary).get::<Window>().unwrap();
+    assert!(
+        !primary_window.ime_enabled,
+        "IME feedback for a secondary viewport should not be applied to the primary window"
+    );
+
+    let entity = app.world().entity(secondary);
+    assert!(
+        entity.get::<CursorOptions>().unwrap().visible,
+        "OS cursor should stay visible when Dear ImGui is not drawing a software cursor"
+    );
+    assert_eq!(
+        entity.get::<CursorIcon>(),
+        Some(&CursorIcon::System(SystemCursorIcon::Text))
+    );
+    let window = entity.get::<Window>().unwrap();
+    assert!(window.ime_enabled);
+    assert_eq!(window.ime_position, Vec2::new(44.0, 55.0));
 }
 
 #[test]
@@ -558,6 +657,93 @@ fn input_non_primary_window_messages_are_ignored() {
         assert!(current_frame_input_chars().is_empty());
         assert!(!ui.is_key_down(imgui::Key::X));
         assert_ne!(ui.mouse_pos(), [300.0, 400.0]);
+    });
+}
+
+#[test]
+fn input_secondary_viewport_window_messages_use_imgui_platform_coordinates_when_viewports_are_enabled()
+ {
+    let _guard = imgui_context_guard();
+    let (mut app, _primary) = app_with_primary_window();
+    let viewport_id = imgui::Id::from(0x500);
+    let secondary = app
+        .world_mut()
+        .spawn((
+            Window {
+                position: WindowPosition::At(IVec2::new(200, 300)),
+                resolution: WindowResolution::new(640, 480),
+                ..Default::default()
+            },
+            ImguiViewportWindow { viewport_id },
+        ))
+        .id();
+    {
+        let mut window = app.world_mut().get_mut::<Window>(secondary).unwrap();
+        window.resolution.set_scale_factor(2.0);
+    }
+    {
+        let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
+        let io = context.context_mut().io_mut();
+        io.set_config_flags(io.config_flags() | imgui::ConfigFlags::VIEWPORTS_ENABLE);
+    }
+
+    app.world_mut()
+        .resource_mut::<Messages<CursorMoved>>()
+        .write(CursorMoved {
+            window: secondary,
+            position: Vec2::new(300.0, 400.0),
+            delta: None,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<MouseButtonInput>>()
+        .write(MouseButtonInput {
+            button: BevyMouseButton::Right,
+            state: ButtonState::Pressed,
+            window: secondary,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<MouseWheel>>()
+        .write(MouseWheel {
+            unit: MouseScrollUnit::Pixel,
+            x: -24.0,
+            y: 24.0,
+            window: secondary,
+            phase: TouchPhase::Moved,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<KeyboardInput>>()
+        .write(key_input(
+            secondary,
+            KeyCode::KeyX,
+            BevyKey::Character("x".into()),
+            ButtonState::Pressed,
+            Some("x"),
+        ));
+    app.world_mut()
+        .resource_mut::<Messages<Ime>>()
+        .write(Ime::Commit {
+            window: secondary,
+            value: "界".to_owned(),
+        });
+    app.world_mut()
+        .resource_mut::<Messages<WindowFocused>>()
+        .write(WindowFocused {
+            window: secondary,
+            focused: true,
+        });
+    run_input_systems(&mut app);
+
+    begin_frame_and_assert(&mut app, |ui| {
+        assert_eq!(ui.mouse_pos(), [400.0, 550.0]);
+        assert_eq!(ui.io().mouse_hovered_viewport(), viewport_id);
+        assert!(ui.is_mouse_down(imgui::MouseButton::Right));
+        assert_eq!(ui.io().mouse_wheel_h(), -1.0);
+        assert_eq!(ui.io().mouse_wheel(), 1.0);
+        assert!(ui.is_key_down(imgui::Key::X));
+
+        let chars = current_frame_input_chars();
+        assert!(chars.contains(&('x' as u32)));
+        assert!(chars.contains(&('界' as u32)));
     });
 }
 

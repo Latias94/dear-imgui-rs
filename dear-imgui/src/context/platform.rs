@@ -33,7 +33,7 @@ impl Context {
     /// The returned reference is owned by this ImGui context and
     /// must not be used after the context is destroyed.
     #[doc(alias = "GetMainViewport")]
-    pub fn main_viewport(&mut self) -> &crate::platform_io::Viewport {
+    pub fn main_viewport(&mut self) -> &mut crate::platform_io::Viewport {
         let _guard = CTX_MUTEX.lock();
         unsafe {
             with_bound_context(self.raw, || {
@@ -41,7 +41,7 @@ impl Context {
                 if ptr.is_null() {
                     panic!("Context::main_viewport() requires a valid ImGui context");
                 }
-                crate::platform_io::Viewport::from_raw(ptr as *const sys::ImGuiViewport)
+                crate::platform_io::Viewport::from_raw_mut(ptr)
             })
         }
     }

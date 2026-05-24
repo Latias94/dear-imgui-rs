@@ -2,6 +2,7 @@ use super::{Context, binding::with_bound_context};
 
 #[test]
 fn platform_io_shared_and_mut_views_match() {
+    let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
     let shared = ctx.platform_io().as_raw();
     let mutable = ctx.platform_io_mut().as_raw();
@@ -10,6 +11,7 @@ fn platform_io_shared_and_mut_views_match() {
 
 #[test]
 fn with_bound_context_restores_previous_context_after_panic() {
+    let _guard = crate::test_support::imgui_context_guard();
     let ctx_a = Context::create();
     let raw_a = ctx_a.raw;
     let suspended_a = ctx_a.suspend();
@@ -29,6 +31,7 @@ fn with_bound_context_restores_previous_context_after_panic() {
 
 #[test]
 fn io_and_platform_io_accessors_use_self_context_not_current_context() {
+    let _guard = crate::test_support::imgui_context_guard();
     let mut ctx_a = Context::create();
     let marker_a = std::ptr::NonNull::<u8>::dangling().as_ptr().cast();
     ctx_a.io_mut().set_backend_language_user_data(marker_a);
@@ -54,6 +57,7 @@ fn io_and_platform_io_accessors_use_self_context_not_current_context() {
 
 #[test]
 fn style_and_main_viewport_accessors_use_self_context_not_current_context() {
+    let _guard = crate::test_support::imgui_context_guard();
     let mut ctx_a = Context::create();
     ctx_a.style_mut().set_alpha(0.25);
     let viewport_a = ctx_a.main_viewport().as_raw();
@@ -76,6 +80,7 @@ fn style_and_main_viewport_accessors_use_self_context_not_current_context() {
 
 #[test]
 fn io_font_global_scale_uses_owner_context_not_current_context() {
+    let _guard = crate::test_support::imgui_context_guard();
     let mut ctx_a = Context::create();
     ctx_a.style_mut().set_font_scale_main(1.25);
     let suspended_a = ctx_a.suspend();
@@ -98,6 +103,7 @@ fn io_font_global_scale_uses_owner_context_not_current_context() {
 
 #[test]
 fn frame_lifecycle_requires_receiver_to_be_current_context() {
+    let _guard = crate::test_support::imgui_context_guard();
     let ctx_a = Context::create();
     let suspended_a = ctx_a.suspend();
     let ctx_b = Context::create();
@@ -115,7 +121,39 @@ fn frame_lifecycle_requires_receiver_to_be_current_context() {
 
 #[cfg(feature = "multi-viewport")]
 #[test]
+fn platform_viewport_snapshot_requires_rendered_frame_and_reuses_current_draw_data() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut ctx = Context::create();
+    let _ = ctx.font_atlas_mut().build();
+    ctx.prepare_frame(super::FramePrepareOptions::new([320.0, 240.0], 1.0 / 60.0));
+
+    let before_render = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = ctx.platform_viewport_snapshot(crate::render::snapshot::SnapshotOptions::default());
+    }));
+    assert!(before_render.is_err());
+
+    let frame = ctx.begin_frame();
+    frame.ui().text("snapshot after render");
+    let _ = frame.render();
+
+    let snapshot = ctx
+        .platform_viewport_snapshot(crate::render::snapshot::SnapshotOptions::default())
+        .expect("rendered platform viewport draw data should snapshot");
+
+    assert_eq!(snapshot.draw.display_size, [320.0, 240.0]);
+    assert!(
+        snapshot
+            .viewports
+            .iter()
+            .any(|viewport| viewport.draw.display_size == [320.0, 240.0]),
+        "platform viewport snapshot should include the rendered main viewport"
+    );
+}
+
+#[cfg(feature = "multi-viewport")]
+#[test]
 fn platform_io_get_window_pos_and_size_setters_install_handlers() {
+    let _guard = crate::test_support::imgui_context_guard();
     unsafe extern "C" fn get_pos(
         _viewport: *mut crate::sys::ImGuiViewport,
         out_pos: *mut crate::sys::ImVec2,
@@ -184,6 +222,7 @@ fn platform_io_get_window_pos_and_size_setters_install_handlers() {
 
 #[test]
 fn registered_user_texture_token_survives_context_drop() {
+    let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
     let mut texture = crate::texture::OwnedTextureData::new();
 
@@ -195,6 +234,7 @@ fn registered_user_texture_token_survives_context_drop() {
 
 #[test]
 fn registered_user_texture_token_survives_texture_drop() {
+    let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
     let token = {
         let mut texture = crate::texture::OwnedTextureData::new();
@@ -207,6 +247,7 @@ fn registered_user_texture_token_survives_texture_drop() {
 
 #[test]
 fn user_texture_registration_is_idempotent_and_unregister_is_noop_when_missing() {
+    let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
     let mut texture = crate::texture::OwnedTextureData::new();
 

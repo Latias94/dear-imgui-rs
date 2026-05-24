@@ -94,6 +94,55 @@ jobs:
       - name: Check test-engine (no capture)
         run: cargo check -p dear-imgui-test-engine --no-default-features
 
+  bevy-backend:
+    name: Bevy backend gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Init required nested submodules (selective)
+        shell: bash
+        run: bash tools/ci/update_submodules.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: "false"
+
+      - name: Install Linux deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential pkg-config \
+            libasound2-dev \
+            libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev \
+            libxkbcommon-dev libwayland-dev libudev-dev \
+            mesa-common-dev libgl1-mesa-dev cmake
+
+      - name: Add wasm32 target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Check formatting
+        run: cargo +stable fmt --all --check
+
+      - name: Check Bevy backend examples
+        run: cargo +stable check -p dear-imgui-bevy --examples --features render
+
+      - name: Run Bevy backend tests
+        run: cargo +stable nextest run -p dear-imgui-bevy --features render
+
+      - name: Check Bevy backend wasm (core)
+        run: cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --no-default-features
+
+      - name: Check Bevy backend wasm (render)
+        run: cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --features render
+
   sys-bindgen-defaults:
     name: Sys crates without bindgen
     runs-on: ubuntu-latest

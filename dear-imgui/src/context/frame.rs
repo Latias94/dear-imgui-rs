@@ -188,6 +188,46 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
         }
     }
 
+    /// Render the current frame and build a thread-safe snapshot for all platform viewports.
+    ///
+    /// With the `multi-viewport` feature enabled, Dear ImGui stores draw data on each viewport.
+    /// `Context::render()` and `igGetDrawData()` only expose the main viewport draw data, so
+    /// engine backends that render secondary OS windows should use this method after opening a
+    /// frame. The returned snapshot still keeps [`FrameSnapshot::draw`] as the main viewport for
+    /// compatibility and adds per-viewport draw data in
+    /// [`FrameSnapshot::viewports`](crate::render::snapshot::FrameSnapshot::viewports).
+    #[cfg(feature = "multi-viewport")]
+    pub fn render_platform_viewport_snapshot(
+        &mut self,
+        options: crate::render::snapshot::SnapshotOptions,
+    ) -> Result<crate::render::snapshot::FrameSnapshot, crate::render::snapshot::SnapshotError>
+    {
+        let _ = self.render();
+        self.platform_viewport_snapshot(options)
+    }
+
+    /// Build a thread-safe snapshot from the current platform viewport draw data.
+    ///
+    /// This does not call `Render()`. Call it only after a frame has already been rendered and
+    /// before the next frame starts. Engine integrations can use this when they need to run
+    /// platform-window maintenance after `Render()` but before cloning draw data for another
+    /// render schedule.
+    #[cfg(feature = "multi-viewport")]
+    pub fn platform_viewport_snapshot(
+        &mut self,
+        options: crate::render::snapshot::SnapshotOptions,
+    ) -> Result<crate::render::snapshot::FrameSnapshot, crate::render::snapshot::SnapshotError>
+    {
+        let _guard = CTX_MUTEX.lock();
+        self.assert_current_context("Context::platform_viewport_snapshot()");
+        if self.frame_lifecycle_state_unlocked() != FrameLifecycleState::Rendered {
+            panic!(
+                "Context::platform_viewport_snapshot() called before rendering the current frame"
+            );
+        }
+        crate::render::snapshot::FrameSnapshot::from_platform_io(self.platform_io(), options)
+    }
+
     /// Gets the draw data for the current frame
     ///
     /// This returns the draw data without calling render. Only valid after
@@ -283,5 +323,15 @@ impl<'ctx> FrameToken<'ctx> {
     {
         let draw_data = self.ctx.render();
         crate::render::snapshot::FrameSnapshot::from_draw_data(draw_data, options)
+    }
+
+    /// Render this frame and build a thread-safe snapshot for all platform viewports.
+    #[cfg(feature = "multi-viewport")]
+    pub fn render_platform_viewport_snapshot(
+        self,
+        options: crate::render::snapshot::SnapshotOptions,
+    ) -> Result<crate::render::snapshot::FrameSnapshot, crate::render::snapshot::SnapshotError>
+    {
+        self.ctx.render_platform_viewport_snapshot(options)
     }
 }

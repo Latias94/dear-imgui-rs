@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "slug": "bevy-docking-multi-viewport-v1",
+  "title": "Bevy Docking Multi-Viewport Workstream",
+  "status": "closed",
+  "updated": "2026-05-23",
+  "scope_kind": "execution",
+  "problem": "Implement real Dear ImGui docking multi-viewport OS-window support for the Bevy-native backend, refactoring dear-imgui-rs core APIs when necessary for a safe engine-managed PlatformIO bridge.",
+  "authoritative_docs": [
+    {
+      "role": "design",
+      "path": "docs/workstreams/bevy-docking-multi-viewport-v1/DESIGN.md"
+    },
+    {
+      "role": "execution",
+      "path": "docs/workstreams/bevy-docking-multi-viewport-v1/TODO.md"
+    },
+    {
+      "role": "gates",
+      "path": "docs/workstreams/bevy-docking-multi-viewport-v1/EVIDENCE_AND_GATES.md"
+    },
+    {
+      "role": "milestones",
+      "path": "docs/workstreams/bevy-docking-multi-viewport-v1/MILESTONES.md"
+    },
+    {
+      "role": "handoff",
+      "path": "docs/workstreams/bevy-docking-multi-viewport-v1/HANDOFF.md"
+    }
+  ],
+  "gates": [
+    "cargo +stable test -p dear-imgui-rs --features multi-viewport platform_io",
+    "cargo +stable nextest run -p dear-imgui-bevy --features render",
+    "cargo +stable check -p dear-imgui-bevy --examples --features render",
+    "cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --no-default-features",
+    "cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --features render",
+    "cargo +stable fmt --all --check",
+    "git diff --check"
+  ],
+  "evidence": [
+    "docs/adr/0001-bevy-native-imgui-backend.md",
+    "docs/workstreams/bevy-backend-product-followups-v1/JOURNAL/2026-05-23-bbp-030.md",
+    "dear-imgui/src/platform_io/",
+    "dear-imgui/src/context/platform.rs",
+    "dear-imgui/src/context/frame.rs",
+    "dear-imgui/src/render/snapshot.rs",
+    "backends/dear-imgui-bevy/src/lib.rs",
+    "backends/dear-imgui-bevy/src/context.rs",
+    "backends/dear-imgui-bevy/src/input.rs",
+    "backends/dear-imgui-bevy/src/render.rs",
+    "backends/dear-imgui-bevy/tests/"
+  ],
+  "adr_refs": [
+    "docs/adr/0001-bevy-native-imgui-backend.md"
+  ],
+  "current_task": null,
+  "next_recommended_task": null,
+  "continue_policy": {
+    "default_action": "closed",
+    "notes": "DMV-010 through DMV-080 are complete. Native Bevy render,multi-viewport requested configs support Dear ImGui OS-level docking multi-viewport windows. Open a new follow-on for minimized-window feedback, wasm/mobile platform support, or runtime OS-window smoke automation."
+  }
+}

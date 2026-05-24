@@ -238,7 +238,7 @@ Run `review-workstream` before accepting task or lane completion. Record blockin
   - Status: BEVY-100 DONE. Continue with BEVY-110 simple embedded Bevy example.
 
 - 2026-05-23: BEVY-110 simple embedded Bevy example implemented and verified.
-  - Added `backends/dear-imgui-bevy/examples/simple.rs`, a minimal one-frame Bevy app that installs `ScheduleRunnerPlugin::run_once`, `ImguiPlugin`, creates a primary window entity, initializes the ImGui context, and draws an overlay in `ImguiPrimaryContextPass`.
+  - Added `backends/dear-imgui-bevy/examples/basic/simple.rs`, a minimal one-frame Bevy app that installs `ScheduleRunnerPlugin::run_once`, `ImguiPlugin`, creates a primary window entity, initializes the ImGui context, and draws an overlay in `ImguiPrimaryContextPass`.
   - Updated the backend README with the simple example command.
   - `cargo +stable check -p dear-imgui-bevy --example simple` — PASS.
   - `cargo +stable fmt --all --check` — PASS.
@@ -247,7 +247,7 @@ Run `review-workstream` before accepting task or lane completion. Record blockin
   - Status: BEVY-110 DONE. Continue with BEVY-120 editor shell example.
 
 - 2026-05-23: BEVY-120 editor shell example implemented and verified.
-  - Added `backends/dear-imgui-bevy/examples/editor_shell.rs`, an editor-oriented render-feature example that creates a Bevy `Image` render target, registers it through `ImguiBevyTextures`, renders it in a dockspace-driven ImGui shell, and documents the input-routing policy for editor tools.
+  - Added `backends/dear-imgui-bevy/examples/editor/editor_shell.rs`, an editor-oriented render-feature example that creates a Bevy `Image` render target, registers it through `ImguiBevyTextures`, renders it in a dockspace-driven ImGui shell, and documents the input-routing policy for editor tools.
   - Updated the backend README with the editor shell run command and marked the example as `required-features = ["render"]`.
   - `cargo +stable check -p dear-imgui-bevy --features render --example editor_shell` — PASS.
   - `cargo +stable fmt --all` — PASS.
@@ -255,7 +255,7 @@ Run `review-workstream` before accepting task or lane completion. Record blockin
   - Status: BEVY-120 DONE. Continue with BEVY-130 ecosystem example.
 
 - 2026-05-23: BEVY-130 ecosystem composition example implemented and verified.
-  - Added `backends/dear-imgui-bevy/examples/ecosystem.rs`, a shared-frame Bevy example that initializes ImPlot, ImNodes, and ImGuizmo as non-send resources and drives them from the same `ImguiPrimaryContextPass`.
+  - Added `backends/dear-imgui-bevy/examples/ecosystem/ecosystem.rs`, a shared-frame Bevy example that initializes ImPlot, ImNodes, and ImGuizmo as non-send resources and drives them from the same `ImguiPrimaryContextPass`.
   - Updated the backend README with the ecosystem example run command.
   - `cargo +stable check -p dear-imgui-bevy --example ecosystem` — PASS.
   - `cargo +stable nextest run -p dear-implot -p dear-imnodes -p dear-node-editor -p dear-imguizmo` — PASS, 84 tests.

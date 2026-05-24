@@ -41,16 +41,24 @@ bevy_shader = { version = "=0.19.0-rc.2", default-features = false, optional = t
 bevy_tasks = { version = "=0.19.0-rc.2", default-features = false }
 bevy_transform = { version = "=0.19.0-rc.2", default-features = false, optional = true }
 bevy_utils = { version = "=0.19.0-rc.2", default-features = false }
+bevy_winit = { version = "=0.19.0-rc.2", default-features = false, optional = true }
 bytemuck = { workspace = true, features = ["derive"], optional = true }
+dear-imguizmo = { path = "../../extensions/dear-imguizmo", version = "0.13", optional = true }
+dear-imnodes = { path = "../../extensions/dear-imnodes", version = "0.13", optional = true }
+dear-implot = { path = "../../extensions/dear-implot", version = "0.13", optional = true }
 
 [dev-dependencies]
 bevy = { version = "=0.19.0-rc.2", default-features = false, features = ["2d", "default_platform"] }
-dear-imguizmo = { path = "../../extensions/dear-imguizmo", version = "0.13" }
-dear-imnodes = { path = "../../extensions/dear-imnodes", version = "0.13" }
-dear-implot = { path = "../../extensions/dear-implot", version = "0.13" }
 
 [features]
 default = []
+ecosystem = ["imguizmo", "imnodes", "implot"]
+imguizmo = ["dep:dear-imguizmo"]
+imnodes = ["dep:dear-imnodes"]
+implot = ["dep:dear-implot"]
+# Enables the first native Dear ImGui PlatformIO lifecycle bridge. This does not by itself
+# advertise full multi-viewport support; render/input routing still gate status.
+multi-viewport = ["dear-imgui-rs/multi-viewport", "dep:bevy_winit"]
 # Enables the Bevy render-world extraction and renderer integration slices.
 render = [
     "dep:bevy_asset",
@@ -68,23 +76,24 @@ render = [
 
 [[example]]
 name = "simple"
-path = "examples/simple.rs"
+path = "examples/basic/simple.rs"
 
 [[example]]
 name = "bevy_plot_controls"
-path = "examples/bevy_plot_controls.rs"
-required-features = ["render"]
+path = "examples/ecosystem/bevy_plot_controls.rs"
+required-features = ["render", "implot"]
 
 [[example]]
 name = "editor_shell"
-path = "examples/editor_shell.rs"
+path = "examples/editor/editor_shell.rs"
 required-features = ["render"]
 
 [[example]]
 name = "ecosystem"
-path = "examples/ecosystem.rs"
+path = "examples/ecosystem/ecosystem.rs"
+required-features = ["ecosystem"]
 
 [[example]]
 name = "windowed_overlay"
-path = "examples/windowed_overlay.rs"
+path = "examples/runtime/windowed_overlay.rs"
 required-features = ["render"]

@@ -25,6 +25,42 @@ impl PlatformIo {
         }
     }
 
+    /// Replace Dear ImGui's platform monitor list.
+    ///
+    /// Multi-viewport backends must keep at least one monitor in `PlatformIO.Monitors` before
+    /// enabling `ConfigFlags::VIEWPORTS_ENABLE`. The vector storage is allocated with Dear ImGui's
+    /// allocator so the context can safely own and release it.
+    #[cfg(feature = "multi-viewport")]
+    pub fn set_monitors(&mut self, monitors: &[sys::ImGuiPlatformMonitor]) {
+        let raw = &mut self.inner_mut().Monitors;
+        if !raw.Data.is_null() {
+            unsafe { sys::igMemFree(raw.Data.cast()) };
+            raw.Data = std::ptr::null_mut();
+        }
+        raw.Size = 0;
+        raw.Capacity = 0;
+
+        if monitors.is_empty() {
+            return;
+        }
+
+        let byte_len = std::mem::size_of_val(monitors);
+        let data = unsafe { sys::igMemAlloc(byte_len) }.cast::<sys::ImGuiPlatformMonitor>();
+        assert!(
+            !data.is_null(),
+            "PlatformIo::set_monitors() failed to allocate monitor storage"
+        );
+        unsafe {
+            data.copy_from_nonoverlapping(monitors.as_ptr(), monitors.len());
+        }
+        raw.Data = data;
+        raw.Size = monitors
+            .len()
+            .try_into()
+            .expect("PlatformIo::set_monitors() supports at most i32::MAX monitors");
+        raw.Capacity = raw.Size;
+    }
+
     /// Get access to the viewports vector
     #[cfg(feature = "multi-viewport")]
     pub(crate) fn viewports(&self) -> &crate::internal::ImVector<*mut sys::ImGuiViewport> {

@@ -92,10 +92,11 @@ gates, and residual risks here or link to the review note.
 - `backends/dear-imgui-bevy/src/render.rs`
 - `backends/dear-imgui-bevy/tests/texture.rs`
 - `backends/dear-imgui-bevy/tests/helpers.rs`
-- `backends/dear-imgui-bevy/examples/windowed_overlay.rs`
-- `backends/dear-imgui-bevy/examples/editor_shell.rs`
-- `backends/dear-imgui-bevy/examples/simple.rs`
-- `backends/dear-imgui-bevy/examples/ecosystem.rs`
+- `backends/dear-imgui-bevy/examples/runtime/windowed_overlay.rs`
+- `backends/dear-imgui-bevy/examples/editor/editor_shell.rs`
+- `backends/dear-imgui-bevy/examples/basic/simple.rs`
+- `backends/dear-imgui-bevy/examples/ecosystem/ecosystem.rs`
+- `backends/dear-imgui-bevy/examples/ecosystem/bevy_plot_controls.rs`
 
 ## Notes
 

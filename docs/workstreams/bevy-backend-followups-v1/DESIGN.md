@@ -19,8 +19,8 @@ polish and platform gaps that are worth tracking together instead of hiding them
 - Code:
   - `backends/dear-imgui-bevy/src/input.rs`
   - `backends/dear-imgui-bevy/src/render.rs`
-  - `backends/dear-imgui-bevy/examples/windowed_overlay.rs`
-  - `backends/dear-imgui-bevy/examples/editor_shell.rs`
+  - `backends/dear-imgui-bevy/examples/runtime/windowed_overlay.rs`
+  - `backends/dear-imgui-bevy/examples/editor/editor_shell.rs`
 
 ## Problem
 
