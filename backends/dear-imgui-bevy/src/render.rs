@@ -1426,31 +1426,21 @@ fn prepare_imgui_texture_bind_groups(
                     let Some(texture) = render_texture.texture.as_ref() else {
                         continue;
                     };
-                    for rect in rects {
-                        if !validate_texture_update_rect(*width, *height, rect.rect) {
-                            continue;
-                        }
-                        if let Some((pixels, row_pitch)) = convert_imgui_texture_pixels(
-                            *format,
-                            u32::from(rect.rect.w),
-                            u32::from(rect.rect.h),
-                            rect.row_pitch,
-                            &rect.data,
-                        ) {
-                            write_texture_rows(
-                                &render_queue,
-                                texture,
-                                Origin3d {
-                                    x: u32::from(rect.rect.x),
-                                    y: u32::from(rect.rect.y),
-                                    z: 0,
-                                },
-                                u32::from(rect.rect.w),
-                                u32::from(rect.rect.h),
-                                row_pitch,
-                                &pixels,
-                            );
-                        }
+                    let Some(updates) =
+                        convert_imgui_texture_update_rects(*format, *width, *height, rects)
+                    else {
+                        continue;
+                    };
+                    for update in updates {
+                        write_texture_rows(
+                            &render_queue,
+                            texture,
+                            update.origin,
+                            update.width,
+                            update.height,
+                            update.row_pitch,
+                            &update.pixels,
+                        );
                     }
                     params
                         .texture_feedback
@@ -1568,6 +1558,48 @@ fn create_imgui_render_texture(
         extent: Some([upload.width, upload.height]),
         bind_group,
     })
+}
+
+struct ConvertedTextureUpdateRect {
+    origin: Origin3d,
+    width: u32,
+    height: u32,
+    row_pitch: u32,
+    pixels: Vec<u8>,
+}
+
+fn convert_imgui_texture_update_rects(
+    format: imgui::texture::TextureFormat,
+    texture_width: u32,
+    texture_height: u32,
+    rects: &[imgui::render::snapshot::TextureUploadRect],
+) -> Option<Vec<ConvertedTextureUpdateRect>> {
+    if rects.is_empty() {
+        return None;
+    }
+
+    let mut updates = Vec::with_capacity(rects.len());
+    for rect in rects {
+        if !validate_texture_update_rect(texture_width, texture_height, rect.rect) {
+            return None;
+        }
+        let width = u32::from(rect.rect.w);
+        let height = u32::from(rect.rect.h);
+        let (pixels, row_pitch) =
+            convert_imgui_texture_pixels(format, width, height, rect.row_pitch, &rect.data)?;
+        updates.push(ConvertedTextureUpdateRect {
+            origin: Origin3d {
+                x: u32::from(rect.rect.x),
+                y: u32::from(rect.rect.y),
+                z: 0,
+            },
+            width,
+            height,
+            row_pitch,
+            pixels,
+        });
+    }
+    Some(updates)
 }
 
 fn prepare_bevy_image_texture_bind_groups(
@@ -2685,6 +2717,83 @@ mod tests {
                 h: 2,
             },
         ));
+    }
+
+    #[test]
+    fn texture_update_rect_conversion_requires_every_requested_rect_to_convert() {
+        let valid = imgui::render::snapshot::TextureUploadRect {
+            rect: imgui::TextureRect {
+                x: 0,
+                y: 0,
+                w: 2,
+                h: 1,
+            },
+            row_pitch: 8,
+            data: vec![1, 2, 3, 4, 5, 6, 7, 8],
+        };
+
+        let converted = convert_imgui_texture_update_rects(
+            imgui::texture::TextureFormat::RGBA32,
+            4,
+            4,
+            std::slice::from_ref(&valid),
+        )
+        .expect("valid update rect should convert");
+
+        assert_eq!(converted.len(), 1);
+        assert_eq!(converted[0].origin, Origin3d { x: 0, y: 0, z: 0 });
+        assert_eq!(converted[0].width, 2);
+        assert_eq!(converted[0].height, 1);
+        assert_eq!(converted[0].row_pitch, 8);
+        assert_eq!(converted[0].pixels, valid.data);
+
+        assert!(
+            convert_imgui_texture_update_rects(imgui::texture::TextureFormat::RGBA32, 4, 4, &[],)
+                .is_none(),
+            "empty update lists must not acknowledge a texture update as complete"
+        );
+
+        let out_of_bounds = imgui::render::snapshot::TextureUploadRect {
+            rect: imgui::TextureRect {
+                x: 3,
+                y: 0,
+                w: 2,
+                h: 1,
+            },
+            row_pitch: 8,
+            data: vec![1, 2, 3, 4, 5, 6, 7, 8],
+        };
+        assert!(
+            convert_imgui_texture_update_rects(
+                imgui::texture::TextureFormat::RGBA32,
+                4,
+                4,
+                &[valid.clone(), out_of_bounds],
+            )
+            .is_none(),
+            "one invalid rect should keep the whole texture update pending"
+        );
+
+        let short_row = imgui::render::snapshot::TextureUploadRect {
+            rect: imgui::TextureRect {
+                x: 0,
+                y: 0,
+                w: 2,
+                h: 1,
+            },
+            row_pitch: 4,
+            data: vec![1, 2, 3, 4],
+        };
+        assert!(
+            convert_imgui_texture_update_rects(
+                imgui::texture::TextureFormat::RGBA32,
+                4,
+                4,
+                &[valid, short_row],
+            )
+            .is_none(),
+            "one unconvertible rect should keep the whole texture update pending"
+        );
     }
 
     #[test]
