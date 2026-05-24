@@ -421,18 +421,23 @@ fn apply_window_ime_feedback(
     window.ime_position = ime_position_for_window(entity, window, ime_position);
 }
 
-fn ime_position_for_window(entity: Entity, window: &Window, ime_position: [f32; 2]) -> Vec2 {
-    let mut position = Vec2::new(ime_position[0], ime_position[1]);
+fn ime_position_for_window(_entity: Entity, _window: &Window, ime_position: [f32; 2]) -> Vec2 {
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-    if let Some(origin) = crate::viewport::window_client_origin_logical(
-        entity,
-        &window.position,
-        window.scale_factor(),
-    ) {
-        position.x -= origin[0];
-        position.y -= origin[1];
+    {
+        let mut position = Vec2::new(ime_position[0], ime_position[1]);
+        if let Some(origin) = crate::viewport::window_client_origin_logical(
+            _entity,
+            &_window.position,
+            _window.scale_factor(),
+        ) {
+            position.x -= origin[0];
+            position.y -= origin[1];
+        }
+        position
     }
-    position
+
+    #[cfg(not(all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
+    Vec2::new(ime_position[0], ime_position[1])
 }
 
 fn apply_window_cursor_feedback(

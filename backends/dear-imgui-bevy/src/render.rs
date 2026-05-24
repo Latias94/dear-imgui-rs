@@ -761,6 +761,7 @@ fn create_camera_uniform_resources(
 struct ImguiRenderTexture {
     texture: Option<Texture>,
     _view: Option<TextureView>,
+    extent: Option<[u32; 2]>,
     bind_group: BindGroup,
 }
 
@@ -867,6 +868,7 @@ impl ImguiTextureBindGroups {
             ImguiRenderTexture {
                 texture: None,
                 _view: None,
+                extent: None,
                 bind_group,
             },
         );
@@ -911,6 +913,7 @@ impl ImguiTextureBindGroups {
             ImguiRenderTexture {
                 texture: None,
                 _view: None,
+                extent: None,
                 bind_group,
             },
         );
@@ -1368,6 +1371,9 @@ fn prepare_imgui_texture_bind_groups(
                 row_pitch,
                 pixels,
             } => {
+                if !validate_managed_texture_extent(&render_device, *width, *height) {
+                    continue;
+                }
                 if let Some(render_texture) = create_imgui_render_texture(
                     &render_device,
                     &render_queue,
@@ -1397,13 +1403,32 @@ fn prepare_imgui_texture_bind_groups(
                     );
                 }
             }
-            imgui::render::TextureOp::Update { format, rects, .. } => {
+            imgui::render::TextureOp::Update {
+                format,
+                width,
+                height,
+                rects,
+            } => {
+                if !validate_managed_texture_extent(&render_device, *width, *height) {
+                    continue;
+                }
                 if let Some(render_texture) = texture_bind_groups
                     .textures
                     .get(&TextureBinding::Managed(request.id))
-                    .and_then(|texture| texture.texture.as_ref())
                 {
+                    let Some(texture_extent) = render_texture.extent else {
+                        continue;
+                    };
+                    if texture_extent != [*width, *height] {
+                        continue;
+                    }
+                    let Some(texture) = render_texture.texture.as_ref() else {
+                        continue;
+                    };
                     for rect in rects {
+                        if !validate_texture_update_rect(*width, *height, rect.rect) {
+                            continue;
+                        }
                         if let Some((pixels, row_pitch)) = convert_imgui_texture_pixels(
                             *format,
                             u32::from(rect.rect.w),
@@ -1413,7 +1438,7 @@ fn prepare_imgui_texture_bind_groups(
                         ) {
                             write_texture_rows(
                                 &render_queue,
-                                render_texture,
+                                texture,
                                 Origin3d {
                                     x: u32::from(rect.rect.x),
                                     y: u32::from(rect.rect.y),
@@ -1459,6 +1484,34 @@ fn prepare_imgui_texture_bind_groups(
 
 fn managed_texture_id(id: imgui::render::snapshot::ManagedTextureId) -> imgui::TextureId {
     imgui::TextureId::new(MANAGED_TEXTURE_NAMESPACE | (u64::from(id.raw() as u32) + 1))
+}
+
+fn validate_managed_texture_extent(render_device: &RenderDevice, width: u32, height: u32) -> bool {
+    managed_texture_extent_supported(
+        width,
+        height,
+        render_device.limits().max_texture_dimension_2d,
+    )
+}
+
+fn managed_texture_extent_supported(width: u32, height: u32, max_dimension_2d: u32) -> bool {
+    width > 0 && height > 0 && width <= max_dimension_2d && height <= max_dimension_2d
+}
+
+fn validate_texture_update_rect(
+    texture_width: u32,
+    texture_height: u32,
+    rect: imgui::TextureRect,
+) -> bool {
+    let x = u32::from(rect.x);
+    let y = u32::from(rect.y);
+    let w = u32::from(rect.w);
+    let h = u32::from(rect.h);
+    w > 0
+        && h > 0
+        && x.checked_add(w).is_some_and(|right| right <= texture_width)
+        && y.checked_add(h)
+            .is_some_and(|bottom| bottom <= texture_height)
 }
 
 fn create_imgui_render_texture(
@@ -1511,6 +1564,7 @@ fn create_imgui_render_texture(
     Some(ImguiRenderTexture {
         texture: Some(texture),
         _view: Some(view),
+        extent: Some([upload.width, upload.height]),
         bind_group,
     })
 }
@@ -2405,6 +2459,80 @@ mod tests {
                 "{compatibility:?} should not be bound to the fixed ImGui texture layout"
             );
         }
+    }
+
+    #[test]
+    fn managed_texture_extent_validation_rejects_zero_or_device_oversized_textures() {
+        assert!(managed_texture_extent_supported(1, 1, 2048));
+        assert!(managed_texture_extent_supported(2048, 2048, 2048));
+        assert!(!managed_texture_extent_supported(0, 1, 2048));
+        assert!(!managed_texture_extent_supported(1, 0, 2048));
+        assert!(!managed_texture_extent_supported(2049, 1, 2048));
+        assert!(!managed_texture_extent_supported(1, 2049, 2048));
+    }
+
+    #[test]
+    fn texture_update_rect_validation_rejects_empty_or_out_of_bounds_rects() {
+        assert!(validate_texture_update_rect(
+            64,
+            32,
+            imgui::TextureRect {
+                x: 8,
+                y: 4,
+                w: 16,
+                h: 8,
+            },
+        ));
+        assert!(validate_texture_update_rect(
+            64,
+            32,
+            imgui::TextureRect {
+                x: 63,
+                y: 31,
+                w: 1,
+                h: 1,
+            },
+        ));
+        assert!(!validate_texture_update_rect(
+            64,
+            32,
+            imgui::TextureRect {
+                x: 8,
+                y: 4,
+                w: 0,
+                h: 8,
+            },
+        ));
+        assert!(!validate_texture_update_rect(
+            64,
+            32,
+            imgui::TextureRect {
+                x: 8,
+                y: 4,
+                w: 16,
+                h: 0,
+            },
+        ));
+        assert!(!validate_texture_update_rect(
+            64,
+            32,
+            imgui::TextureRect {
+                x: 63,
+                y: 0,
+                w: 2,
+                h: 1,
+            },
+        ));
+        assert!(!validate_texture_update_rect(
+            64,
+            32,
+            imgui::TextureRect {
+                x: 0,
+                y: 31,
+                w: 1,
+                h: 2,
+            },
+        ));
     }
 
     #[test]
