@@ -209,10 +209,8 @@ fn begin_primary_frame_system(mut params: BeginFrameParams) {
 
     let context = params.imgui_context.context_mut();
     let feedback = params.texture_feedback.drain();
-    if !feedback.is_empty() {
-        let applied = context.platform_io_mut().apply_texture_feedback(&feedback);
-        params.texture_feedback.set_last_applied(applied);
-    }
+    let applied = context.platform_io_mut().apply_texture_feedback(&feedback);
+    params.texture_feedback.set_last_applied(applied);
 
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     if let Some(viewport_bridge) = params.viewport_bridge.as_deref_mut() {

@@ -128,9 +128,20 @@ fn managed_texture_feedback_round_trips_from_render_world_before_next_frame() {
     assert_eq!(queue.len(), 0, "begin-frame should drain feedback");
     assert_eq!(queue.last_applied(), 1);
 
-    let texture = app.world().get_non_send::<ManagedTexture>().unwrap();
-    assert_eq!(texture.0.status(), imgui::texture::TextureStatus::OK);
-    assert_eq!(texture.0.tex_id(), imgui::TextureId::new(777));
+    {
+        let texture = app.world().get_non_send::<ManagedTexture>().unwrap();
+        assert_eq!(texture.0.status(), imgui::texture::TextureStatus::OK);
+        assert_eq!(texture.0.tex_id(), imgui::TextureId::new(777));
+    }
+
+    app.update();
+
+    let queue = app.world().resource::<ImguiTextureFeedbackQueue>();
+    assert_eq!(
+        queue.last_applied(),
+        0,
+        "a later empty feedback frame should not report the previous apply count"
+    );
 
     let prepared = app
         .sub_app(RenderApp)
@@ -143,6 +154,7 @@ fn managed_texture_feedback_round_trips_from_render_world_before_next_frame() {
             .any(|draw| matches!(draw.texture, TextureBinding::Managed(id) if id == texture_id)),
         "managed texture draws should remain keyed by ImGui's managed texture identity"
     );
+    let texture = app.world().get_non_send::<ManagedTexture>().unwrap();
     assert_eq!(texture_id, texture.0.unique_id());
 }
 
