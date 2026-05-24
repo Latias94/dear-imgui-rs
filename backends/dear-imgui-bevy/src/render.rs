@@ -43,7 +43,6 @@ use bytemuck::{Pod, Zeroable};
 use dear_imgui_rs as imgui;
 use imgui::render::{DrawCmdSnapshot, DrawIdx, TextureBinding};
 use std::collections::{HashMap, HashSet};
-use std::hash::{Hash, Hasher};
 use std::mem::size_of;
 
 pub use crate::texture::ImguiBevyTextures;
@@ -65,6 +64,7 @@ type OverlayCameraQuery<'w> = Query<
 >;
 
 const COPY_BYTES_PER_ROW_ALIGNMENT: u32 = 256;
+const MANAGED_TEXTURE_NAMESPACE: u64 = 0x4000_0000_0000_0000;
 
 /// Vertex shader entry point used by the Bevy-native ImGui pipeline.
 pub const IMGUI_VERTEX_ENTRY_POINT: &str = "vs_main";
@@ -1385,14 +1385,7 @@ fn prepare_imgui_texture_bind_groups(
 }
 
 fn managed_texture_id(id: imgui::render::snapshot::ManagedTextureId) -> imgui::TextureId {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    "dear-imgui-bevy-managed".hash(&mut hasher);
-    id.hash(&mut hasher);
-    let mut raw = hasher.finish();
-    if raw == 0 {
-        raw = 1;
-    }
-    imgui::TextureId::new(raw)
+    imgui::TextureId::new(MANAGED_TEXTURE_NAMESPACE | (u64::from(id.raw() as u32) + 1))
 }
 
 fn create_imgui_render_texture(

@@ -188,6 +188,27 @@ fn bevy_image_handles_register_as_stable_imgui_texture_ids_and_extract() {
 }
 
 #[test]
+fn bevy_image_texture_registry_allocates_distinct_reversible_ids() {
+    let mut images = Assets::<Image>::default();
+    let first = images.add(Image::default());
+    let second = images.add(Image::default());
+
+    let mut textures = ImguiBevyTextures::default();
+    let first_texture = textures.register(&first);
+    let second_texture = textures.register(&second);
+
+    assert_eq!(textures.register(&first), first_texture);
+    assert_ne!(first_texture, second_texture);
+    assert!(!first_texture.is_null());
+    assert!(!second_texture.is_null());
+    assert_eq!(textures.asset_id(first_texture), Some(first.id()));
+    assert_eq!(textures.asset_id(second_texture), Some(second.id()));
+    assert_eq!(textures.unregister(&first), Some(first_texture));
+    assert_eq!(textures.asset_id(first_texture), None);
+    assert_eq!(textures.asset_id(second_texture), Some(second.id()));
+}
+
+#[test]
 fn render_target_texture_images_can_be_registered_and_drawn_as_imgui_viewports() {
     let _guard = imgui_context_guard();
     let mut app = app_with_render_world();

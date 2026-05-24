@@ -66,13 +66,25 @@ mod render {
     use bevy_asset::{AssetId, Handle};
     use bevy_image::Image;
     use std::collections::HashMap;
-    use std::hash::{Hash, Hasher};
+
+    const BEVY_IMAGE_TEXTURE_NAMESPACE: u64 = 0x8000_0000_0000_0000;
 
     /// Main-world registry that maps Bevy `Image` handles to Dear ImGui legacy texture ids.
-    #[derive(Resource, Debug, Default)]
+    #[derive(Resource, Debug)]
     pub struct ImguiBevyTextures {
         by_asset: HashMap<AssetId<Image>, imgui::TextureId>,
         by_texture: HashMap<imgui::TextureId, AssetId<Image>>,
+        next_texture_id: u64,
+    }
+
+    impl Default for ImguiBevyTextures {
+        fn default() -> Self {
+            Self {
+                by_asset: HashMap::new(),
+                by_texture: HashMap::new(),
+                next_texture_id: BEVY_IMAGE_TEXTURE_NAMESPACE,
+            }
+        }
     }
 
     impl ImguiBevyTextures {
@@ -85,7 +97,7 @@ mod render {
                 return *texture_id;
             }
 
-            let texture_id = bevy_image_texture_id(asset_id);
+            let texture_id = self.allocate_texture_id();
             self.by_asset.insert(asset_id, texture_id);
             self.by_texture.insert(texture_id, asset_id);
             texture_id
@@ -122,17 +134,23 @@ mod render {
         pub fn is_empty(&self) -> bool {
             self.by_texture.is_empty()
         }
-    }
 
-    fn bevy_image_texture_id(asset_id: AssetId<Image>) -> imgui::TextureId {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        "dear-imgui-bevy-image".hash(&mut hasher);
-        asset_id.hash(&mut hasher);
-        let mut id = hasher.finish();
-        if id == 0 {
-            id = 1;
+        fn allocate_texture_id(&mut self) -> imgui::TextureId {
+            if self.next_texture_id < BEVY_IMAGE_TEXTURE_NAMESPACE {
+                self.next_texture_id = BEVY_IMAGE_TEXTURE_NAMESPACE;
+            }
+
+            loop {
+                let texture_id = imgui::TextureId::new(self.next_texture_id);
+                self.next_texture_id = self.next_texture_id.wrapping_add(1);
+                if self.next_texture_id < BEVY_IMAGE_TEXTURE_NAMESPACE {
+                    self.next_texture_id = BEVY_IMAGE_TEXTURE_NAMESPACE;
+                }
+                if !texture_id.is_null() && !self.by_texture.contains_key(&texture_id) {
+                    return texture_id;
+                }
+            }
         }
-        imgui::TextureId::new(id)
     }
 }
 

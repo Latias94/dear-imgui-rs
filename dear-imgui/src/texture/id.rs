@@ -118,4 +118,13 @@ impl ManagedTextureId {
     pub(crate) const fn from_raw(raw: i32) -> Self {
         Self(raw)
     }
+
+    /// Returns Dear ImGui's raw `ImTextureData::UniqueID` value.
+    ///
+    /// Renderer backends can use this to derive deterministic backend texture handles for managed
+    /// texture requests without relying on probabilistic hashing.
+    #[inline]
+    pub const fn raw(self) -> i32 {
+        self.0
+    }
 }

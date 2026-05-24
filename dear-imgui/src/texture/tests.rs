@@ -114,6 +114,7 @@ fn managed_texture_id_is_a_typed_texture_identity() {
     let snapshot_id: crate::render::snapshot::ManagedTextureId = id;
 
     assert_eq!(id, ManagedTextureId::from_raw(42));
+    assert_eq!(id.raw(), 42);
     assert_eq!(snapshot_id, id);
 }
 
