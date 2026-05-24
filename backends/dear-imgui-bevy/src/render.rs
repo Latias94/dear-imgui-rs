@@ -31,7 +31,7 @@ use bevy_render::{
         SpecializedRenderPipelines, StoreOp, TexelCopyBufferLayout, TexelCopyTextureInfo, Texture,
         TextureAspect, TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType,
         TextureUsages, TextureView, TextureViewDescriptor, TextureViewDimension, VertexAttribute,
-        VertexFormat, VertexState, VertexStepMode,
+        VertexFormat, VertexState, VertexStepMode, WgpuFeatures,
     },
     renderer::{RenderContext, RenderDevice, RenderQueue, ViewQuery},
     texture::GpuImage,
@@ -772,6 +772,79 @@ struct ImguiTextureUpload<'a> {
     pixels: &'a [u8],
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ImguiTextureViewCompatibility {
+    texture_usage: TextureUsages,
+    view_usage: Option<TextureUsages>,
+    sample_count: u32,
+    texture_dimension: TextureDimension,
+    depth_or_array_layers: u32,
+    view_dimension: Option<TextureViewDimension>,
+    format: TextureFormat,
+    aspect: TextureAspect,
+}
+
+impl ImguiTextureViewCompatibility {
+    fn from_gpu_image(gpu_image: &GpuImage) -> Self {
+        let texture_descriptor = &gpu_image.texture_descriptor;
+        let view_descriptor = gpu_image.texture_view_descriptor.as_ref();
+        Self {
+            texture_usage: texture_descriptor.usage,
+            view_usage: view_descriptor.and_then(|descriptor| descriptor.usage),
+            sample_count: texture_descriptor.sample_count,
+            texture_dimension: texture_descriptor.dimension,
+            depth_or_array_layers: texture_descriptor.size.depth_or_array_layers,
+            view_dimension: view_descriptor.and_then(|descriptor| descriptor.dimension),
+            format: view_descriptor
+                .and_then(|descriptor| descriptor.format)
+                .unwrap_or(texture_descriptor.format),
+            aspect: view_descriptor.map_or(TextureAspect::All, |descriptor| descriptor.aspect),
+        }
+    }
+
+    fn supports_imgui_sampling(self, device_features: WgpuFeatures) -> bool {
+        if !self
+            .resolved_view_usage()
+            .contains(TextureUsages::TEXTURE_BINDING)
+        {
+            return false;
+        }
+        if self.sample_count != 1 || self.resolved_view_dimension() != TextureViewDimension::D2 {
+            return false;
+        }
+
+        matches!(
+            self.format
+                .sample_type(Some(self.aspect), Some(device_features)),
+            Some(TextureSampleType::Float { filterable: true })
+        )
+    }
+
+    fn resolved_view_usage(self) -> TextureUsages {
+        let usage = self.view_usage.unwrap_or_else(TextureUsages::empty);
+        if usage.is_empty() {
+            self.texture_usage
+        } else {
+            usage
+        }
+    }
+
+    fn resolved_view_dimension(self) -> TextureViewDimension {
+        let default_dimension = match self.texture_dimension {
+            TextureDimension::D1 => TextureViewDimension::D1,
+            TextureDimension::D2 => {
+                if self.depth_or_array_layers == 1 {
+                    TextureViewDimension::D2
+                } else {
+                    TextureViewDimension::D2Array
+                }
+            }
+            TextureDimension::D3 => TextureViewDimension::D3,
+        };
+        self.view_dimension.unwrap_or(default_dimension)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct ImguiViewportTarget {
     viewport_id: imgui::Id,
@@ -1486,10 +1559,8 @@ fn create_bevy_image_texture_bind_group(
     pipeline: &ImguiRenderPipeline,
     gpu_image: &GpuImage,
 ) -> Option<BindGroup> {
-    if !gpu_image
-        .texture_descriptor
-        .usage
-        .contains(TextureUsages::TEXTURE_BINDING)
+    if !ImguiTextureViewCompatibility::from_gpu_image(gpu_image)
+        .supports_imgui_sampling(render_device.features())
     {
         return None;
     }
@@ -1882,6 +1953,11 @@ fn prepare_snapshot_draw_data(
                 let Some(vertex_offset) = list_vertex_base.checked_add(vtx_offset) else {
                     continue;
                 };
+                if index_end > list_index_base + list.idx.len()
+                    || vertex_offset > list_vertex_base + list.vtx.len()
+                {
+                    continue;
+                }
                 let Ok(index_start) = u32::try_from(index_start) else {
                     continue;
                 };
@@ -2189,6 +2265,67 @@ mod tests {
     }
 
     #[test]
+    fn prepared_draws_skip_commands_with_out_of_range_index_or_vertex_offsets() {
+        let camera = Entity::from_raw_u32(9).expect("test entity index should be valid");
+        let snapshot = imgui::render::FrameSnapshot {
+            draw: imgui::render::DrawDataSnapshot {
+                display_pos: [0.0, 0.0],
+                display_size: [32.0, 32.0],
+                framebuffer_scale: [1.0, 1.0],
+                draw_lists: vec![imgui::render::DrawListSnapshot {
+                    vtx: vec![
+                        imgui::render::DrawVert::new([0.0, 0.0], [0.0, 0.0], 0xFFFF_FFFF),
+                        imgui::render::DrawVert::new([1.0, 0.0], [1.0, 0.0], 0xFFFF_FFFF),
+                        imgui::render::DrawVert::new([0.0, 1.0], [0.0, 1.0], 0xFFFF_FFFF),
+                    ],
+                    idx: vec![0, 1, 2],
+                    commands: vec![
+                        DrawCmdSnapshot::Elements {
+                            count: 1,
+                            clip_rect: [0.0, 0.0, 16.0, 16.0],
+                            texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
+                            vtx_offset: 0,
+                            idx_offset: 3,
+                        },
+                        DrawCmdSnapshot::Elements {
+                            count: 3,
+                            clip_rect: [0.0, 0.0, 16.0, 16.0],
+                            texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
+                            vtx_offset: 4,
+                            idx_offset: 0,
+                        },
+                        DrawCmdSnapshot::Elements {
+                            count: 3,
+                            clip_rect: [0.0, 0.0, 16.0, 16.0],
+                            texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
+                            vtx_offset: 0,
+                            idx_offset: 0,
+                        },
+                    ],
+                }],
+            },
+            viewports: Vec::new(),
+            texture_requests: Vec::new(),
+        };
+        let targets = [ImguiCameraTarget {
+            camera,
+            order: 0,
+            target: NormalizedRenderTarget::Window(
+                bevy_window::WindowRef::Entity(camera)
+                    .normalize(None)
+                    .expect("entity window target should normalize"),
+            ),
+            viewport_id: None,
+        }];
+
+        let (_, _, draws, _) = prepare_snapshot_draw_data(&snapshot, &targets);
+
+        assert_eq!(draws.len(), 1);
+        assert_eq!(draws[0].index_range, 0..3);
+        assert_eq!(draws[0].vertex_offset, 0);
+    }
+
+    #[test]
     fn bevy_image_binding_tracking_prunes_unregistered_legacy_ids() {
         let mut texture_bind_groups = ImguiTextureBindGroups::default();
         let registered = TextureBinding::Legacy(imgui::TextureId::new(42));
@@ -2209,6 +2346,65 @@ mod tests {
                 .bevy_image_bindings
                 .contains(&still_active)
         );
+    }
+
+    #[test]
+    fn bevy_image_sampling_compatibility_accepts_filterable_float_2d_views() {
+        assert!(
+            imgui_texture_view_compatibility(TextureFormat::Rgba8Unorm)
+                .supports_imgui_sampling(WgpuFeatures::empty())
+        );
+        assert!(
+            imgui_texture_view_compatibility(TextureFormat::Rgba8UnormSrgb)
+                .supports_imgui_sampling(WgpuFeatures::empty())
+        );
+        assert!(
+            imgui_texture_view_compatibility(TextureFormat::Rgba32Float)
+                .supports_imgui_sampling(WgpuFeatures::FLOAT32_FILTERABLE)
+        );
+    }
+
+    #[test]
+    fn bevy_image_sampling_compatibility_rejects_views_that_cannot_match_imgui_layout() {
+        let unsupported_cases = [
+            imgui_texture_view_compatibility(TextureFormat::Rgba8Uint),
+            imgui_texture_view_compatibility(TextureFormat::Rgba8Sint),
+            imgui_texture_view_compatibility(TextureFormat::Depth32Float),
+            imgui_texture_view_compatibility(TextureFormat::Rgba32Float),
+            ImguiTextureViewCompatibility {
+                texture_usage: TextureUsages::COPY_DST,
+                ..imgui_texture_view_compatibility(TextureFormat::Rgba8Unorm)
+            },
+            ImguiTextureViewCompatibility {
+                view_usage: Some(TextureUsages::COPY_SRC),
+                ..imgui_texture_view_compatibility(TextureFormat::Rgba8Unorm)
+            },
+            ImguiTextureViewCompatibility {
+                sample_count: 4,
+                ..imgui_texture_view_compatibility(TextureFormat::Rgba8Unorm)
+            },
+            ImguiTextureViewCompatibility {
+                texture_dimension: TextureDimension::D3,
+                ..imgui_texture_view_compatibility(TextureFormat::Rgba8Unorm)
+            },
+            ImguiTextureViewCompatibility {
+                depth_or_array_layers: 2,
+                view_dimension: None,
+                ..imgui_texture_view_compatibility(TextureFormat::Rgba8Unorm)
+            },
+            ImguiTextureViewCompatibility {
+                depth_or_array_layers: 2,
+                view_dimension: Some(TextureViewDimension::D2Array),
+                ..imgui_texture_view_compatibility(TextureFormat::Rgba8Unorm)
+            },
+        ];
+
+        for compatibility in unsupported_cases {
+            assert!(
+                !compatibility.supports_imgui_sampling(WgpuFeatures::empty()),
+                "{compatibility:?} should not be bound to the fixed ImGui texture layout"
+            );
+        }
     }
 
     #[test]
@@ -2350,6 +2546,19 @@ mod tests {
         RenderHarnessResources {
             render_device: render_device.clone(),
             pipeline_cache: PipelineCache::new(render_device, render_adapter, true),
+        }
+    }
+
+    fn imgui_texture_view_compatibility(format: TextureFormat) -> ImguiTextureViewCompatibility {
+        ImguiTextureViewCompatibility {
+            texture_usage: TextureUsages::TEXTURE_BINDING,
+            view_usage: None,
+            sample_count: 1,
+            texture_dimension: TextureDimension::D2,
+            depth_or_array_layers: 1,
+            view_dimension: None,
+            format,
+            aspect: TextureAspect::All,
         }
     }
 
