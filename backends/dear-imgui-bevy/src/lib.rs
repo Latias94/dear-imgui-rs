@@ -139,15 +139,25 @@ fn sync_backend_context_config(
     context
         .set_platform_name(Some(imgui_name.clone()))
         .expect("sanitized backend names must be valid C strings");
+    let mut backend_flags = context.io().backend_flags();
     if render_integration_installed {
+        backend_flags.insert(
+            dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES
+                | dear_imgui_rs::BackendFlags::RENDERER_HAS_VTX_OFFSET,
+        );
         context
             .set_renderer_name(Some(imgui_name))
             .expect("sanitized backend names must be valid C strings");
     } else {
+        backend_flags.remove(
+            dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES
+                | dear_imgui_rs::BackendFlags::RENDERER_HAS_VTX_OFFSET,
+        );
         context
             .set_renderer_name::<String>(None)
             .expect("clearing BackendRendererName must not fail");
     }
+    context.io_mut().set_backend_flags(backend_flags);
 }
 
 fn sanitized_imgui_backend_name(name: &str) -> String {

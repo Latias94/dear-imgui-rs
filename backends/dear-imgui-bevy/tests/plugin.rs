@@ -68,6 +68,14 @@ fn plugin_registers_minimal_imgui_resources() {
         io.backend_renderer_name().is_none(),
         "renderer name should stay unset until render integration is installed"
     );
+    assert!(
+        !io.backend_flags()
+            .contains(dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES)
+    );
+    assert!(
+        !io.backend_flags()
+            .contains(dear_imgui_rs::BackendFlags::RENDERER_HAS_VTX_OFFSET)
+    );
 }
 
 #[test]
@@ -228,5 +236,21 @@ fn status_reports_render_routing_only_after_render_app_installation() {
             .to_str()
             .expect("backend name should be valid UTF-8"),
         "render-status"
+    );
+    assert!(
+        context
+            .context()
+            .io()
+            .backend_flags()
+            .contains(dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES),
+        "render integration must advertise ImGui 1.92 texture request support"
+    );
+    assert!(
+        context
+            .context()
+            .io()
+            .backend_flags()
+            .contains(dear_imgui_rs::BackendFlags::RENDERER_HAS_VTX_OFFSET),
+        "render integration must advertise support for draw command vertex offsets"
     );
 }
