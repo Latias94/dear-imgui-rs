@@ -1853,10 +1853,10 @@ fn prepare_snapshot_draw_data(
             uniforms_by_camera.insert(target.camera, uniforms);
         }
 
+        let mut active_sampler = ImguiSampler::Linear;
         for list in &draw.draw_lists {
             vertices.extend(list.vtx.iter().copied().map(ImguiGpuVertex::from));
             indices.extend(list.idx.iter().copied());
-            let mut active_sampler = ImguiSampler::Linear;
 
             for command in &list.commands {
                 let (count, clip_rect, texture, vtx_offset, idx_offset) = match command {
@@ -2128,6 +2128,71 @@ mod tests {
         assert_eq!(draws.len(), 2);
         assert_eq!(draws[0].sampler, ImguiSampler::Nearest);
         assert_eq!(draws[1].sampler, ImguiSampler::Linear);
+    }
+
+    #[test]
+    fn prepared_draws_preserve_sampler_state_across_draw_lists() {
+        let camera = Entity::from_raw_u32(8).expect("test entity index should be valid");
+        let snapshot = imgui::render::FrameSnapshot {
+            draw: imgui::render::DrawDataSnapshot {
+                display_pos: [0.0, 0.0],
+                display_size: [32.0, 32.0],
+                framebuffer_scale: [1.0, 1.0],
+                draw_lists: vec![
+                    imgui::render::DrawListSnapshot {
+                        vtx: vec![
+                            imgui::render::DrawVert::new([0.0, 0.0], [0.0, 0.0], 0xFFFF_FFFF),
+                            imgui::render::DrawVert::new([1.0, 0.0], [1.0, 0.0], 0xFFFF_FFFF),
+                            imgui::render::DrawVert::new([0.0, 1.0], [0.0, 1.0], 0xFFFF_FFFF),
+                        ],
+                        idx: vec![0, 1, 2],
+                        commands: vec![
+                            DrawCmdSnapshot::SetSamplerNearest,
+                            DrawCmdSnapshot::Elements {
+                                count: 3,
+                                clip_rect: [0.0, 0.0, 16.0, 16.0],
+                                texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
+                                vtx_offset: 0,
+                                idx_offset: 0,
+                            },
+                        ],
+                    },
+                    imgui::render::DrawListSnapshot {
+                        vtx: vec![
+                            imgui::render::DrawVert::new([2.0, 0.0], [0.0, 0.0], 0xFFFF_FFFF),
+                            imgui::render::DrawVert::new([3.0, 0.0], [1.0, 0.0], 0xFFFF_FFFF),
+                            imgui::render::DrawVert::new([2.0, 1.0], [0.0, 1.0], 0xFFFF_FFFF),
+                        ],
+                        idx: vec![0, 1, 2],
+                        commands: vec![DrawCmdSnapshot::Elements {
+                            count: 3,
+                            clip_rect: [0.0, 0.0, 16.0, 16.0],
+                            texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
+                            vtx_offset: 0,
+                            idx_offset: 0,
+                        }],
+                    },
+                ],
+            },
+            viewports: Vec::new(),
+            texture_requests: Vec::new(),
+        };
+        let targets = [ImguiCameraTarget {
+            camera,
+            order: 0,
+            target: NormalizedRenderTarget::Window(
+                bevy_window::WindowRef::Entity(camera)
+                    .normalize(None)
+                    .expect("entity window target should normalize"),
+            ),
+            viewport_id: None,
+        }];
+
+        let (_, _, draws, _) = prepare_snapshot_draw_data(&snapshot, &targets);
+
+        assert_eq!(draws.len(), 2);
+        assert_eq!(draws[0].sampler, ImguiSampler::Nearest);
+        assert_eq!(draws[1].sampler, ImguiSampler::Nearest);
     }
 
     #[test]

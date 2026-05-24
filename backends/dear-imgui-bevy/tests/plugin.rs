@@ -127,6 +127,33 @@ fn plugin_preserves_existing_config_and_context() {
 }
 
 #[test]
+fn plugin_sanitizes_backend_names_for_imgui_c_strings() {
+    let _guard = imgui_context_guard();
+
+    let mut app = App::new();
+    app.add_plugins(ImguiPlugin::new(ImguiBackendConfig {
+        name: "bad\0name".to_owned(),
+        docking: true,
+        multi_viewport: false,
+    }));
+
+    let context = app
+        .world()
+        .get_non_send::<ImguiContext>()
+        .expect("plugin should install the Dear ImGui context");
+    assert_eq!(
+        context
+            .context()
+            .io()
+            .backend_platform_name()
+            .expect("plugin should set a sanitized BackendPlatformName")
+            .to_str()
+            .expect("sanitized backend name should be valid UTF-8"),
+        "bad?name"
+    );
+}
+
+#[test]
 fn status_multi_viewport_request_reports_exact_enablement_boundary() {
     let _guard = imgui_context_guard();
 

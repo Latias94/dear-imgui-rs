@@ -135,9 +135,23 @@ fn sync_backend_context_config(
     }
     context.io_mut().set_config_flags(config_flags);
 
-    let _ = context.set_platform_name(Some(config.name.clone()));
-    let renderer_name = render_integration_installed.then(|| config.name.clone());
-    let _ = context.set_renderer_name(renderer_name);
+    let imgui_name = sanitized_imgui_backend_name(&config.name);
+    context
+        .set_platform_name(Some(imgui_name.clone()))
+        .expect("sanitized backend names must be valid C strings");
+    if render_integration_installed {
+        context
+            .set_renderer_name(Some(imgui_name))
+            .expect("sanitized backend names must be valid C strings");
+    } else {
+        context
+            .set_renderer_name::<String>(None)
+            .expect("clearing BackendRendererName must not fail");
+    }
+}
+
+fn sanitized_imgui_backend_name(name: &str) -> String {
+    name.replace('\0', "?")
 }
 
 /// Static configuration for the Bevy backend.
