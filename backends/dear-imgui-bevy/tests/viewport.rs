@@ -39,6 +39,10 @@ use imgui::sys;
 use std::sync::{Mutex, OnceLock};
 
 #[cfg(feature = "multi-viewport")]
+static DESTROY_CALLBACK_SAW_NULL_BACKEND_USER_DATA: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(feature = "multi-viewport")]
 fn imgui_context_guard() -> std::sync::MutexGuard<'static, ()> {
     static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
     GUARD.get_or_init(|| Mutex::new(())).lock().unwrap()
@@ -456,6 +460,48 @@ fn viewport_destroy_callback_ignores_owned_by_app_main_viewport() {
     assert!(
         bridge.commands().is_empty(),
         "destroying the application-owned main viewport must not enqueue a secondary-window destroy"
+    );
+}
+
+#[cfg(feature = "multi-viewport")]
+#[test]
+fn context_drop_clears_backend_user_data_before_destroying_platform_windows() {
+    let _guard = imgui_context_guard();
+
+    unsafe extern "C" fn assert_backend_user_data_is_cleared(viewport: *mut sys::ImGuiViewport) {
+        let io = unsafe { sys::igGetIO_Nil() };
+        let cleared = io.is_null() || unsafe { (*io).BackendPlatformUserData.is_null() };
+        DESTROY_CALLBACK_SAW_NULL_BACKEND_USER_DATA
+            .store(cleared, std::sync::atomic::Ordering::SeqCst);
+        if let Some(viewport) = unsafe { viewport.as_mut() } {
+            viewport.PlatformUserData = std::ptr::null_mut();
+            viewport.PlatformHandle = std::ptr::null_mut();
+        }
+    }
+
+    DESTROY_CALLBACK_SAW_NULL_BACKEND_USER_DATA.store(false, std::sync::atomic::Ordering::SeqCst);
+    let mut app = app_with_multi_viewport_bridge("viewport-context-drop");
+    {
+        let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
+        let main_viewport = context.context_mut().main_viewport();
+        main_viewport.set_platform_user_data(std::ptr::dangling_mut::<u8>().cast());
+        main_viewport.set_platform_handle(std::ptr::dangling_mut::<u8>().cast());
+        main_viewport.set_platform_window_created(true);
+        unsafe {
+            let platform_io = context.context_mut().platform_io_mut().as_raw_mut();
+            (*platform_io).Platform_DestroyWindow = Some(assert_backend_user_data_is_cleared);
+        }
+    }
+
+    drop(
+        app.world_mut()
+            .remove_non_send::<ImguiContext>()
+            .expect("ImguiContext should be removable for direct shutdown testing"),
+    );
+
+    assert!(
+        DESTROY_CALLBACK_SAW_NULL_BACKEND_USER_DATA.load(std::sync::atomic::Ordering::SeqCst),
+        "ImguiContext shutdown must not leave Platform_DestroyWindow callbacks with a dangling bridge pointer"
     );
 }
 

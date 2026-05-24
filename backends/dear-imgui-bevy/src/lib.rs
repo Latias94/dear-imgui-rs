@@ -286,10 +286,10 @@ impl ImguiContext {
     fn clear_platform_backend_data(&mut self) {
         #[cfg(feature = "multi-viewport")]
         {
-            self.context.destroy_platform_windows();
             self.context
                 .io_mut()
                 .set_backend_platform_user_data(std::ptr::null_mut());
+            self.context.destroy_platform_windows();
             self.context.platform_io_mut().clear_platform_handlers();
         }
     }
