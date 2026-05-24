@@ -315,7 +315,7 @@ pub(crate) fn install_viewport_bridge(_app: &mut App) {
         );
         app.add_systems(
             Last,
-            cleanup_secondary_viewports_on_primary_close.before(ExitSystems),
+            cleanup_secondary_viewports_when_primary_is_unavailable.before(ExitSystems),
         );
     }
 }
@@ -852,7 +852,7 @@ fn apply_pending_viewport_focus_requests(
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-fn cleanup_secondary_viewports_on_primary_close(
+fn cleanup_secondary_viewports_when_primary_is_unavailable(
     mut ecs_commands: Commands,
     mut close_requests: MessageReader<WindowCloseRequested>,
     primary_windows: Query<Entity, With<PrimaryWindow>>,
@@ -860,13 +860,14 @@ fn cleanup_secondary_viewports_on_primary_close(
     viewport_cameras: Query<Entity, With<ImguiViewportCamera>>,
     mut bridge: NonSendMut<ImguiViewportBridge>,
 ) {
-    let Ok(primary_window) = primary_windows.single() else {
-        return;
-    };
-    if !close_requests
-        .read()
-        .any(|event| event.window == primary_window)
-    {
+    let primary_window = primary_windows.single().ok();
+    let primary_close_requested = primary_window.is_some_and(|primary_window| {
+        close_requests
+            .read()
+            .any(|event| event.window == primary_window)
+    });
+
+    if primary_window.is_some() && !primary_close_requested {
         return;
     }
 

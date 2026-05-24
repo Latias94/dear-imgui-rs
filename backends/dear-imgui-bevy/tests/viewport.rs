@@ -1193,3 +1193,34 @@ fn viewport_primary_close_despawns_secondary_viewport_windows_and_cameras() {
         "closing the primary window should despawn detached viewport cameras"
     );
 }
+
+#[cfg(all(feature = "multi-viewport", feature = "render"))]
+#[test]
+fn viewport_missing_primary_window_despawns_secondary_viewport_windows_and_cameras() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_multi_viewport_bridge("viewport-primary-despawn");
+    let primary = app
+        .world_mut()
+        .spawn((Window::default(), PrimaryWindow))
+        .id();
+    let id = imgui::Id::from(0x104);
+    let (window_entity, camera_entity) = spawn_secondary_viewport(&mut app, id);
+
+    app.world_mut().despawn(primary);
+    app.update();
+
+    let bridge = app
+        .world()
+        .get_non_send::<ImguiViewportBridge>()
+        .expect("bridge should still exist");
+    assert!(bridge.viewport_window(id).is_none());
+    assert!(bridge.viewport_camera(id).is_none());
+    assert!(
+        app.world().get_entity(window_entity).is_err(),
+        "removing the primary window should despawn detached Dear ImGui viewport windows"
+    );
+    assert!(
+        app.world().get_entity(camera_entity).is_err(),
+        "removing the primary window should despawn detached viewport cameras"
+    );
+}
