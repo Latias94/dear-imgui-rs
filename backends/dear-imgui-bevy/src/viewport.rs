@@ -933,6 +933,10 @@ pub(crate) fn prepare_platform_viewports_for_frame(
         .inner
         .focus_ready
         .retain(|viewport_id| live_feedback.contains(viewport_id));
+    bridge
+        .inner
+        .viewport_handles
+        .retain(|viewport_id, _| live_feedback.contains(viewport_id));
     let main_viewport = context.main_viewport();
     let main_viewport_handle = bridge.inner.platform_handle(main_viewport_id);
     main_viewport.set_platform_handle(main_viewport_handle);
@@ -1290,4 +1294,60 @@ fn logical_pos_with_scale(pos: IVec2, scale_factor: f32) -> [f32; 2] {
 
 fn physical_extent(value: f32) -> u32 {
     value.round().max(1.0) as u32
+}
+
+#[cfg(all(test, feature = "multi-viewport", not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+
+    fn feedback() -> ImguiViewportFeedback {
+        ImguiViewportFeedback {
+            pos: [0.0, 0.0],
+            size: [64.0, 64.0],
+            framebuffer_scale: [1.0, 1.0],
+            dpi_scale: 1.0,
+            focused: false,
+            minimized: false,
+        }
+    }
+
+    #[test]
+    fn prepare_platform_viewports_prunes_handles_for_missing_viewports() {
+        let mut context = imgui::Context::create();
+        let mut bridge = ImguiViewportBridge::default();
+        let primary_window = Entity::from_raw_u32(1).expect("test entity index should be valid");
+        let secondary_window = Entity::from_raw_u32(2).expect("test entity index should be valid");
+        let stale_viewport = imgui::Id::from(0x500);
+        let live_viewport = imgui::Id::from(0x501);
+
+        bridge.inner.platform_handle(stale_viewport);
+        bridge.inner.platform_handle(live_viewport);
+
+        prepare_platform_viewports_for_frame(
+            &mut context,
+            &mut bridge,
+            primary_window,
+            &Window::default(),
+            &[],
+            std::iter::once((secondary_window, live_viewport, feedback())),
+            true,
+        );
+
+        let main_viewport_id = context.main_viewport().id();
+        assert!(
+            bridge
+                .inner
+                .viewport_handles
+                .contains_key(&main_viewport_id)
+        );
+        assert!(bridge.inner.viewport_handles.contains_key(&live_viewport));
+        assert!(
+            !bridge.inner.viewport_handles.contains_key(&stale_viewport),
+            "platform handles must not outlive viewports that disappeared from the Bevy mapping"
+        );
+
+        let main_viewport = context.main_viewport();
+        main_viewport.set_platform_handle(std::ptr::null_mut());
+        main_viewport.set_platform_user_data(std::ptr::null_mut());
+    }
 }
