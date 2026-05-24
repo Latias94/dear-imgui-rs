@@ -163,7 +163,6 @@ pub fn primary_window_input_system(
         viewport_id: primary_viewport_id,
         is_primary: true,
     };
-    sync_initial_focus(context, &mut input_state, primary_window, window.focused);
 
     for event in messages
         .window_resized
@@ -191,15 +190,26 @@ pub fn primary_window_input_system(
         set_framebuffer_scale(context, event.scale_factor as f32);
     }
 
-    for (event, window) in messages.window_focused.read().filter_map(|event| {
-        imgui_window_for_event(event.window, primary_window, &viewport_windows)
-            .map(|window| (event, window))
-    }) {
-        apply_focus_event(context, &mut input_state, window, event.focused);
-    }
-
-    if !messages.keyboard_focus_lost.is_empty() {
+    let focus_events = messages
+        .window_focused
+        .read()
+        .filter_map(|event| {
+            imgui_window_for_event(event.window, primary_window, &viewport_windows)
+                .map(|window| (window, event.focused))
+        })
+        .collect::<Vec<_>>();
+    let keyboard_focus_lost = !messages.keyboard_focus_lost.is_empty();
+    if keyboard_focus_lost {
         messages.keyboard_focus_lost.clear();
+    }
+    if focus_events.is_empty() && !keyboard_focus_lost {
+        sync_initial_focus(context, &mut input_state, primary_window, window.focused);
+    } else if input_state.primary_window_focused.is_none() {
+        input_state.primary_window_focused = Some(window.focused);
+    }
+    apply_focus_events(context, &mut input_state, &focus_events);
+
+    if keyboard_focus_lost {
         apply_focus_event(context, &mut input_state, primary_window, false);
     }
 
@@ -593,6 +603,41 @@ fn apply_focus_event(
     if !focused {
         release_sticky_input(context, state);
     }
+}
+
+fn apply_focus_events(
+    context: &mut imgui::Context,
+    state: &mut ImguiInputState,
+    events: &[(ImguiInputWindow, bool)],
+) {
+    if events.is_empty() {
+        return;
+    }
+
+    let was_focused = state.focused_window.is_some();
+    let mut focused_window = state.focused_window;
+    for &(window, focused) in events {
+        if window.is_primary {
+            state.primary_window_focused = Some(focused);
+        }
+        if focused {
+            focused_window = Some(window.entity);
+        } else if focused_window == Some(window.entity) {
+            focused_window = None;
+        }
+    }
+
+    // Dear ImGui focus is context-wide: moving focus between mapped OS windows must not look like
+    // an application blur, otherwise held keys/buttons are released during intra-app focus changes.
+    match (was_focused, focused_window.is_some()) {
+        (false, true) => context.io_mut().add_focus_event(true),
+        (true, false) => {
+            context.io_mut().add_focus_event(false);
+            release_sticky_input(context, state);
+        }
+        _ => {}
+    }
+    state.focused_window = focused_window;
 }
 
 fn apply_keyboard_input(

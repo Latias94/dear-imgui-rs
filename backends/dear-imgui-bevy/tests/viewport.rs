@@ -209,6 +209,40 @@ fn multi_viewport_feature_installs_bridge_but_does_not_advertise_full_support_ye
     assert!(!status.multi_viewport_supported);
 }
 
+#[cfg(feature = "multi-viewport")]
+#[test]
+fn viewport_prepare_refreshes_main_platform_user_data_to_live_handle() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_multi_viewport_bridge("viewport-main-handle-refresh");
+    app.world_mut().spawn((Window::default(), PrimaryWindow));
+
+    let mut stale_marker = 0usize;
+    let stale = (&mut stale_marker as *mut usize).cast::<std::ffi::c_void>();
+    {
+        let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
+        let main_viewport = context.context_mut().main_viewport();
+        main_viewport.set_platform_user_data(stale);
+        main_viewport.set_platform_handle(std::ptr::null_mut());
+    }
+
+    app.update();
+
+    let (handle, user_data) = {
+        let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
+        let main_viewport = context.context_mut().main_viewport();
+        (
+            main_viewport.platform_handle(),
+            main_viewport.platform_user_data(),
+        )
+    };
+    assert!(!handle.is_null());
+    assert_eq!(user_data, handle);
+    assert_ne!(
+        user_data, stale,
+        "main viewport PlatformUserData must not keep a stale backend handle"
+    );
+}
+
 #[test]
 fn viewport_window_factory_maps_snapshot_to_hidden_secondary_window() {
     let snapshot = ImguiViewportSnapshot {

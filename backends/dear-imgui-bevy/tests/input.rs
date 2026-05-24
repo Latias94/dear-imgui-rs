@@ -614,6 +614,72 @@ fn input_focus_loss_releases_tracked_keyboard_and_mouse_state() {
 }
 
 #[test]
+fn input_focus_switch_between_viewport_windows_keeps_sticky_input_pressed() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary) = app_with_primary_window();
+    let secondary = app
+        .world_mut()
+        .spawn((
+            Window::default(),
+            ImguiViewportWindow {
+                viewport_id: imgui::Id::from(0x560),
+            },
+        ))
+        .id();
+
+    app.world_mut()
+        .resource_mut::<Messages<KeyboardInput>>()
+        .write(key_input(
+            primary,
+            KeyCode::KeyA,
+            BevyKey::Character("a".into()),
+            ButtonState::Pressed,
+            None,
+        ));
+    app.world_mut()
+        .resource_mut::<Messages<MouseButtonInput>>()
+        .write(MouseButtonInput {
+            button: BevyMouseButton::Left,
+            state: ButtonState::Pressed,
+            window: primary,
+        });
+    run_input_systems(&mut app);
+
+    begin_frame_and_assert(&mut app, |ui| {
+        assert!(ui.is_key_down(imgui::Key::A));
+        assert!(ui.is_mouse_down(imgui::MouseButton::Left));
+    });
+
+    app.world_mut()
+        .resource_mut::<Messages<WindowFocused>>()
+        .write(WindowFocused {
+            window: primary,
+            focused: false,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<WindowFocused>>()
+        .write(WindowFocused {
+            window: secondary,
+            focused: true,
+        });
+    run_input_systems(&mut app);
+
+    let input_state = app.world().resource::<ImguiInputState>();
+    assert_eq!(input_state.primary_window_focused(), Some(false));
+    assert_eq!(input_state.focused_window(), Some(secondary));
+    begin_frame_and_assert(&mut app, |ui| {
+        assert!(
+            ui.is_key_down(imgui::Key::A),
+            "switching focus between mapped ImGui windows must not synthesize a global key release"
+        );
+        assert!(
+            ui.is_mouse_down(imgui::MouseButton::Left),
+            "switching focus between mapped ImGui windows must not synthesize a global mouse release"
+        );
+    });
+}
+
+#[test]
 fn input_keyboard_focus_lost_releases_tracked_state_without_window_message() {
     let _guard = imgui_context_guard();
     let (mut app, primary) = app_with_primary_window();

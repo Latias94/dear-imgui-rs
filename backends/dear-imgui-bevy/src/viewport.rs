@@ -936,9 +936,7 @@ pub(crate) fn prepare_platform_viewports_for_frame(
     let main_viewport = context.main_viewport();
     let main_viewport_handle = bridge.inner.platform_handle(main_viewport_id);
     main_viewport.set_platform_handle(main_viewport_handle);
-    if main_viewport.platform_user_data().is_null() {
-        main_viewport.set_platform_user_data(main_viewport_handle);
-    }
+    main_viewport.set_platform_user_data(main_viewport_handle);
 
     let fallback_monitor = monitor_from_window(window);
     let monitors = if monitors.is_empty() {
