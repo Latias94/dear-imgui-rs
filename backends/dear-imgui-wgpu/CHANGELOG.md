@@ -6,6 +6,8 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
-### Changed
+### Fixed
 
-- Bump `wgpu` to v28 (requires Rust 1.92+).
+- Winit and SDL3 multi-viewport renderer callbacks now verify `RendererUserData` ownership before
+  reading or freeing per-viewport WGPU data, ignoring foreign backend pointers instead of treating
+  them as `dear-imgui-wgpu` state.

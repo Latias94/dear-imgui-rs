@@ -18,13 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The workspace moved to the `0.14` release train and refreshed public crate metadata.
-- Core, backend, and extension internals were refactored to better match the current safe API and
-  backend contracts.
 
 ### Fixed
 
-- Native Bevy multi-viewport window behavior was tightened, especially around positioning and
-  dock-target interaction.
+- Existing renderer backend multi-viewport paths are safer when multiple backends or contexts are
+  involved: WGPU and Ash now ignore foreign `RendererUserData` pointers, and Glow clears
+  renderer-owned multi-viewport state when a renderer is destroyed.
+- Glow texture updates now reuse the GL texture already registered for an existing `TextureId` and
+  apply the same RGBA expansion path for `Alpha8` uploads.
 
 ## [0.13.0] - 2026-05-15
 

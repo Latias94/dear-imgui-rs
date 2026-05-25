@@ -14,7 +14,7 @@ The format follows Keep a Changelog and Semantic Versioning.
 ### Added
 
 - IME integration:
-  - Wire Dear ImGui's `ImGuiPlatformImeData` to `winit::window::Window::set_ime_cursor_area` so IME candidate/composition windows follow the text caret.
+  - Wire Dear ImGui's `ImGuiPlatformImeData` to `winit::window::Window::set_ime_cursor_area` for the main window and winit-owned multi-viewport windows so IME candidate/composition windows follow the text caret.
   - Add automatic IME management based on `io.want_text_input()` in `WinitPlatform::prepare_render_with_ui`, with explicit control via:
     - `WinitPlatform::set_ime_allowed(&Window, bool)`
     - `WinitPlatform::set_ime_auto_management(bool)`
@@ -37,5 +37,3 @@ The format follows Keep a Changelog and Semantic Versioning.
   Dear ImGui instead of whichever context is currently bound.
 - Multi-viewport shutdown now binds the provided `Context` before destroying platform windows and
   clearing platform callbacks, avoiding cleanup against a different current context.
-
-
