@@ -64,6 +64,7 @@ struct BeginFrameParams<'w, 's> {
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     viewport_bridge: Option<NonSendMut<'w, ImguiViewportBridge>>,
     frame_state: NonSendMut<'w, ImguiFrameState>,
+    output: ResMut<'w, ImguiFrameOutput>,
     texture_feedback: ResMut<'w, ImguiTextureFeedbackQueue>,
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     backend_status: Res<'w, ImguiBackendStatus>,
@@ -116,6 +117,12 @@ impl ImguiFrameOutput {
                 self.snapshot_error = Some(err.to_string());
             }
         }
+    }
+
+    fn clear_snapshot(&mut self, frame_index: u64) {
+        self.frame_index = frame_index;
+        self.snapshot = None;
+        self.snapshot_error = None;
     }
 }
 
@@ -204,6 +211,16 @@ fn begin_primary_frame_system(mut params: BeginFrameParams) {
     }
 
     let Ok((primary_window_entity, window)) = params.primary_window.single() else {
+        let feedback = params.texture_feedback.drain();
+        let applied = params
+            .imgui_context
+            .context_mut()
+            .platform_io_mut()
+            .apply_texture_feedback(&feedback);
+        params.texture_feedback.set_last_applied(applied);
+        params
+            .output
+            .clear_snapshot(params.frame_state.frame_index());
         return;
     };
 

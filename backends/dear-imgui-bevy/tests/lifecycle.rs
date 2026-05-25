@@ -139,6 +139,38 @@ fn lifecycle_primary_context_pass_opens_shared_frame_and_snapshots_once() {
 }
 
 #[test]
+fn lifecycle_clears_last_snapshot_when_primary_window_is_missing() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_primary_window();
+
+    app.update();
+    assert!(
+        app.world()
+            .resource::<ImguiFrameOutput>()
+            .snapshot()
+            .is_some(),
+        "first update should produce a render snapshot"
+    );
+
+    let mut primary_query = app
+        .world_mut()
+        .query_filtered::<Entity, With<PrimaryWindow>>();
+    let primary = primary_query
+        .single(app.world())
+        .expect("test app should have one primary window");
+    app.world_mut().despawn(primary);
+
+    app.update();
+
+    let output = app.world().resource::<ImguiFrameOutput>();
+    assert_eq!(output.frame_index(), 1);
+    assert!(
+        output.snapshot().is_none(),
+        "removing the primary window must not leave stale draw data for render extraction"
+    );
+}
+
+#[test]
 fn lifecycle_ui_access_is_unavailable_outside_primary_context_pass() {
     let _guard = imgui_context_guard();
     let app = app_with_primary_window();

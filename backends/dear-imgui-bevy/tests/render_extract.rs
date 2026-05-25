@@ -153,6 +153,45 @@ fn render_extract_clones_snapshot_texture_requests_and_camera_targets() {
 }
 
 #[test]
+fn render_extract_clears_stale_snapshot_after_primary_window_is_removed() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary_window, _camera, _texture_id) = app_with_primary_window();
+    app.add_systems(ImguiPrimaryContextPass, |mut contexts: ImguiContexts| {
+        let Some(ui) = contexts.primary_ui_mut() else {
+            return;
+        };
+        ui.text("render extract guard");
+    });
+
+    app.update();
+    assert!(
+        app.sub_app(RenderApp)
+            .world()
+            .resource::<ImguiExtractedRenderFrame>()
+            .snapshot()
+            .is_some(),
+        "first update should extract a snapshot"
+    );
+
+    app.world_mut().despawn(primary_window);
+    app.update();
+
+    let render_world = app.sub_app(RenderApp).world();
+    let extracted = render_world.resource::<ImguiExtractedRenderFrame>();
+    assert_eq!(extracted.frame_index(), Some(1));
+    assert!(
+        extracted.snapshot().is_none(),
+        "render extraction must not keep drawing the last frame after the primary window disappears"
+    );
+
+    let prepared = render_world.resource::<ImguiPreparedRenderFrame>();
+    assert_eq!(prepared.frame_index(), Some(1));
+    assert!(prepared.draws().is_empty());
+    assert!(prepared.vertices().is_empty());
+    assert!(prepared.indices().is_empty());
+}
+
+#[test]
 fn render_extract_uses_one_overlay_camera_per_render_target() {
     let _guard = imgui_context_guard();
     let (mut app, primary_window, _camera, _texture_id) = app_with_primary_window();
