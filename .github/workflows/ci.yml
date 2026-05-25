@@ -131,6 +131,9 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
