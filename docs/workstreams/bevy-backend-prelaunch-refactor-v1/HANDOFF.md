@@ -37,8 +37,9 @@ gates recorded in `EVIDENCE_AND_GATES.md` pass with
 
 ## Next Recommended Action
 
-- Ask the user before committing. Suggested commit shape: one focused conventional commit for the
-  Bevy backend prelaunch refactor plus workstream closeout docs.
+- The prelaunch refactor and closeout docs landed in commit
+  `654ac26 feat(bevy): finalize prelaunch backend refactor`.
+- Use the residual risks below as seeds for any new issue-audit or follow-up workstream.
 
 ## Residual Risks
 
