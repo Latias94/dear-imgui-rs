@@ -1,8 +1,15 @@
 use super::*;
 use std::mem::MaybeUninit;
+use std::sync::{Mutex as TestMutex, OnceLock};
+
+fn lock_context() -> std::sync::MutexGuard<'static, ()> {
+    static GUARD: OnceLock<TestMutex<()>> = OnceLock::new();
+    GUARD.get_or_init(|| TestMutex::new(())).lock().unwrap()
+}
 
 #[test]
 fn renderer_state_is_context_local() {
+    let _guard = lock_context();
     let ctx_a = Context::create();
     let raw_a = ctx_a.as_raw();
     let mut renderer_a = MaybeUninit::<AshRenderer>::uninit();
@@ -55,6 +62,7 @@ fn renderer_state_is_context_local() {
 
 #[test]
 fn clear_for_drop_removes_renderer_state() {
+    let _guard = lock_context();
     let ctx = Context::create();
     let raw = ctx.as_raw();
     let mut renderer = MaybeUninit::<AshRenderer>::uninit();
