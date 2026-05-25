@@ -256,13 +256,19 @@ mod tests {
         );
         ctx.fonts().build();
 
+        let macos_behaviors = ctx.io().config_macosx_behaviors();
         let modifiers: winit::event::Modifiers = ModifiersState::CONTROL.into();
         handle_modifiers_changed(&modifiers, &mut ctx);
 
         let ui = ctx.frame();
-        assert!(ui.io().key_ctrl());
+        if macos_behaviors {
+            assert!(!ui.io().key_ctrl());
+            assert!(ui.io().key_super());
+        } else {
+            assert!(ui.io().key_ctrl());
+            assert!(!ui.io().key_super());
+        }
         assert!(!ui.io().key_shift());
         assert!(!ui.io().key_alt());
-        assert!(!ui.io().key_super());
     }
 }
