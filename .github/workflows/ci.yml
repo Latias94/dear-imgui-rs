@@ -148,6 +148,12 @@ jobs:
       - name: Run Bevy backend tests
         run: cargo +stable nextest run -p dear-imgui-bevy --features render
 
+      - name: Check Bevy backend native multi-viewport platform bridge
+        run: cargo +stable check -p dear-imgui-bevy --features multi-viewport
+
+      - name: Run Bevy backend native multi-viewport platform bridge tests
+        run: cargo +stable nextest run -p dear-imgui-bevy --features multi-viewport --test viewport
+
       - name: Check Bevy backend native multi-viewport
         run: cargo +stable check -p dear-imgui-bevy --features render,multi-viewport
 
