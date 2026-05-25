@@ -16,7 +16,7 @@ use std::error::Error;
 use std::time::Instant;
 
 use dear_imgui_rs::{Condition, ConfigFlags, Context};
-use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode};
+use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode, Sdl3PlatformBackend};
 use dear_imgui_wgpu::{WgpuInitInfo, WgpuRenderer};
 use sdl3::event::Event;
 use sdl3::keyboard::Keycode;
@@ -117,9 +117,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // Initialize SDL3 platform backend (for "other" renderer).
-    imgui_sdl3_backend::init_for_other(&mut imgui, &window)?;
+    let mut sdl3_backend = Sdl3PlatformBackend::init_for_other(&mut imgui, &window)?;
     // Use AutoAll so all connected gamepads are merged into ImGui's gamepad state.
-    imgui_sdl3_backend::set_gamepad_mode(GamepadMode::AutoAll);
+    sdl3_backend.set_gamepad_mode(&mut imgui, GamepadMode::AutoAll);
 
     // Initialize WGPU renderer backend.
     let init_info = WgpuInitInfo::new(device.clone(), queue.clone(), surface_config.format);
@@ -132,30 +132,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         // Handle events (both for ImGui via SDL3 backend and our own logic).
         while let Some(raw) = imgui_sdl3_backend::sdl3_poll_event_ll() {
             // Feed ImGui SDL3 backend.
-            let _ = imgui_sdl3_backend::process_sys_event(&raw);
+            let _ = sdl3_backend.process_event(&mut imgui, &raw);
 
             // Convert to high-level Event for application logic.
             let event = Event::from_ll(raw);
             match event {
-                Event::Quit { .. } => {
-                    imgui_sdl3_backend::shutdown(&mut imgui);
-                    return Ok(());
-                }
+                Event::Quit { .. } => return Ok(()),
                 Event::KeyDown {
                     keycode: Some(Keycode::Escape),
                     ..
-                } => {
-                    imgui_sdl3_backend::shutdown(&mut imgui);
-                    return Ok(());
-                }
+                } => return Ok(()),
                 Event::Window {
                     win_event: sdl3::event::WindowEvent::CloseRequested,
                     window_id,
                     ..
-                } if window_id == window.id() => {
-                    imgui_sdl3_backend::shutdown(&mut imgui);
-                    return Ok(());
-                }
+                } if window_id == window.id() => return Ok(()),
                 Event::Window {
                     win_event: sdl3::event::WindowEvent::PixelSizeChanged(_, _),
                     window_id,
@@ -180,7 +171,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         imgui.io_mut().set_delta_time(dt);
 
         // Start a new ImGui frame.
-        imgui_sdl3_backend::sdl3_new_frame(&mut imgui);
+        sdl3_backend.new_frame(&mut imgui);
         let ui = imgui.frame();
 
         // Basic UI: show demo window and a small control window.
@@ -218,7 +209,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                 continue;
             }
             wgpu::CurrentSurfaceTexture::Validation => {
-                imgui_sdl3_backend::shutdown(&mut imgui);
                 return Err("surface acquisition failed with a WGPU validation error".into());
             }
         };

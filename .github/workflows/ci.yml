@@ -100,7 +100,9 @@ jobs:
           cargo check -p dear-imgui-examples --features "sdl3-ash-multi-viewport" --bin sdl3_ash_multi_viewport
 
       - name: Check SDL3 renderer examples
-        run: cargo check -p dear-imgui-examples --features "sdl3-sdlrenderer3" --bin sdl3_sdlrenderer
+        run: |
+          cargo check -p dear-imgui-examples --features "sdl3-platform" --bin sdl3_wgpu
+          cargo check -p dear-imgui-examples --features "sdl3-sdlrenderer3" --bin sdl3_sdlrenderer
 
       - name: Build examples (test-engine)
         run: cargo build -p dear-imgui-examples --features "test-engine" --bin imgui_test_engine_basic
