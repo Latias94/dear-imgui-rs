@@ -82,6 +82,13 @@ jobs:
           cargo check -p dear-imgui-ash --lib --features "multi-viewport-winit,dynamic-rendering"
           cargo check -p dear-imgui-ash --lib --features "multi-viewport-sdl3,dynamic-rendering"
 
+      - name: Run renderer backend focused tests
+        run: |
+          cargo test -p dear-imgui-wgpu --lib --features "multi-viewport-winit" renderer_destroy_window_ignores_foreign_renderer_user_data
+          cargo test -p dear-imgui-wgpu --lib --features "multi-viewport-sdl3" renderer_destroy_window_ignores_foreign_renderer_user_data
+          cargo test -p dear-imgui-ash --lib --features "multi-viewport-sdl3,dynamic-rendering" take_viewport_data_ignores_foreign_renderer_user_data
+          cargo test -p dear-imgui-ash --lib --features "multi-viewport-sdl3,dynamic-rendering" viewport_user_data_mut_ignores_unregistered_renderer_user_data
+
       - name: Check dear-imgui-rs multi-viewport tests compile
         run: cargo test -p dear-imgui-rs --features multi-viewport --no-run
 
