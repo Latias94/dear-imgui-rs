@@ -302,6 +302,59 @@ fn status_reports_render_routing_only_after_render_app_installation() {
 
 #[cfg(feature = "render")]
 #[test]
+fn plugin_replaces_stale_renderer_callbacks_when_render_app_is_installed() {
+    let _guard = imgui_context_guard();
+
+    let mut app = App::new();
+    app.add_plugins(ExtractPlugin::default());
+    app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
+    app.insert_resource(ImguiBackendConfig {
+        name: "replace-render-callbacks".to_owned(),
+        docking: true,
+        multi_viewport: false,
+    });
+    let mut existing_context = ImguiContext::new(dear_imgui_rs::Context::create());
+    {
+        let platform_io = existing_context.context_mut().platform_io_mut();
+        platform_io.set_draw_callback_reset_render_state_raw(Some(stale_draw_callback));
+        platform_io.set_draw_callback_set_sampler_linear_raw(Some(stale_draw_callback));
+        platform_io.set_draw_callback_set_sampler_nearest_raw(Some(stale_draw_callback));
+    }
+    app.insert_non_send(existing_context);
+
+    app.add_plugins(ImguiPlugin::default());
+
+    let context = app
+        .world()
+        .get_non_send::<ImguiContext>()
+        .expect("plugin should preserve the existing Dear ImGui context");
+    let platform_io = context.context().platform_io();
+    assert!(platform_io.draw_callback_reset_render_state_raw().is_some());
+    assert_ne!(
+        platform_io
+            .draw_callback_reset_render_state_raw()
+            .map(|f| f as usize),
+        Some(stale_draw_callback as *const () as usize),
+        "render integration should replace stale reset callbacks with Bevy callbacks"
+    );
+    assert_ne!(
+        platform_io
+            .draw_callback_set_sampler_linear_raw()
+            .map(|f| f as usize),
+        Some(stale_draw_callback as *const () as usize),
+        "render integration should replace stale linear sampler callbacks with Bevy callbacks"
+    );
+    assert_ne!(
+        platform_io
+            .draw_callback_set_sampler_nearest_raw()
+            .map(|f| f as usize),
+        Some(stale_draw_callback as *const () as usize),
+        "render integration should replace stale nearest sampler callbacks with Bevy callbacks"
+    );
+}
+
+#[cfg(feature = "render")]
+#[test]
 fn context_into_inner_clears_renderer_backend_state() {
     let _guard = imgui_context_guard();
 

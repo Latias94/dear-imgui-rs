@@ -147,7 +147,6 @@ fn sync_backend_context_config(
     context
         .io_mut()
         .set_backend_renderer_user_data(std::ptr::null_mut());
-    clear_renderer_draw_callbacks(context);
     let mut backend_flags = context.io().backend_flags();
     if render_integration_installed {
         backend_flags.insert(
@@ -165,6 +164,7 @@ fn sync_backend_context_config(
         context
             .set_renderer_name::<String>(None)
             .expect("clearing BackendRendererName must not fail");
+        clear_renderer_draw_callbacks(context);
     }
     context.io_mut().set_backend_flags(backend_flags);
 }
