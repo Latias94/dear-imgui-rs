@@ -153,6 +153,9 @@ jobs:
       - name: Check Bevy backend examples
         run: cargo +stable check -p dear-imgui-bevy --examples --features render
 
+      - name: Check Bevy backend multi-viewport examples
+        run: cargo +stable check -p dear-imgui-bevy --examples --features render,multi-viewport
+
       - name: Check Bevy backend ecosystem examples
         run: |
           cargo +stable check -p dear-imgui-bevy --example ecosystem --features ecosystem
