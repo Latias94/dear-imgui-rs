@@ -85,6 +85,11 @@ jobs:
       - name: Check dear-imgui-rs multi-viewport tests compile
         run: cargo test -p dear-imgui-rs --features multi-viewport --no-run
 
+      - name: Run winit backend focused tests
+        run: |
+          cargo test -p dear-imgui-winit --lib --no-default-features ime_window_ptr_falls_back_to_platform_ime_user_data
+          cargo test -p dear-imgui-winit --lib --features "multi-viewport" window_ptr_for_viewport
+
       - name: Build dear-app with all add-ons
         run: cargo build -p dear-app --features "implot imnodes implot3d"
 
