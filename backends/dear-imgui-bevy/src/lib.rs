@@ -139,6 +139,14 @@ fn sync_backend_context_config(
     context
         .set_platform_name(Some(imgui_name.clone()))
         .expect("sanitized backend names must be valid C strings");
+    if !config.multi_viewport || !MULTI_VIEWPORT_FEATURE_ENABLED || !NATIVE_PLATFORM_TARGET {
+        context
+            .io_mut()
+            .set_backend_platform_user_data(std::ptr::null_mut());
+    }
+    context
+        .io_mut()
+        .set_backend_renderer_user_data(std::ptr::null_mut());
     let mut backend_flags = context.io().backend_flags();
     if render_integration_installed {
         backend_flags.insert(

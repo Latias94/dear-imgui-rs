@@ -88,7 +88,16 @@ fn plugin_preserves_existing_config_and_context() {
         docking: false,
         multi_viewport: true,
     });
-    app.insert_non_send(ImguiContext::new(dear_imgui_rs::Context::create()));
+    let mut existing_context = ImguiContext::new(dear_imgui_rs::Context::create());
+    existing_context
+        .context_mut()
+        .io_mut()
+        .set_backend_renderer_user_data(std::ptr::dangling_mut::<u8>().cast());
+    existing_context
+        .context_mut()
+        .io_mut()
+        .set_backend_platform_user_data(std::ptr::dangling_mut::<u8>().cast());
+    app.insert_non_send(existing_context);
 
     app.add_plugins(ImguiPlugin::default());
 
@@ -131,6 +140,15 @@ fn plugin_preserves_existing_config_and_context() {
             .to_str()
             .expect("backend name should be valid UTF-8"),
         "custom-imgui"
+    );
+    assert!(
+        io.backend_renderer_user_data().is_null(),
+        "plugin should clear stale renderer user data before advertising Bevy renderer state"
+    );
+    assert_eq!(
+        io.backend_platform_user_data().is_null(),
+        !cfg!(all(feature = "multi-viewport", not(target_arch = "wasm32"))),
+        "plugin should clear stale platform user data unless native multi-viewport installs the Bevy bridge"
     );
 }
 
