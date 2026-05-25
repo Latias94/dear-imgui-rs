@@ -599,6 +599,66 @@ fn input_platform_feedback_hides_os_cursor_when_imgui_requests_no_cursor() {
 }
 
 #[test]
+fn input_platform_feedback_restores_cursor_on_previous_hovered_window() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary) = app_with_primary_window();
+    let secondary = app
+        .world_mut()
+        .spawn((
+            Window::default(),
+            ImguiViewportWindow {
+                viewport_id: imgui::Id::from(0x503),
+            },
+        ))
+        .id();
+    app.add_systems(ImguiPrimaryContextPass, request_software_cursor);
+
+    app.world_mut()
+        .resource_mut::<Messages<CursorMoved>>()
+        .write(CursorMoved {
+            window: secondary,
+            position: Vec2::new(10.0, 20.0),
+            delta: None,
+        });
+    app.update();
+    assert!(
+        !app.world()
+            .entity(secondary)
+            .get::<CursorOptions>()
+            .unwrap()
+            .visible,
+        "the hovered secondary window should inherit Dear ImGui's hidden software-cursor state"
+    );
+
+    app.world_mut()
+        .resource_mut::<Messages<CursorMoved>>()
+        .write(CursorMoved {
+            window: primary,
+            position: Vec2::new(30.0, 40.0),
+            delta: None,
+        });
+    app.update();
+
+    let secondary_entity = app.world().entity(secondary);
+    assert!(
+        secondary_entity.get::<CursorOptions>().unwrap().visible,
+        "moving hover away from a secondary window must restore its OS cursor visibility"
+    );
+    assert!(
+        secondary_entity.get::<CursorIcon>().is_none(),
+        "moving hover away from a secondary window must clear stale ImGui cursor icons"
+    );
+    assert!(
+        !app.world()
+            .entity(primary)
+            .get::<CursorOptions>()
+            .unwrap()
+            .visible,
+        "the newly hovered primary window should now inherit Dear ImGui's hidden software-cursor state"
+    );
+}
+
+#[test]
 fn input_focus_loss_releases_tracked_keyboard_and_mouse_state() {
     let _guard = imgui_context_guard();
     let (mut app, primary) = app_with_primary_window();
