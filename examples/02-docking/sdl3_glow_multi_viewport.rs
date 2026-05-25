@@ -184,10 +184,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 unsafe fn create_glow_context(video: &sdl3::VideoSubsystem) -> glow::Context {
     use std::ffi::c_void;
 
-    glow::Context::from_loader_function(|name| {
-        video
-            .gl_get_proc_address(name)
-            .map(|f| f as *const c_void)
-            .unwrap_or(std::ptr::null())
-    })
+    unsafe {
+        glow::Context::from_loader_function(|name| {
+            video
+                .gl_get_proc_address(name)
+                .map(|f| f as *const c_void)
+                .unwrap_or(std::ptr::null())
+        })
+    }
 }

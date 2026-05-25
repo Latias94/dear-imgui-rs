@@ -91,6 +91,14 @@ jobs:
       - name: Build examples (all extensions)
         run: cargo build -p dear-imgui-examples --features "imguizmo imnodes node-editor implot reflect implot3d imguizmo-quat"
 
+      - name: Check multi-viewport examples
+        run: |
+          cargo check -p dear-imgui-examples --features "multi-viewport" --bin multi_viewport_wgpu --bin multi_viewport_ash
+          cargo check -p dear-imgui-examples --features "multi-viewport sdl3-platform" --bin sdl3_glow_multi_viewport
+          cargo check -p dear-imgui-examples --features "multi-viewport sdl3-opengl3" --bin sdl3_opengl_multi_viewport
+          cargo check -p dear-imgui-examples --features "sdl3-wgpu-multi-viewport" --bin sdl3_wgpu_multi_viewport
+          cargo check -p dear-imgui-examples --features "sdl3-ash-multi-viewport" --bin sdl3_ash_multi_viewport
+
       - name: Build examples (test-engine)
         run: cargo build -p dear-imgui-examples --features "test-engine" --bin imgui_test_engine_basic
 
