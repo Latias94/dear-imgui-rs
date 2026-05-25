@@ -317,6 +317,21 @@ fn context_into_inner_clears_renderer_backend_state() {
         io.backend_renderer_user_data().is_null(),
         "releasing the Bevy wrapper must clear BackendRendererUserData"
     );
+    let platform_io = context.platform_io();
+    assert!(
+        platform_io.draw_callback_reset_render_state_raw().is_none(),
+        "releasing the Bevy wrapper must clear the renderer reset draw callback"
+    );
+    assert!(
+        platform_io.draw_callback_set_sampler_linear_raw().is_none(),
+        "releasing the Bevy wrapper must clear the renderer linear sampler draw callback"
+    );
+    assert!(
+        platform_io
+            .draw_callback_set_sampler_nearest_raw()
+            .is_none(),
+        "releasing the Bevy wrapper must clear the renderer nearest sampler draw callback"
+    );
     assert!(
         !io.backend_flags().intersects(
             dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES

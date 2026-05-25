@@ -314,6 +314,13 @@ impl ImguiContext {
         self.context
             .set_renderer_name::<String>(None)
             .expect("clearing BackendRendererName must not fail");
+        #[cfg(feature = "render")]
+        {
+            let platform_io = self.context.platform_io_mut();
+            platform_io.set_draw_callback_reset_render_state_raw(None);
+            platform_io.set_draw_callback_set_sampler_linear_raw(None);
+            platform_io.set_draw_callback_set_sampler_nearest_raw(None);
+        }
 
         let mut backend_flags = self.context.io().backend_flags();
         backend_flags.remove(
