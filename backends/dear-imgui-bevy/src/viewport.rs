@@ -334,6 +334,7 @@ fn attach_bridge_to_imgui_context(world: &mut World) {
     };
     let context = imgui_context.context_mut();
     context.io_mut().set_backend_platform_user_data(bridge_ptr);
+    crate::clear_platform_backend_handlers(context);
     unsafe {
         let platform_io = context.platform_io_mut();
         platform_io.set_platform_create_window(Some(platform_create_window));

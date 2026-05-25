@@ -7,11 +7,26 @@ use dear_imgui_bevy::{
     BEVY_TARGET_COMMIT, BEVY_TARGET_VERSION, ImguiBackendConfig, ImguiBackendStatus, ImguiContext,
     ImguiPlugin, RUST_TARGET_VERSION, WGPU_TARGET_VERSION,
 };
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 fn imgui_context_guard() -> std::sync::MutexGuard<'static, ()> {
     static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
     GUARD.get_or_init(|| Mutex::new(())).lock().unwrap()
+}
+
+#[derive(Clone)]
+struct TestClipboardBackend {
+    value: Arc<Mutex<Option<String>>>,
+}
+
+impl dear_imgui_rs::ClipboardBackend for TestClipboardBackend {
+    fn get(&mut self) -> Option<String> {
+        self.value.lock().unwrap().clone()
+    }
+
+    fn set(&mut self, text: &str) {
+        *self.value.lock().unwrap() = Some(text.to_owned());
+    }
 }
 
 unsafe extern "C" fn stale_draw_callback(
@@ -35,6 +50,213 @@ unsafe extern "C" fn stale_renderer_render_callback(
     _viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
     _render_arg: *mut std::ffi::c_void,
 ) {
+}
+
+unsafe extern "C" fn stale_platform_open_in_shell_callback(
+    _ctx: *mut dear_imgui_rs::sys::ImGuiContext,
+    _path: *const std::ffi::c_char,
+) -> bool {
+    false
+}
+
+unsafe extern "C" fn stale_platform_ime_callback(
+    _ctx: *mut dear_imgui_rs::sys::ImGuiContext,
+    _viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+    _data: *mut dear_imgui_rs::sys::ImGuiPlatformImeData,
+) {
+}
+
+unsafe extern "C" fn stale_platform_window_callback(
+    _viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+) {
+}
+
+unsafe extern "C" fn stale_platform_vec2_callback(
+    _viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+) -> dear_imgui_rs::sys::ImVec2 {
+    dear_imgui_rs::sys::ImVec2 { x: 1.0, y: 2.0 }
+}
+
+unsafe extern "C" fn stale_platform_size_callback(
+    _viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+    _size: dear_imgui_rs::sys::ImVec2,
+) {
+}
+
+unsafe extern "C" fn stale_platform_title_callback(
+    _viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+    _title: *const std::ffi::c_char,
+) {
+}
+
+unsafe extern "C" fn stale_platform_alpha_callback(
+    _viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+    _alpha: f32,
+) {
+}
+
+unsafe extern "C" fn stale_platform_render_callback(
+    _viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+    _render_arg: *mut std::ffi::c_void,
+) {
+}
+
+unsafe extern "C" fn stale_platform_bool_callback(
+    _viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+) -> bool {
+    true
+}
+
+unsafe extern "C" fn stale_platform_f32_callback(
+    _viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+) -> f32 {
+    1.0
+}
+
+unsafe extern "C" fn stale_platform_vec4_callback(
+    _viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+) -> dear_imgui_rs::sys::ImVec4 {
+    dear_imgui_rs::sys::ImVec4 {
+        x: 1.0,
+        y: 2.0,
+        z: 3.0,
+        w: 4.0,
+    }
+}
+
+unsafe extern "C" fn stale_platform_vk_surface_callback(
+    _viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+    _vk_inst: dear_imgui_rs::sys::ImU64,
+    _vk_allocators: *const std::ffi::c_void,
+    _out_vk_surface: *mut dear_imgui_rs::sys::ImU64,
+) -> std::os::raw::c_int {
+    0
+}
+
+fn install_stale_platform_backend_handlers(context: &mut dear_imgui_rs::Context) {
+    let platform_io = context.platform_io_mut();
+    unsafe {
+        let raw = platform_io.as_raw_mut();
+        (*raw).Platform_OpenInShellFn = Some(stale_platform_open_in_shell_callback);
+        (*raw).Platform_OpenInShellUserData = std::ptr::dangling_mut::<u8>().cast();
+        (*raw).Platform_SetImeDataFn = Some(stale_platform_ime_callback);
+        (*raw).Platform_ImeUserData = std::ptr::dangling_mut::<u8>().cast();
+        (*raw).Platform_CreateWindow = Some(stale_platform_window_callback);
+        (*raw).Platform_DestroyWindow = Some(stale_platform_window_callback);
+        (*raw).Platform_ShowWindow = Some(stale_platform_window_callback);
+        (*raw).Platform_SetWindowPos = Some(stale_platform_size_callback);
+        (*raw).Platform_GetWindowPos = Some(stale_platform_vec2_callback);
+        (*raw).Platform_SetWindowSize = Some(stale_platform_size_callback);
+        (*raw).Platform_GetWindowSize = Some(stale_platform_vec2_callback);
+        (*raw).Platform_GetWindowFramebufferScale = Some(stale_platform_vec2_callback);
+        (*raw).Platform_SetWindowFocus = Some(stale_platform_window_callback);
+        (*raw).Platform_GetWindowFocus = Some(stale_platform_bool_callback);
+        (*raw).Platform_GetWindowMinimized = Some(stale_platform_bool_callback);
+        (*raw).Platform_SetWindowTitle = Some(stale_platform_title_callback);
+        (*raw).Platform_SetWindowAlpha = Some(stale_platform_alpha_callback);
+        (*raw).Platform_UpdateWindow = Some(stale_platform_window_callback);
+        (*raw).Platform_RenderWindow = Some(stale_platform_render_callback);
+        (*raw).Platform_SwapBuffers = Some(stale_platform_render_callback);
+        (*raw).Platform_GetWindowDpiScale = Some(stale_platform_f32_callback);
+        (*raw).Platform_OnChangedViewport = Some(stale_platform_window_callback);
+        (*raw).Platform_GetWindowWorkAreaInsets = Some(stale_platform_vec4_callback);
+        (*raw).Platform_CreateVkSurface = Some(stale_platform_vk_surface_callback);
+    }
+}
+
+fn assert_stale_platform_backend_handlers_cleared(context: &dear_imgui_rs::Context) {
+    let raw = unsafe { &*context.platform_io().as_raw() };
+    assert!(raw.Platform_OpenInShellFn.is_none());
+    assert!(raw.Platform_OpenInShellUserData.is_null());
+    assert!(raw.Platform_SetImeDataFn.is_none());
+    assert!(raw.Platform_ImeUserData.is_null());
+    assert!(raw.Platform_CreateWindow.is_none());
+    assert!(raw.Platform_DestroyWindow.is_none());
+    assert!(raw.Platform_ShowWindow.is_none());
+    assert!(raw.Platform_SetWindowPos.is_none());
+    assert!(raw.Platform_GetWindowPos.is_none());
+    assert!(raw.Platform_SetWindowSize.is_none());
+    assert!(raw.Platform_GetWindowSize.is_none());
+    assert!(raw.Platform_GetWindowFramebufferScale.is_none());
+    assert!(raw.Platform_SetWindowFocus.is_none());
+    assert!(raw.Platform_GetWindowFocus.is_none());
+    assert!(raw.Platform_GetWindowMinimized.is_none());
+    assert!(raw.Platform_SetWindowTitle.is_none());
+    assert!(raw.Platform_SetWindowAlpha.is_none());
+    assert!(raw.Platform_UpdateWindow.is_none());
+    assert!(raw.Platform_RenderWindow.is_none());
+    assert!(raw.Platform_SwapBuffers.is_none());
+    assert!(raw.Platform_GetWindowDpiScale.is_none());
+    assert!(raw.Platform_OnChangedViewport.is_none());
+    assert!(raw.Platform_GetWindowWorkAreaInsets.is_none());
+    assert!(raw.Platform_CreateVkSurface.is_none());
+}
+
+fn assert_platform_bridge_replaced_stale_handlers(context: &dear_imgui_rs::Context) {
+    let raw = unsafe { &*context.platform_io().as_raw() };
+    assert!(raw.Platform_OpenInShellFn.is_none());
+    assert!(raw.Platform_OpenInShellUserData.is_null());
+    assert!(raw.Platform_SetImeDataFn.is_none());
+    assert!(raw.Platform_ImeUserData.is_null());
+    assert_ne!(
+        raw.Platform_CreateWindow.map(|f| f as usize),
+        Some(stale_platform_window_callback as *const () as usize)
+    );
+    assert_ne!(
+        raw.Platform_DestroyWindow.map(|f| f as usize),
+        Some(stale_platform_window_callback as *const () as usize)
+    );
+    assert_ne!(
+        raw.Platform_ShowWindow.map(|f| f as usize),
+        Some(stale_platform_window_callback as *const () as usize)
+    );
+    assert_ne!(
+        raw.Platform_SetWindowPos.map(|f| f as usize),
+        Some(stale_platform_size_callback as *const () as usize)
+    );
+    assert_ne!(
+        raw.Platform_GetWindowPos.map(|f| f as usize),
+        Some(stale_platform_vec2_callback as *const () as usize)
+    );
+    assert_ne!(
+        raw.Platform_SetWindowSize.map(|f| f as usize),
+        Some(stale_platform_size_callback as *const () as usize)
+    );
+    assert_ne!(
+        raw.Platform_GetWindowSize.map(|f| f as usize),
+        Some(stale_platform_vec2_callback as *const () as usize)
+    );
+    assert_ne!(
+        raw.Platform_GetWindowFramebufferScale.map(|f| f as usize),
+        Some(stale_platform_vec2_callback as *const () as usize)
+    );
+    assert_ne!(
+        raw.Platform_SetWindowFocus.map(|f| f as usize),
+        Some(stale_platform_window_callback as *const () as usize)
+    );
+    assert_ne!(
+        raw.Platform_GetWindowFocus.map(|f| f as usize),
+        Some(stale_platform_bool_callback as *const () as usize)
+    );
+    assert_ne!(
+        raw.Platform_GetWindowMinimized.map(|f| f as usize),
+        Some(stale_platform_bool_callback as *const () as usize)
+    );
+    assert_ne!(
+        raw.Platform_SetWindowTitle.map(|f| f as usize),
+        Some(stale_platform_title_callback as *const () as usize)
+    );
+    assert!(raw.Platform_SetWindowAlpha.is_none());
+    assert!(raw.Platform_UpdateWindow.is_none());
+    assert!(raw.Platform_RenderWindow.is_none());
+    assert!(raw.Platform_SwapBuffers.is_none());
+    assert_ne!(
+        raw.Platform_GetWindowDpiScale.map(|f| f as usize),
+        Some(stale_platform_f32_callback as *const () as usize)
+    );
+    assert!(raw.Platform_OnChangedViewport.is_none());
+    assert!(raw.Platform_GetWindowWorkAreaInsets.is_none());
+    assert!(raw.Platform_CreateVkSurface.is_none());
 }
 
 fn install_stale_renderer_backend_handlers(context: &mut dear_imgui_rs::Context) {
@@ -168,6 +390,7 @@ fn plugin_preserves_existing_config_and_context() {
         .context_mut()
         .io_mut()
         .set_backend_platform_user_data(std::ptr::dangling_mut::<u8>().cast());
+    install_stale_platform_backend_handlers(existing_context.context_mut());
     install_stale_renderer_backend_handlers(existing_context.context_mut());
     app.insert_non_send(existing_context);
 
@@ -222,6 +445,41 @@ fn plugin_preserves_existing_config_and_context() {
         io.backend_platform_user_data().is_null(),
         !cfg!(all(feature = "multi-viewport", not(target_arch = "wasm32"))),
         "plugin should clear stale platform user data unless native multi-viewport installs the Bevy bridge"
+    );
+    if cfg!(all(feature = "multi-viewport", not(target_arch = "wasm32"))) {
+        assert_platform_bridge_replaced_stale_handlers(context.context());
+    } else {
+        assert_stale_platform_backend_handlers_cleared(context.context());
+    }
+}
+
+#[test]
+fn plugin_preserves_existing_context_clipboard_backend() {
+    let _guard = imgui_context_guard();
+
+    let mut app = App::new();
+    let clipboard_value = Arc::new(Mutex::new(None));
+    let mut existing_context = dear_imgui_rs::Context::create();
+    existing_context.set_clipboard_backend(TestClipboardBackend {
+        value: clipboard_value.clone(),
+    });
+    existing_context.set_clipboard_text("before-plugin");
+    app.insert_non_send(ImguiContext::new(existing_context));
+
+    app.add_plugins(ImguiPlugin::default());
+
+    let context = app
+        .world()
+        .get_non_send::<ImguiContext>()
+        .expect("plugin should preserve the existing Dear ImGui context");
+    context.context().set_clipboard_text("after-plugin");
+    assert_eq!(
+        context.context().clipboard_text().as_deref(),
+        Some("after-plugin")
+    );
+    assert_eq!(
+        clipboard_value.lock().unwrap().as_deref(),
+        Some("after-plugin")
     );
 }
 
@@ -286,6 +544,41 @@ fn status_multi_viewport_request_reports_exact_enablement_boundary() {
         "Render routing should not be advertised until the Bevy RenderApp integration is installed"
     );
     assert!(!status.multi_viewport_supported);
+}
+
+#[test]
+fn plugin_clears_stale_platform_handlers_when_bridge_is_not_installed() {
+    let _guard = imgui_context_guard();
+
+    let mut app = App::new();
+    app.insert_resource(ImguiBackendConfig {
+        name: "clear-platform-handlers".to_owned(),
+        docking: true,
+        multi_viewport: false,
+    });
+    let mut existing_context = ImguiContext::new(dear_imgui_rs::Context::create());
+    existing_context
+        .context_mut()
+        .io_mut()
+        .set_backend_platform_user_data(std::ptr::dangling_mut::<u8>().cast());
+    install_stale_platform_backend_handlers(existing_context.context_mut());
+    app.insert_non_send(existing_context);
+
+    app.add_plugins(ImguiPlugin::default());
+
+    let context = app
+        .world()
+        .get_non_send::<ImguiContext>()
+        .expect("plugin should preserve the existing Dear ImGui context");
+    assert!(
+        context
+            .context()
+            .io()
+            .backend_platform_user_data()
+            .is_null(),
+        "plugin should clear stale platform backend user data when Bevy does not install the viewport bridge"
+    );
+    assert_stale_platform_backend_handlers_cleared(context.context());
 }
 
 #[cfg(feature = "render")]
@@ -406,14 +699,16 @@ fn plugin_replaces_stale_renderer_callbacks_when_render_app_is_installed() {
     assert!(raw.Renderer_SwapBuffers.is_none());
 }
 
-#[cfg(feature = "render")]
 #[test]
-fn context_into_inner_clears_renderer_backend_state() {
+fn context_into_inner_clears_backend_state() {
     let _guard = imgui_context_guard();
 
     let mut app = App::new();
-    app.add_plugins(ExtractPlugin::default());
-    app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
+    #[cfg(feature = "render")]
+    {
+        app.add_plugins(ExtractPlugin::default());
+        app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
+    }
     app.add_plugins(ImguiPlugin::new(ImguiBackendConfig {
         name: "renderer-cleanup".to_owned(),
         docking: true,
@@ -422,6 +717,8 @@ fn context_into_inner_clears_renderer_backend_state() {
     {
         let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
         let context = context.context_mut();
+        install_stale_platform_backend_handlers(context);
+        install_stale_renderer_backend_handlers(context);
         let backend_flags =
             context.io().backend_flags() | dear_imgui_rs::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT;
         context.io_mut().set_backend_flags(backend_flags);
@@ -450,6 +747,7 @@ fn context_into_inner_clears_renderer_backend_state() {
         io.backend_renderer_user_data().is_null(),
         "releasing the Bevy wrapper must clear BackendRendererUserData"
     );
+    assert_stale_platform_backend_handlers_cleared(&context);
     assert_stale_renderer_backend_handlers_cleared(&context);
     assert!(
         !io.backend_flags().intersects(

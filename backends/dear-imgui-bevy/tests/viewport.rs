@@ -7,6 +7,8 @@ use bevy_ecs::message::Messages;
 #[cfg(all(feature = "multi-viewport", feature = "render"))]
 use bevy_ecs::prelude::Entity;
 #[cfg(feature = "multi-viewport")]
+use bevy_ecs::prelude::With;
+#[cfg(feature = "multi-viewport")]
 use bevy_math::IVec2;
 #[cfg(feature = "multi-viewport")]
 use bevy_window::Monitor;
@@ -128,6 +130,7 @@ fn context_backend_platform_user_data(app: &App) -> *mut std::ffi::c_void {
 
 #[cfg(all(feature = "multi-viewport", feature = "render"))]
 fn spawn_secondary_viewport(app: &mut App, id: imgui::Id) -> (Entity, Entity) {
+    ensure_primary_window(app);
     app.world_mut()
         .get_non_send_mut::<ImguiViewportBridge>()
         .expect("bridge should be installed")
@@ -145,6 +148,22 @@ fn spawn_secondary_viewport(app: &mut App, id: imgui::Id) -> (Entity, Entity) {
         .viewport_camera(id)
         .expect("create command should spawn a secondary viewport overlay camera");
     (window, camera)
+}
+
+#[cfg(feature = "multi-viewport")]
+fn ensure_primary_window(app: &mut App) -> Entity {
+    let mut primary_windows = app
+        .world_mut()
+        .query_filtered::<Entity, With<PrimaryWindow>>();
+    let entity = primary_windows.iter(app.world()).next().unwrap_or_else(|| {
+        app.world_mut()
+            .spawn((Window::default(), PrimaryWindow))
+            .id()
+    });
+    if let Some(mut context) = app.world_mut().get_non_send_mut::<ImguiContext>() {
+        let _ = context.context_mut().font_atlas_mut().build();
+    }
+    entity
 }
 
 #[cfg(feature = "multi-viewport")]
@@ -390,6 +409,7 @@ fn viewport_platform_io_callbacks_capture_commands_and_bevy_system_applies_them(
         docking: true,
         multi_viewport: true,
     }));
+    ensure_primary_window(&mut app);
 
     let id = imgui::Id::from(0x200);
     let raw_viewport = unsafe { sys::ImGuiViewport_ImGuiViewport() };
@@ -889,6 +909,7 @@ fn viewport_commands_spawn_update_show_and_destroy_window_entities() {
         docking: true,
         multi_viewport: true,
     }));
+    ensure_primary_window(&mut app);
 
     let id = imgui::Id::from(0x100);
     app.world_mut()
@@ -995,6 +1016,7 @@ fn viewport_commands_spawn_update_show_and_destroy_window_entities() {
 fn viewport_recreate_updates_window_level_from_latest_flags() {
     let _guard = imgui_context_guard();
     let mut app = app_with_multi_viewport_bridge("viewport-level-refresh");
+    ensure_primary_window(&mut app);
 
     let id = imgui::Id::from(0x106);
     app.world_mut()
@@ -1043,6 +1065,7 @@ fn viewport_show_respects_no_focus_on_appearing() {
         docking: true,
         multi_viewport: true,
     }));
+    ensure_primary_window(&mut app);
 
     let id = imgui::Id::from(0x104);
     app.world_mut()
@@ -1085,6 +1108,7 @@ fn viewport_show_respects_no_focus_on_appearing() {
 fn viewport_set_focus_requests_focus_on_next_ecs_pass() {
     let _guard = imgui_context_guard();
     let mut app = app_with_multi_viewport_bridge("viewport-set-focus");
+    ensure_primary_window(&mut app);
 
     let id = imgui::Id::from(0x105);
     app.world_mut()

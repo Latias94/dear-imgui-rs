@@ -143,6 +143,7 @@ fn sync_backend_context_config(
         context
             .io_mut()
             .set_backend_platform_user_data(std::ptr::null_mut());
+        clear_platform_backend_handlers(context);
     }
     context
         .io_mut()
@@ -332,9 +333,54 @@ impl ImguiContext {
                     | dear_imgui_rs::BackendFlags::RENDERER_HAS_VIEWPORTS,
             );
             self.context.destroy_platform_windows();
-            self.context.platform_io_mut().clear_platform_handlers();
         }
+        clear_platform_backend_handlers(&mut self.context);
         self.context.io_mut().set_backend_flags(backend_flags);
+    }
+}
+
+pub(crate) fn clear_platform_backend_handlers(context: &mut dear_imgui_rs::Context) {
+    let platform_io = context.platform_io_mut();
+    let clipboard_handlers = ClipboardPlatformHandlers::capture(platform_io.as_raw());
+    #[cfg(feature = "multi-viewport")]
+    {
+        platform_io.clear_platform_handlers();
+    }
+    #[cfg(not(feature = "multi-viewport"))]
+    unsafe {
+        dear_imgui_rs::sys::ImGuiPlatformIO_ClearPlatformHandlers(platform_io.as_raw_mut());
+    }
+    clipboard_handlers.restore(platform_io.as_raw_mut());
+}
+
+struct ClipboardPlatformHandlers {
+    get: Option<
+        unsafe extern "C" fn(ctx: *mut dear_imgui_rs::sys::ImGuiContext) -> *const std::ffi::c_char,
+    >,
+    set: Option<
+        unsafe extern "C" fn(
+            ctx: *mut dear_imgui_rs::sys::ImGuiContext,
+            text: *const std::ffi::c_char,
+        ),
+    >,
+    user_data: *mut std::ffi::c_void,
+}
+
+impl ClipboardPlatformHandlers {
+    fn capture(platform_io: *const dear_imgui_rs::sys::ImGuiPlatformIO) -> Self {
+        let platform_io = unsafe { &*platform_io };
+        Self {
+            get: platform_io.Platform_GetClipboardTextFn,
+            set: platform_io.Platform_SetClipboardTextFn,
+            user_data: platform_io.Platform_ClipboardUserData,
+        }
+    }
+
+    fn restore(self, platform_io: *mut dear_imgui_rs::sys::ImGuiPlatformIO) {
+        let platform_io = unsafe { &mut *platform_io };
+        platform_io.Platform_GetClipboardTextFn = self.get;
+        platform_io.Platform_SetClipboardTextFn = self.set;
+        platform_io.Platform_ClipboardUserData = self.user_data;
     }
 }
 
