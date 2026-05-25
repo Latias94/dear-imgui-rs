@@ -79,6 +79,17 @@ render = [
 [[example]]
 name = "simple"
 path = "examples/basic/simple.rs"
+required-features = ["render"]
+
+[[example]]
+name = "app_integration"
+path = "examples/app/app_integration.rs"
+required-features = ["render"]
+
+[[example]]
+name = "game_engine"
+path = "examples/game_engine/game_engine.rs"
+required-features = ["render"]
 
 [[example]]
 name = "bevy_plot_controls"
@@ -86,16 +97,6 @@ path = "examples/ecosystem/bevy_plot_controls.rs"
 required-features = ["render", "implot"]
 
 [[example]]
-name = "editor_shell"
-path = "examples/editor/editor_shell.rs"
-required-features = ["render"]
-
-[[example]]
 name = "ecosystem"
 path = "examples/ecosystem/ecosystem.rs"
 required-features = ["ecosystem"]
-
-[[example]]
-name = "windowed_overlay"
-path = "examples/runtime/windowed_overlay.rs"
-required-features = ["render"]
