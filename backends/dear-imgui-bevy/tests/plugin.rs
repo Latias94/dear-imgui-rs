@@ -254,3 +254,57 @@ fn status_reports_render_routing_only_after_render_app_installation() {
         "render integration must advertise support for draw command vertex offsets"
     );
 }
+
+#[cfg(feature = "render")]
+#[test]
+fn context_into_inner_clears_renderer_backend_state() {
+    let _guard = imgui_context_guard();
+
+    let mut app = App::new();
+    app.add_plugins(ExtractPlugin::default());
+    app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
+    app.add_plugins(ImguiPlugin::new(ImguiBackendConfig {
+        name: "renderer-cleanup".to_owned(),
+        docking: true,
+        multi_viewport: true,
+    }));
+    {
+        let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
+        let context = context.context_mut();
+        let backend_flags =
+            context.io().backend_flags() | dear_imgui_rs::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT;
+        context.io_mut().set_backend_flags(backend_flags);
+    }
+
+    let context = app
+        .world_mut()
+        .remove_non_send::<ImguiContext>()
+        .expect("ImguiContext should be removable for direct shutdown testing");
+    let context = context.into_inner();
+    let io = context.io();
+
+    assert!(
+        io.backend_platform_name().is_none(),
+        "releasing the Bevy wrapper must clear BackendPlatformName"
+    );
+    assert!(
+        io.backend_platform_user_data().is_null(),
+        "releasing the Bevy wrapper must clear BackendPlatformUserData"
+    );
+    assert!(
+        io.backend_renderer_name().is_none(),
+        "releasing the Bevy wrapper must clear BackendRendererName"
+    );
+    assert!(
+        io.backend_renderer_user_data().is_null(),
+        "releasing the Bevy wrapper must clear BackendRendererUserData"
+    );
+    assert!(
+        !io.backend_flags().intersects(
+            dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES
+                | dear_imgui_rs::BackendFlags::RENDERER_HAS_VTX_OFFSET
+                | dear_imgui_rs::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT
+        ),
+        "releasing the Bevy wrapper must clear advertised Bevy backend capabilities"
+    );
+}

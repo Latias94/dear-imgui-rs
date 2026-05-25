@@ -286,28 +286,49 @@ impl ImguiContext {
     /// Consume the wrapper and return the Dear ImGui context.
     #[must_use]
     pub fn into_inner(mut self) -> dear_imgui_rs::Context {
-        self.clear_platform_backend_data();
+        self.clear_backend_data();
         let this = std::mem::ManuallyDrop::new(self);
         // SAFETY: `this` will not run `Drop`, and we return ownership of the inner context to the
         // caller exactly once.
         unsafe { std::ptr::read(&this.context) }
     }
 
-    fn clear_platform_backend_data(&mut self) {
+    fn clear_backend_data(&mut self) {
+        self.context
+            .io_mut()
+            .set_backend_platform_user_data(std::ptr::null_mut());
+        self.context
+            .set_platform_name::<String>(None)
+            .expect("clearing BackendPlatformName must not fail");
+        self.context
+            .io_mut()
+            .set_backend_renderer_user_data(std::ptr::null_mut());
+        self.context
+            .set_renderer_name::<String>(None)
+            .expect("clearing BackendRendererName must not fail");
+
+        let mut backend_flags = self.context.io().backend_flags();
+        backend_flags.remove(
+            dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES
+                | dear_imgui_rs::BackendFlags::RENDERER_HAS_VTX_OFFSET
+                | dear_imgui_rs::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT,
+        );
         #[cfg(feature = "multi-viewport")]
         {
-            self.context
-                .io_mut()
-                .set_backend_platform_user_data(std::ptr::null_mut());
+            backend_flags.remove(
+                dear_imgui_rs::BackendFlags::PLATFORM_HAS_VIEWPORTS
+                    | dear_imgui_rs::BackendFlags::RENDERER_HAS_VIEWPORTS,
+            );
             self.context.destroy_platform_windows();
             self.context.platform_io_mut().clear_platform_handlers();
         }
+        self.context.io_mut().set_backend_flags(backend_flags);
     }
 }
 
 impl Drop for ImguiContext {
     fn drop(&mut self) {
-        self.clear_platform_backend_data();
+        self.clear_backend_data();
     }
 }
 
