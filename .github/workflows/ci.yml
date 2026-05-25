@@ -142,6 +142,9 @@ jobs:
       - name: Check formatting
         run: cargo +stable fmt --all --check
 
+      - name: Check Bevy backend core example
+        run: cargo +stable check -p dear-imgui-bevy --example simple --no-default-features
+
       - name: Check Bevy backend examples
         run: cargo +stable check -p dear-imgui-bevy --examples --features render
 
