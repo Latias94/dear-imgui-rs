@@ -57,16 +57,16 @@ impl WgpuRenderer {
     }
 
     #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
-    fn clear_multi_viewport_renderer_state(&mut self) {
+    pub(super) fn clear_multi_viewport_renderer_state(&mut self) {
         // Make any installed multi-viewport callbacks become a no-op if the renderer is
         // shut down or dropped without an explicit disable/shutdown call.
         #[cfg(feature = "multi-viewport-winit")]
         {
-            multi_viewport::clear_for_drop(self as *mut WgpuRenderer);
+            super::multi_viewport::clear_for_drop(self as *mut WgpuRenderer);
         }
         #[cfg(feature = "multi-viewport-sdl3")]
         {
-            multi_viewport_sdl3::clear_for_drop(self as *mut WgpuRenderer);
+            super::multi_viewport_sdl3::clear_for_drop(self as *mut WgpuRenderer);
         }
     }
 }

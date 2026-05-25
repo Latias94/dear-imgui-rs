@@ -5,6 +5,7 @@
 // WGPU surfaces from SDL3 native window handles.
 
 use super::*;
+use dear_imgui_rs::Context;
 use dear_imgui_rs::internal::RawCast;
 use dear_imgui_rs::platform_io::Viewport;
 use std::ffi::c_void;
@@ -15,6 +16,13 @@ use super::sdl3_raw_window_handle::Sdl3SurfaceTarget;
 
 #[cfg(target_arch = "wasm32")]
 compile_error!("`multi-viewport-sdl3` is not supported on wasm32 targets.");
+
+#[allow(unused_macros)]
+macro_rules! mvlog {
+    ($($arg:tt)*) => {
+        if cfg!(feature = "mv-log") { eprintln!($($arg)*); }
+    };
+}
 
 /// Per-viewport WGPU data stored in ImGuiViewport::RendererUserData
 struct ViewportWgpuData {
@@ -184,9 +192,16 @@ pub fn shutdown_multi_viewport_support(context: &mut Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex as TestMutex, OnceLock};
+
+    fn lock_context() -> std::sync::MutexGuard<'static, ()> {
+        static GUARD: OnceLock<TestMutex<()>> = OnceLock::new();
+        GUARD.get_or_init(|| TestMutex::new(())).lock().unwrap()
+    }
 
     #[test]
     fn enable_targets_passed_context() {
+        let _guard = lock_context();
         let mut ctx_a = Context::create();
         let raw_a = ctx_a.as_raw();
         let pio_a = unsafe { dear_imgui_rs::sys::igGetPlatformIO_ContextPtr(raw_a) };
@@ -241,6 +256,7 @@ mod tests {
 
     #[test]
     fn renderer_state_is_context_local() {
+        let _guard = lock_context();
         let mut ctx_a = Context::create();
         let raw_a = ctx_a.as_raw();
         let mut renderer_a = WgpuRenderer::empty();
@@ -286,6 +302,7 @@ mod tests {
 
     #[test]
     fn renderer_shutdown_clears_renderer_state() {
+        let _guard = lock_context();
         let mut ctx = Context::create();
         let raw = ctx.as_raw();
         let mut renderer = WgpuRenderer::empty();

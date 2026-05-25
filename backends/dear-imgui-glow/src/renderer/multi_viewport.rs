@@ -209,6 +209,12 @@ mod tests {
     use crate::{
         shaders::Shaders, state::GlStateBackup, texture::SimpleTextureMap, versions::GlVersion,
     };
+    use std::sync::{Mutex as TestMutex, OnceLock};
+
+    fn lock_context() -> std::sync::MutexGuard<'static, ()> {
+        static GUARD: OnceLock<TestMutex<()>> = OnceLock::new();
+        GUARD.get_or_init(|| TestMutex::new(())).lock().unwrap()
+    }
 
     fn make_test_renderer() -> GlowRenderer {
         GlowRenderer {
@@ -245,6 +251,7 @@ mod tests {
 
     #[test]
     fn enable_targets_passed_context() {
+        let _guard = lock_context();
         let mut ctx_a = Context::create();
         let raw_a = ctx_a.as_raw();
         let pio_a = unsafe { sys::igGetPlatformIO_ContextPtr(raw_a) };
@@ -286,6 +293,7 @@ mod tests {
 
     #[test]
     fn renderer_state_is_context_local() {
+        let _guard = lock_context();
         let mut ctx_a = Context::create();
         let raw_a = ctx_a.as_raw();
         let mut renderer_a = make_test_renderer();
@@ -331,6 +339,7 @@ mod tests {
 
     #[test]
     fn renderer_destroy_clears_renderer_state() {
+        let _guard = lock_context();
         let mut ctx = Context::create();
         let raw = ctx.as_raw();
         let mut renderer = make_test_renderer();

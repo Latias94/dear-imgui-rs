@@ -74,8 +74,11 @@ jobs:
           NODE_EDITOR_SYS_FORCE_BUILD: "1"
           IMGUIZMO_SYS_FORCE_BUILD: "1"
 
-      - name: Check dear-imgui-ash feature combos
+      - name: Check renderer backend feature combos
         run: |
+          cargo check -p dear-imgui-glow --lib --features "multi-viewport"
+          cargo check -p dear-imgui-wgpu --lib --features "multi-viewport-winit"
+          cargo check -p dear-imgui-wgpu --lib --features "multi-viewport-sdl3"
           cargo check -p dear-imgui-ash --lib --features "multi-viewport-winit,dynamic-rendering"
           cargo check -p dear-imgui-ash --lib --features "multi-viewport-sdl3,dynamic-rendering"
 

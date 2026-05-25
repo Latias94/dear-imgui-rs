@@ -51,7 +51,7 @@ impl GlowRenderer {
     fn clear_multi_viewport_renderer_state(&mut self) {
         // Make any installed multi-viewport callbacks become a no-op if the renderer is
         // explicitly destroyed or dropped without an explicit disable/shutdown call.
-        multi_viewport::clear_for_drop(self as *mut GlowRenderer);
+        super::multi_viewport::clear_for_drop(self as *mut GlowRenderer);
     }
 
     /// Get a reference to the OpenGL context (if owned by the renderer)
