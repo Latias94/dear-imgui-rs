@@ -16,7 +16,8 @@ Publishing Order:
                             dear-imguizmo, dear-implot3d, dear-imguizmo-quat,
                             dear-imgui-test-engine, dear-file-browser,
                             dear-imgui-reflect-derive, dear-imgui-reflect
-6. Application: dear-app
+6. Bevy backend: dear-imgui-bevy
+7. Application: dear-app
 
 Usage:
   # Dry run (show what would be published)
@@ -90,6 +91,9 @@ PUBLISH_ORDER = [
     ("dear-imgui-reflect-derive", "extensions/dear-imgui-reflect-derive"),
     ("dear-imgui-reflect", "extensions/dear-imgui-reflect"),
     
+    # Bevy backend has optional ecosystem extension dependencies.
+    ("dear-imgui-bevy", "backends/dear-imgui-bevy"),
+
     # Application runner (depends on backends and dear-imgui-rs)
     ("dear-app", "dear-app"),
 ]

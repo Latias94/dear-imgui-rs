@@ -38,6 +38,7 @@ WORKSPACE_CRATES = [
     "backends/dear-imgui-glow",
     "backends/dear-imgui-sdl3",
     "backends/dear-imgui-ash",
+    "backends/dear-imgui-bevy",
     "dear-app",
     "extensions/dear-implot-sys",
     "extensions/dear-implot",

@@ -1004,7 +1004,7 @@ pub struct ImguiExtractedRenderFrame {
 }
 
 impl ImguiExtractedRenderFrame {
-    /// Frame index copied from [`ImguiFrameOutput`].
+    /// Frame index copied from [`crate::ImguiFrameOutput`].
     #[must_use]
     pub fn frame_index(&self) -> Option<u64> {
         self.frame_index

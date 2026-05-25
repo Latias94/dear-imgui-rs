@@ -39,6 +39,15 @@ SYS_CRATES = [
     ("dear-imgui-test-engine-sys", "extensions/dear-imgui-test-engine-sys"),
 ]
 
+# Crates that should have rustdoc coverage in the pre-publish documentation gate.
+DOC_CRATES = [
+    (
+        "dear-imgui-bevy",
+        "backends/dear-imgui-bevy",
+        ["--features", "render,multi-viewport,ecosystem"],
+    ),
+]
+
 # All publishable crates
 ALL_CRATES = [
     ("dear-imgui-build-support", "tools/build-support"),
@@ -49,6 +58,7 @@ ALL_CRATES = [
     ("dear-imgui-glow", "backends/dear-imgui-glow"),
     ("dear-imgui-ash", "backends/dear-imgui-ash"),
     ("dear-imgui-sdl3", "backends/dear-imgui-sdl3"),
+    ("dear-imgui-bevy", "backends/dear-imgui-bevy"),
     ("dear-app", "dear-app"),
     ("dear-implot-sys", "extensions/dear-implot-sys"),
     ("dear-implot", "extensions/dear-implot"),
@@ -278,8 +288,8 @@ def check_cargo_lock(repo_root: Path) -> Tuple[bool, List[str]]:
 
 
 def check_docs_build(repo_root: Path) -> Tuple[bool, List[str]]:
-    """Check that documentation builds for -sys crates in offline mode."""
-    print_check("Documentation builds (offline mode for -sys crates)")
+    """Check that documentation-related publish gates build."""
+    print_check("Documentation builds (-sys offline mode plus selected rustdoc crates)")
 
     errors = []
 
@@ -310,8 +320,34 @@ def check_docs_build(repo_root: Path) -> Tuple[bool, List[str]]:
         else:
             print_success(f"OK: {name}")
 
+    for name, _path, extra_args in DOC_CRATES:
+        print(f"\n  Documenting {name}...")
+
+        env = os.environ.copy()
+        env["DOCS_RS"] = "1"
+        rustdocflags = env.get("RUSTDOCFLAGS", "")
+        env["RUSTDOCFLAGS"] = f"{rustdocflags} -D warnings".strip()
+
+        try:
+            result = subprocess.run(
+                ["cargo", "doc", "-p", name, "--no-deps", *extra_args],
+                cwd=repo_root,
+                env=env,
+                check=False
+            )
+            code = result.returncode
+        except Exception as e:
+            print_error(f"Failed to run cargo doc: {e}")
+            code = 1
+
+        if code != 0:
+            errors.append(f"Doc build failed for {name}")
+            print_error(f"Failed: {name}")
+        else:
+            print_success(f"OK: {name}")
+
     if not errors:
-        print_success("\nAll -sys crates build in offline mode")
+        print_success("\nAll documentation checks passed")
         return True, []
     else:
         return False, errors

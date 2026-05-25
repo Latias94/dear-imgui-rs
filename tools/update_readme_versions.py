@@ -34,6 +34,7 @@ README_FILES = [
     "backends/dear-imgui-winit/README.md",
     "backends/dear-imgui-sdl3/README.md",
     "backends/dear-imgui-ash/README.md",
+    "backends/dear-imgui-bevy/README.md",
     "dear-app/README.md",
     "dear-imgui-sys/README.md",
     "extensions/dear-implot/README.md",
