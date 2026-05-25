@@ -147,8 +147,11 @@ fn sync_backend_context_config(
     context
         .io_mut()
         .set_backend_renderer_user_data(std::ptr::null_mut());
+    clear_renderer_backend_handlers(context);
     let mut backend_flags = context.io().backend_flags();
     if render_integration_installed {
+        #[cfg(feature = "render")]
+        render::install_standard_draw_callbacks_for_context(context);
         backend_flags.insert(
             dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES
                 | dear_imgui_rs::BackendFlags::RENDERER_HAS_VTX_OFFSET,
@@ -164,7 +167,6 @@ fn sync_backend_context_config(
         context
             .set_renderer_name::<String>(None)
             .expect("clearing BackendRendererName must not fail");
-        clear_renderer_draw_callbacks(context);
     }
     context.io_mut().set_backend_flags(backend_flags);
 }
@@ -315,7 +317,7 @@ impl ImguiContext {
         self.context
             .set_renderer_name::<String>(None)
             .expect("clearing BackendRendererName must not fail");
-        clear_renderer_draw_callbacks(&mut self.context);
+        clear_renderer_backend_handlers(&mut self.context);
 
         let mut backend_flags = self.context.io().backend_flags();
         backend_flags.remove(
@@ -336,11 +338,16 @@ impl ImguiContext {
     }
 }
 
-fn clear_renderer_draw_callbacks(context: &mut dear_imgui_rs::Context) {
+fn clear_renderer_backend_handlers(context: &mut dear_imgui_rs::Context) {
     let platform_io = context.platform_io_mut();
-    platform_io.set_draw_callback_reset_render_state_raw(None);
-    platform_io.set_draw_callback_set_sampler_linear_raw(None);
-    platform_io.set_draw_callback_set_sampler_nearest_raw(None);
+    #[cfg(feature = "multi-viewport")]
+    {
+        platform_io.clear_renderer_handlers();
+    }
+    #[cfg(not(feature = "multi-viewport"))]
+    unsafe {
+        dear_imgui_rs::sys::ImGuiPlatformIO_ClearRendererHandlers(platform_io.as_raw_mut());
+    }
 }
 
 impl Drop for ImguiContext {

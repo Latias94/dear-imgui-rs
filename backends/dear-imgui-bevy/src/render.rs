@@ -1115,7 +1115,11 @@ fn install_standard_draw_callbacks(app: &mut App) {
     let Some(mut imgui_context) = app.world_mut().get_non_send_mut::<crate::ImguiContext>() else {
         return;
     };
-    let platform_io = imgui_context.context_mut().platform_io_mut();
+    install_standard_draw_callbacks_for_context(imgui_context.context_mut());
+}
+
+pub(crate) fn install_standard_draw_callbacks_for_context(context: &mut imgui::Context) {
+    let platform_io = context.platform_io_mut();
     platform_io.set_draw_callback_reset_render_state_raw(Some(imgui_bevy_draw_callback_reset));
     platform_io.set_draw_callback_set_sampler_linear_raw(Some(imgui_bevy_draw_callback_linear));
     platform_io.set_draw_callback_set_sampler_nearest_raw(Some(imgui_bevy_draw_callback_nearest));

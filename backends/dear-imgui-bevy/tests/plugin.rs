@@ -20,6 +20,71 @@ unsafe extern "C" fn stale_draw_callback(
 ) {
 }
 
+unsafe extern "C" fn stale_renderer_window_callback(
+    _viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+) {
+}
+
+unsafe extern "C" fn stale_renderer_size_callback(
+    _viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+    _size: dear_imgui_rs::sys::ImVec2,
+) {
+}
+
+unsafe extern "C" fn stale_renderer_render_callback(
+    _viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+    _render_arg: *mut std::ffi::c_void,
+) {
+}
+
+fn install_stale_renderer_backend_handlers(context: &mut dear_imgui_rs::Context) {
+    let platform_io = context.platform_io_mut();
+    platform_io.set_draw_callback_reset_render_state_raw(Some(stale_draw_callback));
+    platform_io.set_draw_callback_set_sampler_linear_raw(Some(stale_draw_callback));
+    platform_io.set_draw_callback_set_sampler_nearest_raw(Some(stale_draw_callback));
+    unsafe {
+        platform_io.set_renderer_render_state(std::ptr::dangling_mut::<u8>().cast());
+        let raw = platform_io.as_raw_mut();
+        (*raw).Renderer_TextureMaxWidth = 1234;
+        (*raw).Renderer_TextureMaxHeight = 5678;
+        (*raw).Renderer_CreateWindow = Some(stale_renderer_window_callback);
+        (*raw).Renderer_DestroyWindow = Some(stale_renderer_window_callback);
+        (*raw).Renderer_SetWindowSize = Some(stale_renderer_size_callback);
+        (*raw).Renderer_RenderWindow = Some(stale_renderer_render_callback);
+        (*raw).Renderer_SwapBuffers = Some(stale_renderer_render_callback);
+    }
+}
+
+fn assert_stale_renderer_backend_handlers_cleared(context: &dear_imgui_rs::Context) {
+    let platform_io = context.platform_io();
+    assert!(
+        platform_io.draw_callback_reset_render_state_raw().is_none(),
+        "stale renderer reset draw callback should be cleared"
+    );
+    assert!(
+        platform_io.draw_callback_set_sampler_linear_raw().is_none(),
+        "stale renderer linear sampler draw callback should be cleared"
+    );
+    assert!(
+        platform_io
+            .draw_callback_set_sampler_nearest_raw()
+            .is_none(),
+        "stale renderer nearest sampler draw callback should be cleared"
+    );
+    assert!(
+        unsafe { platform_io.renderer_render_state() }.is_null(),
+        "stale renderer render-state pointer should be cleared"
+    );
+    let raw = unsafe { &*platform_io.as_raw() };
+    assert_eq!(raw.Renderer_TextureMaxWidth, 0);
+    assert_eq!(raw.Renderer_TextureMaxHeight, 0);
+    assert!(raw.Renderer_CreateWindow.is_none());
+    assert!(raw.Renderer_DestroyWindow.is_none());
+    assert!(raw.Renderer_SetWindowSize.is_none());
+    assert!(raw.Renderer_RenderWindow.is_none());
+    assert!(raw.Renderer_SwapBuffers.is_none());
+}
+
 #[test]
 fn plugin_registers_minimal_imgui_resources() {
     let _guard = imgui_context_guard();
@@ -103,12 +168,7 @@ fn plugin_preserves_existing_config_and_context() {
         .context_mut()
         .io_mut()
         .set_backend_platform_user_data(std::ptr::dangling_mut::<u8>().cast());
-    {
-        let platform_io = existing_context.context_mut().platform_io_mut();
-        platform_io.set_draw_callback_reset_render_state_raw(Some(stale_draw_callback));
-        platform_io.set_draw_callback_set_sampler_linear_raw(Some(stale_draw_callback));
-        platform_io.set_draw_callback_set_sampler_nearest_raw(Some(stale_draw_callback));
-    }
+    install_stale_renderer_backend_handlers(existing_context.context_mut());
     app.insert_non_send(existing_context);
 
     app.add_plugins(ImguiPlugin::default());
@@ -157,21 +217,7 @@ fn plugin_preserves_existing_config_and_context() {
         io.backend_renderer_user_data().is_null(),
         "plugin should clear stale renderer user data before advertising Bevy renderer state"
     );
-    let platform_io = context.context().platform_io();
-    assert!(
-        platform_io.draw_callback_reset_render_state_raw().is_none(),
-        "plugin should clear stale renderer reset draw callback before taking over an existing context"
-    );
-    assert!(
-        platform_io.draw_callback_set_sampler_linear_raw().is_none(),
-        "plugin should clear stale renderer linear sampler draw callback before taking over an existing context"
-    );
-    assert!(
-        platform_io
-            .draw_callback_set_sampler_nearest_raw()
-            .is_none(),
-        "plugin should clear stale renderer nearest sampler draw callback before taking over an existing context"
-    );
+    assert_stale_renderer_backend_handlers_cleared(context.context());
     assert_eq!(
         io.backend_platform_user_data().is_null(),
         !cfg!(all(feature = "multi-viewport", not(target_arch = "wasm32"))),
@@ -314,12 +360,7 @@ fn plugin_replaces_stale_renderer_callbacks_when_render_app_is_installed() {
         multi_viewport: false,
     });
     let mut existing_context = ImguiContext::new(dear_imgui_rs::Context::create());
-    {
-        let platform_io = existing_context.context_mut().platform_io_mut();
-        platform_io.set_draw_callback_reset_render_state_raw(Some(stale_draw_callback));
-        platform_io.set_draw_callback_set_sampler_linear_raw(Some(stale_draw_callback));
-        platform_io.set_draw_callback_set_sampler_nearest_raw(Some(stale_draw_callback));
-    }
+    install_stale_renderer_backend_handlers(existing_context.context_mut());
     app.insert_non_send(existing_context);
 
     app.add_plugins(ImguiPlugin::default());
@@ -351,6 +392,18 @@ fn plugin_replaces_stale_renderer_callbacks_when_render_app_is_installed() {
         Some(stale_draw_callback as *const () as usize),
         "render integration should replace stale nearest sampler callbacks with Bevy callbacks"
     );
+    assert!(
+        unsafe { platform_io.renderer_render_state() }.is_null(),
+        "render integration should clear stale renderer render-state pointers before installing Bevy callbacks"
+    );
+    let raw = unsafe { &*platform_io.as_raw() };
+    assert_eq!(raw.Renderer_TextureMaxWidth, 0);
+    assert_eq!(raw.Renderer_TextureMaxHeight, 0);
+    assert!(raw.Renderer_CreateWindow.is_none());
+    assert!(raw.Renderer_DestroyWindow.is_none());
+    assert!(raw.Renderer_SetWindowSize.is_none());
+    assert!(raw.Renderer_RenderWindow.is_none());
+    assert!(raw.Renderer_SwapBuffers.is_none());
 }
 
 #[cfg(feature = "render")]
@@ -397,21 +450,7 @@ fn context_into_inner_clears_renderer_backend_state() {
         io.backend_renderer_user_data().is_null(),
         "releasing the Bevy wrapper must clear BackendRendererUserData"
     );
-    let platform_io = context.platform_io();
-    assert!(
-        platform_io.draw_callback_reset_render_state_raw().is_none(),
-        "releasing the Bevy wrapper must clear the renderer reset draw callback"
-    );
-    assert!(
-        platform_io.draw_callback_set_sampler_linear_raw().is_none(),
-        "releasing the Bevy wrapper must clear the renderer linear sampler draw callback"
-    );
-    assert!(
-        platform_io
-            .draw_callback_set_sampler_nearest_raw()
-            .is_none(),
-        "releasing the Bevy wrapper must clear the renderer nearest sampler draw callback"
-    );
+    assert_stale_renderer_backend_handlers_cleared(&context);
     assert!(
         !io.backend_flags().intersects(
             dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES
