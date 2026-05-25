@@ -150,6 +150,9 @@ jobs:
           cargo +stable check -p dear-imgui-bevy --example ecosystem --features ecosystem
           cargo +stable check -p dear-imgui-bevy --example bevy_plot_controls --features render,implot
 
+      - name: Run Bevy backend core tests
+        run: cargo +stable nextest run -p dear-imgui-bevy --no-default-features --lib --test helpers --test input --test lifecycle --test plugin
+
       - name: Run Bevy backend tests
         run: cargo +stable nextest run -p dear-imgui-bevy --features render
 
