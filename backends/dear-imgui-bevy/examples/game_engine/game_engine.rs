@@ -18,7 +18,9 @@ use dear_imgui_bevy::{
     ImguiPlugin, ImguiPrimaryContextPass, configure_example_context,
     render::{ImguiOverlayCamera, ImguiOverlayDisabled},
 };
-use dear_imgui_rs::{Condition, DockBuilder, DockNodeFlags, SplitDirection, TextureId};
+use dear_imgui_rs::{
+    Condition, DockBuilder, DockNodeFlags, SplitDirection, TextureId, WindowFlags,
+};
 
 const SCENE_SIZE: [u32; 2] = [960, 540];
 
@@ -260,6 +262,10 @@ fn editor_ui(
                 backend.multi_viewport_supported
             ));
         });
+
+    if backend.multi_viewport_supported {
+        render_detached_viewport_window(ui, frame_index);
+    }
 }
 
 fn seed_dockspace(
@@ -350,6 +356,26 @@ fn render_inspector(
         transform.translation.x, transform.translation.y, transform.translation.z
     ));
     ui.text(format!("Scale: {:.1}", transform.scale.x));
+}
+
+fn render_detached_viewport_window(ui: &dear_imgui_rs::Ui, frame_index: u64) {
+    let main_viewport = ui.main_viewport();
+    let main_pos = main_viewport.pos();
+    let main_size = main_viewport.size();
+    let detached_pos = [main_pos[0] + main_size[0] + 24.0, main_pos[1] + 96.0];
+
+    ui.window("Detached Viewport")
+        .position(detached_pos, Condition::FirstUseEver)
+        .size([380.0, 260.0], Condition::FirstUseEver)
+        .flags(WindowFlags::NO_SAVED_SETTINGS)
+        .build(|| {
+            ui.text("This window is owned by a Dear ImGui platform viewport.");
+            ui.separator();
+            ui.text("The Bevy backend creates and renders the OS window.");
+            ui.text(format!("Frame: {frame_index}"));
+            ui.separator();
+            ui.text("Drag the title bar back into the dockspace to dock it again.");
+        });
 }
 
 fn fit_aspect(available: [f32; 2], target: [u32; 2]) -> [f32; 2] {

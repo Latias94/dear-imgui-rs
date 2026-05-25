@@ -78,7 +78,7 @@ grow.
 | Basic | [`simple`][bevy-example-simple] | [`examples/basic/simple.rs`][bevy-example-simple] | `cargo run -p dear-imgui-bevy --features render --example simple` | Smallest visible Dear ImGui overlay in a normal Bevy app. |
 | App | [`app_integration`][bevy-example-app-integration] | [`examples/app/app_integration.rs`][bevy-example-app-integration] | `cargo run -p dear-imgui-bevy --features render --example app_integration` | Plugin-style integration into an existing app/game loop with Bevy input policy. |
 | Game engine | [`game_engine`][bevy-example-game-engine] | [`examples/game_engine/game_engine.rs`][bevy-example-game-engine] | `cargo run -p dear-imgui-bevy --features render --example game_engine`<br>`cargo run -p dear-imgui-bevy --features render,multi-viewport --example game_engine` | Docked editor surface with scene render-target texture interop, plus optional native multi-viewport. |
-| Ecosystem | [`ecosystem`][bevy-example-ecosystem] | [`examples/ecosystem/ecosystem.rs`][bevy-example-ecosystem] | `cargo run -p dear-imgui-bevy --example ecosystem` | Shared-frame ImPlot, ImNodes, and ImGuizmo integration. |
+| Ecosystem | [`ecosystem`][bevy-example-ecosystem] | [`examples/ecosystem/ecosystem.rs`][bevy-example-ecosystem] | `cargo run -p dear-imgui-bevy --features render --example ecosystem` | Shared-frame ImPlot, ImNodes, and ImGuizmo integration. |
 | Ecosystem | [`bevy_plot_controls`][bevy-example-plot-controls] | [`examples/ecosystem/bevy_plot_controls.rs`][bevy-example-plot-controls] | `cargo run -p dear-imgui-bevy --features render --example bevy_plot_controls` | Focused Bevy scene plus ImPlot controls demo. |
 
 [bevy-example-simple]: https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/basic/simple.rs
@@ -86,6 +86,16 @@ grow.
 [bevy-example-game-engine]: https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/game_engine/game_engine.rs
 [bevy-example-ecosystem]: https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/ecosystem/ecosystem.rs
 [bevy-example-plot-controls]: https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/ecosystem/bevy_plot_controls.rs
+
+## Screenshots
+
+<p>
+  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/bevy-game-engine-multi-viewport.png" alt="dear-imgui-bevy game engine multi-viewport example" width="100%"/>
+</p>
+<p>
+  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/bevy-app-integration.png" alt="dear-imgui-bevy app integration example" width="49%"/>
+  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/bevy-ecosystem.png" alt="dear-imgui-bevy ecosystem example" width="49%"/>
+</p>
 
 ## Cargo Features
 

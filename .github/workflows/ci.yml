@@ -173,11 +173,11 @@ jobs:
 
       - name: Check Bevy backend ecosystem examples
         run: |
-          cargo +stable check -p dear-imgui-bevy --example ecosystem --features ecosystem
-          cargo +stable check -p dear-imgui-bevy --example bevy_plot_controls --features render,implot
+          cargo +stable check -p dear-imgui-bevy --example ecosystem --features render
+          cargo +stable check -p dear-imgui-bevy --example bevy_plot_controls --features render
 
       - name: Check Bevy backend docs
-        run: cargo +stable doc -p dear-imgui-bevy --no-deps --features render,multi-viewport,ecosystem
+        run: cargo +stable doc -p dear-imgui-bevy --no-deps --features render,multi-viewport
         env:
           DOCS_RS: "1"
           RUSTDOCFLAGS: "-D warnings"

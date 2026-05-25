@@ -9,8 +9,8 @@ use bevy::{
     window::{PresentMode, WindowPlugin, WindowTheme},
 };
 use dear_imgui_bevy::{
-    configure_example_context, render::ImguiOverlayCamera, ImguiContext, ImguiContexts,
-    ImguiPlugin, ImguiPrimaryContextPass,
+    ImguiContext, ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, configure_example_context,
+    render::ImguiOverlayCamera,
 };
 use dear_imgui_rs::Condition;
 use dear_implot::{ImPlotExt, PlotCond};

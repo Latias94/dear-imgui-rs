@@ -1,7 +1,7 @@
 #[cfg(feature = "multi-viewport")]
 use bevy_app::App;
 #[cfg(all(feature = "multi-viewport", feature = "render"))]
-use bevy_camera::{visibility::RenderLayers, Camera, Camera2d, RenderTarget};
+use bevy_camera::{Camera, Camera2d, RenderTarget, visibility::RenderLayers};
 #[cfg(feature = "multi-viewport")]
 use bevy_ecs::message::Messages;
 #[cfg(feature = "multi-viewport")]

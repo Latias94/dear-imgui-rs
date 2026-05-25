@@ -95,3 +95,4 @@ required-features = ["render"]
 [[example]]
 name = "ecosystem"
 path = "examples/ecosystem/ecosystem.rs"
+required-features = ["render"]

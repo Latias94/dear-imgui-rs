@@ -5,9 +5,9 @@
 //! instead of calling `Context::frame()` / `Context::render()` directly.
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-use crate::{ImguiBackendStatus, ImguiViewportBridge};
+use crate::ImguiViewportBridge;
 use crate::{
-    ImguiContext, ImguiTextureFeedbackQueue, ImguiViewportWindow,
+    ImguiBackendStatus, ImguiContext, ImguiTextureFeedbackQueue, ImguiViewportWindow,
     input::{
         ImguiInputState, map_imgui_mouse_cursor, sanitized_window_display_size,
         sanitized_window_framebuffer_scale,
@@ -286,6 +286,7 @@ pub(crate) fn end_primary_frame_system(
     mut commands: Commands,
     mut imgui_context: NonSendMut<ImguiContext>,
     mut frame_state: NonSendMut<ImguiFrameState>,
+    backend_status: Res<ImguiBackendStatus>,
     input_state: Res<ImguiInputState>,
     mut primary_window: PrimaryFeedbackWindowQuery,
     mut viewport_windows: ViewportFeedbackWindowQuery,
@@ -307,21 +308,27 @@ pub(crate) fn end_primary_frame_system(
     }
 
     let frame_index = frame_state.end();
-    let snapshot = render_frame_snapshot(imgui_context.context_mut());
+    let snapshot = render_frame_snapshot(
+        imgui_context.context_mut(),
+        backend_status.multi_viewport_supported,
+    );
     output.set_snapshot(frame_index, snapshot);
 }
 
 fn render_frame_snapshot(
     context: &mut imgui::Context,
+    _multi_viewport_supported: bool,
 ) -> Result<imgui::render::snapshot::FrameSnapshot, imgui::render::snapshot::SnapshotError> {
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     {
-        let _ = context.render();
-        context.update_platform_windows();
-        context.platform_viewport_snapshot(imgui::render::snapshot::SnapshotOptions::default())
+        if _multi_viewport_supported {
+            let _ = context.render();
+            context.update_platform_windows();
+            return context
+                .platform_viewport_snapshot(imgui::render::snapshot::SnapshotOptions::default());
+        }
     }
 
-    #[cfg(not(all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
     {
         let draw_data = context.render();
         imgui::render::snapshot::FrameSnapshot::from_draw_data(

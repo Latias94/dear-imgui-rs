@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - [`game_engine` with multi-viewport](https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/game_engine/game_engine.rs):
     `cargo run -p dear-imgui-bevy --features render,multi-viewport --example game_engine`
   - [`ecosystem`](https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/ecosystem/ecosystem.rs):
-    `cargo run -p dear-imgui-bevy --example ecosystem`
+    `cargo run -p dear-imgui-bevy --features render --example ecosystem`
   - [`bevy_plot_controls`](https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/ecosystem/bevy_plot_controls.rs):
     `cargo run -p dear-imgui-bevy --features render --example bevy_plot_controls`
 

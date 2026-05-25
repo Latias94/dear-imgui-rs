@@ -152,7 +152,8 @@ fn tools_ui(
     };
 
     ui.window("App Tools")
-        .size([360.0, 260.0], Condition::FirstUseEver)
+        .position([48.0, 48.0], Condition::FirstUseEver)
+        .size([420.0, 380.0], Condition::FirstUseEver)
         .build(|| {
             ui.text("WASD / arrows move the square.");
             ui.checkbox("Pause app movement", &mut state.paused);
@@ -167,12 +168,10 @@ fn tools_ui(
                     transform.translation.x, transform.translation.y
                 ));
             }
-        });
 
-    if state.show_input_status {
-        ui.window("Input Policy")
-            .size([320.0, 150.0], Condition::FirstUseEver)
-            .build(|| {
+            if state.show_input_status {
+                ui.separator();
+                ui.text("Input Policy");
                 ui.text(format!(
                     "ImGui wants mouse: {}",
                     capture.wants_pointer_input()
@@ -182,6 +181,6 @@ fn tools_ui(
                     capture.wants_keyboard_input()
                 ));
                 ui.text(format!("ImGui wants text: {}", capture.wants_text_input()));
-            });
-    }
+            }
+        });
 }

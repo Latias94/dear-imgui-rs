@@ -1972,6 +1972,9 @@ fn render_imgui_overlay(
         view.target_format,
         camera_metadata.and_then(|camera| camera.compositing_space),
     ));
+    let render_target_size = camera_metadata
+        .and_then(|camera| camera.physical_target_size)
+        .map(|size| [size.x, size.y]);
     let Some(common_bind_group) =
         gpu_resources.update_camera_uniforms(camera, &render_queue, uniforms)
     else {
@@ -2001,10 +2004,7 @@ fn render_imgui_overlay(
 
     render_pass.set_pipeline(pipeline);
     render_pass.set_bind_group(0, common_bind_group, &[]);
-    if let Some(viewport) = drawable
-        .iter()
-        .find_map(|draw| render_viewport_for_draw(draw))
-    {
+    if let Some(viewport) = render_viewport_for_pass(&drawable, render_target_size) {
         render_pass.set_viewport(
             viewport.physical_position[0] as f32,
             viewport.physical_position[1] as f32,
@@ -2030,7 +2030,7 @@ fn render_imgui_overlay(
             .texture_bind_groups
             .get(&draw.texture, draw.sampler)
             .unwrap_or_else(|| gpu_resources.fallback_bind_group());
-        let Some(scissor) = scissor_for_render_pass(draw) else {
+        let Some(scissor) = scissor_for_render_pass(draw, render_target_size) else {
             continue;
         };
         render_pass.set_bind_group(1, texture_bind_group, &[]);
@@ -2298,31 +2298,74 @@ fn render_viewport_for_draw(draw: &ImguiPreparedDraw) -> Option<ImguiCameraViewp
     Some(camera_viewport)
 }
 
-fn scissor_for_render_pass(draw: &ImguiPreparedDraw) -> Option<ImguiScissorRect> {
-    let viewport = match render_viewport_for_draw(draw) {
-        Some(viewport) => viewport,
-        None => return Some(draw.scissor),
+fn render_viewport_for_pass(
+    drawable: &[&ImguiPreparedDraw],
+    render_target_size: Option<[u32; 2]>,
+) -> Option<ImguiCameraViewport> {
+    let viewport = drawable
+        .iter()
+        .find_map(|draw| render_viewport_for_draw(draw))?;
+    let Some(render_target_size) = render_target_size else {
+        return Some(viewport);
     };
-    intersect_scissor_with_camera_viewport(draw.scissor, viewport)
+    let viewport_rect = intersect_scissor_with_rect(
+        ImguiScissorRect {
+            x: viewport.physical_position[0],
+            y: viewport.physical_position[1],
+            width: viewport.physical_size[0],
+            height: viewport.physical_size[1],
+        },
+        [0, 0],
+        render_target_size,
+    )?;
+    Some(ImguiCameraViewport {
+        physical_position: [viewport_rect.x, viewport_rect.y],
+        physical_size: [viewport_rect.width, viewport_rect.height],
+    })
+}
+
+fn scissor_for_render_pass(
+    draw: &ImguiPreparedDraw,
+    render_target_size: Option<[u32; 2]>,
+) -> Option<ImguiScissorRect> {
+    let viewport = match render_viewport_for_draw(draw) {
+        Some(viewport) => Some(viewport),
+        None => None,
+    };
+    let scissor = match viewport {
+        Some(viewport) => intersect_scissor_with_camera_viewport(draw.scissor, viewport)?,
+        None => draw.scissor,
+    };
+    match render_target_size {
+        Some(size) => intersect_scissor_with_rect(scissor, [0, 0], size),
+        None => Some(scissor),
+    }
 }
 
 fn intersect_scissor_with_camera_viewport(
     scissor: ImguiScissorRect,
     viewport: ImguiCameraViewport,
 ) -> Option<ImguiScissorRect> {
-    let [viewport_width, viewport_height] = viewport.physical_size;
-    if viewport_width == 0 || viewport_height == 0 {
+    intersect_scissor_with_rect(scissor, viewport.physical_position, viewport.physical_size)
+}
+
+fn intersect_scissor_with_rect(
+    scissor: ImguiScissorRect,
+    rect_position: [u32; 2],
+    rect_size: [u32; 2],
+) -> Option<ImguiScissorRect> {
+    let [rect_width, rect_height] = rect_size;
+    if rect_width == 0 || rect_height == 0 {
         return None;
     }
-
     let scissor_min_x = u64::from(scissor.x);
     let scissor_min_y = u64::from(scissor.y);
     let scissor_max_x = scissor_min_x.checked_add(u64::from(scissor.width))?;
     let scissor_max_y = scissor_min_y.checked_add(u64::from(scissor.height))?;
-    let viewport_min_x = u64::from(viewport.physical_position[0]);
-    let viewport_min_y = u64::from(viewport.physical_position[1]);
-    let viewport_max_x = viewport_min_x.checked_add(u64::from(viewport_width))?;
-    let viewport_max_y = viewport_min_y.checked_add(u64::from(viewport_height))?;
+    let viewport_min_x = u64::from(rect_position[0]);
+    let viewport_min_y = u64::from(rect_position[1]);
+    let viewport_max_x = viewport_min_x.checked_add(u64::from(rect_width))?;
+    let viewport_max_y = viewport_min_y.checked_add(u64::from(rect_height))?;
 
     let min_x = scissor_min_x.max(viewport_min_x);
     let min_y = scissor_min_y.max(viewport_min_y);
@@ -2768,6 +2811,49 @@ mod tests {
     }
 
     #[test]
+    fn render_pass_scissor_is_clamped_to_real_render_target_size() {
+        let scissor = scissor_for_render_pass(
+            &ImguiPreparedDraw {
+                camera: Entity::from_raw_u32(13).expect("test entity index should be valid"),
+                order: 0,
+                target: NormalizedRenderTarget::Window(
+                    bevy_window::WindowRef::Entity(
+                        Entity::from_raw_u32(14).expect("test entity index should be valid"),
+                    )
+                    .normalize(None)
+                    .expect("entity window target should normalize"),
+                ),
+                viewport_id: Some(imgui::Id::from(0x570)),
+                texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
+                sampler: ImguiSampler::Linear,
+                scissor: ImguiScissorRect {
+                    x: 0,
+                    y: 0,
+                    width: 570,
+                    height: 392,
+                },
+                framebuffer_size: [570, 392],
+                camera_viewport: None,
+                index_range: 0..3,
+                vertex_offset: 0,
+            },
+            Some([570, 390]),
+        )
+        .expect("overlapping scissor should be clipped instead of rejected");
+
+        assert_eq!(
+            scissor,
+            ImguiScissorRect {
+                x: 0,
+                y: 0,
+                width: 570,
+                height: 390,
+            },
+            "render pass scissors must never exceed the real WGPU target extent"
+        );
+    }
+
+    #[test]
     fn camera_viewport_uniforms_use_logical_viewport_rect_without_scaling_imgui_coordinates() {
         let camera = Entity::from_raw_u32(12).expect("test entity index should be valid");
         let snapshot = imgui::render::FrameSnapshot {
@@ -2810,7 +2896,7 @@ mod tests {
             "prepared draw scissors stay in source framebuffer coordinates"
         );
         assert_eq!(
-            scissor_for_render_pass(&draws[0]),
+            scissor_for_render_pass(&draws[0], None),
             None,
             "commands outside the camera viewport are clipped instead of scaled into it"
         );

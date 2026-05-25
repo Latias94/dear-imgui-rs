@@ -278,6 +278,31 @@ fn lifecycle_multi_viewport_request_does_not_advertise_viewports_without_render_
     }
 }
 
+#[cfg(all(feature = "render", feature = "multi-viewport"))]
+#[test]
+fn lifecycle_feature_enabled_without_runtime_viewport_support_uses_primary_snapshot_path() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_primary_window();
+    app.add_systems(ImguiPrimaryContextPass, |mut contexts: ImguiContexts| {
+        let ui = contexts.primary_ui_mut().expect("frame should be open");
+        ui.window("Primary Draw").build(|| {
+            ui.text("This draw data belongs to the primary Bevy window.");
+        });
+    });
+
+    app.update();
+
+    let output = app.world().resource::<ImguiFrameOutput>();
+    let snapshot = output
+        .snapshot()
+        .expect("primary draw data should be snapshotted");
+    assert_eq!(snapshot.draw.display_size, [640.0, 360.0]);
+    assert!(
+        snapshot.draw.display_size != [0.0, 0.0],
+        "runtime-disabled multi-viewport builds must not fall back to an empty platform viewport snapshot"
+    );
+}
+
 #[cfg(all(
     feature = "render",
     feature = "multi-viewport",
