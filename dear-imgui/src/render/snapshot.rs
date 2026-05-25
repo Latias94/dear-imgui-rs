@@ -4,7 +4,7 @@
 //! needs to render a frame, without retaining any pointers into ImGui-owned memory.
 
 use crate::render::draw_data::{
-    DrawData, DrawIdx, DrawList, DrawVert, StandardDrawCallback, classify_standard_draw_callback,
+    classify_standard_draw_callback, DrawData, DrawIdx, DrawList, DrawVert, StandardDrawCallback,
 };
 use crate::sys;
 pub use crate::texture::ManagedTextureId;
@@ -128,6 +128,7 @@ pub struct TextureRequest {
 
 /// Feedback produced by the renderer thread, to be applied on the UI thread.
 #[derive(Copy, Clone, Debug)]
+#[non_exhaustive]
 pub struct TextureFeedback {
     pub id: ManagedTextureId,
     pub status: TextureStatus,

@@ -19,9 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - [`game_engine` with multi-viewport](https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/game_engine/game_engine.rs):
     `cargo run -p dear-imgui-bevy --features render,multi-viewport --example game_engine`
   - [`ecosystem`](https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/ecosystem/ecosystem.rs):
-    `cargo run -p dear-imgui-bevy --features ecosystem --example ecosystem`
+    `cargo run -p dear-imgui-bevy --example ecosystem`
   - [`bevy_plot_controls`](https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/ecosystem/bevy_plot_controls.rs):
-    `cargo run -p dear-imgui-bevy --features render,implot --example bevy_plot_controls`
+    `cargo run -p dear-imgui-bevy --features render --example bevy_plot_controls`
 
 ## [0.14.0] - 2026-05-24
 
@@ -35,9 +35,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The workspace moved to the `0.14` release train and refreshed public crate metadata.
+- `dear-imgui-bevy` no longer exposes ImPlot, ImNodes, or ImGuizmo as backend feature flags.
+  Extension crates compose through the shared Bevy-managed `Ui` frame and should be added as
+  normal application or example dependencies.
 
 ### Fixed
 
+- `threaded_snapshot_minimal` now constructs `TextureFeedback` through the public constructors,
+  keeping the example compatible with renderer-owned backend user data feedback.
 - Existing renderer backend multi-viewport paths are safer when multiple backends or contexts are
   involved: WGPU and Ash now ignore foreign `RendererUserData` pointers, and Glow clears
   renderer-owned multi-viewport state when a renderer is destroyed.

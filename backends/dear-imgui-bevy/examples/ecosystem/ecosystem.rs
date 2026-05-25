@@ -1,13 +1,13 @@
 //! Extension ecosystem composition inside one Bevy-managed Dear ImGui frame.
 //!
 //! Run:
-//! `cargo run -p dear-imgui-bevy --features ecosystem --example ecosystem`
+//! `cargo run -p dear-imgui-bevy --example ecosystem`
 
 use bevy_app::{App, ScheduleRunnerPlugin, Startup};
 use bevy_ecs::prelude::*;
 use bevy_window::{PrimaryWindow, Window, WindowResolution};
 use dear_imgui_bevy::{
-    ImguiContext, ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, configure_example_context,
+    configure_example_context, ImguiContext, ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass,
 };
 use dear_imgui_rs::{Condition, DockNodeFlags};
 use dear_imguizmo::{DrawListTarget, GuizmoExt, Mat4Like};

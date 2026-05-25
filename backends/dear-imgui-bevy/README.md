@@ -78,8 +78,8 @@ grow.
 | Basic | [`simple`][bevy-example-simple] | [`examples/basic/simple.rs`][bevy-example-simple] | `cargo run -p dear-imgui-bevy --features render --example simple` | Smallest visible Dear ImGui overlay in a normal Bevy app. |
 | App | [`app_integration`][bevy-example-app-integration] | [`examples/app/app_integration.rs`][bevy-example-app-integration] | `cargo run -p dear-imgui-bevy --features render --example app_integration` | Plugin-style integration into an existing app/game loop with Bevy input policy. |
 | Game engine | [`game_engine`][bevy-example-game-engine] | [`examples/game_engine/game_engine.rs`][bevy-example-game-engine] | `cargo run -p dear-imgui-bevy --features render --example game_engine`<br>`cargo run -p dear-imgui-bevy --features render,multi-viewport --example game_engine` | Docked editor surface with scene render-target texture interop, plus optional native multi-viewport. |
-| Ecosystem | [`ecosystem`][bevy-example-ecosystem] | [`examples/ecosystem/ecosystem.rs`][bevy-example-ecosystem] | `cargo run -p dear-imgui-bevy --features ecosystem --example ecosystem` | Shared-frame ImPlot, ImNodes, and ImGuizmo integration. |
-| Ecosystem | [`bevy_plot_controls`][bevy-example-plot-controls] | [`examples/ecosystem/bevy_plot_controls.rs`][bevy-example-plot-controls] | `cargo run -p dear-imgui-bevy --features render,implot --example bevy_plot_controls` | Focused Bevy scene plus ImPlot controls demo. |
+| Ecosystem | [`ecosystem`][bevy-example-ecosystem] | [`examples/ecosystem/ecosystem.rs`][bevy-example-ecosystem] | `cargo run -p dear-imgui-bevy --example ecosystem` | Shared-frame ImPlot, ImNodes, and ImGuizmo integration. |
+| Ecosystem | [`bevy_plot_controls`][bevy-example-plot-controls] | [`examples/ecosystem/bevy_plot_controls.rs`][bevy-example-plot-controls] | `cargo run -p dear-imgui-bevy --features render --example bevy_plot_controls` | Focused Bevy scene plus ImPlot controls demo. |
 
 [bevy-example-simple]: https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/basic/simple.rs
 [bevy-example-app-integration]: https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/app/app_integration.rs
@@ -94,8 +94,10 @@ grow.
 | `default` | Core plugin, context lifecycle, schedules, and input translation. No renderer is installed. |
 | `render` | Bevy `RenderApp` extraction, WGPU overlay renderer, `ImguiOverlayCamera`, `ImguiOverlayDisabled`, and `ImguiBevyTextures`. |
 | `multi-viewport` | Native Dear ImGui PlatformIO window lifecycle bridge. Use with `render` for full routed rendering. |
-| `implot`, `imnodes`, `imguizmo` | Optional extension crates used by ecosystem examples. |
-| `ecosystem` | Convenience feature for `implot`, `imnodes`, and `imguizmo`. |
+
+ImPlot, ImNodes, ImGuizmo, and other `Ui`-based extension crates compose with this backend through
+the same `ImguiPrimaryContextPass` frame. They are not `dear-imgui-bevy` feature flags; add the
+extension crates you use to your application dependencies directly.
 
 ## Integration Guide
 
@@ -173,7 +175,7 @@ cargo check -p dear-imgui-bevy --target wasm32-unknown-unknown --features render
 cargo nextest run -p dear-imgui-bevy
 cargo nextest run -p dear-imgui-bevy --features render
 cargo nextest run -p dear-imgui-bevy --features render,multi-viewport
-cargo check -p dear-imgui-bevy --features render,multi-viewport,ecosystem --examples
+cargo check -p dear-imgui-bevy --features render,multi-viewport --examples
 ```
 
 Use `cargo run` commands from the examples table for manual smoke tests.

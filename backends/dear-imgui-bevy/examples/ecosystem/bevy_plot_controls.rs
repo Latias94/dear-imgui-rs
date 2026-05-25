@@ -1,7 +1,7 @@
 //! Small Bevy runtime demo with an ImPlot profiler and motion controls.
 //!
 //! Run:
-//! `cargo run -p dear-imgui-bevy --features render,implot --example bevy_plot_controls`
+//! `cargo run -p dear-imgui-bevy --features render --example bevy_plot_controls`
 
 use bevy::{
     app::AppExit,
@@ -9,8 +9,8 @@ use bevy::{
     window::{PresentMode, WindowPlugin, WindowTheme},
 };
 use dear_imgui_bevy::{
-    ImguiContext, ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, configure_example_context,
-    render::ImguiOverlayCamera,
+    configure_example_context, render::ImguiOverlayCamera, ImguiContext, ImguiContexts,
+    ImguiPlugin, ImguiPrimaryContextPass,
 };
 use dear_imgui_rs::Condition;
 use dear_implot::{ImPlotExt, PlotCond};

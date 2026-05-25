@@ -13,12 +13,12 @@ use std::collections::HashMap;
 use std::sync::mpsc;
 use std::thread;
 
-use dear_imgui_rs::BackendFlags;
-use dear_imgui_rs::Context;
 use dear_imgui_rs::render::snapshot::{
     FrameSnapshot, ManagedTextureId, SnapshotOptions, TextureBinding, TextureFeedback, TextureOp,
 };
 use dear_imgui_rs::texture::{TextureFormat, TextureId, TextureStatus};
+use dear_imgui_rs::BackendFlags;
+use dear_imgui_rs::Context;
 
 fn main() {
     let mut ctx = Context::create();
@@ -102,26 +102,18 @@ fn render_thread_main(
                     let tex_id = TextureId::new(next_tex_id);
                     next_tex_id += 1;
                     managed_map.insert(req.id, tex_id);
-                    feedback.push(TextureFeedback {
-                        id: req.id,
-                        status: TextureStatus::OK,
-                        tex_id: Some(tex_id),
-                    });
+                    feedback.push(TextureFeedback::with_tex_id(
+                        req.id,
+                        TextureStatus::OK,
+                        tex_id,
+                    ));
                 }
                 TextureOp::Update { .. } => {
-                    feedback.push(TextureFeedback {
-                        id: req.id,
-                        status: TextureStatus::OK,
-                        tex_id: None,
-                    });
+                    feedback.push(TextureFeedback::status(req.id, TextureStatus::OK));
                 }
                 TextureOp::Destroy => {
                     managed_map.remove(&req.id);
-                    feedback.push(TextureFeedback {
-                        id: req.id,
-                        status: TextureStatus::Destroyed,
-                        tex_id: None,
-                    });
+                    feedback.push(TextureFeedback::status(req.id, TextureStatus::Destroyed));
                 }
             }
         }

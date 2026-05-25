@@ -45,19 +45,15 @@ bevy_transform = { version = "=0.19.0-rc.2", default-features = false, optional 
 bevy_utils = { version = "=0.19.0-rc.2", default-features = false }
 bevy_winit = { version = "=0.19.0-rc.2", default-features = false, optional = true }
 bytemuck = { workspace = true, features = ["derive"], optional = true }
-dear-imguizmo = { path = "../../extensions/dear-imguizmo", version = "0.14", optional = true }
-dear-imnodes = { path = "../../extensions/dear-imnodes", version = "0.14", optional = true }
-dear-implot = { path = "../../extensions/dear-implot", version = "0.14", optional = true }
 
 [dev-dependencies]
 bevy = { version = "=0.19.0-rc.2", default-features = false, features = ["2d", "default_platform"] }
+dear-imguizmo = { path = "../../extensions/dear-imguizmo", version = "0.14" }
+dear-imnodes = { path = "../../extensions/dear-imnodes", version = "0.14" }
+dear-implot = { path = "../../extensions/dear-implot", version = "0.14" }
 
 [features]
 default = []
-ecosystem = ["imguizmo", "imnodes", "implot"]
-imguizmo = ["dep:dear-imguizmo"]
-imnodes = ["dep:dear-imnodes"]
-implot = ["dep:dear-implot"]
 # Enables the first native Dear ImGui PlatformIO lifecycle bridge. This does not by itself
 # advertise full multi-viewport support; render/input routing still gate status.
 multi-viewport = ["dear-imgui-rs/multi-viewport", "dep:bevy_winit"]
@@ -94,9 +90,8 @@ required-features = ["render"]
 [[example]]
 name = "bevy_plot_controls"
 path = "examples/ecosystem/bevy_plot_controls.rs"
-required-features = ["render", "implot"]
+required-features = ["render"]
 
 [[example]]
 name = "ecosystem"
 path = "examples/ecosystem/ecosystem.rs"
-required-features = ["ecosystem"]
