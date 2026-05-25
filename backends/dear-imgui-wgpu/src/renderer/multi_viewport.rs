@@ -32,6 +32,7 @@ struct ViewportWgpuData {
 }
 
 static RENDERERS: Mutex<Vec<ContextRendererState>> = Mutex::new(Vec::new());
+static VIEWPORT_DATA: Mutex<Vec<usize>> = Mutex::new(Vec::new());
 
 struct ContextRendererState {
     ctx: usize,
@@ -117,6 +118,44 @@ fn remove_renderer_state_for_renderer(renderer: *mut WgpuRenderer) {
         .lock()
         .unwrap_or_else(|poison| poison.into_inner())
         .retain(|entry| entry.renderer != renderer);
+}
+
+fn register_viewport_data(ptr: *mut ViewportWgpuData) {
+    if ptr.is_null() {
+        return;
+    }
+
+    let ptr = ptr as usize;
+    let mut items = VIEWPORT_DATA
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    if !items.contains(&ptr) {
+        items.push(ptr);
+    }
+}
+
+fn unregister_viewport_data(ptr: *mut ViewportWgpuData) {
+    if ptr.is_null() {
+        return;
+    }
+
+    let ptr = ptr as usize;
+    VIEWPORT_DATA
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .retain(|entry| *entry != ptr);
+}
+
+fn is_wgpu_viewport_data(ptr: *mut ViewportWgpuData) -> bool {
+    if ptr.is_null() {
+        return false;
+    }
+
+    let ptr = ptr as usize;
+    VIEWPORT_DATA
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .contains(&ptr)
 }
 
 fn global_handles() -> Option<GlobalHandles> {
@@ -325,6 +364,20 @@ mod tests {
         drop(ctx);
         drop(renderer);
     }
+
+    #[test]
+    fn renderer_destroy_window_ignores_foreign_renderer_user_data() {
+        let _guard = lock_context();
+        let mut viewport = dear_imgui_rs::sys::ImGuiViewport::default();
+        let foreign = 0x1234usize as *mut c_void;
+        viewport.RendererUserData = foreign;
+
+        unsafe {
+            renderer_destroy_window((&mut viewport as *mut _) as *mut Viewport);
+        }
+
+        assert_eq!(viewport.RendererUserData, foreign);
+    }
 }
 
 #[allow(unsafe_op_in_unsafe_fn)]
@@ -359,10 +412,11 @@ unsafe fn borrow_renderer() -> Option<RendererBorrowGuard> {
 #[allow(unsafe_op_in_unsafe_fn)]
 unsafe fn viewport_user_data_mut<'a>(vpm: &'a mut Viewport) -> Option<&'a mut ViewportWgpuData> {
     let data = vpm.renderer_user_data();
-    if data.is_null() {
+    let data = data as *mut ViewportWgpuData;
+    if !is_wgpu_viewport_data(data) {
         None
     } else {
-        Some(&mut *(data as *mut ViewportWgpuData))
+        Some(&mut *data)
     }
 }
 
@@ -539,7 +593,9 @@ pub unsafe extern "C" fn renderer_create_window(vp: *mut Viewport) {
                 #[cfg(feature = "mv-log")]
                 last_log_fb_scale: [0.0, 0.0],
             };
-            vpm.set_renderer_user_data(Box::into_raw(Box::new(data)) as *mut c_void);
+            let ptr = Box::into_raw(Box::new(data));
+            register_viewport_data(ptr);
+            vpm.set_renderer_user_data(ptr as *mut c_void);
         }
     }));
     if res.is_err() {
@@ -561,9 +617,10 @@ pub unsafe extern "C" fn renderer_destroy_window(vp: *mut Viewport) {
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
         mvlog!("[wgpu-mv] Renderer_DestroyWindow");
         let vpm = &mut *vp;
-        let data = vpm.renderer_user_data();
-        if !data.is_null() {
-            let _boxed: Box<ViewportWgpuData> = Box::from_raw(data as *mut ViewportWgpuData);
+        let data = vpm.renderer_user_data() as *mut ViewportWgpuData;
+        if is_wgpu_viewport_data(data) {
+            unregister_viewport_data(data);
+            let _boxed: Box<ViewportWgpuData> = Box::from_raw(data);
             vpm.set_renderer_user_data(std::ptr::null_mut());
         }
     }));
