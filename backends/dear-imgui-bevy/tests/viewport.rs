@@ -4,7 +4,6 @@ use bevy_app::App;
 use bevy_camera::{Camera, Camera2d, RenderTarget, visibility::RenderLayers};
 #[cfg(feature = "multi-viewport")]
 use bevy_ecs::message::Messages;
-#[cfg(all(feature = "multi-viewport", feature = "render"))]
 use bevy_ecs::prelude::Entity;
 #[cfg(feature = "multi-viewport")]
 use bevy_ecs::prelude::With;

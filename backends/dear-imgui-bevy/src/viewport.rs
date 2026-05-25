@@ -891,6 +891,30 @@ fn clear_imgui_viewport_platform_handles(
         .values()
         .map(|handle| (&**handle as *const ImguiViewportPlatformHandle).cast::<c_void>())
         .collect::<HashSet<_>>();
+    clear_imgui_viewport_platform_handles_for_owned_handles(context, &owned_handles);
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn clear_stale_imgui_viewport_platform_handles(
+    context: &mut imgui::Context,
+    bridge: &ImguiViewportBridge,
+    live_viewports: &HashSet<ImguiViewportId>,
+) {
+    let owned_handles = bridge
+        .inner
+        .viewport_handles
+        .iter()
+        .filter(|(viewport_id, _)| !live_viewports.contains(viewport_id))
+        .map(|(_, handle)| (&**handle as *const ImguiViewportPlatformHandle).cast::<c_void>())
+        .collect::<HashSet<_>>();
+    clear_imgui_viewport_platform_handles_for_owned_handles(context, &owned_handles);
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn clear_imgui_viewport_platform_handles_for_owned_handles(
+    context: &mut imgui::Context,
+    owned_handles: &HashSet<*const c_void>,
+) {
     if owned_handles.is_empty() {
         return;
     }
@@ -937,6 +961,8 @@ pub(crate) fn prepare_platform_viewports_for_frame(
         bridge.set_viewport_feedback(viewport_id, feedback);
         live_feedback.insert(viewport_id);
     }
+
+    clear_stale_imgui_viewport_platform_handles(context, bridge, &live_feedback);
 
     bridge
         .inner
@@ -1350,6 +1376,52 @@ fn set_window_logical_size(window: &mut Window, size: [f32; 2]) {
 mod tests {
     use super::*;
 
+    struct PlatformViewportsGuard {
+        platform_io: *mut sys::ImGuiPlatformIO,
+        original_viewports: sys::ImVector_ImGuiViewportPtr,
+        owned_viewport: *mut sys::ImGuiViewport,
+    }
+
+    impl PlatformViewportsGuard {
+        unsafe fn replace(
+            context: &mut imgui::Context,
+            viewports: &mut [*mut sys::ImGuiViewport],
+            owned_viewport: *mut sys::ImGuiViewport,
+        ) -> Self {
+            let platform_io = context.platform_io_mut().as_raw_mut();
+            let original_viewports = unsafe { (*platform_io).Viewports };
+            unsafe {
+                (*platform_io).Viewports = sys::ImVector_ImGuiViewportPtr {
+                    Size: viewports
+                        .len()
+                        .try_into()
+                        .expect("test viewport count should fit i32"),
+                    Capacity: viewports
+                        .len()
+                        .try_into()
+                        .expect("test viewport count should fit i32"),
+                    Data: viewports.as_mut_ptr(),
+                };
+            }
+            Self {
+                platform_io,
+                original_viewports,
+                owned_viewport,
+            }
+        }
+    }
+
+    impl Drop for PlatformViewportsGuard {
+        fn drop(&mut self) {
+            unsafe {
+                (*self.platform_io).Viewports = self.original_viewports;
+                if !self.owned_viewport.is_null() {
+                    sys::ImGuiViewport_destroy(self.owned_viewport);
+                }
+            }
+        }
+    }
+
     fn feedback() -> ImguiViewportFeedback {
         ImguiViewportFeedback {
             pos: [0.0, 0.0],
@@ -1395,6 +1467,56 @@ mod tests {
             !bridge.inner.viewport_handles.contains_key(&stale_viewport),
             "platform handles must not outlive viewports that disappeared from the Bevy mapping"
         );
+
+        let main_viewport = context.main_viewport();
+        main_viewport.set_platform_handle(std::ptr::null_mut());
+        main_viewport.set_platform_user_data(std::ptr::null_mut());
+    }
+
+    #[test]
+    fn prepare_platform_viewports_clears_pruned_imgui_platform_handles() {
+        let mut context = imgui::Context::create();
+        let mut bridge = ImguiViewportBridge::default();
+        let primary_window = Entity::from_raw_u32(1).expect("test entity index should be valid");
+        let stale_viewport = imgui::Id::from(0x600);
+        let stale_handle = bridge.inner.platform_handle(stale_viewport);
+        let stale_raw_viewport = unsafe { sys::ImGuiViewport_ImGuiViewport() };
+        assert!(
+            !stale_raw_viewport.is_null(),
+            "test viewport allocation should succeed"
+        );
+
+        let main_raw_viewport = context.main_viewport().as_raw_mut();
+        let mut viewport_ptrs = [main_raw_viewport, stale_raw_viewport];
+        unsafe {
+            (*stale_raw_viewport).ID = stale_viewport.raw();
+            (*stale_raw_viewport).PlatformHandle = stale_handle;
+            (*stale_raw_viewport).PlatformUserData = stale_handle;
+        }
+        let _viewports_guard = unsafe {
+            PlatformViewportsGuard::replace(&mut context, &mut viewport_ptrs, stale_raw_viewport)
+        };
+
+        prepare_platform_viewports_for_frame(
+            &mut context,
+            &mut bridge,
+            primary_window,
+            &Window::default(),
+            &[],
+            std::iter::empty(),
+            true,
+        );
+
+        unsafe {
+            assert!(
+                (*stale_raw_viewport).PlatformHandle.is_null(),
+                "pruning a backend-owned viewport handle must clear ImGui's PlatformHandle first"
+            );
+            assert!(
+                (*stale_raw_viewport).PlatformUserData.is_null(),
+                "pruning a backend-owned viewport handle must clear ImGui's PlatformUserData first"
+            );
+        }
 
         let main_viewport = context.main_viewport();
         main_viewport.set_platform_handle(std::ptr::null_mut());
