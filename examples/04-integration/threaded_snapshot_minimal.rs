@@ -13,12 +13,12 @@ use std::collections::HashMap;
 use std::sync::mpsc;
 use std::thread;
 
+use dear_imgui_rs::BackendFlags;
+use dear_imgui_rs::Context;
 use dear_imgui_rs::render::snapshot::{
     FrameSnapshot, ManagedTextureId, SnapshotOptions, TextureBinding, TextureFeedback, TextureOp,
 };
 use dear_imgui_rs::texture::{TextureFormat, TextureId, TextureStatus};
-use dear_imgui_rs::BackendFlags;
-use dear_imgui_rs::Context;
 
 fn main() {
     let mut ctx = Context::create();
