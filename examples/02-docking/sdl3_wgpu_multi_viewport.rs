@@ -269,6 +269,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
+    if ENABLE_VIEWPORTS {
+        dear_imgui_wgpu::multi_viewport_sdl3::shutdown_multi_viewport_support(&mut imgui);
+    }
     imgui_sdl3_backend::shutdown(&mut imgui);
     Ok(())
 }
