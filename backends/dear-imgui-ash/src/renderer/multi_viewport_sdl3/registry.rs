@@ -13,6 +13,7 @@ pub(super) struct GlobalHandles {
 }
 
 static RENDERERS: Mutex<Vec<ContextRendererState>> = Mutex::new(Vec::new());
+static VIEWPORT_DATA: Mutex<Vec<usize>> = Mutex::new(Vec::new());
 
 struct ContextRendererState {
     pub(super) ctx: usize,
@@ -90,6 +91,44 @@ pub(super) fn remove_renderer_state_for_renderer(renderer: *mut AshRenderer) {
         .lock()
         .unwrap_or_else(|poison| poison.into_inner())
         .retain(|entry| entry.renderer != renderer);
+}
+
+pub(super) fn register_viewport_data(ptr: *mut ViewportAshData) {
+    if ptr.is_null() {
+        return;
+    }
+
+    let ptr = ptr as usize;
+    let mut items = VIEWPORT_DATA
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    if !items.contains(&ptr) {
+        items.push(ptr);
+    }
+}
+
+fn unregister_viewport_data(ptr: *mut ViewportAshData) {
+    if ptr.is_null() {
+        return;
+    }
+
+    let ptr = ptr as usize;
+    VIEWPORT_DATA
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .retain(|entry| *entry != ptr);
+}
+
+fn is_ash_viewport_data(ptr: *mut ViewportAshData) -> bool {
+    if ptr.is_null() {
+        return false;
+    }
+
+    let ptr = ptr as usize;
+    VIEWPORT_DATA
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .contains(&ptr)
 }
 
 pub(super) fn global_handles() -> Option<GlobalHandles> {
@@ -251,9 +290,22 @@ pub(super) unsafe fn viewport_user_data_mut<'a>(
     vpm: &'a mut Viewport,
 ) -> Option<&'a mut ViewportAshData> {
     let data = vpm.renderer_user_data();
-    if data.is_null() {
+    let data = data as *mut ViewportAshData;
+    if !is_ash_viewport_data(data) {
         None
     } else {
-        Some(&mut *(data as *mut ViewportAshData))
+        Some(&mut *data)
     }
+}
+
+#[allow(unsafe_op_in_unsafe_fn)]
+pub(super) unsafe fn take_viewport_data(vpm: &mut Viewport) -> Option<Box<ViewportAshData>> {
+    let data = vpm.renderer_user_data() as *mut ViewportAshData;
+    if !is_ash_viewport_data(data) {
+        return None;
+    }
+
+    unregister_viewport_data(data);
+    vpm.set_renderer_user_data(std::ptr::null_mut());
+    Some(Box::from_raw(data))
 }

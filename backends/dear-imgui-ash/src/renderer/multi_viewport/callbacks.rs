@@ -289,8 +289,9 @@ pub unsafe extern "C" fn renderer_create_window(vp: *mut Viewport) {
             mesh_frames: Frames::new(global.in_flight_frames),
         };
 
-        let boxed = Box::new(data);
-        vpm.set_renderer_user_data(Box::into_raw(boxed) as *mut c_void);
+        let ptr = Box::into_raw(Box::new(data));
+        register_viewport_data(ptr);
+        vpm.set_renderer_user_data(ptr as *mut c_void);
     }));
     if res.is_err() {
         eprintln!("[ash-mv] panic in Renderer_CreateWindow");
@@ -318,13 +319,10 @@ pub unsafe extern "C" fn renderer_destroy_window(vp: *mut Viewport) {
         let surface_loader = khr_surface::Instance::new(&global.entry, &global.instance);
 
         let vpm = &mut *vp;
-        let data_ptr = vpm.renderer_user_data();
-        if data_ptr.is_null() {
+        let Some(data) = take_viewport_data(vpm) else {
             return;
-        }
-        vpm.set_renderer_user_data(std::ptr::null_mut());
-        let boxed: Box<ViewportAshData> = Box::from_raw(data_ptr as *mut ViewportAshData);
-        let _ = boxed.destroy(&mut renderer, &surface_loader);
+        };
+        let _ = data.destroy(&mut renderer, &surface_loader);
     }));
     if res.is_err() {
         eprintln!("[ash-mv] panic in Renderer_DestroyWindow");

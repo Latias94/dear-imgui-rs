@@ -40,7 +40,10 @@ pub use self::callbacks::{
 };
 use self::frame_sync::{FrameSync, create_command_pool, create_frame_syncs};
 pub(crate) use self::registry::clear_for_drop;
-use self::registry::{GlobalHandles, borrow_renderer, global_handles, viewport_user_data_mut};
+use self::registry::{
+    GlobalHandles, borrow_renderer, global_handles, register_viewport_data, take_viewport_data,
+    viewport_user_data_mut,
+};
 pub use self::registry::{disable, enable, shutdown_multi_viewport_support};
 #[cfg(test)]
 use self::registry::{remove_renderer_state_for_context, upsert_renderer_state};

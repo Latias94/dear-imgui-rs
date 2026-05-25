@@ -1,4 +1,5 @@
 use super::*;
+use std::ffi::c_void;
 use std::mem::MaybeUninit;
 use std::sync::{Mutex as TestMutex, OnceLock};
 
@@ -81,4 +82,32 @@ fn clear_for_drop_removes_renderer_state() {
     }
 
     drop(ctx);
+}
+
+#[test]
+fn take_viewport_data_ignores_foreign_renderer_user_data() {
+    let _guard = lock_context();
+    let mut viewport = sys::ImGuiViewport::default();
+    let foreign = 0x1234usize as *mut c_void;
+    viewport.RendererUserData = foreign;
+
+    let viewport = unsafe { Viewport::from_raw_mut(&mut viewport) };
+    let data = unsafe { take_viewport_data(viewport) };
+
+    assert!(data.is_none());
+    assert_eq!(viewport.renderer_user_data(), foreign);
+}
+
+#[test]
+fn viewport_user_data_mut_ignores_unregistered_renderer_user_data() {
+    let _guard = lock_context();
+    let mut viewport = sys::ImGuiViewport::default();
+    let foreign = 0x1234usize as *mut c_void;
+    viewport.RendererUserData = foreign;
+
+    let viewport = unsafe { Viewport::from_raw_mut(&mut viewport) };
+    let data = unsafe { viewport_user_data_mut(viewport) };
+
+    assert!(data.is_none());
+    assert_eq!(viewport.renderer_user_data(), foreign);
 }
