@@ -147,6 +147,7 @@ fn sync_backend_context_config(
     context
         .io_mut()
         .set_backend_renderer_user_data(std::ptr::null_mut());
+    clear_renderer_draw_callbacks(context);
     let mut backend_flags = context.io().backend_flags();
     if render_integration_installed {
         backend_flags.insert(
@@ -314,13 +315,7 @@ impl ImguiContext {
         self.context
             .set_renderer_name::<String>(None)
             .expect("clearing BackendRendererName must not fail");
-        #[cfg(feature = "render")]
-        {
-            let platform_io = self.context.platform_io_mut();
-            platform_io.set_draw_callback_reset_render_state_raw(None);
-            platform_io.set_draw_callback_set_sampler_linear_raw(None);
-            platform_io.set_draw_callback_set_sampler_nearest_raw(None);
-        }
+        clear_renderer_draw_callbacks(&mut self.context);
 
         let mut backend_flags = self.context.io().backend_flags();
         backend_flags.remove(
@@ -339,6 +334,13 @@ impl ImguiContext {
         }
         self.context.io_mut().set_backend_flags(backend_flags);
     }
+}
+
+fn clear_renderer_draw_callbacks(context: &mut dear_imgui_rs::Context) {
+    let platform_io = context.platform_io_mut();
+    platform_io.set_draw_callback_reset_render_state_raw(None);
+    platform_io.set_draw_callback_set_sampler_linear_raw(None);
+    platform_io.set_draw_callback_set_sampler_nearest_raw(None);
 }
 
 impl Drop for ImguiContext {

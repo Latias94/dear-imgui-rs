@@ -14,6 +14,12 @@ fn imgui_context_guard() -> std::sync::MutexGuard<'static, ()> {
     GUARD.get_or_init(|| Mutex::new(())).lock().unwrap()
 }
 
+unsafe extern "C" fn stale_draw_callback(
+    _parent_list: *const dear_imgui_rs::sys::ImDrawList,
+    _cmd: *const dear_imgui_rs::sys::ImDrawCmd,
+) {
+}
+
 #[test]
 fn plugin_registers_minimal_imgui_resources() {
     let _guard = imgui_context_guard();
@@ -97,6 +103,12 @@ fn plugin_preserves_existing_config_and_context() {
         .context_mut()
         .io_mut()
         .set_backend_platform_user_data(std::ptr::dangling_mut::<u8>().cast());
+    {
+        let platform_io = existing_context.context_mut().platform_io_mut();
+        platform_io.set_draw_callback_reset_render_state_raw(Some(stale_draw_callback));
+        platform_io.set_draw_callback_set_sampler_linear_raw(Some(stale_draw_callback));
+        platform_io.set_draw_callback_set_sampler_nearest_raw(Some(stale_draw_callback));
+    }
     app.insert_non_send(existing_context);
 
     app.add_plugins(ImguiPlugin::default());
@@ -144,6 +156,21 @@ fn plugin_preserves_existing_config_and_context() {
     assert!(
         io.backend_renderer_user_data().is_null(),
         "plugin should clear stale renderer user data before advertising Bevy renderer state"
+    );
+    let platform_io = context.context().platform_io();
+    assert!(
+        platform_io.draw_callback_reset_render_state_raw().is_none(),
+        "plugin should clear stale renderer reset draw callback before taking over an existing context"
+    );
+    assert!(
+        platform_io.draw_callback_set_sampler_linear_raw().is_none(),
+        "plugin should clear stale renderer linear sampler draw callback before taking over an existing context"
+    );
+    assert!(
+        platform_io
+            .draw_callback_set_sampler_nearest_raw()
+            .is_none(),
+        "plugin should clear stale renderer nearest sampler draw callback before taking over an existing context"
     );
     assert_eq!(
         io.backend_platform_user_data().is_null(),
