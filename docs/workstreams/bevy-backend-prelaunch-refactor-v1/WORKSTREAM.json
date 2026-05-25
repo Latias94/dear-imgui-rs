@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "slug": "bevy-backend-prelaunch-refactor-v1",
+  "title": "Bevy Backend Prelaunch Refactor",
+  "status": "closed",
+  "updated": "2026-05-25",
+  "scope_kind": "execution",
+  "problem": "Fix pre-release Bevy backend API and renderer risks found during review before publishing the integration.",
+  "authoritative_docs": [
+    {
+      "role": "design",
+      "path": "docs/workstreams/bevy-backend-prelaunch-refactor-v1/DESIGN.md"
+    },
+    {
+      "role": "execution",
+      "path": "docs/workstreams/bevy-backend-prelaunch-refactor-v1/TODO.md"
+    },
+    {
+      "role": "gates",
+      "path": "docs/workstreams/bevy-backend-prelaunch-refactor-v1/EVIDENCE_AND_GATES.md"
+    },
+    {
+      "role": "milestones",
+      "path": "docs/workstreams/bevy-backend-prelaunch-refactor-v1/MILESTONES.md"
+    },
+    {
+      "role": "handoff",
+      "path": "docs/workstreams/bevy-backend-prelaunch-refactor-v1/HANDOFF.md"
+    }
+  ],
+  "gates": [
+    "cargo +stable nextest run -p dear-imgui-bevy",
+    "cargo +stable nextest run -p dear-imgui-bevy --features render",
+    "cargo +stable nextest run -p dear-imgui-bevy --features render,multi-viewport",
+    "cargo +stable check -p dear-imgui-bevy --no-default-features",
+    "cargo +stable check -p dear-imgui-bevy --features render",
+    "cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --no-default-features",
+    "cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --features render",
+    "cargo +stable check -p dear-imgui-bevy --features render,multi-viewport,ecosystem --examples",
+    "cargo +stable clippy -p dear-imgui-bevy --all-targets --features render,multi-viewport,ecosystem --no-deps -- -D warnings",
+    "cargo +stable fmt --all --check",
+    "git diff --check"
+  ],
+  "evidence": [
+    "docs/adr/0001-bevy-native-imgui-backend.md",
+    "docs/workstreams/bevy-backend-prelaunch-refactor-v1/DESIGN.md",
+    "backends/dear-imgui-bevy/src/render.rs",
+    "backends/dear-imgui-bevy/src/input.rs",
+    "backends/dear-imgui-bevy/src/texture.rs",
+    "backends/dear-imgui-bevy/README.md",
+    "backends/dear-imgui-bevy/examples/",
+    "backends/dear-imgui-bevy/tests/"
+  ],
+  "adr_refs": [
+    "docs/adr/0001-bevy-native-imgui-backend.md"
+  ],
+  "current_task": "BPR-070",
+  "next_recommended_task": null,
+  "continue_policy": {
+    "default_action": "closed",
+    "notes": "Lane closed after explicit overlay camera targeting, camera viewport rendering, gamma/compositing, texture sampler, input helper, docs, and dedicated-target nextest discovery evidence were completed."
+  }
+}

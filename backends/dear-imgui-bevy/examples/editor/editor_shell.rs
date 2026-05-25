@@ -24,8 +24,9 @@ use bevy_ecs::{hierarchy::Children, name::Name};
 use dear_imgui_bevy::{
     ImguiBackendConfig, ImguiBackendStatus, ImguiBevyTextures, ImguiContext, ImguiContexts,
     ImguiFrameOutput, ImguiPlugin, ImguiPrimaryContextPass, ImguiViewportCamera,
-    ImguiViewportWindow, configure_example_context, input::ImguiInputSystems,
-    render::ImguiOverlayDisabled,
+    ImguiViewportWindow, configure_example_context,
+    input::ImguiInputSystems,
+    render::{ImguiOverlayCamera, ImguiOverlayDisabled},
 };
 use dear_imgui_rs::{
     Condition, DockBuilder, DockNodeFlags, SplitDirection, TextureId, ViewportFlags, WindowClass,
@@ -264,7 +265,7 @@ fn setup(
 ) {
     // Render the Dear ImGui overlay into the primary window, while the offscreen scene keeps its
     // own image target for the editor viewport.
-    commands.spawn(Camera2d);
+    commands.spawn((Camera2d, ImguiOverlayCamera));
 
     let mut image = Image::new_target_texture(
         SCENE_WIDTH,

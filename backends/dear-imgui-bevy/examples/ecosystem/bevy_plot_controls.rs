@@ -10,6 +10,7 @@ use bevy::{
 };
 use dear_imgui_bevy::{
     ImguiContext, ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, configure_example_context,
+    render::ImguiOverlayCamera,
 };
 use dear_imgui_rs::Condition;
 use dear_implot::{ImPlotExt, PlotCond};
@@ -83,7 +84,7 @@ fn main() {
 }
 
 fn setup_scene(mut commands: Commands, mut imgui: NonSendMut<ImguiContext>) {
-    commands.spawn(Camera2d);
+    commands.spawn((Camera2d, ImguiOverlayCamera));
     commands.spawn((
         Sprite::from_color(Color::srgb(0.12, 0.16, 0.22), BACKGROUND_SIZE),
         Transform::from_xyz(0.0, 0.0, -1.0),

@@ -11,7 +11,7 @@ use bevy::{
 };
 use dear_imgui_bevy::{
     ImguiContext, ImguiContexts, ImguiFrameOutput, ImguiPlugin, ImguiPrimaryContextPass,
-    configure_example_context,
+    configure_example_context, render::ImguiOverlayCamera,
 };
 use dear_imgui_rs::Condition;
 
@@ -53,7 +53,7 @@ fn main() {
 }
 
 fn setup_imgui(mut commands: Commands, mut imgui: NonSendMut<ImguiContext>) {
-    commands.spawn(Camera2d);
+    commands.spawn((Camera2d, ImguiOverlayCamera));
     configure_example_context(&mut imgui, true);
 }
 

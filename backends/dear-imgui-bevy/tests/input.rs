@@ -15,7 +15,11 @@ use bevy_window::{
 };
 use dear_imgui_bevy::{
     ImguiContext, ImguiFrameState, ImguiPlugin, ImguiPrimaryContextPass, ImguiViewportWindow,
-    input::{ImguiInputState, map_bevy_key_code},
+    input::{
+        ImguiInputCapture, ImguiInputState, imgui_wants_any_input, imgui_wants_keyboard_input,
+        imgui_wants_pointer_input, imgui_wants_pointer_input_unless_popup_close,
+        imgui_wants_text_input, map_bevy_key_code,
+    },
 };
 use dear_imgui_rs as imgui;
 use std::sync::{Mutex, OnceLock};
@@ -80,6 +84,10 @@ fn begin_frame_and_assert(app: &mut App, assert_ui: impl FnOnce(&imgui::Ui)) {
 
 fn run_input_systems(app: &mut App) {
     app.world_mut().run_schedule(PreUpdate);
+}
+
+fn run_condition_value<M>(app: &mut App, system: impl IntoSystem<(), bool, M> + 'static) -> bool {
+    app.world_mut().run_system_cached(system).unwrap()
 }
 
 fn request_text_cursor_and_ime(
@@ -1405,4 +1413,41 @@ fn input_key_mapping_covers_modifiers_and_common_keys() {
         map_bevy_key_code(KeyCode::NumpadEnter),
         Some(imgui::Key::KeypadEnter)
     );
+}
+
+#[test]
+fn input_capture_predicates_and_run_conditions_expose_imgui_policy_hints() {
+    let mut app = App::new();
+    app.init_resource::<ImguiInputCapture>();
+
+    assert!(!run_condition_value(&mut app, imgui_wants_pointer_input));
+    assert!(!run_condition_value(
+        &mut app,
+        imgui_wants_pointer_input_unless_popup_close
+    ));
+    assert!(!run_condition_value(&mut app, imgui_wants_keyboard_input));
+    assert!(!run_condition_value(&mut app, imgui_wants_text_input));
+    assert!(!run_condition_value(&mut app, imgui_wants_any_input));
+
+    {
+        let mut capture = app.world_mut().resource_mut::<ImguiInputCapture>();
+        capture.want_capture_mouse = true;
+        capture.want_capture_mouse_unless_popup_close = true;
+        capture.want_capture_keyboard = true;
+        capture.want_text_input = true;
+        assert!(capture.wants_pointer_input());
+        assert!(capture.wants_pointer_input_unless_popup_close());
+        assert!(capture.wants_keyboard_input());
+        assert!(capture.wants_text_input());
+        assert!(capture.wants_any_input());
+    }
+
+    assert!(run_condition_value(&mut app, imgui_wants_pointer_input));
+    assert!(run_condition_value(
+        &mut app,
+        imgui_wants_pointer_input_unless_popup_close
+    ));
+    assert!(run_condition_value(&mut app, imgui_wants_keyboard_input));
+    assert!(run_condition_value(&mut app, imgui_wants_text_input));
+    assert!(run_condition_value(&mut app, imgui_wants_any_input));
 }

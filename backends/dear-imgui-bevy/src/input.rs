@@ -95,12 +95,67 @@ pub struct ImguiInputCapture {
 }
 
 impl ImguiInputCapture {
+    /// Whether Dear ImGui wants pointer input.
+    #[must_use]
+    pub fn wants_pointer_input(&self) -> bool {
+        self.want_capture_mouse
+    }
+
+    /// Whether Dear ImGui wants pointer input after allowing popup-close clicks through.
+    #[must_use]
+    pub fn wants_pointer_input_unless_popup_close(&self) -> bool {
+        self.want_capture_mouse_unless_popup_close
+    }
+
+    /// Whether Dear ImGui wants keyboard input.
+    #[must_use]
+    pub fn wants_keyboard_input(&self) -> bool {
+        self.want_capture_keyboard
+    }
+
+    /// Whether Dear ImGui wants text input / IME.
+    #[must_use]
+    pub fn wants_text_input(&self) -> bool {
+        self.want_text_input
+    }
+
+    /// Whether Dear ImGui wants any pointer, keyboard, or text input.
+    #[must_use]
+    pub fn wants_any_input(&self) -> bool {
+        self.wants_pointer_input() || self.wants_keyboard_input() || self.wants_text_input()
+    }
+
     fn update_from_io(&mut self, io: &imgui::Io) {
         self.want_capture_mouse = io.want_capture_mouse();
         self.want_capture_mouse_unless_popup_close = io.want_capture_mouse_unless_popup_close();
         self.want_capture_keyboard = io.want_capture_keyboard();
         self.want_text_input = io.want_text_input();
     }
+}
+
+/// Run condition that returns true while Dear ImGui wants pointer input.
+pub fn imgui_wants_pointer_input(capture: Res<ImguiInputCapture>) -> bool {
+    capture.wants_pointer_input()
+}
+
+/// Run condition that returns true while Dear ImGui wants pointer input, excluding popup-close clicks.
+pub fn imgui_wants_pointer_input_unless_popup_close(capture: Res<ImguiInputCapture>) -> bool {
+    capture.wants_pointer_input_unless_popup_close()
+}
+
+/// Run condition that returns true while Dear ImGui wants keyboard input.
+pub fn imgui_wants_keyboard_input(capture: Res<ImguiInputCapture>) -> bool {
+    capture.wants_keyboard_input()
+}
+
+/// Run condition that returns true while Dear ImGui wants text input or IME.
+pub fn imgui_wants_text_input(capture: Res<ImguiInputCapture>) -> bool {
+    capture.wants_text_input()
+}
+
+/// Run condition that returns true while Dear ImGui wants any pointer, keyboard, or text input.
+pub fn imgui_wants_any_input(capture: Res<ImguiInputCapture>) -> bool {
+    capture.wants_any_input()
 }
 
 pub(crate) fn install_input_mapping(app: &mut App) {

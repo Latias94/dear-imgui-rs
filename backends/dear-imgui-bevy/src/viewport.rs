@@ -1091,6 +1091,7 @@ fn ensure_viewport_camera(
             Camera::default(),
             RenderTarget::Window(WindowRef::Entity(window_entity)),
             RenderLayers::none(),
+            crate::render::ImguiOverlayCamera,
             ImguiViewportCamera { viewport_id },
         ))
         .id();

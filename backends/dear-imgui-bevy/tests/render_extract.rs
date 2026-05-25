@@ -2,13 +2,17 @@
 
 use bevy_app::App;
 use bevy_asset::Assets;
-use bevy_camera::{Camera, NormalizedRenderTarget, RenderTarget};
+use bevy_camera::{Camera, NormalizedRenderTarget, RenderTarget, Viewport};
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::ScheduleLabel;
+use bevy_math::UVec2;
 use bevy_render::{
     Render, RenderApp,
     extract_plugin::ExtractPlugin,
-    render_resource::{BlendState, SpecializedRenderPipeline, TextureFormat},
+    render_resource::{
+        BindGroupLayoutEntry, BindingType, BlendState, SamplerBindingType,
+        SpecializedRenderPipeline, TextureFormat,
+    },
 };
 use bevy_shader::Shader;
 use bevy_window::{PrimaryWindow, Window, WindowRef, WindowResolution};
@@ -18,9 +22,9 @@ use dear_imgui_bevy::{
     ImguiContext, ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, ImguiViewportWindow,
     render::{
         IMGUI_FRAGMENT_ENTRY_POINT, IMGUI_SHADER_HANDLE, IMGUI_SHADER_SOURCE,
-        IMGUI_VERTEX_ENTRY_POINT, ImguiExtractedRenderFrame, ImguiOverlayDisabled,
-        ImguiPipelineKey, ImguiPreparedRenderFrame, ImguiQueuedPipelines, ImguiRenderPipeline,
-        ImguiTextureBindGroups, imgui_vertex_buffer_layout,
+        IMGUI_VERTEX_ENTRY_POINT, ImguiExtractedRenderFrame, ImguiOverlayCamera,
+        ImguiOverlayDisabled, ImguiPipelineKey, ImguiPreparedRenderFrame, ImguiQueuedPipelines,
+        ImguiRenderPipeline, ImguiTextureBindGroups, imgui_vertex_buffer_layout,
     },
 };
 use dear_imgui_rs::{self as imgui, render::TextureBinding};
@@ -225,6 +229,107 @@ fn render_extract_uses_one_overlay_camera_per_render_target() {
         targets[0].target,
         NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap())
     );
+}
+
+#[test]
+fn render_extract_prefers_explicit_overlay_camera_over_higher_order_fallback() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary_window, _camera, _texture_id) = app_with_primary_window();
+    let explicit_camera = app
+        .world_mut()
+        .spawn((
+            Camera {
+                order: -100,
+                ..Default::default()
+            },
+            RenderTarget::Window(WindowRef::Primary),
+            ImguiOverlayCamera,
+        ))
+        .id();
+    app.world_mut().spawn((
+        Camera {
+            order: 500,
+            ..Default::default()
+        },
+        RenderTarget::Window(WindowRef::Primary),
+    ));
+    app.add_systems(ImguiPrimaryContextPass, draw_managed_texture);
+
+    app.update();
+
+    let extracted = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<ImguiExtractedRenderFrame>();
+    let targets = extracted.camera_targets();
+    assert_eq!(
+        targets.len(),
+        1,
+        "only one overlay camera should be selected for one render target"
+    );
+    assert_eq!(targets[0].camera, explicit_camera);
+    assert!(targets[0].explicit);
+    assert_eq!(
+        targets[0].target,
+        NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap())
+    );
+}
+
+#[test]
+fn render_extract_preserves_explicit_overlay_camera_viewport_for_render_pass() {
+    let _guard = imgui_context_guard();
+    let (mut app, _primary_window, _camera, _texture_id) = app_with_primary_window();
+    let overlay_camera = app
+        .world_mut()
+        .spawn((
+            Camera {
+                order: 50,
+                viewport: Some(Viewport {
+                    physical_position: UVec2::new(320, 0),
+                    physical_size: UVec2::new(640, 360),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            RenderTarget::Window(WindowRef::Primary),
+            ImguiOverlayCamera,
+        ))
+        .id();
+    app.add_systems(ImguiPrimaryContextPass, draw_managed_texture);
+
+    app.update();
+
+    let extracted = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<ImguiExtractedRenderFrame>();
+    let target = extracted
+        .camera_targets()
+        .iter()
+        .find(|target| target.camera == overlay_camera)
+        .expect("explicit overlay camera should be extracted");
+    assert_eq!(
+        target
+            .camera_viewport
+            .map(|viewport| { (viewport.physical_position, viewport.physical_size) }),
+        Some(([320, 0], [640, 360]))
+    );
+
+    let prepared = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<ImguiPreparedRenderFrame>();
+    let draw = prepared
+        .draws()
+        .iter()
+        .find(|draw| draw.camera == overlay_camera)
+        .expect("explicit overlay camera should receive prepared draw commands");
+    assert_eq!(
+        draw.camera_viewport
+            .map(|viewport| { (viewport.physical_position, viewport.physical_size) }),
+        Some(([320, 0], [640, 360]))
+    );
+    assert_eq!(draw.framebuffer_size, [1280, 720]);
 }
 
 #[test]
@@ -562,6 +667,16 @@ fn renderer_pipeline_resources_and_descriptors_are_installed() {
     });
 
     assert_eq!(descriptor.layout.len(), 2);
+    assert_eq!(pipeline.common_layout().entries.len(), 1);
+    assert_eq!(pipeline.texture_layout().entries.len(), 2);
+    assert!(
+        pipeline
+            .texture_layout()
+            .entries
+            .iter()
+            .any(is_filtering_sampler_binding),
+        "texture bind group layout must carry a sampler so registered Bevy images keep their GpuImage sampler"
+    );
     assert_eq!(descriptor.vertex.shader, IMGUI_SHADER_HANDLE);
     assert_eq!(
         descriptor.vertex.entry_point.as_deref(),
@@ -583,4 +698,11 @@ fn renderer_pipeline_resources_and_descriptors_are_installed() {
         .expect("Imgui pipeline should write one color target");
     assert_eq!(target.format, TextureFormat::Rgba8UnormSrgb);
     assert_eq!(target.blend, Some(BlendState::ALPHA_BLENDING));
+}
+
+fn is_filtering_sampler_binding(entry: &BindGroupLayoutEntry) -> bool {
+    matches!(
+        entry.ty,
+        BindingType::Sampler(SamplerBindingType::Filtering)
+    )
 }

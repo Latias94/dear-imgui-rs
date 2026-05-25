@@ -31,6 +31,15 @@ These gates are intended for a dedicated Bevy backend CI lane. The root workspac
 substitute for them, because this crate sits on a different Rust and Bevy release train than the
 rest of the workspace.
 
+For local release checks, prefer a clean or dedicated target directory for this lane:
+
+```bash
+export CARGO_TARGET_DIR=target/bevy-backend
+```
+
+This avoids stale artifacts from unrelated workspace builds making rustc or nextest discovery spend
+minutes scanning a polluted `target/debug/deps` directory before any Bevy backend test starts.
+
 The current backend shape is verified on `wasm32-unknown-unknown` for both the core and `render`
 feature sets. Mobile-specific targets are not split out yet; if Bevy's mobile support matrix needs a
 different gate, keep it as a separate follow-on instead of widening the current lane.
@@ -82,6 +91,7 @@ BEVY-060 through BEVY-100:
 - `ImguiFrameState`
 - `ImguiFrameOutput`
 - `render::ImguiExtractedRenderFrame`
+- `render::ImguiOverlayCamera`
 - `render::ImguiCameraTarget`
 - `render::ImguiPreparedRenderFrame`
 - `render::ImguiTextureBindGroups`
@@ -194,12 +204,14 @@ Bevy's render sub-app is available. The extraction system runs in `ExtractSchedu
 thread-safe `FrameSnapshot` from main-world `ImguiFrameOutput`, and stores it in render-world
 `render::ImguiExtractedRenderFrame`.
 
-The extracted frame also records active camera associations as `render::ImguiCameraTarget`, including
-the main-world camera entity, camera order, and normalized render target. Raw Dear ImGui draw-data
-pointers never cross the extract boundary; only the owned `FrameSnapshot` and its texture requests do.
-If multiple active cameras target the same Bevy render target, the backend uses the highest-order
-non-disabled camera for the ImGui overlay so the same immediate-mode frame is not drawn repeatedly
-onto one window or image.
+The extracted frame also records active camera associations as `render::ImguiCameraTarget`,
+including the main-world camera entity, camera order, normalized render target, and optional Bevy
+camera viewport. Raw Dear ImGui draw-data pointers never cross the extract boundary; only the owned
+`FrameSnapshot` and its texture requests do. Add `render::ImguiOverlayCamera` to the camera that
+should receive the overlay for a render target. If no active camera on a target has that marker, the
+backend falls back to the highest-order non-disabled camera so small applications keep working.
+When the selected camera has `Camera.viewport`, the renderer applies the same physical viewport and
+clips ImGui scissors to that region, so the overlay cannot draw outside the camera's Bevy viewport.
 
 The renderer consumes only the owned snapshot and prepared render data. It does not borrow raw
 Dear ImGui draw pointers across the Bevy main/render-world boundary and does not wrap
@@ -228,8 +240,9 @@ fn register_image(mut textures: ResMut<ImguiBevyTextures>, image: Handle<Image>)
 
 The returned `TextureId` can be passed to `ui.image(texture_id, size)`. Render-world code extracts
 the registry and resolves the underlying `Handle<Image>` through Bevy `RenderAssets<GpuImage>` when
-the GPU image is available. Missing images keep using the renderer fallback bind group until the
-asset is prepared by Bevy.
+the GPU image is available. Registered Bevy images use the prepared `GpuImage` texture view and
+sampler, so Bevy image sampler settings are preserved. Missing images keep using the renderer
+fallback bind group until the asset is prepared by Bevy.
 
 Editor-style render targets that are shown inside ImGui viewports can add
 `render::ImguiOverlayDisabled` to their Bevy camera to prevent the global ImGui overlay pass from
@@ -251,5 +264,11 @@ The input system reads Bevy messages and queues Dear ImGui IO events:
 - IME: committed text is queued as Dear ImGui input characters; preedit text is not injected.
 
 The backend does **not** consume or delete Bevy messages. Bevy gameplay/editor systems should use
-`ImguiInputCapture` or `Context::io().want_capture_*()` as policy hints after the Dear ImGui frame
-has had a chance to compute capture intent.
+`ImguiInputCapture` or the `imgui_wants_*` run-condition helpers as policy hints after the Dear
+ImGui frame has had a chance to compute capture intent.
+
+Current input/runtime boundaries:
+
+- pointer and keyboard capture are policy hints only;
+- file drop, gamepad navigation, and Bevy picking integration are not part of this backend yet;
+- wasm builds compile, but browser runtime IME/clipboard behavior still depends on the target host.
