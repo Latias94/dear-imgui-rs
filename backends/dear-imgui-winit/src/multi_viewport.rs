@@ -26,7 +26,9 @@ pub use self::event_loop::{
     EventLoopFrameGuard, clear_event_loop, set_event_loop, set_event_loop_for_frame,
 };
 pub use self::events::{handle_event_with_multi_viewport, route_event_to_viewports};
-use self::registry::{drop_viewport_data, is_winit_viewport_data, register_viewport_data};
+use self::registry::{
+    drop_viewport_data, is_winit_viewport_data, register_viewport_data, viewport_data_ref,
+};
 use self::viewport_data::{
     ViewportData, clear_main_viewport_data_for_current_context, init_main_viewport,
 };
@@ -85,4 +87,23 @@ pub fn shutdown_multi_viewport_support(ctx: &mut Context) {
 
         ctx.platform_io_mut().clear_platform_handlers();
     }
+}
+
+pub(crate) unsafe fn window_ptr_for_viewport(
+    ctx: *mut dear_imgui_rs::sys::ImGuiContext,
+    viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+) -> *const Window {
+    if viewport.is_null() {
+        return std::ptr::null();
+    }
+
+    let _context_guard = if ctx.is_null() {
+        None
+    } else {
+        Some(unsafe { CurrentContextGuard::bind(ctx) })
+    };
+
+    unsafe { viewport_data_ref(viewport) }
+        .map(|vd| vd.window as *const Window)
+        .unwrap_or(std::ptr::null())
 }

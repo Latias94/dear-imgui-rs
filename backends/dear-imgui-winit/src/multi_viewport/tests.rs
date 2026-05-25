@@ -99,3 +99,60 @@ fn shutdown_multi_viewport_support_targets_passed_context() {
     }
     drop(ctx_b);
 }
+
+#[test]
+fn window_ptr_for_viewport_targets_passed_context() {
+    let _guard = lock_context();
+
+    let ctx_a = Context::create();
+    let raw_a = ctx_a.as_raw();
+    let main_viewport_a = unsafe { dear_imgui_rs::sys::igGetMainViewport() };
+    let window_a = std::ptr::NonNull::<Window>::dangling().as_ptr();
+    let vd_a = unsafe {
+        let vd = Box::into_raw(Box::new(ViewportData::new()));
+        (*vd).window = window_a;
+        register_viewport_data(vd);
+        (*main_viewport_a).PlatformUserData = vd.cast();
+        vd
+    };
+
+    unsafe {
+        dear_imgui_rs::sys::igSetCurrentContext(std::ptr::null_mut());
+    }
+
+    let ctx_b = Context::create();
+    let raw_b = ctx_b.as_raw();
+
+    unsafe {
+        assert_eq!(
+            window_ptr_for_viewport(raw_a, main_viewport_a),
+            window_a as *const Window
+        );
+        assert_eq!(dear_imgui_rs::sys::igGetCurrentContext(), raw_b);
+
+        dear_imgui_rs::sys::igSetCurrentContext(raw_a);
+        (*main_viewport_a).PlatformUserData = std::ptr::null_mut();
+        drop_viewport_data(vd_a);
+    }
+    drop(ctx_a);
+    unsafe {
+        dear_imgui_rs::sys::igSetCurrentContext(raw_b);
+    }
+    drop(ctx_b);
+}
+
+#[test]
+fn window_ptr_for_viewport_ignores_foreign_platform_user_data() {
+    let _guard = lock_context();
+
+    let ctx = Context::create();
+    let raw = ctx.as_raw();
+    let main_viewport = unsafe { dear_imgui_rs::sys::igGetMainViewport() };
+    unsafe {
+        (*main_viewport).PlatformUserData = std::ptr::dangling_mut::<u8>().cast();
+
+        assert!(window_ptr_for_viewport(raw, main_viewport).is_null());
+
+        (*main_viewport).PlatformUserData = std::ptr::null_mut();
+    }
+}

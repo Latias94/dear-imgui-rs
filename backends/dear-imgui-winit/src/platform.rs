@@ -39,13 +39,14 @@ unsafe extern "C" fn imgui_winit_set_ime_data(
             return;
         }
 
-        // Retrieve the window pointer we stored in Platform_ImeUserData.
+        // Prefer the target viewport window when multi-viewport owns it, then fall back to the
+        // main-window pointer stored in Platform_ImeUserData.
         let pio = platform_io_for_ime_context(ctx);
         if pio.is_null() {
             return;
         }
 
-        let user_data = (*pio).Platform_ImeUserData as *const Window;
+        let user_data = ime_window_ptr_for_viewport(ctx, viewport, pio);
         if user_data.is_null() {
             return;
         }
@@ -89,6 +90,27 @@ fn is_winit_set_ime_data(callback: Option<SetImeDataCallback>) -> bool {
     callback.is_some_and(|callback| {
         std::ptr::fn_addr_eq(callback, imgui_winit_set_ime_data as SetImeDataCallback)
     })
+}
+
+unsafe fn ime_window_ptr_for_viewport(
+    _ctx: *mut dear_imgui_rs::sys::ImGuiContext,
+    _viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+    pio: *mut dear_imgui_rs::sys::ImGuiPlatformIO,
+) -> *const Window {
+    #[cfg(feature = "multi-viewport")]
+    {
+        let viewport_window =
+            unsafe { crate::multi_viewport::window_ptr_for_viewport(_ctx, _viewport) };
+        if !viewport_window.is_null() {
+            return viewport_window;
+        }
+    }
+
+    if pio.is_null() {
+        std::ptr::null()
+    } else {
+        unsafe { (*pio).Platform_ImeUserData as *const Window }
+    }
 }
 
 unsafe fn platform_io_for_ime_context(
@@ -666,6 +688,24 @@ mod tests {
             dear_imgui_rs::sys::igSetCurrentContext(raw_b);
         }
         drop(ctx_b);
+    }
+
+    #[test]
+    fn ime_window_ptr_falls_back_to_platform_ime_user_data() {
+        let _guard = lock_context();
+
+        let ctx = Context::create();
+        let raw = ctx.as_raw();
+        let marker = std::ptr::NonNull::<Window>::dangling().as_ptr() as *const Window;
+        unsafe {
+            let platform_io = dear_imgui_rs::sys::igGetPlatformIO_ContextPtr(raw);
+            (*platform_io).Platform_ImeUserData = marker.cast_mut().cast();
+
+            assert_eq!(
+                ime_window_ptr_for_viewport(raw, std::ptr::null_mut(), platform_io),
+                marker
+            );
+        }
     }
 
     #[test]
