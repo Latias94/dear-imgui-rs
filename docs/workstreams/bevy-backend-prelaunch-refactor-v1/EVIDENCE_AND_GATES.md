@@ -74,6 +74,33 @@ missing-gate findings remain. Residual risks are recorded in `HANDOFF.md` and th
 
 ## Evidence Log
 
+### 2026-05-25 - Publication Readiness Rerun
+
+Environment:
+
+- `rustc 1.95.0 (59807616e 2026-04-14)`
+- `cargo 1.95.0 (f2d3ce0bd 2026-03-21)`
+- `cargo-nextest 0.9.115 (b8e0d5dcd 2025-12-15)`
+- `CARGO_TARGET_DIR=target/bevy-backend-prelaunch`
+- `wasm32-unknown-unknown` target installed before wasm checks.
+- Commands were run serially to avoid cargo build-lock contention.
+
+Results:
+
+| Command | Result | Behavior proven |
+| --- | --- | --- |
+| `cargo nextest run -p dear-imgui-bevy` | PASS: 43 passed, 0 skipped | Base backend tests pass under the repository-pinned Rust 1.95 toolchain. |
+| `cargo nextest run -p dear-imgui-bevy --features render` | PASS: 78 passed, 2 skipped | Render, input, texture, gamma, and lifecycle tests pass with the render feature enabled. |
+| `cargo nextest run -p dear-imgui-bevy --features render,multi-viewport` | PASS: 101 passed, 2 skipped | Render plus multi-viewport tests pass, including secondary viewport/window and overlay-camera behavior. |
+| `cargo check -p dear-imgui-bevy --no-default-features` | PASS | Core backend compiles without default features. |
+| `cargo check -p dear-imgui-bevy --features render` | PASS | Native render feature compiles. |
+| `cargo check -p dear-imgui-bevy --target wasm32-unknown-unknown --no-default-features` | PASS | Wasm core backend compiles; existing `dear-imgui` clipboard dead-code warnings remain. |
+| `cargo check -p dear-imgui-bevy --target wasm32-unknown-unknown --features render` | PASS | Wasm render feature compiles; existing `dear-imgui` clipboard dead-code warnings remain. |
+| `cargo check -p dear-imgui-bevy --features render,multi-viewport,ecosystem --examples` | PASS | Bevy examples compile across render, multi-viewport, and ecosystem feature surfaces. |
+| `cargo clippy -p dear-imgui-bevy --all-targets --features render,multi-viewport,ecosystem --no-deps -- -D warnings` | PASS | Full Bevy backend target surface is clippy-clean; output contains only existing native binding build-script warnings. |
+| `cargo fmt --all --check` | PASS | Workspace formatting remains clean after the publication readiness rerun. |
+| `git diff --check` | PASS | No whitespace errors in the evidence update. |
+
 ### 2026-05-25 - Closeout Gate Run
 
 Environment:
