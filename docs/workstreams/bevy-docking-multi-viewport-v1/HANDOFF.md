@@ -39,8 +39,9 @@ wasm boundary.
   viewport windows. Secondary windows now feed Dear ImGui mouse viewport events, cursor/IME output
   is applied to the target viewport window, and Bevy window position/size/focus/DPI snapshots are
   exposed through PlatformIO getter callbacks. `viewport_input_feedback_enabled` is now true for
-  native requested `multi-viewport` builds. Bevy currently exposes no current minimized-window
-  state, so PlatformIO minimized feedback returns `false` and is documented as a limitation.
+  native requested `multi-viewport` builds. Later prelaunch work maps Bevy `WindowOccluded` events
+  into Dear ImGui minimized feedback for secondary viewport windows; Bevy still does not expose a
+  persistent minimized-window field on `Window`.
 - DMV-060 completed secondary viewport render routing. Core `FrameSnapshot` can now carry all
   platform viewport draw data, Bevy render extraction/preparation routes secondary viewport draws
   to the matching window target, and native `render,multi-viewport` requested configs now advertise
@@ -64,8 +65,9 @@ wasm boundary.
 ## Blockers / Constraints
 
 - No blocking findings remain for this lane.
-- Bevy `0.19.0-rc.2` does not expose current minimized-window state in `Window`; PlatformIO
-  minimized feedback currently returns `false`.
+- Bevy `0.19.0-rc.2` does not expose persistent minimized-window state in `Window`; current backend
+  code maps `WindowOccluded` events into PlatformIO minimized feedback and otherwise falls back to
+  the last observed value or `false`.
 - `wasm32-unknown-unknown` compiles for the normal core and `render` feature sets, but
   `render,multi-viewport` intentionally fails at the core compile-time unsupported-target gate.
 - Mobile multi-window support is outside this lane and needs a target-specific Bevy gate before it
@@ -74,5 +76,6 @@ wasm boundary.
 ## Next Recommended Action
 
 - Keep this lane closed unless a regression is found.
-- Open a new follow-on for minimized-window feedback if Bevy exposes the required state, wasm/mobile
-  platform support, or runtime screenshot/manual OS-window smoke automation.
+- Open a new follow-on only if Bevy exposes more precise persistent minimized-window state,
+  wasm/mobile platform support becomes a target, or runtime screenshot/manual OS-window smoke
+  automation is required.

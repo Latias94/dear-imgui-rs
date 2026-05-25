@@ -39,7 +39,10 @@ gates recorded in `EVIDENCE_AND_GATES.md` pass with
 
 - The prelaunch refactor and closeout docs landed in commit
   `654ac26 feat(bevy): finalize prelaunch backend refactor`.
-- Use the residual risks below as seeds for any new issue-audit or follow-up workstream.
+- Post-closeout issue audit is recorded in `ISSUE_AUDIT_2026-05-25.md`.
+- The audit covers all 17 repository issue objects fetched from GitHub; no Bevy-specific blocker or
+  missing Bevy workflow was found.
+- Use that audit and the residual risks below as seeds for any new follow-up workstream.
 
 ## Residual Risks
 

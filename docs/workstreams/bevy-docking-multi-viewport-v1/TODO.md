@@ -128,6 +128,7 @@ Last updated: 2026-05-23
   Handoff: DONE 2026-05-23. Lane closed. Native `render,multi-viewport` requested configs now ship
   the OS-window PlatformIO bridge, secondary window input/platform feedback, per-viewport render
   routing, product-facing example command, and README support matrix. Remaining limitations are
-  platform-specific follow-ons: Bevy `0.19.0-rc.2` has no observable minimized-window feedback,
+  platform-specific follow-ons: Bevy `0.19.0-rc.2` has no persistent minimized-window field,
   `wasm32-unknown-unknown` still rejects the `multi-viewport` feature at compile time, and mobile
-  multi-window support needs a separate target gate.
+  multi-window support needs a separate target gate. Later prelaunch work maps Bevy
+  `WindowOccluded` events into minimized feedback for secondary viewport windows.

@@ -67,8 +67,9 @@ experience.
 | Native, `render,multi-viewport` features without Bevy `RenderApp` | Matches config | Yes, when requested | Yes, when requested | No |
 | `wasm32-unknown-unknown` | Matches config | No | No | No |
 
-Bevy `0.19.0-rc.2` does not expose a current minimized-window state in `Window`; the PlatformIO
-minimized query currently returns `false` until Bevy provides observable minimized feedback.
+Bevy `0.19.0-rc.2` does not expose a persistent minimized-window field on `Window`; the backend
+maps `WindowOccluded` events into Dear ImGui minimized feedback for secondary viewport windows and
+otherwise preserves the last observed feedback, falling back to `false` when no feedback exists.
 
 This is separate from the existing multi-window camera/render-target routing, which can draw the
 same ImGui overlay to multiple Bevy window targets but does not create Dear ImGui platform windows.
@@ -270,5 +271,11 @@ ImGui frame has had a chance to compute capture intent.
 Current input/runtime boundaries:
 
 - pointer and keyboard capture are policy hints only;
+- clipboard is application-provided: the plugin preserves an existing
+  `Context::set_clipboard_backend` installation but does not install a native or browser clipboard
+  backend itself;
+- accessibility is not integrated: the backend does not generate Bevy `AccessibilityNode` or
+  AccessKit data for Dear ImGui widgets;
 - file drop, gamepad navigation, and Bevy picking integration are not part of this backend yet;
-- wasm builds compile, but browser runtime IME/clipboard behavior still depends on the target host.
+- wasm builds compile, but browser runtime IME and clipboard behavior still depends on the target
+  host.

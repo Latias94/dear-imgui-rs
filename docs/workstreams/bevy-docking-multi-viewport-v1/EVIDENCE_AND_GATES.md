@@ -170,8 +170,9 @@ Fresh verification is required before marking a task, Codex goal, or lane comple
     viewport is found.
   - `ImguiViewportBridge` now keeps ECS-owned window feedback snapshots for primary and secondary
     viewports and installs PlatformIO getter callbacks for window position, size, framebuffer scale,
-    DPI scale, focus, and minimized state. Bevy `0.19.0-rc.2` has no observable minimized-window
-    state, so minimized feedback returns `false`.
+    DPI scale, focus, and minimized state. At DMV-050 closeout, Bevy `0.19.0-rc.2` had no
+    persistent minimized-window field, so minimized feedback fell back to `false`; later prelaunch
+    work maps `WindowOccluded` events into minimized feedback for secondary viewport windows.
   - `ImguiBackendStatus::viewport_input_feedback_enabled` is true for native requested
     `multi-viewport` builds. `ConfigFlags::VIEWPORTS_ENABLE` and `multi_viewport_supported` remain
     false until DMV-060 proves secondary viewport render routing.
@@ -264,9 +265,10 @@ Fresh verification is required before marking a task, Codex goal, or lane comple
   - Verification:
     `git diff --check` - PASS.
   - Review: no blocking workstream-compliance or code-quality findings remain. Residual platform
-    risks are documented as follow-ons rather than blockers: minimized-window feedback is not
-    observable in Bevy `0.19.0-rc.2`, wasm rejects `multi-viewport` by design, and mobile
-    multi-window support needs a target-specific lane.
+    risks are documented as follow-ons rather than blockers: Bevy `0.19.0-rc.2` has no persistent
+    minimized-window field, wasm rejects `multi-viewport` by design, and mobile multi-window support
+    needs a target-specific lane. Later prelaunch work maps Bevy `WindowOccluded` events into
+    minimized feedback for secondary viewport windows.
 
 - 2026-05-24: Post-closeout detached Hierarchy regression probes.
   - Added `DEAR_IMGUI_BEVY_VIEWPORT_PROBE_DOCK_BACK=1` to the `editor_shell` probe. The probe now
