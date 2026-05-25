@@ -1614,16 +1614,11 @@ fn prepare_bevy_image_texture_bind_groups(
     pipeline: &ImguiRenderPipeline,
     texture_bind_groups: &mut ImguiTextureBindGroups,
 ) {
+    retain_extracted_bevy_image_bindings(extracted_bevy_textures, texture_bind_groups);
+
     let Some(gpu_images) = gpu_images else {
         return;
     };
-
-    let active_bindings = extracted_bevy_textures
-        .textures()
-        .iter()
-        .map(|(texture_id, _)| TextureBinding::Legacy(*texture_id))
-        .collect::<HashSet<_>>();
-    texture_bind_groups.retain_bevy_image_bindings(&active_bindings);
 
     for (texture_id, asset_id) in extracted_bevy_textures.textures() {
         let binding = TextureBinding::Legacy(*texture_id);
@@ -1642,6 +1637,18 @@ fn prepare_bevy_image_texture_bind_groups(
         };
         texture_bind_groups.insert_bevy_image(binding, bind_group);
     }
+}
+
+fn retain_extracted_bevy_image_bindings(
+    extracted_bevy_textures: &ImguiExtractedBevyTextures,
+    texture_bind_groups: &mut ImguiTextureBindGroups,
+) {
+    let active_bindings = extracted_bevy_textures
+        .textures()
+        .iter()
+        .map(|(texture_id, _)| TextureBinding::Legacy(*texture_id))
+        .collect::<HashSet<_>>();
+    texture_bind_groups.retain_bevy_image_bindings(&active_bindings);
 }
 
 fn create_bevy_image_texture_bind_group(
@@ -2583,6 +2590,28 @@ mod tests {
                 .bevy_image_bindings
                 .contains(&registered)
         );
+        assert!(
+            texture_bind_groups
+                .bevy_image_bindings
+                .contains(&still_active)
+        );
+    }
+
+    #[test]
+    fn extracted_bevy_image_binding_retention_does_not_require_gpu_images() {
+        let mut extracted = ImguiExtractedBevyTextures::default();
+        let mut texture_bind_groups = ImguiTextureBindGroups::default();
+        let stale = TextureBinding::Legacy(imgui::TextureId::new(42));
+        let still_active_id = imgui::TextureId::new(43);
+        let still_active = TextureBinding::Legacy(still_active_id);
+
+        texture_bind_groups.bevy_image_bindings.insert(stale);
+        texture_bind_groups.bevy_image_bindings.insert(still_active);
+        extracted.replace(vec![(still_active_id, AssetId::<Image>::default())]);
+
+        retain_extracted_bevy_image_bindings(&extracted, &mut texture_bind_groups);
+
+        assert!(!texture_bind_groups.bevy_image_bindings.contains(&stale));
         assert!(
             texture_bind_groups
                 .bevy_image_bindings
