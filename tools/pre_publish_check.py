@@ -44,7 +44,7 @@ DOC_CRATES = [
     (
         "dear-imgui-bevy",
         "backends/dear-imgui-bevy",
-        ["--features", "render,multi-viewport,ecosystem"],
+        ["--features", "render,multi-viewport"],
     ),
 ]
 
