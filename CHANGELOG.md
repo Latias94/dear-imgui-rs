@@ -7,23 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Documentation
-
-- Document the `dear-imgui-bevy` examples with clickable source links and run commands:
-  - [`simple`](https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/basic/simple.rs):
-    `cargo run -p dear-imgui-bevy --features render --example simple`
-  - [`app_integration`](https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/app/app_integration.rs):
-    `cargo run -p dear-imgui-bevy --features render --example app_integration`
-  - [`game_engine`](https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/game_engine/game_engine.rs):
-    `cargo run -p dear-imgui-bevy --features render --example game_engine`
-  - [`game_engine` with multi-viewport](https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/game_engine/game_engine.rs):
-    `cargo run -p dear-imgui-bevy --features render,multi-viewport --example game_engine`
-  - [`ecosystem`](https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/ecosystem/ecosystem.rs):
-    `cargo run -p dear-imgui-bevy --features render --example ecosystem`
-  - [`bevy_plot_controls`](https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/ecosystem/bevy_plot_controls.rs):
-    `cargo run -p dear-imgui-bevy --features render --example bevy_plot_controls`
-
-## [0.14.0] - 2026-05-24
+## [0.14.0] - 2026-05-26
 
 ### Added
 
