@@ -157,7 +157,7 @@ jobs:
             mesa-common-dev libgl1-mesa-dev cmake
 
       - name: Add wasm32 target
-        run: rustup target add wasm32-unknown-unknown
+        run: rustup target add --toolchain stable wasm32-unknown-unknown
 
       - name: Check formatting
         run: cargo +stable fmt --all --check
