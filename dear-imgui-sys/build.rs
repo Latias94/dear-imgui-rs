@@ -112,13 +112,11 @@ fn main() {
         return;
     }
 
-    if skip_cc {
-        if any_backend_shim_enabled() {
-            panic!(
-                "IMGUI_SYS_SKIP_CC is incompatible with backend-shim-* features. \
-                 Disable backend shims or allow native C++ compilation."
-            );
-        }
+    if skip_cc && any_backend_shim_enabled() {
+        panic!(
+            "IMGUI_SYS_SKIP_CC is incompatible with backend-shim-* features. \
+             Disable backend shims or allow native C++ compilation."
+        );
     }
 
     // Bindings: prefer the checked-in pregenerated bindings for normal builds. This keeps

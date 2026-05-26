@@ -282,6 +282,7 @@ fn imgui_delta_time(context: &imgui::Context, real_time: Option<&Time<Real>>) ->
         .max(f32::EPSILON)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn end_primary_frame_system(
     mut commands: Commands,
     mut imgui_context: NonSendMut<ImguiContext>,

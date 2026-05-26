@@ -8,7 +8,10 @@
 
 use bevy_app::App;
 use bevy_asset::{Assets, Handle, uuid_handle};
-use bevy_camera::{Camera, CompositingSpace, NormalizedRenderTarget, RenderTarget, Viewport};
+use bevy_camera::{
+    Camera, CameraOutputMode, ClearColor, ClearColorConfig, CompositingSpace,
+    NormalizedRenderTarget, RenderTarget, Viewport,
+};
 use bevy_core_pipeline::{
     Core2d, Core2dSystems, Core3d, Core3dSystems, tonemapping::tonemapping, upscaling::upscaling,
 };
@@ -25,18 +28,21 @@ use bevy_render::{
         BindGroup, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor, BindingResource,
         BindingType, BlendState, Buffer, BufferAddress, BufferBindingType, BufferDescriptor,
         BufferSize, BufferUsages, COPY_BUFFER_ALIGNMENT, CachedRenderPipelineId, ColorTargetState,
-        ColorWrites, Extent3d, FilterMode, FragmentState, IndexFormat, LoadOp, MipmapFilterMode,
-        MultisampleState, Operations, Origin3d, PipelineCache, PrimitiveState, PrimitiveTopology,
-        RawBufferVec, RenderPassColorAttachment, RenderPassDescriptor, RenderPipelineDescriptor,
-        Sampler, SamplerBindingType, SamplerDescriptor, ShaderStages, SpecializedRenderPipeline,
-        SpecializedRenderPipelines, StoreOp, TexelCopyBufferLayout, TexelCopyTextureInfo, Texture,
-        TextureAspect, TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType,
-        TextureUsages, TextureView, TextureViewDescriptor, TextureViewDimension, VertexAttribute,
-        VertexFormat, VertexState, VertexStepMode, WgpuFeatures,
+        ColorWrites, CommandEncoderDescriptor, Extent3d, FilterMode, FragmentState, IndexFormat,
+        LoadOp, MipmapFilterMode, MultisampleState, Operations, Origin3d, PipelineCache,
+        PrimitiveState, PrimitiveTopology, RawBufferVec, RenderPassColorAttachment,
+        RenderPassDescriptor, RenderPipelineDescriptor, Sampler, SamplerBindingType,
+        SamplerDescriptor, ShaderStages, SpecializedRenderPipeline, SpecializedRenderPipelines,
+        StoreOp, TexelCopyBufferLayout, TexelCopyTextureInfo, Texture, TextureAspect,
+        TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType, TextureUsages,
+        TextureView, TextureViewDescriptor, TextureViewDimension, VertexAttribute, VertexFormat,
+        VertexState, VertexStepMode, WgpuFeatures,
     },
-    renderer::{RenderContext, RenderDevice, RenderQueue, ViewQuery},
+    renderer::{
+        RenderContext, RenderDevice, RenderGraph, RenderGraphSystems, RenderQueue, ViewQuery,
+    },
     texture::GpuImage,
-    view::{ExtractedView, Msaa, ViewTarget},
+    view::{ExtractedView, ExtractedWindows, Msaa, ViewTarget},
 };
 use bevy_shader::Shader;
 use bevy_window::PrimaryWindow;
@@ -1102,6 +1108,10 @@ pub(crate) fn install_render_extraction(app: &mut App) -> bool {
             prepare_imgui_uniform_bind_groups.in_set(RenderSystems::PrepareBindGroups),
         )
         .add_systems(
+            RenderGraph,
+            ensure_presentable_window_outputs.in_set(RenderGraphSystems::Finish),
+        )
+        .add_systems(
             Core2d,
             render_imgui_overlay
                 .after(tonemapping)
@@ -2039,6 +2049,104 @@ fn render_imgui_overlay(
     }
 }
 
+/// Touches swapchain outputs immediately before Bevy presents them.
+///
+/// Vulkan validation requires a swapchain image to leave `UNDEFINED` before present. Bevy can still
+/// do an initial present or mark a view as needing present before a real output pass reaches the
+/// swapchain, so this final pass is intentionally attached to the root render graph `Finish` set.
+fn ensure_presentable_window_outputs(
+    windows: Res<ExtractedWindows>,
+    views: Query<(&ViewTarget, &ExtractedCamera)>,
+    clear_color: Res<ClearColor>,
+    render_device: Res<RenderDevice>,
+    render_queue: Res<RenderQueue>,
+) {
+    let mut encoder = None;
+
+    for window in windows.values() {
+        let mut view_needs_present = false;
+        let mut output_color = None;
+
+        for (view_target, camera) in &views {
+            if !camera_targets_window(camera, window.entity) {
+                continue;
+            }
+            view_needs_present |= view_target.needs_present();
+            output_color.get_or_insert_with(|| output_clear_color(Some(camera), &clear_color));
+        }
+
+        if !window.needs_initial_present && !view_needs_present {
+            continue;
+        }
+        let Some(swapchain_view) = window.swap_chain_texture_view.as_ref() else {
+            continue;
+        };
+
+        let encoder = encoder.get_or_insert_with(|| {
+            render_device.create_command_encoder(&CommandEncoderDescriptor {
+                label: Some("dear_imgui_bevy_presentable_output_encoder"),
+            })
+        });
+        let ops = if view_needs_present {
+            Operations {
+                load: LoadOp::Load,
+                store: StoreOp::Store,
+            }
+        } else {
+            let clear_color = output_color.flatten().unwrap_or(clear_color.0);
+            let clear_color: bevy_color::LinearRgba = clear_color.into();
+            Operations {
+                load: LoadOp::Clear(clear_color.into()),
+                store: StoreOp::Store,
+            }
+        };
+
+        let render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
+            label: Some("dear_imgui_bevy_clear_unwritten_output"),
+            color_attachments: &[Some(RenderPassColorAttachment {
+                view: swapchain_view,
+                depth_slice: None,
+                resolve_target: None,
+                ops,
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        drop(render_pass);
+    }
+
+    if let Some(encoder) = encoder {
+        render_queue.submit([encoder.finish()]);
+    }
+}
+
+fn camera_targets_window(camera: &ExtractedCamera, window: Entity) -> bool {
+    matches!(
+        camera.target,
+        Some(NormalizedRenderTarget::Window(target)) if target.entity() == window
+    )
+}
+
+fn output_clear_color(
+    camera: Option<&ExtractedCamera>,
+    clear_color: &ClearColor,
+) -> Option<bevy_color::Color> {
+    match camera.map(|camera| camera.output_mode) {
+        Some(CameraOutputMode::Skip) => None,
+        Some(CameraOutputMode::Write {
+            clear_color: ClearColorConfig::Custom(color),
+            ..
+        }) => Some(color),
+        Some(CameraOutputMode::Write {
+            clear_color: ClearColorConfig::Default | ClearColorConfig::None,
+            ..
+        })
+        | None => Some(clear_color.0),
+    }
+}
+
 fn prepare_snapshot_draw_data(
     snapshot: &imgui::render::FrameSnapshot,
     camera_targets: &[ImguiCameraTarget],
@@ -2328,10 +2436,7 @@ fn scissor_for_render_pass(
     draw: &ImguiPreparedDraw,
     render_target_size: Option<[u32; 2]>,
 ) -> Option<ImguiScissorRect> {
-    let viewport = match render_viewport_for_draw(draw) {
-        Some(viewport) => Some(viewport),
-        None => None,
-    };
+    let viewport = render_viewport_for_draw(draw);
     let scissor = match viewport {
         Some(viewport) => intersect_scissor_with_camera_viewport(draw.scissor, viewport)?,
         None => draw.scissor,
