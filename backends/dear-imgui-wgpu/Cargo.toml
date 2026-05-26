@@ -49,3 +49,6 @@ wasm-font-atlas-experimental = ["dear-imgui-rs/wasm-font-atlas-experimental"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { version = "0.6", optional = true }
+
+[target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
+sdl3-sys = { version = "0.6", features = ["build-from-source"], optional = true }
