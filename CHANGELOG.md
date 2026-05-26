@@ -11,22 +11,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Experimental Bevy-native backend support on Bevy `0.19.0-rc.2`, including docking,
-  render integration, texture interop, and native multi-viewport on supported targets.
-- A broader Bevy example surface for `simple`, `app_integration`, `game_engine`, `ecosystem`, and
-  `bevy_plot_controls` workflows.
+- Added experimental `dear-imgui-bevy` support for Bevy `0.19.0-rc.2`, including primary-window
+  overlays, docking, WGPU rendering, Bevy texture interop, and preview-grade native
+  multi-viewport support.
+- Added Bevy examples that cover a minimal overlay, plugin-style app integration, a docked
+  game-engine editor surface, and ecosystem demos for ImPlot, ImNodes, and ImGuizmo.
 
-### Changed
+### Bevy Examples
 
-- The workspace moved to the `0.14` release train and refreshed public crate metadata.
-- `dear-imgui-bevy` no longer exposes ImPlot, ImNodes, or ImGuizmo as backend feature flags.
-  Extension crates compose through the shared Bevy-managed `Ui` frame and should be added as
-  normal application or example dependencies.
+| Example | Source | Run command |
+| --- | --- | --- |
+| `simple` | [`examples/basic/simple.rs`](https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/basic/simple.rs) | `cargo run -p dear-imgui-bevy --features render --example simple` |
+| `app_integration` | [`examples/app/app_integration.rs`](https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/app/app_integration.rs) | `cargo run -p dear-imgui-bevy --features render --example app_integration` |
+| `game_engine` | [`examples/game_engine/game_engine.rs`](https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/game_engine/game_engine.rs) | `cargo run -p dear-imgui-bevy --features render --example game_engine` |
+| `game_engine` with multi-viewport | [`examples/game_engine/game_engine.rs`](https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/game_engine/game_engine.rs) | `cargo run -p dear-imgui-bevy --features render,multi-viewport --example game_engine` |
+| `ecosystem` | [`examples/ecosystem/ecosystem.rs`](https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/ecosystem/ecosystem.rs) | `cargo run -p dear-imgui-bevy --features render --example ecosystem` |
+| `bevy_plot_controls` | [`examples/ecosystem/bevy_plot_controls.rs`](https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/ecosystem/bevy_plot_controls.rs) | `cargo run -p dear-imgui-bevy --features render --example bevy_plot_controls` |
+
+### Screenshots
+
+<p>
+  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/bevy-game-engine-multi-viewport.png" alt="dear-imgui-bevy game engine multi-viewport example" width="100%"/>
+</p>
+<p>
+  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/bevy-app-integration.png" alt="dear-imgui-bevy app integration example" width="49%"/>
+  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/bevy-ecosystem.png" alt="dear-imgui-bevy ecosystem example" width="49%"/>
+</p>
 
 ### Fixed
 
-- `threaded_snapshot_minimal` now constructs `TextureFeedback` through the public constructors,
-  keeping the example compatible with renderer-owned backend user data feedback.
+- `dear-imgui-bevy` now ensures window swapchain images are touched before present, avoiding Vulkan
+  validation errors when Bevy performs an initial or warmup present.
 - Existing renderer backend multi-viewport paths are safer when multiple backends or contexts are
   involved: WGPU and Ash now ignore foreign `RendererUserData` pointers, and Glow clears
   renderer-owned multi-viewport state when a renderer is destroyed.
