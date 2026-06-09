@@ -334,8 +334,36 @@ jobs:
         shell: pwsh
         run: |
           vcpkg install freetype:x64-windows-static-md sdl3:x64-windows-static-md
-          $root = if ($env:VCPKG_INSTALLATION_ROOT) { $env:VCPKG_INSTALLATION_ROOT } elseif ($env:VCPKG_ROOT) { $env:VCPKG_ROOT } else { '' }
-          if (-not $root) { throw 'VCPKG root not found in environment.' }
+
+          $vcpkgExe = (Get-Command vcpkg -ErrorAction Stop).Source
+          $candidates = @(
+            $env:VCPKG_ROOT,
+            $env:VCPKG_INSTALLATION_ROOT,
+            (Split-Path -Parent $vcpkgExe)
+          ) | Where-Object { $_ } | Select-Object -Unique
+          $root = $candidates | Where-Object { Test-Path (Join-Path $_ '.vcpkg-root') } | Select-Object -First 1
+          if (-not $root) {
+            Write-Host "vcpkg.exe: $vcpkgExe"
+            Write-Host "VCPKG_ROOT: $env:VCPKG_ROOT"
+            Write-Host "VCPKG_INSTALLATION_ROOT: $env:VCPKG_INSTALLATION_ROOT"
+            throw 'VCPKG root not found in environment or next to vcpkg.exe.'
+          }
+
+          # vcpkg-rs 0.2.x still reads installed\vcpkg\updates. Modern vcpkg
+          # installs may create installed\vcpkg\status without creating the
+          # updates directory, which otherwise makes vcpkg-rs fail before it
+          # can inspect the installed packages.
+          $statusDir = Join-Path $root 'installed\vcpkg'
+          $updatesDir = Join-Path $statusDir 'updates'
+          New-Item -ItemType Directory -Force -Path $updatesDir | Out-Null
+          $statusFile = Join-Path $statusDir 'status'
+          $hasUpdates = @(Get-ChildItem -Path $updatesDir -File -ErrorAction SilentlyContinue).Count -gt 0
+          if (-not (Test-Path $statusFile) -and -not $hasUpdates) {
+            throw "vcpkg status data not found under $statusDir"
+          }
+
+          Write-Host "Using VCPKG_ROOT=$root"
+          Write-Host "Using VCPKGRS_TRIPLET=x64-windows-static-md"
           echo "VCPKG_ROOT=$root" >> $env:GITHUB_ENV
           echo "VCPKGRS_TRIPLET=x64-windows-static-md" >> $env:GITHUB_ENV
           echo "PKG_CONFIG=$env:RUNNER_TEMP\missing-pkg-config.exe" >> $env:GITHUB_ENV
