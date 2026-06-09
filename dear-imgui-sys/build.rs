@@ -287,7 +287,7 @@ fn generate_bindings_native(cfg: &BuildConfig) {
     }
     #[cfg(feature = "freetype")]
     {
-        let freetype = find_freetype_dependency(cfg, false);
+        let freetype = find_freetype_dependency(false);
         // Mirror CMake behavior: when building with FreeType, also keep stb_truetype enabled
         // so wrappers referencing stb helpers stay valid.
         bindings = bindings
@@ -315,13 +315,8 @@ fn generate_bindings_native(cfg: &BuildConfig) {
 }
 
 #[cfg(feature = "freetype")]
-fn find_freetype_dependency(
-    cfg: &BuildConfig,
-    emit_cargo_metadata: bool,
-) -> build_support::NativeDependency {
+fn find_freetype_dependency(emit_cargo_metadata: bool) -> build_support::NativeDependency {
     let dependency = build_support::find_freetype(build_support::PackageSearchConfig {
-        target_os: &cfg.target_os,
-        target_env: &cfg.target_env,
         use_pkg_config: cfg!(feature = "pkg-config"),
         use_vcpkg: cfg!(feature = "vcpkg"),
         emit_cargo_metadata,
@@ -444,7 +439,7 @@ fn build_with_cc_cfg(cfg: &BuildConfig) {
     }
     #[cfg(feature = "freetype")]
     {
-        let freetype = find_freetype_dependency(cfg, true);
+        let freetype = find_freetype_dependency(true);
         // Enable both FreeType and stb_truetype backends.
         // ImGui 1.92 gates stb_truetype helpers (e.g. ImFontAtlasGetFontLoaderForStbTruetype)
         // behind IMGUI_ENABLE_STB_TRUETYPE, while FreeType is selected when IMGUI_ENABLE_FREETYPE is defined.
@@ -687,7 +682,6 @@ fn add_sdl3_include_path(build: &mut cc::Build, cfg: &BuildConfig) -> Result<(),
     let found = build_support::find_sdl3_include_paths(build_support::Sdl3SearchConfig {
         out_dir: &cfg.out_dir,
         target_os: &cfg.target_os,
-        target_env: &cfg.target_env,
         use_pkg_config: cfg!(feature = "pkg-config"),
         use_vcpkg: cfg!(feature = "vcpkg"),
     })
@@ -881,7 +875,7 @@ fn try_link_prebuilt(dir: &Path, cfg: &BuildConfig) -> bool {
     {
         // A freetype-enabled dear_imgui static prebuilt still references the
         // FreeType library. Emit the same native link metadata as source builds.
-        let _ = find_freetype_dependency(cfg, true);
+        let _ = find_freetype_dependency(true);
     }
     true
 }

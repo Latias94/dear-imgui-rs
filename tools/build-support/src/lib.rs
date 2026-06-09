@@ -413,9 +413,7 @@ pub struct NativeDependency {
 
 #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
 #[derive(Clone, Copy, Debug)]
-pub struct PackageSearchConfig<'a> {
-    pub target_os: &'a str,
-    pub target_env: &'a str,
+pub struct PackageSearchConfig {
     pub use_pkg_config: bool,
     pub use_vcpkg: bool,
     pub emit_cargo_metadata: bool,
@@ -426,17 +424,18 @@ pub struct PackageSearchConfig<'a> {
 pub struct Sdl3SearchConfig<'a> {
     pub out_dir: &'a Path,
     pub target_os: &'a str,
-    pub target_env: &'a str,
     pub use_pkg_config: bool,
     pub use_vcpkg: bool,
 }
 
 #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
-pub fn find_freetype(config: PackageSearchConfig<'_>) -> Result<NativeDependency, String> {
+pub fn find_freetype(config: PackageSearchConfig) -> Result<NativeDependency, String> {
     let mut attempts = Vec::new();
     emit_pkg_config_rerun_vars("FREETYPE2");
     emit_vcpkg_rerun_vars("FREETYPE");
-    let use_vcpkg = should_use_vcpkg(config.use_vcpkg, config.target_os, config.target_env);
+    let target_os = cargo_target_os();
+    let target_env = cargo_target_env();
+    let use_vcpkg = should_use_vcpkg(config.use_vcpkg, &target_os, &target_env);
 
     if config.use_pkg_config {
         #[cfg(feature = "pkg-config")]
@@ -483,12 +482,7 @@ pub fn find_freetype(config: PackageSearchConfig<'_>) -> Result<NativeDependency
             attempts.push("vcpkg support was not compiled into build-support".to_string());
         }
     } else {
-        push_vcpkg_skip_attempt(
-            &mut attempts,
-            config.use_vcpkg,
-            config.target_os,
-            config.target_env,
-        );
+        push_vcpkg_skip_attempt(&mut attempts, config.use_vcpkg, &target_os, &target_env);
     }
 
     let install_hint = if use_vcpkg {
@@ -509,7 +503,8 @@ pub fn find_sdl3_include_paths(config: Sdl3SearchConfig<'_>) -> Result<NativeDep
     let mut attempts = Vec::new();
     emit_pkg_config_rerun_vars("SDL3");
     emit_vcpkg_rerun_vars("SDL3");
-    let use_vcpkg = should_use_vcpkg(config.use_vcpkg, config.target_os, config.target_env);
+    let target_env = cargo_target_env();
+    let use_vcpkg = should_use_vcpkg(config.use_vcpkg, config.target_os, &target_env);
 
     if let Ok(dir) = env::var("SDL3_INCLUDE_DIR") {
         let root = PathBuf::from(&dir);
@@ -609,7 +604,7 @@ pub fn find_sdl3_include_paths(config: Sdl3SearchConfig<'_>) -> Result<NativeDep
             &mut attempts,
             config.use_vcpkg,
             config.target_os,
-            config.target_env,
+            &target_env,
         );
     }
 
@@ -640,6 +635,16 @@ fn include_root_has_header(root: &Path, header: &str) -> bool {
 #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
 fn should_use_vcpkg(use_vcpkg: bool, target_os: &str, target_env: &str) -> bool {
     use_vcpkg && target_os == "windows" && target_env == "msvc"
+}
+
+#[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+fn cargo_target_os() -> String {
+    env::var("CARGO_CFG_TARGET_OS").unwrap_or_default()
+}
+
+#[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+fn cargo_target_env() -> String {
+    env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default()
 }
 
 #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
@@ -770,6 +775,9 @@ mod tests {
         "DEP_SDL3_OUT_DIR",
     ];
 
+    #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+    const TARGET_ENV_VARS: [&str; 2] = ["CARGO_CFG_TARGET_OS", "CARGO_CFG_TARGET_ENV"];
+
     fn unique_tmp_dir(suffix: &str) -> PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -798,8 +806,28 @@ mod tests {
     #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
     impl EnvSnapshot {
         fn clear_sdl3_vars() -> Self {
-            let saved = SDL3_ENV_VARS
-                .into_iter()
+            Self::save_and_clear(&SDL3_ENV_VARS)
+        }
+
+        fn clear_target_vars() -> Self {
+            Self::save_and_clear(&TARGET_ENV_VARS)
+        }
+
+        fn clear_sdl3_and_target_vars() -> Self {
+            Self::save_and_clear(&[
+                "SDL3_INCLUDE_DIR",
+                "DEP_SDL3_INCLUDE_PATH",
+                "DEP_SDL3_INCLUDE_DIR",
+                "DEP_SDL3_OUT_DIR",
+                "CARGO_CFG_TARGET_OS",
+                "CARGO_CFG_TARGET_ENV",
+            ])
+        }
+
+        fn save_and_clear(vars: &[&'static str]) -> Self {
+            let saved = vars
+                .iter()
+                .copied()
                 .map(|var| (var, env::var_os(var)))
                 .collect::<Vec<_>>();
 
@@ -835,6 +863,19 @@ mod tests {
     }
 
     #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+    fn set_env_str(name: &str, value: &str) {
+        unsafe {
+            env::set_var(name, value);
+        }
+    }
+
+    #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+    fn set_cargo_target(os: &str, target_env: &str) {
+        set_env_str("CARGO_CFG_TARGET_OS", os);
+        set_env_str("CARGO_CFG_TARGET_ENV", target_env);
+    }
+
+    #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
     fn write_sdl3_header(include_root: &Path) {
         let header_dir = include_root.join("SDL3");
         std::fs::create_dir_all(&header_dir).unwrap();
@@ -846,7 +887,6 @@ mod tests {
         find_sdl3_include_paths(Sdl3SearchConfig {
             out_dir,
             target_os: "unknown-test-os",
-            target_env: "unknown-test-env",
             use_pkg_config: false,
             use_vcpkg: false,
         })
@@ -856,9 +896,11 @@ mod tests {
     #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
     #[test]
     fn freetype_skips_vcpkg_on_non_windows_msvc_targets() {
+        let _lock = lock_sdl3_env();
+        let _env = EnvSnapshot::clear_target_vars();
+        set_cargo_target("linux", "gnu");
+
         let err = find_freetype(PackageSearchConfig {
-            target_os: "linux",
-            target_env: "gnu",
             use_pkg_config: false,
             use_vcpkg: true,
             emit_cargo_metadata: false,
@@ -1035,7 +1077,6 @@ mod tests {
         let err = find_sdl3_include_paths(Sdl3SearchConfig {
             out_dir: &root.join("target/debug/build/current/out"),
             target_os: "unknown-test-os",
-            target_env: "unknown-test-env",
             use_pkg_config: false,
             use_vcpkg: false,
         })
@@ -1051,13 +1092,13 @@ mod tests {
     #[test]
     fn sdl3_skips_vcpkg_on_non_windows_msvc_targets() {
         let _lock = lock_sdl3_env();
-        let _env = EnvSnapshot::clear_sdl3_vars();
+        let _env = EnvSnapshot::clear_sdl3_and_target_vars();
+        set_cargo_target("linux", "gnu");
         let root = unique_tmp_dir("sdl3-linux-vcpkg-skip");
 
         let err = find_sdl3_include_paths(Sdl3SearchConfig {
             out_dir: &root.join("target/debug/build/current/out"),
             target_os: "linux",
-            target_env: "gnu",
             use_pkg_config: false,
             use_vcpkg: true,
         })
