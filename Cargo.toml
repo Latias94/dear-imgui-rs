@@ -70,6 +70,7 @@ image = "0.25"
 bindgen = "0.72"
 cc = "1.2"
 pkg-config = "0.3"
+vcpkg = "0.2.15"
 xshell = "0.2"
 
 # Error handling

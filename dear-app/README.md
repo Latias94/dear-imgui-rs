@@ -17,10 +17,10 @@ Convenient Dear ImGui application runner for `dear-imgui-rs`, bundling Winit + W
 
 ```toml
 [dependencies]
-dear-app = "0.14.0"
+dear-app = "0.14.1"
 
 # Optional add-ons (enable any subset)
-dear-app = { version = "0.14.0", features = ["implot", "imnodes", "implot3d"] }
+dear-app = { version = "0.14.1", features = ["implot", "imnodes", "implot3d"] }
 ```
 
 Minimal usage:

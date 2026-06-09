@@ -13,6 +13,9 @@ downloading/extracting prebuilt static libraries.
 - Compose a `manifest.txt` describing the prebuilt contents (version, target, link type, CRT, features)
 - Download `.tar.gz` archives (HTTP(S), optional feature `download`) and extract to a cache
 - Utility helpers to build candidate GitHub release URLs
+- Optional native dependency discovery helpers behind `pkg-config` / `vcpkg`
+  features. These are used by build scripts for FreeType and SDL3 header
+  discovery.
 
 ## API Sketch
 

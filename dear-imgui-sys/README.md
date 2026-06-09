@@ -57,6 +57,8 @@ Bindgen is only needed when regenerating bindings.
 **Requirements by platform:**
 
 - **Windows**: Visual Studio Build Tools or Visual Studio with C++ support
+  - Optional `freetype` source builds can use vcpkg:
+    `vcpkg install freetype:x64-windows-static-md`
 - **Linux**: `build-essential`, `pkg-config`
   ```bash
   sudo apt-get install build-essential pkg-config
@@ -65,6 +67,13 @@ Bindgen is only needed when regenerating bindings.
   ```bash
   xcode-select --install
   ```
+
+When the `freetype` feature is enabled, `dear-imgui-sys` must find real
+FreeType development files. The build script tries `pkg-config freetype2` first
+and vcpkg's `freetype` port next. On Windows/MSVC, install the vcpkg triplet
+that matches vcpkg-rs' selection, for example `x64-windows-static-md` for the
+default Rust CRT mode, or set `VCPKGRS_TRIPLET` explicitly. If you use a dynamic
+vcpkg triplet such as `x64-windows`, also set `VCPKGRS_DYNAMIC=1`.
 
 ### 3. Development Mode
 
@@ -131,10 +140,10 @@ This is a low-level sys crate providing unsafe FFI bindings. Most users should u
 
 ```toml
 [dependencies]
-dear-imgui-sys = "0.14.0"
+dear-imgui-sys = "0.14.1"
 
 # Enable features as needed
-dear-imgui-sys = { version = "0.14.0", features = ["freetype", "wasm"] }
+dear-imgui-sys = { version = "0.14.1", features = ["freetype", "wasm"] }
 ```
 
 ### Direct FFI Usage (Advanced)
@@ -167,7 +176,7 @@ can expose optional backend shim modules behind `backend-shim-*` features:
 
 ```toml
 [dependencies]
-dear-imgui-sys = { version = "0.14.0", features = ["backend-shim-opengl3"] }
+dear-imgui-sys = { version = "0.14.1", features = ["backend-shim-opengl3"] }
 ```
 
 These features expose modules such as:
@@ -290,8 +299,8 @@ There are two first-class Android directions.
 
    ```toml
    [dependencies]
-   dear-imgui-rs = "0.14.0"
-   dear-imgui-sys = { version = "0.14.0", features = ["backend-shim-android", "backend-shim-opengl3"] }
+   dear-imgui-rs = "0.14.1"
+   dear-imgui-sys = { version = "0.14.1", features = ["backend-shim-android", "backend-shim-opengl3"] }
    ```
 
    Use `dear-imgui-rs` for the safe core (`Context`, IO, frame lifecycle,
@@ -321,10 +330,11 @@ There are two first-class Android directions.
 
    Depend on `dear-imgui-sdl3` for the SDL3 backend wrapper, but keep SDL3
    acquisition, NDK setup, and Android packaging owned by the application. The
-   application may either provide SDL3 headers via `SDL3_INCLUDE_DIR` or add a
-   direct `sdl3` dependency with `features = ["build-from-source"]` so Cargo
-   feature unification makes `sdl3-sys` export `DEP_SDL3_OUT_DIR`. When using
-   the build-from-source route, the application still needs to provide the
+   application may provide SDL3 headers via `SDL3_INCLUDE_DIR`, rely on
+   pkg-config/vcpkg discovery, or add a direct `sdl3` dependency with
+   `features = ["build-from-source"]` so Cargo feature unification makes
+   `sdl3-sys` export `DEP_SDL3_OUT_DIR`. When using the build-from-source route,
+   the application still needs to provide the
    Android ABI/toolchain contract expected by SDL3's CMake build
    (`ANDROID_ABI` / `CMAKE_ANDROID_ARCH_ABI`, toolchain file, generator, etc.),
    typically via `cargo-ndk`, Gradle+CMake, or an equivalent app-owned build

@@ -36,27 +36,27 @@ Typical use cases:
 Platform-only usage (SDL3 + WGPU/Glow, no official OpenGL3 renderer):
 
 ```toml
-dear-imgui-sdl3 = { version = "0.14.0", default-features = false }
+dear-imgui-sdl3 = { version = "0.14.1", default-features = false }
 ```
 
 Enable the official OpenGL3 renderer:
 
 ```toml
-dear-imgui-sdl3 = { version = "0.14.0", features = ["opengl3-renderer"] }
+dear-imgui-sdl3 = { version = "0.14.1", features = ["opengl3-renderer"] }
 ```
 
 Enable the official SDLRenderer3 renderer:
 
 ```toml
-dear-imgui-sdl3 = { version = "0.14.0", features = ["sdlrenderer3-renderer"] }
+dear-imgui-sdl3 = { version = "0.14.1", features = ["sdlrenderer3-renderer"] }
 ```
 
 ## Compatibility
 
 | Item          | Version  |
 |---------------|----------|
-| Crate         | 0.14.0   |
-| dear-imgui-rs | 0.14.0   |
+| Crate         | 0.14.1   |
+| dear-imgui-rs | 0.14.1   |
 | SDL3 crate    | 0.18.4   |
 | sdl3-sys      | 0.6      |
 
@@ -189,14 +189,17 @@ Build behavior is aligned with `Cargo.toml`:
   - The `sdl3` dependency is configured with `features = ["build-from-source"]`.
   - This means SDL3 is downloaded and built via CMake and does **not** require
     a pre-installed system SDL3 library.
+  - The build script can also discover SDL3 headers from `SDL3_INCLUDE_DIR`,
+    pkg-config, or vcpkg. Linking remains owned by `sdl3` / `sdl3-sys`.
   - You still need a working C toolchain (compiler, linker, CMake).
 
 - **macOS**
-  - The crate expects a system SDL3 install (for example via Homebrew):
+  - The crate expects a discoverable SDL3 install (for example via Homebrew):
     - `brew install sdl3`
   - SDL3 headers are typically found under:
     - `/opt/homebrew/include/SDL3/SDL.h` (Apple Silicon)
     - `/usr/local/include/SDL3/SDL.h` (Intel / custom setups)
+  - pkg-config and vcpkg are also supported when they provide SDL3 metadata.
   - Linking parameters are handled by `sdl3-sys` / `sdl3`; this crate only
     needs the headers to build the C++ backend sources.
 
@@ -231,13 +234,22 @@ Build behavior is aligned with `Cargo.toml`:
 
 ### Header Search Order and `SDL3_INCLUDE_DIR`
 
-For cases where a system SDL3 is used, `build.rs` locates the headers in the
-following order:
+`build.rs` locates SDL3 headers in the following order:
 
 1. `SDL3_INCLUDE_DIR` environment variable (highest priority).
-2. `pkg-config sdl3` (if available).
-3. A small set of common default paths (e.g. `/opt/homebrew/include`,
+2. `DEP_SDL3_INCLUDE_PATH` / `DEP_SDL3_INCLUDE_DIR` from an upstream SDL3 build
+   script, when present.
+3. `DEP_SDL3_OUT_DIR/include` from `sdl3-sys` build-from-source.
+4. Cargo's target `build/sdl3-sys-*/out/include` cache, used as a fallback when
+   Cargo metadata is not directly available to the current build script.
+5. `pkg-config sdl3` with Cargo link metadata disabled.
+6. vcpkg `sdl3` with Cargo link metadata disabled.
+7. A small set of common default paths (e.g. `/opt/homebrew/include`,
    `/usr/local/include`, `/opt/local/include`).
+
+Only header include paths are consumed from pkg-config/vcpkg here. Link flags
+and SDL3 runtime selection remain the responsibility of `sdl3` / `sdl3-sys` or
+the final application.
 
 **1. Explicit `SDL3_INCLUDE_DIR`**
 
@@ -268,7 +280,16 @@ This is the preferred Android route when your application already owns the SDL3
 integration (Gradle/NDK/Prefab/custom packaging) and just needs
 `dear-imgui-sdl3` to compile the official Dear ImGui SDL3 backend sources.
 
-**2. `pkg-config sdl3`**
+**2. `sdl3-sys` build metadata**
+
+When the final dependency graph enables `sdl3/build-from-source`, `sdl3-sys`
+builds SDL3 from source and exports header locations through Cargo metadata.
+This crate reuses those headers automatically.
+
+This is especially useful when the application wants Cargo to drive the SDL3
+build instead of relying on a system install.
+
+**3. `pkg-config sdl3`**
 
 If `SDL3_INCLUDE_DIR` is not set, the build script tries:
 
@@ -280,20 +301,23 @@ On success, the reported `include_paths` are added to the compiler flags. This
 is the preferred route for most Linux distributions and pkg-config-enabled
 macOS setups.
 
-**3. Fallback paths**
+**4. vcpkg `sdl3`**
 
-If both the environment variable and pkg-config checks fail, `build.rs` tries
-a few common include roots (such as Homebrew / MacPorts locations) and looks
-for `SDL3/SDL.h` there.
+If pkg-config is unavailable, the build script tries vcpkg's `sdl3` port. On
+Windows/MSVC, install the triplet that matches vcpkg-rs' selection, for example:
 
-**4. `sdl3/build-from-source` feature unification**
+```powershell
+vcpkg install sdl3:x64-windows-static-md
+```
 
-If the final dependency graph enables `sdl3/build-from-source`, `sdl3-sys`
-builds SDL3 from source and exports `DEP_SDL3_OUT_DIR`. This crate will then
-reuse `DEP_SDL3_OUT_DIR/include` automatically.
+If you use a dynamic vcpkg triplet such as `x64-windows`, set
+`VCPKGRS_DYNAMIC=1` and make the SDL3 DLLs available to the final executable.
 
-This is especially useful when the application wants Cargo to drive the SDL3
-build instead of relying on a system install.
+**5. Fallback paths**
+
+If the explicit environment, Cargo metadata, pkg-config, and vcpkg checks fail,
+`build.rs` tries a few common include roots (such as Homebrew / MacPorts
+locations) and looks for `SDL3/SDL.h` there.
 
 ### When Headers Cannot Be Found
 
@@ -301,14 +325,16 @@ If the build script cannot locate SDL3 headers, it will panic with a message
 similar to:
 
 > dear-imgui-sdl3: could not find SDL3 headers. \
-> Install SDL3 development files (e.g. `brew install sdl3`) \
-> or set SDL3_INCLUDE_DIR to the SDL3 include path.
+> Install SDL3 development files through pkg-config/vcpkg, set \
+> SDL3_INCLUDE_DIR to the SDL3 include path, or make the final \
+> dependency graph enable `sdl3/build-from-source`.
 
 To fix this:
 
 1. Install SDL3 development packages and verify `pkg-config sdl3` works, **or**
 2. Set `SDL3_INCLUDE_DIR` to the correct include root, **or**
-3. Enable `sdl3/build-from-source` in the final dependency graph so `sdl3-sys`
+3. Install vcpkg `sdl3` with a triplet that matches your Rust target, **or**
+4. Enable `sdl3/build-from-source` in the final dependency graph so `sdl3-sys`
    exports SDL3 headers via `DEP_SDL3_OUT_DIR`.
 
 ## Android Integration Notes
@@ -329,8 +355,8 @@ Example:
 
 ```toml
 [dependencies]
-dear-imgui-sdl3 = { version = "0.14.0", features = ["opengl3-renderer"] }
-sdl3 = { version = "0.17", features = ["build-from-source"] }
+dear-imgui-sdl3 = { version = "0.14.1", features = ["opengl3-renderer"] }
+sdl3 = { version = "0.18", features = ["build-from-source"] }
 ```
 
 On Android, that route usually also requires the standard SDL/NDK build

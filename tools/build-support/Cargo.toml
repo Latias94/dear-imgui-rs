@@ -1,6 +1,6 @@
 [package]
 name = "dear-imgui-build-support"
-version = "0.14.0"
+version = "0.14.1"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -18,6 +18,8 @@ path = "src/lib.rs"
 ureq = { version = "3.3", default-features = false, features = ["rustls"], optional = true }
 flate2 = { workspace = true, optional = true }
 tar = { workspace = true, optional = true }
+pkg-config = { workspace = true, optional = true }
+vcpkg = { workspace = true, optional = true }
 
 [features]
 default = []
@@ -25,4 +27,10 @@ default = []
 download = ["dep:ureq", "archive"]
 # Enable `.tar.gz` extraction support.
 archive = ["dep:flate2", "dep:tar"]
+# Enable pkg-config-backed native dependency discovery.
+pkg-config = ["dep:pkg-config"]
+# Enable vcpkg-backed native dependency discovery.
+vcpkg = ["dep:vcpkg"]
+# Enable native dependency discovery helpers for build scripts.
+native-deps = ["pkg-config", "vcpkg"]
 

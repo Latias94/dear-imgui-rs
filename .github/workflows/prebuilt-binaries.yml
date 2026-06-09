@@ -108,16 +108,18 @@ jobs:
           vcpkgGitCommitId: 9a98f93671f984351377044210854900bfd73171
           runVcpkgInstall: false
 
-      - name: Install FreeType + pkgconf via vcpkg (Windows)
+      - name: Install FreeType via vcpkg (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          vcpkg install freetype:x64-windows pkgconf:x64-windows
+          $triplet = if ('${{ matrix.crt }}' -eq 'mt') { 'x64-windows-static' } else { 'x64-windows-static-md' }
+          vcpkg install "freetype:$triplet"
           $root = if ($env:VCPKG_INSTALLATION_ROOT) { $env:VCPKG_INSTALLATION_ROOT } elseif ($env:VCPKG_ROOT) { $env:VCPKG_ROOT } else { '' }
           if (-not $root) { throw 'VCPKG root not found in environment.' }
-          echo "PKG_CONFIG_PATH=$root\installed\x64-windows\lib\pkgconfig" >> $env:GITHUB_ENV
-          echo "PATH=$root\installed\x64-windows\tools\pkgconf;$env:PATH" >> $env:GITHUB_ENV
-          echo "PKG_CONFIG=$root\installed\x64-windows\tools\pkgconf\pkgconf.exe" >> $env:GITHUB_ENV
+          echo "VCPKG_ROOT=$root" >> $env:GITHUB_ENV
+          echo "VCPKGRS_TRIPLET=$triplet" >> $env:GITHUB_ENV
+          echo "PKG_CONFIG=$env:RUNNER_TEMP\missing-pkg-config.exe" >> $env:GITHUB_ENV
+          echo "PKG_CONFIG_PATH=" >> $env:GITHUB_ENV
 
       - name: Install FreeType (macOS)
         if: runner.os == 'macOS'

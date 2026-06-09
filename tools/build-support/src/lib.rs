@@ -403,6 +403,300 @@ pub fn prebuilt_cache_root_from_env_or_target(
         .unwrap_or_else(|_| manifest_dir.parent().unwrap().join("target"));
     target_dir.join(folder)
 }
+
+#[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativeDependency {
+    pub include_paths: Vec<PathBuf>,
+    pub source: String,
+}
+
+#[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+#[derive(Clone, Copy, Debug)]
+pub struct PackageSearchConfig {
+    pub use_pkg_config: bool,
+    pub use_vcpkg: bool,
+    pub emit_cargo_metadata: bool,
+}
+
+#[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+#[derive(Clone, Copy, Debug)]
+pub struct Sdl3SearchConfig<'a> {
+    pub out_dir: &'a Path,
+    pub target_os: &'a str,
+    pub use_pkg_config: bool,
+    pub use_vcpkg: bool,
+}
+
+#[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+pub fn find_freetype(config: PackageSearchConfig) -> Result<NativeDependency, String> {
+    let mut attempts = Vec::new();
+    emit_pkg_config_rerun_vars("FREETYPE2");
+    emit_vcpkg_rerun_vars("FREETYPE");
+
+    if config.use_pkg_config {
+        #[cfg(feature = "pkg-config")]
+        {
+            let mut pkg = pkg_config::Config::new();
+            pkg.cargo_metadata(config.emit_cargo_metadata);
+            match pkg.probe("freetype2") {
+                Ok(lib) => {
+                    return Ok(NativeDependency {
+                        include_paths: lib.include_paths,
+                        source: "pkg-config (freetype2)".to_string(),
+                    });
+                }
+                Err(err) => attempts.push(format!("pkg-config freetype2: {err}")),
+            }
+        }
+        #[cfg(not(feature = "pkg-config"))]
+        {
+            attempts.push("pkg-config support was not compiled into build-support".to_string());
+        }
+    } else {
+        attempts.push("pkg-config feature disabled".to_string());
+    }
+
+    if config.use_vcpkg {
+        #[cfg(feature = "vcpkg")]
+        {
+            let mut vcpkg_config = vcpkg::Config::new();
+            vcpkg_config
+                .cargo_metadata(config.emit_cargo_metadata)
+                .copy_dlls(config.emit_cargo_metadata);
+            match vcpkg_config.find_package("freetype") {
+                Ok(lib) => {
+                    return Ok(NativeDependency {
+                        include_paths: lib.include_paths,
+                        source: "vcpkg (freetype)".to_string(),
+                    });
+                }
+                Err(err) => attempts.push(format!("vcpkg freetype: {err}")),
+            }
+        }
+        #[cfg(not(feature = "vcpkg"))]
+        {
+            attempts.push("vcpkg support was not compiled into build-support".to_string());
+        }
+    } else {
+        attempts.push("vcpkg feature disabled".to_string());
+    }
+
+    Err(format!(
+        "could not find FreeType. Tried {}. Install FreeType development files \
+         with pkg-config metadata, or install the vcpkg `freetype` port and set \
+         VCPKG_ROOT/VCPKGRS_DYNAMIC as required by vcpkg.",
+        attempts.join("; ")
+    ))
+}
+
+#[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+pub fn find_sdl3_include_paths(config: Sdl3SearchConfig<'_>) -> Result<NativeDependency, String> {
+    let mut attempts = Vec::new();
+    emit_pkg_config_rerun_vars("SDL3");
+    emit_vcpkg_rerun_vars("SDL3");
+
+    if let Ok(dir) = env::var("SDL3_INCLUDE_DIR") {
+        let root = PathBuf::from(&dir);
+        if include_root_has_header(&root, "SDL3/SDL.h") {
+            return Ok(NativeDependency {
+                include_paths: vec![root],
+                source: format!("SDL3_INCLUDE_DIR={dir}"),
+            });
+        }
+        return Err(format!(
+            "SDL3_INCLUDE_DIR is set to `{dir}`, but `{}` was not found under it",
+            PathBuf::from(&dir).join("SDL3/SDL.h").display()
+        ));
+    }
+
+    for var in ["DEP_SDL3_INCLUDE_PATH", "DEP_SDL3_INCLUDE_DIR"] {
+        if let Ok(dir) = env::var(var) {
+            let root = PathBuf::from(&dir);
+            if include_root_has_header(&root, "SDL3/SDL.h") {
+                return Ok(NativeDependency {
+                    include_paths: vec![root],
+                    source: format!("{var}={dir}"),
+                });
+            }
+            attempts.push(format!(
+                "{var}={dir}, but {} was not found",
+                PathBuf::from(&dir).join("SDL3/SDL.h").display()
+            ));
+        }
+    }
+
+    if let Ok(out_dir) = env::var("DEP_SDL3_OUT_DIR") {
+        let include_root = PathBuf::from(&out_dir).join("include");
+        if include_root_has_header(&include_root, "SDL3/SDL.h") {
+            return Ok(NativeDependency {
+                include_paths: vec![include_root],
+                source: format!("sdl3-sys OUT_DIR={out_dir}"),
+            });
+        }
+        attempts.push(format!(
+            "DEP_SDL3_OUT_DIR={out_dir}, but {} was not found",
+            include_root.join("SDL3/SDL.h").display()
+        ));
+    }
+
+    if let Some(include_root) = find_sdl3_cargo_target_include(config.out_dir) {
+        return Ok(NativeDependency {
+            include_paths: vec![include_root.clone()],
+            source: format!("Cargo target dir={}", include_root.display()),
+        });
+    }
+
+    if config.use_pkg_config {
+        #[cfg(feature = "pkg-config")]
+        {
+            let mut pkg = pkg_config::Config::new();
+            pkg.cargo_metadata(false).print_system_libs(false);
+            match pkg.probe("sdl3") {
+                Ok(lib) => {
+                    return Ok(NativeDependency {
+                        include_paths: lib.include_paths,
+                        source: "pkg-config (sdl3)".to_string(),
+                    });
+                }
+                Err(err) => attempts.push(format!("pkg-config sdl3: {err}")),
+            }
+        }
+        #[cfg(not(feature = "pkg-config"))]
+        {
+            attempts.push("pkg-config support was not compiled into build-support".to_string());
+        }
+    } else {
+        attempts.push("pkg-config feature disabled".to_string());
+    }
+
+    if config.use_vcpkg {
+        #[cfg(feature = "vcpkg")]
+        {
+            let mut vcpkg_config = vcpkg::Config::new();
+            vcpkg_config.cargo_metadata(false).copy_dlls(false);
+            match vcpkg_config.find_package("sdl3") {
+                Ok(lib) => {
+                    return Ok(NativeDependency {
+                        include_paths: lib.include_paths,
+                        source: "vcpkg (sdl3)".to_string(),
+                    });
+                }
+                Err(err) => attempts.push(format!("vcpkg sdl3: {err}")),
+            }
+        }
+        #[cfg(not(feature = "vcpkg"))]
+        {
+            attempts.push("vcpkg support was not compiled into build-support".to_string());
+        }
+    } else {
+        attempts.push("vcpkg feature disabled".to_string());
+    }
+
+    for candidate in known_sdl3_include_roots(config.target_os) {
+        if include_root_has_header(&candidate, "SDL3/SDL.h") {
+            return Ok(NativeDependency {
+                include_paths: vec![candidate.clone()],
+                source: format!("known include path {}", candidate.display()),
+            });
+        }
+        attempts.push(format!(
+            "known include path {} did not contain SDL3/SDL.h",
+            candidate.display()
+        ));
+    }
+
+    Err(format!(
+        "could not find SDL3 headers. Tried {}.",
+        attempts.join("; ")
+    ))
+}
+
+#[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+fn include_root_has_header(root: &Path, header: &str) -> bool {
+    root.join(header).exists()
+}
+
+#[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+fn known_sdl3_include_roots(target_os: &str) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if matches!(target_os, "macos" | "ios") {
+        roots.extend([
+            PathBuf::from("/opt/homebrew/include"),
+            PathBuf::from("/usr/local/include"),
+            PathBuf::from("/opt/local/include"),
+        ]);
+    } else if matches!(target_os, "linux" | "freebsd" | "openbsd" | "netbsd") {
+        roots.extend([
+            PathBuf::from("/usr/include"),
+            PathBuf::from("/usr/local/include"),
+            PathBuf::from("/opt/local/include"),
+        ]);
+    }
+    roots
+}
+
+#[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+fn find_sdl3_cargo_target_include(out_dir: &Path) -> Option<PathBuf> {
+    let mut cargo_build_dir = out_dir.to_path_buf();
+    while cargo_build_dir
+        .file_name()
+        .is_some_and(|name| name != "build")
+    {
+        if !cargo_build_dir.pop() {
+            return None;
+        }
+    }
+
+    if !cargo_build_dir
+        .file_name()
+        .is_some_and(|name| name == "build")
+    {
+        return None;
+    }
+
+    let entries = std::fs::read_dir(&cargo_build_dir).ok()?;
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        if !file_name.to_string_lossy().starts_with("sdl3-sys-") {
+            continue;
+        }
+
+        let include_root = entry.path().join("out/include");
+        if include_root_has_header(&include_root, "SDL3/SDL.h") {
+            return Some(include_root);
+        }
+    }
+
+    None
+}
+
+#[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+fn emit_pkg_config_rerun_vars(package_env_stem: &str) {
+    for var in [
+        "PKG_CONFIG",
+        "PKG_CONFIG_PATH",
+        "PKG_CONFIG_LIBDIR",
+        "PKG_CONFIG_SYSROOT_DIR",
+    ] {
+        println!("cargo:rerun-if-env-changed={var}");
+    }
+    println!("cargo:rerun-if-env-changed={package_env_stem}_NO_PKG_CONFIG");
+}
+
+#[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+fn emit_vcpkg_rerun_vars(port_env_stem: &str) {
+    for var in [
+        "VCPKG_ROOT",
+        "VCPKGRS_TRIPLET",
+        "VCPKGRS_DYNAMIC",
+        "VCPKGRS_DISABLE",
+    ] {
+        println!("cargo:rerun-if-env-changed={var}");
+    }
+    println!("cargo:rerun-if-env-changed=VCPKGRS_NO_{port_env_stem}");
+}
+
 pub const DEFAULT_GITHUB_OWNER: &str = "Latias94";
 pub const DEFAULT_GITHUB_REPO: &str = "dear-imgui";
 

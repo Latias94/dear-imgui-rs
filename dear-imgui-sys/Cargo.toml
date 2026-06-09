@@ -1,6 +1,6 @@
 [package]
 name = "dear-imgui-sys"
-version = "0.14.0"
+version = "0.14.1"
 edition.workspace = true
 description = "Low-level FFI bindings to Dear ImGui v1.92.8 (docking branch) via cimgui (C API)"
 license.workspace = true
@@ -48,7 +48,6 @@ glam = { workspace = true, optional = true }
 [build-dependencies]
 bindgen = { workspace = true, optional = true }
 cc.workspace = true
-pkg-config = { workspace = true, optional = true }
 build-support = { package = "dear-imgui-build-support", version = "0.14", path = "../tools/build-support" }
 
 [target.'cfg(any(target_os = "linux", target_os = "windows"))'.build-dependencies]
@@ -71,7 +70,9 @@ bindgen = ["dep:bindgen"]
 # Enable Dear ImGui test engine hooks (requires linking dear-imgui-test-engine-sys)
 test-engine = []
 # Enable freetype font rasterizer
-freetype = ["pkg-config"]
+freetype = ["pkg-config", "vcpkg"]
+pkg-config = ["build-support/pkg-config"]
+vcpkg = ["build-support/vcpkg"]
 # Enable for WASM targets
 wasm = []
 package-bin = ["dep:flate2", "dep:tar", "dep:build-support"]
@@ -81,5 +82,5 @@ glam = ["dep:glam"]
 backend-shim-android = []
 backend-shim-dx11 = []
 backend-shim-opengl3 = []
-backend-shim-sdlrenderer3 = ["pkg-config", "dep:sdl3-sys"]
+backend-shim-sdlrenderer3 = ["pkg-config", "vcpkg", "dep:sdl3-sys"]
 backend-shim-win32 = []

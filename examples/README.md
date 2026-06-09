@@ -176,9 +176,11 @@ Tip: On Windows/macOS, CWD may differ when launching from an IDE. Prefer absolut
 
 - Enable at build time:
   - `cargo run --features freetype --bin style_and_fonts`
-- Requires system FreeType + pkg-config:
-  - Windows: MSYS2 (`pacman -S mingw-w64-ucrt-x86_64-freetype pkgconf`) or vcpkg.
-  - Linux/macOS: install `freetype` and `pkg-config` via your package manager.
+- Requires discoverable FreeType development files:
+  - `pkg-config freetype2` is tried first.
+  - vcpkg `freetype` is tried next, which is usually the simplest MSVC route on Windows.
+  - With vcpkg dynamic triplets such as `x64-windows`, set `VCPKGRS_DYNAMIC=1`; otherwise use the vcpkg-rs default/static triplet that matches your Rust target.
+- If `freetype` is enabled and FreeType cannot be found, the build fails fast.
 - With `freetype` enabled, `style_and_fonts` can load OTF/CFF and color emoji fonts (e.g. `NotoColorEmoji.ttf`).
 
 ## Example ideas (next up)

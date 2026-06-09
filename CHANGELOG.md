@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-06-09
+
+### Added
+
+- Add shared native dependency discovery helpers for build scripts, with
+  pkg-config and vcpkg backends for FreeType and SDL3 header lookup.
+- Add Windows CI coverage for vcpkg-only native dependency discovery.
+
+### Fixed
+
+- `dear-imgui-sys/freetype` now fails fast when FreeType cannot be found instead
+  of silently compiling without the FreeType rasterizer. Fixes #30, thanks @spindlymist.
+- `dear-imgui-sys` and `dear-imgui-sdl3` now fall back to vcpkg when pkg-config
+  cannot provide FreeType or SDL3 header metadata.
+
 ## [0.14.0] - 2026-05-26
 
 ### Added

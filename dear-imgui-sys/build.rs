@@ -286,7 +286,8 @@ fn generate_bindings_native(cfg: &BuildConfig) {
         bindings = bindings.clang_arg("-DIMGUI_ENABLE_TEST_ENGINE");
     }
     #[cfg(feature = "freetype")]
-    if let Ok(freetype) = pkg_config::probe_library("freetype2") {
+    {
+        let freetype = find_freetype_dependency(false);
         // Mirror CMake behavior: when building with FreeType, also keep stb_truetype enabled
         // so wrappers referencing stb helpers stay valid.
         bindings = bindings
@@ -311,6 +312,21 @@ fn generate_bindings_native(cfg: &BuildConfig) {
         .write_to_file(&out)
         .expect("Couldn't write bindings!");
     sanitize_bindings_file(&out);
+}
+
+#[cfg(feature = "freetype")]
+fn find_freetype_dependency(emit_cargo_metadata: bool) -> build_support::NativeDependency {
+    let dependency = build_support::find_freetype(build_support::PackageSearchConfig {
+        use_pkg_config: cfg!(feature = "pkg-config"),
+        use_vcpkg: cfg!(feature = "vcpkg"),
+        emit_cargo_metadata,
+    })
+    .unwrap_or_else(|message| panic!("dear-imgui-sys: {message}"));
+    println!(
+        "cargo:warning=dear-imgui-sys: using FreeType from {}",
+        dependency.source
+    );
+    dependency
 }
 
 fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
@@ -422,7 +438,8 @@ fn build_with_cc_cfg(cfg: &BuildConfig) {
         build.file(cfg.manifest_dir.join("src/imgui_test_engine_hooks.cpp"));
     }
     #[cfg(feature = "freetype")]
-    if let Ok(freetype) = pkg_config::probe_library("freetype2") {
+    {
+        let freetype = find_freetype_dependency(true);
         // Enable both FreeType and stb_truetype backends.
         // ImGui 1.92 gates stb_truetype helpers (e.g. ImFontAtlasGetFontLoaderForStbTruetype)
         // behind IMGUI_ENABLE_STB_TRUETYPE, while FreeType is selected when IMGUI_ENABLE_FREETYPE is defined.
@@ -618,7 +635,8 @@ fn build_backend_shims(cfg: &BuildConfig) {
     if cfg!(feature = "backend-shim-opengl3") {
         build_backend_shim_opengl3(cfg);
     }
-    if cfg!(feature = "backend-shim-sdlrenderer3") {
+    #[cfg(feature = "backend-shim-sdlrenderer3")]
+    {
         build_backend_shim_sdlrenderer3(cfg);
     }
     if cfg.is_windows() && cfg!(feature = "backend-shim-win32") {
@@ -659,99 +677,43 @@ fn build_backend_shim_opengl3(cfg: &BuildConfig) {
     }
 }
 
+#[cfg(feature = "backend-shim-sdlrenderer3")]
 fn add_sdl3_include_path(build: &mut cc::Build, cfg: &BuildConfig) -> Result<(), String> {
-    if let Ok(dir) = env::var("SDL3_INCLUDE_DIR") {
-        build.include(&dir);
-        println!("cargo:warning=dear-imgui-sys: using SDL3 headers from SDL3_INCLUDE_DIR={dir}");
-        return Ok(());
-    }
+    let found = build_support::find_sdl3_include_paths(build_support::Sdl3SearchConfig {
+        out_dir: &cfg.out_dir,
+        target_os: &cfg.target_os,
+        use_pkg_config: cfg!(feature = "pkg-config"),
+        use_vcpkg: cfg!(feature = "vcpkg"),
+    })
+    .map_err(|message| {
+        let platform_hint = if cfg.target_os == "android" {
+            " Android application / NDK / CMake setup still belongs to the consuming application."
+        } else if cfg.target_os == "ios" {
+            " If your app links an SDL3.xcframework from Xcode, framework packaging, signing, and the host app entry point still belong to the consuming application."
+        } else {
+            ""
+        };
+        format!(
+            "dear-imgui-sys: could not find SDL3 headers required for \
+             backend-shim-sdlrenderer3. {message} Set SDL3_INCLUDE_DIR to an \
+             include root containing SDL3/SDL.h, install SDL3 development files \
+             through pkg-config/vcpkg, or make the final dependency graph enable \
+             `sdl3/build-from-source` so sdl3-sys can expose headers via \
+             DEP_SDL3_OUT_DIR.{platform_hint}"
+        )
+    })?;
 
-    #[cfg(feature = "pkg-config")]
-    if let Ok(lib) = pkg_config::Config::new()
-        .print_system_libs(false)
-        .probe("sdl3")
-    {
-        for include_path in lib.include_paths {
-            build.include(&include_path);
-        }
-        println!("cargo:warning=dear-imgui-sys: using SDL3 headers from pkg-config (sdl3)");
-        return Ok(());
+    for include_path in found.include_paths {
+        build.include(&include_path);
     }
-
-    for candidate in [
-        "/opt/homebrew/include",
-        "/usr/local/include",
-        "/opt/local/include",
-    ] {
-        let header = PathBuf::from(candidate).join("SDL3/SDL.h");
-        if header.exists() {
-            build.include(candidate);
-            println!("cargo:warning=dear-imgui-sys: using SDL3 headers from {candidate}");
-            return Ok(());
-        }
-    }
-
-    if let Ok(out_dir) = env::var("DEP_SDL3_OUT_DIR") {
-        let include_root = PathBuf::from(out_dir).join("include");
-        let header = include_root.join("SDL3/SDL.h");
-        if header.exists() {
-            build.include(&include_root);
-            println!(
-                "cargo:warning=dear-imgui-sys: using SDL3 headers from sdl3-sys OUT_DIR={}",
-                include_root.display()
-            );
-            return Ok(());
-        }
-    }
-
-    let mut cargo_build_dir = cfg.out_dir.clone();
-    while cargo_build_dir
-        .file_name()
-        .is_some_and(|name| name != "build")
-    {
-        if !cargo_build_dir.pop() {
-            break;
-        }
-    }
-    if cargo_build_dir
-        .file_name()
-        .is_some_and(|name| name == "build")
-        && let Ok(entries) = std::fs::read_dir(&cargo_build_dir)
-    {
-        for entry in entries.flatten() {
-            let file_name = entry.file_name();
-            if !file_name.to_string_lossy().starts_with("sdl3-sys-") {
-                continue;
-            }
-
-            let include_root = entry.path().join("out/include");
-            let header = include_root.join("SDL3/SDL.h");
-            if header.exists() {
-                build.include(&include_root);
-                println!(
-                    "cargo:warning=dear-imgui-sys: using SDL3 headers from Cargo target dir={}",
-                    include_root.display()
-                );
-                return Ok(());
-            }
-        }
-    }
-
-    if cfg.target_os == "android" {
-        return Err("dear-imgui-sys: could not find SDL3 headers required for \
-             backend-shim-sdlrenderer3 on Android. Set SDL3_INCLUDE_DIR to an \
-             include root containing SDL3/SDL.h, or provide SDL3 headers/libs \
-             as part of the consuming application's Android build setup."
-            .to_string());
-    }
-
-    Err("dear-imgui-sys: could not find SDL3 headers required for \
-         backend-shim-sdlrenderer3. Install SDL3 development files, set \
-         SDL3_INCLUDE_DIR to an include root containing SDL3/SDL.h, or use a \
-         build where sdl3-sys exposes headers under Cargo's target/build cache."
-        .to_string())
+    println!(
+        "cargo:warning=dear-imgui-sys: using SDL3 headers from {}",
+        found.source
+    );
+    Ok(())
 }
 
+#[cfg(feature = "backend-shim-sdlrenderer3")]
 fn build_backend_shim_sdlrenderer3(cfg: &BuildConfig) {
     let imgui_src = cfg.imgui_src();
     let shim_root = cfg.manifest_dir.join("backend-shims");
@@ -909,6 +871,12 @@ fn try_link_prebuilt(dir: &Path, target_env: &str) -> bool {
     }
     println!("cargo:rustc-link-search=native={}", dir.display());
     println!("cargo:rustc-link-lib=static=dear_imgui");
+    #[cfg(feature = "freetype")]
+    {
+        // A freetype-enabled dear_imgui static prebuilt still references the
+        // FreeType library. Emit the same native link metadata as source builds.
+        let _ = find_freetype_dependency(true);
+    }
     true
 }
 

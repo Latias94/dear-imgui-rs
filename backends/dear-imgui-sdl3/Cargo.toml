@@ -1,6 +1,6 @@
 [package]
 name = "dear-imgui-sdl3"
-version = "0.14.0"
+version = "0.14.1"
 edition.workspace = true
 description = "SDL3 platform backend with optional OpenGL3 renderer for dear-imgui-rs"
 license.workspace = true
@@ -40,7 +40,7 @@ sdl3 = { version = "0.18" }
 
 [build-dependencies]
 cc.workspace = true
-pkg-config.workspace = true
+build-support = { package = "dear-imgui-build-support", version = "0.14", path = "../../tools/build-support", features = ["pkg-config", "vcpkg"] }
 
 [features]
 default = []

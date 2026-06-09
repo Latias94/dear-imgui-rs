@@ -296,6 +296,84 @@ jobs:
           grep -F 'regenerating bindings requires the `bindgen` feature' regen-without-bindgen.log
           grep -F -- '--features bindgen' regen-without-bindgen.log
 
+  windows-vcpkg-native-deps:
+    name: Windows vcpkg native dependency discovery
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Init required nested submodules (selective)
+        shell: bash
+        run: bash tools/ci/update_submodules.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: "false"
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: 9a98f93671f984351377044210854900bfd73171
+          runVcpkgInstall: false
+
+      - name: Install native deps through vcpkg
+        shell: pwsh
+        run: |
+          vcpkg install freetype:x64-windows-static-md sdl3:x64-windows-static-md
+          $root = if ($env:VCPKG_INSTALLATION_ROOT) { $env:VCPKG_INSTALLATION_ROOT } elseif ($env:VCPKG_ROOT) { $env:VCPKG_ROOT } else { '' }
+          if (-not $root) { throw 'VCPKG root not found in environment.' }
+          echo "VCPKG_ROOT=$root" >> $env:GITHUB_ENV
+          echo "VCPKGRS_TRIPLET=x64-windows-static-md" >> $env:GITHUB_ENV
+          echo "PKG_CONFIG=$env:RUNNER_TEMP\missing-pkg-config.exe" >> $env:GITHUB_ENV
+          echo "PKG_CONFIG_PATH=" >> $env:GITHUB_ENV
+
+      - name: Check dear-imgui-sys FreeType via vcpkg fallback
+        run: cargo check -p dear-imgui-sys --no-default-features --features freetype
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+
+      - name: Check SDL3 header discovery via vcpkg fallback
+        shell: pwsh
+        run: |
+          $smoke = Join-Path $env:RUNNER_TEMP 'dear-imgui-native-deps-smoke'
+          New-Item -ItemType Directory -Force -Path (Join-Path $smoke 'src') | Out-Null
+          $workspace = '${{ github.workspace }}'.Replace('\', '/')
+          @"
+          [package]
+          name = "dear-imgui-native-deps-smoke"
+          version = "0.0.0"
+          edition = "2024"
+
+          [build-dependencies]
+          build-support = { package = "dear-imgui-build-support", path = "$workspace/tools/build-support", features = ["vcpkg"] }
+          "@ | Set-Content -Path (Join-Path $smoke 'Cargo.toml')
+          @'
+          fn main() {
+              let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
+              let found = build_support::find_sdl3_include_paths(build_support::Sdl3SearchConfig {
+                  out_dir: &out_dir,
+                  target_os: "windows",
+                  use_pkg_config: false,
+                  use_vcpkg: true,
+              })
+              .expect("SDL3 headers should be discoverable through vcpkg");
+              assert!(
+                  !found.include_paths.is_empty(),
+                  "vcpkg SDL3 discovery returned no include paths"
+              );
+          }
+          '@ | Set-Content -Path (Join-Path $smoke 'build.rs')
+          'fn main() {}' | Set-Content -Path (Join-Path $smoke 'src\main.rs')
+          $manifest = Join-Path $smoke 'Cargo.toml'
+          cargo check --manifest-path $manifest
+
   windows-gnu:
     name: Windows GNU link check
     runs-on: windows-latest
