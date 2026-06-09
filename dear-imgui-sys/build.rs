@@ -287,7 +287,7 @@ fn generate_bindings_native(cfg: &BuildConfig) {
     }
     #[cfg(feature = "freetype")]
     {
-        let freetype = find_freetype_dependency(false);
+        let freetype = find_freetype_dependency(cfg, false);
         // Mirror CMake behavior: when building with FreeType, also keep stb_truetype enabled
         // so wrappers referencing stb helpers stay valid.
         bindings = bindings
@@ -315,8 +315,13 @@ fn generate_bindings_native(cfg: &BuildConfig) {
 }
 
 #[cfg(feature = "freetype")]
-fn find_freetype_dependency(emit_cargo_metadata: bool) -> build_support::NativeDependency {
+fn find_freetype_dependency(
+    cfg: &BuildConfig,
+    emit_cargo_metadata: bool,
+) -> build_support::NativeDependency {
     let dependency = build_support::find_freetype(build_support::PackageSearchConfig {
+        target_os: &cfg.target_os,
+        target_env: &cfg.target_env,
         use_pkg_config: cfg!(feature = "pkg-config"),
         use_vcpkg: cfg!(feature = "vcpkg"),
         emit_cargo_metadata,
@@ -334,7 +339,7 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
     if cfg.target_arch != "wasm32" {
         if let Some(lib_dir) = env::var_os("IMGUI_SYS_LIB_DIR") {
             let lib_dir = PathBuf::from(lib_dir);
-            if try_link_prebuilt(&lib_dir, &cfg.target_env) {
+            if try_link_prebuilt(&lib_dir, cfg) {
                 println!(
                     "cargo:warning=Using prebuilt dear_imgui from {}",
                     lib_dir.display()
@@ -353,7 +358,7 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
             } else {
                 let cache_root = prebuilt_cache_root(cfg);
                 if let Ok(lib_dir) = try_download_prebuilt(&cache_root, &url, &cfg.target_env)
-                    && try_link_prebuilt(&lib_dir, &cfg.target_env)
+                    && try_link_prebuilt(&lib_dir, cfg)
                 {
                     println!(
                         "cargo:warning=Downloaded and using prebuilt dear_imgui from {}",
@@ -388,7 +393,7 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
                 source, owner, repo
             );
             if let Some(lib_dir) = try_download_prebuilt_from_release(cfg)
-                && try_link_prebuilt(&lib_dir, &cfg.target_env)
+                && try_link_prebuilt(&lib_dir, cfg)
             {
                 println!(
                     "cargo:warning=Downloaded and using prebuilt dear_imgui from release at {}",
@@ -403,7 +408,7 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
                 .join("third-party")
                 .join("prebuilt")
                 .join(&cfg.target_triple);
-            if try_link_prebuilt(&repo_prebuilt, &cfg.target_env) {
+            if try_link_prebuilt(&repo_prebuilt, cfg) {
                 println!(
                     "cargo:warning=Using repo prebuilt dear_imgui from {}",
                     repo_prebuilt.display()
@@ -439,7 +444,7 @@ fn build_with_cc_cfg(cfg: &BuildConfig) {
     }
     #[cfg(feature = "freetype")]
     {
-        let freetype = find_freetype_dependency(true);
+        let freetype = find_freetype_dependency(cfg, true);
         // Enable both FreeType and stb_truetype backends.
         // ImGui 1.92 gates stb_truetype helpers (e.g. ImFontAtlasGetFontLoaderForStbTruetype)
         // behind IMGUI_ENABLE_STB_TRUETYPE, while FreeType is selected when IMGUI_ENABLE_FREETYPE is defined.
@@ -682,6 +687,7 @@ fn add_sdl3_include_path(build: &mut cc::Build, cfg: &BuildConfig) -> Result<(),
     let found = build_support::find_sdl3_include_paths(build_support::Sdl3SearchConfig {
         out_dir: &cfg.out_dir,
         target_os: &cfg.target_os,
+        target_env: &cfg.target_env,
         use_pkg_config: cfg!(feature = "pkg-config"),
         use_vcpkg: cfg!(feature = "vcpkg"),
     })
@@ -834,8 +840,8 @@ fn prebuilt_manifest_has_feature(dir: &Path, feature: &str) -> bool {
     features.iter().any(|f| f == &feature)
 }
 
-fn try_link_prebuilt(dir: &Path, target_env: &str) -> bool {
-    let lib_name = expected_lib_name(target_env);
+fn try_link_prebuilt(dir: &Path, cfg: &BuildConfig) -> bool {
+    let lib_name = expected_lib_name(&cfg.target_env);
     let lib_path = dir.join(lib_name.as_str());
     if !lib_path.exists() {
         return false;
@@ -875,7 +881,7 @@ fn try_link_prebuilt(dir: &Path, target_env: &str) -> bool {
     {
         // A freetype-enabled dear_imgui static prebuilt still references the
         // FreeType library. Emit the same native link metadata as source builds.
-        let _ = find_freetype_dependency(true);
+        let _ = find_freetype_dependency(cfg, true);
     }
     true
 }

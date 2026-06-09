@@ -413,7 +413,9 @@ pub struct NativeDependency {
 
 #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
 #[derive(Clone, Copy, Debug)]
-pub struct PackageSearchConfig {
+pub struct PackageSearchConfig<'a> {
+    pub target_os: &'a str,
+    pub target_env: &'a str,
     pub use_pkg_config: bool,
     pub use_vcpkg: bool,
     pub emit_cargo_metadata: bool,
@@ -424,15 +426,17 @@ pub struct PackageSearchConfig {
 pub struct Sdl3SearchConfig<'a> {
     pub out_dir: &'a Path,
     pub target_os: &'a str,
+    pub target_env: &'a str,
     pub use_pkg_config: bool,
     pub use_vcpkg: bool,
 }
 
 #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
-pub fn find_freetype(config: PackageSearchConfig) -> Result<NativeDependency, String> {
+pub fn find_freetype(config: PackageSearchConfig<'_>) -> Result<NativeDependency, String> {
     let mut attempts = Vec::new();
     emit_pkg_config_rerun_vars("FREETYPE2");
     emit_vcpkg_rerun_vars("FREETYPE");
+    let use_vcpkg = should_use_vcpkg(config.use_vcpkg, config.target_os, config.target_env);
 
     if config.use_pkg_config {
         #[cfg(feature = "pkg-config")]
@@ -457,7 +461,7 @@ pub fn find_freetype(config: PackageSearchConfig) -> Result<NativeDependency, St
         attempts.push("pkg-config feature disabled".to_string());
     }
 
-    if config.use_vcpkg {
+    if use_vcpkg {
         #[cfg(feature = "vcpkg")]
         {
             let mut vcpkg_config = vcpkg::Config::new();
@@ -479,14 +483,24 @@ pub fn find_freetype(config: PackageSearchConfig) -> Result<NativeDependency, St
             attempts.push("vcpkg support was not compiled into build-support".to_string());
         }
     } else {
-        attempts.push("vcpkg feature disabled".to_string());
+        push_vcpkg_skip_attempt(
+            &mut attempts,
+            config.use_vcpkg,
+            config.target_os,
+            config.target_env,
+        );
     }
 
+    let install_hint = if use_vcpkg {
+        "Install FreeType development files with pkg-config metadata, or install \
+         the vcpkg `freetype` port and set VCPKG_ROOT/VCPKGRS_DYNAMIC as \
+         required by vcpkg."
+    } else {
+        "Install FreeType development files with pkg-config metadata."
+    };
     Err(format!(
-        "could not find FreeType. Tried {}. Install FreeType development files \
-         with pkg-config metadata, or install the vcpkg `freetype` port and set \
-         VCPKG_ROOT/VCPKGRS_DYNAMIC as required by vcpkg.",
-        attempts.join("; ")
+        "could not find FreeType. Tried {}. {install_hint}",
+        attempts.join("; "),
     ))
 }
 
@@ -495,6 +509,7 @@ pub fn find_sdl3_include_paths(config: Sdl3SearchConfig<'_>) -> Result<NativeDep
     let mut attempts = Vec::new();
     emit_pkg_config_rerun_vars("SDL3");
     emit_vcpkg_rerun_vars("SDL3");
+    let use_vcpkg = should_use_vcpkg(config.use_vcpkg, config.target_os, config.target_env);
 
     if let Ok(dir) = env::var("SDL3_INCLUDE_DIR") {
         let root = PathBuf::from(&dir);
@@ -570,7 +585,7 @@ pub fn find_sdl3_include_paths(config: Sdl3SearchConfig<'_>) -> Result<NativeDep
         attempts.push("pkg-config feature disabled".to_string());
     }
 
-    if config.use_vcpkg {
+    if use_vcpkg {
         #[cfg(feature = "vcpkg")]
         {
             let mut vcpkg_config = vcpkg::Config::new();
@@ -590,7 +605,12 @@ pub fn find_sdl3_include_paths(config: Sdl3SearchConfig<'_>) -> Result<NativeDep
             attempts.push("vcpkg support was not compiled into build-support".to_string());
         }
     } else {
-        attempts.push("vcpkg feature disabled".to_string());
+        push_vcpkg_skip_attempt(
+            &mut attempts,
+            config.use_vcpkg,
+            config.target_os,
+            config.target_env,
+        );
     }
 
     for candidate in known_sdl3_include_roots(config.target_os) {
@@ -615,6 +635,38 @@ pub fn find_sdl3_include_paths(config: Sdl3SearchConfig<'_>) -> Result<NativeDep
 #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
 fn include_root_has_header(root: &Path, header: &str) -> bool {
     root.join(header).exists()
+}
+
+#[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+fn should_use_vcpkg(use_vcpkg: bool, target_os: &str, target_env: &str) -> bool {
+    use_vcpkg && target_os == "windows" && target_env == "msvc"
+}
+
+#[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+fn push_vcpkg_skip_attempt(
+    attempts: &mut Vec<String>,
+    use_vcpkg: bool,
+    target_os: &str,
+    target_env: &str,
+) {
+    if use_vcpkg {
+        let target = target_label(target_os, target_env);
+        attempts.push(format!(
+            "vcpkg skipped for target {target}: automatic vcpkg \
+             discovery is only enabled for Windows MSVC targets"
+        ));
+    } else {
+        attempts.push("vcpkg feature disabled".to_string());
+    }
+}
+
+#[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+fn target_label(target_os: &str, target_env: &str) -> String {
+    if target_env.is_empty() {
+        target_os.to_string()
+    } else {
+        format!("{target_os}-{target_env}")
+    }
 }
 
 #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
@@ -794,10 +846,45 @@ mod tests {
         find_sdl3_include_paths(Sdl3SearchConfig {
             out_dir,
             target_os: "unknown-test-os",
+            target_env: "unknown-test-env",
             use_pkg_config: false,
             use_vcpkg: false,
         })
         .unwrap()
+    }
+
+    #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+    #[test]
+    fn freetype_skips_vcpkg_on_non_windows_msvc_targets() {
+        let err = find_freetype(PackageSearchConfig {
+            target_os: "linux",
+            target_env: "gnu",
+            use_pkg_config: false,
+            use_vcpkg: true,
+            emit_cargo_metadata: false,
+        })
+        .unwrap_err();
+
+        assert!(err.contains("vcpkg skipped for target linux-gnu"));
+        assert!(err.contains("Install FreeType development files with pkg-config metadata."));
+        assert!(!err.contains("VCPKG_ROOT"));
+    }
+
+    #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+    #[test]
+    fn vcpkg_discovery_is_limited_to_windows_msvc_targets() {
+        assert!(should_use_vcpkg(true, "windows", "msvc"));
+        assert!(!should_use_vcpkg(false, "windows", "msvc"));
+        assert!(!should_use_vcpkg(true, "windows", "gnu"));
+        assert!(!should_use_vcpkg(true, "linux", "gnu"));
+        assert!(!should_use_vcpkg(true, "macos", ""));
+    }
+
+    #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+    #[test]
+    fn target_label_omits_empty_target_env() {
+        assert_eq!(target_label("macos", ""), "macos");
+        assert_eq!(target_label("linux", "gnu"), "linux-gnu");
     }
 
     #[test]
@@ -948,6 +1035,7 @@ mod tests {
         let err = find_sdl3_include_paths(Sdl3SearchConfig {
             out_dir: &root.join("target/debug/build/current/out"),
             target_os: "unknown-test-os",
+            target_env: "unknown-test-env",
             use_pkg_config: false,
             use_vcpkg: false,
         })
@@ -955,6 +1043,28 @@ mod tests {
 
         assert!(err.contains("SDL3_INCLUDE_DIR is set"));
         assert!(err.contains("SDL3/SDL.h"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+    #[test]
+    fn sdl3_skips_vcpkg_on_non_windows_msvc_targets() {
+        let _lock = lock_sdl3_env();
+        let _env = EnvSnapshot::clear_sdl3_vars();
+        let root = unique_tmp_dir("sdl3-linux-vcpkg-skip");
+
+        let err = find_sdl3_include_paths(Sdl3SearchConfig {
+            out_dir: &root.join("target/debug/build/current/out"),
+            target_os: "linux",
+            target_env: "gnu",
+            use_pkg_config: false,
+            use_vcpkg: true,
+        })
+        .unwrap_err();
+
+        assert!(err.contains("vcpkg skipped for target linux-gnu"));
+        assert!(!err.contains("vcpkg sdl3:"));
 
         let _ = std::fs::remove_dir_all(&root);
     }

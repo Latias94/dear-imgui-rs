@@ -60,9 +60,11 @@ fn main() {
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
     let sdl3_headers = build_support::find_sdl3_include_paths(build_support::Sdl3SearchConfig {
         out_dir: &out_dir,
         target_os: &target_os,
+        target_env: &target_env,
         use_pkg_config: true,
         use_vcpkg: true,
     })

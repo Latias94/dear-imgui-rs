@@ -19,8 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `dear-imgui-sys/freetype` now fails fast when FreeType cannot be found instead
   of silently compiling without the FreeType rasterizer. Fixes #30, thanks @spindlymist.
-- `dear-imgui-sys` and `dear-imgui-sdl3` now fall back to vcpkg when pkg-config
-  cannot provide FreeType or SDL3 header metadata.
+- `dear-imgui-sys` and `dear-imgui-sdl3` now fall back to vcpkg on Windows MSVC
+  targets when pkg-config cannot provide FreeType or SDL3 header metadata.
 
 ## [0.14.0] - 2026-05-26
 
