@@ -44,6 +44,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential pkg-config \
+            libfreetype6-dev \
             libasound2-dev \
             libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev \
             libxkbcommon-dev libwayland-dev libudev-dev \
@@ -56,7 +57,7 @@ jobs:
           # CMake is needed by various -sys crates; SDL3 is required by the
           # dear-imgui-sdl3 backend on macOS (we rely on system headers/libs
           # instead of building SDL3 from source here).
-          brew install cmake sdl3
+          brew install cmake freetype pkg-config sdl3
 
       - name: Install Windows deps
         if: runner.os == 'Windows'
@@ -73,6 +74,12 @@ jobs:
           IMNODES_SYS_FORCE_BUILD: "1"
           NODE_EDITOR_SYS_FORCE_BUILD: "1"
           IMGUIZMO_SYS_FORCE_BUILD: "1"
+
+      - name: Check FreeType feature through native package metadata
+        if: runner.os != 'Windows'
+        run: cargo check -p dear-imgui-sys --no-default-features --features freetype
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
 
       - name: Check renderer backend feature combos
         run: |
@@ -339,6 +346,9 @@ jobs:
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
 
+      - name: Test native dependency helper search order
+        run: cargo test -p dear-imgui-build-support --features pkg-config,vcpkg --lib
+
       - name: Check SDL3 header discovery via vcpkg fallback
         shell: pwsh
         run: |
@@ -373,6 +383,11 @@ jobs:
           'fn main() {}' | Set-Content -Path (Join-Path $smoke 'src\main.rs')
           $manifest = Join-Path $smoke 'Cargo.toml'
           cargo check --manifest-path $manifest
+
+      - name: Check SDLRenderer3 backend with pkg-config unavailable
+        run: cargo check -p dear-imgui-sdl3 --no-default-features --features sdlrenderer3-renderer
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
 
   windows-gnu:
     name: Windows GNU link check

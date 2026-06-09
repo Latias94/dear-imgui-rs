@@ -703,7 +703,20 @@ pub const DEFAULT_GITHUB_REPO: &str = "dear-imgui";
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
+    use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+    static SDL3_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+    const SDL3_ENV_VARS: [&str; 4] = [
+        "SDL3_INCLUDE_DIR",
+        "DEP_SDL3_INCLUDE_PATH",
+        "DEP_SDL3_INCLUDE_DIR",
+        "DEP_SDL3_OUT_DIR",
+    ];
 
     fn unique_tmp_dir(suffix: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -716,6 +729,75 @@ mod tests {
             nanos,
             suffix
         ))
+    }
+
+    #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+    fn lock_sdl3_env() -> std::sync::MutexGuard<'static, ()> {
+        SDL3_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+    struct EnvSnapshot {
+        saved: Vec<(&'static str, Option<OsString>)>,
+    }
+
+    #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+    impl EnvSnapshot {
+        fn clear_sdl3_vars() -> Self {
+            let saved = SDL3_ENV_VARS
+                .into_iter()
+                .map(|var| (var, env::var_os(var)))
+                .collect::<Vec<_>>();
+
+            for (var, _) in &saved {
+                unsafe {
+                    env::remove_var(var);
+                }
+            }
+
+            Self { saved }
+        }
+    }
+
+    #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+    impl Drop for EnvSnapshot {
+        fn drop(&mut self) {
+            for (var, value) in &self.saved {
+                unsafe {
+                    match value {
+                        Some(value) => env::set_var(var, value),
+                        None => env::remove_var(var),
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+    fn set_env_var(name: &str, value: &Path) {
+        unsafe {
+            env::set_var(name, value);
+        }
+    }
+
+    #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+    fn write_sdl3_header(include_root: &Path) {
+        let header_dir = include_root.join("SDL3");
+        std::fs::create_dir_all(&header_dir).unwrap();
+        std::fs::write(header_dir.join("SDL.h"), "/* test SDL3 header */\n").unwrap();
+    }
+
+    #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+    fn sdl3_search(out_dir: &Path) -> NativeDependency {
+        find_sdl3_include_paths(Sdl3SearchConfig {
+            out_dir,
+            target_os: "unknown-test-os",
+            use_pkg_config: false,
+            use_vcpkg: false,
+        })
+        .unwrap()
     }
 
     #[test]
@@ -744,6 +826,135 @@ mod tests {
 
         assert!(prebuilt_manifest_has_feature(&root, "wchar32"));
         assert!(!prebuilt_manifest_has_feature(&root, "freetype"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+    #[test]
+    fn sdl3_include_dir_takes_precedence_over_dep_vars() {
+        let _lock = lock_sdl3_env();
+        let _env = EnvSnapshot::clear_sdl3_vars();
+        let root = unique_tmp_dir("sdl3-include-dir");
+        let include_dir = root.join("explicit");
+        let dep_include_dir = root.join("dep-include");
+        write_sdl3_header(&include_dir);
+        write_sdl3_header(&dep_include_dir);
+        set_env_var("SDL3_INCLUDE_DIR", &include_dir);
+        set_env_var("DEP_SDL3_INCLUDE_PATH", &dep_include_dir);
+
+        let found = sdl3_search(&root.join("target/debug/build/current/out"));
+
+        assert_eq!(found.include_paths, vec![include_dir.clone()]);
+        assert!(found.source.starts_with("SDL3_INCLUDE_DIR="));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+    #[test]
+    fn sdl3_dep_include_path_takes_precedence_over_dep_include_dir() {
+        let _lock = lock_sdl3_env();
+        let _env = EnvSnapshot::clear_sdl3_vars();
+        let root = unique_tmp_dir("sdl3-dep-include-path");
+        let dep_include_path = root.join("dep-include-path");
+        let dep_include_dir = root.join("dep-include-dir");
+        write_sdl3_header(&dep_include_path);
+        write_sdl3_header(&dep_include_dir);
+        set_env_var("DEP_SDL3_INCLUDE_PATH", &dep_include_path);
+        set_env_var("DEP_SDL3_INCLUDE_DIR", &dep_include_dir);
+
+        let found = sdl3_search(&root.join("target/debug/build/current/out"));
+
+        assert_eq!(found.include_paths, vec![dep_include_path.clone()]);
+        assert!(found.source.starts_with("DEP_SDL3_INCLUDE_PATH="));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+    #[test]
+    fn sdl3_dep_include_dir_takes_precedence_over_dep_out_dir() {
+        let _lock = lock_sdl3_env();
+        let _env = EnvSnapshot::clear_sdl3_vars();
+        let root = unique_tmp_dir("sdl3-dep-include-dir");
+        let dep_include_dir = root.join("dep-include-dir");
+        let dep_out_dir = root.join("dep-out");
+        write_sdl3_header(&dep_include_dir);
+        write_sdl3_header(&dep_out_dir.join("include"));
+        set_env_var("DEP_SDL3_INCLUDE_DIR", &dep_include_dir);
+        set_env_var("DEP_SDL3_OUT_DIR", &dep_out_dir);
+
+        let found = sdl3_search(&root.join("target/debug/build/current/out"));
+
+        assert_eq!(found.include_paths, vec![dep_include_dir.clone()]);
+        assert!(found.source.starts_with("DEP_SDL3_INCLUDE_DIR="));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+    #[test]
+    fn sdl3_dep_out_dir_uses_include_child() {
+        let _lock = lock_sdl3_env();
+        let _env = EnvSnapshot::clear_sdl3_vars();
+        let root = unique_tmp_dir("sdl3-dep-out-dir");
+        let dep_out_dir = root.join("dep-out");
+        let include_root = dep_out_dir.join("include");
+        write_sdl3_header(&include_root);
+        set_env_var("DEP_SDL3_OUT_DIR", &dep_out_dir);
+
+        let found = sdl3_search(&root.join("target/debug/build/current/out"));
+
+        assert_eq!(found.include_paths, vec![include_root]);
+        assert!(found.source.starts_with("sdl3-sys OUT_DIR="));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+    #[test]
+    fn sdl3_cargo_target_include_is_used_after_env_vars() {
+        let _lock = lock_sdl3_env();
+        let _env = EnvSnapshot::clear_sdl3_vars();
+        let root = unique_tmp_dir("sdl3-target-dir");
+        let build_dir = root.join("target").join("debug").join("build");
+        let current_out_dir = build_dir.join("current-crate").join("out");
+        let sdl3_include_root = build_dir.join("sdl3-sys-test").join("out").join("include");
+        std::fs::create_dir_all(&current_out_dir).unwrap();
+        write_sdl3_header(&sdl3_include_root);
+
+        let found = sdl3_search(&current_out_dir);
+
+        assert_eq!(found.include_paths, vec![sdl3_include_root.clone()]);
+        assert!(found.source.starts_with("Cargo target dir="));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
+    #[test]
+    fn sdl3_include_dir_fails_fast_when_explicit_path_is_invalid() {
+        let _lock = lock_sdl3_env();
+        let _env = EnvSnapshot::clear_sdl3_vars();
+        let root = unique_tmp_dir("sdl3-invalid-explicit");
+        let invalid_include_dir = root.join("invalid");
+        let dep_include_dir = root.join("dep-include");
+        std::fs::create_dir_all(&invalid_include_dir).unwrap();
+        write_sdl3_header(&dep_include_dir);
+        set_env_var("SDL3_INCLUDE_DIR", &invalid_include_dir);
+        set_env_var("DEP_SDL3_INCLUDE_PATH", &dep_include_dir);
+
+        let err = find_sdl3_include_paths(Sdl3SearchConfig {
+            out_dir: &root.join("target/debug/build/current/out"),
+            target_os: "unknown-test-os",
+            use_pkg_config: false,
+            use_vcpkg: false,
+        })
+        .unwrap_err();
+
+        assert!(err.contains("SDL3_INCLUDE_DIR is set"));
+        assert!(err.contains("SDL3/SDL.h"));
 
         let _ = std::fs::remove_dir_all(&root);
     }
