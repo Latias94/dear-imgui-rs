@@ -8,7 +8,7 @@ paths, see `docs/workstreams/apple-platform-support.md`.
 ## Versioning Policy
 
 - Unified release train: all published `dear-*` crates in this workspace are versioned and released together under the same semver, so consumers can depend on a single minor across the board.
-- Current train: unified `v0.14.0` (use `version = "0.14"`).
+- Current train: unified `v0.14.1` (use `version = "0.14"`).
 - Previous train: unified `v0.13.0` (use `version = "0.13"`).
 - Previous train: unified `v0.12.0` (use `version = "0.12"`).
 - Previous train: unified `v0.11.0` (use `version = "0.11"`).
@@ -23,53 +23,53 @@ Core
 
 | Crate           | Version | Upstream        | Notes                                     |
 |-----------------|---------|-----------------|-------------------------------------------|
-| dear-imgui-rs   | 0.14.0  | —               | Safe Rust API over dear-imgui-sys         |
-| dear-imgui-sys  | 0.14.0  | ImGui v1.92.8   | Docking branch via cimgui                 |
+| dear-imgui-rs   | 0.14.1  | —               | Safe Rust API over dear-imgui-sys         |
+| dear-imgui-sys  | 0.14.1  | ImGui v1.92.8   | Docking branch via cimgui                 |
 
 Backends
 
 | Crate             | Version | External deps           | Notes |
 |-------------------|---------|-------------------------|-------|
-| dear-imgui-wgpu   | 0.14.0  | wgpu = 29/28/27        | WebGPU renderer (default wgpu 29; optional wgpu 28/27 via features; experimental multi-viewport on native via winit/SDL3; disabled on wasm) |
-| dear-imgui-glow   | 0.14.0  | glow = 0.17            | OpenGL renderer (winit/glutin) |
-| dear-imgui-ash    | 0.14.0  | ash = 0.38             | Vulkan renderer (native only). Optional: `ash-window` for winit multi-viewport; SDL3 multi-viewport via `Platform_CreateVkSurface`; `gpu-allocator`/`vk-mem` allocators |
-| dear-imgui-winit  | 0.14.0  | winit = 0.30.13        | Winit platform backend |
-| dear-imgui-sdl3   | 0.14.0  | sdl3 = 0.18.4, sdl3-sys 0.6 | SDL3 platform backend with optional official OpenGL3/SDLRenderer3 shims |
-| dear-imgui-bevy   | 0.14.0  | Bevy = 0.19.0-rc.2     | Experimental Bevy-native backend (docking, texture interop, native multi-viewport on supported targets) |
+| dear-imgui-wgpu   | 0.14.1  | wgpu = 29/28/27        | WebGPU renderer (default wgpu 29; optional wgpu 28/27 via features; experimental multi-viewport on native via winit/SDL3; disabled on wasm) |
+| dear-imgui-glow   | 0.14.1  | glow = 0.17            | OpenGL renderer (winit/glutin) |
+| dear-imgui-ash    | 0.14.1  | ash = 0.38             | Vulkan renderer (native only). Optional: `ash-window` for winit multi-viewport; SDL3 multi-viewport via `Platform_CreateVkSurface`; `gpu-allocator`/`vk-mem` allocators |
+| dear-imgui-winit  | 0.14.1  | winit = 0.30.13        | Winit platform backend |
+| dear-imgui-sdl3   | 0.14.1  | sdl3 = 0.18.4, sdl3-sys 0.6 | SDL3 platform backend with optional official OpenGL3/SDLRenderer3 shims |
+| dear-imgui-bevy   | 0.14.1  | Bevy = 0.19.0-rc.2     | Experimental Bevy-native backend (docking, texture interop, native multi-viewport on supported targets) |
 
 Utilities
 
 | Crate     | Version | External deps | Notes |
 |-----------|---------|---------------|-------|
-| dear-app  | 0.14.0  | winit, wgpu   | App runner (docking, themes, add-ons) |
+| dear-app  | 0.14.1  | winit, wgpu   | App runner (docking, themes, add-ons) |
 
 Tooling
 
 | Crate                    | Version | External deps | Notes |
 |--------------------------|---------|---------------|-------|
-| dear-imgui-build-support | 0.14.0  | ureq = 3.3    | Shared build/publish helpers for `*-sys` crates and prebuilt archives |
+| dear-imgui-build-support | 0.14.1  | ureq = 3.3    | Shared build/publish helpers for `*-sys` crates and prebuilt archives |
 
 Extensions
 
 | Crate               | Version | Requires dear-imgui-rs | Sys crate                    | Notes                                  |
 |---------------------|---------|------------------------|------------------------------|----------------------------------------|
-| dear-implot         | 0.14.0  | 0.14.0                 | dear-implot-sys 0.14.0       | 2D plotting                            |
-| dear-imnodes        | 0.14.0  | 0.14.0                 | dear-imnodes-sys 0.14.0      | Node editor                            |
-| dear-node-editor    | 0.14.0  | 0.14.0                 | dear-node-editor-sys 0.14.0  | Native-only imgui-node-editor integration |
-| dear-imguizmo       | 0.14.0  | 0.14.0                 | dear-imguizmo-sys 0.14.0     | 3D gizmo                               |
-| dear-file-browser   | 0.14.0  | 0.14.0                 | —                            | ImGui UI + native (rfd) backends       |
-| dear-implot3d       | 0.14.0  | 0.14.0                 | dear-implot3d-sys 0.14.0     | 3D plotting                            |
-| dear-imguizmo-quat  | 0.14.0  | 0.14.0                 | dear-imguizmo-quat-sys 0.14.0 | Quaternion gizmo                      |
-| dear-imgui-test-engine | 0.14.0 | 0.14.0                 | dear-imgui-test-engine-sys 0.14.0 | UI automation and test runner      |
-| dear-imgui-reflect  | 0.14.0  | 0.14.0                 | —                            | Reflection-based UI helpers (pure Rust)|
+| dear-implot         | 0.14.1  | 0.14.1                 | dear-implot-sys 0.14.1       | 2D plotting                            |
+| dear-imnodes        | 0.14.1  | 0.14.1                 | dear-imnodes-sys 0.14.1      | Node editor                            |
+| dear-node-editor    | 0.14.1  | 0.14.1                 | dear-node-editor-sys 0.14.1  | Native-only imgui-node-editor integration |
+| dear-imguizmo       | 0.14.1  | 0.14.1                 | dear-imguizmo-sys 0.14.1     | 3D gizmo                               |
+| dear-file-browser   | 0.14.1  | 0.14.1                 | —                            | ImGui UI + native (rfd) backends       |
+| dear-implot3d       | 0.14.1  | 0.14.1                 | dear-implot3d-sys 0.14.1     | 3D plotting                            |
+| dear-imguizmo-quat  | 0.14.1  | 0.14.1                 | dear-imguizmo-quat-sys 0.14.1 | Quaternion gizmo                      |
+| dear-imgui-test-engine | 0.14.1 | 0.14.1                 | dear-imgui-test-engine-sys 0.14.1 | UI automation and test runner      |
+| dear-imgui-reflect  | 0.14.1  | 0.14.1                 | —                            | Reflection-based UI helpers (pure Rust)|
 
 ## Trunk (Unreleased)
 
 - Next release train: TBD.
-- Main branch currently reflects post-`0.14.0` development and may move independently until the next planned release is cut.
-- Current baselines after the `0.14.0` release: Dear ImGui v1.92.8 (docking) via cimgui, unified `dear-*` crate minor `0.14`, MSRV 1.92, Bevy `0.19.0-rc.2` for the experimental Bevy backend, and the external dependency baseline described above.
+- After `0.14.1` is cut, main may move independently until the next planned release is cut.
+- Current baselines after the `0.14.1` release: Dear ImGui v1.92.8 (docking) via cimgui, unified `dear-*` crate minor `0.14`, MSRV 1.92, Bevy `0.19.0-rc.2` for the experimental Bevy backend, and the external dependency baseline described above.
 - Main-branch compatibility policy:
-  - Detailed post-`0.14.0` source breaks live in `CHANGELOG.md`; this file tracks the broader
+  - Detailed post-`0.14.1` source breaks live in `CHANGELOG.md`; this file tracks the broader
     compatibility contract.
   - The safe Rust API may intentionally break source compatibility when raw FFI values would
     otherwise expose stale handles, unchecked sizes, invalid sentinels, wrong-context access, or
@@ -84,7 +84,8 @@ Extensions
 
 Release Train 0.14 (current)
 
-- All crates unified to 0.14.0 across the workspace (use `version = "0.14"`).
+- Latest patch: 0.14.1 (use `version = "0.14"`).
+- All crates in this train share the 0.14 minor across the workspace.
 - Core + backends aligned with Dear ImGui v1.92.8 (docking) via cimgui.
 - The experimental Bevy backend ships on the same release train, targeting Bevy `0.19.0-rc.2`.
 - Normal source builds use checked-in pregenerated bindings by default; LLVM/libclang is only required for explicit binding regeneration.
