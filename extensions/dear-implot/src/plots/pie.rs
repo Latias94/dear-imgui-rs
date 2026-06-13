@@ -136,13 +136,14 @@ impl<'a> PieChartPlot<'a> {
 }
 
 impl<'a> Plot for PieChartPlot<'a> {
-    fn plot(&self) {
+    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
         if self.validate().is_err() {
             return;
         }
         let Ok(count) = i32::try_from(self.values.len()) else {
             return;
         };
+        let _guard = plot_ui.bind();
         with_plot_str_slice_with_opt(
             &self.label_ids,
             self.label_fmt,
@@ -293,13 +294,14 @@ impl<'a> PieChartPlotF32<'a> {
 }
 
 impl<'a> Plot for PieChartPlotF32<'a> {
-    fn plot(&self) {
+    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
         if self.validate().is_err() {
             return;
         }
         let Ok(count) = i32::try_from(self.values.len()) else {
             return;
         };
+        let _guard = plot_ui.bind();
         with_plot_str_slice_with_opt(
             &self.label_ids,
             self.label_fmt,
@@ -342,8 +344,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = PieChartPlot::new(label_ids, values, center_x, center_y, radius);
         plot.validate()?;
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 
@@ -358,8 +359,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = PieChartPlotF32::new(label_ids, values, center_x, center_y, radius);
         plot.validate()?;
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 
@@ -371,8 +371,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = PieChartPlot::new(label_ids, values, 0.5, 0.5, 0.4);
         plot.validate()?;
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 }

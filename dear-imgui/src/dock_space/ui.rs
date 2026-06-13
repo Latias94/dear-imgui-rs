@@ -39,14 +39,14 @@ impl Ui {
         flags: DockNodeFlags,
     ) -> Id {
         validate_dock_node_flags("Ui::dockspace_over_main_viewport_with_flags()", flags);
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             Id::from(sys::igDockSpaceOverViewport(
                 dockspace_id.into(),
                 sys::igGetMainViewport(),
                 flags.bits(),
                 ptr::null(),
             ))
-        }
+        })
     }
 
     /// Creates a dockspace over the main viewport with default settings
@@ -112,23 +112,23 @@ impl Ui {
         validate_dock_node_flags("Ui::dock_space_with_class()", flags);
         assert_nonzero_id("Ui::dock_space_with_class()", "id", id);
         assert_finite_vec2("Ui::dock_space_with_class()", "size", size);
-        unsafe {
-            let size_vec = sys::ImVec2 {
-                x: size[0],
-                y: size[1],
-            };
-            let imgui_window_class =
-                window_class.map(|class| class.to_imgui("Ui::dock_space_with_class()"));
-            let window_class_ptr = imgui_window_class
-                .as_ref()
-                .map_or(ptr::null(), |wc| wc as *const _);
+        let size_vec = sys::ImVec2 {
+            x: size[0],
+            y: size[1],
+        };
+        let imgui_window_class =
+            window_class.map(|class| class.to_imgui("Ui::dock_space_with_class()"));
+        let window_class_ptr = imgui_window_class
+            .as_ref()
+            .map_or(ptr::null(), |wc| wc as *const _);
+        self.run_with_bound_context(|| unsafe {
             Id::from(sys::igDockSpace(
                 id.into(),
                 size_vec,
                 flags.bits(),
                 window_class_ptr,
             ))
-        }
+        })
     }
 
     /// Creates a dockspace with the specified ID and size
@@ -179,9 +179,9 @@ impl Ui {
     /// ```
     #[doc(alias = "SetNextWindowDockID")]
     pub fn set_next_window_dock_id_with_cond(&self, dock_id: Id, cond: crate::Condition) {
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             sys::igSetNextWindowDockID(dock_id.into(), cond as i32);
-        }
+        });
     }
 
     /// Sets the dock ID for the next window
@@ -232,10 +232,10 @@ impl Ui {
     /// ```
     #[doc(alias = "SetNextWindowClass")]
     pub fn set_next_window_class(&self, window_class: &WindowClass) {
-        unsafe {
-            let imgui_wc = window_class.to_imgui("Ui::set_next_window_class()");
+        let imgui_wc = window_class.to_imgui("Ui::set_next_window_class()");
+        self.run_with_bound_context(|| unsafe {
             sys::igSetNextWindowClass(&imgui_wc as *const _);
-        }
+        });
     }
 
     /// Gets the dock ID of the current window
@@ -261,7 +261,7 @@ impl Ui {
     /// ```
     #[doc(alias = "GetWindowDockID")]
     pub fn get_window_dock_id(&self) -> Id {
-        unsafe { Id::from(sys::igGetWindowDockID()) }
+        self.run_with_bound_context(|| unsafe { Id::from(sys::igGetWindowDockID()) })
     }
 
     /// Checks if the current window is docked
@@ -286,6 +286,6 @@ impl Ui {
     /// ```
     #[doc(alias = "IsWindowDocked")]
     pub fn is_window_docked(&self) -> bool {
-        unsafe { sys::igIsWindowDocked() }
+        self.run_with_bound_context(|| unsafe { sys::igIsWindowDocked() })
     }
 }

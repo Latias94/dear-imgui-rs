@@ -170,14 +170,14 @@ impl<'ui, T: AsRef<str>> Selectable<'ui, T> {
             x: self.size[0],
             y: self.size[1],
         };
-        unsafe {
+        self.ui.run_with_bound_context(|| unsafe {
             sys::igSelectable_Bool(
                 self.ui.scratch_txt(self.label),
                 self.selected,
                 self.flags.bits(),
                 size_vec,
             )
-        }
+        })
     }
 
     /// Builds the selectable using a mutable reference to selected state.
@@ -188,13 +188,13 @@ impl<'ui, T: AsRef<str>> Selectable<'ui, T> {
             x: self.size[0],
             y: self.size[1],
         };
-        unsafe {
+        self.ui.run_with_bound_context(|| unsafe {
             sys::igSelectable_BoolPtr(
                 self.ui.scratch_txt(self.label),
                 selected as *mut bool,
                 self.flags.bits(),
                 size_vec,
             )
-        }
+        })
     }
 }

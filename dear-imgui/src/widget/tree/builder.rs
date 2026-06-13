@@ -141,7 +141,7 @@ impl<'a, T: AsRef<str>, L: AsRef<str>> TreeNode<'a, T, L> {
     ///
     /// Returns `None` if the tree node is not open and no content should be rendered.
     pub fn push(self) -> Option<TreeNodeToken<'a>> {
-        let open = unsafe {
+        let open = self.ui.run_with_bound_context(|| unsafe {
             if let Some(opened_cond) = self.opened_cond {
                 sys::igSetNextItemOpen(self.opened, opened_cond as i32);
             }
@@ -176,7 +176,7 @@ impl<'a, T: AsRef<str>, L: AsRef<str>> TreeNode<'a, T, L> {
                     open
                 }
             }
-        };
+        });
 
         if open {
             Some(TreeNodeToken::new(self.ui))

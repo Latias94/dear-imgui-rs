@@ -116,6 +116,30 @@ pub(crate) fn plot3d_spec_with_style(
     spec
 }
 
+struct ScopedNextPlot3DSpec {
+    previous: Option<sys::ImPlot3DSpec_c>,
+    active: bool,
+}
+
+impl ScopedNextPlot3DSpec {
+    fn restore_if_unused(&mut self) {
+        if !self.active {
+            return;
+        }
+
+        if crate::take_next_plot3d_spec().is_some() {
+            crate::set_next_plot3d_spec(self.previous.take());
+        }
+        self.active = false;
+    }
+}
+
+impl Drop for ScopedNextPlot3DSpec {
+    fn drop(&mut self) {
+        self.restore_if_unused();
+    }
+}
+
 fn with_scoped_next_plot3d_spec<R>(
     style: Plot3DItemStyle,
     item_flags: crate::Item3DFlags,
@@ -127,12 +151,12 @@ fn with_scoped_next_plot3d_spec<R>(
     spec.Flags = ((spec.Flags as u32) | item_flags.bits()) as sys::ImPlot3DItemFlags;
     crate::set_next_plot3d_spec(Some(spec));
 
+    let mut guard = ScopedNextPlot3DSpec {
+        previous,
+        active: true,
+    };
     let out = f();
-
-    if crate::take_next_plot3d_spec().is_some() {
-        crate::set_next_plot3d_spec(previous);
-    }
-
+    guard.restore_if_unused();
     out
 }
 
@@ -554,5 +578,30 @@ mod tests {
             Item3DFlags::NO_LEGEND.bits() | crate::Line3DFlags::SEGMENTS.bits(),
         );
         assert!(take_next_plot3d_spec().is_none());
+    }
+
+    #[test]
+    fn scoped_next_spec_restores_previous_if_closure_panics() {
+        set_next_plot3d_spec(None);
+
+        let mut previous = default_plot3d_spec();
+        previous.FillAlpha = 0.25;
+        set_next_plot3d_spec(Some(previous));
+
+        let result = std::panic::catch_unwind(|| {
+            with_scoped_next_plot3d_spec(
+                Plot3DItemStyle::new().with_line_weight(2.0),
+                Item3DFlags::NO_LEGEND,
+                || panic!("boom"),
+            );
+        });
+
+        assert!(result.is_err());
+
+        let restored = take_next_plot3d_spec().expect("previous next spec should be restored");
+        assert_eq!(restored.FillAlpha, 0.25);
+        assert_eq!(restored.LineWeight, 1.0);
+
+        set_next_plot3d_spec(None);
     }
 }

@@ -25,7 +25,7 @@ impl Ui {
     ) -> ColorStackToken<'_> {
         let color_array = color.into();
         validate_style_color("Ui::push_style_color()", "color", color_array);
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             sys::igPushStyleColor_Vec4(
                 style_color as i32,
                 sys::ImVec4 {
@@ -35,7 +35,7 @@ impl Ui {
                     w: color_array[3],
                 },
             )
-        };
+        });
         ColorStackToken::new(self)
     }
 
@@ -57,7 +57,7 @@ impl Ui {
     #[doc(alias = "PushStyleVar")]
     pub fn push_style_var(&self, style_var: StyleVar) -> StyleStackToken<'_> {
         validate_style_var("Ui::push_style_var()", style_var);
-        unsafe { push_style_var(style_var) };
+        self.run_with_bound_context(|| unsafe { push_style_var(style_var) });
         StyleStackToken::new(self)
     }
 }

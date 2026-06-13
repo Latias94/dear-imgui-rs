@@ -104,7 +104,7 @@ where
     #[doc(alias = "DragFloatRange2")]
     pub fn build(self, ui: &Ui, min: &mut f32, max: &mut f32) -> bool {
         validate_drag_flags("DragRange::build()", self.flags);
-        unsafe {
+        ui.run_with_bound_context(|| unsafe {
             let buffer = &mut *ui.scratch_buffer().get();
             buffer.refresh_buffer();
 
@@ -131,7 +131,7 @@ where
                 max_display_format,
                 self.flags.bits(),
             )
-        }
+        })
     }
 }
 
@@ -147,7 +147,7 @@ where
     #[doc(alias = "DragIntRange2")]
     pub fn build(self, ui: &Ui, min: &mut i32, max: &mut i32) -> bool {
         validate_drag_flags("DragRange::build()", self.flags);
-        unsafe {
+        ui.run_with_bound_context(|| unsafe {
             let buffer = &mut *ui.scratch_buffer().get();
             buffer.refresh_buffer();
 
@@ -174,6 +174,6 @@ where
                 max_display_format,
                 self.flags.bits(),
             )
-        }
+        })
     }
 }

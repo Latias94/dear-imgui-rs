@@ -7,8 +7,6 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub use colormap::*;
 pub use item_arrays::*;
-pub use palette::*;
 pub use tokens::*;
 pub use types::*;

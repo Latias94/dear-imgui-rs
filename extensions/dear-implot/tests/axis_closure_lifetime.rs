@@ -4,7 +4,10 @@ use std::sync::{Mutex, OnceLock};
 
 fn test_guard() -> std::sync::MutexGuard<'static, ()> {
     static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
-    GUARD.get_or_init(|| Mutex::new(())).lock().unwrap()
+    GUARD
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|err| err.into_inner())
 }
 
 #[test]
@@ -56,7 +59,7 @@ fn multi_axis_plot_rejects_interior_nul_labels() {
     let plot_ctx = PlotContext::create(&imgui);
 
     let ui = imgui.frame();
-    let _plot_ui = plot_ctx.get_plot_ui(&ui);
+    let plot_ui = plot_ctx.get_plot_ui(&ui);
 
     let plot = dear_implot::MultiAxisPlot::new("t").add_y_axis(YAxisConfig {
         label: Some("a\0b"),
@@ -64,7 +67,7 @@ fn multi_axis_plot_rejects_interior_nul_labels() {
         range: None,
     });
 
-    match plot.begin() {
+    match plot.begin(&plot_ui) {
         Ok(_) => panic!("expected interior NUL label to be rejected"),
         Err(err) => assert!(matches!(err, PlotError::StringConversion(_))),
     }

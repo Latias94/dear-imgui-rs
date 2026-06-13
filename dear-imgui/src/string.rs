@@ -29,7 +29,7 @@ mod tests;
 
 pub use buffer::UiBuffer;
 pub use im_string::{ImStr, ImString};
-pub(crate) use scratch::{tls_scratch_txt, tls_scratch_txt_two};
+pub(crate) use scratch::tls_scratch_txt;
 pub use scratch::{
     with_scratch_txt, with_scratch_txt_slice, with_scratch_txt_slice_with_opt,
     with_scratch_txt_three, with_scratch_txt_two,

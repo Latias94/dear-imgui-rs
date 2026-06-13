@@ -6,13 +6,13 @@ impl crate::ui::Ui {
     #[doc(alias = "IsRectVisible")]
     pub fn is_rect_visible(&self, size: [f32; 2]) -> bool {
         assert_finite_vec2("Ui::is_rect_visible()", "size", size);
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             let size = sys::ImVec2 {
                 x: size[0],
                 y: size[1],
             };
             sys::igIsRectVisible_Nil(size)
-        }
+        })
     }
 
     /// Test if rectangle (in screen space) is visible / not clipped.
@@ -20,7 +20,7 @@ impl crate::ui::Ui {
     pub fn is_rect_visible_ex(&self, rect_min: [f32; 2], rect_max: [f32; 2]) -> bool {
         assert_finite_vec2("Ui::is_rect_visible_ex()", "rect_min", rect_min);
         assert_finite_vec2("Ui::is_rect_visible_ex()", "rect_max", rect_max);
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             let rect_min = sys::ImVec2 {
                 x: rect_min[0],
                 y: rect_min[1],
@@ -30,6 +30,6 @@ impl crate::ui::Ui {
                 y: rect_max[1],
             };
             sys::igIsRectVisible_Vec2(rect_min, rect_max)
-        }
+        })
     }
 }

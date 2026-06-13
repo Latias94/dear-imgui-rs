@@ -31,7 +31,9 @@ impl Ui {
             x: max[0],
             y: max[1],
         };
-        unsafe { sys::igPushClipRect(min_v, max_v, intersect_with_current) };
+        self.run_with_bound_context(|| unsafe {
+            sys::igPushClipRect(min_v, max_v, intersect_with_current)
+        });
         ClipRectToken::new(self)
     }
 
@@ -60,7 +62,7 @@ impl Ui {
         assert_finite_vec2("Ui::is_rect_visible_min_max()", "rect_max", mx);
         let mn_v = sys::ImVec2 { x: mn[0], y: mn[1] };
         let mx_v = sys::ImVec2 { x: mx[0], y: mx[1] };
-        unsafe { sys::igIsRectVisible_Vec2(mn_v, mx_v) }
+        self.run_with_bound_context(|| unsafe { sys::igIsRectVisible_Vec2(mn_v, mx_v) })
     }
 
     /// Returns true if a rectangle of given size at the current cursor pos is visible.
@@ -69,6 +71,6 @@ impl Ui {
         let s = size.into();
         assert_finite_vec2("Ui::is_rect_visible_with_size()", "size", s);
         let v = sys::ImVec2 { x: s[0], y: s[1] };
-        unsafe { sys::igIsRectVisible_Nil(v) }
+        self.run_with_bound_context(|| unsafe { sys::igIsRectVisible_Nil(v) })
     }
 }

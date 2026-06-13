@@ -23,7 +23,8 @@ impl Ui {
     #[doc(alias = "Columns")]
     pub fn columns(&self, count: usize, id: impl AsRef<str>, border: bool) {
         let count = columns_count_to_i32(count, "Ui::columns()");
-        unsafe { sys::igColumns(count, self.scratch_txt(id), border) }
+        let id = self.scratch_txt(id);
+        self.run_with_bound_context(|| unsafe { sys::igColumns(count, id, border) });
     }
 
     /// Begin columns layout with advanced flags.
@@ -41,16 +42,21 @@ impl Ui {
     ) -> ColumnsToken<'_> {
         let count = columns_count_to_i32(count, "Ui::begin_columns()");
         validate_old_column_flags("Ui::begin_columns()", flags);
-        assert_no_current_columns("Ui::begin_columns()");
-        unsafe { sys::igBeginColumns(self.scratch_txt(id), count, flags.bits()) };
+        let id = self.scratch_txt(id);
+        self.run_with_bound_context(|| {
+            assert_no_current_columns("Ui::begin_columns()");
+            unsafe { sys::igBeginColumns(id, count, flags.bits()) };
+        });
         ColumnsToken { ui: self }
     }
 
     /// End columns layout.
     #[doc(alias = "EndColumns")]
     pub(crate) fn end_columns(&self) {
-        assert_current_columns("Ui::end_columns()");
-        unsafe { sys::igEndColumns() }
+        self.run_with_bound_context(|| {
+            assert_current_columns("Ui::end_columns()");
+            unsafe { sys::igEndColumns() }
+        });
     }
 
     /// Switches to the next column.
@@ -58,14 +64,14 @@ impl Ui {
     /// If the current row is finished, switches to first column of the next row
     #[doc(alias = "NextColumn")]
     pub fn next_column(&self) {
-        unsafe { sys::igNextColumn() }
+        self.run_with_bound_context(|| unsafe { sys::igNextColumn() });
     }
 
     /// Returns the index of the current column
     #[doc(alias = "GetColumnIndex")]
     pub fn current_column_index(&self) -> OldColumnIndex {
         OldColumnIndex::from_i32(
-            unsafe { sys::igGetColumnIndex() },
+            self.run_with_bound_context(|| unsafe { sys::igGetColumnIndex() }),
             "Ui::current_column_index()",
         )
     }
@@ -73,66 +79,78 @@ impl Ui {
     /// Returns the width of the current column (in pixels)
     #[doc(alias = "GetColumnWidth")]
     pub fn current_column_width(&self) -> f32 {
-        unsafe { sys::igGetColumnWidth(-1) }
+        self.run_with_bound_context(|| unsafe { sys::igGetColumnWidth(-1) })
     }
 
     /// Returns the width of the given column (in pixels)
     #[doc(alias = "GetColumnWidth")]
     pub fn column_width(&self, column: impl Into<OldColumnRef>) -> f32 {
         let column_index = resolve_column_query_ref(column.into(), "Ui::column_width()");
-        unsafe { sys::igGetColumnWidth(column_index) }
+        self.run_with_bound_context(|| unsafe { sys::igGetColumnWidth(column_index) })
     }
 
     /// Sets the width of the current column (in pixels)
     #[doc(alias = "SetColumnWidth")]
     pub fn set_current_column_width(&self, width: f32) {
-        assert_current_columns("Ui::set_current_column_width()");
         assert_non_negative_f32("Ui::set_current_column_width()", "width", width);
-        unsafe { sys::igSetColumnWidth(-1, width) };
+        self.run_with_bound_context(|| {
+            assert_current_columns("Ui::set_current_column_width()");
+            unsafe { sys::igSetColumnWidth(-1, width) };
+        });
     }
 
     /// Sets the width of the given column (in pixels)
     #[doc(alias = "SetColumnWidth")]
     pub fn set_column_width(&self, column: impl Into<OldColumnIndex>, width: f32) {
-        let columns = assert_current_columns("Ui::set_column_width()");
-        let column_index = assert_valid_column_in(columns, column.into(), "Ui::set_column_width()");
         assert_non_negative_f32("Ui::set_column_width()", "width", width);
-        unsafe { sys::igSetColumnWidth(column_index, width) };
+        self.run_with_bound_context(|| {
+            let columns = assert_current_columns("Ui::set_column_width()");
+            let column_index =
+                assert_valid_column_in(columns, column.into(), "Ui::set_column_width()");
+            unsafe { sys::igSetColumnWidth(column_index, width) };
+        });
     }
 
     /// Returns the offset of the current column (in pixels from the left side of the content region)
     #[doc(alias = "GetColumnOffset")]
     pub fn current_column_offset(&self) -> f32 {
-        unsafe { sys::igGetColumnOffset(-1) }
+        self.run_with_bound_context(|| unsafe { sys::igGetColumnOffset(-1) })
     }
 
     /// Returns the offset of the given column (in pixels from the left side of the content region)
     #[doc(alias = "GetColumnOffset")]
     pub fn column_offset(&self, offset: impl Into<OldColumnOffsetRef>) -> f32 {
         let column_index = resolve_column_offset_query_ref(offset.into(), "Ui::column_offset()");
-        unsafe { sys::igGetColumnOffset(column_index) }
+        self.run_with_bound_context(|| unsafe { sys::igGetColumnOffset(column_index) })
     }
 
     /// Sets the offset of the current column (in pixels from the left side of the content region)
     #[doc(alias = "SetColumnOffset")]
     pub fn set_current_column_offset(&self, offset_x: f32) {
-        assert_current_columns("Ui::set_current_column_offset()");
         assert_non_negative_f32("Ui::set_current_column_offset()", "offset_x", offset_x);
-        unsafe { sys::igSetColumnOffset(-1, offset_x) };
+        self.run_with_bound_context(|| {
+            assert_current_columns("Ui::set_current_column_offset()");
+            unsafe { sys::igSetColumnOffset(-1, offset_x) };
+        });
     }
 
     /// Sets the offset of the given column (in pixels from the left side of the content region)
     #[doc(alias = "SetColumnOffset")]
     pub fn set_column_offset(&self, offset: impl Into<OldColumnOffsetRef>, offset_x: f32) {
-        let column_index = resolve_column_offset_ref(offset.into(), "Ui::set_column_offset()");
         assert_non_negative_f32("Ui::set_column_offset()", "offset_x", offset_x);
-        unsafe { sys::igSetColumnOffset(column_index, offset_x) };
+        self.run_with_bound_context(|| {
+            let column_index = resolve_column_offset_ref(offset.into(), "Ui::set_column_offset()");
+            unsafe { sys::igSetColumnOffset(column_index, offset_x) };
+        });
     }
 
     /// Returns the current amount of columns
     #[doc(alias = "GetColumnsCount")]
     pub fn column_count(&self) -> usize {
-        column_count_from_i32(unsafe { sys::igGetColumnsCount() }, "Ui::column_count()")
+        column_count_from_i32(
+            self.run_with_bound_context(|| unsafe { sys::igGetColumnsCount() }),
+            "Ui::column_count()",
+        )
     }
 
     // ============================================================================
@@ -146,33 +164,40 @@ impl Ui {
         &self,
         column: impl Into<OldColumnIndex>,
     ) -> crate::layout::ClipRectToken<'_> {
-        let columns = assert_current_columns("Ui::push_column_clip_rect()");
-        let column_index =
-            assert_valid_column_in(columns, column.into(), "Ui::push_column_clip_rect()");
-        unsafe { sys::igPushColumnClipRect(column_index) };
+        self.run_with_bound_context(|| {
+            let columns = assert_current_columns("Ui::push_column_clip_rect()");
+            let column_index =
+                assert_valid_column_in(columns, column.into(), "Ui::push_column_clip_rect()");
+            unsafe { sys::igPushColumnClipRect(column_index) };
+        });
         crate::layout::ClipRectToken::new(self)
     }
 
     /// Push columns background for drawing.
     #[doc(alias = "PushColumnsBackground")]
     pub fn push_columns_background(&self) -> ColumnsBackgroundToken<'_> {
-        assert_current_columns("Ui::push_columns_background()");
-        unsafe { sys::igPushColumnsBackground() };
+        self.run_with_bound_context(|| {
+            assert_current_columns("Ui::push_columns_background()");
+            unsafe { sys::igPushColumnsBackground() };
+        });
         ColumnsBackgroundToken { ui: self }
     }
 
     /// Pop columns background.
     #[doc(alias = "PopColumnsBackground")]
     pub(crate) fn pop_columns_background(&self) {
-        assert_current_columns("Ui::pop_columns_background()");
-        unsafe { sys::igPopColumnsBackground() }
+        self.run_with_bound_context(|| {
+            assert_current_columns("Ui::pop_columns_background()");
+            unsafe { sys::igPopColumnsBackground() }
+        });
     }
 
     /// Get columns ID for the given string ID and count.
     #[doc(alias = "GetColumnsID")]
     pub fn get_columns_id(&self, str_id: impl AsRef<str>, count: usize) -> Id {
         let count = columns_count_to_i32(count, "Ui::get_columns_id()");
-        unsafe { Id::from(sys::igGetColumnsID(self.scratch_txt(str_id), count)) }
+        let str_id = self.scratch_txt(str_id);
+        self.run_with_bound_context(|| unsafe { Id::from(sys::igGetColumnsID(str_id, count)) })
     }
 
     // ============================================================================
@@ -183,7 +208,7 @@ impl Ui {
     ///
     /// Returns `false` when the current window is not inside a legacy columns set.
     pub fn is_any_column_resizing(&self) -> bool {
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             let window = sys::igGetCurrentWindowRead();
             if window.is_null() {
                 return false;
@@ -195,7 +220,7 @@ impl Ui {
             }
 
             (*columns).IsBeingResized
-        }
+        })
     }
 
     /// Get the total width of all columns.

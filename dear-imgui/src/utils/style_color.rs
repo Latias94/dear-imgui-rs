@@ -8,11 +8,11 @@ impl crate::ui::Ui {
     /// style object.
     #[doc(alias = "GetStyle", alias = "GetStyleColorVec4")]
     pub fn style_color(&self, style_color: StyleColor) -> [f32; 4] {
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             let color = sys::igGetStyleColorVec4(style_color as sys::ImGuiCol);
             let color = &*color;
             [color.x, color.y, color.z, color.w]
-        }
+        })
     }
 
     /// Returns an ImGui-packed ABGR color (`ImU32`) from a style color.
@@ -27,7 +27,9 @@ impl crate::ui::Ui {
     #[doc(alias = "GetColorU32")]
     pub fn get_color_u32_with_alpha(&self, style_color: StyleColor, alpha_mul: f32) -> u32 {
         assert_finite_f32("Ui::get_color_u32_with_alpha()", "alpha_mul", alpha_mul);
-        unsafe { sys::igGetColorU32_Col(style_color as sys::ImGuiCol, alpha_mul) }
+        self.run_with_bound_context(|| unsafe {
+            sys::igGetColorU32_Col(style_color as sys::ImGuiCol, alpha_mul)
+        })
     }
 
     /// Returns an ImGui-packed ABGR color (`ImU32`) from an RGBA float color.
@@ -36,21 +38,21 @@ impl crate::ui::Ui {
     #[doc(alias = "GetColorU32")]
     pub fn get_color_u32_from_rgba(&self, rgba: [f32; 4]) -> u32 {
         assert_finite_vec4("Ui::get_color_u32_from_rgba()", "rgba", rgba);
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             sys::igGetColorU32_Vec4(sys::ImVec4_c {
                 x: rgba[0],
                 y: rgba[1],
                 z: rgba[2],
                 w: rgba[3],
             })
-        }
+        })
     }
 
     /// Returns an ImGui-packed ABGR color (`ImU32`) from an existing packed color, with alpha multiplier.
     #[doc(alias = "GetColorU32")]
     pub fn get_color_u32_from_packed(&self, abgr: u32, alpha_mul: f32) -> u32 {
         assert_finite_f32("Ui::get_color_u32_from_packed()", "alpha_mul", alpha_mul);
-        unsafe { sys::igGetColorU32_U32(abgr, alpha_mul) }
+        self.run_with_bound_context(|| unsafe { sys::igGetColorU32_U32(abgr, alpha_mul) })
     }
 
     /// Returns the name of a style color.
@@ -60,13 +62,13 @@ impl crate::ui::Ui {
     /// [`name`]: StyleColor::name
     #[doc(alias = "GetStyleColorName")]
     pub fn style_color_name(&self, style_color: StyleColor) -> &'static str {
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             let name_ptr = sys::igGetStyleColorName(style_color as sys::ImGuiCol);
             if name_ptr.is_null() {
                 return "Unknown";
             }
             let c_str = std::ffi::CStr::from_ptr(name_ptr);
             c_str.to_str().unwrap_or("Unknown")
-        }
+        })
     }
 }

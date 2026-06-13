@@ -21,8 +21,7 @@ impl<'ui> ComboBoxToken<'ui> {
 
 impl Drop for ComboBoxToken<'_> {
     fn drop(&mut self) {
-        unsafe {
-            sys::igEndCombo();
-        }
+        self._ui
+            .run_with_bound_context(|| unsafe { sys::igEndCombo() });
     }
 }

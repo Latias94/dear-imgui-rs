@@ -5,7 +5,7 @@ use std::os::raw::c_void;
 impl<'ui> NodeEditor<'ui> {
     /// Draw a minimap in the editor
     pub fn minimap(&self, size_fraction: f32, location: crate::MiniMapLocation) {
-        self.bind();
+        let _guard = self.bind();
         unsafe {
             sys::imnodes_MiniMap(
                 size_fraction,
@@ -41,7 +41,7 @@ impl<'ui> NodeEditor<'ui> {
 
         // ImNodes may invoke the callback during EndNodeEditor(). Keep the closure alive for the
         // whole editor frame by storing it inside the NodeEditor token.
-        self.bind();
+        let _guard = self.bind();
         self.minimap_callbacks.push(Box::new(MiniMapCallbackHolder {
             callback: Box::new(callback),
         }));

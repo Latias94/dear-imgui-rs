@@ -21,9 +21,8 @@ impl<'ui> MainMenuBarToken<'ui> {
 
 impl Drop for MainMenuBarToken<'_> {
     fn drop(&mut self) {
-        unsafe {
-            sys::igEndMainMenuBar();
-        }
+        self._ui
+            .run_with_bound_context(|| unsafe { sys::igEndMainMenuBar() });
     }
 }
 
@@ -47,9 +46,8 @@ impl<'ui> MenuBarToken<'ui> {
 
 impl Drop for MenuBarToken<'_> {
     fn drop(&mut self) {
-        unsafe {
-            sys::igEndMenuBar();
-        }
+        self._ui
+            .run_with_bound_context(|| unsafe { sys::igEndMenuBar() });
     }
 }
 
@@ -73,8 +71,7 @@ impl<'ui> MenuToken<'ui> {
 
 impl Drop for MenuToken<'_> {
     fn drop(&mut self) {
-        unsafe {
-            sys::igEndMenu();
-        }
+        self._ui
+            .run_with_bound_context(|| unsafe { sys::igEndMenu() });
     }
 }

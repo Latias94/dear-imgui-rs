@@ -16,7 +16,7 @@ impl Ui {
     /// Returns a `GroupToken` that must be ended by calling `.end()`.
     #[doc(alias = "BeginGroup")]
     pub fn begin_group(&self) -> GroupToken<'_> {
-        unsafe { sys::igBeginGroup() };
+        self.run_with_bound_context(|| unsafe { sys::igBeginGroup() });
         GroupToken::new(self)
     }
 

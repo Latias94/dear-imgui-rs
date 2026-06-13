@@ -116,7 +116,7 @@ impl<'a> ScatterPlot<'a> {
 }
 
 impl<'a> Plot for ScatterPlot<'a> {
-    fn plot(&self) {
+    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
         if self.validate().is_err() {
             return; // Skip plotting if data is invalid
         }
@@ -124,6 +124,7 @@ impl<'a> Plot for ScatterPlot<'a> {
             return;
         };
 
+        let _guard = plot_ui.bind();
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -244,7 +245,7 @@ impl<'a> SimpleScatterPlot<'a> {
 }
 
 impl<'a> Plot for SimpleScatterPlot<'a> {
-    fn plot(&self) {
+    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
         if self.values.is_empty() {
             return;
         }
@@ -252,6 +253,7 @@ impl<'a> Plot for SimpleScatterPlot<'a> {
             return;
         };
 
+        let _guard = plot_ui.bind();
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -285,8 +287,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = ScatterPlot::new(label, x_data, y_data);
         plot.validate()?;
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 
@@ -296,8 +297,7 @@ impl<'ui> crate::PlotUi<'ui> {
             return Err(PlotError::EmptyData);
         }
         let plot = SimpleScatterPlot::new(label, values);
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 }

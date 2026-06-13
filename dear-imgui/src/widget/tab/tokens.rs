@@ -22,9 +22,8 @@ impl<'ui> TabBarToken<'ui> {
 
 impl<'ui> Drop for TabBarToken<'ui> {
     fn drop(&mut self) {
-        unsafe {
-            sys::igEndTabBar();
-        }
+        self._ui
+            .run_with_bound_context(|| unsafe { sys::igEndTabBar() });
     }
 }
 
@@ -49,8 +48,7 @@ impl<'ui> TabItemToken<'ui> {
 
 impl<'ui> Drop for TabItemToken<'ui> {
     fn drop(&mut self) {
-        unsafe {
-            sys::igEndTabItem();
-        }
+        self._ui
+            .run_with_bound_context(|| unsafe { sys::igEndTabItem() });
     }
 }

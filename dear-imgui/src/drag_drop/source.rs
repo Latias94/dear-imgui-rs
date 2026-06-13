@@ -98,7 +98,7 @@ impl<'ui, T: AsRef<str>> DragDropSource<'ui, T> {
             "DragDropSource::begin_payload_unchecked()",
         );
         validate_drag_drop_source_flags("DragDropSource::begin_payload_unchecked()", self.flags);
-        unsafe {
+        self.ui.run_with_bound_context(|| unsafe {
             let should_begin = sys::igBeginDragDropSource(self.flags.bits() as i32);
 
             if should_begin {
@@ -113,7 +113,7 @@ impl<'ui, T: AsRef<str>> DragDropSource<'ui, T> {
             } else {
                 None
             }
-        }
+        })
     }
 }
 
@@ -141,8 +141,7 @@ impl<'ui> DragDropSourceTooltip<'ui> {
 
 impl Drop for DragDropSourceTooltip<'_> {
     fn drop(&mut self) {
-        unsafe {
-            sys::igEndDragDropSource();
-        }
+        self._ui
+            .run_with_bound_context(|| unsafe { sys::igEndDragDropSource() });
     }
 }

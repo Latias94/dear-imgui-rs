@@ -128,7 +128,7 @@ impl<'a> LinePlot<'a> {
 }
 
 impl<'a> Plot for LinePlot<'a> {
-    fn plot(&self) {
+    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
         if self.validate().is_err() {
             return; // Skip plotting if data is invalid
         }
@@ -136,6 +136,7 @@ impl<'a> Plot for LinePlot<'a> {
             return;
         };
 
+        let _guard = plot_ui.bind();
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -268,7 +269,7 @@ impl<'a> SimpleLinePlot<'a> {
 }
 
 impl<'a> Plot for SimpleLinePlot<'a> {
-    fn plot(&self) {
+    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
         if self.values.is_empty() {
             return;
         }
@@ -276,6 +277,7 @@ impl<'a> Plot for SimpleLinePlot<'a> {
             return;
         };
 
+        let _guard = plot_ui.bind();
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -304,8 +306,7 @@ impl<'ui> crate::PlotUi<'ui> {
     pub fn line_plot(&self, label: &str, x_data: &[f64], y_data: &[f64]) -> Result<(), PlotError> {
         let plot = LinePlot::new(label, x_data, y_data);
         plot.validate()?;
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 
@@ -315,8 +316,7 @@ impl<'ui> crate::PlotUi<'ui> {
             return Err(PlotError::EmptyData);
         }
         let plot = SimpleLinePlot::new(label, values);
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 }

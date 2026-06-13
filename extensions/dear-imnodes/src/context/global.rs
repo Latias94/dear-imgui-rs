@@ -22,23 +22,18 @@ pub struct BoundEditor<'a> {
 
 impl<'a> BoundEditor<'a> {
     #[inline]
-    fn bind(&self) {
-        self.scope.bind();
-    }
-
-    #[inline]
-    pub fn set_current(&self) {
-        self.bind();
+    fn bind(&self) -> super::ImNodesScopeGuard {
+        self.scope.bind()
     }
 
     pub fn get_panning(&self) -> [f32; 2] {
-        self.bind();
+        let _guard = self.bind();
         let out = unsafe { crate::compat_ffi::imnodes_EditorContextGetPanning() };
         [out.x, out.y]
     }
 
     pub fn reset_panning(&self, pos: [f32; 2]) {
-        self.bind();
+        let _guard = self.bind();
         unsafe {
             sys::imnodes_EditorContextResetPanning(sys::ImVec2_c {
                 x: pos[0],
@@ -48,13 +43,13 @@ impl<'a> BoundEditor<'a> {
     }
 
     pub fn move_to_node(&self, node_id: crate::NodeId) {
-        self.bind();
+        let _guard = self.bind();
         unsafe { sys::imnodes_EditorContextMoveToNode(node_id.raw()) };
     }
 
     /// Save this editor's state to an INI string.
     pub fn save_state_to_ini_string(&self) -> String {
-        self.bind();
+        let _guard = self.bind();
         unsafe {
             let mut size: usize = 0;
             let ptr =
@@ -72,7 +67,7 @@ impl<'a> BoundEditor<'a> {
 
     /// Load this editor's state from an INI string.
     pub fn load_state_from_ini_string(&self, data: &str) {
-        self.bind();
+        let _guard = self.bind();
         unsafe {
             sys::imnodes_LoadEditorStateFromIniString(
                 self._editor.raw,
@@ -84,7 +79,7 @@ impl<'a> BoundEditor<'a> {
 
     /// Save this editor's state directly to an INI file.
     pub fn save_state_to_ini_file(&self, file_name: &str) {
-        self.bind();
+        let _guard = self.bind();
         let file_name = if file_name.contains('\0') {
             ""
         } else {
@@ -97,7 +92,7 @@ impl<'a> BoundEditor<'a> {
 
     /// Load this editor's state from an INI file.
     pub fn load_state_from_ini_file(&self, file_name: &str) {
-        self.bind();
+        let _guard = self.bind();
         let file_name = if file_name.contains('\0') {
             ""
         } else {
@@ -134,23 +129,6 @@ impl Context {
     /// Create a new ImNodes context (panics on error)
     pub fn create(imgui: &ImGuiContext) -> Self {
         Self::try_create(imgui).expect("Failed to create ImNodes context")
-    }
-
-    /// Set as current ImNodes context
-    pub fn set_as_current(&self) {
-        assert!(
-            self.imgui_alive.is_alive(),
-            "dear-imnodes: ImGui context has been dropped"
-        );
-        assert_eq!(
-            unsafe { imgui_sys::igGetCurrentContext() },
-            self.imgui_ctx_raw,
-            "dear-imnodes: Context must be used with the currently-active ImGui context"
-        );
-        unsafe {
-            sys::imnodes_SetImGuiContext(self.imgui_ctx_raw);
-            sys::imnodes_SetCurrentContext(self.raw);
-        };
     }
 
     /// Return the raw pointer for this context.

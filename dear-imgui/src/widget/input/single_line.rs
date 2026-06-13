@@ -96,7 +96,7 @@ impl<'ui, 'p, L: AsRef<str>, H: AsRef<str>, T> InputTextImStr<'ui, 'p, L, H, T> 
 
         validate_input_text_flags("InputTextImStr::build()", self.flags);
         let flags = self.flags.raw() | sys::ImGuiInputTextFlags_CallbackResize as i32;
-        let result = unsafe {
+        let result = self.ui.run_with_bound_context(|| unsafe {
             if hint_ptr.is_null() {
                 sys::igInputText(
                     label_ptr,
@@ -117,7 +117,7 @@ impl<'ui, 'p, L: AsRef<str>, H: AsRef<str>, T> InputTextImStr<'ui, 'p, L, H, T> 
                     user_ptr,
                 )
             }
-        };
+        });
         // Ensure ImString logical length reflects actual text (scan to NUL)
         unsafe { self.buf.refresh_len() };
         result
@@ -262,7 +262,7 @@ where
 
         validate_input_text_flags("InputText::build()", self.flags);
         let flags = self.flags.raw() | sys::ImGuiInputTextFlags_CallbackResize as i32;
-        let result = unsafe {
+        let result = self.ui.run_with_bound_context(|| unsafe {
             if hint_ptr.is_null() {
                 sys::igInputText(
                     label_ptr,
@@ -283,7 +283,7 @@ where
                     user_ptr,
                 )
             }
-        };
+        });
 
         finish_string_input_buffer(self.buf, input_buffer);
         result

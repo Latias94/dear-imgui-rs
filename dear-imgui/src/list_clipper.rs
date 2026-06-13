@@ -3,7 +3,6 @@
 //! Wrapper around Dear ImGui's list clipper to efficiently display large
 //! lists by only processing visible items.
 //!
-use std::marker::PhantomData;
 use std::ops::Range;
 
 use crate::Ui;
@@ -57,14 +56,14 @@ impl ListClipper {
             "ListClipper::begin() items_height must be finite"
         );
         let items_count = items_count_to_i32(self.items_count, "ListClipper::begin()");
-        unsafe {
+        ui.run_with_bound_context(|| unsafe {
             let ptr = sys::ImGuiListClipper_ImGuiListClipper();
             if ptr.is_null() {
                 panic!("ImGuiListClipper_ImGuiListClipper() returned null");
             }
             sys::ImGuiListClipper_Begin(ptr, items_count, self.items_height);
             ListClipperToken::new(ui, ptr)
-        }
+        })
     }
 }
 
@@ -74,16 +73,16 @@ impl ListClipper {
 /// For example you have a list of 1 million buttons, and the list
 /// clipper will help you only draw the ones which are visible.
 pub struct ListClipperToken<'ui> {
+    ui: &'ui Ui,
     list_clipper: *mut sys::ImGuiListClipper,
-    _phantom: PhantomData<&'ui Ui>,
     ended: bool,
 }
 
 impl<'ui> ListClipperToken<'ui> {
-    fn new(_: &Ui, list_clipper: *mut sys::ImGuiListClipper) -> Self {
+    fn new(ui: &'ui Ui, list_clipper: *mut sys::ImGuiListClipper) -> Self {
         Self {
+            ui,
             list_clipper,
-            _phantom: PhantomData,
             ended: false,
         }
     }
@@ -102,7 +101,9 @@ impl<'ui> ListClipperToken<'ui> {
         if self.ended {
             panic!("ListClipperToken::step() called after the clipper has ended");
         }
-        let ret = unsafe { sys::ImGuiListClipper_Step(self.list_clipper) };
+        let ret = self
+            .ui
+            .run_with_bound_context(|| unsafe { sys::ImGuiListClipper_Step(self.list_clipper) });
         if !ret {
             self.ended = true;
         }
@@ -113,9 +114,9 @@ impl<'ui> ListClipperToken<'ui> {
     /// `step`. You can call it sooner but typically not needed.
     pub fn end(&mut self) {
         if !self.ended {
-            unsafe {
+            self.ui.run_with_bound_context(|| unsafe {
                 sys::ImGuiListClipper_End(self.list_clipper);
-            }
+            });
             self.ended = true;
         }
     }
@@ -150,9 +151,9 @@ impl<'ui> ListClipperToken<'ui> {
 
 impl Drop for ListClipperToken<'_> {
     fn drop(&mut self) {
-        unsafe {
+        self.ui.run_with_bound_context(|| unsafe {
             sys::ImGuiListClipper_destroy(self.list_clipper);
-        };
+        });
     }
 }
 

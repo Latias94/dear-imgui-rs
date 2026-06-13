@@ -1,10 +1,10 @@
 use crate::dialog_core::DirEntry;
 use crate::dialog_state::FileDialogState;
 use crate::file_style::EntryKind;
-use dear_imgui_rs::sys;
+use dear_imgui_rs::{ColorStackToken, StyleColor, Ui};
 
-pub(super) struct TextColorToken {
-    pushed: bool,
+pub(super) struct TextColorToken<'ui> {
+    _token: Option<ColorStackToken<'ui>>,
 }
 
 pub(super) struct StyleVisual {
@@ -36,31 +36,15 @@ pub(super) fn style_visual_for_entry(state: &mut FileDialogState, e: &DirEntry) 
     }
 }
 
-impl TextColorToken {
-    pub(super) fn push(color: [f32; 4]) -> Self {
-        unsafe {
-            sys::igPushStyleColor_Vec4(
-                sys::ImGuiCol_Text as i32,
-                sys::ImVec4 {
-                    x: color[0],
-                    y: color[1],
-                    z: color[2],
-                    w: color[3],
-                },
-            );
+impl<'ui> TextColorToken<'ui> {
+    pub(super) fn push(ui: &'ui Ui, color: [f32; 4]) -> Self {
+        let token = ui.push_style_color(StyleColor::Text, color);
+        Self {
+            _token: Some(token),
         }
-        Self { pushed: true }
     }
 
     pub(super) fn none() -> Self {
-        Self { pushed: false }
-    }
-}
-
-impl Drop for TextColorToken {
-    fn drop(&mut self) {
-        if self.pushed {
-            unsafe { sys::igPopStyleColor(1) };
-        }
+        Self { _token: None }
     }
 }

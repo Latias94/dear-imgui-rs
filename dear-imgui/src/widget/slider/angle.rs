@@ -100,9 +100,9 @@ where
     pub fn build(self, ui: &Ui, value_rad: &mut f32) -> bool {
         validate_slider_flags("AngleSlider::build()", self.flags);
         validate_slider_range("AngleSlider::build()", &self.min_degrees, &self.max_degrees);
-        unsafe {
-            let (label, display_format) = ui.scratch_txt_two(self.label, self.display_format);
+        let (label, display_format) = ui.scratch_txt_two(self.label, self.display_format);
 
+        ui.run_with_bound_context(|| unsafe {
             sys::igSliderAngle(
                 label,
                 value_rad as *mut _,
@@ -111,6 +111,6 @@ where
                 display_format,
                 self.flags.bits(),
             )
-        }
+        })
     }
 }

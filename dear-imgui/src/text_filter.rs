@@ -13,7 +13,7 @@
 //! let mut filter = TextFilter::new("Search");
 //!
 //! // Draw the filter input
-//! filter.draw();
+//! filter.draw(&ui);
 //!
 //! // Test if text passes the filter
 //! if filter.pass_filter("some text") {
@@ -142,12 +142,12 @@ impl TextFilter {
     /// # let ui = ctx.frame();
     /// let mut filter = TextFilter::new("Search");
     ///
-    /// if filter.draw() {
+    /// if filter.draw(&ui) {
     ///     println!("Filter was modified!");
     /// }
     /// ```
-    pub fn draw(&mut self) -> bool {
-        self.draw_with_size(0.0)
+    pub fn draw(&mut self, ui: &Ui) -> bool {
+        self.draw_with_size(ui, 0.0)
     }
 
     /// Draws an InputText widget to control the filter with a specific width.
@@ -165,13 +165,19 @@ impl TextFilter {
     /// # let ui = ctx.frame();
     /// let mut filter = TextFilter::new("Search");
     ///
-    /// if filter.draw_with_size(200.0) {
+    /// if filter.draw_with_size(&ui, 200.0) {
     ///     println!("Filter was modified!");
     /// }
     /// ```
-    pub fn draw_with_size(&mut self, width: f32) -> bool {
-        let label_ptr = crate::string::tls_scratch_txt(&self.label);
-        unsafe { sys::ImGuiTextFilter_Draw(self.raw, label_ptr, width) }
+    pub fn draw_with_size(&mut self, ui: &Ui, width: f32) -> bool {
+        assert!(
+            width.is_finite(),
+            "TextFilter::draw_with_size() width must be finite"
+        );
+        let label_ptr = ui.scratch_txt(&self.label);
+        ui.run_with_bound_context(|| unsafe {
+            sys::ImGuiTextFilter_Draw(self.raw, label_ptr, width)
+        })
     }
 
     /// Returns true if the filter is not empty.
@@ -373,5 +379,39 @@ mod tests {
             filter.pass_filter(text),
             filter.pass_filter_range(text, 0..text.len())
         );
+    }
+
+    #[test]
+    fn draw_uses_owner_ui_context_and_restores_previous_current_context() {
+        let _lock = TEST_CTX_LOCK.lock().unwrap();
+        let mut ctx_a = crate::Context::create();
+        let raw_a = unsafe { crate::sys::igGetCurrentContext() };
+        let raw_b = unsafe { crate::sys::igCreateContext(std::ptr::null_mut()) };
+        assert!(!raw_b.is_null());
+
+        unsafe { crate::sys::igSetCurrentContext(raw_a) };
+        let _ = ctx_a.font_atlas_mut().build();
+        ctx_a.io_mut().set_display_size([128.0, 128.0]);
+        ctx_a.io_mut().set_delta_time(1.0 / 60.0);
+
+        {
+            let ui_a = ctx_a.frame();
+            let _ = ui_a.window("TextFilter owner context").build(|| {
+                let mut filter = TextFilter::new("Search");
+
+                unsafe { crate::sys::igSetCurrentContext(raw_b) };
+                assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw_b);
+
+                let _ = filter.draw(&ui_a);
+
+                assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw_b);
+            });
+        }
+
+        unsafe { crate::sys::igSetCurrentContext(raw_a) };
+        let _ = ctx_a.render();
+        unsafe { crate::sys::igDestroyContext(raw_b) };
+
+        drop(ctx_a);
     }
 }

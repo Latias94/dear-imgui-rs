@@ -15,14 +15,15 @@ fn usize_to_i32(name: &str, value: usize) -> i32 {
 /// struct. It does not perform any selection updates by itself; you are expected
 /// to call helper methods or use the raw IO to drive your own storage.
 pub struct MultiSelectScope<'ui> {
+    ui: &'ui crate::Ui,
     pub(super) ms_io_begin: *mut sys::ImGuiMultiSelectIO,
     items_count: i32,
     ended: bool,
-    _marker: std::marker::PhantomData<&'ui crate::Ui>,
 }
 
 impl<'ui> MultiSelectScope<'ui> {
     pub(super) fn new(
+        ui: &'ui crate::Ui,
         flags: impl Into<MultiSelectOptions>,
         selection_size: Option<i32>,
         items_count: usize,
@@ -30,13 +31,14 @@ impl<'ui> MultiSelectScope<'ui> {
         let options = flags.into();
         let selection_size_i32 = selection_size.unwrap_or(-1);
         let items_count_i32 = usize_to_i32("items_count", items_count);
-        let ms_io_begin =
-            unsafe { sys::igBeginMultiSelect(options.raw(), selection_size_i32, items_count_i32) };
+        let ms_io_begin = ui.run_with_bound_context(|| unsafe {
+            sys::igBeginMultiSelect(options.raw(), selection_size_i32, items_count_i32)
+        });
         Self {
+            ui,
             ms_io_begin,
             items_count: items_count_i32,
             ended: false,
-            _marker: std::marker::PhantomData,
         }
     }
 
@@ -62,7 +64,9 @@ impl<'ui> MultiSelectScope<'ui> {
     /// This calls `EndMultiSelect()` and returns a `MultiSelectEnd` wrapper
     /// that can be used to apply the final selection requests.
     pub fn end(mut self) -> MultiSelectEnd<'ui> {
-        let ms_io_end = unsafe { sys::igEndMultiSelect() };
+        let ms_io_end = self
+            .ui
+            .run_with_bound_context(|| unsafe { sys::igEndMultiSelect() });
         self.ended = true;
         MultiSelectEnd {
             ms_io_end,
@@ -75,9 +79,9 @@ impl<'ui> MultiSelectScope<'ui> {
 impl Drop for MultiSelectScope<'_> {
     fn drop(&mut self) {
         if !self.ended {
-            unsafe {
+            self.ui.run_with_bound_context(|| unsafe {
                 sys::igEndMultiSelect();
-            }
+            });
             self.ended = true;
         }
     }

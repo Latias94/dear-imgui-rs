@@ -24,7 +24,8 @@ impl<'ui> DisabledToken<'ui> {
 
 impl<'ui> Drop for DisabledToken<'ui> {
     fn drop(&mut self) {
-        unsafe { sys::igEndDisabled() }
+        self._ui
+            .run_with_bound_context(|| unsafe { sys::igEndDisabled() });
     }
 }
 
@@ -35,7 +36,7 @@ impl Ui {
     /// until the returned token is dropped.
     #[doc(alias = "BeginDisabled")]
     pub fn begin_disabled(&self) -> DisabledToken<'_> {
-        unsafe { sys::igBeginDisabled(true) }
+        self.run_with_bound_context(|| unsafe { sys::igBeginDisabled(true) });
         DisabledToken::new(self)
     }
 
@@ -45,7 +46,7 @@ impl Ui {
     /// token being dropped to correctly balance the internal stack.
     #[doc(alias = "BeginDisabled")]
     pub fn begin_disabled_with_cond(&self, disabled: bool) -> DisabledToken<'_> {
-        unsafe { sys::igBeginDisabled(disabled) }
+        self.run_with_bound_context(|| unsafe { sys::igBeginDisabled(disabled) });
         DisabledToken::new(self)
     }
 }

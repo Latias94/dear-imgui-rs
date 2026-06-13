@@ -98,13 +98,14 @@ impl<'a> ErrorBarsPlot<'a> {
 }
 
 impl<'a> Plot for ErrorBarsPlot<'a> {
-    fn plot(&self) {
+    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
         if self.validate().is_err() {
             return;
         }
         let Ok(count) = i32::try_from(self.x_data.len()) else {
             return;
         };
+        let _guard = plot_ui.bind();
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -229,13 +230,14 @@ impl<'a> AsymmetricErrorBarsPlot<'a> {
 }
 
 impl<'a> Plot for AsymmetricErrorBarsPlot<'a> {
-    fn plot(&self) {
+    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
         if self.validate().is_err() {
             return;
         }
         let Ok(count) = i32::try_from(self.x_data.len()) else {
             return;
         };
+        let _guard = plot_ui.bind();
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -337,7 +339,7 @@ impl<'a> SimpleErrorBarsPlot<'a> {
 }
 
 impl<'a> Plot for SimpleErrorBarsPlot<'a> {
-    fn plot(&self) {
+    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
         if self.validate().is_err() {
             return;
         }
@@ -350,6 +352,7 @@ impl<'a> Plot for SimpleErrorBarsPlot<'a> {
             .map(|i| self.x_start + i as f64 * self.x_scale)
             .collect();
 
+        let _guard = plot_ui.bind();
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -384,8 +387,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = ErrorBarsPlot::new(label, x_data, y_data, err_data);
         plot.validate()?;
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 
@@ -400,8 +402,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = AsymmetricErrorBarsPlot::new(label, x_data, y_data, err_neg, err_pos);
         plot.validate()?;
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 
@@ -414,8 +415,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = SimpleErrorBarsPlot::new(label, values, errors);
         plot.validate()?;
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 }

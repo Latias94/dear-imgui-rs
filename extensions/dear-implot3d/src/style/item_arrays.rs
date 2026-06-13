@@ -1,4 +1,4 @@
-use crate::sys;
+use crate::{Plot3DUi, sys};
 use std::borrow::Cow;
 
 /// One-shot array-backed item style overrides for the next ImPlot3D submission.
@@ -71,8 +71,31 @@ impl<'a> Plot3DItemArrayStyle<'a> {
     }
 }
 
-/// Apply array-backed item styling to the next ImPlot3D submission executed inside `f`.
-pub fn with_next_plot3d_item_array_style<'a, R>(
+struct ScopedNextPlot3DItemArrayStyle {
+    previous: Option<sys::ImPlot3DSpec_c>,
+    active: bool,
+}
+
+impl ScopedNextPlot3DItemArrayStyle {
+    fn restore_if_unused(&mut self) {
+        if !self.active {
+            return;
+        }
+
+        if crate::take_next_plot3d_spec().is_some() {
+            crate::set_next_plot3d_spec(self.previous.take());
+        }
+        self.active = false;
+    }
+}
+
+impl Drop for ScopedNextPlot3DItemArrayStyle {
+    fn drop(&mut self) {
+        self.restore_if_unused();
+    }
+}
+
+pub(crate) fn with_scoped_next_plot3d_item_array_style<'a, R>(
     style: Plot3DItemArrayStyle<'a>,
     f: impl FnOnce() -> R,
 ) -> R {
@@ -81,11 +104,26 @@ pub fn with_next_plot3d_item_array_style<'a, R>(
     style.apply_to_spec(&mut spec);
     crate::set_next_plot3d_spec(Some(spec));
 
+    let mut guard = ScopedNextPlot3DItemArrayStyle {
+        previous,
+        active: true,
+    };
     let out = f();
-
-    if crate::take_next_plot3d_spec().is_some() {
-        crate::set_next_plot3d_spec(previous);
-    }
-
+    guard.restore_if_unused();
     out
+}
+
+impl<'ui> Plot3DUi<'ui> {
+    /// Apply array-backed item styling to the next ImPlot3D submission executed inside `f`.
+    ///
+    /// This is closure-scoped so borrowed slices stay valid for the entire next
+    /// plot call and are restored even if `f` panics before submitting an item.
+    pub fn with_next_plot3d_item_array_style<'a, R>(
+        &self,
+        style: Plot3DItemArrayStyle<'a>,
+        f: impl FnOnce(&Plot3DUi<'ui>) -> R,
+    ) -> R {
+        let _guard = self.bind();
+        with_scoped_next_plot3d_item_array_style(style, || f(self))
+    }
 }

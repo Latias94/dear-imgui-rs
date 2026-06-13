@@ -40,7 +40,9 @@ impl Ui {
         options.validate("Ui::begin_combo_with_flags()");
         let (label_ptr, preview_ptr) = self.scratch_txt_two(label, preview_value);
 
-        let should_render = unsafe { sys::igBeginCombo(label_ptr, preview_ptr, options.raw()) };
+        let should_render = self.run_with_bound_context(|| unsafe {
+            sys::igBeginCombo(label_ptr, preview_ptr, options.raw())
+        });
 
         if should_render {
             Some(ComboBoxToken::new(self))
@@ -79,8 +81,9 @@ impl Ui {
         options.validate("Ui::begin_combo_no_preview_with_flags()");
         let label_ptr = self.scratch_txt(label);
 
-        let should_render =
-            unsafe { sys::igBeginCombo(label_ptr, std::ptr::null(), options.raw()) };
+        let should_render = self.run_with_bound_context(|| unsafe {
+            sys::igBeginCombo(label_ptr, std::ptr::null(), options.raw())
+        });
 
         if should_render {
             Some(ComboBoxToken::new(self))

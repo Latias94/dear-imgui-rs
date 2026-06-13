@@ -57,13 +57,11 @@ pub mod plots;
 mod style;
 mod surface_builder;
 mod ui;
-mod ui_ext;
 
 mod axis;
 
 pub use builder::Plot3DBuilder;
 pub use context::Plot3DContext;
-pub use demos::*;
 pub use flags::*;
 pub use image_builder::{Image3DByAxesBuilder, Image3DByCornersBuilder};
 pub use item_style::*;
@@ -73,7 +71,6 @@ pub use plots::*;
 pub use style::*;
 pub use surface_builder::Surface3DBuilder;
 pub use ui::{Plot3DToken, Plot3DUi};
-pub use ui_ext::*;
 
 pub(crate) use debug_state::{
     debug_before_plot, debug_before_setup, debug_begin_plot, debug_end_plot,

@@ -75,13 +75,14 @@ impl<'a> InfLinesPlot<'a> {
 }
 
 impl<'a> Plot for InfLinesPlot<'a> {
-    fn plot(&self) {
+    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
         if self.validate().is_err() {
             return;
         }
         let Ok(count) = i32::try_from(self.positions.len()) else {
             return;
         };
+        let _guard = plot_ui.bind();
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -103,8 +104,7 @@ impl<'ui> crate::PlotUi<'ui> {
     pub fn inf_lines_vertical(&self, label: &str, xs: &[f64]) -> Result<(), PlotError> {
         let plot = InfLinesPlot::new(label, xs);
         plot.validate()?;
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 
@@ -112,8 +112,7 @@ impl<'ui> crate::PlotUi<'ui> {
     pub fn inf_lines_horizontal(&self, label: &str, ys: &[f64]) -> Result<(), PlotError> {
         let plot = InfLinesPlot::new(label, ys).horizontal();
         plot.validate()?;
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 }

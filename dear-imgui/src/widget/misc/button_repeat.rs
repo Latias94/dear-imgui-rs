@@ -1,4 +1,4 @@
-use crate::{Ui, create_token, sys};
+use crate::{Ui, sys};
 
 // ============================================================================
 // Button repeat (convenience over item flag)
@@ -26,7 +26,9 @@ impl Ui {
     /// Internally uses `PushItemFlag(ImGuiItemFlags_ButtonRepeat, repeat)`.
     #[doc(alias = "PushButtonRepeat")]
     pub fn push_button_repeat(&self, repeat: bool) -> ButtonRepeatToken<'_> {
-        unsafe { sys::igPushItemFlag(sys::ImGuiItemFlags_ButtonRepeat as i32, repeat) };
+        self.run_with_bound_context(|| unsafe {
+            sys::igPushItemFlag(sys::ImGuiItemFlags_ButtonRepeat as i32, repeat)
+        });
         ButtonRepeatToken::new(self)
     }
 

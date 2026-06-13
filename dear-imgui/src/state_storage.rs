@@ -101,13 +101,15 @@ impl Drop for OwnedStateStorage {
 /// RAII token that restores the previous state storage on drop.
 #[must_use]
 pub struct StateStorageToken<'ui, 'storage> {
+    ui: &'ui Ui,
     prev: *mut sys::ImGuiStorage,
-    _marker: PhantomData<(&'ui Ui, &'storage mut sys::ImGuiStorage)>,
+    _marker: PhantomData<&'storage mut sys::ImGuiStorage>,
 }
 
 impl Drop for StateStorageToken<'_, '_> {
     fn drop(&mut self) {
-        unsafe { sys::igSetStateStorage(self.prev) }
+        self.ui
+            .run_with_bound_context(|| unsafe { sys::igSetStateStorage(self.prev) });
     }
 }
 
@@ -115,7 +117,7 @@ impl crate::ui::Ui {
     /// Returns the current window's state storage.
     #[doc(alias = "GetStateStorage")]
     pub fn state_storage(&self) -> StateStorage<'_> {
-        unsafe { StateStorage::from_raw(sys::igGetStateStorage()) }
+        self.run_with_bound_context(|| unsafe { StateStorage::from_raw(sys::igGetStateStorage()) })
     }
 
     /// Overrides the current state storage until the returned token is dropped.
@@ -124,19 +126,20 @@ impl crate::ui::Ui {
         &self,
         storage: &'storage mut sys::ImGuiStorage,
     ) -> StateStorageToken<'_, 'storage> {
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             let prev = sys::igGetStateStorage();
             sys::igSetStateStorage(storage as *mut sys::ImGuiStorage);
             StateStorageToken {
+                ui: self,
                 prev,
                 _marker: PhantomData,
             }
-        }
+        })
     }
 
     /// Set the storage ID for the next item.
     #[doc(alias = "SetNextItemStorageID")]
     pub fn set_next_item_storage_id(&self, storage_id: Id) {
-        unsafe { sys::igSetNextItemStorageID(storage_id.raw()) }
+        self.run_with_bound_context(|| unsafe { sys::igSetNextItemStorageID(storage_id.raw()) });
     }
 }

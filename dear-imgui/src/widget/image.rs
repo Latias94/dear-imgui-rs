@@ -194,7 +194,9 @@ impl<'ui, 'tex> Image<'ui, 'tex> {
         let uv1_vec: sys::ImVec2 = self.uv1.into();
 
         let _border_size_token = (self.border_color[3] > 0.0).then(|| {
-            let current_size = unsafe { self._ui.style().image_border_size() };
+            let current_size = self
+                ._ui
+                .run_with_bound_context(|| unsafe { self._ui.style().image_border_size() });
             self._ui
                 .push_style_var(StyleVar::ImageBorderSize(current_size.max(1.0)))
         });
@@ -204,9 +206,11 @@ impl<'ui, 'tex> Image<'ui, 'tex> {
         });
 
         if is_default_tint_color(self.tint_color) && is_transparent_color(self.border_color) {
-            unsafe { sys::igImage(self.texture.raw(), size_vec, uv0_vec, uv1_vec) }
+            self._ui.run_with_bound_context(|| unsafe {
+                sys::igImage(self.texture.raw(), size_vec, uv0_vec, uv1_vec)
+            })
         } else {
-            unsafe {
+            self._ui.run_with_bound_context(|| unsafe {
                 sys::igImageWithBg(
                     self.texture.raw(),
                     size_vec,
@@ -215,7 +219,7 @@ impl<'ui, 'tex> Image<'ui, 'tex> {
                     im_vec4([0.0, 0.0, 0.0, 0.0]),
                     im_vec4(self.tint_color),
                 )
-            }
+            })
         }
     }
 
@@ -233,7 +237,9 @@ impl<'ui, 'tex> Image<'ui, 'tex> {
         let uv1_vec: sys::ImVec2 = self.uv1.into();
 
         let _border_size_token = (self.border_color[3] > 0.0).then(|| {
-            let current_size = unsafe { self._ui.style().image_border_size() };
+            let current_size = self
+                ._ui
+                .run_with_bound_context(|| unsafe { self._ui.style().image_border_size() });
             self._ui
                 .push_style_var(StyleVar::ImageBorderSize(current_size.max(1.0)))
         });
@@ -242,7 +248,7 @@ impl<'ui, 'tex> Image<'ui, 'tex> {
                 .push_style_color(StyleColor::Border, self.border_color)
         });
 
-        unsafe {
+        self._ui.run_with_bound_context(|| unsafe {
             sys::igImageWithBg(
                 self.texture.raw(),
                 size_vec,
@@ -251,7 +257,7 @@ impl<'ui, 'tex> Image<'ui, 'tex> {
                 im_vec4(bg_color),
                 im_vec4(tint_color),
             )
-        }
+        });
     }
 }
 
@@ -326,7 +332,7 @@ impl<'ui, 'tex> ImageButton<'ui, 'tex> {
         let uv0_vec: sys::ImVec2 = self.uv0.into();
         let uv1_vec: sys::ImVec2 = self.uv1.into();
 
-        unsafe {
+        self.ui.run_with_bound_context(|| unsafe {
             sys::igImageButton(
                 str_id_ptr,
                 self.texture.raw(),
@@ -336,6 +342,6 @@ impl<'ui, 'tex> ImageButton<'ui, 'tex> {
                 im_vec4(self.bg_color),
                 im_vec4(self.tint_color),
             )
-        }
+        })
     }
 }

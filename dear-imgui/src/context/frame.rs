@@ -1,7 +1,7 @@
 use crate::sys;
 
 use super::Context;
-use super::binding::CTX_MUTEX;
+use super::binding::{CTX_MUTEX, with_bound_context};
 
 /// Runtime state for a Dear ImGui frame owned by an external engine schedule.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -65,8 +65,10 @@ impl FramePrepareOptions {
 /// explicit: one system opens the frame, several user systems draw through [`Self::ui`], and one
 /// system consumes the token to render or snapshot the frame. The existing [`Context::frame`] and
 /// [`Context::render`] calls remain available for traditional immediate-mode loops.
+#[must_use = "dropping FrameToken ends the frame without rendering; call render() or render_snapshot() to produce draw data"]
 pub struct FrameToken<'ctx> {
     ctx: &'ctx mut Context,
+    closed: bool,
 }
 
 /// Result returned by [`Context::frame_with_result`].
@@ -109,7 +111,10 @@ impl Context {
     /// [`FrameToken::render`] or [`FrameToken::render_snapshot`].
     pub fn begin_frame(&mut self) -> FrameToken<'_> {
         let _ = self.frame();
-        FrameToken { ctx: self }
+        FrameToken {
+            ctx: self,
+            closed: false,
+        }
     }
 
     /// Creates a new frame and returns a Ui object for building the interface.
@@ -308,8 +313,12 @@ impl<'ctx> FrameToken<'ctx> {
     }
 
     /// Render this frame and return the resulting draw data.
-    pub fn render(self) -> &'ctx mut crate::render::DrawData {
-        self.ctx.render()
+    pub fn render(mut self) -> &'ctx mut crate::render::DrawData {
+        let ctx = self.ctx as *mut Context;
+        let draw_data = unsafe { (&mut *ctx).render() };
+        self.closed = true;
+        std::mem::forget(self);
+        draw_data
     }
 
     /// Render this frame and build a thread-safe snapshot from the resulting draw data.
@@ -317,21 +326,42 @@ impl<'ctx> FrameToken<'ctx> {
     /// This is the preferred handoff shape for render-world integrations such as Bevy, where raw
     /// ImGui pointers must not cross the engine extraction boundary.
     pub fn render_snapshot(
-        self,
+        mut self,
         options: crate::render::snapshot::SnapshotOptions,
     ) -> Result<crate::render::snapshot::FrameSnapshot, crate::render::snapshot::SnapshotError>
     {
-        let draw_data = self.ctx.render();
+        let ctx = self.ctx as *mut Context;
+        let draw_data = unsafe { (&mut *ctx).render() };
+        self.closed = true;
+        std::mem::forget(self);
         crate::render::snapshot::FrameSnapshot::from_draw_data(draw_data, options)
     }
 
     /// Render this frame and build a thread-safe snapshot for all platform viewports.
     #[cfg(feature = "multi-viewport")]
     pub fn render_platform_viewport_snapshot(
-        self,
+        mut self,
         options: crate::render::snapshot::SnapshotOptions,
     ) -> Result<crate::render::snapshot::FrameSnapshot, crate::render::snapshot::SnapshotError>
     {
-        self.ctx.render_platform_viewport_snapshot(options)
+        let ctx = self.ctx as *mut Context;
+        let snapshot = unsafe { (&mut *ctx).render_platform_viewport_snapshot(options) };
+        self.closed = true;
+        std::mem::forget(self);
+        snapshot
+    }
+}
+
+impl Drop for FrameToken<'_> {
+    fn drop(&mut self) {
+        if self.closed {
+            return;
+        }
+
+        let _guard = CTX_MUTEX.lock();
+        if self.ctx.frame_lifecycle_state_unlocked() == FrameLifecycleState::InFrame {
+            unsafe { with_bound_context(self.ctx.raw, || sys::igEndFrame()) };
+        }
+        self.closed = true;
     }
 }

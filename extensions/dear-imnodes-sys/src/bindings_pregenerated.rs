@@ -6237,5 +6237,8 @@ unsafe extern "C" {
     pub fn imnodes_EditorContextResetToDefault();
 }
 unsafe extern "C" {
+    pub fn imnodes_EditorContextGetCurrent() -> *mut ImNodesEditorContext;
+}
+unsafe extern "C" {
     pub fn imnodes_EditorContextResetToDefaultIfCurrent(editor: *mut ImNodesEditorContext);
 }

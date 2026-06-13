@@ -6326,5 +6326,9 @@ unsafe extern "C" {
 }
 #[link(wasm_import_module = "imgui-sys-v0")]
 unsafe extern "C" {
+    pub fn imnodes_EditorContextGetCurrent() -> *mut ImNodesEditorContext;
+}
+#[link(wasm_import_module = "imgui-sys-v0")]
+unsafe extern "C" {
     pub fn imnodes_EditorContextResetToDefaultIfCurrent(editor: *mut ImNodesEditorContext);
 }

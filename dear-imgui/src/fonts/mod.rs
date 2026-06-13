@@ -41,13 +41,15 @@ impl Ui {
     /// Returns the current font
     #[doc(alias = "GetFont")]
     pub fn current_font(&self) -> &Font {
-        unsafe { Font::from_raw(crate::sys::igGetFont() as *const _) }
+        self.run_with_bound_context(|| unsafe {
+            Font::from_raw(crate::sys::igGetFont() as *const _)
+        })
     }
 
     /// Returns the current font size (= height in pixels) with font scale applied
     #[doc(alias = "GetFontSize")]
     pub fn current_font_size(&self) -> f32 {
-        unsafe { crate::sys::igGetFontSize() }
+        self.run_with_bound_context(|| unsafe { crate::sys::igGetFontSize() })
     }
 
     /// Push a font with dynamic size support (v1.92+ feature).
@@ -60,12 +62,12 @@ impl Ui {
     #[doc(alias = "PushFont")]
     pub fn push_font_with_size(&self, font: Option<&Font>, size: f32) -> crate::FontStackToken<'_> {
         assert_non_negative_finite_f32("Ui::push_font_with_size()", "size", size);
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             let font_ptr = font.map_or(std::ptr::null_mut(), |f| {
                 crate::fonts::validate_font_for_current_context(f, "Ui::push_font_with_size()")
             });
             crate::sys::igPushFont(font_ptr, size);
-        }
+        });
         crate::FontStackToken::new(self)
     }
 
@@ -83,10 +85,10 @@ impl Ui {
     /// Useful for drawing custom shapes with the draw list API.
     #[doc(alias = "GetFontTexUvWhitePixel")]
     pub fn font_tex_uv_white_pixel(&self) -> [f32; 2] {
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             let uv = crate::sys::igGetFontTexUvWhitePixel();
             [uv.x, uv.y]
-        }
+        })
     }
 
     /// Sets the legacy per-window font scale of the current window.
@@ -96,14 +98,14 @@ impl Ui {
     pub fn set_window_font_scale(&self, scale: f32) {
         assert_positive_finite_f32("Ui::set_window_font_scale()", "scale", scale);
 
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             let window = crate::sys::igGetCurrentWindow();
             if window.is_null() {
                 return;
             }
             (*window).FontWindowScale = scale;
             crate::sys::igUpdateCurrentFontSize(0.0);
-        }
+        });
     }
 }
 

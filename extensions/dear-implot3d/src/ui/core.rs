@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use crate::builder::Plot3DBuilder;
 use crate::{
     Line3DFlags, Plot3DDataLayout, Plot3DFlags, Quad3DFlags, Scatter3DFlags, Triangle3DFlags,
-    imgui_sys, len_i32, plot3d_spec_from, sys,
+    len_i32, plot3d_spec_from, sys,
 };
 use dear_imgui_rs::Ui;
 
@@ -36,35 +36,14 @@ pub struct Plot3DUi<'ui> {
 }
 
 impl<'ui> Plot3DUi<'ui> {
-    pub(crate) fn from_current(ui: &'ui Ui) -> Self {
-        let imgui_ctx_raw = unsafe { imgui_sys::igGetCurrentContext() };
-        assert!(
-            !imgui_ctx_raw.is_null(),
-            "dear-implot3d: Plot3DUi requires an active ImGui context"
-        );
-        let plot_ctx_raw = unsafe { sys::ImPlot3D_GetCurrentContext() };
-        assert!(
-            !plot_ctx_raw.is_null(),
-            "dear-implot3d: Plot3DUi requires an active ImPlot3D context"
-        );
-        Self {
-            _ui: ui,
-            binding: Plot3DContextBinding {
-                plot_ctx_raw,
-                imgui_ctx_raw,
-            },
-            imgui_alive: None,
-        }
-    }
-
-    pub(crate) fn bind(&self) {
+    pub(crate) fn bind(&self) -> super::binding::Plot3DContextBindingGuard {
         if let Some(alive) = &self.imgui_alive {
             assert!(
                 alive.is_alive(),
                 "dear-implot3d: ImGui context has been dropped"
             );
         }
-        self.binding.bind();
+        self.binding.bind()
     }
 
     /// Builder to configure and begin a 3D plot
@@ -87,10 +66,11 @@ impl<'ui> Plot3DUi<'ui> {
     /// }
     /// ```
     pub fn begin_plot<S: AsRef<str>>(&self, title: S) -> Plot3DBuilder<'ui> {
-        self.bind();
+        let _guard = self.bind();
         Plot3DBuilder {
             binding: self.binding,
             imgui_alive: self.imgui_alive.clone(),
+            ui: self._ui,
             title: title.as_ref().into(),
             size: None,
             flags: Plot3DFlags::empty(),
@@ -130,7 +110,7 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f32],
         flags: Line3DFlags,
     ) {
-        self.bind();
+        let _guard = self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -164,7 +144,7 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Line3DFlags,
         layout: Plot3DDataLayout,
     ) {
-        self.bind();
+        let _guard = self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -197,7 +177,7 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f64],
         flags: Line3DFlags,
     ) {
-        self.bind();
+        let _guard = self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -231,7 +211,7 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Line3DFlags,
         layout: Plot3DDataLayout,
     ) {
-        self.bind();
+        let _guard = self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -264,7 +244,7 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f32],
         flags: Scatter3DFlags,
     ) {
-        self.bind();
+        let _guard = self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -298,7 +278,7 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Scatter3DFlags,
         layout: Plot3DDataLayout,
     ) {
-        self.bind();
+        let _guard = self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -331,7 +311,7 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f64],
         flags: Scatter3DFlags,
     ) {
-        self.bind();
+        let _guard = self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -365,7 +345,7 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Scatter3DFlags,
         layout: Plot3DDataLayout,
     ) {
-        self.bind();
+        let _guard = self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -398,7 +378,7 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f32],
         flags: Triangle3DFlags,
     ) {
-        self.bind();
+        let _guard = self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -431,7 +411,7 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Triangle3DFlags,
         layout: Plot3DDataLayout,
     ) {
-        self.bind();
+        let _guard = self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -464,7 +444,7 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f32],
         flags: Quad3DFlags,
     ) {
-        self.bind();
+        let _guard = self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -497,7 +477,7 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Quad3DFlags,
         layout: Plot3DDataLayout,
     ) {
-        self.bind();
+        let _guard = self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -530,7 +510,7 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f64],
         flags: Triangle3DFlags,
     ) {
-        self.bind();
+        let _guard = self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -563,7 +543,7 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Triangle3DFlags,
         layout: Plot3DDataLayout,
     ) {
-        self.bind();
+        let _guard = self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -596,7 +576,7 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f64],
         flags: Quad3DFlags,
     ) {
-        self.bind();
+        let _guard = self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }
@@ -629,7 +609,7 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Quad3DFlags,
         layout: Plot3DDataLayout,
     ) {
-        self.bind();
+        let _guard = self.bind();
         if xs.len() != ys.len() || ys.len() != zs.len() {
             return;
         }

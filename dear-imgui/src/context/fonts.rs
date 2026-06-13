@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 
 use super::Context;
 use super::binding::{CTX_MUTEX, with_bound_context};
+use super::core::ContextAliveToken;
 
 /// Tracks a font pushed through [`Context::push_font`].
 ///
@@ -12,13 +13,15 @@ use super::binding::{CTX_MUTEX, with_bound_context};
 #[must_use]
 pub struct ContextFontStackToken<'ctx> {
     ctx: *mut sys::ImGuiContext,
+    ctx_alive: ContextAliveToken,
     _phantom: PhantomData<&'ctx mut Context>,
 }
 
 impl<'ctx> ContextFontStackToken<'ctx> {
-    fn new(ctx: *mut sys::ImGuiContext) -> Self {
+    fn new(ctx: *mut sys::ImGuiContext, ctx_alive: ContextAliveToken) -> Self {
         Self {
             ctx,
+            ctx_alive,
             _phantom: PhantomData,
         }
     }
@@ -34,6 +37,10 @@ impl<'ctx> ContextFontStackToken<'ctx> {
 
 impl Drop for ContextFontStackToken<'_> {
     fn drop(&mut self) {
+        if self.ctx.is_null() || !self.ctx_alive.is_alive() {
+            return;
+        }
+
         let _guard = CTX_MUTEX.lock();
         unsafe {
             with_bound_context(self.ctx, || {
@@ -57,7 +64,7 @@ impl Context {
                 sys::igPushFont(font_ptr, 0.0);
             });
         }
-        ContextFontStackToken::new(self.raw)
+        ContextFontStackToken::new(self.raw, self.alive_token())
     }
 
     /// Get the current font

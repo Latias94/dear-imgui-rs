@@ -53,7 +53,7 @@ impl<'ui> ColorButton<'ui> {
         let desc_id_ptr = self.ui.scratch_txt(self.desc_id.as_ref());
         let size_vec: sys::ImVec2 = self.size.into();
 
-        unsafe {
+        self.ui.run_with_bound_context(|| unsafe {
             sys::igColorButton(
                 desc_id_ptr,
                 sys::ImVec4 {
@@ -65,6 +65,6 @@ impl<'ui> ColorButton<'ui> {
                 self.flags.bits() as i32,
                 size_vec,
             )
-        }
+        })
     }
 }

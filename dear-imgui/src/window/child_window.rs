@@ -147,47 +147,47 @@ impl<'ui> ChildWindow<'ui> {
             "ChildWindow::begin() size must contain finite values"
         );
 
-        let result = unsafe {
-            let size_vec = sys::ImVec2 {
-                x: self.size[0],
-                y: self.size[1],
+        ui.run_with_bound_context(|| {
+            let result = unsafe {
+                let size_vec = sys::ImVec2 {
+                    x: self.size[0],
+                    y: self.size[1],
+                };
+                sys::igBeginChild_Str(
+                    name_ptr,
+                    size_vec,
+                    self.child_flags.bits() as i32,
+                    self.flags.bits(),
+                )
             };
-            sys::igBeginChild_Str(
-                name_ptr,
-                size_vec,
-                self.child_flags.bits() as i32,
-                self.flags.bits(),
-            )
-        };
 
-        // IMPORTANT: According to ImGui documentation, BeginChild/EndChild are inconsistent
-        // with other Begin/End functions. EndChild() must ALWAYS be called regardless of
-        // what BeginChild() returns. However, if BeginChild returns false, EndChild must
-        // be called immediately and no content should be rendered.
-        if result {
-            Some(ChildWindowToken {
-                _phantom: std::marker::PhantomData,
-            })
-        } else {
-            // If BeginChild returns false, call EndChild immediately and return None
-            unsafe {
-                sys::igEndChild();
+            // IMPORTANT: According to ImGui documentation, BeginChild/EndChild are inconsistent
+            // with other Begin/End functions. EndChild() must ALWAYS be called regardless of
+            // what BeginChild() returns. However, if BeginChild returns false, EndChild must
+            // be called immediately and no content should be rendered.
+            if result {
+                Some(ChildWindowToken { ui })
+            } else {
+                // If BeginChild returns false, call EndChild immediately and return None
+                unsafe {
+                    sys::igEndChild();
+                }
+                None
             }
-            None
-        }
+        })
     }
 }
 
 /// Token representing an active child window
 pub struct ChildWindowToken<'ui> {
-    _phantom: std::marker::PhantomData<&'ui Ui>,
+    ui: &'ui Ui,
 }
 
 impl<'ui> Drop for ChildWindowToken<'ui> {
     fn drop(&mut self) {
-        unsafe {
+        self.ui.run_with_bound_context(|| unsafe {
             sys::igEndChild();
-        }
+        });
     }
 }
 

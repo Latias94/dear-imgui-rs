@@ -52,7 +52,7 @@ impl Ui {
     /// ```
     #[doc(alias = "BeginDragDropTarget")]
     pub fn drag_drop_target(&self) -> Option<DragDropTarget<'_>> {
-        let should_begin = unsafe { sys::igBeginDragDropTarget() };
+        let should_begin = self.run_with_bound_context(|| unsafe { sys::igBeginDragDropTarget() });
         if should_begin {
             Some(DragDropTarget(self))
         } else {
@@ -68,12 +68,12 @@ impl Ui {
     /// after the drag operation completes. Do not cache it beyond the current frame.
     #[doc(alias = "GetDragDropPayload")]
     pub fn drag_drop_payload(&self) -> Option<DragDropPayload> {
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             let ptr = sys::igGetDragDropPayload();
             if ptr.is_null() {
                 return None;
             }
             Some(DragDropPayload::from_raw(*ptr))
-        }
+        })
     }
 }

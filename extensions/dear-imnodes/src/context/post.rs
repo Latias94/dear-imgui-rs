@@ -29,8 +29,8 @@ pub struct PostEditor<'ui> {
 impl<'ui> NodeEditor<'ui> {
     /// Explicitly end the node editor and return post-editor query handle
     pub fn end(mut self) -> PostEditor<'ui> {
+        let _guard = self.bind();
         if !self.ended {
-            self.bind();
             unsafe { sys::imnodes_EndNodeEditor() };
             self.ended = true;
         }
@@ -38,7 +38,6 @@ impl<'ui> NodeEditor<'ui> {
         // Capture hover state immediately after EndNodeEditor while the current ImGui window
         // is still the editor host window. This avoids calling ImNodes hover queries later
         // from a different window (e.g. a popup), which can lead to inconsistent behavior.
-        self.bind();
         let editor_hovered = unsafe { sys::imnodes_IsEditorHovered() };
         let mut hovered_node = 0i32;
         let hovered_node = if unsafe { sys::imnodes_IsNodeHovered(&mut hovered_node) } {
@@ -164,8 +163,8 @@ impl<'ui> NodeEditor<'ui> {
 
 impl<'ui> PostEditor<'ui> {
     #[inline]
-    fn bind(&self) {
-        self.scope.bind();
+    fn bind(&self) -> super::ImNodesScopeGuard {
+        self.scope.bind()
     }
 
     /// Save current editor state to an INI string
@@ -175,7 +174,7 @@ impl<'ui> PostEditor<'ui> {
         // until the next save/load call on the same editor, which we do not
         // perform while this slice is alive.
         unsafe {
-            self.bind();
+            let _guard = self.bind();
             let mut size: usize = 0;
             let ptr = sys::imnodes_SaveCurrentEditorStateToIniString(&mut size as *mut usize);
             if ptr.is_null() || size == 0 {
@@ -195,7 +194,7 @@ impl<'ui> PostEditor<'ui> {
         // length; `data.as_ptr()` and `data.len()` satisfy this for the
         // duration of the call.
         unsafe {
-            self.bind();
+            let _guard = self.bind();
             sys::imnodes_LoadCurrentEditorStateFromIniString(
                 data.as_ptr() as *const c_char,
                 data.len(),
@@ -211,7 +210,7 @@ impl<'ui> PostEditor<'ui> {
             file_name
         };
         // Safety: ImNodes reads a NUL-terminated string for the duration of the call.
-        self.bind();
+        let _guard = self.bind();
         dear_imgui_rs::with_scratch_txt(file_name, |ptr| unsafe {
             sys::imnodes_SaveCurrentEditorStateToIniFile(ptr)
         })
@@ -224,7 +223,7 @@ impl<'ui> PostEditor<'ui> {
             file_name
         };
         // Safety: see `save_state_to_ini_file`.
-        self.bind();
+        let _guard = self.bind();
         dear_imgui_rs::with_scratch_txt(file_name, |ptr| unsafe {
             sys::imnodes_LoadCurrentEditorStateFromIniFile(ptr)
         })
@@ -232,39 +231,39 @@ impl<'ui> PostEditor<'ui> {
 
     /// Selection helpers per id
     pub fn select_node(&self, node_id: crate::NodeId) {
-        self.bind();
+        let _guard = self.bind();
         unsafe { sys::imnodes_SelectNode(node_id.raw()) }
     }
 
     pub fn clear_node_selection_of(&self, node_id: crate::NodeId) {
-        self.bind();
+        let _guard = self.bind();
         unsafe { sys::imnodes_ClearNodeSelection_Int(node_id.raw()) }
     }
 
     pub fn is_node_selected(&self, node_id: crate::NodeId) -> bool {
-        self.bind();
+        let _guard = self.bind();
         unsafe { sys::imnodes_IsNodeSelected(node_id.raw()) }
     }
 
     pub fn select_link(&self, link_id: crate::LinkId) {
-        self.bind();
+        let _guard = self.bind();
         unsafe { sys::imnodes_SelectLink(link_id.raw()) }
     }
 
     pub fn clear_link_selection_of(&self, link_id: crate::LinkId) {
-        self.bind();
+        let _guard = self.bind();
         unsafe { sys::imnodes_ClearLinkSelection_Int(link_id.raw()) }
     }
 
     pub fn is_link_selected(&self, link_id: crate::LinkId) -> bool {
-        self.bind();
+        let _guard = self.bind();
         unsafe { sys::imnodes_IsLinkSelected(link_id.raw()) }
     }
 
     pub fn selected_nodes(&self) -> Vec<crate::NodeId> {
         // Safety: ImNodes returns the current count of selected nodes, and
         // `GetSelectedNodes` writes exactly that many IDs into the buffer.
-        self.bind();
+        let _guard = self.bind();
         let n = unsafe { sys::imnodes_NumSelectedNodes() };
         if n <= 0 {
             return Vec::new();
@@ -277,7 +276,7 @@ impl<'ui> PostEditor<'ui> {
     pub fn selected_links(&self) -> Vec<crate::LinkId> {
         // Safety: ImNodes returns the current count of selected links, and
         // `GetSelectedLinks` writes exactly that many IDs into the buffer.
-        self.bind();
+        let _guard = self.bind();
         let n = unsafe { sys::imnodes_NumSelectedLinks() };
         if n <= 0 {
             return Vec::new();
@@ -288,7 +287,7 @@ impl<'ui> PostEditor<'ui> {
     }
 
     pub fn clear_selection(&self) {
-        self.bind();
+        let _guard = self.bind();
         unsafe {
             sys::imnodes_ClearNodeSelection_Nil();
             sys::imnodes_ClearLinkSelection_Nil();
@@ -325,7 +324,7 @@ impl<'ui> PostEditor<'ui> {
 
     /// Set a node's position in screen space for the current editor context.
     pub fn set_node_pos_screen(&self, node_id: crate::NodeId, pos: [f32; 2]) {
-        self.bind();
+        let _guard = self.bind();
         unsafe {
             sys::imnodes_SetNodeScreenSpacePos(
                 node_id.raw(),
@@ -339,7 +338,7 @@ impl<'ui> PostEditor<'ui> {
 
     /// Set a node's position in grid space for the current editor context.
     pub fn set_node_pos_grid(&self, node_id: crate::NodeId, pos: [f32; 2]) {
-        self.bind();
+        let _guard = self.bind();
         unsafe {
             sys::imnodes_SetNodeGridSpacePos(
                 node_id.raw(),

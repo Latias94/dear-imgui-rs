@@ -15,8 +15,8 @@ use implot3d::*;
 use std::cell::{Cell, RefCell};
 use std::f32::consts::PI;
 
-fn cmap(index: usize) -> [f32; 4] {
-    get_colormap_color(ColormapColorIndex::from(index))
+fn cmap(plot_ui: &Plot3DUi, index: usize) -> [f32; 4] {
+    plot_ui.colormap_color(ColormapColorIndex::from(index))
 }
 
 fn main() {
@@ -68,7 +68,7 @@ fn main() {
                 ui.text(format!("ImPlot3D says olá! (0.3 WIP)"));
                 ui.spacing();
                 // Tools toggles similar to upstream demo
-                demo_tools(ui);
+                demo_tools(ui, &plot_ui);
 
                 if let Some(tab_bar) = ui.tab_bar("ImPlot3DDemoTabs") {
                     // Plots Tab
@@ -119,7 +119,7 @@ fn main() {
 
         // Official C++ implementation window (will be docked to the right)
         // Note: show_demo_window() creates a window titled "ImPlot3D Demo"
-        implot3d::show_demo_window();
+        plot_ui.show_demo_window();
     })
     .unwrap();
 }
@@ -134,25 +134,26 @@ fn setup_dockspace_layout(ui: &Ui) {
         let viewport_size = ui.main_viewport().size();
 
         // Clear any existing layout
-        DockBuilder::remove_node(dockspace_id);
+        DockBuilder::remove_node(ui, dockspace_id);
 
         // Create the root dockspace node
-        DockBuilder::add_node(dockspace_id, DockNodeFlags::NONE);
-        DockBuilder::set_node_size(dockspace_id, viewport_size);
+        DockBuilder::add_node(ui, dockspace_id, DockNodeFlags::NONE);
+        DockBuilder::set_node_size(ui, dockspace_id, viewport_size);
 
         // Split the dockspace: left 50% for Rust demo, right 50% for C++ demo
         let (left_id, right_id) = DockBuilder::split_node(
+            ui,
             dockspace_id,
             SplitDirection::Left,
             0.5, // 50% split
         );
 
         // Dock the windows to their respective panels
-        DockBuilder::dock_window("ImPlot3D Demo (Rust)", left_id);
-        DockBuilder::dock_window("ImPlot3D Demo", right_id); // C++ demo window title
+        DockBuilder::dock_window(ui, "ImPlot3D Demo (Rust)", left_id);
+        DockBuilder::dock_window(ui, "ImPlot3D Demo", right_id); // C++ demo window title
 
         // Finalize the layout
-        DockBuilder::finish(dockspace_id);
+        DockBuilder::finish(ui, dockspace_id);
     }
 }
 
@@ -204,7 +205,7 @@ fn demo_line_plots(ui: &Ui, plot_ui: &Plot3DUi) {
             Axis3DFlags::NONE,
         );
         Line3D::f32("f(x)", &xs1, &ys1, &zs1).plot(plot_ui);
-        set_next_marker_style(
+        plot_ui.set_next_marker_style(
             Marker3D::Circle,
             4.0,
             [1.0, 1.0, 1.0, 1.0],
@@ -239,9 +240,9 @@ fn demo_scatter_plots(_ui: &Ui, plot_ui: &Plot3DUi) {
 
     if let Some(_tok) = plot_ui.begin_plot("Scatter Plots").build() {
         Scatter3D::f32("Data 1", &xs1, &ys1, &zs1).plot(plot_ui);
-        let _fill_alpha = push_style_var_f32(Plot3DStyleVar::FillAlpha, 0.25);
-        let col1 = cmap(1);
-        set_next_marker_style(Marker3D::Square, 6.0, col1, -1.0, col1);
+        let _fill_alpha = plot_ui.push_style_var_f32(Plot3DStyleVar::FillAlpha, 0.25);
+        let col1 = cmap(plot_ui, 1);
+        plot_ui.set_next_marker_style(Marker3D::Square, 6.0, col1, -1.0, col1);
         Scatter3D::f32("Data 2", &xs2, &ys2, &zs2).plot(plot_ui);
     }
 }
@@ -301,10 +302,10 @@ fn demo_triangle_plots(ui: &Ui, plot_ui: &Plot3DUi) {
 
     if let Some(_tok) = plot_ui.begin_plot("Triangle Plots").build() {
         plot_ui.setup_axes_limits(-1.0, 1.0, -1.0, 1.0, -0.5, 1.5, Plot3DCond::Once);
-        set_next_fill_style(cmap(0), 1.0);
-        set_next_line_style(cmap(1), 2.0);
-        let col2 = cmap(2);
-        set_next_marker_style(Marker3D::Square, 3.0, col2, -1.0, col2);
+        plot_ui.set_next_fill_style(cmap(plot_ui, 0), 1.0);
+        plot_ui.set_next_line_style(cmap(plot_ui, 1), 2.0);
+        let col2 = cmap(plot_ui, 2);
+        plot_ui.set_next_marker_style(Marker3D::Square, 3.0, col2, -1.0, col2);
         Triangles3D::f32("Pyramid", &xs, &ys, &zs)
             .flags(flags)
             .plot(plot_ui);
@@ -383,23 +384,23 @@ fn demo_quad_plots(ui: &Ui, plot_ui: &Plot3DUi) {
         let color_y = [0.2, 0.8, 0.2, 0.8];
         let color_z = [0.2, 0.2, 0.8, 0.8];
 
-        set_next_fill_style(color_x, 1.0);
-        set_next_line_style(color_x, 2.0);
-        set_next_marker_style(Marker3D::Square, 3.0, color_x, -1.0, color_x);
+        plot_ui.set_next_fill_style(color_x, 1.0);
+        plot_ui.set_next_line_style(color_x, 2.0);
+        plot_ui.set_next_marker_style(Marker3D::Square, 3.0, color_x, -1.0, color_x);
         Quads3D::f32("X", &xs[0..8], &ys[0..8], &zs[0..8])
             .flags(flags)
             .plot(plot_ui);
 
-        set_next_fill_style(color_y, 1.0);
-        set_next_line_style(color_y, 2.0);
-        set_next_marker_style(Marker3D::Square, 3.0, color_y, -1.0, color_y);
+        plot_ui.set_next_fill_style(color_y, 1.0);
+        plot_ui.set_next_line_style(color_y, 2.0);
+        plot_ui.set_next_marker_style(Marker3D::Square, 3.0, color_y, -1.0, color_y);
         Quads3D::f32("Y", &xs[8..16], &ys[8..16], &zs[8..16])
             .flags(flags)
             .plot(plot_ui);
 
-        set_next_fill_style(color_z, 1.0);
-        set_next_line_style(color_z, 2.0);
-        set_next_marker_style(Marker3D::Square, 3.0, color_z, -1.0, color_z);
+        plot_ui.set_next_fill_style(color_z, 1.0);
+        plot_ui.set_next_line_style(color_z, 2.0);
+        plot_ui.set_next_marker_style(Marker3D::Square, 3.0, color_z, -1.0, color_z);
         Quads3D::f32("Z", &xs[16..24], &ys[16..24], &zs[16..24])
             .flags(flags)
             .plot(plot_ui);
@@ -524,7 +525,7 @@ fn demo_surface_plots(ui: &Ui, plot_ui: &Plot3DUi) {
             "Viridis", "Plasma", "Hot", "Cool", "Pink", "Jet", "Twilight", "RdBu", "BrBG", "PiYG",
             "Spectral", "Greys",
         ];
-        Some(push_colormap_name(colormaps[sel_colormap as usize]))
+        Some(plot_ui.push_colormap_name(colormaps[sel_colormap as usize]))
     } else {
         None
     };
@@ -538,16 +539,22 @@ fn demo_surface_plots(ui: &Ui, plot_ui: &Plot3DUi) {
         plot_ui.setup_axes_limits(-1.0, 1.0, -1.0, 1.0, -1.5, 1.5, Plot3DCond::Once);
 
         // Set fill style
-        let _fill_alpha = push_style_var_f32(Plot3DStyleVar::FillAlpha, 0.8);
+        let _fill_alpha = plot_ui.push_style_var_f32(Plot3DStyleVar::FillAlpha, 0.8);
         if selected_fill == 0 {
-            set_next_fill_style(solid_color, 1.0);
+            plot_ui.set_next_fill_style(solid_color, 1.0);
         }
 
         // Set line style
-        set_next_line_style(cmap(1), 1.0);
+        plot_ui.set_next_line_style(cmap(plot_ui, 1), 1.0);
 
         // Set marker style
-        set_next_marker_style(Marker3D::Square, -1.0, cmap(2), -1.0, cmap(2));
+        plot_ui.set_next_marker_style(
+            Marker3D::Square,
+            -1.0,
+            cmap(plot_ui, 2),
+            -1.0,
+            cmap(plot_ui, 2),
+        );
 
         let x_grid: Vec<f32> = (0..N).map(|j| MIN_VAL + j as f32 * STEP).collect();
         let y_grid: Vec<f32> = (0..N).map(|i| MIN_VAL + i as f32 * STEP).collect();
@@ -619,9 +626,9 @@ fn demo_mesh_plots(ui: &Ui, plot_ui: &Plot3DUi) {
 
     if let Some(_tok) = plot_ui.begin_plot("Mesh Plots").build() {
         plot_ui.setup_axes_limits(-1.0, 1.0, -1.0, 1.0, -1.0, 1.0, Plot3DCond::Once);
-        set_next_fill_style(fill_color, 1.0);
-        set_next_line_style(line_color, 1.0);
-        set_next_marker_style(Marker3D::Square, 3.0, marker_color, -1.0, marker_color);
+        plot_ui.set_next_fill_style(fill_color, 1.0);
+        plot_ui.set_next_line_style(line_color, 1.0);
+        plot_ui.set_next_marker_style(Marker3D::Square, 3.0, marker_color, -1.0, marker_color);
         if mesh_id == 0 {
             Mesh3D::new("Tetrahedron", &vertices, &indices)
                 .flags(flags)
@@ -806,11 +813,11 @@ fn demo_box_rotation(ui: &Ui, plot_ui: &Plot3DUi) {
         // Plot axis lines
         let origin = [0.0f32, 0.0];
         let axis = [0.0f32, 1.0];
-        set_next_line_style([0.8, 0.2, 0.2, 1.0], 1.0);
+        plot_ui.set_next_line_style([0.8, 0.2, 0.2, 1.0], 1.0);
         Line3D::f32("X-Axis", &axis, &origin, &origin).plot(plot_ui);
-        set_next_line_style([0.2, 0.8, 0.2, 1.0], 1.0);
+        plot_ui.set_next_line_style([0.2, 0.8, 0.2, 1.0], 1.0);
         Line3D::f32("Y-Axis", &origin, &axis, &origin).plot(plot_ui);
-        set_next_line_style([0.2, 0.2, 0.8, 1.0], 1.0);
+        plot_ui.set_next_line_style([0.2, 0.2, 0.8, 1.0], 1.0);
         Line3D::f32("Z-Axis", &origin, &origin, &axis).plot(plot_ui);
     }
 }
@@ -1035,7 +1042,13 @@ fn demo_markers_and_text(ui: &Ui, plot_ui: &Plot3DUi) {
             ys[0] = 0.0;
             xs[1] = xs[0] + (zs[0] / markers.len() as f32 * 2.0 * std::f32::consts::PI).cos() * 0.5;
             ys[1] = ys[0] + (zs[0] / markers.len() as f32 * 2.0 * std::f32::consts::PI).sin() * 0.5;
-            set_next_marker_style(m, mk_size, cmap(0), mk_weight, cmap(0));
+            plot_ui.set_next_marker_style(
+                m,
+                mk_size,
+                cmap(plot_ui, 0),
+                mk_weight,
+                cmap(plot_ui, 0),
+            );
             Line3D::f32(&format!("##Filled_{}", i), &xs, &ys, &zs).plot(plot_ui);
             zs[0] -= 1.0;
             zs[1] -= 1.0;
@@ -1049,7 +1062,13 @@ fn demo_markers_and_text(ui: &Ui, plot_ui: &Plot3DUi) {
         for (i, &m) in markers.iter().enumerate() {
             xs[1] = xs[0] + (zs[0] / markers.len() as f32 * 2.0 * std::f32::consts::PI).cos() * 0.5;
             ys[1] = ys[0] - (zs[0] / markers.len() as f32 * 2.0 * std::f32::consts::PI).sin() * 0.5;
-            set_next_marker_style(m, mk_size, [0.0, 0.0, 0.0, 0.0], mk_weight, cmap(0));
+            plot_ui.set_next_marker_style(
+                m,
+                mk_size,
+                [0.0, 0.0, 0.0, 0.0],
+                mk_weight,
+                cmap(plot_ui, 0),
+            );
             Line3D::f32(&format!("##Open_{}", i), &xs, &ys, &zs).plot(plot_ui);
             zs[0] -= 1.0;
             zs[1] -= 1.0;
@@ -1104,7 +1123,13 @@ fn demo_nan_values(ui: &Ui, plot_ui: &Plot3DUi) {
     }
 
     if let Some(_tok) = plot_ui.begin_plot("##NaNValues").build() {
-        set_next_marker_style(Marker3D::Square, 6.0, cmap(0), -1.0, cmap(0));
+        plot_ui.set_next_marker_style(
+            Marker3D::Square,
+            6.0,
+            cmap(plot_ui, 0),
+            -1.0,
+            cmap(plot_ui, 0),
+        );
         Line3D::f32("Line", &xs, &ys, &zs)
             .flags(flags)
             .plot(plot_ui);
@@ -1156,11 +1181,17 @@ fn demo_custom_styles(ui: &Ui, plot_ui: &Plot3DUi) {
     if let Some(_tok) = plot_ui.begin_plot("Custom Styles").build() {
         plot_ui.setup_axes_limits(-1.5, 1.5, -1.5, 1.5, -1.5, 1.5, Plot3DCond::Once);
 
-        let _line_weight = push_style_var_f32(Plot3DStyleVar::LineWeight, line_weight);
-        let _marker_size = push_style_var_f32(Plot3DStyleVar::MarkerSize, marker_size);
-        let _fill_alpha = push_style_var_f32(Plot3DStyleVar::FillAlpha, fill_alpha);
+        let _line_weight = plot_ui.push_style_var_f32(Plot3DStyleVar::LineWeight, line_weight);
+        let _marker_size = plot_ui.push_style_var_f32(Plot3DStyleVar::MarkerSize, marker_size);
+        let _fill_alpha = plot_ui.push_style_var_f32(Plot3DStyleVar::FillAlpha, fill_alpha);
 
-        set_next_marker_style(Marker3D::Circle, -1.0, cmap(0), marker_weight, cmap(0));
+        plot_ui.set_next_marker_style(
+            Marker3D::Circle,
+            -1.0,
+            cmap(plot_ui, 0),
+            marker_weight,
+            cmap(plot_ui, 0),
+        );
         Line3D::f32("Styled Line", &xs, &ys, &zs).plot(plot_ui);
     }
 }
@@ -1195,11 +1226,11 @@ fn demo_array_backed_item_styles(ui: &Ui, plot_ui: &Plot3DUi) {
         Color::rgb(0.28, 0.50, 0.95).to_imgui_u32(),
     ];
 
-    let _axis_bg = push_style_color(Plot3DColorElement::AxisBg, [0.12, 0.18, 0.28, 0.18]);
+    let _axis_bg = plot_ui.push_style_color(Plot3DColorElement::AxisBg, [0.12, 0.18, 0.28, 0.18]);
     let _axis_bg_hovered =
-        push_style_color(Plot3DColorElement::AxisBgHovered, [0.22, 0.42, 0.78, 0.28]);
+        plot_ui.push_style_color(Plot3DColorElement::AxisBgHovered, [0.22, 0.42, 0.78, 0.28]);
     let _axis_bg_active =
-        push_style_color(Plot3DColorElement::AxisBgActive, [0.88, 0.50, 0.18, 0.34]);
+        plot_ui.push_style_color(Plot3DColorElement::AxisBgActive, [0.88, 0.50, 0.18, 0.34]);
 
     if let Some(_tok) = plot_ui.begin_plot("Array-backed Item Styles").build() {
         plot_ui.setup_axes(
@@ -1212,21 +1243,21 @@ fn demo_array_backed_item_styles(ui: &Ui, plot_ui: &Plot3DUi) {
         );
         plot_ui.setup_axes_limits(-0.2, 1.2, -1.2, 1.2, -0.2, 1.2, Plot3DCond::Once);
 
-        with_next_plot3d_item_array_style(
+        plot_ui.with_next_plot3d_item_array_style(
             Plot3DItemArrayStyle::new().with_line_colors(&line_colors),
-            || {
+            |plot_ui| {
                 Line3D::f32("Gradient Path", &xs, &ys, &zs)
                     .with_line_weight(3.0)
                     .plot(plot_ui);
             },
         );
 
-        with_next_plot3d_item_array_style(
+        plot_ui.with_next_plot3d_item_array_style(
             Plot3DItemArrayStyle::new()
                 .with_marker_sizes(&marker_sizes)
                 .with_marker_fill_colors(&marker_colors)
                 .with_marker_line_colors(&marker_colors),
-            || {
+            |plot_ui| {
                 Scatter3D::f32("Colored Markers", &xs, &ys, &zs)
                     .with_marker(Marker3D::Circle)
                     .plot(plot_ui);
@@ -1320,7 +1351,7 @@ fn demo_help(ui: &Ui) {
     ui.bullet_text("Integration with dear-imgui-rs ecosystem");
 }
 // Tools toggles and auxiliary windows (metrics, style editors, demos)
-fn demo_tools(ui: &Ui) {
+fn demo_tools(ui: &Ui, plot_ui: &Plot3DUi) {
     thread_local! {
         static SHOW_IP3D_METRICS: Cell<bool> = Cell::new(false);
         static SHOW_IP3D_STYLE: Cell<bool> = Cell::new(false);
@@ -1352,11 +1383,11 @@ fn demo_tools(ui: &Ui) {
     SHOW_IMGUI_DEMO.with(|c| c.set(imgui_demo));
 
     if ip3d_metrics {
-        implot3d::show_metrics_window();
+        plot_ui.show_metrics_window();
     }
     if ip3d_style {
         ui.window("Style Editor (ImPlot3D)").build(|| {
-            implot3d::show_style_editor();
+            plot_ui.show_style_editor();
         });
     }
     if imgui_metrics {

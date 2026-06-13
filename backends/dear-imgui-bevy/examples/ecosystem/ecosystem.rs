@@ -159,16 +159,16 @@ fn seed_ecosystem_dockspace(
     }
 
     let viewport = ui.main_viewport();
-    DockBuilder::remove_node(dockspace_id);
-    let root = DockBuilder::add_node(dockspace_id, DockNodeFlags::NONE);
-    DockBuilder::set_node_pos(root, viewport.pos());
-    DockBuilder::set_node_size(root, viewport.size());
-    let (left_id, graph_id) = DockBuilder::split_node(root, SplitDirection::Left, 0.42);
-    let (plot_id, gizmo_id) = DockBuilder::split_node(left_id, SplitDirection::Up, 0.48);
-    DockBuilder::dock_window("Profiler Plot", plot_id);
-    DockBuilder::dock_window("Gizmo", gizmo_id);
-    DockBuilder::dock_window("Frame Graph", graph_id);
-    DockBuilder::finish(root);
+    DockBuilder::remove_node(ui, dockspace_id);
+    let root = DockBuilder::add_node(ui, dockspace_id, DockNodeFlags::NONE);
+    DockBuilder::set_node_pos(ui, root, viewport.pos());
+    DockBuilder::set_node_size(ui, root, viewport.size());
+    let (left_id, graph_id) = DockBuilder::split_node(ui, root, SplitDirection::Left, 0.42);
+    let (plot_id, gizmo_id) = DockBuilder::split_node(ui, left_id, SplitDirection::Up, 0.48);
+    DockBuilder::dock_window(ui, "Profiler Plot", plot_id);
+    DockBuilder::dock_window(ui, "Gizmo", gizmo_id);
+    DockBuilder::dock_window(ui, "Frame Graph", graph_id);
+    DockBuilder::finish(ui, root);
 
     *seeded = true;
 }

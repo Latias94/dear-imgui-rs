@@ -22,6 +22,7 @@ mod widgets;
 mod window;
 
 use crate::Id;
+use crate::context::ContextAliveToken;
 use crate::draw::DrawListMut;
 use crate::input::MouseCursor;
 use crate::internal::RawWrapper;
@@ -33,6 +34,9 @@ use std::cell::UnsafeCell;
 /// Represents the Dear ImGui user interface for one frame
 #[derive(Debug)]
 pub struct Ui {
+    /// Dear ImGui context that owns this per-frame UI entry point.
+    pub(crate) ctx: *mut sys::ImGuiContext,
+    pub(crate) ctx_alive: ContextAliveToken,
     /// Internal buffer for string operations
     buffer: UnsafeCell<UiBuffer>,
 }

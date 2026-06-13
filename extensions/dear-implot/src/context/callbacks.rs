@@ -11,7 +11,7 @@ impl<'ui> PlotUi<'ui> {
     where
         F: Fn(f64) -> String + Send + Sync + 'static,
     {
-        self.bind();
+        let _guard = self.bind();
         AxisFormatterToken::new(axis as sys::ImAxis, f)
     }
 
@@ -22,7 +22,7 @@ impl<'ui> PlotUi<'ui> {
     where
         F: Fn(f64) -> String + Send + Sync + 'static,
     {
-        self.bind();
+        let _guard = self.bind();
         AxisFormatterToken::new(axis as sys::ImAxis, f)
     }
 
@@ -40,7 +40,7 @@ impl<'ui> PlotUi<'ui> {
         FW: Fn(f64) -> f64 + Send + Sync + 'static,
         INV: Fn(f64) -> f64 + Send + Sync + 'static,
     {
-        self.bind();
+        let _guard = self.bind();
         AxisTransformToken::new(axis as sys::ImAxis, forward, inverse)
     }
 
@@ -55,7 +55,7 @@ impl<'ui> PlotUi<'ui> {
         FW: Fn(f64) -> f64 + Send + Sync + 'static,
         INV: Fn(f64) -> f64 + Send + Sync + 'static,
     {
-        self.bind();
+        let _guard = self.bind();
         AxisTransformToken::new(axis as sys::ImAxis, forward, inverse)
     }
 }

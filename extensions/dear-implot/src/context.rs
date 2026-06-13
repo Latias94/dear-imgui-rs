@@ -11,5 +11,6 @@ mod tests;
 pub(crate) use callbacks::PlotScopeGuard;
 pub use callbacks::{AxisFormatterToken, AxisTransformToken};
 pub use core::PlotContext;
-pub use token::PlotToken;
+pub(crate) use core::PlotContextBinding;
+pub use token::{PlotClipRectToken, PlotToken};
 pub use ui::PlotUi;

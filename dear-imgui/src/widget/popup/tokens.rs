@@ -21,9 +21,8 @@ impl<'ui> PopupToken<'ui> {
 
 impl<'ui> Drop for PopupToken<'ui> {
     fn drop(&mut self) {
-        unsafe {
-            sys::igEndPopup();
-        }
+        self._ui
+            .run_with_bound_context(|| unsafe { sys::igEndPopup() });
     }
 }
 
@@ -47,8 +46,7 @@ impl<'ui> ModalPopupToken<'ui> {
 
 impl<'ui> Drop for ModalPopupToken<'ui> {
     fn drop(&mut self) {
-        unsafe {
-            sys::igEndPopup();
-        }
+        self._ui
+            .run_with_bound_context(|| unsafe { sys::igEndPopup() });
     }
 }

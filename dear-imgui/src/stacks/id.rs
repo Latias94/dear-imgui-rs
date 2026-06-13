@@ -38,13 +38,13 @@ impl Ui {
     #[doc(alias = "PushID")]
     pub fn push_id<'a, T: Into<Id<'a>>>(&self, id: T) -> IdStackToken<'_> {
         let id = id.into();
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             match id {
                 Id::Int(i) => sys::igPushID_Int(i),
                 Id::Str(s) => sys::igPushID_Str(self.scratch_txt(s)),
                 Id::Ptr(p) => sys::igPushID_Ptr(p),
             }
-        }
+        });
         IdStackToken::new(self)
     }
 }
@@ -84,7 +84,7 @@ impl Ui {
     /// Returns a `FocusScopeToken` which will pop the focus scope when dropped.
     #[doc(alias = "PushFocusScope")]
     pub fn push_focus_scope(&self, id: crate::Id) -> FocusScopeToken<'_> {
-        unsafe { sys::igPushFocusScope(id.raw()) };
+        self.run_with_bound_context(|| unsafe { sys::igPushFocusScope(id.raw()) });
         FocusScopeToken::new(self)
     }
 }

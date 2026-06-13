@@ -7,31 +7,35 @@ impl crate::Ui {
     /// Check if a key is being held down
     #[doc(alias = "IsKeyDown")]
     pub fn is_key_down(&self, key: Key) -> bool {
-        unsafe { sys::igIsKeyDown_Nil(key as sys::ImGuiKey) }
+        self.run_with_bound_context(|| unsafe { sys::igIsKeyDown_Nil(key as sys::ImGuiKey) })
     }
 
     /// Check if a key was pressed (went from !Down to Down)
     #[doc(alias = "IsKeyPressed")]
     pub fn is_key_pressed(&self, key: Key) -> bool {
-        unsafe { sys::igIsKeyPressed_Bool(key as sys::ImGuiKey, true) }
+        self.run_with_bound_context(|| unsafe {
+            sys::igIsKeyPressed_Bool(key as sys::ImGuiKey, true)
+        })
     }
 
     /// Check if a key was pressed (went from !Down to Down), with repeat
     #[doc(alias = "IsKeyPressed")]
     pub fn is_key_pressed_with_repeat(&self, key: Key, repeat: bool) -> bool {
-        unsafe { sys::igIsKeyPressed_Bool(key as sys::ImGuiKey, repeat) }
+        self.run_with_bound_context(|| unsafe {
+            sys::igIsKeyPressed_Bool(key as sys::ImGuiKey, repeat)
+        })
     }
 
     /// Check if a key was released (went from Down to !Down)
     #[doc(alias = "IsKeyReleased")]
     pub fn is_key_released(&self, key: Key) -> bool {
-        unsafe { sys::igIsKeyReleased_Nil(key as sys::ImGuiKey) }
+        self.run_with_bound_context(|| unsafe { sys::igIsKeyReleased_Nil(key as sys::ImGuiKey) })
     }
 
     /// Check if a key chord was pressed (e.g. `Ctrl+S`).
     #[doc(alias = "IsKeyChordPressed")]
     pub fn is_key_chord_pressed(&self, key_chord: KeyChord) -> bool {
-        unsafe { sys::igIsKeyChordPressed_Nil(key_chord.raw()) }
+        self.run_with_bound_context(|| unsafe { sys::igIsKeyChordPressed_Nil(key_chord.raw()) })
     }
 
     /// Call ImGui shortcut routing with default flags.
@@ -47,7 +51,8 @@ impl crate::Ui {
         key_chord: KeyChord,
         flags: impl Into<ShortcutOptions>,
     ) -> bool {
-        unsafe { sys::igShortcut_Nil(key_chord.raw(), flags.into().raw()) }
+        let flags = flags.into();
+        self.run_with_bound_context(|| unsafe { sys::igShortcut_Nil(key_chord.raw(), flags.raw()) })
     }
 
     /// Set the next item's shortcut with default flags.
@@ -64,49 +69,55 @@ impl crate::Ui {
         flags: impl Into<NextItemShortcutOptions>,
     ) {
         let flags = flags.into();
-        unsafe { sys::igSetNextItemShortcut(key_chord.raw(), flags.raw()) }
+        self.run_with_bound_context(|| unsafe {
+            sys::igSetNextItemShortcut(key_chord.raw(), flags.raw())
+        });
     }
 
     /// Overrides `io.WantCaptureKeyboard` for the next frame.
     #[doc(alias = "SetNextFrameWantCaptureKeyboard")]
     pub fn set_next_frame_want_capture_keyboard(&self, want_capture_keyboard: bool) {
-        unsafe { sys::igSetNextFrameWantCaptureKeyboard(want_capture_keyboard) }
+        self.run_with_bound_context(|| unsafe {
+            sys::igSetNextFrameWantCaptureKeyboard(want_capture_keyboard)
+        });
     }
 
     /// Overrides `io.WantCaptureMouse` for the next frame.
     #[doc(alias = "SetNextFrameWantCaptureMouse")]
     pub fn set_next_frame_want_capture_mouse(&self, want_capture_mouse: bool) {
-        unsafe { sys::igSetNextFrameWantCaptureMouse(want_capture_mouse) }
+        self.run_with_bound_context(|| unsafe {
+            sys::igSetNextFrameWantCaptureMouse(want_capture_mouse)
+        });
     }
 
     /// Check if a mouse button is being held down
     #[doc(alias = "IsMouseDown")]
     pub fn is_mouse_down(&self, button: MouseButton) -> bool {
-        unsafe { sys::igIsMouseDown_Nil(button.into()) }
+        self.run_with_bound_context(|| unsafe { sys::igIsMouseDown_Nil(button.into()) })
     }
 
     /// Check if a mouse button was clicked (went from !Down to Down)
     #[doc(alias = "IsMouseClicked")]
     pub fn is_mouse_clicked(&self, button: MouseButton) -> bool {
-        unsafe { sys::igIsMouseClicked_Bool(button.into(), false) }
+        self.run_with_bound_context(|| unsafe { sys::igIsMouseClicked_Bool(button.into(), false) })
     }
 
     /// Check if a mouse button was clicked, with repeat
     #[doc(alias = "IsMouseClicked")]
     pub fn is_mouse_clicked_with_repeat(&self, button: MouseButton, repeat: bool) -> bool {
-        unsafe { sys::igIsMouseClicked_Bool(button.into(), repeat) }
+        self.run_with_bound_context(|| unsafe { sys::igIsMouseClicked_Bool(button.into(), repeat) })
     }
 
     /// Check if a mouse button was released (went from Down to !Down)
     #[doc(alias = "IsMouseReleased")]
     pub fn is_mouse_released(&self, button: MouseButton) -> bool {
-        unsafe { sys::igIsMouseReleased_Nil(button.into()) }
+        self.run_with_bound_context(|| unsafe { sys::igIsMouseReleased_Nil(button.into()) })
     }
 
     /// Check if a mouse button was double-clicked
     #[doc(alias = "IsMouseDoubleClicked")]
     pub fn is_mouse_double_clicked(&self, button: MouseButton) -> bool {
-        unsafe { sys::igIsMouseDoubleClicked_Nil(button.into()) }
+        self.run_with_bound_context(|| unsafe { sys::igIsMouseDoubleClicked_Nil(button.into()) })
     }
 
     /// Returns `true` if the mouse position is valid (not NaN).
@@ -114,7 +125,7 @@ impl crate::Ui {
     /// This checks the current mouse position as known by Dear ImGui.
     #[doc(alias = "IsMousePosValid")]
     pub fn is_mouse_pos_valid(&self) -> bool {
-        unsafe { sys::igIsMousePosValid(std::ptr::null()) }
+        self.run_with_bound_context(|| unsafe { sys::igIsMousePosValid(std::ptr::null()) })
     }
 
     /// Returns `true` if the provided mouse position is valid (not NaN).
@@ -124,39 +135,44 @@ impl crate::Ui {
             x: pos[0],
             y: pos[1],
         };
-        unsafe { sys::igIsMousePosValid(&v as *const sys::ImVec2_c) }
+        self.run_with_bound_context(|| unsafe {
+            sys::igIsMousePosValid(&v as *const sys::ImVec2_c)
+        })
     }
 
     /// Returns `true` if the mouse button was released and the given delay has passed.
     #[doc(alias = "IsMouseReleasedWithDelay")]
     pub fn is_mouse_released_with_delay(&self, button: MouseButton, delay: f32) -> bool {
-        unsafe { sys::igIsMouseReleasedWithDelay(button.into(), delay) }
+        self.run_with_bound_context(|| unsafe {
+            sys::igIsMouseReleasedWithDelay(button.into(), delay)
+        })
     }
 
     /// Get mouse position in screen coordinates
     #[doc(alias = "GetMousePos")]
     pub fn mouse_pos(&self) -> [f32; 2] {
-        let pos = unsafe { sys::igGetMousePos() };
+        let pos = self.run_with_bound_context(|| unsafe { sys::igGetMousePos() });
         [pos.x, pos.y]
     }
 
     /// Get mouse position when a specific button was clicked
     #[doc(alias = "GetMousePosOnOpeningCurrentPopup")]
     pub fn mouse_pos_on_opening_current_popup(&self) -> [f32; 2] {
-        let pos = unsafe { sys::igGetMousePosOnOpeningCurrentPopup() };
+        let pos =
+            self.run_with_bound_context(|| unsafe { sys::igGetMousePosOnOpeningCurrentPopup() });
         [pos.x, pos.y]
     }
 
     /// Check if mouse is hovering given rectangle
     #[doc(alias = "IsMouseHoveringRect")]
     pub fn is_mouse_hovering_rect(&self, r_min: [f32; 2], r_max: [f32; 2]) -> bool {
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             sys::igIsMouseHoveringRect(
                 sys::ImVec2::new(r_min[0], r_min[1]),
                 sys::ImVec2::new(r_max[0], r_max[1]),
                 true,
             )
-        }
+        })
     }
 
     /// Check if mouse is hovering given rectangle (with clipping test)
@@ -167,19 +183,19 @@ impl crate::Ui {
         r_max: [f32; 2],
         clip: bool,
     ) -> bool {
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             sys::igIsMouseHoveringRect(
                 sys::ImVec2::new(r_min[0], r_min[1]),
                 sys::ImVec2::new(r_max[0], r_max[1]),
                 clip,
             )
-        }
+        })
     }
 
     /// Check if mouse is dragging
     #[doc(alias = "IsMouseDragging")]
     pub fn is_mouse_dragging(&self, button: MouseButton) -> bool {
-        unsafe { sys::igIsMouseDragging(button as i32, -1.0) }
+        self.run_with_bound_context(|| unsafe { sys::igIsMouseDragging(button as i32, -1.0) })
     }
 
     /// Check if mouse is dragging with threshold
@@ -189,13 +205,16 @@ impl crate::Ui {
         button: MouseButton,
         lock_threshold: f32,
     ) -> bool {
-        unsafe { sys::igIsMouseDragging(button as i32, lock_threshold) }
+        self.run_with_bound_context(|| unsafe {
+            sys::igIsMouseDragging(button as i32, lock_threshold)
+        })
     }
 
     /// Get mouse drag delta
     #[doc(alias = "GetMouseDragDelta")]
     pub fn mouse_drag_delta(&self, button: MouseButton) -> [f32; 2] {
-        let delta = unsafe { sys::igGetMouseDragDelta(button as i32, -1.0) };
+        let delta = self
+            .run_with_bound_context(|| unsafe { sys::igGetMouseDragDelta(button as i32, -1.0) });
         [delta.x, delta.y]
     }
 
@@ -206,14 +225,16 @@ impl crate::Ui {
         button: MouseButton,
         lock_threshold: f32,
     ) -> [f32; 2] {
-        let delta = unsafe { sys::igGetMouseDragDelta(button as i32, lock_threshold) };
+        let delta = self.run_with_bound_context(|| unsafe {
+            sys::igGetMouseDragDelta(button as i32, lock_threshold)
+        });
         [delta.x, delta.y]
     }
 
     /// Reset mouse drag delta for a specific button
     #[doc(alias = "ResetMouseDragDelta")]
     pub fn reset_mouse_drag_delta(&self, button: MouseButton) {
-        unsafe { sys::igResetMouseDragDelta(button as i32) }
+        self.run_with_bound_context(|| unsafe { sys::igResetMouseDragDelta(button as i32) });
     }
 
     /// Returns true if the last item toggled its selection state in a multi-select scope.
@@ -222,6 +243,6 @@ impl crate::Ui {
     /// `EndMultiSelect()` (or helpers built on top of them).
     #[doc(alias = "IsItemToggledSelection")]
     pub fn is_item_toggled_selection(&self) -> bool {
-        unsafe { sys::igIsItemToggledSelection() }
+        self.run_with_bound_context(|| unsafe { sys::igIsItemToggledSelection() })
     }
 }

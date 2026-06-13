@@ -5,7 +5,7 @@
 //! your chosen backend. See struct-level docs for details and caveats about one
 //! active context at a time.
 
-mod binding;
+pub(crate) mod binding;
 mod clipboard;
 mod core;
 mod fonts;

@@ -61,7 +61,8 @@ impl<'a> DummyPlot<'a> {
     }
 
     /// Plot the dummy entry
-    pub fn plot(self) {
+    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
+        let _guard = plot_ui.bind();
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -145,13 +146,13 @@ impl<'a> MultiDummyPlot<'a> {
     }
 
     /// Plot all dummy entries
-    pub fn plot(self) {
+    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
         for &label in &self.labels {
             let dummy_plot = DummyPlot::new(label)
                 .with_style(self.style)
                 .with_flags(self.flags)
                 .with_item_flags(self.item_flags);
-            dummy_plot.plot();
+            dummy_plot.plot(plot_ui);
         }
     }
 }
@@ -202,9 +203,9 @@ impl<'a> LegendSeparator<'a> {
     }
 
     /// Plot the separator
-    pub fn plot(self) {
+    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
         let dummy_plot = DummyPlot::new(self.label).with_style(self.style);
-        dummy_plot.plot();
+        dummy_plot.plot(plot_ui);
     }
 }
 
@@ -236,9 +237,9 @@ impl<'a> LegendHeader<'a> {
     }
 
     /// Plot the header
-    pub fn plot(self) {
+    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
         let dummy_plot = DummyPlot::new(self.title).with_style(self.style);
-        dummy_plot.plot();
+        dummy_plot.plot(plot_ui);
     }
 }
 
@@ -286,12 +287,12 @@ impl<'a> CustomLegendEntry<'a> {
     }
 
     /// Plot the custom entry
-    pub fn plot(self) {
+    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
         let dummy_plot = DummyPlot::new(self.label)
             .with_style(self.style)
             .with_flags(self.flags)
             .with_item_flags(self.item_flags);
-        dummy_plot.plot();
+        dummy_plot.plot(plot_ui);
     }
 }
 
@@ -333,18 +334,22 @@ impl<'a> LegendGroup<'a> {
     }
 
     /// Plot the legend group
-    pub fn plot(self) {
+    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
         // Plot the header
-        LegendHeader::new(self.title).with_style(self.style).plot();
+        LegendHeader::new(self.title)
+            .with_style(self.style)
+            .plot(plot_ui);
 
         // Plot all entries
         for &entry in &self.entries {
-            DummyPlot::new(entry).with_style(self.style).plot();
+            DummyPlot::new(entry).with_style(self.style).plot(plot_ui);
         }
 
         // Add separator if requested
         if self.add_separator && !self.entries.is_empty() {
-            LegendSeparator::empty().with_style(self.style).plot();
+            LegendSeparator::empty()
+                .with_style(self.style)
+                .plot(plot_ui);
         }
     }
 }

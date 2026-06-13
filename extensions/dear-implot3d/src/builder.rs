@@ -8,6 +8,7 @@ use dear_imgui_rs::Ui;
 pub struct Plot3DBuilder<'ui> {
     pub(crate) binding: Plot3DContextBinding,
     pub(crate) imgui_alive: Option<dear_imgui_rs::ContextAliveToken>,
+    pub(crate) ui: &'ui Ui,
     pub(crate) title: String,
     pub(crate) size: Option<[f32; 2]>,
     pub(crate) flags: Plot3DFlags,
@@ -30,7 +31,7 @@ impl<'ui> Plot3DBuilder<'ui> {
                 "dear-implot3d: ImGui context has been dropped"
             );
         }
-        self.binding.bind();
+        let _guard = self.binding.bind();
         if self.title.contains('\0') {
             return None;
         }
@@ -56,6 +57,7 @@ impl<'ui> Plot3DBuilder<'ui> {
             Some(Plot3DToken {
                 binding: self.binding,
                 imgui_alive: self.imgui_alive.clone(),
+                ui: self.ui,
                 _lifetime: PhantomData,
             })
         } else {

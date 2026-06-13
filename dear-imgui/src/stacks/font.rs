@@ -29,8 +29,11 @@ impl Ui {
     /// ```
     #[doc(alias = "PushFont")]
     pub fn push_font(&self, id: FontId) -> FontStackToken<'_> {
-        let font_ptr = crate::fonts::validate_font_id_for_current_context(id, "Ui::push_font()");
-        unsafe { sys::igPushFont(font_ptr, 0.0) };
+        self.run_with_bound_context(|| unsafe {
+            let font_ptr =
+                crate::fonts::validate_font_id_for_current_context(id, "Ui::push_font()");
+            sys::igPushFont(font_ptr, 0.0);
+        });
         FontStackToken::new(self)
     }
 }

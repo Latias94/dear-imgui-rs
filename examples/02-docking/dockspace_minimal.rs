@@ -182,28 +182,28 @@ impl AppWindow {
                 let dockspace_id = ui.get_id("MyDockspace");
                 // Configure DockBuilder only once (if node doesn't exist yet)
                 if !DockBuilder::node_exists(&ui, dockspace_id) {
-                    DockBuilder::remove_node(dockspace_id);
-                    DockBuilder::add_node(dockspace_id, DockNodeFlags::NONE);
-                    DockBuilder::set_node_size(dockspace_id, size);
+                    DockBuilder::remove_node(&ui, dockspace_id);
+                    DockBuilder::add_node(&ui, dockspace_id, DockNodeFlags::NONE);
+                    DockBuilder::set_node_size(&ui, dockspace_id, size);
 
                     let mut dock_main_id = dockspace_id;
                     let (dock_id_left, new_main) =
-                        DockBuilder::split_node(dock_main_id, SplitDirection::Left, 0.20);
+                        DockBuilder::split_node(&ui, dock_main_id, SplitDirection::Left, 0.20);
                     dock_main_id = new_main;
 
                     let (dock_id_right, new_main) =
-                        DockBuilder::split_node(dock_main_id, SplitDirection::Right, 0.20);
+                        DockBuilder::split_node(&ui, dock_main_id, SplitDirection::Right, 0.20);
                     dock_main_id = new_main;
 
                     let (dock_id_bottom, new_main) =
-                        DockBuilder::split_node(dock_main_id, SplitDirection::Down, 0.20);
+                        DockBuilder::split_node(&ui, dock_main_id, SplitDirection::Down, 0.20);
                     dock_main_id = new_main;
 
-                    DockBuilder::dock_window("James_1", dock_id_left);
-                    DockBuilder::dock_window("James_2", dock_main_id);
-                    DockBuilder::dock_window("James_3", dock_id_right);
-                    DockBuilder::dock_window("James_4", dock_id_bottom);
-                    DockBuilder::finish(dockspace_id);
+                    DockBuilder::dock_window(&ui, "James_1", dock_id_left);
+                    DockBuilder::dock_window(&ui, "James_2", dock_main_id);
+                    DockBuilder::dock_window(&ui, "James_3", dock_id_right);
+                    DockBuilder::dock_window(&ui, "James_4", dock_id_bottom);
+                    DockBuilder::finish(&ui, dockspace_id);
                 }
 
                 // Render DockSpace inside the host window

@@ -28,14 +28,6 @@ pub fn with_scratch_txt<R>(txt: impl AsRef<str>, f: impl FnOnce(*const c_char) -
     })
 }
 
-/// Same as [`tls_scratch_txt`] but returns two pointers that stay valid together.
-pub(crate) fn tls_scratch_txt_two(
-    txt_0: impl AsRef<str>,
-    txt_1: impl AsRef<str>,
-) -> (*const c_char, *const c_char) {
-    TLS_SCRATCH.with(|buf| buf.borrow_mut().scratch_txt_two(txt_0, txt_1))
-}
-
 /// Calls `f` with two temporary, NUL-terminated C string pointers backed by a thread-local scratch buffer.
 ///
 /// Both pointers are valid together for the duration of the call (and will be overwritten by

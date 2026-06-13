@@ -36,7 +36,9 @@ impl<'ui> ModalPopup<'ui> {
             .map(|o| o as *mut bool)
             .unwrap_or(std::ptr::null_mut());
 
-        let render = unsafe { sys::igBeginPopupModal(name_ptr, opened_ptr, self.flags.bits()) };
+        let render = self.ui.run_with_bound_context(|| unsafe {
+            sys::igBeginPopupModal(name_ptr, opened_ptr, self.flags.bits())
+        });
 
         if render {
             Some(ModalPopupToken::new(self.ui))

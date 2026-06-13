@@ -94,11 +94,6 @@ impl EditorContext {
             self.imgui_alive.is_alive(),
             "{caller} requires the owning Dear ImGui context to be alive"
         );
-        assert_eq!(
-            unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
-            self.imgui_ctx_raw,
-            "{caller} must be used while the owning Dear ImGui context is current"
-        );
         assert!(
             !self.raw.is_null(),
             "{caller} requires a valid node-editor context"
@@ -107,10 +102,12 @@ impl EditorContext {
 
     pub(crate) fn bind_current(&self, caller: &str) -> CurrentEditorGuard<'_> {
         self.assert_usable(caller);
+        let imgui_guard = ImGuiContextGuard::bind(self.imgui_ctx_raw);
         let previous = unsafe { sys::dne_get_current_editor_raw() };
         unsafe { sys::dne_set_current_editor(self.raw) };
         CurrentEditorGuard {
             _editor: self,
+            _imgui_guard: imgui_guard,
             previous,
         }
     }
@@ -140,6 +137,7 @@ impl Drop for EditorContext {
 
 pub(crate) struct CurrentEditorGuard<'a> {
     _editor: &'a EditorContext,
+    _imgui_guard: ImGuiContextGuard,
     previous: *mut c_void,
 }
 
@@ -176,7 +174,9 @@ impl Drop for ImGuiContextGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{EditorConfig, LinkId, NodeEditorUiExt, NodeId, PinId, PinKind, StyleColor};
+    use crate::{
+        EditorConfig, LinkId, NodeEditorUiExt, NodeId, PinId, PinKind, StyleColor, StyleVar,
+    };
     use dear_imgui_rs::MouseButton;
     use std::{
         ptr,
@@ -329,6 +329,44 @@ mod tests {
             editor.end();
         });
         imgui.render();
+    }
+
+    #[test]
+    fn frame_tokens_bind_own_editor_before_drop_and_restore_previous_editor() {
+        let _guard = test_guard();
+        let mut imgui = ImGuiContext::create();
+        imgui.io_mut().set_display_size([640.0, 480.0]);
+        imgui.io_mut().set_delta_time(1.0 / 60.0);
+        let _ = imgui.font_atlas_mut().build();
+
+        let editor_a = EditorContext::create(&imgui);
+        let editor_b = EditorContext::create(&imgui);
+        let raw_a = editor_a.as_raw_native();
+        let raw_b = editor_b.as_raw_native();
+
+        let ui = imgui.frame();
+        ui.window("node-editor-token-context").build(|| {
+            let frame = ui.node_editor(&editor_a, "token-context", [320.0, 240.0]);
+
+            let style = frame.push_style_var_float(StyleVar::LinkStrength, 0.75);
+            unsafe { sys::dne_set_current_editor_raw(raw_b) };
+            drop(style);
+            assert_eq!(unsafe { sys::dne_get_current_editor_raw() }, raw_b);
+
+            let node = frame.begin_node(NodeId::new(1));
+            unsafe { sys::dne_set_current_editor_raw(raw_b) };
+            drop(node);
+            assert_eq!(unsafe { sys::dne_get_current_editor_raw() }, raw_b);
+
+            unsafe { sys::dne_set_current_editor_raw(raw_b) };
+            drop(frame);
+            assert_eq!(unsafe { sys::dne_get_current_editor_raw() }, raw_b);
+        });
+        imgui.render();
+
+        unsafe { sys::dne_set_current_editor_raw(ptr::null_mut()) };
+
+        let _ = raw_a;
     }
 
     #[test]

@@ -83,7 +83,7 @@ impl<'a> StemPlot<'a> {
 }
 
 impl<'a> Plot for StemPlot<'a> {
-    fn plot(&self) {
+    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
         if self.validate().is_err() {
             return;
         }
@@ -91,6 +91,7 @@ impl<'a> Plot for StemPlot<'a> {
             return;
         };
 
+        let _guard = plot_ui.bind();
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -178,7 +179,7 @@ impl<'a> SimpleStemPlot<'a> {
 }
 
 impl<'a> Plot for SimpleStemPlot<'a> {
-    fn plot(&self) {
+    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
         if self.values.is_empty() {
             return;
         }
@@ -186,6 +187,7 @@ impl<'a> Plot for SimpleStemPlot<'a> {
             return;
         };
 
+        let _guard = plot_ui.bind();
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -215,8 +217,7 @@ impl<'ui> crate::PlotUi<'ui> {
     pub fn stem_plot(&self, label: &str, x_data: &[f64], y_data: &[f64]) -> Result<(), PlotError> {
         let plot = StemPlot::new(label, x_data, y_data);
         plot.validate()?;
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 
@@ -230,8 +231,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = StemPlot::new(label, x_data, y_data).with_y_ref(y_ref);
         plot.validate()?;
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 
@@ -241,8 +241,7 @@ impl<'ui> crate::PlotUi<'ui> {
             return Err(PlotError::EmptyData);
         }
         let plot = SimpleStemPlot::new(label, values);
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 
@@ -257,8 +256,7 @@ impl<'ui> crate::PlotUi<'ui> {
             return Err(PlotError::EmptyData);
         }
         let plot = SimpleStemPlot::new(label, values).with_y_ref(y_ref);
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 }

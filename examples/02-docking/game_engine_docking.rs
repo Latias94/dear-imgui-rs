@@ -1050,6 +1050,7 @@ impl AppWindow {
         if imgui.first_frame {
             let vp = ui.main_viewport();
             setup_initial_docking_layout(
+                ui,
                 dear_imgui_rs::Id::from(imgui.dockspace_id),
                 vp.work_pos(),
                 vp.work_size(),
@@ -1174,14 +1175,9 @@ impl AppWindow {
             imgui.context.render_platform_windows_default();
         }
 
-        // Handle deferred actions (safe after frame is rendered)
+        // Handle deferred actions that must happen outside the immediate UI draw.
         if actions.reset_layout {
-            let vp = imgui.context.main_viewport();
-            setup_initial_docking_layout(
-                dear_imgui_rs::Id::from(imgui.dockspace_id),
-                vp.work_pos(),
-                vp.work_size(),
-            );
+            imgui.first_frame = true;
         }
         if actions.load_ini {
             if let Ok(s) = std::fs::read_to_string("examples/02-docking/game_engine_docking.ini") {
@@ -1242,6 +1238,7 @@ impl App {
 
 /// Setup the initial docking layout - Unity-style game engine layout
 fn setup_initial_docking_layout(
+    ui: &dear_imgui_rs::Ui,
     dockspace_id: dear_imgui_rs::Id,
     viewport_work_pos: [f32; 2],
     viewport_work_size: [f32; 2],
@@ -1251,13 +1248,13 @@ fn setup_initial_docking_layout(
     println!("Setting up initial docking layout...");
 
     // Clear any existing layout and create fresh dockspace (size comes from main viewport)
-    DockBuilder::remove_node_docked_windows(dockspace_id, true);
-    DockBuilder::remove_node(dockspace_id);
-    DockBuilder::add_node(dockspace_id, dear_imgui_rs::DockNodeFlags::NONE);
+    DockBuilder::remove_node_docked_windows(ui, dockspace_id, true);
+    DockBuilder::remove_node(ui, dockspace_id);
+    DockBuilder::add_node(ui, dockspace_id, dear_imgui_rs::DockNodeFlags::NONE);
     // Match node pos/size to main viewport work area (exclude menu bars) before splitting
     {
-        DockBuilder::set_node_pos(dockspace_id, viewport_work_pos);
-        DockBuilder::set_node_size(dockspace_id, viewport_work_size);
+        DockBuilder::set_node_pos(ui, dockspace_id, viewport_work_pos);
+        DockBuilder::set_node_size(ui, dockspace_id, viewport_work_size);
     }
 
     // Unity-style Professional Layout:
@@ -1273,12 +1270,14 @@ fn setup_initial_docking_layout(
     // Right Inspector ~25.1%, Left Hierarchy column ~21.7%, Center ~remaining
     // First split right from root
     let (inspector_panel, after_right) = DockBuilder::split_node(
+        ui,
         dockspace_id,
         SplitDirection::Right,
         0.251, // 402/1600
     );
     // Then split left from the remaining
     let (left_panel_id, center_area_id) = DockBuilder::split_node(
+        ui,
         after_right,
         SplitDirection::Left,
         0.2896, // normalized 0.217/(1-0.251)
@@ -1288,12 +1287,14 @@ fn setup_initial_docking_layout(
     // total H ~881, Hierarchy 337, Project 264, Asset 276
     // First split bottom Asset (~276/881 ≈ 0.313)
     let (asset_id, top_left_stack) = DockBuilder::split_node(
+        ui,
         left_panel_id,
         SplitDirection::Down,
         0.313, // Asset Browser
     );
     // Then split the remaining into Hierarchy (337) and Project (264)
     let (project_id, hierarchy_id) = DockBuilder::split_node(
+        ui,
         top_left_stack,
         SplitDirection::Down,
         0.439, // 337/(337+264)
@@ -1301,27 +1302,28 @@ fn setup_initial_docking_layout(
 
     // Split right panel vertically: Performance (~20%) bottom, Inspector (~80%) top
     let (performance_id, inspector_id) =
-        DockBuilder::split_node(inspector_panel, SplitDirection::Down, 0.2);
+        DockBuilder::split_node(ui, inspector_panel, SplitDirection::Down, 0.2);
 
     // Split center vertically: Console (~27%) bottom, Scene/Game (~73%) top
     let (console_id, scene_game_id) = DockBuilder::split_node(
+        ui,
         center_area_id,
         SplitDirection::Down,
         0.313, // 276/881 approx
     );
 
     // Dock all windows to their designated areas
-    DockBuilder::dock_window("Hierarchy", hierarchy_id);
-    DockBuilder::dock_window("Project", project_id);
-    DockBuilder::dock_window("Asset Browser", asset_id); // Tabbed vertically under Project
-    DockBuilder::dock_window("Scene View", scene_game_id);
-    DockBuilder::dock_window("Game View", scene_game_id); // Tabbed with Scene View
-    DockBuilder::dock_window("Console", console_id); // Bottom center
-    DockBuilder::dock_window("Inspector", inspector_id);
-    DockBuilder::dock_window("Performance", performance_id);
+    DockBuilder::dock_window(ui, "Hierarchy", hierarchy_id);
+    DockBuilder::dock_window(ui, "Project", project_id);
+    DockBuilder::dock_window(ui, "Asset Browser", asset_id); // Tabbed vertically under Project
+    DockBuilder::dock_window(ui, "Scene View", scene_game_id);
+    DockBuilder::dock_window(ui, "Game View", scene_game_id); // Tabbed with Scene View
+    DockBuilder::dock_window(ui, "Console", console_id); // Bottom center
+    DockBuilder::dock_window(ui, "Inspector", inspector_id);
+    DockBuilder::dock_window(ui, "Performance", performance_id);
 
     // Finalize the layout
-    DockBuilder::finish(dockspace_id);
+    DockBuilder::finish(ui, dockspace_id);
 
     println!("Docking layout setup complete");
 }
@@ -2543,7 +2545,7 @@ fn render_performance(ui: &Ui, plot_ui: &PlotUi, game_state: &mut GameEngineStat
                         dear_implot::PlotCond::Always,
                     );
 
-                    LinePlot::new("FPS", &x_data, &y_data).plot();
+                    LinePlot::new("FPS", &x_data, &y_data).plot(&plot_ui);
                     token.end();
                 }
             } else {

@@ -13,7 +13,7 @@ impl Ui {
     ///   the right side)
     #[doc(alias = "PushItemWidth")]
     pub fn push_item_width(&self, item_width: f32) -> ItemWidthStackToken<'_> {
-        unsafe { sys::igPushItemWidth(item_width) };
+        self.run_with_bound_context(|| unsafe { sys::igPushItemWidth(item_width) });
         ItemWidthStackToken::new(self)
     }
 
@@ -41,7 +41,7 @@ impl Ui {
     /// - `wrap_pos_x > 0.0`: wrap at `wrap_pos_x` position in window local space
     #[doc(alias = "PushTextWrapPos")]
     pub fn push_text_wrap_pos(&self, wrap_pos_x: f32) -> TextWrapPosStackToken<'_> {
-        unsafe { sys::igPushTextWrapPos(wrap_pos_x) };
+        self.run_with_bound_context(|| unsafe { sys::igPushTextWrapPos(wrap_pos_x) });
         TextWrapPosStackToken::new(self)
     }
 }

@@ -83,13 +83,14 @@ impl<'a> ShadedPlot<'a> {
 }
 
 impl<'a> Plot for ShadedPlot<'a> {
-    fn plot(&self) {
+    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
         if self.validate().is_err() {
             return;
         }
         let Ok(count) = i32::try_from(self.x_data.len()) else {
             return;
         };
+        let _guard = plot_ui.bind();
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -184,7 +185,7 @@ impl<'a> ShadedBetweenPlot<'a> {
 }
 
 impl<'a> Plot for ShadedBetweenPlot<'a> {
-    fn plot(&self) {
+    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
         if self.validate().is_err() {
             return;
         }
@@ -192,6 +193,7 @@ impl<'a> Plot for ShadedBetweenPlot<'a> {
             return;
         };
 
+        let _guard = plot_ui.bind();
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -279,7 +281,7 @@ impl<'a> SimpleShadedPlot<'a> {
 }
 
 impl<'a> Plot for SimpleShadedPlot<'a> {
-    fn plot(&self) {
+    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
         if self.values.is_empty() {
             return;
         }
@@ -287,6 +289,7 @@ impl<'a> Plot for SimpleShadedPlot<'a> {
             return;
         };
 
+        let _guard = plot_ui.bind();
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -321,8 +324,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = ShadedPlot::new(label, x_data, y_data);
         plot.validate()?;
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 
@@ -336,8 +338,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = ShadedPlot::new(label, x_data, y_data).with_y_ref(y_ref);
         plot.validate()?;
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 
@@ -351,8 +352,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = ShadedBetweenPlot::new(label, x_data, y1_data, y2_data);
         plot.validate()?;
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 
@@ -362,8 +362,7 @@ impl<'ui> crate::PlotUi<'ui> {
             return Err(PlotError::EmptyData);
         }
         let plot = SimpleShadedPlot::new(label, values);
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 }

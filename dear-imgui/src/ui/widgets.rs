@@ -5,14 +5,14 @@ impl Ui {
     #[doc(alias = "TextUnformatted")]
     pub fn text<T: AsRef<str>>(&self, text: T) {
         let s = text.as_ref();
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             let start = s.as_ptr();
             let end = start.add(s.len());
             crate::sys::igTextUnformatted(
                 start as *const std::os::raw::c_char,
                 end as *const std::os::raw::c_char,
             );
-        }
+        });
     }
 
     /// Convenience: draw an image with background and tint (ImGui 1.92+)
@@ -90,15 +90,17 @@ impl Ui {
     /// This is useful for tree nodes, collapsing headers, etc.
     #[doc(alias = "SetNextItemOpen")]
     pub fn set_next_item_open(&self, is_open: bool) {
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             sys::igSetNextItemOpen(is_open, 0); // 0 = ImGuiCond_Always
-        }
+        });
     }
 
     /// Set next item to be open by default with condition.
     #[doc(alias = "SetNextItemOpen")]
     pub fn set_next_item_open_with_cond(&self, is_open: bool, cond: crate::Condition) {
-        unsafe { sys::igSetNextItemOpen(is_open, cond as sys::ImGuiCond) }
+        self.run_with_bound_context(|| unsafe {
+            sys::igSetNextItemOpen(is_open, cond as sys::ImGuiCond)
+        });
     }
 
     /// Set next item width.
@@ -107,14 +109,14 @@ impl Ui {
     #[doc(alias = "SetNextItemWidth")]
     pub fn set_next_item_width(&self, item_width: f32) {
         Self::assert_finite_f32("Ui::set_next_item_width()", "item_width", item_width);
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             sys::igSetNextItemWidth(item_width);
-        }
+        });
     }
 
     /// Display a text label with a boolean value (for quick debug UIs).
     #[doc(alias = "Value")]
     pub fn value_bool(&self, prefix: impl AsRef<str>, v: bool) {
-        unsafe { sys::igValue_Bool(self.scratch_txt(prefix), v) }
+        self.run_with_bound_context(|| unsafe { sys::igValue_Bool(self.scratch_txt(prefix), v) })
     }
 }

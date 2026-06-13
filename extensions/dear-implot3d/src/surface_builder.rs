@@ -31,7 +31,7 @@ impl<'ui> Surface3DBuilder<'ui> {
         self
     }
     pub fn plot(self) {
-        self._ui.bind();
+        let _guard = self._ui.bind();
         let x_count = match i32::try_from(self.xs.len()) {
             Ok(v) => v,
             Err(_) => return,
@@ -83,7 +83,7 @@ impl<'ui> Plot3DUi<'ui> {
         ys: &'ui [f32],
         zs: &'ui [f32],
     ) -> Surface3DBuilder<'ui> {
-        self.bind();
+        let _guard = self.bind();
         Surface3DBuilder {
             _ui: self,
             label: label.into(),
@@ -110,7 +110,7 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Surface3DFlags,
         layout: Plot3DDataLayout,
     ) {
-        self.bind();
+        let _guard = self.bind();
         debug_before_plot();
         let x_count = xs.len();
         let y_count = ys.len();
@@ -176,7 +176,7 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Surface3DFlags,
         layout: Plot3DDataLayout,
     ) {
-        self.bind();
+        let _guard = self.bind();
         debug_before_plot();
         let Some(x_count_i32) = surface_count_to_i32(x_count) else {
             return;

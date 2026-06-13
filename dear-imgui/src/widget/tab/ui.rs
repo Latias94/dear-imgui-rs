@@ -26,7 +26,8 @@ impl Ui {
         let options = flags.into();
         options.validate("Ui::tab_bar_with_flags()");
         let id_ptr = self.scratch_txt(id);
-        let should_render = unsafe { sys::igBeginTabBar(id_ptr, options.raw()) };
+        let should_render =
+            self.run_with_bound_context(|| unsafe { sys::igBeginTabBar(id_ptr, options.raw()) });
 
         if should_render {
             Some(TabBarToken::new(self))
@@ -72,7 +73,9 @@ impl Ui {
         let label_ptr = self.scratch_txt(label);
         let opened_ptr = opened.map(|x| x as *mut bool).unwrap_or(ptr::null_mut());
 
-        let should_render = unsafe { sys::igBeginTabItem(label_ptr, opened_ptr, options.raw()) };
+        let should_render = self.run_with_bound_context(|| unsafe {
+            sys::igBeginTabItem(label_ptr, opened_ptr, options.raw())
+        });
 
         if should_render {
             Some(TabItemToken::new(self))
@@ -96,12 +99,14 @@ impl Ui {
     ) -> bool {
         let options = flags.into();
         options.validate_for_tab_button("Ui::tab_item_button_with_flags()");
-        unsafe { sys::igTabItemButton(self.scratch_txt(label), options.raw()) }
+        let label_ptr = self.scratch_txt(label);
+        self.run_with_bound_context(|| unsafe { sys::igTabItemButton(label_ptr, options.raw()) })
     }
 
     /// Notifies Dear ImGui that a tab (or docked window) has been closed.
     #[doc(alias = "SetTabItemClosed")]
     pub fn set_tab_item_closed(&self, tab_or_docked_window_label: impl AsRef<str>) {
-        unsafe { sys::igSetTabItemClosed(self.scratch_txt(tab_or_docked_window_label)) }
+        let label_ptr = self.scratch_txt(tab_or_docked_window_label);
+        self.run_with_bound_context(|| unsafe { sys::igSetTabItemClosed(label_ptr) });
     }
 }

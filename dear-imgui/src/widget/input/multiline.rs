@@ -68,7 +68,7 @@ impl<'ui, 'p> InputTextMultilineImStr<'ui, 'p> {
 
         validate_input_multiline_flags("InputTextMultilineImStr::build()", self.flags);
         let flags = self.flags.raw() | sys::ImGuiInputTextFlags_CallbackResize as i32;
-        let result = unsafe {
+        let result = self.ui.run_with_bound_context(|| unsafe {
             sys::igInputTextMultiline(
                 label_ptr,
                 buf_ptr,
@@ -78,7 +78,7 @@ impl<'ui, 'p> InputTextMultilineImStr<'ui, 'p> {
                 Some(im_string_multiline_resize_callback),
                 user_ptr,
             )
-        };
+        });
         // Ensure ImString logical length reflects actual text (scan to NUL)
         unsafe { self.buf.refresh_len() };
         result
@@ -135,7 +135,7 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
         let size_vec: sys::ImVec2 = self.size.into();
         validate_input_multiline_flags("InputTextMultiline::build()", self.flags);
         let flags = self.flags.raw() | sys::ImGuiInputTextFlags_CallbackResize as i32;
-        let result = unsafe {
+        let result = self.ui.run_with_bound_context(|| unsafe {
             sys::igInputTextMultiline(
                 label_ptr,
                 buf_ptr,
@@ -145,7 +145,7 @@ impl<'ui, 'p> InputTextMultiline<'ui, 'p> {
                 Some(string_multiline_resize_callback),
                 user_ptr,
             )
-        };
+        });
 
         finish_string_input_buffer(self.buf, input_buffer);
         result
@@ -212,7 +212,7 @@ impl<'ui, 'p, T: InputTextCallbackHandler> InputTextMultilineWithCb<'ui, 'p, T> 
         let size_vec: sys::ImVec2 = self.size.into();
         validate_input_multiline_flags("InputTextMultilineWithCb::build()", self.flags);
         let flags = self.flags.raw() | sys::ImGuiInputTextFlags_CallbackResize as i32;
-        let result = unsafe {
+        let result = self.ui.run_with_bound_context(|| unsafe {
             sys::igInputTextMultiline(
                 label_ptr,
                 buf_ptr,
@@ -222,7 +222,7 @@ impl<'ui, 'p, T: InputTextCallbackHandler> InputTextMultilineWithCb<'ui, 'p, T> 
                 Some(string_multiline_callback_router::<T>),
                 user_ptr,
             )
-        };
+        });
 
         finish_string_input_buffer(self.buf, input_buffer);
         result

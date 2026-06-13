@@ -98,7 +98,7 @@ impl<'a> BarPlot<'a> {
 }
 
 impl<'a> Plot for BarPlot<'a> {
-    fn plot(&self) {
+    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
         if self.validate().is_err() {
             return; // Skip plotting if data is invalid
         }
@@ -106,6 +106,7 @@ impl<'a> Plot for BarPlot<'a> {
             return;
         };
 
+        let _guard = plot_ui.bind();
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -190,7 +191,7 @@ impl<'a> PositionalBarPlot<'a> {
 }
 
 impl<'a> Plot for PositionalBarPlot<'a> {
-    fn plot(&self) {
+    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
         if self.validate().is_err() {
             return; // Skip plotting if data is invalid
         }
@@ -198,6 +199,7 @@ impl<'a> Plot for PositionalBarPlot<'a> {
             return;
         };
 
+        let _guard = plot_ui.bind();
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -226,8 +228,7 @@ impl<'ui> crate::PlotUi<'ui> {
     pub fn bar_plot(&self, label: &str, values: &[f64]) -> Result<(), PlotError> {
         let plot = BarPlot::new(label, values);
         plot.validate()?;
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 
@@ -240,8 +241,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = BarPlot::new(label, values).with_bar_size(width);
         plot.validate()?;
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 
@@ -254,8 +254,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = PositionalBarPlot::new(label, x_data, y_data);
         plot.validate()?;
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 }

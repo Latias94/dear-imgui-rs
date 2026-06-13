@@ -36,13 +36,13 @@ impl Ui {
     /// Maximum label width used for angled headers (when enabled in style/options).
     #[doc(alias = "TableGetHeaderAngledMaxLabelWidth")]
     pub fn table_get_header_angled_max_label_width(&self) -> f32 {
-        unsafe { sys::igTableGetHeaderAngledMaxLabelWidth() }
+        self.run_with_bound_context(|| unsafe { sys::igTableGetHeaderAngledMaxLabelWidth() })
     }
 
     /// Submit angled headers row (requires style/flags enabling angled headers).
     #[doc(alias = "TableAngledHeadersRow")]
     pub fn table_angled_headers_row(&self) {
-        unsafe { sys::igTableAngledHeadersRow() }
+        self.run_with_bound_context(|| unsafe { sys::igTableAngledHeadersRow() });
     }
 
     // Removed legacy TableAngledHeadersRowEx(flags) wrapper; use `table_angled_headers_row_ex_with_data`.
@@ -61,7 +61,7 @@ impl Ui {
         headers: &[TableHeaderData],
     ) {
         if headers.is_empty() {
-            unsafe { sys::igTableAngledHeadersRow() }
+            self.run_with_bound_context(|| unsafe { sys::igTableAngledHeadersRow() });
             return;
         }
         let count = len_i32(
@@ -69,34 +69,44 @@ impl Ui {
             "headers",
             headers.len(),
         );
-        let table = assert_current_table("Ui::table_angled_headers_row_ex_with_data()");
         let mut data: Vec<sys::ImGuiTableHeaderData> = Vec::with_capacity(headers.len());
-        for h in headers {
-            assert_valid_table_column_in(
-                table,
-                h.index,
-                "Ui::table_angled_headers_row_ex_with_data()",
-            );
-            data.push(sys::ImGuiTableHeaderData {
-                Index: h
-                    .index
-                    .into_imgui_column_idx("Ui::table_angled_headers_row_ex_with_data()"),
-                TextColor: u32::from(h.text_color),
-                BgColor0: u32::from(h.bg_color0),
-                BgColor1: u32::from(h.bg_color1),
-            });
-        }
-        unsafe {
-            sys::igTableAngledHeadersRowEx(row_id, angle, max_label_width, data.as_ptr(), count);
-        }
+        self.run_with_bound_context(|| {
+            let table = assert_current_table("Ui::table_angled_headers_row_ex_with_data()");
+            for h in headers {
+                assert_valid_table_column_in(
+                    table,
+                    h.index,
+                    "Ui::table_angled_headers_row_ex_with_data()",
+                );
+                data.push(sys::ImGuiTableHeaderData {
+                    Index: h
+                        .index
+                        .into_imgui_column_idx("Ui::table_angled_headers_row_ex_with_data()"),
+                    TextColor: u32::from(h.text_color),
+                    BgColor0: u32::from(h.bg_color0),
+                    BgColor1: u32::from(h.bg_color1),
+                });
+            }
+            unsafe {
+                sys::igTableAngledHeadersRowEx(
+                    row_id,
+                    angle,
+                    max_label_width,
+                    data.as_ptr(),
+                    count,
+                );
+            }
+        });
     }
 
     /// Push background draw channel for the current table and return a token to pop it.
     #[must_use = "dropping the token pops the table background draw channel immediately"]
     #[doc(alias = "TablePushBackgroundChannel")]
     pub fn table_background_channel(&self) -> TableBackgroundChannelToken<'_> {
-        assert_current_table_cell("Ui::table_background_channel()");
-        unsafe { sys::igTablePushBackgroundChannel() };
+        self.run_with_bound_context(|| {
+            assert_current_table_cell("Ui::table_background_channel()");
+            unsafe { sys::igTablePushBackgroundChannel() };
+        });
         TableBackgroundChannelToken::new(self)
     }
 
@@ -107,9 +117,12 @@ impl Ui {
         &self,
         column: impl Into<TableColumnIndex>,
     ) -> TableColumnChannelToken<'_> {
-        assert_current_table_cell("Ui::table_column_channel()");
-        let column_n = assert_valid_table_column(column.into(), "Ui::table_column_channel()");
-        unsafe { sys::igTablePushColumnChannel(column_n) };
+        let column = column.into();
+        self.run_with_bound_context(|| {
+            assert_current_table_cell("Ui::table_column_channel()");
+            let column_n = assert_valid_table_column(column, "Ui::table_column_channel()");
+            unsafe { sys::igTablePushColumnChannel(column_n) };
+        });
         TableColumnChannelToken::new(self)
     }
 
@@ -133,16 +146,18 @@ impl Ui {
     #[doc(alias = "TableOpenContextMenu")]
     pub fn table_open_context_menu(&self, target: impl Into<TableContextMenuTarget>) {
         let target = target.into();
-        let column_n = match target {
-            TableContextMenuTarget::CurrentColumn => -1,
-            TableContextMenuTarget::Column(index) => {
-                index.into_i32("Ui::table_open_context_menu()")
-            }
-            TableContextMenuTarget::Table => {
-                let table = assert_current_table("Ui::table_open_context_menu()");
-                unsafe { (*table).ColumnsCount }
-            }
-        };
-        unsafe { sys::igTableOpenContextMenu(column_n) }
+        self.run_with_bound_context(|| {
+            let column_n = match target {
+                TableContextMenuTarget::CurrentColumn => -1,
+                TableContextMenuTarget::Column(index) => {
+                    index.into_i32("Ui::table_open_context_menu()")
+                }
+                TableContextMenuTarget::Table => {
+                    let table = assert_current_table("Ui::table_open_context_menu()");
+                    unsafe { (*table).ColumnsCount }
+                }
+            };
+            unsafe { sys::igTableOpenContextMenu(column_n) }
+        });
     }
 }

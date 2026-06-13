@@ -110,8 +110,8 @@ impl<'ui> ProgressBar<'ui> {
             .as_deref()
             .map_or(std::ptr::null(), |txt| self.ui.scratch_txt(txt));
 
-        unsafe {
+        self.ui.run_with_bound_context(|| unsafe {
             sys::igProgressBar(self.fraction, size_vec, overlay_ptr);
-        }
+        });
     }
 }

@@ -348,7 +348,7 @@ pub trait PlotItemStyled: Sized {
 /// Common trait for all plot types
 pub trait Plot {
     /// Plot this element
-    fn plot(&self);
+    fn plot(&self, plot_ui: &crate::PlotUi<'_>);
 
     /// Get the label for this plot
     fn label(&self) -> &str;
@@ -681,7 +681,7 @@ impl<'a> PlotBuilder<'a> {
     }
 
     /// Build and plot the chart
-    pub fn build(self) -> Result<(), PlotError> {
+    pub fn build(self, plot_ui: &crate::PlotUi<'_>) -> Result<(), PlotError> {
         match self.plot_type {
             PlotType::Line {
                 label,
@@ -690,7 +690,7 @@ impl<'a> PlotBuilder<'a> {
             } => {
                 let plot = line::LinePlot::new(label, x_data, y_data);
                 plot.validate()?;
-                plot.plot();
+                plot.plot(plot_ui);
             }
             PlotType::Scatter {
                 label,
@@ -699,7 +699,7 @@ impl<'a> PlotBuilder<'a> {
             } => {
                 let plot = scatter::ScatterPlot::new(label, x_data, y_data);
                 plot.validate()?;
-                plot.plot();
+                plot.plot(plot_ui);
             }
             PlotType::Bar {
                 label,
@@ -708,7 +708,7 @@ impl<'a> PlotBuilder<'a> {
             } => {
                 let plot = bar::BarPlot::new(label, values).with_bar_size(width);
                 plot.validate()?;
-                plot.plot();
+                plot.plot(plot_ui);
             }
             PlotType::Histogram {
                 label,
@@ -717,7 +717,7 @@ impl<'a> PlotBuilder<'a> {
             } => {
                 let plot = histogram::HistogramPlot::new(label, values).with_bins(bins);
                 plot.validate()?;
-                plot.plot();
+                plot.plot(plot_ui);
             }
             PlotType::Heatmap {
                 label,
@@ -727,7 +727,7 @@ impl<'a> PlotBuilder<'a> {
             } => {
                 let plot = heatmap::HeatmapPlot::new(label, values, rows, cols);
                 plot.validate()?;
-                plot.plot();
+                plot.plot(plot_ui);
             }
             PlotType::PieChart {
                 labels,
@@ -737,7 +737,7 @@ impl<'a> PlotBuilder<'a> {
             } => {
                 let plot = pie::PieChartPlot::new(labels, values, center.0, center.1, radius);
                 plot.validate()?;
-                plot.plot();
+                plot.plot(plot_ui);
             }
             PlotType::Polygon {
                 label,
@@ -746,7 +746,7 @@ impl<'a> PlotBuilder<'a> {
             } => {
                 let plot = polygon::PolygonPlot::new(label, x_data, y_data);
                 plot.validate()?;
-                plot.plot();
+                plot.plot(plot_ui);
             }
         }
         Ok(())

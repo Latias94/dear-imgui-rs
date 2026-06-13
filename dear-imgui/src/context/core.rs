@@ -55,6 +55,10 @@ pub struct Context {
 pub struct ContextAliveToken(Weak<()>);
 
 impl ContextAliveToken {
+    pub(in crate::context) fn new(alive: &Rc<()>) -> Self {
+        Self(Rc::downgrade(alive))
+    }
+
     /// Returns true if the originating `Context` has not been dropped.
     pub fn is_alive(&self) -> bool {
         self.0.upgrade().is_some()
@@ -99,7 +103,7 @@ impl Context {
     /// Useful for extension crates that store raw pointers and need to avoid calling into FFI
     /// after the owning `Context` has been dropped.
     pub fn alive_token(&self) -> ContextAliveToken {
-        ContextAliveToken(Rc::downgrade(&self.alive))
+        ContextAliveToken::new(&self.alive)
     }
 
     // removed legacy create_or_panic variants (use create()/try_create())
@@ -154,16 +158,19 @@ impl Context {
             sys::igSetCurrentContext(raw);
         }
 
+        let alive = Rc::new(());
+        let ui = crate::ui::Ui::new(raw, ContextAliveToken::new(&alive));
+
         Ok(Context {
             raw,
-            alive: Rc::new(()),
+            alive,
             shared_font_atlas,
             ini_filename: None,
             log_filename: None,
             platform_name: None,
             renderer_name: None,
             clipboard_ctx: Box::new(ClipboardContext::dummy()),
-            ui: crate::ui::Ui::new(),
+            ui,
         })
     }
 

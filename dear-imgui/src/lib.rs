@@ -379,6 +379,9 @@ mod state_storage;
 mod string;
 mod style;
 pub mod texture;
+// Token system for resource management
+#[macro_use]
+mod tokens;
 mod ui;
 mod utils;
 #[cfg(feature = "multi-viewport")]
@@ -386,10 +389,6 @@ pub mod viewport_backend;
 // mod math;
 mod widget;
 mod window;
-
-// Token system for resource management
-#[macro_use]
-mod tokens;
 
 // Stack management
 mod stacks;

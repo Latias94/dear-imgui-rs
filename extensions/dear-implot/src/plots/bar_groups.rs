@@ -103,7 +103,12 @@ impl<'a> BarGroupsPlot<'a> {
             )));
         }
 
-        let expected_values = self.item_count * self.group_count;
+        let expected_values = self
+            .item_count
+            .checked_mul(self.group_count)
+            .ok_or_else(|| {
+                PlotError::InvalidData("item_count * group_count overflowed usize".to_string())
+            })?;
         if self.values.len() != expected_values {
             return Err(PlotError::InvalidData(format!(
                 "Values length ({}) must equal item_count * group_count ({})",
@@ -116,11 +121,28 @@ impl<'a> BarGroupsPlot<'a> {
             return Err(PlotError::EmptyData);
         }
 
+        let _ = i32::try_from(self.item_count).map_err(|_| {
+            PlotError::InvalidData("item_count exceeded ImPlot's i32 range".to_string())
+        })?;
+        let _ = i32::try_from(self.group_count).map_err(|_| {
+            PlotError::InvalidData("group_count exceeded ImPlot's i32 range".to_string())
+        })?;
+
         Ok(())
     }
 
     /// Plot the bar groups
-    pub fn plot(self) {
+    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
+        if self.validate().is_err() {
+            return;
+        }
+        let Ok(item_count) = i32::try_from(self.item_count) else {
+            return;
+        };
+        let Ok(group_count) = i32::try_from(self.group_count) else {
+            return;
+        };
+        let _guard = plot_ui.bind();
         with_plot_str_slice(&self.label_ids, |label_ptrs| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -130,8 +152,8 @@ impl<'a> BarGroupsPlot<'a> {
             sys::ImPlot_PlotBarGroups_doublePtr(
                 label_ptrs.as_ptr(),
                 self.values.as_ptr(),
-                self.item_count as i32,
-                self.group_count as i32,
+                item_count,
+                group_count,
                 self.group_size,
                 self.shift,
                 spec,
@@ -242,7 +264,12 @@ impl<'a> BarGroupsPlotF32<'a> {
             )));
         }
 
-        let expected_values = self.item_count * self.group_count;
+        let expected_values = self
+            .item_count
+            .checked_mul(self.group_count)
+            .ok_or_else(|| {
+                PlotError::InvalidData("item_count * group_count overflowed usize".to_string())
+            })?;
         if self.values.len() != expected_values {
             return Err(PlotError::InvalidData(format!(
                 "Values length ({}) must equal item_count * group_count ({})",
@@ -255,11 +282,28 @@ impl<'a> BarGroupsPlotF32<'a> {
             return Err(PlotError::EmptyData);
         }
 
+        let _ = i32::try_from(self.item_count).map_err(|_| {
+            PlotError::InvalidData("item_count exceeded ImPlot's i32 range".to_string())
+        })?;
+        let _ = i32::try_from(self.group_count).map_err(|_| {
+            PlotError::InvalidData("group_count exceeded ImPlot's i32 range".to_string())
+        })?;
+
         Ok(())
     }
 
     /// Plot the bar groups
-    pub fn plot(self) {
+    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
+        if self.validate().is_err() {
+            return;
+        }
+        let Ok(item_count) = i32::try_from(self.item_count) else {
+            return;
+        };
+        let Ok(group_count) = i32::try_from(self.group_count) else {
+            return;
+        };
+        let _guard = plot_ui.bind();
         with_plot_str_slice(&self.label_ids, |label_ptrs| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -269,8 +313,8 @@ impl<'a> BarGroupsPlotF32<'a> {
             sys::ImPlot_PlotBarGroups_FloatPtr(
                 label_ptrs.as_ptr(),
                 self.values.as_ptr(),
-                self.item_count as i32,
-                self.group_count as i32,
+                item_count,
+                group_count,
                 self.group_size,
                 self.shift,
                 spec,
@@ -359,7 +403,7 @@ impl<'a> SimpleBarGroupsPlot<'a> {
     }
 
     /// Plot the bar groups
-    pub fn plot(self) {
+    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
         if self.data.is_empty() || self.labels.is_empty() {
             return;
         }
@@ -385,6 +429,6 @@ impl<'a> SimpleBarGroupsPlot<'a> {
             .with_flags(self.flags)
             .with_item_flags(self.item_flags);
 
-        plot.plot();
+        plot.plot(plot_ui);
     }
 }

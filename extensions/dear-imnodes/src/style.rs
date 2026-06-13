@@ -46,8 +46,8 @@ impl<'a> ColorToken<'a> {
 }
 impl Drop for ColorToken<'_> {
     fn drop(&mut self) {
+        let _guard = self.scope.bind();
         unsafe {
-            self.scope.bind();
             sys::imnodes_PopColorStyle();
         }
     }
@@ -62,8 +62,8 @@ impl<'a> StyleVarToken<'a> {
 }
 impl Drop for StyleVarToken<'_> {
     fn drop(&mut self) {
+        let _guard = self.scope.bind();
         unsafe {
-            self.scope.bind();
             sys::imnodes_PopStyleVar(1);
         }
     }
@@ -83,8 +83,8 @@ impl<'a> AttributeFlagToken<'a> {
 }
 impl Drop for AttributeFlagToken<'_> {
     fn drop(&mut self) {
+        let _guard = self.scope.bind();
         unsafe {
-            self.scope.bind();
             sys::imnodes_PopAttributeFlag();
         }
     }
@@ -93,7 +93,7 @@ impl Drop for AttributeFlagToken<'_> {
 /// Style helpers available from NodeEditor
 impl<'ui> crate::NodeEditor<'ui> {
     pub fn push_attribute_flag(&self, flag: crate::AttributeFlags) -> AttributeFlagToken<'_> {
-        self.bind();
+        let _guard = self.bind();
         unsafe { sys::imnodes_PushAttributeFlag(flag.bits()) };
         AttributeFlagToken {
             scope: self.scope(),
@@ -102,7 +102,7 @@ impl<'ui> crate::NodeEditor<'ui> {
     }
 
     pub fn push_color(&self, elem: ColorElement, color: [f32; 4]) -> ColorToken<'_> {
-        self.bind();
+        let _guard = self.bind();
         // Use Dear ImGui's helper for packing RGBA -> ABGR (u32)
         let col = unsafe {
             imgui_sys::igColorConvertFloat4ToU32(imgui_sys::ImVec4 {
@@ -120,7 +120,7 @@ impl<'ui> crate::NodeEditor<'ui> {
     }
 
     pub fn push_style_var(&self, var: crate::StyleVar, value: StyleVarValue) -> StyleVarToken<'_> {
-        self.bind();
+        let _guard = self.bind();
         match value {
             StyleVarValue::Float(v) => unsafe { sys::imnodes_PushStyleVar_Float(var as i32, v) },
             StyleVarValue::Vec2(v) => unsafe {
@@ -134,7 +134,7 @@ impl<'ui> crate::NodeEditor<'ui> {
     }
 
     pub fn push_style_var_f32(&self, var: crate::StyleVar, value: f32) -> StyleVarToken<'_> {
-        self.bind();
+        let _guard = self.bind();
         unsafe { sys::imnodes_PushStyleVar_Float(var as i32, value) };
         StyleVarToken {
             scope: self.scope(),
@@ -143,7 +143,7 @@ impl<'ui> crate::NodeEditor<'ui> {
     }
 
     pub fn push_style_var_vec2(&self, var: crate::StyleVar, value: [f32; 2]) -> StyleVarToken<'_> {
-        self.bind();
+        let _guard = self.bind();
         unsafe {
             sys::imnodes_PushStyleVar_Vec2(
                 var as i32,

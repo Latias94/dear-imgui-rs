@@ -86,7 +86,7 @@ fn main() {
         if let Some(token) = plot_ui.begin_plot("Line") {
             let x = [0.0, 1.0, 2.0, 3.0];
             let y = [0.0, 1.0, 4.0, 9.0];
-            LinePlot::new("y=x^2", &x, &y).plot();
+            LinePlot::new("y=x^2", &x, &y).plot(&plot_ui);
             token.end();
         }
     });
@@ -145,7 +145,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let y_data = [0.0, 1.0, 4.0, 9.0, 16.0];
 
                 // New modular API
-                LinePlot::new("Quadratic", &x_data, &y_data).plot();
+                LinePlot::new("Quadratic", &x_data, &y_data).plot(&plot_ui);
 
                 token.end();
             }
@@ -161,10 +161,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ```rust
 // Line plot
-LinePlot::new("My Line", &x_data, &y_data).plot();
+LinePlot::new("My Line", &x_data, &y_data).plot(&plot_ui);
 
 // Scatter plot
-ScatterPlot::new("My Points", &x_data, &y_data).plot();
+ScatterPlot::new("My Points", &x_data, &y_data).plot(&plot_ui);
 
 // Item styling via ImPlotSpec-backed builder helpers
 LinePlot::new("Styled Line", &x_data, &y_data)
@@ -173,14 +173,14 @@ LinePlot::new("Styled Line", &x_data, &y_data)
     .with_marker(Marker::Circle)
     .with_marker_size(6.0)
     .with_marker_fill_color([0.20, 0.70, 1.00, 0.85])
-    .plot();
+    .plot(&plot_ui);
 
 // The same styling helpers are available on other ImPlotSpec-backed builders
 BarPlot::new("Styled Bars", &values)
     .with_fill_color([0.90, 0.45, 0.20, 0.80])
     .with_line_color([0.45, 0.15, 0.05, 1.00])
     .with_line_weight(1.5)
-    .plot();
+    .plot(&plot_ui);
 ```
 
 ### Bar Charts
@@ -189,12 +189,12 @@ BarPlot::new("Styled Bars", &values)
 // Simple bar chart
 BarPlot::new("Bars", &values)
     .with_bar_size(0.8)
-    .plot();
+    .plot(&plot_ui);
 
 // Positional bar chart
 PositionalBarPlot::new("Positioned Bars", &x_positions, &values)
     .with_bar_size(0.5)
-    .plot();
+    .plot(&plot_ui);
 ```
 
 ### Histograms
@@ -205,17 +205,17 @@ HistogramPlot::new("Distribution", &data)
     .with_bins(20usize)
     .density()
     .cumulative()
-    .plot();
+    .plot(&plot_ui);
 
 // Automatic binning method
 HistogramPlot::new("Auto Distribution", &data)
     .with_bins(BinMethod::Scott)
-    .plot();
+    .plot(&plot_ui);
 
 // 2D Histogram
 Histogram2DPlot::new("2D Distribution", &x_data, &y_data)
     .with_bins(10usize, 10usize)
-    .plot();
+    .plot(&plot_ui);
 ```
 
 ### Heatmaps
@@ -226,8 +226,8 @@ let data: Vec<f64> = (0..100).map(|i| (i as f64 * 0.1).sin()).collect();
 HeatmapPlot::new("Heat", &data, 10, 10)
     .with_scale(-1.0, 1.0)
     .with_bounds(0.0, 0.0, 1.0, 1.0)
-    .with_label_format("%.2f")
-    .plot();
+    .with_label_format(Some("%.2f"))
+    .plot(&plot_ui);
 ```
 
 ### Pie Charts
@@ -239,8 +239,8 @@ let values = [0.25, 0.35, 0.20, 0.20];
 PieChartPlot::new(labels, &values, 0.5, 0.5, 0.4)
     .normalize()
     .exploding()
-    .with_angle0(90.0)
-    .plot();
+    .with_start_angle(90.0)
+    .plot(&plot_ui);
 ```
 
 ### Error Bars
@@ -250,7 +250,7 @@ let errors = [0.1, 0.2, 0.15, 0.3, 0.25];
 
 ErrorBarsPlot::new("Measurements", &x_data, &y_data, &errors)
     .horizontal()
-    .plot();
+    .plot(&plot_ui);
 ```
 
 ### Shaded Plots
@@ -259,11 +259,11 @@ ErrorBarsPlot::new("Measurements", &x_data, &y_data, &errors)
 // Shaded area plot
 ShadedPlot::new("Area", &x_data, &y_data)
     .with_y_ref(0.0)
-    .plot();
+    .plot(&plot_ui);
 
 // Shaded between two curves
 ShadedBetweenPlot::new("Between", &x_data, &y1_data, &y2_data)
-    .plot();
+    .plot(&plot_ui);
 ```
 
 ## Advanced Features
@@ -274,17 +274,17 @@ ShadedBetweenPlot::new("Between", &x_data, &y1_data, &y2_data)
 if let Ok(token) = SubplotGrid::new("My Subplots", 2usize, 2usize)
     .with_size([800.0, 600.0])
     .with_flags(SubplotFlags::NONE)
-    .begin() {
+    .begin(&plot_ui) {
 
     // First subplot
     if let Some(plot_token) = plot_ui.begin_plot("") {
-        LinePlot::new("Line", &x_data, &y_data).plot();
+        LinePlot::new("Line", &x_data, &y_data).plot(&plot_ui);
         plot_token.end();
     }
 
     // Second subplot
     if let Some(plot_token) = plot_ui.begin_plot("") {
-        BarPlot::new("Bars", &values).plot();
+        BarPlot::new("Bars", &values).plot(&plot_ui);
         plot_token.end();
     }
 
@@ -297,7 +297,7 @@ if let Ok(token) = SubplotGrid::new("My Subplots", 2usize, 2usize)
 ### Multi-Axis Plots
 
 ```rust
-let mut multi_plot = MultiAxisPlot::new("Multi-Axis")
+let multi_plot = MultiAxisPlot::new("Multi-Axis")
     .add_y_axis(YAxisConfig {
         label: Some("Temperature (°C)"),
         flags: AxisFlags::NONE,
@@ -309,14 +309,14 @@ let mut multi_plot = MultiAxisPlot::new("Multi-Axis")
         range: Some((900.0, 1100.0)),
     });
 
-if let Ok(token) = multi_plot.begin() {
+if let Ok(token) = multi_plot.begin(&plot_ui) {
     // Plot on first Y-axis
     token.set_y_axis(YAxis::Y1);
-    LinePlot::new("Temperature", &time, &temp).plot();
+    LinePlot::new("Temperature", &time, &temp).plot(&plot_ui);
 
     // Plot on second Y-axis
     token.set_y_axis(YAxis::Y2);
-    LinePlot::new("Pressure", &time, &pressure).plot();
+    LinePlot::new("Pressure", &time, &pressure).plot(&plot_ui);
 
     token.end();
 }
@@ -343,8 +343,8 @@ plot_ui.setup_y_axis_format(YAxis::Y1, "%.2f");
 plot_ui.setup_axes_limits(0.0, 3.0, -1.0, 1.0, PlotCond::Once);
 
 // Selection query
-if dear_implot::utils::is_plot_selected() {
-    if let Some(rect) = dear_implot::utils::get_plot_selection_axes(XAxis::X1, YAxis::Y1) {
+if plot_ui.is_plot_selected() {
+    if let Some(rect) = plot_ui.plot_selection_axes(XAxis::X1, YAxis::Y1) {
         // rect.X.Min/Max, rect.Y.Min/Max
     }
 }
@@ -367,16 +367,16 @@ For a more unified API, you can use the `PlotBuilder`:
 
 ```rust
 // Line plot
-PlotBuilder::line("My Line", &x_data, &y_data).build()?;
+PlotBuilder::line("My Line", &x_data, &y_data).build(&plot_ui)?;
 
 // Bar plot
-PlotBuilder::bar("My Bars", &values).build()?;
+PlotBuilder::bar("My Bars", &values).build(&plot_ui)?;
 
 // Histogram
-PlotBuilder::histogram("Distribution", &data).build()?;
+PlotBuilder::histogram("Distribution", &data).build(&plot_ui)?;
 
 // Heatmap
-PlotBuilder::heatmap("Heat", &data, 10, 10).build()?;
+PlotBuilder::heatmap("Heat", &data, 10, 10).build(&plot_ui)?;
 ```
 
 ## Error Handling
@@ -387,7 +387,7 @@ All plot functions return `Result<(), PlotError>` for proper error handling:
 match LinePlot::new("My Plot", &x_data, &y_data).validate() {
     Ok(_) => {
         // Plot is valid, proceed
-        LinePlot::new("My Plot", &x_data, &y_data).plot();
+        LinePlot::new("My Plot", &x_data, &y_data).plot(&plot_ui);
     }
     Err(PlotError::DataLengthMismatch { expected, actual }) => {
         eprintln!("Data length mismatch: expected {}, got {}", expected, actual);

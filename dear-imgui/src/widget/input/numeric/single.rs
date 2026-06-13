@@ -48,7 +48,7 @@ impl<'ui> InputInt<'ui> {
     pub fn build(self, value: &mut i32) -> bool {
         validate_input_scalar_flags("InputInt::build()", self.flags);
         let label_ptr = self.ui.scratch_txt(self.label.as_ref());
-        unsafe {
+        self.ui.run_with_bound_context(|| unsafe {
             sys::igInputInt(
                 label_ptr,
                 value as *mut i32,
@@ -56,7 +56,7 @@ impl<'ui> InputInt<'ui> {
                 self.step_fast,
                 self.flags.raw(),
             )
-        }
+        })
     }
 }
 
@@ -115,7 +115,7 @@ impl<'ui> InputFloat<'ui> {
         let format = self.format.as_deref().unwrap_or("%.3f");
         let (label_ptr, format_ptr) = self.ui.scratch_txt_two(self.label.as_ref(), format);
 
-        unsafe {
+        self.ui.run_with_bound_context(|| unsafe {
             sys::igInputFloat(
                 label_ptr,
                 value as *mut f32,
@@ -124,7 +124,7 @@ impl<'ui> InputFloat<'ui> {
                 format_ptr,
                 self.flags.raw(),
             )
-        }
+        })
     }
 }
 
@@ -183,7 +183,7 @@ impl<'ui> InputDouble<'ui> {
         let format = self.format.as_deref().unwrap_or("%.6f");
         let (label_ptr, format_ptr) = self.ui.scratch_txt_two(self.label.as_ref(), format);
 
-        unsafe {
+        self.ui.run_with_bound_context(|| unsafe {
             sys::igInputDouble(
                 label_ptr,
                 value as *mut f64,
@@ -192,6 +192,6 @@ impl<'ui> InputDouble<'ui> {
                 format_ptr,
                 self.flags.raw(),
             )
-        }
+        })
     }
 }

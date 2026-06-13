@@ -247,7 +247,7 @@ impl AppWindow {
                         // Line plot
                         ui.text("Line Plot:");
                         if let Some(token) = plot_ui.begin_plot("Line Plot") {
-                            LinePlot::new("sin(x)", &x_data, &y_data).plot();
+                            LinePlot::new("sin(x)", &x_data, &y_data).plot(&plot_ui);
                             token.end();
                         }
 
@@ -256,7 +256,7 @@ impl AppWindow {
                         // Scatter plot
                         ui.text("Scatter Plot:");
                         if let Some(token) = plot_ui.begin_plot("Scatter Plot") {
-                            ScatterPlot::new("cos(2x)", &scatter_x, &scatter_y).plot();
+                            ScatterPlot::new("cos(2x)", &scatter_x, &scatter_y).plot(&plot_ui);
                             token.end();
                         }
 
@@ -273,7 +273,7 @@ impl AppWindow {
                         if let Some(token) = plot_ui.begin_plot("Bar Chart") {
                             BarPlot::new("Values", &bar_values)
                                 .with_bar_size(0.8)
-                                .plot();
+                                .plot(&plot_ui);
                             token.end();
                         }
 
@@ -284,7 +284,7 @@ impl AppWindow {
                         if let Some(token) = plot_ui.begin_plot("Bar Groups") {
                             BarGroupsPlot::new(group_labels.clone(), &group_values, 3, 4)
                                 .with_group_size(0.75)
-                                .plot();
+                                .plot(&plot_ui);
                             token.end();
                         }
 
@@ -301,7 +301,7 @@ impl AppWindow {
                         if let Some(token) = plot_ui.begin_plot("Stairs Plot") {
                             StairsPlot::new("Steps", &stairs_x, &stairs_y)
                                 .pre_step()
-                                .plot();
+                                .plot(&plot_ui);
                             token.end();
                         }
 
@@ -310,7 +310,7 @@ impl AppWindow {
                         // Digital Plot
                         ui.text("Digital Plot:");
                         if let Some(token) = plot_ui.begin_plot("Digital Signals") {
-                            DigitalPlot::new("Signal", &digital_x, &digital_y).plot();
+                            DigitalPlot::new("Signal", &digital_x, &digital_y).plot(&plot_ui);
                             token.end();
                         }
 
@@ -328,7 +328,7 @@ impl AppWindow {
                             HistogramPlot::new("Distribution", &histogram_data)
                                 .with_bins(8usize)
                                 .density()
-                                .plot();
+                                .plot(&plot_ui);
                             token.end();
                         }
 
@@ -341,7 +341,7 @@ impl AppWindow {
                             let y_hist = vec![1.0, 1.0, 2.0, 3.0, 2.0, 1.0, 3.0, 2.0];
                             Histogram2DPlot::new("2D Data", &x_hist, &y_hist)
                                 .with_bins(4usize, 4usize)
-                                .plot();
+                                .plot(&plot_ui);
                             token.end();
                         }
 
@@ -360,7 +360,7 @@ impl AppWindow {
                                 .with_scale(-1.0, 1.0)
                                 .with_bounds(0.0, 0.0, 1.0, 1.0)
                                 .with_label_format(Some("%.2f"))
-                                .plot();
+                                .plot(&plot_ui);
                             token.end();
                         }
 
@@ -370,15 +370,15 @@ impl AppWindow {
                         ui.text("Text Annotations:");
                         if let Some(token) = plot_ui.begin_plot("Text Plot") {
                             // Plot some data first
-                            LinePlot::new("Data", &x_data[..20], &y_data[..20]).plot();
+                            LinePlot::new("Data", &x_data[..20], &y_data[..20]).plot(&plot_ui);
 
                             // Add text annotations
                             TextPlot::new("Peak", 1.5, 0.9)
                                 .with_pixel_offset(10.0, -10.0)
-                                .plot();
+                                .plot(&plot_ui);
                             TextPlot::new("Valley", 4.7, -0.9)
                                 .with_pixel_offset(-20.0, 10.0)
-                                .plot();
+                                .plot(&plot_ui);
                             token.end();
                         }
 
@@ -393,24 +393,24 @@ impl AppWindow {
 
                         ui.text("Array-backed item styling:");
                         if let Some(token) = plot_ui.begin_plot("Array-backed Item Style") {
-                            with_next_plot_item_array_style(
+                            plot_ui.with_next_plot_item_array_style(
                                 PlotItemArrayStyle::new().with_line_colors(&styled_line_colors),
-                                || {
+                                |plot_ui| {
                                     LinePlot::new("Gradient Line", &styled_x, &styled_y)
                                         .with_line_weight(3.0)
-                                        .plot();
+                                        .plot(plot_ui);
                                 },
                             );
 
-                            with_next_plot_item_array_style(
+                            plot_ui.with_next_plot_item_array_style(
                                 PlotItemArrayStyle::new()
                                     .with_marker_sizes(&styled_marker_sizes)
                                     .with_marker_fill_colors(&styled_marker_colors)
                                     .with_marker_line_colors(&styled_marker_colors),
-                                || {
+                                |plot_ui| {
                                     ScatterPlot::new("Variable Markers", &styled_x, &styled_y)
                                         .with_marker(Marker::Circle)
-                                        .plot();
+                                        .plot(plot_ui);
                                 },
                             );
 
@@ -430,7 +430,7 @@ impl AppWindow {
                                 .with_fill_color([0.18, 0.62, 0.92, 0.35])
                                 .with_line_color([0.07, 0.34, 0.66, 1.0])
                                 .with_line_weight(2.0)
-                                .plot();
+                                .plot(&plot_ui);
                             token.end();
                         }
 
@@ -453,10 +453,10 @@ impl AppWindow {
                             let y_err = vec![1.0, 2.5, 2.0, 3.5, 3.0, 4.0, 3.5, 2.0];
 
                             // Line plot first
-                            LinePlot::new("Data", &x_err, &y_err).plot();
+                            LinePlot::new("Data", &x_err, &y_err).plot(&plot_ui);
 
                             // Then error bars
-                            ErrorBarsPlot::new("Errors", &x_err, &y_err, &errors).plot();
+                            ErrorBarsPlot::new("Errors", &x_err, &y_err, &errors).plot(&plot_ui);
                             token.end();
                         }
 
@@ -471,7 +471,7 @@ impl AppWindow {
                                 .normalize()
                                 .exploding()
                                 .no_slice_border()
-                                .plot();
+                                .plot(&plot_ui);
                             token.end();
                         }
 
@@ -488,7 +488,7 @@ impl AppWindow {
                         if let Some(token) = plot_ui.begin_plot("Stems Plot") {
                             StemPlot::new("Stems", &stairs_x, &stairs_y)
                                 .with_y_ref(0.0)
-                                .plot();
+                                .plot(&plot_ui);
                             token.end();
                         }
 
@@ -498,12 +498,13 @@ impl AppWindow {
                         ui.text("Legend with Dummy Items:");
                         if let Some(token) = plot_ui.begin_plot("Legend Demo") {
                             // Real plots
-                            LinePlot::new("Real Data", &x_data[..10], &y_data[..10]).plot();
+                            LinePlot::new("Real Data", &x_data[..10], &y_data[..10])
+                                .plot(&plot_ui);
 
                             // Dummy items for legend organization
-                            DummyPlot::new("--- Separator ---").plot();
-                            DummyPlot::new("Future Feature 1").plot();
-                            DummyPlot::new("Future Feature 2").plot();
+                            DummyPlot::new("--- Separator ---").plot(&plot_ui);
+                            DummyPlot::new("Future Feature 1").plot(&plot_ui);
+                            DummyPlot::new("Future Feature 2").plot(&plot_ui);
                             token.end();
                         }
 
@@ -517,18 +518,20 @@ impl AppWindow {
 
                         if let Some(token) = plot_ui.begin_plot("Combined Plot") {
                             // Multiple plot types in one chart
-                            LinePlot::new("Trend", &x_data[..30], &y_data[..30]).plot();
-                            ScatterPlot::new("Points", &scatter_x[..15], &scatter_y[..15]).plot();
+                            LinePlot::new("Trend", &x_data[..30], &y_data[..30]).plot(&plot_ui);
+                            ScatterPlot::new("Points", &scatter_x[..15], &scatter_y[..15])
+                                .plot(&plot_ui);
 
                             // Add stairs and digital plots
-                            StairsPlot::new("Steps", &stairs_x[..5], &stairs_y[..5]).plot();
+                            StairsPlot::new("Steps", &stairs_x[..5], &stairs_y[..5])
+                                .plot(&plot_ui);
 
                             // Shaded area
                             let x_combined = vec![0.0, 1.0, 2.0, 3.0];
                             let y_combined = vec![0.5, 0.8, 0.6, 0.9];
                             ShadedPlot::new("Background", &x_combined, &y_combined)
                                 .with_y_ref(0.0)
-                                .plot();
+                                .plot(&plot_ui);
 
                             token.end();
                         }
@@ -550,14 +553,14 @@ impl AppWindow {
 
                 // Subplot example (commented out as it requires additional bindings)
                 ui.text("Subplots (Future Feature):");
-                ui.text_disabled("SubplotGrid::new(\"Grid\", 2usize, 2usize).begin()");
+                ui.text_disabled("SubplotGrid::new(\"Grid\", 2usize, 2usize).begin(&plot_ui)");
                 ui.text_disabled("  // Multiple plots in grid layout");
                 ui.text_disabled("  // Each subplot can have different plot types");
                 ui.separator();
 
                 // Multi-axis example (commented out as it requires additional bindings)
                 ui.text("Multi-Axis Plots (Future Feature):");
-                ui.text_disabled("MultiAxisPlot::new(\"Multi\")");
+                ui.text_disabled("MultiAxisPlot::new(\"Multi\").begin(&plot_ui)");
                 ui.text_disabled("  .add_y_axis(YAxisConfig { ... })");
                 ui.text_disabled("  // Multiple Y-axes with different scales");
                 ui.separator();
@@ -587,7 +590,7 @@ impl AppWindow {
                 ui.separator();
                 ui.text("API Comparison:");
                 ui.text("Old API: plot_ui.plot_line(\"label\", &x, &y)");
-                ui.text("New API: LinePlot::new(\"label\", &x, &y).plot()");
+                ui.text("New API: LinePlot::new(\"label\", &x, &y).plot(&plot_ui)");
                 ui.text("Benefits:");
                 ui.bullet_text("Type safety and validation");
                 ui.bullet_text("Builder pattern for configuration");

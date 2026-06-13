@@ -80,11 +80,12 @@ impl<'a> TextPlot<'a> {
     }
 
     /// Plot the text
-    pub fn plot(self) {
+    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
         let pix_offset = sys::ImVec2_c {
             x: self.pix_offset_x as f32,
             y: self.pix_offset_y as f32,
         };
+        let _guard = plot_ui.bind();
         let _ = with_plot_str(self.text, |text_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -195,7 +196,7 @@ impl<'a> MultiTextPlot<'a> {
     }
 
     /// Plot all texts
-    pub fn plot(self) {
+    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
         for (i, &text) in self.texts.iter().enumerate() {
             let position = self.positions[i];
             let offset = self.pixel_offsets[i];
@@ -206,7 +207,7 @@ impl<'a> MultiTextPlot<'a> {
                 .with_flags(self.flags)
                 .with_item_flags(self.item_flags);
 
-            text_plot.plot();
+            text_plot.plot(plot_ui);
         }
     }
 }
@@ -298,11 +299,12 @@ impl FormattedTextPlot {
     }
 
     /// Plot the formatted text
-    pub fn plot(self) {
+    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
         let pix_offset = sys::ImVec2_c {
             x: self.pix_offset_x as f32,
             y: self.pix_offset_y as f32,
         };
+        let _guard = plot_ui.bind();
         let _ = with_plot_str(&self.text, |text_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -388,7 +390,7 @@ impl<'a> TextAnnotation<'a> {
     }
 
     /// Plot the annotation
-    pub fn plot(self) {
+    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
         let offset = if self.auto_offset {
             // Simple auto-offset logic - could be enhanced
             (5.0, -5.0)
@@ -402,6 +404,6 @@ impl<'a> TextAnnotation<'a> {
             .with_flags(self.flags)
             .with_item_flags(self.item_flags);
 
-        text_plot.plot();
+        text_plot.plot(plot_ui);
     }
 }

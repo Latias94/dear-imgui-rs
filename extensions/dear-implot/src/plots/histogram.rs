@@ -110,7 +110,7 @@ impl<'a> HistogramPlot<'a> {
 }
 
 impl<'a> Plot for HistogramPlot<'a> {
-    fn plot(&self) {
+    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
         if self.validate().is_err() {
             return;
         }
@@ -124,6 +124,7 @@ impl<'a> Plot for HistogramPlot<'a> {
             sys::ImPlotRange { Min: 0.0, Max: 0.0 }
         };
 
+        let _guard = plot_ui.bind();
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -251,7 +252,7 @@ impl<'a> Histogram2DPlot<'a> {
 }
 
 impl<'a> Plot for Histogram2DPlot<'a> {
-    fn plot(&self) {
+    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
         if self.validate().is_err() {
             return;
         }
@@ -268,6 +269,7 @@ impl<'a> Plot for Histogram2DPlot<'a> {
             }
         };
 
+        let _guard = plot_ui.bind();
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -298,8 +300,7 @@ impl<'ui> crate::PlotUi<'ui> {
     pub fn histogram_plot(&self, label: &str, values: &[f64]) -> Result<(), PlotError> {
         let plot = HistogramPlot::new(label, values);
         plot.validate()?;
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 
@@ -312,8 +313,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = HistogramPlot::new(label, values).with_bins(bins);
         plot.validate()?;
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 
@@ -326,8 +326,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = Histogram2DPlot::new(label, x_values, y_values);
         plot.validate()?;
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 
@@ -342,8 +341,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = Histogram2DPlot::new(label, x_values, y_values).with_bins(x_bins, y_bins);
         plot.validate()?;
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 }

@@ -88,6 +88,9 @@ Release Train 0.15 (current)
 - Latest patch: 0.15.0 (use `version = "0.15"`).
 - All crates in this train share the 0.15 minor across the workspace.
 - Core + backends aligned with Dear ImGui v1.92.8 (docking) via cimgui.
+- Safe `Ui` APIs and scoped cleanup tokens bind operations to the receiver
+  ImGui context and restore the previously current context, closing the
+  multi-context lifecycle hole fixed for #31.
 - The experimental Bevy backend ships on the same release train, targeting Bevy `0.19.0-rc.2`.
 - Normal source builds use checked-in pregenerated bindings by default; LLVM/libclang is only required for explicit binding regeneration.
 - External dependencies baseline: wgpu 29, winit 0.30.13, glow 0.17, sdl3 0.18.4.

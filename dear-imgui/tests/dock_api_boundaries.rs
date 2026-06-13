@@ -82,41 +82,42 @@ fn dock_builder_rejects_invalid_flags_and_geometry_before_ffi() {
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
 
-    let _ui = ctx.frame();
+    let ui = ctx.frame();
     let private_dockspace =
         imgui::DockNodeFlags::from_bits_retain(imgui::sys::ImGuiDockNodeFlags_DockSpace);
 
     assert!(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _ = imgui::DockBuilder::add_node(0.into(), private_dockspace);
+            let _ = imgui::DockBuilder::add_node(&ui, 0.into(), private_dockspace);
         }))
         .is_err()
     );
 
-    let node_id = imgui::DockBuilder::add_node(0.into(), imgui::DockNodeFlags::NONE);
+    let node_id = imgui::DockBuilder::add_node(&ui, 0.into(), imgui::DockNodeFlags::NONE);
     assert_ne!(node_id.raw(), 0);
 
     assert!(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            imgui::DockBuilder::set_node_size(node_id, [0.0, 100.0]);
+            imgui::DockBuilder::set_node_size(&ui, node_id, [0.0, 100.0]);
         }))
         .is_err()
     );
     assert!(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            imgui::DockBuilder::set_node_pos(node_id, [f32::INFINITY, 0.0]);
+            imgui::DockBuilder::set_node_pos(&ui, node_id, [f32::INFINITY, 0.0]);
         }))
         .is_err()
     );
     assert!(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _ = imgui::DockBuilder::split_node(node_id, imgui::SplitDirection::Left, f32::NAN);
+            let _ =
+                imgui::DockBuilder::split_node(&ui, node_id, imgui::SplitDirection::Left, f32::NAN);
         }))
         .is_err()
     );
     assert!(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _ = imgui::DockBuilder::split_node(node_id, imgui::SplitDirection::Left, 1.5);
+            let _ = imgui::DockBuilder::split_node(&ui, node_id, imgui::SplitDirection::Left, 1.5);
         }))
         .is_err()
     );
@@ -129,16 +130,16 @@ fn dock_builder_copy_helpers_pass_required_remap_vectors() {
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
 
-    let _ui = ctx.frame();
-    let src = imgui::DockBuilder::add_node(0.into(), imgui::DockNodeFlags::NONE);
-    let dst = imgui::DockBuilder::add_node(0.into(), imgui::DockNodeFlags::NONE);
+    let ui = ctx.frame();
+    let src = imgui::DockBuilder::add_node(&ui, 0.into(), imgui::DockNodeFlags::NONE);
+    let dst = imgui::DockBuilder::add_node(&ui, 0.into(), imgui::DockNodeFlags::NONE);
 
-    imgui::DockBuilder::copy_node(src, dst);
-    let remap = imgui::DockBuilder::copy_node_with_remap_out(dst, src);
+    imgui::DockBuilder::copy_node(&ui, src, dst);
+    let remap = imgui::DockBuilder::copy_node_with_remap_out(&ui, dst, src);
     assert!(!remap.is_empty());
 
-    imgui::DockBuilder::copy_dock_space(src, dst);
-    imgui::DockBuilder::copy_dock_space_with_window_remap(src, dst, &[]);
+    imgui::DockBuilder::copy_dock_space(&ui, src, dst);
+    imgui::DockBuilder::copy_dock_space_with_window_remap(&ui, src, dst, &[]);
 }
 
 #[test]
@@ -148,17 +149,17 @@ fn dock_builder_copy_helpers_reject_missing_source_nodes_before_ffi() {
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
 
-    let _ui = ctx.frame();
+    let ui = ctx.frame();
 
     assert!(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            imgui::DockBuilder::copy_node(0.into(), 1.into());
+            imgui::DockBuilder::copy_node(&ui, 0.into(), 1.into());
         }))
         .is_err()
     );
     assert!(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            imgui::DockBuilder::copy_dock_space(999_999.into(), 1.into());
+            imgui::DockBuilder::copy_dock_space(&ui, 999_999.into(), 1.into());
         }))
         .is_err()
     );

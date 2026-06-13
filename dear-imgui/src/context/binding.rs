@@ -5,7 +5,7 @@ use crate::sys;
 
 // This mutex needs to be used to guard all public functions that can affect the underlying
 // Dear ImGui active context
-pub(super) static CTX_MUTEX: ReentrantMutex<()> = parking_lot::const_reentrant_mutex(());
+pub(crate) static CTX_MUTEX: ReentrantMutex<()> = parking_lot::const_reentrant_mutex(());
 
 pub(super) fn clear_current_context() {
     unsafe {
@@ -46,7 +46,7 @@ impl Drop for BoundContextGuard {
     }
 }
 
-pub(super) fn with_bound_context<R>(ctx: *mut sys::ImGuiContext, f: impl FnOnce() -> R) -> R {
+pub(crate) fn with_bound_context<R>(ctx: *mut sys::ImGuiContext, f: impl FnOnce() -> R) -> R {
     let _guard = BoundContextGuard::bind(ctx);
     f()
 }

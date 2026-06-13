@@ -43,7 +43,7 @@ impl Ui {
     /// Returns a `TooltipToken` that must be ended by calling `.end()` or by dropping.
     #[doc(alias = "BeginTooltip")]
     pub fn begin_tooltip(&self) -> Option<TooltipToken<'_>> {
-        if unsafe { sys::igBeginTooltip() } {
+        if self.run_with_bound_context(|| unsafe { sys::igBeginTooltip() }) {
             Some(TooltipToken::new(self))
         } else {
             None
@@ -74,7 +74,7 @@ impl Ui {
     #[doc(alias = "SetTooltip")]
     pub fn set_tooltip(&self, text: impl AsRef<str>) {
         let s = text.as_ref();
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             // Avoid calling C variadic APIs: build a tooltip window and render unformatted text.
             if sys::igBeginTooltip() {
                 let begin = s.as_ptr() as *const std::os::raw::c_char;
@@ -82,7 +82,7 @@ impl Ui {
                 sys::igTextUnformatted(begin, end);
                 sys::igEndTooltip();
             }
-        }
+        });
     }
 
     /// Sets a tooltip with formatted text content.
@@ -97,7 +97,7 @@ impl Ui {
     #[doc(alias = "SetItemTooltip")]
     pub fn set_item_tooltip(&self, text: impl AsRef<str>) {
         let s = text.as_ref();
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             // Prefer the non-variadic ImGui 1.9x+ API when available.
             if sys::igBeginItemTooltip() {
                 let begin = s.as_ptr() as *const std::os::raw::c_char;
@@ -105,7 +105,7 @@ impl Ui {
                 sys::igTextUnformatted(begin, end);
                 sys::igEndTooltip();
             }
-        }
+        });
     }
 }
 
@@ -115,62 +115,66 @@ impl Ui {
     /// This is typically used to show tooltips.
     #[doc(alias = "IsItemHovered")]
     pub fn is_item_hovered(&self) -> bool {
-        unsafe { sys::igIsItemHovered(crate::ItemHoveredFlags::NONE.bits()) }
+        self.run_with_bound_context(|| unsafe {
+            sys::igIsItemHovered(crate::ItemHoveredFlags::NONE.bits())
+        })
     }
 
     /// Returns true if the last item is being hovered by mouse with specific flags.
     #[doc(alias = "IsItemHovered")]
     pub fn is_item_hovered_with_flags(&self, flags: crate::ItemHoveredFlags) -> bool {
         crate::utils::validate_item_hovered_flags("Ui::is_item_hovered_with_flags()", flags);
-        unsafe { sys::igIsItemHovered(flags.bits()) }
+        self.run_with_bound_context(|| unsafe { sys::igIsItemHovered(flags.bits()) })
     }
 
     /// Returns true if the last item is active (e.g. button being held, text field being edited).
     #[doc(alias = "IsItemActive")]
     pub fn is_item_active(&self) -> bool {
-        unsafe { sys::igIsItemActive() }
+        self.run_with_bound_context(|| unsafe { sys::igIsItemActive() })
     }
 
     /// Returns true if the last item is focused (e.g. text input field).
     #[doc(alias = "IsItemFocused")]
     pub fn is_item_focused(&self) -> bool {
-        unsafe { sys::igIsItemFocused() }
+        self.run_with_bound_context(|| unsafe { sys::igIsItemFocused() })
     }
 
     /// Returns true if the last item was just clicked.
     #[doc(alias = "IsItemClicked")]
     pub fn is_item_clicked(&self) -> bool {
-        unsafe { sys::igIsItemClicked(crate::input::MouseButton::Left as i32) }
+        self.run_with_bound_context(|| unsafe {
+            sys::igIsItemClicked(crate::input::MouseButton::Left as i32)
+        })
     }
 
     /// Returns true if the last item was clicked with specific mouse button.
     #[doc(alias = "IsItemClicked")]
     pub fn is_item_clicked_with_button(&self, mouse_button: MouseButton) -> bool {
-        unsafe { sys::igIsItemClicked(mouse_button as i32) }
+        self.run_with_bound_context(|| unsafe { sys::igIsItemClicked(mouse_button as i32) })
     }
 
     /// Returns true if the last item is visible (not clipped).
     #[doc(alias = "IsItemVisible")]
     pub fn is_item_visible(&self) -> bool {
-        unsafe { sys::igIsItemVisible() }
+        self.run_with_bound_context(|| unsafe { sys::igIsItemVisible() })
     }
 
     /// Returns true if the last item was just made active (e.g. button was pressed).
     #[doc(alias = "IsItemActivated")]
     pub fn is_item_activated(&self) -> bool {
-        unsafe { sys::igIsItemActivated() }
+        self.run_with_bound_context(|| unsafe { sys::igIsItemActivated() })
     }
 
     /// Returns true if the last item was just made inactive (e.g. button was released).
     #[doc(alias = "IsItemDeactivated")]
     pub fn is_item_deactivated(&self) -> bool {
-        unsafe { sys::igIsItemDeactivated() }
+        self.run_with_bound_context(|| unsafe { sys::igIsItemDeactivated() })
     }
 
     /// Returns true if the last item was just made inactive and was edited.
     #[doc(alias = "IsItemDeactivatedAfterEdit")]
     pub fn is_item_deactivated_after_edit(&self) -> bool {
-        unsafe { sys::igIsItemDeactivatedAfterEdit() }
+        self.run_with_bound_context(|| unsafe { sys::igIsItemDeactivatedAfterEdit() })
     }
 
     /// Returns true if the last item was edited.
@@ -178,46 +182,47 @@ impl Ui {
     /// This is typically used to detect value changes for widgets.
     #[doc(alias = "IsItemEdited")]
     pub fn is_item_edited(&self) -> bool {
-        unsafe { sys::igIsItemEdited() }
+        self.run_with_bound_context(|| unsafe { sys::igIsItemEdited() })
     }
 
     /// Returns true if any item is active.
     #[doc(alias = "IsAnyItemActive")]
     pub fn is_any_item_active(&self) -> bool {
-        unsafe { sys::igIsAnyItemActive() }
+        self.run_with_bound_context(|| unsafe { sys::igIsAnyItemActive() })
     }
 
     /// Returns true if any item is focused.
     #[doc(alias = "IsAnyItemFocused")]
     pub fn is_any_item_focused(&self) -> bool {
-        unsafe { sys::igIsAnyItemFocused() }
+        self.run_with_bound_context(|| unsafe { sys::igIsAnyItemFocused() })
     }
 
     /// Returns true if any item is hovered.
     #[doc(alias = "IsAnyItemHovered")]
     pub fn is_any_item_hovered(&self) -> bool {
-        unsafe { sys::igIsAnyItemHovered() }
+        self.run_with_bound_context(|| unsafe { sys::igIsAnyItemHovered() })
     }
 
     /// Gets the bounding rectangle of the last item in screen space.
     #[doc(alias = "GetItemRectMin", alias = "GetItemRectMax")]
     pub fn item_rect(&self) -> ([f32; 2], [f32; 2]) {
-        let min = unsafe { sys::igGetItemRectMin() };
-        let max = unsafe { sys::igGetItemRectMax() };
+        let (min, max) = self.run_with_bound_context(|| unsafe {
+            (sys::igGetItemRectMin(), sys::igGetItemRectMax())
+        });
         ([min.x, min.y], [max.x, max.y])
     }
 
     /// Gets the size of the last item.
     #[doc(alias = "GetItemRectSize")]
     pub fn item_rect_size(&self) -> [f32; 2] {
-        let size = unsafe { sys::igGetItemRectSize() };
+        let size = self.run_with_bound_context(|| unsafe { sys::igGetItemRectSize() });
         [size.x, size.y]
     }
 
     /// Returns the ImGui ID of the last item.
     #[doc(alias = "GetItemID")]
     pub fn item_id(&self) -> crate::Id {
-        unsafe { crate::Id::from(sys::igGetItemID()) }
+        self.run_with_bound_context(|| unsafe { crate::Id::from(sys::igGetItemID()) })
     }
 }
 
@@ -241,8 +246,7 @@ impl<'ui> TooltipToken<'ui> {
 
 impl<'ui> Drop for TooltipToken<'ui> {
     fn drop(&mut self) {
-        unsafe {
-            sys::igEndTooltip();
-        }
+        self._ui
+            .run_with_bound_context(|| unsafe { sys::igEndTooltip() });
     }
 }

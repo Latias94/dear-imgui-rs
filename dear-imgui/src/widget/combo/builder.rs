@@ -55,8 +55,9 @@ impl<'ui, Label: AsRef<str>> ComboBox<'ui, Label> {
             .ui
             .scratch_txt_with_opt(self.label.as_ref(), self.preview_value.as_deref());
 
-        let should_render =
-            unsafe { sys::igBeginCombo(label_ptr, preview_ptr, self.options.raw()) };
+        let should_render = self.ui.run_with_bound_context(|| unsafe {
+            sys::igBeginCombo(label_ptr, preview_ptr, self.options.raw())
+        });
 
         if should_render {
             Some(ComboBoxToken::new(self.ui))

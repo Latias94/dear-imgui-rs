@@ -37,7 +37,9 @@ impl Ui {
     #[doc(alias = "CollapsingHeader")]
     pub fn collapsing_header(&self, label: impl AsRef<str>, flags: TreeNodeFlags) -> bool {
         let label_ptr = self.scratch_txt(label);
-        unsafe { sys::igCollapsingHeader_TreeNodeFlags(label_ptr, flags.bits()) }
+        self.run_with_bound_context(|| unsafe {
+            sys::igCollapsingHeader_TreeNodeFlags(label_ptr, flags.bits())
+        })
     }
 
     /// Creates a collapsing header widget with a visibility tracking variable.
@@ -53,18 +55,20 @@ impl Ui {
         flags: TreeNodeFlags,
     ) -> bool {
         let label_ptr = self.scratch_txt(label);
-        unsafe { sys::igCollapsingHeader_BoolPtr(label_ptr, visible as *mut bool, flags.bits()) }
+        self.run_with_bound_context(|| unsafe {
+            sys::igCollapsingHeader_BoolPtr(label_ptr, visible as *mut bool, flags.bits())
+        })
     }
 
     /// Returns the distance from the start of a tree node to the label text.
     #[doc(alias = "GetTreeNodeToLabelSpacing")]
     pub fn tree_node_to_label_spacing(&self) -> f32 {
-        unsafe { sys::igGetTreeNodeToLabelSpacing() }
+        self.run_with_bound_context(|| unsafe { sys::igGetTreeNodeToLabelSpacing() })
     }
 
     /// Returns whether the tree node identified by `storage_id` is open in storage.
     #[doc(alias = "TreeNodeGetOpen")]
     pub fn tree_node_get_open(&self, storage_id: Id) -> bool {
-        unsafe { sys::igTreeNodeGetOpen(storage_id.raw()) }
+        self.run_with_bound_context(|| unsafe { sys::igTreeNodeGetOpen(storage_id.raw()) })
     }
 }

@@ -45,9 +45,19 @@ pub(crate) struct ImNodesScope {
     editor_raw: Option<*mut sys::ImNodesEditorContext>,
 }
 
+#[must_use = "dropping the guard restores the previous Dear ImGui/ImNodes contexts"]
+pub(crate) struct ImNodesScopeGuard {
+    prev_imgui_ctx_raw: *mut imgui_sys::ImGuiContext,
+    prev_ctx_raw: *mut sys::ImNodesContext,
+    prev_editor_raw: *mut sys::ImNodesEditorContext,
+    restore_imgui: bool,
+    restore_ctx: bool,
+    restore_editor: bool,
+}
+
 impl ImNodesScope {
     #[inline]
-    pub(crate) fn bind(&self) {
+    pub(crate) fn bind(&self) -> ImNodesScopeGuard {
         assert!(
             self.imgui_alive.is_alive(),
             "dear-imnodes: ImGui context has been dropped"
@@ -56,17 +66,52 @@ impl ImNodesScope {
             self.ctx_alive.is_alive(),
             "dear-imnodes: ImNodes context has been dropped"
         );
-        assert_eq!(
-            unsafe { imgui_sys::igGetCurrentContext() },
-            self.imgui_ctx_raw,
-            "dear-imnodes: ImNodes scope must be used with the currently-active ImGui context"
-        );
+        let prev_imgui_ctx_raw = unsafe { imgui_sys::igGetCurrentContext() };
+        let prev_ctx_raw = unsafe { sys::imnodes_GetCurrentContext() };
+        let prev_editor_raw = unsafe { sys::imnodes_EditorContextGetCurrent() };
+        let restore_imgui = prev_imgui_ctx_raw != self.imgui_ctx_raw;
+        let restore_ctx = prev_ctx_raw != self.ctx_raw;
+        let restore_editor = prev_editor_raw != self.editor_raw.unwrap_or(std::ptr::null_mut());
         unsafe {
+            if restore_imgui && imgui_sys::igGetCurrentContext() != self.imgui_ctx_raw {
+                imgui_sys::igSetCurrentContext(self.imgui_ctx_raw);
+            }
             sys::imnodes_SetImGuiContext(self.imgui_ctx_raw);
-            sys::imnodes_SetCurrentContext(self.ctx_raw);
+            if restore_ctx && sys::imnodes_GetCurrentContext() != self.ctx_raw {
+                sys::imnodes_SetCurrentContext(self.ctx_raw);
+            }
             match self.editor_raw {
                 Some(ed) => sys::imnodes_EditorContextSet(ed),
                 None => sys::imnodes_EditorContextResetToDefault(),
+            }
+        }
+        ImNodesScopeGuard {
+            prev_imgui_ctx_raw,
+            prev_ctx_raw,
+            prev_editor_raw,
+            restore_imgui,
+            restore_ctx,
+            restore_editor,
+        }
+    }
+}
+
+impl Drop for ImNodesScopeGuard {
+    fn drop(&mut self) {
+        unsafe {
+            if self.restore_ctx {
+                sys::imnodes_SetCurrentContext(self.prev_ctx_raw);
+            }
+            if self.restore_editor {
+                if self.prev_editor_raw.is_null() {
+                    sys::imnodes_EditorContextResetToDefault();
+                } else {
+                    sys::imnodes_EditorContextSet(self.prev_editor_raw);
+                }
+            }
+            if self.restore_imgui {
+                sys::imnodes_SetImGuiContext(self.prev_imgui_ctx_raw);
+                imgui_sys::igSetCurrentContext(self.prev_imgui_ctx_raw);
             }
         }
     }
@@ -164,7 +209,10 @@ mod tests {
 
     fn test_guard() -> std::sync::MutexGuard<'static, ()> {
         static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
-        GUARD.get_or_init(|| Mutex::new(())).lock().unwrap()
+        GUARD
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
     }
 
     fn prepare_imgui(imgui: &mut ImGuiContext) {
@@ -210,38 +258,22 @@ mod tests {
     }
 
     #[test]
-    fn node_editor_drop_rejects_wrong_imgui_context_without_switching_current() {
+    fn node_editor_drop_restores_previous_imgui_context() {
         let _guard = test_guard();
         let mut imgui = ImGuiContext::create();
         prepare_imgui(&mut imgui);
         let raw_imgui = imgui.as_raw();
         let nodes = ImNodesContext::create(&imgui);
-        let raw_nodes = nodes.as_raw();
 
         let ui = imgui.frame();
         let editor = ui.imnodes(&nodes).editor(None);
 
         unsafe { imgui_sys::igSetCurrentContext(ptr::null_mut()) };
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(editor)));
+        drop(editor);
         assert_eq!(unsafe { imgui_sys::igGetCurrentContext() }, ptr::null_mut());
 
-        unsafe {
-            imgui_sys::igSetCurrentContext(raw_imgui);
-            sys::imnodes_SetImGuiContext(raw_imgui);
-            sys::imnodes_SetCurrentContext(raw_nodes);
-            sys::imnodes_EndNodeEditor();
-        }
+        unsafe { imgui_sys::igSetCurrentContext(raw_imgui) };
         let _ = imgui.render();
-
-        let panic = result.expect_err("expected NodeEditor drop on wrong ImGui context to panic");
-        let message = panic
-            .downcast_ref::<String>()
-            .map(String::as_str)
-            .or_else(|| panic.downcast_ref::<&'static str>().copied())
-            .unwrap_or("");
-        assert!(
-            message.contains("ImNodes scope must be used with the currently-active ImGui context")
-        );
     }
 
     #[test]
@@ -279,8 +311,7 @@ mod tests {
         let raw_nodes = nodes.as_raw();
 
         {
-            let bound = nodes.bind_editor(&explicit_editor);
-            bound.set_current();
+            let _bound = nodes.bind_editor(&explicit_editor);
         }
 
         drop(explicit_editor);

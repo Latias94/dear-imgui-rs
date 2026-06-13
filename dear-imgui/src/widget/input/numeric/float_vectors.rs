@@ -50,13 +50,13 @@ impl<'ui, 'p, L: AsRef<str>, F: AsRef<str>> InputFloat2<'ui, 'p, L, F> {
     /// Returns true if any value was changed.
     pub fn build(self) -> bool {
         validate_input_scalar_flags("InputFloat2::build()", self.flags);
-        unsafe {
-            let (one, two) = self
-                .ui
-                .scratch_txt_with_opt(self.label, self.display_format);
+        let (one, two) = self
+            .ui
+            .scratch_txt_with_opt(self.label, self.display_format);
 
+        self.ui.run_with_bound_context(|| unsafe {
             sys::igInputFloat2(one, self.value.as_mut_ptr(), two, self.flags.raw())
-        }
+        })
     }
 }
 
@@ -108,13 +108,13 @@ impl<'ui, 'p, L: AsRef<str>, F: AsRef<str>> InputFloat3<'ui, 'p, L, F> {
     /// Returns true if any value was changed.
     pub fn build(self) -> bool {
         validate_input_scalar_flags("InputFloat3::build()", self.flags);
-        unsafe {
-            let (one, two) = self
-                .ui
-                .scratch_txt_with_opt(self.label, self.display_format);
+        let (one, two) = self
+            .ui
+            .scratch_txt_with_opt(self.label, self.display_format);
 
+        self.ui.run_with_bound_context(|| unsafe {
             sys::igInputFloat3(one, self.value.as_mut_ptr(), two, self.flags.raw())
-        }
+        })
     }
 }
 
@@ -166,12 +166,12 @@ impl<'ui, 'p, L: AsRef<str>, F: AsRef<str>> InputFloat4<'ui, 'p, L, F> {
     /// Returns true if any value was changed.
     pub fn build(self) -> bool {
         validate_input_scalar_flags("InputFloat4::build()", self.flags);
-        unsafe {
-            let (one, two) = self
-                .ui
-                .scratch_txt_with_opt(self.label, self.display_format);
+        let (one, two) = self
+            .ui
+            .scratch_txt_with_opt(self.label, self.display_format);
 
+        self.ui.run_with_bound_context(|| unsafe {
             sys::igInputFloat4(one, self.value.as_mut_ptr(), two, self.flags.raw())
-        }
+        })
     }
 }

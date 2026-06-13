@@ -104,7 +104,7 @@ impl Ui {
             "Ui::begin_horizontal_stack_layout() align must be finite"
         );
         let size = sys::ImVec2::from(size);
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             match id.into() {
                 StackLayoutId::Str(value) => {
                     sys::ImGuiStack_BeginHorizontal_Str(self.scratch_txt(value), size, align);
@@ -119,7 +119,7 @@ impl Ui {
                     sys::ImGuiStack_BeginHorizontal_Id(value.raw(), size, align);
                 }
             }
-        }
+        });
         HorizontalStackLayoutToken::new(self)
     }
 
@@ -185,7 +185,7 @@ impl Ui {
             "Ui::begin_vertical_stack_layout() align must be finite"
         );
         let size = sys::ImVec2::from(size);
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             match id.into() {
                 StackLayoutId::Str(value) => {
                     sys::ImGuiStack_BeginVertical_Str(self.scratch_txt(value), size, align);
@@ -200,7 +200,7 @@ impl Ui {
                     sys::ImGuiStack_BeginVertical_Id(value.raw(), size, align);
                 }
             }
-        }
+        });
         VerticalStackLayoutToken::new(self)
     }
 
@@ -262,7 +262,7 @@ impl Ui {
             spacing.is_finite(),
             "Ui::stack_layout_spring() spacing must be finite"
         );
-        unsafe { sys::ImGuiStack_Spring(weight, spacing) }
+        self.run_with_bound_context(|| unsafe { sys::ImGuiStack_Spring(weight, spacing) });
     }
 
     /// Inserts a spring into the current stack layout.
@@ -277,7 +277,7 @@ impl Ui {
     /// Suspends the current stack layout until the returned token is dropped.
     #[doc(alias = "SuspendLayout")]
     pub fn suspend_stack_layout(&self) -> StackLayoutSuspensionToken<'_> {
-        unsafe { sys::ImGuiStack_SuspendLayout() };
+        self.run_with_bound_context(|| unsafe { sys::ImGuiStack_SuspendLayout() });
         StackLayoutSuspensionToken::new(self)
     }
 }

@@ -17,7 +17,7 @@ impl Ui {
     pub fn set_color_edit_options(&self, options: impl Into<ColorEditOptions>) {
         let options = options.into();
         options.validate("Ui::set_color_edit_options()");
-        unsafe { sys::igSetColorEditOptions(options.bits() as i32) }
+        self.run_with_bound_context(|| unsafe { sys::igSetColorEditOptions(options.bits() as i32) })
     }
 
     /// Creates a color edit widget for 3 components (RGB)

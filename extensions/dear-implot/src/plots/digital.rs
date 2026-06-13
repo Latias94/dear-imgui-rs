@@ -86,10 +86,11 @@ impl<'a> DigitalPlot<'a> {
     }
 
     /// Plot the digital signal
-    pub fn plot(self) {
+    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
         let Ok(count) = i32::try_from(self.x_data.len()) else {
             return;
         };
+        let _guard = plot_ui.bind();
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -179,10 +180,11 @@ impl<'a> DigitalPlotF32<'a> {
     }
 
     /// Plot the digital signal
-    pub fn plot(self) {
+    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
         let Ok(count) = i32::try_from(self.x_data.len()) else {
             return;
         };
+        let _guard = plot_ui.bind();
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -280,7 +282,7 @@ impl<'a> SimpleDigitalPlot<'a> {
     }
 
     /// Plot the digital signal
-    pub fn plot(self) {
+    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
         let Ok(count) = i32::try_from(self.y_data.len()) else {
             return;
         };
@@ -289,6 +291,7 @@ impl<'a> SimpleDigitalPlot<'a> {
             .map(|i| self.x_start + i as f64 * self.x_scale)
             .collect();
 
+        let _guard = plot_ui.bind();
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -378,7 +381,7 @@ impl<'a> BooleanDigitalPlot<'a> {
     }
 
     /// Plot the digital signal
-    pub fn plot(self) {
+    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
         let Ok(count) = i32::try_from(self.x_data.len()) else {
             return;
         };
@@ -389,6 +392,7 @@ impl<'a> BooleanDigitalPlot<'a> {
             .map(|&b| if b { 1.0 } else { 0.0 })
             .collect();
 
+        let _guard = plot_ui.bind();
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,

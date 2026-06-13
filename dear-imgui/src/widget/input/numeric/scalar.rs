@@ -76,11 +76,11 @@ impl<'ui, 'p, L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> InputScalar<'ui, 'p
     /// Returns true if the value was changed.
     pub fn build(self) -> bool {
         validate_input_scalar_flags("InputScalar::build()", self.flags);
-        unsafe {
-            let (one, two) = self
-                .ui
-                .scratch_txt_with_opt(self.label, self.display_format);
+        let (one, two) = self
+            .ui
+            .scratch_txt_with_opt(self.label, self.display_format);
 
+        self.ui.run_with_bound_context(|| unsafe {
             sys::igInputScalar(
                 one,
                 T::KIND as i32,
@@ -96,7 +96,7 @@ impl<'ui, 'p, L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> InputScalar<'ui, 'p
                 two,
                 self.flags.raw(),
             )
-        }
+        })
     }
 }
 
@@ -172,11 +172,11 @@ impl<'ui, 'p, L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> InputScalarN<'ui, '
     pub fn build(self) -> bool {
         validate_input_scalar_flags("InputScalarN::build()", self.flags);
         let count = component_count_i32("InputScalarN::build()", self.values.len());
-        unsafe {
-            let (one, two) = self
-                .ui
-                .scratch_txt_with_opt(self.label, self.display_format);
+        let (one, two) = self
+            .ui
+            .scratch_txt_with_opt(self.label, self.display_format);
 
+        self.ui.run_with_bound_context(|| unsafe {
             sys::igInputScalarN(
                 one,
                 T::KIND as i32,
@@ -193,6 +193,6 @@ impl<'ui, 'p, L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> InputScalarN<'ui, '
                 two,
                 self.flags.raw(),
             )
-        }
+        })
     }
 }

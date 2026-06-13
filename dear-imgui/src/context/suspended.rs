@@ -70,16 +70,19 @@ impl SuspendedContext {
             });
         }
 
+        let alive = Rc::new(());
+        let ui = crate::ui::Ui::new(raw, super::core::ContextAliveToken::new(&alive));
+
         let ctx = Context {
             raw,
-            alive: Rc::new(()),
+            alive,
             shared_font_atlas,
             ini_filename: None,
             log_filename: None,
             platform_name: None,
             renderer_name: None,
             clipboard_ctx: Box::new(ClipboardContext::dummy()),
-            ui: crate::ui::Ui::new(),
+            ui,
         };
 
         // If the context was activated during creation, deactivate it

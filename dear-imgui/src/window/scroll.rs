@@ -22,43 +22,39 @@ impl Ui {
     /// Returns the current scroll position of the window
     #[doc(alias = "GetScrollX")]
     pub fn scroll_x(&self) -> f32 {
-        unsafe { sys::igGetScrollX() }
+        self.run_with_bound_context(|| unsafe { sys::igGetScrollX() })
     }
 
     /// Returns the current vertical scroll position of the window
     #[doc(alias = "GetScrollY")]
     pub fn scroll_y(&self) -> f32 {
-        unsafe { sys::igGetScrollY() }
+        self.run_with_bound_context(|| unsafe { sys::igGetScrollY() })
     }
 
     /// Returns the maximum horizontal scroll position
     #[doc(alias = "GetScrollMaxX")]
     pub fn scroll_max_x(&self) -> f32 {
-        unsafe { sys::igGetScrollMaxX() }
+        self.run_with_bound_context(|| unsafe { sys::igGetScrollMaxX() })
     }
 
     /// Returns the maximum vertical scroll position
     #[doc(alias = "GetScrollMaxY")]
     pub fn scroll_max_y(&self) -> f32 {
-        unsafe { sys::igGetScrollMaxY() }
+        self.run_with_bound_context(|| unsafe { sys::igGetScrollMaxY() })
     }
 
     /// Sets the horizontal scroll position
     #[doc(alias = "SetScrollX")]
     pub fn set_scroll_x(&self, scroll_x: f32) {
         assert_finite_f32("Ui::set_scroll_x()", "scroll_x", scroll_x);
-        unsafe {
-            sys::igSetScrollX_Float(scroll_x);
-        }
+        self.run_with_bound_context(|| unsafe { sys::igSetScrollX_Float(scroll_x) });
     }
 
     /// Sets the vertical scroll position
     #[doc(alias = "SetScrollY")]
     pub fn set_scroll_y(&self, scroll_y: f32) {
         assert_finite_f32("Ui::set_scroll_y()", "scroll_y", scroll_y);
-        unsafe {
-            sys::igSetScrollY_Float(scroll_y);
-        }
+        self.run_with_bound_context(|| unsafe { sys::igSetScrollY_Float(scroll_y) });
     }
 
     /// Sets the horizontal scroll position to center on the given position
@@ -72,9 +68,9 @@ impl Ui {
             "center_x_ratio",
             center_x_ratio,
         );
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             sys::igSetScrollFromPosX_Float(local_x, center_x_ratio);
-        }
+        });
     }
 
     /// Sets the vertical scroll position to center on the given position
@@ -88,9 +84,9 @@ impl Ui {
             "center_y_ratio",
             center_y_ratio,
         );
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             sys::igSetScrollFromPosY_Float(local_y, center_y_ratio);
-        }
+        });
     }
 
     /// Scrolls to make the current item visible
@@ -99,9 +95,7 @@ impl Ui {
     #[doc(alias = "SetScrollHereX")]
     pub fn set_scroll_here_x(&self, center_x_ratio: f32) {
         assert_unit_ratio("Ui::set_scroll_here_x()", "center_x_ratio", center_x_ratio);
-        unsafe {
-            sys::igSetScrollHereX(center_x_ratio);
-        }
+        self.run_with_bound_context(|| unsafe { sys::igSetScrollHereX(center_x_ratio) });
     }
 
     /// Scrolls to make the current item visible vertically
@@ -110,8 +104,6 @@ impl Ui {
     #[doc(alias = "SetScrollHereY")]
     pub fn set_scroll_here_y(&self, center_y_ratio: f32) {
         assert_unit_ratio("Ui::set_scroll_here_y()", "center_y_ratio", center_y_ratio);
-        unsafe {
-            sys::igSetScrollHereY(center_y_ratio);
-        }
+        self.run_with_bound_context(|| unsafe { sys::igSetScrollHereY(center_y_ratio) });
     }
 }

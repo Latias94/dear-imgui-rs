@@ -14,7 +14,7 @@ impl Ui {
     #[must_use]
     #[doc(alias = "BeginMainMenuBar")]
     pub fn begin_main_menu_bar(&self) -> Option<MainMenuBarToken<'_>> {
-        if unsafe { sys::igBeginMainMenuBar() } {
+        if self.run_with_bound_context(|| unsafe { sys::igBeginMainMenuBar() }) {
             Some(MainMenuBarToken::new(self))
         } else {
             None
@@ -30,7 +30,7 @@ impl Ui {
     #[must_use]
     #[doc(alias = "BeginMenuBar")]
     pub fn begin_menu_bar(&self) -> Option<MenuBarToken<'_>> {
-        if unsafe { sys::igBeginMenuBar() } {
+        if self.run_with_bound_context(|| unsafe { sys::igBeginMenuBar() }) {
             Some(MenuBarToken::new(self))
         } else {
             None
@@ -63,7 +63,7 @@ impl Ui {
         enabled: bool,
     ) -> Option<MenuToken<'_>> {
         let label_ptr = self.scratch_txt(label);
-        if unsafe { sys::igBeginMenu(label_ptr, enabled) } {
+        if self.run_with_bound_context(|| unsafe { sys::igBeginMenu(label_ptr, enabled) }) {
             Some(MenuToken::new(self))
         } else {
             None

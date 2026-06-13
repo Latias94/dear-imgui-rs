@@ -11,13 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Breaking Changes
 
-- `Ui::push_font_with_size` now returns `FontStackToken`, so sized font pushes
-  are paired with `PopFont` through RAII and no longer leave Dear ImGui's font
-  stack unbalanced. Fixes #31, thanks @spindlymist.
-- Safe stack-style APIs now return RAII tokens directly and no longer expose the
-  obsolete public manual pop/end helpers. This covers font, clip-rect, draw-list
-  texture, button-repeat, table-channel, columns, and ImPlot plot clip-rect
-  scopes.
+- Safe handles and RAII tokens now clean up through the context that created them. This makes it supported to keep multiple ImGui, ImPlot, ImPlot3D, ImNodes, or ImGuizmo contexts alive and switch between them without stack cleanup, drawing, or post-frame queries accidentally targeting the wrong current context.
+- `Ui::push_font_with_size(...)` now returns `FontStackToken`. Keep the token alive for the font scope and let it drop to pop the font. Fixes #31, thanks @spindlymist.
+- Obsolete public manual pop/end helpers for stack scopes were removed. Use the returned RAII tokens instead.
+- ImPlot item submission now takes the owner `&PlotUi`, for example `LinePlot::new(...).plot(&plot_ui)` and `PlotBuilder::new(...).build(&plot_ui)`. Other context-dependent ImPlot APIs such as `SubplotGrid::begin(...)`, `MultiAxisPlot::begin(...)`, and `LegendManager::{setup, begin_custom}(...)` now take `&PlotUi` too.
+- ImPlot and ImPlot3D style helpers moved onto `PlotUi` / `Plot3DUi`. Use `plot_ui.push_style_*`, `plot_ui.push_colormap_*`, `plot_ui.with_next_plot_item_array_style(...)`, `plot_ui.with_next_plot3d_item_array_style(...)`, and the `Plot3DUi` next-style setters instead of safe free functions.
+- `dear-imnodes` removed deprecated post-frame query methods from active `NodeEditor` handles. Call `let post = editor.end();` and then query `post.selected_nodes()`, `post.is_link_created()`, `post.clear_selection()`, and the other `PostEditor` helpers.
+
+### Added
+
+- Added the `multi_context_switch` example showing how integrations can keep multiple contexts alive and switch between them with `Context::suspend()` / `SuspendedContext::activate()`.
+
+### Fixed
+
+- Destroying the current ImPlot or ImPlot3D context now clears the corresponding global current-context pointer instead of restoring a dangling pointer to the destroyed context.
 
 ## [0.14.1] - 2026-06-09
 

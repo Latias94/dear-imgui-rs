@@ -11,7 +11,7 @@ impl<'ui> NodeEditor<'ui> {
             ctx_alive: ctx.alive_token(),
             editor_raw: editor.map(|ed| ed.raw),
         };
-        scope.bind();
+        let _guard = scope.bind();
         unsafe { sys::imnodes_BeginNodeEditor() };
         Self {
             _ui: ui,
@@ -23,31 +23,12 @@ impl<'ui> NodeEditor<'ui> {
     }
 
     #[inline]
-    pub(crate) fn bind(&self) {
-        self.scope.bind();
+    pub(crate) fn bind(&self) -> super::super::ImNodesScopeGuard {
+        self.scope.bind()
     }
 
     #[inline]
     pub(crate) fn scope(&self) -> ImNodesScope {
         self.scope.clone()
-    }
-
-    #[inline]
-    pub(super) fn style_ptr(&self) -> *mut sys::ImNodesStyle {
-        self.bind();
-        let ptr = unsafe { sys::imnodes_GetStyle() };
-        assert!(
-            !ptr.is_null(),
-            "dear-imnodes: imnodes_GetStyle returned null"
-        );
-        ptr
-    }
-
-    #[inline]
-    pub(super) fn io_ptr(&self) -> *mut sys::ImNodesIO {
-        self.bind();
-        let ptr = unsafe { sys::imnodes_GetIO() };
-        assert!(!ptr.is_null(), "dear-imnodes: imnodes_GetIO returned null");
-        ptr
     }
 }

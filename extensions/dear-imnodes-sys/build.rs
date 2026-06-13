@@ -108,6 +108,7 @@ fn generate_bindings(
         .allowlist_function("imnodes_getIOKeyShiftPtr")
         .allowlist_function("imnodes_getIOKeyAltPtr")
         .allowlist_function("imnodes_EditorContextResetToDefault")
+        .allowlist_function("imnodes_EditorContextGetCurrent")
         .allowlist_function("imnodes_EditorContextResetToDefaultIfCurrent")
         .allowlist_type("ImNodes.*")
         .allowlist_type("ImWchar32")

@@ -8,6 +8,10 @@ void imnodes_EditorContextResetToDefault()
         GImNodes->EditorCtx = GImNodes->DefaultEditorCtx;
     }
 }
+ImNodesEditorContext* imnodes_EditorContextGetCurrent()
+{
+    return GImNodes != nullptr ? GImNodes->EditorCtx : nullptr;
+}
 void imnodes_EditorContextResetToDefaultIfCurrent(ImNodesEditorContext* editor)
 {
     if (GImNodes != nullptr && GImNodes->EditorCtx == editor) {

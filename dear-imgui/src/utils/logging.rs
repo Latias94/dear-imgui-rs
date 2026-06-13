@@ -42,13 +42,15 @@ impl crate::ui::Ui {
     /// Start logging to TTY.
     #[doc(alias = "LogToTTY")]
     pub fn log_to_tty(&self, auto_open_depth: impl Into<LogAutoOpenDepth>) {
-        unsafe { sys::igLogToTTY(auto_open_depth.into().raw()) }
+        self.run_with_bound_context(|| unsafe { sys::igLogToTTY(auto_open_depth.into().raw()) });
     }
 
     /// Start logging to file with the default filename.
     #[doc(alias = "LogToFile")]
     pub fn log_to_file_default(&self, auto_open_depth: impl Into<LogAutoOpenDepth>) {
-        unsafe { sys::igLogToFile(auto_open_depth.into().raw(), std::ptr::null()) }
+        self.run_with_bound_context(|| unsafe {
+            sys::igLogToFile(auto_open_depth.into().raw(), std::ptr::null())
+        });
     }
 
     /// Start logging to file.
@@ -64,26 +66,30 @@ impl crate::ui::Ui {
     ) -> crate::error::ImGuiResult<()> {
         use crate::error::SafeStringConversion;
         let cstr = filename.to_string_lossy().into_owned().to_cstring_safe()?;
-        unsafe { sys::igLogToFile(auto_open_depth.into().raw(), cstr.as_ptr()) }
+        self.run_with_bound_context(|| unsafe {
+            sys::igLogToFile(auto_open_depth.into().raw(), cstr.as_ptr())
+        });
         Ok(())
     }
 
     /// Start logging to clipboard.
     #[doc(alias = "LogToClipboard")]
     pub fn log_to_clipboard(&self, auto_open_depth: impl Into<LogAutoOpenDepth>) {
-        unsafe { sys::igLogToClipboard(auto_open_depth.into().raw()) }
+        self.run_with_bound_context(|| unsafe {
+            sys::igLogToClipboard(auto_open_depth.into().raw())
+        });
     }
 
     /// Show ImGui's logging buttons (TTY/File/Clipboard).
     #[doc(alias = "LogButtons")]
     pub fn log_buttons(&self) {
-        unsafe { sys::igLogButtons() }
+        self.run_with_bound_context(|| unsafe { sys::igLogButtons() });
     }
 
     /// Finish logging (close file / copy to clipboard as needed).
     #[doc(alias = "LogFinish")]
     pub fn log_finish(&self) {
-        unsafe { sys::igLogFinish() }
+        self.run_with_bound_context(|| unsafe { sys::igLogFinish() });
     }
 }
 

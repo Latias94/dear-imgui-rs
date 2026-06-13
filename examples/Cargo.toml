@@ -247,6 +247,10 @@ name = "threaded_snapshot_minimal"
 path = "04-integration/threaded_snapshot_minimal.rs"
 
 [[bin]]
+name = "multi_context_switch"
+path = "04-integration/multi_context_switch.rs"
+
+[[bin]]
 name = "dear_app_docking"
 path = "02-docking/dear_app_docking.rs"
 

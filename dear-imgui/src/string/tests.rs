@@ -48,12 +48,13 @@ fn tls_scratch_txt_is_nul_terminated() {
 }
 
 #[test]
-fn tls_scratch_txt_two_returns_two_valid_strings() {
-    let (a_ptr, b_ptr) = tls_scratch_txt_two("a", "bcd");
-    let a = unsafe { CStr::from_ptr(a_ptr) }.to_str().unwrap();
-    let b = unsafe { CStr::from_ptr(b_ptr) }.to_str().unwrap();
-    assert_eq!(a, "a");
-    assert_eq!(b, "bcd");
+fn with_scratch_txt_two_returns_two_valid_strings() {
+    with_scratch_txt_two("a", "bcd", |a_ptr, b_ptr| {
+        let a = unsafe { CStr::from_ptr(a_ptr) }.to_str().unwrap();
+        let b = unsafe { CStr::from_ptr(b_ptr) }.to_str().unwrap();
+        assert_eq!(a, "a");
+        assert_eq!(b, "bcd");
+    });
 }
 
 #[test]

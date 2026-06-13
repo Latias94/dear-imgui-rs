@@ -278,18 +278,20 @@ fn seed_dockspace(
     }
 
     let viewport = ui.main_viewport();
-    DockBuilder::remove_node(dockspace_id);
-    let root = DockBuilder::add_node(dockspace_id, DockNodeFlags::NONE);
-    DockBuilder::set_node_pos(root, viewport.pos());
-    DockBuilder::set_node_size(root, viewport.size());
-    let (hierarchy_id, center_id) = DockBuilder::split_node(root, SplitDirection::Left, 0.20);
-    let (inspector_id, scene_id) = DockBuilder::split_node(center_id, SplitDirection::Right, 0.25);
-    let (diagnostics_id, scene_id) = DockBuilder::split_node(scene_id, SplitDirection::Down, 0.24);
-    DockBuilder::dock_window("Hierarchy", hierarchy_id);
-    DockBuilder::dock_window("Scene", scene_id);
-    DockBuilder::dock_window("Inspector", inspector_id);
-    DockBuilder::dock_window("Diagnostics", diagnostics_id);
-    DockBuilder::finish(root);
+    DockBuilder::remove_node(ui, dockspace_id);
+    let root = DockBuilder::add_node(ui, dockspace_id, DockNodeFlags::NONE);
+    DockBuilder::set_node_pos(ui, root, viewport.pos());
+    DockBuilder::set_node_size(ui, root, viewport.size());
+    let (hierarchy_id, center_id) = DockBuilder::split_node(ui, root, SplitDirection::Left, 0.20);
+    let (inspector_id, scene_id) =
+        DockBuilder::split_node(ui, center_id, SplitDirection::Right, 0.25);
+    let (diagnostics_id, scene_id) =
+        DockBuilder::split_node(ui, scene_id, SplitDirection::Down, 0.24);
+    DockBuilder::dock_window(ui, "Hierarchy", hierarchy_id);
+    DockBuilder::dock_window(ui, "Scene", scene_id);
+    DockBuilder::dock_window(ui, "Inspector", inspector_id);
+    DockBuilder::dock_window(ui, "Diagnostics", diagnostics_id);
+    DockBuilder::finish(ui, root);
 
     editor.dockspace_seeded = true;
 }

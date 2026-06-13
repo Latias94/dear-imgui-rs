@@ -4,14 +4,14 @@ impl crate::ui::Ui {
     /// Get cursor position in screen coordinates.
     #[doc(alias = "GetCursorScreenPos")]
     pub fn get_cursor_screen_pos(&self) -> [f32; 2] {
-        let pos = unsafe { sys::igGetCursorScreenPos() };
+        let pos = self.run_with_bound_context(|| unsafe { sys::igGetCursorScreenPos() });
         [pos.x, pos.y]
     }
 
     /// Get available content region size.
     #[doc(alias = "GetContentRegionAvail")]
     pub fn get_content_region_avail(&self) -> [f32; 2] {
-        let size = unsafe { sys::igGetContentRegionAvail() };
+        let size = self.run_with_bound_context(|| unsafe { sys::igGetContentRegionAvail() });
         [size.x, size.y]
     }
 

@@ -61,6 +61,6 @@ impl Ui {
     /// Shows or hides the navigation cursor (a small marker indicating nav focus).
     #[doc(alias = "SetNavCursorVisible")]
     pub fn set_nav_cursor_visible(&self, visible: bool) {
-        unsafe { sys::igSetNavCursorVisible(visible) }
+        self.run_with_bound_context(|| unsafe { sys::igSetNavCursorVisible(visible) });
     }
 }

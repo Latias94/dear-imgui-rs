@@ -283,125 +283,133 @@ impl<'ui> Window<'ui> {
         validate_window_flags("Window::begin()", self.flags);
 
         // Set window properties before beginning
-        if let Some(size) = self.size {
-            assert_finite_vec2("Window::begin()", "size", size);
-            unsafe {
-                let size_vec = crate::sys::ImVec2 {
-                    x: size[0],
-                    y: size[1],
-                };
-                crate::sys::igSetNextWindowSize(size_vec, self.size_condition as i32);
+        self.ui.run_with_bound_context(|| {
+            if let Some(size) = self.size {
+                assert_finite_vec2("Window::begin()", "size", size);
+                unsafe {
+                    let size_vec = crate::sys::ImVec2 {
+                        x: size[0],
+                        y: size[1],
+                    };
+                    crate::sys::igSetNextWindowSize(size_vec, self.size_condition as i32);
+                }
             }
-        }
 
-        if let Some((min, max)) = self.size_constraints {
-            assert_finite_vec2("Window::begin()", "minimum size constraint", min);
-            assert_finite_vec2("Window::begin()", "maximum size constraint", max);
-            unsafe {
-                let min_vec = sys::ImVec2_c {
-                    x: min[0],
-                    y: min[1],
-                };
-                let max_vec = sys::ImVec2_c {
-                    x: max[0],
-                    y: max[1],
-                };
-                sys::igSetNextWindowSizeConstraints(min_vec, max_vec, None, std::ptr::null_mut());
+            if let Some((min, max)) = self.size_constraints {
+                assert_finite_vec2("Window::begin()", "minimum size constraint", min);
+                assert_finite_vec2("Window::begin()", "maximum size constraint", max);
+                unsafe {
+                    let min_vec = sys::ImVec2_c {
+                        x: min[0],
+                        y: min[1],
+                    };
+                    let max_vec = sys::ImVec2_c {
+                        x: max[0],
+                        y: max[1],
+                    };
+                    sys::igSetNextWindowSizeConstraints(
+                        min_vec,
+                        max_vec,
+                        None,
+                        std::ptr::null_mut(),
+                    );
+                }
             }
-        }
 
-        if let Some(pos) = self.pos {
-            assert_finite_vec2("Window::begin()", "position", pos);
-            unsafe {
-                let pos_vec = crate::sys::ImVec2 {
-                    x: pos[0],
-                    y: pos[1],
-                };
-                let pivot_vec = crate::sys::ImVec2 { x: 0.0, y: 0.0 };
-                crate::sys::igSetNextWindowPos(pos_vec, self.pos_condition as i32, pivot_vec);
+            if let Some(pos) = self.pos {
+                assert_finite_vec2("Window::begin()", "position", pos);
+                unsafe {
+                    let pos_vec = crate::sys::ImVec2 {
+                        x: pos[0],
+                        y: pos[1],
+                    };
+                    let pivot_vec = crate::sys::ImVec2 { x: 0.0, y: 0.0 };
+                    crate::sys::igSetNextWindowPos(pos_vec, self.pos_condition as i32, pivot_vec);
+                }
             }
-        }
 
-        if let Some(content_size) = self.content_size {
-            assert_finite_vec2("Window::begin()", "content size", content_size);
-            unsafe {
-                let content_size_vec = crate::sys::ImVec2 {
-                    x: content_size[0],
-                    y: content_size[1],
-                };
-                crate::sys::igSetNextWindowContentSize(content_size_vec);
+            if let Some(content_size) = self.content_size {
+                assert_finite_vec2("Window::begin()", "content size", content_size);
+                unsafe {
+                    let content_size_vec = crate::sys::ImVec2 {
+                        x: content_size[0],
+                        y: content_size[1],
+                    };
+                    crate::sys::igSetNextWindowContentSize(content_size_vec);
+                }
             }
-        }
 
-        if let Some(collapsed) = self.collapsed {
-            unsafe {
-                crate::sys::igSetNextWindowCollapsed(collapsed, self.collapsed_condition as i32);
+            if let Some(collapsed) = self.collapsed {
+                unsafe {
+                    crate::sys::igSetNextWindowCollapsed(
+                        collapsed,
+                        self.collapsed_condition as i32,
+                    );
+                }
             }
-        }
 
-        if let Some(focused) = self.focused
-            && focused
-        {
-            unsafe {
-                crate::sys::igSetNextWindowFocus();
+            if let Some(focused) = self.focused
+                && focused
+            {
+                unsafe {
+                    crate::sys::igSetNextWindowFocus();
+                }
             }
-        }
 
-        if let Some(alpha) = self.bg_alpha {
-            assert!(
-                alpha.is_finite(),
-                "Window::begin() background alpha must be finite"
-            );
-            unsafe {
-                crate::sys::igSetNextWindowBgAlpha(alpha);
+            if let Some(alpha) = self.bg_alpha {
+                assert!(
+                    alpha.is_finite(),
+                    "Window::begin() background alpha must be finite"
+                );
+                unsafe {
+                    crate::sys::igSetNextWindowBgAlpha(alpha);
+                }
             }
-        }
 
-        if let Some(scroll) = self.scroll {
-            assert_finite_vec2("Window::begin()", "scroll", scroll);
-            unsafe {
-                let scroll_vec = sys::ImVec2_c {
-                    x: scroll[0],
-                    y: scroll[1],
-                };
-                sys::igSetNextWindowScroll(scroll_vec);
+            if let Some(scroll) = self.scroll {
+                assert_finite_vec2("Window::begin()", "scroll", scroll);
+                unsafe {
+                    let scroll_vec = sys::ImVec2_c {
+                        x: scroll[0],
+                        y: scroll[1],
+                    };
+                    sys::igSetNextWindowScroll(scroll_vec);
+                }
             }
-        }
 
-        // Begin the window
-        let mut opened = self.opened;
-        let opened_ptr: *mut bool = match opened.as_deref_mut() {
-            Some(opened) => opened as *mut bool,
-            None => std::ptr::null_mut(),
-        };
-        let result = unsafe { crate::sys::igBegin(name_ptr, opened_ptr, self.flags.bits()) };
-        let is_open = opened.is_none_or(|opened| *opened);
+            // Begin the window
+            let mut opened = self.opened;
+            let opened_ptr: *mut bool = match opened.as_deref_mut() {
+                Some(opened) => opened as *mut bool,
+                None => std::ptr::null_mut(),
+            };
+            let result = unsafe { crate::sys::igBegin(name_ptr, opened_ptr, self.flags.bits()) };
+            let is_open = opened.is_none_or(|opened| *opened);
 
-        // IMPORTANT: According to ImGui documentation, Begin/End calls must be balanced.
-        // If Begin returns false, we need to call End immediately and return None.
-        if result && is_open {
-            Some(WindowToken {
-                _phantom: std::marker::PhantomData,
-            })
-        } else {
-            // If Begin returns false, call End immediately and return None
-            unsafe {
-                crate::sys::igEnd();
+            // IMPORTANT: According to ImGui documentation, Begin/End calls must be balanced.
+            // If Begin returns false, we need to call End immediately and return None.
+            if result && is_open {
+                Some(WindowToken { ui: self.ui })
+            } else {
+                // If Begin returns false, call End immediately and return None
+                unsafe {
+                    crate::sys::igEnd();
+                }
+                None
             }
-            None
-        }
+        })
     }
 }
 
 /// Token representing an active window
 pub struct WindowToken<'ui> {
-    _phantom: std::marker::PhantomData<&'ui Ui>,
+    ui: &'ui Ui,
 }
 
 impl<'ui> Drop for WindowToken<'ui> {
     fn drop(&mut self) {
-        unsafe {
+        self.ui.run_with_bound_context(|| unsafe {
             crate::sys::igEnd();
-        }
+        });
     }
 }

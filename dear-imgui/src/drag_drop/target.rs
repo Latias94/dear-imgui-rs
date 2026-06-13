@@ -75,8 +75,10 @@ impl<'ui> DragDropTarget<'ui> {
     ) -> Option<DragDropPayload> {
         validate_payload_type_name(name.as_ref(), "DragDropTarget::accept_payload_unchecked()");
         validate_drag_drop_target_flags("DragDropTarget::accept_payload_unchecked()", flags);
-        let inner =
-            unsafe { sys::igAcceptDragDropPayload(self.0.scratch_txt(name), flags.bits() as i32) };
+        let name = self.0.scratch_txt(name);
+        let inner = self.0.run_with_bound_context(|| unsafe {
+            sys::igAcceptDragDropPayload(name, flags.bits() as i32)
+        });
 
         if inner.is_null() {
             None
@@ -95,8 +97,8 @@ impl<'ui> DragDropTarget<'ui> {
 
 impl Drop for DragDropTarget<'_> {
     fn drop(&mut self) {
-        unsafe {
+        self.0.run_with_bound_context(|| unsafe {
             sys::igEndDragDropTarget();
-        }
+        });
     }
 }

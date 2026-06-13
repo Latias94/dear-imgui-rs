@@ -74,9 +74,9 @@ impl<L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> Drag<T, L, F> {
     /// Returns true if the slider value was changed
     pub fn build(self, ui: &Ui, value: &mut T) -> bool {
         validate_drag_flags("Drag::build()", self.flags);
-        unsafe {
-            let (one, two) = ui.scratch_txt_with_opt(self.label, self.display_format);
+        let (one, two) = ui.scratch_txt_with_opt(self.label, self.display_format);
 
+        ui.run_with_bound_context(|| unsafe {
             sys::igDragScalar(
                 one,
                 T::KIND as i32,
@@ -93,7 +93,7 @@ impl<L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> Drag<T, L, F> {
                 two,
                 self.flags.bits(),
             )
-        }
+        })
     }
 
     /// Builds a horizontal array of multiple drag sliders attached to the given slice
@@ -108,9 +108,9 @@ impl<L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> Drag<T, L, F> {
                 "Drag::build_array() supports at most 4 components with COLOR_MARKERS"
             );
         }
-        unsafe {
-            let (one, two) = ui.scratch_txt_with_opt(self.label, self.display_format);
+        let (one, two) = ui.scratch_txt_with_opt(self.label, self.display_format);
 
+        ui.run_with_bound_context(|| unsafe {
             sys::igDragScalarN(
                 one,
                 T::KIND as i32,
@@ -128,6 +128,6 @@ impl<L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> Drag<T, L, F> {
                 two,
                 self.flags.bits(),
             )
-        }
+        })
     }
 }

@@ -147,7 +147,7 @@ impl<'ui, 'p> PlotLines<'ui, 'p> {
             .scratch_txt_with_opt(self.label.as_ref(), self.overlay_text.as_deref());
         let graph_size_vec: sys::ImVec2 = self.graph_size.into();
 
-        unsafe {
+        self.ui.run_with_bound_context(|| unsafe {
             sys::igPlotLines_FloatPtr(
                 label_ptr,
                 self.values.as_ptr(),
@@ -159,7 +159,7 @@ impl<'ui, 'p> PlotLines<'ui, 'p> {
                 graph_size_vec,
                 std::mem::size_of::<f32>() as i32,
             );
-        }
+        });
     }
 }
 
@@ -231,7 +231,7 @@ impl<'ui, 'p> PlotHistogram<'ui, 'p> {
             .scratch_txt_with_opt(self.label.as_ref(), self.overlay_text.as_deref());
         let graph_size_vec: sys::ImVec2 = self.graph_size.into();
 
-        unsafe {
+        self.ui.run_with_bound_context(|| unsafe {
             sys::igPlotHistogram_FloatPtr(
                 label_ptr,
                 self.values.as_ptr(),
@@ -243,6 +243,6 @@ impl<'ui, 'p> PlotHistogram<'ui, 'p> {
                 graph_size_vec,
                 std::mem::size_of::<f32>() as i32,
             );
-        }
+        });
     }
 }

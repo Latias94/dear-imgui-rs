@@ -554,7 +554,7 @@ fn draw_file_table_view(
                         let _font = visual.font_id.map(|id| ui.push_font(id));
                         let _color = visual
                             .text_color
-                            .map(TextColorToken::push)
+                            .map(|color| TextColorToken::push(ui, color))
                             .unwrap_or_else(TextColorToken::none);
                         {
                             if ui

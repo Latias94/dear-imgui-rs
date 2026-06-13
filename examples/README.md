@@ -60,6 +60,7 @@ Quick picks:
   - Smoke test (auto-run + exit): `cargo run --bin imgui_test_engine_basic --features test-engine -- --exit-when-done --group tests`
 - dear-node-editor basic: `cargo run -p dear-imgui-examples --bin node_editor_basic --features node-editor`
 - dear-node-editor showcase: `cargo run -p dear-imgui-examples --bin node_editor_showcase --features node-editor`
+- Safe multi-context lifecycle pattern: `cargo run -p dear-imgui-examples --bin multi_context_switch`
 
 Image preview: both `glow_textures` and `wgpu_textures` load `examples/assets/texture.jpg` and show it alongside generated textures.
 - Extensions (e.g., ImPlot): `cargo run --bin implot_basic --features implot`
@@ -137,6 +138,7 @@ This is the intended organization.
   - `asset_browser_grid.rs`: Asset browser grid with thumbnails and filter.
   - `file_dialog_native.rs`: OS-native file dialog using `dear-file-browser` (non-blocking thread).
   - `file_browser_imgui.rs`: Pure ImGui file browser widget.
+  - `multi_context_switch.rs`: Headless API example for integrations that keep multiple contexts alive and switch between them with `Context::suspend()` / `SuspendedContext::activate()`.
 
 - support/
   - `wgpu_init.rs` (WGPU init + resize helpers)

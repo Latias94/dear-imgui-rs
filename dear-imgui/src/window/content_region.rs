@@ -12,7 +12,7 @@ impl Ui {
     /// This is the size of the window minus decorations (title bar, scrollbars, etc.)
     #[doc(alias = "GetContentRegionAvail")]
     pub fn content_region_avail(&self) -> [f32; 2] {
-        let size = unsafe { sys::igGetContentRegionAvail() };
+        let size = self.run_with_bound_context(|| unsafe { sys::igGetContentRegionAvail() });
         [size.x, size.y]
     }
 

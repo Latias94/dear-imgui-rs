@@ -19,7 +19,7 @@ impl Ui {
         selection_size: Option<i32>,
         items_count: usize,
     ) -> MultiSelectScope<'_> {
-        MultiSelectScope::new(flags, selection_size, items_count)
+        MultiSelectScope::new(self, flags, selection_size, items_count)
     }
 
     /// Multi-select helper for index-based storage.
@@ -65,7 +65,7 @@ impl Ui {
             .and_then(|n| i32::try_from(n).ok())
             .unwrap_or(-1);
 
-        let mut scope = MultiSelectScope::new(flags, Some(selection_size_i32), items_count);
+        let mut scope = MultiSelectScope::new(self, flags, Some(selection_size_i32), items_count);
 
         // Apply SetAll requests (if any) before submitting items.
         scope.apply_begin_requests_indexed(storage);
@@ -73,9 +73,9 @@ impl Ui {
         // Submit items: for each index we set SelectionUserData and let user
         // draw widgets, passing the current selection state as `is_selected`.
         for idx in 0..items_count {
-            unsafe {
+            self.run_with_bound_context(|| unsafe {
                 sys::igSetNextItemSelectionUserData(idx as sys::ImGuiSelectionUserData);
-            }
+            });
             let is_selected = storage.is_selected(idx);
             render_item(self, idx, is_selected);
         }
@@ -105,14 +105,14 @@ impl Ui {
             .and_then(|n| i32::try_from(n).ok())
             .unwrap_or(-1);
 
-        let mut scope = MultiSelectScope::new(flags, Some(selection_size_i32), row_count);
+        let mut scope = MultiSelectScope::new(self, flags, Some(selection_size_i32), row_count);
 
         scope.apply_begin_requests_indexed(storage);
 
         for row in 0..row_count {
-            unsafe {
+            self.run_with_bound_context(|| unsafe {
                 sys::igSetNextItemSelectionUserData(row as sys::ImGuiSelectionUserData);
-            }
+            });
             // Start a new table row and move to first column.
             self.table_next_row();
             self.table_next_column();
@@ -145,7 +145,7 @@ impl Ui {
     {
         let selection_size_i32 = i32::try_from(selection.len()).unwrap_or(-1);
 
-        let scope = MultiSelectScope::new(flags, Some(selection_size_i32), items_count);
+        let scope = MultiSelectScope::new(self, flags, Some(selection_size_i32), items_count);
 
         unsafe {
             apply_multi_select_requests_basic(
@@ -157,9 +157,9 @@ impl Ui {
         }
 
         for idx in 0..items_count {
-            unsafe {
+            self.run_with_bound_context(|| unsafe {
                 sys::igSetNextItemSelectionUserData(idx as sys::ImGuiSelectionUserData);
-            }
+            });
             let id = id_at_index(idx);
             let is_selected = selection.contains(id);
             render_item(self, idx, id, is_selected);

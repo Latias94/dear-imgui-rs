@@ -16,10 +16,11 @@
 //! # let ui = ctx.frame();
 //! // Create a dockspace
 //! let dockspace_id = ui.get_id("MyDockspace");
-//! DockBuilder::add_node(dockspace_id, DockNodeFlags::NONE);
+//! DockBuilder::add_node(&ui, dockspace_id, DockNodeFlags::NONE);
 //!
 //! // Split the dockspace: 30% left panel, 70% remaining
 //! let (left_panel, main_area) = DockBuilder::split_node(
+//!     &ui,
 //!     dockspace_id,
 //!     SplitDirection::Left,
 //!     0.30
@@ -27,18 +28,19 @@
 //!
 //! // Further split the main area: 70% top, 30% bottom
 //! let (top_area, bottom_area) = DockBuilder::split_node(
+//!     &ui,
 //!     main_area,
 //!     SplitDirection::Down,
 //!     0.30
 //! );
 //!
 //! // Dock windows to specific nodes
-//! DockBuilder::dock_window("Tool Panel", left_panel);
-//! DockBuilder::dock_window("Main View", top_area);
-//! DockBuilder::dock_window("Console", bottom_area);
+//! DockBuilder::dock_window(&ui, "Tool Panel", left_panel);
+//! DockBuilder::dock_window(&ui, "Main View", top_area);
+//! DockBuilder::dock_window(&ui, "Console", bottom_area);
 //!
 //! // Finish the layout
-//! DockBuilder::finish(dockspace_id);
+//! DockBuilder::finish(&ui, dockspace_id);
 //! ```
 
 mod direction;

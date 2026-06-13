@@ -84,7 +84,7 @@ impl<'a, 'tex> ImagePlot<'a, 'tex> {
 }
 
 impl<'a, 'tex> Plot for ImagePlot<'a, 'tex> {
-    fn plot(&self) {
+    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
         if self.validate().is_err() {
             return;
         }
@@ -106,6 +106,7 @@ impl<'a, 'tex> Plot for ImagePlot<'a, 'tex> {
             _TexData: self.tex_ref._TexData,
             _TexID: self.tex_ref._TexID,
         };
+        let _guard = plot_ui.bind();
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -141,8 +142,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = ImagePlot::new(label, texture, bounds_min, bounds_max);
         plot.validate()?;
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 

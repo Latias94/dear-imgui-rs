@@ -12,7 +12,7 @@ impl Ui {
     #[doc(alias = "SetItemKeyOwner")]
     pub fn set_item_key_owner(&self, key: crate::input::Key) -> bool {
         let k: sys::ImGuiKey = key as sys::ImGuiKey;
-        unsafe { sys::igSetItemKeyOwner_Nil(k) }
+        self.run_with_bound_context(|| unsafe { sys::igSetItemKeyOwner_Nil(k) })
     }
 
     /// Set the key owner for the last item with input flags.
@@ -25,6 +25,6 @@ impl Ui {
         flags: crate::input::ItemKeyOwnerFlags,
     ) -> bool {
         let k: sys::ImGuiKey = key as sys::ImGuiKey;
-        unsafe { sys::igSetItemKeyOwner_InputFlags(k, flags.raw()) }
+        self.run_with_bound_context(|| unsafe { sys::igSetItemKeyOwner_InputFlags(k, flags.raw()) })
     }
 }

@@ -17,9 +17,9 @@ pub struct PlotUi<'ui> {
 
 impl<'ui> PlotUi<'ui> {
     #[inline]
-    pub(crate) fn bind(&self) {
+    pub(crate) fn bind(&self) -> super::core::PlotContextBindingGuard {
         self.context.assert_imgui_alive();
-        self.context.binding().bind("dear-implot: PlotUi");
+        self.context.binding().bind("dear-implot: PlotUi")
     }
 
     /// Begin a new plot with the given title
@@ -31,13 +31,14 @@ impl<'ui> PlotUi<'ui> {
         if title.contains('\0') {
             return None;
         }
-        self.bind();
+        let _guard = self.bind();
         let started = with_scratch_txt(title, |ptr| unsafe { sys::ImPlot_BeginPlot(ptr, size, 0) });
 
         if started {
             Some(PlotToken::new(
                 self.context.binding(),
                 self.context.imgui_alive_token(),
+                self.ui,
             ))
         } else {
             None
@@ -54,7 +55,7 @@ impl<'ui> PlotUi<'ui> {
         if title.contains('\0') {
             return None;
         }
-        self.bind();
+        let _guard = self.bind();
         let started = with_scratch_txt(title, |ptr| unsafe {
             sys::ImPlot_BeginPlot(ptr, plot_size, 0)
         });
@@ -63,6 +64,7 @@ impl<'ui> PlotUi<'ui> {
             Some(PlotToken::new(
                 self.context.binding(),
                 self.context.imgui_alive_token(),
+                self.ui,
             ))
         } else {
             None
@@ -82,7 +84,7 @@ impl<'ui> PlotUi<'ui> {
         };
 
         let label = if label.contains('\0') { "" } else { label };
-        self.bind();
+        let _guard = self.bind();
         with_scratch_txt(label, |ptr| unsafe {
             let spec = crate::plots::plot_spec_from(0, crate::plots::PlotDataLayout::DEFAULT);
             sys::ImPlot_PlotLine_doublePtrdoublePtr(
@@ -106,7 +108,7 @@ impl<'ui> PlotUi<'ui> {
         };
 
         let label = if label.contains('\0') { "" } else { label };
-        self.bind();
+        let _guard = self.bind();
         with_scratch_txt(label, |ptr| unsafe {
             let spec = crate::plots::plot_spec_from(0, crate::plots::PlotDataLayout::DEFAULT);
             sys::ImPlot_PlotScatter_doublePtrdoublePtr(
@@ -130,7 +132,7 @@ impl<'ui> PlotUi<'ui> {
         };
 
         let label = if label.contains('\0') { "" } else { label };
-        self.bind();
+        let _guard = self.bind();
         with_scratch_txt(label, |ptr| unsafe {
             let spec = crate::plots::plot_spec_from(0, crate::plots::PlotDataLayout::DEFAULT);
             sys::ImPlot_PlotPolygon_doublePtr(ptr, x_data.as_ptr(), y_data.as_ptr(), count, spec);
@@ -139,7 +141,7 @@ impl<'ui> PlotUi<'ui> {
 
     /// Check if the plot area is hovered
     pub fn is_plot_hovered(&self) -> bool {
-        self.bind();
+        let _guard = self.bind();
         unsafe { sys::ImPlot_IsPlotHovered() }
     }
 
@@ -152,19 +154,19 @@ impl<'ui> PlotUi<'ui> {
             2 => 5,
             _ => 3,
         };
-        self.bind();
+        let _guard = self.bind();
         unsafe { sys::ImPlot_GetPlotMousePos(0, y_axis) }
     }
 
     /// Get the mouse position in plot coordinates for specific axes
     pub fn get_plot_mouse_pos_axes(&self, x_axis: XAxis, y_axis: YAxis) -> sys::ImPlotPoint {
-        self.bind();
+        let _guard = self.bind();
         unsafe { sys::ImPlot_GetPlotMousePos(x_axis as i32, y_axis as i32) }
     }
 
     /// Set current axes for subsequent plot submissions
     pub fn set_axes(&self, x_axis: XAxis, y_axis: YAxis) {
-        self.bind();
+        let _guard = self.bind();
         unsafe { sys::ImPlot_SetAxes(x_axis as i32, y_axis as i32) }
     }
 }

@@ -9,13 +9,13 @@ impl Ui {
     /// must not be used after the context is destroyed.
     #[doc(alias = "GetMainViewport")]
     pub fn main_viewport(&self) -> &crate::platform_io::Viewport {
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             let ptr = sys::igGetMainViewport();
             if ptr.is_null() {
                 panic!("Ui::main_viewport() requires an active ImGui context");
             }
             crate::platform_io::Viewport::from_raw(ptr as *const sys::ImGuiViewport)
-        }
+        })
     }
 
     /// Set the viewport for the next window.
@@ -24,7 +24,7 @@ impl Ui {
     /// Useful when hosting a fullscreen DockSpace window inside the main viewport.
     #[doc(alias = "SetNextWindowViewport")]
     pub fn set_next_window_viewport(&self, viewport_id: Id) {
-        unsafe { sys::igSetNextWindowViewport(viewport_id.into()) }
+        self.run_with_bound_context(|| unsafe { sys::igSetNextWindowViewport(viewport_id.into()) });
     }
 
     /// Returns the viewport of the current window.
@@ -32,19 +32,19 @@ impl Ui {
     /// This requires a current window (i.e. must be called between `Begin`/`End`).
     #[doc(alias = "GetWindowViewport")]
     pub fn window_viewport(&self) -> &crate::platform_io::Viewport {
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             let ptr = sys::igGetWindowViewport();
             if ptr.is_null() {
                 panic!("Ui::window_viewport() requires a current window");
             }
             crate::platform_io::Viewport::from_raw(ptr as *const sys::ImGuiViewport)
-        }
+        })
     }
 
     /// Find a viewport by ID.
     #[doc(alias = "FindViewportByID")]
     pub fn find_viewport_by_id(&self, viewport_id: Id) -> Option<&crate::platform_io::Viewport> {
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             let ptr = sys::igFindViewportByID(viewport_id.raw());
             if ptr.is_null() {
                 None
@@ -53,7 +53,7 @@ impl Ui {
                     ptr as *const sys::ImGuiViewport,
                 ))
             }
-        }
+        })
     }
 
     /// Find a viewport by its platform handle.
@@ -65,7 +65,7 @@ impl Ui {
         &self,
         platform_handle: *mut std::ffi::c_void,
     ) -> Option<&crate::platform_io::Viewport> {
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             let ptr = sys::igFindViewportByPlatformHandle(platform_handle);
             if ptr.is_null() {
                 None
@@ -74,6 +74,6 @@ impl Ui {
                     ptr as *const sys::ImGuiViewport,
                 ))
             }
-        }
+        })
     }
 }

@@ -11,6 +11,9 @@ bool* imnodes_getIOKeyAltPtr();
 // Reset the active editor context to the current ImNodes context's default editor.
 void imnodes_EditorContextResetToDefault();
 
+// Return the active editor context for the current ImNodes context.
+ImNodesEditorContext* imnodes_EditorContextGetCurrent();
+
 // Reset only if the active editor context matches `editor`.
 void imnodes_EditorContextResetToDefaultIfCurrent(ImNodesEditorContext* editor);
 

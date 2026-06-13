@@ -68,6 +68,60 @@ fn frame_token_allows_engine_owned_begin_ui_end_flow() {
 }
 
 #[test]
+fn dropping_frame_token_ends_frame_without_rendering() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+
+    {
+        let frame = ctx.begin_frame();
+        assert_eq!(frame.lifecycle_state(), imgui::FrameLifecycleState::InFrame);
+        frame.ui().text("dropped frame");
+    }
+
+    assert_eq!(
+        ctx.frame_lifecycle_state(),
+        imgui::FrameLifecycleState::Idle
+    );
+    assert!(ctx.draw_data().is_none());
+
+    prepare_context(&mut ctx);
+    let frame = ctx.begin_frame();
+    frame.ui().text("next frame still starts cleanly");
+    let draw_data = frame.render();
+    assert!(draw_data.valid());
+}
+
+#[test]
+fn dropping_frame_token_ends_owner_context_and_restores_previous_current_context() {
+    let _guard = test_guard();
+
+    let mut ctx_a = imgui::Context::create();
+    prepare_context(&mut ctx_a);
+    let raw_a = ctx_a.as_raw();
+    let raw_b = unsafe { imgui::sys::igCreateContext(std::ptr::null_mut()) };
+    assert!(!raw_b.is_null());
+
+    unsafe { dear_imgui_rs::sys::igSetCurrentContext(raw_a) };
+    let frame = ctx_a.begin_frame();
+    frame.ui().text("owner frame");
+
+    unsafe { dear_imgui_rs::sys::igSetCurrentContext(raw_b) };
+    drop(frame);
+
+    assert_eq!(unsafe { dear_imgui_rs::sys::igGetCurrentContext() }, raw_b);
+    unsafe { dear_imgui_rs::sys::igSetCurrentContext(raw_a) };
+    assert_eq!(
+        ctx_a.frame_lifecycle_state(),
+        imgui::FrameLifecycleState::Idle
+    );
+
+    unsafe { imgui::sys::igDestroyContext(raw_b) };
+    drop(ctx_a);
+}
+
+#[test]
 fn render_without_beginning_frame_panics_before_entering_ffi() {
     let _guard = test_guard();
 

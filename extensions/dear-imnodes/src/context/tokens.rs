@@ -16,15 +16,15 @@ impl NodeToken<'_> {
 
         impl Drop for TitleBarToken {
             fn drop(&mut self) {
+                let _guard = self.scope.bind();
                 unsafe {
-                    self.scope.bind();
                     sys::imnodes_EndNodeTitleBar();
                 }
             }
         }
 
+        let _guard = self.scope.bind();
         unsafe {
-            self.scope.bind();
             sys::imnodes_BeginNodeTitleBar();
         }
         let _title_bar = TitleBarToken {
@@ -38,8 +38,8 @@ impl NodeToken<'_> {
 
 impl Drop for NodeToken<'_> {
     fn drop(&mut self) {
+        let _guard = self.scope.bind();
         unsafe {
-            self.scope.bind();
             sys::imnodes_EndNode();
         }
     }
@@ -63,8 +63,8 @@ impl AttributeToken<'_> {
 
 impl Drop for AttributeToken<'_> {
     fn drop(&mut self) {
+        let _guard = self.scope.bind();
         unsafe {
-            self.scope.bind();
             match self.kind {
                 AttrKind::Input => sys::imnodes_EndInputAttribute(),
                 AttrKind::Output => sys::imnodes_EndOutputAttribute(),

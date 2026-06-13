@@ -40,7 +40,7 @@ impl<'ui, 'tex> Image3DByAxesBuilder<'ui, 'tex> {
         self
     }
     pub fn plot(self) {
-        self._ui.bind();
+        let _guard = self._ui.bind();
         let label = self.label.as_ref();
         let label = if label.contains('\0') { "image" } else { label };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
@@ -114,7 +114,7 @@ impl<'ui, 'tex> Image3DByCornersBuilder<'ui, 'tex> {
         self
     }
     pub fn plot(self) {
-        self._ui.bind();
+        let _guard = self._ui.bind();
         let label = self.label.as_ref();
         let label = if label.contains('\0') { "image" } else { label };
         dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
@@ -168,7 +168,7 @@ impl<'ui> Plot3DUi<'ui> {
         axis_u: [f32; 3],
         axis_v: [f32; 3],
     ) -> Image3DByAxesBuilder<'ui, 'tex> {
-        self.bind();
+        let _guard = self.bind();
         let tr = tex.into().raw();
         let tex_ref = sys::ImTextureRef_c {
             _TexData: tr._TexData as *mut sys::ImTextureData,
@@ -202,7 +202,7 @@ impl<'ui> Plot3DUi<'ui> {
         p2: [f32; 3],
         p3: [f32; 3],
     ) -> Image3DByCornersBuilder<'ui, 'tex> {
-        self.bind();
+        let _guard = self.bind();
         let tr = tex.into().raw();
         let tex_ref = sys::ImTextureRef_c {
             _TexData: tr._TexData as *mut sys::ImTextureData,

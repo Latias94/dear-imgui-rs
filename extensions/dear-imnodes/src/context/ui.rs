@@ -6,10 +6,10 @@ impl<'ui> NodesUi<'ui> {
     pub(crate) fn new(ui: &'ui Ui, ctx: &'ui Context) -> Self {
         // Keep ImNodes bound to the ImGui context this ImNodes context was created with.
         // This avoids accidental cross-context use when users manage multiple ImGui contexts.
+        let ui_ctx_raw = ui.with_bound_context(|| unsafe { imgui_sys::igGetCurrentContext() });
         assert_eq!(
-            unsafe { imgui_sys::igGetCurrentContext() },
-            ctx.imgui_ctx_raw,
-            "dear-imnodes: NodesUi must be used with the currently-active ImGui context"
+            ui_ctx_raw, ctx.imgui_ctx_raw,
+            "dear-imnodes: NodesUi requires a Ui from the owning ImGui context"
         );
         let scope = ImNodesScope {
             imgui_ctx_raw: ctx.imgui_ctx_raw,
@@ -18,7 +18,7 @@ impl<'ui> NodesUi<'ui> {
             ctx_alive: ctx.alive_token(),
             editor_raw: None,
         };
-        scope.bind();
+        let _guard = scope.bind();
         Self { _ui: ui, _ctx: ctx }
     }
 

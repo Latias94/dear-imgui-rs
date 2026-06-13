@@ -21,8 +21,7 @@ impl<'ui> TreeNodeToken<'ui> {
 
 impl Drop for TreeNodeToken<'_> {
     fn drop(&mut self) {
-        unsafe {
-            sys::igTreePop();
-        }
+        self._ui
+            .run_with_bound_context(|| unsafe { sys::igTreePop() });
     }
 }

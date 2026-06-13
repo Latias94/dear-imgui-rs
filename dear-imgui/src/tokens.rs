@@ -25,7 +25,6 @@
 //! token.end(); // explicit end instead of relying on Drop
 //! ```
 //!
-#[macro_export]
 /// This is a macro used internally by dear-imgui to create StackTokens
 /// representing various global state in Dear ImGui.
 ///
@@ -46,12 +45,20 @@ macro_rules! create_token {
     ) => {
         #[must_use]
         $(#[$struct_meta])*
-        pub struct $token_name<'a>(std::marker::PhantomData<&'a $crate::Ui>);
+        pub struct $token_name<'a> {
+            ctx: *mut $crate::sys::ImGuiContext,
+            ctx_alive: $crate::ContextAliveToken,
+            _phantom: std::marker::PhantomData<&'a $crate::Ui>,
+        }
 
         impl<'a> $token_name<'a> {
             /// Creates a new token type.
-            pub(crate) fn new(_: &'a $crate::Ui) -> Self {
-                Self(std::marker::PhantomData)
+            pub(crate) fn new(ui: &'a $crate::Ui) -> Self {
+                Self {
+                    ctx: ui.context_raw(),
+                    ctx_alive: ui.context_alive_token(),
+                    _phantom: std::marker::PhantomData,
+                }
             }
 
             $(#[$end_meta])*
@@ -63,8 +70,15 @@ macro_rules! create_token {
 
         impl Drop for $token_name<'_> {
             fn drop(&mut self) {
-                // Execute provided drop expression; callers wrap unsafe if needed
-                $on_drop
+                if self.ctx.is_null() || !self.ctx_alive.is_alive() {
+                    return;
+                }
+
+                let _guard = $crate::context::binding::CTX_MUTEX.lock();
+                $crate::context::binding::with_bound_context(self.ctx, || {
+                    // Execute provided drop expression; callers wrap unsafe if needed.
+                    $on_drop
+                });
             }
         }
     }

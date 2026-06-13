@@ -35,48 +35,48 @@ fn apply_default_layout(ui: &Ui, dockspace_id: Id) {
     let vp = ui.main_viewport();
     let size = vp.size();
 
-    DockBuilder::remove_node(dockspace_id);
-    let root = DockBuilder::add_node(dockspace_id, DockNodeFlags::NONE);
-    DockBuilder::set_node_size(root, [size[0], size[1]]);
+    DockBuilder::remove_node(ui, dockspace_id);
+    let root = DockBuilder::add_node(ui, dockspace_id, DockNodeFlags::NONE);
+    DockBuilder::set_node_size(ui, root, [size[0], size[1]]);
 
     // Layout like the C++ demo comments:
     // Split Main -> Down: Misc (25%) + Main
-    let (misc, main) = DockBuilder::split_node(root, SplitDirection::Down, 0.25);
+    let (misc, main) = DockBuilder::split_node(ui, root, SplitDirection::Down, 0.25);
     // Split Main -> Left: Command (25%) + Main
-    let (command, main) = DockBuilder::split_node(main, SplitDirection::Left, 0.25);
+    let (command, main) = DockBuilder::split_node(ui, main, SplitDirection::Left, 0.25);
     // Split Main -> Down: Command2 (50%) + Main
-    let (command2, main) = DockBuilder::split_node(main, SplitDirection::Down, 0.5);
+    let (command2, main) = DockBuilder::split_node(ui, main, SplitDirection::Down, 0.5);
 
     // Dock windows
-    DockBuilder::dock_window("Main View", main);
-    DockBuilder::dock_window("Command", command);
-    DockBuilder::dock_window("Command 2", command2);
-    DockBuilder::dock_window("Misc", misc);
-    DockBuilder::dock_window("Logs", misc);
+    DockBuilder::dock_window(ui, "Main View", main);
+    DockBuilder::dock_window(ui, "Command", command);
+    DockBuilder::dock_window(ui, "Command 2", command2);
+    DockBuilder::dock_window(ui, "Misc", misc);
+    DockBuilder::dock_window(ui, "Logs", misc);
 
-    DockBuilder::finish(root);
+    DockBuilder::finish(ui, root);
 }
 
 fn apply_alternative_layout(ui: &Ui, dockspace_id: Id) {
     let vp = ui.main_viewport();
     let size = vp.size();
 
-    DockBuilder::remove_node(dockspace_id);
-    let root = DockBuilder::add_node(dockspace_id, DockNodeFlags::NONE);
-    DockBuilder::set_node_size(root, [size[0], size[1]]);
+    DockBuilder::remove_node(ui, dockspace_id);
+    let root = DockBuilder::add_node(ui, dockspace_id, DockNodeFlags::NONE);
+    DockBuilder::set_node_size(ui, root, [size[0], size[1]]);
 
     // Alternative layout: Misc on left (30%), bottom split between Command and Command2
-    let (misc, main) = DockBuilder::split_node(root, SplitDirection::Left, 0.30);
-    let (command, bottom) = DockBuilder::split_node(main, SplitDirection::Down, 0.35);
-    let (command2, main) = DockBuilder::split_node(bottom, SplitDirection::Right, 0.5);
+    let (misc, main) = DockBuilder::split_node(ui, root, SplitDirection::Left, 0.30);
+    let (command, bottom) = DockBuilder::split_node(ui, main, SplitDirection::Down, 0.35);
+    let (command2, main) = DockBuilder::split_node(ui, bottom, SplitDirection::Right, 0.5);
 
-    DockBuilder::dock_window("Main View", main);
-    DockBuilder::dock_window("Command", command);
-    DockBuilder::dock_window("Command 2", command2);
-    DockBuilder::dock_window("Misc", misc);
-    DockBuilder::dock_window("Logs", misc);
+    DockBuilder::dock_window(ui, "Main View", main);
+    DockBuilder::dock_window(ui, "Command", command);
+    DockBuilder::dock_window(ui, "Command 2", command2);
+    DockBuilder::dock_window(ui, "Misc", misc);
+    DockBuilder::dock_window(ui, "Logs", misc);
 
-    DockBuilder::finish(root);
+    DockBuilder::finish(ui, root);
 }
 
 fn main() {

@@ -149,7 +149,7 @@ impl<'a> HeatmapPlot<'a> {
 }
 
 impl<'a> Plot for HeatmapPlot<'a> {
-    fn plot(&self) {
+    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
         if self.validate().is_err() {
             return; // Skip plotting if data is invalid
         }
@@ -160,6 +160,7 @@ impl<'a> Plot for HeatmapPlot<'a> {
             return;
         };
         let label_fmt = self.label_fmt.filter(|s| !s.contains('\0'));
+        let _guard = plot_ui.bind();
         match label_fmt {
             Some(label_fmt) => {
                 let label = if self.label.contains('\0') {
@@ -309,7 +310,7 @@ impl<'a> HeatmapPlotF32<'a> {
 }
 
 impl<'a> Plot for HeatmapPlotF32<'a> {
-    fn plot(&self) {
+    fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
         if self.validate().is_err() {
             return;
         }
@@ -320,6 +321,7 @@ impl<'a> Plot for HeatmapPlotF32<'a> {
             return;
         };
         let label_fmt = self.label_fmt.filter(|s| !s.contains('\0'));
+        let _guard = plot_ui.bind();
         match label_fmt {
             Some(label_fmt) => {
                 let label = if self.label.contains('\0') {
@@ -386,8 +388,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = HeatmapPlot::new(label, values, rows, cols);
         plot.validate()?;
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 
@@ -401,8 +402,7 @@ impl<'ui> crate::PlotUi<'ui> {
     ) -> Result<(), PlotError> {
         let plot = HeatmapPlotF32::new(label, values, rows, cols);
         plot.validate()?;
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 
@@ -422,8 +422,7 @@ impl<'ui> crate::PlotUi<'ui> {
             .with_scale(scale_min, scale_max)
             .with_bounds_points(bounds_min, bounds_max);
         plot.validate()?;
-        self.bind();
-        plot.plot();
+        plot.plot(self);
         Ok(())
     }
 }

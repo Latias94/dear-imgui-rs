@@ -21,9 +21,8 @@ impl<'ui> TableToken<'ui> {
 
 impl<'ui> Drop for TableToken<'ui> {
     fn drop(&mut self) {
-        unsafe {
-            sys::igEndTable();
-        }
+        self._ui
+            .run_with_bound_context(|| unsafe { sys::igEndTable() });
     }
 }
 
@@ -47,9 +46,8 @@ impl<'ui> TableBackgroundChannelToken<'ui> {
 
 impl Drop for TableBackgroundChannelToken<'_> {
     fn drop(&mut self) {
-        unsafe {
-            sys::igTablePopBackgroundChannel();
-        }
+        self._ui
+            .run_with_bound_context(|| unsafe { sys::igTablePopBackgroundChannel() });
     }
 }
 
@@ -73,8 +71,7 @@ impl<'ui> TableColumnChannelToken<'ui> {
 
 impl Drop for TableColumnChannelToken<'_> {
     fn drop(&mut self) {
-        unsafe {
-            sys::igTablePopColumnChannel();
-        }
+        self._ui
+            .run_with_bound_context(|| unsafe { sys::igTablePopColumnChannel() });
     }
 }

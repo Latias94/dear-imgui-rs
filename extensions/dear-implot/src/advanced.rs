@@ -5,6 +5,8 @@
 
 use crate::context::PlotScopeGuard;
 use crate::{AxisFlags, YAxis, plots::PlotError, sys};
+use crate::{PlotContextBinding, PlotUi};
+use dear_imgui_rs::ContextAliveToken;
 use std::ffi::CString;
 use std::marker::PhantomData;
 use std::rc::Rc;
@@ -123,8 +125,8 @@ impl<'a> SubplotGrid<'a> {
         self
     }
 
-    /// Begin the subplot grid and return a token
-    pub fn begin(self) -> Result<SubplotToken<'a>, PlotError> {
+    /// Begin the subplot grid on a bound ImPlot UI and return a token.
+    pub fn begin<'ui>(self, plot_ui: &'ui PlotUi<'ui>) -> Result<SubplotToken<'ui>, PlotError> {
         let rows = count_to_i32("SubplotGrid::begin()", "rows", self.rows)?;
         let cols = count_to_i32("SubplotGrid::begin()", "cols", self.cols)?;
         let title_cstr =
@@ -168,6 +170,7 @@ impl<'a> SubplotGrid<'a> {
             .map(|c| c.as_mut_ptr())
             .unwrap_or(std::ptr::null_mut());
 
+        let _guard = plot_ui.bind();
         let success = unsafe {
             sys::ImPlot_BeginSubplots(
                 title_cstr.as_ptr(),
@@ -182,10 +185,12 @@ impl<'a> SubplotGrid<'a> {
 
         if success {
             Ok(SubplotToken {
+                binding: plot_ui.context.binding(),
+                imgui_alive: plot_ui.context.imgui_alive_token(),
                 _title: title_cstr,
                 _row_ratios: row_ratios,
                 _col_ratios: col_ratios,
-                _phantom: PhantomData,
+                _lifetime: PhantomData,
                 _not_send_or_sync: PhantomData,
             })
         } else {
@@ -197,23 +202,27 @@ impl<'a> SubplotGrid<'a> {
 }
 
 /// Token representing an active subplot grid
-pub struct SubplotToken<'a> {
+pub struct SubplotToken<'ui> {
+    binding: PlotContextBinding,
+    imgui_alive: Option<ContextAliveToken>,
     _title: CString,
     _row_ratios: Option<Vec<f32>>,
     _col_ratios: Option<Vec<f32>>,
-    _phantom: PhantomData<&'a ()>,
+    _lifetime: PhantomData<&'ui PlotUi<'ui>>,
     _not_send_or_sync: PhantomData<Rc<()>>,
 }
 
-impl<'a> SubplotToken<'a> {
+impl SubplotToken<'_> {
     /// End the subplot grid
     pub fn end(self) {
         // The actual ending happens in Drop.
     }
 }
 
-impl<'a> Drop for SubplotToken<'a> {
+impl Drop for SubplotToken<'_> {
     fn drop(&mut self) {
+        assert_imgui_alive(&self.imgui_alive, "dear-implot: SubplotToken");
+        let _guard = self.binding.bind("dear-implot: SubplotToken");
         unsafe {
             sys::ImPlot_EndSubplots();
         }
@@ -256,8 +265,8 @@ impl<'a> MultiAxisPlot<'a> {
         self
     }
 
-    /// Begin the multi-axis plot
-    pub fn begin(self) -> Result<MultiAxisToken<'a>, PlotError> {
+    /// Begin the multi-axis plot on a bound ImPlot UI.
+    pub fn begin<'ui>(self, plot_ui: &'ui PlotUi<'ui>) -> Result<MultiAxisToken<'ui>, PlotError> {
         let title_cstr =
             CString::new(self.title).map_err(|e| PlotError::StringConversion(e.to_string()))?;
 
@@ -286,6 +295,7 @@ impl<'a> MultiAxisPlot<'a> {
             y: size[1],
         };
 
+        let _guard = plot_ui.bind();
         let success = unsafe { sys::ImPlot_BeginPlot(title_cstr.as_ptr(), size_vec, 0) };
 
         if success {
@@ -314,10 +324,13 @@ impl<'a> MultiAxisPlot<'a> {
             }
 
             Ok(MultiAxisToken {
+                binding: plot_ui.context.binding(),
+                imgui_alive: plot_ui.context.imgui_alive_token(),
                 _title: title_cstr,
                 _axis_labels: axis_labels,
                 _scope: PlotScopeGuard::new(),
-                _phantom: PhantomData,
+                _lifetime: PhantomData,
+                _not_send_or_sync: PhantomData,
             })
         } else {
             Err(PlotError::PlotCreationFailed(
@@ -328,16 +341,20 @@ impl<'a> MultiAxisPlot<'a> {
 }
 
 /// Token representing an active multi-axis plot
-pub struct MultiAxisToken<'a> {
+pub struct MultiAxisToken<'ui> {
+    binding: PlotContextBinding,
+    imgui_alive: Option<ContextAliveToken>,
     _title: CString,
     _axis_labels: Vec<CString>,
     _scope: PlotScopeGuard,
-    _phantom: PhantomData<&'a ()>,
+    _lifetime: PhantomData<&'ui PlotUi<'ui>>,
+    _not_send_or_sync: PhantomData<Rc<()>>,
 }
 
-impl<'a> MultiAxisToken<'a> {
+impl MultiAxisToken<'_> {
     /// Set the current Y-axis for subsequent plots
     pub fn set_y_axis(&self, axis: YAxis) {
+        let _guard = self.binding.bind("dear-implot: MultiAxisToken");
         unsafe {
             sys::ImPlot_SetAxes(
                 0, // ImAxis_X1
@@ -353,6 +370,7 @@ impl<'a> MultiAxisToken<'a> {
     /// `axis` must be a valid ImPlot Y-axis value for the active plot. Passing an
     /// out-of-range value lets ImPlot index internal axis arrays out of bounds.
     pub unsafe fn set_y_axis_unchecked(&self, axis: sys::ImAxis) {
+        let _guard = self.binding.bind("dear-implot: MultiAxisToken");
         unsafe {
             sys::ImPlot_SetAxes(
                 0, // ImAxis_X1
@@ -367,8 +385,10 @@ impl<'a> MultiAxisToken<'a> {
     }
 }
 
-impl<'a> Drop for MultiAxisToken<'a> {
+impl Drop for MultiAxisToken<'_> {
     fn drop(&mut self) {
+        assert_imgui_alive(&self.imgui_alive, "dear-implot: MultiAxisToken");
+        let _guard = self.binding.bind("dear-implot: MultiAxisToken");
         unsafe {
             sys::ImPlot_EndPlot();
         }
@@ -380,17 +400,23 @@ pub struct LegendManager;
 
 impl LegendManager {
     /// Setup legend with custom position and flags
-    pub fn setup(location: LegendLocation, flags: LegendFlags) {
+    pub fn setup(plot_ui: &PlotUi<'_>, location: LegendLocation, flags: LegendFlags) {
+        let _guard = plot_ui.bind();
         unsafe {
             sys::ImPlot_SetupLegend(location as i32, flags.bits() as i32);
         }
     }
 
-    /// Begin a custom legend
-    pub fn begin_custom(label: &str, _size: [f32; 2]) -> Result<LegendToken, PlotError> {
+    /// Begin a custom legend popup on a bound ImPlot UI.
+    pub fn begin_custom<'ui>(
+        plot_ui: &'ui PlotUi<'ui>,
+        label: &str,
+        _size: [f32; 2],
+    ) -> Result<LegendToken<'ui>, PlotError> {
         let label_cstr =
             CString::new(label).map_err(|e| PlotError::StringConversion(e.to_string()))?;
 
+        let _guard = plot_ui.bind();
         let success = unsafe {
             sys::ImPlot_BeginLegendPopup(
                 label_cstr.as_ptr(),
@@ -400,7 +426,10 @@ impl LegendManager {
 
         if success {
             Ok(LegendToken {
+                binding: plot_ui.context.binding(),
+                imgui_alive: plot_ui.context.imgui_alive_token(),
                 _label: label_cstr,
+                _lifetime: PhantomData,
                 _not_send_or_sync: PhantomData,
             })
         } else {
@@ -441,23 +470,34 @@ bitflags::bitflags! {
 }
 
 /// Token representing an active legend
-pub struct LegendToken {
+pub struct LegendToken<'ui> {
+    binding: PlotContextBinding,
+    imgui_alive: Option<ContextAliveToken>,
     _label: CString,
+    _lifetime: PhantomData<&'ui PlotUi<'ui>>,
     _not_send_or_sync: PhantomData<Rc<()>>,
 }
 
-impl LegendToken {
+impl LegendToken<'_> {
     /// End the legend
     pub fn end(self) {
         // The actual ending happens in Drop.
     }
 }
 
-impl Drop for LegendToken {
+impl Drop for LegendToken<'_> {
     fn drop(&mut self) {
+        assert_imgui_alive(&self.imgui_alive, "dear-implot: LegendToken");
+        let _guard = self.binding.bind("dear-implot: LegendToken");
         unsafe {
             sys::ImPlot_EndLegendPopup();
         }
+    }
+}
+
+fn assert_imgui_alive(alive: &Option<ContextAliveToken>, caller: &str) {
+    if let Some(alive) = alive {
+        assert!(alive.is_alive(), "{caller}: ImGui context has been dropped");
     }
 }
 
@@ -469,7 +509,10 @@ mod tests {
 
     fn test_guard() -> std::sync::MutexGuard<'static, ()> {
         static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
-        GUARD.get_or_init(|| Mutex::new(())).lock().unwrap()
+        GUARD
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
     }
 
     fn setup_context() -> (dear_imgui_rs::Context, PlotContext) {
@@ -499,16 +542,17 @@ mod tests {
     fn subplot_grid_rejects_invalid_counts_before_ffi() {
         let _guard = test_guard();
         let (mut imgui, _plot) = setup_context();
-        let _ui = imgui.frame();
+        let ui = imgui.frame();
+        let plot_ui = _plot.get_plot_ui(&ui);
 
-        let rows = expect_invalid_data(SubplotGrid::new("bad_rows", 0, 1).begin());
+        let rows = expect_invalid_data(SubplotGrid::new("bad_rows", 0, 1).begin(&plot_ui));
         assert!(rows.contains("rows must be positive"));
 
-        let cols = expect_invalid_data(SubplotGrid::new("bad_cols", 1, 0).begin());
+        let cols = expect_invalid_data(SubplotGrid::new("bad_cols", 1, 0).begin(&plot_ui));
         assert!(cols.contains("cols must be positive"));
 
         let overflow = expect_invalid_data(
-            SubplotGrid::new("too_many_rows", i32::MAX as usize + 1, 1).begin(),
+            SubplotGrid::new("too_many_rows", i32::MAX as usize + 1, 1).begin(&plot_ui),
         );
         assert!(overflow.contains("rows exceeded"));
     }
@@ -517,12 +561,13 @@ mod tests {
     fn subplot_grid_ratio_lengths_follow_usize_counts() {
         let _guard = test_guard();
         let (mut imgui, _plot) = setup_context();
-        let _ui = imgui.frame();
+        let ui = imgui.frame();
+        let plot_ui = _plot.get_plot_ui(&ui);
 
         let err = expect_invalid_data(
             SubplotGrid::new("bad_ratios", 2usize, 1usize)
                 .with_row_ratios(&[1.0])
-                .begin(),
+                .begin(&plot_ui),
         );
 
         assert!(err.contains("row_ratios length must equal rows (2)"));

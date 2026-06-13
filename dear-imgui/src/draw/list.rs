@@ -88,17 +88,21 @@ impl<'ui> DrawListMut<'ui> {
         Self::from_raw(draw_list)
     }
 
-    pub(crate) fn window(_ui: &'ui crate::Ui) -> Self {
-        Self::from_raw(unsafe { sys::igGetWindowDrawList() })
+    pub(crate) fn window(ui: &'ui crate::Ui) -> Self {
+        ui.run_with_bound_context(|| Self::from_raw(unsafe { sys::igGetWindowDrawList() }))
     }
 
-    pub(crate) fn background(_ui: &'ui crate::Ui) -> Self {
-        let viewport = unsafe { sys::igGetMainViewport() };
-        Self::from_raw(unsafe { sys::igGetBackgroundDrawList(viewport) })
+    pub(crate) fn background(ui: &'ui crate::Ui) -> Self {
+        ui.run_with_bound_context(|| {
+            let viewport = unsafe { sys::igGetMainViewport() };
+            Self::from_raw(unsafe { sys::igGetBackgroundDrawList(viewport) })
+        })
     }
 
-    pub(crate) fn foreground(_ui: &'ui crate::Ui) -> Self {
-        let viewport = unsafe { sys::igGetMainViewport() };
-        Self::from_raw(unsafe { sys::igGetForegroundDrawList_ViewportPtr(viewport) })
+    pub(crate) fn foreground(ui: &'ui crate::Ui) -> Self {
+        ui.run_with_bound_context(|| {
+            let viewport = unsafe { sys::igGetMainViewport() };
+            Self::from_raw(unsafe { sys::igGetForegroundDrawList_ViewportPtr(viewport) })
+        })
     }
 }

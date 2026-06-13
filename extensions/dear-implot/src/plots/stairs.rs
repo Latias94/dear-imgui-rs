@@ -85,10 +85,11 @@ impl<'a> StairsPlot<'a> {
     }
 
     /// Plot the stairs
-    pub fn plot(self) {
+    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
         let Ok(count) = i32::try_from(self.x_data.len()) else {
             return;
         };
+        let _guard = plot_ui.bind();
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -184,10 +185,11 @@ impl<'a> StairsPlotF32<'a> {
     }
 
     /// Plot the stairs
-    pub fn plot(self) {
+    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
         let Ok(count) = i32::try_from(self.x_data.len()) else {
             return;
         };
+        let _guard = plot_ui.bind();
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,
@@ -291,10 +293,11 @@ impl<'a> SimpleStairsPlot<'a> {
     }
 
     /// Plot the stairs
-    pub fn plot(self) {
+    pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
         let Ok(count) = i32::try_from(self.y_data.len()) else {
             return;
         };
+        let _guard = plot_ui.bind();
         with_plot_str_or_empty(self.label, |label_ptr| unsafe {
             let spec = plot_spec_with_style(
                 self.style,

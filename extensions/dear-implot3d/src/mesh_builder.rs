@@ -22,7 +22,7 @@ impl<'ui> Mesh3DBuilder<'ui> {
         self
     }
     pub fn plot(self) {
-        self._ui.bind();
+        let _guard = self._ui.bind();
         let Some(vtx_count) = len_i32(self.vertices.len()) else {
             return;
         };
@@ -69,7 +69,7 @@ impl<'ui> Plot3DUi<'ui> {
         vertices: &'ui [[f32; 3]],
         indices: &'ui [u32],
     ) -> Mesh3DBuilder<'ui> {
-        self.bind();
+        let _guard = self.bind();
         Mesh3DBuilder {
             _ui: self,
             label: label.into(),
