@@ -36,27 +36,27 @@ Typical use cases:
 Platform-only usage (SDL3 + WGPU/Glow, no official OpenGL3 renderer):
 
 ```toml
-dear-imgui-sdl3 = { version = "0.14.1", default-features = false }
+dear-imgui-sdl3 = { version = "0.15.0", default-features = false }
 ```
 
 Enable the official OpenGL3 renderer:
 
 ```toml
-dear-imgui-sdl3 = { version = "0.14.1", features = ["opengl3-renderer"] }
+dear-imgui-sdl3 = { version = "0.15.0", features = ["opengl3-renderer"] }
 ```
 
 Enable the official SDLRenderer3 renderer:
 
 ```toml
-dear-imgui-sdl3 = { version = "0.14.1", features = ["sdlrenderer3-renderer"] }
+dear-imgui-sdl3 = { version = "0.15.0", features = ["sdlrenderer3-renderer"] }
 ```
 
 ## Compatibility
 
 | Item          | Version  |
 |---------------|----------|
-| Crate         | 0.14.1   |
-| dear-imgui-rs | 0.14.1   |
+| Crate         | 0.15.0   |
+| dear-imgui-rs | 0.15.0   |
 | SDL3 crate    | 0.18.4   |
 | sdl3-sys      | 0.6      |
 
@@ -355,7 +355,7 @@ Example:
 
 ```toml
 [dependencies]
-dear-imgui-sdl3 = { version = "0.14.1", features = ["opengl3-renderer"] }
+dear-imgui-sdl3 = { version = "0.15.0", features = ["opengl3-renderer"] }
 sdl3 = { version = "0.18", features = ["build-from-source"] }
 ```
 

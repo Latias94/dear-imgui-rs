@@ -1,7 +1,41 @@
 use crate::sys;
+use std::marker::PhantomData;
 
 use super::super::util::finite_vec2;
-use super::{DrawListClipRectGuard, DrawListMut};
+use super::DrawListMut;
+
+/// Tracks a clip rectangle pushed onto a draw-list clip stack.
+///
+/// The clip rectangle is popped when the token is dropped or when [`Self::pop`]
+/// is called.
+#[must_use]
+pub struct DrawListClipRectToken<'draw_list> {
+    draw_list: *mut sys::ImDrawList,
+    _phantom: PhantomData<&'draw_list ()>,
+}
+
+impl<'draw_list> DrawListClipRectToken<'draw_list> {
+    fn new(draw_list: *mut sys::ImDrawList) -> Self {
+        Self {
+            draw_list,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Pop the clip rectangle immediately instead of waiting for drop.
+    #[doc(alias = "PopClipRect")]
+    pub fn pop(self) {}
+
+    /// Pop the clip rectangle immediately instead of waiting for drop.
+    #[doc(alias = "PopClipRect")]
+    pub fn end(self) {}
+}
+
+impl Drop for DrawListClipRectToken<'_> {
+    fn drop(&mut self) {
+        unsafe { sys::ImDrawList_PopClipRect(self.draw_list) }
+    }
+}
 
 impl<'ui> DrawListMut<'ui> {
     /// Push a clip rectangle, optionally intersecting with the current clip rect.
@@ -11,7 +45,7 @@ impl<'ui> DrawListMut<'ui> {
         clip_rect_min: impl Into<sys::ImVec2>,
         clip_rect_max: impl Into<sys::ImVec2>,
         intersect_with_current: bool,
-    ) {
+    ) -> DrawListClipRectToken<'_> {
         let clip_rect_min = finite_vec2(
             "DrawListMut::push_clip_rect()",
             "clip_rect_min",
@@ -30,19 +64,15 @@ impl<'ui> DrawListMut<'ui> {
                 clip_rect_max,
                 intersect_with_current,
             )
-        }
+        };
+        DrawListClipRectToken::new(self.draw_list)
     }
 
     /// Push a full-screen clip rectangle.
     #[doc(alias = "PushClipRectFullScreen")]
-    pub fn push_clip_rect_full_screen(&self) {
-        unsafe { sys::ImDrawList_PushClipRectFullScreen(self.draw_list) }
-    }
-
-    /// Pop the last clip rectangle.
-    #[doc(alias = "PopClipRect")]
-    pub fn pop_clip_rect(&self) {
-        unsafe { sys::ImDrawList_PopClipRect(self.draw_list) }
+    pub fn push_clip_rect_full_screen(&self) -> DrawListClipRectToken<'_> {
+        unsafe { sys::ImDrawList_PushClipRectFullScreen(self.draw_list) };
+        DrawListClipRectToken::new(self.draw_list)
     }
 
     /// Get current minimum clip rectangle point.
@@ -58,16 +88,16 @@ impl<'ui> DrawListMut<'ui> {
     }
 
     /// Convenience: push a clip rect, run f, pop.
-    pub fn with_clip_rect<F>(
+    pub fn with_clip_rect<F, R>(
         &self,
         clip_rect_min: impl Into<sys::ImVec2>,
         clip_rect_max: impl Into<sys::ImVec2>,
         f: F,
-    ) where
-        F: FnOnce(),
+    ) -> R
+    where
+        F: FnOnce() -> R,
     {
-        self.push_clip_rect(clip_rect_min, clip_rect_max, false);
-        let _clip_rect_guard = DrawListClipRectGuard { draw_list: self };
-        f();
+        let _clip_rect = self.push_clip_rect(clip_rect_min, clip_rect_max, false);
+        f()
     }
 }

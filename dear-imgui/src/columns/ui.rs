@@ -10,7 +10,7 @@ use super::resolve::{
     resolve_column_query_ref,
 };
 use super::state::{assert_current_columns, assert_no_current_columns, current_columns};
-use super::token::ColumnsToken;
+use super::token::{ColumnsBackgroundToken, ColumnsToken};
 
 /// # Columns
 impl Ui {
@@ -33,28 +33,22 @@ impl Ui {
     /// * `count` - Number of columns (must be >= 1)
     /// * `flags` - Column flags
     #[doc(alias = "BeginColumns")]
-    pub fn begin_columns(&self, id: impl AsRef<str>, count: usize, flags: OldColumnFlags) {
-        let count = columns_count_to_i32(count, "Ui::begin_columns()");
-        validate_old_column_flags("Ui::begin_columns()", flags);
-        assert_no_current_columns("Ui::begin_columns()");
-        unsafe { sys::igBeginColumns(self.scratch_txt(id), count, flags.bits()) }
-    }
-
-    /// Begin columns layout with advanced flags and return a token that ends columns on drop.
-    #[doc(alias = "BeginColumns")]
-    pub fn begin_columns_token(
+    pub fn begin_columns(
         &self,
         id: impl AsRef<str>,
         count: usize,
         flags: OldColumnFlags,
     ) -> ColumnsToken<'_> {
-        self.begin_columns(id, count, flags);
+        let count = columns_count_to_i32(count, "Ui::begin_columns()");
+        validate_old_column_flags("Ui::begin_columns()", flags);
+        assert_no_current_columns("Ui::begin_columns()");
+        unsafe { sys::igBeginColumns(self.scratch_txt(id), count, flags.bits()) };
         ColumnsToken { ui: self }
     }
 
     /// End columns layout.
     #[doc(alias = "EndColumns")]
-    pub fn end_columns(&self) {
+    pub(crate) fn end_columns(&self) {
         assert_current_columns("Ui::end_columns()");
         unsafe { sys::igEndColumns() }
     }
@@ -148,23 +142,28 @@ impl Ui {
     /// Push column clip rect for the given column index.
     /// This is useful for custom drawing within columns.
     #[doc(alias = "PushColumnClipRect")]
-    pub fn push_column_clip_rect(&self, column: impl Into<OldColumnIndex>) {
+    pub fn push_column_clip_rect(
+        &self,
+        column: impl Into<OldColumnIndex>,
+    ) -> crate::layout::ClipRectToken<'_> {
         let columns = assert_current_columns("Ui::push_column_clip_rect()");
         let column_index =
             assert_valid_column_in(columns, column.into(), "Ui::push_column_clip_rect()");
-        unsafe { sys::igPushColumnClipRect(column_index) }
+        unsafe { sys::igPushColumnClipRect(column_index) };
+        crate::layout::ClipRectToken::new(self)
     }
 
     /// Push columns background for drawing.
     #[doc(alias = "PushColumnsBackground")]
-    pub fn push_columns_background(&self) {
+    pub fn push_columns_background(&self) -> ColumnsBackgroundToken<'_> {
         assert_current_columns("Ui::push_columns_background()");
-        unsafe { sys::igPushColumnsBackground() }
+        unsafe { sys::igPushColumnsBackground() };
+        ColumnsBackgroundToken { ui: self }
     }
 
     /// Pop columns background.
     #[doc(alias = "PopColumnsBackground")]
-    pub fn pop_columns_background(&self) {
+    pub(crate) fn pop_columns_background(&self) {
         assert_current_columns("Ui::pop_columns_background()");
         unsafe { sys::igPopColumnsBackground() }
     }

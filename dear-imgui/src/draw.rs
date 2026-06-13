@@ -38,6 +38,8 @@ pub use color::ImColor32;
 pub use counts::{
     DrawCornerFlags, DrawListFlags, DrawNgonSegmentCount, DrawSegmentCount, PolylineFlags,
 };
+#[allow(unused_imports)]
+pub use list::DrawListClipRectToken;
 pub use list::{DrawListMut, DrawListTextureToken};
 #[allow(unused_imports)]
 pub use primitives::{BezierCurve, Circle, Line, Polyline, Rect, Triangle};

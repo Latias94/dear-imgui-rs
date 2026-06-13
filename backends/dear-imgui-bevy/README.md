@@ -26,7 +26,7 @@ Use the same Bevy version as the backend:
 ```toml
 [dependencies]
 bevy = "=0.19.0-rc.2"
-dear-imgui-bevy = { version = "0.14", features = ["render"] }
+dear-imgui-bevy = { version = "0.15", features = ["render"] }
 dear-imgui-rs = "0.14"
 ```
 

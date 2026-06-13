@@ -1,6 +1,6 @@
 [package]
 name = "dear-imgui-bevy"
-version = "0.14.1"
+version = "0.15.0"
 edition.workspace = true
 rust-version = "1.95.0"
 description = "Experimental Bevy-native backend for dear-imgui-rs on Bevy 0.19.0-rc.2"
@@ -13,7 +13,7 @@ categories.workspace = true
 keywords.workspace = true
 
 [dependencies]
-dear-imgui-rs = { path = "../../dear-imgui", version = "0.14" }
+dear-imgui-rs = { path = "../../dear-imgui", version = "0.15" }
 
 # The first proof is intentionally pinned to the checked reference train instead of a floating
 # prerelease. Bevy subcrates use semver-compatible internal dependencies, so exact pin anchors keep
@@ -48,9 +48,9 @@ bytemuck = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
 bevy = { version = "=0.19.0-rc.2", default-features = false, features = ["2d", "default_platform"] }
-dear-imguizmo = { path = "../../extensions/dear-imguizmo", version = "0.14" }
-dear-imnodes = { path = "../../extensions/dear-imnodes", version = "0.14" }
-dear-implot = { path = "../../extensions/dear-implot", version = "0.14" }
+dear-imguizmo = { path = "../../extensions/dear-imguizmo", version = "0.15" }
+dear-imnodes = { path = "../../extensions/dear-imnodes", version = "0.15" }
+dear-implot = { path = "../../extensions/dear-implot", version = "0.15" }
 
 [features]
 default = []

@@ -5,7 +5,7 @@ use crate::{Ui, create_token, sys};
 // ============================================================================
 
 create_token!(
-    /// Tracks a button repeat item flag pushed with [`Ui::push_button_repeat_token`].
+    /// Tracks a button repeat item flag pushed with [`Ui::push_button_repeat`].
     pub struct ButtonRepeatToken<'ui>;
 
     /// Pops the button repeat item flag.
@@ -24,20 +24,9 @@ impl Ui {
     /// Enable/disable repeating behavior for subsequent buttons.
     ///
     /// Internally uses `PushItemFlag(ImGuiItemFlags_ButtonRepeat, repeat)`.
-    ///
-    /// Prefer [`Self::push_button_repeat_token`] or [`Self::with_button_repeat`]
-    /// for scoped usage that remains balanced if a panic unwinds through the
-    /// scope. This manual API is kept for compatibility with existing
-    /// push/pop-style code.
     #[doc(alias = "PushButtonRepeat")]
-    pub fn push_button_repeat(&self, repeat: bool) {
-        unsafe { sys::igPushItemFlag(sys::ImGuiItemFlags_ButtonRepeat as i32, repeat) }
-    }
-
-    /// Push a button repeat item flag and return an RAII token that pops it on drop.
-    #[doc(alias = "PushButtonRepeat")]
-    pub fn push_button_repeat_token(&self, repeat: bool) -> ButtonRepeatToken<'_> {
-        self.push_button_repeat(repeat);
+    pub fn push_button_repeat(&self, repeat: bool) -> ButtonRepeatToken<'_> {
+        unsafe { sys::igPushItemFlag(sys::ImGuiItemFlags_ButtonRepeat as i32, repeat) };
         ButtonRepeatToken::new(self)
     }
 
@@ -46,13 +35,7 @@ impl Ui {
     /// The flag is popped during unwinding if `f` panics.
     #[doc(alias = "PushButtonRepeat", alias = "PopButtonRepeat")]
     pub fn with_button_repeat<R>(&self, repeat: bool, f: impl FnOnce() -> R) -> R {
-        let _repeat = self.push_button_repeat_token(repeat);
+        let _repeat = self.push_button_repeat(repeat);
         f()
-    }
-
-    /// Pop the button repeat item flag.
-    #[doc(alias = "PopButtonRepeat")]
-    pub fn pop_button_repeat(&self) {
-        unsafe { sys::igPopItemFlag() }
     }
 }

@@ -13,6 +13,7 @@ mod tests;
 mod text;
 mod texture;
 
+pub use clip::DrawListClipRectToken;
 pub use texture::DrawListTextureToken;
 
 thread_local! {
@@ -36,16 +37,6 @@ pub(super) struct ChannelsSplitMergeGuard<'ui> {
 impl Drop for ChannelsSplitMergeGuard<'_> {
     fn drop(&mut self) {
         unsafe { sys::ImDrawList_ChannelsMerge(self.draw_list.draw_list) };
-    }
-}
-
-pub(super) struct DrawListClipRectGuard<'ui> {
-    pub(super) draw_list: &'ui DrawListMut<'ui>,
-}
-
-impl Drop for DrawListClipRectGuard<'_> {
-    fn drop(&mut self) {
-        unsafe { sys::ImDrawList_PopClipRect(self.draw_list.draw_list) };
     }
 }
 

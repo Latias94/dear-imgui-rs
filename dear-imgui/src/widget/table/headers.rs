@@ -92,38 +92,11 @@ impl Ui {
     }
 
     /// Push background draw channel for the current table and return a token to pop it.
-    #[doc(alias = "TablePushBackgroundChannel")]
-    pub fn table_push_background_channel(&self) {
-        assert_current_table_cell("Ui::table_push_background_channel()");
-        unsafe { sys::igTablePushBackgroundChannel() }
-    }
-
-    /// Pop background draw channel for the current table.
-    #[doc(alias = "TablePopBackgroundChannel")]
-    pub fn table_pop_background_channel(&self) {
-        assert_current_table_cell("Ui::table_pop_background_channel()");
-        unsafe { sys::igTablePopBackgroundChannel() }
-    }
-
-    /// Push column draw channel for the given column index and return a token to pop it.
-    #[doc(alias = "TablePushColumnChannel")]
-    pub fn table_push_column_channel(&self, column: impl Into<TableColumnIndex>) {
-        let column_n = assert_valid_table_column(column.into(), "Ui::table_push_column_channel()");
-        unsafe { sys::igTablePushColumnChannel(column_n) }
-    }
-
-    /// Pop column draw channel.
-    #[doc(alias = "TablePopColumnChannel")]
-    pub fn table_pop_column_channel(&self) {
-        assert_current_table_cell("Ui::table_pop_column_channel()");
-        unsafe { sys::igTablePopColumnChannel() }
-    }
-
-    /// Push background draw channel for the current table and return a token to pop it.
     #[must_use = "dropping the token pops the table background draw channel immediately"]
     #[doc(alias = "TablePushBackgroundChannel")]
     pub fn table_background_channel(&self) -> TableBackgroundChannelToken<'_> {
-        self.table_push_background_channel();
+        assert_current_table_cell("Ui::table_background_channel()");
+        unsafe { sys::igTablePushBackgroundChannel() };
         TableBackgroundChannelToken::new(self)
     }
 
@@ -134,7 +107,9 @@ impl Ui {
         &self,
         column: impl Into<TableColumnIndex>,
     ) -> TableColumnChannelToken<'_> {
-        self.table_push_column_channel(column);
+        assert_current_table_cell("Ui::table_column_channel()");
+        let column_n = assert_valid_table_column(column.into(), "Ui::table_column_channel()");
+        unsafe { sys::igTablePushColumnChannel(column_n) };
         TableColumnChannelToken::new(self)
     }
 

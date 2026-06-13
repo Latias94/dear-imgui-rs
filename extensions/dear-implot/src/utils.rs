@@ -392,15 +392,31 @@ pub fn get_plot_draw_list() -> *mut sys::ImDrawList {
     unsafe { sys::ImPlot_GetPlotDrawList() }
 }
 
-/// Push plot clip rect
-pub fn push_plot_clip_rect(expand: f32) {
-    assert_finite_f32("push_plot_clip_rect()", "expand", expand);
-    unsafe { sys::ImPlot_PushPlotClipRect(expand) }
+/// Token for a pushed ImPlot plot clip rect.
+#[must_use]
+pub struct PlotClipRectToken;
+
+impl PlotClipRectToken {
+    /// Pop the plot clip rect immediately instead of waiting for drop.
+    pub fn pop(self) {}
+
+    /// Pop the plot clip rect immediately instead of waiting for drop.
+    pub fn end(self) {}
 }
 
-/// Pop plot clip rect
-pub fn pop_plot_clip_rect() {
-    unsafe { sys::ImPlot_PopPlotClipRect() }
+impl Drop for PlotClipRectToken {
+    fn drop(&mut self) {
+        unsafe { sys::ImPlot_PopPlotClipRect() }
+    }
+}
+
+/// Push plot clip rect.
+///
+/// The returned token pops the clip rect when dropped.
+pub fn push_plot_clip_rect(expand: f32) -> PlotClipRectToken {
+    assert_finite_f32("push_plot_clip_rect()", "expand", expand);
+    unsafe { sys::ImPlot_PushPlotClipRect(expand) };
+    PlotClipRectToken
 }
 
 /// Result of a drag interaction

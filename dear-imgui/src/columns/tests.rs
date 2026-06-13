@@ -18,7 +18,7 @@ mod tests {
         ui.window("columns_resize_test").build(|| {
             assert!(!ui.is_any_column_resizing());
 
-            let _columns = ui.begin_columns_token("legacy_columns", 2, OldColumnFlags::NONE);
+            let _columns = ui.begin_columns("legacy_columns", 2, OldColumnFlags::NONE);
             let window = unsafe { crate::sys::igGetCurrentWindowRead() };
             assert!(!window.is_null());
 
@@ -48,15 +48,15 @@ mod tests {
             );
             assert!(
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let _columns = ui.begin_columns_token("bad_columns", 0, OldColumnFlags::NONE);
+                    let _columns = ui.begin_columns("bad_columns", 0, OldColumnFlags::NONE);
                 }))
                 .is_err()
             );
 
-            let _columns = ui.begin_columns_token("outer_columns", 2, OldColumnFlags::NONE);
+            let _columns = ui.begin_columns("outer_columns", 2, OldColumnFlags::NONE);
             assert!(
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let _nested = ui.begin_columns_token("nested_columns", 2, OldColumnFlags::NONE);
+                    let _nested = ui.begin_columns("nested_columns", 2, OldColumnFlags::NONE);
                 }))
                 .is_err()
             );
@@ -69,7 +69,7 @@ mod tests {
         let ui = ctx.frame();
 
         ui.window("columns_index_bounds").build(|| {
-            let _columns = ui.begin_columns_token("legacy_columns", 2, OldColumnFlags::NONE);
+            let _columns = ui.begin_columns("legacy_columns", 2, OldColumnFlags::NONE);
 
             assert!(
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -91,7 +91,7 @@ mod tests {
             );
             assert!(
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    ui.push_column_clip_rect(2);
+                    let _ = ui.push_column_clip_rect(2);
                 }))
                 .is_err()
             );
@@ -106,16 +106,13 @@ mod tests {
         ui.window("columns_numeric_bounds").build(|| {
             assert!(
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let _columns = ui.begin_columns_token(
-                        "bad_flags",
-                        2,
-                        OldColumnFlags::from_bits_retain(1 << 16),
-                    );
+                    let _columns =
+                        ui.begin_columns("bad_flags", 2, OldColumnFlags::from_bits_retain(1 << 16));
                 }))
                 .is_err()
             );
 
-            let _columns = ui.begin_columns_token("legacy_columns", 2, OldColumnFlags::NONE);
+            let _columns = ui.begin_columns("legacy_columns", 2, OldColumnFlags::NONE);
             assert_eq!(ui.column_count(), 2);
             assert_eq!(ui.current_column_index(), OldColumnIndex::ZERO);
 

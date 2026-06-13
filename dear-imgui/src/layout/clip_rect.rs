@@ -18,7 +18,7 @@ impl Ui {
         min: impl Into<[f32; 2]>,
         max: impl Into<[f32; 2]>,
         intersect_with_current: bool,
-    ) {
+    ) -> ClipRectToken<'_> {
         let min = min.into();
         let max = max.into();
         assert_finite_vec2("Ui::push_clip_rect()", "min", min);
@@ -31,13 +31,8 @@ impl Ui {
             x: max[0],
             y: max[1],
         };
-        unsafe { sys::igPushClipRect(min_v, max_v, intersect_with_current) }
-    }
-
-    /// Pop a clipping rectangle from the stack.
-    #[doc(alias = "PopClipRect")]
-    pub fn pop_clip_rect(&self) {
-        unsafe { sys::igPopClipRect() }
+        unsafe { sys::igPushClipRect(min_v, max_v, intersect_with_current) };
+        ClipRectToken::new(self)
     }
 
     /// Run a closure with a clip rect pushed and automatically popped.
@@ -48,8 +43,7 @@ impl Ui {
         intersect_with_current: bool,
         f: impl FnOnce() -> R,
     ) -> R {
-        self.push_clip_rect(min, max, intersect_with_current);
-        let _t = ClipRectToken::new(self);
+        let _t = self.push_clip_rect(min, max, intersect_with_current);
         f()
     }
 

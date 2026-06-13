@@ -148,13 +148,12 @@ pub(super) fn draw_node<'ui>(
     ];
     if custom_min[0] < custom_max[0] && custom_min[1] < custom_max[1] {
         if let Some(cb) = custom.as_deref_mut() {
-            ui.push_clip_rect(custom_min, custom_max, true);
+            let _clip_rect = ui.push_clip_rect(custom_min, custom_max, true);
             (*cb)(
                 dl,
                 [custom_min[0], custom_min[1], custom_max[0], custom_max[1]],
                 node.id,
             );
-            ui.pop_clip_rect();
         }
     }
 }

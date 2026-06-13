@@ -50,11 +50,15 @@ impl Ui {
         unsafe { crate::sys::igGetFontSize() }
     }
 
-    /// Push a font with dynamic size support (v1.92+ feature)
+    /// Push a font with dynamic size support (v1.92+ feature).
     ///
     /// This allows changing font size at runtime without pre-loading different sizes.
     /// Pass None for font to use the current font with the new size.
-    pub fn push_font_with_size(&self, font: Option<&Font>, size: f32) {
+    ///
+    /// Returns a `FontStackToken` that pops the font stack when dropped or when
+    /// [`FontStackToken::pop`] is called.
+    #[doc(alias = "PushFont")]
+    pub fn push_font_with_size(&self, font: Option<&Font>, size: f32) -> crate::FontStackToken<'_> {
         assert_non_negative_finite_f32("Ui::push_font_with_size()", "size", size);
         unsafe {
             let font_ptr = font.map_or(std::ptr::null_mut(), |f| {
@@ -62,6 +66,7 @@ impl Ui {
             });
             crate::sys::igPushFont(font_ptr, size);
         }
+        crate::FontStackToken::new(self)
     }
 
     /// Execute a closure with a specific font and size (v1.92+ dynamic fonts)
@@ -69,8 +74,7 @@ impl Ui {
     where
         F: FnOnce() -> R,
     {
-        self.push_font_with_size(font, size);
-        let _token = crate::FontStackToken::new(self);
+        let _token = self.push_font_with_size(font, size);
         f()
     }
 
@@ -132,20 +136,28 @@ mod tests {
     #[test]
     fn font_runtime_size_setters_validate_before_ffi() {
         let mut ctx = setup_context();
-        let raw_ctx = ctx.as_raw();
-        let ui = ctx.frame();
+        {
+            let ui = ctx.frame();
 
-        let initial_stack_size = unsafe { (*raw_ctx).FontStack.Size };
-        ui.with_font_and_size(None, 0.0, || {});
-        assert_eq!(unsafe { (*raw_ctx).FontStack.Size }, initial_stack_size);
+            ui.window("font_size_token").build(|| {
+                let _font = ui.push_font_with_size(None, 18.0);
+                ui.text("font token is scoped");
+            });
+
+            ui.with_font_and_size(None, 0.0, || {
+                ui.text("closure helper is scoped");
+            });
+        }
+        let _ = ctx.render();
+
+        let ui = ctx.frame();
 
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                ui.push_font_with_size(None, -1.0);
+                let _ = ui.push_font_with_size(None, -1.0);
             }))
             .is_err()
         );
-        assert_eq!(unsafe { (*raw_ctx).FontStack.Size }, initial_stack_size);
 
         ui.window("font_scale_invalid").build(|| {
             let window = unsafe { crate::sys::igGetCurrentWindowRead() };
@@ -164,18 +176,19 @@ mod tests {
     #[test]
     fn with_font_and_size_pops_after_panic() {
         let mut ctx = setup_context();
-        let raw_ctx = ctx.as_raw();
-        let ui = ctx.frame();
+        {
+            let ui = ctx.frame();
 
-        let initial_stack_size = unsafe { (*raw_ctx).FontStack.Size };
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            ui.with_font_and_size(None, 18.0, || {
-                assert_eq!(unsafe { (*raw_ctx).FontStack.Size }, initial_stack_size + 1);
-                panic!("forced panic while font is pushed");
-            });
-        }));
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                ui.with_font_and_size(None, 18.0, || {
+                    panic!("forced panic while font is pushed");
+                });
+            }));
 
-        assert!(result.is_err());
-        assert_eq!(unsafe { (*raw_ctx).FontStack.Size }, initial_stack_size);
+            assert!(result.is_err());
+            ui.text("frame remains balanced after panic");
+        }
+
+        let _ = ctx.render();
     }
 }

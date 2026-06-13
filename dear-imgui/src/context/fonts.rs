@@ -1,12 +1,54 @@
 use crate::fonts::{Font, FontAtlas, FontAtlasRef, SharedFontAtlas};
 use crate::sys;
+use std::marker::PhantomData;
 
 use super::Context;
 use super::binding::{CTX_MUTEX, with_bound_context};
 
+/// Tracks a font pushed through [`Context::push_font`].
+///
+/// The font stack entry is popped when the token is dropped or when
+/// [`Self::pop`] is called.
+#[must_use]
+pub struct ContextFontStackToken<'ctx> {
+    ctx: *mut sys::ImGuiContext,
+    _phantom: PhantomData<&'ctx mut Context>,
+}
+
+impl<'ctx> ContextFontStackToken<'ctx> {
+    fn new(ctx: *mut sys::ImGuiContext) -> Self {
+        Self {
+            ctx,
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Pops the font stack entry immediately.
+    #[doc(alias = "PopFont")]
+    pub fn pop(self) {}
+
+    /// Pops the font stack entry immediately.
+    #[doc(alias = "PopFont")]
+    pub fn end(self) {}
+}
+
+impl Drop for ContextFontStackToken<'_> {
+    fn drop(&mut self) {
+        let _guard = CTX_MUTEX.lock();
+        unsafe {
+            with_bound_context(self.ctx, || {
+                sys::igPopFont();
+            });
+        }
+    }
+}
+
 impl Context {
-    /// Push a font onto the font stack
-    pub fn push_font(&mut self, font: &Font) {
+    /// Push a font onto the font stack.
+    ///
+    /// Returns a token that pops the font stack when dropped.
+    #[doc(alias = "PushFont")]
+    pub fn push_font(&mut self, font: &Font) -> ContextFontStackToken<'_> {
         let _guard = CTX_MUTEX.lock();
         unsafe {
             with_bound_context(self.raw, || {
@@ -15,19 +57,7 @@ impl Context {
                 sys::igPushFont(font_ptr, 0.0);
             });
         }
-    }
-
-    /// Pop a font from the font stack
-    ///
-    /// This restores the previous font. Must be paired with a call to `push_font()`.
-    #[doc(alias = "PopFont")]
-    pub fn pop_font(&mut self) {
-        let _guard = CTX_MUTEX.lock();
-        unsafe {
-            with_bound_context(self.raw, || {
-                sys::igPopFont();
-            });
-        }
+        ContextFontStackToken::new(self.raw)
     }
 
     /// Get the current font

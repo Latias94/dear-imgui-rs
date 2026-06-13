@@ -24,4 +24,4 @@ mod ui;
 
 pub use flags::OldColumnFlags;
 pub use index::{OldColumnIndex, OldColumnOffsetRef, OldColumnRef};
-pub use token::ColumnsToken;
+pub use token::{ColumnsBackgroundToken, ColumnsToken};

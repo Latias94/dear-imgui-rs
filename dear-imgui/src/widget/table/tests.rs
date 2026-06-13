@@ -140,7 +140,7 @@ fn table_channels_require_current_cell_before_ffi() {
         );
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                ui.table_pop_column_channel();
+                let _token = ui.table_column_channel(0);
             }))
             .is_err()
         );

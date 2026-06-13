@@ -40,8 +40,7 @@ fn layout_and_scroll_helpers_reject_non_finite_or_invalid_ratios_before_ffi() {
         ui.set_cursor_screen_pos([0.0, 0.0]);
         ui.set_cursor_pos_x(0.0);
         ui.set_cursor_pos_y(0.0);
-        ui.push_clip_rect([0.0, 0.0], [1.0, 1.0], true);
-        ui.pop_clip_rect();
+        let _clip_rect = ui.push_clip_rect([0.0, 0.0], [1.0, 1.0], true);
         let _ = ui.is_rect_visible_min_max([0.0, 0.0], [1.0, 1.0]);
         let _ = ui.is_rect_visible_with_size([1.0, 1.0]);
 
@@ -66,7 +65,7 @@ fn layout_and_scroll_helpers_reject_non_finite_or_invalid_ratios_before_ffi() {
                 ui.set_cursor_pos([f32::NAN, 0.0]);
             })),
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                ui.push_clip_rect([0.0, 0.0], [f32::INFINITY, 1.0], true);
+                let _ = ui.push_clip_rect([0.0, 0.0], [f32::INFINITY, 1.0], true);
             })),
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let _ = ui.is_rect_visible_min_max([0.0, 0.0], [f32::NAN, 1.0]);

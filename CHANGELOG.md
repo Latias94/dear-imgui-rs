@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-06-13
+
+### Breaking Changes
+
+- `Ui::push_font_with_size` now returns `FontStackToken`, so sized font pushes
+  are paired with `PopFont` through RAII and no longer leave Dear ImGui's font
+  stack unbalanced. Fixes #31, thanks @spindlymist.
+- Safe stack-style APIs now return RAII tokens directly and no longer expose the
+  obsolete public manual pop/end helpers. This covers font, clip-rect, draw-list
+  texture, button-repeat, table-channel, columns, and ImPlot plot clip-rect
+  scopes.
+
 ## [0.14.1] - 2026-06-09
 
 ### Added

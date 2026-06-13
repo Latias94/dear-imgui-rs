@@ -243,8 +243,8 @@
 //!     and automatically merges on scope exit. Call `channels.set_current(i)` to select a channel.
 //!
 //! - Clipping helpers:
-//!   - `push_clip_rect`, `push_clip_rect_full_screen`, `pop_clip_rect`, `with_clip_rect`,
-//!     `clip_rect_min`, `clip_rect_max`.
+//!   - `push_clip_rect`, `push_clip_rect_full_screen`, `with_clip_rect`, `clip_rect_min`,
+//!     `clip_rect_max`.
 //!
 //! - Unsafe prim API (for custom geometry):
 //!   - `prim_reserve`, `prim_unreserve`, `prim_rect`, `prim_rect_uv`, `prim_quad_uv`,

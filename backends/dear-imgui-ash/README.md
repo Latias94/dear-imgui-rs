@@ -167,8 +167,8 @@ textures, the shader gamma path will not match (you'll effectively decode twice)
 
 | Item          | Version |
 |---------------|---------|
-| Crate         | 0.14.1  |
-| dear-imgui-rs | 0.14.1  |
+| Crate         | 0.15.0  |
+| dear-imgui-rs | 0.15.0  |
 | ash           | 0.38    |
 | ash-window    | 0.13 (`multi-viewport-winit`) |
 

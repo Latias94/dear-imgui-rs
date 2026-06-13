@@ -11,3 +11,15 @@ impl Drop for ColumnsToken<'_> {
         self.ui.end_columns();
     }
 }
+
+/// Token representing a pushed legacy columns background draw channel.
+#[must_use]
+pub struct ColumnsBackgroundToken<'ui> {
+    pub(super) ui: &'ui Ui,
+}
+
+impl Drop for ColumnsBackgroundToken<'_> {
+    fn drop(&mut self) {
+        self.ui.pop_columns_background();
+    }
+}

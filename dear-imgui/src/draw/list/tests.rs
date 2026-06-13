@@ -278,7 +278,7 @@ fn text_and_clip_inputs_validate_before_ffi() {
     assert_eq!(draw_list_counts(raw_draw_list), before);
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        draw_list.push_clip_rect([f32::NAN, 0.0], [1.0, 1.0], false);
+        let _ = draw_list.push_clip_rect([f32::NAN, 0.0], [1.0, 1.0], false);
     }));
     assert!(result.is_err());
     assert_eq!(
@@ -294,7 +294,7 @@ fn raw_draw_list_clip_helper_reads_stack_without_mutation() {
     let draw_list = fixture.draw_list();
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        draw_list.push_clip_rect([0.0, 0.0], [f32::INFINITY, 1.0], false);
+        let _ = draw_list.push_clip_rect([0.0, 0.0], [f32::INFINITY, 1.0], false);
     }));
 
     assert!(result.is_err());
