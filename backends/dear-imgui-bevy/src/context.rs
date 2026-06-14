@@ -271,8 +271,8 @@ fn begin_primary_frame_system(mut params: BeginFrameParams) {
         .framebuffer_scale(sanitized_window_framebuffer_scale(window)),
     );
 
-    let frame = context.begin_frame();
-    params.frame_state.begin(frame.ui());
+    let ui = context.frame();
+    params.frame_state.begin(ui);
 }
 
 fn imgui_delta_time(context: &imgui::Context, real_time: Option<&Time<Real>>) -> f32 {
