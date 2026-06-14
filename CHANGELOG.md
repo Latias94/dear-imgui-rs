@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.15.0] - 2026-06-13
+## [0.15.0] - 2026-06-14
 
 ### Breaking Changes
 
@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Destroying the current ImPlot or ImPlot3D context now clears the corresponding global current-context pointer instead of restoring a dangling pointer to the destroyed context.
+- `dear-imgui-bevy` now keeps the scheduled ImGui frame open across Bevy systems until `ImguiEndFrame`, avoiding premature frame closure before platform feedback and rendering systems run.
 
 ## [0.14.1] - 2026-06-09
 
