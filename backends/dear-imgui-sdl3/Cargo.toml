@@ -47,6 +47,8 @@ default = []
 # Enable the official C++ OpenGL3 renderer backend (imgui_impl_opengl3).
 # Off by default to keep SDL3 platform-only mode lightweight.
 opengl3-renderer = ["dear-imgui-sys/backend-shim-opengl3"]
+# Enable the official C++ SDLGPU3 renderer backend (imgui_impl_sdlgpu3).
+sdlgpu3-renderer = ["dear-imgui-sys/backend-shim-sdlgpu3"]
 # Enable the official C++ SDLRenderer3 renderer backend (imgui_impl_sdlrenderer3).
 sdlrenderer3-renderer = ["dear-imgui-sys/backend-shim-sdlrenderer3"]
 # Enable multi-viewport helpers (requires multi-viewport support in dear-imgui-rs).

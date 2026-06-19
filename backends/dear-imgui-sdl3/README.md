@@ -6,6 +6,7 @@ crate. This wraps the official Dear ImGui C++ backends:
 - `imgui_impl_sdl3.cpp` (platform layer)
 - `imgui_impl_opengl3.cpp` (OpenGL3 renderer, via the shared sys shim)
 - `imgui_impl_sdlrenderer3.cpp` (SDLRenderer (canvas) renderer, via the shared sys shim)
+- `imgui_impl_sdlgpu3.cpp` (SDLGpu renderer)
 
 and exposes a small, Rust-friendly API that plugs into an existing
 `dear-imgui-rs::Context`.
@@ -154,6 +155,9 @@ APIs of interest (see `src/lib.rs` for full docs):
 - `init_for_vulkan(&mut Context, &Window)` / `init_for_metal(&mut Context, &Window)` /
   `init_for_d3d(&mut Context, &Window)` / `init_for_sdl_gpu(&mut Context, &Window)`:
   initialize the SDL3 platform backend for specific renderer families (use `init_for_vulkan` for Vulkan multi-viewport support).
+- `init_for_sdlgpu3(&mut Context, &Window, SdlGpu3InitInfo)` /
+  `init_for_sdlgpu3_default(&mut Context, &Window, &Device)`:
+  initialize SDL3 platform + official SDLGPU3 renderer with explicit or default renderer settings.
 - `unsafe init_for_sdl_renderer(&mut Context, &Window, *mut SDL_Renderer)`:
   initialize SDL3 platform backend for SDL_Renderer-based renderers.
 - `shutdown_for_opengl(&mut Context)` / `shutdown(&mut Context)`:
@@ -162,6 +166,8 @@ APIs of interest (see `src/lib.rs` for full docs):
   begin a frame for SDL3 + OpenGL3.
 - `sdl3_new_frame(&mut Context)`:
   begin a frame for SDL3 platform only.
+- `SdlGpu3RendererBackend`:
+  RAII owner for SDL3 platform + official SDLGPU3 renderer.
 - `sdl3_poll_event_ll() -> Option<SDL_Event>` and
   `process_sys_event(&SDL_Event) -> bool` / `process_sys_event_for_context(&mut Context, &SDL_Event) -> bool`:
   low-level event polling/processing helpers.

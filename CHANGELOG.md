@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add SDL3 + SDLGPU3 backend support in `dear-imgui-sdl3`, including the multi-viewport example and the matching `dear-imgui-sys` backend shim updates. PR #32, thanks @TheDaChicken.
+
 ## [0.15.0] - 2026-06-14
 
 ### Breaking Changes

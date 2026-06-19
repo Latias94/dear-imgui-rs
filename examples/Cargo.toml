@@ -68,6 +68,17 @@ sdl3-sdlrenderer3 = [
     "dear-imgui-sdl3/sdlrenderer3-renderer",
 ]
 
+# SDL3 + official SDLGPU3 renderer backend.
+sdl3-sdlgpu3 = [
+    "sdl3-platform",
+    "dear-imgui-sdl3/sdlgpu3-renderer",
+]
+
+sdl3-gpu-multi-viewport = [
+    "sdl3-sdlgpu3",
+    "multi-viewport"
+]
+
 [[bin]]
 name = "wgpu_basic"
 path = "00-quickstart/wgpu_basic.rs"
@@ -267,6 +278,11 @@ required-features = ["reflect"]
 name = "imgui_test_engine_basic"
 path = "imgui_test_engine_basic.rs"
 required-features = ["test-engine"]
+
+[[bin]]
+name = "sdl3_sdlgpu_multi_view"
+path = "02-docking/sdl3_sdlgpu_multi_view.rs"
+required-features = ["sdl3-sdlgpu3", "multi-viewport"]
 
 [dependencies]
 dear-imgui-rs = { path = "../dear-imgui", version = "0.15" }

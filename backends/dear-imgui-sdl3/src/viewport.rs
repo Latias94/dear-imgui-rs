@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(feature = "sdlgpu3-renderer")]
+use sdl3::gpu::{Device, PresentMode, SampleCount, SwapchainComposition, TextureFormat};
+
 /// Enable native IME UI for SDL3 (recommended on IME-heavy platforms).
 ///
 /// This should be called before creating any SDL3 windows so that the
@@ -180,15 +183,68 @@ pub unsafe fn init_for_sdl_renderer(
 
 /// Initialize the Dear ImGui SDL3 platform backend for SDL GPU (SDL_gpu3) renderers.
 pub fn init_for_sdl_gpu(imgui: &mut Context, window: &Window) -> Result<(), Sdl3BackendError> {
-    let sdl_window = window.raw();
     with_context(imgui, "init_for_sdl_gpu()", || {
-        unsafe {
-            if !ffi::ImGui_ImplSDL3_InitForSDLGPU_Rust(sdl_window) {
-                return Err(Sdl3BackendError::Sdl3InitFailed);
-            }
-        }
-        Ok(())
+        init_for_sdl_gpu_impl(window.raw())
     })
+}
+
+fn init_for_sdl_gpu_impl(
+    sdl_window: *mut sdl3_sys::video::SDL_Window,
+) -> Result<(), Sdl3BackendError> {
+    unsafe {
+        if !ffi::ImGui_ImplSDL3_InitForSDLGPU_Rust(sdl_window) {
+            return Err(Sdl3BackendError::Sdl3InitFailed);
+        }
+    }
+    Ok(())
+}
+
+/// Initialization parameters for the official SDLGPU3 renderer backend.
+#[cfg(feature = "sdlgpu3-renderer")]
+#[derive(Clone, Copy)]
+pub struct SdlGpu3InitInfo<'a> {
+    pub device: &'a Device,
+    pub color_target_format: TextureFormat,
+    pub msaa_samples: SampleCount,
+    pub swapchain_composition: SwapchainComposition,
+    pub present_mode: PresentMode,
+}
+
+#[cfg(feature = "sdlgpu3-renderer")]
+impl<'a> SdlGpu3InitInfo<'a> {
+    /// Build a default configuration from the swapchain format of `window`.
+    pub fn from_window(device: &'a Device, window: &Window) -> Self {
+        Self {
+            device,
+            color_target_format: device.get_swapchain_texture_format(window),
+            msaa_samples: SampleCount::NoMultiSampling,
+            swapchain_composition: SwapchainComposition::Sdr,
+            present_mode: PresentMode::Vsync,
+        }
+    }
+}
+
+/// Initialize the Dear ImGui SDL3 + SDLGPU3 backend with explicit renderer settings.
+#[cfg(feature = "sdlgpu3-renderer")]
+pub fn init_for_sdlgpu3(
+    imgui: &mut Context,
+    window: &Window,
+    info: SdlGpu3InitInfo<'_>,
+) -> Result<(), Sdl3BackendError> {
+    with_context(imgui, "init_for_sdlgpu3()", || {
+        init_for_sdl_gpu_impl(window.raw())?;
+        init_sdlgpu3_impl(info)
+    })
+}
+
+/// Initialize the Dear ImGui SDL3 + SDLGPU3 backend using the default renderer settings.
+#[cfg(feature = "sdlgpu3-renderer")]
+pub fn init_for_sdlgpu3_default(
+    imgui: &mut Context,
+    window: &Window,
+    device: &Device,
+) -> Result<(), Sdl3BackendError> {
+    init_for_sdlgpu3(imgui, window, SdlGpu3InitInfo::from_window(device, window))
 }
 
 /// Initialize the Dear ImGui SDL3 + SDLRenderer3 backend.
