@@ -86,6 +86,7 @@ fn main() {
     println!("cargo:rerun-if-changed=src/stack_layout_imgui_item_size_horizontal_compat.cpp.inc");
     println!("cargo:rerun-if-changed=backend-shims/opengl3.cpp");
     println!("cargo:rerun-if-changed=backend-shims/sdlrenderer3.cpp");
+    println!("cargo:rerun-if-changed=backend-shims/sdlgpu3.cpp");
     println!("cargo:rerun-if-changed=backend-shims/android.cpp");
     println!("cargo:rerun-if-changed=backend-shims/win32.cpp");
     println!("cargo:rerun-if-changed=backend-shims/dx11.cpp");
@@ -595,6 +596,7 @@ fn any_backend_shim_enabled() -> bool {
         || cfg!(feature = "backend-shim-opengl3")
         || cfg!(feature = "backend-shim-sdlrenderer3")
         || cfg!(feature = "backend-shim-win32")
+        || cfg!(feature = "backend-shim-sdlgpu3")
 }
 
 fn new_native_cpp_build(cfg: &BuildConfig) -> cc::Build {
@@ -639,6 +641,10 @@ fn build_backend_shims(cfg: &BuildConfig) {
     {
         build_backend_shim_sdlrenderer3(cfg);
     }
+    #[cfg(feature = "backend-shim-sdlgpu3")]
+    {
+        build_backend_shim_sdlgpu3(cfg);
+    }
     if cfg.is_windows() && cfg!(feature = "backend-shim-win32") {
         build_backend_shim_win32(cfg);
     }
@@ -677,7 +683,7 @@ fn build_backend_shim_opengl3(cfg: &BuildConfig) {
     }
 }
 
-#[cfg(feature = "backend-shim-sdlrenderer3")]
+#[cfg(any(feature = "backend-shim-sdlrenderer3", feature="backend-shim-sdlgpu3"))]
 fn add_sdl3_include_path(build: &mut cc::Build, cfg: &BuildConfig) -> Result<(), String> {
     let found = build_support::find_sdl3_include_paths(build_support::Sdl3SearchConfig {
         out_dir: &cfg.out_dir,
@@ -724,6 +730,23 @@ fn build_backend_shim_sdlrenderer3(cfg: &BuildConfig) {
     build.file(imgui_src.join("backends/imgui_impl_sdlrenderer3.cpp"));
     build.file(shim_root.join("sdlrenderer3.cpp"));
     build.compile("dear_imgui_backend_sdlrenderer3");
+
+    if matches!(cfg.target_os.as_str(), "linux" | "android") {
+        println!("cargo:rustc-link-lib=dl");
+    }
+}
+
+#[cfg(feature = "backend-shim-sdlgpu3")]
+fn build_backend_shim_sdlgpu3(cfg: &BuildConfig) {
+    let imgui_src = cfg.imgui_src();
+    let shim_root = cfg.manifest_dir.join("backend-shims");
+    let mut build = new_native_cpp_build(cfg);
+    if let Err(message) = add_sdl3_include_path(&mut build, cfg) {
+        panic!("{message}");
+    }
+    build.file(imgui_src.join("backends/imgui_impl_sdlgpu3.cpp"));
+    build.file(shim_root.join("sdlgpu3.cpp"));
+    build.compile("dear_imgui_backend_sdlgpu3");
 
     if matches!(cfg.target_os.as_str(), "linux" | "android") {
         println!("cargo:rustc-link-lib=dl");

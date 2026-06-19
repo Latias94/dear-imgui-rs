@@ -48,3 +48,5 @@ pub mod sdlrenderer3;
 
 #[cfg(all(target_os = "windows", feature = "backend-shim-win32"))]
 pub mod win32;
+#[cfg(all(target_os = "windows", feature = "backend-shim-sdlgpu3"))]
+pub mod sdlgpu3;

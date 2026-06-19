@@ -6,6 +6,7 @@ crate. This wraps the official Dear ImGui C++ backends:
 - `imgui_impl_sdl3.cpp` (platform layer)
 - `imgui_impl_opengl3.cpp` (OpenGL3 renderer, via the shared sys shim)
 - `imgui_impl_sdlrenderer3.cpp` (SDLRenderer (canvas) renderer, via the shared sys shim)
+- `imgui_impl_sdlgpu3.cpp` (SDLGpu renderer)
 
 and exposes a small, Rust-friendly API that plugs into an existing
 `dear-imgui-rs::Context`.

@@ -46,7 +46,7 @@ impl ContextBinding {
         }
     }
 
-    #[cfg(any(feature = "opengl3-renderer", feature = "sdlrenderer3-renderer"))]
+    #[cfg(any(feature = "opengl3-renderer", feature = "sdlrenderer3-renderer", feature = "sdlgpu3-renderer"))]
     pub(super) fn assert_current_draw_data(&self, draw_data: &mut DrawData, caller: &str) {
         let expected = unsafe { sys::igGetDrawData() as *mut sys::ImDrawData };
         let actual = draw_data as *mut DrawData as *mut sys::ImDrawData;
@@ -134,6 +134,8 @@ pub enum Sdl3BackendError {
     InvalidGlslVersion,
     #[error("ImGui_ImplSDLRenderer3_Init returned false")]
     Renderer3InitFailed,
+    #[error("ImGui_ImplSDLGpu3_Init returned false")]
+    Gpu3InitFailed,
 }
 
 #[cfg(feature = "opengl3-renderer")]
@@ -144,6 +146,30 @@ pub(super) fn init_opengl3_impl(
         if !opengl3_backend::dear_imgui_backend_opengl3_init(glsl_version) {
             ffi::ImGui_ImplSDL3_Shutdown_Rust();
             return Err(Sdl3BackendError::OpenGlInitFailed);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "sdlgpu3-renderer")]
+pub(super) fn init_sdlgpu3_impl(
+    device: *mut sdl3_sys::gpu::SDL_GPUDevice,
+    texture: c_int,
+    sample_count: c_int,
+    swap_chain: c_int,
+    preset_mode: c_int
+) -> Result<(), Sdl3BackendError> {
+    let mut sd = Box::new(sdlgpu3_backend::ImGui_ImplSDLGPU3_InitInfo {
+        device: device as *mut _ as *mut c_void,
+        colorTargetFormat: texture as c_int,
+        MSAASamples: sample_count as c_int,
+        SwapchainComposition: swap_chain as c_int,
+        PresentMode: preset_mode as c_int,
+    });
+    unsafe {
+        if !sdlgpu3_backend::dear_imgui_backend_sdlgpu3_init(sd.as_mut()) {
+            ffi::ImGui_ImplSDL3_Shutdown_Rust();
+            return Err(Sdl3BackendError::Gpu3InitFailed);
         }
     }
     Ok(())
@@ -163,11 +189,27 @@ pub(super) fn shutdown_opengl3_impl() {
     }
 }
 
+#[cfg(feature = "sdlgpu3-renderer")]
+pub(super) fn shutdown_gpu_impl() {
+    unsafe {
+        sdlgpu3_backend::dear_imgui_backend_sdlgpu3_shutdown();
+        ffi::ImGui_ImplSDL3_Shutdown_Rust();
+    }
+}
+
 #[cfg(feature = "sdlrenderer3-renderer")]
 pub(super) fn shutdown_sdlrenderer3_impl() {
     unsafe {
         sdlrenderer3_backend::dear_imgui_backend_sdlrenderer3_shutdown();
         ffi::ImGui_ImplSDL3_Shutdown_Rust();
+    }
+}
+
+#[cfg(feature = "sdlgpu3-renderer")]
+pub(super) fn new_frame_gpu3_impl() {
+    unsafe {
+        sdlgpu3_backend::dear_imgui_backend_sdlgpu3_new_frame();
+        ffi::ImGui_ImplSDL3_NewFrame_Rust();
     }
 }
 

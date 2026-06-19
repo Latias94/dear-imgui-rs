@@ -179,17 +179,41 @@ pub unsafe fn init_for_sdl_renderer(
 }
 
 /// Initialize the Dear ImGui SDL3 platform backend for SDL GPU (SDL_gpu3) renderers.
-pub fn init_for_sdl_gpu(imgui: &mut Context, window: &Window) -> Result<(), Sdl3BackendError> {
+pub fn init_for_platform_sdl_gpu(imgui: &mut Context, window: &Window) -> Result<(), Sdl3BackendError> {
     let sdl_window = window.raw();
+
     with_context(imgui, "init_for_sdl_gpu()", || {
         unsafe {
             if !ffi::ImGui_ImplSDL3_InitForSDLGPU_Rust(sdl_window) {
                 return Err(Sdl3BackendError::Sdl3InitFailed);
             }
+            Ok(())
         }
-        Ok(())
     })
 }
+
+#[cfg(feature = "sdlgpu3-renderer")]
+pub fn init_for_sdl_gpu(imgui: &mut Context, window: &Window, device: &Device) -> Result<(), Sdl3BackendError> {
+    let sdl_window = window.raw();
+    let sdl_gpu = device.raw();
+
+    with_context(imgui, "init_for_sdl_gpu_default()", || {
+        unsafe {
+            if !ffi::ImGui_ImplSDL3_InitForSDLGPU_Rust(sdl_window) {
+                return Err(Sdl3BackendError::Sdl3InitFailed);
+            }
+
+            init_sdlgpu3_impl(
+                sdl_gpu,
+                device.get_swapchain_texture_format(&window) as c_int,
+                sdl3::gpu::SampleCount::NoMultiSampling as c_int,
+                sdl3::gpu::SwapchainComposition::Sdr as c_int,
+                sdl3::gpu::PresentMode::Vsync as c_int
+            )
+        }
+    })
+}
+
 
 /// Initialize the Dear ImGui SDL3 + SDLRenderer3 backend.
 ///
