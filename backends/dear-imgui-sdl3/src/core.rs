@@ -46,7 +46,11 @@ impl ContextBinding {
         }
     }
 
-    #[cfg(any(feature = "opengl3-renderer", feature = "sdlrenderer3-renderer", feature = "sdlgpu3-renderer"))]
+    #[cfg(any(
+        feature = "opengl3-renderer",
+        feature = "sdlrenderer3-renderer",
+        feature = "sdlgpu3-renderer"
+    ))]
     pub(super) fn assert_current_draw_data(&self, draw_data: &mut DrawData, caller: &str) {
         let expected = unsafe { sys::igGetDrawData() as *mut sys::ImDrawData };
         let actual = draw_data as *mut DrawData as *mut sys::ImDrawData;
@@ -134,7 +138,7 @@ pub enum Sdl3BackendError {
     InvalidGlslVersion,
     #[error("ImGui_ImplSDLRenderer3_Init returned false")]
     Renderer3InitFailed,
-    #[error("ImGui_ImplSDLGpu3_Init returned false")]
+    #[error("ImGui_ImplSDLGPU3_Init returned false")]
     Gpu3InitFailed,
 }
 
@@ -153,21 +157,17 @@ pub(super) fn init_opengl3_impl(
 
 #[cfg(feature = "sdlgpu3-renderer")]
 pub(super) fn init_sdlgpu3_impl(
-    device: *mut sdl3_sys::gpu::SDL_GPUDevice,
-    texture: c_int,
-    sample_count: c_int,
-    swap_chain: c_int,
-    preset_mode: c_int
+    info: crate::viewport::SdlGpu3InitInfo<'_>,
 ) -> Result<(), Sdl3BackendError> {
-    let mut sd = Box::new(sdlgpu3_backend::ImGui_ImplSDLGPU3_InitInfo {
-        device: device as *mut _ as *mut c_void,
-        colorTargetFormat: texture as c_int,
-        MSAASamples: sample_count as c_int,
-        SwapchainComposition: swap_chain as c_int,
-        PresentMode: preset_mode as c_int,
-    });
+    let mut init_info = sdlgpu3_backend::ImGui_ImplSDLGPU3_InitInfo {
+        device: info.device.raw() as *mut _ as *mut c_void,
+        color_target_format: info.color_target_format as i32,
+        msaa_samples: info.msaa_samples as i32,
+        swapchain_composition: info.swapchain_composition as i32,
+        present_mode: info.present_mode as i32,
+    };
     unsafe {
-        if !sdlgpu3_backend::dear_imgui_backend_sdlgpu3_init(sd.as_mut()) {
+        if !sdlgpu3_backend::dear_imgui_backend_sdlgpu3_init(&mut init_info) {
             ffi::ImGui_ImplSDL3_Shutdown_Rust();
             return Err(Sdl3BackendError::Gpu3InitFailed);
         }
@@ -190,7 +190,7 @@ pub(super) fn shutdown_opengl3_impl() {
 }
 
 #[cfg(feature = "sdlgpu3-renderer")]
-pub(super) fn shutdown_gpu_impl() {
+pub(super) fn shutdown_sdlgpu3_impl() {
     unsafe {
         sdlgpu3_backend::dear_imgui_backend_sdlgpu3_shutdown();
         ffi::ImGui_ImplSDL3_Shutdown_Rust();
@@ -206,7 +206,7 @@ pub(super) fn shutdown_sdlrenderer3_impl() {
 }
 
 #[cfg(feature = "sdlgpu3-renderer")]
-pub(super) fn new_frame_gpu3_impl() {
+pub(super) fn new_frame_sdlgpu3_impl() {
     unsafe {
         sdlgpu3_backend::dear_imgui_backend_sdlgpu3_new_frame();
         ffi::ImGui_ImplSDL3_NewFrame_Rust();

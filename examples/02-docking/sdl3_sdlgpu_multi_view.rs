@@ -1,10 +1,10 @@
-use std::error::Error;
+use dear_imgui_rs::{Condition, ConfigFlags, Context};
+use dear_imgui_sdl3::{self as imgui_sdl3_backend, SdlGpu3RendererBackend};
 use sdl3::event::{Event, WindowEvent};
 use sdl3::gpu::{PresentMode, ShaderFormat, SwapchainComposition};
 use sdl3::keyboard::Keycode;
 use sdl3::pixels::Color;
-use dear_imgui_rs::{Condition, ConfigFlags, Context};
-use dear_imgui_sdl3::{self as imgui_sdl3_backend, SdlGpu3RendererBackend};
+use std::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Enable VSYNC on Renderer
@@ -18,7 +18,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let video = sdl_ctx.video()?;
 
     let main_scale = video
-        .get_primary_display().unwrap()
+        .get_primary_display()
+        .unwrap()
         .get_content_scale()
         .unwrap_or(1.0);
 
@@ -28,7 +29,6 @@ fn main() -> Result<(), Box<dyn Error>> {
             (800.0 * main_scale) as u32,
             (600.0 * main_scale) as u32,
         )
-        .opengl()
         .resizable()
         .hidden()
         .high_pixel_density()
@@ -38,9 +38,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     window.show();
 
     let gpu = sdl3::gpu::Device::new(
-        ShaderFormat::SPIRV | ShaderFormat::DXIL | ShaderFormat::DXBC | ShaderFormat::METALLIB,
+        ShaderFormat::SPIRV | ShaderFormat::DXIL | ShaderFormat::MSL | ShaderFormat::METALLIB,
         true,
-    )?.with_window(&window)?;
+    )?
+    .with_window(&window)?;
 
     let mut imgui = Context::create();
 
@@ -59,11 +60,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         style.set_font_scale_dpi(window_scale);
     }
 
-    gpu.set_swapchain_parameters(
-        &window, PresentMode::Vsync, SwapchainComposition::Sdr)?;
+    gpu.set_swapchain_parameters(&window, PresentMode::Vsync, SwapchainComposition::Sdr)?;
 
-    let mut sdl3_backend = SdlGpu3RendererBackend::init(
-        &mut imgui, &window, &gpu)?;
+    let mut sdl3_backend = SdlGpu3RendererBackend::init_default(&mut imgui, &window, &gpu)?;
 
     let mut show_demo = false;
     let mut show_debug = false;
@@ -77,21 +76,23 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
             let event = Event::from_ll(raw);
             match event {
-                Event::Quit { .. } | Event::KeyDown {
+                Event::Quit { .. }
+                | Event::KeyDown {
                     keycode: Some(Keycode::Escape),
                     ..
                 } => {
                     break 'running;
                 }
-                Event::Window { timestamp: _, window_id: _, win_event } => {
-                    match win_event
-                    {
-                        WindowEvent::CloseRequested => {
-                            break 'running;
-                        }
-                        _ => (),
+                Event::Window {
+                    timestamp: _,
+                    window_id: _,
+                    win_event,
+                } => match win_event {
+                    WindowEvent::CloseRequested => {
+                        break 'running;
                     }
-                }
+                    _ => (),
+                },
                 _ => (),
             }
         }
@@ -133,25 +134,22 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             sdl3_backend.prepare_render(draw_data, &mut draw_cmd);
 
-            let mut render_pass = gpu.begin_render_pass(&draw_cmd,
-                                                        &[target_info], None)?;
+            let mut render_pass = gpu.begin_render_pass(&draw_cmd, &[target_info], None)?;
 
             sdl3_backend.render(draw_data, &mut draw_cmd, &mut render_pass);
 
             gpu.end_render_pass(render_pass);
-
-            draw_cmd.submit().expect("TODO: panic message");
 
             let io_flags = imgui.io().config_flags();
             if io_flags.contains(ConfigFlags::VIEWPORTS_ENABLE) {
                 imgui.update_platform_windows();
                 imgui.render_platform_windows_default();
             }
+
+            draw_cmd.submit().expect("TODO: panic message");
         } else {
             draw_cmd.cancel();
         }
-
-
     }
 
     Ok(())

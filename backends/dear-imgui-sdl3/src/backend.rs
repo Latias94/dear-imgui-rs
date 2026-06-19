@@ -76,7 +76,7 @@ impl Sdl3PlatformBackend {
         imgui: &mut Context,
         window: &Window,
     ) -> Result<Self, Sdl3BackendError> {
-        init_for_platform_sdl_gpu(imgui, window)?;
+        init_for_sdl_gpu(imgui, window)?;
         Ok(Self::from_initialized_context(imgui))
     }
 
@@ -292,6 +292,7 @@ impl Drop for Sdl3OpenGl3Backend {
     }
 }
 
+#[cfg(feature = "sdlgpu3-renderer")]
 #[must_use = "dropping the backend owner shuts down the SDL3 platform backend"]
 #[derive(Debug)]
 pub struct SdlGpu3RendererBackend {
@@ -308,13 +309,23 @@ impl SdlGpu3RendererBackend {
         }
     }
 
-    /// Initialize the SDL3 platform backend and the official Gpu3 renderer.
+    /// Initialize the SDL3 platform backend and the official SDLGPU3 renderer.
     pub fn init(
+        imgui: &mut Context,
+        window: &Window,
+        info: SdlGpu3InitInfo<'_>,
+    ) -> Result<Self, Sdl3BackendError> {
+        init_for_sdlgpu3(imgui, window, info)?;
+        Ok(Self::from_initialized_context(imgui))
+    }
+
+    /// Initialize the SDL3 platform backend and the official SDLGPU3 renderer.
+    pub fn init_default(
         imgui: &mut Context,
         window: &Window,
         gpu: &Device,
     ) -> Result<Self, Sdl3BackendError> {
-        init_for_sdl_gpu(imgui, window, gpu)?;
+        init_for_sdlgpu3_default(imgui, window, gpu)?;
         Ok(Self::from_initialized_context(imgui))
     }
 
@@ -331,19 +342,26 @@ impl SdlGpu3RendererBackend {
         self.context
             .assert_matches(imgui, "SdlGpu3RendererBackend::new_frame()");
         let _guard = self.context.bind("SdlGpu3RendererBackend::new_frame()");
-        new_frame_gpu3_impl();
+        new_frame_sdlgpu3_impl();
     }
 
     /// Render Dear ImGui draw data using the official SDLGPU3 renderer.
     pub fn prepare_render(&mut self, draw_data: &mut DrawData, command_buffer: &mut CommandBuffer) {
-        let _guard = self.context.bind("SdlGpu3RendererBackend::prepare_render()");
+        let _guard = self
+            .context
+            .bind("SdlGpu3RendererBackend::prepare_render()");
         self.context
             .assert_current_draw_data(draw_data, "SdlGpu3RendererBackend::prepare_render()");
         prepare_render_sdlgpu3_impl(draw_data, command_buffer);
     }
 
     /// Render Dear ImGui draw data using the official SDLGPU3 renderer.
-    pub fn render(&mut self, draw_data: &mut DrawData, command_buffer: &CommandBuffer, render_pass: &mut RenderPass) {
+    pub fn render(
+        &mut self,
+        draw_data: &mut DrawData,
+        command_buffer: &CommandBuffer,
+        render_pass: &mut RenderPass,
+    ) {
         let _guard = self.context.bind("SdlGpu3RendererBackend::render()");
         self.context
             .assert_current_draw_data(draw_data, "SdlGpu3RendererBackend::render()");
@@ -354,8 +372,10 @@ impl SdlGpu3RendererBackend {
     pub fn update_texture(&mut self, imgui: &mut Context, tex: &mut TextureData) {
         self.context
             .assert_matches(imgui, "SdlGpu3RendererBackend::update_texture()");
-        let _guard = self.context.bind("SdlGpu3RendererBackend::update_texture()");
-        update_gp3_texture(tex);
+        let _guard = self
+            .context
+            .bind("SdlGpu3RendererBackend::update_texture()");
+        update_gpu3_texture(tex);
     }
 
     /// Create SDL GPU3 renderer device objects.
@@ -377,7 +397,6 @@ impl SdlGpu3RendererBackend {
             .bind("SdlGpu3RendererBackend::destroy_device_objects()");
         destroy_gpu3_device_objects();
     }
-
 }
 
 #[cfg(feature = "sdlgpu3-renderer")]
@@ -385,12 +404,11 @@ impl Drop for SdlGpu3RendererBackend {
     fn drop(&mut self) {
         if self.shutdown_on_drop {
             if let Some(_guard) = self.context.bind_for_drop() {
-                shutdown_gpu_impl();
+                shutdown_sdlgpu3_impl();
             }
         }
     }
 }
-
 
 /// RAII owner for SDL3 platform + official SDLRenderer3 renderer backends.
 #[cfg(feature = "sdlrenderer3-renderer")]
@@ -551,27 +569,26 @@ pub fn canvas_render(draw_data: &mut DrawData, canvas: &WindowCanvas) {
 fn render_sdlgpu3_impl(
     draw_data: &mut DrawData,
     command_buffer: &CommandBuffer,
-    render_pass: &RenderPass) {
+    render_pass: &RenderPass,
+) {
     unsafe {
         let raw = draw_data as *mut DrawData as *mut sys::ImDrawData;
         sdlgpu3_backend::dear_imgui_backend_sdlgpu3_render_draw_data(
             raw,
             command_buffer.raw() as *mut _ as *mut c_void,
             render_pass.raw() as *mut _ as *mut c_void,
-            std::ptr::null_mut()
+            std::ptr::null_mut(),
         );
     }
 }
 
 #[cfg(feature = "sdlgpu3-renderer")]
-fn prepare_render_sdlgpu3_impl(
-    draw_data: &mut DrawData,
-    command_buffer: &CommandBuffer) {
+fn prepare_render_sdlgpu3_impl(draw_data: &mut DrawData, command_buffer: &CommandBuffer) {
     unsafe {
         let raw = draw_data as *mut DrawData as *mut sys::ImDrawData;
         sdlgpu3_backend::dear_imgui_backend_sdlgpu3_prepare_draw_data(
             raw,
-            command_buffer.raw() as *mut _ as *mut c_void
+            command_buffer.raw() as *mut _ as *mut c_void,
         );
     }
 }
@@ -598,15 +615,19 @@ pub fn update_texture(tex: &mut TextureData) {
     }
 }
 
-
 /// Update a single ImGui texture using the SDLGPU3 backend.
 ///
 /// This is an advanced helper that delegates to `ImGui_ImplSDLGPU3_UpdateTexture`.
 #[cfg(feature = "sdlgpu3-renderer")]
-pub fn update_gp3_texture(tex: &mut TextureData) {
+pub fn update_gpu3_texture(tex: &mut TextureData) {
     unsafe {
         sdlgpu3_backend::dear_imgui_backend_sdlgpu3_update_texture(tex.as_raw_mut());
     }
+}
+
+#[cfg(feature = "sdlgpu3-renderer")]
+pub fn update_gp3_texture(tex: &mut TextureData) {
+    update_gpu3_texture(tex);
 }
 
 /// Create SDLGPU3 renderer device objects.
@@ -626,7 +647,6 @@ pub fn destroy_gpu3_device_objects() {
         sdlgpu3_backend::dear_imgui_backend_sdlgpu3_destroy_device_objects();
     }
 }
-
 
 /// Update a single ImGui texture using the SDLRenderer3 backend.
 ///

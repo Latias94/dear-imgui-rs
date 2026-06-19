@@ -683,7 +683,10 @@ fn build_backend_shim_opengl3(cfg: &BuildConfig) {
     }
 }
 
-#[cfg(any(feature = "backend-shim-sdlrenderer3", feature="backend-shim-sdlgpu3"))]
+#[cfg(any(
+    feature = "backend-shim-sdlrenderer3",
+    feature = "backend-shim-sdlgpu3"
+))]
 fn add_sdl3_include_path(build: &mut cc::Build, cfg: &BuildConfig) -> Result<(), String> {
     let found = build_support::find_sdl3_include_paths(build_support::Sdl3SearchConfig {
         out_dir: &cfg.out_dir,
@@ -701,7 +704,7 @@ fn add_sdl3_include_path(build: &mut cc::Build, cfg: &BuildConfig) -> Result<(),
         };
         format!(
             "dear-imgui-sys: could not find SDL3 headers required for \
-             backend-shim-sdlrenderer3. {message} Set SDL3_INCLUDE_DIR to an \
+             SDL3 backend shims. {message} Set SDL3_INCLUDE_DIR to an \
              include root containing SDL3/SDL.h, install SDL3 development files \
              through pkg-config/vcpkg, or make the final dependency graph enable \
              `sdl3/build-from-source` so sdl3-sys can expose headers via \
@@ -747,10 +750,6 @@ fn build_backend_shim_sdlgpu3(cfg: &BuildConfig) {
     build.file(imgui_src.join("backends/imgui_impl_sdlgpu3.cpp"));
     build.file(shim_root.join("sdlgpu3.cpp"));
     build.compile("dear_imgui_backend_sdlgpu3");
-
-    if matches!(cfg.target_os.as_str(), "linux" | "android") {
-        println!("cargo:rustc-link-lib=dl");
-    }
 }
 
 fn build_backend_shim_android(cfg: &BuildConfig) {
