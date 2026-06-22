@@ -7,7 +7,7 @@
 //!
 //! # Compatibility and gates
 //!
-//! The first proof target is Bevy `0.19.0-rc.2`, which declares Rust `1.95.0`. The root
+//! The current Bevy target is Bevy `0.19.0`, which declares Rust `1.95.0`. The root
 //! `dear-imgui-rs` workspace currently remains on Rust `1.92`, so this crate has a dedicated
 //! `rust-version = "1.95.0"` and should be validated with an explicit Bevy gate, for example:
 //!
@@ -204,7 +204,7 @@ impl Default for ImguiBackendConfig {
 /// Observable backend state installed by [`ImguiPlugin`].
 #[derive(Resource, Debug, Clone, Eq, PartialEq)]
 pub struct ImguiBackendStatus {
-    /// First Bevy version targeted by this crate skeleton.
+    /// Bevy version currently targeted by this crate.
     pub bevy_target: &'static str,
     /// Rust version required by the Bevy target train.
     pub rust_target: &'static str,
@@ -402,13 +402,13 @@ impl Drop for ImguiContext {
     }
 }
 
-/// First Bevy version targeted by this crate.
-pub const BEVY_TARGET_VERSION: &str = "0.19.0-rc.2";
+/// Current Bevy version targeted by this crate.
+pub const BEVY_TARGET_VERSION: &str = "0.19.0";
 /// Bevy reference commit used by the workstream.
-pub const BEVY_TARGET_COMMIT: &str = "a389b928aee5906928a16a7d4e66cb02c7362901";
+pub const BEVY_TARGET_COMMIT: &str = "c6f634ca9f406d68ba5109d921247b654cb42c10";
 /// Rust version required by the first Bevy target train.
 pub const RUST_TARGET_VERSION: &str = "1.95.0";
-/// WGPU version used by Bevy `0.19.0-rc.2`.
+/// WGPU version used by Bevy `0.19.0`.
 pub const WGPU_TARGET_VERSION: &str = "29.0.3";
 
 #[cfg(feature = "render")]

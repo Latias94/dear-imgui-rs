@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Update the experimental `dear-imgui-bevy` target from Bevy `0.19.0-rc.2`
+  to Bevy `0.19.0`.
 - Rehome SDLRenderer3 and SDLGPU3 renderer shim ownership into
   `dear-imgui-sdl3`. `dear-imgui-sys` now keeps self-contained backend shims
   such as OpenGL3, Android, Win32, and DX11.

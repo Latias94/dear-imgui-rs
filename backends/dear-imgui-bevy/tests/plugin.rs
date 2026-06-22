@@ -334,10 +334,10 @@ fn plugin_registers_minimal_imgui_resources() {
     assert!(!status.viewport_input_feedback_enabled);
     assert!(!status.viewport_render_routing_enabled);
     assert!(!status.multi_viewport_supported);
-    assert_eq!(BEVY_TARGET_VERSION, "0.19.0-rc.2");
+    assert_eq!(BEVY_TARGET_VERSION, "0.19.0");
     assert_eq!(
         BEVY_TARGET_COMMIT,
-        "a389b928aee5906928a16a7d4e66cb02c7362901"
+        "c6f634ca9f406d68ba5109d921247b654cb42c10"
     );
     assert_eq!(WGPU_TARGET_VERSION, "29.0.3");
 
