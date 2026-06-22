@@ -34,12 +34,10 @@ bevy_macro_utils = "=0.19.0"
 bevy_mesh = { version = "=0.19.0", default-features = false, optional = true }
 bevy_platform = { version = "=0.19.0", default-features = false }
 bevy_ptr = "=0.19.0"
-bevy_reflect = { version = "=0.19.0", default-features = false, optional = true }
 bevy_render = { version = "=0.19.0", default-features = false, optional = true }
 bevy_shader = { version = "=0.19.0", default-features = false, optional = true }
 bevy_tasks = { version = "=0.19.0", default-features = false }
 bevy_time = { version = "=0.19.0", default-features = false, features = ["std"] }
-bevy_transform = { version = "=0.19.0", default-features = false, optional = true }
 bevy_utils = { version = "=0.19.0", default-features = false }
 bevy_winit = { version = "=0.19.0", default-features = false, features = ["x11"], optional = true }
 bytemuck = { workspace = true, features = ["derive"], optional = true }
@@ -63,10 +61,8 @@ render = [
     "dep:bevy_core_pipeline",
     "dep:bevy_image",
     "dep:bevy_mesh",
-    "dep:bevy_reflect",
     "dep:bevy_render",
     "dep:bevy_shader",
-    "dep:bevy_transform",
     "dep:bytemuck",
 ]
 
