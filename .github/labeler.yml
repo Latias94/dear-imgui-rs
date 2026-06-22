@@ -1,30 +1,48 @@
 "crate: dear-imgui-sys":
-  - dear-imgui-sys/**
+  - changed-files:
+      - any-glob-to-any-file: dear-imgui-sys/**
 "crate: dear-imgui":
-  - dear-imgui/**
+  - changed-files:
+      - any-glob-to-any-file: dear-imgui/**
 "crate: backend-wgpu":
-  - backends/dear-imgui-wgpu/**
+  - changed-files:
+      - any-glob-to-any-file: backends/dear-imgui-wgpu/**
 "crate: backend-glow":
-  - backends/dear-imgui-glow/**
+  - changed-files:
+      - any-glob-to-any-file: backends/dear-imgui-glow/**
 "crate: backend-winit":
-  - backends/dear-imgui-winit/**
+  - changed-files:
+      - any-glob-to-any-file: backends/dear-imgui-winit/**
 "crate: ext-implot":
-  - extensions/dear-implot/**
-  - extensions/dear-implot-sys/**
+  - changed-files:
+      - any-glob-to-any-file:
+          - extensions/dear-implot/**
+          - extensions/dear-implot-sys/**
 "crate: ext-imnodes":
-  - extensions/dear-imnodes/**
-  - extensions/dear-imnodes-sys/**
+  - changed-files:
+      - any-glob-to-any-file:
+          - extensions/dear-imnodes/**
+          - extensions/dear-imnodes-sys/**
 "crate: ext-node-editor":
-  - extensions/dear-node-editor/**
-  - extensions/dear-node-editor-sys/**
+  - changed-files:
+      - any-glob-to-any-file:
+          - extensions/dear-node-editor/**
+          - extensions/dear-node-editor-sys/**
 "crate: ext-imguizmo":
-  - extensions/dear-imguizmo/**
-  - extensions/dear-imguizmo-sys/**
+  - changed-files:
+      - any-glob-to-any-file:
+          - extensions/dear-imguizmo/**
+          - extensions/dear-imguizmo-sys/**
 "area: build":
-  - "**/build.rs"
-  - tools/build-support/**
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/build.rs"
+          - tools/build-support/**
 "area: ci":
-  - .github/workflows/**
+  - changed-files:
+      - any-glob-to-any-file: .github/workflows/**
 "area: docs":
-  - README.md
-  - docs/**
+  - changed-files:
+      - any-glob-to-any-file:
+          - README.md
+          - docs/**
