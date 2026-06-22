@@ -16,10 +16,6 @@
 //!   `backend-shim-android`
 //! - `opengl3` requires feature `backend-shim-opengl3` and is currently
 //!   available on non-wasm targets
-//! - `sdlrenderer3` requires feature `backend-shim-sdlrenderer3` and is
-//!   currently available on non-wasm targets
-//! - `sdlgpu3` requires feature `backend-shim-sdlgpu3` and is currently
-//!   available on non-wasm targets
 //! - `win32` requires `target_os = "windows"` and feature
 //!   `backend-shim-win32`
 //! - `dx11` requires `target_os = "windows"` and feature
@@ -32,6 +28,8 @@
 //!   in the application
 //! - backend crates such as SDL3 wrappers may still own framework-specific
 //!   build logic while reusing shared shim ABI where appropriate
+//! - SDL3 renderer shims are owned by `dear-imgui-sdl3`; the sys-level
+//!   renderer shim features are not exposed by `dear-imgui-sys`
 //!
 //! The repository's concrete Android proof-of-shape lives in
 //! `examples-android/dear-imgui-android-smoke/`.
@@ -44,12 +42,6 @@ pub mod dx11;
 
 #[cfg(all(not(target_arch = "wasm32"), feature = "backend-shim-opengl3"))]
 pub mod opengl3;
-
-#[cfg(all(not(target_arch = "wasm32"), feature = "backend-shim-sdlrenderer3"))]
-pub mod sdlrenderer3;
-
-#[cfg(all(not(target_arch = "wasm32"), feature = "backend-shim-sdlgpu3"))]
-pub mod sdlgpu3;
 
 #[cfg(all(target_os = "windows", feature = "backend-shim-win32"))]
 pub mod win32;

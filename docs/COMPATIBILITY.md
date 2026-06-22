@@ -35,7 +35,7 @@ Backends
 | dear-imgui-glow   | 0.15.0  | glow = 0.17            | OpenGL renderer (winit/glutin) |
 | dear-imgui-ash    | 0.15.0  | ash = 0.38             | Vulkan renderer (native only). Optional: `ash-window` for winit multi-viewport; SDL3 multi-viewport via `Platform_CreateVkSurface`; `gpu-allocator`/`vk-mem` allocators |
 | dear-imgui-winit  | 0.15.0  | winit = 0.30.13        | Winit platform backend |
-| dear-imgui-sdl3   | 0.15.0  | sdl3 = 0.18.4, sdl3-sys 0.6 | SDL3 platform backend with optional official OpenGL3/SDLRenderer3 shims |
+| dear-imgui-sdl3   | 0.15.0  | sdl3 = 0.18.4, sdl3-sys 0.6 | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
 | dear-imgui-bevy   | 0.15.0  | Bevy = 0.19.0-rc.2     | Experimental Bevy-native backend (docking, texture interop, native multi-viewport on supported targets) |
 
 Utilities

@@ -2,7 +2,7 @@
 name = "dear-imgui-sdl3"
 version = "0.15.0"
 edition.workspace = true
-description = "SDL3 platform backend with optional OpenGL3 renderer for dear-imgui-rs"
+description = "SDL3 platform backend with optional OpenGL3, SDLRenderer3, and SDLGPU3 renderers for dear-imgui-rs"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -48,8 +48,8 @@ default = []
 # Off by default to keep SDL3 platform-only mode lightweight.
 opengl3-renderer = ["dear-imgui-sys/backend-shim-opengl3"]
 # Enable the official C++ SDLGPU3 renderer backend (imgui_impl_sdlgpu3).
-sdlgpu3-renderer = ["dear-imgui-sys/backend-shim-sdlgpu3"]
+sdlgpu3-renderer = []
 # Enable the official C++ SDLRenderer3 renderer backend (imgui_impl_sdlrenderer3).
-sdlrenderer3-renderer = ["dear-imgui-sys/backend-shim-sdlrenderer3"]
+sdlrenderer3-renderer = []
 # Enable multi-viewport helpers (requires multi-viewport support in dear-imgui-rs).
 multi-viewport = ["dear-imgui-rs/multi-viewport"]

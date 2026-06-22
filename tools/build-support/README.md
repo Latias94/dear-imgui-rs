@@ -15,7 +15,8 @@ downloading/extracting prebuilt static libraries.
 - Utility helpers to build candidate GitHub release URLs
 - Optional native dependency discovery helpers behind `pkg-config` / `vcpkg`
   features. These are used by build scripts for FreeType and SDL3 header
-  discovery.
+  discovery, with a shared include-search helper for explicit include env vars,
+  Cargo dependency metadata, pkg-config, vcpkg, and known system include roots.
 
 ## API Sketch
 
@@ -66,4 +67,3 @@ checking in `src/bindings_pregenerated.rs` and copying/sanitizing it in `build.r
 ## License
 
 Dual-licensed under MIT or Apache-2.0.
-

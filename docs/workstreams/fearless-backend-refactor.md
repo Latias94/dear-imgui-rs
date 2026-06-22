@@ -66,7 +66,7 @@ That means the missing abstraction is not "raw backend declarations" in the narr
 |---|---|---|
 | `dear-imgui-sys` | core Dear ImGui/cimgui build, core FFI, optional backend shim ABI, upstream backend source packaging | SDL3 ownership, safe backend API |
 | `dear-imgui-rs` | safe core API, `PlatformIo`, texture lifecycle, render snapshots, typed viewport/platform hooks | backend-specific build logic, backend feature passthrough |
-| backend crates | platform/render integration, framework-specific wrapper code, safe or semi-safe API, docs/examples/tests | redefining the shared shim ABI once it exists |
+| backend crates | platform/render integration, framework-specific wrapper code, safe or semi-safe API, docs/examples/tests | redefining self-contained sys-owned shim ABI |
 | third-party ecosystems | engine/framework-specific integration choices on top of `dear-imgui-sys` and `dear-imgui-rs` | core crate boundary decisions |
 
 ### Backend Shim Module

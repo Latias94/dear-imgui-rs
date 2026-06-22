@@ -14,7 +14,7 @@ This crate provides unsafe Rust bindings to Dear ImGui v1.92.8 (docking branch) 
 - **Cross-platform**: Consistent builds on Windows (MSVC/MinGW), Linux, macOS, and WebAssembly
 - **Prebuilt Binaries**: Optional prebuilt static libraries for faster builds
 - **Offline-friendly**: Pregenerated bindings for normal builds, docs.rs, and offline environments
-- **Optional backend shim ABI**: Shared low-level backend shim modules for downstream backend crates and engine integrations
+- **Optional backend shim ABI**: Shared low-level self-contained backend shim modules for downstream backend crates and engine integrations
 - **Stack layout compatibility shim**: Repository-owned C ABI for the `BeginHorizontal`,
   `BeginVertical`, and `Spring` layout helpers used by imgui-node-editor blueprint examples
 
@@ -179,13 +179,16 @@ can expose optional backend shim modules behind `backend-shim-*` features:
 dear-imgui-sys = { version = "0.15.0", features = ["backend-shim-opengl3"] }
 ```
 
-These features expose modules such as:
+These features expose self-contained modules such as:
 
 - `dear_imgui_sys::backend_shim::win32`
 - `dear_imgui_sys::backend_shim::dx11`
 - `dear_imgui_sys::backend_shim::android`
 - `dear_imgui_sys::backend_shim::opengl3`
-- `dear_imgui_sys::backend_shim::sdlrenderer3`
+
+SDLRenderer3 and SDLGPU3 renderer shims are owned by `dear-imgui-sdl3`, not
+`dear-imgui-sys`. Use `dear-imgui-sdl3` with feature `sdlrenderer3-renderer`
+or `sdlgpu3-renderer` for those renderer integrations.
 
 Important scope note:
 
@@ -193,6 +196,7 @@ Important scope note:
   upstream C++ backend symbol names
 - self-contained official backends may be compiled by `dear-imgui-sys` behind
   these features
+- SDL3 renderer shims are framework-specific and are compiled by `dear-imgui-sdl3`
 - this does not mean `dear-imgui-rs` already provides a safe wrapper for those
   backends
 
