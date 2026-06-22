@@ -12,8 +12,8 @@ ownership model directly.
 | Item | Status |
 | --- | --- |
 | Rust | `1.95.0` or newer |
-| Bevy | `=0.19.0-rc.2` |
-| dear-imgui-rs | `0.14` |
+| Bevy | `=0.19.0` |
+| dear-imgui-rs | `0.15` |
 | Primary-window overlay | Supported with the `render` feature |
 | Docking in the primary window | Supported when the ImGui context enables docking |
 | Native multi-viewport OS windows | Preview-grade with `render,multi-viewport` |
@@ -25,9 +25,9 @@ Use the same Bevy version as the backend:
 
 ```toml
 [dependencies]
-bevy = "=0.19.0-rc.2"
+bevy = "=0.19.0"
 dear-imgui-bevy = { version = "0.15", features = ["render"] }
-dear-imgui-rs = "0.14"
+dear-imgui-rs = "0.15"
 ```
 
 A minimal overlay app registers `ImguiPlugin`, marks the camera that should receive the ImGui

@@ -1,6 +1,14 @@
 use std::env;
 use std::path::PathBuf;
 
+fn feature_enabled(feature: &str) -> bool {
+    let env_name = format!(
+        "CARGO_FEATURE_{}",
+        feature.replace('-', "_").to_ascii_uppercase()
+    );
+    env::var_os(env_name).is_some()
+}
+
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=wrapper.cpp");
@@ -33,6 +41,8 @@ fn main() {
         .map(PathBuf::from)
         .unwrap_or_else(|_| imgui_root.join("backends"));
     let backends_parent = backends_root.parent().unwrap_or(&imgui_root);
+    let enable_sdlrenderer3 = feature_enabled("sdlrenderer3-renderer");
+    let enable_sdlgpu3 = feature_enabled("sdlgpu3-renderer");
 
     if !backends_root.join("imgui_impl_sdl3.h").exists() {
         panic!(
@@ -50,6 +60,44 @@ fn main() {
         "cargo:rerun-if-changed={}",
         backends_root.join("imgui_impl_sdl3.h").display()
     );
+    if enable_sdlrenderer3 {
+        if !backends_root.join("imgui_impl_sdlrenderer3.h").exists() {
+            panic!(
+                "dear-imgui-sdl3: could not find Dear ImGui SDLRenderer3 backend sources at {}. \
+                 Make sure dear-imgui-sys packages the upstream imgui/backends directory.",
+                backends_root.display()
+            );
+        }
+        println!(
+            "cargo:rerun-if-changed={}",
+            backends_root.join("imgui_impl_sdlrenderer3.cpp").display()
+        );
+        println!(
+            "cargo:rerun-if-changed={}",
+            backends_root.join("imgui_impl_sdlrenderer3.h").display()
+        );
+    }
+    if enable_sdlgpu3 {
+        if !backends_root.join("imgui_impl_sdlgpu3.h").exists() {
+            panic!(
+                "dear-imgui-sdl3: could not find Dear ImGui SDLGPU3 backend sources at {}. \
+                 Make sure dear-imgui-sys packages the upstream imgui/backends directory.",
+                backends_root.display()
+            );
+        }
+        println!(
+            "cargo:rerun-if-changed={}",
+            backends_root.join("imgui_impl_sdlgpu3.cpp").display()
+        );
+        println!(
+            "cargo:rerun-if-changed={}",
+            backends_root.join("imgui_impl_sdlgpu3.h").display()
+        );
+        println!(
+            "cargo:rerun-if-changed={}",
+            backends_root.join("imgui_impl_sdlgpu3_shaders.h").display()
+        );
+    }
 
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
@@ -108,6 +156,14 @@ fn main() {
 
     // Backend sources come from the upstream Dear ImGui tree packaged by dear-imgui-sys.
     build.file(backends_root.join("imgui_impl_sdl3.cpp"));
+    if enable_sdlrenderer3 {
+        build.define("DEAR_IMGUI_SDL3_ENABLE_SDLRENDERER3", None);
+        build.file(backends_root.join("imgui_impl_sdlrenderer3.cpp"));
+    }
+    if enable_sdlgpu3 {
+        build.define("DEAR_IMGUI_SDL3_ENABLE_SDLGPU3", None);
+        build.file(backends_root.join("imgui_impl_sdlgpu3.cpp"));
+    }
 
     // C wrappers used by Rust FFI (see wrapper.cpp).
     build.file("wrapper.cpp");

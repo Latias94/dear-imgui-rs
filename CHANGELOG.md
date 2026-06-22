@@ -7,9 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Remove the sys-level `backend-shim-sdlrenderer3` and
+  `backend-shim-sdlgpu3` features from `dear-imgui-sys`. Downstream users
+  should enable `dear-imgui-sdl3` with `sdlrenderer3-renderer` or
+  `sdlgpu3-renderer` instead.
+
 ### Added
 
-- Add SDL3 + SDLGPU3 backend support in `dear-imgui-sdl3`, including the multi-viewport example and the matching `dear-imgui-sys` backend shim updates. PR #32, thanks @TheDaChicken.
+- Add SDL3 + SDLGPU3 backend support in `dear-imgui-sdl3`, including the multi-viewport example. PR #32, thanks @TheDaChicken.
+- Add local SDLRenderer3 and SDLGPU3 shim compilation to `dear-imgui-sdl3`
+  while keeping the user-facing `sdlrenderer3-renderer` and
+  `sdlgpu3-renderer` feature names.
+
+### Changed
+
+- Update the experimental `dear-imgui-bevy` target from Bevy `0.19.0-rc.2` to Bevy `0.19.0`.
+- Rehome SDLRenderer3 and SDLGPU3 renderer shim ownership into
+  `dear-imgui-sdl3`. `dear-imgui-sys` now keeps self-contained backend shims
+  such as OpenGL3, Android, Win32, and DX11.
+- Share native include discovery through `dear-imgui-build-support` and
+  table-drive the remaining self-contained backend shim builds in
+  `dear-imgui-sys`.
 
 ## [0.15.0] - 2026-06-14
 

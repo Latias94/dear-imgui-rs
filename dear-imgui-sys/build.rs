@@ -85,8 +85,6 @@ fn main() {
     println!("cargo:rerun-if-changed=src/stack_layout_imgui_item_size.cpp.inc");
     println!("cargo:rerun-if-changed=src/stack_layout_imgui_item_size_horizontal_compat.cpp.inc");
     println!("cargo:rerun-if-changed=backend-shims/opengl3.cpp");
-    println!("cargo:rerun-if-changed=backend-shims/sdlrenderer3.cpp");
-    println!("cargo:rerun-if-changed=backend-shims/sdlgpu3.cpp");
     println!("cargo:rerun-if-changed=backend-shims/android.cpp");
     println!("cargo:rerun-if-changed=backend-shims/win32.cpp");
     println!("cargo:rerun-if-changed=backend-shims/dx11.cpp");
@@ -98,8 +96,6 @@ fn main() {
     println!("cargo:rerun-if-env-changed=DEAR_IMGUI_RS_REGEN_BINDINGS");
     println!("cargo:rerun-if-env-changed=DOCS_RS");
     println!("cargo:rerun-if-env-changed=CARGO_NET_OFFLINE");
-    println!("cargo:rerun-if-env-changed=SDL3_INCLUDE_DIR");
-
     // docs.rs: generate bindings only
     if cfg.docs_rs {
         docsrs_build(&cfg);
@@ -594,9 +590,7 @@ fn any_backend_shim_enabled() -> bool {
     cfg!(feature = "backend-shim-android")
         || cfg!(feature = "backend-shim-dx11")
         || cfg!(feature = "backend-shim-opengl3")
-        || cfg!(feature = "backend-shim-sdlrenderer3")
         || cfg!(feature = "backend-shim-win32")
-        || cfg!(feature = "backend-shim-sdlgpu3")
 }
 
 fn new_native_cpp_build(cfg: &BuildConfig) -> cc::Build {
@@ -634,25 +628,10 @@ fn build_backend_shims(cfg: &BuildConfig) {
         panic!("backend-shim-* features are not supported for wasm targets yet.");
     }
 
-    if cfg!(feature = "backend-shim-opengl3") {
-        build_backend_shim_opengl3(cfg);
-    }
-    #[cfg(feature = "backend-shim-sdlrenderer3")]
-    {
-        build_backend_shim_sdlrenderer3(cfg);
-    }
-    #[cfg(feature = "backend-shim-sdlgpu3")]
-    {
-        build_backend_shim_sdlgpu3(cfg);
-    }
-    if cfg.is_windows() && cfg!(feature = "backend-shim-win32") {
-        build_backend_shim_win32(cfg);
-    }
-    if cfg.is_windows() && cfg!(feature = "backend-shim-dx11") {
-        build_backend_shim_dx11(cfg);
-    }
-    if cfg.target_os == "android" && cfg!(feature = "backend-shim-android") {
-        build_backend_shim_android(cfg);
+    for spec in backend_shim_specs() {
+        if spec.enabled && backend_shim_supported_on_target(spec, cfg) {
+            build_backend_shim_from_spec(cfg, spec);
+        }
     }
 }
 
@@ -664,126 +643,137 @@ fn generate_bindings_native(_cfg: &BuildConfig) {
     );
 }
 
-fn build_backend_shim_opengl3(cfg: &BuildConfig) {
-    let imgui_src = cfg.imgui_src();
-    let shim_root = cfg.manifest_dir.join("backend-shims");
-    let mut build = new_native_cpp_build(cfg);
-    build.file(imgui_src.join("backends/imgui_impl_opengl3.cpp"));
-    build.file(shim_root.join("opengl3.cpp"));
-    build.compile("dear_imgui_backend_opengl3");
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BackendShimTarget {
+    Any,
+    Android,
+    Linux,
+    Windows,
+}
 
-    if matches!(cfg.target_os.as_str(), "linux" | "android") {
-        println!("cargo:rustc-link-lib=dl");
-    }
-    if cfg.target_os == "android" {
-        // The official OpenGL3 backend references GLES entry points directly.
-        // Link the Android GLES loader explicitly so NativeActivity can load the
-        // final cdylib before the application creates its own EGL/GLES context.
-        println!("cargo:rustc-link-lib=GLESv3");
+#[derive(Clone, Copy, Debug)]
+struct BackendShimLinkLib {
+    target: BackendShimTarget,
+    name: &'static str,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct BackendShimSpec {
+    enabled: bool,
+    target: BackendShimTarget,
+    upstream_source: &'static str,
+    shim_source: &'static str,
+    output_lib: &'static str,
+    link_libs: &'static [BackendShimLinkLib],
+}
+
+const OPENGL3_BACKEND_LINK_LIBS: &[BackendShimLinkLib] = &[
+    BackendShimLinkLib {
+        target: BackendShimTarget::Linux,
+        name: "dl",
+    },
+    BackendShimLinkLib {
+        target: BackendShimTarget::Android,
+        name: "dl",
+    },
+    // The official OpenGL3 backend references GLES entry points directly.
+    // Link the Android GLES loader explicitly so NativeActivity can load the
+    // final cdylib before the application creates its own EGL/GLES context.
+    BackendShimLinkLib {
+        target: BackendShimTarget::Android,
+        name: "GLESv3",
+    },
+];
+
+const WIN32_BACKEND_LINK_LIBS: &[BackendShimLinkLib] = &[
+    BackendShimLinkLib {
+        target: BackendShimTarget::Any,
+        name: "gdi32",
+    },
+    BackendShimLinkLib {
+        target: BackendShimTarget::Any,
+        name: "dwmapi",
+    },
+];
+
+const DX11_BACKEND_LINK_LIBS: &[BackendShimLinkLib] = &[
+    BackendShimLinkLib {
+        target: BackendShimTarget::Any,
+        name: "d3d11",
+    },
+    BackendShimLinkLib {
+        target: BackendShimTarget::Any,
+        name: "dxgi",
+    },
+    BackendShimLinkLib {
+        target: BackendShimTarget::Any,
+        name: "d3dcompiler",
+    },
+];
+
+fn backend_shim_specs() -> &'static [BackendShimSpec] {
+    &[
+        BackendShimSpec {
+            enabled: cfg!(feature = "backend-shim-opengl3"),
+            target: BackendShimTarget::Any,
+            upstream_source: "imgui_impl_opengl3.cpp",
+            shim_source: "opengl3.cpp",
+            output_lib: "dear_imgui_backend_opengl3",
+            link_libs: OPENGL3_BACKEND_LINK_LIBS,
+        },
+        BackendShimSpec {
+            enabled: cfg!(feature = "backend-shim-android"),
+            target: BackendShimTarget::Android,
+            upstream_source: "imgui_impl_android.cpp",
+            shim_source: "android.cpp",
+            output_lib: "dear_imgui_backend_android",
+            link_libs: &[],
+        },
+        BackendShimSpec {
+            enabled: cfg!(feature = "backend-shim-win32"),
+            target: BackendShimTarget::Windows,
+            upstream_source: "imgui_impl_win32.cpp",
+            shim_source: "win32.cpp",
+            output_lib: "dear_imgui_backend_win32",
+            link_libs: WIN32_BACKEND_LINK_LIBS,
+        },
+        BackendShimSpec {
+            enabled: cfg!(feature = "backend-shim-dx11"),
+            target: BackendShimTarget::Windows,
+            upstream_source: "imgui_impl_dx11.cpp",
+            shim_source: "dx11.cpp",
+            output_lib: "dear_imgui_backend_dx11",
+            link_libs: DX11_BACKEND_LINK_LIBS,
+        },
+    ]
+}
+
+fn backend_shim_supported_on_target(spec: &BackendShimSpec, cfg: &BuildConfig) -> bool {
+    backend_shim_target_matches(spec.target, cfg)
+}
+
+fn backend_shim_target_matches(target: BackendShimTarget, cfg: &BuildConfig) -> bool {
+    match target {
+        BackendShimTarget::Any => true,
+        BackendShimTarget::Android => cfg.target_os == "android",
+        BackendShimTarget::Linux => cfg.target_os == "linux",
+        BackendShimTarget::Windows => cfg.is_windows(),
     }
 }
 
-#[cfg(any(
-    feature = "backend-shim-sdlrenderer3",
-    feature = "backend-shim-sdlgpu3"
-))]
-fn add_sdl3_include_path(build: &mut cc::Build, cfg: &BuildConfig) -> Result<(), String> {
-    let found = build_support::find_sdl3_include_paths(build_support::Sdl3SearchConfig {
-        out_dir: &cfg.out_dir,
-        target_os: &cfg.target_os,
-        use_pkg_config: cfg!(feature = "pkg-config"),
-        use_vcpkg: cfg!(feature = "vcpkg"),
-    })
-    .map_err(|message| {
-        let platform_hint = if cfg.target_os == "android" {
-            " Android application / NDK / CMake setup still belongs to the consuming application."
-        } else if cfg.target_os == "ios" {
-            " If your app links an SDL3.xcframework from Xcode, framework packaging, signing, and the host app entry point still belong to the consuming application."
-        } else {
-            ""
-        };
-        format!(
-            "dear-imgui-sys: could not find SDL3 headers required for \
-             SDL3 backend shims. {message} Set SDL3_INCLUDE_DIR to an \
-             include root containing SDL3/SDL.h, install SDL3 development files \
-             through pkg-config/vcpkg, or make the final dependency graph enable \
-             `sdl3/build-from-source` so sdl3-sys can expose headers via \
-             DEP_SDL3_OUT_DIR.{platform_hint}"
-        )
-    })?;
+fn build_backend_shim_from_spec(cfg: &BuildConfig, spec: &BackendShimSpec) {
+    let imgui_src = cfg.imgui_src();
+    let shim_root = cfg.manifest_dir.join("backend-shims");
+    let mut build = new_native_cpp_build(cfg);
+    build.file(imgui_src.join("backends").join(spec.upstream_source));
+    build.file(shim_root.join(spec.shim_source));
+    build.compile(spec.output_lib);
 
-    for include_path in found.include_paths {
-        build.include(&include_path);
+    for link_lib in spec.link_libs {
+        if backend_shim_target_matches(link_lib.target, cfg) {
+            println!("cargo:rustc-link-lib={}", link_lib.name);
+        }
     }
-    println!(
-        "cargo:warning=dear-imgui-sys: using SDL3 headers from {}",
-        found.source
-    );
-    Ok(())
-}
-
-#[cfg(feature = "backend-shim-sdlrenderer3")]
-fn build_backend_shim_sdlrenderer3(cfg: &BuildConfig) {
-    let imgui_src = cfg.imgui_src();
-    let shim_root = cfg.manifest_dir.join("backend-shims");
-    let mut build = new_native_cpp_build(cfg);
-    if let Err(message) = add_sdl3_include_path(&mut build, cfg) {
-        panic!("{message}");
-    }
-    build.file(imgui_src.join("backends/imgui_impl_sdlrenderer3.cpp"));
-    build.file(shim_root.join("sdlrenderer3.cpp"));
-    build.compile("dear_imgui_backend_sdlrenderer3");
-
-    if matches!(cfg.target_os.as_str(), "linux" | "android") {
-        println!("cargo:rustc-link-lib=dl");
-    }
-}
-
-#[cfg(feature = "backend-shim-sdlgpu3")]
-fn build_backend_shim_sdlgpu3(cfg: &BuildConfig) {
-    let imgui_src = cfg.imgui_src();
-    let shim_root = cfg.manifest_dir.join("backend-shims");
-    let mut build = new_native_cpp_build(cfg);
-    if let Err(message) = add_sdl3_include_path(&mut build, cfg) {
-        panic!("{message}");
-    }
-    build.file(imgui_src.join("backends/imgui_impl_sdlgpu3.cpp"));
-    build.file(shim_root.join("sdlgpu3.cpp"));
-    build.compile("dear_imgui_backend_sdlgpu3");
-}
-
-fn build_backend_shim_android(cfg: &BuildConfig) {
-    let imgui_src = cfg.imgui_src();
-    let shim_root = cfg.manifest_dir.join("backend-shims");
-    let mut build = new_native_cpp_build(cfg);
-    build.file(imgui_src.join("backends/imgui_impl_android.cpp"));
-    build.file(shim_root.join("android.cpp"));
-    build.compile("dear_imgui_backend_android");
-}
-
-fn build_backend_shim_win32(cfg: &BuildConfig) {
-    let imgui_src = cfg.imgui_src();
-    let shim_root = cfg.manifest_dir.join("backend-shims");
-    let mut build = new_native_cpp_build(cfg);
-    build.file(imgui_src.join("backends/imgui_impl_win32.cpp"));
-    build.file(shim_root.join("win32.cpp"));
-    build.compile("dear_imgui_backend_win32");
-
-    println!("cargo:rustc-link-lib=gdi32");
-    println!("cargo:rustc-link-lib=dwmapi");
-}
-
-fn build_backend_shim_dx11(cfg: &BuildConfig) {
-    let imgui_src = cfg.imgui_src();
-    let shim_root = cfg.manifest_dir.join("backend-shims");
-    let mut build = new_native_cpp_build(cfg);
-    build.file(imgui_src.join("backends/imgui_impl_dx11.cpp"));
-    build.file(shim_root.join("dx11.cpp"));
-    build.compile("dear_imgui_backend_dx11");
-
-    println!("cargo:rustc-link-lib=d3d11");
-    println!("cargo:rustc-link-lib=dxgi");
-    println!("cargo:rustc-link-lib=d3dcompiler");
 }
 
 fn export_include_paths(cfg: &BuildConfig) {

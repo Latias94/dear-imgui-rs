@@ -2,9 +2,8 @@
 //!
 //! This crate is a thin, opinionated wrapper around the official C++ SDL3
 //! platform backend (`imgui_impl_sdl3.cpp`). When the `opengl3-renderer`,
-//! `sdlrenderer3-renderer`, or `sdlgpu3-renderer` features are enabled, the
-//! renderer path uses the matching shared backend shim exported by
-//! `dear-imgui-sys`.
+//! `sdlrenderer3-renderer`, or `sdlgpu3-renderer` features are enabled, this
+//! crate compiles the matching official renderer backend and local C shim.
 //!
 //! The intent is to provide a simple, safe-ish API that:
 //! - plugs into an existing `dear-imgui-rs::Context`
@@ -40,10 +39,6 @@ use dear_imgui_sys as sys;
 #[cfg(feature = "opengl3-renderer")]
 use dear_imgui_sys::backend_shim::opengl3 as opengl3_backend;
 #[cfg(feature = "sdlgpu3-renderer")]
-use dear_imgui_sys::backend_shim::sdlgpu3 as sdlgpu3_backend;
-#[cfg(feature = "sdlrenderer3-renderer")]
-use dear_imgui_sys::backend_shim::sdlrenderer3 as sdlrenderer3_backend;
-#[cfg(feature = "sdlgpu3-renderer")]
 use sdl3::gpu::CommandBuffer;
 #[cfg(feature = "sdlgpu3-renderer")]
 use sdl3::gpu::Device;
@@ -53,6 +48,13 @@ use sdl3::gpu::RenderPass;
 use sdl3::render::WindowCanvas;
 use sdl3::video::{GLContext, Window};
 use sdl3_sys::events::SDL_Event;
+#[cfg(feature = "sdlgpu3-renderer")]
+use sdl3_sys::gpu::{
+    SDL_GPUCommandBuffer, SDL_GPUDevice, SDL_GPUGraphicsPipeline, SDL_GPUPresentMode,
+    SDL_GPURenderPass, SDL_GPUSampleCount, SDL_GPUSwapchainComposition, SDL_GPUTextureFormat,
+};
+#[cfg(feature = "sdlrenderer3-renderer")]
+use sdl3_sys::render::SDL_Renderer;
 
 pub use self::backend::Sdl3PlatformBackend;
 #[cfg(feature = "opengl3-renderer")]

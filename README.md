@@ -34,7 +34,7 @@
   - `dear-imgui-sys` — low-level FFI via cimgui (docking branch), with pregenerated bindings for Dear ImGui v1.92.8
   - `dear-imgui-rs` — safe, idiomatic Rust API (RAII + builder style similar to imgui-rs)
   - Backends: `dear-imgui-wgpu`, `dear-imgui-glow`, `dear-imgui-ash`, `dear-imgui-winit`, `dear-imgui-sdl3`, `dear-imgui-bevy`
-    - `dear-imgui-bevy` is an experimental Bevy-native backend on Bevy `0.19.0-rc.2`, with docking,
+    - `dear-imgui-bevy` is an experimental Bevy-native backend on Bevy `0.19.0`, with docking,
       texture interop, and native multi-viewport on supported targets.
   - `dear-app` — convenient Winit + WGPU application runner (docking, themes, add-ons)
 - Extensions
@@ -219,6 +219,8 @@ For the checked-in iOS smoke templates and a quick route-selection index, see
 
 Most users should stay on the safe backends (`dear-imgui-winit`,
 `dear-imgui-sdl3`, `dear-imgui-wgpu`, `dear-imgui-glow`, `dear-imgui-ash`).
+If you need to integrate a custom engine or renderer, start with
+[`docs/CUSTOM_BACKENDS.md`](docs/CUSTOM_BACKENDS.md).
 
 For engine integrations or platform stacks that are not wrapped by a dedicated
 crate yet, `dear-imgui-sys` can expose selected official backend pieces behind
@@ -355,8 +357,11 @@ Backends
 | dear-imgui-glow  | 0.15.0   | glow = 0.17       | OpenGL renderer (winit/glutin) |
 | dear-imgui-ash   | 0.15.0   | ash = 0.38        | Vulkan renderer (optional multi-viewport helpers via winit/SDL3; native only) |
 | dear-imgui-winit | 0.15.0   | winit = 0.30.13   | Winit platform backend         |
-| dear-imgui-sdl3  | 0.15.0   | sdl3 = 0.18.4     | SDL3 platform backend with optional official OpenGL3/SDLRenderer3 shims |
+| dear-imgui-sdl3  | 0.15.0   | sdl3 = 0.18.4     | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
 | dear-imgui-bevy  | 0.15.0   | Bevy = 0.19.0-rc.2 | Experimental Bevy-native backend with docking, texture interop, and native multi-viewport on supported targets |
+
+The current main branch has moved the experimental Bevy backend to Bevy `0.19.0`;
+the table above records the latest published release train.
 
 Application Runner
 

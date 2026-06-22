@@ -573,10 +573,10 @@ fn render_sdlgpu3_impl(
 ) {
     unsafe {
         let raw = draw_data as *mut DrawData as *mut sys::ImDrawData;
-        sdlgpu3_backend::dear_imgui_backend_sdlgpu3_render_draw_data(
+        ffi::dear_imgui_sdl3_backend_sdlgpu3_render_draw_data(
             raw,
-            command_buffer.raw() as *mut _ as *mut c_void,
-            render_pass.raw() as *mut _ as *mut c_void,
+            command_buffer.raw(),
+            render_pass.raw(),
             std::ptr::null_mut(),
         );
     }
@@ -586,10 +586,7 @@ fn render_sdlgpu3_impl(
 fn prepare_render_sdlgpu3_impl(draw_data: &mut DrawData, command_buffer: &CommandBuffer) {
     unsafe {
         let raw = draw_data as *mut DrawData as *mut sys::ImDrawData;
-        sdlgpu3_backend::dear_imgui_backend_sdlgpu3_prepare_draw_data(
-            raw,
-            command_buffer.raw() as *mut _ as *mut c_void,
-        );
+        ffi::dear_imgui_sdl3_backend_sdlgpu3_prepare_draw_data(raw, command_buffer.raw());
     }
 }
 
@@ -598,10 +595,7 @@ fn render_sdlrenderer3_impl(draw_data: &mut DrawData, canvas: &WindowCanvas) {
     let sdl_renderer = canvas.raw();
     unsafe {
         let raw = draw_data as *mut DrawData as *mut sys::ImDrawData;
-        sdlrenderer3_backend::dear_imgui_backend_sdlrenderer3_render_draw_data(
-            raw,
-            sdl_renderer as *mut std::ffi::c_void,
-        );
+        ffi::dear_imgui_sdl3_backend_sdlrenderer3_render_draw_data(raw, sdl_renderer);
     }
 }
 
@@ -621,7 +615,7 @@ pub fn update_texture(tex: &mut TextureData) {
 #[cfg(feature = "sdlgpu3-renderer")]
 pub fn update_gpu3_texture(tex: &mut TextureData) {
     unsafe {
-        sdlgpu3_backend::dear_imgui_backend_sdlgpu3_update_texture(tex.as_raw_mut());
+        ffi::dear_imgui_sdl3_backend_sdlgpu3_update_texture(tex.as_raw_mut());
     }
 }
 
@@ -635,7 +629,7 @@ pub fn update_gp3_texture(tex: &mut TextureData) {
 /// This is an optional advanced helper mirroring `ImGui_ImplSDLGPU3_CreateDeviceObjects`.
 #[cfg(feature = "sdlgpu3-renderer")]
 pub fn create_gpu3_device_objects() {
-    unsafe { sdlgpu3_backend::dear_imgui_backend_sdlgpu3_create_device_objects() }
+    unsafe { ffi::dear_imgui_sdl3_backend_sdlgpu3_create_device_objects() }
 }
 
 /// Destroy SDLGPU3 renderer device objects.
@@ -644,7 +638,7 @@ pub fn create_gpu3_device_objects() {
 #[cfg(feature = "sdlgpu3-renderer")]
 pub fn destroy_gpu3_device_objects() {
     unsafe {
-        sdlgpu3_backend::dear_imgui_backend_sdlgpu3_destroy_device_objects();
+        ffi::dear_imgui_sdl3_backend_sdlgpu3_destroy_device_objects();
     }
 }
 
@@ -654,7 +648,7 @@ pub fn destroy_gpu3_device_objects() {
 #[cfg(feature = "sdlrenderer3-renderer")]
 pub fn canvas_update_texture(tex: &mut TextureData) {
     unsafe {
-        sdlrenderer3_backend::dear_imgui_backend_sdlrenderer3_update_texture(tex.as_raw_mut());
+        ffi::dear_imgui_sdl3_backend_sdlrenderer3_update_texture(tex.as_raw_mut());
     }
 }
 
@@ -681,7 +675,7 @@ pub fn destroy_device_objects() {
 /// This is an optional advanced helper mirroring `ImGui_ImplSDLRenderer3_CreateDeviceObjects`.
 #[cfg(feature = "sdlrenderer3-renderer")]
 pub fn canvas_create_device_objects() {
-    unsafe { sdlrenderer3_backend::dear_imgui_backend_sdlrenderer3_create_device_objects() }
+    unsafe { ffi::dear_imgui_sdl3_backend_sdlrenderer3_create_device_objects() }
 }
 
 /// Destroy SDLRenderer3 renderer device objects.
@@ -690,6 +684,6 @@ pub fn canvas_create_device_objects() {
 #[cfg(feature = "sdlrenderer3-renderer")]
 pub fn canvas_destroy_device_objects() {
     unsafe {
-        sdlrenderer3_backend::dear_imgui_backend_sdlrenderer3_destroy_device_objects();
+        ffi::dear_imgui_sdl3_backend_sdlrenderer3_destroy_device_objects();
     }
 }

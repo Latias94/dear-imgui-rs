@@ -5,6 +5,12 @@
 
 #include "imgui.h"
 #include "backends/imgui_impl_sdl3.h"
+#if defined(DEAR_IMGUI_SDL3_ENABLE_SDLRENDERER3)
+#include "backends/imgui_impl_sdlrenderer3.h"
+#endif
+#if defined(DEAR_IMGUI_SDL3_ENABLE_SDLGPU3)
+#include "backends/imgui_impl_sdlgpu3.h"
+#endif
 
 #include <SDL3/SDL.h>
 #include <vector>
@@ -73,5 +79,74 @@ void ImGui_ImplSDL3_SetGamepadMode_Manual_Rust(SDL_Gamepad* const* manual_gamepa
         (int)manual_gamepads.size()
     );
 }
+
+#if defined(DEAR_IMGUI_SDL3_ENABLE_SDLRENDERER3)
+bool dear_imgui_sdl3_backend_sdlrenderer3_init(SDL_Renderer* renderer) {
+    return ImGui_ImplSDLRenderer3_Init(renderer);
+}
+
+void dear_imgui_sdl3_backend_sdlrenderer3_shutdown() {
+    ImGui_ImplSDLRenderer3_Shutdown();
+}
+
+void dear_imgui_sdl3_backend_sdlrenderer3_new_frame() {
+    ImGui_ImplSDLRenderer3_NewFrame();
+}
+
+void dear_imgui_sdl3_backend_sdlrenderer3_render_draw_data(ImDrawData* draw_data, SDL_Renderer* renderer) {
+    ImGui_ImplSDLRenderer3_RenderDrawData(draw_data, renderer);
+}
+
+void dear_imgui_sdl3_backend_sdlrenderer3_create_device_objects() {
+    ImGui_ImplSDLRenderer3_CreateDeviceObjects();
+}
+
+void dear_imgui_sdl3_backend_sdlrenderer3_destroy_device_objects() {
+    ImGui_ImplSDLRenderer3_DestroyDeviceObjects();
+}
+
+void dear_imgui_sdl3_backend_sdlrenderer3_update_texture(ImTextureData* tex) {
+    ImGui_ImplSDLRenderer3_UpdateTexture(tex);
+}
+#endif
+
+#if defined(DEAR_IMGUI_SDL3_ENABLE_SDLGPU3)
+bool dear_imgui_sdl3_backend_sdlgpu3_init(ImGui_ImplSDLGPU3_InitInfo* info) {
+    return ImGui_ImplSDLGPU3_Init(info);
+}
+
+void dear_imgui_sdl3_backend_sdlgpu3_shutdown() {
+    ImGui_ImplSDLGPU3_Shutdown();
+}
+
+void dear_imgui_sdl3_backend_sdlgpu3_new_frame() {
+    ImGui_ImplSDLGPU3_NewFrame();
+}
+
+void dear_imgui_sdl3_backend_sdlgpu3_prepare_draw_data(ImDrawData* draw_data, SDL_GPUCommandBuffer* buffer) {
+    ImGui_ImplSDLGPU3_PrepareDrawData(draw_data, buffer);
+}
+
+void dear_imgui_sdl3_backend_sdlgpu3_render_draw_data(
+    ImDrawData* draw_data,
+    SDL_GPUCommandBuffer* buffer,
+    SDL_GPURenderPass* render_pass,
+    SDL_GPUGraphicsPipeline* pipeline
+) {
+    ImGui_ImplSDLGPU3_RenderDrawData(draw_data, buffer, render_pass, pipeline);
+}
+
+void dear_imgui_sdl3_backend_sdlgpu3_create_device_objects() {
+    ImGui_ImplSDLGPU3_CreateDeviceObjects();
+}
+
+void dear_imgui_sdl3_backend_sdlgpu3_destroy_device_objects() {
+    ImGui_ImplSDLGPU3_DestroyDeviceObjects();
+}
+
+void dear_imgui_sdl3_backend_sdlgpu3_update_texture(ImTextureData* tex) {
+    ImGui_ImplSDLGPU3_UpdateTexture(tex);
+}
+#endif
 
 } // extern "C"

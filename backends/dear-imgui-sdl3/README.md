@@ -1,12 +1,12 @@
 # dear-imgui-sdl3
 
-SDL3 platform backend (with optional OpenGL3 renderer) for the `dear-imgui-rs`
+SDL3 platform backend with optional official renderer backends for the `dear-imgui-rs`
 crate. This wraps the official Dear ImGui C++ backends:
 
 - `imgui_impl_sdl3.cpp` (platform layer)
 - `imgui_impl_opengl3.cpp` (OpenGL3 renderer, via the shared sys shim)
-- `imgui_impl_sdlrenderer3.cpp` (SDLRenderer (canvas) renderer, via the shared sys shim)
-- `imgui_impl_sdlgpu3.cpp` (SDLGpu renderer)
+- `imgui_impl_sdlrenderer3.cpp` (SDLRenderer (canvas) renderer, via this crate's SDL3 shim)
+- `imgui_impl_sdlgpu3.cpp` (SDLGPU3 renderer, via this crate's SDL3 shim)
 
 and exposes a small, Rust-friendly API that plugs into an existing
 `dear-imgui-rs::Context`.
@@ -15,6 +15,7 @@ Typical use cases:
 
 - Drive Dear ImGui input from an SDL3 window (keyboard/mouse/gamepad/IME).
 - Render Dear ImGui via the official OpenGL3 backend.
+- Render Dear ImGui via the official SDLRenderer3 or SDLGPU3 backends.
 - Use SDL3 only for the platform layer together with a Rust renderer
   (e.g. `dear-imgui-glow` or `dear-imgui-wgpu`).
 
@@ -27,11 +28,15 @@ Typical use cases:
   wrapper boundary.
 - When `opengl3-renderer` is enabled, this crate uses the shared OpenGL3 backend shim exported by
   `dear-imgui-sys` instead of compiling a second local OpenGL3 wrapper layer.
+- When `sdlrenderer3-renderer` or `sdlgpu3-renderer` is enabled, this crate compiles the
+  matching official renderer source and local SDL3 shim. These renderer shims are not shared
+  `dear-imgui-sys` features.
 
 ## Features
 
 - `opengl3-renderer`: enables the shared official OpenGL3 renderer shim from `dear-imgui-sys`.
-- `sdlrenderer3-renderer`: enables the shared official SDLRenderer3 shim from `dear-imgui-sys`.
+- `sdlrenderer3-renderer`: enables this crate's official SDLRenderer3 renderer shim.
+- `sdlgpu3-renderer`: enables this crate's official SDLGPU3 renderer shim.
 - `multi-viewport`: enables multi-viewport helpers (requires `dear-imgui-rs/multi-viewport`).
 
 Platform-only usage (SDL3 + WGPU/Glow, no official OpenGL3 renderer):
@@ -50,6 +55,12 @@ Enable the official SDLRenderer3 renderer:
 
 ```toml
 dear-imgui-sdl3 = { version = "0.15.0", features = ["sdlrenderer3-renderer"] }
+```
+
+Enable the official SDLGPU3 renderer:
+
+```toml
+dear-imgui-sdl3 = { version = "0.15.0", features = ["sdlgpu3-renderer"] }
 ```
 
 ## Compatibility

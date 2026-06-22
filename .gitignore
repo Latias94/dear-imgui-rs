@@ -7,3 +7,4 @@ extensions/target
 *.ttf
 repo-ref/
 tools/__pycache__
+docs/plans/

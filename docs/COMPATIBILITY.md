@@ -35,7 +35,7 @@ Backends
 | dear-imgui-glow   | 0.15.0  | glow = 0.17            | OpenGL renderer (winit/glutin) |
 | dear-imgui-ash    | 0.15.0  | ash = 0.38             | Vulkan renderer (native only). Optional: `ash-window` for winit multi-viewport; SDL3 multi-viewport via `Platform_CreateVkSurface`; `gpu-allocator`/`vk-mem` allocators |
 | dear-imgui-winit  | 0.15.0  | winit = 0.30.13        | Winit platform backend |
-| dear-imgui-sdl3   | 0.15.0  | sdl3 = 0.18.4, sdl3-sys 0.6 | SDL3 platform backend with optional official OpenGL3/SDLRenderer3 shims |
+| dear-imgui-sdl3   | 0.15.0  | sdl3 = 0.18.4, sdl3-sys 0.6 | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
 | dear-imgui-bevy   | 0.15.0  | Bevy = 0.19.0-rc.2     | Experimental Bevy-native backend (docking, texture interop, native multi-viewport on supported targets) |
 
 Utilities
@@ -68,7 +68,7 @@ Extensions
 
 - Next release train: TBD.
 - After `0.15.0` is cut, main may move independently until the next planned release is cut.
-- Current baselines after the `0.15.0` release: Dear ImGui v1.92.8 (docking) via cimgui, unified `dear-*` crate minor `0.15`, MSRV 1.92, Bevy `0.19.0-rc.2` for the experimental Bevy backend, and the external dependency baseline described above.
+- Current baselines after the `0.15.0` release: Dear ImGui v1.92.8 (docking) via cimgui, unified `dear-*` crate minor `0.15`, MSRV 1.92, Bevy `0.19.0` for the experimental Bevy backend on main, and the external dependency baseline described above.
 - Main-branch compatibility policy:
   - Detailed `0.15.0` source breaks live in `CHANGELOG.md`; this file tracks the broader
     compatibility contract.
