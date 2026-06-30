@@ -1,6 +1,6 @@
 [package]
 name = "dear-imgui-bevy"
-version = "0.15.0"
+version = "0.15.1"
 edition.workspace = true
 rust-version = "1.95.0"
 description = "Experimental Bevy-native backend for dear-imgui-rs on Bevy 0.19.0"

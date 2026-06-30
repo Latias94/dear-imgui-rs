@@ -1,6 +1,7 @@
 use super::registry::{viewport_data_mut, viewport_data_ref};
 use super::viewport_data::decoration_offset_logical;
 use super::*;
+use crate::sanitize;
 use std::ffi::{CStr, c_char, c_void};
 use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::window::{WindowAttributes, WindowLevel};
@@ -88,19 +89,22 @@ pub(super) unsafe fn setup_monitors_with_window(window: &Window, ctx: &mut Conte
             // Winit reports monitor geometry in physical pixels. Dear ImGui expects
             // monitor rectangles in the same coordinate space as viewport Pos/Size.
             // Our multi-viewport backend uses logical screen coordinates, so convert.
-            let scale_f64 = m.scale_factor();
-            let scale = scale_f64 as f32;
+            let scale_f64 = sanitize::positive_finite_or(m.scale_factor(), 1.0);
+            let scale = sanitize::positive_finite_f32_or(scale_f64 as f32, 1.0);
             let pos_logical = m.position().to_logical::<f64>(scale_f64);
             let size_logical = m.size().to_logical::<f64>(scale_f64);
+            let pos = sanitize::finite_vec2_f64_to_f32([pos_logical.x, pos_logical.y])
+                .unwrap_or([0.0, 0.0]);
+            let size = sanitize::finite_non_negative_size(size_logical);
 
             let mut monitor = dear_imgui_rs::sys::ImGuiPlatformMonitor::default();
             monitor.MainPos = dear_imgui_rs::sys::ImVec2 {
-                x: pos_logical.x as f32,
-                y: pos_logical.y as f32,
+                x: pos[0],
+                y: pos[1],
             };
             monitor.MainSize = dear_imgui_rs::sys::ImVec2 {
-                x: size_logical.width as f32,
-                y: size_logical.height as f32,
+                x: size[0],
+                y: size[1],
             };
             monitor.WorkPos = monitor.MainPos;
             monitor.WorkSize = monitor.MainSize;
@@ -111,14 +115,15 @@ pub(super) unsafe fn setup_monitors_with_window(window: &Window, ctx: &mut Conte
 
         if out.is_empty() {
             // Fallback using window bounds
-            let scale_f64 = window.scale_factor();
-            let scale = scale_f64 as f32;
+            let scale_f64 = sanitize::positive_finite_or(window.scale_factor(), 1.0);
+            let scale = sanitize::positive_finite_f32_or(scale_f64 as f32, 1.0);
             let size_logical = window.inner_size().to_logical::<f64>(scale_f64);
+            let size = sanitize::finite_non_negative_size(size_logical);
             let mut monitor = dear_imgui_rs::sys::ImGuiPlatformMonitor::default();
             monitor.MainPos = dear_imgui_rs::sys::ImVec2 { x: 0.0, y: 0.0 };
             monitor.MainSize = dear_imgui_rs::sys::ImVec2 {
-                x: size_logical.width as f32,
-                y: size_logical.height as f32,
+                x: size[0],
+                y: size[1],
             };
             monitor.WorkPos = monitor.MainPos;
             monitor.WorkSize = monitor.MainSize;
@@ -257,7 +262,7 @@ pub(super) unsafe extern "C" fn winit_create_window(vp: *mut dear_imgui_rs::sys:
 
                 // Initialize DPI/framebuffer scale immediately
                 let window_ref: &Window = unsafe { &*window_ptr };
-                let scale = window_ref.scale_factor() as f32;
+                let scale = sanitize::positive_finite_f32_or(window_ref.scale_factor() as f32, 1.0);
                 vp_ref.DpiScale = scale;
                 vp_ref.FramebufferScale.x = scale;
                 vp_ref.FramebufferScale.y = scale;
@@ -339,15 +344,29 @@ pub(super) unsafe extern "C" fn winit_get_window_pos_out(
             let vp_ref = &*vp;
             if let Some(vd) = viewport_data_ref(vp) {
                 if let Some(window) = vd.window.as_ref() {
-                    let scale = window.scale_factor();
+                    let scale = sanitize::positive_finite_or(window.scale_factor(), 1.0);
                     if let Ok(pos_phys) = window.inner_position() {
                         let pos_logical = pos_phys.to_logical::<f64>(scale);
-                        r.x = pos_logical.x as f32;
-                        r.y = pos_logical.y as f32;
+                        if let Some(pos) =
+                            sanitize::finite_vec2_f64_to_f32([pos_logical.x, pos_logical.y])
+                        {
+                            r.x = pos[0];
+                            r.y = pos[1];
+                        } else {
+                            r.x = vp_ref.Pos.x;
+                            r.y = vp_ref.Pos.y;
+                        }
                     } else if let Ok(pos_phys) = window.outer_position() {
                         let pos_logical = pos_phys.to_logical::<f64>(scale);
-                        r.x = pos_logical.x as f32;
-                        r.y = pos_logical.y as f32;
+                        if let Some(pos) =
+                            sanitize::finite_vec2_f64_to_f32([pos_logical.x, pos_logical.y])
+                        {
+                            r.x = pos[0];
+                            r.y = pos[1];
+                        } else {
+                            r.x = vp_ref.Pos.x;
+                            r.y = vp_ref.Pos.y;
+                        }
                     } else {
                         r.x = vp_ref.Pos.x;
                         r.y = vp_ref.Pos.y;
@@ -381,7 +400,10 @@ pub(super) unsafe extern "C" fn winit_set_window_pos(
             if let Some(window) = unsafe { vd.window.as_ref() } {
                 // ImGui provides screen-space logical coordinates relative to client origin.
                 // Convert to outer coordinates for winit by subtracting decoration offset.
-                let desired_client = LogicalPosition::new(pos.x as f64, pos.y as f64);
+                let Some([x, y]) = sanitize::finite_vec2_f32([pos.x, pos.y]) else {
+                    return;
+                };
+                let desired_client = LogicalPosition::new(x as f64, y as f64);
                 let outer_target = if let Some((dx, dy)) = decoration_offset_logical(window) {
                     LogicalPosition::new(desired_client.x - dx, desired_client.y - dy)
                 } else {
@@ -406,10 +428,11 @@ pub(super) unsafe extern "C" fn winit_get_window_size_out(
             if let Some(vd) = viewport_data_ref(vp) {
                 if let Some(window) = vd.window.as_ref() {
                     let size_phys = window.inner_size();
-                    let size_logical: LogicalSize<f64> =
-                        size_phys.to_logical(window.scale_factor());
-                    r.x = size_logical.width as f32;
-                    r.y = size_logical.height as f32;
+                    let size_logical: LogicalSize<f64> = size_phys
+                        .to_logical(sanitize::positive_finite_or(window.scale_factor(), 1.0));
+                    let size = sanitize::finite_non_negative_size(size_logical);
+                    r.x = size[0];
+                    r.y = size[1];
                 } else {
                     r.x = vp_ref.Size.x;
                     r.y = vp_ref.Size.y;
@@ -438,7 +461,9 @@ pub(super) unsafe extern "C" fn winit_set_window_size(
         if let Some(vd) = unsafe { viewport_data_mut(vp) } {
             if let Some(window) = unsafe { vd.window.as_ref() } {
                 // ImGui provides inner size in logical pixels; pass through directly.
-                let logical: LogicalSize<f64> = LogicalSize::new(size.x as f64, size.y as f64);
+                let size = sanitize::finite_vec2_f32([size.x, size.y]).unwrap_or([0.0, 0.0]);
+                let logical: LogicalSize<f64> =
+                    LogicalSize::new(size[0].max(0.0) as f64, size[1].max(0.0) as f64);
                 let _ = window.request_inner_size(winit::dpi::Size::Logical(logical));
                 vd.ignore_window_size_event_frame =
                     unsafe { dear_imgui_rs::sys::igGetFrameCount() };
@@ -549,7 +574,7 @@ pub(super) unsafe extern "C" fn winit_get_window_framebuffer_scale_out(
                 return;
             }
             if let Some(window) = unsafe { vd.window.as_ref() } {
-                let scale = window.scale_factor() as f32;
+                let scale = sanitize::positive_finite_f32_or(window.scale_factor() as f32, 1.0);
                 if cfg!(feature = "mv-log") && (scale - vd.last_log_fb_scale).abs() > 0.01 {
                     mvlog(format_args!(
                         "[winit-mv] fb_scale changed id={} -> {:.2}",
@@ -576,11 +601,8 @@ pub(super) unsafe extern "C" fn winit_get_window_dpi_scale(
         let mut scale = 1.0f32;
         if let Some(vd) = viewport_data_ref(vp_ref) {
             if let Some(window) = vd.window.as_ref() {
-                scale = window.scale_factor() as f32;
+                scale = sanitize::positive_finite_f32_or(window.scale_factor() as f32, 1.0);
             }
-        }
-        if !scale.is_finite() || scale <= 0.0 {
-            scale = 1.0;
         }
         scale
     })

@@ -164,10 +164,10 @@ cargo run --bin file_browser_imgui --features file-browser
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.15.0"
+dear-imgui-rs = "0.15.1"
 # Choose a backend + platform integration
-dear-imgui-wgpu = "0.15.0"   # or dear-imgui-glow / dear-imgui-ash
-dear-imgui-winit = "0.15.0"  # or dear-imgui-sdl3
+dear-imgui-wgpu = "0.15.1"   # or dear-imgui-glow / dear-imgui-ash
+dear-imgui-winit = "0.15.1"  # or dear-imgui-sdl3
 ```
 
 `dear-imgui-wgpu` defaults to `wgpu-29` on the current `main` branch.
@@ -176,25 +176,25 @@ If you need `wgpu = 28` compatibility for the WGPU renderer backend:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.15.0"
-dear-imgui-wgpu = { version = "0.15.0", default-features = false, features = ["wgpu-28"] }
-dear-imgui-winit = "0.15.0"
+dear-imgui-rs = "0.15.1"
+dear-imgui-wgpu = { version = "0.15.1", default-features = false, features = ["wgpu-28"] }
+dear-imgui-winit = "0.15.1"
 ```
 
 If you need `wgpu = 27` compatibility for the WGPU renderer backend:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.15.0"
-dear-imgui-wgpu = { version = "0.15.0", default-features = false, features = ["wgpu-27"] }
-dear-imgui-winit = "0.15.0"
+dear-imgui-rs = "0.15.1"
+dear-imgui-wgpu = { version = "0.15.1", default-features = false, features = ["wgpu-27"] }
+dear-imgui-winit = "0.15.1"
 ```
 
 ### Application Runner (Recommended for Quick Start)
 
 ```toml
 [dependencies]
-dear-app = "0.15.0"  # Includes dear-imgui-rs, wgpu backend, and docking support
+dear-app = "0.15.1"  # Includes dear-imgui-rs, wgpu backend, and docking support
 ```
 
 ### Apple Platform Examples
@@ -231,8 +231,8 @@ Example: low-level Android route without a dedicated Android convenience crate:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.15.0"
-dear-imgui-sys = { version = "0.15.0", features = ["backend-shim-android", "backend-shim-opengl3"] }
+dear-imgui-rs = "0.15.1"
+dear-imgui-sys = { version = "0.15.1", features = ["backend-shim-android", "backend-shim-opengl3"] }
 ```
 
 Recommended ownership split:
@@ -262,25 +262,25 @@ assembly.
 ```toml
 [dependencies]
 # Plotting
-dear-implot = "0.15.0"      # 2D plotting
-dear-implot3d = "0.15.0"    # 3D plotting
+dear-implot = "0.15.1"      # 2D plotting
+dear-implot3d = "0.15.1"    # 3D plotting
 
 # 3D Gizmos
-dear-imguizmo = "0.15.0"         # Standard 3D gizmo + GraphEditor
-dear-imguizmo-quat = "0.15.0"    # Quaternion-based gizmo
+dear-imguizmo = "0.15.1"         # Standard 3D gizmo + GraphEditor
+dear-imguizmo-quat = "0.15.1"    # Quaternion-based gizmo
 
 # Node Editor
-dear-imnodes = "0.15.0"
-dear-node-editor = "0.15.0"  # native-only imgui-node-editor integration
+dear-imnodes = "0.15.1"
+dear-node-editor = "0.15.1"  # native-only imgui-node-editor integration
 
 # Test automation
-dear-imgui-test-engine = "0.15.0"
+dear-imgui-test-engine = "0.15.1"
 
 # File Browser
-dear-file-browser = "0.15.0"  # Native dialogs + ImGui file browser
+dear-file-browser = "0.15.1"  # Native dialogs + ImGui file browser
 
 # Reflection-based UI helpers
-dear-imgui-reflect = "0.15.0"
+dear-imgui-reflect = "0.15.1"
 ```
 
 ### Reflection-based UI (dear-imgui-reflect)
@@ -346,19 +346,19 @@ Core
 
 | Crate           | Version | Notes                                     |
 |-----------------|---------|-------------------------------------------|
-| dear-imgui-rs   | 0.15.0   | Safe Rust API over dear-imgui-sys         |
-| dear-imgui-sys  | 0.15.0   | Binds Dear ImGui v1.92.8 (docking branch) |
+| dear-imgui-rs   | 0.15.1   | Safe Rust API over dear-imgui-sys         |
+| dear-imgui-sys  | 0.15.1   | Binds Dear ImGui v1.92.8 (docking branch) |
 
 Backends
 
 | Crate            | Version | External deps     | Notes                          |
 |------------------|---------|-------------------|--------------------------------|
-| dear-imgui-wgpu  | 0.15.0   | wgpu = 29/28/27   | WebGPU renderer (default wgpu 29; optional wgpu 28/27 via features). Experimental multi-viewport on native via winit/SDL3; disabled on wasm |
-| dear-imgui-glow  | 0.15.0   | glow = 0.17       | OpenGL renderer (winit/glutin) |
-| dear-imgui-ash   | 0.15.0   | ash = 0.38        | Vulkan renderer (optional multi-viewport helpers via winit/SDL3; native only) |
-| dear-imgui-winit | 0.15.0   | winit = 0.30.13   | Winit platform backend         |
-| dear-imgui-sdl3  | 0.15.0   | sdl3 = 0.18.4     | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
-| dear-imgui-bevy  | 0.15.0   | Bevy = 0.19.0-rc.2 | Experimental Bevy-native backend with docking, texture interop, and native multi-viewport on supported targets |
+| dear-imgui-wgpu  | 0.15.1   | wgpu = 29/28/27   | WebGPU renderer (default wgpu 29; optional wgpu 28/27 via features). Experimental multi-viewport on native via winit/SDL3; disabled on wasm |
+| dear-imgui-glow  | 0.15.1   | glow = 0.17       | OpenGL renderer (winit/glutin) |
+| dear-imgui-ash   | 0.15.1   | ash = 0.38        | Vulkan renderer (optional multi-viewport helpers via winit/SDL3; native only) |
+| dear-imgui-winit | 0.15.1   | winit = 0.30.13   | Winit platform backend         |
+| dear-imgui-sdl3  | 0.15.1   | sdl3 = 0.18.4     | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
+| dear-imgui-bevy  | 0.15.1   | Bevy = 0.19.0-rc.2 | Experimental Bevy-native backend with docking, texture interop, and native multi-viewport on supported targets |
 
 The current main branch has moved the experimental Bevy backend to Bevy `0.19.0`;
 the table above records the latest published release train.
@@ -367,24 +367,24 @@ Application Runner
 
 | Crate     | Version | Requires dear-imgui-rs | Notes                                            |
 |-----------|---------|------------------------|--------------------------------------------------|
-| dear-app  | 0.15.0   | 0.15.0                 | App runner (docking, themes, add-ons)            |
+| dear-app  | 0.15.1   | 0.15.1                 | App runner (docking, themes, add-ons)            |
 
 Extensions
 
 | Crate               | Version | Requires dear-imgui-rs | Sys crate                   | Notes                                  |
 |---------------------|---------|------------------------|-----------------------------|----------------------------------------|
-| dear-implot         | 0.15.0   | 0.15.0                 | dear-implot-sys 0.15.0      | 2D plotting                            |
-| dear-imnodes        | 0.15.0   | 0.15.0                 | dear-imnodes-sys 0.15.0     | Node editor                            |
-| dear-node-editor    | 0.15.0   | 0.15.0                 | dear-node-editor-sys 0.15.0 | Native imgui-node-editor integration   |
-| dear-imguizmo       | 0.15.0   | 0.15.0                 | dear-imguizmo-sys 0.15.0    | 3D gizmo + GraphEditor                 |
-| dear-file-browser   | 0.15.0   | 0.15.0                 | —                           | ImGui UI + native (rfd) backends       |
-| dear-implot3d       | 0.15.0   | 0.15.0                 | dear-implot3d-sys 0.15.0    | 3D plotting                            |
-| dear-imguizmo-quat  | 0.15.0   | 0.15.0                 | dear-imguizmo-quat-sys 0.15.0 | Quaternion gizmo                       |
-| dear-imgui-test-engine | 0.15.0 | 0.15.0                 | dear-imgui-test-engine-sys 0.15.0 | UI automation and test runner      |
-| dear-imgui-reflect  | 0.15.0   | 0.15.0                 | —                           | Reflection-based UI helpers (pure Rust)|
+| dear-implot         | 0.15.1   | 0.15.1                 | dear-implot-sys 0.15.1      | 2D plotting                            |
+| dear-imnodes        | 0.15.1   | 0.15.1                 | dear-imnodes-sys 0.15.1     | Node editor                            |
+| dear-node-editor    | 0.15.1   | 0.15.1                 | dear-node-editor-sys 0.15.1 | Native imgui-node-editor integration   |
+| dear-imguizmo       | 0.15.1   | 0.15.1                 | dear-imguizmo-sys 0.15.1    | 3D gizmo + GraphEditor                 |
+| dear-file-browser   | 0.15.1   | 0.15.1                 | —                           | ImGui UI + native (rfd) backends       |
+| dear-implot3d       | 0.15.1   | 0.15.1                 | dear-implot3d-sys 0.15.1    | 3D plotting                            |
+| dear-imguizmo-quat  | 0.15.1   | 0.15.1                 | dear-imguizmo-quat-sys 0.15.1 | Quaternion gizmo                       |
+| dear-imgui-test-engine | 0.15.1 | 0.15.1                 | dear-imgui-test-engine-sys 0.15.1 | UI automation and test runner      |
+| dear-imgui-reflect  | 0.15.1   | 0.15.1                 | —                           | Reflection-based UI helpers (pure Rust)|
 
 Note: if your ecosystem is pinned to `wgpu = 28` or `wgpu = 27`, you can use
-`dear-imgui-wgpu 0.15.0` with `default-features = false, features = ["wgpu-28"]` or
+`dear-imgui-wgpu 0.15.1` with `default-features = false, features = ["wgpu-28"]` or
 `default-features = false, features = ["wgpu-27"]`. `dear-app` follows the workspace default
 `wgpu = 29` path.
 

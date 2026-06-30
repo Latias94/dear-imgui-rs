@@ -11,6 +11,7 @@ use std::cell::RefCell;
 use winit::window::Window;
 
 use crate::input::{to_imgui_mouse_button, winit_key_to_imgui_key};
+use crate::sanitize;
 
 /// Handle keyboard input events
 pub fn handle_keyboard_input(event: &KeyEvent, imgui_ctx: &mut Context) -> bool {
@@ -45,7 +46,9 @@ pub fn handle_mouse_wheel(delta: MouseScrollDelta, imgui_ctx: &mut Context) -> b
     io.add_mouse_source_event(MouseSource::Mouse);
 
     match delta {
-        MouseScrollDelta::LineDelta(h, v) => io.add_mouse_wheel_event([h, v]),
+        MouseScrollDelta::LineDelta(h, v) => {
+            io.add_mouse_wheel_event([sanitize::finite_or_zero(h), sanitize::finite_or_zero(v)]);
+        }
         MouseScrollDelta::PixelDelta(pos) => {
             // Follow upstream practice: treat pixel delta as +/- 1.0 per event
             let h = match pos.x.partial_cmp(&0.0) {
@@ -86,11 +89,15 @@ pub fn handle_mouse_button(
 
 /// Handle cursor movement events
 pub fn handle_cursor_moved(position: [f64; 2], imgui_ctx: &mut Context) -> bool {
+    let Some(position) = sanitize::finite_vec2_f64_to_f32(position) else {
+        return imgui_ctx.io().want_capture_mouse();
+    };
+
     {
         let io = imgui_ctx.io_mut();
         // Cursor move events from winit are produced by a physical mouse.
         io.add_mouse_source_event(MouseSource::Mouse);
-        io.add_mouse_pos_event([position[0] as f32, position[1] as f32]);
+        io.add_mouse_pos_event(position);
     }
     imgui_ctx.io().want_capture_mouse()
 }
@@ -157,30 +164,54 @@ pub fn handle_touch_event(touch: &winit::event::Touch, _window: &Window, _imgui_
         match touch.phase {
             TouchPhase::Started => {
                 if active_id.is_none() {
+                    let pos = touch
+                        .location
+                        .to_logical::<f64>(sanitize::positive_finite_or(
+                            _window.scale_factor(),
+                            1.0,
+                        ));
+                    let Some(pos) = sanitize::finite_position(pos) else {
+                        return;
+                    };
+
                     // Capture this touch as the active pointer
                     *active.borrow_mut() = Some(id);
-                    let pos = touch.location.to_logical::<f64>(_window.scale_factor());
                     let io = _imgui_ctx.io_mut();
                     // Map touch to a touchscreen mouse source.
                     io.add_mouse_source_event(MouseSource::TouchScreen);
-                    io.add_mouse_pos_event([pos.x as f32, pos.y as f32]);
+                    io.add_mouse_pos_event(pos);
                     io.add_mouse_button_event(dear_imgui_rs::input::MouseButton::Left, true);
                 }
             }
             TouchPhase::Moved => {
                 if active_id == Some(id) {
-                    let pos = touch.location.to_logical::<f64>(_window.scale_factor());
+                    let pos = touch
+                        .location
+                        .to_logical::<f64>(sanitize::positive_finite_or(
+                            _window.scale_factor(),
+                            1.0,
+                        ));
+                    let Some(pos) = sanitize::finite_position(pos) else {
+                        return;
+                    };
                     let io = _imgui_ctx.io_mut();
                     io.add_mouse_source_event(MouseSource::TouchScreen);
-                    io.add_mouse_pos_event([pos.x as f32, pos.y as f32]);
+                    io.add_mouse_pos_event(pos);
                 }
             }
             TouchPhase::Ended | TouchPhase::Cancelled => {
                 if active_id == Some(id) {
-                    let pos = touch.location.to_logical::<f64>(_window.scale_factor());
+                    let pos = touch
+                        .location
+                        .to_logical::<f64>(sanitize::positive_finite_or(
+                            _window.scale_factor(),
+                            1.0,
+                        ));
                     let io = _imgui_ctx.io_mut();
                     io.add_mouse_source_event(MouseSource::TouchScreen);
-                    io.add_mouse_pos_event([pos.x as f32, pos.y as f32]);
+                    if let Some(pos) = sanitize::finite_position(pos) {
+                        io.add_mouse_pos_event(pos);
+                    }
                     io.add_mouse_button_event(dear_imgui_rs::input::MouseButton::Left, false);
                     *active.borrow_mut() = None;
                 }
@@ -243,6 +274,33 @@ mod tests {
         // We just test that it doesn't panic
         // Test that the function returns a boolean value (always true)
         let _ = handled; // Just verify it's a boolean
+    }
+
+    #[test]
+    fn test_cursor_moved_ignores_non_finite_position() {
+        let _guard = lock_context();
+        let mut ctx = Context::create();
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            handle_cursor_moved([f64::NAN, f64::INFINITY], &mut ctx);
+        }));
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_mouse_wheel_ignores_non_finite_line_delta() {
+        let _guard = lock_context();
+        let mut ctx = Context::create();
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            handle_mouse_wheel(
+                MouseScrollDelta::LineDelta(f32::NAN, f32::INFINITY),
+                &mut ctx,
+            );
+        }));
+
+        assert!(result.is_ok());
     }
 
     #[test]

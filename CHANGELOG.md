@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-06-30
+
 ### Breaking Changes
 
 - Remove the sys-level `backend-shim-sdlrenderer3` and
@@ -30,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Share native include discovery through `dear-imgui-build-support` and
   table-drive the remaining self-contained backend shim builds in
   `dear-imgui-sys`.
+
+### Fixed
+
+- `dear-imgui-winit` now filters non-finite platform coordinates, sizes, scale factors, and wheel deltas before forwarding them to Dear ImGui IO. This prevents panics such as `Io::set_mouse_pos() pos must contain finite values` during window-manager-driven moves on Wayland/KDE. Fixes #35, thanks @AndreasPantle.
 
 ## [0.15.0] - 2026-06-14
 

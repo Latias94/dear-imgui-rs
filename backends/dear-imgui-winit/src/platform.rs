@@ -17,6 +17,7 @@ use web_time::Instant;
 
 use crate::cursor::CursorSettings;
 use crate::events;
+use crate::sanitize;
 
 type SetImeDataCallback = unsafe extern "C" fn(
     *mut dear_imgui_rs::sys::ImGuiContext,
@@ -247,19 +248,17 @@ impl WinitPlatform {
         imgui_ctx: &mut Context,
     ) {
         self.hidpi_mode = hidpi_mode;
-        self.hidpi_factor = match hidpi_mode {
-            HiDpiMode::Default => window.scale_factor(),
-            HiDpiMode::Locked(factor) => factor,
-            HiDpiMode::Rounded => window.scale_factor().round(),
-        };
+        self.hidpi_factor = self.hidpi_factor_for_window(window);
 
         // Convert via winit scale then adapt to our active HiDPI mode
-        let logical_size = window.inner_size().to_logical(window.scale_factor());
+        let logical_size = window
+            .inner_size()
+            .to_logical(sanitize::positive_finite_or(window.scale_factor(), 1.0));
         let logical_size = self.scale_size_from_winit(window, logical_size);
         let io = imgui_ctx.io_mut();
 
-        io.set_display_size([logical_size.width as f32, logical_size.height as f32]);
-        io.set_display_framebuffer_scale([self.hidpi_factor as f32, self.hidpi_factor as f32]);
+        io.set_display_size(sanitize::finite_non_negative_size(logical_size));
+        io.set_display_framebuffer_scale(sanitize::framebuffer_scale(self.hidpi_factor, 1.0));
 
         // Enable IME by default so WindowEvent::Ime events and IME composition
         // are available on desktop platforms. Auto-management (when enabled)
@@ -353,38 +352,38 @@ impl WinitPlatform {
     ) -> bool {
         match event {
             WindowEvent::Resized(physical_size) => {
-                let logical_size = physical_size.to_logical(window.scale_factor());
+                let logical_size = physical_size
+                    .to_logical(sanitize::positive_finite_or(window.scale_factor(), 1.0));
                 let logical_size = self.scale_size_from_winit(window, logical_size);
                 imgui_ctx
                     .io_mut()
-                    .set_display_size([logical_size.width as f32, logical_size.height as f32]);
+                    .set_display_size(sanitize::finite_non_negative_size(logical_size));
                 false
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                let new_hidpi = match self.hidpi_mode {
-                    HiDpiMode::Default => *scale_factor,
-                    HiDpiMode::Locked(factor) => factor,
-                    HiDpiMode::Rounded => scale_factor.round(),
-                };
+                let new_hidpi = self.hidpi_factor_for_scale(*scale_factor);
                 // Adjust mouse position proportionally when DPI factor changes
                 {
                     let io = imgui_ctx.io_mut();
                     let mouse = io.mouse_pos();
-                    if mouse[0].is_finite() && mouse[1].is_finite() && self.hidpi_factor > 0.0 {
-                        let scale = (new_hidpi / self.hidpi_factor) as f32;
-                        io.set_mouse_pos([mouse[0] * scale, mouse[1] * scale]);
+                    if let Some(scaled) =
+                        rescale_mouse_pos_for_hidpi_change(mouse, self.hidpi_factor, new_hidpi)
+                    {
+                        io.set_mouse_pos(scaled);
                     }
                 }
                 self.hidpi_factor = new_hidpi;
 
-                let logical_size = window.inner_size().to_logical(window.scale_factor());
+                let logical_size = window
+                    .inner_size()
+                    .to_logical(sanitize::positive_finite_or(window.scale_factor(), 1.0));
                 let logical_size = self.scale_size_from_winit(window, logical_size);
                 let io = imgui_ctx.io_mut();
-                io.set_display_size([logical_size.width as f32, logical_size.height as f32]);
-                io.set_display_framebuffer_scale([
-                    self.hidpi_factor as f32,
-                    self.hidpi_factor as f32,
-                ]);
+                io.set_display_size(sanitize::finite_non_negative_size(logical_size));
+                io.set_display_framebuffer_scale(sanitize::framebuffer_scale(
+                    self.hidpi_factor,
+                    1.0,
+                ));
                 false
             }
             WindowEvent::KeyboardInput { event, .. } => {
@@ -405,7 +404,7 @@ impl WinitPlatform {
                             .io_mut()
                             .add_mouse_viewport_event(main_viewport_id);
                         // Feed absolute/screen coordinates in logical pixels, matching io.DisplaySize.
-                        let scale = window.scale_factor();
+                        let scale = sanitize::positive_finite_or(window.scale_factor(), 1.0);
                         let pos_logical = position.to_logical::<f64>(scale);
                         if let Ok(base_phys) = window.inner_position() {
                             let base_logical = base_phys.to_logical::<f64>(scale);
@@ -421,7 +420,8 @@ impl WinitPlatform {
                     }
                 }
                 // Fallback: local logical coordinates
-                let position = position.to_logical(window.scale_factor());
+                let position =
+                    position.to_logical(sanitize::positive_finite_or(window.scale_factor(), 1.0));
                 let position = self.scale_pos_from_winit(window, position);
                 events::handle_cursor_moved([position.x, position.y], imgui_ctx)
             }
@@ -478,19 +478,15 @@ impl WinitPlatform {
                 .config_flags()
                 .contains(ConfigFlags::VIEWPORTS_ENABLE)
             {
-                let winit_scale = window.scale_factor();
-                let hidpi = match self.hidpi_mode {
-                    HiDpiMode::Default => winit_scale,
-                    HiDpiMode::Locked(factor) => factor,
-                    HiDpiMode::Rounded => winit_scale.round(),
-                };
+                let winit_scale = sanitize::positive_finite_or(window.scale_factor(), 1.0);
+                let hidpi = self.hidpi_factor_for_scale(winit_scale);
                 self.hidpi_factor = hidpi;
 
                 let logical_size = window.inner_size().to_logical(winit_scale);
                 let logical_size = self.scale_size_from_winit(window, logical_size);
                 let io = imgui_ctx.io_mut();
-                io.set_display_size([logical_size.width as f32, logical_size.height as f32]);
-                io.set_display_framebuffer_scale([hidpi as f32, hidpi as f32]);
+                io.set_display_size(sanitize::finite_non_negative_size(logical_size));
+                io.set_display_framebuffer_scale(sanitize::framebuffer_scale(hidpi, 1.0));
             }
         }
 
@@ -505,7 +501,9 @@ impl WinitPlatform {
             let pos = imgui_ctx.io().mouse_pos();
             let logical_pos = self
                 .scale_pos_for_winit(window, LogicalPosition::new(pos[0] as f64, pos[1] as f64));
-            let _ = window.set_cursor_position(logical_pos);
+            if let Some(pos) = sanitize::finite_position(logical_pos) {
+                let _ = window.set_cursor_position(LogicalPosition::new(pos[0], pos[1]));
+            }
         }
         // Note: cursor shape update is exposed via prepare_render_with_ui()
     }
@@ -567,8 +565,8 @@ impl WinitPlatform {
             HiDpiMode::Default => logical_size,
             // Convert to physical using winit scale, then back to logical with our factor
             _ => logical_size
-                .to_physical::<f64>(window.scale_factor())
-                .to_logical(self.hidpi_factor),
+                .to_physical::<f64>(sanitize::positive_finite_or(window.scale_factor(), 1.0))
+                .to_logical(sanitize::positive_finite_or(self.hidpi_factor, 1.0)),
         }
     }
 
@@ -581,8 +579,8 @@ impl WinitPlatform {
         match self.hidpi_mode {
             HiDpiMode::Default => logical_pos,
             _ => logical_pos
-                .to_physical::<f64>(window.scale_factor())
-                .to_logical(self.hidpi_factor),
+                .to_physical::<f64>(sanitize::positive_finite_or(window.scale_factor(), 1.0))
+                .to_logical(sanitize::positive_finite_or(self.hidpi_factor, 1.0)),
         }
     }
 
@@ -595,8 +593,21 @@ impl WinitPlatform {
         match self.hidpi_mode {
             HiDpiMode::Default => logical_pos,
             _ => logical_pos
-                .to_physical::<f64>(self.hidpi_factor)
-                .to_logical(window.scale_factor()),
+                .to_physical::<f64>(sanitize::positive_finite_or(self.hidpi_factor, 1.0))
+                .to_logical(sanitize::positive_finite_or(window.scale_factor(), 1.0)),
+        }
+    }
+
+    fn hidpi_factor_for_window(&self, window: &Window) -> f64 {
+        self.hidpi_factor_for_scale(window.scale_factor())
+    }
+
+    fn hidpi_factor_for_scale(&self, scale_factor: f64) -> f64 {
+        let scale_factor = sanitize::positive_finite_or(scale_factor, 1.0);
+        match self.hidpi_mode {
+            HiDpiMode::Default => scale_factor,
+            HiDpiMode::Locked(factor) => sanitize::positive_finite_or(factor, 1.0),
+            HiDpiMode::Rounded => sanitize::positive_finite_or(scale_factor.round(), 1.0),
         }
     }
 
@@ -606,6 +617,17 @@ impl WinitPlatform {
             .with_title("Dear ImGui Window")
             .with_inner_size(LogicalSize::new(1024.0, 768.0))
     }
+}
+
+fn rescale_mouse_pos_for_hidpi_change(
+    mouse: [f32; 2],
+    old_hidpi: f64,
+    new_hidpi: f64,
+) -> Option<[f32; 2]> {
+    let mouse = sanitize::finite_vec2_f32(mouse)?;
+    let old_hidpi = sanitize::positive_finite_or(old_hidpi, 1.0);
+    let scale = sanitize::positive_finite_or(new_hidpi / old_hidpi, 1.0);
+    sanitize::finite_vec2_f32([mouse[0] * scale as f32, mouse[1] * scale as f32])
 }
 
 #[cfg(test)]
@@ -641,6 +663,26 @@ mod tests {
 
         platform.set_hidpi_mode(HiDpiMode::Rounded);
         assert_eq!(platform.hidpi_mode, HiDpiMode::Rounded);
+    }
+
+    #[test]
+    fn rescale_mouse_pos_for_hidpi_change_rejects_non_finite_results() {
+        assert_eq!(
+            rescale_mouse_pos_for_hidpi_change([10.0, 20.0], 1.0, 2.0),
+            Some([20.0, 40.0])
+        );
+        assert_eq!(
+            rescale_mouse_pos_for_hidpi_change([f32::NAN, 20.0], 1.0, 2.0),
+            None
+        );
+        assert_eq!(
+            rescale_mouse_pos_for_hidpi_change([10.0, 20.0], 0.0, 2.0),
+            Some([20.0, 40.0])
+        );
+        assert_eq!(
+            rescale_mouse_pos_for_hidpi_change([f32::MAX, 20.0], 1.0, f64::MAX),
+            None
+        );
     }
 
     #[test]

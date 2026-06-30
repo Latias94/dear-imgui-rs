@@ -51,6 +51,7 @@ mod input;
 #[cfg(feature = "multi-viewport")]
 pub mod multi_viewport;
 mod platform;
+mod sanitize;
 #[cfg(test)]
 mod test_util;
 

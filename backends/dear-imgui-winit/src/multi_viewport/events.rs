@@ -1,6 +1,7 @@
 use super::registry::viewport_data_ref;
 use super::viewport_data::client_to_screen_pos;
 use super::*;
+use crate::sanitize;
 use winit::event::{Event, WindowEvent};
 
 pub fn route_event_to_viewports<T>(imgui_ctx: &mut Context, event: &Event<T>) -> bool {
@@ -45,7 +46,10 @@ pub fn route_event_to_viewports<T>(imgui_ctx: &mut Context, event: &Event<T>) ->
                                         }
                                         WindowEvent::ScaleFactorChanged { .. } => {
                                             // Keep cached scales up-to-date immediately.
-                                            let scale = window.scale_factor() as f32;
+                                            let scale = sanitize::positive_finite_f32_or(
+                                                window.scale_factor() as f32,
+                                                1.0,
+                                            );
                                             if scale.is_finite() && scale > 0.0 {
                                                 (*vp).DpiScale = scale;
                                                 (*vp).FramebufferScale.x = scale;
@@ -87,7 +91,10 @@ pub fn route_event_to_viewports<T>(imgui_ctx: &mut Context, event: &Event<T>) ->
                                             );
                                             // With multi-viewports, feed absolute/screen coordinates
                                             let pos_logical =
-                                                position.to_logical(window.scale_factor());
+                                                position.to_logical(sanitize::positive_finite_or(
+                                                    window.scale_factor(),
+                                                    1.0,
+                                                ));
                                             let logical = [pos_logical.x, pos_logical.y];
                                             if let Some(screen) =
                                                 client_to_screen_pos(window, logical)
@@ -97,8 +104,12 @@ pub fn route_event_to_viewports<T>(imgui_ctx: &mut Context, event: &Event<T>) ->
                                                     imgui_ctx,
                                                 );
                                             } else {
-                                                let pos =
-                                                    position.to_logical(window.scale_factor());
+                                                let pos = position.to_logical(
+                                                    sanitize::positive_finite_or(
+                                                        window.scale_factor(),
+                                                        1.0,
+                                                    ),
+                                                );
                                                 return crate::events::handle_cursor_moved(
                                                     [pos.x, pos.y],
                                                     imgui_ctx,

@@ -6,6 +6,8 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-06-30
+
 ### Breaking Changes
 
 - `multi_viewport::shutdown_multi_viewport_support` now takes `&mut Context`, matching the
@@ -32,6 +34,7 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ### Fixed
 
+- Filter non-finite winit-provided coordinates, sizes, scale factors, and wheel deltas before forwarding them to Dear ImGui IO, including multi-viewport callbacks. This prevents `Io::set_mouse_pos()` / mouse-position event panics during window-manager-driven moves on Wayland/KDE. Fixes #35, thanks @AndreasPantle.
 - `WinitPlatform::attach_window` no longer overwrites `Platform_ImeUserData` when another backend owns `Platform_SetImeDataFn`; it only updates the IME userdata for winit-owned callbacks.
 - `Platform_SetImeDataFn` now resolves `Platform_ImeUserData` from the `ImGuiContext*` passed by
   Dear ImGui instead of whichever context is currently bound.

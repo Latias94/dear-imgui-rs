@@ -1,4 +1,5 @@
 use super::*;
+use crate::sanitize;
 use std::ffi::c_void;
 
 /// Helper structure stored in the void* PlatformUserData field of each ImGuiViewport
@@ -33,7 +34,8 @@ impl ViewportData {
 
 // Convert client-area logical coordinates to screen coordinates (logical), per-window
 pub(crate) fn client_to_screen_pos(window: &Window, logical: [f64; 2]) -> Option<[f32; 2]> {
-    let scale = window.scale_factor();
+    let logical = sanitize::finite_vec2_f64_to_f32(logical)?;
+    let scale = sanitize::positive_finite_or(window.scale_factor(), 1.0);
     // Cross-platform: absolute screen = client top-left (logical) + client offset (logical)
     let base = window
         .inner_position()
@@ -46,9 +48,9 @@ pub(crate) fn client_to_screen_pos(window: &Window, logical: [f64; 2]) -> Option
                 .map(|p| p.to_logical::<f64>(scale))
         });
     if let Some(base) = base {
-        Some([(base.x + logical[0]) as f32, (base.y + logical[1]) as f32])
+        sanitize::finite_vec2_f64_to_f32([base.x + logical[0] as f64, base.y + logical[1] as f64])
     } else {
-        Some([logical[0] as f32, logical[1] as f32])
+        Some(logical)
     }
 }
 
@@ -57,11 +59,12 @@ pub(crate) fn client_to_screen_pos(window: &Window, logical: [f64; 2]) -> Option
 /// This lets us translate between ImGui's platform coordinate space (client origin)
 /// and winit's outer-position APIs. Returns None if either position is unavailable.
 pub(super) fn decoration_offset_logical(window: &Window) -> Option<(f64, f64)> {
-    let scale = window.scale_factor();
+    let scale = sanitize::positive_finite_or(window.scale_factor(), 1.0);
     let inner_phys = window.inner_position().ok()?;
     let outer_phys = window.outer_position().ok()?;
     let inner_log = inner_phys.to_logical::<f64>(scale);
     let outer_log = outer_phys.to_logical::<f64>(scale);
+    sanitize::finite_vec2_f64_to_f32([inner_log.x - outer_log.x, inner_log.y - outer_log.y])?;
     Some((inner_log.x - outer_log.x, inner_log.y - outer_log.y))
 }
 
