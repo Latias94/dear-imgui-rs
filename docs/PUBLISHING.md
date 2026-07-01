@@ -38,6 +38,12 @@ Before publishing, ensure:
   - Update all internal dependencies to use the new version
 
 - [ ] `CHANGELOG.md` is updated with release notes
+  - Keep changelog prose soft-wrapped. Do not hard-wrap paragraphs or bullet text just to fit a fixed column width.
+  - Verify the GitHub Release body that CI will use:
+    ```bash
+    python3 tools/changelog.py extract --version 0.15.1
+    python3 tools/changelog.py check-soft-wrap --version 0.15.1
+    ```
 
 - [ ] Documentation is up-to-date
   - [ ] Root `README.md` compatibility table
@@ -211,13 +217,15 @@ git tag -a v0.15.0 -m "Release v0.15.0"
 git push origin v0.15.0
 ```
 
-### 2. Create GitHub Release
+### 2. GitHub Release
 
-1. Go to GitHub repository releases page
-2. Click "Draft a new release"
-3. Select the tag you just created
-4. Copy changelog content for this version
-5. Publish the release
+Pushing a `v*` tag triggers `.github/workflows/release.yml`. The workflow extracts the matching `CHANGELOG.md` section with `tools/changelog.py` and creates or updates the GitHub Release body automatically.
+
+To rerun it manually:
+
+```bash
+gh workflow run release.yml -f tag=v0.15.0
+```
 
 ### 3. Trigger Prebuilt Binaries Workflow (Optional)
 

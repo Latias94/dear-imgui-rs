@@ -206,6 +206,7 @@ git diff
 
 # 3. Update documentation
 # - Edit CHANGELOG.md
+#   - Keep changelog prose soft-wrapped; do not hard-wrap bullet text to a fixed column.
 # - Update README.md compatibility table
 # - Update docs/COMPATIBILITY.md
 
@@ -222,8 +223,8 @@ git tag -a v0.9.0 -m "Release v0.9.0"
 git push origin main
 git push origin v0.9.0
 
-# 7. Create GitHub release
-# Go to GitHub and create a release from the tag
+# 7. GitHub release
+# Pushing the v* tag triggers .github/workflows/release.yml, which uses the matching CHANGELOG.md section as the release body.
 ```
 
 ### Option 2: Step-by-Step
@@ -249,6 +250,7 @@ python3 tools/pre_publish_check.py
 
 # 6. Update documentation
 # - CHANGELOG.md
+#   - Keep prose soft-wrapped
 # - README.md
 # - docs/COMPATIBILITY.md
 
@@ -265,7 +267,7 @@ git tag -a v0.9.0 -m "Release v0.9.0"
 git push origin main
 git push origin v0.9.0
 
-# 10. Create GitHub release
+# 10. GitHub release is created/updated automatically from CHANGELOG.md by .github/workflows/release.yml
 ```
 
 ## Common Tasks

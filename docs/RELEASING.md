@@ -144,6 +144,7 @@ cargo publish -p dear-imguizmo-quat-sys
 Before tagging and publishing, verify the following:
 
 - Versions bumped correctly in all `Cargo.toml` (workspace and crates), and `CHANGELOG.md` updated.
+- Changelog prose is soft-wrapped, and the current release notes can be extracted with `python3 tools/changelog.py extract --version <version>`.
 - Compatibility docs are in sync:
   - Root `README.md` “Compatibility (Latest)” table updated.
   - `docs/COMPATIBILITY.md` updated with the new release train and notes.
@@ -151,6 +152,7 @@ Before tagging and publishing, verify the following:
 - CI green on Linux/Windows/macOS; examples build with extensions enabled.
 - If external deps changed (e.g., `wgpu`, `winit`, `glow`), backends’ readmes compatibility tables updated.
 - If interfaces changed, examples and crate-level docs updated accordingly.
+- Pushing a `v*` tag creates or updates the GitHub Release from the matching `CHANGELOG.md` section via `.github/workflows/release.yml`.
 - Optional: Run `.github/workflows/prebuilt-binaries.yml` (workflow_dispatch) to produce prebuilt archives for the new tag.
 - Ensure the publishing environment has access to a valid crates.io token (`cargo login` or `CARGO_REGISTRY_TOKEN`) before running the Python publishing scripts.
 

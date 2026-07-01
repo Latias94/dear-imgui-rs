@@ -287,6 +287,40 @@ def check_cargo_lock(repo_root: Path) -> Tuple[bool, List[str]]:
         return True, []
 
 
+def check_changelog_release_notes(repo_root: Path) -> Tuple[bool, List[str]]:
+    """Check that the current release has extractable, soft-wrapped release notes."""
+    print_check("Changelog release notes")
+
+    version = get_crate_version(repo_root / "dear-imgui")
+    if version is None:
+        print_error("Could not determine current dear-imgui-rs version")
+        return False, ["Could not determine current dear-imgui-rs version"]
+
+    errors = []
+    changelog_tool = repo_root / "tools" / "changelog.py"
+    for command in (
+        ["extract", "--version", version],
+        ["check-soft-wrap", "--version", version],
+    ):
+        code, stdout, stderr = run_command(
+            [sys.executable, str(changelog_tool), *command],
+            cwd=repo_root,
+            capture=True,
+        )
+        if code != 0:
+            errors.append(f"CHANGELOG.md failed {' '.join(command)}")
+            if stdout:
+                print(stdout)
+            if stderr:
+                print_error(stderr.strip())
+
+    if errors:
+        return False, errors
+
+    print_success(f"CHANGELOG.md has release notes for {version}")
+    return True, []
+
+
 def check_docs_build(repo_root: Path) -> Tuple[bool, List[str]]:
     """Check that documentation-related publish gates build."""
     print_check("Documentation builds (-sys offline mode plus selected rustdoc crates)")
@@ -473,6 +507,7 @@ def main() -> int:
         checks.append(("Git Status", check_git_status(repo_root)))
     
     checks.append(("Cargo.lock", check_cargo_lock(repo_root)))
+    checks.append(("Changelog", check_changelog_release_notes(repo_root)))
     
     if not args.skip_doc_check:
         checks.append(("Documentation", check_docs_build(repo_root)))
