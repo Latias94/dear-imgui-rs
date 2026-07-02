@@ -1,5 +1,8 @@
 use std::env;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static STATIC_CPP_STDLIB_LINK_EMITTED: AtomicBool = AtomicBool::new(false);
 
 pub fn parse_bool_env(key: &str) -> bool {
     match env::var(key) {
@@ -27,6 +30,19 @@ pub fn msvc_crt_suffix_from_env(target_env: Option<&str>) -> Option<&'static str
         Some("mt")
     } else {
         Some("md")
+    }
+}
+
+pub fn should_static_link_cpp_stdlib(target_os: &str, target_env: &str) -> bool {
+    target_os == "windows" && target_env == "gnu"
+}
+
+pub fn configure_cpp_runtime_linkage(build: &mut cc::Build, target_os: &str, target_env: &str) {
+    if should_static_link_cpp_stdlib(target_os, target_env) {
+        build.cpp_link_stdlib(None);
+        if !STATIC_CPP_STDLIB_LINK_EMITTED.swap(true, Ordering::Relaxed) {
+            println!("cargo:rustc-link-lib=static:-bundle=stdc++");
+        }
     }
 }
 
@@ -842,7 +858,9 @@ pub const DEFAULT_GITHUB_REPO: &str = "dear-imgui";
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
     use std::ffi::OsString;
+    #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
     use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -859,6 +877,14 @@ mod tests {
 
     #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
     const TARGET_ENV_VARS: [&str; 2] = ["CARGO_CFG_TARGET_OS", "CARGO_CFG_TARGET_ENV"];
+
+    #[test]
+    fn static_cpp_stdlib_is_limited_to_windows_gnu_targets() {
+        assert!(should_static_link_cpp_stdlib("windows", "gnu"));
+        assert!(!should_static_link_cpp_stdlib("windows", "msvc"));
+        assert!(!should_static_link_cpp_stdlib("linux", "gnu"));
+        assert!(!should_static_link_cpp_stdlib("macos", ""));
+    }
 
     fn unique_tmp_dir(suffix: &str) -> PathBuf {
         let nanos = SystemTime::now()

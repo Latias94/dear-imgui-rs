@@ -596,6 +596,7 @@ fn any_backend_shim_enabled() -> bool {
 fn new_native_cpp_build(cfg: &BuildConfig) -> cc::Build {
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
+    build_support::configure_cpp_runtime_linkage(&mut build, &cfg.target_os, &cfg.target_env);
     build.include(cfg.imgui_src());
     build.define("IMGUI_USE_WCHAR32", None);
     if cfg.is_msvc() && cfg.is_windows() {

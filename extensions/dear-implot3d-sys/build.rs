@@ -428,6 +428,7 @@ fn build_with_cc(cfg: &BuildConfig, cimplot3d_root: &Path, imgui_src: &Path, cim
         build.define("IMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS", "1");
     } else {
         build.cpp(true).std("c++17");
+        build_support::configure_cpp_runtime_linkage(&mut build, &cfg.target_os, &cfg.target_env);
     }
 
     if cfg.is_msvc() && cfg.is_windows() {

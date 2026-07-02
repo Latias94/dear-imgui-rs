@@ -218,6 +218,7 @@ fn build_with_cc(cfg: &BuildConfig, cimplot_root: &Path, imgui_src: &Path, cimgu
 
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
+    build_support::configure_cpp_runtime_linkage(&mut build, &cfg.target_os, &cfg.target_env);
 
     // MSVC flags align with dear-imgui-sys
     if cfg.is_msvc() && cfg.is_windows() {

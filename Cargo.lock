@@ -2582,6 +2582,7 @@ dependencies = [
 name = "dear-imgui-build-support"
 version = "0.15.1"
 dependencies = [
+ "cc",
  "flate2",
  "pkg-config",
  "tar",
@@ -2723,6 +2724,7 @@ version = "0.15.1"
 dependencies = [
  "bindgen",
  "cc",
+ "dear-imgui-build-support",
  "dear-imgui-sys",
 ]
 

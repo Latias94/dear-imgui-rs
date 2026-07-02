@@ -334,6 +334,7 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
 fn build_with_cc(cfg: &BuildConfig, cimguizmo_root: &Path, imgui_src: &Path, cimgui_root: &Path) {
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
+    build_support::configure_cpp_runtime_linkage(&mut build, &cfg.target_os, &cfg.target_env);
     for (k, v) in env::vars() {
         let suffix = k
             .strip_prefix("DEP_DEAR_IMGUI_SYS_DEFINE_")

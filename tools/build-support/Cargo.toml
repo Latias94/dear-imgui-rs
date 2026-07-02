@@ -15,6 +15,7 @@ name = "build_support"
 path = "src/lib.rs"
 
 [dependencies]
+cc = { workspace = true }
 ureq = { version = "3.3", default-features = false, features = ["rustls"], optional = true }
 flate2 = { workspace = true, optional = true }
 tar = { workspace = true, optional = true }
@@ -33,4 +34,3 @@ pkg-config = ["dep:pkg-config"]
 vcpkg = ["dep:vcpkg"]
 # Enable native dependency discovery helpers for build scripts.
 native-deps = ["pkg-config", "vcpkg"]
-

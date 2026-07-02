@@ -471,6 +471,27 @@ jobs:
           CXX_x86_64_pc_windows_gnu: '${{ env.MINGW_BIN }}\g++.exe'
           AR_x86_64_pc_windows_gnu: '${{ env.MINGW_BIN }}\ar.exe'
 
+      - name: Verify windows-gnu binary does not import libstdc++
+        shell: powershell
+        run: |
+          $deps = Join-Path (Get-Location) 'target\x86_64-pc-windows-gnu\debug\deps'
+          $binaries = Get-ChildItem $deps -Filter 'dear_imgui_sys-*.exe'
+          if (-not $binaries) {
+            throw "No dear_imgui_sys test binaries found in $deps"
+          }
+
+          foreach ($binary in $binaries) {
+            Write-Host "Checking imports for $($binary.FullName)"
+            $imports = & "$env:MINGW_BIN\objdump.exe" -p $binary.FullName
+            if ($LASTEXITCODE -ne 0) {
+              throw "objdump failed for $($binary.FullName)"
+            }
+            if ($imports | Select-String -Pattern 'DLL Name:\s+libstdc\+\+-6\.dll') {
+              $imports | Select-String -Pattern 'DLL Name:'
+              throw "$($binary.Name) imports libstdc++-6.dll"
+            }
+          }
+
   ffi-cross-check:
     name: FFI signedness check (armv7)
     runs-on: ubuntu-latest

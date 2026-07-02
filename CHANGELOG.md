@@ -12,6 +12,10 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 - Update the main-branch WGPU renderer path to `wgpu` 30 while keeping explicit `wgpu-29`, `wgpu-28`, and `wgpu-27` compatibility features. `dear-app`, WGPU examples, and the WASM example now use WGPU 30's surface color-space and queue-present APIs.
 
+### Fixed
+
+- Statically link the C++ standard library for Windows GNU native C++ builds so downstream executables no longer require a separate `libstdc++-6.dll` at runtime. The Windows GNU CI job now checks the produced test binary import table for this regression. Fixes #36, thanks @HampusMat.
+
 ## [0.15.1] - 2026-06-30
 
 ### Breaking Changes

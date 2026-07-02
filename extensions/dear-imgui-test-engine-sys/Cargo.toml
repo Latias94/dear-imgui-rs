@@ -33,6 +33,7 @@ dear-imgui-sys = { path = "../../dear-imgui-sys", version = "0.15", features = [
 
 [build-dependencies]
 bindgen = { workspace = true, optional = true }
+build-support = { package = "dear-imgui-build-support", version = "0.15", path = "../../tools/build-support" }
 cc.workspace = true
 
 [features]
