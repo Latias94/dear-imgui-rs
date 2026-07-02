@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use dear_imgui_rs::{Condition, ConfigFlags, Context};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode};
-use dear_imgui_wgpu::{WgpuInitInfo, WgpuRenderer};
+use dear_imgui_wgpu::{WgpuInitInfo, WgpuRenderer, wgpu};
 use pollster::block_on;
 use sdl3::event::Event;
 use sdl3::keyboard::Keycode;
@@ -40,6 +40,7 @@ fn run_inner(_argc: c_int, _argv: *mut *mut c_char) -> Result<c_int, Box<dyn std
         power_preference: wgpu::PowerPreference::LowPower,
         compatible_surface: Some(&surface),
         force_fallback_adapter: false,
+        apply_limit_buckets: false,
     }))
     .expect("failed to find suitable WGPU adapter for SDL3 iOS smoke");
 
@@ -72,6 +73,7 @@ fn run_inner(_argc: c_int, _argv: *mut *mut c_char) -> Result<c_int, Box<dyn std
         alpha_mode: wgpu::CompositeAlphaMode::Auto,
         view_formats: vec![],
         desired_maximum_frame_latency: 2,
+        color_space: wgpu::SurfaceColorSpace::Auto,
     };
     surface.configure(&device, &surface_config);
 
@@ -240,7 +242,7 @@ fn run_inner(_argc: c_int, _argv: *mut *mut c_char) -> Result<c_int, Box<dyn std
         }
 
         queue.submit(std::iter::once(encoder.finish()));
-        frame.present();
+        queue.present(frame);
         if reconfigure_after_present {
             surface.configure(&device, &surface_config);
         }
@@ -259,6 +261,7 @@ pub extern "C" fn dear_imgui_ios_sdl3_smoke_main(argc: c_int, argv: *mut *mut c_
 }
 
 mod create_surface {
+    use crate::wgpu;
     use sdl3::video::Window;
     use wgpu::rwh::{HasDisplayHandle, HasWindowHandle};
 

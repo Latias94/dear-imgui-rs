@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use dear_imgui_rs::{Condition, ConfigFlags, Context};
-use dear_imgui_wgpu::{GammaMode, WgpuInitInfo, WgpuRenderer};
+use dear_imgui_wgpu::{GammaMode, WgpuInitInfo, WgpuRenderer, wgpu};
 use dear_imgui_winit::{HiDpiMode, WinitPlatform};
 use pollster::block_on;
 use winit::application::ApplicationHandler;
@@ -72,6 +72,7 @@ impl AppWindow {
             power_preference: wgpu::PowerPreference::LowPower,
             compatible_surface: Some(&surface),
             force_fallback_adapter: false,
+            apply_limit_buckets: false,
         }))
         .expect("failed to acquire a WGPU adapter for the smoke window");
 
@@ -110,6 +111,7 @@ impl AppWindow {
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
+            color_space: wgpu::SurfaceColorSpace::Auto,
         };
         surface.configure(&device, &surface_desc);
 
@@ -266,7 +268,7 @@ impl AppWindow {
         }
 
         self.queue.submit(Some(encoder.finish()));
-        frame.present();
+        self.queue.present(frame);
 
         if reconfigure_after_present {
             self.surface.configure(&self.device, &self.surface_desc);

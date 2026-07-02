@@ -17,4 +17,3 @@ dear-imgui-sdl3 = { path = "../../backends/dear-imgui-sdl3" }
 dear-imgui-wgpu = { path = "../../backends/dear-imgui-wgpu" }
 pollster = "0.4"
 sdl3 = { version = "0.18", features = ["raw-window-handle"] }
-wgpu = "29.0"

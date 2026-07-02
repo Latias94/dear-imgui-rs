@@ -16,5 +16,4 @@ dear-imgui-rs = { path = "../../dear-imgui" }
 dear-imgui-wgpu = { path = "../../backends/dear-imgui-wgpu" }
 dear-imgui-winit = { path = "../../backends/dear-imgui-winit" }
 pollster = "0.4"
-wgpu = "29.0"
 winit = "0.30.13"
