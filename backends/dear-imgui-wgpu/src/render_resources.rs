@@ -51,11 +51,11 @@ impl RenderResources {
         fn nearest_mipmap_filter() -> FilterMode {
             FilterMode::Nearest
         }
-        #[cfg(any(feature = "wgpu-28", feature = "wgpu-29"))]
+        #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
         fn linear_mipmap_filter() -> MipmapFilterMode {
             MipmapFilterMode::Linear
         }
-        #[cfg(any(feature = "wgpu-28", feature = "wgpu-29"))]
+        #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
         fn nearest_mipmap_filter() -> MipmapFilterMode {
             MipmapFilterMode::Nearest
         }

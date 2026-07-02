@@ -234,7 +234,7 @@ impl AppWindow {
         };
 
         // Init WGPU
-        let (device, queue, surface, mut surface_desc) = wgpu_init::init_wgpu_for_window(&window)?;
+        let (device, queue, surface, surface_desc) = wgpu_init::init_wgpu_for_window(&window)?;
 
         // ImGui context
         let mut context = Context::create();
@@ -495,7 +495,7 @@ impl AppWindow {
         }
 
         self.queue.submit(Some(encoder.finish()));
-        frame.present();
+        self.queue.present(frame);
         if reconfigure_after_present {
             self.surface.configure(&self.device, &self.surface_desc);
         }

@@ -490,7 +490,7 @@ fn create_scene_pipeline(device: &wgpu::Device, format: wgpu::TextureFormat) -> 
         vertex: wgpu::VertexState {
             module: &shader,
             entry_point: Some("vs"),
-            buffers: &[VertexPNC::layout()],
+            buffers: &[Some(VertexPNC::layout())],
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         },
         primitive: wgpu::PrimitiveState {
@@ -618,6 +618,7 @@ impl AppWindow {
         let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: Some(&surface),
+            apply_limit_buckets: false,
             force_fallback_adapter: false,
         }))
         .expect("No suitable GPU adapters found on the system!");
@@ -639,6 +640,7 @@ impl AppWindow {
         let surface_desc = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
+            color_space: wgpu::SurfaceColorSpace::Auto,
             width: size.width,
             height: size.height,
             present_mode: wgpu::PresentMode::Fifo,
@@ -869,7 +871,7 @@ impl AppWindow {
         }
 
         self.queue.submit(Some(encoder.finish()));
-        frame.present();
+        self.queue.present(frame);
         if reconfigure_after_present {
             self.surface.configure(&self.device, &self.surface_desc);
         }

@@ -362,7 +362,7 @@ impl AppWindow {
         }
 
         self.queue.submit(Some(encoder.finish()));
-        frame.present();
+        self.queue.present(frame);
         if reconfigure_after_present {
             self.surface.configure(&self.device, &self.surface_desc);
         }

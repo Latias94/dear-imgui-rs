@@ -34,7 +34,7 @@ impl WgpuRenderer {
             })?;
 
         // Create pipeline layout
-        #[cfg(feature = "wgpu-29")]
+        #[cfg(any(feature = "wgpu-29", feature = "wgpu-30"))]
         let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Dear ImGui Pipeline Layout"),
             bind_group_layouts: &[Some(uniform_layout), Some(image_layout)],
@@ -55,6 +55,9 @@ impl WgpuRenderer {
 
         // Create vertex buffer layout
         let vertex_buffer_layout = crate::shaders::create_vertex_buffer_layout();
+        #[cfg(feature = "wgpu-30")]
+        let vertex_buffer_layouts = [Some(vertex_buffer_layout)];
+        #[cfg(not(feature = "wgpu-30"))]
         let vertex_buffer_layouts = [vertex_buffer_layout];
 
         // Create vertex state
@@ -100,7 +103,7 @@ impl WgpuRenderer {
 
         // Create depth stencil state if needed (matches imgui_impl_wgpu.cpp depth-stencil setup)
         let depth_stencil = backend_data.depth_stencil_format.map(|format| {
-            #[cfg(feature = "wgpu-29")]
+            #[cfg(any(feature = "wgpu-29", feature = "wgpu-30"))]
             let state = DepthStencilState {
                 format,
                 depth_write_enabled: Some(false), // matches WGPUOptionalBool_False in C++
@@ -166,7 +169,7 @@ impl WgpuRenderer {
             depth_stencil,
             multisample: backend_data.init_info.pipeline_multisample_state,
             fragment: Some(fragment_state),
-            #[cfg(any(feature = "wgpu-28", feature = "wgpu-29"))]
+            #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
             multiview_mask: None,
             #[cfg(feature = "wgpu-27")]
             multiview: None,

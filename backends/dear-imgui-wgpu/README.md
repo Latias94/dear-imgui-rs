@@ -23,9 +23,14 @@ draw callbacks read `Renderer_RenderState` from the matching ImGui context's `Pl
 
 ## Selecting wgpu version
 
-By default this crate uses `wgpu` v29.
+The current `main` branch defaults to `wgpu` v30. Published `dear-imgui-wgpu` 0.15.1 defaults to `wgpu` v29.
 
-If your ecosystem is pinned to `wgpu` v28 or `wgpu` v27, select it explicitly:
+If your ecosystem is pinned to `wgpu` v29, v28, or v27, select it explicitly:
+
+```toml
+[dependencies]
+dear-imgui-wgpu = { version = "0.15.1", default-features = false, features = ["wgpu-29"] }
+```
 
 ```toml
 [dependencies]
@@ -51,11 +56,10 @@ dear-imgui-wgpu = { version = "0.15.1", default-features = false, features = ["w
 
 ## Compatibility
 
-| Item            | Version |
-|-----------------|---------|
-| Crate           | 0.15.1   |
-| dear-imgui-rs   | 0.15.1   |
-| wgpu            | 29 (default), 28 (`wgpu-28`), 27 (`wgpu-27`) |
+| Track | wgpu support |
+|-------|--------------|
+| current main (unreleased) | 30 (default), 29 (`wgpu-29`), 28 (`wgpu-28`), 27 (`wgpu-27`) |
+| published 0.15.1 | 29 (default), 28 (`wgpu-28`), 27 (`wgpu-27`) |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 
@@ -68,11 +72,13 @@ See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob
 
 - Default: no extra features required for native builds
 - WGPU version selection (mutually exclusive)
-  - `wgpu-29` (default)
+  - `wgpu-30` (default)
+  - `wgpu-29`
   - `wgpu-28`
   - `wgpu-27`
 - WASM targets
-  - `webgl` / `webgpu` select the WASM route for the default `wgpu-29` build
+  - `webgl` / `webgpu` select the WASM route for the default `wgpu-30` build
+  - With `wgpu-29`, use `webgl-wgpu29` / `webgpu-wgpu29` instead
   - With `wgpu-28`, use `webgl-wgpu28` / `webgpu-wgpu28` instead
   - With `wgpu-27`, use `webgl-wgpu27` / `webgpu-wgpu27` instead
 

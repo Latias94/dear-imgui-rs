@@ -6,6 +6,10 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- Default `dear-imgui-wgpu` to `wgpu` 30, add the `wgpu-30` feature, and keep `wgpu-29`, `wgpu-28`, and `wgpu-27` as explicit compatibility features.
+
 ### Fixed
 
 - Winit and SDL3 multi-viewport renderer callbacks now verify `RendererUserData` ownership before

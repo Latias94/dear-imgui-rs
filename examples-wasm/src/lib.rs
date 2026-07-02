@@ -77,6 +77,7 @@ impl AppWindow {
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
                 compatible_surface: Some(&surface),
+                apply_limit_buckets: false,
                 force_fallback_adapter: false,
             })
             .await
@@ -100,6 +101,7 @@ impl AppWindow {
         let surface_desc = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
+            color_space: wgpu::SurfaceColorSpace::Auto,
             width: physical.width.max(1),
             height: physical.height.max(1),
             present_mode: wgpu::PresentMode::Fifo,
@@ -459,7 +461,7 @@ impl AppWindow {
         }
 
         self.queue.submit(Some(encoder.finish()));
-        frame.present();
+        self.queue.present(frame);
         if reconfigure_after_present {
             self.surface.configure(&self.device, &self.surface_desc);
         }

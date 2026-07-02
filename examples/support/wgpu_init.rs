@@ -34,6 +34,7 @@ pub fn init_wgpu_for_window(
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::HighPerformance,
         compatible_surface: Some(&surface),
+        apply_limit_buckets: false,
         force_fallback_adapter: false,
     }))
     .map_err(|_| "No suitable GPU adapter found")?;
@@ -75,6 +76,7 @@ pub fn default_surface_config(
     wgpu::SurfaceConfiguration {
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
         format,
+        color_space: wgpu::SurfaceColorSpace::Auto,
         width,
         height,
         present_mode: wgpu::PresentMode::Fifo,

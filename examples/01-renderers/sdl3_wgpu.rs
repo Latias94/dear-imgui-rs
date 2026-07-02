@@ -68,6 +68,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::HighPerformance,
         compatible_surface: Some(&surface),
+        apply_limit_buckets: false,
         force_fallback_adapter: false,
     }))
     .expect("failed to find suitable WGPU adapter");
@@ -91,6 +92,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut surface_config = wgpu::SurfaceConfiguration {
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
         format,
+        color_space: wgpu::SurfaceColorSpace::Auto,
         width,
         height,
         present_mode: wgpu::PresentMode::Fifo,
@@ -255,7 +257,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         queue.submit(std::iter::once(encoder.finish()));
-        frame.present();
+        queue.present(frame);
         if reconfigure_after_present {
             surface.configure(&device, &surface_config);
         }

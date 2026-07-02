@@ -68,7 +68,7 @@ Extensions
 
 - Next release train: TBD.
 - After `0.15.1` is cut, main may move independently until the next planned release is cut.
-- Current baselines after the `0.15.1` release: Dear ImGui v1.92.8 (docking) via cimgui, unified `dear-*` crate minor `0.15`, MSRV 1.92, Bevy `0.19.0` for the experimental Bevy backend on main, and the external dependency baseline described above.
+- Current baselines after the `0.15.1` release: Dear ImGui v1.92.8 (docking) via cimgui, unified `dear-*` crate minor `0.15`, MSRV 1.92, WGPU 30 on the main-branch default path, Bevy `0.19.0` for the experimental Bevy backend on main, and the external dependency baseline described above.
 - Main-branch compatibility policy:
   - Detailed `0.15.1` source breaks live in `CHANGELOG.md`; this file tracks the broader
     compatibility contract.

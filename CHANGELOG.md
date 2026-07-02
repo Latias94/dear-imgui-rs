@@ -8,6 +8,10 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
+### Changed
+
+- Update the main-branch WGPU renderer path to `wgpu` 30 while keeping explicit `wgpu-29`, `wgpu-28`, and `wgpu-27` compatibility features. `dear-app`, WGPU examples, and the WASM example now use WGPU 30's surface color-space and queue-present APIs.
+
 ## [0.15.1] - 2026-06-30
 
 ### Breaking Changes

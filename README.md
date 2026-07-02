@@ -170,7 +170,7 @@ dear-imgui-wgpu = "0.15.1"   # or dear-imgui-glow / dear-imgui-ash
 dear-imgui-winit = "0.15.1"  # or dear-imgui-sdl3
 ```
 
-`dear-imgui-wgpu` defaults to `wgpu-29` on the current `main` branch.
+`dear-imgui-wgpu` 0.15.1 defaults to `wgpu-29`. The current `main` branch has moved to `wgpu-30`, but that path is unreleased.
 
 If you need `wgpu = 28` compatibility for the WGPU renderer backend:
 
@@ -385,8 +385,8 @@ Extensions
 
 Note: if your ecosystem is pinned to `wgpu = 28` or `wgpu = 27`, you can use
 `dear-imgui-wgpu 0.15.1` with `default-features = false, features = ["wgpu-28"]` or
-`default-features = false, features = ["wgpu-27"]`. `dear-app` follows the workspace default
-`wgpu = 29` path.
+`default-features = false, features = ["wgpu-27"]`. `dear-app` follows the published workspace default
+`wgpu = 29` path. The current `main` branch has moved to `wgpu = 30` for the next release train.
 
 Maintenance rules
 

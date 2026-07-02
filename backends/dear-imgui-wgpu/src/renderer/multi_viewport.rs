@@ -20,6 +20,8 @@ macro_rules! mvlog {
 /// Per-viewport WGPU data stored in ImGuiViewport::RendererUserData
 struct ViewportWgpuData {
     pub device: wgpu::Device,
+    #[cfg(feature = "wgpu-30")]
+    pub queue: wgpu::Queue,
     pub surface: wgpu::Surface<'static>,
     pub config: wgpu::SurfaceConfiguration,
     pub pending_frame: Option<wgpu::SurfaceTexture>,
@@ -69,6 +71,8 @@ struct GlobalHandles {
     instance: Option<wgpu::Instance>,
     adapter: Option<wgpu::Adapter>,
     device: wgpu::Device,
+    #[cfg(feature = "wgpu-30")]
+    queue: wgpu::Queue,
     render_target_format: wgpu::TextureFormat,
 }
 
@@ -198,6 +202,8 @@ pub fn enable(renderer: &mut WgpuRenderer, imgui_context: &mut Context) {
         instance: backend.instance.clone(),
         adapter: backend.adapter.clone(),
         device: backend.device.clone(),
+        #[cfg(feature = "wgpu-30")]
+        queue: backend.queue.clone(),
         render_target_format: backend.render_target_format,
     });
     upsert_renderer_state(imgui_context.as_raw(), renderer as *mut _, global);
@@ -552,6 +558,8 @@ pub unsafe extern "C" fn renderer_create_window(vp: *mut Viewport) {
                 wgpu::SurfaceConfiguration {
                     usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                     format,
+                    #[cfg(feature = "wgpu-30")]
+                    color_space: wgpu::SurfaceColorSpace::Auto,
                     width,
                     height,
                     present_mode,
@@ -564,6 +572,8 @@ pub unsafe extern "C" fn renderer_create_window(vp: *mut Viewport) {
                 wgpu::SurfaceConfiguration {
                     usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                     format: global.render_target_format,
+                    #[cfg(feature = "wgpu-30")]
+                    color_space: wgpu::SurfaceColorSpace::Auto,
                     width,
                     height,
                     present_mode: wgpu::PresentMode::Fifo,
@@ -584,6 +594,8 @@ pub unsafe extern "C" fn renderer_create_window(vp: *mut Viewport) {
         {
             let data = ViewportWgpuData {
                 device: global.device.clone(),
+                #[cfg(feature = "wgpu-30")]
+                queue: global.queue.clone(),
                 surface,
                 config,
                 pending_frame: None,
@@ -753,7 +765,7 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
             let fb_w = data.config.width;
             let fb_h = data.config.height;
             // Acquire frame with basic recovery on Outdated/Lost/Timeout
-            #[cfg(feature = "wgpu-29")]
+            #[cfg(any(feature = "wgpu-29", feature = "wgpu-30"))]
             let (frame, reconfigure_after_present) = match data.surface.get_current_texture() {
                 wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
                 wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
@@ -832,7 +844,7 @@ pub unsafe extern "C" fn renderer_render_window(vp: *mut Viewport, _render_arg: 
                         })],
                         depth_stencil_attachment: None,
                         occlusion_query_set: None,
-                        #[cfg(any(feature = "wgpu-28", feature = "wgpu-29"))]
+                        #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
                         multiview_mask: None,
                         timestamp_writes: None,
                     });
@@ -881,6 +893,9 @@ pub unsafe extern "C" fn renderer_swap_buffers(vp: *mut Viewport, _render_arg: *
         let vpm = &mut *vp;
         if let Some(data) = viewport_user_data_mut(vpm) {
             if let Some(frame) = data.pending_frame.take() {
+                #[cfg(feature = "wgpu-30")]
+                data.queue.present(frame);
+                #[cfg(not(feature = "wgpu-30"))]
                 frame.present();
                 if data.pending_reconfigure {
                     data.surface.configure(&data.device, &data.config);

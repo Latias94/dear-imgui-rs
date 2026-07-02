@@ -533,7 +533,7 @@ impl AppWindow {
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
-        output.present();
+        self.queue.present(output);
         if reconfigure_after_present {
             self.surface.configure(&self.device, &self.surface_desc);
         }

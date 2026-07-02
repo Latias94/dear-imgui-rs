@@ -129,9 +129,24 @@ pub fn create_vertex_buffer_layout() -> VertexBufferLayout<'static> {
 }
 
 /// Create vertex state for render pipeline
+#[cfg(not(feature = "wgpu-30"))]
 pub fn create_vertex_state<'a>(
     shader_module: &'a ShaderModule,
     buffers: &'a [VertexBufferLayout],
+) -> VertexState<'a> {
+    VertexState {
+        module: shader_module,
+        entry_point: Some(VS_ENTRY_POINT),
+        compilation_options: Default::default(),
+        buffers,
+    }
+}
+
+/// Create vertex state for render pipeline.
+#[cfg(feature = "wgpu-30")]
+pub fn create_vertex_state<'a>(
+    shader_module: &'a ShaderModule,
+    buffers: &'a [Option<VertexBufferLayout>],
 ) -> VertexState<'a> {
     VertexState {
         module: shader_module,

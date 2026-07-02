@@ -6,7 +6,8 @@
 //! # Features
 //!
 //! - **WGPU version selection**: choose exactly one of:
-//!   - `wgpu-29` (default)
+//!   - `wgpu-30` (default)
+//!   - `wgpu-29`
 //!   - `wgpu-28`
 //!   - `wgpu-27` (for ecosystems pinned to wgpu 27.x, e.g. some Bevy version trains)
 //! - **Modern texture management**: Full integration with Dear ImGui's ImTextureData system
@@ -46,38 +47,58 @@
 //! # }
 //! ```
 
-// Select a single wgpu version via features (default: wgpu-29).
+// Select a single wgpu version via features (default: wgpu-30).
 //
 // We keep the public API surface using `wgpu::*` types, but allow downstream crates to opt into a
 // specific major version to better match their ecosystem (e.g. Bevy).
-#[cfg(all(feature = "wgpu-27", any(feature = "wgpu-28", feature = "wgpu-29")))]
+#[cfg(all(
+    feature = "wgpu-27",
+    any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30")
+))]
 compile_error!(
-    "Features `wgpu-27`, `wgpu-28`, and `wgpu-29` are mutually exclusive; enable only one."
+    "Features `wgpu-27`, `wgpu-28`, `wgpu-29`, and `wgpu-30` are mutually exclusive; enable only one."
 );
-#[cfg(all(feature = "wgpu-28", feature = "wgpu-29"))]
+#[cfg(all(feature = "wgpu-28", any(feature = "wgpu-29", feature = "wgpu-30")))]
 compile_error!(
-    "Features `wgpu-27`, `wgpu-28`, and `wgpu-29` are mutually exclusive; enable only one."
+    "Features `wgpu-27`, `wgpu-28`, `wgpu-29`, and `wgpu-30` are mutually exclusive; enable only one."
 );
-#[cfg(not(any(feature = "wgpu-27", feature = "wgpu-28", feature = "wgpu-29")))]
+#[cfg(all(feature = "wgpu-29", feature = "wgpu-30"))]
 compile_error!(
-    "Either feature `wgpu-27`, `wgpu-28`, or `wgpu-29` must be enabled for dear-imgui-wgpu."
+    "Features `wgpu-27`, `wgpu-28`, `wgpu-29`, and `wgpu-30` are mutually exclusive; enable only one."
+);
+#[cfg(not(any(
+    feature = "wgpu-27",
+    feature = "wgpu-28",
+    feature = "wgpu-29",
+    feature = "wgpu-30"
+)))]
+compile_error!(
+    "Either feature `wgpu-27`, `wgpu-28`, `wgpu-29`, or `wgpu-30` must be enabled for dear-imgui-wgpu."
 );
 
 #[cfg(all(feature = "wgpu-27", feature = "webgl"))]
 compile_error!(
-    "Feature `webgl` selects the wgpu-29 WebGL route; use `webgl-wgpu27` with `wgpu-27`."
+    "Feature `webgl` selects the wgpu-30 WebGL route; use `webgl-wgpu27` with `wgpu-27`."
 );
 #[cfg(all(feature = "wgpu-27", feature = "webgpu"))]
 compile_error!(
-    "Feature `webgpu` selects the wgpu-29 WebGPU route; use `webgpu-wgpu27` with `wgpu-27`."
+    "Feature `webgpu` selects the wgpu-30 WebGPU route; use `webgpu-wgpu27` with `wgpu-27`."
 );
 #[cfg(all(feature = "wgpu-28", feature = "webgl"))]
 compile_error!(
-    "Feature `webgl` selects the wgpu-29 WebGL route; use `webgl-wgpu28` with `wgpu-28`."
+    "Feature `webgl` selects the wgpu-30 WebGL route; use `webgl-wgpu28` with `wgpu-28`."
 );
 #[cfg(all(feature = "wgpu-28", feature = "webgpu"))]
 compile_error!(
-    "Feature `webgpu` selects the wgpu-29 WebGPU route; use `webgpu-wgpu28` with `wgpu-28`."
+    "Feature `webgpu` selects the wgpu-30 WebGPU route; use `webgpu-wgpu28` with `wgpu-28`."
+);
+#[cfg(all(feature = "wgpu-29", feature = "webgl"))]
+compile_error!(
+    "Feature `webgl` selects the wgpu-30 WebGL route; use `webgl-wgpu29` with `wgpu-29`."
+);
+#[cfg(all(feature = "wgpu-29", feature = "webgpu"))]
+compile_error!(
+    "Feature `webgpu` selects the wgpu-30 WebGPU route; use `webgpu-wgpu29` with `wgpu-29`."
 );
 #[cfg(all(feature = "wgpu-28", feature = "webgl-wgpu27"))]
 compile_error!(
@@ -111,6 +132,30 @@ compile_error!(
 compile_error!(
     "Feature `webgpu-wgpu28` is incompatible with `wgpu-29` (would pull multiple wgpu majors)."
 );
+#[cfg(all(feature = "wgpu-30", feature = "webgl-wgpu27"))]
+compile_error!(
+    "Feature `webgl-wgpu27` is incompatible with `wgpu-30` (would pull multiple wgpu majors)."
+);
+#[cfg(all(feature = "wgpu-30", feature = "webgpu-wgpu27"))]
+compile_error!(
+    "Feature `webgpu-wgpu27` is incompatible with `wgpu-30` (would pull multiple wgpu majors)."
+);
+#[cfg(all(feature = "wgpu-30", feature = "webgl-wgpu28"))]
+compile_error!(
+    "Feature `webgl-wgpu28` is incompatible with `wgpu-30` (would pull multiple wgpu majors)."
+);
+#[cfg(all(feature = "wgpu-30", feature = "webgpu-wgpu28"))]
+compile_error!(
+    "Feature `webgpu-wgpu28` is incompatible with `wgpu-30` (would pull multiple wgpu majors)."
+);
+#[cfg(all(feature = "wgpu-30", feature = "webgl-wgpu29"))]
+compile_error!(
+    "Feature `webgl-wgpu29` is incompatible with `wgpu-30` (would pull multiple wgpu majors)."
+);
+#[cfg(all(feature = "wgpu-30", feature = "webgpu-wgpu29"))]
+compile_error!(
+    "Feature `webgpu-wgpu29` is incompatible with `wgpu-30` (would pull multiple wgpu majors)."
+);
 #[cfg(all(feature = "wgpu-27", feature = "webgl-wgpu29"))]
 compile_error!(
     "Feature `webgl-wgpu29` is incompatible with `wgpu-27` (would pull multiple wgpu majors)."
@@ -127,6 +172,30 @@ compile_error!(
 compile_error!(
     "Feature `webgpu-wgpu29` is incompatible with `wgpu-28` (would pull multiple wgpu majors)."
 );
+#[cfg(all(feature = "wgpu-27", feature = "webgl-wgpu30"))]
+compile_error!(
+    "Feature `webgl-wgpu30` is incompatible with `wgpu-27` (would pull multiple wgpu majors)."
+);
+#[cfg(all(feature = "wgpu-27", feature = "webgpu-wgpu30"))]
+compile_error!(
+    "Feature `webgpu-wgpu30` is incompatible with `wgpu-27` (would pull multiple wgpu majors)."
+);
+#[cfg(all(feature = "wgpu-28", feature = "webgl-wgpu30"))]
+compile_error!(
+    "Feature `webgl-wgpu30` is incompatible with `wgpu-28` (would pull multiple wgpu majors)."
+);
+#[cfg(all(feature = "wgpu-28", feature = "webgpu-wgpu30"))]
+compile_error!(
+    "Feature `webgpu-wgpu30` is incompatible with `wgpu-28` (would pull multiple wgpu majors)."
+);
+#[cfg(all(feature = "wgpu-29", feature = "webgl-wgpu30"))]
+compile_error!(
+    "Feature `webgl-wgpu30` is incompatible with `wgpu-29` (would pull multiple wgpu majors)."
+);
+#[cfg(all(feature = "wgpu-29", feature = "webgpu-wgpu30"))]
+compile_error!(
+    "Feature `webgpu-wgpu30` is incompatible with `wgpu-29` (would pull multiple wgpu majors)."
+);
 
 #[cfg(feature = "wgpu-27")]
 pub extern crate wgpu27 as wgpu;
@@ -134,6 +203,8 @@ pub extern crate wgpu27 as wgpu;
 pub extern crate wgpu28 as wgpu;
 #[cfg(feature = "wgpu-29")]
 pub extern crate wgpu29 as wgpu;
+#[cfg(feature = "wgpu-30")]
+pub extern crate wgpu30 as wgpu;
 
 // Module declarations
 mod data;

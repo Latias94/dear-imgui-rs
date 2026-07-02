@@ -597,6 +597,7 @@ impl AppWindow {
         let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: cfg.wgpu.power_preference,
             compatible_surface: Some(&surface),
+            apply_limit_buckets: false,
             force_fallback_adapter: cfg.wgpu.force_fallback_adapter,
         }))
         .map_err(DearAppError::AdapterUnavailable)?;
@@ -627,6 +628,7 @@ impl AppWindow {
         let surface_desc = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
+            color_space: wgpu::SurfaceColorSpace::Auto,
             width: physical_size.width,
             height: physical_size.height,
             present_mode: cfg.present_mode,
@@ -872,7 +874,7 @@ impl AppWindow {
         }
 
         self.queue.submit(Some(encoder.finish()));
-        frame.present();
+        self.queue.present(frame);
         if reconfigure_after_present {
             self.surface.configure(&self.device, &self.surface_desc);
         }

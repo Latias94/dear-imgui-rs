@@ -154,6 +154,7 @@ impl AppWindow {
         let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: Some(&surface),
+            apply_limit_buckets: false,
             force_fallback_adapter: false,
         }))
         .expect("Failed to find an appropriate adapter");
@@ -176,6 +177,7 @@ impl AppWindow {
         let surface_desc = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
+            color_space: wgpu::SurfaceColorSpace::Auto,
             width: size.width as u32,
             height: size.height as u32,
             present_mode: wgpu::PresentMode::Fifo,
@@ -1241,7 +1243,7 @@ impl AppWindow {
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
-        output.present();
+        self.queue.present(output);
         if reconfigure_after_present {
             self.surface.configure(&self.device, &self.surface_desc);
         }

@@ -92,6 +92,7 @@ impl AppWindow {
         let adapter = block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: Some(&surface),
+            apply_limit_buckets: false,
             force_fallback_adapter: false,
         }))?;
 
@@ -110,6 +111,7 @@ impl AppWindow {
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
+            color_space: wgpu::SurfaceColorSpace::Auto,
             width: size.width.max(1),
             height: size.height.max(1),
             present_mode: wgpu::PresentMode::Fifo,
@@ -325,7 +327,7 @@ impl AppWindow {
 
         // Submit and present main frame first to avoid cross-surface validation hazards
         self.queue.submit(Some(encoder.finish()));
-        frame.present();
+        self.queue.present(frame);
         if reconfigure_after_present {
             self.surface.configure(&self.device, &self.surface_config);
         }
