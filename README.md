@@ -88,8 +88,11 @@ invalid sentinels, wrong-context access, or other states that should remain outs
 ## Examples
 
 ```bash
-# Clone with submodules
-git clone https://github.com/Latias94/dear-imgui-rs
+# Fresh source checkout. The native -sys crates need vendored submodules.
+git clone --recursive https://github.com/Latias94/dear-imgui-rs
+cd dear-imgui-rs
+
+# If you already cloned without --recursive, run this inside the repo.
 git submodule update --init --recursive
 
 # Core & docking examples
@@ -309,6 +312,7 @@ fn ui_frame(ui: &reflect::imgui::Ui, settings: &mut Settings) {
 ## Build Strategy
 
 - Default: build from source on all platforms. Prebuilt binaries are optional and off by default.
+- Source builds from a repository checkout require initialized submodules because the native C/C++ sources live under `dear-imgui-sys/third-party/cimgui` and extension `third-party/` directories. Use `git clone --recursive ...` for a fresh checkout, or `git submodule update --init --recursive` inside an existing checkout.
 - Windows: we publish prebuilt packages (MD/MT, with/without `freetype`). Linux/macOS may have CI artifacts but are not used automatically.
 - Opt-in prebuilt download from Release: enable the crate feature `prebuilt` (the env toggle `<CRATE>_SYS_USE_PREBUILT=1` is still accepted but requires that feature). Otherwise builds only use prebuilt when you explicitly point to them (e.g., `<CRATE>_SYS_LIB_DIR` or `<CRATE>_SYS_PREBUILT_URL`).
 

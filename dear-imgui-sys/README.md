@@ -47,6 +47,18 @@ Compile Dear ImGui and cimgui from the vendored source code:
 cargo build -p dear-imgui-sys
 ```
 
+When building from a repository checkout, the vendored cimgui source comes from
+Git submodules. For a fresh checkout, clone with `--recursive`; for an existing
+checkout, run this inside the repository before building:
+
+```bash
+git submodule update --init --recursive
+```
+
+If Cargo reports a missing header such as
+`dear-imgui-sys/third-party/cimgui/imgui/imgui.h`, the cimgui submodule is not
+initialized.
+
 Source builds currently use the `cc` crate on every platform. `IMGUI_SYS_USE_CMAKE`
 is accepted for compatibility, but the build script warns and ignores it because
 the native stack-layout ABI patches the `imgui.cpp` build copy in `OUT_DIR`.
