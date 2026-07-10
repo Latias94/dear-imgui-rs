@@ -20,14 +20,14 @@ Dear ImGui context or panel whose settings and drafts it should retain.
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.15.1"
-dear-imgui-reflect = "0.15.1"
+dear-imgui-rs = "0.16.0"
+dear-imgui-reflect = "0.16.0"
 ```
 
 Optional math support:
 
 ```toml
-dear-imgui-reflect = { version = "0.15.1", features = ["glam", "mint"] }
+dear-imgui-reflect = { version = "0.16.0", features = ["glam", "mint"] }
 glam = "0.32"
 mint = "0.5"
 ```
@@ -166,8 +166,8 @@ See `examples/reflect_demo.rs` for a complete inspector and
 
 | Item | Version |
 |---|---|
-| Crate | 0.15.1 |
-| dear-imgui-rs | 0.15.1 |
+| Crate | 0.16.0 |
+| dear-imgui-rs | 0.16.0 |
 
 ## License
 

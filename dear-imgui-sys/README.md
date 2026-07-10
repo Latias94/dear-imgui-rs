@@ -9,7 +9,7 @@ This crate provides unsafe Rust bindings to Dear ImGui v1.92.8 (docking branch) 
 ## Key Features
 
 - **cimgui C API**: A deliberate C boundary for the core `ig*` API
-- **Docking Support**: Full support for docking and multi-viewport features (multi-viewport WIP)
+- **Docking Support**: Full docking support; PlatformIO primitives for backend-specific native multi-viewport routes
 - **Modern Dear ImGui**: Based on Dear ImGui v1.92.8 docking branch
 - **Cross-platform**: Consistent builds on Windows (MSVC/MinGW), Linux, macOS, and WebAssembly
 - **Prebuilt Binaries**: Optional prebuilt static libraries for faster builds
@@ -27,16 +27,17 @@ This crate supports multiple build strategies to fit different development workf
 The fastest way to get started. Use prebuilt static libraries instead of compiling from source:
 
 ```bash
-# Option A: Point to a local directory containing the static library
-export IMGUI_SYS_LIB_DIR=/path/to/lib/dir  # Contains dear_imgui.lib (Windows) or libdear_imgui.a (Unix)
+# Option A: Point to the library directory inside an extracted core artifact.
+# The strict manifest.txt may be in this directory or its parent artifact root.
+export IMGUI_SYS_LIB_DIR=/path/to/extracted/dear-imgui-artifact/lib
 
-# Option B: Use a local file path (library or .tar.gz archive)
-export IMGUI_SYS_PREBUILT_URL=/path/to/dear_imgui.lib
+# Option B: Use a package-tool-generated local archive or HTTP(S) URL.
+export IMGUI_SYS_PREBUILT_URL=/path/to/dear-imgui-prebuilt-0.16.0-<target>-static.tar.gz
+cargo build -p dear-imgui-sys --features prebuilt
 
 # Option C: Enable HTTP(S) downloads / auto-download from GitHub releases
-cargo build -p dear-imgui-sys --features prebuilt
-# optional (requires the feature above)
 export IMGUI_SYS_USE_PREBUILT=1
+cargo build -p dear-imgui-sys --features prebuilt
 ```
 
 ### 2. Build from Source
@@ -125,7 +126,7 @@ then verify them:
 ```bash
 cargo run -p xtask -- verify-bindings --update --allow-dirty
 python3 tools/update_submodule_and_bindings.py \
-  --crates dear-imgui-sys --submodules update --wasm
+  --crates dear-imgui-sys --submodules auto --wasm
 ```
 
 Canonical generation rejects `BINDGEN_EXTRA_CLANG_ARGS*`. The target profile,
@@ -163,10 +164,10 @@ This is a low-level sys crate providing unsafe FFI bindings. Most users should u
 
 ```toml
 [dependencies]
-dear-imgui-sys = "0.15.1"
+dear-imgui-sys = "0.16.0"
 
 # Enable features as needed
-dear-imgui-sys = { version = "0.15.1", features = ["freetype", "wasm"] }
+dear-imgui-sys = { version = "0.16.0", features = ["freetype", "wasm"] }
 ```
 
 ### Direct FFI Usage (Advanced)
@@ -199,7 +200,7 @@ can expose optional backend shim modules behind `backend-shim-*` features:
 
 ```toml
 [dependencies]
-dear-imgui-sys = { version = "0.15.1", features = ["backend-shim-opengl3"] }
+dear-imgui-sys = { version = "0.16.0", features = ["backend-shim-opengl3"] }
 ```
 
 These features expose self-contained modules such as:
@@ -331,8 +332,8 @@ There are two first-class Android directions.
 
    ```toml
    [dependencies]
-   dear-imgui-rs = "0.15.1"
-   dear-imgui-sys = { version = "0.15.1", features = ["backend-shim-android", "backend-shim-opengl3"] }
+   dear-imgui-rs = "0.16.0"
+   dear-imgui-sys = { version = "0.16.0", features = ["backend-shim-android", "backend-shim-opengl3"] }
    ```
 
    Use `dear-imgui-rs` for the safe core (`Context`, IO, frame lifecycle,
@@ -408,7 +409,7 @@ require both source submodules to be clean and to match the recorded revisions.
 
 - **Dear ImGui Version**: v1.92.8 (docking branch)
 - **cimgui Version**: Latest compatible with Dear ImGui v1.92.8
-- **Supported Features**: Docking, multi-viewport (WIP), FreeType font rendering
+- **Supported Features**: Docking, FreeType font rendering, and low-level PlatformIO/multi-viewport primitives; end-to-end status is documented per backend route
 
 ### Environment Variables
 
@@ -416,12 +417,16 @@ Control build behavior with these environment variables:
 
 | Variable | Description |
 |----------|-------------|
-| `IMGUI_SYS_LIB_DIR` | Path to directory containing prebuilt static library |
-| `IMGUI_SYS_PREBUILT_URL` | Local file path or direct URL to a prebuilt library/archive (HTTP(S) and `.tar.gz` extraction require feature `prebuilt`) |
+| `IMGUI_SYS_LIB_DIR` | Directory containing the core static library; a matching strict `manifest.txt` must be in that directory or its parent |
+| `IMGUI_SYS_PREBUILT_URL` | Local path or direct URL to a package-tool-generated core archive; HTTP(S) and `.tar.gz` extraction require feature `prebuilt` |
 | `IMGUI_SYS_USE_PREBUILT` | Enable automatic download from GitHub releases (`1`, requires feature `prebuilt`) |
 | `IMGUI_SYS_SKIP_CC` | Skip C/C++ compilation, use pregenerated bindings only (`1`) |
 | `IMGUI_SYS_FORCE_BUILD` | Force build from source, ignore prebuilt options (`1`) |
 | `DEAR_IMGUI_RS_REGEN_BINDINGS` | Regenerate Rust bindings with bindgen (`1`; requires `--features bindgen` and libclang) |
+
+Bare `.a`/`.lib` inputs are not trusted core artifacts. An explicit library is
+accepted only when its directory or parent artifact root also contains the
+complete matching `manifest.txt`; using the packaged `.tar.gz` is recommended.
 
 ## Related Crates
 

@@ -88,7 +88,7 @@ fn generate_bindings(
         }
         panic!(
             "dear-imnodes-sys: wasm32 target detected but src/wasm_bindings_pregenerated.rs not found.\n\
-             Run: cargo run -p xtask -- wasm-bindgen-imnodes imgui-sys-v0"
+             Run: cargo run -p xtask -- wasm-bindgen-imnodes"
         );
     }
 

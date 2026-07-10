@@ -33,8 +33,8 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
 
 | Item          | Version |
 |---------------|---------|
-| Crate         | 0.15.1   |
-| dear-imgui-rs | 0.15.1   |
+| Crate         | 0.16.0  |
+| dear-imgui-rs | 0.16.0  |
 
 ## Features
 
@@ -544,8 +544,34 @@ let mut provider = ImageThumbnailProvider::default();
 
 ## WASM
 
-- Native: `rfd` uses the browser file picker and is the recommended way to access user files.
-- ImGui: the pure UI browser relies on `std::fs` to enumerate directories. In the browser this cannot access the OS filesystem, so the view will be empty. Prefer the native `rfd` backend on wasm.
+- Native dialog route (`native-rfd`): supported asynchronously through the Web
+  File Picker. Browser security rules expose only files or directories selected
+  by the user; this is not arbitrary host filesystem access.
+- In-UI route (`imgui`): `FileDialogState::new` owns a blocking
+  `StdFileSystem` capability on wasm32. The browser cannot enumerate host paths
+  through `std::fs`, so that default capability normally produces no useful OS
+  directory listing.
+- Background scanning is native-only. Selecting `ScanPolicy::Background` on
+  wasm32 returns `FileDialogError::BackgroundScanUnsupported`; it is never
+  silently downgraded and never creates a pseudo-worker.
+
+A custom blocking JavaScript or virtual-filesystem adapter is supported. Implement
+`FileSystem`, then pass it to `FileDialogState::with_blocking_filesystem`. The
+trait deliberately has no `Send` bound, so the adapter may own JS values and is
+called on the browser/UI thread:
+
+```rust,ignore
+let state = FileDialogState::with_blocking_filesystem(
+    DialogMode::OpenFile,
+    Box::new(JsFileSystem::new()),
+);
+```
+
+`FileSystem::visit_dir` is synchronous. A JS adapter should enumerate a virtual
+filesystem or a snapshot already granted by a picker; complete asynchronous JS
+permission/picker work before drawing the browser. Stop enumeration when the
+visitor returns `ScanVisit::Stop` so cancellation and generation filtering keep
+their normal semantics.
 
 ## Fonts (CJK/Emoji)
 

@@ -23,9 +23,10 @@ Run any example with:
   - `--features implot` for ImPlot
   - `--features imnodes` for ImNodes
   - `--features node-editor` for imgui-node-editor / dear-node-editor
+  - `--features node-editor-blueprints` for the patched blueprints stack-layout showcase
   - `--features imguizmo` for ImGuizmo
   - `--features imguizmo-quat` for ImGuIZMO.quat
-  - `--features implot3d` for ImPlot3D (and, if your workspace doesn’t pre-enable add-ons on dear-app, also add `, dear-app/implot3d`)
+  - `--features implot3d` for ImPlot3D
   - `--features file-browser` for File Browser / Dialogs
   - `--features reflect` for dear-imgui-reflect demo
   - `--features test-engine` for ImGui Test Engine
@@ -54,18 +55,17 @@ Quick picks:
 - File browser (ImGui): `cargo run --features file-browser --bin file_browser_imgui`
 - Style & Fonts + FreeType: `cargo run --features freetype --bin style_and_fonts`
 - ImPlot3D Demo: `cargo run --bin implot3d_basic --features "implot3d"`
-  - If your workspace doesn’t pre-enable dear-app add-on features, use: `cargo run --bin implot3d_basic --features "implot3d, dear-app/implot3d"`
 - Reflect demo: `cargo run --bin reflect_demo --features reflect`
 - ImGui Test Engine: `cargo run --bin imgui_test_engine_basic --features test-engine`
   - Smoke test (auto-run + exit): `cargo run --bin imgui_test_engine_basic --features test-engine -- --exit-when-done --group tests`
 - dear-node-editor basic: `cargo run -p dear-imgui-examples --bin node_editor_basic --features node-editor`
-- dear-node-editor showcase: `cargo run -p dear-imgui-examples --bin node_editor_showcase --features node-editor`
+- dear-node-editor showcase: `cargo run -p dear-imgui-examples --bin node_editor_showcase --features node-editor-blueprints`
 - Safe multi-context lifecycle pattern: `cargo run -p dear-imgui-examples --bin multi_context_switch`
 
 Image preview: both `glow_textures` and `wgpu_textures` load `examples/assets/texture.jpg` and show it alongside generated textures.
 - Extensions (e.g., ImPlot): `cargo run --bin implot_basic --features implot`
   - ImNodes: `cargo run --bin imnodes_basic --features imnodes`
-  - dear-node-editor: `cargo run -p dear-imgui-examples --bin node_editor_showcase --features node-editor`
+  - dear-node-editor: `cargo run -p dear-imgui-examples --bin node_editor_showcase --features node-editor-blueprints`
   - ImGuizmo: `cargo run --bin imguizmo_basic --features imguizmo`
 
 ## Structure (from easy to advanced)
@@ -99,14 +99,13 @@ This is the intended organization.
     - Menu already includes: Reset to Unity Layout, Save INI, Load INI.
     - Optional extensions: `--features implot` (FPS graph), `--features imguizmo` (3D gizmo manipulation).
     - Note: INI path is relative to the process CWD; see INI section below.
-  - `multi_viewport_wgpu.rs`: **Experimental test example only** - winit + WGPU multi-viewport support is not production-ready.
+  - `multi_viewport_wgpu.rs`: Winit + WGPU native multi-viewport lifecycle reference.
     - Run with: `cargo run --bin multi_viewport_wgpu --features multi-viewport`
-    - Native only, enabled on Windows/macOS/Linux; tested on Windows/macOS, Linux untested.
     - The examples feature `multi-viewport` enables the required backend features:
       `dear-imgui-winit/multi-viewport` + `dear-imgui-wgpu/multi-viewport-winit`.
     - Important pattern: only the main window should drive WGPU rendering and surface resize;
       secondary viewport windows are rendered via ImGui platform/renderer callbacks.
-  - `multi_viewport_ash.rs`: **Experimental test example only** - winit + Vulkan/Ash multi-viewport support.
+  - `multi_viewport_ash.rs`: Winit + Vulkan/Ash native multi-viewport lifecycle reference.
     - Run with: `cargo run --bin multi_viewport_ash --features multi-viewport`
     - Secondary viewports create their own Vulkan surfaces + swapchains.
     - The examples feature `multi-viewport` enables: `dear-imgui-ash/multi-viewport-winit`.
@@ -117,15 +116,17 @@ This is the intended organization.
   - `sdl3_glow_multi_viewport.rs`: SDL3 + Glow multi-viewport example using Rust Glow renderer backend.
     - Run with: `cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport --features multi-viewport,sdl3-platform`
     - Uses SDL3 platform backend for window/GL context management and `dear-imgui-glow` for rendering all viewports.
-  - `sdl3_wgpu_multi_viewport.rs`: SDL3 + WGPU multi-viewport example (experimental, native only) using Rust WGPU renderer backend.
+  - `sdl3_wgpu_multi_viewport.rs`: SDL3 + WGPU native multi-viewport example using the Rust WGPU renderer backend.
     - Run with: `cargo run -p dear-imgui-examples --bin sdl3_wgpu_multi_viewport --features sdl3-wgpu-multi-viewport`
     - Uses SDL3 platform backend for window management and `dear-imgui-wgpu` to render all viewports.
-  - `sdl3_ash_multi_viewport.rs`: SDL3 + Vulkan/Ash multi-viewport example (experimental, native only) using Rust Vulkan renderer backend.
+  - `sdl3_ash_multi_viewport.rs`: SDL3 + Vulkan/Ash native multi-viewport example using the Rust Vulkan renderer backend.
     - Run with: `cargo run -p dear-imgui-examples --bin sdl3_ash_multi_viewport --features sdl3-ash-multi-viewport`
     - Uses SDL3 platform backend for window management and `dear-imgui-ash` to render all viewports via `Platform_CreateVkSurface`.
   - `sdl3_sdlgpu_multi_view.rs`: SDL3 + SDL3 multi-viewport example using official C++ backends. (feature `sdl3-sdlgpu3`)
     - Run with: `cargo run -p dear-imgui-examples --bin sdl3_sdlgpu_multi_view --features sdl3-gpu-multi-viewport`
     - Uses SDL3 platform backend for window management and `sdl3::gpu` to render all viewports via `sdl3::gpu::Device`.
+
+The WGPU and Ash renderer examples deliberately keep their renderer in a `Box` before installing callbacks. Their `enable` calls are unsafe because Dear ImGui retains a renderer pointer; moving or dropping that value while callbacks are active is invalid. Shutdown order is equally important: destroy renderer multi-viewport support first, shut down the Winit/SDL3 platform support second, and only then drop the renderer, context, windows, and GPU/Vulkan objects. The adapters claim only their documented `Renderer_*` slots and preserve foreign callback replacements.
 
 
 - 03-extensions (logical group; these examples still live as top-level bins today)
@@ -156,14 +157,20 @@ This is the intended organization.
   and `04-integration/file_dialog_native.rs`, `04-integration/file_browser_imgui.rs`
 - Extensions: `implot_basic.rs`, `imnodes_basic.rs`, `node_editor_basic.rs`, `node_editor_showcase.rs`, `imguizmo_basic.rs`, `reflect_demo.rs`, `imgui_test_engine_basic.rs`
 
-### dear-app helpers
+### dear-app applications
 
-These examples use the `dear-app` runner (Winit + WGPU) with minimal code:
+These examples implement the `dear-app::Application` lifecycle on Winit + WGPU:
 
 - Quickstart: `cargo run --bin dear_app_quickstart`
 - Docking template: `cargo run --bin dear_app_docking`
+- Managed and external WGPU textures: `cargo run --bin dear_app_wgpu_textures`
+- ImPlot3D: `cargo run --features implot3d --bin implot3d_basic`
+- Reflection inspector: `cargo run --features reflect --bin reflect_demo`
+- Test Engine: `cargo run --features test-engine --bin imgui_test_engine_basic`
 
-These will remain runnable as-is; future additions may live in subfolders with explicit `[[bin]]` paths.
+Application state and the Dear ImGui context survive device recovery. Rebuild application-owned GPU
+resources from `gpu_recreated`; external texture handles from older generations are intentionally
+rejected.
 
 ## INI handling and paths
 
@@ -174,7 +181,7 @@ Dear ImGui persists window/docking state via an INI file. Useful patterns:
   - or `context.set_ini_filename::<std::path::PathBuf>(None)?;`
 - Use a known INI path relative to the repo for reproducible layouts:
   - `context.set_ini_filename(Some(std::path::PathBuf::from("examples/02-docking/game_engine_docking.ini")))?;`
-- When mixing DockBuilder with INI restore, apply builder only on a pristine state (first run or after reset), then let INI drive subsequent runs.
+- Submit declarative dock layouts every frame with `DockLayoutApply::IfMissing` to preserve restored INI trees. Use `DockLayoutApply::Replace` only for an explicit layout reset.
 
 Tip: On Windows/macOS, CWD may differ when launching from an IDE. Prefer absolute or repo-relative paths when you need deterministic INI behavior.
 
@@ -191,7 +198,7 @@ Tip: On Windows/macOS, CWD may differ when launching from an IDE. Prefer absolut
 
 ## Example ideas (next up)
 
-- “Unity layout�?DockBuilder (proportional splits, tabs) with a one-click reset.
+- Declarative Unity-style `DockLayout` variants with proportional splits, tabs, and a one-click `Replace` reset.
 - Texture upload and dynamic updates in WGPU matching `glow_textures.rs` capabilities.
 - InputText best-practice demos: `String` with `capacity_hint`, and zero-copy `ImString` fields.
 - Table angled headers (Ex) demo exercising custom header data.

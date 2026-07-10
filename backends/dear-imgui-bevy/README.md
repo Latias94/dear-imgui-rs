@@ -13,7 +13,7 @@ ownership model directly.
 | --- | --- |
 | Rust | `1.95.0` or newer |
 | Bevy | `=0.19.0` |
-| dear-imgui-rs | `0.15` |
+| dear-imgui-rs | `0.16` |
 | Primary-window overlay | Supported with the `render` feature |
 | Docking in the primary window | Supported when the ImGui context enables docking |
 | Native multi-viewport OS windows | Preview-grade with `render,multi-viewport` |
@@ -26,8 +26,8 @@ Use the same Bevy version as the backend:
 ```toml
 [dependencies]
 bevy = "=0.19.0"
-dear-imgui-bevy = { version = "0.15", features = ["render"] }
-dear-imgui-rs = "0.15"
+dear-imgui-bevy = { version = "0.16", features = ["render"] }
+dear-imgui-rs = "0.16"
 ```
 
 A minimal overlay app registers `ImguiPlugin`, marks the camera that should receive the ImGui
@@ -102,6 +102,7 @@ grow.
 | Feature | What it enables |
 | --- | --- |
 | `default` | Core plugin, context lifecycle, schedules, and input translation. No renderer is installed. |
+| `wasm` | Selects the explicit `dear-imgui-rs` WASM provider contract. Required for every `wasm32-unknown-unknown` build. |
 | `render` | Bevy `RenderApp` extraction, WGPU overlay renderer, `ImguiOverlayCamera`, `ImguiOverlayDisabled`, and `ImguiBevyTextures`. |
 | `multi-viewport` | Native Dear ImGui PlatformIO window lifecycle bridge. Use with `render` for full routed rendering. |
 
@@ -180,8 +181,8 @@ Recommended checks for this crate:
 ```bash
 cargo check -p dear-imgui-bevy --no-default-features
 cargo check -p dear-imgui-bevy --features render
-cargo check -p dear-imgui-bevy --target wasm32-unknown-unknown --no-default-features
-cargo check -p dear-imgui-bevy --target wasm32-unknown-unknown --features render
+cargo check -p dear-imgui-bevy --target wasm32-unknown-unknown --no-default-features --features wasm
+cargo check -p dear-imgui-bevy --target wasm32-unknown-unknown --no-default-features --features render,wasm
 cargo nextest run -p dear-imgui-bevy
 cargo nextest run -p dear-imgui-bevy --features render
 cargo nextest run -p dear-imgui-bevy --features render,multi-viewport

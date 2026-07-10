@@ -6,15 +6,221 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text just to fit a fixed column width.
 
-## [Unreleased]
+## [0.16.0] - 2026-07-10
+
+This is an intentionally source-breaking architecture release. It replaces shallow safe mirrors of Dear ImGui internals with explicit state owners, makes native callback and renderer lifetime contracts visible, and turns pregenerated bindings and prebuilts into reproducible target-specific artifacts.
+
+### Breaking Changes
+
+#### Core and FFI
+
+- Remove the legacy safe Columns API, including `Ui::{columns,begin_columns,next_column}`, `ColumnsToken`, and the old column index/flag types. Use the Tables API for safe multi-column layouts; raw cimgui Columns functions remain available through `dear-imgui-sys` for compatibility code.
+- Remove the safe `DockBuilder`, `DockNode`, `NodeRect`, and `SplitDirection` mirror of Dear ImGui internals. Use `DockLayout`, `DockspaceTarget`, and `Ui::{dock_space_with_layout,dockspace_over_main_viewport_with_layout}`. `DockLayoutApply::IfMissing` preserves a restored INI tree, while `Replace` is the explicit destructive reset policy. Raw `dear_imgui_sys::igDockBuilder*` functions remain an unstable unsafe escape hatch.
+- Remove the unused `ImGuiPlatform` and `ImGuiRenderer` traits. Backend crates expose their concrete initialization, frame, recovery, and shutdown APIs directly.
+- `Context::enable_multi_viewport()` now enables only `ConfigFlags::VIEWPORTS_ENABLE`; applications that also need docking must enable `ConfigFlags::DOCKING_ENABLE` explicitly.
+- Remove raw safe access to the `PlatformIO.Monitors` vector. Platform backends must replace monitors with `PlatformIo::set_monitors()`, which allocates through Dear ImGui and leaves release ownership with the context.
+- Route all seven aggregate-bearing PlatformIO callbacks through repository-owned C++ ABI shims: `Platform_SetWindowPos`, `Platform_GetWindowPos`, `Platform_SetWindowSize`, `Platform_GetWindowSize`, `Platform_GetWindowFramebufferScale`, `Platform_GetWindowWorkAreaInsets`, and `Renderer_SetWindowSize`. Raw Rust callbacks now receive aggregate inputs by pointer and return aggregates through out-parameters, avoiding compiler-dependent C++ small-aggregate calling conventions on MSVC. Typed callbacks retain their ergonomic value types through Rust trampolines.
+- WGPU and Ash renderer callback registration is now ownership-aware. These renderer backends refuse occupied `Renderer_*` slots, preserve foreign replacements, and clear only callbacks and `RendererUserData` they still own. Platform backends still own the complete `Platform_*` table exclusively and use bulk platform teardown.
+- Rename `dear_imgui_sys::IMGUI_VERSION` to `BINDING_VERSION` without a compatibility alias. Its value remains the Rust binding crate release version; call `igGetVersion()` when the linked Dear ImGui runtime version is required.
+- Split core pregenerated bindings into three profiles: `bindings_pregenerated_windows.rs` for supported 64-bit Windows targets, `bindings_pregenerated.rs` for the supported non-Windows native whitelist, and `wasm_bindings_pregenerated.rs` for the fixed browser import ABI. Unsupported target triples fail instead of reusing a merely similar layout.
+- Make `ImGuiDockNode` opaque in core bindings and omit C/C++ `va_list` entry points. Private C++ layouts and `va_list` representations are not portable Rust ABI contracts.
+- Gate the blueprint stack-layout API and patched Dear ImGui core artifact behind `dear-imgui-rs/stack-layout` and `dear-node-editor/blueprints`. Normal node-editor builds use the unpatched core; the two native artifact profiles have distinct names, manifests, and cache identities. `stack-layout` remains required for the blueprints showcase and is rejected on WASM.
+- Make WASM support explicit. Only `wasm32-unknown-unknown` with the `wasm` feature may select the `imgui-sys-v0` import binding profile. Missing feature forwarding, WASI targets, Emscripten Rust targets, and `wasm + stack-layout` combinations fail at build time.
+
+#### Backends and runtime
+
+- Default `dear-imgui-wgpu` to WGPU 30 and keep WGPU 29, 28, and 27 behind separate mutually exclusive compatibility features.
+- Make WGPU and Ash multi-viewport `enable` entry points `unsafe`. The renderer must have a stable address, remain single-thread serialized with callback execution, and outlive every registered callback and secondary viewport. A pinned owner or `Box` is the normal integration pattern.
+- Require explicit ordered multi-viewport shutdown. Shut down renderer support first, then the platform backend, then drop the renderer, context, secondary/main windows, and GPU or Vulkan objects in their documented ownership order. Renderer reinitialization and explicit renderer shutdown reject an active callback runtime. Rust `Drop` is non-fallible best-effort cleanup and is not a substitute for the required ordered shutdown.
+- Replace duplicated Winit and SDL3 renderer implementations with one private shared runtime per renderer backend. Each adapter now shares callback ownership, viewport data, recovery, and teardown logic while retaining its platform-specific surface creation seam.
+- WGPU secondary surfaces now require the originating `Instance` and `Adapter`, recover lost/outdated/suboptimal surfaces, and treat timeout, occlusion, validation, and out-of-memory outcomes explicitly. `ViewportFlags::NO_RENDERER_CLEAR` loads the existing target instead of clearing it.
+- Ash secondary viewports now share one swapchain runtime for classic render-pass and dynamic-rendering routes, use per-image synchronization, retire old swapchains safely, clamp or pause zero-sized surfaces, and rebuild after out-of-date or suboptimal acquire/present results. `ViewportFlags::NO_RENDERER_CLEAR` uses Vulkan discard semantics rather than issuing a clear.
+- Replace dear-app's `AppBuilder`, `RunnerCallbacks`, `RunnerConfig`, `run_simple`, and `run_with_callbacks` APIs with `AppConfig`, one state-owning `Application`, and `dear_app::run`. The application, main window, add-ons, and Dear ImGui context survive WGPU device loss; only generation-scoped GPU resources are recreated, and stale external texture handles are rejected.
+
+#### Extensions
+
+- Replace `dear-imgui-reflect` global/thread-local settings, free `input`, and `ImGuiReflectExt::input_reflect` with `ReflectSession` and one-frame `Inspector` values. A session owns settings and persistent map drafts for one UI owner; an inspector owns response and logical path state for one render pass.
+- Make `FileDialogState` own its filesystem capability. Native callers choose `with_background_filesystem(Arc<dyn FileSystem + Send + Sync>)`; caller-thread and browser adapters use `with_blocking_filesystem(Box<dyn FileSystem>)`. Draw methods no longer borrow a filesystem that a worker could outlive.
+- Replace `FileSystem::read_dir` with streaming `FileSystem::visit_dir` and `ScanVisit::{Continue,Stop}`. Replace incremental/synchronous scan presets with explicit `ScanPolicy::Blocking` and native-only `ScanPolicy::Background`. Requesting a background scan without a thread-safe native capability returns an error instead of silently changing execution mode.
+
+### Added
+
+- Add a deterministic binding specification shared by build scripts, regeneration, verification, packaging, and CI. It hashes the generator contract, exact compatibility targets, formatter, allow/block lists, enum normalization, header shims, opaque types, and fixed WASM provider.
+- Add exact cimgui and nested Dear ImGui source revisions to package metadata so source identity survives `cargo package` without a `.git` directory.
+- Add strict `dear-imgui-sys` core native prebuilt manifests covering crate/version, target, link type, MSVC CRT, normalized artifact features, exact source revisions, and binding-spec hash. Missing, duplicate, unknown, or mismatched fields reject the core artifact.
+- Add a bounded shared native file-scan executor with per-dialog cancellation, latest-request coalescing, bounded UI-thread batch application, and generation filtering for stale results.
 
 ### Changed
 
-- Update the main-branch WGPU renderer path to `wgpu` 30 while keeping explicit `wgpu-29`, `wgpu-28`, and `wgpu-27` compatibility features. `dear-app`, WGPU examples, and the WASM example now use WGPU 30's surface color-space and queue-present APIs.
+- Update `dear-app`, renderer examples, and the browser demo to WGPU 30 surface color-space and queue-present APIs.
+- Regenerate and verify the Windows, non-Windows, and WASM core binding profiles from one canonical command while keeping extension generation on the fixed `imgui-sys-v0` provider contract.
 
 ### Fixed
 
-- Statically link the C++ standard library for Windows GNU native C++ builds so downstream executables no longer require a separate `libstdc++-6.dll` at runtime. The Windows GNU CI job now checks the produced test binary import table for this regression. Fixes #36, thanks @HampusMat.
+- Statically link the C++ standard library for Windows GNU native C++ builds so downstream executables no longer require a separate `libstdc++-6.dll` at runtime. The Windows GNU CI job checks the produced test binary import table for this regression. Fixes #36, thanks @HampusMat.
+- Exercise aggregate PlatformIO callbacks through the real C++ slots on both MSVC `/MD` and `/MT`, preventing Rust declarations from drifting away from the compiler ABI actually used by Dear ImGui.
+- Prevent WGPU and Ash multi-viewport backends from treating foreign `RendererUserData` as their own state or clearing callbacks installed by another backend during teardown.
+
+### Migration Examples
+
+#### Columns to Tables
+
+Before 0.16:
+
+```rust
+ui.columns(2, "settings", true);
+ui.text("Quality");
+ui.next_column();
+ui.text("High");
+ui.columns(1, "", false);
+```
+
+In 0.16:
+
+```rust
+ui.table("settings")
+    .flags(TableFlags::BORDERS_INNER_V)
+    .column("Name").done()
+    .column("Value").done()
+    .build(|ui| {
+        ui.table_next_row();
+        ui.table_next_column();
+        ui.text("Quality");
+        ui.table_next_column();
+        ui.text("High");
+    });
+```
+
+#### DockBuilder to DockLayout
+
+Before 0.16:
+
+```rust
+let root = ui.get_id("EditorDockspace");
+DockBuilder::add_node(ui, root, DockNodeFlags::NONE);
+let (left, center) = DockBuilder::split_node(ui, root, SplitDirection::Left, 0.25);
+DockBuilder::dock_window(ui, "Hierarchy", left);
+DockBuilder::dock_window(ui, "Scene", center);
+DockBuilder::finish(ui, root);
+```
+
+In 0.16:
+
+```rust
+let viewport = ui.main_viewport();
+let target = DockspaceTarget::new(
+    ui.get_id("EditorDockspace"),
+    viewport.work_pos(),
+    viewport.work_size(),
+)?;
+let layout = DockLayout::split(
+    DockSplit::Left,
+    0.25,
+    DockLayout::tabs(["Hierarchy"]),
+    DockLayout::tabs(["Scene"]),
+);
+ui.dockspace_over_main_viewport_with_layout(
+    &target,
+    &layout,
+    DockLayoutApply::IfMissing,
+)?;
+```
+
+Submit the declarative layout every frame with `IfMissing`; it compiles only when the persisted root is absent. Use `Replace` only for an explicit user-requested reset.
+
+#### Blueprint stack layout becomes opt-in
+
+Before 0.16, the patched stack-layout core was part of ordinary node-editor builds:
+
+```bash
+cargo run -p dear-imgui-examples --bin node_editor_showcase --features node-editor
+```
+
+In 0.16, ordinary node-editor builds use the unpatched core. Select the distinct native blueprint artifact explicitly:
+
+```bash
+cargo run -p dear-imgui-examples --bin node_editor_showcase --features node-editor-blueprints
+```
+
+Library users enable `dear-node-editor/blueprints`, which forwards `dear-imgui-rs/stack-layout`. The profile is native-only and cannot be combined with `wasm`.
+
+#### PlatformIO raw aggregate setters
+
+Before 0.16, the three raw aggregate input callbacks appeared to accept `ImVec2` by value:
+
+```rust
+unsafe extern "C" fn set_pos(
+    viewport: *mut dear_imgui_sys::ImGuiViewport,
+    pos: dear_imgui_sys::ImVec2,
+) {
+    // ...
+}
+
+platform_io.set_platform_set_window_pos_raw(Some(set_pos));
+```
+
+In 0.16, the C++ thunk owns the by-value ABI and Rust receives a callback-scoped pointer:
+
+```rust
+unsafe extern "C" fn set_pos(
+    viewport: *mut dear_imgui_sys::ImGuiViewport,
+    pos: *const dear_imgui_sys::ImVec2,
+) {
+    let pos = unsafe { *pos };
+    // ...
+}
+
+platform_io.set_platform_set_window_pos_raw(Some(set_pos));
+```
+
+Apply the same signature change to `set_platform_set_window_size_raw` and `set_renderer_set_window_size_raw`. Aggregate getters now return through out-parameters. Prefer the typed setters unless a backend requires sys pointers.
+
+#### Reflection globals to ReflectSession
+
+Before 0.16, reflection used global/thread-local state through a `Ui` extension:
+
+```rust
+if ui.input_reflect("Game Settings", &mut settings) {
+    save(&settings);
+}
+```
+
+In 0.16, keep a session beside the UI owner and create one inspector per frame:
+
+```rust
+let mut inspector = editor.reflect_session.inspector(ui);
+if inspector.input("Game Settings", &mut editor.settings) {
+    save(&editor.settings);
+}
+for event in inspector.response().events() {
+    handle_structural_edit(event);
+}
+```
+
+#### File-browser filesystem ownership
+
+Before 0.16, advanced draw methods borrowed a filesystem for the frame:
+
+```rust
+let fs = StdFileSystem;
+ui.file_browser()
+    .show_windowed_with(&mut state, &window_config, &fs, None, None);
+```
+
+In 0.16, construct the dialog with an owned filesystem capability and draw without a filesystem argument:
+
+```rust
+let filesystem = std::sync::Arc::new(StdFileSystem);
+let mut state = FileDialogState::with_background_filesystem(
+    DialogMode::OpenFile,
+    filesystem,
+);
+state.set_scan_policy(ScanPolicy::tuned_background())?;
+
+ui.file_browser().show_windowed(&mut state, &window_config);
+```
+
+Use `with_blocking_filesystem(Box<dyn FileSystem>)` for caller-thread and browser adapters. `ScanPolicy::Background` never silently falls back to blocking execution.
 
 ## [0.15.1] - 2026-06-30
 

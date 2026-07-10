@@ -4,7 +4,7 @@ This guide explains how to publish new versions of the dear-imgui-rs workspace c
 
 ## Overview
 
-The workspace uses a **unified release train** model where all published crates share the same version number (e.g., 0.15.0). This simplifies dependency management and ensures compatibility across the ecosystem.
+The workspace uses a **unified release train** model where all 27 publishable crates share the same version number. Version 0.16.0 includes the build-support crate, core, backends, extension sys/high-level pairs, and `dear-app`; examples and `xtask` are not published.
 
 ## Prerequisites
 
@@ -12,7 +12,7 @@ The workspace uses a **unified release train** model where all published crates 
 
 - **Rust toolchain**: Latest stable Rust installed
 - **Git**: For version control and submodule management
-- **Python 3.7+**: For running automation scripts
+- **Python 3.11+**: Automation uses the standard-library `tomllib` module
 - **Cargo login**: Must be logged in to crates.io
   ```bash
   cargo login <your-api-token>
@@ -24,25 +24,27 @@ Before publishing, ensure:
 
 - [ ] All tests pass on all platforms (Linux, Windows, macOS)
   ```bash
-  cargo nextest run --workspace
+  python3 tools/tasks.py test
   ```
+  The task runner keeps mutually incompatible feature families separate; a workspace-wide feature-unified nextest invocation is not a valid substitute.
 
-- [ ] All examples build successfully
+- [ ] `release-check` and the CI route matrix pass for feature-gated examples, WGPU versions, Ash render modes, platform adapters, node-editor blueprints, and WASM contracts. A default `cargo build --examples` does not cover those routes.
+
+- [ ] The unified workspace release version is updated
   ```bash
-  cargo build --examples
+  cargo run -p xtask -- release-version 0.16.0
   ```
-
-- [ ] Version numbers are updated in all `Cargo.toml` files
-  - Update workspace version in root `Cargo.toml`
-  - Update all crate versions to match
-  - Update all internal dependencies to use the new version
+  - The root `workspace.package.version` is the single source of truth.
+  - All 27 publishable manifests use `version.workspace = true`.
+  - Internal package dependencies inherit the root workspace dependency declarations.
+  - Examples and workspace-only tools retain their independent package versions.
 
 - [ ] `CHANGELOG.md` is updated with release notes
   - Keep changelog prose soft-wrapped. Do not hard-wrap paragraphs or bullet text just to fit a fixed column width.
   - Verify the GitHub Release body that CI will use:
     ```bash
-    python3 tools/changelog.py extract --version 0.15.1
-    python3 tools/changelog.py check-soft-wrap --version 0.15.1
+    python3 tools/changelog.py extract --version 0.16.0
+    python3 tools/changelog.py check-soft-wrap --version 0.16.0
     ```
 
 - [ ] Documentation is up-to-date
@@ -53,11 +55,18 @@ Before publishing, ensure:
 - [ ] Pregenerated native and WASM bindings are up-to-date for `-sys` crates
   ```bash
   # Windows PowerShell
-  python tools/update_submodule_and_bindings.py --crates all --profile release --submodules skip --wasm --wasm-import imgui-sys-v0 --wasm-ext implot,implot3d,imnodes,imguizmo,imguizmo-quat
+  python tools/update_submodule_and_bindings.py --crates all --profile release --submodules skip --wasm --wasm-ext implot,implot3d,imnodes,imguizmo,imguizmo-quat
 
   # Linux/macOS
-  python3 tools/update_submodule_and_bindings.py --crates all --profile release --submodules skip --wasm --wasm-import imgui-sys-v0 --wasm-ext implot,implot3d,imnodes,imguizmo,imguizmo-quat
+  python3 tools/update_submodule_and_bindings.py --crates all --profile release --submodules skip --wasm --wasm-ext implot,implot3d,imnodes,imguizmo,imguizmo-quat
   ```
+
+- [ ] Core bindings reproduce exactly from the canonical Windows, non-Windows, and WASM specifications
+  ```bash
+  cargo run -p xtask -- verify-bindings
+  ```
+
+- [ ] The packaged `dear-imgui-sys` crate contains all three binding files and exact source metadata, builds from an unpacked crate without `.git`, and passes the offline package-consumption gate in CI
 
 - [ ] Verify `-sys` crates build in docs.rs offline mode
   ```bash
@@ -86,11 +95,30 @@ Before publishing, ensure:
 
 - [ ] Git working tree is clean (commit all changes)
 
+## Release Preparation and Final Check
+
+Release preparation and release validation are intentionally separate. Preparation invokes `xtask release-version`, refreshes bindings, metadata, and `Cargo.lock`, so it must not run a clean-tree release gate against its own output.
+
+```bash
+# Phase 1: create the 0.16.0 release diff.
+python3 tools/tasks.py release-prepare 0.16.0
+
+# Review generated bindings, package metadata, Cargo.lock, CHANGELOG.md, and docs.
+git diff
+git add -A
+git commit -m "chore: prepare release v0.16.0"
+
+# Phase 2: validate the committed, clean release candidate.
+python3 tools/tasks.py release-check
+```
+
+`release-prepare` may leave the working tree dirty by design. `release-check` is the strict gate: it requires a clean tree, one unified publishable version, a matching changelog section, a locked dependency graph, exact binding/source provenance, package/offline checks, documentation, and tests. Do not publish by skipping the second phase.
+
 ## Publishing Process
 
 ### Automated Publishing (Recommended)
 
-Use the `tools/publish.py` script to publish all crates in the correct dependency order:
+After `release-check` succeeds, use `tools/publish.py` to publish all crates in dependency order:
 
 #### 1. Dry Run (Preview)
 
@@ -105,6 +133,10 @@ This will show you:
 - Version numbers for each crate
 - Any potential issues
 
+This print-only preview does not run the expensive release gate. `--cargo-dry-run`
+and every real upload rerun the strict clean-tree preflight and bind the operation
+to the validated Git `HEAD` before invoking Cargo.
+
 #### 2. Publish All Crates
 
 Once you've verified the dry run output:
@@ -116,9 +148,11 @@ python3 tools/publish.py
 The script will:
 1. Show a summary of what will be published
 2. Ask for confirmation
-3. Publish each crate in dependency order
-4. Wait between publishes for crates.io to index
-5. Check if crates are already published and skip if needed
+3. Rerun the strict `release-check` preflight and verify the clean `HEAD` fingerprint
+4. Publish each crate explicitly to the `crates-io` registry in dependency order
+5. Recheck the source fingerprint before every Cargo upload
+6. Wait between publishes for crates.io to index
+7. Check if crates are already published and skip if needed
 
 #### 3. Advanced Options
 
@@ -127,7 +161,7 @@ The script will:
 python3 tools/publish.py --crates dear-imgui-sys,dear-imgui-rs
 ```
 
-**Skip verification (faster, but not recommended):**
+**Skip Cargo's per-crate package verification (the strict release preflight still runs):**
 ```bash
 python3 tools/publish.py --no-verify
 ```
@@ -154,52 +188,59 @@ If you prefer to publish manually or need to publish individual crates:
 
 1. **Tooling**
    ```bash
-   cargo publish -p dear-imgui-build-support
+   cargo publish -p dear-imgui-build-support --locked --registry crates-io
    # Wait for crates.io to index (~30 seconds)
    ```
 
 2. **Core**
    ```bash
-   cargo publish -p dear-imgui-sys
+   cargo publish -p dear-imgui-sys --locked --registry crates-io
    # Wait for crates.io to index (~30 seconds)
-   cargo publish -p dear-imgui-rs
+   cargo publish -p dear-imgui-rs --locked --registry crates-io
    ```
 
 3. **Backends**
    ```bash
-   cargo publish -p dear-imgui-winit
-   cargo publish -p dear-imgui-wgpu
-   cargo publish -p dear-imgui-glow
-   cargo publish -p dear-imgui-ash
-   cargo publish -p dear-imgui-sdl3
+   cargo publish -p dear-imgui-winit --locked --registry crates-io
+   cargo publish -p dear-imgui-wgpu --locked --registry crates-io
+   cargo publish -p dear-imgui-glow --locked --registry crates-io
+   cargo publish -p dear-imgui-ash --locked --registry crates-io
+   cargo publish -p dear-imgui-sdl3 --locked --registry crates-io
    ```
 
 4. **Extension Sys Crates**
    ```bash
-   cargo publish -p dear-implot-sys
-   cargo publish -p dear-imnodes-sys
-   cargo publish -p dear-node-editor-sys
-   cargo publish -p dear-imguizmo-sys
-   cargo publish -p dear-implot3d-sys
-   cargo publish -p dear-imguizmo-quat-sys
+   cargo publish -p dear-implot-sys --locked --registry crates-io
+   cargo publish -p dear-imnodes-sys --locked --registry crates-io
+   cargo publish -p dear-node-editor-sys --locked --registry crates-io
+   cargo publish -p dear-imguizmo-sys --locked --registry crates-io
+   cargo publish -p dear-implot3d-sys --locked --registry crates-io
+   cargo publish -p dear-imguizmo-quat-sys --locked --registry crates-io
+   cargo publish -p dear-imgui-test-engine-sys --locked --registry crates-io
    ```
 
 5. **Extension High-Level Crates**
    ```bash
-   cargo publish -p dear-implot
-   cargo publish -p dear-imnodes
-   cargo publish -p dear-node-editor
-   cargo publish -p dear-imguizmo
-   cargo publish -p dear-implot3d
-   cargo publish -p dear-imguizmo-quat
-   cargo publish -p dear-file-browser
-   cargo publish -p dear-imgui-reflect-derive
-   cargo publish -p dear-imgui-reflect
+   cargo publish -p dear-implot --locked --registry crates-io
+   cargo publish -p dear-imnodes --locked --registry crates-io
+   cargo publish -p dear-node-editor --locked --registry crates-io
+   cargo publish -p dear-imguizmo --locked --registry crates-io
+   cargo publish -p dear-implot3d --locked --registry crates-io
+   cargo publish -p dear-imguizmo-quat --locked --registry crates-io
+   cargo publish -p dear-imgui-test-engine --locked --registry crates-io
+   cargo publish -p dear-file-browser --locked --registry crates-io
+   cargo publish -p dear-imgui-reflect-derive --locked --registry crates-io
+   cargo publish -p dear-imgui-reflect --locked --registry crates-io
    ```
 
-6. **Application Runner**
+6. **Bevy Backend**
    ```bash
-   cargo publish -p dear-app
+   cargo publish -p dear-imgui-bevy --locked --registry crates-io
+   ```
+
+7. **Application Runtime**
+   ```bash
+   cargo publish -p dear-app --locked --registry crates-io
    ```
 
 **Note**: Wait 30-60 seconds between publishes to allow crates.io to index the crates. `dear-imgui-build-support` must be indexed before publishing `dear-imgui-sys` and the other `*-sys` crates.
@@ -213,8 +254,8 @@ After successful publishing:
 Tag the release in git:
 
 ```bash
-git tag -a v0.15.0 -m "Release v0.15.0"
-git push origin v0.15.0
+git tag -a v0.16.0 -m "Release v0.16.0"
+git push origin v0.16.0
 ```
 
 ### 2. GitHub Release
@@ -224,7 +265,7 @@ Pushing a `v*` tag triggers `.github/workflows/release.yml`. The workflow extrac
 To rerun it manually:
 
 ```bash
-gh workflow run release.yml -f tag=v0.15.0
+gh workflow run release.yml -f tag=v0.16.0
 ```
 
 ### 3. Trigger Prebuilt Binaries Workflow (Optional)
@@ -233,7 +274,7 @@ If you want to provide prebuilt binaries for the `-sys` crates:
 
 1. Go to Actions → "Prebuilt Binaries" workflow
 2. Click "Run workflow"
-3. Select the tag (e.g., `v0.15.0`)
+3. Select the tag (e.g., `v0.16.0`)
 4. Select crates to build (or `all`)
 5. Run the workflow
 
@@ -262,15 +303,18 @@ Ensure docs.rs has successfully built documentation for all crates:
 
 ### Crate Already Published
 
-If a crate version is already published, you have two options:
+Published crate versions are immutable. The script can skip a package that is
+already present, but yanking does not make the same version publishable again.
+If 0.16.0 is defective, yank the affected package if necessary, prepare a new
+patch release, and publish the complete release train at that new version:
 
-1. **Skip it**: The script will detect this and ask if you want to skip
-2. **Yank and republish**: 
-   ```bash
-   cargo yank --vers 0.15.0 dear-imgui-sys
-   cargo publish -p dear-imgui-sys
-   ```
-   **Warning**: Only do this immediately after publishing if you found a critical issue.
+```bash
+cargo yank --registry crates-io --vers 0.16.0 dear-imgui-sys
+python3 tools/tasks.py release-prepare 0.16.1
+# Review and commit the release candidate, then:
+python3 tools/tasks.py release-check
+python3 tools/publish.py
+```
 
 ### Publishing Failed
 
@@ -314,16 +358,17 @@ If docs.rs fails to build a `-sys` crate:
 
 When preparing a new version:
 
-- [ ] Update version in `Cargo.toml` for all crates
-- [ ] Update internal dependency versions
+- [ ] Run `cargo run -p xtask -- release-version 0.16.0`
+- [ ] Verify every publishable manifest inherits `workspace.package.version` and internal dependencies inherit the root workspace declarations
 - [ ] Update `CHANGELOG.md`
 - [ ] Update `README.md` compatibility table
 - [ ] Update `docs/COMPATIBILITY.md`
-- [ ] Run `cargo update` to update `Cargo.lock`
+- [ ] Verify `Cargo.lock` with `cargo metadata --locked --format-version 1 --no-deps`
 - [ ] Commit all changes
 - [ ] Run full test suite
 - [ ] Generate pregenerated bindings
 - [ ] Verify docs.rs offline builds
+- [ ] Commit the release candidate and run `python3 tools/tasks.py release-check` from a clean tree
 - [ ] Publish using the script
 - [ ] Create git tag
 - [ ] Create GitHub release
@@ -333,11 +378,13 @@ When preparing a new version:
 
 The project follows a **release train** model:
 
-- **Major versions** (0.x → 1.0, 1.x → 2.0): Breaking changes, major upstream updates
-- **Minor versions** (0.4 → 0.5): New features, non-breaking changes, upstream updates
-- **Patch versions** (0.15.0 → 0.15.1): Bug fixes, documentation updates
+- **1.0 and later major versions** (1.x → 2.0): Breaking changes and major upstream transitions
+- **Pre-1.0 minor versions** (0.15 → 0.16): May intentionally contain source-breaking architecture changes
+- **Patch versions** (0.16.0 → 0.16.1): Bug fixes and documentation updates
 
-All crates in the workspace are versioned together, even if some crates haven't changed.
+All 27 publishable crates are versioned together, even if some crates have not
+changed. The private examples, web demo, and `xtask` remain independently
+versioned workspace members.
 
 ## Related Documentation
 

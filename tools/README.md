@@ -4,22 +4,26 @@ This directory contains automation scripts for managing the dear-imgui-rs worksp
 
 ## Overview
 
-The workspace uses a **unified release train** model where all crates share the same version number. These tools help automate common tasks like version bumping, publishing, and validation.
+The workspace uses a **unified release train** model. All 27 publishable packages inherit `workspace.package.version`; examples and workspace-only tools keep independent package versions. Release tooling prepares, validates, and publishes that single version source.
 
 ## Quick Start
 
 ### Prepare a New Release
 
 ```bash
-# All-in-one command to prepare a release
-python3 tools/tasks.py release-prep 0.9.0
+# Generate the complete 0.16.0 release diff.
+python3 tools/tasks.py release-prepare 0.16.0
+
+# Review and commit versions, bindings, lockfile, changelog, and docs.
+git diff
+git add -A
+git commit -m "chore: prepare release v0.16.0"
+
+# Validate the committed clean release candidate.
+python3 tools/tasks.py release-check
 ```
 
-This will:
-1. Bump version to 0.9.0 across all crates
-2. Update pregenerated bindings for -sys crates
-3. Run tests
-4. Run pre-publish validation checks
+`release-prepare` intentionally leaves changes in the working tree. `release-check` runs the strict clean-tree, changelog, locked dependency graph, reproducible binding, package/offline, documentation, and test gates. Keeping these phases separate prevents release preparation from failing its own clean-tree check.
 
 ### Publish to crates.io
 
@@ -41,9 +45,6 @@ Convenient shortcuts for common tasks.
 # Run pre-publish checks
 python3 tools/tasks.py check
 
-# Bump version
-python3 tools/tasks.py bump 0.9.0
-
 # Update pregenerated bindings
 python3 tools/tasks.py bindings
 
@@ -59,11 +60,22 @@ python3 tools/tasks.py doc
 # Clean build artifacts
 python3 tools/tasks.py clean
 
-# All-in-one release preparation
-python3 tools/tasks.py release-prep 0.9.0
+# Create a release diff, then validate it after commit
+python3 tools/tasks.py release-prepare 0.16.0
+python3 tools/tasks.py release-check
 ```
 
-### 2. `publish.py` - Publishing Script
+### 2. `xtask release-version` - Unified Version Update
+
+The workspace root is the single version source. Publishable manifests use `version.workspace = true`, and internal dependencies inherit their root workspace declarations. Update the release train with:
+
+```bash
+cargo run -p xtask -- release-version 0.16.0
+```
+
+The command updates the root release version and inherited internal dependency requirements as one validated workspace operation. It never offers partial crate selection. Documentation remains an explicit review step.
+
+### 3. `publish.py` - Publishing Script
 
 Publishes all crates in the correct dependency order.
 
@@ -84,35 +96,19 @@ python3 tools/publish.py --start-from dear-implot-sys
 python3 tools/publish.py --wait 60
 ```
 
+Print-only `--dry-run` validates metadata and shows commands without running the
+expensive release gate. `--cargo-dry-run` and real uploads rerun the strict
+clean-tree preflight, explicitly target the `crates-io` registry, and verify the
+validated Git `HEAD` again before every Cargo publish command.
+
 **Publishing Order:**
-1. Core: `dear-imgui-sys` → `dear-imgui-rs`
-2. Backends: `dear-imgui-winit`, `dear-imgui-wgpu`, `dear-imgui-glow`, `dear-imgui-ash`, `dear-imgui-sdl3`
-3. Extension sys: `dear-implot-sys`, `dear-imnodes-sys`, `dear-node-editor-sys`, etc.
-4. Extension high-level: `dear-implot`, `dear-imnodes`, `dear-node-editor`, etc.
-5. Application: `dear-app`
-
-### 3. `bump_version.py` - Version Bumping
-
-Updates version numbers across all crates and README files.
-
-```bash
-# Bump to a specific version (updates Cargo.toml and README files)
-python3 tools/bump_version.py 0.9.0
-
-# Dry run (show what would change)
-python3 tools/bump_version.py 0.9.0 --dry-run
-
-# Specify old version manually
-python3 tools/bump_version.py 0.9.0 --old-version 0.8.0
-
-# Bump only specific crates
-python3 tools/bump_version.py 0.9.0 --crates dear-imgui-sys,dear-imgui-rs
-
-# Skip README updates
-python3 tools/bump_version.py 0.9.0 --skip-readme
-```
-
-**Note**: This script now automatically updates README files in addition to Cargo.toml files.
+1. Build tooling: `dear-imgui-build-support`
+2. Core: `dear-imgui-sys` → `dear-imgui-rs`
+3. Platform/renderer backends except Bevy
+4. All extension sys crates, including `dear-imgui-test-engine-sys`
+5. All extension high-level crates, file browser, and reflection derive/runtime
+6. `dear-imgui-bevy` after its optional ecosystem dependencies
+7. `dear-app`
 
 ### 4. `pre_publish_check.py` - Validation
 
@@ -123,14 +119,18 @@ Runs pre-publish validation checks.
 python3 tools/pre_publish_check.py
 
 # Skip specific checks
-python3 tools/pre_publish_check.py --skip-git-check --skip-doc-check
+python3 tools/pre_publish_check.py \
+  --skip-git-check --skip-doc-check --skip-package-check
 ```
 
 **Checks performed:**
 - Version consistency across all crates
-- Pregenerated bindings exist for -sys crates
+- Exact source metadata and reproducible Windows/non-Windows/WASM core bindings
+- Pregenerated bindings exist for extension sys crates
 - Git working tree is clean
-- Cargo.lock is up-to-date
+- `Cargo.lock` resolves with `--locked`
+- Packaged core crates build from a clean clone and offline consumer
+- Packaged sys crates contain required artifacts and build offline without `.git`
 - Documentation builds in offline mode
 - Tests pass
 
@@ -154,99 +154,77 @@ python3 tools/update_submodule_and_bindings.py \
 # Update specific crate (e.g. dear-imgui-sys only)
 python3 tools/update_submodule_and_bindings.py \
   --crates dear-imgui-sys \
-  --submodules update \
+  --submodules auto \
   --profile release
 
-# Additionally generate WASM pregenerated bindings:
-# - Core ImGui only (dear-imgui-sys, import module = imgui-sys-v0)
+# Regenerate core binding profiles and compile-check the fixed WASM provider contract
 python3 tools/update_submodule_and_bindings.py \
   --crates dear-imgui-sys \
   --submodules skip \
   --profile release \
-  --wasm \
-  --wasm-import imgui-sys-v0
+  --wasm
 
-# - Core ImGui + selected extensions (ImPlot, ImPlot3D, ImNodes, ImGuizmo, ImGuIZMO.quat)
+# Regenerate core bindings plus selected extension WASM bindings
 python3 tools/update_submodule_and_bindings.py \
   --crates dear-imgui-sys,dear-implot-sys,dear-implot3d-sys,dear-imnodes-sys,dear-imguizmo-sys,dear-imguizmo-quat-sys \
   --submodules skip \
   --profile release \
   --wasm \
-  --wasm-import imgui-sys-v0 \
   --wasm-ext implot,implot3d,imnodes,imguizmo,imguizmo-quat
 ```
 
-### 6. `update_readme_versions.py` - README Version Updater
-
-Updates version numbers in README files (compatibility tables and examples).
-
-```bash
-# Update to a specific version
-python3 tools/update_readme_versions.py 0.9.0
-
-# Dry run (show what would change)
-python3 tools/update_readme_versions.py 0.9.0 --dry-run
-
-# Specify old version manually
-python3 tools/update_readme_versions.py 0.9.0 --old-version 0.8.0
-```
-
-**Note**: This script is automatically called by `bump_version.py`, so you usually don't need to run it manually.
-
 ## Typical Release Workflow
 
-### Option 1: Using the All-in-One Command
+### Option 1: Recommended Two-Phase Workflow
 
 ```bash
-# 1. Prepare release (bump version, update bindings, test, check)
-python3 tools/tasks.py release-prep 0.9.0
+# 1. Generate versions, bindings, provenance, and lockfile changes.
+python3 tools/tasks.py release-prepare 0.16.0
 
-# 2. Review changes
+# 2. Review generated and hand-written release changes.
 git diff
-
-# 3. Update documentation
 # - Edit CHANGELOG.md
 #   - Keep changelog prose soft-wrapped; do not hard-wrap bullet text to a fixed column.
 # - Update README.md compatibility table
 # - Update docs/COMPATIBILITY.md
 
-# 4. Commit changes
+# 3. Commit the release candidate.
 git add -A
-git commit -m "chore: prepare release v0.9.0"
+git commit -m "chore: prepare release v0.16.0"
 
-# 5. Publish (dry run first)
+# 4. Run strict checks against the clean committed tree.
+python3 tools/tasks.py release-check
+
+# 5. Publish (dry run first).
 python3 tools/tasks.py publish --dry-run
 python3 tools/tasks.py publish
 
-# 6. Tag and push
-git tag -a v0.9.0 -m "Release v0.9.0"
+# 6. Tag and push.
+git tag -a v0.16.0 -m "Release v0.16.0"
 git push origin main
-git push origin v0.9.0
+git push origin v0.16.0
 
-# 7. GitHub release
+# 7. GitHub release.
 # Pushing the v* tag triggers .github/workflows/release.yml, which uses the matching CHANGELOG.md section as the release body.
 ```
 
 ### Option 2: Step-by-Step
 
 ```bash
-# 1. Update submodules and bindings
-python3 tools/update_submodule_and_bindings.py \
-  --crates all \
-  --submodules update \
-  --profile release
+# 1. Update the single workspace release version
+cargo run -p xtask -- release-version 0.16.0
 
-# 2. Bump version
-python3 tools/bump_version.py 0.9.0
+# 2. Regenerate bindings without moving third-party submodules
+python3 tools/tasks.py bindings
 
-# 3. Update Cargo.lock
-cargo update
+# 3. Verify the version command left a locked dependency graph
+cargo metadata --locked --format-version 1 --no-deps > /dev/null
 
-# 4. Run tests
-cargo test --workspace
+# 4. Run the repository's feature-safe test matrix
+python3 tools/tasks.py test
 
-# 5. Run pre-publish checks
-python3 tools/pre_publish_check.py
+# 5. Verify core binding drift
+cargo run -p xtask -- verify-bindings
 
 # 6. Update documentation
 # - CHANGELOG.md
@@ -256,18 +234,21 @@ python3 tools/pre_publish_check.py
 
 # 7. Commit changes
 git add -A
-git commit -m "chore: prepare release v0.9.0"
+git commit -m "chore: prepare release v0.16.0"
 
-# 8. Publish
+# 8. Run the strict clean-tree release gate
+python3 tools/tasks.py release-check
+
+# 9. Publish
 python3 tools/publish.py --dry-run  # Dry run first
 python3 tools/publish.py            # Actual publish
 
-# 9. Tag and push
-git tag -a v0.9.0 -m "Release v0.9.0"
+# 10. Tag and push
+git tag -a v0.16.0 -m "Release v0.16.0"
 git push origin main
-git push origin v0.9.0
+git push origin v0.16.0
 
-# 10. GitHub release is created/updated automatically from CHANGELOG.md by .github/workflows/release.yml
+# 11. GitHub release is created/updated automatically from CHANGELOG.md by .github/workflows/release.yml
 ```
 
 ## Common Tasks
@@ -281,9 +262,11 @@ python3 tools/update_submodule_and_bindings.py \
   --profile release \
   --cimgui-branch docking_inter \
   --cimplot-branch master \
+  --cimplot3d-branch main \
   --cimnodes-branch master \
   --cimnodes-editor-branch main \
-  --cimguizmo-branch master
+  --cimguizmo-branch master \
+  --imgui-test-engine-branch main
 ```
 
 ### Verify docs.rs Offline Builds
@@ -298,6 +281,7 @@ cargo check -p dear-node-editor-sys
 cargo check -p dear-imguizmo-sys
 cargo check -p dear-implot3d-sys
 cargo check -p dear-imguizmo-quat-sys
+cargo check -p dear-imgui-test-engine-sys
 
 # Linux/macOS
 DOCS_RS=1 cargo check -p dear-imgui-sys
@@ -307,6 +291,7 @@ DOCS_RS=1 cargo check -p dear-node-editor-sys
 DOCS_RS=1 cargo check -p dear-imguizmo-sys
 DOCS_RS=1 cargo check -p dear-implot3d-sys
 DOCS_RS=1 cargo check -p dear-imguizmo-quat-sys
+DOCS_RS=1 cargo check -p dear-imgui-test-engine-sys
 ```
 
 ### Resume Publishing After Failure
@@ -321,14 +306,14 @@ python3 tools/publish.py --start-from dear-implot-sys
 ### Publish Only Specific Crates
 
 ```bash
-# Publish only backends
-python3 tools/publish.py --crates dear-imgui-winit,dear-imgui-wgpu,dear-imgui-glow,dear-imgui-sdl3
+# Publish only backend crates
+python3 tools/publish.py --crates dear-imgui-winit,dear-imgui-wgpu,dear-imgui-glow,dear-imgui-ash,dear-imgui-sdl3,dear-imgui-bevy
 ```
 
 ## Requirements
 
 All scripts require:
-- **Python 3.7+**
+- **Python 3.11+**
 - **cargo** in PATH
 - **git** in PATH (for submodule management)
 - **Logged in to crates.io**: `cargo login <token>`
@@ -351,10 +336,14 @@ chmod +x tools/*.py
 
 ### Publishing Fails with "already published"
 
-The script will detect this and ask if you want to skip. If you need to republish:
+Published versions cannot be overwritten. The script can skip an already
+published crate; if the release is defective, prepare and publish a new patch:
 ```bash
-cargo yank --vers 0.4.0 dear-imgui-sys
-python3 tools/publish.py --start-from dear-imgui-sys
+cargo yank --registry crates-io --vers 0.16.0 dear-imgui-sys
+python3 tools/tasks.py release-prepare 0.16.1
+# Review and commit, then run the strict gate from the clean tree.
+python3 tools/tasks.py release-check
+python3 tools/publish.py
 ```
 
 ### docs.rs Build Failures
@@ -379,11 +368,10 @@ DOCS_RS=1 cargo check -p dear-imgui-sys
 
 When adding new crates to the workspace:
 
-1. Add the crate to `PUBLISH_ORDER` in `publish.py`
-2. Add the crate to `ALL_CRATES` in `pre_publish_check.py`
-3. Add the crate to `WORKSPACE_CRATES` in `bump_version.py`
-4. If it's a `-sys` crate, add it to `SYS_CRATES` in `pre_publish_check.py`
-5. Update this README with any new requirements
+1. Set `version.workspace = true` for a publishable package, or keep an explicit independent version for a workspace-only package
+2. Add publishable crates to the shared `PUBLISH_ORDER` in `release_metadata.py`; metadata discovery supplies the version and package inventory automatically
+3. If it's a `-sys` crate, add it to `SYS_CRATES` in `pre_publish_check.py`
+4. Update this README with any new requirements
 
 ## License
 
