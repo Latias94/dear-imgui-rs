@@ -26,6 +26,7 @@ Current parity status vs IGFD (excluding C API by product decision):
   - unified host/content entrypoints (`*_with` API) to remove redundant method matrix (commit: `60b4a12`)
   - P2 background scan architecture (streaming visitor + bounded worker channel + generation model)
   - Background scan-policy tuning (`max_batches_per_tick` + tuned preset)
+  - Incremental partial-scan projection (per-batch filtering + stable ordered index)
   - IGFD-like path composer: breadcrumb style + edit toggle + devices/reset + quick path selection popups
   - Path popup: separator quick-select uses known recent descendants without synchronous filesystem I/O
   - IGFD-like places: toolbar "Places" control + show/hide + splitter-resizable pane (Standard layout), popup access in Minimal layout
@@ -40,8 +41,7 @@ Execution plan (next implementation wave):
 
 1. P2 Stage F: publish migration snippets and rollout notes
 2. P2 Stage G: extend benchmark matrix (batch size + mixed metadata)
-3. P2 Stage H: evaluate projection delta path under partial scan
-4. P3 UX/config parity wave (Rust-first, capability-first):
+3. P3 UX/config parity wave (Rust-first, capability-first):
    - dockable custom pane (right/bottom) + resizable splitter
    - IGFD-classic UI preset (layout/labels/density)
    - explicit config toggles for “IGFD flags”-like behavior (disable new-folder, hide columns, natural sort toggle, etc.)
@@ -624,6 +624,13 @@ Reference design: `docs/FEARLESS_REFACTOR_P2_PERF_ASYNC_DESIGN.md`
   - Acceptance:
     - selected IDs persist when entries remain resolvable
     - unresolved IDs are dropped deterministically
+- [x] Task: incrementally project accepted partial batches
+  - Acceptance:
+    - old snapshot entries are not cloned, filtered, or sorted for each batch
+    - visible batch entries enter a stable ordered index without traversing the
+      accumulated projection
+    - measured order comparisons and historical-entry visits stay `O(N log N)`
+    - completion reconciles selection without a redundant full rebuild
 
 ### Epic 17.4 - Observability and tuning (Stage D)
 

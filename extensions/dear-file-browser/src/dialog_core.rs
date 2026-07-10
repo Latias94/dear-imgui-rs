@@ -1,6 +1,9 @@
+use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering as AtomicOrdering};
 use std::{
-    collections::{VecDeque, hash_map::DefaultHasher},
+    collections::{BTreeSet, HashSet, VecDeque, btree_set, hash_map::DefaultHasher},
     hash::Hasher,
 };
 
@@ -395,6 +398,301 @@ impl DirEntry {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ProjectionOrder {
+    sort_by: SortBy,
+    sort_ascending: bool,
+    sort_mode: SortMode,
+    dirs_first: bool,
+    type_dots_to_extract: usize,
+}
+
+impl ProjectionOrder {
+    fn new(core: &FileDialogCore) -> Self {
+        Self {
+            sort_by: core.sort_by,
+            sort_ascending: core.sort_ascending,
+            sort_mode: core.sort_mode,
+            dirs_first: core.dirs_first,
+            type_dots_to_extract: igfd_type_dots_to_extract(core.active_filter()),
+        }
+    }
+
+    fn discriminant(self) -> (u8, bool, u8, bool, usize) {
+        let sort_by = match self.sort_by {
+            SortBy::Name => 0,
+            SortBy::Type => 1,
+            SortBy::Extension => 2,
+            SortBy::Size => 3,
+            SortBy::Modified => 4,
+        };
+        let sort_mode = match self.sort_mode {
+            SortMode::Natural => 0,
+            SortMode::Lexicographic => 1,
+        };
+        (
+            sort_by,
+            self.sort_ascending,
+            sort_mode,
+            self.dirs_first,
+            self.type_dots_to_extract,
+        )
+    }
+}
+
+#[derive(Debug)]
+struct ProjectionComparisonMetrics {
+    comparisons: AtomicUsize,
+    existing_entry_visits: AtomicUsize,
+    batch_start_sequence: AtomicU64,
+}
+
+impl Default for ProjectionComparisonMetrics {
+    fn default() -> Self {
+        Self {
+            comparisons: AtomicUsize::new(0),
+            existing_entry_visits: AtomicUsize::new(0),
+            batch_start_sequence: AtomicU64::new(Self::NO_BATCH),
+        }
+    }
+}
+
+impl ProjectionComparisonMetrics {
+    const NO_BATCH: u64 = u64::MAX;
+
+    fn begin_batch(&self, batch_start_sequence: u64) -> ProjectionMetricSnapshot {
+        self.batch_start_sequence
+            .store(batch_start_sequence, AtomicOrdering::Relaxed);
+        ProjectionMetricSnapshot {
+            comparisons: self.comparisons.load(AtomicOrdering::Relaxed),
+            existing_entry_visits: self.existing_entry_visits.load(AtomicOrdering::Relaxed),
+        }
+    }
+
+    fn finish_batch(&self, before: ProjectionMetricSnapshot) -> ProjectionBatchWork {
+        self.batch_start_sequence
+            .store(Self::NO_BATCH, AtomicOrdering::Relaxed);
+        ProjectionBatchWork {
+            comparisons: self
+                .comparisons
+                .load(AtomicOrdering::Relaxed)
+                .saturating_sub(before.comparisons),
+            existing_entry_visits: self
+                .existing_entry_visits
+                .load(AtomicOrdering::Relaxed)
+                .saturating_sub(before.existing_entry_visits),
+        }
+    }
+
+    fn record_comparison(&self, left_sequence: u64, right_sequence: u64) {
+        self.comparisons.fetch_add(1, AtomicOrdering::Relaxed);
+        let batch_start = self.batch_start_sequence.load(AtomicOrdering::Relaxed);
+        if batch_start == Self::NO_BATCH {
+            return;
+        }
+        let visits_existing = (left_sequence < batch_start) != (right_sequence < batch_start);
+        if visits_existing {
+            self.existing_entry_visits
+                .fetch_add(1, AtomicOrdering::Relaxed);
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct ProjectionMetricSnapshot {
+    comparisons: usize,
+    existing_entry_visits: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct ProjectionBatchWork {
+    comparisons: usize,
+    existing_entry_visits: usize,
+}
+
+#[derive(Debug)]
+struct ProjectedEntry {
+    entry: DirEntry,
+    name_lower: String,
+    sequence: u64,
+    order: ProjectionOrder,
+    metrics: Arc<ProjectionComparisonMetrics>,
+}
+
+impl ProjectedEntry {
+    fn new(
+        entry: DirEntry,
+        sequence: u64,
+        order: ProjectionOrder,
+        metrics: Arc<ProjectionComparisonMetrics>,
+    ) -> Self {
+        let name_lower = entry.name.to_lowercase();
+        Self {
+            entry,
+            name_lower,
+            sequence,
+            order,
+            metrics,
+        }
+    }
+}
+
+impl PartialEq for ProjectedEntry {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Eq for ProjectedEntry {}
+
+impl PartialOrd for ProjectedEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ProjectedEntry {
+    fn cmp(&self, other: &Self) -> Ordering {
+        if Arc::ptr_eq(&self.metrics, &other.metrics) {
+            self.metrics
+                .record_comparison(self.sequence, other.sequence);
+        }
+
+        self.order
+            .discriminant()
+            .cmp(&other.order.discriminant())
+            .then_with(|| compare_projected_entries(self, other))
+            .then_with(|| self.sequence.cmp(&other.sequence))
+            .then_with(|| self.entry.id.0.cmp(&other.entry.id.0))
+    }
+}
+
+#[derive(Debug, Default)]
+struct EntryProjection {
+    entries: BTreeSet<ProjectedEntry>,
+    visible_ids: HashSet<EntryId>,
+    order: Option<ProjectionOrder>,
+    next_sequence: u64,
+    metrics: Arc<ProjectionComparisonMetrics>,
+}
+
+impl EntryProjection {
+    fn rebuild(&mut self, order: ProjectionOrder, entries: Vec<DirEntry>) {
+        self.entries.clear();
+        self.visible_ids.clear();
+        self.order = Some(order);
+        self.next_sequence = 0;
+        for entry in entries {
+            self.insert(entry, order);
+        }
+    }
+
+    fn extend(
+        &mut self,
+        order: ProjectionOrder,
+        entries: Vec<DirEntry>,
+    ) -> Option<ProjectionBatchWork> {
+        if self.order != Some(order) {
+            return None;
+        }
+        let before = self.metrics.begin_batch(self.next_sequence);
+        for entry in entries {
+            self.insert(entry, order);
+        }
+        Some(self.metrics.finish_batch(before))
+    }
+
+    fn insert(&mut self, entry: DirEntry, order: ProjectionOrder) {
+        let id = entry.stable_id();
+        let sequence = self.next_sequence;
+        self.next_sequence = self.next_sequence.saturating_add(1);
+        self.visible_ids.insert(id);
+        self.entries.insert(ProjectedEntry::new(
+            entry,
+            sequence,
+            order,
+            Arc::clone(&self.metrics),
+        ));
+    }
+
+    fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    fn iter(&self) -> ProjectedEntries<'_> {
+        ProjectedEntries {
+            inner: self.entries.iter(),
+        }
+    }
+
+    fn contains_id(&self, id: EntryId) -> bool {
+        self.visible_ids.contains(&id)
+    }
+
+    fn entry_by_id(&self, id: EntryId) -> Option<&DirEntry> {
+        self.iter().find(|entry| entry.id == id)
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct ProjectedEntries<'a> {
+    inner: btree_set::Iter<'a, ProjectedEntry>,
+}
+
+impl ProjectedEntries<'_> {
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.inner.len() == 0
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    pub(crate) fn iter(&self) -> Self {
+        self.clone()
+    }
+
+    pub(crate) fn to_vec(&self) -> Vec<DirEntry> {
+        self.clone().cloned().collect()
+    }
+}
+
+impl<'a> Iterator for ProjectedEntries<'a> {
+    type Item = &'a DirEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|entry| &entry.entry)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
+}
+
+impl DoubleEndedIterator for ProjectedEntries<'_> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.inner.next_back().map(|entry| &entry.entry)
+    }
+}
+
+impl ExactSizeIterator for ProjectedEntries<'_> {}
+
+#[cfg(test)]
+#[derive(Debug, Default)]
+struct ProjectionStats {
+    full_rebuilds: usize,
+    full_rebuild_input_entries: usize,
+    incremental_batches: usize,
+    incremental_input_entries: usize,
+    incremental_order_comparisons: usize,
+    incremental_existing_entry_visits: usize,
+}
+
 /// Core state machine for the ImGui-embedded file dialog.
 ///
 /// This type contains only domain state and logic (selection, navigation,
@@ -446,9 +744,7 @@ pub struct FileDialogCore {
     pending_overwrite: Option<Selection>,
     focused_id: Option<EntryId>,
     selection_anchor_id: Option<EntryId>,
-    view_names: Vec<String>,
-    view_ids: Vec<EntryId>,
-    entries: Vec<DirEntry>,
+    entries: EntryProjection,
 
     scan_hook: Option<ScanHook>,
     scan_policy: ScanPolicy,
@@ -460,6 +756,8 @@ pub struct FileDialogCore {
     dir_snapshot: DirSnapshot,
     dir_snapshot_dirty: bool,
     last_view_key: Option<ViewKey>,
+    #[cfg(test)]
+    projection_stats: ProjectionStats,
 
     nav_back: VecDeque<PathBuf>,
     nav_forward: VecDeque<PathBuf>,
@@ -503,9 +801,7 @@ impl FileDialogCore {
             pending_overwrite: None,
             focused_id: None,
             selection_anchor_id: None,
-            view_names: Vec::new(),
-            view_ids: Vec::new(),
-            entries: Vec::new(),
+            entries: EntryProjection::default(),
             scan_hook: None,
             scan_policy: ScanPolicy::default(),
             scan_status: ScanStatus::default(),
@@ -520,6 +816,8 @@ impl FileDialogCore {
             },
             dir_snapshot_dirty: true,
             last_view_key: None,
+            #[cfg(test)]
+            projection_stats: ProjectionStats::default(),
             nav_back: VecDeque::new(),
             nav_forward: VecDeque::new(),
             nav_recent,
@@ -692,8 +990,8 @@ impl FileDialogCore {
     }
 
     /// Returns a snapshot of the current entries list.
-    pub(crate) fn entries(&self) -> &[DirEntry] {
-        &self.entries
+    pub(crate) fn entries(&self) -> ProjectedEntries<'_> {
+        self.entries.iter()
     }
 
     /// Apply one core event and return host-facing outcome.
@@ -815,6 +1113,7 @@ impl FileDialogCore {
     /// Installs a scan hook that can mutate or drop filesystem entries.
     ///
     /// The hook runs before filtering/sorting and before snapshot ids are built.
+    /// It is invoked only by the owner thread while applying scan batches.
     /// Calling this invalidates the directory cache.
     pub(crate) fn set_scan_hook<F>(&mut self, hook: F)
     where
@@ -948,36 +1247,70 @@ impl FileDialogCore {
         } else {
             "view_inputs_changed"
         };
-        let rebuild_started_at = std::time::Instant::now();
+        self.rebuild_projection(key, rebuild_reason);
+    }
 
+    fn rebuild_projection(&mut self, key: ViewKey, reason: &'static str) {
+        let rebuild_started_at = std::time::Instant::now();
+        #[cfg(test)]
+        let input_entries = self.dir_snapshot.entries.len();
         let mut entries = self.dir_snapshot.entries.clone();
+        self.filter_projection_entries(&mut entries);
+        let order = ProjectionOrder::new(self);
+        self.entries.rebuild(order, entries);
+        self.retain_selected_visible();
+        self.last_view_key = Some(key);
+
+        #[cfg(test)]
+        {
+            self.projection_stats.full_rebuilds += 1;
+            self.projection_stats.full_rebuild_input_entries += input_entries;
+        }
+        trace_projector_rebuild(
+            reason,
+            self.entries.len(),
+            rebuild_started_at.elapsed().as_micros(),
+        );
+    }
+
+    fn append_projection_batch(&mut self, mut entries: Vec<DirEntry>) {
+        // The caller has already verified that the existing view uses the
+        // current projection inputs, so only this accepted batch needs work.
+        let project_started_at = std::time::Instant::now();
+        let input_entries = entries.len();
+        self.filter_projection_entries(&mut entries);
+        let visible_entries = entries.len();
+        let order = ProjectionOrder::new(self);
+        let Some(work) = self.entries.extend(order, entries) else {
+            self.last_view_key = None;
+            return;
+        };
+
+        #[cfg(test)]
+        {
+            self.projection_stats.incremental_batches += 1;
+            self.projection_stats.incremental_input_entries += input_entries;
+            self.projection_stats.incremental_order_comparisons += work.comparisons;
+            self.projection_stats.incremental_existing_entry_visits += work.existing_entry_visits;
+        }
+        trace_projector_incremental(
+            input_entries,
+            visible_entries,
+            self.entries.len(),
+            work.comparisons,
+            work.existing_entry_visits,
+            project_started_at.elapsed().as_micros(),
+        );
+    }
+
+    fn filter_projection_entries(&self, entries: &mut Vec<DirEntry>) {
         filter_entries_in_place(
-            &mut entries,
+            entries,
             self.mode,
             self.show_hidden,
             &self.filters,
             self.active_filter,
             &self.search,
-        );
-        let type_dots_to_extract = igfd_type_dots_to_extract(self.active_filter());
-        sort_entries_in_place(
-            &mut entries,
-            self.sort_by,
-            self.sort_ascending,
-            self.sort_mode,
-            self.dirs_first,
-            type_dots_to_extract,
-        );
-        self.view_names = entries.iter().map(|e| e.name.clone()).collect();
-        self.view_ids = entries.iter().map(DirEntry::stable_id).collect();
-        self.entries = entries;
-        self.retain_selected_visible();
-        self.last_view_key = Some(key);
-
-        trace_projector_rebuild(
-            rebuild_reason,
-            self.entries.len(),
-            rebuild_started_at.elapsed().as_micros(),
         );
     }
 
@@ -1039,13 +1372,19 @@ impl FileDialogCore {
             self.dir_snapshot_dirty = false;
         }
 
-        let mut budget = self.scan_runtime_batch_budget();
-        while budget > 0 {
+        self.poll_runtime_batches();
+    }
+
+    fn poll_runtime_batches(&mut self) {
+        let mut accepted = 0;
+        let budget = self.scan_runtime_batch_budget();
+        while accepted < budget {
             let Some(runtime_batch) = self.scan_runtime.poll_batch() else {
                 break;
             };
-            self.apply_runtime_batch(runtime_batch);
-            budget = budget.saturating_sub(1);
+            if self.apply_runtime_batch(runtime_batch) {
+                accepted += 1;
+            }
         }
     }
 
@@ -1060,14 +1399,14 @@ impl FileDialogCore {
         generation
     }
 
-    fn apply_runtime_batch(&mut self, runtime_batch: RuntimeBatch) {
+    fn apply_runtime_batch(&mut self, runtime_batch: RuntimeBatch) -> bool {
         if runtime_batch.generation != self.scan_generation {
             trace_scan_dropped_stale_batch(
                 runtime_batch.generation,
                 self.scan_generation,
                 "runtime_batch",
             );
-            return;
+            return false;
         }
 
         match runtime_batch.kind {
@@ -1088,9 +1427,14 @@ impl FileDialogCore {
                 entries,
                 loaded: raw_loaded,
             } => {
-                if self.dir_snapshot.cwd != cwd {
+                let snapshot_matches = self.dir_snapshot.cwd == cwd;
+                if !snapshot_matches {
                     self.dir_snapshot = empty_snapshot_for_cwd(&cwd);
                 }
+
+                let projection_key = ViewKey::new(self);
+                let can_extend_projection =
+                    snapshot_matches && self.last_view_key.as_ref() == Some(&projection_key);
 
                 let mut accepted = Vec::with_capacity(entries.len());
                 for mut entry in entries {
@@ -1105,14 +1449,24 @@ impl FileDialogCore {
                 }
 
                 let batch_entries = accepted.len();
-                self.dir_snapshot.entries.extend(accepted);
+                if can_extend_projection {
+                    self.dir_snapshot.entries.extend(accepted.iter().cloned());
+                } else {
+                    self.dir_snapshot
+                        .entries
+                        .extend(std::mem::take(&mut accepted));
+                }
                 self.dir_snapshot.entry_count = self.dir_snapshot.entries.len();
                 let loaded = self.dir_snapshot.entry_count;
-                self.last_view_key = None;
                 self.scan_status = ScanStatus::Partial {
                     generation: runtime_batch.generation,
                     loaded,
                 };
+                if can_extend_projection {
+                    self.append_projection_batch(accepted);
+                } else {
+                    self.last_view_key = None;
+                }
                 trace_scan_batch_applied(
                     runtime_batch.generation,
                     batch_entries,
@@ -1131,11 +1485,13 @@ impl FileDialogCore {
                     .take()
                     .map(|started| started.elapsed().as_millis())
                     .unwrap_or(0);
-                self.last_view_key = None;
                 self.scan_status = ScanStatus::Complete {
                     generation: runtime_batch.generation,
                     loaded,
                 };
+                if self.last_view_key.as_ref() == Some(&ViewKey::new(self)) {
+                    self.retain_selected_visible();
+                }
                 trace_scan_completed(runtime_batch.generation, loaded, duration_ms);
                 trace_scan_batch_applied(runtime_batch.generation, 0, "complete");
             }
@@ -1150,21 +1506,15 @@ impl FileDialogCore {
                 trace_scan_batch_applied(runtime_batch.generation, 0, "error");
             }
         }
+        true
     }
 
     fn entry_by_id(&self, id: EntryId) -> Option<&DirEntry> {
-        self.entries.iter().find(|entry| entry.id == id)
+        self.entries.entry_by_id(id)
     }
 
     fn name_for_id(&self, id: EntryId) -> Option<&str> {
-        self.entry_by_id(id)
-            .map(|entry| entry.name.as_str())
-            .or_else(|| {
-                self.view_ids
-                    .iter()
-                    .position(|candidate| *candidate == id)
-                    .and_then(|index| self.view_names.get(index).map(String::as_str))
-            })
+        self.entry_by_id(id).map(|entry| entry.name.as_str())
     }
 
     /// Select the next entry whose base name starts with the given prefix (case-insensitive).
@@ -1172,21 +1522,22 @@ impl FileDialogCore {
     /// This is used by "type-to-select" navigation (IGFD-style).
     pub(crate) fn select_by_prefix(&mut self, prefix: &str) {
         let prefix = prefix.trim();
-        if prefix.is_empty() || self.view_ids.is_empty() {
+        if prefix.is_empty() || self.entries.is_empty() {
             return;
         }
         let prefix_lower = prefix.to_lowercase();
+        let view_ids = self.projected_entry_ids();
 
-        let len = self.view_ids.len();
+        let len = view_ids.len();
         let start_idx = self
             .focused_id
-            .and_then(|focused| self.view_ids.iter().position(|id| *id == focused))
+            .and_then(|focused| view_ids.iter().position(|id| *id == focused))
             .map(|i| (i + 1) % len)
             .unwrap_or(0);
 
         for offset in 0..len {
             let index = (start_idx + offset) % len;
-            let id = self.view_ids[index];
+            let id = view_ids[index];
             if self
                 .name_for_id(id)
                 .map(|name| name.to_lowercase().starts_with(&prefix_lower))
@@ -1204,8 +1555,14 @@ impl FileDialogCore {
         if cap <= 1 {
             return;
         }
+        let ids = self
+            .entries
+            .iter()
+            .take(cap)
+            .map(DirEntry::stable_id)
+            .collect::<Vec<_>>();
         self.selected_ids.clear();
-        for id in self.view_ids.iter().take(cap).copied() {
+        for id in ids {
             self.selected_ids.insert(id);
         }
         let last = self.selected_ids.iter().next_back().copied();
@@ -1215,14 +1572,15 @@ impl FileDialogCore {
 
     /// Moves keyboard focus up/down within the current view.
     pub(crate) fn move_focus(&mut self, delta: i32, modifiers: Modifiers) {
-        if self.view_ids.is_empty() {
+        if self.entries.is_empty() {
             return;
         }
+        let view_ids = self.projected_entry_ids();
 
-        let len = self.view_ids.len();
+        let len = view_ids.len();
         let current_idx = self
             .focused_id
-            .and_then(|id| self.view_ids.iter().position(|candidate| *candidate == id));
+            .and_then(|id| view_ids.iter().position(|candidate| *candidate == id));
         let next_idx = match current_idx {
             Some(index) => {
                 let next = index as i32 + delta;
@@ -1237,7 +1595,7 @@ impl FileDialogCore {
             }
         };
 
-        let target_id = self.view_ids[next_idx];
+        let target_id = view_ids[next_idx];
         if modifiers.shift {
             let anchor_id = self
                 .selection_anchor_id
@@ -1246,12 +1604,9 @@ impl FileDialogCore {
             if self.selection_anchor_id.is_none() {
                 self.selection_anchor_id = Some(anchor_id);
             }
-            if let Some(range) = select_range_by_id_capped(
-                &self.view_ids,
-                anchor_id,
-                target_id,
-                self.selection_cap(),
-            ) {
+            if let Some(range) =
+                select_range_by_id_capped(&view_ids, anchor_id, target_id, self.selection_cap())
+            {
                 self.selected_ids = range.into_iter().collect();
                 self.focused_id = Some(target_id);
             } else {
@@ -1296,8 +1651,9 @@ impl FileDialogCore {
 
         if modifiers.shift {
             if let Some(anchor_id) = self.selection_anchor_id {
+                let view_ids = self.projected_entry_ids();
                 if let Some(range) =
-                    select_range_by_id_capped(&self.view_ids, anchor_id, id, self.selection_cap())
+                    select_range_by_id_capped(&view_ids, anchor_id, id, self.selection_cap())
                 {
                     self.selected_ids = range.into_iter().collect();
                     self.focused_id = Some(id);
@@ -1519,12 +1875,11 @@ impl FileDialogCore {
 
         let allow_unresolved = self.allow_unresolved_selection();
         if !allow_unresolved {
-            self.selected_ids
-                .retain(|id| self.view_ids.iter().any(|visible| visible == id));
+            self.selected_ids.retain(|id| self.entries.contains_id(*id));
             self.enforce_selection_cap();
         }
 
-        if self.view_ids.is_empty() {
+        if self.entries.is_empty() {
             if !allow_unresolved {
                 self.focused_id = None;
                 self.selection_anchor_id = None;
@@ -1535,7 +1890,7 @@ impl FileDialogCore {
         if !allow_unresolved
             && self
                 .focused_id
-                .map(|id| self.view_ids.iter().all(|visible| *visible != id))
+                .map(|id| !self.entries.contains_id(id))
                 .unwrap_or(false)
         {
             self.focused_id = self.selected_ids.iter().next_back().copied();
@@ -1543,7 +1898,7 @@ impl FileDialogCore {
         if !allow_unresolved
             && self
                 .selection_anchor_id
-                .map(|id| self.view_ids.iter().all(|visible| *visible != id))
+                .map(|id| !self.entries.contains_id(id))
                 .unwrap_or(false)
         {
             self.selection_anchor_id = self.focused_id;
@@ -1555,6 +1910,10 @@ impl FileDialogCore {
             self.scan_status,
             ScanStatus::Scanning { .. } | ScanStatus::Partial { .. }
         )
+    }
+
+    fn projected_entry_ids(&self) -> Vec<EntryId> {
+        self.entries.iter().map(DirEntry::stable_id).collect()
     }
 }
 
@@ -1911,6 +2270,7 @@ fn filter_entries_in_place(
     });
 }
 
+#[cfg(test)]
 fn sort_entries_in_place(
     entries: &mut [DirEntry],
     sort_by: SortBy,
@@ -1920,46 +2280,90 @@ fn sort_entries_in_place(
     type_dots_to_extract: usize,
 ) {
     entries.sort_by(|a, b| {
-        if dirs_first && a.is_dir != b.is_dir {
-            return b.is_dir.cmp(&a.is_dir);
-        }
-        let ord = match sort_by {
-            SortBy::Name => {
-                let al = a.name.to_lowercase();
-                let bl = b.name.to_lowercase();
-                cmp_lower(&al, &bl, sort_mode)
-            }
-            SortBy::Type => {
-                use std::cmp::Ordering;
-                let al = a.name.to_lowercase();
-                let bl = b.name.to_lowercase();
-                let ae = type_extension_lower(&al, type_dots_to_extract);
-                let be = type_extension_lower(&bl, type_dots_to_extract);
-                let ord = cmp_lower(ae, be, sort_mode);
-                if ord == Ordering::Equal {
-                    cmp_lower(&al, &bl, sort_mode)
-                } else {
-                    ord
-                }
-            }
-            SortBy::Extension => {
-                use std::cmp::Ordering;
-                let al = a.name.to_lowercase();
-                let bl = b.name.to_lowercase();
-                let ae = full_extension_lower(&al);
-                let be = full_extension_lower(&bl);
-                let ord = cmp_lower(ae, be, sort_mode);
-                if ord == Ordering::Equal {
-                    cmp_lower(&al, &bl, sort_mode)
-                } else {
-                    ord
-                }
-            }
-            SortBy::Size => a.size.unwrap_or(0).cmp(&b.size.unwrap_or(0)),
-            SortBy::Modified => a.modified.cmp(&b.modified),
-        };
-        if sort_ascending { ord } else { ord.reverse() }
+        compare_entries(
+            a,
+            b,
+            sort_by,
+            sort_ascending,
+            sort_mode,
+            dirs_first,
+            type_dots_to_extract,
+        )
     });
+}
+
+#[cfg(test)]
+fn compare_entries(
+    a: &DirEntry,
+    b: &DirEntry,
+    sort_by: SortBy,
+    sort_ascending: bool,
+    sort_mode: SortMode,
+    dirs_first: bool,
+    type_dots_to_extract: usize,
+) -> Ordering {
+    let a_name_lower = a.name.to_lowercase();
+    let b_name_lower = b.name.to_lowercase();
+    compare_entry_order(
+        a,
+        &a_name_lower,
+        b,
+        &b_name_lower,
+        ProjectionOrder {
+            sort_by,
+            sort_ascending,
+            sort_mode,
+            dirs_first,
+            type_dots_to_extract,
+        },
+    )
+}
+
+fn compare_projected_entries(a: &ProjectedEntry, b: &ProjectedEntry) -> Ordering {
+    debug_assert_eq!(a.order, b.order);
+    compare_entry_order(&a.entry, &a.name_lower, &b.entry, &b.name_lower, a.order)
+}
+
+fn compare_entry_order(
+    a: &DirEntry,
+    a_name_lower: &str,
+    b: &DirEntry,
+    b_name_lower: &str,
+    order: ProjectionOrder,
+) -> Ordering {
+    if order.dirs_first && a.is_dir != b.is_dir {
+        return b.is_dir.cmp(&a.is_dir);
+    }
+    let compared = match order.sort_by {
+        SortBy::Name => cmp_lower(a_name_lower, b_name_lower, order.sort_mode),
+        SortBy::Type => {
+            let a_extension = type_extension_lower(a_name_lower, order.type_dots_to_extract);
+            let b_extension = type_extension_lower(b_name_lower, order.type_dots_to_extract);
+            let extension_order = cmp_lower(a_extension, b_extension, order.sort_mode);
+            if extension_order == Ordering::Equal {
+                cmp_lower(a_name_lower, b_name_lower, order.sort_mode)
+            } else {
+                extension_order
+            }
+        }
+        SortBy::Extension => {
+            let a_extension = full_extension_lower(a_name_lower);
+            let b_extension = full_extension_lower(b_name_lower);
+            let extension_order = cmp_lower(a_extension, b_extension, order.sort_mode);
+            if extension_order == Ordering::Equal {
+                cmp_lower(a_name_lower, b_name_lower, order.sort_mode)
+            } else {
+                extension_order
+            }
+        }
+        SortBy::Size => a.size.unwrap_or(0).cmp(&b.size.unwrap_or(0)),
+        SortBy::Modified => a.modified.cmp(&b.modified),
+    };
+    if order.sort_ascending {
+        compared
+    } else {
+        compared.reverse()
+    }
 }
 
 fn igfd_type_dots_to_extract(active_filter: Option<&FileFilter>) -> usize {
@@ -2205,12 +2609,44 @@ fn trace_projector_rebuild(reason: &'static str, visible_entries: usize, duratio
 #[cfg(not(feature = "tracing"))]
 fn trace_projector_rebuild(_reason: &'static str, _visible_entries: usize, _duration_us: u128) {}
 
+#[cfg(feature = "tracing")]
+fn trace_projector_incremental(
+    input_entries: usize,
+    visible_entries: usize,
+    total_visible_entries: usize,
+    order_comparisons: usize,
+    existing_entry_visits: usize,
+    duration_us: u128,
+) {
+    trace!(
+        event = "projector.incremental",
+        input_entries,
+        visible_entries,
+        total_visible_entries,
+        order_comparisons,
+        existing_entry_visits,
+        duration_us,
+        "projector indexed a scan batch"
+    );
+}
+
+#[cfg(not(feature = "tracing"))]
+fn trace_projector_incremental(
+    _input_entries: usize,
+    _visible_entries: usize,
+    _total_visible_entries: usize,
+    _order_comparisons: usize,
+    _existing_entry_visits: usize,
+    _duration_us: u128,
+) {
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::fs::StdFileSystem;
     use std::sync::Mutex;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
     use std::time::Duration;
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -2249,13 +2685,15 @@ mod tests {
     }
 
     fn set_view_files(core: &mut FileDialogCore, names: &[&str]) {
-        core.entries = names.iter().map(|name| make_file_entry(name)).collect();
-        core.view_names = core
-            .entries
-            .iter()
-            .map(|entry| entry.name.clone())
-            .collect();
-        core.view_ids = core.entries.iter().map(|entry| entry.id).collect();
+        set_projection_entries(
+            core,
+            names.iter().map(|name| make_file_entry(name)).collect(),
+        );
+    }
+
+    fn set_projection_entries(core: &mut FileDialogCore, entries: Vec<DirEntry>) {
+        let order = ProjectionOrder::new(core);
+        core.entries.rebuild(order, entries);
     }
 
     fn entry_id(core: &FileDialogCore, name: &str) -> EntryId {
@@ -2352,7 +2790,7 @@ mod tests {
             _dir: &Path,
             visit: &mut dyn FnMut(crate::fs::FsEntry) -> crate::fs::ScanVisit,
         ) -> std::io::Result<()> {
-            self.visit_dir_calls.fetch_add(1, Ordering::Relaxed);
+            self.visit_dir_calls.fetch_add(1, AtomicOrdering::Relaxed);
             self.visit_threads
                 .lock()
                 .expect("visit thread mutex poisoned")
@@ -2594,13 +3032,10 @@ mod tests {
     #[test]
     fn selected_entry_counts_tracks_files_and_dirs() {
         let mut core = FileDialogCore::new(DialogMode::OpenFiles);
-        core.entries = vec![make_file_entry("a.txt"), make_dir_entry("folder")];
-        core.view_names = core
-            .entries
-            .iter()
-            .map(|entry| entry.name.clone())
-            .collect();
-        core.view_ids = core.entries.iter().map(|entry| entry.id).collect();
+        set_projection_entries(
+            &mut core,
+            vec![make_file_entry("a.txt"), make_dir_entry("folder")],
+        );
 
         let a = entry_id(&core, "a.txt");
         let folder = entry_id(&core, "folder");
@@ -2849,13 +3284,7 @@ mod tests {
     fn pick_folder_confirms_selected_directory_when_present() {
         let mut core = FileDialogCore::new(DialogMode::PickFolder);
         core.cwd = PathBuf::from("/tmp");
-        core.entries = vec![make_dir_entry("a"), make_dir_entry("b")];
-        core.view_names = core
-            .entries
-            .iter()
-            .map(|entry| entry.name.clone())
-            .collect();
-        core.view_ids = core.entries.iter().map(|entry| entry.id).collect();
+        set_projection_entries(&mut core, vec![make_dir_entry("a"), make_dir_entry("b")]);
 
         let b = entry_id(&core, "b");
         let _ = core.handle_event(CoreEvent::ClickEntry {
@@ -3011,6 +3440,114 @@ mod tests {
     }
 
     #[test]
+    fn incremental_index_matches_full_stable_sort() {
+        let mut alpha = make_file_entry("alpha.tar.gz");
+        alpha.size = Some(20);
+        alpha.modified = Some(std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(4));
+        let mut beta = make_file_entry("beta2.rs");
+        beta.size = Some(10);
+        beta.modified = Some(std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(2));
+        let mut gamma = make_file_entry("gamma10.rs");
+        gamma.size = Some(10);
+        gamma.modified = Some(std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(2));
+        let mut delta = make_file_entry("delta.txt");
+        delta.size = Some(30);
+        delta.modified = Some(std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(1));
+        let scan_order = vec![
+            alpha,
+            make_dir_entry("zeta"),
+            beta,
+            gamma,
+            make_dir_entry("assets"),
+            delta,
+        ];
+
+        for sort_by in [
+            SortBy::Name,
+            SortBy::Type,
+            SortBy::Extension,
+            SortBy::Size,
+            SortBy::Modified,
+        ] {
+            for sort_ascending in [true, false] {
+                for sort_mode in [SortMode::Natural, SortMode::Lexicographic] {
+                    for dirs_first in [true, false] {
+                        let mut expected = scan_order.clone();
+                        sort_entries_in_place(
+                            &mut expected,
+                            sort_by,
+                            sort_ascending,
+                            sort_mode,
+                            dirs_first,
+                            2,
+                        );
+
+                        let order = ProjectionOrder {
+                            sort_by,
+                            sort_ascending,
+                            sort_mode,
+                            dirs_first,
+                            type_dots_to_extract: 2,
+                        };
+                        let mut projection = EntryProjection::default();
+                        projection.rebuild(order, scan_order[..3].to_vec());
+                        let work = projection
+                            .extend(order, scan_order[3..].to_vec())
+                            .expect("projection order should match");
+                        let expected_ids: Vec<_> =
+                            expected.iter().map(DirEntry::stable_id).collect();
+                        let projected_ids: Vec<_> =
+                            projection.iter().map(DirEntry::stable_id).collect();
+                        assert_eq!(projected_ids, expected_ids);
+                        assert!(work.comparisons > 0);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn projection_metrics_do_not_change_order_and_equal_keys_keep_arrival_order() {
+        let order = ProjectionOrder {
+            sort_by: SortBy::Size,
+            sort_ascending: false,
+            sort_mode: SortMode::Natural,
+            dirs_first: false,
+            type_dots_to_extract: 1,
+        };
+        let metrics = Arc::new(ProjectionComparisonMetrics::default());
+        let mut old = make_file_entry("old.txt");
+        old.size = Some(7);
+        let mut new = make_file_entry("new.txt");
+        new.size = Some(7);
+        let old_projected = ProjectedEntry::new(old.clone(), 0, order, Arc::clone(&metrics));
+        let new_projected = ProjectedEntry::new(new.clone(), 1, order, Arc::clone(&metrics));
+
+        let before_metrics = old_projected.cmp(&new_projected);
+        let metric_snapshot = metrics.begin_batch(1);
+        let during_metrics = old_projected.cmp(&new_projected);
+        let work = metrics.finish_batch(metric_snapshot);
+
+        assert_eq!(before_metrics, Ordering::Less);
+        assert_eq!(during_metrics, before_metrics);
+        assert_eq!(work.comparisons, 1);
+        assert_eq!(work.existing_entry_visits, 1);
+
+        let mut projection = EntryProjection::default();
+        projection.rebuild(order, vec![old]);
+        projection
+            .extend(order, vec![new])
+            .expect("projection order should match");
+        assert_eq!(
+            projection
+                .iter()
+                .map(|entry| entry.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["old.txt", "new.txt"]
+        );
+    }
+
+    #[test]
     fn select_by_prefix_cycles_from_current_focus() {
         let mut core = FileDialogCore::new(DialogMode::OpenFile);
         set_view_files(&mut core, &["alpha", "beta", "alpine"]);
@@ -3078,7 +3615,10 @@ mod tests {
 
         let mut core = FileDialogCore::new(DialogMode::OpenFiles);
         core.cwd = PathBuf::from("/tmp");
-        core.set_scan_hook(|entry| {
+        let visited = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let hook_visited = std::rc::Rc::clone(&visited);
+        core.set_scan_hook(move |entry| {
+            hook_visited.borrow_mut().push(entry.name.clone());
             if entry.name == "drop.txt" {
                 ScanHookAction::Drop
             } else {
@@ -3087,6 +3627,8 @@ mod tests {
         });
 
         core.rescan_if_needed(&fs);
+
+        assert_eq!(&*visited.borrow(), &["keep.txt", "drop.txt"]);
 
         let names: Vec<&str> = core
             .entries()
@@ -3184,7 +3726,13 @@ mod tests {
         core.clear_scan_hook();
         core.rescan_if_needed(&fs);
         assert_eq!(core.entries().len(), 1);
-        assert_eq!(core.entries()[0].name, "a.txt");
+        assert_eq!(
+            core.entries()
+                .next()
+                .expect("restored scan entry should be visible")
+                .name,
+            "a.txt"
+        );
     }
 
     #[test]
@@ -3274,9 +3822,7 @@ mod tests {
             entry_count: 1,
             entries: vec![old_entry.clone()],
         };
-        core.entries = vec![old_entry.clone()];
-        core.view_names = vec![old_entry.name.clone()];
-        core.view_ids = vec![old_entry.id];
+        set_projection_entries(&mut core, vec![old_entry.clone()]);
 
         core.rescan_if_needed(&filesystem);
         assert!(
@@ -3303,7 +3849,7 @@ mod tests {
         }
 
         assert_eq!(core.entries().len(), 4);
-        assert_eq!(fs.visit_dir_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(fs.visit_dir_calls.load(AtomicOrdering::Relaxed), 1);
         assert!(
             fs.visit_threads
                 .lock()
@@ -3663,7 +4209,162 @@ mod tests {
             }
         );
         assert_eq!(core.entries().len(), 3);
-        assert_eq!(fs.visit_dir_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(fs.visit_dir_calls.load(AtomicOrdering::Relaxed), 1);
+    }
+
+    #[test]
+    fn partial_scan_projects_only_new_batches_for_large_directories() {
+        const ENTRY_COUNT: usize = 4_096;
+        const BATCH_ENTRIES: usize = 128;
+
+        let fs = TestFs {
+            entries: (0..ENTRY_COUNT)
+                .rev()
+                .map(|index| {
+                    let name = format!("file-{index:05}.txt");
+                    crate::fs::FsEntry {
+                        path: PathBuf::from("/tmp").join(&name),
+                        name,
+                        is_dir: false,
+                        is_symlink: false,
+                        size: Some(index as u64),
+                        modified: None,
+                    }
+                })
+                .collect(),
+            ..Default::default()
+        };
+
+        let mut core = FileDialogCore::new(DialogMode::OpenFile);
+        core.cwd = PathBuf::from("/tmp");
+        core.set_scan_policy(ScanPolicy::Background {
+            batch_entries: BATCH_ENTRIES,
+            max_batches_per_tick: 1,
+        });
+
+        for _ in 0..=(ENTRY_COUNT / BATCH_ENTRIES + 2) {
+            core.rescan_if_needed(&fs);
+            if matches!(core.scan_status(), ScanStatus::Complete { .. }) {
+                break;
+            }
+        }
+
+        assert!(matches!(core.scan_status(), ScanStatus::Complete { .. }));
+        assert_eq!(core.entries().len(), ENTRY_COUNT);
+        let names = core
+            .entries()
+            .map(|entry| entry.name.as_str())
+            .collect::<Vec<_>>();
+        assert!(names.windows(2).all(|pair| pair[0] <= pair[1]));
+        assert_eq!(core.projection_stats.full_rebuilds, 1);
+        assert_eq!(core.projection_stats.full_rebuild_input_entries, 0);
+        assert_eq!(core.projection_stats.incremental_input_entries, ENTRY_COUNT);
+        assert_eq!(
+            core.projection_stats.incremental_batches,
+            ENTRY_COUNT / BATCH_ENTRIES
+        );
+        let ceil_log2 = usize::BITS as usize - ENTRY_COUNT.leading_zeros() as usize;
+        let btree_comparison_bound = ENTRY_COUNT * ceil_log2 * 8;
+        assert!(
+            core.projection_stats.incremental_order_comparisons <= btree_comparison_bound,
+            "{} comparisons exceeded O(N log N) bound {btree_comparison_bound}",
+            core.projection_stats.incremental_order_comparisons,
+        );
+        assert!(
+            core.projection_stats.incremental_existing_entry_visits <= btree_comparison_bound,
+            "{} historical-entry visits exceeded O(N log N) bound {btree_comparison_bound}",
+            core.projection_stats.incremental_existing_entry_visits,
+        );
+        assert!(core.projection_stats.incremental_order_comparisons > 0);
+        assert!(core.projection_stats.incremental_existing_entry_visits > 0);
+    }
+
+    #[test]
+    fn partial_scan_rebuilds_ordered_index_after_view_key_changes() {
+        let fs = TestFs {
+            entries: vec![
+                crate::fs::FsEntry {
+                    name: "zeta.rs".into(),
+                    path: PathBuf::from("/tmp/zeta.rs"),
+                    is_dir: false,
+                    is_symlink: false,
+                    size: Some(1),
+                    modified: None,
+                },
+                crate::fs::FsEntry {
+                    name: "folder".into(),
+                    path: PathBuf::from("/tmp/folder"),
+                    is_dir: true,
+                    is_symlink: false,
+                    size: None,
+                    modified: None,
+                },
+                crate::fs::FsEntry {
+                    name: "alpha.txt".into(),
+                    path: PathBuf::from("/tmp/alpha.txt"),
+                    is_dir: false,
+                    is_symlink: false,
+                    size: Some(30),
+                    modified: None,
+                },
+                crate::fs::FsEntry {
+                    name: ".hidden.rs".into(),
+                    path: PathBuf::from("/tmp/.hidden.rs"),
+                    is_dir: false,
+                    is_symlink: false,
+                    size: Some(10),
+                    modified: None,
+                },
+                crate::fs::FsEntry {
+                    name: "beta.rs".into(),
+                    path: PathBuf::from("/tmp/beta.rs"),
+                    is_dir: false,
+                    is_symlink: false,
+                    size: Some(20),
+                    modified: None,
+                },
+            ],
+            ..Default::default()
+        };
+
+        let mut core = FileDialogCore::new(DialogMode::OpenFile);
+        core.cwd = PathBuf::from("/tmp");
+        core.set_scan_policy(ScanPolicy::Background {
+            batch_entries: 2,
+            max_batches_per_tick: 1,
+        });
+
+        core.rescan_if_needed(&fs);
+        core.rescan_if_needed(&fs);
+        assert_eq!(
+            core.entries()
+                .map(|entry| entry.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["folder", "zeta.rs"]
+        );
+
+        core.sort_by = SortBy::Size;
+        core.sort_ascending = false;
+        core.sort_mode = SortMode::Lexicographic;
+        core.dirs_first = false;
+        core.show_hidden = true;
+        core.set_filters(vec![FileFilter::new("Rust", vec!["rs".to_string()])]);
+
+        for _ in 0..5 {
+            core.rescan_if_needed(&fs);
+            if matches!(core.scan_status(), ScanStatus::Complete { .. }) {
+                break;
+            }
+        }
+
+        assert!(matches!(core.scan_status(), ScanStatus::Complete { .. }));
+        assert_eq!(
+            core.entries()
+                .map(|entry| entry.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["beta.rs", ".hidden.rs", "zeta.rs", "folder"]
+        );
+        assert_eq!(core.projection_stats.full_rebuilds, 2);
     }
 
     #[test]
@@ -3745,8 +4446,8 @@ mod tests {
             .map(|entry| entry.name.as_str())
             .collect();
         assert_eq!(names, vec!["new.txt"]);
-        assert_eq!(fs_old.visit_dir_calls.load(Ordering::Relaxed), 1);
-        assert_eq!(fs_new.visit_dir_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(fs_old.visit_dir_calls.load(AtomicOrdering::Relaxed), 1);
+        assert_eq!(fs_new.visit_dir_calls.load(AtomicOrdering::Relaxed), 1);
     }
 
     #[test]
@@ -3864,18 +4565,57 @@ mod tests {
             generation: ScanGeneration::new(3),
         };
 
-        core.apply_runtime_batch(RuntimeBatch {
+        assert!(!core.apply_runtime_batch(RuntimeBatch {
             generation: ScanGeneration::new(2),
             kind: RuntimeBatchKind::Error {
                 cwd: PathBuf::from("/tmp"),
                 message: "stale".to_string(),
             },
-        });
+        }));
 
         assert_eq!(
             core.scan_status,
             ScanStatus::Scanning {
                 generation: ScanGeneration::new(3)
+            }
+        );
+    }
+
+    #[test]
+    fn stale_batches_do_not_consume_the_current_generation_budget() {
+        let mut core = FileDialogCore::new(DialogMode::OpenFile);
+        core.scan_generation = ScanGeneration::new(3);
+        core.scan_policy = ScanPolicy::Background {
+            batch_entries: 1,
+            max_batches_per_tick: 1,
+        };
+        core.scan_status = ScanStatus::Scanning {
+            generation: ScanGeneration::new(3),
+        };
+
+        for _ in 0..8 {
+            core.scan_runtime.push_test_batch(RuntimeBatch {
+                generation: ScanGeneration::new(2),
+                kind: RuntimeBatchKind::Begin {
+                    cwd: PathBuf::from("/stale"),
+                },
+            });
+        }
+        core.scan_runtime.push_test_batch(RuntimeBatch {
+            generation: ScanGeneration::new(3),
+            kind: RuntimeBatchKind::Error {
+                cwd: PathBuf::from("/current"),
+                message: "current".to_string(),
+            },
+        });
+
+        core.poll_runtime_batches();
+
+        assert_eq!(
+            core.scan_status,
+            ScanStatus::Failed {
+                generation: ScanGeneration::new(3),
+                message: "current".to_string(),
             }
         );
     }
@@ -3943,34 +4683,40 @@ mod tests {
         core.cwd = PathBuf::from("/tmp");
 
         core.rescan_if_needed(&fs);
-        assert_eq!(fs.visit_dir_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(fs.visit_dir_calls.load(AtomicOrdering::Relaxed), 1);
         assert!(core.entries().iter().all(|e| e.name != ".hidden"));
 
         // Same key => no rescan, no fs hit.
         core.rescan_if_needed(&fs);
-        assert_eq!(fs.visit_dir_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(fs.visit_dir_calls.load(AtomicOrdering::Relaxed), 1);
 
         // View-only changes should rebuild without hitting fs again.
         core.search = "b".into();
         core.rescan_if_needed(&fs);
-        assert_eq!(fs.visit_dir_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(fs.visit_dir_calls.load(AtomicOrdering::Relaxed), 1);
         assert_eq!(core.entries().len(), 1);
-        assert_eq!(core.entries()[0].name, "b.txt");
+        assert_eq!(
+            core.entries()
+                .next()
+                .expect("filtered entry should be visible")
+                .name,
+            "b.txt"
+        );
 
         core.search.clear();
         core.show_hidden = true;
         core.rescan_if_needed(&fs);
-        assert_eq!(fs.visit_dir_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(fs.visit_dir_calls.load(AtomicOrdering::Relaxed), 1);
         assert!(core.entries().iter().any(|e| e.name == ".hidden"));
 
         // Explicit refresh should hit fs again even if the view inputs didn't change.
         core.invalidate_dir_cache();
         core.rescan_if_needed(&fs);
-        assert_eq!(fs.visit_dir_calls.load(Ordering::Relaxed), 2);
+        assert_eq!(fs.visit_dir_calls.load(AtomicOrdering::Relaxed), 2);
 
         // Changing cwd should refresh snapshot.
         core.set_cwd(PathBuf::from("/other"));
         core.rescan_if_needed(&fs);
-        assert_eq!(fs.visit_dir_calls.load(Ordering::Relaxed), 3);
+        assert_eq!(fs.visit_dir_calls.load(AtomicOrdering::Relaxed), 3);
     }
 }

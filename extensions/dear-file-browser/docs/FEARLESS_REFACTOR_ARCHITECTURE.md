@@ -442,9 +442,14 @@ Implemented baseline:
 - apply at most the configured number of batches per UI tick
 - reject stale batches by generation after cooperative cancellation
 - run scan hooks and projection on the UI thread
+- filter only newly accepted partial batches, then insert visible entries into a
+  stable ordered index without traversing the accumulated view; rebuild the index
+  from the full snapshot only when projection inputs change
 
 ### 15.2 Large directories
 
+- partial scan ticks do not clone/filter/sort the accumulated directory snapshot
+- projection tracing reports actual order comparisons and historical index-node visits
 - avoid allocating strings repeatedly (interning / reuse buffers)
 - avoid `to_lowercase()` on every frame; precompute lowercase name or use case-folding cache
 

@@ -1085,7 +1085,8 @@ impl FileDialogState {
 
     /// Installs a scan hook on the core listing pipeline.
     ///
-    /// The hook runs during directory scan and can mutate or drop entries.
+    /// The hook runs while the owning thread applies scan batches and can mutate
+    /// or drop entries. It never crosses into the background scan worker.
     pub fn set_scan_hook<F>(&mut self, hook: F)
     where
         F: FnMut(&mut crate::FsEntry) -> crate::ScanHookAction + 'static,

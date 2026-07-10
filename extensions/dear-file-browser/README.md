@@ -140,7 +140,14 @@ On native targets, `FileDialogState::new` owns an
 `Arc<dyn FileSystem + Send + Sync>` and selects `ScanPolicy::tuned_background()`.
 The worker invokes `FileSystem::visit_dir` directly and sends bounded raw-entry
 batches to the UI thread. Scan hooks, filtering, sorting, selection reconciliation,
-and rendering remain on the UI thread.
+and rendering remain on the UI thread. During a partial scan, the projector filters
+only the newly accepted batch, then inserts visible entries into an ordered index.
+Arrival sequence breaks equal sort keys, so entries from earlier batches remain first
+without walking or moving the accumulated view. The full index is rebuilt only when
+projection inputs change.
+
+Scan hooks may capture owner-thread state such as `Rc<RefCell<_>>`; they never cross
+into the worker and run only on the thread that applies scan batches.
 
 Native scans share a fixed-size process-wide executor. Each dialog keeps one
 running request and coalesces repeated navigation into one latest pending request.

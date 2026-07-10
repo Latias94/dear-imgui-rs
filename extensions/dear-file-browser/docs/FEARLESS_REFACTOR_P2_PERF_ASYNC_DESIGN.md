@@ -101,6 +101,12 @@ superseded.
 - User scan hooks execute while the UI thread applies a raw batch, before creating
   `DirEntry` values.
 - At most `max_batches_per_tick` messages are applied in one UI tick.
+- Partial batches are filtered independently, then inserted into a `BTreeSet`
+  ordered by the active view key and a stable arrival sequence. Batch ingestion
+  does not traverse, move, clone, or re-filter the accumulated view; the full
+  index is rebuilt only when view inputs change.
+- A terminal `Complete` message reconciles unresolved selection without forcing a
+  redundant full-snapshot projection.
 - Selection IDs remain unresolved during partial data and are reconciled when the
   generation completes.
 
@@ -120,6 +126,9 @@ sleeps. It proves:
 - worker submission returns before a gated `visit_dir` finishes,
 - filesystem I/O runs on a worker while scan hooks run on the polling thread,
 - batch application respects the configured per-tick budget,
+- a 4,096-entry scan applies 128-entry projection deltas without full-snapshot
+  rebuilds between batches and bounds measured comparisons and historical-entry
+  visits by `O(N log N)`,
 - repeated blocked generations retain only the latest pending request,
 - stale entries and errors cannot replace the new cwd, status, or selection,
 - cancellation reaches the streaming visitor, and

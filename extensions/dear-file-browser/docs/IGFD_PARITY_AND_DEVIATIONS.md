@@ -116,7 +116,9 @@ See `docs/IGFD_SOURCE_REFERENCE_MAP.md` for a practical function map.
 - Completed: streaming, cancellable `FileSystem::visit_dir` boundary.
 - Completed: native bounded-channel background runtime with latest-request coalescing and non-blocking teardown.
 - Completed: bounded per-frame batch apply + partial selection reconciliation stability.
-- Completed: Stage D tracing metrics/events (`scan.requested`, `scan.batch_applied`, `scan.completed`, `scan.dropped_stale_batch`, `projector.rebuild`).
+- Completed: partial batches use batch-local filtering plus a stable ordered projection
+  index; equal keys retain scan order across batches without accumulated-view merges.
+- Completed: Stage D tracing metrics/events (`scan.requested`, `scan.batch_applied`, `scan.completed`, `scan.dropped_stale_batch`, `projector.rebuild`, `projector.incremental`).
 - Completed: channel/condition-variable regression coverage for non-blocking submit, cancellation, and teardown.
 - Completed: truthful `Blocking`/`Background` policy split and tuned background preset.
 - Next: publish migration snippets and extend benchmark matrix (batch size + mixed metadata).
