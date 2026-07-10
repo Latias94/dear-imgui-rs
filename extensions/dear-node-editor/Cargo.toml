@@ -19,6 +19,7 @@ thiserror.workspace = true
 [features]
 default = []
 freetype = ["dear-imgui-rs/freetype", "dear-node-editor-sys/freetype"]
+blueprints = ["dear-imgui-rs/stack-layout", "dear-node-editor-sys/stack-layout"]
 
 [dev-dependencies]
 static_assertions = "1.1"

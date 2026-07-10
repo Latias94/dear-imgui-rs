@@ -1,4 +1,6 @@
+use std::collections::hash_map::DefaultHasher;
 use std::env;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 // Asset-importer style build configuration and structure
@@ -176,13 +178,19 @@ fn main() {
         } else {
             if use_cmake_requested() {
                 println!(
-                    "cargo:warning=IMGUI_SYS_USE_CMAKE is ignored because dear-imgui-sys applies a build-time stack-layout patch to imgui.cpp; using the cc source build."
+                    "cargo:warning=IMGUI_SYS_USE_CMAKE is ignored; dear-imgui-sys uses the cc source build."
                 );
             }
             build_with_cc_cfg(&cfg);
             has_platform_io_hooks = true;
         }
     } else if !linked_prebuilt && skip_cc {
+        if cfg!(feature = "stack-layout") {
+            panic!(
+                "IMGUI_SYS_SKIP_CC with feature `stack-layout` requires a compatible prebuilt \
+                 dear_imgui artifact whose manifest declares features=stack-layout"
+            );
+        }
         println!(
             "cargo:warning=IMGUI_SYS_SKIP_CC is set but no prebuilt dear_imgui library was linked; the Rust build will likely fail at link time."
         );
@@ -334,6 +342,7 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
     if cfg.target_arch != "wasm32" {
         if let Some(lib_dir) = env::var_os("IMGUI_SYS_LIB_DIR") {
             let lib_dir = PathBuf::from(lib_dir);
+            assert_explicit_stack_layout_profile(&lib_dir, cfg, "IMGUI_SYS_LIB_DIR");
             if try_link_prebuilt(&lib_dir, cfg) {
                 println!(
                     "cargo:warning=Using prebuilt dear_imgui from {}",
@@ -351,15 +360,16 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
                      or use IMGUI_SYS_LIB_DIR / repo prebuilts instead."
                 );
             } else {
-                let cache_root = prebuilt_cache_root(cfg);
-                if let Ok(lib_dir) = try_download_prebuilt(&cache_root, &url, &cfg.target_env)
-                    && try_link_prebuilt(&lib_dir, cfg)
-                {
-                    println!(
-                        "cargo:warning=Downloaded and using prebuilt dear_imgui from {}",
-                        lib_dir.display()
-                    );
-                    linked = true;
+                let cache_root = explicit_prebuilt_cache_root(cfg, &url);
+                if let Ok(lib_dir) = try_download_prebuilt(&cache_root, &url, &cfg.target_env) {
+                    assert_explicit_stack_layout_profile(&lib_dir, cfg, "IMGUI_SYS_PREBUILT_URL");
+                    if try_link_prebuilt(&lib_dir, cfg) {
+                        println!(
+                            "cargo:warning=Downloaded and using prebuilt dear_imgui from {}",
+                            lib_dir.display()
+                        );
+                        linked = true;
+                    }
                 }
             }
         }
@@ -420,14 +430,18 @@ fn build_with_cc_cfg(cfg: &BuildConfig) {
     let imgui_src = cfg.imgui_src();
     let mut build = new_native_cpp_build(cfg);
     build.include(&cimgui_root);
-    build.file(write_stack_layout_patched_imgui_cpp(
-        cfg,
-        &imgui_src.join("imgui.cpp"),
-    ));
+    if cfg!(feature = "stack-layout") {
+        build.file(write_stack_layout_patched_imgui_cpp(
+            cfg,
+            &imgui_src.join("imgui.cpp"),
+        ));
+        build.file(cfg.manifest_dir.join("src/stack_layout_shim.cpp"));
+    } else {
+        build.file(imgui_src.join("imgui.cpp"));
+    }
     build.file(imgui_src.join("imgui_draw.cpp"));
     build.file(imgui_src.join("imgui_widgets.cpp"));
     build.file(imgui_src.join("imgui_tables.cpp"));
-    build.file(cfg.manifest_dir.join("src/stack_layout_shim.cpp"));
     build.file(cfg.manifest_dir.join("src/platform_io_hooks.cpp"));
     // Include official demo/metrics/debug windows for native builds so symbols like
     // ImGui::ShowDemoWindow/ShowAboutWindow/ShowStyleEditor resolve.
@@ -844,6 +858,21 @@ fn prebuilt_manifest_has_feature(dir: &Path, feature: &str) -> bool {
     features.iter().any(|f| f == &feature)
 }
 
+fn assert_explicit_stack_layout_profile(dir: &Path, cfg: &BuildConfig, source: &str) {
+    let lib_path = dir.join(expected_lib_name(&cfg.target_env));
+    if !lib_path.exists() {
+        return;
+    }
+
+    let expected = cfg!(feature = "stack-layout");
+    let actual = prebuilt_manifest_has_feature(dir, "stack-layout");
+    assert!(
+        actual == expected,
+        "{source} selected an incompatible dear_imgui artifact: requested stack-layout={expected}, \
+         but the prebuilt manifest declares stack-layout={actual}"
+    );
+}
+
 fn try_link_prebuilt(dir: &Path, cfg: &BuildConfig) -> bool {
     let lib_name = expected_lib_name(&cfg.target_env);
     let lib_path = dir.join(lib_name.as_str());
@@ -856,11 +885,9 @@ fn try_link_prebuilt(dir: &Path, cfg: &BuildConfig) -> bool {
     if !prebuilt_manifest_has_feature(dir, "wchar32") {
         return false;
     }
-    // Stack layout is part of the native dear-imgui ABI used by safe
-    // `begin_horizontal`/`begin_vertical`/`spring` wrappers. Reject older
-    // prebuilts that do not include the patched ItemAdd() hook and C ABI
-    // forwarding layer.
-    if !prebuilt_manifest_has_feature(dir, "stack-layout") {
+    // Stack layout changes the native core artifact. Match both directions so a normal build
+    // cannot silently link the patched profile and a blueprint build cannot link the normal one.
+    if prebuilt_manifest_has_feature(dir, "stack-layout") != cfg!(feature = "stack-layout") {
         return false;
     }
     // Aggregate callback hooks must be compiled into the same native archive as Dear ImGui.
@@ -991,53 +1018,38 @@ fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
         ""
     };
 
-    // Candidate archive names: match enabled features exactly (e.g. -freetype, -test-engine,
-    // -freetype-test-engine). We still validate the manifest in `try_link_prebuilt()`, but this
-    // avoids downloading/trying obviously incompatible prebuilts.
+    // Candidate archive names match the complete native profile. We still validate the manifest
+    // in `try_link_prebuilt()`, but distinct names prevent a normal build from even trying a
+    // patched stack-layout artifact (and vice versa).
     let mut candidates: Vec<String> = Vec::new();
     let target = &cfg.target_triple;
     let mut suffix = String::new();
+    if cfg!(feature = "stack-layout") {
+        suffix.push_str("-stack-layout");
+    }
     if cfg!(feature = "freetype") {
         suffix.push_str("-freetype");
     }
     if cfg!(feature = "test-engine") {
         suffix.push_str("-test-engine");
     }
-    if suffix.is_empty() {
-        candidates.push(build_support::compose_archive_name(
-            "dear-imgui",
-            &version,
-            target,
-            link_type,
-            None,
-            crt,
-        ));
-        candidates.push(build_support::compose_archive_name(
-            "dear-imgui",
-            &version,
-            target,
-            link_type,
-            None,
-            "",
-        ));
-    } else {
-        candidates.push(build_support::compose_archive_name(
-            "dear-imgui",
-            &version,
-            target,
-            link_type,
-            Some(suffix.as_str()),
-            crt,
-        ));
-        candidates.push(build_support::compose_archive_name(
-            "dear-imgui",
-            &version,
-            target,
-            link_type,
-            Some(suffix.as_str()),
-            "",
-        ));
-    }
+    let suffix = (!suffix.is_empty()).then_some(suffix.as_str());
+    candidates.push(build_support::compose_archive_name(
+        "dear-imgui",
+        &version,
+        target,
+        link_type,
+        suffix,
+        crt,
+    ));
+    candidates.push(build_support::compose_archive_name(
+        "dear-imgui",
+        &version,
+        target,
+        link_type,
+        suffix,
+        "",
+    ));
 
     let tags = build_support::release_tags("dear-imgui-sys", &version);
 
@@ -1070,11 +1082,29 @@ fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
 }
 
 fn prebuilt_cache_root(cfg: &BuildConfig) -> PathBuf {
-    build_support::prebuilt_cache_root_from_env_or_target(
+    let root = build_support::prebuilt_cache_root_from_env_or_target(
         &cfg.manifest_dir,
         "IMGUI_SYS_CACHE_DIR",
         "dear-imgui-prebuilt",
-    )
+    );
+    let mut profile = if cfg!(feature = "stack-layout") {
+        "stack-layout".to_string()
+    } else {
+        "standard".to_string()
+    };
+    if cfg!(feature = "freetype") {
+        profile.push_str("+freetype");
+    }
+    if cfg!(feature = "test-engine") {
+        profile.push_str("+test-engine");
+    }
+    root.join(profile)
+}
+
+fn explicit_prebuilt_cache_root(cfg: &BuildConfig, source: &str) -> PathBuf {
+    let mut hasher = DefaultHasher::new();
+    source.hash(&mut hasher);
+    prebuilt_cache_root(cfg).join(format!("explicit-{:016x}", hasher.finish()))
 }
 
 // (removed duplicate prebuilt_extract_dir_env/extract_archive_to_cache; using build_support equivalents)

@@ -80,6 +80,9 @@ Extensions
   - Backend crates may break independently when external renderer/windowing dependencies require it.
     Texture feedback, multi-viewport lifecycle, and renderer ownership behavior follow Dear ImGui
     upstream backend contracts.
+  - Blueprint stack layout is a native-only artifact profile selected by `dear-imgui-rs/stack-layout`
+    or `dear-node-editor/blueprints`. Normal and stack-layout prebuilts have distinct archive names,
+    caches, and manifest profiles and are not interchangeable.
 
 ## History
 

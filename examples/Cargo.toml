@@ -11,6 +11,11 @@ implot = ["dep:dear-implot", "dear-app/implot"]
 imguizmo = ["dep:dear-imguizmo"]
 imnodes = ["dep:dear-imnodes", "dear-app/imnodes"]
 node-editor = ["dep:dear-node-editor"]
+node-editor-blueprints = [
+    "node-editor",
+    "dear-imgui-rs/stack-layout",
+    "dear-node-editor/blueprints",
+]
 imguizmo-quat = ["dep:dear-imguizmo-quat"]
 implot3d = ["dep:dear-implot3d", "dear-app/implot3d"]
 freetype = ["dear-imgui-rs/freetype"]
@@ -219,7 +224,7 @@ required-features = ["node-editor"]
 [[bin]]
 name = "node_editor_showcase"
 path = "node_editor_showcase.rs"
-required-features = ["node-editor"]
+required-features = ["node-editor-blueprints"]
 
 [[bin]]
 name = "imguizmo_quat_basic"

@@ -40,6 +40,8 @@ test-engine = ["dear-imgui-sys/test-engine"]
 serde = ["dep:serde"]
 # Enable for WASM targets (import-style provider)
 wasm = ["dear-imgui-sys/wasm"]
+# Enable the native patched Dear ImGui artifact used by blueprint-style stack layouts.
+stack-layout = ["dear-imgui-sys/stack-layout"]
 # Experimental: enable direct font atlas access on wasm. Requires the shared
 # memory provider (imgui-sys-v0) built via xtask; API and behaviour may change.
 wasm-font-atlas-experimental = []

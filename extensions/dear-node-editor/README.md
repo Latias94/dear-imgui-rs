@@ -33,7 +33,9 @@ The `node_editor_showcase` example follows the upstream blueprints example
 structure and uses the same style of stack layout calls (`BeginHorizontal`,
 `BeginVertical`, and `Spring`) through `dear-imgui-rs` safe wrappers. Those
 stack layout helpers are compatibility APIs implemented by `dear-imgui-sys`;
-they are not official Dear ImGui APIs.
+they are not official Dear ImGui APIs. Enable this crate's `blueprints` feature
+to compile and link the patched native core artifact. Ordinary node-editor use
+does not enable that artifact profile.
 
 The vendored native `imgui-node-editor` sources are MIT-licensed. See
 `extensions/dear-node-editor-sys/third-party/cimnodes_editor/imgui-node-editor/LICENSE`
@@ -118,5 +120,5 @@ Run the repository examples:
 cargo run -p dear-imgui-examples --bin node_editor_basic --features node-editor
 
 # Blueprint-style showcase based on upstream blueprints-example.
-cargo run -p dear-imgui-examples --bin node_editor_showcase --features node-editor
+cargo run -p dear-imgui-examples --bin node_editor_showcase --features node-editor-blueprints
 ```

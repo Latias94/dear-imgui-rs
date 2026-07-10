@@ -196,11 +196,53 @@ jobs:
           (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-imgui-sys-v'))) ||
           (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imgui-sys'))) ||
           (github.event_name == 'push' && startsWith(github.ref_name, 'dear-imgui-sys-v'))
-        run: cargo run -p dear-imgui-sys --features package-bin --bin package --release --target ${{ matrix.target }}
+        run: cargo run -p dear-imgui-sys --features "package-bin,freetype" --bin package --release --target ${{ matrix.target }}
         env:
           IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
           IMGUI_SYS_PKG_CRT: ${{ matrix.crt }}
           IMGUI_SYS_PKG_FEATURES: freetype
+          TARGET: ${{ matrix.target }}
+
+      - name: Build dear-imgui-sys (Release, stack layout)
+        if: |
+          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-imgui-sys-v'))) ||
+          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imgui-sys'))) ||
+          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-imgui-sys-v'))
+        run: cargo build -p dear-imgui-sys --release --no-default-features --features "stack-layout" --target ${{ matrix.target }}
+        env:
+          TARGET: ${{ matrix.target }}
+
+      - name: Package dear-imgui-sys static library + headers (stack layout)
+        if: |
+          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-imgui-sys-v'))) ||
+          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imgui-sys'))) ||
+          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-imgui-sys-v'))
+        run: cargo run -p dear-imgui-sys --features "package-bin,stack-layout" --bin package --release --target ${{ matrix.target }}
+        env:
+          IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
+          IMGUI_SYS_PKG_CRT: ${{ matrix.crt }}
+          IMGUI_SYS_PKG_FEATURES: stack-layout
+          TARGET: ${{ matrix.target }}
+
+      - name: Build dear-imgui-sys (Release, stack layout + freetype)
+        if: |
+          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-imgui-sys-v'))) ||
+          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imgui-sys'))) ||
+          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-imgui-sys-v'))
+        run: cargo build -p dear-imgui-sys --release --no-default-features --features "stack-layout,freetype" --target ${{ matrix.target }}
+        env:
+          TARGET: ${{ matrix.target }}
+
+      - name: Package dear-imgui-sys static library + headers (stack layout + freetype)
+        if: |
+          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-imgui-sys-v'))) ||
+          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imgui-sys'))) ||
+          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-imgui-sys-v'))
+        run: cargo run -p dear-imgui-sys --features "package-bin,stack-layout,freetype" --bin package --release --target ${{ matrix.target }}
+        env:
+          IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
+          IMGUI_SYS_PKG_CRT: ${{ matrix.crt }}
+          IMGUI_SYS_PKG_FEATURES: stack-layout,freetype
           TARGET: ${{ matrix.target }}
 
       - name: Build dear-implot-sys (Release)

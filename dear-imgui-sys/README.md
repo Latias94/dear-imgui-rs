@@ -15,8 +15,8 @@ This crate provides unsafe Rust bindings to Dear ImGui v1.92.8 (docking branch) 
 - **Prebuilt Binaries**: Optional prebuilt static libraries for faster builds
 - **Offline-friendly**: Pregenerated bindings for normal builds, docs.rs, and offline environments
 - **Optional backend shim ABI**: Shared low-level self-contained backend shim modules for downstream backend crates and engine integrations
-- **Stack layout compatibility shim**: Repository-owned C ABI for the `BeginHorizontal`,
-  `BeginVertical`, and `Spring` layout helpers used by imgui-node-editor blueprint examples
+- **Optional stack layout artifact**: The native-only `stack-layout` feature enables a patched
+  core and repository-owned C ABI for blueprint-style layout helpers
 
 ## Build Strategies
 
@@ -60,8 +60,7 @@ If Cargo reports a missing header such as
 initialized.
 
 Source builds currently use the `cc` crate on every platform. `IMGUI_SYS_USE_CMAKE`
-is accepted for compatibility, but the build script warns and ignores it because
-the native stack-layout ABI patches the `imgui.cpp` build copy in `OUT_DIR`.
+is accepted for compatibility, but the build script warns and ignores it.
 
 Normal source builds use the checked-in pregenerated Rust bindings and do not require libclang.
 Bindgen is only needed when regenerating bindings.
@@ -265,9 +264,13 @@ shims for self-contained backends such as OpenGL3.
 
 ## Stack Layout Compatibility Shim
 
-`dear-imgui-sys` also builds a small repository-owned stack layout shim that
+With feature `stack-layout`, `dear-imgui-sys` builds a repository-owned stack layout shim that
 backs the safe `dear-imgui-rs` helpers named `begin_horizontal`,
 `begin_vertical`, and `spring`.
+
+```bash
+cargo build -p dear-imgui-sys --features stack-layout
+```
 
 Scope notes:
 
@@ -283,9 +286,10 @@ Scope notes:
   [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 - The Rust-facing ABI uses `dear_imgui_stack_*` symbols and is owned by this
   crate. Downstream code should prefer the safe `dear-imgui-rs` wrappers.
-- The shim is compiled for native source/prebuilt builds. It is intentionally
-  outside the current import-style WASM provider path because
-  `dear-node-editor` is native-only.
+- Normal native builds compile the original Dear ImGui core and do not export the shim symbols.
+- Prebuilt profiles match exactly: normal manifests omit `stack-layout`; patched manifests include
+  it and use a `-stack-layout` archive suffix.
+- `stack-layout` is native-only and cannot be combined with the WASM feature or target.
 
 ### Cargo Metadata for Backend Authors
 
@@ -387,7 +391,7 @@ Control build behavior with these environment variables:
 | `IMGUI_SYS_LIB_DIR` | Path to directory containing prebuilt static library |
 | `IMGUI_SYS_PREBUILT_URL` | Local file path or direct URL to a prebuilt library/archive (HTTP(S) and `.tar.gz` extraction require feature `prebuilt`) |
 | `IMGUI_SYS_USE_PREBUILT` | Enable automatic download from GitHub releases (`1`, requires feature `prebuilt`) |
-| `IMGUI_SYS_USE_CMAKE` | Accepted for compatibility; currently warns and uses the cc source build because stack-layout patches the `imgui.cpp` build copy |
+| `IMGUI_SYS_USE_CMAKE` | Accepted for compatibility; currently warns and uses the cc source build |
 | `IMGUI_SYS_SKIP_CC` | Skip C/C++ compilation, use pregenerated bindings only (`1`) |
 | `IMGUI_SYS_FORCE_BUILD` | Force build from source, ignore prebuilt options (`1`) |
 | `DEAR_IMGUI_RS_REGEN_BINDINGS` | Regenerate Rust bindings with bindgen (`1`; requires `--features bindgen` and libclang) |

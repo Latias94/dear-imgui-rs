@@ -69,6 +69,8 @@ pkg-config = ["build-support/pkg-config"]
 vcpkg = ["build-support/vcpkg"]
 # Enable for WASM targets
 wasm = []
+# Enable the native patched Dear ImGui artifact used by blueprint-style stack layouts.
+stack-layout = []
 package-bin = ["dep:flate2", "dep:tar", "dep:build-support"]
 prebuilt = ["build-support/download"]
 build-from-source = []

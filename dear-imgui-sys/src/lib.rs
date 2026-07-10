@@ -8,6 +8,7 @@
 //! - **docking**: Always enabled in this crate
 //! - **freetype**: Enable FreeType font rasterizer support
 //! - **wasm**: Enable WebAssembly compatibility
+//! - **stack-layout**: Enable the native patched core artifact used by blueprint-style layouts
 //! - **backend-shim-\***: Expose selected repository-owned backend shim modules
 //!   for low-level integrations
 //!
@@ -86,6 +87,12 @@
 // New Clippy lint warns these comparisons are unpredictable; suppress for raw FFI types.
 #![allow(unpredictable_function_pointer_comparisons)]
 
+#[cfg(all(
+    feature = "stack-layout",
+    any(feature = "wasm", target_arch = "wasm32")
+))]
+compile_error!("feature `stack-layout` is native-only and cannot be combined with WASM");
+
 // Bindings are generated into OUT_DIR and included via a submodule so that
 // possible inner attributes in the generated file are accepted at module root.
 mod ffi;
@@ -112,190 +119,226 @@ const _: [(); 4] = [(); std::mem::size_of::<ImWchar>()];
 /// Whether this build linked the repository-owned PlatformIO aggregate ABI hook shim.
 pub const HAS_PLATFORM_IO_AGGREGATE_HOOKS: bool = cfg!(dear_imgui_rs_platform_io_hooks);
 
-unsafe extern "C" {
-    fn dear_imgui_stack_begin_horizontal_str(
+#[cfg(feature = "stack-layout")]
+mod stack_layout {
+    use super::*;
+
+    unsafe extern "C" {
+        fn dear_imgui_stack_begin_horizontal_str(
+            str_id: *const std::os::raw::c_char,
+            size: ImVec2,
+            align: f32,
+        );
+        fn dear_imgui_stack_begin_horizontal_ptr(
+            ptr_id: *const std::ffi::c_void,
+            size: ImVec2,
+            align: f32,
+        );
+        fn dear_imgui_stack_begin_horizontal_int(id: std::os::raw::c_int, size: ImVec2, align: f32);
+        fn dear_imgui_stack_begin_horizontal_id(id: ImGuiID, size: ImVec2, align: f32);
+        fn dear_imgui_stack_end_horizontal();
+        fn dear_imgui_stack_begin_vertical_str(
+            str_id: *const std::os::raw::c_char,
+            size: ImVec2,
+            align: f32,
+        );
+        fn dear_imgui_stack_begin_vertical_ptr(
+            ptr_id: *const std::ffi::c_void,
+            size: ImVec2,
+            align: f32,
+        );
+        fn dear_imgui_stack_begin_vertical_int(id: std::os::raw::c_int, size: ImVec2, align: f32);
+        fn dear_imgui_stack_begin_vertical_id(id: ImGuiID, size: ImVec2, align: f32);
+        fn dear_imgui_stack_end_vertical();
+        fn dear_imgui_stack_spring(weight: f32, spacing: f32);
+        fn dear_imgui_stack_suspend_layout();
+        fn dear_imgui_stack_resume_layout();
+        fn dear_imgui_stack_destroy_context_state(context: *mut ImGuiContext);
+        fn dear_imgui_stack_state_count() -> usize;
+    }
+
+    /// Start a stack-layout horizontal group using a string ID.
+    ///
+    /// This is a repository-owned compatibility shim for the stack layout extension
+    /// used by `imgui-node-editor` examples; it is not an official Dear ImGui API.
+    ///
+    /// # Safety
+    ///
+    /// Requires an active Dear ImGui context and current window. `str_id` must point
+    /// to a valid NUL-terminated string for the duration of the call.
+    #[inline]
+    pub unsafe fn ImGuiStack_BeginHorizontal_Str(
         str_id: *const std::os::raw::c_char,
         size: ImVec2,
         align: f32,
-    );
-    fn dear_imgui_stack_begin_horizontal_ptr(
+    ) {
+        unsafe { dear_imgui_stack_begin_horizontal_str(str_id, size, align) }
+    }
+
+    /// Start a stack-layout horizontal group using a pointer ID.
+    ///
+    /// # Safety
+    ///
+    /// Requires an active Dear ImGui context and current window. `ptr_id` is used as
+    /// an ID value only and is not dereferenced.
+    #[inline]
+    pub unsafe fn ImGuiStack_BeginHorizontal_Ptr(
         ptr_id: *const std::ffi::c_void,
         size: ImVec2,
         align: f32,
-    );
-    fn dear_imgui_stack_begin_horizontal_int(id: std::os::raw::c_int, size: ImVec2, align: f32);
-    fn dear_imgui_stack_begin_horizontal_id(id: ImGuiID, size: ImVec2, align: f32);
-    fn dear_imgui_stack_end_horizontal();
-    fn dear_imgui_stack_begin_vertical_str(
+    ) {
+        unsafe { dear_imgui_stack_begin_horizontal_ptr(ptr_id, size, align) }
+    }
+
+    /// Start a stack-layout horizontal group using an integer ID.
+    ///
+    /// # Safety
+    ///
+    /// Requires an active Dear ImGui context and current window.
+    #[inline]
+    pub unsafe fn ImGuiStack_BeginHorizontal_Int(
+        id: std::os::raw::c_int,
+        size: ImVec2,
+        align: f32,
+    ) {
+        unsafe { dear_imgui_stack_begin_horizontal_int(id, size, align) }
+    }
+
+    /// Start a stack-layout horizontal group using a precomputed ImGui ID.
+    ///
+    /// # Safety
+    ///
+    /// Requires an active Dear ImGui context and current window.
+    #[inline]
+    pub unsafe fn ImGuiStack_BeginHorizontal_Id(id: ImGuiID, size: ImVec2, align: f32) {
+        unsafe { dear_imgui_stack_begin_horizontal_id(id, size, align) }
+    }
+
+    /// End the current stack-layout horizontal group.
+    ///
+    /// # Safety
+    ///
+    /// Must match a previous `ImGuiStack_BeginHorizontal_*` call.
+    #[inline]
+    pub unsafe fn ImGuiStack_EndHorizontal() {
+        unsafe { dear_imgui_stack_end_horizontal() }
+    }
+
+    /// Start a stack-layout vertical group using a string ID.
+    ///
+    /// # Safety
+    ///
+    /// Requires an active Dear ImGui context and current window. `str_id` must point
+    /// to a valid NUL-terminated string for the duration of the call.
+    #[inline]
+    pub unsafe fn ImGuiStack_BeginVertical_Str(
         str_id: *const std::os::raw::c_char,
         size: ImVec2,
         align: f32,
-    );
-    fn dear_imgui_stack_begin_vertical_ptr(
+    ) {
+        unsafe { dear_imgui_stack_begin_vertical_str(str_id, size, align) }
+    }
+
+    /// Start a stack-layout vertical group using a pointer ID.
+    ///
+    /// # Safety
+    ///
+    /// Requires an active Dear ImGui context and current window. `ptr_id` is used as
+    /// an ID value only and is not dereferenced.
+    #[inline]
+    pub unsafe fn ImGuiStack_BeginVertical_Ptr(
         ptr_id: *const std::ffi::c_void,
         size: ImVec2,
         align: f32,
-    );
-    fn dear_imgui_stack_begin_vertical_int(id: std::os::raw::c_int, size: ImVec2, align: f32);
-    fn dear_imgui_stack_begin_vertical_id(id: ImGuiID, size: ImVec2, align: f32);
-    fn dear_imgui_stack_end_vertical();
-    fn dear_imgui_stack_spring(weight: f32, spacing: f32);
-    fn dear_imgui_stack_suspend_layout();
-    fn dear_imgui_stack_resume_layout();
+    ) {
+        unsafe { dear_imgui_stack_begin_vertical_ptr(ptr_id, size, align) }
+    }
+
+    /// Start a stack-layout vertical group using an integer ID.
+    ///
+    /// # Safety
+    ///
+    /// Requires an active Dear ImGui context and current window.
+    #[inline]
+    pub unsafe fn ImGuiStack_BeginVertical_Int(id: std::os::raw::c_int, size: ImVec2, align: f32) {
+        unsafe { dear_imgui_stack_begin_vertical_int(id, size, align) }
+    }
+
+    /// Start a stack-layout vertical group using a precomputed ImGui ID.
+    ///
+    /// # Safety
+    ///
+    /// Requires an active Dear ImGui context and current window.
+    #[inline]
+    pub unsafe fn ImGuiStack_BeginVertical_Id(id: ImGuiID, size: ImVec2, align: f32) {
+        unsafe { dear_imgui_stack_begin_vertical_id(id, size, align) }
+    }
+
+    /// End the current stack-layout vertical group.
+    ///
+    /// # Safety
+    ///
+    /// Must match a previous `ImGuiStack_BeginVertical_*` call.
+    #[inline]
+    pub unsafe fn ImGuiStack_EndVertical() {
+        unsafe { dear_imgui_stack_end_vertical() }
+    }
+
+    /// Insert a spring separator into the current stack layout.
+    ///
+    /// # Safety
+    ///
+    /// Requires an active stack layout.
+    #[inline]
+    pub unsafe fn ImGuiStack_Spring(weight: f32, spacing: f32) {
+        unsafe { dear_imgui_stack_spring(weight, spacing) }
+    }
+
+    /// Temporarily suspend the current stack layout.
+    ///
+    /// # Safety
+    ///
+    /// Requires an active stack layout and must be matched by resume.
+    #[inline]
+    pub unsafe fn ImGuiStack_SuspendLayout() {
+        unsafe { dear_imgui_stack_suspend_layout() }
+    }
+
+    /// Resume a suspended stack layout.
+    ///
+    /// # Safety
+    ///
+    /// Must match a previous suspend call.
+    #[inline]
+    pub unsafe fn ImGuiStack_ResumeLayout() {
+        unsafe { dear_imgui_stack_resume_layout() }
+    }
+
+    /// Remove all stack-layout state owned by an ImGui context.
+    ///
+    /// # Safety
+    ///
+    /// `context` must be null or point to a live ImGui context. Call this before destroying that
+    /// context and while no stack-layout operation is active concurrently.
+    #[inline]
+    pub unsafe fn ImGuiStack_DestroyContextState(context: *mut ImGuiContext) {
+        unsafe { dear_imgui_stack_destroy_context_state(context) }
+    }
+
+    /// Return the number of ImGui contexts with retained stack-layout state.
+    ///
+    /// # Safety
+    ///
+    /// No stack-layout operation may mutate the native state concurrently.
+    #[doc(hidden)]
+    #[inline]
+    pub unsafe fn ImGuiStack_StateCount() -> usize {
+        unsafe { dear_imgui_stack_state_count() }
+    }
 }
 
-/// Start a stack-layout horizontal group using a string ID.
-///
-/// This is a repository-owned compatibility shim for the stack layout extension
-/// used by `imgui-node-editor` examples; it is not an official Dear ImGui API.
-///
-/// # Safety
-///
-/// Requires an active Dear ImGui context and current window. `str_id` must point
-/// to a valid NUL-terminated string for the duration of the call.
-#[inline]
-pub unsafe fn ImGuiStack_BeginHorizontal_Str(
-    str_id: *const std::os::raw::c_char,
-    size: ImVec2,
-    align: f32,
-) {
-    unsafe { dear_imgui_stack_begin_horizontal_str(str_id, size, align) }
-}
-
-/// Start a stack-layout horizontal group using a pointer ID.
-///
-/// # Safety
-///
-/// Requires an active Dear ImGui context and current window. `ptr_id` is used as
-/// an ID value only and is not dereferenced.
-#[inline]
-pub unsafe fn ImGuiStack_BeginHorizontal_Ptr(
-    ptr_id: *const std::ffi::c_void,
-    size: ImVec2,
-    align: f32,
-) {
-    unsafe { dear_imgui_stack_begin_horizontal_ptr(ptr_id, size, align) }
-}
-
-/// Start a stack-layout horizontal group using an integer ID.
-///
-/// # Safety
-///
-/// Requires an active Dear ImGui context and current window.
-#[inline]
-pub unsafe fn ImGuiStack_BeginHorizontal_Int(id: std::os::raw::c_int, size: ImVec2, align: f32) {
-    unsafe { dear_imgui_stack_begin_horizontal_int(id, size, align) }
-}
-
-/// Start a stack-layout horizontal group using a precomputed ImGui ID.
-///
-/// # Safety
-///
-/// Requires an active Dear ImGui context and current window.
-#[inline]
-pub unsafe fn ImGuiStack_BeginHorizontal_Id(id: ImGuiID, size: ImVec2, align: f32) {
-    unsafe { dear_imgui_stack_begin_horizontal_id(id, size, align) }
-}
-
-/// End the current stack-layout horizontal group.
-///
-/// # Safety
-///
-/// Must match a previous `ImGuiStack_BeginHorizontal_*` call.
-#[inline]
-pub unsafe fn ImGuiStack_EndHorizontal() {
-    unsafe { dear_imgui_stack_end_horizontal() }
-}
-
-/// Start a stack-layout vertical group using a string ID.
-///
-/// # Safety
-///
-/// Requires an active Dear ImGui context and current window. `str_id` must point
-/// to a valid NUL-terminated string for the duration of the call.
-#[inline]
-pub unsafe fn ImGuiStack_BeginVertical_Str(
-    str_id: *const std::os::raw::c_char,
-    size: ImVec2,
-    align: f32,
-) {
-    unsafe { dear_imgui_stack_begin_vertical_str(str_id, size, align) }
-}
-
-/// Start a stack-layout vertical group using a pointer ID.
-///
-/// # Safety
-///
-/// Requires an active Dear ImGui context and current window. `ptr_id` is used as
-/// an ID value only and is not dereferenced.
-#[inline]
-pub unsafe fn ImGuiStack_BeginVertical_Ptr(
-    ptr_id: *const std::ffi::c_void,
-    size: ImVec2,
-    align: f32,
-) {
-    unsafe { dear_imgui_stack_begin_vertical_ptr(ptr_id, size, align) }
-}
-
-/// Start a stack-layout vertical group using an integer ID.
-///
-/// # Safety
-///
-/// Requires an active Dear ImGui context and current window.
-#[inline]
-pub unsafe fn ImGuiStack_BeginVertical_Int(id: std::os::raw::c_int, size: ImVec2, align: f32) {
-    unsafe { dear_imgui_stack_begin_vertical_int(id, size, align) }
-}
-
-/// Start a stack-layout vertical group using a precomputed ImGui ID.
-///
-/// # Safety
-///
-/// Requires an active Dear ImGui context and current window.
-#[inline]
-pub unsafe fn ImGuiStack_BeginVertical_Id(id: ImGuiID, size: ImVec2, align: f32) {
-    unsafe { dear_imgui_stack_begin_vertical_id(id, size, align) }
-}
-
-/// End the current stack-layout vertical group.
-///
-/// # Safety
-///
-/// Must match a previous `ImGuiStack_BeginVertical_*` call.
-#[inline]
-pub unsafe fn ImGuiStack_EndVertical() {
-    unsafe { dear_imgui_stack_end_vertical() }
-}
-
-/// Insert a spring separator into the current stack layout.
-///
-/// # Safety
-///
-/// Requires an active stack layout.
-#[inline]
-pub unsafe fn ImGuiStack_Spring(weight: f32, spacing: f32) {
-    unsafe { dear_imgui_stack_spring(weight, spacing) }
-}
-
-/// Temporarily suspend the current stack layout.
-///
-/// # Safety
-///
-/// Requires an active stack layout and must be matched by resume.
-#[inline]
-pub unsafe fn ImGuiStack_SuspendLayout() {
-    unsafe { dear_imgui_stack_suspend_layout() }
-}
-
-/// Resume a suspended stack layout.
-///
-/// # Safety
-///
-/// Must match a previous suspend call.
-#[inline]
-pub unsafe fn ImGuiStack_ResumeLayout() {
-    unsafe { dear_imgui_stack_resume_layout() }
-}
+#[cfg(feature = "stack-layout")]
+pub use stack_layout::*;
 
 #[cfg(dear_imgui_rs_platform_io_hooks)]
 unsafe extern "C" {

@@ -20,6 +20,7 @@
 #include <imgui_internal.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <unordered_map>
@@ -505,7 +506,6 @@ void BalanceChildLayouts(StackLayout& layout)
 
 void BeginLayoutItem(WindowStackLayoutState& state, StackLayout& layout)
 {
-    ImGuiContext& g = *GImGui;
     ImGuiWindow* window = ImGui::GetCurrentWindow();
     StackLayoutItem& item = *GenerateLayoutItem(state, layout, StackLayoutItemType::Item);
 
@@ -823,5 +823,26 @@ void dear_imgui_stack_resume_layout()
     IM_ASSERT(state.CurrentLayout == nullptr);
     IM_ASSERT(!state.LayoutStack.empty());
     PopLayout(state, nullptr);
+}
+
+void dear_imgui_stack_destroy_context_state(ImGuiContext* context)
+{
+    if (!context)
+        return;
+
+    if (GActiveStackLayoutContext == context)
+    {
+        GActiveStackLayoutContext = nullptr;
+        GActiveStackLayoutWindowId = 0;
+        GActiveStackLayoutFrame = -1;
+        GActiveStackLayoutState = nullptr;
+    }
+
+    GStackLayoutStates.erase(context);
+}
+
+size_t dear_imgui_stack_state_count()
+{
+    return GStackLayoutStates.size();
 }
 }

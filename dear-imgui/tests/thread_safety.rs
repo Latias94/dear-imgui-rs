@@ -52,11 +52,6 @@ fn thread_safety_core_scope_tokens_are_ui_bound() {
 
     assert_not_impl_any!(dear_imgui_rs::GroupToken<'static>: Send, Sync);
     assert_not_impl_any!(dear_imgui_rs::ClipRectToken<'static>: Send, Sync);
-    assert_not_impl_any!(dear_imgui_rs::HorizontalStackLayoutToken<'static>: Send, Sync);
-    assert_not_impl_any!(dear_imgui_rs::VerticalStackLayoutToken<'static>: Send, Sync);
-    assert_not_impl_any!(dear_imgui_rs::StackLayoutSuspensionToken<'static>: Send, Sync);
-
-    assert_not_impl_any!(dear_imgui_rs::ColumnsToken<'static>: Send, Sync);
     assert_not_impl_any!(dear_imgui_rs::ListClipperToken<'static>: Send, Sync);
     assert_not_impl_any!(dear_imgui_rs::DragDropSourceTooltip<'static>: Send, Sync);
     assert_not_impl_any!(dear_imgui_rs::DragDropTarget<'static>: Send, Sync);
@@ -78,4 +73,12 @@ fn thread_safety_core_scope_tokens_are_ui_bound() {
     assert_not_impl_any!(dear_imgui_rs::TooltipToken<'static>: Send, Sync);
     assert_not_impl_any!(dear_imgui_rs::TreeNodeToken<'static>: Send, Sync);
     assert_not_impl_any!(dear_imgui_rs::MultiSelectScope<'static>: Send, Sync);
+}
+
+#[cfg(feature = "stack-layout")]
+#[test]
+fn thread_safety_stack_layout_tokens_are_ui_bound() {
+    assert_not_impl_any!(dear_imgui_rs::HorizontalStackLayoutToken<'static>: Send, Sync);
+    assert_not_impl_any!(dear_imgui_rs::VerticalStackLayoutToken<'static>: Send, Sync);
+    assert_not_impl_any!(dear_imgui_rs::StackLayoutSuspensionToken<'static>: Send, Sync);
 }
