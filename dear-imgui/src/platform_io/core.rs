@@ -43,9 +43,6 @@ pub(crate) unsafe fn clear_platform_aggregate_callbacks_for_current_context() {
     }
 }
 
-#[cfg(not(feature = "multi-viewport"))]
-pub(crate) unsafe fn clear_platform_aggregate_callbacks_for_current_context() {}
-
 #[cfg(feature = "multi-viewport")]
 pub(super) unsafe fn clear_platform_aggregate_callbacks_for_platform_io(
     pio: *mut sys::ImGuiPlatformIO,
@@ -70,9 +67,6 @@ pub(crate) unsafe fn clear_renderer_aggregate_callbacks_for_current_context() {
         unsafe { sys::ImGuiPlatformIO_Set_Renderer_SetWindowSize_PointerParam(pio, None) }
     }
 }
-
-#[cfg(not(feature = "multi-viewport"))]
-pub(crate) unsafe fn clear_renderer_aggregate_callbacks_for_current_context() {}
 
 #[cfg(feature = "multi-viewport")]
 pub(super) unsafe fn clear_renderer_aggregate_callbacks_for_platform_io(

@@ -58,7 +58,8 @@ impl Drop for AppWindow {
         // Avoid ImGui's shutdown assertion by ensuring platform windows are destroyed before the
         // context is dropped.
         if self.enable_viewports {
-            dear_imgui_wgpu::multi_viewport::shutdown_multi_viewport_support(&mut self.imgui);
+            dear_imgui_wgpu::multi_viewport::shutdown_multi_viewport_support(&mut self.imgui)
+                .expect("WGPU multi-viewport shutdown failed");
             winit_mvp::shutdown_multi_viewport_support(&mut self.imgui);
         }
     }

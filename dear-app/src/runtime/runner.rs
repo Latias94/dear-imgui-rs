@@ -10,12 +10,10 @@ use winit::{
 };
 
 use super::{
-    lifecycle::{LifecycleAction, LifecycleMachine, SurfaceEvent},
+    lifecycle::{LifecycleAction, SurfaceEvent},
     managed_textures::reset_for_new_gpu_generation,
-    recovery::{RecoveryHooks, execute_recovery},
-    state::{
-        RuntimeEvent, RuntimeFactory, RuntimeGeneration, UiState, WgpuRuntimeFactory, WindowState,
-    },
+    recovery::{RecoveryEffects, RecoveryOutcome, RuntimeFactory, RuntimeGenerations},
+    state::{RuntimeEvent, RuntimeGeneration, UiState, WgpuRuntimeFactory, WindowState},
 };
 use crate::{
     AddOns, AppConfig, Application, DockingApi, FrameContext, GpuGeneration, InitContext,
@@ -34,9 +32,9 @@ pub(crate) fn run<A: Application + 'static>(
     info!("Starting Dear App event loop");
     let event_loop_result = event_loop.run_app(&mut runner);
     runner.shutdown_once();
-    runner.finish()?;
-    event_loop_result?;
-    Ok(())
+    let terminal_before_shutdown = runner.take_terminal_error();
+    let shutdown_error = runner.take_shutdown_error();
+    resolve_run_result(terminal_before_shutdown, event_loop_result, shutdown_error)
 }
 
 fn set_initial_control_flow(event_loop: &EventLoop<RuntimeEvent>, redraw: RedrawMode) {
@@ -57,7 +55,7 @@ fn frame_duration(fps: f32) -> Duration {
 struct Runtime {
     window: WindowState,
     ui: UiState,
-    generation: Option<RuntimeGeneration>,
+    generations: RuntimeGenerations<RuntimeGeneration>,
     clear_color: wgpu::Color,
 }
 
@@ -68,12 +66,46 @@ impl Runtime {
         config: &AppConfig,
         application: &mut A,
     ) -> Result<Self, RunError> {
-        let window = WindowState::new(event_loop, config)?;
-        let ui = UiState::new(&window, config, application)?;
+        let mut window = WindowState::new(event_loop, config)?;
+        let mut ui = UiState::new(&window, config, application)?;
+        let generation = match WgpuRuntimeFactory::create(
+            &mut window,
+            &mut ui,
+            config,
+            event_proxy,
+            GpuGeneration::INITIAL,
+        ) {
+            Ok(generation) => generation,
+            Err(error) => {
+                let mut shutdown = ShutdownContext {
+                    imgui: &mut ui.context,
+                    window: &window.window,
+                    generation: None,
+                };
+                let _ = application.shutdown(&mut shutdown);
+                ui.teardown();
+                drop(window);
+                return Err(error);
+            }
+        };
+        let generations = match RuntimeGenerations::new(generation) {
+            Ok(generations) => generations,
+            Err(error) => {
+                let mut shutdown = ShutdownContext {
+                    imgui: &mut ui.context,
+                    window: &window.window,
+                    generation: None,
+                };
+                let _ = application.shutdown(&mut shutdown);
+                ui.teardown();
+                drop(window);
+                return Err(error);
+            }
+        };
         let mut runtime = Self {
             window,
             ui,
-            generation: None,
+            generations,
             clear_color: wgpu::Color {
                 r: config.clear_color[0] as f64,
                 g: config.clear_color[1] as f64,
@@ -82,28 +114,9 @@ impl Runtime {
             },
         };
 
-        let initial_generation = {
-            let mut factory = WgpuRuntimeFactory {
-                window: &mut runtime.window,
-                ui: &mut runtime.ui,
-                config,
-                event_proxy,
-            };
-            factory.create(GpuGeneration::INITIAL)
-        };
-        let generation = match initial_generation {
-            Ok(generation) => generation,
-            Err(error) => {
-                runtime.shutdown_application(application);
-                runtime.teardown();
-                return Err(error);
-            }
-        };
-        runtime.generation = Some(generation);
-
         if let Err(error) = runtime.notify_initialized(application, config) {
             runtime.shutdown_application(application);
-            runtime.teardown();
+            let _ = runtime.teardown();
             return Err(error);
         }
         Ok(runtime)
@@ -114,9 +127,12 @@ impl Runtime {
         application: &mut A,
         config: &AppConfig,
     ) -> Result<(), RunError> {
-        let generation = self.generation.as_mut().ok_or_else(|| RunError::Recovery {
-            message: "initialized callback requested without a GPU generation".to_owned(),
-        })?;
+        let generation = self
+            .generations
+            .current_mut()
+            .ok_or_else(|| RunError::Recovery {
+                message: "initialized callback requested without a GPU generation".to_owned(),
+            })?;
         let mut init = InitContext {
             imgui: &mut self.ui.context,
             window: &self.window.window,
@@ -151,7 +167,7 @@ impl Runtime {
             application.event(&mut context)?;
         }
 
-        let Some(generation) = self.generation.as_ref() else {
+        let Some(generation) = self.generations.current() else {
             return Ok(exit_requested);
         };
         match event {
@@ -173,11 +189,13 @@ impl Runtime {
         &mut self,
         application: &mut A,
         config: &AppConfig,
-        lifecycle: &mut LifecycleMachine,
     ) -> Result<bool, RunError> {
-        let generation = self.generation.as_mut().ok_or_else(|| RunError::Recovery {
-            message: "render requested without an active GPU generation".to_owned(),
-        })?;
+        let generation = self
+            .generations
+            .current_mut()
+            .ok_or_else(|| RunError::Recovery {
+                message: "render requested without an active GPU generation".to_owned(),
+            })?;
         let UiState {
             context,
             platform,
@@ -219,18 +237,25 @@ impl Runtime {
 
         let (frame, reconfigure_after_present) = match self.window.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => {
-                let action = lifecycle.surface_event(SurfaceEvent::Success);
+                let action = self.generations.surface_event(SurfaceEvent::Success);
                 debug_assert_eq!(action, LifecycleAction::Render);
                 (frame, false)
             }
             wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
-                let action = lifecycle.surface_event(SurfaceEvent::Suboptimal);
+                let action = self.generations.surface_event(SurfaceEvent::Suboptimal);
                 debug_assert_eq!(action, LifecycleAction::RenderAndReconfigure);
                 (frame, true)
             }
             wgpu::CurrentSurfaceTexture::Lost => {
-                let action = lifecycle.surface_event(SurfaceEvent::Lost);
+                let action = self.generations.surface_event(SurfaceEvent::Lost);
                 debug_assert_eq!(action, LifecycleAction::RecreateSurface);
+                let generation = self
+                    .generations
+                    .current()
+                    .ok_or_else(|| RunError::Recovery {
+                        message: "surface recreation requested without an active GPU generation"
+                            .to_owned(),
+                    })?;
                 self.window.recreate_surface(
                     &generation.gpu.adapter,
                     &generation.gpu.device,
@@ -239,28 +264,42 @@ impl Runtime {
                 return Ok(exit_requested);
             }
             wgpu::CurrentSurfaceTexture::Outdated => {
-                let action = lifecycle.surface_event(SurfaceEvent::Outdated);
+                let action = self.generations.surface_event(SurfaceEvent::Outdated);
                 debug_assert_eq!(action, LifecycleAction::ReconfigureSurface);
+                let generation = self
+                    .generations
+                    .current()
+                    .ok_or_else(|| RunError::Recovery {
+                        message:
+                            "surface reconfiguration requested without an active GPU generation"
+                                .to_owned(),
+                    })?;
                 self.window.reconfigure(&generation.gpu.device);
                 return Ok(exit_requested);
             }
             wgpu::CurrentSurfaceTexture::Timeout => {
-                let action = lifecycle.surface_event(SurfaceEvent::Timeout);
+                let action = self.generations.surface_event(SurfaceEvent::Timeout);
                 debug_assert_eq!(action, LifecycleAction::SkipFrame);
                 return Ok(exit_requested);
             }
             wgpu::CurrentSurfaceTexture::Occluded => {
-                let action = lifecycle.surface_event(SurfaceEvent::Occluded);
+                let action = self.generations.surface_event(SurfaceEvent::Occluded);
                 debug_assert_eq!(action, LifecycleAction::SkipFrame);
                 return Ok(exit_requested);
             }
             wgpu::CurrentSurfaceTexture::Validation => {
-                let action = lifecycle.surface_event(SurfaceEvent::Validation);
+                let action = self.generations.surface_event(SurfaceEvent::Validation);
                 debug_assert_eq!(action, LifecycleAction::Exit);
                 return Err(RunError::SurfaceValidation);
             }
         };
 
+        let generation = self
+            .generations
+            .current_mut()
+            .ok_or_else(|| RunError::Recovery {
+                message: "render submission requested without an active GPU generation".to_owned(),
+            })?;
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -312,20 +351,29 @@ impl Runtime {
         application: &mut A,
         config: &AppConfig,
         event_proxy: EventLoopProxy<RuntimeEvent>,
-        lifecycle: &mut LifecycleMachine,
-    ) -> Result<(), RunError> {
-        let mut hooks = RuntimeRecovery {
-            runtime: self,
+        signal_generation: GpuGeneration,
+    ) -> RecoveryOutcome {
+        let mut environment = RuntimeRecovery {
+            window: &mut self.window,
+            ui: &mut self.ui,
             application,
             config,
             event_proxy,
-            lifecycle,
         };
-        execute_recovery(&mut hooks)
+        let mut factory = WgpuRuntimeFactory;
+        self.generations
+            .recover(signal_generation, &mut environment, &mut factory)
+    }
+
+    fn recovery_error_message(&self) -> String {
+        self.generations
+            .terminal_error()
+            .map(ToString::to_string)
+            .unwrap_or_else(|| "GPU recovery failed without a terminal error".to_owned())
     }
 
     fn shutdown_application<A: Application>(&mut self, application: &mut A) -> Option<RunError> {
-        let generation = self.generation.as_ref().map(|generation| generation.id);
+        let generation = self.generations.current_generation();
         let mut context = ShutdownContext {
             imgui: &mut self.ui.context,
             window: &self.window.window,
@@ -334,12 +382,28 @@ impl Runtime {
         application.shutdown(&mut context).err()
     }
 
-    fn teardown(mut self) {
-        if let Some(generation) = self.generation.take() {
-            generation.teardown();
-        }
+    fn fail(&mut self, error: RunError) {
+        self.generations.fail(error);
+    }
+
+    fn teardown(mut self) -> Option<RunError> {
+        self.generations.shutdown();
+        let terminal_error = self.generations.take_terminal_error();
         self.ui.teardown();
         drop(self.window);
+        terminal_error
+    }
+
+    fn shutdown<A: Application>(mut self, application: &mut A) -> RuntimeShutdownErrors {
+        let terminal_error = self.generations.take_terminal_error();
+        let shutdown_error = self.shutdown_application(application);
+        self.generations.shutdown();
+        self.ui.teardown();
+        drop(self.window);
+        RuntimeShutdownErrors {
+            terminal_error,
+            shutdown_error,
+        }
     }
 }
 
@@ -353,106 +417,49 @@ fn build_and_render_frame(
 }
 
 struct RuntimeRecovery<'a, A> {
-    runtime: &'a mut Runtime,
+    window: &'a mut WindowState,
+    ui: &'a mut UiState,
     application: &'a mut A,
     config: &'a AppConfig,
     event_proxy: EventLoopProxy<RuntimeEvent>,
-    lifecycle: &'a mut LifecycleMachine,
 }
 
-impl<A: Application> RecoveryHooks for RuntimeRecovery<'_, A> {
-    type Candidate = RuntimeGeneration;
-
-    fn pending_generation(&self) -> Result<GpuGeneration, RunError> {
-        self.lifecycle
-            .pending_generation()
-            .map_err(|error| RunError::Recovery {
-                message: format!("cannot allocate the next GPU generation: {error:?}"),
-            })
-    }
-
-    fn gpu_lost(&mut self) -> Result<(), RunError> {
-        let generation = self
-            .runtime
-            .generation
-            .as_mut()
-            .ok_or_else(|| RunError::Recovery {
-                message: "device loss received without an active GPU generation".to_owned(),
-            })?;
-        let mut context = generation.context(&self.runtime.window)?;
+impl<A: Application> RecoveryEffects<RuntimeGeneration> for RuntimeRecovery<'_, A> {
+    fn gpu_lost(&mut self, generation: &mut RuntimeGeneration) -> Result<(), RunError> {
+        let mut context = generation.context(self.window)?;
         self.application.gpu_lost(&mut context)
     }
 
-    fn invalidate_resources(&mut self) -> Result<(), RunError> {
-        reset_for_new_gpu_generation(&mut self.runtime.ui.context);
-        self.runtime
-            .generation
-            .as_mut()
-            .ok_or_else(|| RunError::Recovery {
-                message: "GPU generation disappeared before resource invalidation".to_owned(),
-            })?
+    fn invalidate_resources(&mut self, generation: &mut RuntimeGeneration) -> Result<(), RunError> {
+        reset_for_new_gpu_generation(&mut self.ui.context);
+        generation
             .gpu
             .renderer
             .invalidate_device_objects()
             .map_err(RunError::GpuInvalidation)
     }
 
-    fn teardown_old_gpu(&mut self) {
-        if let Some(generation) = self.runtime.generation.take() {
-            generation.teardown();
-        }
-    }
-
-    fn build_candidate(&mut self, generation: GpuGeneration) -> Result<Self::Candidate, RunError> {
-        let mut factory = WgpuRuntimeFactory {
-            window: &mut self.runtime.window,
-            ui: &mut self.runtime.ui,
-            config: self.config,
-            event_proxy: self.event_proxy.clone(),
-        };
-        factory.create(generation)
-    }
-
-    fn commit_candidate(&mut self, candidate: Self::Candidate) {
-        self.runtime.generation = Some(candidate);
-    }
-
-    fn advance_generation(&mut self) -> Result<GpuGeneration, RunError> {
-        let committed =
-            self.lifecycle
-                .recovery_succeeded()
-                .map_err(|error| RunError::Recovery {
-                    message: format!("cannot commit GPU generation: {error:?}"),
-                })?;
-        if self
-            .runtime
-            .generation
-            .as_ref()
-            .map(|generation| generation.id)
-            != Some(committed)
-        {
-            return Err(RunError::Recovery {
-                message: "candidate generation does not match lifecycle generation".to_owned(),
-            });
-        }
-        Ok(committed)
-    }
-
-    fn gpu_recreated(&mut self, generation: GpuGeneration) -> Result<(), RunError> {
-        let candidate = self
-            .runtime
-            .generation
-            .as_mut()
-            .filter(|candidate| candidate.id == generation)
-            .ok_or_else(|| RunError::Recovery {
-                message: "ready callback requested for a missing GPU generation".to_owned(),
-            })?;
-        let mut context = candidate.context(&self.runtime.window)?;
+    fn gpu_recreated(&mut self, generation: &mut RuntimeGeneration) -> Result<(), RunError> {
+        let mut context = generation.context(self.window)?;
         self.application.gpu_recreated(&mut context)
     }
+}
 
-    fn recovery_failed(&mut self) {
-        let _ = self.lifecycle.recovery_failed();
+impl<A: Application> RuntimeFactory<RuntimeRecovery<'_, A>> for WgpuRuntimeFactory {
+    type Candidate = RuntimeGeneration;
+
+    fn create(
+        &mut self,
+        environment: &mut RuntimeRecovery<'_, A>,
+        generation: GpuGeneration,
+    ) -> Result<Self::Candidate, RunError> {
+        WgpuRuntimeFactory::create(
+            environment.window,
+            environment.ui,
+            environment.config,
+            environment.event_proxy.clone(),
+            generation,
+        )
     }
 }
 
@@ -480,9 +487,8 @@ struct Runner<A> {
     config: AppConfig,
     application: A,
     runtime: Option<Runtime>,
-    lifecycle: LifecycleMachine,
+    shutdown: ShutdownCoordinator,
     event_proxy: EventLoopProxy<RuntimeEvent>,
-    shutdown_called: bool,
     last_wake: Instant,
 }
 
@@ -492,16 +498,19 @@ impl<A: Application> Runner<A> {
             config,
             application,
             runtime: None,
-            lifecycle: LifecycleMachine::new(),
+            shutdown: ShutdownCoordinator::default(),
             event_proxy,
-            shutdown_called: false,
             last_wake: Instant::now(),
         }
     }
 
     fn terminate(&mut self, event_loop: &ActiveEventLoop, error: RunError) {
         error!("Dear App terminated: {error}");
-        self.lifecycle.fail(error);
+        if let Some(runtime) = self.runtime.as_mut() {
+            runtime.fail(error);
+        } else {
+            self.shutdown.remember_error(error);
+        }
         self.shutdown_once();
         event_loop.exit();
     }
@@ -512,41 +521,98 @@ impl<A: Application> Runner<A> {
     }
 
     fn shutdown_once(&mut self) {
-        if !begin_once(&mut self.shutdown_called) {
-            return;
-        }
-
-        if let Some(runtime) = self.runtime.as_mut()
-            && let Some(error) = runtime.shutdown_application(&mut self.application)
-        {
-            self.lifecycle.fail(error);
-        }
-        if let Some(runtime) = self.runtime.take() {
-            runtime.teardown();
-        }
-        self.lifecycle.shutdown();
+        self.shutdown
+            .shutdown_once(&mut self.runtime, &mut self.application, Runtime::shutdown);
     }
 
-    fn finish(mut self) -> Result<(), RunError> {
-        match self.lifecycle.take_terminal_error() {
-            Some(error) => Err(error),
-            None => Ok(()),
-        }
+    fn take_terminal_error(&mut self) -> Option<RunError> {
+        self.shutdown.take_terminal_error()
+    }
+
+    fn take_shutdown_error(&mut self) -> Option<RunError> {
+        self.shutdown.take_shutdown_error()
     }
 }
 
-fn begin_once(started: &mut bool) -> bool {
-    if *started {
-        false
-    } else {
-        *started = true;
-        true
+#[derive(Default)]
+struct RuntimeShutdownErrors {
+    terminal_error: Option<RunError>,
+    shutdown_error: Option<RunError>,
+}
+
+#[derive(Default)]
+struct ShutdownCoordinator {
+    started: bool,
+    terminal_error: Option<RunError>,
+    shutdown_error: Option<RunError>,
+}
+
+impl ShutdownCoordinator {
+    const fn started(&self) -> bool {
+        self.started
+    }
+
+    fn remember_error(&mut self, error: RunError) {
+        if self.terminal_error.is_none() {
+            self.terminal_error = Some(error);
+        }
+    }
+
+    fn shutdown_once<R, A>(
+        &mut self,
+        runtime: &mut Option<R>,
+        application: &mut A,
+        shutdown: impl FnOnce(R, &mut A) -> RuntimeShutdownErrors,
+    ) {
+        if self.started {
+            return;
+        }
+        self.started = true;
+        let errors = runtime
+            .take()
+            .map(|runtime| shutdown(runtime, application))
+            .unwrap_or_default();
+        if let Some(error) = errors.terminal_error {
+            self.remember_error(error);
+        }
+        if self.shutdown_error.is_none() {
+            self.shutdown_error = errors.shutdown_error;
+        }
+    }
+
+    fn take_terminal_error(&mut self) -> Option<RunError> {
+        self.terminal_error.take()
+    }
+
+    fn take_shutdown_error(&mut self) -> Option<RunError> {
+        self.shutdown_error.take()
+    }
+}
+
+fn should_process_runtime_event(shutdown_called: bool, event_loop_exiting: bool) -> bool {
+    !shutdown_called && !event_loop_exiting
+}
+
+fn resolve_run_result(
+    terminal_before_shutdown: Option<RunError>,
+    event_loop_result: Result<(), winit::error::EventLoopError>,
+    shutdown_error: Option<RunError>,
+) -> Result<(), RunError> {
+    if let Some(error) = terminal_before_shutdown {
+        return Err(error);
+    }
+    if let Err(error) = event_loop_result {
+        return Err(error.into());
+    }
+    match shutdown_error {
+        Some(error) => Err(error),
+        None => Ok(()),
     }
 }
 
 impl<A: Application + 'static> ApplicationHandler<RuntimeEvent> for Runner<A> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.runtime.is_some() || self.shutdown_called {
+        if self.runtime.is_some() || self.shutdown.started() {
             return;
         }
 
@@ -570,14 +636,14 @@ impl<A: Application + 'static> ApplicationHandler<RuntimeEvent> for Runner<A> {
             generation,
             message,
         } = event;
-        if self.lifecycle.device_lost(generation) != LifecycleAction::RecoverGpu {
+
+        if !should_process_runtime_event(self.shutdown.started(), event_loop.exiting()) {
             warn!(
                 generation = generation.get(),
-                "Ignoring stale or duplicate device-loss signal"
+                "Ignoring device-loss signal after runtime shutdown"
             );
             return;
         }
-        warn!(generation = generation.get(), %message, "Recovering lost WGPU device");
 
         let Some(runtime) = self.runtime.as_mut() else {
             self.terminate(
@@ -588,16 +654,34 @@ impl<A: Application + 'static> ApplicationHandler<RuntimeEvent> for Runner<A> {
             );
             return;
         };
-        if let Err(error) = runtime.recover(
+        match runtime.recover(
             &mut self.application,
             &self.config,
             self.event_proxy.clone(),
-            &mut self.lifecycle,
+            generation,
         ) {
-            self.terminate(event_loop, error);
-            return;
+            RecoveryOutcome::Ignored => {
+                warn!(
+                    generation = generation.get(),
+                    "Ignoring stale or duplicate device-loss signal"
+                );
+            }
+            RecoveryOutcome::Recovered(replacement) => {
+                warn!(
+                    generation = generation.get(),
+                    replacement = replacement.get(),
+                    %message,
+                    "Recovered lost WGPU device"
+                );
+                runtime.window.window.request_redraw();
+            }
+            RecoveryOutcome::Failed => {
+                let message = runtime.recovery_error_message();
+                error!(%message, "WGPU device recovery failed");
+                self.shutdown_once();
+                event_loop.exit();
+            }
         }
-        runtime.window.window.request_redraw();
     }
 
     fn window_event(
@@ -626,8 +710,7 @@ impl<A: Application + 'static> ApplicationHandler<RuntimeEvent> for Runner<A> {
         }
 
         if matches!(event, WindowEvent::RedrawRequested) {
-            let render_result =
-                runtime.render(&mut self.application, &self.config, &mut self.lifecycle);
+            let render_result = runtime.render(&mut self.application, &self.config);
             match render_result {
                 Ok(true) => self.exit_normally(event_loop),
                 Ok(false) => {
@@ -674,13 +757,20 @@ impl<A: Application + 'static> ApplicationHandler<RuntimeEvent> for Runner<A> {
 
 #[cfg(test)]
 mod tests {
-    use dear_imgui_rs::FrameLifecycleState;
+    use std::{cell::Cell, rc::Rc};
 
-    use super::{begin_once, build_and_render_frame};
+    use dear_imgui_rs::FrameLifecycleState;
+    use winit::error::EventLoopError;
+
+    use super::{
+        RuntimeShutdownErrors, ShutdownCoordinator, build_and_render_frame, resolve_run_result,
+        should_process_runtime_event,
+    };
     use crate::RunError;
 
     #[test]
-    fn application_frame_error_closes_frame_before_shutdown_once() {
+    fn application_frame_error_closes_the_active_frame() {
+        let _guard = super::super::imgui_test_guard();
         let mut context = dear_imgui_rs::Context::create();
         context.prepare_frame(
             dear_imgui_rs::FramePrepareOptions::new([640.0, 480.0], 1.0 / 60.0)
@@ -693,15 +783,147 @@ mod tests {
         });
         assert!(result.is_err());
         assert_eq!(context.frame_lifecycle_state(), FrameLifecycleState::Idle);
+    }
 
-        let mut shutdown_started = false;
-        let mut shutdown_calls = 0;
-        for _ in 0..2 {
-            if begin_once(&mut shutdown_started) {
-                assert_eq!(context.frame_lifecycle_state(), FrameLifecycleState::Idle);
-                shutdown_calls += 1;
+    #[test]
+    fn delayed_device_loss_is_ignored_after_shutdown_or_event_loop_exit() {
+        assert!(should_process_runtime_event(false, false));
+        assert!(!should_process_runtime_event(true, false));
+        assert!(!should_process_runtime_event(false, true));
+        assert!(!should_process_runtime_event(true, true));
+    }
+
+    #[test]
+    fn shutdown_coordinator_hands_off_the_first_runtime_error_exactly_once() {
+        struct ProbeRuntime {
+            teardown_calls: Rc<Cell<usize>>,
+            terminal_error: Option<RunError>,
+        }
+
+        impl Drop for ProbeRuntime {
+            fn drop(&mut self) {
+                self.teardown_calls.set(self.teardown_calls.get() + 1);
             }
         }
+
+        #[derive(Default)]
+        struct ProbeApplication {
+            shutdown_calls: usize,
+        }
+
+        let mut shutdown = ShutdownCoordinator::default();
+        let teardown_calls = Rc::new(Cell::new(0));
+        let mut runtime = Some(ProbeRuntime {
+            teardown_calls: Rc::clone(&teardown_calls),
+            terminal_error: Some(RunError::application("runtime", "primary failure")),
+        });
+        let mut application = ProbeApplication::default();
+        for _ in 0..2 {
+            shutdown.shutdown_once(
+                &mut runtime,
+                &mut application,
+                |mut runtime, application| {
+                    application.shutdown_calls += 1;
+                    RuntimeShutdownErrors {
+                        terminal_error: runtime.terminal_error.take(),
+                        shutdown_error: Some(RunError::application(
+                            "shutdown",
+                            "secondary failure",
+                        )),
+                    }
+                },
+            );
+        }
+
+        assert!(shutdown.started());
+        assert!(runtime.is_none());
+        assert_eq!(application.shutdown_calls, 1);
+        assert_eq!(teardown_calls.get(), 1);
+        let error = shutdown
+            .take_terminal_error()
+            .expect("the runtime error must reach the runner owner");
+        assert_eq!(
+            error.to_string(),
+            "application callback failed during runtime: primary failure"
+        );
+        assert!(shutdown.take_terminal_error().is_none());
+        let shutdown_error = shutdown
+            .take_shutdown_error()
+            .expect("the shutdown error must remain separately observable");
+        assert_eq!(
+            shutdown_error.to_string(),
+            "application callback failed during shutdown: secondary failure"
+        );
+        assert!(shutdown.take_shutdown_error().is_none());
+    }
+
+    #[test]
+    fn shutdown_coordinator_does_not_replace_an_earlier_runner_error() {
+        let mut shutdown = ShutdownCoordinator::default();
+        shutdown.remember_error(RunError::application("runner", "primary failure"));
+        let mut runtime = Some(());
+        let mut shutdown_calls = 0;
+
+        shutdown.shutdown_once(&mut runtime, &mut shutdown_calls, |_runtime, calls| {
+            *calls += 1;
+            RuntimeShutdownErrors {
+                terminal_error: Some(RunError::application("runtime", "secondary failure")),
+                shutdown_error: Some(RunError::application("shutdown", "shutdown failure")),
+            }
+        });
+
         assert_eq!(shutdown_calls, 1);
+        let error = shutdown
+            .take_terminal_error()
+            .expect("the first runner error must survive shutdown");
+        assert_eq!(
+            error.to_string(),
+            "application callback failed during runner: primary failure"
+        );
+        assert_eq!(
+            shutdown
+                .take_shutdown_error()
+                .expect("the separate shutdown error must be retained")
+                .to_string(),
+            "application callback failed during shutdown: shutdown failure"
+        );
+    }
+
+    #[test]
+    fn run_result_resolution_covers_every_error_combination_in_observed_order() {
+        for mask in 0_u8..8 {
+            let has_terminal_before_shutdown = mask & 0b001 != 0;
+            let event_loop_failed = mask & 0b010 != 0;
+            let shutdown_failed = mask & 0b100 != 0;
+
+            let terminal_before_shutdown = has_terminal_before_shutdown
+                .then(|| RunError::application("runtime", "runtime failure"));
+            let event_loop_result = if event_loop_failed {
+                Err(EventLoopError::ExitFailure(73))
+            } else {
+                Ok(())
+            };
+            let shutdown_error =
+                shutdown_failed.then(|| RunError::application("shutdown", "shutdown failure"));
+
+            let result =
+                resolve_run_result(terminal_before_shutdown, event_loop_result, shutdown_error);
+            let actual = match result {
+                Ok(()) => "ok",
+                Err(RunError::Application { stage, .. }) => stage,
+                Err(RunError::EventLoop(EventLoopError::ExitFailure(73))) => "event-loop",
+                Err(error) => panic!("unexpected run result for mask {mask:#05b}: {error}"),
+            };
+            let expected = if has_terminal_before_shutdown {
+                "runtime"
+            } else if event_loop_failed {
+                "event-loop"
+            } else if shutdown_failed {
+                "shutdown"
+            } else {
+                "ok"
+            };
+            assert_eq!(actual, expected, "result mask: {mask:#05b}");
+        }
     }
 }

@@ -207,7 +207,8 @@ impl Drop for ImguiState {
         // context is dropped.
         #[cfg(feature = "multi-viewport")]
         if self.enable_viewports {
-            wgpu_mvp::shutdown_multi_viewport_support(&mut self.context);
+            wgpu_mvp::shutdown_multi_viewport_support(&mut self.context)
+                .expect("WGPU multi-viewport shutdown failed");
             winit_mvp::shutdown_multi_viewport_support(&mut self.context);
         }
     }

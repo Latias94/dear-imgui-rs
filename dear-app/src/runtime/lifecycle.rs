@@ -58,7 +58,7 @@ impl LifecycleMachine {
     }
 
     #[cfg(test)]
-    const fn state(&self) -> RuntimeState {
+    pub(crate) const fn state(&self) -> RuntimeState {
         self.state
     }
 
@@ -115,13 +115,8 @@ impl LifecycleMachine {
         Ok(next)
     }
 
-    pub(crate) fn recovery_failed(&mut self) -> Result<LifecycleAction, TransitionError> {
-        if matches!(self.state, RuntimeState::Recovering(_)) {
-            self.state = RuntimeState::Failed;
-            Ok(LifecycleAction::Exit)
-        } else {
-            Err(TransitionError::RecoveryNotActive { state: self.state })
-        }
+    pub(crate) fn mark_failed(&mut self) {
+        self.state = RuntimeState::Failed;
     }
 
     pub(crate) fn shutdown(&mut self) {
@@ -129,7 +124,7 @@ impl LifecycleMachine {
     }
 
     pub(crate) fn fail(&mut self, error: RunError) {
-        self.state = RuntimeState::Failed;
+        self.mark_failed();
         if self.terminal_error.is_none() {
             self.terminal_error = Some(error);
         }
@@ -137,6 +132,10 @@ impl LifecycleMachine {
 
     pub(crate) fn take_terminal_error(&mut self) -> Option<RunError> {
         self.terminal_error.take()
+    }
+
+    pub(crate) fn terminal_error(&self) -> Option<&RunError> {
+        self.terminal_error.as_ref()
     }
 }
 
@@ -222,7 +221,7 @@ mod tests {
             lifecycle.device_lost(GpuGeneration::INITIAL),
             LifecycleAction::RecoverGpu
         );
-        assert_eq!(lifecycle.recovery_failed(), Ok(LifecycleAction::Exit));
+        lifecycle.mark_failed();
         assert_eq!(lifecycle.state(), RuntimeState::Failed);
     }
 

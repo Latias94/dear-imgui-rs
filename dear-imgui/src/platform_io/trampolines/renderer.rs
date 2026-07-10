@@ -27,6 +27,14 @@ pub unsafe extern "C" fn renderer_destroy_window(vp: *mut sys::ImGuiViewport) {
         );
     }
 }
+/// Forwards Dear ImGui's renderer-window size callback into Rust.
+///
+/// # Safety
+///
+/// `vp` must identify a viewport owned by the active Dear ImGui context. `size` must be non-null,
+/// properly aligned, and point to an `ImVec2` that remains readable for the duration of this call.
+/// The repository-owned C++ thunk satisfies this contract by passing the address of its
+/// callback-scoped aggregate value.
 pub unsafe extern "C" fn renderer_set_window_size(
     vp: *mut sys::ImGuiViewport,
     size: *const sys::ImVec2,
@@ -35,6 +43,8 @@ pub unsafe extern "C" fn renderer_set_window_size(
         return;
     }
     if let Some(cb) = load_cb(&RENDERER_SET_WINDOW_SIZE_CB) {
+        // SAFETY: The null check above and the C++ thunk contract guarantee that `size` is aligned
+        // and readable for this callback only. Copying the value prevents Rust from retaining it.
         let size = unsafe { *size };
         abort_if_panicked(
             "Renderer_SetWindowSize",

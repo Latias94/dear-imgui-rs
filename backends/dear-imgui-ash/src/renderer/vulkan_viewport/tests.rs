@@ -431,6 +431,34 @@ fn shutdown_is_a_noop_for_a_foreign_renderer_context() {
 }
 
 #[test]
+fn shutdown_rejects_missing_callback_before_mutating_live_runtime() {
+    let _guard = lock_context();
+    let mut ctx = Context::create();
+    let raw = ctx.as_raw();
+    let mut renderer = MaybeUninit::<AshRenderer>::uninit();
+
+    try_install(&mut ctx).expect("empty renderer callback table");
+    insert_renderer_state(raw, renderer.as_mut_ptr(), None).unwrap();
+    let pointer = std::ptr::NonNull::<ViewportAshData>::dangling().as_ptr();
+    register_viewport_data(pointer);
+    ctx.platform_io_mut().set_renderer_destroy_window_raw(None);
+
+    assert_eq!(
+        shutdown_multi_viewport_support(&mut ctx),
+        Err(CallbackOwnershipError::RendererCallbacksReplaced)
+    );
+
+    assert!(has_renderer_state_for_context(raw));
+    assert!(is_ash_viewport_data(pointer));
+    assert!(ctx.platform_io().renderer_destroy_window_raw().is_none());
+
+    unregister_viewport_data(pointer);
+    ctx.platform_io_mut()
+        .set_renderer_destroy_window_raw(Some(renderer_destroy_window_sys));
+    shutdown_multi_viewport_support(&mut ctx).unwrap();
+}
+
+#[test]
 fn renderer_state_is_context_local() {
     let _guard = lock_context();
     let ctx_a = Context::create();
@@ -557,6 +585,49 @@ fn viewport_user_data_mut_ignores_unregistered_renderer_user_data() {
 
     assert!(data.is_none());
     assert_eq!(viewport.renderer_user_data(), foreign);
+}
+
+#[test]
+fn creation_failure_requests_platform_window_close() {
+    let mut raw_viewport = sys::ImGuiViewport::default();
+    let viewport = unsafe { Viewport::from_raw_mut(&mut raw_viewport) };
+
+    request_platform_close_after_create_failure(viewport);
+
+    assert!(viewport.platform_request_close());
+}
+
+#[test]
+fn missing_renderer_data_reasserts_close_during_render() {
+    let mut raw_viewport = sys::ImGuiViewport::default();
+
+    unsafe {
+        renderer_render_window(
+            (&mut raw_viewport as *mut sys::ImGuiViewport).cast::<Viewport>(),
+            std::ptr::null_mut(),
+        );
+    }
+
+    assert!(raw_viewport.PlatformRequestClose);
+}
+
+#[test]
+fn foreign_renderer_data_does_not_request_close_during_render() {
+    let foreign = 0x1234usize as *mut c_void;
+    let mut raw_viewport = sys::ImGuiViewport {
+        RendererUserData: foreign,
+        ..Default::default()
+    };
+
+    unsafe {
+        renderer_render_window(
+            (&mut raw_viewport as *mut sys::ImGuiViewport).cast::<Viewport>(),
+            std::ptr::null_mut(),
+        );
+    }
+
+    assert_eq!(raw_viewport.RendererUserData, foreign);
+    assert!(!raw_viewport.PlatformRequestClose);
 }
 
 #[test]

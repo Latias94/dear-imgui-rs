@@ -21,6 +21,8 @@ pub(crate) use self::callbacks::{
     renderer_create_window_sys, renderer_destroy_window_sys, renderer_render_window_sys,
     renderer_set_window_size_sys, renderer_swap_buffers_sys,
 };
+#[cfg(test)]
+use self::callbacks::{renderer_render_window, request_platform_close_after_create_failure};
 use self::frame_sync::{
     FrameSync, create_command_pool, create_frame_syncs, create_present_semaphores,
     destroy_frame_syncs, destroy_present_semaphores, present_semaphore_for_image,

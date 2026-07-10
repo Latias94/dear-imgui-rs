@@ -26,8 +26,10 @@ pub unsafe fn enable(
 }
 
 /// Destroys platform windows before disabling WGPU renderer callbacks.
-pub fn shutdown_multi_viewport_support(imgui_context: &mut Context) {
-    multi_viewport_runtime::shutdown_multi_viewport_support(imgui_context);
+pub fn shutdown_multi_viewport_support(
+    imgui_context: &mut Context,
+) -> Result<(), CallbackOwnershipError> {
+    multi_viewport_runtime::shutdown_multi_viewport_support(imgui_context)
 }
 
 pub(crate) fn clear_for_drop(renderer: *mut WgpuRenderer) {

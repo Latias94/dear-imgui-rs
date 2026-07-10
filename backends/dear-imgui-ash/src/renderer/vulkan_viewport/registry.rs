@@ -177,6 +177,10 @@ pub enum CallbackOwnershipError {
     #[error("ImGuiPlatformIO renderer callbacks are already owned by another backend")]
     RendererCallbacksOccupied,
 
+    /// An active runtime no longer owns the complete callback table required for teardown.
+    #[error("Ash renderer callbacks were replaced while multi-viewport remained active")]
+    RendererCallbacksReplaced,
+
     /// The current Dear ImGui artifact cannot safely bridge `Renderer_SetWindowSize`.
     #[error("dear-imgui-sys was built without PlatformIO aggregate ABI hooks")]
     AggregateCallbackHooksUnavailable,
@@ -467,6 +471,24 @@ fn any_renderer_callback_owned(platform_io: &dear_imgui_rs::platform_io::Platfor
         )
 }
 
+fn renderer_callbacks_owned(platform_io: &dear_imgui_rs::platform_io::PlatformIo) -> bool {
+    unary_callback_matches(
+        platform_io.renderer_create_window_raw(),
+        renderer_create_window_sys,
+    ) && unary_callback_matches(
+        platform_io.renderer_destroy_window_raw(),
+        renderer_destroy_window_sys,
+    ) && platform_io.renderer_set_window_size_matches_pointer_callback(renderer_set_window_size_sys)
+        && render_callback_matches(
+            platform_io.renderer_render_window_raw(),
+            renderer_render_window_sys,
+        )
+        && render_callback_matches(
+            platform_io.renderer_swap_buffers_raw(),
+            renderer_swap_buffers_sys,
+        )
+}
+
 pub(super) fn try_install_renderer_callbacks(
     _ctx: *mut sys::ImGuiContext,
     platform_io: &mut dear_imgui_rs::platform_io::PlatformIo,
@@ -667,10 +689,11 @@ pub fn shutdown_multi_viewport_support(
     context: &mut Context,
 ) -> Result<(), CallbackOwnershipError> {
     let _context_guard = unsafe { CurrentContextGuard::bind(context.as_raw()) };
-    if !has_renderer_state_for_context(context.as_raw())
-        && !any_renderer_callback_owned(context.platform_io())
-    {
+    if !has_renderer_state_for_context(context.as_raw()) {
         return Ok(());
+    }
+    if !renderer_callbacks_owned(context.platform_io()) {
+        return Err(CallbackOwnershipError::RendererCallbacksReplaced);
     }
     context.destroy_platform_windows();
     disable(context)

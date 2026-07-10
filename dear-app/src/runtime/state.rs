@@ -15,6 +15,8 @@ use crate::{
     ShutdownContext, Theme,
 };
 
+use super::recovery::OwnedGpuGeneration;
+
 #[cfg(feature = "imnodes")]
 use dear_imnodes as imnodes;
 #[cfg(feature = "implot")]
@@ -284,43 +286,47 @@ impl RuntimeGeneration {
     }
 }
 
-pub(crate) trait RuntimeFactory {
-    type Candidate;
+impl OwnedGpuGeneration for RuntimeGeneration {
+    fn generation(&self) -> GpuGeneration {
+        self.id
+    }
 
-    fn create(&mut self, generation: GpuGeneration) -> Result<Self::Candidate, RunError>;
+    fn teardown(self) {
+        RuntimeGeneration::teardown(self);
+    }
 }
 
-pub(crate) struct WgpuRuntimeFactory<'a> {
-    pub(crate) window: &'a mut WindowState,
-    pub(crate) ui: &'a mut UiState,
-    pub(crate) config: &'a AppConfig,
-    pub(crate) event_proxy: EventLoopProxy<RuntimeEvent>,
-}
+pub(crate) struct WgpuRuntimeFactory;
 
-impl RuntimeFactory for WgpuRuntimeFactory<'_> {
-    type Candidate = RuntimeGeneration;
-
-    fn create(&mut self, generation: GpuGeneration) -> Result<Self::Candidate, RunError> {
-        let adapter = block_on(self.window.instance.request_adapter(
-            &wgpu::RequestAdapterOptions {
-                power_preference: self.config.wgpu.power_preference,
-                compatible_surface: Some(&self.window.surface),
-                apply_limit_buckets: false,
-                force_fallback_adapter: self.config.wgpu.force_fallback_adapter,
-            },
-        ))
+impl WgpuRuntimeFactory {
+    pub(crate) fn create(
+        window: &mut WindowState,
+        ui: &mut UiState,
+        config: &AppConfig,
+        event_proxy: EventLoopProxy<RuntimeEvent>,
+        generation: GpuGeneration,
+    ) -> Result<RuntimeGeneration, RunError> {
+        let adapter = block_on(
+            window
+                .instance
+                .request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: config.wgpu.power_preference,
+                    compatible_surface: Some(&window.surface),
+                    apply_limit_buckets: false,
+                    force_fallback_adapter: config.wgpu.force_fallback_adapter,
+                }),
+        )
         .map_err(RunError::AdapterUnavailable)?;
         let descriptor = wgpu::DeviceDescriptor {
-            label: self.config.wgpu.device_label.as_deref(),
-            required_features: self.config.wgpu.required_features,
-            required_limits: self.config.wgpu.required_limits.clone(),
-            memory_hints: self.config.wgpu.memory_hints.clone(),
+            label: config.wgpu.device_label.as_deref(),
+            required_features: config.wgpu.required_features,
+            required_limits: config.wgpu.required_limits.clone(),
+            memory_hints: config.wgpu.memory_hints.clone(),
             ..Default::default()
         };
         let (device, queue) =
             block_on(adapter.request_device(&descriptor)).map_err(RunError::DeviceRequest)?;
 
-        let event_proxy = self.event_proxy.clone();
         device.set_device_lost_callback(move |reason, message| {
             let _ = event_proxy.send_event(RuntimeEvent::DeviceLost {
                 generation,
@@ -328,11 +334,9 @@ impl RuntimeFactory for WgpuRuntimeFactory<'_> {
             });
         });
 
-        let format = self
-            .window
-            .configure_surface(&adapter, &device, self.config)?;
+        let format = window.configure_surface(&adapter, &device, config)?;
         let init_info = dear_imgui_wgpu::WgpuInitInfo::new(device.clone(), queue.clone(), format);
-        let mut renderer = dear_imgui_wgpu::WgpuRenderer::new(init_info, &mut self.ui.context)
+        let mut renderer = dear_imgui_wgpu::WgpuRenderer::new(init_info, &mut ui.context)
             .map_err(RunError::RendererInit)?;
         renderer.set_gamma_mode(dear_imgui_wgpu::GammaMode::Auto);
 

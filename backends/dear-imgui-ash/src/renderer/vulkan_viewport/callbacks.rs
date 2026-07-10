@@ -1,5 +1,9 @@
 use super::*;
 
+pub(super) fn request_platform_close_after_create_failure(viewport: &mut Viewport) {
+    viewport.set_platform_request_close(true);
+}
+
 /// Renderer: create per-viewport Vulkan resources (surface + swapchain).
 ///
 /// # Safety
@@ -31,6 +35,7 @@ unsafe fn renderer_create_window(viewport: *mut Viewport) {
                 Ok(surface) => surface,
                 Err(error) => {
                     eprintln!("[ash-mv] create surface error: {error}");
+                    request_platform_close_after_create_failure(viewport);
                     return;
                 }
             };
@@ -42,6 +47,7 @@ unsafe fn renderer_create_window(viewport: *mut Viewport) {
                 Err(error) => {
                     eprintln!("[ash-mv] create command pool error: {error}");
                     surface_loader.destroy_surface(surface, None);
+                    request_platform_close_after_create_failure(viewport);
                     return;
                 }
             };
@@ -52,6 +58,7 @@ unsafe fn renderer_create_window(viewport: *mut Viewport) {
                     eprintln!("[ash-mv] create frame synchronization error: {error}");
                     renderer.device.destroy_command_pool(command_pool, None);
                     surface_loader.destroy_surface(surface, None);
+                    request_platform_close_after_create_failure(viewport);
                     return;
                 }
             };
@@ -76,6 +83,7 @@ unsafe fn renderer_create_window(viewport: *mut Viewport) {
         ) {
             eprintln!("[ash-mv] initial swapchain build failed: {error}");
             let _ = data.destroy(&mut renderer, &surface_loader);
+            request_platform_close_after_create_failure(viewport);
             return;
         }
 
@@ -210,29 +218,34 @@ fn fail_viewport(
 ///
 /// Called by Dear ImGui from C with a valid `Viewport*` belonging to the current ImGui context.
 #[allow(unsafe_op_in_unsafe_fn)]
-unsafe fn renderer_render_window(viewport: *mut Viewport, _render_arg: *mut c_void) {
+pub(super) unsafe fn renderer_render_window(viewport: *mut Viewport, _render_arg: *mut c_void) {
     if viewport.is_null() {
         return;
     }
     unsafe {
+        let viewport = &mut *viewport;
+        let desired_extent = desired_extent_from_viewport(viewport);
+        let attachment_load_op = viewport_attachment_load_op(viewport.flags());
+        let draw_data = viewport.draw_data();
+        let Some(data) = viewport_user_data_mut(viewport) else {
+            if viewport.renderer_user_data().is_null() {
+                // `UpdatePlatformWindows()` clears request flags after create callbacks. Reassert
+                // the request during rendering so the failed viewport closes on the next frame.
+                request_platform_close_after_create_failure(viewport);
+            }
+            return;
+        };
         let Some(mut renderer) = borrow_renderer() else {
             return;
         };
         let Some(global) = global_handles() else {
             return;
         };
-        let viewport = &mut *viewport;
-        let desired_extent = desired_extent_from_viewport(viewport);
-        let attachment_load_op = viewport_attachment_load_op(viewport.flags());
-        let draw_data = viewport.draw_data();
         if draw_data.is_null() {
             return;
         }
         let draw_data: &mut dear_imgui_rs::render::DrawData =
             dear_imgui_rs::render::DrawData::from_raw_mut(&mut *draw_data);
-        let Some(data) = viewport_user_data_mut(viewport) else {
-            return;
-        };
         if data.pending_present.is_some() || data.frames.is_empty() {
             return;
         }
