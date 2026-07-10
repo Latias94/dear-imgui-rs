@@ -1,4 +1,5 @@
-use build_support::{compose_archive_name, compose_manifest_bytes};
+use build_support::binding::{ArtifactProfile, SourceRevisions};
+use build_support::{compose_archive_name, compose_manifest_bytes_with_profile};
 use flate2::{Compression, write::GzEncoder};
 use std::{
     env, fs,
@@ -13,25 +14,6 @@ fn expected_lib_name() -> &'static str {
     }
 }
 
-fn default_target_triple() -> String {
-    // Try env first
-    if let Ok(t) = env::var("TARGET") {
-        return t;
-    }
-    if let Ok(t) = env::var("CARGO_CFG_TARGET_TRIPLE") {
-        return t;
-    }
-    // Fallback compose
-    let arch = std::env::consts::ARCH;
-    let os = std::env::consts::OS;
-    match os {
-        "windows" => format!("{}-pc-windows-msvc", arch),
-        "macos" => format!("{}-apple-darwin", arch),
-        "linux" => format!("{}-unknown-linux-gnu", arch),
-        _ => format!("{}-unknown-{}", arch, os),
-    }
-}
-
 fn sys_out_dir() -> PathBuf {
     // This path belongs to the exact Cargo feature profile that compiled this package binary.
     // Scanning target/build by mtime can select a stale artifact from another feature profile.
@@ -42,29 +24,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir.parent().unwrap();
 
-    let target = default_target_triple();
+    let target = env!("DEAR_IMGUI_ARTIFACT_TARGET").to_string();
     let crate_version = env!("CARGO_PKG_VERSION").to_string();
-    let target_os = std::env::consts::OS;
-    let target_env = if cfg!(target_env = "msvc") {
-        "msvc"
-    } else if cfg!(target_env = "gnu") {
-        "gnu"
-    } else {
-        ""
-    };
-    let mut crt = if target_os == "windows" && target_env == "msvc" {
-        if cfg!(target_feature = "crt-static") {
-            "mt"
-        } else {
-            "md"
-        }
-    } else {
-        ""
-    };
+    let crt = env!("DEAR_IMGUI_ARTIFACT_CRT");
     if let Ok(v) = env::var("IMGUI_SYS_PKG_CRT")
         && !v.is_empty()
+        && v != crt
     {
-        crt = Box::leak(v.into_boxed_str());
+        return Err(format!(
+            "IMGUI_SYS_PKG_CRT declares {v}, but this package binary was built for CRT profile {crt}"
+        )
+        .into());
     }
 
     let link_type = "static"; // we package static lib
@@ -76,44 +46,55 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Artifact-changing features must match the Cargo profile that built this binary. The
     // optional environment list may add metadata but cannot claim an unavailable artifact.
     let explicit_features = env::var("IMGUI_SYS_PKG_FEATURES").unwrap_or_default();
-    let mut features: Vec<String> = explicit_features
+    let declared_features: Vec<String> = explicit_features
         .split(',')
         .map(|feature| feature.trim().to_ascii_lowercase())
         .filter(|feature| !feature.is_empty())
         .collect();
-    for (feature, enabled) in [
-        ("stack-layout", cfg!(feature = "stack-layout")),
-        ("freetype", cfg!(feature = "freetype")),
-        ("test-engine", cfg!(feature = "test-engine")),
-    ] {
-        let declared = features.iter().any(|candidate| candidate == feature);
-        if declared && !enabled {
+    for feature in &declared_features {
+        let enabled = match feature.as_str() {
+            "stack-layout" => cfg!(feature = "stack-layout"),
+            "freetype" => cfg!(feature = "freetype"),
+            "test-engine" => cfg!(feature = "test-engine"),
+            "wchar32" | "platform-io-aggregate-hooks" => true,
+            _ => {
+                return Err(
+                    format!("IMGUI_SYS_PKG_FEATURES contains unknown feature {feature}").into(),
+                );
+            }
+        };
+        if !enabled {
             return Err(format!(
                 "IMGUI_SYS_PKG_FEATURES declares {feature}, but this package binary was built without feature `{feature}`"
             )
             .into());
         }
-        if enabled && !declared {
-            features.push(feature.to_string());
-        }
     }
-    for required in ["wchar32", "platform-io-aggregate-hooks"] {
-        if !features.iter().any(|feature| feature == required) {
-            features.push(required.to_string());
+
+    let mut features = vec![
+        "platform-io-aggregate-hooks".to_string(),
+        "wchar32".to_string(),
+    ];
+    for (feature, enabled) in [
+        ("stack-layout", cfg!(feature = "stack-layout")),
+        ("freetype", cfg!(feature = "freetype")),
+        ("test-engine", cfg!(feature = "test-engine")),
+    ] {
+        if enabled {
+            features.push(feature.to_string());
         }
     }
     features.sort_unstable();
     features.dedup();
-    let features = features.join(",");
 
     let pkg_dir = PathBuf::from(
         env::var("IMGUI_SYS_PACKAGE_DIR").unwrap_or_else(|_| env!("OUT_DIR").to_string()),
     );
     fs::create_dir_all(&pkg_dir)?;
 
-    let has_freetype = features.split(',').any(|f| f.trim() == "freetype");
-    let has_test_engine = features.split(',').any(|f| f.trim() == "test-engine");
-    let has_stack_layout = features.split(',').any(|f| f.trim() == "stack-layout");
+    let has_freetype = cfg!(feature = "freetype");
+    let has_test_engine = cfg!(feature = "test-engine");
+    let has_stack_layout = cfg!(feature = "stack-layout");
     let mut suffix = String::new();
     if has_stack_layout {
         suffix.push_str("-stack-layout");
@@ -224,14 +205,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Added lib: {}", lib_path.display());
 
     // Add simple manifest txt
-    let manifest_txt = compose_manifest_bytes(
+    let artifact_profile = ArtifactProfile::new(
         "dear-imgui",
         &crate_version,
         &target,
         link_type,
         crt,
-        Some(&features),
+        &features,
+        SourceRevisions::new(
+            env!("DEAR_IMGUI_CIMGUI_REVISION"),
+            env!("DEAR_IMGUI_IMGUI_REVISION"),
+        ),
+        env!("DEAR_IMGUI_BINDING_SPEC_HASH"),
     );
+    let manifest_txt = compose_manifest_bytes_with_profile(&artifact_profile);
     let mut hdr = tar::Header::new_gnu();
     hdr.set_size(manifest_txt.len() as u64);
     hdr.set_mode(0o644);

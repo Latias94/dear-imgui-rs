@@ -16,13 +16,15 @@ Usage:
   python3 tools/pre_publish_check.py --skip-git-check --skip-doc-check
 
 Requirements:
-  - Python 3.7+
+  - Python 3.11+
   - cargo, git in PATH
 """
 
 import argparse
+import re
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict
 
@@ -78,6 +80,11 @@ ALL_CRATES = [
     ("dear-imgui-reflect-derive", "extensions/dear-imgui-reflect-derive"),
     ("dear-imgui-reflect", "extensions/dear-imgui-reflect"),
 ]
+
+SOURCE_METADATA_SECTION = "package.metadata.dear-imgui-sources"
+SOURCE_METADATA_KEYS = {"cimgui-revision", "imgui-revision"}
+GIT_REVISION_RE = re.compile(r"^[0-9a-fA-F]{40}$")
+SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
 
 
 class Colors:
@@ -178,7 +185,7 @@ def get_crate_version(crate_path: Path) -> Optional[str]:
 
 
 def check_version_consistency(repo_root: Path) -> Tuple[bool, List[str]]:
-    """Check that all crates have consistent versions."""
+    """Check release crate versions and the independently patched build helper."""
     print_check("Version consistency across crates")
     
     versions: Dict[str, str] = {}
@@ -198,20 +205,41 @@ def check_version_consistency(repo_root: Path) -> Tuple[bool, List[str]]:
             print_error(error)
         return False, errors
     
-    # Check if all versions are the same
-    unique_versions = set(versions.values())
-    
-    if len(unique_versions) == 1:
-        version = list(unique_versions)[0]
-        print_success(f"All crates use version {version}")
-        return True, []
-    else:
-        errors.append("Version mismatch detected:")
+    build_support_version = versions.pop("dear-imgui-build-support")
+    release_versions = set(versions.values())
+    if len(release_versions) != 1:
+        errors.append("Release crate version mismatch detected:")
         for name, version in sorted(versions.items()):
             errors.append(f"  {name}: {version}")
+    else:
+        release_version = next(iter(release_versions))
+        release_match = SEMVER_RE.fullmatch(release_version)
+        build_support_match = SEMVER_RE.fullmatch(build_support_version)
+        if release_match is None or build_support_match is None:
+            errors.append(
+                "Could not compare dear-imgui-build-support and release crate semantic versions"
+            )
+        else:
+            release_parts = tuple(int(part) for part in release_match.groups())
+            build_support_parts = tuple(int(part) for part in build_support_match.groups())
+            if build_support_parts[:2] != release_parts[:2]:
+                errors.append(
+                    "dear-imgui-build-support must share the release major/minor version"
+                )
+            elif build_support_parts[2] < release_parts[2]:
+                errors.append(
+                    "dear-imgui-build-support patch version cannot trail the release crates"
+                )
+
+    if errors:
         for error in errors:
             print_error(error)
         return False, errors
+
+    print_success(
+        f"Release crates use {release_version}; build support uses {build_support_version}"
+    )
+    return True, []
 
 
 def check_pregenerated_bindings(repo_root: Path) -> Tuple[bool, List[str]]:
@@ -234,6 +262,26 @@ def check_pregenerated_bindings(repo_root: Path) -> Tuple[bool, List[str]]:
                 print_error(f"Too small: {full_path} ({size} bytes)")
             else:
                 print_success(f"{name}: {size:,} bytes")
+
+    for label, relative_path in (
+        (
+            "dear-imgui-sys Windows ABI profile",
+            "dear-imgui-sys/src/bindings_pregenerated_windows.rs",
+        ),
+        (
+            "dear-imgui-sys WASM import profile",
+            "dear-imgui-sys/src/wasm_bindings_pregenerated.rs",
+        ),
+    ):
+        path = repo_root / relative_path
+        if not path.exists():
+            errors.append(f"Missing pregenerated bindings: {label}")
+            print_error(f"Missing: {path}")
+        elif path.stat().st_size < 1000:
+            errors.append(f"Pregenerated bindings too small: {label}")
+            print_error(f"Too small: {path} ({path.stat().st_size} bytes)")
+        else:
+            print_success(f"{label}: {path.stat().st_size:,} bytes")
     
     if not errors:
         print_success("All -sys crates have pregenerated bindings")
@@ -241,6 +289,99 @@ def check_pregenerated_bindings(repo_root: Path) -> Tuple[bool, List[str]]:
     else:
         print_error("Run: python3 tools/update_submodule_and_bindings.py --crates all --profile release")
         return False, errors
+
+
+def read_core_source_metadata(manifest_path: Path) -> Dict[str, str]:
+    """Read the exact source provenance schema from the packaged manifest."""
+    with manifest_path.open("rb") as manifest_file:
+        data = tomllib.load(manifest_file)
+    try:
+        metadata = data["package"]["metadata"]["dear-imgui-sources"]
+    except (KeyError, TypeError) as error:
+        raise ValueError(f"missing [{SOURCE_METADATA_SECTION}]") from error
+    if not isinstance(metadata, dict) or set(metadata) != SOURCE_METADATA_KEYS:
+        found = sorted(metadata) if isinstance(metadata, dict) else type(metadata).__name__
+        raise ValueError(
+            f"[{SOURCE_METADATA_SECTION}] must contain exactly "
+            f"{sorted(SOURCE_METADATA_KEYS)}, found {found}"
+        )
+    for key, value in metadata.items():
+        if not isinstance(value, str) or not GIT_REVISION_RE.fullmatch(value):
+            raise ValueError(f"{key} must be a 40-character hexadecimal git revision")
+    return metadata
+
+
+def check_core_source_contract(repo_root: Path) -> Tuple[bool, List[str]]:
+    """Require clean vendored sources whose HEADs match packaged metadata."""
+    print_check("Dear ImGui source provenance")
+    errors = []
+    try:
+        metadata = read_core_source_metadata(repo_root / "dear-imgui-sys" / "Cargo.toml")
+    except (OSError, ValueError, tomllib.TOMLDecodeError) as error:
+        print_error(str(error))
+        return False, [str(error)]
+
+    sources = (
+        (
+            "cimgui",
+            repo_root / "dear-imgui-sys" / "third-party" / "cimgui",
+            "cimgui-revision",
+        ),
+        (
+            "Dear ImGui",
+            repo_root / "dear-imgui-sys" / "third-party" / "cimgui" / "imgui",
+            "imgui-revision",
+        ),
+    )
+    for label, source_path, metadata_key in sources:
+        status_code, status, status_error = run_command(
+            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            cwd=source_path,
+        )
+        if status_code != 0:
+            errors.append(f"Could not inspect {label}: {status_error.strip()}")
+            continue
+        if status:
+            errors.append(f"{label} source tree is dirty: {source_path}\n{status.rstrip()}")
+
+        revision_code, revision, revision_error = run_command(
+            ["git", "rev-parse", "HEAD"], cwd=source_path
+        )
+        revision = revision.strip()
+        if revision_code != 0 or not GIT_REVISION_RE.fullmatch(revision):
+            errors.append(f"Could not read {label} revision: {revision_error.strip()}")
+        elif revision != metadata[metadata_key]:
+            errors.append(
+                f"{label} metadata mismatch: expected {revision}, "
+                f"found {metadata[metadata_key]}"
+            )
+        else:
+            print_success(f"{label}: {revision}")
+
+    if errors:
+        for error in errors:
+            print_error(error)
+        return False, errors
+    return True, []
+
+
+def check_core_binding_contract(
+    repo_root: Path, allow_dirty: bool
+) -> Tuple[bool, List[str]]:
+    """Regenerate every supported core ABI profile and require exact parity."""
+    print_check("Core binding specification and ABI profiles")
+    command = ["cargo", "run", "-p", "xtask", "--", "verify-bindings"]
+    if allow_dirty:
+        command.append("--allow-dirty")
+    code, stdout, stderr = run_command(command, cwd=repo_root, capture=True)
+    if code != 0:
+        detail = stderr.strip() or stdout.strip() or "core binding verification failed"
+        print_error(detail)
+        return False, [detail]
+    if stderr.strip():
+        print(stderr.strip())
+    print_success("Core native/WASM bindings match the shared binding specification")
+    return True, []
 
 
 def check_git_status(repo_root: Path) -> Tuple[bool, List[str]]:
@@ -265,26 +406,18 @@ def check_git_status(repo_root: Path) -> Tuple[bool, List[str]]:
 def check_cargo_lock(repo_root: Path) -> Tuple[bool, List[str]]:
     """Check that Cargo.lock is up-to-date."""
     print_check("Cargo.lock is up-to-date")
-    
-    # Run cargo update --dry-run to check if lock file needs updating
+
     code, stdout, stderr = run_command(
-        ["cargo", "update", "--workspace", "--dry-run"],
+        ["cargo", "metadata", "--locked", "--format-version", "1", "--no-deps"],
         cwd=repo_root
     )
-    
     if code != 0:
-        print_error(f"Cargo update check failed: {stderr}")
-        return False, ["Cargo update check failed"]
-    
-    # Check if any updates are available
-    if "Updating" in stdout or "Adding" in stdout:
-        print_warning("Cargo.lock may need updating:")
-        print(stdout)
-        print_warning("Run: cargo update")
-        return False, ["Cargo.lock may be outdated"]
-    else:
-        print_success("Cargo.lock is up-to-date")
-        return True, []
+        detail = stderr.strip() or stdout.strip() or "cargo metadata --locked failed"
+        print_error(detail)
+        return False, [detail]
+
+    print_success("Cargo.lock satisfies cargo metadata --locked")
+    return True, []
 
 
 def check_changelog_release_notes(repo_root: Path) -> Tuple[bool, List[str]]:
@@ -489,6 +622,11 @@ def main() -> int:
         action="store_true",
         help="Skip test execution check"
     )
+    parser.add_argument(
+        "--core-contract-only",
+        action="store_true",
+        help="Only verify core source provenance and reproducible binding profiles"
+    )
     
     args = parser.parse_args()
     
@@ -499,21 +637,29 @@ def main() -> int:
     
     checks = []
     
-    # Run checks
-    checks.append(("Version Consistency", check_version_consistency(repo_root)))
-    checks.append(("Pregenerated Bindings", check_pregenerated_bindings(repo_root)))
-    
-    if not args.skip_git_check:
-        checks.append(("Git Status", check_git_status(repo_root)))
-    
-    checks.append(("Cargo.lock", check_cargo_lock(repo_root)))
-    checks.append(("Changelog", check_changelog_release_notes(repo_root)))
-    
-    if not args.skip_doc_check:
-        checks.append(("Documentation", check_docs_build(repo_root)))
-    
-    if not args.skip_test_check:
-        checks.append(("Tests", check_tests(repo_root)))
+    checks.append(("Core Source Provenance", check_core_source_contract(repo_root)))
+    checks.append(
+        (
+            "Core Binding Contract",
+            check_core_binding_contract(repo_root, allow_dirty=args.skip_git_check),
+        )
+    )
+
+    if not args.core_contract_only:
+        checks.append(("Version Consistency", check_version_consistency(repo_root)))
+        checks.append(("Pregenerated Bindings", check_pregenerated_bindings(repo_root)))
+
+        if not args.skip_git_check:
+            checks.append(("Git Status", check_git_status(repo_root)))
+
+        checks.append(("Cargo.lock", check_cargo_lock(repo_root)))
+        checks.append(("Changelog", check_changelog_release_notes(repo_root)))
+
+        if not args.skip_doc_check:
+            checks.append(("Documentation", check_docs_build(repo_root)))
+
+        if not args.skip_test_check:
+            checks.append(("Tests", check_tests(repo_root)))
     
     # Print summary
     print_header("Validation Summary")
@@ -537,6 +683,9 @@ def main() -> int:
     
     if failed == 0:
         print()
+        if args.core_contract_only:
+            print_success("Core source and binding contracts passed.")
+            return 0
         print_success("All checks passed! Ready to publish.")
         print()
         print("Next steps:")

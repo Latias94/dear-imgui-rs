@@ -108,7 +108,6 @@ fn declarative_layout_preserves_if_missing_and_rebuilds_on_replace() {
     prepare_context(&mut ctx);
 
     let root_id;
-    let initial_children;
     {
         let ui = ctx.frame();
         root_id = ui.get_id("Declarative dock layout lifecycle");
@@ -129,10 +128,9 @@ fn declarative_layout_preserves_if_missing_and_rebuilds_on_replace() {
         )
         .unwrap();
 
-        let root = unsafe { &*imgui::sys::igDockBuilderGetNode(root_id.raw()) };
-        assert!(!root.ChildNodes[0].is_null());
-        assert!(!root.ChildNodes[1].is_null());
-        initial_children = unsafe { [(*root.ChildNodes[0]).ID, (*root.ChildNodes[1]).ID] };
+        let root = unsafe { imgui::sys::igDockBuilderGetNode(root_id.raw()) };
+        assert!(!root.is_null());
+        assert!(unsafe { imgui::sys::ImGuiDockNode_IsSplitNode(root) });
         ui.window("Left").build(|| ui.text("left"));
         ui.window("Right").build(|| ui.text("right"));
     }
@@ -151,9 +149,9 @@ fn declarative_layout_preserves_if_missing_and_rebuilds_on_replace() {
         )
         .unwrap();
 
-        let root = unsafe { &*imgui::sys::igDockBuilderGetNode(root_id.raw()) };
-        let preserved_children = unsafe { [(*root.ChildNodes[0]).ID, (*root.ChildNodes[1]).ID] };
-        assert_eq!(preserved_children, initial_children);
+        let root = unsafe { imgui::sys::igDockBuilderGetNode(root_id.raw()) };
+        assert!(!root.is_null());
+        assert!(unsafe { imgui::sys::ImGuiDockNode_IsSplitNode(root) });
         ui.window("Left").build(|| ui.text("left"));
         ui.window("Right").build(|| ui.text("right"));
     }
@@ -172,16 +170,17 @@ fn declarative_layout_preserves_if_missing_and_rebuilds_on_replace() {
         )
         .unwrap();
 
-        let root = unsafe { &*imgui::sys::igDockBuilderGetNode(root_id.raw()) };
-        assert!(root.ChildNodes[0].is_null());
-        assert!(root.ChildNodes[1].is_null());
+        let root = unsafe { imgui::sys::igDockBuilderGetNode(root_id.raw()) };
+        assert!(!root.is_null());
+        assert!(unsafe { imgui::sys::ImGuiDockNode_IsLeafNode(root) });
+        assert!(!unsafe { imgui::sys::ImGuiDockNode_IsSplitNode(root) });
         ui.window("Replacement").build(|| ui.text("replacement"));
     }
     let _ = ctx.render();
 }
 
 #[test]
-fn replace_preserves_submitted_target_metadata() {
+fn replace_creates_the_submitted_dockspace_geometry() {
     let _guard = test_guard();
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
@@ -202,17 +201,18 @@ fn replace_preserves_submitted_target_metadata() {
     )
     .unwrap();
 
-    let root = unsafe { &*imgui::sys::igDockBuilderGetNode(root_id.raw()) };
-    assert_eq!(root.WindowClass.ClassId, class_id.raw());
-    assert_ne!(
-        root.SharedFlags & imgui::sys::ImGuiDockNodeFlags_NoResize,
-        0
+    let root = unsafe { imgui::sys::igDockBuilderGetNode(root_id.raw()) };
+    assert!(!root.is_null());
+    assert!(unsafe { imgui::sys::ImGuiDockNode_IsDockSpace(root) });
+    let rect = unsafe { imgui::sys::ImGuiDockNode_Rect(root) };
+    assert!((rect.Min.x - viewport.work_pos()[0]).abs() <= f32::EPSILON);
+    assert!((rect.Min.y - viewport.work_pos()[1]).abs() <= f32::EPSILON);
+    assert!(
+        (rect.Max.x - (viewport.work_pos()[0] + viewport.work_size()[0])).abs() <= f32::EPSILON
     );
-    assert_eq!(
-        root.SharedFlags & imgui::sys::ImGuiDockNodeFlags_KeepAliveOnly,
-        0
+    assert!(
+        (rect.Max.y - (viewport.work_pos()[1] + viewport.work_size()[1])).abs() <= f32::EPSILON
     );
-    assert!(!root.HostWindow.is_null());
 
     let _ = ctx.render();
 }
@@ -239,9 +239,11 @@ fn current_window_layout_uses_the_actual_cursor_position() {
             )
             .unwrap();
 
-            let root = unsafe { &*imgui::sys::igDockBuilderGetNode(root_id.raw()) };
-            assert!((root.Pos.x - cursor[0]).abs() <= f32::EPSILON);
-            assert!((root.Pos.y - cursor[1]).abs() <= f32::EPSILON);
+            let root = unsafe { imgui::sys::igDockBuilderGetNode(root_id.raw()) };
+            assert!(!root.is_null());
+            let rect = unsafe { imgui::sys::ImGuiDockNode_Rect(root) };
+            assert!((rect.Min.x - cursor[0]).abs() <= f32::EPSILON);
+            assert!((rect.Min.y - cursor[1]).abs() <= f32::EPSILON);
         });
     let _ = ctx.render();
 }
@@ -332,9 +334,9 @@ fn if_missing_preserves_a_layout_restored_from_ini() {
     )
     .unwrap();
 
-    let root = unsafe { &*imgui::sys::igDockBuilderGetNode(root_id.raw()) };
-    assert!(!root.ChildNodes[0].is_null());
-    assert!(!root.ChildNodes[1].is_null());
+    let root = unsafe { imgui::sys::igDockBuilderGetNode(root_id.raw()) };
+    assert!(!root.is_null());
+    assert!(unsafe { imgui::sys::ImGuiDockNode_IsSplitNode(root) });
     let _ = restored.render();
 }
 

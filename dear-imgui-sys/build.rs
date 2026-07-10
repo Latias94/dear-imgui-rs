@@ -1,7 +1,13 @@
-use std::collections::hash_map::DefaultHasher;
 use std::env;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+
+use build_support::binding::{
+    ArtifactProfile, BindingSpec, BuildRequest, BuildRequestInput, CORE_BUILD_ENV_VARS,
+    NativeAbiProfile, SourceRevisions, TargetFacts, bindgen_rerun_env_vars,
+    is_supported_wasm_target, validate_wasm_feature_contract,
+};
+
+const CORE_WASM_IMPORT_MODULE: &str = "imgui-sys-v0";
 
 // Asset-importer style build configuration and structure
 #[derive(Clone, Debug)]
@@ -11,6 +17,8 @@ struct BuildConfig {
     target_os: String,
     target_env: String,
     target_arch: String,
+    target_endian: String,
+    target_pointer_width: String,
     target_triple: String,
     profile: String,
     docs_rs: bool,
@@ -24,6 +32,8 @@ impl BuildConfig {
             target_os: env::var("CARGO_CFG_TARGET_OS").unwrap_or_default(),
             target_env: env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default(),
             target_arch: env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default(),
+            target_endian: env::var("CARGO_CFG_TARGET_ENDIAN").unwrap_or_default(),
+            target_pointer_width: env::var("CARGO_CFG_TARGET_POINTER_WIDTH").unwrap_or_default(),
             target_triple: env::var("TARGET").unwrap_or_default(),
             profile: env::var("PROFILE").unwrap_or_else(|_| "release".to_string()),
             docs_rs: env::var("DOCS_RS").is_ok(),
@@ -31,6 +41,9 @@ impl BuildConfig {
     }
     fn is_windows(&self) -> bool {
         self.target_os == "windows"
+    }
+    fn is_core_wasm_target(&self) -> bool {
+        is_supported_wasm_target(&self.target_triple)
     }
     fn is_msvc(&self) -> bool {
         self.target_env == "msvc"
@@ -52,11 +65,83 @@ impl BuildConfig {
     fn imgui_src(&self) -> PathBuf {
         self.cimgui_root().join("imgui")
     }
-}
-
-fn use_cmake_requested() -> bool {
-    // Treat empty as not set to avoid accidental enabling on CI
-    matches!(env::var("IMGUI_SYS_USE_CMAKE"), Ok(v) if !v.is_empty())
+    fn crt_profile(&self) -> &'static str {
+        if self.is_windows() && self.is_msvc() {
+            if self.use_static_crt() { "mt" } else { "md" }
+        } else {
+            ""
+        }
+    }
+    fn artifact_features(&self) -> Vec<&'static str> {
+        let mut features = vec!["platform-io-aggregate-hooks", "wchar32"];
+        if cfg!(feature = "stack-layout") {
+            features.push("stack-layout");
+        }
+        if cfg!(feature = "freetype") {
+            features.push("freetype");
+        }
+        if cfg!(feature = "test-engine") {
+            features.push("test-engine");
+        }
+        features
+    }
+    fn source_revisions(&self) -> SourceRevisions {
+        SourceRevisions::from_cargo_manifest(include_str!("Cargo.toml")).unwrap_or_else(|error| {
+            panic!("invalid checked-in Dear ImGui source metadata: {error}")
+        })
+    }
+    fn native_abi_profile(&self) -> NativeAbiProfile {
+        NativeAbiProfile::for_target(TargetFacts {
+            triple: &self.target_triple,
+            os: &self.target_os,
+            env: &self.target_env,
+            arch: &self.target_arch,
+            endian: &self.target_endian,
+            pointer_width: &self.target_pointer_width,
+        })
+        .unwrap_or_else(|error| panic!("dear-imgui-sys: {error}"))
+    }
+    fn binding_spec(&self) -> BindingSpec {
+        if self.is_core_wasm_target() {
+            BindingSpec::core_wasm(CORE_WASM_IMPORT_MODULE)
+        } else {
+            BindingSpec::core_native(self.native_abi_profile())
+        }
+    }
+    fn artifact_profile(&self) -> ArtifactProfile {
+        ArtifactProfile::new(
+            "dear-imgui",
+            env!("CARGO_PKG_VERSION"),
+            &self.target_triple,
+            "static",
+            self.crt_profile(),
+            self.artifact_features(),
+            self.source_revisions(),
+            self.binding_spec().deterministic_hash(),
+        )
+    }
+    fn build_request(&self) -> BuildRequest {
+        let artifact_features = self.artifact_features();
+        let environment = CORE_BUILD_ENV_VARS
+            .iter()
+            .copied()
+            .map(|name| (name, env::var(name).ok()))
+            .collect::<Vec<_>>();
+        BuildRequest::new(BuildRequestInput {
+            target_triple: &self.target_triple,
+            target_os: &self.target_os,
+            target_env: &self.target_env,
+            target_arch: &self.target_arch,
+            target_endian: &self.target_endian,
+            target_pointer_width: &self.target_pointer_width,
+            cargo_profile: &self.profile,
+            artifact_features,
+            environment: environment
+                .iter()
+                .map(|(name, value)| (*name, value.as_deref()))
+                .collect(),
+        })
+    }
 }
 
 fn is_http_url(s: &str) -> bool {
@@ -69,15 +154,25 @@ fn is_archive_urlish(s: &str) -> bool {
 
 fn main() {
     let cfg = BuildConfig::new();
+    validate_wasm_feature_contract(&cfg.target_triple, cfg!(feature = "wasm"))
+        .unwrap_or_else(|error| panic!("dear-imgui-sys: {error}"));
     let skip_cc = env::var("IMGUI_SYS_SKIP_CC").is_ok();
     let mut has_platform_io_hooks = false;
+    let artifact_profile = cfg.artifact_profile();
+    let build_request = cfg.build_request();
 
     // Re-run triggers
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=Cargo.toml");
     println!("cargo:rustc-check-cfg=cfg(dear_imgui_rs_platform_io_hooks)");
+    println!("cargo:rustc-check-cfg=cfg(dear_imgui_rs_wasm_import_target)");
+    if cfg.is_core_wasm_target() {
+        println!("cargo:rustc-cfg=dear_imgui_rs_wasm_import_target");
+    }
     // Pregenerated bindings are copied into OUT_DIR when native toolchains are disabled.
     // Track them so `cargo check` picks up refreshed bindings immediately.
     println!("cargo:rerun-if-changed=src/bindings_pregenerated.rs");
+    println!("cargo:rerun-if-changed=src/bindings_pregenerated_windows.rs");
     println!("cargo:rerun-if-changed=src/wasm_bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=src/imgui_test_engine_hooks.cpp");
     println!("cargo:rerun-if-changed=src/platform_io_hooks.cpp");
@@ -90,14 +185,36 @@ fn main() {
     println!("cargo:rerun-if-changed=backend-shims/android.cpp");
     println!("cargo:rerun-if-changed=backend-shims/win32.cpp");
     println!("cargo:rerun-if-changed=backend-shims/dx11.cpp");
-    println!("cargo:rerun-if-env-changed=IMGUI_SYS_LIB_DIR");
-    println!("cargo:rerun-if-env-changed=IMGUI_SYS_SKIP_CC");
-    println!("cargo:rerun-if-env-changed=IMGUI_SYS_FORCE_BUILD");
-    println!("cargo:rerun-if-env-changed=IMGUI_SYS_PREBUILT_URL");
-    println!("cargo:rerun-if-env-changed=IMGUI_SYS_USE_CMAKE");
-    println!("cargo:rerun-if-env-changed=DEAR_IMGUI_RS_REGEN_BINDINGS");
-    println!("cargo:rerun-if-env-changed=DOCS_RS");
-    println!("cargo:rerun-if-env-changed=CARGO_NET_OFFLINE");
+    for name in CORE_BUILD_ENV_VARS {
+        println!("cargo:rerun-if-env-changed={name}");
+    }
+    for name in bindgen_rerun_env_vars(&cfg.target_triple) {
+        println!("cargo:rerun-if-env-changed={name}");
+    }
+    println!(
+        "cargo:rustc-env=DEAR_IMGUI_ARTIFACT_TARGET={}",
+        artifact_profile.target
+    );
+    println!(
+        "cargo:rustc-env=DEAR_IMGUI_ARTIFACT_CRT={}",
+        artifact_profile.crt
+    );
+    println!(
+        "cargo:rustc-env=DEAR_IMGUI_CIMGUI_REVISION={}",
+        artifact_profile.source_revisions.cimgui
+    );
+    println!(
+        "cargo:rustc-env=DEAR_IMGUI_IMGUI_REVISION={}",
+        artifact_profile.source_revisions.imgui
+    );
+    println!(
+        "cargo:rustc-env=DEAR_IMGUI_BINDING_SPEC_HASH={}",
+        artifact_profile.binding_spec_hash
+    );
+    println!(
+        "cargo:BUILD_REQUEST_HASH={}",
+        build_request.deterministic_hash()
+    );
     // docs.rs: generate bindings only
     if cfg.docs_rs {
         docsrs_build(&cfg);
@@ -106,6 +223,12 @@ fn main() {
 
     // Maintainer workflow: regenerate bindings via bindgen without requiring native compilation.
     if build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS") {
+        if cfg.is_core_wasm_target() {
+            panic!(
+                "dear-imgui-sys: WASM bindings are generated through the import-provider adapter; \
+                 run `cargo run -p xtask -- wasm-bindgen` (provider: {CORE_WASM_IMPORT_MODULE})"
+            );
+        }
         generate_bindings_native(&cfg);
         export_include_paths(&cfg);
         return;
@@ -122,7 +245,7 @@ fn main() {
     // source builds free of a libclang runtime dependency while still compiling the native
     // C++ objects and PlatformIO hook shim below. Maintainers can opt into bindgen with
     // DEAR_IMGUI_RS_REGEN_BINDINGS=1.
-    if !use_pregenerated_bindings(&cfg.out_dir) {
+    if !use_pregenerated_bindings(&cfg) {
         if skip_cc {
             panic!(
                 "IMGUI_SYS_SKIP_CC is set but no pregenerated bindings were found. \
@@ -135,7 +258,7 @@ fn main() {
 
     // Build optional backend shim libraries before linking the core library so
     // static link order remains backend-shim first, core dear_imgui second.
-    if !skip_cc {
+    if !skip_cc && !cfg.is_core_wasm_target() {
         build_backend_shims(&cfg);
     }
 
@@ -147,7 +270,7 @@ fn main() {
         || env::var("IMGUI_SYS_FORCE_BUILD").is_ok();
 
     // Try prebuilt dear_imgui first (static lib) unless force_build
-    let linked_prebuilt = if force_build {
+    let linked_prebuilt = if force_build || cfg.is_core_wasm_target() {
         false
     } else {
         try_link_prebuilt_all(&cfg)
@@ -161,30 +284,11 @@ fn main() {
 
     // Build from sources when needed
     if !linked_prebuilt && !skip_cc {
-        if cfg.target_arch == "wasm32" {
-            // If targeting Emscripten, attempt to compile C/C++ (requires emsdk toolchain)
-            if cfg.target_env == "emscripten" {
-                build_with_cc_wasm(&cfg);
-            } else {
-                // Unknown-unknown skeleton: compile only when explicitly requested
-                if env::var("IMGUI_SYS_WASM_CC").is_ok() {
-                    build_with_cc_wasm(&cfg);
-                } else {
-                    println!(
-                        "cargo:warning=WASM (unknown) skeleton: skipping native C/C++ build (set IMGUI_SYS_WASM_CC=1 to enable)"
-                    );
-                }
-            }
-        } else {
-            if use_cmake_requested() {
-                println!(
-                    "cargo:warning=IMGUI_SYS_USE_CMAKE is ignored; dear-imgui-sys uses the cc source build."
-                );
-            }
+        if !cfg.is_core_wasm_target() {
             build_with_cc_cfg(&cfg);
             has_platform_io_hooks = true;
         }
-    } else if !linked_prebuilt && skip_cc {
+    } else if !linked_prebuilt && skip_cc && !cfg.is_core_wasm_target() {
         if cfg!(feature = "stack-layout") {
             panic!(
                 "IMGUI_SYS_SKIP_CC with feature `stack-layout` requires a compatible prebuilt \
@@ -198,7 +302,7 @@ fn main() {
 
     if has_platform_io_hooks {
         println!("cargo:rustc-cfg=dear_imgui_rs_platform_io_hooks");
-    } else if cfg.target_arch != "wasm32" {
+    } else if !cfg.is_core_wasm_target() {
         println!(
             "cargo:warning=dear-imgui-sys: PlatformIO aggregate ABI hooks are unavailable; \
              aggregate callback installation \
@@ -211,7 +315,7 @@ fn main() {
     // but MinGW/GNU toolchains do not, so we must link these system libraries explicitly.
     //
     // Ref: https://github.com/Latias94/dear-imgui-rs/issues/20
-    if cfg.is_windows() && cfg.target_arch != "wasm32" {
+    if cfg.is_windows() && !cfg.is_core_wasm_target() {
         println!("cargo:rustc-link-lib=user32"); // OpenClipboard, etc.
         println!("cargo:rustc-link-lib=kernel32"); // MultiByteToWideChar, etc.
         println!("cargo:rustc-link-lib=shell32"); // ShellExecuteW
@@ -225,7 +329,7 @@ fn main() {
 fn docsrs_build(cfg: &BuildConfig) {
     println!("cargo:warning=DOCS_RS detected: generating bindings, skipping native build");
     println!("cargo:rustc-cfg=docsrs");
-    if use_pregenerated_bindings(&cfg.out_dir) {
+    if use_pregenerated_bindings(cfg) {
         return;
     }
     let cimgui_root = cfg.cimgui_root();
@@ -246,80 +350,102 @@ fn docsrs_build(cfg: &BuildConfig) {
 
 #[cfg(feature = "bindgen")]
 fn generate_bindings_native(cfg: &BuildConfig) {
-    // For wasm and Android targets, prefer pregenerated bindings to avoid
-    // requiring a fully configured cross-target sysroot during bindgen.
-    if (cfg.target_arch == "wasm32" || cfg.target_os == "android")
-        && use_pregenerated_bindings(&cfg.out_dir)
-    {
-        // Expose include paths to dependent crates during pregenerated-binding builds
-        println!("cargo:IMGUI_INCLUDE_PATH={}", cfg.imgui_src().display());
-        println!(
-            "cargo:IMGUI_BACKENDS_PATH={}",
-            cfg.imgui_src().join("backends").display()
-        );
-        println!("cargo:CIMGUI_INCLUDE_PATH={}", cfg.cimgui_root().display());
-        println!(
-            "cargo:IMGUI_BACKEND_SHIMS_PATH={}",
-            cfg.manifest_dir.join("backend-shims").display()
-        );
-        return;
-    }
-
-    let cimgui_root = cfg.cimgui_root();
-    let imgui_src = cfg.imgui_src();
-    let mut bindings = bindgen::Builder::default()
-        .header(cimgui_root.join("cimgui.h").to_string_lossy())
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        .clang_arg(format!("-I{}", cimgui_root.display()))
-        .clang_arg(format!("-I{}", imgui_src.display()))
-        .allowlist_function("ig.*")
-        .allowlist_function("Im.*")
-        .blocklist_function("ImGuiPlatformIO_Set_Platform_GetWindowPos")
-        .blocklist_function("ImGuiPlatformIO_Set_Platform_GetWindowSize")
-        .allowlist_type("Im.*")
-        .allowlist_var("Im.*")
-        .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
-        .derive_default(true)
-        .derive_debug(true)
-        .derive_copy(true)
-        .derive_eq(true)
-        .derive_partialeq(true)
-        .derive_hash(true)
-        .prepend_enum_name(false)
-        .layout_tests(false);
-    // Keep bindgen in sync with the compiled C++ library: we always enable `IMGUI_USE_WCHAR32`
-    // so `ImWchar` is a 32-bit codepoint type.
-    bindings = bindings.clang_arg("-DIMGUI_USE_WCHAR32");
-    if cfg!(feature = "test-engine") {
-        bindings = bindings.clang_arg("-DIMGUI_ENABLE_TEST_ENGINE");
-    }
-    #[cfg(feature = "freetype")]
-    {
-        let freetype = find_freetype_dependency(false);
-        // Mirror CMake behavior: when building with FreeType, also keep stb_truetype enabled
-        // so wrappers referencing stb helpers stay valid.
-        bindings = bindings
-            .clang_arg("-DIMGUI_ENABLE_FREETYPE=1")
-            .clang_arg("-DIMGUI_ENABLE_STB_TRUETYPE=1");
-        for include in &freetype.include_paths {
-            bindings = bindings.clang_args(["-I", &include.display().to_string()]);
-        }
-    }
-    // WASM-friendly: disable file/OS-specific functions in bindings when targeting wasm
-    if cfg.target_arch == "wasm32" {
-        bindings = bindings
-            .clang_arg("-DIMGUI_DISABLE_FILE_FUNCTIONS")
-            .clang_arg("-DIMGUI_DISABLE_OSX_FUNCTIONS")
-            .clang_arg("-DIMGUI_DISABLE_WIN32_FUNCTIONS");
-    }
-    let bindings = bindings
+    assert_canonical_bindgen_environment();
+    let spec = BindingSpec::core_native(cfg.native_abi_profile());
+    let bindings = core_bindgen_builder(cfg, &spec)
         .generate()
         .expect("Unable to generate bindings from cimgui.h");
     let out = cfg.out_dir.join("bindings.rs");
     bindings
         .write_to_file(&out)
         .expect("Couldn't write bindings!");
-    sanitize_bindings_file(&out);
+    let content = std::fs::read_to_string(&out)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", out.display()));
+    let content = spec.sanitize(&content);
+    spec.validate_generated_bindings(&content)
+        .unwrap_or_else(|error| panic!("invalid native bindings: {error}"));
+    std::fs::write(&out, content)
+        .unwrap_or_else(|error| panic!("failed to write {}: {error}", out.display()));
+}
+
+#[cfg(feature = "bindgen")]
+fn core_bindgen_builder(cfg: &BuildConfig, spec: &BindingSpec) -> bindgen::Builder {
+    let cimgui_root = cfg.cimgui_root();
+    let shim_root = cfg
+        .out_dir
+        .join("binding-spec-headers")
+        .join(spec.deterministic_hash().replace(':', "-"));
+    std::fs::create_dir_all(&shim_root).unwrap_or_else(|error| {
+        panic!(
+            "failed to create binding header shim dir {}: {error}",
+            shim_root.display()
+        )
+    });
+    for shim in spec.header_shims {
+        std::fs::write(shim_root.join(shim.name), shim.contents).unwrap_or_else(|error| {
+            panic!("failed to write binding header shim {}: {error}", shim.name)
+        });
+    }
+    let wrapper = format!("{}\n#include \"{}\"\n", spec.header_preamble, spec.header);
+    let mut builder = bindgen::Builder::default()
+        .header_contents("dear_imgui_rs_bindings.h", &wrapper)
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()));
+    builder = match spec.formatter {
+        build_support::binding::BindingFormatter::Rustfmt => {
+            builder.formatter(bindgen::Formatter::Rustfmt)
+        }
+    };
+    builder = match spec.rust_edition {
+        build_support::binding::BindingRustEdition::Rust2021 => {
+            builder.rust_edition(bindgen::RustEdition::Edition2021)
+        }
+    };
+    builder = builder.clang_arg(format!("-I{}", shim_root.display()));
+    for include in spec.include_paths {
+        builder = builder.clang_arg(format!("-I{}", cimgui_root.join(include).display()));
+    }
+    for arg in spec.clang_args {
+        builder = builder.clang_arg(*arg);
+    }
+    for define in spec.clang_defines {
+        builder = builder.clang_arg(format!("-D{define}"));
+    }
+    for pattern in spec.allowlisted_functions {
+        builder = builder.allowlist_function(pattern);
+    }
+    for pattern in spec.blocklisted_functions {
+        builder = builder.blocklist_function(pattern);
+    }
+    for pattern in spec.allowlisted_types {
+        builder = builder.allowlist_type(pattern);
+    }
+    for pattern in spec.blocklisted_types {
+        builder = builder.blocklist_type(pattern);
+    }
+    for pattern in spec.allowlisted_vars {
+        builder = builder.allowlist_var(pattern);
+    }
+    for line in spec.raw_lines {
+        builder = builder.raw_line(*line);
+    }
+    builder
+        .derive_default(spec.derives.default)
+        .derive_debug(spec.derives.debug)
+        .derive_copy(spec.derives.copy)
+        .derive_eq(spec.derives.eq)
+        .derive_partialeq(spec.derives.partial_eq)
+        .derive_hash(spec.derives.hash)
+        .prepend_enum_name(spec.prepend_enum_name)
+        .layout_tests(spec.layout_tests)
+}
+
+#[cfg(feature = "bindgen")]
+fn assert_canonical_bindgen_environment() {
+    let names = env::vars_os()
+        .map(|(name, _)| name.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    build_support::binding::validate_bindgen_environment(&names)
+        .unwrap_or_else(|error| panic!("dear-imgui-sys: {error}"));
 }
 
 #[cfg(feature = "freetype")]
@@ -339,10 +465,10 @@ fn find_freetype_dependency(emit_cargo_metadata: bool) -> build_support::NativeD
 
 fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
     let mut linked = false;
-    if cfg.target_arch != "wasm32" {
+    if !cfg.is_core_wasm_target() {
         if let Some(lib_dir) = env::var_os("IMGUI_SYS_LIB_DIR") {
             let lib_dir = PathBuf::from(lib_dir);
-            assert_explicit_stack_layout_profile(&lib_dir, cfg, "IMGUI_SYS_LIB_DIR");
+            assert_explicit_artifact_profile(&lib_dir, cfg, "IMGUI_SYS_LIB_DIR");
             if try_link_prebuilt(&lib_dir, cfg) {
                 println!(
                     "cargo:warning=Using prebuilt dear_imgui from {}",
@@ -362,7 +488,7 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
             } else {
                 let cache_root = explicit_prebuilt_cache_root(cfg, &url);
                 if let Ok(lib_dir) = try_download_prebuilt(&cache_root, &url, &cfg.target_env) {
-                    assert_explicit_stack_layout_profile(&lib_dir, cfg, "IMGUI_SYS_PREBUILT_URL");
+                    assert_explicit_artifact_profile(&lib_dir, cfg, "IMGUI_SYS_PREBUILT_URL");
                     if try_link_prebuilt(&lib_dir, cfg) {
                         println!(
                             "cargo:warning=Downloaded and using prebuilt dear_imgui from {}",
@@ -636,7 +762,7 @@ fn build_backend_shims(cfg: &BuildConfig) {
         return;
     }
 
-    if cfg.target_arch == "wasm32" {
+    if cfg.is_core_wasm_target() {
         panic!("backend-shim-* features are not supported for wasm targets yet.");
     }
 
@@ -823,54 +949,39 @@ fn expected_lib_name(target_env: &str) -> String {
     build_support::expected_lib_name(target_env, "dear_imgui")
 }
 
-fn prebuilt_manifest_features(dir: &Path) -> Option<Vec<String>> {
-    let mut candidates = Vec::with_capacity(2);
-    candidates.push(dir.join("manifest.txt"));
+fn read_prebuilt_manifest(dir: &Path) -> Result<Vec<u8>, String> {
+    let mut candidates = vec![dir.join("manifest.txt")];
     if let Some(parent) = dir.parent() {
         candidates.push(parent.join("manifest.txt"));
     }
-
     for manifest in candidates {
-        let Ok(s) = std::fs::read_to_string(&manifest) else {
-            continue;
-        };
-        for line in s.lines() {
-            if let Some(rest) = line.strip_prefix("features=") {
-                return Some(
-                    rest.split(',')
-                        .map(|f| f.trim().to_ascii_lowercase())
-                        .filter(|f| !f.is_empty())
-                        .collect(),
-                );
+        match std::fs::read(&manifest) {
+            Ok(content) => return Ok(content),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(format!("failed to read {}: {error}", manifest.display()));
             }
         }
-        return Some(Vec::new());
     }
-
-    None
+    Err(format!(
+        "manifest.txt was not found beside prebuilt library directory {}",
+        dir.display()
+    ))
 }
 
-fn prebuilt_manifest_has_feature(dir: &Path, feature: &str) -> bool {
-    let feature = feature.trim().to_ascii_lowercase();
-    let Some(features) = prebuilt_manifest_features(dir) else {
-        return false;
-    };
-    features.iter().any(|f| f == &feature)
+fn validate_prebuilt_artifact_profile(dir: &Path, cfg: &BuildConfig) -> Result<(), String> {
+    cfg.artifact_profile()
+        .validate_manifest_bytes(&read_prebuilt_manifest(dir)?)
 }
 
-fn assert_explicit_stack_layout_profile(dir: &Path, cfg: &BuildConfig, source: &str) {
+fn assert_explicit_artifact_profile(dir: &Path, cfg: &BuildConfig, source: &str) {
     let lib_path = dir.join(expected_lib_name(&cfg.target_env));
     if !lib_path.exists() {
         return;
     }
-
-    let expected = cfg!(feature = "stack-layout");
-    let actual = prebuilt_manifest_has_feature(dir, "stack-layout");
-    assert!(
-        actual == expected,
-        "{source} selected an incompatible dear_imgui artifact: requested stack-layout={expected}, \
-         but the prebuilt manifest declares stack-layout={actual}"
-    );
+    validate_prebuilt_artifact_profile(dir, cfg).unwrap_or_else(|error| {
+        panic!("{source} selected an incompatible dear_imgui artifact: {error}")
+    });
 }
 
 fn try_link_prebuilt(dir: &Path, cfg: &BuildConfig) -> bool {
@@ -880,36 +991,11 @@ fn try_link_prebuilt(dir: &Path, cfg: &BuildConfig) -> bool {
         return false;
     }
 
-    // Prebuilt ABI guard: we always compile with `IMGUI_USE_WCHAR32`, so we must not link a
-    // wchar16 prebuilt. Enforce this via the package manifest.
-    if !prebuilt_manifest_has_feature(dir, "wchar32") {
-        return false;
-    }
-    // Stack layout changes the native core artifact. Match both directions so a normal build
-    // cannot silently link the patched profile and a blueprint build cannot link the normal one.
-    if prebuilt_manifest_has_feature(dir, "stack-layout") != cfg!(feature = "stack-layout") {
-        return false;
-    }
-    // Aggregate callback hooks must be compiled into the same native archive as Dear ImGui.
-    // Reject older prebuilts instead of compiling a second local C++ shim with a potentially
-    // different compiler or CRT profile.
-    if !prebuilt_manifest_has_feature(dir, "platform-io-aggregate-hooks") {
-        return false;
-    }
-    // If freetype feature is enabled, only accept prebuilt if manifest declares it
-    if cfg!(feature = "freetype") && !prebuilt_manifest_has_feature(dir, "freetype") {
-        return false;
-    }
-    // If test-engine feature is enabled, only accept prebuilt if manifest declares it.
-    //
-    // Without this, cargo could silently use a non-test-engine prebuilt while the Rust side
-    // expects IMGUI_ENABLE_TEST_ENGINE hooks to be present, leading to confusing runtime failures.
-    if cfg!(feature = "test-engine") && !prebuilt_manifest_has_feature(dir, "test-engine") {
-        return false;
-    }
-    // Conversely, if test-engine is disabled, reject prebuilts that were built with it enabled:
-    // those objects reference hook symbols that won't be linked, causing undefined symbols at link time.
-    if !cfg!(feature = "test-engine") && prebuilt_manifest_has_feature(dir, "test-engine") {
+    if let Err(error) = validate_prebuilt_artifact_profile(dir, cfg) {
+        println!(
+            "cargo:warning=Rejecting incompatible dear_imgui prebuilt at {}: {error}",
+            dir.display()
+        );
         return false;
     }
     println!("cargo:rustc-link-search=native={}", dir.display());
@@ -921,74 +1007,6 @@ fn try_link_prebuilt(dir: &Path, cfg: &BuildConfig) -> bool {
         let _ = find_freetype_dependency(true);
     }
     true
-}
-
-// Minimal WASM (skeleton) build: compile cimgui + imgui with WASM-friendly defines.
-// This will be extended with proper toolchain flags in future iterations.
-fn build_with_cc_wasm(cfg: &BuildConfig) {
-    let mut build = cc::Build::new();
-    build.cpp(true).std("c++17");
-    let cimgui_root = cfg.cimgui_root();
-    let imgui_src = cfg.imgui_src();
-    build.include(&cimgui_root);
-    build.include(&imgui_src);
-    build.file(imgui_src.join("imgui.cpp"));
-    build.file(imgui_src.join("imgui_draw.cpp"));
-    build.file(imgui_src.join("imgui_widgets.cpp"));
-    build.file(imgui_src.join("imgui_tables.cpp"));
-    build.file(imgui_src.join("imgui_demo.cpp"));
-    build.file(cimgui_root.join("cimgui.cpp"));
-    build.file(cfg.manifest_dir.join("src/platform_io_hooks.cpp"));
-
-    // If EMSDK is available, prefer its upstream clang++ for wasm32-unknown-unknown objects
-    if let Ok(emsdk) = std::env::var("EMSDK") {
-        let mut clangpp = PathBuf::from(emsdk.clone());
-        // EMSDK/upstream/bin/clang++
-        clangpp.push("upstream");
-        clangpp.push("bin");
-        clangpp.push(if cfg!(windows) {
-            "clang++.exe"
-        } else {
-            "clang++"
-        });
-        if clangpp.exists() {
-            build.compiler(clangpp);
-            build.flag("-target");
-            build.flag("wasm32-unknown-unknown");
-            // Use emscripten sysroot headers to resolve <string.h>, etc.
-            let mut sysroot = PathBuf::from(&emsdk);
-            sysroot.push("upstream");
-            sysroot.push("emscripten");
-            sysroot.push("cache");
-            sysroot.push("sysroot");
-            if sysroot.exists() {
-                build.flag(format!("--sysroot={}", sysroot.display()));
-            }
-        }
-    } else {
-        // Fallback: ask clang to target wasm32
-        build.flag("-target");
-        build.flag("wasm32-unknown-unknown");
-    }
-
-    // WASM-friendly defines
-    build.define("IMGUI_DISABLE_FILE_FUNCTIONS", None);
-    build.define("IMGUI_DISABLE_OSX_FUNCTIONS", None);
-    build.define("IMGUI_DISABLE_WIN32_FUNCTIONS", None);
-    build.define("IMGUI_USE_WCHAR32", None);
-    if cfg!(feature = "test-engine") {
-        build.define("IMGUI_ENABLE_TEST_ENGINE", None);
-        build.file(cfg.manifest_dir.join("src/imgui_test_engine_hooks.cpp"));
-    }
-
-    // Avoid exceptions/RTTI
-    build.flag_if_supported("-fno-exceptions");
-    build.flag_if_supported("-fno-rtti");
-
-    // Do not link the C++ standard library for wasm32-unknown-unknown
-    build.cpp_link_stdlib(None);
-
-    build.compile("dear_imgui");
 }
 
 fn try_download_prebuilt(
@@ -1098,88 +1116,68 @@ fn prebuilt_cache_root(cfg: &BuildConfig) -> PathBuf {
     if cfg!(feature = "test-engine") {
         profile.push_str("+test-engine");
     }
-    root.join(profile)
+    let identity = cfg
+        .artifact_profile()
+        .deterministic_hash()
+        .replace(':', "-");
+    root.join(profile).join(identity)
 }
 
 fn explicit_prebuilt_cache_root(cfg: &BuildConfig, source: &str) -> PathBuf {
-    let mut hasher = DefaultHasher::new();
-    source.hash(&mut hasher);
-    prebuilt_cache_root(cfg).join(format!("explicit-{:016x}", hasher.finish()))
+    prebuilt_cache_root(cfg).join(format!("explicit-{}", stable_cache_key(source)))
+}
+
+fn stable_cache_key(value: &str) -> String {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in value.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{hash:016x}")
 }
 
 // (removed duplicate prebuilt_extract_dir_env/extract_archive_to_cache; using build_support equivalents)
 
-fn use_pregenerated_bindings(out_dir: &Path) -> bool {
+fn use_pregenerated_bindings(cfg: &BuildConfig) -> bool {
     if build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS") {
         return false;
     }
 
-    // Prefer wasm pregenerated bindings when targeting wasm32, unless single-module is requested
-    let single_module = std::env::var("IMGUI_SYS_SINGLE_MODULE")
-        .ok()
-        .map(|v| v == "1")
-        .unwrap_or(false);
-    let is_wasm = std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("wasm32");
-    let candidates = if is_wasm && !single_module {
-        vec![
+    let (pregenerated, spec) = if cfg.is_core_wasm_target() {
+        (
             Path::new("src").join("wasm_bindings_pregenerated.rs"),
-            Path::new("src").join("bindings_pregenerated.rs"),
-        ]
+            BindingSpec::core_wasm(CORE_WASM_IMPORT_MODULE),
+        )
     } else {
-        vec![Path::new("src").join("bindings_pregenerated.rs")]
+        let profile = cfg.native_abi_profile();
+        (
+            Path::new(profile.pregenerated_file()).to_path_buf(),
+            BindingSpec::core_native(profile),
+        )
     };
 
-    for preg in candidates {
-        if preg.exists() {
-            match std::fs::read_to_string(&preg).and_then(|content| {
-                let sanitized = sanitize_bindings_string(&content);
-                std::fs::write(out_dir.join("bindings.rs"), sanitized)
-            }) {
-                Ok(()) => {
-                    println!(
-                        "cargo:warning=Using pregenerated bindings: {}",
-                        preg.display()
-                    );
-                    return true;
-                }
-                Err(e) => {
-                    println!("cargo:warning=Failed to write pregenerated bindings: {}", e);
-                    return false;
-                }
-            }
-        }
+    if !pregenerated.exists() {
+        return false;
     }
-    false
-}
-
-#[cfg(feature = "bindgen")]
-fn sanitize_bindings_file(path: &Path) {
-    if let Ok(content) = std::fs::read_to_string(path) {
-        let sanitized = sanitize_bindings_string(&content);
-        let _ = std::fs::write(path, sanitized);
-    }
-}
-
-fn sanitize_bindings_string(content: &str) -> String {
-    // Remove any inner attributes like #![allow(...)] which may be emitted by bindgen
-    // and can be rejected depending on include context. Also drop an immediate blank
-    // line following such attributes to keep the file tidy.
-    let mut out = String::with_capacity(content.len());
-    let mut skip_next_blank = false;
-    for line in content.lines() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("#![") {
-            skip_next_blank = true;
-            continue; // drop this line
+    let content = match std::fs::read_to_string(&pregenerated) {
+        Ok(content) => spec.sanitize(&content),
+        Err(error) => {
+            println!(
+                "cargo:warning=Failed to read pregenerated bindings {}: {error}",
+                pregenerated.display()
+            );
+            return false;
         }
-        if skip_next_blank {
-            if trimmed.is_empty() {
-                continue;
-            }
-            skip_next_blank = false;
-        }
-        out.push_str(line);
-        out.push('\n');
+    };
+    spec.validate_generated_bindings(&content)
+        .unwrap_or_else(|error| panic!("invalid {}: {error}", pregenerated.display()));
+    if let Err(error) = std::fs::write(cfg.out_dir.join("bindings.rs"), content) {
+        println!("cargo:warning=Failed to write pregenerated bindings: {error}");
+        return false;
     }
-    out
+    println!(
+        "cargo:warning=Using pregenerated bindings: {}",
+        pregenerated.display()
+    );
+    true
 }

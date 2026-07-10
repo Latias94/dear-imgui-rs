@@ -9,3 +9,4 @@ anyhow = "1.0"
 bindgen = "0.72"
 xshell = "0.2"
 which = "8"
+build-support = { package = "dear-imgui-build-support", path = "../tools/build-support", features = ["binding-spec"] }

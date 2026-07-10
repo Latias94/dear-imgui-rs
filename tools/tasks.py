@@ -10,7 +10,7 @@ Usage:
 Available tasks:
   check           - Run pre-publish validation checks
   bump <version>  - Bump version to specified version
-  bindings        - Update pregenerated bindings for all -sys crates
+  bindings        - Update all three core profiles and extension bindings
   publish         - Publish all crates to crates.io
   test            - Run all tests
   doc             - Build documentation
@@ -97,25 +97,58 @@ def task_bump(args, repo_root: Path) -> int:
 
 
 def task_bindings(args, repo_root: Path) -> int:
-    """Update pregenerated bindings."""
+    """Update core ABI profiles through xtask and extensions through their builders."""
+    crates = getattr(args, "crates", None) or "all"
+    selected = {crate.strip() for crate in crates.split(",") if crate.strip()}
+    includes_core = crates.strip().lower() == "all" or "dear-imgui-sys" in selected
+
     cmd = [sys.executable, "tools/update_submodule_and_bindings.py"]
-    
-    if getattr(args, "crates", None):
-        cmd.extend(["--crates", args.crates])
-    else:
-        cmd.extend(["--crates", "all"])
-    
+    cmd.extend(["--crates", crates])
     cmd.extend(["--profile", "release"])
-    
     if getattr(args, "update_submodules", False):
         cmd.extend(["--submodules", "update"])
     else:
         cmd.extend(["--submodules", "skip"])
-    
+    if includes_core:
+        cmd.append("--skip-core-bindings")
     if getattr(args, "dry_run", False):
         cmd.append("--dry-run")
-    
-    return run_command(cmd, cwd=repo_root)
+
+    rc = run_command(cmd, cwd=repo_root)
+    if rc != 0 or not includes_core:
+        return rc
+
+    core_commands = [
+        [
+            "cargo",
+            "run",
+            "-p",
+            "xtask",
+            "--",
+            "verify-bindings",
+            "--update",
+            "--allow-dirty",
+        ],
+        [
+            "cargo",
+            "run",
+            "-p",
+            "xtask",
+            "--",
+            "verify-bindings",
+            "--allow-dirty",
+        ],
+    ]
+    if getattr(args, "dry_run", False):
+        for core_command in core_commands:
+            print(f"$ {' '.join(core_command)}")
+        return 0
+
+    for core_command in core_commands:
+        rc = run_command(core_command, cwd=repo_root)
+        if rc != 0:
+            return rc
+    return 0
 
 
 def task_publish(args, repo_root: Path) -> int:
@@ -277,7 +310,10 @@ def main() -> int:
     bump_parser.add_argument("--dry-run", action="store_true", help="Dry run")
     
     # bindings task
-    bindings_parser = subparsers.add_parser("bindings", help="Update pregenerated bindings")
+    bindings_parser = subparsers.add_parser(
+        "bindings",
+        help="Update Windows, non-Windows, WASM, and extension bindings",
+    )
     bindings_parser.add_argument("--crates", help="Comma-separated list of crates")
     bindings_parser.add_argument("--update-submodules", action="store_true", help="Update submodules")
     bindings_parser.add_argument("--dry-run", action="store_true", help="Dry run")

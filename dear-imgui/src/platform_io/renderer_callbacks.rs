@@ -221,10 +221,7 @@ impl PlatformIo {
         callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, *const sys::ImVec2),
     ) -> bool {
         unsafe {
-            sys::ImGuiPlatformIO_RendererSetWindowSizeMatchesPointerParam(
-                self.raw.get(),
-                callback,
-            )
+            sys::ImGuiPlatformIO_RendererSetWindowSizeMatchesPointerParam(self.raw.get(), callback)
         }
     }
 

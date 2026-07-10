@@ -50,6 +50,7 @@ dear-implot = { path = "../../extensions/dear-implot", version = "0.15" }
 
 [features]
 default = []
+wasm = ["dear-imgui-rs/wasm"]
 # Enables the first native Dear ImGui PlatformIO lifecycle bridge. This does not by itself
 # advertise full multi-viewport support; render/input routing still gate status.
 multi-viewport = ["dear-imgui-rs/multi-viewport", "dep:bevy_winit"]

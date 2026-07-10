@@ -17,7 +17,7 @@ Supported crates (native bindings):
   - extensions/dear-imgui-test-engine-sys (imgui_test_engine)
 
 WASM pregenerated bindings:
-  - dear-imgui-sys: via `xtask wasm-bindgen`
+  - dear-imgui-sys: regenerated with the native profiles via `xtask verify-bindings --update`
   - optional extensions via `--wasm-ext`:
     - dear-implot-sys: `xtask wasm-bindgen-implot`
     - dear-implot3d-sys: `xtask wasm-bindgen-implot3d`
@@ -46,15 +46,22 @@ Usage examples:
 
 Requirements:
   - git, cargo in PATH
-  - Python 3.7+
+  - Python 3.11+
 """
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
+
+
+SOURCE_METADATA_SECTION = "package.metadata.dear-imgui-sources"
+SOURCE_METADATA_KEYS = {"cimgui-revision", "imgui-revision"}
+GIT_REVISION_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 
 
 def run(cmd, cwd=None, env=None, dry=False):
@@ -84,6 +91,119 @@ def find_bindings(target_dir: Path, profile: str, crate: str) -> Path:
     return matches[0]
 
 
+def read_core_source_metadata(manifest_path: Path):
+    data = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
+    try:
+        metadata = data["package"]["metadata"]["dear-imgui-sources"]
+    except (KeyError, TypeError) as error:
+        raise RuntimeError(f"missing [{SOURCE_METADATA_SECTION}] in {manifest_path}") from error
+    if set(metadata) != SOURCE_METADATA_KEYS:
+        raise RuntimeError(
+            f"[{SOURCE_METADATA_SECTION}] must contain exactly "
+            f"{sorted(SOURCE_METADATA_KEYS)}, found {sorted(metadata)}"
+        )
+    for key, value in metadata.items():
+        if not isinstance(value, str) or not GIT_REVISION_RE.fullmatch(value):
+            raise RuntimeError(f"{key} must be a 40-character hexadecimal git revision")
+    return metadata
+
+
+def git_revision(path: Path) -> str:
+    revision = subprocess.check_output(
+        ["git", "-C", str(path), "rev-parse", "HEAD"], text=True
+    ).strip()
+    if not GIT_REVISION_RE.fullmatch(revision):
+        raise RuntimeError(f"invalid git revision from {path}: {revision!r}")
+    return revision
+
+
+def require_clean_git_tree(path: Path):
+    status = subprocess.check_output(
+        ["git", "-C", str(path), "status", "--porcelain=v1", "--untracked-files=all"],
+        text=True,
+    )
+    if status:
+        raise RuntimeError(f"source tree is dirty: {path}\n{status.rstrip()}")
+
+
+def sync_core_source_metadata(manifest_path: Path, cimgui_path: Path, dry: bool):
+    imgui_path = cimgui_path / "imgui"
+    require_clean_git_tree(cimgui_path)
+    require_clean_git_tree(imgui_path)
+    revisions = {
+        "cimgui-revision": git_revision(cimgui_path),
+        "imgui-revision": git_revision(imgui_path),
+    }
+    current = read_core_source_metadata(manifest_path)
+    if current == revisions:
+        print("Core source metadata already matches clean submodule revisions")
+        return
+
+    print(
+        "Updating core source metadata: "
+        f"cimgui={revisions['cimgui-revision']} imgui={revisions['imgui-revision']}"
+    )
+    if dry:
+        return
+
+    lines = manifest_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    section_header = f"[{SOURCE_METADATA_SECTION}]"
+    try:
+        section_start = next(
+            index for index, line in enumerate(lines) if line.strip() == section_header
+        )
+    except StopIteration as error:
+        raise RuntimeError(f"missing {section_header} in {manifest_path}") from error
+    section_end = next(
+        (
+            index
+            for index in range(section_start + 1, len(lines))
+            if lines[index].lstrip().startswith("[")
+        ),
+        len(lines),
+    )
+    found = set()
+    for index in range(section_start + 1, section_end):
+        match = re.match(r"^(\s*)([A-Za-z0-9_-]+)(\s*=).*$", lines[index])
+        if match is None or match.group(2) not in revisions:
+            continue
+        key = match.group(2)
+        newline = "\n" if lines[index].endswith("\n") else ""
+        lines[index] = f'{match.group(1)}{key}{match.group(3)} "{revisions[key]}"{newline}'
+        found.add(key)
+    if found != SOURCE_METADATA_KEYS:
+        raise RuntimeError(
+            f"could not update all source metadata keys in {manifest_path}: found {sorted(found)}"
+        )
+    manifest_path.write_text("".join(lines), encoding="utf-8")
+    if read_core_source_metadata(manifest_path) != revisions:
+        raise RuntimeError("source metadata update did not round-trip through TOML parsing")
+
+
+def core_binding_commands():
+    return [
+        [
+            "cargo",
+            "run",
+            "-p",
+            "xtask",
+            "--",
+            "verify-bindings",
+            "--update",
+            "--allow-dirty",
+        ],
+        [
+            "cargo",
+            "run",
+            "-p",
+            "xtask",
+            "--",
+            "verify-bindings",
+            "--allow-dirty",
+        ],
+    ]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Update third-party submodules and pregenerate bindings for sys crates (incl. wasm)")
     parser.add_argument("--crates", default="dear-imgui-sys", help="Comma-separated list of crates to process (or 'all')")
@@ -103,7 +223,11 @@ def main() -> int:
     )
     parser.add_argument("--remote", default="origin", help="Remote name for submodules")
     parser.add_argument("--wasm", action="store_true", help="Additionally generate wasm pregenerated bindings for dear-imgui-sys")
-    parser.add_argument("--wasm-import", default="imgui-sys-v0", help="WASM import module name for generated bindings")
+    parser.add_argument(
+        "--skip-core-bindings",
+        action="store_true",
+        help="Skip core generation after source/metadata sync; a caller will run the core xtask",
+    )
     parser.add_argument(
         "--wasm-ext",
         default="",
@@ -153,6 +277,7 @@ def main() -> int:
         if unknown:
             print(f"Unknown crates: {unknown}", file=sys.stderr)
             return 2
+    core_requested = "dear-imgui-sys" in crates or args.wasm or args.submodules == "update"
 
     # Optionally update submodules
     if args.submodules != "skip":
@@ -172,7 +297,26 @@ def main() -> int:
             rc = run(["git", "-C", str(path), "pull", args.remote, branch], dry=args.dry_run)
             if rc != 0:
                 return rc
-            run(["git", "-C", str(path), "submodule", "update", "--init", "--recursive"], dry=args.dry_run)
+            rc = run(
+                ["git", "-C", str(path), "submodule", "update", "--init", "--recursive"],
+                dry=args.dry_run,
+            )
+            if rc != 0:
+                return rc
+
+    if core_requested:
+        sync_core_source_metadata(
+            crate_roots["dear-imgui-sys"] / "Cargo.toml",
+            submodules["dear-imgui-sys"][0],
+            args.dry_run,
+        )
+
+    if core_requested and not args.skip_core_bindings:
+        print("Generating and validating all core native/WASM binding profiles via xtask...")
+        for command in core_binding_commands():
+            rc = run(command, cwd=str(repo_root), dry=args.dry_run)
+            if rc != 0:
+                return rc
 
     # Generate pregenerated bindings for selected crates
     env_base = os.environ.copy()
@@ -191,6 +335,8 @@ def main() -> int:
     }
     target_dir = Path(env_base.get("CARGO_TARGET_DIR", repo_root / "target"))
     for crate in crates:
+        if crate == "dear-imgui-sys":
+            continue
         env = env_base.copy()
         if crate != "dear-imgui-test-engine-sys":
             env[crate_skip_env[crate]] = "1"
@@ -222,29 +368,18 @@ def main() -> int:
             dest.write_text(header + content, encoding="utf-8")
         print(f"Updated pregenerated bindings: {dest}")
 
-    # Optionally generate wasm pregenerated bindings for dear-imgui-sys
+    # Optionally compile-check the explicit core WASM provider contract.
     if args.wasm:
-        xtask = repo_root / "xtask"
-        if not xtask.exists():
-            print("xtask workspace member not found; cannot generate wasm bindings", file=sys.stderr)
-            return 4
-        print(f"Generating wasm pregenerated bindings (import='{args.wasm_import}') via xtask...")
-        rc = run(["cargo", "run", "-p", "xtask", "--", "wasm-bindgen", args.wasm_import], cwd=str(repo_root), dry=args.dry_run)
-        if rc != 0:
-            return rc
         wasm_preg = crate_roots["dear-imgui-sys"] / "src" / "wasm_bindings_pregenerated.rs"
         if not wasm_preg.exists():
             print(f"WASM pregenerated bindings not found: {wasm_preg}", file=sys.stderr)
             return 5
         print(f"WASM pregenerated bindings ready: {wasm_preg}")
 
-        # Quick compile-check under wasm target (skip native C/C++)
-        print("Running cargo check for wasm32-unknown-unknown (skip native cc)...")
-        env = os.environ.copy()
-        env["IMGUI_SYS_SKIP_CC"] = "1"
+        print("Running cargo check for the explicit wasm32 provider feature...")
         rc = run([
             "cargo", "check", "-p", "dear-imgui-rs", "-F", "wasm", "--target", "wasm32-unknown-unknown"
-        ], cwd=str(repo_root), env=env, dry=args.dry_run)
+        ], cwd=str(repo_root), dry=args.dry_run)
         if rc != 0:
             return rc
 
@@ -280,9 +415,12 @@ def main() -> int:
                 return 7
             cmd = ext_to_cmd[ext]
             sys_crate = ext_to_sys_crate[ext]
-            print(f"Generating wasm pregenerated bindings for {sys_crate} (ext='{ext}', import='{args.wasm_import}') via xtask...")
+            print(
+                f"Generating wasm pregenerated bindings for {sys_crate} "
+                f"(ext='{ext}', provider='imgui-sys-v0') via xtask..."
+            )
             rc = run(
-                ["cargo", "run", "-p", "xtask", "--", cmd, args.wasm_import],
+                ["cargo", "run", "-p", "xtask", "--", cmd],
                 cwd=str(repo_root),
                 dry=args.dry_run,
             )

@@ -2580,7 +2580,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-build-support"
-version = "0.15.1"
+version = "0.15.2"
 dependencies = [
  "cc",
  "flate2",
@@ -8304,6 +8304,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bindgen",
+ "dear-imgui-build-support",
  "which",
  "xshell",
 ]

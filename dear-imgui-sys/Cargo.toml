@@ -30,6 +30,10 @@ exclude = [
     "third-party/cimgui/test/**",
 ]
 
+[package.metadata.dear-imgui-sources]
+cimgui-revision = "1261b231939fc210032f30c4ee8a8f0440372237"
+imgui-revision = "b61e56346a92cfcaf1f43a545ca37b0b32239654"
+
 # docs.rs configuration for offline builds
 [package.metadata.docs.rs]
 no-default-features = true
@@ -42,13 +46,13 @@ mint.workspace = true
 cfg-if.workspace = true
 flate2 = { version = "1", optional = true }
 tar = { version = "0.4", optional = true }
-build-support = { package = "dear-imgui-build-support", version = "0.15", path = "../tools/build-support", optional = true }
+build-support = { package = "dear-imgui-build-support", version = "0.15.2", path = "../tools/build-support", features = ["binding-spec"], optional = true }
 glam = { workspace = true, optional = true }
 
 [build-dependencies]
 bindgen = { workspace = true, optional = true }
 cc.workspace = true
-build-support = { package = "dear-imgui-build-support", version = "0.15", path = "../tools/build-support" }
+build-support = { package = "dear-imgui-build-support", version = "0.15.2", path = "../tools/build-support", features = ["binding-spec"] }
 
 [[bin]]
 name = "package"

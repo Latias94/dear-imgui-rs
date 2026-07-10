@@ -114,7 +114,8 @@ const _: [(); 4] = [(); std::mem::size_of::<ImWchar>()];
 // cimgui exposes typed vectors (e.g., ImVector_ImVec2) instead of a generic ImVector<T>.
 // The sys crate intentionally avoids adding higher-level helpers here.
 
-// cimgui C API avoids C++ ABI pitfalls; no MSVC-specific conversions are required.
+// Core cimgui calls use the C ABI. PlatformIO aggregate callbacks retain C++ ABI-sensitive
+// signatures, so repository-owned shims translate them to pointer/out-parameter callbacks.
 
 /// Whether this build linked the repository-owned PlatformIO aggregate ABI hook shim.
 pub const HAS_PLATFORM_IO_AGGREGATE_HOOKS: bool = cfg!(dear_imgui_rs_platform_io_hooks);
@@ -796,11 +797,22 @@ pub const HAS_FREETYPE: bool = true;
 pub const HAS_FREETYPE: bool = false;
 
 /// Check if WASM support is available
-#[cfg(feature = "wasm")]
+#[cfg(all(dear_imgui_rs_wasm_import_target, feature = "wasm"))]
 pub const HAS_WASM: bool = true;
 
-#[cfg(not(feature = "wasm"))]
+#[cfg(not(all(dear_imgui_rs_wasm_import_target, feature = "wasm")))]
 pub const HAS_WASM: bool = false;
+
+#[cfg(test)]
+mod target_contract_tests {
+    #[test]
+    fn wasm_availability_requires_the_build_selected_import_target() {
+        assert_eq!(
+            super::HAS_WASM,
+            cfg!(all(dear_imgui_rs_wasm_import_target, feature = "wasm"))
+        );
+    }
+}
 
 // (No wasm-specific shims are required when using shared memory import style.)
 

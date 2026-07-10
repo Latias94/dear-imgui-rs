@@ -69,8 +69,6 @@ jobs:
       - name: Build workspace (native)
         run: cargo build --workspace --exclude dear-imgui-examples --exclude dear-imgui-web-demo --exclude xtask
         env:
-          # Prefer CMake path on Windows (auto-detects VS/SDK)
-          IMGUI_SYS_USE_CMAKE: ${{ runner.os == 'Windows' && '1' || '' }}
           # Force building from source in CI for stability
           IMGUI_SYS_FORCE_BUILD: "1"
           IMPLOT_SYS_FORCE_BUILD: "1"
@@ -209,10 +207,10 @@ jobs:
         run: cargo +stable nextest run -p dear-imgui-bevy --features render,multi-viewport
 
       - name: Check Bevy backend wasm (core)
-        run: cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --no-default-features
+        run: cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --no-default-features --features wasm
 
       - name: Check Bevy backend wasm (render)
-        run: cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --features render
+        run: cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --features render,wasm
 
   windows-platform-io-abi:
     name: PlatformIO C++ ABI (MSVC ${{ matrix.crt }})
@@ -705,16 +703,35 @@ jobs:
       - name: Add wasm32 target
         run: rustup target add wasm32-unknown-unknown
 
-      - name: Generate pregenerated WASM bindings for dear-imgui-sys
-        run: cargo run -p xtask -- wasm-bindgen imgui-sys-v0
+      - name: Test shared binding and WASM target specification
+        run: |
+          # Resolver tests reject wasm32-wasip1/wasip2/emscripten without
+          # requiring those Rust standard-library targets to be installed.
+          cargo test -p dear-imgui-build-support --features binding-spec
+
+      - name: Verify source provenance and all core binding profiles
+        run: python3 tools/pre_publish_check.py --core-contract-only
+
+      - name: Require the explicit core WASM feature
+        shell: bash
+        run: |
+          if cargo check -p dear-imgui-sys --target wasm32-unknown-unknown; then
+            echo "dear-imgui-sys unexpectedly accepted wasm32 without feature 'wasm'" >&2
+            exit 1
+          fi
+          if cargo check -p dear-imgui-rs --target wasm32-unknown-unknown --features wasm,stack-layout; then
+            echo "dear-imgui-rs unexpectedly accepted wasm with native stack-layout" >&2
+            exit 1
+          fi
+          cargo check -p dear-imgui-rs --target wasm32-unknown-unknown --features wasm
 
       - name: Generate WASM bindings for extensions (ImPlot/ImPlot3D/ImNodes/ImGuizmo/ImGuIZMO.quat)
         run: |
-          cargo run -p xtask -- wasm-bindgen-implot imgui-sys-v0
-          cargo run -p xtask -- wasm-bindgen-implot3d imgui-sys-v0
-          cargo run -p xtask -- wasm-bindgen-imnodes imgui-sys-v0
-          cargo run -p xtask -- wasm-bindgen-imguizmo imgui-sys-v0
-          cargo run -p xtask -- wasm-bindgen-imguizmo-quat imgui-sys-v0
+          cargo run -p xtask -- wasm-bindgen-implot
+          cargo run -p xtask -- wasm-bindgen-implot3d
+          cargo run -p xtask -- wasm-bindgen-imnodes
+          cargo run -p xtask -- wasm-bindgen-imguizmo
+          cargo run -p xtask -- wasm-bindgen-imguizmo-quat
 
       - name: Build web demo crate for wasm32-unknown-unknown (core + extensions)
         run: cargo build -p dear-imgui-web-demo --target wasm32-unknown-unknown --no-default-features --features "web-backends,implot,implot3d,imnodes,imguizmo,imguizmo-quat"
