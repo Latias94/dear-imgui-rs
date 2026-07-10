@@ -1,48 +1,78 @@
-// Multi-viewport support (Renderer_* callbacks and helpers)
+//! Winit surface adapter for the shared Vulkan multi-viewport runtime.
 
-mod callbacks;
-mod frame_sync;
-mod registry;
-mod surface;
-mod swapchain;
-#[cfg(test)]
-mod tests;
-
-use super::*;
-
-use ash::{
-    khr::{surface as khr_surface, swapchain as khr_swapchain},
-    vk,
+use super::{
+    AshRenderer,
+    vulkan_viewport::{self, SurfaceAdapter, SurfaceCreateError},
 };
-use dear_imgui_rs::Context;
-use dear_imgui_rs::internal::RawCast;
-use dear_imgui_rs::platform_io::Viewport;
-use dear_imgui_rs::sys;
-use std::ffi::c_void;
-use std::sync::Mutex;
+use ash::vk;
+use dear_imgui_rs::{Context, platform_io::Viewport};
+use std::sync::Arc;
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::window::Window;
 
-pub use self::callbacks::{
-    renderer_create_window, renderer_create_window_sys, renderer_destroy_window,
-    renderer_destroy_window_sys, renderer_render_window, renderer_render_window_sys,
-    renderer_set_window_size, renderer_set_window_size_sys, renderer_swap_buffers,
-    renderer_swap_buffers_sys,
+pub use super::vulkan_viewport::{
+    CallbackOwnershipError, SurfaceSupportError, VulkanViewportConfig,
+    shutdown_multi_viewport_support,
 };
-use self::frame_sync::{FrameSync, create_command_pool, create_frame_syncs};
-pub(crate) use self::registry::clear_for_drop;
-pub use self::registry::{
-    CallbackOwnershipError, disable, enable, shutdown_multi_viewport_support,
-};
-use self::registry::{
-    GlobalHandles, borrow_renderer, global_handles, register_viewport_data, take_viewport_data,
-    viewport_user_data_mut,
-};
-#[cfg(test)]
-use self::registry::{remove_renderer_state_for_context, upsert_renderer_state};
-use self::surface::ViewportAshData;
-#[cfg(feature = "dynamic-rendering")]
-use self::swapchain::transition_swapchain_image;
-use self::swapchain::{
-    extent_from_window, pick_present_mode, pick_surface_format, recreate_swapchain,
-};
+
+struct WinitSurfaceAdapter;
+
+impl SurfaceAdapter for WinitSurfaceAdapter {
+    unsafe fn create_surface(
+        &self,
+        entry: &ash::Entry,
+        instance: &ash::Instance,
+        viewport: &mut Viewport,
+    ) -> Result<vk::SurfaceKHR, SurfaceCreateError> {
+        let window_ptr = viewport.platform_handle();
+        if window_ptr.is_null() {
+            return Err(SurfaceCreateError::MissingPlatformHandle);
+        }
+        let window = unsafe { &*(window_ptr as *const Window) };
+        let display = window
+            .display_handle()
+            .map_err(|_| SurfaceCreateError::DisplayHandleUnavailable)?;
+        let window_handle = window
+            .window_handle()
+            .map_err(|_| SurfaceCreateError::WindowHandleUnavailable)?;
+
+        unsafe {
+            ash_window::create_surface(
+                entry,
+                instance,
+                display.as_raw(),
+                window_handle.as_raw(),
+                None,
+            )
+            .map_err(Into::into)
+        }
+    }
+}
+
+/// Enable Vulkan multi-viewport rendering for a Winit platform backend.
+///
+/// # Safety
+///
+/// `renderer` must remain at a stable address until [`shutdown_multi_viewport_support`] returns.
+/// All viewport callbacks and renderer access must be serialized on the enabling thread; no other
+/// reference may access, reinitialize, shut down, move, or drop the renderer while a callback is
+/// executing. The context must use `dear-imgui-winit`, and every viewport platform handle must
+/// remain a live `winit::window::Window` until its renderer destroy callback runs. Call shutdown
+/// before dropping the context, renderer, platform backend/windows, Vulkan device, or instance,
+/// and do not replace any viewport's `RendererUserData` while support is active. Every Vulkan
+/// handle and queue family in `config` must satisfy [`VulkanViewportConfig`]'s device-lineage
+/// contract.
+pub unsafe fn enable(
+    renderer: &mut AshRenderer,
+    imgui_context: &mut Context,
+    config: VulkanViewportConfig,
+) -> Result<(), CallbackOwnershipError> {
+    unsafe {
+        vulkan_viewport::enable_with_adapter(
+            renderer,
+            imgui_context,
+            config,
+            Arc::new(WinitSurfaceAdapter),
+        )
+    }
+}

@@ -4,7 +4,6 @@ pub(super) struct FrameSync {
     pub(super) fence: vk::Fence,
     pub(super) command_buffer: vk::CommandBuffer,
     pub(super) image_available: vk::Semaphore,
-    pub(super) render_finished: vk::Semaphore,
 }
 
 pub(super) fn create_command_pool(
@@ -25,20 +24,10 @@ pub(super) fn create_frame_sync(
     let fence_info = vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
 
     let image_available = unsafe { device.create_semaphore(&semaphore_info, None)? };
-    let render_finished = match unsafe { device.create_semaphore(&semaphore_info, None) } {
-        Ok(render_finished) => render_finished,
-        Err(err) => {
-            unsafe { device.destroy_semaphore(image_available, None) };
-            return Err(err.into());
-        }
-    };
     let fence = match unsafe { device.create_fence(&fence_info, None) } {
         Ok(fence) => fence,
         Err(err) => {
-            unsafe {
-                device.destroy_semaphore(render_finished, None);
-                device.destroy_semaphore(image_available, None);
-            }
+            unsafe { device.destroy_semaphore(image_available, None) };
             return Err(err.into());
         }
     };
@@ -55,7 +44,6 @@ pub(super) fn create_frame_sync(
         Err(err) => {
             unsafe {
                 device.destroy_fence(fence, None);
-                device.destroy_semaphore(render_finished, None);
                 device.destroy_semaphore(image_available, None);
             }
             return Err(err.into());
@@ -64,7 +52,6 @@ pub(super) fn create_frame_sync(
     let Some(command_buffer) = command_buffers.pop() else {
         unsafe {
             device.destroy_fence(fence, None);
-            device.destroy_semaphore(render_finished, None);
             device.destroy_semaphore(image_available, None);
         }
         return Err(RendererError::Init(
@@ -76,7 +63,6 @@ pub(super) fn create_frame_sync(
         fence,
         command_buffer,
         image_available,
-        render_finished,
     })
 }
 
@@ -88,11 +74,42 @@ pub(super) fn destroy_frame_syncs(
     unsafe {
         for frame in frames {
             device.destroy_semaphore(frame.image_available, None);
-            device.destroy_semaphore(frame.render_finished, None);
             device.destroy_fence(frame.fence, None);
             device.free_command_buffers(command_pool, &[frame.command_buffer]);
         }
     }
+}
+
+pub(super) fn create_present_semaphores(
+    device: &Device,
+    count: usize,
+) -> RendererResult<Vec<vk::Semaphore>> {
+    let mut semaphores = Vec::with_capacity(count);
+    for _ in 0..count {
+        match unsafe { device.create_semaphore(&vk::SemaphoreCreateInfo::default(), None) } {
+            Ok(semaphore) => semaphores.push(semaphore),
+            Err(err) => {
+                destroy_present_semaphores(device, semaphores);
+                return Err(err.into());
+            }
+        }
+    }
+    Ok(semaphores)
+}
+
+pub(super) fn destroy_present_semaphores(device: &Device, semaphores: Vec<vk::Semaphore>) {
+    unsafe {
+        for semaphore in semaphores {
+            device.destroy_semaphore(semaphore, None);
+        }
+    }
+}
+
+pub(super) fn present_semaphore_for_image(
+    semaphores: &[vk::Semaphore],
+    image_index: u32,
+) -> Option<vk::Semaphore> {
+    semaphores.get(image_index as usize).copied()
 }
 
 pub(super) fn create_frame_syncs(
@@ -111,4 +128,15 @@ pub(super) fn create_frame_syncs(
         }
     }
     Ok(frames)
+}
+
+pub(super) fn replace_frame_sync(
+    device: &Device,
+    command_pool: vk::CommandPool,
+    frame: &mut FrameSync,
+) -> RendererResult<()> {
+    let replacement = create_frame_sync(device, command_pool)?;
+    let previous = std::mem::replace(frame, replacement);
+    destroy_frame_syncs(device, command_pool, vec![previous]);
+    Ok(())
 }

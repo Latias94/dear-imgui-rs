@@ -4,7 +4,25 @@ use super::*;
 pub(super) struct ViewportPipeline {
     pub(super) pipeline: vk::Pipeline,
     #[cfg(not(feature = "dynamic-rendering"))]
-    pub(super) render_pass: vk::RenderPass,
+    pub(super) clear_render_pass: vk::RenderPass,
+    #[cfg(not(feature = "dynamic-rendering"))]
+    pub(super) discard_render_pass: vk::RenderPass,
+}
+
+#[cfg(all(
+    any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"),
+    not(feature = "dynamic-rendering")
+))]
+impl ViewportPipeline {
+    pub(super) fn render_pass(&self, load_op: vk::AttachmentLoadOp) -> vk::RenderPass {
+        // Load ops do not affect render-pass compatibility, so both passes share one pipeline.
+        if load_op == vk::AttachmentLoadOp::DONT_CARE {
+            self.discard_render_pass
+        } else {
+            debug_assert_eq!(load_op, vk::AttachmentLoadOp::CLEAR);
+            self.clear_render_pass
+        }
+    }
 }
 
 #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
@@ -22,16 +40,17 @@ pub(super) fn is_srgb_format(format: vk::Format) -> bool {
 pub(super) fn create_viewport_render_pass(
     device: &Device,
     format: vk::Format,
+    load_op: vk::AttachmentLoadOp,
 ) -> RendererResult<vk::RenderPass> {
     let attachments = [vk::AttachmentDescription::default()
         .format(format)
         .samples(vk::SampleCountFlags::TYPE_1)
-        .load_op(vk::AttachmentLoadOp::CLEAR)
+        .load_op(load_op)
         .store_op(vk::AttachmentStoreOp::STORE)
         .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
         .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
-        // Swapchain images are in PRESENT_SRC_KHR when acquired.
-        .initial_layout(vk::ImageLayout::PRESENT_SRC_KHR)
+        // Swapchain contents are discarded for both CLEAR and DONT_CARE.
+        .initial_layout(vk::ImageLayout::UNDEFINED)
         .final_layout(vk::ImageLayout::PRESENT_SRC_KHR)];
 
     let color_attachment_refs = [vk::AttachmentReference::default()
@@ -56,4 +75,30 @@ pub(super) fn create_viewport_render_pass(
         .subpasses(&subpass)
         .dependencies(&dependencies);
     unsafe { Ok(device.create_render_pass(&rp_info, None)?) }
+}
+
+#[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+pub(super) fn viewport_attachment_load_op(flags: ViewportFlags) -> vk::AttachmentLoadOp {
+    if flags.contains(ViewportFlags::NO_RENDERER_CLEAR) {
+        vk::AttachmentLoadOp::DONT_CARE
+    } else {
+        vk::AttachmentLoadOp::CLEAR
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_renderer_clear_selects_discard_policy() {
+        assert_eq!(
+            viewport_attachment_load_op(ViewportFlags::empty()),
+            vk::AttachmentLoadOp::CLEAR
+        );
+        assert_eq!(
+            viewport_attachment_load_op(ViewportFlags::NO_RENDERER_CLEAR),
+            vk::AttachmentLoadOp::DONT_CARE
+        );
+    }
 }

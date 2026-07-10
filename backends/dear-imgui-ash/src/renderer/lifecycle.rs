@@ -14,10 +14,6 @@ impl AshRenderer {
         let mut flags = io.backend_flags();
         flags.insert(BackendFlags::RENDERER_HAS_VTX_OFFSET);
         flags.insert(BackendFlags::RENDERER_HAS_TEXTURES);
-        #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
-        {
-            flags.insert(BackendFlags::RENDERER_HAS_VIEWPORTS);
-        }
         io.set_backend_flags(flags);
 
         imgui_context
@@ -264,13 +260,28 @@ impl AshRenderer {
         };
 
         #[cfg(not(feature = "dynamic-rendering"))]
-        let render_pass = create_viewport_render_pass(&self.device, format)?;
+        let clear_render_pass =
+            create_viewport_render_pass(&self.device, format, vk::AttachmentLoadOp::CLEAR)?;
+        #[cfg(not(feature = "dynamic-rendering"))]
+        let discard_render_pass = match create_viewport_render_pass(
+            &self.device,
+            format,
+            vk::AttachmentLoadOp::DONT_CARE,
+        ) {
+            Ok(render_pass) => render_pass,
+            Err(err) => {
+                unsafe {
+                    self.device.destroy_render_pass(clear_render_pass, None);
+                }
+                return Err(err);
+            }
+        };
 
         let pipeline = match create_vulkan_pipeline(
             &self.device,
             self.pipeline_layout,
             #[cfg(not(feature = "dynamic-rendering"))]
-            render_pass,
+            clear_render_pass,
             #[cfg(feature = "dynamic-rendering")]
             DynamicRendering {
                 color_attachment_format: format,
@@ -282,7 +293,8 @@ impl AshRenderer {
             Err(err) => {
                 #[cfg(not(feature = "dynamic-rendering"))]
                 unsafe {
-                    self.device.destroy_render_pass(render_pass, None);
+                    self.device.destroy_render_pass(discard_render_pass, None);
+                    self.device.destroy_render_pass(clear_render_pass, None);
                 }
                 return Err(err);
             }
@@ -291,7 +303,9 @@ impl AshRenderer {
         let vp = ViewportPipeline {
             pipeline,
             #[cfg(not(feature = "dynamic-rendering"))]
-            render_pass,
+            clear_render_pass,
+            #[cfg(not(feature = "dynamic-rendering"))]
+            discard_render_pass,
         };
 
         self.viewport_pipelines.insert(format, vp);
@@ -316,19 +330,23 @@ impl AshRenderer {
         }
 
         unsafe {
-            #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+            #[cfg(all(
+                any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"),
+                not(all(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))
+            ))]
             {
                 // Ensure callbacks cannot reach this renderer during teardown.
-                #[cfg(feature = "multi-viewport-winit")]
-                multi_viewport::clear_for_drop(self as *mut _);
-                #[cfg(feature = "multi-viewport-sdl3")]
-                multi_viewport_sdl3::clear_for_drop(self as *mut _);
+                vulkan_viewport::clear_for_drop(self as *mut _);
 
                 let viewport_pipelines = std::mem::take(&mut self.viewport_pipelines);
                 for (_, vp) in viewport_pipelines {
                     self.device.destroy_pipeline(vp.pipeline, None);
                     #[cfg(not(feature = "dynamic-rendering"))]
-                    self.device.destroy_render_pass(vp.render_pass, None);
+                    {
+                        self.device
+                            .destroy_render_pass(vp.discard_render_pass, None);
+                        self.device.destroy_render_pass(vp.clear_render_pass, None);
+                    }
                 }
             }
 

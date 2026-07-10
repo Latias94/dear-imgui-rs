@@ -14,12 +14,13 @@
 //! - The ash renderer caches pipelines per swapchain format to handle per-viewport formats.
 
 use ash::{
+    Device, Entry, Instance,
     khr::{surface as khr_surface, swapchain as khr_swapchain},
-    vk, Device, Entry, Instance,
+    vk,
 };
-use dear_imgui_ash::{multi_viewport as ash_mvp, AshRenderer, Options as AshOptions};
+use dear_imgui_ash::{AshRenderer, Options as AshOptions, multi_viewport as ash_mvp};
 use dear_imgui_rs::{Condition, ConfigFlags, Context};
-use dear_imgui_winit::{multi_viewport as winit_mvp, HiDpiMode, WinitPlatform};
+use dear_imgui_winit::{HiDpiMode, WinitPlatform, multi_viewport as winit_mvp};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use std::{ffi::CString, sync::Arc, time::Instant};
 use tracing::{error, info};
@@ -124,6 +125,7 @@ struct SwapchainState {
     images: Vec<vk::Image>,
     image_views: Vec<vk::ImageView>,
     framebuffers: Vec<vk::Framebuffer>,
+    present_semaphores: Vec<vk::Semaphore>,
 }
 
 impl SwapchainState {
@@ -132,6 +134,22 @@ impl SwapchainState {
         window: &Window,
         render_pass: vk::RenderPass,
         surface_format: vk::SurfaceFormatKHR,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::new_with_old(
+            ctx,
+            window,
+            render_pass,
+            surface_format,
+            vk::SwapchainKHR::null(),
+        )
+    }
+
+    fn new_with_old(
+        ctx: &VulkanContext,
+        window: &Window,
+        render_pass: vk::RenderPass,
+        surface_format: vk::SurfaceFormatKHR,
+        old_swapchain: vk::SwapchainKHR,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let loader = khr_swapchain::Device::new(&ctx.instance, &ctx.device);
 
@@ -178,12 +196,42 @@ impl SwapchainState {
             .pre_transform(caps.current_transform)
             .composite_alpha(composite_alpha)
             .present_mode(present_mode)
-            .clipped(true);
+            .clipped(true)
+            .old_swapchain(old_swapchain);
 
         let swapchain = unsafe { loader.create_swapchain(&swapchain_create_info, None)? };
-        let images = unsafe { loader.get_swapchain_images(swapchain)? };
-        let image_views = create_image_views(&ctx.device, &images, surface_format.format)?;
-        let framebuffers = create_framebuffers(&ctx.device, render_pass, extent, &image_views)?;
+        let images = match unsafe { loader.get_swapchain_images(swapchain) } {
+            Ok(images) => images,
+            Err(error) => {
+                unsafe { loader.destroy_swapchain(swapchain, None) };
+                return Err(Box::new(error));
+            }
+        };
+        let image_views = match create_image_views(&ctx.device, &images, surface_format.format) {
+            Ok(image_views) => image_views,
+            Err(error) => {
+                unsafe { loader.destroy_swapchain(swapchain, None) };
+                return Err(error);
+            }
+        };
+        let framebuffers = match create_framebuffers(&ctx.device, render_pass, extent, &image_views)
+        {
+            Ok(framebuffers) => framebuffers,
+            Err(error) => {
+                destroy_image_views(&ctx.device, image_views);
+                unsafe { loader.destroy_swapchain(swapchain, None) };
+                return Err(error);
+            }
+        };
+        let present_semaphores = match create_present_semaphores(&ctx.device, images.len()) {
+            Ok(semaphores) => semaphores,
+            Err(error) => {
+                destroy_framebuffers(&ctx.device, framebuffers);
+                destroy_image_views(&ctx.device, image_views);
+                unsafe { loader.destroy_swapchain(swapchain, None) };
+                return Err(error);
+            }
+        };
 
         Ok(Self {
             loader,
@@ -193,7 +241,26 @@ impl SwapchainState {
             images,
             image_views,
             framebuffers,
+            present_semaphores,
         })
+    }
+
+    fn destroy_resources(&mut self, device: &Device) {
+        unsafe {
+            for framebuffer in self.framebuffers.drain(..) {
+                device.destroy_framebuffer(framebuffer, None);
+            }
+            for image_view in self.image_views.drain(..) {
+                device.destroy_image_view(image_view, None);
+            }
+            for semaphore in self.present_semaphores.drain(..) {
+                device.destroy_semaphore(semaphore, None);
+            }
+            if self.swapchain != vk::SwapchainKHR::null() {
+                self.loader.destroy_swapchain(self.swapchain, None);
+                self.swapchain = vk::SwapchainKHR::null();
+            }
+        }
     }
 
     fn recreate(
@@ -202,32 +269,24 @@ impl SwapchainState {
         window: &Window,
         render_pass: vk::RenderPass,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        unsafe {
-            let _ = ctx.device.device_wait_idle();
-            for fb in self.framebuffers.drain(..) {
-                ctx.device.destroy_framebuffer(fb, None);
-            }
-            for v in self.image_views.drain(..) {
-                ctx.device.destroy_image_view(v, None);
-            }
-            self.loader.destroy_swapchain(self.swapchain, None);
-        }
-
+        unsafe { ctx.device.device_wait_idle()? };
         let new_format = pick_surface_format(ctx, window)?;
-        *self = Self::new(ctx, window, render_pass, new_format)?;
+        let replacement =
+            match Self::new_with_old(ctx, window, render_pass, new_format, self.swapchain) {
+                Ok(replacement) => replacement,
+                Err(error) => {
+                    self.destroy_resources(&ctx.device);
+                    return Err(error);
+                }
+            };
+        let mut previous = std::mem::replace(self, replacement);
+        previous.destroy_resources(&ctx.device);
         Ok(())
-    }
-}
-
-impl Drop for SwapchainState {
-    fn drop(&mut self) {
-        // Resources are destroyed by VulkanContext drop (device idle), but keep local cleanup too.
     }
 }
 
 struct FrameSync {
     image_available: vk::Semaphore,
-    render_finished: vk::Semaphore,
     fence: vk::Fence,
     command_buffer: vk::CommandBuffer,
 }
@@ -246,23 +305,8 @@ impl Drop for VulkanState {
     fn drop(&mut self) {
         unsafe {
             let _ = self.ctx.device.device_wait_idle();
-            for f in self.frames.drain(..) {
-                self.ctx.device.destroy_semaphore(f.image_available, None);
-                self.ctx.device.destroy_semaphore(f.render_finished, None);
-                self.ctx.device.destroy_fence(f.fence, None);
-                self.ctx
-                    .device
-                    .free_command_buffers(self.ctx.command_pool, &[f.command_buffer]);
-            }
-            for fb in self.swapchain.framebuffers.drain(..) {
-                self.ctx.device.destroy_framebuffer(fb, None);
-            }
-            for v in self.swapchain.image_views.drain(..) {
-                self.ctx.device.destroy_image_view(v, None);
-            }
-            self.swapchain
-                .loader
-                .destroy_swapchain(self.swapchain.swapchain, None);
+            destroy_frame_syncs(&self.ctx.device, self.ctx.command_pool, &mut self.frames);
+            self.swapchain.destroy_resources(&self.ctx.device);
             self.ctx.device.destroy_render_pass(self.render_pass, None);
         }
     }
@@ -277,11 +321,58 @@ struct ImguiState {
     last_frame: Instant,
 }
 
+struct WinitViewportBackendGuard {
+    context: Option<Context>,
+    active: bool,
+}
+
+impl WinitViewportBackendGuard {
+    fn new(context: Context) -> Self {
+        Self {
+            context: Some(context),
+            active: false,
+        }
+    }
+
+    fn context_mut(&mut self) -> &mut Context {
+        self.context
+            .as_mut()
+            .expect("viewport backend guard must own its context")
+    }
+
+    fn init(&mut self, window: &Window) {
+        winit_mvp::init_multi_viewport_support(self.context_mut(), window);
+        self.active = true;
+    }
+
+    fn into_parts(mut self) -> (Context, bool) {
+        let active = self.active;
+        self.active = false;
+        let context = self
+            .context
+            .take()
+            .expect("viewport backend guard must own its context");
+        (context, active)
+    }
+}
+
+impl Drop for WinitViewportBackendGuard {
+    fn drop(&mut self) {
+        if self.active {
+            if let Some(context) = self.context.as_mut() {
+                let _ = winit_mvp::shutdown_multi_viewport_support(context);
+            }
+        }
+    }
+}
+
 struct AppWindow {
-    window: Arc<Window>,
     enable_viewports: bool,
+    platform_backend_active: bool,
     imgui: ImguiState,
     vk: VulkanState,
+    // Keep the platform window alive until renderer, swapchains, and surfaces have been dropped.
+    window: Arc<Window>,
 }
 
 impl Drop for AppWindow {
@@ -289,14 +380,18 @@ impl Drop for AppWindow {
         // Avoid shutdown assertions by ensuring platform windows are destroyed before the context
         // and renderer are dropped.
         if self.enable_viewports {
-            winit_mvp::shutdown_multi_viewport_support(&mut self.imgui.context);
+            let _ = ash_mvp::shutdown_multi_viewport_support(&mut self.imgui.context);
+        }
+        if self.platform_backend_active {
+            let _ = winit_mvp::shutdown_multi_viewport_support(&mut self.imgui.context);
+            self.platform_backend_active = false;
         }
     }
 }
 
 #[derive(Default)]
 struct App {
-    window: Option<AppWindow>,
+    window: Option<Box<AppWindow>>,
 }
 
 impl AppWindow {
@@ -338,9 +433,10 @@ impl AppWindow {
         let mut platform = WinitPlatform::new(&mut imgui);
         platform.attach_window(&window, HiDpiMode::Default, &mut imgui);
 
+        let mut platform_backend = WinitViewportBackendGuard::new(imgui);
         if enable_viewports {
             // Install platform (winit) viewport handlers (required by Dear ImGui).
-            winit_mvp::init_multi_viewport_support(&mut imgui, &window);
+            platform_backend.init(&window);
         }
 
         let framebuffer_srgb = is_srgb_format(swapchain.surface_format.format);
@@ -351,7 +447,7 @@ impl AppWindow {
             ctx.queue,
             ctx.command_pool,
             render_pass,
-            &mut imgui,
+            platform_backend.context_mut(),
             Some(AshOptions {
                 in_flight_frames: FRAMES_IN_FLIGHT,
                 framebuffer_srgb,
@@ -360,14 +456,14 @@ impl AppWindow {
         )?;
         renderer.set_viewport_clear_color([0.1, 0.12, 0.15, 1.0]);
 
-        let frames = (0..FRAMES_IN_FLIGHT)
-            .map(|_| create_frame_sync(&ctx.device, ctx.command_pool))
-            .collect::<Result<Vec<_>, _>>()?;
+        let frames = create_frame_syncs(&ctx.device, ctx.command_pool, FRAMES_IN_FLIGHT)?;
         let images_in_flight = vec![vk::Fence::null(); swapchain.images.len()];
+        let (imgui, platform_backend_active) = platform_backend.into_parts();
 
         Ok(Self {
             window,
             enable_viewports,
+            platform_backend_active,
             imgui: ImguiState {
                 context: imgui,
                 platform,
@@ -396,6 +492,10 @@ impl AppWindow {
     }
 
     fn render(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let window_size = self.window.inner_size();
+        if window_size.width == 0 || window_size.height == 0 {
+            return Ok(());
+        }
         if self.vk.swapchain_dirty {
             self.vk
                 .swapchain
@@ -466,14 +566,16 @@ impl AppWindow {
             )
         };
 
-        let (image_index, _suboptimal) = match acquire {
+        let (image_index, suboptimal) = match acquire {
             Ok(v) => v,
-            Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+            Err(vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR) => {
                 self.vk.swapchain_dirty = true;
                 return Ok(());
             }
             Err(e) => return Err(Box::new(e)),
         };
+        self.vk.swapchain_dirty |= suboptimal;
+        let present_semaphore = self.vk.swapchain.present_semaphores[image_index as usize];
 
         if self.vk.images_in_flight[image_index as usize] != vk::Fence::null() {
             unsafe {
@@ -509,7 +611,7 @@ impl AppWindow {
             .wait_semaphores(std::slice::from_ref(&frame.image_available))
             .wait_dst_stage_mask(&wait_stages)
             .command_buffers(std::slice::from_ref(&frame.command_buffer))
-            .signal_semaphores(std::slice::from_ref(&frame.render_finished));
+            .signal_semaphores(std::slice::from_ref(&present_semaphore));
 
         unsafe {
             self.vk.ctx.device.queue_submit(
@@ -520,7 +622,7 @@ impl AppWindow {
         }
 
         let present_info = vk::PresentInfoKHR::default()
-            .wait_semaphores(std::slice::from_ref(&frame.render_finished))
+            .wait_semaphores(std::slice::from_ref(&present_semaphore))
             .swapchains(std::slice::from_ref(&self.vk.swapchain.swapchain))
             .image_indices(std::slice::from_ref(&image_index));
 
@@ -531,7 +633,7 @@ impl AppWindow {
                 .queue_present(self.vk.ctx.queue, &present_info)
         };
         match present {
-            Ok(_) => {}
+            Ok(suboptimal) => self.vk.swapchain_dirty |= suboptimal,
             Err(vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR) => {
                 self.vk.swapchain_dirty = true;
             }
@@ -556,21 +658,27 @@ impl ApplicationHandler for App {
             Ok(win) => {
                 // Place the window struct first so its address is stable.
                 win.window.request_redraw();
-                self.window = Some(win);
+                self.window = Some(Box::new(win));
 
                 // Now that AppWindow is in its final place, (re)install renderer callbacks.
                 if let Some(app) = self.window.as_mut() {
                     if app.enable_viewports {
-                        if let Err(err) = ash_mvp::enable(
-                            &mut app.imgui.renderer,
-                            &mut app.imgui.context,
-                            app.vk.ctx.entry.clone(),
-                            app.vk.ctx.instance.clone(),
-                            app.vk.ctx.physical_device,
-                            app.vk.ctx.queue,
-                            app.vk.ctx.queue_family_index,
-                            app.vk.ctx.queue_family_index,
-                        ) {
+                        let result = unsafe {
+                            ash_mvp::enable(
+                                &mut app.imgui.renderer,
+                                &mut app.imgui.context,
+                                ash_mvp::VulkanViewportConfig {
+                                    entry: app.vk.ctx.entry.clone(),
+                                    instance: app.vk.ctx.instance.clone(),
+                                    physical_device: app.vk.ctx.physical_device,
+                                    validation_surface: app.vk.ctx.surface,
+                                    present_queue: app.vk.ctx.queue,
+                                    graphics_queue_family_index: app.vk.ctx.queue_family_index,
+                                    present_queue_family_index: app.vk.ctx.queue_family_index,
+                                },
+                            )
+                        };
+                        if let Err(err) = result {
                             error!("Failed to enable Ash multi-viewport rendering: {err}");
                             event_loop.exit();
                         }
@@ -767,7 +875,7 @@ fn create_image_views(
 ) -> Result<Vec<vk::ImageView>, Box<dyn std::error::Error>> {
     let mut views = Vec::with_capacity(images.len());
     for &image in images {
-        let view = unsafe {
+        let view = match unsafe {
             device.create_image_view(
                 &vk::ImageViewCreateInfo::default()
                     .image(image)
@@ -781,11 +889,25 @@ fn create_image_views(
                         layer_count: 1,
                     }),
                 None,
-            )?
+            )
+        } {
+            Ok(view) => view,
+            Err(error) => {
+                destroy_image_views(device, views);
+                return Err(Box::new(error));
+            }
         };
         views.push(view);
     }
     Ok(views)
+}
+
+fn destroy_image_views(device: &Device, image_views: Vec<vk::ImageView>) {
+    unsafe {
+        for image_view in image_views {
+            device.destroy_image_view(image_view, None);
+        }
+    }
 }
 
 fn create_render_pass(
@@ -838,7 +960,7 @@ fn create_framebuffers(
 ) -> Result<Vec<vk::Framebuffer>, Box<dyn std::error::Error>> {
     let mut framebuffers = Vec::with_capacity(image_views.len());
     for &view in image_views {
-        let fb = unsafe {
+        let framebuffer = match unsafe {
             device.create_framebuffer(
                 &vk::FramebufferCreateInfo::default()
                     .render_pass(render_pass)
@@ -847,11 +969,46 @@ fn create_framebuffers(
                     .height(extent.height)
                     .layers(1),
                 None,
-            )?
+            )
+        } {
+            Ok(framebuffer) => framebuffer,
+            Err(error) => {
+                destroy_framebuffers(device, framebuffers);
+                return Err(Box::new(error));
+            }
         };
-        framebuffers.push(fb);
+        framebuffers.push(framebuffer);
     }
     Ok(framebuffers)
+}
+
+fn destroy_framebuffers(device: &Device, framebuffers: Vec<vk::Framebuffer>) {
+    unsafe {
+        for framebuffer in framebuffers {
+            device.destroy_framebuffer(framebuffer, None);
+        }
+    }
+}
+
+fn create_present_semaphores(
+    device: &Device,
+    count: usize,
+) -> Result<Vec<vk::Semaphore>, Box<dyn std::error::Error>> {
+    let mut semaphores = Vec::with_capacity(count);
+    for _ in 0..count {
+        match unsafe { device.create_semaphore(&vk::SemaphoreCreateInfo::default(), None) } {
+            Ok(semaphore) => semaphores.push(semaphore),
+            Err(error) => {
+                unsafe {
+                    for semaphore in semaphores {
+                        device.destroy_semaphore(semaphore, None);
+                    }
+                }
+                return Err(Box::new(error));
+            }
+        }
+    }
+    Ok(semaphores)
 }
 
 fn create_frame_sync(
@@ -862,24 +1019,69 @@ fn create_frame_sync(
     let fence_info = vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
 
     let image_available = unsafe { device.create_semaphore(&semaphore_info, None)? };
-    let render_finished = unsafe { device.create_semaphore(&semaphore_info, None)? };
-    let fence = unsafe { device.create_fence(&fence_info, None)? };
+    let fence = match unsafe { device.create_fence(&fence_info, None) } {
+        Ok(fence) => fence,
+        Err(error) => {
+            unsafe { device.destroy_semaphore(image_available, None) };
+            return Err(Box::new(error));
+        }
+    };
 
-    let command_buffer = unsafe {
+    let command_buffer = match unsafe {
         device.allocate_command_buffers(
             &vk::CommandBufferAllocateInfo::default()
                 .command_pool(command_pool)
                 .level(vk::CommandBufferLevel::PRIMARY)
                 .command_buffer_count(1),
-        )?[0]
+        )
+    } {
+        Ok(command_buffers) => command_buffers[0],
+        Err(error) => {
+            unsafe {
+                device.destroy_fence(fence, None);
+                device.destroy_semaphore(image_available, None);
+            }
+            return Err(Box::new(error));
+        }
     };
 
     Ok(FrameSync {
         image_available,
-        render_finished,
         fence,
         command_buffer,
     })
+}
+
+fn create_frame_syncs(
+    device: &Device,
+    command_pool: vk::CommandPool,
+    count: usize,
+) -> Result<Vec<FrameSync>, Box<dyn std::error::Error>> {
+    let mut frames = Vec::with_capacity(count);
+    for _ in 0..count {
+        match create_frame_sync(device, command_pool) {
+            Ok(frame) => frames.push(frame),
+            Err(error) => {
+                destroy_frame_syncs(device, command_pool, &mut frames);
+                return Err(error);
+            }
+        }
+    }
+    Ok(frames)
+}
+
+fn destroy_frame_syncs(
+    device: &Device,
+    command_pool: vk::CommandPool,
+    frames: &mut Vec<FrameSync>,
+) {
+    unsafe {
+        for frame in frames.drain(..) {
+            device.destroy_semaphore(frame.image_available, None);
+            device.destroy_fence(frame.fence, None);
+            device.free_command_buffers(command_pool, &[frame.command_buffer]);
+        }
+    }
 }
 
 fn record_command_buffer<F>(
