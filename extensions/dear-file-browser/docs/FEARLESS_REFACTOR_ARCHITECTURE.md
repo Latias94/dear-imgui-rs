@@ -86,10 +86,10 @@ Parity status note (2026-02-07, non-C-API scope):
    - Enable multiple dialogs concurrently without singleton global state.
 4. **Explicit extension points**
    - Custom panes, file styles, filesystem backends, thumbnails, places persistence.
-5. **Feature-gated complexity**
-   - Regex parsing, thumbnail decoding, async scanning should be optional cargo features.
+5. **Capability-gated complexity**
+   - Regex parsing and thumbnail decoding use Cargo features; worker scanning requires an explicit thread-safe filesystem capability.
 6. **Performance by design**
-   - Caching, incremental scanning, and an "asynchronous enumeration" path.
+   - Cached projection plus bounded background enumeration on native targets.
 
 Non-goals (for early phases):
 
@@ -429,19 +429,19 @@ partial batches, bounded per-frame work, observability) is documented in:
 
 ### 15.1 Directory enumeration
 
-Baseline:
+Implemented baseline:
 
-- keep a cached snapshot of `Vec<FileMeta>` for current dir
+- stream raw entries through `FileSystem::visit_dir`
+- use a bounded native worker channel for `ScanPolicy::Background`
+- keep a cached snapshot for the current directory
 - recompute only on:
   - dir changed
   - refresh requested
   - show_hidden toggled (could be a filtered view instead)
 
-Advanced (optional):
-
-- background enumeration / incremental fill:
-  - return partial results to keep UI responsive
-  - ensure deterministic ordering by sorting once complete (or stable insert)
+- apply at most the configured number of batches per UI tick
+- reject stale batches by generation after cooperative cancellation
+- run scan hooks and projection on the UI thread
 
 ### 15.2 Large directories
 

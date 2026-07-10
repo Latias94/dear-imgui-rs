@@ -112,12 +112,12 @@ See `docs/IGFD_SOURCE_REFERENCE_MAP.md` for a practical function map.
 
 ## Post-Parity Backlog (P2)
 
-- Published: `docs/FEARLESS_REFACTOR_P2_PERF_ASYNC_DESIGN.md` (ScanCoordinator/ScanRuntime + generation-safe incremental scanning model).
-- Completed: Stage A scaffolding (`ScanPolicy`, `ScanRequest`, `ScanBatch`, `ScanStatus`) and generation-owned sync scan flow in `FileDialogCore`.
-- Completed: Stage B runtime abstraction (`ScanRuntime` with `SyncRuntime`/`WorkerRuntime`) and stale-generation supersession behavior.
-- Completed: Stage C bounded per-frame batch apply + incremental selection reconciliation stability.
+- Published: `docs/FEARLESS_REFACTOR_P2_PERF_ASYNC_DESIGN.md` (state-owned filesystem capabilities and the native worker lifecycle).
+- Completed: streaming, cancellable `FileSystem::visit_dir` boundary.
+- Completed: native bounded-channel background runtime with latest-request coalescing and non-blocking teardown.
+- Completed: bounded per-frame batch apply + partial selection reconciliation stability.
 - Completed: Stage D tracing metrics/events (`scan.requested`, `scan.batch_applied`, `scan.completed`, `scan.dropped_stale_batch`, `projector.rebuild`).
-- Completed: Stage D synthetic baseline tests for `10k/50k` entries (`docs/P2_PERF_BASELINE_2026-02-06.md`).
-- Completed: Stage E policy tuning (`max_batches_per_tick` + tuned presets + sweep baseline).
+- Completed: channel/condition-variable regression coverage for non-blocking submit, cancellation, and teardown.
+- Completed: truthful `Blocking`/`Background` policy split and tuned background preset.
 - Next: publish migration snippets and extend benchmark matrix (batch size + mixed metadata).
 - Continue UX polish and migration snippets without changing parity guarantees.

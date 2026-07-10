@@ -5,7 +5,6 @@ use crate::custom_pane::{CustomPane, CustomPaneCtx};
 use crate::dialog_core::{ConfirmGate, CoreEvent};
 use crate::dialog_state::CustomPaneDock;
 use crate::dialog_state::{FileDialogState, FileListViewMode};
-use crate::fs::{FileSystem, StdFileSystem};
 use crate::thumbnails::ThumbnailBackend;
 use dear_imgui_rs::Ui;
 use dear_imgui_rs::input::MouseCursor;
@@ -117,25 +116,22 @@ impl<'ui> FileBrowser<'ui> {
         &self,
         state: &mut FileDialogState,
     ) -> Option<Result<Selection, FileDialogError>> {
-        self.draw_contents_with(state, &StdFileSystem, None, None)
+        self.draw_contents_with(state, None, None)
     }
 
     /// Draw only the contents of the file browser (no window/modal host) with explicit hooks.
     ///
-    /// - `fs`: filesystem backend used by core operations.
     /// - `custom_pane`: optional custom pane that can render extra UI and block confirm.
     /// - `thumbnails_backend`: optional backend for thumbnail decode/upload lifecycle.
     pub fn draw_contents_with(
         &self,
         state: &mut FileDialogState,
-        fs: &dyn FileSystem,
         mut custom_pane: Option<&mut dyn CustomPane>,
         mut thumbnails_backend: Option<&mut ThumbnailBackend<'_>>,
     ) -> Option<Result<Selection, FileDialogError>> {
-        draw_contents_with_fs_and_hooks(
+        draw_contents_with_hooks(
             self.ui,
             state,
-            fs,
             custom_pane.take(),
             thumbnails_backend.take(),
         )
@@ -155,7 +151,7 @@ impl<'ui> FileBrowser<'ui> {
         state: &mut FileDialogState,
         cfg: &WindowHostConfig,
     ) -> Option<Result<Selection, FileDialogError>> {
-        self.show_windowed_with(state, cfg, &StdFileSystem, None, None)
+        self.show_windowed_with(state, cfg, None, None)
     }
 
     /// Draw the file browser in a standard ImGui window with explicit hooks.
@@ -163,7 +159,6 @@ impl<'ui> FileBrowser<'ui> {
         &self,
         state: &mut FileDialogState,
         cfg: &WindowHostConfig,
-        fs: &dyn FileSystem,
         mut custom_pane: Option<&mut dyn CustomPane>,
         mut thumbnails_backend: Option<&mut ThumbnailBackend<'_>>,
     ) -> Option<Result<Selection, FileDialogError>> {
@@ -182,10 +177,9 @@ impl<'ui> FileBrowser<'ui> {
             window = window.size_constraints(min_size, max_size);
         }
         window.build(|| {
-            out = draw_contents_with_fs_and_hooks(
+            out = draw_contents_with_hooks(
                 self.ui,
                 state,
-                fs,
                 custom_pane.take(),
                 thumbnails_backend.take(),
             );
@@ -200,7 +194,7 @@ impl<'ui> FileBrowser<'ui> {
         state: &mut FileDialogState,
     ) -> Option<Result<Selection, FileDialogError>> {
         let cfg = ModalHostConfig::for_mode(state.core.mode);
-        self.show_modal_with(state, &cfg, &StdFileSystem, None, None)
+        self.show_modal_with(state, &cfg, None, None)
     }
 
     /// Draw the file browser in an ImGui modal popup with explicit hooks.
@@ -208,7 +202,6 @@ impl<'ui> FileBrowser<'ui> {
         &self,
         state: &mut FileDialogState,
         cfg: &ModalHostConfig,
-        fs: &dyn FileSystem,
         mut custom_pane: Option<&mut dyn CustomPane>,
         mut thumbnails_backend: Option<&mut ThumbnailBackend<'_>>,
     ) -> Option<Result<Selection, FileDialogError>> {
@@ -248,10 +241,9 @@ impl<'ui> FileBrowser<'ui> {
             return None;
         };
 
-        let out = draw_contents_with_fs_and_hooks(
+        let out = draw_contents_with_hooks(
             self.ui,
             state,
-            fs,
             custom_pane.take(),
             thumbnails_backend.take(),
         );
@@ -292,10 +284,9 @@ fn resolve_host_size_constraints(
     Some((min, max))
 }
 
-fn draw_contents_with_fs_and_hooks(
+fn draw_contents_with_hooks(
     ui: &Ui,
     state: &mut FileDialogState,
-    fs: &dyn FileSystem,
     mut custom_pane: Option<&mut dyn CustomPane>,
     mut thumbnails_backend: Option<&mut ThumbnailBackend<'_>>,
 ) -> Option<Result<Selection, FileDialogError>> {
@@ -312,7 +303,7 @@ fn draw_contents_with_fs_and_hooks(
     let mut request_confirm = false;
     let mut confirm_gate = ConfirmGate::default();
 
-    header::draw_chrome(ui, state, fs, has_thumbnail_backend);
+    header::draw_chrome(ui, state, has_thumbnail_backend);
 
     // Content region
     let avail = ui.content_region_avail();
@@ -377,7 +368,6 @@ fn draw_contents_with_fs_and_hooks(
                                 ui,
                                 state,
                                 [inner[0], inner[1]],
-                                fs,
                                 &mut request_confirm,
                                 thumbnails_backend.as_deref_mut(),
                             );
@@ -402,7 +392,6 @@ fn draw_contents_with_fs_and_hooks(
                                     ui,
                                     state,
                                     [inner[0], table_h],
-                                    fs,
                                     &mut request_confirm,
                                     thumbnails_backend.as_deref_mut(),
                                 );
@@ -456,7 +445,6 @@ fn draw_contents_with_fs_and_hooks(
                                             ui,
                                             state,
                                             [table_w, inner[1]],
-                                            fs,
                                             &mut request_confirm,
                                             thumbnails_backend.as_deref_mut(),
                                         );
@@ -518,7 +506,6 @@ fn draw_contents_with_fs_and_hooks(
                                 ui,
                                 state,
                                 [inner[0], inner[1]],
-                                fs,
                                 &mut request_confirm,
                                 thumbnails_backend.as_deref_mut(),
                             );
@@ -543,7 +530,6 @@ fn draw_contents_with_fs_and_hooks(
                                     ui,
                                     state,
                                     [inner[0], table_h],
-                                    fs,
                                     &mut request_confirm,
                                     thumbnails_backend.as_deref_mut(),
                                 );
@@ -597,7 +583,6 @@ fn draw_contents_with_fs_and_hooks(
                                             ui,
                                             state,
                                             [table_w, inner[1]],
-                                            fs,
                                             &mut request_confirm,
                                             thumbnails_backend.as_deref_mut(),
                                         );
@@ -661,7 +646,6 @@ fn draw_contents_with_fs_and_hooks(
                             ui,
                             state,
                             [inner[0], inner[1]],
-                            fs,
                             &mut request_confirm,
                             thumbnails_backend.as_deref_mut(),
                         );
@@ -686,7 +670,6 @@ fn draw_contents_with_fs_and_hooks(
                                 ui,
                                 state,
                                 [inner[0], table_h],
-                                fs,
                                 &mut request_confirm,
                                 thumbnails_backend.as_deref_mut(),
                             );
@@ -740,7 +723,6 @@ fn draw_contents_with_fs_and_hooks(
                                         ui,
                                         state,
                                         [table_w, inner[1]],
-                                        fs,
                                         &mut request_confirm,
                                         thumbnails_backend.as_deref_mut(),
                                     );
@@ -792,7 +774,7 @@ fn draw_contents_with_fs_and_hooks(
     }
 
     // IGFD-style quick path selection popup (opened from breadcrumb separators).
-    if let Some(p) = igfd_path_popup::draw_igfd_path_popup(ui, state, fs, [avail[0], content_h]) {
+    if let Some(p) = igfd_path_popup::draw_igfd_path_popup(ui, state, [avail[0], content_h]) {
         let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
     }
 
@@ -801,13 +783,13 @@ fn draw_contents_with_fs_and_hooks(
     popups::draw_options_popup(ui, state, has_thumbnail_backend);
 
     places::draw_places_io_modal(ui, state);
-    places::draw_places_edit_modal(ui, state, fs);
-    popups::draw_new_folder_modal(ui, state, fs);
-    popups::draw_rename_modal(ui, state, fs);
-    popups::draw_delete_confirm_modal(ui, state, fs);
-    popups::draw_paste_conflict_modal(ui, state, fs);
+    places::draw_places_edit_modal(ui, state);
+    popups::draw_new_folder_modal(ui, state);
+    popups::draw_rename_modal(ui, state);
+    popups::draw_delete_confirm_modal(ui, state);
+    popups::draw_paste_conflict_modal(ui, state);
 
-    footer::draw_footer(ui, state, fs, &confirm_gate, &mut request_confirm);
+    footer::draw_footer(ui, state, &confirm_gate, &mut request_confirm);
 
     let out = state.core.take_result();
     if out.is_some() {
@@ -863,7 +845,7 @@ mod tests {
         FileDialogState, FileListColumnWeightOverrides, FileListColumnsConfig, FileListDataColumn,
         FileListViewMode,
     };
-    use crate::fs::{FileSystem, FsEntry, FsMetadata};
+    use crate::fs::{FileSystem, FsEntry, FsMetadata, ScanVisit};
     use dear_imgui_rs::TableColumnIndex;
     use std::path::{Path, PathBuf};
 
@@ -911,8 +893,17 @@ mod tests {
     }
 
     impl FileSystem for UiTestFs {
-        fn read_dir(&self, _dir: &Path) -> std::io::Result<Vec<FsEntry>> {
-            Ok(self.entries.clone())
+        fn visit_dir(
+            &self,
+            _dir: &Path,
+            visit: &mut dyn FnMut(FsEntry) -> ScanVisit,
+        ) -> std::io::Result<()> {
+            for entry in self.entries.iter().cloned() {
+                if matches!(visit(entry), ScanVisit::Stop) {
+                    break;
+                }
+            }
+            Ok(())
         }
 
         fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {

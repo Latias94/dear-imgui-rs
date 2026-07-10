@@ -352,6 +352,12 @@ pub enum FileDialogError {
     /// Requested operation unsupported by the chosen backend
     #[error("unsupported operation for backend")]
     Unsupported,
+    /// Background scanning is unavailable for the current target.
+    #[error("background scanning is unsupported on this target")]
+    BackgroundScanUnsupported,
+    /// Background scanning requires a shared, thread-safe filesystem capability.
+    #[error("background scanning requires Arc<dyn FileSystem + Send + Sync>")]
+    BackgroundScanRequiresThreadSafeFileSystem,
     /// Invalid or non-existing path requested
     #[error("invalid path: {0}")]
     InvalidPath(String),

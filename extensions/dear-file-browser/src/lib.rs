@@ -32,6 +32,8 @@ mod native;
 #[cfg(feature = "imgui")]
 mod places;
 #[cfg(feature = "imgui")]
+mod scan;
+#[cfg(feature = "imgui")]
 mod thumbnails;
 #[cfg(feature = "thumbnails-image")]
 mod thumbnails_image;
@@ -47,8 +49,7 @@ pub use custom_pane::{CustomPane, CustomPaneCtx};
 #[cfg(feature = "imgui")]
 pub use dialog_core::{
     ConfirmGate, CoreEvent, CoreEventOutcome, DirSnapshot, EntryId, FileDialogCore, FileMeta,
-    Modifiers, ScanBatch, ScanBatchKind, ScanGeneration, ScanHookAction, ScanPolicy, ScanRequest,
-    ScanStatus,
+    Modifiers, ScanGeneration, ScanHookAction, ScanPolicy, ScanStatus,
 };
 #[cfg(feature = "imgui")]
 pub use dialog_manager::{DialogId, DialogManager};
@@ -67,7 +68,7 @@ pub use file_style::FileStyleCallback;
 #[cfg(feature = "imgui")]
 pub use file_style::{EntryKind, FileStyle, FileStyleRegistry, StyleMatcher, StyleRule};
 #[cfg(feature = "imgui")]
-pub use fs::{FileSystem, FsEntry, FsMetadata, StdFileSystem};
+pub use fs::{FileSystem, FsEntry, FsMetadata, ScanVisit, StdFileSystem};
 #[cfg(feature = "imgui")]
 pub use places::{
     Place, PlaceGroup, PlaceOrigin, Places, PlacesDeserializeError, PlacesMergeOptions,

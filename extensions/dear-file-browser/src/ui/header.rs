@@ -6,7 +6,6 @@ use crate::dialog_core::CoreEvent;
 use crate::dialog_state::{
     FileDialogState, FileListViewMode, HeaderStyle, PathBarStyle, ToolbarDensity, ToolbarIconMode,
 };
-use crate::fs::FileSystem;
 use crate::places::Places;
 
 use super::{apply_file_list_view_from_ui, path_bar};
@@ -65,12 +64,7 @@ fn toolbar_toggle_button(
     toolbar_button(ui, id, text, icon, mode, show_tooltips, tooltip)
 }
 
-pub(super) fn draw_chrome(
-    ui: &Ui,
-    state: &mut FileDialogState,
-    fs: &dyn FileSystem,
-    has_thumbnail_backend: bool,
-) {
+pub(super) fn draw_chrome(ui: &Ui, state: &mut FileDialogState, has_thumbnail_backend: bool) {
     let show_tooltips = state.ui.config.toolbar.show_tooltips;
     let icon_mode = state.ui.config.toolbar.icons.mode;
     let chrome_style = ui.clone_style();
@@ -214,7 +208,7 @@ pub(super) fn draw_chrome(
                 }
 
                 if ok || submitted {
-                    if super::popups::try_create_new_folder_in_cwd(state, fs) {
+                    if super::popups::try_create_new_folder_in_cwd(state) {
                         state.ui.operations.new_folder.inline_active = false;
                     }
                 }
@@ -521,7 +515,7 @@ pub(super) fn draw_chrome(
                 }
 
                 if ok || submitted {
-                    if super::popups::try_create_new_folder_in_cwd(state, fs) {
+                    if super::popups::try_create_new_folder_in_cwd(state) {
                         state.ui.operations.new_folder.inline_active = false;
                     }
                 }
@@ -844,7 +838,6 @@ pub(super) fn draw_chrome(
                 if let Some(p) = path_bar::draw_breadcrumbs(
                     ui,
                     state,
-                    fs,
                     state.ui.config.breadcrumbs_max_segments,
                     false,
                     false,
@@ -856,10 +849,10 @@ pub(super) fn draw_chrome(
             // Restore layout cursor to after the reserved region.
             ui.set_cursor_pos(after);
         } else {
-            path_bar::draw_path_input_text(ui, state, fs, &recent_paths, path_w, false);
+            path_bar::draw_path_input_text(ui, state, &recent_paths, path_w, false);
         }
     } else {
-        path_bar::draw_path_input_text(ui, state, fs, &recent_paths, path_w, true);
+        path_bar::draw_path_input_text(ui, state, &recent_paths, path_w, true);
     }
 
     if stacked {
@@ -972,7 +965,6 @@ pub(super) fn draw_chrome(
         if let Some(p) = path_bar::draw_breadcrumbs(
             ui,
             state,
-            fs,
             state.ui.config.breadcrumbs_max_segments,
             true,
             false,

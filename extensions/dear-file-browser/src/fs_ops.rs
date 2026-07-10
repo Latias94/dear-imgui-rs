@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::fs::FileSystem;
+use crate::fs::{FileSystem, ScanVisit};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ExistingTargetPolicy {
@@ -23,7 +23,11 @@ pub(crate) fn copy_tree(fs: &dyn FileSystem, from: &Path, to: &Path) -> std::io:
     }
 
     fs.create_dir(to)?;
-    let entries = fs.read_dir(from)?;
+    let mut entries = Vec::new();
+    fs.visit_dir(from, &mut |entry| {
+        entries.push(entry);
+        ScanVisit::Continue
+    })?;
     for e in entries {
         let child_from = e.path;
         let child_to = to.join(&e.name);

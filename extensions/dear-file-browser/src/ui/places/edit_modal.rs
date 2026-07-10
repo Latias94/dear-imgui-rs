@@ -3,14 +3,9 @@ use std::path::PathBuf;
 use dear_imgui_rs::Ui;
 
 use crate::dialog_state::FileDialogState;
-use crate::fs::FileSystem;
 use crate::places::{Place, PlaceOrigin, Places};
 
-pub(in crate::ui) fn draw_places_edit_modal(
-    ui: &Ui,
-    state: &mut FileDialogState,
-    fs: &dyn FileSystem,
-) {
+pub(in crate::ui) fn draw_places_edit_modal(ui: &Ui, state: &mut FileDialogState) {
     const POPUP_ID: &str = "Edit Places";
     if state.ui.operations.places.edit.open_next {
         ui.open_popup(POPUP_ID);
@@ -181,8 +176,12 @@ pub(in crate::ui) fn draw_places_edit_modal(
                     state.ui.operations.places.edit.error = Some("Path is empty".into());
                 } else {
                     let raw = PathBuf::from(path_s);
-                    let p = fs.canonicalize(&raw).unwrap_or(raw);
-                    let is_dir = fs.metadata(&p).map(|m| m.is_dir).unwrap_or(false);
+                    let (p, is_dir) = {
+                        let fs = state.filesystem.as_file_system();
+                        let p = fs.canonicalize(&raw).unwrap_or(raw);
+                        let is_dir = fs.metadata(&p).map(|m| m.is_dir).unwrap_or(false);
+                        (p, is_dir)
+                    };
                     if !is_dir {
                         state.ui.operations.places.edit.error =
                             Some("Path does not exist or is not a directory".into());

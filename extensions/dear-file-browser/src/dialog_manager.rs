@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use dear_imgui_rs::Ui;
 
 use crate::dialog_state::FileDialogState;
-use crate::fs::{FileSystem, StdFileSystem};
 use crate::ui::{FileDialogExt, WindowHostConfig};
 use crate::{FileDialogError, Selection};
 
@@ -13,39 +12,22 @@ pub struct DialogId(u64);
 
 /// Manager for multiple in-UI file browser dialogs (IGFD-style open/display separation).
 ///
-/// This is an incremental step toward IGFD-grade behavior:
+/// The manager keeps dialog identity and rendering separate:
 /// - Multiple dialogs can exist concurrently (each keyed by a `DialogId`).
 /// - The caller opens a dialog (`open_browser*`) and later drives rendering per-frame via
 ///   `show_*` / `draw_*`.
 pub struct DialogManager {
     next_id: u64,
     browsers: HashMap<DialogId, FileDialogState>,
-    fs: Box<dyn FileSystem>,
 }
 
 impl DialogManager {
     /// Create a new manager.
     pub fn new() -> Self {
-        Self::with_fs(Box::new(StdFileSystem))
-    }
-
-    /// Create a new manager using a custom filesystem.
-    pub fn with_fs(fs: Box<dyn FileSystem>) -> Self {
         Self {
             next_id: 0,
             browsers: HashMap::new(),
-            fs,
         }
-    }
-
-    /// Replace the manager filesystem.
-    pub fn set_fs(&mut self, fs: Box<dyn FileSystem>) {
-        self.fs = fs;
-    }
-
-    /// Get a shared reference to the manager filesystem.
-    pub fn fs(&self) -> &dyn FileSystem {
-        self.fs.as_ref()
     }
 
     /// Open a new in-UI file browser dialog with a default state.
@@ -98,7 +80,7 @@ impl DialogManager {
         let cfg = WindowHostConfig::for_mode(state.core.mode);
         let res = ui
             .file_browser()
-            .show_windowed_with(state, &cfg, self.fs.as_ref(), None, None);
+            .show_windowed_with(state, &cfg, None, None);
         if res.is_some() {
             self.browsers.remove(&id);
         }
@@ -116,9 +98,7 @@ impl DialogManager {
         cfg: &WindowHostConfig,
     ) -> Option<Result<Selection, FileDialogError>> {
         let state = self.browsers.get_mut(&id)?;
-        let res = ui
-            .file_browser()
-            .show_windowed_with(state, cfg, self.fs.as_ref(), None, None);
+        let res = ui.file_browser().show_windowed_with(state, cfg, None, None);
         if res.is_some() {
             self.browsers.remove(&id);
         }
@@ -135,9 +115,7 @@ impl DialogManager {
         id: DialogId,
     ) -> Option<Result<Selection, FileDialogError>> {
         let state = self.browsers.get_mut(&id)?;
-        let res = ui
-            .file_browser()
-            .draw_contents_with(state, self.fs.as_ref(), None, None);
+        let res = ui.file_browser().draw_contents_with(state, None, None);
         if res.is_some() {
             self.browsers.remove(&id);
         }

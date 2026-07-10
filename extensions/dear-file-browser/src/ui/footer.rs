@@ -3,14 +3,12 @@ use crate::dialog_core::{ConfirmGate, CoreEvent, CoreEventOutcome, ScanStatus};
 use crate::dialog_state::{
     FileDialogState, PathBarStyle, ValidationButtonsAlign, ValidationButtonsOrder,
 };
-use crate::fs::FileSystem;
 use dear_imgui_rs::Ui;
 use dear_imgui_rs::input::Key;
 
 pub(super) fn draw_footer(
     ui: &Ui,
     state: &mut FileDialogState,
-    fs: &dyn FileSystem,
     confirm_gate: &ConfirmGate,
     request_confirm: &mut bool,
 ) {
@@ -138,10 +136,10 @@ pub(super) fn draw_footer(
 
     // Buttons (right-aligned).
     ui.same_line();
-    let (confirm, cancel) = draw_validation_buttons_row(ui, state, &confirm_gate);
+    let (confirm, cancel) = draw_validation_buttons_row(ui, state, confirm_gate);
 
     // Compact status line (non-interactive).
-    ui.text_disabled(footer_status_text(state, &confirm_gate));
+    ui.text_disabled(footer_status_text(state, confirm_gate));
 
     // Keyboard shortcuts (only when the host window is focused)
     if state.ui.visible && ui.is_window_focused() {
@@ -196,15 +194,13 @@ pub(super) fn draw_footer(
         state.ui.runtime.error = None;
         let typed_footer_name = match state.core.mode {
             DialogMode::OpenFile | DialogMode::OpenFiles => {
-                Some(state.ui.runtime.footer.file_name_buffer.as_str())
+                Some(state.ui.runtime.footer.file_name_buffer.clone())
             }
             _ => None,
         };
         let can_confirm = confirm_gate.can_confirm && core_can_confirm(state);
-        if can_confirm {
-            if let Err(e) = state.core.confirm(fs, &confirm_gate, typed_footer_name) {
-                state.ui.runtime.error = Some(e.to_string());
-            }
+        if can_confirm && let Err(e) = state.confirm(confirm_gate, typed_footer_name.as_deref()) {
+            state.ui.runtime.error = Some(e.to_string());
         }
     }
 
