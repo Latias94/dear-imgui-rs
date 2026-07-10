@@ -8,12 +8,14 @@ This script performs various checks to ensure the workspace is ready for publish
 - Git working tree is clean
 - Cargo.lock is up-to-date
 - Documentation builds successfully
+- Packaged core crates build from an offline consumer
 
 Usage:
   python3 tools/pre_publish_check.py
 
   # Skip specific checks
-  python3 tools/pre_publish_check.py --skip-git-check --skip-doc-check
+  python3 tools/pre_publish_check.py \
+    --skip-git-check --skip-doc-check --skip-package-check
 
 Requirements:
   - Python 3.11+
@@ -26,7 +28,16 @@ import subprocess
 import sys
 import tomllib
 from pathlib import Path
-from typing import List, Tuple, Optional, Dict
+from typing import List, Optional, Tuple
+
+from release_metadata import (
+    MetadataError,
+    PUBLISH_ORDER,
+    WorkspaceMetadata,
+    load_workspace_metadata,
+    validate_publish_order,
+    validate_release_workspace,
+)
 
 
 # Crates that should have pregenerated bindings
@@ -50,41 +61,9 @@ DOC_CRATES = [
     ),
 ]
 
-# All publishable crates
-ALL_CRATES = [
-    ("dear-imgui-build-support", "tools/build-support"),
-    ("dear-imgui-sys", "dear-imgui-sys"),
-    ("dear-imgui-rs", "dear-imgui"),
-    ("dear-imgui-winit", "backends/dear-imgui-winit"),
-    ("dear-imgui-wgpu", "backends/dear-imgui-wgpu"),
-    ("dear-imgui-glow", "backends/dear-imgui-glow"),
-    ("dear-imgui-ash", "backends/dear-imgui-ash"),
-    ("dear-imgui-sdl3", "backends/dear-imgui-sdl3"),
-    ("dear-imgui-bevy", "backends/dear-imgui-bevy"),
-    ("dear-app", "dear-app"),
-    ("dear-implot-sys", "extensions/dear-implot-sys"),
-    ("dear-implot", "extensions/dear-implot"),
-    ("dear-imnodes-sys", "extensions/dear-imnodes-sys"),
-    ("dear-imnodes", "extensions/dear-imnodes"),
-    ("dear-node-editor-sys", "extensions/dear-node-editor-sys"),
-    ("dear-node-editor", "extensions/dear-node-editor"),
-    ("dear-imguizmo-sys", "extensions/dear-imguizmo-sys"),
-    ("dear-imguizmo", "extensions/dear-imguizmo"),
-    ("dear-implot3d-sys", "extensions/dear-implot3d-sys"),
-    ("dear-implot3d", "extensions/dear-implot3d"),
-    ("dear-imguizmo-quat-sys", "extensions/dear-imguizmo-quat-sys"),
-    ("dear-imguizmo-quat", "extensions/dear-imguizmo-quat"),
-    ("dear-imgui-test-engine-sys", "extensions/dear-imgui-test-engine-sys"),
-    ("dear-imgui-test-engine", "extensions/dear-imgui-test-engine"),
-    ("dear-file-browser", "extensions/dear-file-browser"),
-    ("dear-imgui-reflect-derive", "extensions/dear-imgui-reflect-derive"),
-    ("dear-imgui-reflect", "extensions/dear-imgui-reflect"),
-]
-
 SOURCE_METADATA_SECTION = "package.metadata.dear-imgui-sources"
 SOURCE_METADATA_KEYS = {"cimgui-revision", "imgui-revision"}
 GIT_REVISION_RE = re.compile(r"^[0-9a-fA-F]{40}$")
-SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
 
 
 class Colors:
@@ -163,81 +142,41 @@ def cargo_nextest_available(repo_root: Path) -> bool:
     return code == 0
 
 
-def get_crate_version(crate_path: Path) -> Optional[str]:
-    """Extract version from Cargo.toml."""
-    cargo_toml = crate_path / "Cargo.toml"
-    if not cargo_toml.exists():
-        return None
-    
+def read_locked_workspace_metadata(
+    repo_root: Path,
+) -> tuple[Optional[WorkspaceMetadata], Tuple[bool, List[str]]]:
+    """Load the one Cargo metadata snapshot used by every release check."""
+    print_check("Locked Cargo workspace metadata")
     try:
-        with open(cargo_toml, 'r', encoding='utf-8') as f:
-            for line in f:
-                if line.strip().startswith('version'):
-                    parts = line.split('=')
-                    if len(parts) == 2:
-                        version = parts[1].strip().strip('"').strip("'")
-                        if not version.startswith('{'):
-                            return version
-    except Exception:
-        pass
-    
-    return None
+        metadata = load_workspace_metadata(repo_root)
+    except MetadataError as error:
+        print_error(str(error))
+        return None, (False, [str(error)])
+
+    print_success(
+        f"Cargo.lock resolves {len(metadata.publishable_packages)} publishable and "
+        f"{len(metadata.private_packages)} private workspace packages"
+    )
+    return metadata, (True, [])
 
 
-def check_version_consistency(repo_root: Path) -> Tuple[bool, List[str]]:
-    """Check release crate versions and the independently patched build helper."""
-    print_check("Version consistency across crates")
-    
-    versions: Dict[str, str] = {}
-    errors = []
-    
-    for name, path in ALL_CRATES:
-        full_path = repo_root / path
-        version = get_crate_version(full_path)
-        
-        if version is None:
-            errors.append(f"Could not read version for {name}")
-        else:
-            versions[name] = version
-    
-    if errors:
-        for error in errors:
-            print_error(error)
-        return False, errors
-    
-    build_support_version = versions.pop("dear-imgui-build-support")
-    release_versions = set(versions.values())
-    if len(release_versions) != 1:
-        errors.append("Release crate version mismatch detected:")
-        for name, version in sorted(versions.items()):
-            errors.append(f"  {name}: {version}")
-    else:
-        release_version = next(iter(release_versions))
-        release_match = SEMVER_RE.fullmatch(release_version)
-        build_support_match = SEMVER_RE.fullmatch(build_support_version)
-        if release_match is None or build_support_match is None:
-            errors.append(
-                "Could not compare dear-imgui-build-support and release crate semantic versions"
-            )
-        else:
-            release_parts = tuple(int(part) for part in release_match.groups())
-            build_support_parts = tuple(int(part) for part in build_support_match.groups())
-            if build_support_parts[:2] != release_parts[:2]:
-                errors.append(
-                    "dear-imgui-build-support must share the release major/minor version"
-                )
-            elif build_support_parts[2] < release_parts[2]:
-                errors.append(
-                    "dear-imgui-build-support patch version cannot trail the release crates"
-                )
-
+def check_version_consistency(
+    repo_root: Path, metadata: WorkspaceMetadata
+) -> Tuple[bool, List[str]]:
+    """Check release versions and every internal workspace dependency edge."""
+    print_check("Release versions and internal path requirements")
+    errors = [
+        *validate_release_workspace(metadata),
+        *validate_publish_order(metadata, PUBLISH_ORDER, repo_root),
+    ]
     if errors:
         for error in errors:
             print_error(error)
         return False, errors
 
     print_success(
-        f"Release crates use {release_version}; build support uses {build_support_version}"
+        f"All {len(metadata.publishable_packages)} publishable packages use "
+        f"{metadata.release_version}; internal path requirements match their targets"
     )
     return True, []
 
@@ -291,7 +230,7 @@ def check_pregenerated_bindings(repo_root: Path) -> Tuple[bool, List[str]]:
         return False, errors
 
 
-def read_core_source_metadata(manifest_path: Path) -> Dict[str, str]:
+def read_core_source_metadata(manifest_path: Path) -> dict[str, str]:
     """Read the exact source provenance schema from the packaged manifest."""
     with manifest_path.open("rb") as manifest_file:
         data = tomllib.load(manifest_file)
@@ -388,7 +327,10 @@ def check_git_status(repo_root: Path) -> Tuple[bool, List[str]]:
     """Check that git working tree is clean."""
     print_check("Git working tree status")
     
-    code, stdout, stderr = run_command(["git", "status", "--porcelain"], cwd=repo_root)
+    code, stdout, stderr = run_command(
+        ["git", "status", "--porcelain", "--ignore-submodules=none"],
+        cwd=repo_root,
+    )
     
     if code != 0:
         print_error(f"Git command failed: {stderr}")
@@ -403,31 +345,17 @@ def check_git_status(repo_root: Path) -> Tuple[bool, List[str]]:
         return True, []
 
 
-def check_cargo_lock(repo_root: Path) -> Tuple[bool, List[str]]:
-    """Check that Cargo.lock is up-to-date."""
-    print_check("Cargo.lock is up-to-date")
-
-    code, stdout, stderr = run_command(
-        ["cargo", "metadata", "--locked", "--format-version", "1", "--no-deps"],
-        cwd=repo_root
-    )
-    if code != 0:
-        detail = stderr.strip() or stdout.strip() or "cargo metadata --locked failed"
-        print_error(detail)
-        return False, [detail]
-
-    print_success("Cargo.lock satisfies cargo metadata --locked")
-    return True, []
-
-
-def check_changelog_release_notes(repo_root: Path) -> Tuple[bool, List[str]]:
+def check_changelog_release_notes(
+    repo_root: Path, metadata: WorkspaceMetadata
+) -> Tuple[bool, List[str]]:
     """Check that the current release has extractable, soft-wrapped release notes."""
     print_check("Changelog release notes")
 
-    version = get_crate_version(repo_root / "dear-imgui")
-    if version is None:
-        print_error("Could not determine current dear-imgui-rs version")
-        return False, ["Could not determine current dear-imgui-rs version"]
+    try:
+        version = metadata.release_version
+    except MetadataError as error:
+        print_error(str(error))
+        return False, [str(error)]
 
     errors = []
     changelog_tool = repo_root / "tools" / "changelog.py"
@@ -451,6 +379,25 @@ def check_changelog_release_notes(repo_root: Path) -> Tuple[bool, List[str]]:
         return False, errors
 
     print_success(f"CHANGELOG.md has release notes for {version}")
+    return True, []
+
+
+def check_packaged_core(repo_root: Path) -> Tuple[bool, List[str]]:
+    """Package and consume the core crates from a clean isolated checkout."""
+    print_check("Packaged core crates and offline consumption")
+    command = ["bash", "tools/ci/verify_packaged_core.sh"]
+    code, stdout, stderr = run_command(
+        command,
+        cwd=repo_root,
+        capture=True,
+        show_output=True,
+    )
+    if code != 0:
+        detail = stderr.strip() or stdout.strip() or "packaged core verification failed"
+        print_error(detail)
+        return False, [detail]
+
+    print_success("Packaged dear-imgui-sys builds offline with its packaged helper")
     return True, []
 
 
@@ -623,12 +570,27 @@ def main() -> int:
         help="Skip test execution check"
     )
     parser.add_argument(
+        "--skip-package-check",
+        action="store_true",
+        help="Skip the clean-clone package and offline-consumer release gate"
+    )
+    parser.add_argument(
         "--core-contract-only",
         action="store_true",
         help="Only verify core source provenance and reproducible binding profiles"
     )
     
     args = parser.parse_args()
+
+    if (
+        args.skip_git_check
+        and not args.skip_package_check
+        and not args.core_contract_only
+    ):
+        parser.error(
+            "--skip-git-check must be paired with --skip-package-check: "
+            "the package gate verifies a clean clone of HEAD, not dirty worktree changes"
+        )
     
     repo_root = Path(__file__).resolve().parents[1]
     
@@ -636,6 +598,11 @@ def main() -> int:
     print(f"Repository: {repo_root}\n")
     
     checks = []
+
+    metadata: Optional[WorkspaceMetadata] = None
+    if not args.core_contract_only:
+        metadata, metadata_check = read_locked_workspace_metadata(repo_root)
+        checks.append(("Locked Workspace Metadata", metadata_check))
     
     checks.append(("Core Source Provenance", check_core_source_contract(repo_root)))
     checks.append(
@@ -646,20 +613,31 @@ def main() -> int:
     )
 
     if not args.core_contract_only:
-        checks.append(("Version Consistency", check_version_consistency(repo_root)))
+        if metadata is not None:
+            checks.append(
+                (
+                    "Version Consistency",
+                    check_version_consistency(repo_root, metadata),
+                )
+            )
         checks.append(("Pregenerated Bindings", check_pregenerated_bindings(repo_root)))
 
         if not args.skip_git_check:
             checks.append(("Git Status", check_git_status(repo_root)))
 
-        checks.append(("Cargo.lock", check_cargo_lock(repo_root)))
-        checks.append(("Changelog", check_changelog_release_notes(repo_root)))
+        if metadata is not None:
+            checks.append(
+                ("Changelog", check_changelog_release_notes(repo_root, metadata))
+            )
 
         if not args.skip_doc_check:
             checks.append(("Documentation", check_docs_build(repo_root)))
 
         if not args.skip_test_check:
             checks.append(("Tests", check_tests(repo_root)))
+
+        if not args.skip_package_check:
+            checks.append(("Packaged Core", check_packaged_core(repo_root)))
     
     # Print summary
     print_header("Validation Summary")

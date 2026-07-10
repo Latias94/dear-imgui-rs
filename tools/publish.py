@@ -35,6 +35,9 @@ Usage:
   # Skip verification (faster but not recommended)
   python3 tools/publish.py --no-verify
 
+  # Emergency-only upload without rerunning the strict release gate
+  python3 tools/publish.py --dangerously-skip-release-check
+
   # Wait longer between publishes (for crates.io to index)
   python3 tools/publish.py --wait 60
 
@@ -46,57 +49,20 @@ Requirements:
 """
 
 import argparse
-import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional
 
-
-# Define all crates in dependency order
-PUBLISH_ORDER = [
-    # Tooling (must be published before any -sys crate that depends on it)
-    ("dear-imgui-build-support", "tools/build-support"),
-
-    # Core
-    ("dear-imgui-sys", "dear-imgui-sys"),
-    ("dear-imgui-rs", "dear-imgui"),
-    
-    # Backends (depend on dear-imgui-rs)
-    ("dear-imgui-winit", "backends/dear-imgui-winit"),
-    ("dear-imgui-wgpu", "backends/dear-imgui-wgpu"),
-    ("dear-imgui-glow", "backends/dear-imgui-glow"),
-    ("dear-imgui-ash", "backends/dear-imgui-ash"),
-    ("dear-imgui-sdl3", "backends/dear-imgui-sdl3"),
-    
-    # Extension sys crates (depend on dear-imgui-sys)
-    ("dear-implot-sys", "extensions/dear-implot-sys"),
-    ("dear-imnodes-sys", "extensions/dear-imnodes-sys"),
-    ("dear-node-editor-sys", "extensions/dear-node-editor-sys"),
-    ("dear-imguizmo-sys", "extensions/dear-imguizmo-sys"),
-    ("dear-implot3d-sys", "extensions/dear-implot3d-sys"),
-    ("dear-imguizmo-quat-sys", "extensions/dear-imguizmo-quat-sys"),
-    ("dear-imgui-test-engine-sys", "extensions/dear-imgui-test-engine-sys"),
-    
-    # Extension high-level crates (depend on dear-imgui-rs and their sys crates)
-    ("dear-implot", "extensions/dear-implot"),
-    ("dear-imnodes", "extensions/dear-imnodes"),
-    ("dear-node-editor", "extensions/dear-node-editor"),
-    ("dear-imguizmo", "extensions/dear-imguizmo"),
-    ("dear-implot3d", "extensions/dear-implot3d"),
-    ("dear-imguizmo-quat", "extensions/dear-imguizmo-quat"),
-    ("dear-imgui-test-engine", "extensions/dear-imgui-test-engine"),
-    ("dear-file-browser", "extensions/dear-file-browser"),
-    ("dear-imgui-reflect-derive", "extensions/dear-imgui-reflect-derive"),
-    ("dear-imgui-reflect", "extensions/dear-imgui-reflect"),
-    
-    # Bevy backend has optional ecosystem extension dependencies.
-    ("dear-imgui-bevy", "backends/dear-imgui-bevy"),
-
-    # Application runner (depends on backends and dear-imgui-rs)
-    ("dear-app", "dear-app"),
-]
+from release_metadata import (
+    MetadataError,
+    PUBLISH_ORDER,
+    WorkspaceMetadata,
+    load_workspace_metadata,
+    validate_publish_order,
+    validate_release_workspace,
+)
 
 
 class Colors:
@@ -180,34 +146,19 @@ def run_command(cmd: List[str], cwd: Optional[Path] = None, dry_run: bool = Fals
         return e.returncode
 
 
-def get_crate_version(crate_path: Path) -> Optional[str]:
-    """Extract version from Cargo.toml."""
-    cargo_toml = crate_path / "Cargo.toml"
-    if not cargo_toml.exists():
-        return None
-    
-    try:
-        with open(cargo_toml, 'r', encoding='utf-8') as f:
-            for line in f:
-                if line.strip().startswith('version'):
-                    # Extract version from line like: version = "0.4.0"
-                    parts = line.split('=')
-                    if len(parts) == 2:
-                        version = parts[1].strip().strip('"').strip("'")
-                        # Skip workspace references
-                        if not version.startswith('{'):
-                            return version
-    except Exception as e:
-        print_error(f"Failed to read version from {cargo_toml}: {e}")
-    
-    return None
-
-
 def check_crate_published(crate_name: str, version: str) -> bool:
     """Check if a crate version is already published on crates.io."""
     try:
         result = subprocess.run(
-            ["cargo", "search", crate_name, "--limit", "1"],
+            [
+                "cargo",
+                "search",
+                crate_name,
+                "--limit",
+                "1",
+                "--registry",
+                "crates-io",
+            ],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -226,11 +177,13 @@ def check_crate_published(crate_name: str, version: str) -> bool:
 def publish_crate(
     crate_name: str,
     crate_path: Path,
+    version: str,
     repo_root: Path,
     dry_run: bool = False,
     cargo_dry_run: bool = False,
     no_verify: bool = False,
-    wait_time: int = 30
+    wait_time: int = 30,
+    source_guard: Optional[Callable[[], bool]] = None,
 ) -> bool:
     """Publish a single crate."""
     print_header(f"Publishing {crate_name}")
@@ -240,18 +193,16 @@ def publish_crate(
         print_error(f"Crate path does not exist: {full_path}")
         return False
 
-    # Get version
-    version = get_crate_version(full_path)
-    if not version:
-        print_error(f"Could not determine version for {crate_name}")
-        return False
-
     print_info(f"Crate: {crate_name}")
     print_info(f"Version: {version}")
     print_info(f"Path: {crate_path}")
 
     # Check if already published
-    if not dry_run and check_crate_published(crate_name, version):
+    if (
+        not dry_run
+        and not cargo_dry_run
+        and check_crate_published(crate_name, version)
+    ):
         print_warning(f"{crate_name} v{version} is already published on crates.io")
         response = input("Skip this crate? [Y/n]: ").strip().lower()
         if response in ('', 'y', 'yes'):
@@ -259,11 +210,23 @@ def publish_crate(
             return True
 
     # Build publish command
-    cmd = ["cargo", "publish", "-p", crate_name]
+    cmd = [
+        "cargo",
+        "publish",
+        "-p",
+        crate_name,
+        "--locked",
+        "--registry",
+        "crates-io",
+    ]
     if cargo_dry_run:
         cmd.append("--dry-run")
     if no_verify:
         cmd.append("--no-verify")
+
+    if source_guard is not None and not source_guard():
+        print_error(f"Release source changed before invoking cargo publish for {crate_name}")
+        return False
 
     # Execute publish (stream output in real-time, don't capture)
     result = run_command(cmd, cwd=repo_root, dry_run=dry_run, capture=False)
@@ -285,6 +248,79 @@ def publish_crate(
         print_info(f"Waiting {wait_time} seconds for crates.io to index...")
         time.sleep(wait_time)
 
+    return True
+
+
+def validate_release_configuration(
+    metadata: WorkspaceMetadata, repo_root: Path
+) -> list[str]:
+    """Validate release versions and the hand-authored dependency order."""
+    return [
+        *validate_release_workspace(metadata),
+        *validate_publish_order(metadata, PUBLISH_ORDER, repo_root),
+    ]
+
+
+def run_release_preflight(repo_root: Path) -> int:
+    """Run the strict committed-tree gate immediately before an upload."""
+    print_header("Strict Release Preflight")
+    return run_command(
+        [sys.executable, "tools/pre_publish_check.py"],
+        cwd=repo_root,
+    )
+
+
+def capture_release_fingerprint(repo_root: Path) -> Optional[str]:
+    """Return the clean HEAD that subsequent publish commands must retain."""
+    commands = [
+        ["git", "rev-parse", "--verify", "HEAD"],
+        [
+            "git",
+            "status",
+            "--porcelain=v1",
+            "--untracked-files=all",
+            "--ignore-submodules=none",
+        ],
+    ]
+    results = []
+    for command in commands:
+        try:
+            result = subprocess.run(
+                command,
+                cwd=repo_root,
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+        except OSError as error:
+            print_error(f"Could not inspect release source: {error}")
+            return None
+        if result.returncode != 0:
+            detail = result.stderr.strip() or "Git command failed"
+            print_error(detail)
+            return None
+        results.append(result.stdout.strip())
+
+    head, status = results
+    if status:
+        print_error("Publishing requires a completely clean worktree:")
+        print(status, file=sys.stderr)
+        return None
+    return head
+
+
+def verify_release_fingerprint(repo_root: Path, expected_head: str) -> bool:
+    """Reject source edits or commits after the strict release preflight."""
+    current_head = capture_release_fingerprint(repo_root)
+    if current_head is None:
+        return False
+    if current_head != expected_head:
+        print_error(
+            f"Release HEAD changed after validation: {expected_head} -> {current_head}"
+        )
+        return False
     return True
 
 
@@ -314,6 +350,11 @@ def main() -> int:
         help="Skip verification (pass --no-verify to cargo publish)"
     )
     parser.add_argument(
+        "--dangerously-skip-release-check",
+        action="store_true",
+        help="Upload without rerunning the strict clean-tree release gate",
+    )
+    parser.add_argument(
         "--wait",
         type=int,
         default=30,
@@ -332,7 +373,7 @@ def main() -> int:
     
     # Get repository root
     repo_root = Path(__file__).resolve().parents[1]
-    
+
     # Determine which crates to publish
     if args.crates:
         requested_crates = set(c.strip() for c in args.crates.split(","))
@@ -363,14 +404,68 @@ def main() -> int:
             print_error(f"Start crate not found: {args.start_from}")
             return 1
         crates_to_publish = filtered
+
+    release_head: Optional[str] = None
+    if not args.dry_run:
+        release_head = capture_release_fingerprint(repo_root)
+        if release_head is None:
+            return 1
+        if args.dangerously_skip_release_check:
+            print_warning("Strict release preflight was explicitly bypassed")
+        else:
+            preflight = run_release_preflight(repo_root)
+            if preflight != 0:
+                print_error("Strict release preflight failed; no crates were uploaded")
+                return preflight
+            if not verify_release_fingerprint(repo_root, release_head):
+                print_error("Release source changed during preflight; no crates were uploaded")
+                return 1
+
+    try:
+        metadata = load_workspace_metadata(repo_root)
+    except MetadataError as error:
+        print_error(str(error))
+        return 1
+
+    configuration_errors = validate_release_configuration(metadata, repo_root)
+    if configuration_errors:
+        print_error("Release metadata or PUBLISH_ORDER is inconsistent:")
+        for error in configuration_errors:
+            print_error(f"  {error}")
+        return 1
+    package_versions = {
+        package.name: package.version for package in metadata.publishable_packages
+    }
+    if release_head is not None and not verify_release_fingerprint(
+        repo_root, release_head
+    ):
+        print_error("Release source changed while loading metadata")
+        return 1
     
     # Print summary
     print_header("Publishing Summary")
     print_info(f"Repository: {repo_root}")
+    print_info(f"Release version: {metadata.release_version}")
+    print_info(
+        f"Workspace packages: {len(metadata.publishable_packages)} publishable, "
+        f"{len(metadata.private_packages)} private"
+    )
     print_info(f"Crates to publish: {len(crates_to_publish)}")
     print_info(f"Dry run: {args.dry_run}")
     print_info(f"Cargo dry run: {args.cargo_dry_run}")
     print_info(f"No verify: {args.no_verify}")
+    print_info(
+        "Strict release preflight: "
+        + (
+            "not run for print-only dry-run"
+            if args.dry_run
+            else (
+                "DANGEROUSLY SKIPPED"
+                if args.dangerously_skip_release_check
+                else "passed for this clean HEAD"
+            )
+        )
+    )
     print_info(f"Wait time: {args.wait}s")
     print()
     print("Publishing order:")
@@ -383,21 +478,36 @@ def main() -> int:
         if response not in ('y', 'yes'):
             print_info("Publishing cancelled")
             return 0
-    
     # Publish each crate
     failed_crates = []
     for name, path in crates_to_publish:
+        if release_head is not None and not verify_release_fingerprint(
+            repo_root, release_head
+        ):
+            print_error("Release source changed before publish; stopping immediately")
+            return 1
         success = publish_crate(
             name,
             Path(path),
+            package_versions[name],
             repo_root,
             dry_run=args.dry_run,
             cargo_dry_run=args.cargo_dry_run,
             no_verify=args.no_verify,
-            wait_time=args.wait
+            wait_time=args.wait,
+            source_guard=(
+                (lambda: verify_release_fingerprint(repo_root, release_head))
+                if release_head is not None
+                else None
+            ),
         )
         
         if not success:
+            if release_head is not None and not verify_release_fingerprint(
+                repo_root, release_head
+            ):
+                print_error("Release source changed; refusing to continue publishing")
+                return 1
             failed_crates.append(name)
             print_error(f"Failed to publish {name}")
             if args.dry_run or args.cargo_dry_run:
@@ -415,7 +525,18 @@ def main() -> int:
             print(f"  - {name}")
         return 1
     else:
-        print_success(f"Successfully published all {len(crates_to_publish)} crate(s)!")
+        if args.dry_run:
+            print_success(
+                f"Preview complete for all {len(crates_to_publish)} selected crate(s)."
+            )
+        elif args.cargo_dry_run:
+            print_success(
+                f"Cargo dry-run succeeded for all {len(crates_to_publish)} crate(s)."
+            )
+        else:
+            print_success(
+                f"Successfully uploaded all {len(crates_to_publish)} crate(s)."
+            )
         return 0
 
 

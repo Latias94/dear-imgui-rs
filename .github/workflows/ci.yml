@@ -11,6 +11,53 @@ env:
   # Reduce disk usage in CI (helps avoid "No space left on device" from LLVM/rustc).
   CARGO_INCREMENTAL: "0"
   RUSTFLAGS: "-Cdebuginfo=0"
+  # Existing workspace-wide lint debt. Broad Clippy routes deny every warning except this
+  # explicit baseline; new release and binding tooling below has no allowances.
+  CLIPPY_HISTORICAL_LINTS: >-
+    -A dead_code
+    -A clippy::assertions_on_constants
+    -A clippy::collapsible_if
+    -A clippy::collapsible_match
+    -A clippy::default_constructed_unit_structs
+    -A clippy::derivable_impls
+    -A clippy::doc_lazy_continuation
+    -A clippy::drop_non_drop
+    -A clippy::explicit_auto_deref
+    -A clippy::explicit_counter_loop
+    -A clippy::field_reassign_with_default
+    -A clippy::get_first
+    -A clippy::if_same_then_else
+    -A clippy::items_after_test_module
+    -A clippy::large_enum_variant
+    -A clippy::let_and_return
+    -A clippy::manual_c_str_literals
+    -A clippy::manual_div_ceil
+    -A clippy::manual_is_multiple_of
+    -A clippy::manual_unwrap_or
+    -A clippy::manual_unwrap_or_default
+    -A clippy::missing_const_for_thread_local
+    -A clippy::missing_safety_doc
+    -A clippy::module_inception
+    -A clippy::needless_borrow
+    -A clippy::needless_lifetimes
+    -A clippy::needless_option_as_deref
+    -A clippy::needless_range_loop
+    -A clippy::new_ret_no_self
+    -A clippy::new_without_default
+    -A clippy::nonminimal_bool
+    -A clippy::obfuscated_if_else
+    -A clippy::question_mark
+    -A clippy::redundant_closure
+    -A clippy::result_large_err
+    -A clippy::should_implement_trait
+    -A clippy::single_match
+    -A clippy::too_many_arguments
+    -A clippy::type_complexity
+    -A clippy::unnecessary_cast
+    -A clippy::unnecessary_lazy_evaluations
+    -A clippy::useless_conversion
+    -A clippy::vec_box
+    -A clippy::wrong_self_convention
 
 jobs:
   build:
@@ -76,26 +123,14 @@ jobs:
           NODE_EDITOR_SYS_FORCE_BUILD: "1"
           IMGUIZMO_SYS_FORCE_BUILD: "1"
 
+      - name: Test cross-platform release tooling
+        run: cargo nextest run -p xtask
+
       - name: Check FreeType feature through native package metadata
         if: runner.os != 'Windows'
         run: cargo check -p dear-imgui-sys --no-default-features --features freetype
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
-
-      - name: Check renderer backend feature combos
-        run: |
-          cargo check -p dear-imgui-glow --lib --features "multi-viewport"
-          cargo check -p dear-imgui-wgpu --lib --features "multi-viewport-winit"
-          cargo check -p dear-imgui-wgpu --lib --features "multi-viewport-sdl3"
-          cargo check -p dear-imgui-ash --lib --features "multi-viewport-winit,dynamic-rendering"
-          cargo check -p dear-imgui-ash --lib --features "multi-viewport-sdl3,dynamic-rendering"
-
-      - name: Run renderer backend ownership tests
-        run: |
-          cargo nextest run -p dear-imgui-wgpu --lib --features "multi-viewport-winit"
-          cargo nextest run -p dear-imgui-wgpu --lib --features "multi-viewport-sdl3"
-          cargo nextest run -p dear-imgui-ash --lib --features "multi-viewport-winit,dynamic-rendering"
-          cargo nextest run -p dear-imgui-ash --lib --features "multi-viewport-sdl3,dynamic-rendering"
 
       - name: Check dear-imgui-rs multi-viewport tests compile
         run: cargo test -p dear-imgui-rs --features multi-viewport --no-run
@@ -107,7 +142,7 @@ jobs:
         run: cargo build -p dear-app --features "implot imnodes implot3d"
 
       - name: Build examples (all extensions)
-        run: cargo build -p dear-imgui-examples --features "imguizmo imnodes node-editor implot reflect implot3d imguizmo-quat"
+        run: cargo build -p dear-imgui-examples --features "imguizmo imnodes implot reflect implot3d imguizmo-quat"
 
       - name: Check multi-viewport examples
         run: |
@@ -127,6 +162,541 @@ jobs:
 
       - name: Check test-engine (no capture)
         run: cargo check -p dear-imgui-test-engine --no-default-features
+
+  binding-contract:
+    name: Core binding contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Init required nested submodules (selective)
+        shell: bash
+        run: bash tools/ci/update_submodules.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Install fixed LLVM toolchain
+        uses: KyleMayes/install-llvm-action@v1
+        with:
+          directory: ${{ runner.temp }}/llvm
+          cached: true
+          version: '14.0'
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: "false"
+          key: core-binding-contract
+
+      - name: Test binding specification and provenance models
+        run: cargo nextest run -p dear-imgui-build-support --features binding-spec
+
+      - name: Verify exact vendored source provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re
+          import subprocess
+          import tomllib
+          from pathlib import Path
+
+          manifest_path = Path("dear-imgui-sys/Cargo.toml")
+          with manifest_path.open("rb") as manifest_file:
+              manifest = tomllib.load(manifest_file)
+          metadata = manifest["package"]["metadata"]["dear-imgui-sources"]
+          required = {"cimgui-revision", "imgui-revision"}
+          if set(metadata) != required:
+              raise SystemExit(
+                  f"source metadata keys differ: expected {sorted(required)}, "
+                  f"found {sorted(metadata)}"
+              )
+
+          sources = (
+              (Path("dear-imgui-sys/third-party/cimgui"), "cimgui-revision"),
+              (Path("dear-imgui-sys/third-party/cimgui/imgui"), "imgui-revision"),
+          )
+          for source_path, metadata_key in sources:
+              status = subprocess.run(
+                  ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+                  cwd=source_path,
+                  check=True,
+                  capture_output=True,
+                  text=True,
+              ).stdout
+              if status:
+                  raise SystemExit(f"vendored source is dirty: {source_path}\n{status}")
+              revision = subprocess.run(
+                  ["git", "rev-parse", "HEAD"],
+                  cwd=source_path,
+                  check=True,
+                  capture_output=True,
+                  text=True,
+              ).stdout.strip()
+              expected = metadata[metadata_key]
+              if re.fullmatch(r"[0-9a-f]{40}", expected) is None:
+                  raise SystemExit(f"{metadata_key} is not an exact revision: {expected}")
+              if revision != expected:
+                  raise SystemExit(
+                      f"{source_path} revision mismatch: expected {expected}, found {revision}"
+                  )
+              print(f"{metadata_key}={revision}")
+          PY
+
+      - name: Regenerate and verify every core binding profile
+        run: cargo run -p xtask -- verify-bindings --allow-dirty
+
+      - name: Assert checked-in core bindings did not drift
+        run: |
+          git diff --exit-code -- \
+            dear-imgui-sys/src/bindings_pregenerated.rs \
+            dear-imgui-sys/src/bindings_pregenerated_windows.rs \
+            dear-imgui-sys/src/wasm_bindings_pregenerated.rs
+
+  wgpu-routes:
+    name: WGPU ${{ matrix.wgpu }} + ${{ matrix.platform }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - wgpu: '27'
+            platform: Winit
+            features: wgpu-27,multi-viewport-winit
+          - wgpu: '28'
+            platform: Winit
+            features: wgpu-28,multi-viewport-winit
+          - wgpu: '29'
+            platform: Winit
+            features: wgpu-29,multi-viewport-winit
+          - wgpu: '30'
+            platform: Winit
+            features: wgpu-30,multi-viewport-winit
+          - wgpu: '30'
+            platform: SDL3
+            features: wgpu-30,multi-viewport-sdl3
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Init required nested submodules (selective)
+        shell: bash
+        run: bash tools/ci/update_submodules.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: "false"
+          key: wgpu-${{ matrix.wgpu }}-${{ matrix.platform }}
+
+      - name: Install Linux deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake ninja-build pkg-config \
+            libasound2-dev \
+            libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev \
+            libxkbcommon-dev libwayland-dev libudev-dev \
+            mesa-common-dev libgl1-mesa-dev
+
+      - name: Check exact WGPU route
+        run: cargo check -p dear-imgui-wgpu --lib --no-default-features --features "${{ matrix.features }}"
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+
+      - name: Test exact WGPU route
+        run: cargo nextest run -p dear-imgui-wgpu --lib --no-default-features --features "${{ matrix.features }}"
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+
+  ash-routes:
+    name: Ash ${{ matrix.platform }} + ${{ matrix.rendering }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: Winit
+            rendering: classic
+            features: multi-viewport-winit
+          - platform: Winit
+            rendering: dynamic
+            features: multi-viewport-winit,dynamic-rendering
+          - platform: SDL3
+            rendering: classic
+            features: multi-viewport-sdl3
+          - platform: SDL3
+            rendering: dynamic
+            features: multi-viewport-sdl3,dynamic-rendering
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Init required nested submodules (selective)
+        shell: bash
+        run: bash tools/ci/update_submodules.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: "false"
+          key: ash-${{ matrix.platform }}-${{ matrix.rendering }}
+
+      - name: Install Linux deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential pkg-config \
+            libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev \
+            libxkbcommon-dev libwayland-dev libudev-dev
+
+      - name: Check exact Ash route
+        run: cargo check -p dear-imgui-ash --lib --no-default-features --features "${{ matrix.features }}"
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+
+      - name: Test exact Ash route including NoRendererClear policy
+        run: cargo nextest run -p dear-imgui-ash --lib --no-default-features --features "${{ matrix.features }}"
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+
+  feature-conflict-contracts:
+    name: Mutually exclusive feature contracts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Init required nested submodules (selective)
+        shell: bash
+        run: bash tools/ci/update_submodules.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: "false"
+          key: feature-conflict-contracts
+
+      - name: Install Linux deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake ninja-build pkg-config \
+            libasound2-dev \
+            libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev \
+            libxkbcommon-dev libwayland-dev libudev-dev \
+            mesa-common-dev libgl1-mesa-dev
+
+      - name: Reject mutually exclusive renderer features
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          expect_failure() {
+            local name="$1"
+            local expected="$2"
+            shift 2
+            local log="$RUNNER_TEMP/$name.log"
+            if "$@" >"$log" 2>&1; then
+              echo "::error::$name unexpectedly succeeded"
+              exit 1
+            fi
+            if ! grep -Fq "$expected" "$log"; then
+              cat "$log"
+              echo "::error::$name failed without the expected compile_error contract"
+              exit 1
+            fi
+            echo "Verified expected failure: $expected"
+          }
+
+          expect_failure \
+            wgpu-dual-major \
+            "Features \`wgpu-27\`, \`wgpu-28\`, \`wgpu-29\`, and \`wgpu-30\` are mutually exclusive; enable only one." \
+            cargo check -p dear-imgui-wgpu --lib --no-default-features --features wgpu-29,wgpu-30
+
+          expect_failure \
+            wgpu-dual-platform \
+            "Features \`multi-viewport-winit\` and \`multi-viewport-sdl3\` are mutually exclusive; enable only one." \
+            cargo check -p dear-imgui-wgpu --lib --no-default-features --features wgpu-30,multi-viewport-winit,multi-viewport-sdl3
+
+          expect_failure \
+            ash-dual-platform \
+            "dear-imgui-ash cannot enable both \`multi-viewport-winit\` and \`multi-viewport-sdl3\`; select one platform surface adapter" \
+            cargo check -p dear-imgui-ash --lib --no-default-features --features multi-viewport-winit,multi-viewport-sdl3
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+
+  node-editor-normal:
+    name: Node editor normal profile
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Init required nested submodules (selective)
+        shell: bash
+        run: bash tools/ci/update_submodules.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: "false"
+          key: node-editor-normal
+
+      - name: Install Linux deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake pkg-config \
+            libasound2-dev \
+            libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev \
+            libxkbcommon-dev libwayland-dev libudev-dev \
+            mesa-common-dev libgl1-mesa-dev
+
+      - name: Check node editor without stack-layout injection
+        run: cargo check -p dear-node-editor --lib --no-default-features
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+          NODE_EDITOR_SYS_FORCE_BUILD: "1"
+
+      - name: Check normal node editor basic example
+        run: cargo check -p dear-imgui-examples --bin node_editor_basic --no-default-features --features node-editor
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+          NODE_EDITOR_SYS_FORCE_BUILD: "1"
+
+  stack-layout-profiles:
+    name: Stack layout ${{ matrix.profile }} profile
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [core, blueprints]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Init required nested submodules (selective)
+        shell: bash
+        run: bash tools/ci/update_submodules.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: "false"
+          key: stack-layout-${{ matrix.profile }}
+
+      - name: Install Linux deps
+        if: matrix.profile == 'blueprints'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake pkg-config \
+            libasound2-dev \
+            libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev \
+            libxkbcommon-dev libwayland-dev libudev-dev \
+            mesa-common-dev libgl1-mesa-dev
+
+      - name: Check standalone core stack-layout profile
+        if: matrix.profile == 'core'
+        run: cargo check -p dear-imgui-rs --lib --no-default-features --features stack-layout
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+
+      - name: Test standalone core stack-layout profile
+        if: matrix.profile == 'core'
+        run: cargo nextest run -p dear-imgui-rs --lib --no-default-features --features stack-layout
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+
+      - name: Check node editor blueprints profile
+        if: matrix.profile == 'blueprints'
+        run: cargo check -p dear-node-editor --lib --no-default-features --features blueprints
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+          NODE_EDITOR_SYS_FORCE_BUILD: "1"
+
+      - name: Test node editor blueprints profile
+        if: matrix.profile == 'blueprints'
+        run: cargo nextest run -p dear-node-editor --no-default-features --features blueprints
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+          NODE_EDITOR_SYS_FORCE_BUILD: "1"
+
+      - name: Check node editor blueprints showcase
+        if: matrix.profile == 'blueprints'
+        run: cargo check -p dear-imgui-examples --bin node_editor_showcase --no-default-features --features node-editor-blueprints
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+          NODE_EDITOR_SYS_FORCE_BUILD: "1"
+
+  clippy-default:
+    name: Clippy default workspace
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Init required nested submodules (selective)
+        shell: bash
+        run: bash tools/ci/update_submodules.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: "false"
+          key: clippy-default
+
+      - name: Install Linux deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake pkg-config \
+            libfreetype6-dev libasound2-dev \
+            libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev \
+            libxkbcommon-dev libwayland-dev libudev-dev \
+            mesa-common-dev libgl1-mesa-dev
+
+      - name: Lint default workspace routes
+        run: |
+          set -euo pipefail
+          read -r -a historical_lints <<< "$CLIPPY_HISTORICAL_LINTS"
+          cargo clippy --workspace --all-targets \
+            --exclude dear-imgui-examples \
+            --exclude dear-imgui-web-demo \
+            --exclude xtask -- \
+            -D warnings "${historical_lints[@]}"
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+          IMPLOT_SYS_FORCE_BUILD: "1"
+          IMNODES_SYS_FORCE_BUILD: "1"
+          NODE_EDITOR_SYS_FORCE_BUILD: "1"
+          IMGUIZMO_SYS_FORCE_BUILD: "1"
+
+  clippy-focused:
+    name: Clippy focused feature routes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Init required nested submodules (selective)
+        shell: bash
+        run: bash tools/ci/update_submodules.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: "false"
+          key: clippy-focused
+
+      - name: Install Linux deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake pkg-config \
+            libasound2-dev \
+            libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev \
+            libxkbcommon-dev libwayland-dev libudev-dev \
+            mesa-common-dev libgl1-mesa-dev
+
+      - name: Lint binding contract tooling without warnings
+        run: cargo clippy -p dear-imgui-build-support --all-targets --features binding-spec -- -D warnings
+
+      - name: Lint cross-platform release tooling without warnings
+        run: cargo clippy -p xtask --all-targets -- -D warnings
+
+      - name: Lint core multi-viewport callback ownership
+        run: |
+          set -euo pipefail
+          read -r -a historical_lints <<< "$CLIPPY_HISTORICAL_LINTS"
+          cargo clippy -p dear-imgui-rs --lib --no-default-features --features multi-viewport -- \
+            -D warnings "${historical_lints[@]}"
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+
+      - name: Lint WGPU 30 Winit multi-viewport route
+        run: |
+          set -euo pipefail
+          read -r -a historical_lints <<< "$CLIPPY_HISTORICAL_LINTS"
+          cargo clippy -p dear-imgui-wgpu --lib --no-default-features --features wgpu-30,multi-viewport-winit -- \
+            -D warnings "${historical_lints[@]}"
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+
+      - name: Lint Ash dynamic Winit multi-viewport route
+        run: |
+          set -euo pipefail
+          read -r -a historical_lints <<< "$CLIPPY_HISTORICAL_LINTS"
+          cargo clippy -p dear-imgui-ash --lib --no-default-features --features multi-viewport-winit,dynamic-rendering -- \
+            -D warnings "${historical_lints[@]}"
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+
+      - name: Lint node editor blueprints route
+        run: |
+          set -euo pipefail
+          read -r -a historical_lints <<< "$CLIPPY_HISTORICAL_LINTS"
+          cargo clippy -p dear-node-editor --lib --no-default-features --features blueprints -- \
+            -D warnings "${historical_lints[@]}"
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+          NODE_EDITOR_SYS_FORCE_BUILD: "1"
 
   bevy-backend:
     name: Bevy backend gates
@@ -245,8 +815,14 @@ jobs:
           cache-bin: "false"
           key: platform-io-${{ matrix.crt }}
 
-      - name: Run C++ aggregate callback probe and lifecycle tests
-        run: cargo +stable nextest run -p dear-imgui-rs --features multi-viewport
+      - name: Run exact C++ aggregate callback ABI probe
+        run: cargo +stable nextest run -p dear-imgui-rs --features multi-viewport cpp_platform_io_probe_round_trips_all_aggregate_slots
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+          RUSTFLAGS: ${{ matrix.rustflags }}
+
+      - name: Run exact aggregate callback lifecycle sentinel
+        run: cargo +stable nextest run -p dear-imgui-rs --features multi-viewport context_drop_clears_aggregate_callback_storage
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
           RUSTFLAGS: ${{ matrix.rustflags }}
@@ -338,6 +914,8 @@ jobs:
             echo "::error::binding regeneration unexpectedly succeeded without the bindgen feature"
             exit 1
           fi
+          # Match Cargo's literal backticks.
+          # shellcheck disable=SC2016
           grep -F 'regenerating bindings requires the `bindgen` feature' regen-without-bindgen.log
           grep -F -- '--features bindgen' regen-without-bindgen.log
 
@@ -635,27 +1213,12 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cargo package (selected crates)
+      - name: Test release metadata and publish topology
+        run: python3 -B -m unittest discover -s tools/tests -p 'test_release_workflow.py' -v
+
+      - name: Package, unpack, and consume core crates
         shell: bash
-        run: |
-          set -euo pipefail
-          # Package the helper crate first because published -sys crates depend on it.
-          echo "::group::package dear-imgui-build-support"
-          cargo package -p dear-imgui-build-support
-          echo "::endgroup::"
-
-          # Then inspect the root -sys crate package file list. A full `cargo package`
-          # for dear-imgui-sys resolves the stripped manifest against crates.io, which
-          # will fail before release until dear-imgui-build-support has been published
-          # and indexed. `--list` still validates the package contents/excludes without
-          # requiring the helper crate to exist on crates.io yet.
-          echo "::group::package dear-imgui-sys (list)"
-          cargo package -p dear-imgui-sys --list
-          echo "::endgroup::"
-
-          # Note: other -sys crates depend on dear-imgui-sys by version and will fail
-          # packaging until dear-imgui-sys is published. We keep their packaging disabled
-          # here to avoid false CI failures pre-release.
+        run: bash tools/ci/verify_packaged_core.sh
 
   fmt:
     name: Format
@@ -688,6 +1251,9 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
@@ -703,27 +1269,43 @@ jobs:
       - name: Add wasm32 target
         run: rustup target add wasm32-unknown-unknown
 
-      - name: Test shared binding and WASM target specification
-        run: |
-          # Resolver tests reject wasm32-wasip1/wasip2/emscripten without
-          # requiring those Rust standard-library targets to be installed.
-          cargo test -p dear-imgui-build-support --features binding-spec
+      - name: Reject WASI and Emscripten in the pure target resolver
+        run: cargo nextest run -p dear-imgui-build-support --features binding-spec wasm_target_requires_the_explicit_provider_feature
 
-      - name: Verify source provenance and all core binding profiles
-        run: python3 tools/pre_publish_check.py --core-contract-only
+      - name: Check explicit core WASM feature
+        run: cargo check -p dear-imgui-rs --target wasm32-unknown-unknown --no-default-features --features wasm
 
-      - name: Require the explicit core WASM feature
+      - name: Reject core WASM target without the explicit feature
         shell: bash
         run: |
-          if cargo check -p dear-imgui-sys --target wasm32-unknown-unknown; then
-            echo "dear-imgui-sys unexpectedly accepted wasm32 without feature 'wasm'" >&2
+          set -euo pipefail
+          set +e
+          cargo check -p dear-imgui-sys --target wasm32-unknown-unknown --no-default-features 2>&1 | tee wasm-missing-feature.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [[ "$status" -eq 0 ]]; then
+            echo "::error::dear-imgui-sys unexpectedly accepted wasm32 without feature 'wasm'"
             exit 1
           fi
-          if cargo check -p dear-imgui-rs --target wasm32-unknown-unknown --features wasm,stack-layout; then
-            echo "dear-imgui-rs unexpectedly accepted wasm with native stack-layout" >&2
+          # Match Cargo's literal backticks.
+          # shellcheck disable=SC2016
+          grep -F 'wasm32-unknown-unknown requires the explicit `wasm` feature' wasm-missing-feature.log
+
+      - name: Reject native stack-layout injection on WASM
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          cargo check -p dear-imgui-rs --target wasm32-unknown-unknown --no-default-features --features wasm,stack-layout 2>&1 | tee wasm-stack-layout.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [[ "$status" -eq 0 ]]; then
+            echo "::error::dear-imgui-rs unexpectedly accepted WASM with native stack-layout"
             exit 1
           fi
-          cargo check -p dear-imgui-rs --target wasm32-unknown-unknown --features wasm
+          # Match rustc's literal backticks.
+          # shellcheck disable=SC2016
+          grep -F 'feature `stack-layout` is native-only and cannot be combined with WASM' wasm-stack-layout.log
 
       - name: Generate WASM bindings for extensions (ImPlot/ImPlot3D/ImNodes/ImGuizmo/ImGuIZMO.quat)
         run: |
