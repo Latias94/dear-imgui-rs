@@ -67,9 +67,7 @@ pub fn init_multi_viewport_support(ctx: &mut Context, main_window: &Window) {
     init_main_viewport(ctx, main_window);
 
     // Set up monitors - required for multi-viewport (after main viewport exists)
-    unsafe {
-        setup_monitors_with_window(main_window, ctx);
-    }
+    setup_monitors_with_window(main_window, ctx);
 }
 
 /// Shutdown multi-viewport support for `ctx`.

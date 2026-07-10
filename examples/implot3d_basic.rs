@@ -7,7 +7,7 @@
 //! - Left: Rust implementation (ImPlot3D Demo (Rust))
 //! - Right: Official C++ implementation (ImPlot3D Demo)
 
-use dear_app::{AddOnsConfig, DockingConfig, RunnerConfig, run};
+use dear_app::{AddOnsConfig, AppConfig, Application, DockingConfig, FrameContext, RunError, run};
 use dear_imgui_rs::*;
 use dear_implot3d as implot3d;
 use implot3d::plots::*;
@@ -19,47 +19,32 @@ fn cmap(plot_ui: &Plot3DUi, index: usize) -> [f32; 4] {
     plot_ui.colormap_color(ColormapColorIndex::from(index))
 }
 
-fn main() {
-    dear_imgui_rs::logging::init_tracing_with_filter(
-        "dear_imgui=info,implot3d_basic=info,wgpu=warn",
-    );
+struct ImPlot3dApp;
 
-    let runner = RunnerConfig {
-        window_title: "ImPlot3D Demo - Rust vs C++ Comparison".to_string(),
-        window_size: (1600.0, 900.0), // Wider window for side-by-side comparison
-        present_mode: wgpu::PresentMode::Fifo,
-        clear_color: [0.06, 0.08, 0.1, 1.0],
-        docking: DockingConfig {
-            enable: true,
-            auto_dockspace: true, // Enable automatic dockspace
-            dockspace_flags: DockFlags::PASSTHRU_CENTRAL_NODE,
-            host_window_flags: WindowFlags::empty(),
-            host_window_name: "DockSpaceHost",
-        },
-        ini_filename: Some("implot3d_demo.ini".into()), // Save layout
-        restore_previous_geometry: true,
-        redraw: dear_app::RedrawMode::Poll,
-        io_config_flags: None,
-        ..Default::default()
-    };
-
-    let addons = AddOnsConfig::auto();
-
-    // State to track if layout has been initialized
-    let layout_initialized = std::cell::RefCell::new(false);
-
-    run(runner, addons, move |ui, addons| {
-        let Some(plot_ctx) = addons.implot3d else {
+impl Application for ImPlot3dApp {
+    fn frame(&mut self, context: &mut FrameContext<'_, '_>) -> Result<(), RunError> {
+        let plot_ctx = context.addons().implot3d();
+        let ui = context.ui();
+        let Some(plot_ctx) = plot_ctx else {
             ui.text("ImPlot3D add-on not enabled");
-            return;
+            return Ok(());
         };
         let plot_ui = plot_ctx.get_plot_ui(ui);
 
-        // Initialize dockspace layout on first frame
-        if !*layout_initialized.borrow() {
-            setup_dockspace_layout(ui);
-            *layout_initialized.borrow_mut() = true;
-        }
+        let viewport = ui.main_viewport();
+        let target = DockspaceTarget::new(
+            ui.get_id("ImPlot3dDockspace"),
+            viewport.work_pos(),
+            viewport.work_size(),
+        )
+        .map_err(|error| RunError::application("frame", error.to_string()))?
+        .flags(DockFlags::PASSTHRU_CENTRAL_NODE);
+        ui.dockspace_over_main_viewport_with_layout(
+            &target,
+            &implot3d_dock_layout(),
+            DockLayoutApply::IfMissing,
+        )
+        .map_err(|error| RunError::application("frame", error.to_string()))?;
 
         // Rust implementation window (will be docked to the left)
         ui.window("ImPlot3D Demo (Rust)")
@@ -120,41 +105,43 @@ fn main() {
         // Official C++ implementation window (will be docked to the right)
         // Note: show_demo_window() creates a window titled "ImPlot3D Demo"
         plot_ui.show_demo_window();
-    })
-    .unwrap();
+        Ok(())
+    }
 }
 
-/// Setup the dockspace layout: split into left (Rust) and right (C++) panels
-fn setup_dockspace_layout(ui: &Ui) {
-    // Get the dockspace ID (created by auto_dockspace)
-    let dockspace_id = ui.get_id("DockSpaceHost");
+fn main() {
+    dear_imgui_rs::logging::init_tracing_with_filter(
+        "dear_imgui=info,implot3d_basic=info,wgpu=warn",
+    );
 
-    // Only setup layout if the dockspace node doesn't exist yet
-    if !DockBuilder::node_exists(&ui, dockspace_id) {
-        let viewport_size = ui.main_viewport().size();
+    let config = AppConfig {
+        window_title: "ImPlot3D Demo - Rust vs C++ Comparison".to_string(),
+        window_size: (1600.0, 900.0),
+        present_mode: wgpu::PresentMode::Fifo,
+        clear_color: [0.06, 0.08, 0.1, 1.0],
+        docking: DockingConfig {
+            enable: true,
+            auto_dockspace: false,
+            dockspace_flags: DockFlags::PASSTHRU_CENTRAL_NODE,
+            host_window_flags: WindowFlags::empty(),
+            host_window_name: "DockSpaceHost",
+        },
+        addons: AddOnsConfig::auto(),
+        ini_filename: Some("implot3d_demo.ini".into()),
+        ..Default::default()
+    };
 
-        // Clear any existing layout
-        DockBuilder::remove_node(ui, dockspace_id);
+    run(config, ImPlot3dApp).unwrap();
+}
 
-        // Create the root dockspace node
-        DockBuilder::add_node(ui, dockspace_id, DockNodeFlags::NONE);
-        DockBuilder::set_node_size(ui, dockspace_id, viewport_size);
-
-        // Split the dockspace: left 50% for Rust demo, right 50% for C++ demo
-        let (left_id, right_id) = DockBuilder::split_node(
-            ui,
-            dockspace_id,
-            SplitDirection::Left,
-            0.5, // 50% split
-        );
-
-        // Dock the windows to their respective panels
-        DockBuilder::dock_window(ui, "ImPlot3D Demo (Rust)", left_id);
-        DockBuilder::dock_window(ui, "ImPlot3D Demo", right_id); // C++ demo window title
-
-        // Finalize the layout
-        DockBuilder::finish(ui, dockspace_id);
-    }
+/// Split the dockspace into the Rust and C++ demo panels.
+fn implot3d_dock_layout() -> DockLayout {
+    DockLayout::split(
+        DockSplit::Left,
+        0.5,
+        DockLayout::tabs(["ImPlot3D Demo (Rust)"]),
+        DockLayout::tabs(["ImPlot3D Demo"]),
+    )
 }
 
 // Helper function to create collapsible demo sections

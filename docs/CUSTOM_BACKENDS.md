@@ -305,38 +305,6 @@ Renderer checklist:
   caller must reset state after rendering.
 - Clip/scissor in framebuffer coordinates, not logical window coordinates.
 
-## Optional Unified Traits
-
-`dear-imgui-rs` exposes `ImGuiPlatform` and `ImGuiRenderer` as small common
-traits. They are useful for application-local abstraction, but first-party
-backend crates may expose richer APIs when their framework needs concrete
-window, device, queue, command encoder, or render-pass types.
-
-```rust,no_run
-use dear_imgui_rs::{ImGuiRenderer, render::DrawData};
-
-pub struct MyRenderer;
-
-#[derive(Debug, thiserror::Error)]
-#[error("renderer error")]
-pub struct MyRendererError;
-
-impl ImGuiRenderer for MyRenderer {
-    type Error = MyRendererError;
-
-    fn init(&mut self) -> Result<(), Self::Error> {
-        Ok(())
-    }
-
-    fn render(&mut self, _draw_data: &mut DrawData) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
-```
-
-Use these traits when they make your application cleaner. Do not force them
-when the backend naturally needs a concrete render pass or command buffer.
-
 ## Threaded Or Render-Graph Backends
 
 If rendering happens off the UI thread, do not send live `DrawData` references

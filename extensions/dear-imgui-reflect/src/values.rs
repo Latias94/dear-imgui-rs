@@ -8,10 +8,8 @@
 use std::collections::{BTreeMap, HashMap};
 use std::hash::BuildHasher;
 
-use crate::response;
-use crate::settings::with_settings_read;
 use crate::{
-    ImGuiValue, TupleRenderMode, TupleSettings, imgui, imgui_array_with_settings,
+    ImGuiValue, Inspector, TupleRenderMode, TupleSettings, imgui, imgui_array_with_settings,
     imgui_btree_map_with_settings, imgui_hash_map_with_settings, imgui_vec_with_settings,
 };
 
@@ -19,42 +17,48 @@ use crate::{
 
 /// ImGui editor for a `bool` using a checkbox.
 impl ImGuiValue for bool {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let ui = inspector.ui();
         ui.checkbox(label, value)
     }
 }
 
 /// ImGui editor for a 32-bit signed integer.
 impl ImGuiValue for i32 {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let ui = inspector.ui();
         ui.input_int(label, value)
     }
 }
 
 /// ImGui editor for a 32-bit float.
 impl ImGuiValue for f32 {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let ui = inspector.ui();
         ui.input_float(label, value)
     }
 }
 
 /// ImGui editor for a 64-bit float.
 impl ImGuiValue for f64 {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let ui = inspector.ui();
         ui.input_double(label, value)
     }
 }
 
 /// ImGui editor for an owned UTF-8 string.
 impl ImGuiValue for String {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let ui = inspector.ui();
         ui.input_text(label, value).build()
     }
 }
 
 /// ImGui editor for an ImString buffer (zero-copy).
 impl ImGuiValue for imgui::ImString {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let ui = inspector.ui();
         ui.input_text_imstr(label, value).build()
     }
 }
@@ -62,55 +66,64 @@ impl ImGuiValue for imgui::ImString {
 // Integer scalar types via InputScalar
 
 impl ImGuiValue for i8 {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let ui = inspector.ui();
         ui.input_scalar(label, value).build()
     }
 }
 
 impl ImGuiValue for u8 {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let ui = inspector.ui();
         ui.input_scalar(label, value).build()
     }
 }
 
 impl ImGuiValue for i16 {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let ui = inspector.ui();
         ui.input_scalar(label, value).build()
     }
 }
 
 impl ImGuiValue for u16 {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let ui = inspector.ui();
         ui.input_scalar(label, value).build()
     }
 }
 
 impl ImGuiValue for u32 {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let ui = inspector.ui();
         ui.input_scalar(label, value).build()
     }
 }
 
 impl ImGuiValue for i64 {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let ui = inspector.ui();
         ui.input_scalar(label, value).build()
     }
 }
 
 impl ImGuiValue for u64 {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let ui = inspector.ui();
         ui.input_scalar(label, value).build()
     }
 }
 
 impl ImGuiValue for isize {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let ui = inspector.ui();
         ui.input_scalar(label, value).build()
     }
 }
 
 impl ImGuiValue for usize {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let ui = inspector.ui();
         ui.input_scalar(label, value).build()
     }
 }
@@ -118,56 +131,44 @@ impl ImGuiValue for usize {
 // Small fixed-size arrays treated as containers (with optional reordering).
 
 impl ImGuiValue for [f32; 2] {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
-        with_settings_read(|settings| {
-            let arr_settings = settings.arrays();
-            imgui_array_with_settings(ui, label, value, arr_settings)
-        })
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let settings = inspector.settings().arrays();
+        imgui_array_with_settings(inspector, label, value, settings)
     }
 }
 
 impl ImGuiValue for [f32; 3] {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
-        with_settings_read(|settings| {
-            let arr_settings = settings.arrays();
-            imgui_array_with_settings(ui, label, value, arr_settings)
-        })
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let settings = inspector.settings().arrays();
+        imgui_array_with_settings(inspector, label, value, settings)
     }
 }
 
 impl ImGuiValue for [f32; 4] {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
-        with_settings_read(|settings| {
-            let arr_settings = settings.arrays();
-            imgui_array_with_settings(ui, label, value, arr_settings)
-        })
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let settings = inspector.settings().arrays();
+        imgui_array_with_settings(inspector, label, value, settings)
     }
 }
 
 impl ImGuiValue for [i32; 2] {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
-        with_settings_read(|settings| {
-            let arr_settings = settings.arrays();
-            imgui_array_with_settings(ui, label, value, arr_settings)
-        })
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let settings = inspector.settings().arrays();
+        imgui_array_with_settings(inspector, label, value, settings)
     }
 }
 
 impl ImGuiValue for [i32; 3] {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
-        with_settings_read(|settings| {
-            let arr_settings = settings.arrays();
-            imgui_array_with_settings(ui, label, value, arr_settings)
-        })
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let settings = inspector.settings().arrays();
+        imgui_array_with_settings(inspector, label, value, settings)
     }
 }
 
 impl ImGuiValue for [i32; 4] {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
-        with_settings_read(|settings| {
-            let arr_settings = settings.arrays();
-            imgui_array_with_settings(ui, label, value, arr_settings)
-        })
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let settings = inspector.settings().arrays();
+        imgui_array_with_settings(inspector, label, value, settings)
     }
 }
 
@@ -179,11 +180,9 @@ where
     V: ImGuiValue + Default + Clone + 'static,
     S: BuildHasher,
 {
-    fn imgui_value(ui: &imgui::Ui, label: &str, map: &mut Self) -> bool {
-        with_settings_read(|settings| {
-            let map_settings = settings.maps();
-            imgui_hash_map_with_settings(ui, label, map, map_settings)
-        })
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, map: &mut Self) -> bool {
+        let settings = inspector.settings().maps();
+        imgui_hash_map_with_settings(inspector, label, map, settings)
     }
 }
 
@@ -191,11 +190,9 @@ impl<V> ImGuiValue for BTreeMap<String, V>
 where
     V: ImGuiValue + Default + Clone + 'static,
 {
-    fn imgui_value(ui: &imgui::Ui, label: &str, map: &mut Self) -> bool {
-        with_settings_read(|settings| {
-            let map_settings = settings.maps();
-            imgui_btree_map_with_settings(ui, label, map, map_settings)
-        })
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, map: &mut Self) -> bool {
+        let settings = inspector.settings().maps();
+        imgui_btree_map_with_settings(inspector, label, map, settings)
     }
 }
 
@@ -204,7 +201,8 @@ impl<T> ImGuiValue for Option<T>
 where
     T: ImGuiValue + Default,
 {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let ui = inspector.ui();
         let mut enabled = value.is_some();
         let mut changed = ui.checkbox(label, &mut enabled);
 
@@ -212,7 +210,7 @@ where
             (true, Some(inner)) => {
                 ui.indent();
                 let inner_label = format!("{label}##value");
-                changed |= T::imgui_value(ui, &inner_label, inner);
+                changed |= T::imgui_value(inspector, &inner_label, inner);
                 ui.unindent();
             }
             (true, None) => {
@@ -221,7 +219,7 @@ where
                 if let Some(inner) = value.as_mut() {
                     ui.indent();
                     let inner_label = format!("{label}##value");
-                    changed |= T::imgui_value(ui, &inner_label, inner);
+                    changed |= T::imgui_value(inspector, &inner_label, inner);
                     ui.unindent();
                 }
             }
@@ -242,15 +240,16 @@ where
 /// small tuples and by the derive macro for struct fields that contain tuple
 /// types, allowing consistent layout behavior across both paths.
 pub fn imgui_tuple_body<F>(
-    ui: &imgui::Ui,
+    inspector: &mut Inspector<'_, '_>,
     label: &str,
     element_count: usize,
     settings: &TupleSettings,
     mut render_element: F,
 ) -> bool
 where
-    F: FnMut(&imgui::Ui, usize) -> bool,
+    F: FnMut(&mut Inspector<'_, '_>, usize) -> bool,
 {
+    let ui = inspector.ui();
     let mut changed = false;
 
     let mut render_inner = |ui: &imgui::Ui, changed: &mut bool| match settings.render_mode {
@@ -260,11 +259,12 @@ where
                 if index > 0 {
                     ui.same_line();
                 }
-                let local_changed = if response::is_field_path_active() {
+                let local_changed = if inspector.is_path_active() {
                     let segment = format!("[{index}]");
-                    response::with_field_path(&segment, || render_element(ui, index))
+                    let _path = inspector.push_path(segment);
+                    render_element(inspector, index)
                 } else {
-                    render_element(ui, index)
+                    render_element(inspector, index)
                 };
                 *changed |= local_changed;
             }
@@ -288,11 +288,12 @@ where
                 for index in 0..element_count {
                     ui.table_next_column();
                     let _id = ui.push_id(index as i32);
-                    let local_changed = if response::is_field_path_active() {
+                    let local_changed = if inspector.is_path_active() {
                         let segment = format!("[{index}]");
-                        response::with_field_path(&segment, || render_element(ui, index))
+                        let _path = inspector.push_path(segment);
+                        render_element(inspector, index)
                     } else {
-                        render_element(ui, index)
+                        render_element(inspector, index)
                     };
                     *changed |= local_changed;
                 }
@@ -322,17 +323,21 @@ where
     A: ImGuiValue,
     B: ImGuiValue,
 {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
-        with_settings_read(|settings| {
-            let tuple_settings = settings.tuples();
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let tuple_settings = inspector.settings().tuples();
 
-            let (ref mut a, ref mut b) = *value;
-            imgui_tuple_body(ui, label, 2, tuple_settings, |ui, index| match index {
-                0 => A::imgui_value(ui, "##0", a),
-                1 => B::imgui_value(ui, "##1", b),
+        let (ref mut a, ref mut b) = *value;
+        imgui_tuple_body(
+            inspector,
+            label,
+            2,
+            tuple_settings,
+            |inspector, index| match index {
+                0 => A::imgui_value(inspector, "##0", a),
+                1 => B::imgui_value(inspector, "##1", b),
                 _ => false,
-            })
-        })
+            },
+        )
     }
 }
 
@@ -342,18 +347,22 @@ where
     B: ImGuiValue,
     C: ImGuiValue,
 {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
-        with_settings_read(|settings| {
-            let tuple_settings = settings.tuples();
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let tuple_settings = inspector.settings().tuples();
 
-            let (ref mut a, ref mut b, ref mut c) = *value;
-            imgui_tuple_body(ui, label, 3, tuple_settings, |ui, index| match index {
-                0 => A::imgui_value(ui, "##0", a),
-                1 => B::imgui_value(ui, "##1", b),
-                2 => C::imgui_value(ui, "##2", c),
+        let (ref mut a, ref mut b, ref mut c) = *value;
+        imgui_tuple_body(
+            inspector,
+            label,
+            3,
+            tuple_settings,
+            |inspector, index| match index {
+                0 => A::imgui_value(inspector, "##0", a),
+                1 => B::imgui_value(inspector, "##1", b),
+                2 => C::imgui_value(inspector, "##2", c),
                 _ => false,
-            })
-        })
+            },
+        )
     }
 }
 
@@ -364,19 +373,23 @@ where
     C: ImGuiValue,
     D: ImGuiValue,
 {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
-        with_settings_read(|settings| {
-            let tuple_settings = settings.tuples();
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let tuple_settings = inspector.settings().tuples();
 
-            let (ref mut a, ref mut b, ref mut c, ref mut d) = *value;
-            imgui_tuple_body(ui, label, 4, tuple_settings, |ui, index| match index {
-                0 => A::imgui_value(ui, "##0", a),
-                1 => B::imgui_value(ui, "##1", b),
-                2 => C::imgui_value(ui, "##2", c),
-                3 => D::imgui_value(ui, "##3", d),
+        let (ref mut a, ref mut b, ref mut c, ref mut d) = *value;
+        imgui_tuple_body(
+            inspector,
+            label,
+            4,
+            tuple_settings,
+            |inspector, index| match index {
+                0 => A::imgui_value(inspector, "##0", a),
+                1 => B::imgui_value(inspector, "##1", b),
+                2 => C::imgui_value(inspector, "##2", c),
+                3 => D::imgui_value(inspector, "##3", d),
                 _ => false,
-            })
-        })
+            },
+        )
     }
 }
 
@@ -388,20 +401,24 @@ where
     D: ImGuiValue,
     E: ImGuiValue,
 {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
-        with_settings_read(|settings| {
-            let tuple_settings = settings.tuples();
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let tuple_settings = inspector.settings().tuples();
 
-            let (ref mut a, ref mut b, ref mut c, ref mut d, ref mut e) = *value;
-            imgui_tuple_body(ui, label, 5, tuple_settings, |ui, index| match index {
-                0 => A::imgui_value(ui, "##0", a),
-                1 => B::imgui_value(ui, "##1", b),
-                2 => C::imgui_value(ui, "##2", c),
-                3 => D::imgui_value(ui, "##3", d),
-                4 => E::imgui_value(ui, "##4", e),
+        let (ref mut a, ref mut b, ref mut c, ref mut d, ref mut e) = *value;
+        imgui_tuple_body(
+            inspector,
+            label,
+            5,
+            tuple_settings,
+            |inspector, index| match index {
+                0 => A::imgui_value(inspector, "##0", a),
+                1 => B::imgui_value(inspector, "##1", b),
+                2 => C::imgui_value(inspector, "##2", c),
+                3 => D::imgui_value(inspector, "##3", d),
+                4 => E::imgui_value(inspector, "##4", e),
                 _ => false,
-            })
-        })
+            },
+        )
     }
 }
 
@@ -414,21 +431,25 @@ where
     E: ImGuiValue,
     F: ImGuiValue,
 {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
-        with_settings_read(|settings| {
-            let tuple_settings = settings.tuples();
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let tuple_settings = inspector.settings().tuples();
 
-            let (ref mut a, ref mut b, ref mut c, ref mut d, ref mut e, ref mut f) = *value;
-            imgui_tuple_body(ui, label, 6, tuple_settings, |ui, index| match index {
-                0 => A::imgui_value(ui, "##0", a),
-                1 => B::imgui_value(ui, "##1", b),
-                2 => C::imgui_value(ui, "##2", c),
-                3 => D::imgui_value(ui, "##3", d),
-                4 => E::imgui_value(ui, "##4", e),
-                5 => F::imgui_value(ui, "##5", f),
+        let (ref mut a, ref mut b, ref mut c, ref mut d, ref mut e, ref mut f) = *value;
+        imgui_tuple_body(
+            inspector,
+            label,
+            6,
+            tuple_settings,
+            |inspector, index| match index {
+                0 => A::imgui_value(inspector, "##0", a),
+                1 => B::imgui_value(inspector, "##1", b),
+                2 => C::imgui_value(inspector, "##2", c),
+                3 => D::imgui_value(inspector, "##3", d),
+                4 => E::imgui_value(inspector, "##4", e),
+                5 => F::imgui_value(inspector, "##5", f),
                 _ => false,
-            })
-        })
+            },
+        )
     }
 }
 
@@ -442,23 +463,26 @@ where
     F: ImGuiValue,
     G: ImGuiValue,
 {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
-        with_settings_read(|settings| {
-            let tuple_settings = settings.tuples();
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let tuple_settings = inspector.settings().tuples();
 
-            let (ref mut a, ref mut b, ref mut c, ref mut d, ref mut e, ref mut f, ref mut g) =
-                *value;
-            imgui_tuple_body(ui, label, 7, tuple_settings, |ui, index| match index {
-                0 => A::imgui_value(ui, "##0", a),
-                1 => B::imgui_value(ui, "##1", b),
-                2 => C::imgui_value(ui, "##2", c),
-                3 => D::imgui_value(ui, "##3", d),
-                4 => E::imgui_value(ui, "##4", e),
-                5 => F::imgui_value(ui, "##5", f),
-                6 => G::imgui_value(ui, "##6", g),
+        let (ref mut a, ref mut b, ref mut c, ref mut d, ref mut e, ref mut f, ref mut g) = *value;
+        imgui_tuple_body(
+            inspector,
+            label,
+            7,
+            tuple_settings,
+            |inspector, index| match index {
+                0 => A::imgui_value(inspector, "##0", a),
+                1 => B::imgui_value(inspector, "##1", b),
+                2 => C::imgui_value(inspector, "##2", c),
+                3 => D::imgui_value(inspector, "##3", d),
+                4 => E::imgui_value(inspector, "##4", e),
+                5 => F::imgui_value(inspector, "##5", f),
+                6 => G::imgui_value(inspector, "##6", g),
                 _ => false,
-            })
-        })
+            },
+        )
     }
 }
 
@@ -473,32 +497,36 @@ where
     G: ImGuiValue,
     H: ImGuiValue,
 {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
-        with_settings_read(|settings| {
-            let tuple_settings = settings.tuples();
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let tuple_settings = inspector.settings().tuples();
 
-            let (
-                ref mut a,
-                ref mut b,
-                ref mut c,
-                ref mut d,
-                ref mut e,
-                ref mut f,
-                ref mut g,
-                ref mut h,
-            ) = *value;
-            imgui_tuple_body(ui, label, 8, tuple_settings, |ui, index| match index {
-                0 => A::imgui_value(ui, "##0", a),
-                1 => B::imgui_value(ui, "##1", b),
-                2 => C::imgui_value(ui, "##2", c),
-                3 => D::imgui_value(ui, "##3", d),
-                4 => E::imgui_value(ui, "##4", e),
-                5 => F::imgui_value(ui, "##5", f),
-                6 => G::imgui_value(ui, "##6", g),
-                7 => H::imgui_value(ui, "##7", h),
+        let (
+            ref mut a,
+            ref mut b,
+            ref mut c,
+            ref mut d,
+            ref mut e,
+            ref mut f,
+            ref mut g,
+            ref mut h,
+        ) = *value;
+        imgui_tuple_body(
+            inspector,
+            label,
+            8,
+            tuple_settings,
+            |inspector, index| match index {
+                0 => A::imgui_value(inspector, "##0", a),
+                1 => B::imgui_value(inspector, "##1", b),
+                2 => C::imgui_value(inspector, "##2", c),
+                3 => D::imgui_value(inspector, "##3", d),
+                4 => E::imgui_value(inspector, "##4", e),
+                5 => F::imgui_value(inspector, "##5", f),
+                6 => G::imgui_value(inspector, "##6", g),
+                7 => H::imgui_value(inspector, "##7", h),
                 _ => false,
-            })
-        })
+            },
+        )
     }
 }
 
@@ -507,11 +535,9 @@ impl<T> ImGuiValue for Vec<T>
 where
     T: ImGuiValue + Default,
 {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
-        with_settings_read(|settings| {
-            let vec_settings = settings.vec();
-            imgui_vec_with_settings(ui, label, value, vec_settings)
-        })
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let settings = inspector.settings().vec();
+        imgui_vec_with_settings(inspector, label, value, settings)
     }
 }
 
@@ -520,11 +546,12 @@ where
 /// ImGui editors for `glam` vector types when the `glam` feature is enabled.
 #[cfg(feature = "glam")]
 mod glam_impls {
-    use crate::{ImGuiValue, imgui};
+    use crate::{ImGuiValue, Inspector};
     use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 
     impl ImGuiValue for Vec2 {
-        fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
+        fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+            let ui = inspector.ui();
             let mut arr = value.to_array();
             let changed = ui.input_float2(label, &mut arr).build();
             if changed {
@@ -535,7 +562,8 @@ mod glam_impls {
     }
 
     impl ImGuiValue for Vec3 {
-        fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
+        fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+            let ui = inspector.ui();
             let mut arr = value.to_array();
             let changed = ui.input_float3(label, &mut arr).build();
             if changed {
@@ -546,7 +574,8 @@ mod glam_impls {
     }
 
     impl ImGuiValue for Vec4 {
-        fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
+        fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+            let ui = inspector.ui();
             let mut arr = value.to_array();
             let changed = ui.input_float4(label, &mut arr).build();
             if changed {
@@ -557,7 +586,8 @@ mod glam_impls {
     }
 
     impl ImGuiValue for Quat {
-        fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
+        fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+            let ui = inspector.ui();
             // Represent the quaternion as (x, y, z, w) and allow direct editing.
             // After editing, renormalize to keep it as a unit quaternion.
             let mut arr = value.to_array();
@@ -577,7 +607,8 @@ mod glam_impls {
     }
 
     impl ImGuiValue for Mat4 {
-        fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
+        fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+            let ui = inspector.ui();
             // Render the 4x4 matrix as four rows of input_float4 widgets.
             // This is primarily intended for debugging/inspection.
             let mut cols = value.to_cols_array();
@@ -609,11 +640,12 @@ mod glam_impls {
 /// ImGui editors for `mint` vector types when the `mint` feature is enabled.
 #[cfg(feature = "mint")]
 mod mint_impls {
-    use crate::{ImGuiValue, imgui};
+    use crate::{ImGuiValue, Inspector};
     use mint::{Vector2, Vector3, Vector4};
 
     impl ImGuiValue for Vector2<f32> {
-        fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
+        fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+            let ui = inspector.ui();
             let mut arr = [value.x, value.y];
             let changed = ui.input_float2(label, &mut arr).build();
             if changed {
@@ -625,7 +657,8 @@ mod mint_impls {
     }
 
     impl ImGuiValue for Vector3<f32> {
-        fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
+        fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+            let ui = inspector.ui();
             let mut arr = [value.x, value.y, value.z];
             let changed = ui.input_float3(label, &mut arr).build();
             if changed {
@@ -638,7 +671,8 @@ mod mint_impls {
     }
 
     impl ImGuiValue for Vector4<f32> {
-        fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
+        fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+            let ui = inspector.ui();
             let mut arr = [value.x, value.y, value.z, value.w];
             let changed = ui.input_float4(label, &mut arr).build();
             if changed {

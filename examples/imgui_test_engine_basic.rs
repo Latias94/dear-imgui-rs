@@ -1,8 +1,9 @@
-use dear_app::{AppBuilder, Theme};
+use dear_app::{
+    AppConfig, Application, FrameContext, InitContext, RunError, ShutdownContext, Theme, run,
+};
 use dear_imgui_test_engine::{
     RunFlags, RunSpeed, ScriptCount, TestEngine, TestGroup, VerboseLevel,
 };
-use std::{cell::RefCell, rc::Rc};
 
 #[derive(Debug, Default)]
 struct ScriptTargetState {
@@ -152,202 +153,180 @@ Options:\n\
     Ok(cli)
 }
 
+struct TestEngineApp {
+    cli: Cli,
+    engine: Option<TestEngine>,
+    script_target_state: ScriptTargetState,
+    auto_run_started: bool,
+    frame_counter: u64,
+}
+
+impl Application for TestEngineApp {
+    fn configure_imgui(&mut self, context: &mut InitContext<'_>) -> Result<(), RunError> {
+        let mut engine = TestEngine::create();
+        engine.set_verbose_level(self.cli.verbose.unwrap_or(VerboseLevel::Info));
+        engine.set_run_speed(self.cli.speed.unwrap_or(RunSpeed::Normal));
+        engine.register_default_tests();
+        engine
+            .add_script_test("rust_tests", "script_smoke", |test| {
+                test.set_ref("Script Target###RustScriptTarget")?;
+                test.wait_for_item("Click Me", ScriptCount::new(120))?;
+                test.assert_item_visible("Click Me")?;
+                test.item_click("Click Me")?;
+                test.wait_for_item_visible("Input", ScriptCount::new(120))?;
+                test.input_text_replace("Input", "hello from script", false)?;
+                test.wait_for_item_visible("MyInt", ScriptCount::new(120))?;
+                test.item_input_int("MyInt", 123)?;
+                test.assert_item_read_int_eq("MyInt", 123)?;
+                test.item_check("Node/Checkbox")?;
+                test.item_uncheck("Node/Checkbox")?;
+                test.yield_frames(ScriptCount::new(2));
+                Ok(())
+            })
+            .map_err(|error| RunError::application("configure_imgui", error.to_string()))?;
+        engine
+            .try_start(context.imgui())
+            .map_err(|error| RunError::application("configure_imgui", error.to_string()))?;
+
+        if self.cli.run {
+            let filter = self.cli.filter.as_deref();
+            let flags = RunFlags::RUN_FROM_COMMAND_LINE;
+            match self.cli.group {
+                GroupSel::Tests => {
+                    let _ = engine.queue_tests(TestGroup::Tests, filter, flags);
+                }
+                GroupSel::Perfs => {
+                    let _ = engine.queue_tests(TestGroup::Perfs, filter, flags);
+                }
+                GroupSel::All => {
+                    let _ = engine.queue_tests(TestGroup::Tests, filter, flags);
+                    let _ = engine.queue_tests(TestGroup::Perfs, filter, flags);
+                }
+            }
+            self.auto_run_started = true;
+        }
+        TestEngine::install_default_crash_handler();
+        self.engine = Some(engine);
+        Ok(())
+    }
+
+    fn frame(&mut self, context: &mut FrameContext<'_, '_>) -> Result<(), RunError> {
+        let ui = context.ui();
+        let Some(engine) = self.engine.as_mut() else {
+            return Ok(());
+        };
+        let state = &mut self.script_target_state;
+        ui.window("Script Target###RustScriptTarget")
+            .size([420.0, 160.0], dear_imgui_rs::Condition::FirstUseEver)
+            .build(|| {
+                ui.text("This window is owned by the application.");
+                ui.button("Click Me");
+                ui.input_text("Input", &mut state.input).build();
+                ui.input_int("MyInt", &mut state.my_int);
+                if let Some(_node) = ui.tree_node("Node") {
+                    ui.checkbox("Checkbox", &mut state.checkbox);
+                }
+                ui.slider_i32("Slider", &mut state.slider, 0, 1000);
+            });
+
+        ui.window("ImGui Test Engine")
+            .size([420.0, 220.0], dear_imgui_rs::Condition::FirstUseEver)
+            .build(|| {
+                if ui.button("Queue all Tests") {
+                    let _ =
+                        engine.queue_tests(TestGroup::Tests, None, RunFlags::RUN_FROM_COMMAND_LINE);
+                }
+                ui.same_line();
+                if ui.button("Queue all Perfs") {
+                    let _ =
+                        engine.queue_tests(TestGroup::Perfs, None, RunFlags::RUN_FROM_COMMAND_LINE);
+                }
+                ui.same_line();
+                if ui.button("Abort") {
+                    engine.abort_current_test();
+                }
+
+                let summary = engine.result_summary();
+                ui.separator();
+                ui.text(format!(
+                    "Tested: {}  Success: {}  In queue: {}",
+                    summary.count_tested, summary.count_success, summary.count_in_queue
+                ));
+                ui.text(format!("Running tests: {}", engine.is_running_tests()));
+                ui.text(format!(
+                    "Request max app speed: {}",
+                    engine.is_requesting_max_app_speed()
+                ));
+            });
+        engine.show_windows(ui, None);
+
+        if self.cli.exit_when_done && self.auto_run_started {
+            self.frame_counter += 1;
+            let done = engine.is_test_queue_empty() && !engine.is_running_tests();
+            let timed_out = self
+                .cli
+                .max_frames
+                .is_some_and(|max| self.frame_counter >= max);
+            if done || timed_out {
+                engine.stop();
+                let summary = engine.result_summary();
+                let failures = summary.count_tested.saturating_sub(summary.count_success);
+                if timed_out {
+                    return Err(RunError::application(
+                        "frame",
+                        format!("test queue timed out after {} frames", self.frame_counter),
+                    ));
+                }
+                if failures != 0 {
+                    return Err(RunError::application(
+                        "frame",
+                        format!("{failures} test-engine tests failed"),
+                    ));
+                }
+                println!(
+                    "Tests passed (tested={}, success={})",
+                    summary.count_tested, summary.count_success
+                );
+                context.request_exit();
+            }
+        }
+        Ok(())
+    }
+
+    fn shutdown(&mut self, _context: &mut ShutdownContext<'_>) -> Result<(), RunError> {
+        if let Some(engine) = self.engine.as_mut() {
+            engine.shutdown();
+        }
+        Ok(())
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
-
     let cli = match parse_cli() {
         Ok(cli) => cli,
-        Err(msg) => {
-            if msg.starts_with("Usage:") {
-                eprintln!("{msg}");
-                return Ok(());
-            }
-            return Err(msg.into());
+        Err(message) if message.starts_with("Usage:") => {
+            eprintln!("{message}");
+            return Ok(());
         }
+        Err(message) => return Err(message.into()),
     };
-
-    let cli = Rc::new(cli);
-    let engine = Rc::new(RefCell::new(None::<TestEngine>));
-    let script_target_state = Rc::new(RefCell::new(ScriptTargetState {
-        checkbox: false,
-        slider: 42,
-        input: String::new(),
-        my_int: 42,
-    }));
-
-    let engine_setup = Rc::clone(&engine);
-    let engine_frame = Rc::clone(&engine);
-    let engine_exit = Rc::clone(&engine);
-    let script_target_state_frame = Rc::clone(&script_target_state);
-    let cli_setup = Rc::clone(&cli);
-    let cli_frame = Rc::clone(&cli);
-    let auto_run_started = Rc::new(RefCell::new(false));
-    let auto_run_started_setup = Rc::clone(&auto_run_started);
-    let auto_run_started_frame = Rc::clone(&auto_run_started);
-    let frame_counter = Rc::new(RefCell::new(0u64));
-    let frame_counter_frame = Rc::clone(&frame_counter);
-
-    AppBuilder::new()
-        .with_theme(Theme::Dark)
-        .on_setup(move |ctx| {
-            let mut test_engine = TestEngine::create();
-            test_engine.set_verbose_level(cli_setup.verbose.unwrap_or(VerboseLevel::Info));
-            test_engine.set_run_speed(cli_setup.speed.unwrap_or(RunSpeed::Normal));
-            test_engine.register_default_tests();
-
-            // Minimal Rust-authored test (scripted): keeps everything on the C++ side at runtime,
-            // while letting you define the intent in Rust without FFI callbacks.
-            test_engine
-                .add_script_test("rust_tests", "script_smoke", |t| {
-                    t.set_ref("Script Target###RustScriptTarget")?;
-                    t.wait_for_item("Click Me", ScriptCount::new(120))?;
-                    t.assert_item_visible("Click Me")?;
-                    t.item_click("Click Me")?;
-                    t.wait_for_item_visible("Input", ScriptCount::new(120))?;
-                    t.input_text_replace("Input", "hello from script", false)?;
-                    t.wait_for_item_visible("MyInt", ScriptCount::new(120))?;
-                    t.item_input_int("MyInt", 123)?;
-                    t.assert_item_read_int_eq("MyInt", 123)?;
-                    t.item_check("Node/Checkbox")?;
-                    t.item_uncheck("Node/Checkbox")?;
-                    t.yield_frames(ScriptCount::new(2));
-                    Ok(())
-                })
-                .expect("Failed to register script_smoke test");
-
-            test_engine
-                .try_start(ctx)
-                .expect("Failed to start Dear ImGui Test Engine");
-
-            if cli_setup.run {
-                let filter = cli_setup.filter.as_deref();
-                let flags = RunFlags::RUN_FROM_COMMAND_LINE;
-                match cli_setup.group {
-                    GroupSel::Tests => {
-                        let _ = test_engine.queue_tests(TestGroup::Tests, filter, flags);
-                    }
-                    GroupSel::Perfs => {
-                        let _ = test_engine.queue_tests(TestGroup::Perfs, filter, flags);
-                    }
-                    GroupSel::All => {
-                        let _ = test_engine.queue_tests(TestGroup::Tests, filter, flags);
-                        let _ = test_engine.queue_tests(TestGroup::Perfs, filter, flags);
-                    }
-                }
-                *auto_run_started_setup.borrow_mut() = true;
-            }
-
-            *engine_setup.borrow_mut() = Some(test_engine);
-            TestEngine::install_default_crash_handler();
-        })
-        .on_frame(move |ui, _addons| {
-            let mut guard = engine_frame.borrow_mut();
-            let Some(engine) = guard.as_mut() else {
-                return;
-            };
-
-            // A small window rendered by the application every frame, meant to be driven by script tests.
-            let mut state = script_target_state_frame.borrow_mut();
-            ui.window("Script Target###RustScriptTarget")
-                .size([420.0, 160.0], dear_imgui_rs::Condition::FirstUseEver)
-                .build(|| {
-                    ui.text("This window is owned by the app (not a test GuiFunc).");
-                    ui.button("Click Me");
-                    ui.input_text("Input", &mut state.input).build();
-                    ui.input_int("MyInt", &mut state.my_int);
-                    if let Some(_node) = ui.tree_node("Node") {
-                        ui.checkbox("Checkbox", &mut state.checkbox);
-                    }
-                    ui.slider_i32("Slider", &mut state.slider, 0, 1000);
-                });
-
-            ui.window("ImGui Test Engine")
-                .size([420.0, 220.0], dear_imgui_rs::Condition::FirstUseEver)
-                .build(|| {
-                    if ui.button("Queue all Tests") {
-                        let _ = engine.queue_tests(
-                            TestGroup::Tests,
-                            None,
-                            RunFlags::RUN_FROM_COMMAND_LINE,
-                        );
-                    }
-                    ui.same_line();
-                    if ui.button("Queue all Perfs") {
-                        let _ = engine.queue_tests(
-                            TestGroup::Perfs,
-                            None,
-                            RunFlags::RUN_FROM_COMMAND_LINE,
-                        );
-                    }
-                    ui.same_line();
-                    if ui.button("Abort") {
-                        engine.abort_current_test();
-                    }
-
-                    let summary = engine.result_summary();
-                    ui.separator();
-                    ui.text(format!(
-                        "Tested: {}  Success: {}  In queue: {}",
-                        summary.count_tested, summary.count_success, summary.count_in_queue
-                    ));
-                    ui.text(format!("Running tests: {}", engine.is_running_tests()));
-                    ui.text(format!(
-                        "Request max app speed: {}",
-                        engine.is_requesting_max_app_speed()
-                    ));
-                    ui.text("Note: call post_swap() in custom loops when capture is needed.");
-                });
-
-            engine.show_windows(ui, None);
-
-            if cli_frame.exit_when_done && *auto_run_started_frame.borrow() {
-                *frame_counter_frame.borrow_mut() += 1;
-
-                let done = engine.is_test_queue_empty() && !engine.is_running_tests();
-                let too_many_frames = cli_frame
-                    .max_frames
-                    .is_some_and(|max| *frame_counter_frame.borrow() >= max);
-
-                if done || too_many_frames {
-                    // Try to shut down cleanly before exiting the process.
-                    engine.stop();
-                    let summary = engine.result_summary();
-                    let failures = summary.count_tested.saturating_sub(summary.count_success);
-                    engine.shutdown();
-
-                    if too_many_frames {
-                        eprintln!(
-                            "Timed out after {} frames (tested={}, success={}, in_queue={})",
-                            frame_counter_frame.borrow(),
-                            summary.count_tested,
-                            summary.count_success,
-                            summary.count_in_queue
-                        );
-                        std::process::exit(2);
-                    }
-
-                    if failures != 0 {
-                        eprintln!(
-                            "Tests failed (tested={}, success={}, in_queue={})",
-                            summary.count_tested, summary.count_success, summary.count_in_queue
-                        );
-                        std::process::exit(1);
-                    }
-
-                    println!(
-                        "Tests passed (tested={}, success={})",
-                        summary.count_tested, summary.count_success
-                    );
-                    std::process::exit(0);
-                }
-            }
-        })
-        .on_exit(move |_ctx| {
-            if let Some(engine) = engine_exit.borrow_mut().as_mut() {
-                engine.shutdown();
-            }
-        })
-        .run()?;
-
+    let application = TestEngineApp {
+        cli,
+        engine: None,
+        script_target_state: ScriptTargetState {
+            checkbox: false,
+            slider: 42,
+            input: String::new(),
+            my_int: 42,
+        },
+        auto_run_started: false,
+        frame_counter: 0,
+    };
+    let config = AppConfig {
+        theme: Some(Theme::Dark),
+        ..Default::default()
+    };
+    run(config, application)?;
     Ok(())
 }

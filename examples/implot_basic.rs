@@ -55,6 +55,19 @@ struct App {
     window: Option<AppWindow>,
 }
 
+fn two_column_plot_table(ui: &Ui, id: &str, content: impl FnOnce(&Ui)) {
+    ui.table(id)
+        .flags(TableFlags::BORDERS_INNER_V | TableFlags::RESIZABLE)
+        .sizing_policy(TableSizingPolicy::StretchSame)
+        .column("Left")
+        .weight(1.0)
+        .done()
+        .column("Right")
+        .weight(1.0)
+        .done()
+        .build(content);
+}
+
 impl AppWindow {
     fn new(event_loop: &ActiveEventLoop) -> Result<Self, Box<dyn std::error::Error>> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -244,199 +257,199 @@ impl AppWindow {
                 if let Some(tab_bar) = ui.tab_bar("PlotTabs") {
                     // Basic Plots Tab
                     if let Some(tab) = ui.tab_item("Basic Plots") {
-                        ui.columns(2usize, "basic_plots", true);
+                        two_column_plot_table(ui, "basic_plots", |ui| {
+                            ui.table_next_column();
 
-                        // Line plot
-                        ui.text("Line Plot:");
-                        if let Some(token) = plot_ui.begin_plot("Line Plot") {
-                            LinePlot::new("sin(x)", &x_data, &y_data).plot(&plot_ui);
-                            token.end();
-                        }
+                            // Line plot
+                            ui.text("Line Plot:");
+                            if let Some(token) = plot_ui.begin_plot("Line Plot") {
+                                LinePlot::new("sin(x)", &x_data, &y_data).plot(&plot_ui);
+                                token.end();
+                            }
 
-                        ui.next_column();
+                            ui.table_next_column();
 
-                        // Scatter plot
-                        ui.text("Scatter Plot:");
-                        if let Some(token) = plot_ui.begin_plot("Scatter Plot") {
-                            ScatterPlot::new("cos(2x)", &scatter_x, &scatter_y).plot(&plot_ui);
-                            token.end();
-                        }
-
-                        ui.columns(1usize, "reset_basic", false); // Reset column state
+                            // Scatter plot
+                            ui.text("Scatter Plot:");
+                            if let Some(token) = plot_ui.begin_plot("Scatter Plot") {
+                                ScatterPlot::new("cos(2x)", &scatter_x, &scatter_y).plot(&plot_ui);
+                                token.end();
+                            }
+                        });
                         tab.end();
                     }
 
                     // Bar Charts Tab
                     if let Some(tab) = ui.tab_item("Bar Charts") {
-                        ui.columns(2usize, "bar_plots", true);
+                        two_column_plot_table(ui, "bar_plots", |ui| {
+                            ui.table_next_column();
 
-                        // Simple bar chart
-                        ui.text("Bar Chart:");
-                        if let Some(token) = plot_ui.begin_plot("Bar Chart") {
-                            BarPlot::new("Values", &bar_values)
-                                .with_bar_size(0.8)
-                                .plot(&plot_ui);
-                            token.end();
-                        }
+                            // Simple bar chart
+                            ui.text("Bar Chart:");
+                            if let Some(token) = plot_ui.begin_plot("Bar Chart") {
+                                BarPlot::new("Values", &bar_values)
+                                    .with_bar_size(0.8)
+                                    .plot(&plot_ui);
+                                token.end();
+                            }
 
-                        ui.next_column();
+                            ui.table_next_column();
 
-                        // Bar Groups
-                        ui.text("Bar Groups:");
-                        if let Some(token) = plot_ui.begin_plot("Bar Groups") {
-                            BarGroupsPlot::new(group_labels.clone(), &group_values, 3, 4)
-                                .with_group_size(0.75)
-                                .plot(&plot_ui);
-                            token.end();
-                        }
-
-                        ui.columns(1usize, "reset_bar", false); // Reset column state
+                            // Bar Groups
+                            ui.text("Bar Groups:");
+                            if let Some(token) = plot_ui.begin_plot("Bar Groups") {
+                                BarGroupsPlot::new(group_labels.clone(), &group_values, 3, 4)
+                                    .with_group_size(0.75)
+                                    .plot(&plot_ui);
+                                token.end();
+                            }
+                        });
                         tab.end();
                     }
 
                     // Signal & Step Plots Tab
                     if let Some(tab) = ui.tab_item("Signal & Step Plots") {
-                        ui.columns(2usize, "signal_plots", true);
+                        two_column_plot_table(ui, "signal_plots", |ui| {
+                            ui.table_next_column();
 
-                        // Stairs Plot
-                        ui.text("Stairs Plot:");
-                        if let Some(token) = plot_ui.begin_plot("Stairs Plot") {
-                            StairsPlot::new("Steps", &stairs_x, &stairs_y)
-                                .pre_step()
-                                .plot(&plot_ui);
-                            token.end();
-                        }
+                            // Stairs Plot
+                            ui.text("Stairs Plot:");
+                            if let Some(token) = plot_ui.begin_plot("Stairs Plot") {
+                                StairsPlot::new("Steps", &stairs_x, &stairs_y)
+                                    .pre_step()
+                                    .plot(&plot_ui);
+                                token.end();
+                            }
 
-                        ui.next_column();
+                            ui.table_next_column();
 
-                        // Digital Plot
-                        ui.text("Digital Plot:");
-                        if let Some(token) = plot_ui.begin_plot("Digital Signals") {
-                            DigitalPlot::new("Signal", &digital_x, &digital_y).plot(&plot_ui);
-                            token.end();
-                        }
-
-                        ui.columns(1usize, "reset_signal", false); // Reset column state
+                            // Digital Plot
+                            ui.text("Digital Plot:");
+                            if let Some(token) = plot_ui.begin_plot("Digital Signals") {
+                                DigitalPlot::new("Signal", &digital_x, &digital_y).plot(&plot_ui);
+                                token.end();
+                            }
+                        });
                         tab.end();
                     }
 
                     // Histograms Tab
                     if let Some(tab) = ui.tab_item("Histograms") {
-                        ui.columns(2usize, "hist_plots", true);
+                        two_column_plot_table(ui, "hist_plots", |ui| {
+                            ui.table_next_column();
 
-                        // 1D Histogram
-                        ui.text("1D Histogram:");
-                        if let Some(token) = plot_ui.begin_plot("Histogram") {
-                            HistogramPlot::new("Distribution", &histogram_data)
-                                .with_bins(8usize)
-                                .density()
-                                .plot(&plot_ui);
-                            token.end();
-                        }
+                            // 1D Histogram
+                            ui.text("1D Histogram:");
+                            if let Some(token) = plot_ui.begin_plot("Histogram") {
+                                HistogramPlot::new("Distribution", &histogram_data)
+                                    .with_bins(8usize)
+                                    .density()
+                                    .plot(&plot_ui);
+                                token.end();
+                            }
 
-                        ui.next_column();
+                            ui.table_next_column();
 
-                        // 2D Histogram
-                        ui.text("2D Histogram:");
-                        if let Some(token) = plot_ui.begin_plot("2D Histogram") {
-                            let x_hist = vec![1.0, 2.0, 3.0, 2.0, 1.0, 3.0, 2.0, 1.0];
-                            let y_hist = vec![1.0, 1.0, 2.0, 3.0, 2.0, 1.0, 3.0, 2.0];
-                            Histogram2DPlot::new("2D Data", &x_hist, &y_hist)
-                                .with_bins(4usize, 4usize)
-                                .plot(&plot_ui);
-                            token.end();
-                        }
-
-                        ui.columns(1usize, "reset_hist", false); // Reset column state
+                            // 2D Histogram
+                            ui.text("2D Histogram:");
+                            if let Some(token) = plot_ui.begin_plot("2D Histogram") {
+                                let x_hist = vec![1.0, 2.0, 3.0, 2.0, 1.0, 3.0, 2.0, 1.0];
+                                let y_hist = vec![1.0, 1.0, 2.0, 3.0, 2.0, 1.0, 3.0, 2.0];
+                                Histogram2DPlot::new("2D Data", &x_hist, &y_hist)
+                                    .with_bins(4usize, 4usize)
+                                    .plot(&plot_ui);
+                                token.end();
+                            }
+                        });
                         tab.end();
                     }
 
                     // Advanced Plots Tab
                     if let Some(tab) = ui.tab_item("Advanced Plots") {
-                        ui.columns(2usize, "advanced_plots", true);
+                        two_column_plot_table(ui, "advanced_plots", |ui| {
+                            ui.table_next_column();
 
-                        // Heatmap
-                        ui.text("Heatmap:");
-                        if let Some(token) = plot_ui.begin_plot("Heatmap") {
-                            HeatmapPlot::new("Temperature", &heatmap_data, 10, 10)
-                                .with_scale(-1.0, 1.0)
-                                .with_bounds(0.0, 0.0, 1.0, 1.0)
-                                .with_label_format(Some("%.2f"))
-                                .plot(&plot_ui);
-                            token.end();
-                        }
+                            // Heatmap
+                            ui.text("Heatmap:");
+                            if let Some(token) = plot_ui.begin_plot("Heatmap") {
+                                HeatmapPlot::new("Temperature", &heatmap_data, 10, 10)
+                                    .with_scale(-1.0, 1.0)
+                                    .with_bounds(0.0, 0.0, 1.0, 1.0)
+                                    .with_label_format(Some("%.2f"))
+                                    .plot(&plot_ui);
+                                token.end();
+                            }
 
-                        ui.next_column();
+                            ui.table_next_column();
 
-                        // Text Annotations
-                        ui.text("Text Annotations:");
-                        if let Some(token) = plot_ui.begin_plot("Text Plot") {
-                            // Plot some data first
-                            LinePlot::new("Data", &x_data[..20], &y_data[..20]).plot(&plot_ui);
+                            // Text Annotations
+                            ui.text("Text Annotations:");
+                            if let Some(token) = plot_ui.begin_plot("Text Plot") {
+                                // Plot some data first
+                                LinePlot::new("Data", &x_data[..20], &y_data[..20]).plot(&plot_ui);
 
-                            // Add text annotations
-                            TextPlot::new("Peak", 1.5, 0.9)
-                                .with_pixel_offset(10.0, -10.0)
-                                .plot(&plot_ui);
-                            TextPlot::new("Valley", 4.7, -0.9)
-                                .with_pixel_offset(-20.0, 10.0)
-                                .plot(&plot_ui);
-                            token.end();
-                        }
-
-                        ui.columns(1usize, "reset_advanced", false); // Reset column state
+                                // Add text annotations
+                                TextPlot::new("Peak", 1.5, 0.9)
+                                    .with_pixel_offset(10.0, -10.0)
+                                    .plot(&plot_ui);
+                                TextPlot::new("Valley", 4.7, -0.9)
+                                    .with_pixel_offset(-20.0, 10.0)
+                                    .plot(&plot_ui);
+                                token.end();
+                            }
+                        });
                         tab.end();
                     }
 
                     // New in 0.11 Tab
                     if let Some(tab) = ui.tab_item("New in 0.11") {
                         ui.text("These plots exercise the new safe wrappers added for this release.");
-                        ui.columns(2usize, "new_api_plots", true);
+                        two_column_plot_table(ui, "new_api_plots", |ui| {
+                            ui.table_next_column();
 
-                        ui.text("Array-backed item styling:");
-                        if let Some(token) = plot_ui.begin_plot("Array-backed Item Style") {
-                            plot_ui.with_next_plot_item_array_style(
-                                PlotItemArrayStyle::new().with_line_colors(&styled_line_colors),
-                                |plot_ui| {
-                                    LinePlot::new("Gradient Line", &styled_x, &styled_y)
-                                        .with_line_weight(3.0)
-                                        .plot(plot_ui);
-                                },
+                            ui.text("Array-backed item styling:");
+                            if let Some(token) = plot_ui.begin_plot("Array-backed Item Style") {
+                                plot_ui.with_next_plot_item_array_style(
+                                    PlotItemArrayStyle::new().with_line_colors(&styled_line_colors),
+                                    |plot_ui| {
+                                        LinePlot::new("Gradient Line", &styled_x, &styled_y)
+                                            .with_line_weight(3.0)
+                                            .plot(plot_ui);
+                                    },
+                                );
+
+                                plot_ui.with_next_plot_item_array_style(
+                                    PlotItemArrayStyle::new()
+                                        .with_marker_sizes(&styled_marker_sizes)
+                                        .with_marker_fill_colors(&styled_marker_colors)
+                                        .with_marker_line_colors(&styled_marker_colors),
+                                    |plot_ui| {
+                                        ScatterPlot::new("Variable Markers", &styled_x, &styled_y)
+                                            .with_marker(Marker::Circle)
+                                            .plot(plot_ui);
+                                    },
+                                );
+
+                                token.end();
+                            }
+                            ui.text_wrapped(
+                                "The array-style helper is closure-scoped, so borrowed slices only live \
+                                 for the next plot item submission.",
                             );
 
-                            plot_ui.with_next_plot_item_array_style(
-                                PlotItemArrayStyle::new()
-                                    .with_marker_sizes(&styled_marker_sizes)
-                                    .with_marker_fill_colors(&styled_marker_colors)
-                                    .with_marker_line_colors(&styled_marker_colors),
-                                |plot_ui| {
-                                    ScatterPlot::new("Variable Markers", &styled_x, &styled_y)
-                                        .with_marker(Marker::Circle)
-                                        .plot(plot_ui);
-                                },
-                            );
+                            ui.table_next_column();
 
-                            token.end();
-                        }
-                        ui.text_wrapped(
-                            "The array-style helper is closure-scoped, so borrowed slices only live \
-                             for the next plot item submission.",
-                        );
-
-                        ui.next_column();
-
-                        ui.text("Polygon plot:");
-                        if let Some(token) = plot_ui.begin_plot("Polygon Plot") {
-                            PolygonPlot::new("Concave Region", &polygon_x, &polygon_y)
-                                .with_flags(PolygonFlags::CONCAVE)
-                                .with_fill_color([0.18, 0.62, 0.92, 0.35])
-                                .with_line_color([0.07, 0.34, 0.66, 1.0])
-                                .with_line_weight(2.0)
-                                .plot(&plot_ui);
-                            token.end();
-                        }
-
-                        ui.columns(1usize, "reset_new_api", false);
+                            ui.text("Polygon plot:");
+                            if let Some(token) = plot_ui.begin_plot("Polygon Plot") {
+                                PolygonPlot::new("Concave Region", &polygon_x, &polygon_y)
+                                    .with_flags(PolygonFlags::CONCAVE)
+                                    .with_fill_color([0.18, 0.62, 0.92, 0.35])
+                                    .with_line_color([0.07, 0.34, 0.66, 1.0])
+                                    .with_line_weight(2.0)
+                                    .plot(&plot_ui);
+                                token.end();
+                            }
+                        });
                         ui.text_wrapped(
                             "The pie chart example in the Error & Shaded tab also uses \
                              PieChartFlags::NO_SLICE_BORDER.",
@@ -446,71 +459,72 @@ impl AppWindow {
 
                     // Error & Shaded Plots Tab
                     if let Some(tab) = ui.tab_item("Error & Shaded") {
-                        ui.columns(2usize, "error_plots", true);
+                        two_column_plot_table(ui, "error_plots", |ui| {
+                            ui.table_next_column();
 
-                        // Error bars
-                        ui.text("Error Bars:");
-                        if let Some(token) = plot_ui.begin_plot("Error Bars") {
-                            let x_err = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
-                            let y_err = vec![1.0, 2.5, 2.0, 3.5, 3.0, 4.0, 3.5, 2.0];
+                            // Error bars
+                            ui.text("Error Bars:");
+                            if let Some(token) = plot_ui.begin_plot("Error Bars") {
+                                let x_err = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
+                                let y_err = vec![1.0, 2.5, 2.0, 3.5, 3.0, 4.0, 3.5, 2.0];
 
-                            // Line plot first
-                            LinePlot::new("Data", &x_err, &y_err).plot(&plot_ui);
+                                // Line plot first
+                                LinePlot::new("Data", &x_err, &y_err).plot(&plot_ui);
 
-                            // Then error bars
-                            ErrorBarsPlot::new("Errors", &x_err, &y_err, &errors).plot(&plot_ui);
-                            token.end();
-                        }
+                                // Then error bars
+                                ErrorBarsPlot::new("Errors", &x_err, &y_err, &errors)
+                                    .plot(&plot_ui);
+                                token.end();
+                            }
 
-                        ui.next_column();
+                            ui.table_next_column();
 
-                        // Pie Chart
-                        ui.text("Pie Chart:");
-                        if let Some(token) = plot_ui.begin_plot("Pie Chart") {
-                            let pie_labels = vec!["Apples", "Bananas", "Cherries", "Dates"];
-                            let pie_values = [0.35, 0.25, 0.25, 0.15];
-                            PieChartPlot::new(pie_labels, &pie_values, 0.5, 0.5, 0.35)
-                                .normalize()
-                                .exploding()
-                                .no_slice_border()
-                                .plot(&plot_ui);
-                            token.end();
-                        }
-
-                        ui.columns(1usize, "reset_error", false); // Reset column state
+                            // Pie Chart
+                            ui.text("Pie Chart:");
+                            if let Some(token) = plot_ui.begin_plot("Pie Chart") {
+                                let pie_labels = vec!["Apples", "Bananas", "Cherries", "Dates"];
+                                let pie_values = [0.35, 0.25, 0.25, 0.15];
+                                PieChartPlot::new(pie_labels, &pie_values, 0.5, 0.5, 0.35)
+                                    .normalize()
+                                    .exploding()
+                                    .no_slice_border()
+                                    .plot(&plot_ui);
+                                token.end();
+                            }
+                        });
                         tab.end();
                     }
 
                     // Utility Plots Tab
                     if let Some(tab) = ui.tab_item("Utility Plots") {
-                        ui.columns(2usize, "utility_plots", true);
+                        two_column_plot_table(ui, "utility_plots", |ui| {
+                            ui.table_next_column();
 
-                        // Stems Plot
-                        ui.text("Stems Plot:");
-                        if let Some(token) = plot_ui.begin_plot("Stems Plot") {
-                            StemPlot::new("Stems", &stairs_x, &stairs_y)
-                                .with_y_ref(0.0)
-                                .plot(&plot_ui);
-                            token.end();
-                        }
+                            // Stems Plot
+                            ui.text("Stems Plot:");
+                            if let Some(token) = plot_ui.begin_plot("Stems Plot") {
+                                StemPlot::new("Stems", &stairs_x, &stairs_y)
+                                    .with_y_ref(0.0)
+                                    .plot(&plot_ui);
+                                token.end();
+                            }
 
-                        ui.next_column();
+                            ui.table_next_column();
 
-                        // Dummy Plot for Legend
-                        ui.text("Legend with Dummy Items:");
-                        if let Some(token) = plot_ui.begin_plot("Legend Demo") {
-                            // Real plots
-                            LinePlot::new("Real Data", &x_data[..10], &y_data[..10])
-                                .plot(&plot_ui);
+                            // Dummy Plot for Legend
+                            ui.text("Legend with Dummy Items:");
+                            if let Some(token) = plot_ui.begin_plot("Legend Demo") {
+                                // Real plots
+                                LinePlot::new("Real Data", &x_data[..10], &y_data[..10])
+                                    .plot(&plot_ui);
 
-                            // Dummy items for legend organization
-                            DummyPlot::new("--- Separator ---").plot(&plot_ui);
-                            DummyPlot::new("Future Feature 1").plot(&plot_ui);
-                            DummyPlot::new("Future Feature 2").plot(&plot_ui);
-                            token.end();
-                        }
-
-                        ui.columns(1usize, "reset_utility", false); // Reset column state
+                                // Dummy items for legend organization
+                                DummyPlot::new("--- Separator ---").plot(&plot_ui);
+                                DummyPlot::new("Future Feature 1").plot(&plot_ui);
+                                DummyPlot::new("Future Feature 2").plot(&plot_ui);
+                                token.end();
+                            }
+                        });
                         tab.end();
                     }
 

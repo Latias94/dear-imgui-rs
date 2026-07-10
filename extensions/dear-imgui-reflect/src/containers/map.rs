@@ -1,6 +1,3 @@
-use super::path_state::{
-    escape_field_path_key, map_add_state, with_map_add_value_state, with_temp_map_value,
-};
 use super::*;
 use crate::MapSettings;
 use std::collections::BTreeMap;
@@ -11,7 +8,7 @@ use std::hash::BuildHasher;
 /// This mirrors the behavior of the built-in `ImGuiValue` implementation but
 /// lets callers supply per-member map settings.
 pub fn imgui_hash_map_with_settings<V, S>(
-    ui: &imgui::Ui,
+    inspector: &mut Inspector<'_, '_>,
     label: &str,
     map: &mut HashMap<String, V, S>,
     map_settings: &MapSettings,
@@ -20,16 +17,17 @@ where
     V: ImGuiValue + Default + Clone + 'static,
     S: BuildHasher,
 {
+    let ui = inspector.ui();
     let mut changed = false;
     let header_label = format!("{label} [{}]", map.len());
 
     if map_settings.dropdown {
         if let Some(_node) = ui.tree_node(&header_label) {
-            changed |= imgui_hash_map_body(ui, label, map, map_settings);
+            changed |= imgui_hash_map_body(inspector, label, map, map_settings);
         }
     } else {
         ui.text(&header_label);
-        changed |= imgui_hash_map_body(ui, label, map, map_settings);
+        changed |= imgui_hash_map_body(inspector, label, map, map_settings);
     }
 
     changed
@@ -37,7 +35,7 @@ where
 
 /// Public helper for rendering `BTreeMap<String, V>` using explicit `MapSettings`.
 pub fn imgui_btree_map_with_settings<V>(
-    ui: &imgui::Ui,
+    inspector: &mut Inspector<'_, '_>,
     label: &str,
     map: &mut BTreeMap<String, V>,
     map_settings: &MapSettings,
@@ -45,23 +43,24 @@ pub fn imgui_btree_map_with_settings<V>(
 where
     V: ImGuiValue + Default + Clone + 'static,
 {
+    let ui = inspector.ui();
     let mut changed = false;
     let header_label = format!("{label} [{}]", map.len());
 
     if map_settings.dropdown {
         if let Some(_node) = ui.tree_node(&header_label) {
-            changed |= imgui_btree_map_body(ui, label, map, map_settings);
+            changed |= imgui_btree_map_body(inspector, label, map, map_settings);
         }
     } else {
         ui.text(&header_label);
-        changed |= imgui_btree_map_body(ui, label, map, map_settings);
+        changed |= imgui_btree_map_body(inspector, label, map, map_settings);
     }
 
     changed
 }
 
 pub(super) fn imgui_hash_map_body<V, S>(
-    ui: &imgui::Ui,
+    inspector: &mut Inspector<'_, '_>,
     label: &str,
     map: &mut HashMap<String, V, S>,
     map_settings: &MapSettings,
@@ -70,6 +69,7 @@ where
     V: ImGuiValue + Default + Clone + 'static,
     S: BuildHasher,
 {
+    let ui = inspector.ui();
     let mut changed = false;
     let mut key_to_remove: Option<String> = None;
     let mut clear_all = false;
@@ -77,6 +77,9 @@ where
 
     // Popup id used for the "add new entry" dialog.
     let popup_id = format!("add_map_item_popup##{label}");
+    // Capture the owner scope before BeginPopup switches to the popup window's
+    // ID stack. Every operation for this popup must use the same identity.
+    let draft_identity = inspector.map_draft_identity::<V>(&popup_id);
 
     // "+" button to open a popup where the user can type a key for the new entry.
     // When insertion is disabled via MapSettings, we still render a disabled button
@@ -85,21 +88,20 @@ where
     let add_label = format!("+##{label}_add");
     if map_settings.insertable {
         if ui.small_button(&add_label) {
-            let mut state = map_add_state()
-                .lock()
-                .unwrap_or_else(|err| err.into_inner());
-            let key_buf = state.entry(popup_id.clone()).or_default();
-            if key_buf.is_empty() {
-                let mut idx = map.len();
-                loop {
-                    let candidate = format!("{label}_{}", idx);
-                    if !map.contains_key(&candidate) {
-                        *key_buf = candidate;
-                        break;
+            inspector.with_map_draft::<V, _>(
+                draft_identity,
+                || {
+                    let mut idx = map.len();
+                    loop {
+                        let candidate = format!("{label}_{}", idx);
+                        if !map.contains_key(&candidate) {
+                            break candidate;
+                        }
+                        idx += 1;
                     }
-                    idx += 1;
-                }
-            }
+                },
+                |_, _, _| {},
+            );
             ui.open_popup(&popup_id);
         }
     } else {
@@ -111,87 +113,72 @@ where
         }
     }
 
-    // Add-entry popup: let the user confirm insertion with a custom key and
-    // a pre-edited value (optionally copied from an existing entry).
     if let Some(_popup) = ui.begin_popup(&popup_id) {
-        let mut should_clear_popup_state = false;
+        let initial_key = {
+            let mut idx = map.len();
+            loop {
+                let candidate = format!("{label}_{}", idx);
+                if !map.contains_key(&candidate) {
+                    break candidate;
+                }
+                idx += 1;
+            }
+        };
+        let should_clear_popup_state = inspector.with_map_draft::<V, _>(
+            draft_identity,
+            || initial_key,
+            |inspector, key_buf, temp_value| {
+                ui.text("Add map entry");
 
-        {
-            let mut key_state = map_add_state()
-                .lock()
-                .unwrap_or_else(|err| err.into_inner());
-            let key_buf = key_state.entry(popup_id.clone()).or_default();
+                let key_label = format!("Key##{label}_new_key");
+                let _ = String::imgui_value(inspector, &key_label, key_buf);
 
-            ui.text("Add map entry");
+                let value_label = format!("Value##{label}_new_value");
+                changed |= V::imgui_value(inspector, &value_label, temp_value);
 
-            let key_label = format!("Key##{label}_new_key");
-            let _ = String::imgui_value(ui, &key_label, key_buf);
-
-            let value_label = format!("Value##{label}_new_value");
-            with_temp_map_value::<V, _>(&popup_id, |temp_value| {
-                changed |= V::imgui_value(ui, &value_label, temp_value);
-            });
-
-            if !map.is_empty() {
-                ui.separator();
-                ui.text("Copy value from existing entry:");
-                for (idx, (existing_key, existing_value)) in map.iter().enumerate() {
-                    let copy_label = format!("Copy from \"{existing_key}\"##{label}_copy_{idx}");
-                    if ui.small_button(&copy_label) {
-                        with_temp_map_value::<V, _>(&popup_id, |temp_value| {
+                if !map.is_empty() {
+                    ui.separator();
+                    ui.text("Copy value from existing entry:");
+                    for (idx, (existing_key, existing_value)) in map.iter().enumerate() {
+                        let copy_label =
+                            format!("Copy from \"{existing_key}\"##{label}_copy_{idx}");
+                        if ui.small_button(&copy_label) {
                             *temp_value = existing_value.clone();
-                        });
-                        changed = true;
+                            changed = true;
+                        }
                     }
                 }
-            }
 
-            if ui.button("Add") && !key_buf.is_empty() && !map.contains_key(key_buf) {
-                let inserted_key = key_buf.clone();
-                with_temp_map_value::<V, _>(&popup_id, |temp_value| {
-                    let value = std::mem::take(temp_value);
-                    map.insert(inserted_key.clone(), value);
-                });
-                response::record_event(response::ReflectEvent::MapInserted {
-                    path: response::current_field_path(),
-                    key: inserted_key,
-                });
-                with_map_add_value_state(|values| {
-                    values.remove(&(TypeId::of::<V>(), popup_id.clone()));
-                });
-                changed = true;
-                should_clear_popup_state = true;
-                ui.close_current_popup();
-            }
-
-            ui.same_line();
-
-            if ui.button("Cancel") {
-                with_map_add_value_state(|values| {
-                    values.remove(&(TypeId::of::<V>(), popup_id.clone()));
-                });
-                should_clear_popup_state = true;
-                ui.close_current_popup();
-            }
-        }
+                if ui.button("Add") && !key_buf.is_empty() && !map.contains_key(key_buf) {
+                    let inserted_key = key_buf.clone();
+                    map.insert(inserted_key.clone(), std::mem::take(temp_value));
+                    inspector.record_event(crate::ReflectEvent::MapInserted {
+                        path: inspector.current_path(),
+                        key: inserted_key,
+                    });
+                    changed = true;
+                    ui.close_current_popup();
+                    true
+                } else {
+                    ui.same_line();
+                    if ui.button("Cancel") {
+                        ui.close_current_popup();
+                        true
+                    } else {
+                        false
+                    }
+                }
+            },
+        );
 
         if should_clear_popup_state {
-            map_add_state()
-                .lock()
-                .unwrap_or_else(|err| err.into_inner())
-                .remove(&popup_id);
+            inspector.clear_map_draft(draft_identity);
         }
     }
     // If the popup was closed externally (e.g. click outside), clear any
     // per-popup state to avoid unbounded growth across dynamically generated ids.
     if !ui.is_popup_open(&popup_id) {
-        map_add_state()
-            .lock()
-            .unwrap_or_else(|err| err.into_inner())
-            .remove(&popup_id);
-        with_map_add_value_state(|values| {
-            values.remove(&(TypeId::of::<V>(), popup_id.clone()));
-        });
+        inspector.clear_map_draft(draft_identity);
     }
     let mut index = 0usize;
 
@@ -215,7 +202,7 @@ where
                 ui.table_next_column();
                 let mut key_buf = key.clone();
                 let key_label = format!("##{label}_key_{index}");
-                changed |= String::imgui_value(ui, &key_label, &mut key_buf);
+                changed |= String::imgui_value(inspector, &key_label, &mut key_buf);
                 if key_buf != *key && !key_buf.is_empty() {
                     rename_ops.push((key.clone(), key_buf));
                 }
@@ -223,12 +210,13 @@ where
                 // Column 2: value.
                 ui.table_next_column();
                 let value_label = format!("##{label}_value_{index}");
-                let local_changed = if response::is_field_path_active() {
+                let local_changed = if inspector.is_path_active() {
                     let escaped = escape_field_path_key(key);
                     let segment = format!("[\"{escaped}\"]");
-                    response::with_field_path(&segment, || V::imgui_value(ui, &value_label, value))
+                    let _path = inspector.push_path(segment);
+                    V::imgui_value(inspector, &value_label, value)
                 } else {
-                    V::imgui_value(ui, &value_label, value)
+                    V::imgui_value(inspector, &value_label, value)
                 };
                 changed |= local_changed;
 
@@ -272,7 +260,7 @@ where
 
             let mut key_buf = key.clone();
             let key_label = format!("##{label}_key_{index}");
-            changed |= String::imgui_value(ui, &key_label, &mut key_buf);
+            changed |= String::imgui_value(inspector, &key_label, &mut key_buf);
 
             if key_buf != *key && !key_buf.is_empty() {
                 rename_ops.push((key.clone(), key_buf));
@@ -281,12 +269,13 @@ where
             ui.same_line();
 
             let value_label = format!("##{label}_value_{index}");
-            let local_changed = if response::is_field_path_active() {
+            let local_changed = if inspector.is_path_active() {
                 let escaped = escape_field_path_key(key);
                 let segment = format!("[\"{escaped}\"]");
-                response::with_field_path(&segment, || V::imgui_value(ui, &value_label, value))
+                let _path = inspector.push_path(segment);
+                V::imgui_value(inspector, &value_label, value)
             } else {
-                V::imgui_value(ui, &value_label, value)
+                V::imgui_value(inspector, &value_label, value)
             };
             changed |= local_changed;
 
@@ -319,16 +308,16 @@ where
     if clear_all {
         let previous_len = map.len();
         map.clear();
-        response::record_event(response::ReflectEvent::MapCleared {
-            path: response::current_field_path(),
+        inspector.record_event(crate::ReflectEvent::MapCleared {
+            path: inspector.current_path(),
             previous_len,
         });
         changed = true;
     } else {
         if let Some(k) = key_to_remove {
             map.remove(&k);
-            response::record_event(response::ReflectEvent::MapRemoved {
-                path: response::current_field_path(),
+            inspector.record_event(crate::ReflectEvent::MapRemoved {
+                path: inspector.current_path(),
                 key: k,
             });
             changed = true;
@@ -344,8 +333,8 @@ where
             }
             if let Some(value) = map.remove(&old_key) {
                 map.insert(new_key.clone(), value);
-                response::record_event(response::ReflectEvent::MapRenamed {
-                    path: response::current_field_path(),
+                inspector.record_event(crate::ReflectEvent::MapRenamed {
+                    path: inspector.current_path(),
                     from: old_key,
                     to: new_key,
                 });
@@ -358,7 +347,7 @@ where
 }
 
 pub(super) fn imgui_btree_map_body<V>(
-    ui: &imgui::Ui,
+    inspector: &mut Inspector<'_, '_>,
     label: &str,
     map: &mut BTreeMap<String, V>,
     map_settings: &MapSettings,
@@ -366,32 +355,35 @@ pub(super) fn imgui_btree_map_body<V>(
 where
     V: ImGuiValue + Default + Clone + 'static,
 {
+    let ui = inspector.ui();
     let mut changed = false;
     let mut key_to_remove: Option<String> = None;
     let mut clear_all = false;
     let mut rename_ops: Vec<(String, String)> = Vec::new();
 
     let popup_id = format!("add_map_item_popup##{label}");
+    // Capture the owner scope before BeginPopup switches to the popup window's
+    // ID stack. Every operation for this popup must use the same identity.
+    let draft_identity = inspector.map_draft_identity::<V>(&popup_id);
 
     ui.same_line();
     let add_label = format!("+##{label}_add");
     if map_settings.insertable {
         if ui.small_button(&add_label) {
-            let mut state = map_add_state()
-                .lock()
-                .unwrap_or_else(|err| err.into_inner());
-            let key_buf = state.entry(popup_id.clone()).or_default();
-            if key_buf.is_empty() {
-                let mut idx = map.len();
-                loop {
-                    let candidate = format!("{label}_{}", idx);
-                    if !map.contains_key(&candidate) {
-                        *key_buf = candidate;
-                        break;
+            inspector.with_map_draft::<V, _>(
+                draft_identity,
+                || {
+                    let mut idx = map.len();
+                    loop {
+                        let candidate = format!("{label}_{}", idx);
+                        if !map.contains_key(&candidate) {
+                            break candidate;
+                        }
+                        idx += 1;
                     }
-                    idx += 1;
-                }
-            }
+                },
+                |_, _, _| {},
+            );
             ui.open_popup(&popup_id);
         }
     } else {
@@ -404,82 +396,69 @@ where
     }
 
     if let Some(_popup) = ui.begin_popup(&popup_id) {
-        let mut should_clear_popup_state = false;
+        let initial_key = {
+            let mut idx = map.len();
+            loop {
+                let candidate = format!("{label}_{}", idx);
+                if !map.contains_key(&candidate) {
+                    break candidate;
+                }
+                idx += 1;
+            }
+        };
+        let should_clear_popup_state = inspector.with_map_draft::<V, _>(
+            draft_identity,
+            || initial_key,
+            |inspector, key_buf, temp_value| {
+                ui.text("Add map entry");
 
-        {
-            let mut key_state = map_add_state()
-                .lock()
-                .unwrap_or_else(|err| err.into_inner());
-            let key_buf = key_state.entry(popup_id.clone()).or_default();
+                let key_label = format!("Key##{label}_new_key");
+                let _ = String::imgui_value(inspector, &key_label, key_buf);
 
-            ui.text("Add map entry");
+                let value_label = format!("Value##{label}_new_value");
+                changed |= V::imgui_value(inspector, &value_label, temp_value);
 
-            let key_label = format!("Key##{label}_new_key");
-            let _ = String::imgui_value(ui, &key_label, key_buf);
-
-            let value_label = format!("Value##{label}_new_value");
-            with_temp_map_value::<V, _>(&popup_id, |temp_value| {
-                changed |= V::imgui_value(ui, &value_label, temp_value);
-            });
-
-            if !map.is_empty() {
-                ui.separator();
-                ui.text("Copy value from existing entry:");
-                for (idx, (existing_key, existing_value)) in map.iter().enumerate() {
-                    let copy_label = format!("Copy from \"{existing_key}\"##{label}_copy_{idx}");
-                    if ui.small_button(&copy_label) {
-                        with_temp_map_value::<V, _>(&popup_id, |temp_value| {
+                if !map.is_empty() {
+                    ui.separator();
+                    ui.text("Copy value from existing entry:");
+                    for (idx, (existing_key, existing_value)) in map.iter().enumerate() {
+                        let copy_label =
+                            format!("Copy from \"{existing_key}\"##{label}_copy_{idx}");
+                        if ui.small_button(&copy_label) {
                             *temp_value = existing_value.clone();
-                        });
-                        changed = true;
+                            changed = true;
+                        }
                     }
                 }
-            }
 
-            if ui.button("Add") && !key_buf.is_empty() && !map.contains_key(key_buf) {
-                let inserted_key = key_buf.clone();
-                with_temp_map_value::<V, _>(&popup_id, |temp_value| {
-                    let value = std::mem::take(temp_value);
-                    map.insert(inserted_key.clone(), value);
-                });
-                response::record_event(response::ReflectEvent::MapInserted {
-                    path: response::current_field_path(),
-                    key: inserted_key,
-                });
-                with_map_add_value_state(|values| {
-                    values.remove(&(TypeId::of::<V>(), popup_id.clone()));
-                });
-                changed = true;
-                should_clear_popup_state = true;
-                ui.close_current_popup();
-            }
-
-            ui.same_line();
-
-            if ui.button("Cancel") {
-                with_map_add_value_state(|values| {
-                    values.remove(&(TypeId::of::<V>(), popup_id.clone()));
-                });
-                should_clear_popup_state = true;
-                ui.close_current_popup();
-            }
-        }
+                if ui.button("Add") && !key_buf.is_empty() && !map.contains_key(key_buf) {
+                    let inserted_key = key_buf.clone();
+                    map.insert(inserted_key.clone(), std::mem::take(temp_value));
+                    inspector.record_event(crate::ReflectEvent::MapInserted {
+                        path: inspector.current_path(),
+                        key: inserted_key,
+                    });
+                    changed = true;
+                    ui.close_current_popup();
+                    true
+                } else {
+                    ui.same_line();
+                    if ui.button("Cancel") {
+                        ui.close_current_popup();
+                        true
+                    } else {
+                        false
+                    }
+                }
+            },
+        );
 
         if should_clear_popup_state {
-            map_add_state()
-                .lock()
-                .unwrap_or_else(|err| err.into_inner())
-                .remove(&popup_id);
+            inspector.clear_map_draft(draft_identity);
         }
     }
     if !ui.is_popup_open(&popup_id) {
-        map_add_state()
-            .lock()
-            .unwrap_or_else(|err| err.into_inner())
-            .remove(&popup_id);
-        with_map_add_value_state(|values| {
-            values.remove(&(TypeId::of::<V>(), popup_id.clone()));
-        });
+        inspector.clear_map_draft(draft_identity);
     }
 
     let keys: Vec<String> = map.keys().cloned().collect();
@@ -506,19 +485,20 @@ where
                 ui.table_next_column();
                 let mut key_buf = key.clone();
                 let key_label = format!("##{label}_key_{index}");
-                changed |= String::imgui_value(ui, &key_label, &mut key_buf);
+                changed |= String::imgui_value(inspector, &key_label, &mut key_buf);
                 if key_buf != *key && !key_buf.is_empty() {
                     rename_ops.push((key.clone(), key_buf));
                 }
 
                 ui.table_next_column();
                 let value_label = format!("##{label}_value_{index}");
-                let local_changed = if response::is_field_path_active() {
+                let local_changed = if inspector.is_path_active() {
                     let escaped = escape_field_path_key(key);
                     let segment = format!("[\"{escaped}\"]");
-                    response::with_field_path(&segment, || V::imgui_value(ui, &value_label, value))
+                    let _path = inspector.push_path(segment);
+                    V::imgui_value(inspector, &value_label, value)
                 } else {
-                    V::imgui_value(ui, &value_label, value)
+                    V::imgui_value(inspector, &value_label, value)
                 };
                 changed |= local_changed;
 
@@ -564,7 +544,7 @@ where
 
             let mut key_buf = key.clone();
             let key_label = format!("##{label}_key_{index}");
-            changed |= String::imgui_value(ui, &key_label, &mut key_buf);
+            changed |= String::imgui_value(inspector, &key_label, &mut key_buf);
             if key_buf != *key && !key_buf.is_empty() {
                 rename_ops.push((key.clone(), key_buf));
             }
@@ -572,12 +552,13 @@ where
             ui.same_line();
 
             let value_label = format!("##{label}_value_{index}");
-            let local_changed = if response::is_field_path_active() {
+            let local_changed = if inspector.is_path_active() {
                 let escaped = escape_field_path_key(key);
                 let segment = format!("[\"{escaped}\"]");
-                response::with_field_path(&segment, || V::imgui_value(ui, &value_label, value))
+                let _path = inspector.push_path(segment);
+                V::imgui_value(inspector, &value_label, value)
             } else {
-                V::imgui_value(ui, &value_label, value)
+                V::imgui_value(inspector, &value_label, value)
             };
             changed |= local_changed;
 
@@ -608,16 +589,16 @@ where
     if clear_all {
         let previous_len = map.len();
         map.clear();
-        response::record_event(response::ReflectEvent::MapCleared {
-            path: response::current_field_path(),
+        inspector.record_event(crate::ReflectEvent::MapCleared {
+            path: inspector.current_path(),
             previous_len,
         });
         changed = true;
     } else {
         if let Some(k) = key_to_remove {
             map.remove(&k);
-            response::record_event(response::ReflectEvent::MapRemoved {
-                path: response::current_field_path(),
+            inspector.record_event(crate::ReflectEvent::MapRemoved {
+                path: inspector.current_path(),
                 key: k,
             });
             changed = true;
@@ -632,8 +613,8 @@ where
             }
             if let Some(value) = map.remove(&old_key) {
                 map.insert(new_key.clone(), value);
-                response::record_event(response::ReflectEvent::MapRenamed {
-                    path: response::current_field_path(),
+                inspector.record_event(crate::ReflectEvent::MapRenamed {
+                    path: inspector.current_path(),
                     from: old_key,
                     to: new_key,
                 });

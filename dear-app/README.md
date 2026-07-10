@@ -3,85 +3,76 @@
 [![Crates.io](https://img.shields.io/crates/v/dear-app.svg)](https://crates.io/crates/dear-app)
 [![Documentation](https://docs.rs/dear-app/badge.svg)](https://docs.rs/dear-app)
 
-Convenient Dear ImGui application runner for `dear-imgui-rs`, bundling Winit + WGPU setup into a tiny API. It hides boilerplate, exposes ergonomic callbacks, and can initialize popular add-ons (ImPlot, ImNodes, ImPlot3D) behind feature flags.
-
-## Features
-
-- Winit + WGPU app bootstrap with sensible defaults
-- Per-frame UI closure (`run_simple`) and a configurable builder (`AppBuilder`)
-- Optional add-ons via features: `implot`, `imnodes`, `implot3d`
-- Docking helpers, theme presets, INI path selection
-- Lifecycle callbacks: setup/style/fonts/post-init/event/exit
+`dear-app` is the Winit + WGPU runtime for `dear-imgui-rs`. It keeps the main window, Dear ImGui
+context, add-ons, and user `Application` alive while replacing only GPU-owned state after device
+loss.
 
 ## Quick Start
 
-```toml
-[dependencies]
-dear-app = "0.15.1"
-
-# Optional add-ons (enable any subset)
-dear-app = { version = "0.15.1", features = ["implot", "imnodes", "implot3d"] }
-```
-
-Minimal usage:
-
 ```rust
-use dear_app::run_simple;
-use dear_imgui_rs::*;
+use dear_app::{AppConfig, Application, FrameContext, RunError};
+use dear_imgui_rs::{Condition, Ui};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    run_simple(|ui| {
+struct Hello {
+    frames: u64,
+}
+
+impl Application for Hello {
+    fn frame(&mut self, context: &mut FrameContext<'_, '_>) -> Result<(), RunError> {
+        self.frames += 1;
+        let ui: &Ui = context.ui();
         ui.window("Hello")
             .size([360.0, 160.0], Condition::FirstUseEver)
-            .build(|| ui.text("Hello from dear-app!"));
-    })?;
-    Ok(())
+            .build(|| ui.text(format!("Frame {}", self.frames)));
+        Ok(())
+    }
+}
+
+fn main() -> Result<(), RunError> {
+    dear_app::run(AppConfig::default(), Hello { frames: 0 })
 }
 ```
 
-Tip: pass `.opened(&mut open)` if you want a title-bar close button (X), and stop submitting the window when `open == false`.
-
-Builder with add-ons and docking/theme presets:
+Configuration is a value, not a builder:
 
 ```rust
-use dear_app::{AppBuilder, AddOnsConfig, RunnerConfig, Theme, WgpuConfig, WgpuPreset};
-use dear_imgui_rs as imgui;
+use dear_app::{AddOnsConfig, AppConfig, Theme, WgpuConfig, WgpuPreset};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let cfg = RunnerConfig {
-        theme: Some(Theme::Dark),
-        wgpu: WgpuConfig::from_preset(WgpuPreset::HighPerformance),
-        ..Default::default()
-    };
-    let addons = AddOnsConfig::auto(); // enable compiled add-ons
-
-    AppBuilder::new()
-        .with_config(cfg)
-        .with_addons(addons)
-        .on_gpu_init(|_window, _device, _queue, _surface_cfg| {
-            // Ideal for one-time GPU resource initialization to avoid first-frame hitches.
-        })
-        .on_frame(|ui: &imgui::Ui, addons| {
-            ui.window("App").build(|| {
-                ui.text("Docking and WGPU are ready!");
-
-                #[cfg(feature = "implot")]
-                if let Some(pc) = addons.implot { let plot = ui.implot(pc); let _ = plot; }
-
-                #[cfg(feature = "imnodes")]
-                if let Some(nc) = addons.imnodes { let _ = nc; /* ui.imnodes(nc) ... */ }
-
-                #[cfg(feature = "implot3d")]
-                if let Some(pc3) = addons.implot3d { let _ = pc3; }
-            });
-        })
-        .run()?;
-
-    Ok(())
-}
+let config = AppConfig {
+    window_title: "Editor".to_owned(),
+    theme: Some(Theme::Dark),
+    addons: AddOnsConfig::auto(),
+    wgpu: WgpuConfig::from_preset(WgpuPreset::HighPerformance),
+    ..Default::default()
+};
 ```
 
-## Notes
+## Lifecycle
 
-- Backends: Uses `dear-imgui-winit` and `dear-imgui-wgpu` internally.
-- Fonts/FreeType: Configure in the `on_fonts` callback; FreeType can be enabled via `dear-imgui-rs/freetype`.
+`Application` is the single owner of application state:
+
+- `configure_imgui` runs once before renderer initialization.
+- `initialized` runs once after the first GPU generation is ready.
+- `event` receives events only for the live main window.
+- `frame` is the only per-frame UI callback.
+- `gpu_lost` runs before old GPU resources are invalidated.
+- `gpu_recreated` runs after a replacement generation is committed.
+- `shutdown` runs once before add-ons and the Dear ImGui context are destroyed.
+
+Surface loss and resize do not recreate the application or Dear ImGui context. Only WGPU's
+device-loss callback starts GPU recovery, and that callback communicates with the UI thread through
+the Winit event loop.
+
+## GPU Resources
+
+External WGPU textures return an `ExternalTextureHandle` instead of a raw `TextureId`. Resolve the
+handle through the current frame's `GpuApi` before submitting it to Dear ImGui. Resolution fails
+after GPU recovery, so an old identifier cannot alias a resource from a newer generation.
+
+Rebuild application-owned GPU resources from `gpu_recreated`. Managed Dear ImGui textures retain
+their CPU data and are reset to `WantCreate` before the old renderer is torn down.
+
+## Add-ons
+
+The `implot`, `imnodes`, and `implot3d` features create extension contexts owned by the stable UI
+state. Access them through `FrameContext::addons()`.

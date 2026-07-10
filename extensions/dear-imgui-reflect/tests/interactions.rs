@@ -148,10 +148,11 @@ impl<T> VecHarness<T> {
         }
     }
 
-    fn draw(&mut self, ui: &reflect::imgui::Ui) -> bool
+    fn draw(&mut self, inspector: &mut reflect::Inspector<'_, '_>) -> bool
     where
         T: ImGuiValue + Default,
     {
+        let ui = inspector.ui();
         let mut changed = false;
         ui.window("VecHarness")
             .flags(WindowFlags::NO_MOVE | WindowFlags::NO_RESIZE | WindowFlags::NO_COLLAPSE)
@@ -159,9 +160,14 @@ impl<T> VecHarness<T> {
             .size([400.0, 300.0], Condition::Always)
             .focused(true)
             .build(|| {
-                changed = reflect::with_field_path("items", || {
-                    reflect::imgui_vec_with_settings(ui, "items", &mut self.items, &self.settings)
-                });
+                let path = inspector.push_path_static("items");
+                changed = reflect::imgui_vec_with_settings(
+                    inspector,
+                    "items",
+                    &mut self.items,
+                    &self.settings,
+                );
+                drop(path);
                 self.last_item_min = ui.item_rect_min();
                 self.last_item_max = ui.item_rect_max();
                 self.last_item_hovered = ui.is_item_hovered();
@@ -176,8 +182,8 @@ impl<T> ImGuiReflect for VecHarness<T>
 where
     T: ImGuiValue + Default,
 {
-    fn imgui_reflect(&mut self, ui: &reflect::imgui::Ui, _label: &str) -> bool {
-        self.draw(ui)
+    fn imgui_reflect(&mut self, inspector: &mut reflect::Inspector<'_, '_>, _label: &str) -> bool {
+        self.draw(inspector)
     }
 }
 
@@ -185,7 +191,11 @@ where
 struct NoWidget;
 
 impl ImGuiValue for NoWidget {
-    fn imgui_value(_ui: &reflect::imgui::Ui, _label: &str, _value: &mut Self) -> bool {
+    fn imgui_value(
+        _inspector: &mut reflect::Inspector<'_, '_>,
+        _label: &str,
+        _value: &mut Self,
+    ) -> bool {
         false
     }
 }
@@ -194,6 +204,7 @@ impl ImGuiValue for NoWidget {
 fn vec_add_button_emits_event_on_click() {
     let _guard = test_guard();
     let mut ctx = new_test_ctx();
+    let session = reflect::ReflectSession::new();
 
     let mut harness = VecHarness::new(
         Vec::<i32>::new(),
@@ -208,7 +219,8 @@ fn vec_add_button_emits_event_on_click() {
     // Frame 1: render once to get the "+" button rectangle.
     let add_center = {
         let ui = ctx.frame();
-        let _ = harness.draw(&ui);
+        let mut inspector = session.inspector(ui);
+        let _ = harness.draw(&mut inspector);
         rect_center(harness.last_item_min, harness.last_item_max)
     };
     ctx.render();
@@ -217,7 +229,8 @@ fn vec_add_button_emits_event_on_click() {
     queue_mouse_left(&mut ctx, add_center, false);
     {
         let ui = ctx.frame();
-        let _ = harness.draw(&ui);
+        let mut inspector = session.inspector(ui);
+        let _ = harness.draw(&mut inspector);
     }
     ctx.render();
 
@@ -225,8 +238,9 @@ fn vec_add_button_emits_event_on_click() {
     queue_mouse_left(&mut ctx, add_center, true);
     {
         let ui = ctx.frame();
-        let mut resp = reflect::ReflectResponse::default();
-        let changed = reflect::input_with_response(&ui, "Root", &mut harness, &mut resp);
+        let mut inspector = session.inspector(ui);
+        let changed = inspector.input("Root", &mut harness);
+        let resp = inspector.into_response();
         assert!(!changed);
         assert!(resp.is_empty());
         assert!(harness.items.is_empty());
@@ -237,8 +251,9 @@ fn vec_add_button_emits_event_on_click() {
     queue_mouse_left(&mut ctx, add_center, false);
     {
         let ui = ctx.frame();
-        let mut resp = reflect::ReflectResponse::default();
-        let changed = reflect::input_with_response(&ui, "Root", &mut harness, &mut resp);
+        let mut inspector = session.inspector(ui);
+        let changed = inspector.input("Root", &mut harness);
+        let resp = inspector.into_response();
         assert!(
             changed || !resp.is_empty(),
             "expected click to change value; hovered={}, active={}, clicked={}, rect={:?}-{:?}, mouse={:?}",
@@ -268,6 +283,7 @@ fn vec_add_button_emits_event_on_click() {
 fn vec_remove_button_emits_event_on_click() {
     let _guard = test_guard();
     let mut ctx = new_test_ctx();
+    let session = reflect::ReflectSession::new();
 
     let mut harness = VecHarness::new(
         vec![NoWidget],
@@ -282,7 +298,8 @@ fn vec_remove_button_emits_event_on_click() {
     // Frame 1: render once to get the "-" button rectangle.
     let remove_center = {
         let ui = ctx.frame();
-        let _ = harness.draw(&ui);
+        let mut inspector = session.inspector(ui);
+        let _ = harness.draw(&mut inspector);
         rect_center(harness.last_item_min, harness.last_item_max)
     };
     ctx.render();
@@ -291,7 +308,8 @@ fn vec_remove_button_emits_event_on_click() {
     queue_mouse_left(&mut ctx, remove_center, false);
     {
         let ui = ctx.frame();
-        let _ = harness.draw(&ui);
+        let mut inspector = session.inspector(ui);
+        let _ = harness.draw(&mut inspector);
     }
     ctx.render();
 
@@ -299,8 +317,9 @@ fn vec_remove_button_emits_event_on_click() {
     queue_mouse_left(&mut ctx, remove_center, true);
     {
         let ui = ctx.frame();
-        let mut resp = reflect::ReflectResponse::default();
-        let changed = reflect::input_with_response(&ui, "Root", &mut harness, &mut resp);
+        let mut inspector = session.inspector(ui);
+        let changed = inspector.input("Root", &mut harness);
+        let resp = inspector.into_response();
         assert!(!changed);
         assert!(resp.is_empty());
         assert_eq!(harness.items.len(), 1);
@@ -311,8 +330,9 @@ fn vec_remove_button_emits_event_on_click() {
     queue_mouse_left(&mut ctx, remove_center, false);
     {
         let ui = ctx.frame();
-        let mut resp = reflect::ReflectResponse::default();
-        let changed = reflect::input_with_response(&ui, "Root", &mut harness, &mut resp);
+        let mut inspector = session.inspector(ui);
+        let changed = inspector.input("Root", &mut harness);
+        let resp = inspector.into_response();
         assert!(
             changed || !resp.is_empty(),
             "expected click to change value; hovered={}, active={}, clicked={}, rect={:?}-{:?}, mouse={:?}",

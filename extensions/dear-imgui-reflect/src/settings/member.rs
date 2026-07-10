@@ -1,6 +1,6 @@
 use super::*;
 
-/// Per-member override settings layered on top of global [`ReflectSettings`].
+/// Per-member override settings layered on top of session [`ReflectSettings`].
 ///
 /// This provides an ImSettings-style configuration surface for specific
 /// fields (members) of a reflected type, analogous to

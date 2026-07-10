@@ -135,51 +135,6 @@ where
     }
 }
 
-/// Trait for backend renderers with unified error handling
-pub trait ImGuiRenderer {
-    /// Backend-specific error type
-    type Error: std::error::Error + Send + Sync + 'static;
-
-    /// Initialize the renderer
-    fn init(&mut self) -> Result<(), Self::Error>;
-
-    /// Render the current frame
-    fn render(&mut self, draw_data: &mut crate::render::DrawData) -> Result<(), Self::Error>;
-
-    /// Handle device lost/reset scenarios
-    fn device_lost(&mut self) -> Result<(), Self::Error> {
-        // Default implementation does nothing
-        Ok(())
-    }
-
-    /// Clean up resources
-    fn shutdown(&mut self) -> Result<(), Self::Error> {
-        // Default implementation does nothing
-        Ok(())
-    }
-}
-
-/// Trait for platform backends with unified error handling
-pub trait ImGuiPlatform {
-    /// Platform-specific error type
-    type Error: std::error::Error + Send + Sync + 'static;
-
-    /// Initialize the platform backend
-    fn init(&mut self) -> Result<(), Self::Error>;
-
-    /// Handle platform events
-    fn handle_event(&mut self, event: &dyn std::any::Any) -> Result<bool, Self::Error>;
-
-    /// Update platform state for new frame
-    fn new_frame(&mut self) -> Result<(), Self::Error>;
-
-    /// Clean up platform resources
-    fn shutdown(&mut self) -> Result<(), Self::Error> {
-        // Default implementation does nothing
-        Ok(())
-    }
-}
-
 /// Helper trait for safe string conversion
 pub trait SafeStringConversion {
     /// Convert to CString safely, returning an error if the string contains null bytes

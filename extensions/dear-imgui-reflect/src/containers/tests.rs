@@ -2,15 +2,8 @@ use super::*;
 use crate::{ArraySettings, MapSettings};
 use std::collections::BTreeMap;
 
-use std::sync::{Mutex, MutexGuard, OnceLock};
-
-use crate::response;
-use crate::{ImGuiValue, ReflectEvent, ReflectResponse};
-
-fn test_guard() -> MutexGuard<'static, ()> {
-    static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
-    GUARD.get_or_init(|| Mutex::new(())).lock().unwrap()
-}
+use crate::test_guard;
+use crate::{ImGuiValue, Inspector, ReflectEvent, ReflectSession};
 
 fn new_test_ctx() -> imgui::Context {
     let mut ctx = imgui::Context::create();
@@ -30,11 +23,11 @@ struct Probe {
 }
 
 impl ImGuiValue for Probe {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
-        let _ = (ui, label);
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        let _ = (inspector.ui(), label);
         let id = value.id;
-        response::record_event(ReflectEvent::VecInserted {
-            path: response::current_field_path(),
+        inspector.record_event(ReflectEvent::VecInserted {
+            path: inspector.current_path(),
             index: id,
         });
         false
@@ -54,15 +47,15 @@ fn nested_vec_element_paths_include_index_segments() {
         dropdown: false,
     };
 
-    let mut resp = ReflectResponse::default();
-    {
+    let session = ReflectSession::new();
+    let resp = {
         let ui = ctx.frame();
-        response::with_response(&mut resp, || {
-            response::with_field_path("items", || {
-                let _ = imgui_vec_with_settings(ui, "items", &mut values, &vec_settings);
-            });
-        });
-    }
+        let mut inspector = session.inspector(ui);
+        let path = inspector.push_path_static("items");
+        let _ = imgui_vec_with_settings(&mut inspector, "items", &mut values, &vec_settings);
+        drop(path);
+        inspector.into_response()
+    };
     ctx.render();
 
     let paths: Vec<Option<String>> = resp
@@ -89,15 +82,15 @@ fn nested_array_element_paths_include_index_segments() {
         reorderable: false,
     };
 
-    let mut resp = ReflectResponse::default();
-    {
+    let session = ReflectSession::new();
+    let resp = {
         let ui = ctx.frame();
-        response::with_response(&mut resp, || {
-            response::with_field_path("arr", || {
-                let _ = imgui_array_with_settings(ui, "arr", &mut values, &arr_settings);
-            });
-        });
-    }
+        let mut inspector = session.inspector(ui);
+        let path = inspector.push_path_static("arr");
+        let _ = imgui_array_with_settings(&mut inspector, "arr", &mut values, &arr_settings);
+        drop(path);
+        inspector.into_response()
+    };
     ctx.render();
 
     let paths: Vec<Option<String>> = resp
@@ -130,15 +123,15 @@ fn nested_map_value_paths_include_key_segments() {
         columns: 3,
     };
 
-    let mut resp = ReflectResponse::default();
-    {
+    let session = ReflectSession::new();
+    let resp = {
         let ui = ctx.frame();
-        response::with_response(&mut resp, || {
-            response::with_field_path("map", || {
-                let _ = imgui_btree_map_with_settings(ui, "map", &mut map, &map_settings);
-            });
-        });
-    }
+        let mut inspector = session.inspector(ui);
+        let path = inspector.push_path_static("map");
+        let _ = imgui_btree_map_with_settings(&mut inspector, "map", &mut map, &map_settings);
+        drop(path);
+        inspector.into_response()
+    };
     ctx.render();
 
     let paths: Vec<Option<String>> = resp
@@ -160,15 +153,15 @@ fn nested_tuple_element_paths_include_index_segments() {
     let mut ctx = new_test_ctx();
 
     let mut tuple = (Probe { id: 0 }, Probe { id: 1 });
-    let mut resp = ReflectResponse::default();
-    {
+    let session = ReflectSession::new();
+    let resp = {
         let ui = ctx.frame();
-        response::with_response(&mut resp, || {
-            response::with_field_path("tup", || {
-                let _ = <(Probe, Probe) as ImGuiValue>::imgui_value(ui, "tup", &mut tuple);
-            });
-        });
-    }
+        let mut inspector = session.inspector(ui);
+        let path = inspector.push_path_static("tup");
+        let _ = <(Probe, Probe) as ImGuiValue>::imgui_value(&mut inspector, "tup", &mut tuple);
+        drop(path);
+        inspector.into_response()
+    };
     ctx.render();
 
     let paths: Vec<Option<String>> = resp
@@ -182,4 +175,20 @@ fn nested_tuple_element_paths_include_index_segments() {
     assert_eq!(paths.len(), 2);
     assert_eq!(paths[0].as_deref(), Some("tup[0]"));
     assert_eq!(paths[1].as_deref(), Some("tup[1]"));
+}
+
+#[test]
+fn nested_containers_render_without_reentrant_settings_state() {
+    let _guard = test_guard();
+    let mut ctx = new_test_ctx();
+    let mut session = ReflectSession::new();
+    session.settings_mut().vec_mut().dropdown = false;
+    let mut values = vec![vec![1_i32, 2_i32]];
+
+    {
+        let ui = ctx.frame();
+        let mut inspector = session.inspector(ui);
+        let _ = <Vec<Vec<i32>> as ImGuiValue>::imgui_value(&mut inspector, "nested", &mut values);
+    }
+    ctx.render();
 }

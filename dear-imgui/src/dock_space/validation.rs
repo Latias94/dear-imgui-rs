@@ -17,11 +17,3 @@ pub(crate) fn assert_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
         "{caller} {name} must contain finite values"
     );
 }
-
-pub(crate) fn assert_positive_finite_vec2(caller: &str, name: &str, value: [f32; 2]) {
-    assert_finite_vec2(caller, name, value);
-    assert!(
-        value[0] > 0.0 && value[1] > 0.0,
-        "{caller} {name} must contain positive values"
-    );
-}

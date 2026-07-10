@@ -36,6 +36,3 @@ mod window_class;
 
 pub use flags::{DockFlags, DockNodeFlags};
 pub use window_class::{WindowClass, WindowClassParentViewport};
-
-pub(crate) use flags::validate_dock_node_flags;
-pub(crate) use validation::{assert_finite_vec2, assert_nonzero_id, assert_positive_finite_vec2};

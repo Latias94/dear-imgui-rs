@@ -1,17 +1,15 @@
-use super::*;
+use crate::ReflectSession;
 
 #[test]
-fn settings_scope_restores_previous_settings() {
-    with_settings(|settings| {
-        settings.vec_mut().insertable = true;
-    });
+fn sessions_own_independent_settings() {
+    let mut left = ReflectSession::new();
+    let mut right = ReflectSession::new();
 
-    with_settings_scope(|| {
-        with_settings(|settings| {
-            settings.vec_mut().insertable = false;
-        });
-        assert!(!current_settings().vec().insertable);
-    });
+    left.settings_mut().vec_mut().insertable = false;
+    right.settings_mut().vec_mut().reorderable = false;
 
-    assert!(current_settings().vec().insertable);
+    assert!(!left.settings().vec().insertable);
+    assert!(right.settings().vec().insertable);
+    assert!(left.settings().vec().reorderable);
+    assert!(!right.settings().vec().reorderable);
 }

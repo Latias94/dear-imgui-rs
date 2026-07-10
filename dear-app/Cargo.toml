@@ -2,7 +2,7 @@
 name = "dear-app"
 version = "0.15.1"
 edition.workspace = true
-description = "Convenient Dear ImGui application runner for dear-imgui-rs (Winit + WGPU, docking, themes, add-ons)"
+description = "Generation-aware Dear ImGui application runtime for dear-imgui-rs on Winit and WGPU"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true

@@ -6,23 +6,21 @@
 //!
 //! At a high level:
 //! - derive [`ImGuiReflect`](trait.ImGuiReflect.html) for your structs/enums;
-//! - call [`input`] or [`ImGuiReflectExt::input_reflect`] each frame to render
-//!   an editor for a value;
+//! - keep a [`ReflectSession`] beside the owning Dear ImGui context;
+//! - create an [`Inspector`] each frame and call [`Inspector::input`];
 //! - optionally customize container / numeric behavior via
-//!   [`ReflectSettings`] and [`MemberSettings`];
-//! - optionally collect structural change events with
-//!   [`input_with_response`].
+//!   [`ReflectSession::settings_mut`] and [`MemberSettings`];
+//! - inspect structural change events through [`Inspector::response`].
 //!
 //! The goal is to let you build "data inspector" style UIs quickly without
 //! hand-writing widgets for every field.
 //!
 //! # Quick start
 //!
-//! Derive [`ImGuiReflect`] for your type and use `input_reflect`:
+//! Derive [`ImGuiReflect`] for your type and render it through an inspector:
 //!
 //! ```no_run
 //! use dear_imgui_reflect as reflect;
-//! use reflect::ImGuiReflectExt;
 //!
 //! #[derive(reflect::ImGuiReflect, Default)]
 //! struct Player {
@@ -33,9 +31,14 @@
 //!     inventory: Vec<String>,
 //! }
 //!
-//! fn draw_ui(ui: &reflect::imgui::Ui, player: &mut Player) {
+//! fn draw_ui(
+//!     session: &reflect::ReflectSession,
+//!     ui: &reflect::imgui::Ui,
+//!     player: &mut Player,
+//! ) {
+//!     let mut inspector = session.inspector(ui);
 //!     // Returns true if any field changed this frame.
-//!     if ui.input_reflect("Player", player) {
+//!     if inspector.input("Player", player) {
 //!         // React to edits (save, mark dirty, etc).
 //!     }
 //! }
@@ -47,7 +50,7 @@
 //!
 //! - **Configuration panels / settings windows**:
 //!   derive [`ImGuiReflect`] for your config structs and call
-//!   [`ImGuiReflectExt::input_reflect`] each frame to build a live editor.
+//!   [`Inspector::input`] each frame to build a live editor.
 //! - **Game/engine inspectors**:
 //!   derive [`ImGuiReflect`] for components or resource types, then render
 //!   inspectors for the currently selected entity/resource inside a docked
@@ -57,7 +60,7 @@
 //!   `HashMap<String, V>` and `BTreeMap<String, V>` to build list views,
 //!   property bags and key/value editors with insertion/removal/reordering.
 //! - **Tooling and data browsers**:
-//!   combine [`input_with_response`] and [`ReflectResponse`] to track when
+//!   use [`Inspector::response`] and [`ReflectResponse`] to track when
 //!   items are inserted/removed/reordered, and synchronize those changes
 //!   back into your engine or persistence layer.
 //! - **Math-heavy editors**:
@@ -81,22 +84,23 @@
 //!
 //! # Settings and per-field overrides
 //!
-//! The global [`ReflectSettings`] object controls how generic containers
+//! Each [`ReflectSession`] owns [`ReflectSettings`] that control how generic containers
 //! are rendered (for example, whether `Vec<T>` is insertable/reorderable, or
-//! how numeric sliders behave). You can adjust it at startup:
+//! how numeric sliders behave). Configure a session before rendering:
 //!
 //! ```no_run
 //! use dear_imgui_reflect as reflect;
 //!
-//! fn configure_reflect() {
-//!     reflect::with_settings(|s| {
+//! fn configure_reflect(session: &mut reflect::ReflectSession) {
+//!     {
+//!         let s = session.settings_mut();
 //!         // Make all Vec<T> non-reorderable by default.
 //!         s.vec_mut().reorderable = false;
 //!
 //!         // Use a 0..1 slider for all f32 values by default.
 //!         let f32_settings = s.numerics_f32().clone().slider_0_to_1(2); // "%.2f"
 //!         *s.numerics_f32_mut() = f32_settings;
-//!     });
+//!     }
 //! }
 //! ```
 //!
@@ -111,26 +115,26 @@
 //!     weights: Vec<f32>,
 //! }
 //!
-//! fn configure_per_field() {
-//!     reflect::with_settings(|s| {
+//! fn configure_per_field(session: &mut reflect::ReflectSession) {
+//!     {
+//!         let s = session.settings_mut();
 //!         // For Settings::weights, allow reordering only.
 //!         s.for_member::<Settings>("weights")
 //!             .vec_reorder_only()
 //!             .numerics_f32_slider_0_to_1(3);
-//!     });
+//!     }
 //! }
 //! ```
 //!
-//! The [`with_settings_scope`] helper lets you temporarily override global
-//! settings for a single panel or widget subtree and automatically restore
-//! the previous configuration afterwards.
+//! Use separate sessions for panels that need different defaults. Settings
+//! cannot change while an inspector borrows its session.
 //!
 //! # Collecting structural change events
 //!
-//! The [`input`] and [`ImGuiReflectExt::input_reflect`] helpers return a
+//! [`Inspector::input`] returns a
 //! simple `bool` indicating whether any field changed. If you also want to
-//! react to container-structure changes (insert/remove/reorder/rename), use
-//! [`input_with_response`] and inspect the resulting [`ReflectResponse`]:
+//! react to container-structure changes (insert/remove/reorder/rename), inspect
+//! the response owned by the same inspector:
 //!
 //! ```no_run
 //! use dear_imgui_reflect as reflect;
@@ -140,11 +144,15 @@
 //!     tags: Vec<String>,
 //! }
 //!
-//! fn draw_tags(ui: &reflect::imgui::Ui, state: &mut AppState) {
-//!     let mut resp = reflect::ReflectResponse::default();
-//!     let _changed = reflect::input_with_response(ui, "Tags", state, &mut resp);
+//! fn draw_tags(
+//!     session: &reflect::ReflectSession,
+//!     ui: &reflect::imgui::Ui,
+//!     state: &mut AppState,
+//! ) {
+//!     let mut inspector = session.inspector(ui);
+//!     let _changed = inspector.input("Tags", state);
 //!
-//!     for event in resp.events() {
+//!     for event in inspector.response().events() {
 //!         match event {
 //!             reflect::ReflectEvent::VecInserted { path, index } => {
 //!                 // path is "tags" when generated via the derive macro.
@@ -175,7 +183,6 @@
 //!
 //! ```no_run
 //! use dear_imgui_reflect as reflect;
-//! use reflect::ImGuiReflectExt;
 //!
 //! #[derive(reflect::ImGuiReflect, Default)]
 //! struct Transform {
@@ -204,10 +211,12 @@
 //! struct EnemyInspector {
 //!     enemies: Vec<Enemy>,
 //!     selected: usize,
+//!     reflect_session: reflect::ReflectSession,
 //! }
 //!
 //! impl EnemyInspector {
 //!     fn ui(&mut self, ui: &reflect::imgui::Ui) {
+//!         let mut inspector = self.reflect_session.inspector(ui);
 //!         ui.window("Enemies").build(|| {
 //!             // Left side: list of enemies with selection.
 //!             ui.child_window("EnemyList")
@@ -231,7 +240,7 @@
 //!                 .size([0.0, 0.0])
 //!                 .build(ui, || {
 //!                     if let Some(enemy) = self.enemies.get_mut(self.selected) {
-//!                         ui.input_reflect("Enemy", enemy);
+//!                         inspector.input("Enemy", enemy);
 //!                     } else {
 //!                         ui.text("No enemy selected");
 //!                     }
@@ -243,7 +252,7 @@
 //!
 //! This pattern generalizes well to component-based engines, material
 //! editors, and other data-driven UIs: derive [`ImGuiReflect`] for the
-//! types you care about, then compose editors using `input_reflect` inside
+//! types you care about, then compose editors using [`Inspector::input`] inside
 //! whatever layout best fits your application.
 
 #![deny(rust_2018_idioms)]
@@ -261,18 +270,31 @@ pub use dear_imgui_rs as imgui;
 
 mod containers;
 mod response;
+mod session;
 mod settings;
 mod values;
+
+#[cfg(test)]
+pub(crate) fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+    use std::sync::{Mutex, OnceLock};
+
+    static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+    GUARD
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+}
 
 pub use containers::{
     imgui_array_with_settings, imgui_btree_map_with_settings, imgui_hash_map_with_settings,
     imgui_vec_with_settings,
 };
-pub use response::{ReflectEvent, ReflectResponse, with_field_path, with_field_path_static};
+pub use response::{ReflectEvent, ReflectResponse};
+pub use session::{Inspector, InspectorPathGuard, ReflectSession};
 pub use settings::{
     ArraySettings, BoolSettings, BoolStyle, MapSettings, MemberSettings, NumericDefaultRange,
     NumericRange, NumericTypeSettings, NumericWidgetKind, ReflectSettings, TupleRenderMode,
-    TupleSettings, VecSettings, current_settings, with_settings, with_settings_scope,
+    TupleSettings, VecSettings,
 };
 pub use values::imgui_tuple_body;
 
@@ -285,7 +307,7 @@ pub trait ImGuiValue {
     /// Draw a widget for this value.
     ///
     /// Returns `true` if the value was modified.
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool;
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool;
 }
 
 /// Trait for complex types (structs/enums) that can generate ImGui controls
@@ -296,14 +318,14 @@ pub trait ImGuiReflect {
     /// Draw an ImGui editor for this value with the given label.
     ///
     /// Returns `true` if any field was modified.
-    fn imgui_reflect(&mut self, ui: &imgui::Ui, label: &str) -> bool;
+    fn imgui_reflect(&mut self, inspector: &mut Inspector<'_, '_>, label: &str) -> bool;
 }
 
 /// Blanket implementation: any type that implements [`ImGuiReflect`] can also
 /// be used wherever an [`ImGuiValue`] is expected.
 impl<T: ImGuiReflect> ImGuiValue for T {
-    fn imgui_value(ui: &imgui::Ui, label: &str, value: &mut Self) -> bool {
-        value.imgui_reflect(ui, label)
+    fn imgui_value(inspector: &mut Inspector<'_, '_>, label: &str, value: &mut Self) -> bool {
+        value.imgui_reflect(inspector, label)
     }
 }
 
@@ -313,8 +335,8 @@ impl<T: ImGuiReflect> ImGuiValue for T {
 /// matching ImReflect's behavior for smart pointers that simply forward to
 /// the pointed-to value when engaged.
 impl<T: ImGuiReflect> ImGuiReflect for Box<T> {
-    fn imgui_reflect(&mut self, ui: &imgui::Ui, label: &str) -> bool {
-        self.as_mut().imgui_reflect(ui, label)
+    fn imgui_reflect(&mut self, inspector: &mut Inspector<'_, '_>, label: &str) -> bool {
+        self.as_mut().imgui_reflect(inspector, label)
     }
 }
 
@@ -324,10 +346,11 @@ impl<T: ImGuiReflect> ImGuiReflect for Box<T> {
 /// inner `T`. Otherwise, it renders a read-only marker indicating that the
 /// value is shared and cannot be safely mutated.
 impl<T: ImGuiReflect> ImGuiReflect for Rc<T> {
-    fn imgui_reflect(&mut self, ui: &imgui::Ui, label: &str) -> bool {
+    fn imgui_reflect(&mut self, inspector: &mut Inspector<'_, '_>, label: &str) -> bool {
         if let Some(inner) = Rc::get_mut(self) {
-            inner.imgui_reflect(ui, label)
+            inner.imgui_reflect(inspector, label)
         } else {
+            let ui = inspector.ui();
             ui.text(label);
             ui.same_line();
             ui.text("<Rc shared (read-only)>");
@@ -342,54 +365,16 @@ impl<T: ImGuiReflect> ImGuiReflect for Rc<T> {
 /// inner `T`. Otherwise, it renders a read-only marker indicating that the
 /// value is shared and cannot be safely mutated.
 impl<T: ImGuiReflect> ImGuiReflect for Arc<T> {
-    fn imgui_reflect(&mut self, ui: &imgui::Ui, label: &str) -> bool {
+    fn imgui_reflect(&mut self, inspector: &mut Inspector<'_, '_>, label: &str) -> bool {
         if let Some(inner) = Arc::get_mut(self) {
-            inner.imgui_reflect(ui, label)
+            inner.imgui_reflect(inspector, label)
         } else {
+            let ui = inspector.ui();
             ui.text(label);
             ui.same_line();
             ui.text("<Arc shared (read-only)>");
             false
         }
-    }
-}
-
-/// Render ImGui controls for a value that implements [`ImGuiReflect`].
-///
-/// This is the main entry point mirroring the C++ `ImReflect::Input` API.
-pub fn input<T: ImGuiReflect>(ui: &imgui::Ui, label: &str, value: &mut T) -> bool {
-    value.imgui_reflect(ui, label)
-}
-
-/// Variant of [`input`] that additionally collects container-level change events
-/// into the provided [`ReflectResponse`].
-///
-/// The returned boolean is identical to [`input`]: `true` if any field was
-/// modified. Container editors emit structural change events into `response`
-/// while this function is executing. User-defined `ImGuiValue`/`ImGuiReflect`
-/// implementations that only rely on the existing APIs will continue to work,
-/// but will not automatically populate `response` unless they call into
-/// `dear-imgui-reflect`'s container helpers.
-pub fn input_with_response<T: ImGuiReflect>(
-    ui: &imgui::Ui,
-    label: &str,
-    value: &mut T,
-    response: &mut ReflectResponse,
-) -> bool {
-    response::with_response(response, || input(ui, label, value))
-}
-
-/// Extension methods on `Ui` for reflection-based widgets.
-pub trait ImGuiReflectExt {
-    /// Render a reflected editor for a value.
-    ///
-    /// Returns `true` if any field changed.
-    fn input_reflect<T: ImGuiReflect>(&self, label: &str, value: &mut T) -> bool;
-}
-
-impl ImGuiReflectExt for imgui::Ui {
-    fn input_reflect<T: ImGuiReflect>(&self, label: &str, value: &mut T) -> bool {
-        input(self, label, value)
     }
 }
 

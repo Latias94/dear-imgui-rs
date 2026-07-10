@@ -906,7 +906,7 @@ impl AppWindow {
 
     fn setup_imgui(&mut self) {
         let mut context = Context::create();
-        // Disable INI load/save to test DockBuilder-only layout reliably
+        // Disable INI load/save to test the declarative layout reliably.
         context
             .set_ini_filename::<std::path::PathBuf>(None)
             .unwrap();
@@ -1046,24 +1046,26 @@ impl AppWindow {
 
         let ui = imgui.context.frame();
 
-        // Stable dockspace id and layout setup before submitting DockSpace
+        // Submit the stable dockspace and let the declarative compiler own its lifecycle.
         let dock_id_struct = ui.get_id("MainDockSpace");
         imgui.dockspace_id = dock_id_struct.into();
-        if imgui.first_frame {
-            let vp = ui.main_viewport();
-            setup_initial_docking_layout(
-                ui,
-                dear_imgui_rs::Id::from(imgui.dockspace_id),
-                vp.work_pos(),
-                vp.work_size(),
-            );
-            imgui.first_frame = false;
-        }
-        let _ = ui.dockspace_over_main_viewport_with_flags(
-            dear_imgui_rs::Id::from(imgui.dockspace_id),
+        let viewport = ui.main_viewport();
+        let target = dear_imgui_rs::DockspaceTarget::new(
+            dock_id_struct,
+            viewport.work_pos(),
+            viewport.work_size(),
+        )?
+        .flags(
             dear_imgui_rs::DockNodeFlags::PASSTHRU_CENTRAL_NODE
                 | dear_imgui_rs::DockNodeFlags::AUTO_HIDE_TAB_BAR,
         );
+        let apply = if imgui.first_frame {
+            dear_imgui_rs::DockLayoutApply::Replace
+        } else {
+            dear_imgui_rs::DockLayoutApply::IfMissing
+        };
+        ui.dockspace_over_main_viewport_with_layout(&target, &initial_docking_layout(), apply)?;
+        imgui.first_frame = false;
 
         let actions = render_main_menu_bar(ui, &mut imgui.game_state);
         render_hierarchy(ui, &mut imgui.game_state);
@@ -1238,26 +1240,9 @@ impl App {
     }
 }
 
-/// Setup the initial docking layout - Unity-style game engine layout
-fn setup_initial_docking_layout(
-    ui: &dear_imgui_rs::Ui,
-    dockspace_id: dear_imgui_rs::Id,
-    viewport_work_pos: [f32; 2],
-    viewport_work_size: [f32; 2],
-) {
-    use dear_imgui_rs::{DockBuilder, SplitDirection};
-
-    println!("Setting up initial docking layout...");
-
-    // Clear any existing layout and create fresh dockspace (size comes from main viewport)
-    DockBuilder::remove_node_docked_windows(ui, dockspace_id, true);
-    DockBuilder::remove_node(ui, dockspace_id);
-    DockBuilder::add_node(ui, dockspace_id, dear_imgui_rs::DockNodeFlags::NONE);
-    // Match node pos/size to main viewport work area (exclude menu bars) before splitting
-    {
-        DockBuilder::set_node_pos(ui, dockspace_id, viewport_work_pos);
-        DockBuilder::set_node_size(ui, dockspace_id, viewport_work_size);
-    }
+/// Initial Unity-style game engine layout.
+fn initial_docking_layout() -> dear_imgui_rs::DockLayout {
+    use dear_imgui_rs::{DockLayout, DockSplit};
 
     // Unity-style Professional Layout:
     // +-------------------+---------------------------+-------------------+
@@ -1268,66 +1253,37 @@ fn setup_initial_docking_layout(
     // |      Project      |         Console           |   Performance     |
     // +-------------------+---------------------------+-------------------+
 
-    // Split horizontally to match Unity-like proportions derived from INI (approx.):
-    // Right Inspector ~25.1%, Left Hierarchy column ~21.7%, Center ~remaining
-    // First split right from root
-    let (inspector_panel, after_right) = DockBuilder::split_node(
-        ui,
-        dockspace_id,
-        SplitDirection::Right,
-        0.251, // 402/1600
-    );
-    // Then split left from the remaining
-    let (left_panel_id, center_area_id) = DockBuilder::split_node(
-        ui,
-        after_right,
-        SplitDirection::Left,
-        0.2896, // normalized 0.217/(1-0.251)
-    );
-
-    // Split left panel vertically to match INI heights (approx):
-    // total H ~881, Hierarchy 337, Project 264, Asset 276
-    // First split bottom Asset (~276/881 ≈ 0.313)
-    let (asset_id, top_left_stack) = DockBuilder::split_node(
-        ui,
-        left_panel_id,
-        SplitDirection::Down,
-        0.313, // Asset Browser
-    );
-    // Then split the remaining into Hierarchy (337) and Project (264)
-    let (project_id, hierarchy_id) = DockBuilder::split_node(
-        ui,
-        top_left_stack,
-        SplitDirection::Down,
-        0.439, // 337/(337+264)
-    );
-
-    // Split right panel vertically: Performance (~20%) bottom, Inspector (~80%) top
-    let (performance_id, inspector_id) =
-        DockBuilder::split_node(ui, inspector_panel, SplitDirection::Down, 0.2);
-
-    // Split center vertically: Console (~27%) bottom, Scene/Game (~73%) top
-    let (console_id, scene_game_id) = DockBuilder::split_node(
-        ui,
-        center_area_id,
-        SplitDirection::Down,
-        0.313, // 276/881 approx
-    );
-
-    // Dock all windows to their designated areas
-    DockBuilder::dock_window(ui, "Hierarchy", hierarchy_id);
-    DockBuilder::dock_window(ui, "Project", project_id);
-    DockBuilder::dock_window(ui, "Asset Browser", asset_id); // Tabbed vertically under Project
-    DockBuilder::dock_window(ui, "Scene View", scene_game_id);
-    DockBuilder::dock_window(ui, "Game View", scene_game_id); // Tabbed with Scene View
-    DockBuilder::dock_window(ui, "Console", console_id); // Bottom center
-    DockBuilder::dock_window(ui, "Inspector", inspector_id);
-    DockBuilder::dock_window(ui, "Performance", performance_id);
-
-    // Finalize the layout
-    DockBuilder::finish(ui, dockspace_id);
-
-    println!("Docking layout setup complete");
+    DockLayout::split(
+        DockSplit::Right,
+        0.251,
+        DockLayout::split(
+            DockSplit::Down,
+            0.2,
+            DockLayout::tabs(["Performance"]),
+            DockLayout::tabs(["Inspector"]),
+        ),
+        DockLayout::split(
+            DockSplit::Left,
+            0.2896,
+            DockLayout::split(
+                DockSplit::Down,
+                0.313,
+                DockLayout::tabs(["Asset Browser"]),
+                DockLayout::split(
+                    DockSplit::Down,
+                    0.439,
+                    DockLayout::tabs(["Project"]),
+                    DockLayout::tabs(["Hierarchy"]),
+                ),
+            ),
+            DockLayout::split(
+                DockSplit::Down,
+                0.313,
+                DockLayout::tabs(["Console"]),
+                DockLayout::tabs(["Scene View", "Game View"]),
+            ),
+        ),
+    )
 }
 
 #[derive(Default, Clone, Copy)]

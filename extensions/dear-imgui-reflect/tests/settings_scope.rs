@@ -5,12 +5,15 @@ mod common;
 use common::test_guard;
 
 #[test]
-fn settings_scope_restores_global_defaults() {
+fn reflect_sessions_isolate_settings() {
     let _guard = test_guard();
     use reflect::{NumericRange, NumericTypeSettings, NumericWidgetKind};
 
-    // Establish a known global baseline for i32 numeric settings.
-    reflect::with_settings(|s| {
+    let mut left = reflect::ReflectSession::new();
+    let right = reflect::ReflectSession::new();
+
+    {
+        let s = left.settings_mut();
         *s.numerics_i32_mut() = NumericTypeSettings {
             widget: NumericWidgetKind::Slider,
             range: NumericRange::Explicit {
@@ -19,31 +22,14 @@ fn settings_scope_restores_global_defaults() {
             },
             ..NumericTypeSettings::default()
         };
-    });
+    }
 
-    let before = reflect::current_settings();
     assert!(matches!(
-        before.numerics_i32().widget,
+        left.settings().numerics_i32().widget,
         NumericWidgetKind::Slider
     ));
-
-    // Within the scope, override the widget kind; after the scope, the
-    // previous global value must be restored.
-    reflect::with_settings_scope(|| {
-        reflect::with_settings(|s| {
-            s.numerics_i32_mut().widget = NumericWidgetKind::Drag;
-        });
-
-        let inner = reflect::current_settings();
-        assert!(matches!(
-            inner.numerics_i32().widget,
-            NumericWidgetKind::Drag
-        ));
-    });
-
-    let after = reflect::current_settings();
     assert!(matches!(
-        after.numerics_i32().widget,
-        NumericWidgetKind::Slider
+        right.settings().numerics_i32().widget,
+        NumericWidgetKind::Input
     ));
 }

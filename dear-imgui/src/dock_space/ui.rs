@@ -2,11 +2,51 @@ use super::flags::{DockNodeFlags, validate_dock_node_flags};
 use super::validation::{assert_finite_vec2, assert_nonzero_id};
 use super::window_class::WindowClass;
 use crate::ui::Ui;
-use crate::{Id, sys};
+use crate::{
+    DockLayout, DockLayoutApply, DockLayoutError, DockspaceTarget, Id,
+    dock_layout::{DockspaceSubmission, submit_and_apply},
+    sys,
+};
 use std::ptr;
 
 /// Docking-related functionality
 impl Ui {
+    /// Submit a dockspace at the current cursor and apply a complete declarative layout.
+    ///
+    /// The target's initial position is ignored for this submission mode; the dock node follows
+    /// the host window's current cursor position. Initial size, flags, and window class still come
+    /// from the target.
+    pub fn dock_space_with_layout(
+        &self,
+        target: &DockspaceTarget,
+        layout: &DockLayout,
+        apply: DockLayoutApply,
+    ) -> Result<Id, DockLayoutError> {
+        submit_and_apply(
+            self,
+            target,
+            layout,
+            apply,
+            DockspaceSubmission::CurrentWindow,
+        )
+    }
+
+    /// Submit a dockspace over the main viewport and apply a complete declarative layout.
+    pub fn dockspace_over_main_viewport_with_layout(
+        &self,
+        target: &DockspaceTarget,
+        layout: &DockLayout,
+        apply: DockLayoutApply,
+    ) -> Result<Id, DockLayoutError> {
+        submit_and_apply(
+            self,
+            target,
+            layout,
+            apply,
+            DockspaceSubmission::MainViewport,
+        )
+    }
+
     /// Creates a dockspace over the main viewport
     ///
     /// This is a convenience function that creates a dockspace covering the entire main viewport.
