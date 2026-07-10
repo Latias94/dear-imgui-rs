@@ -72,7 +72,7 @@ use dear_imgui_winit::multi_viewport as winit_mvp;
 #   present_queue: ash::vk::Queue,
 #   graphics_queue_family_index: u32,
 #   present_queue_family_index: u32,
-# ) {
+# ) -> Result<(), Box<dyn std::error::Error>> {
 imgui.enable_multi_viewport();
 winit_mvp::init_multi_viewport_support(imgui, window);
 
@@ -86,12 +86,12 @@ ash_mvp::enable(
     present_queue,
     graphics_queue_family_index,
     present_queue_family_index,
-);
+)?;
 
 // Each frame (after rendering/presenting the main window):
 imgui.update_platform_windows();
 imgui.render_platform_windows_default();
-# }
+# Ok(()) }
 ```
 
 Notes:
@@ -124,7 +124,7 @@ use dear_imgui_ash::multi_viewport_sdl3 as ash_mvp;
 #   present_queue: ash::vk::Queue,
 #   graphics_queue_family_index: u32,
 #   present_queue_family_index: u32,
-# ) -> Result<(), dear_imgui_sdl3::Sdl3BackendError> {
+# ) -> Result<(), Box<dyn std::error::Error>> {
 imgui.enable_multi_viewport();
 
 // Configure SDL3 platform backend for Vulkan (sets Platform_CreateVkSurface).
@@ -140,7 +140,7 @@ ash_mvp::enable(
     present_queue,
     graphics_queue_family_index,
     present_queue_family_index,
-);
+)?;
 
 // Each frame (after rendering/presenting the main window):
 imgui.update_platform_windows();

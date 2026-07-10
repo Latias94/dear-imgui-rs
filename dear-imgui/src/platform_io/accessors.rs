@@ -3,28 +3,6 @@ use crate::sys;
 use super::{PlatformIo, Viewport};
 
 impl PlatformIo {
-    /// Get access to the monitors vector
-    #[cfg(feature = "multi-viewport")]
-    pub fn monitors(&self) -> &crate::internal::ImVector<sys::ImGuiPlatformMonitor> {
-        unsafe {
-            crate::internal::imvector_cast_ref::<
-                sys::ImGuiPlatformMonitor,
-                sys::ImVector_ImGuiPlatformMonitor,
-            >(&self.inner().Monitors)
-        }
-    }
-
-    /// Get mutable access to the monitors vector
-    #[cfg(feature = "multi-viewport")]
-    pub fn monitors_mut(&mut self) -> &mut crate::internal::ImVector<sys::ImGuiPlatformMonitor> {
-        unsafe {
-            crate::internal::imvector_cast_mut::<
-                sys::ImGuiPlatformMonitor,
-                sys::ImVector_ImGuiPlatformMonitor,
-            >(&mut self.inner_mut().Monitors)
-        }
-    }
-
     /// Replace Dear ImGui's platform monitor list.
     ///
     /// Multi-viewport backends must keep at least one monitor in `PlatformIO.Monitors` before

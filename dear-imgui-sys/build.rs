@@ -135,10 +135,6 @@ fn main() {
     // static link order remains backend-shim first, core dear_imgui second.
     if !skip_cc {
         build_backend_shims(&cfg);
-        if cfg.target_arch != "wasm32" {
-            build_platform_io_hooks(&cfg);
-            has_platform_io_hooks = true;
-        }
     }
 
     // Build strategy selection via features + env var override
@@ -154,6 +150,12 @@ fn main() {
     } else {
         try_link_prebuilt_all(&cfg)
     };
+    if linked_prebuilt {
+        // `try_link_prebuilt` accepts only archives that declare the aggregate hook capability.
+        // The hook object is part of the same `dear_imgui` archive and therefore shares its C++
+        // compiler, CRT, defines, and source profile.
+        has_platform_io_hooks = true;
+    }
 
     // Build from sources when needed
     if !linked_prebuilt && !skip_cc {
@@ -178,6 +180,7 @@ fn main() {
                 );
             }
             build_with_cc_cfg(&cfg);
+            has_platform_io_hooks = true;
         }
     } else if !linked_prebuilt && skip_cc {
         println!(
@@ -189,8 +192,8 @@ fn main() {
         println!("cargo:rustc-cfg=dear_imgui_rs_platform_io_hooks");
     } else if cfg.target_arch != "wasm32" {
         println!(
-            "cargo:warning=dear-imgui-sys: PlatformIO out-parameter hooks are unavailable; \
-             Platform_GetWindowPos/Size/FramebufferScale/WorkAreaInsets callback installation \
+            "cargo:warning=dear-imgui-sys: PlatformIO aggregate ABI hooks are unavailable; \
+             aggregate callback installation \
              will panic if used."
         );
     }
@@ -425,6 +428,7 @@ fn build_with_cc_cfg(cfg: &BuildConfig) {
     build.file(imgui_src.join("imgui_widgets.cpp"));
     build.file(imgui_src.join("imgui_tables.cpp"));
     build.file(cfg.manifest_dir.join("src/stack_layout_shim.cpp"));
+    build.file(cfg.manifest_dir.join("src/platform_io_hooks.cpp"));
     // Include official demo/metrics/debug windows for native builds so symbols like
     // ImGui::ShowDemoWindow/ShowAboutWindow/ShowStyleEditor resolve.
     // This is excluded from the WASM single‑module path below.
@@ -577,13 +581,6 @@ fn write_stack_layout_patched_imgui_cpp(cfg: &BuildConfig, imgui_cpp: &Path) -> 
     std::fs::write(&out, patched)
         .unwrap_or_else(|e| panic!("failed to write {}: {e}", out.display()));
     out
-}
-
-fn build_platform_io_hooks(cfg: &BuildConfig) {
-    let mut build = new_native_cpp_build(cfg);
-    build.include(cfg.cimgui_root());
-    build.file(cfg.manifest_dir.join("src/platform_io_hooks.cpp"));
-    build.compile("dear_imgui_sys_platform_io_hooks");
 }
 
 fn any_backend_shim_enabled() -> bool {
@@ -864,6 +861,12 @@ fn try_link_prebuilt(dir: &Path, cfg: &BuildConfig) -> bool {
     // prebuilts that do not include the patched ItemAdd() hook and C ABI
     // forwarding layer.
     if !prebuilt_manifest_has_feature(dir, "stack-layout") {
+        return false;
+    }
+    // Aggregate callback hooks must be compiled into the same native archive as Dear ImGui.
+    // Reject older prebuilts instead of compiling a second local C++ shim with a potentially
+    // different compiler or CRT profile.
+    if !prebuilt_manifest_has_feature(dir, "platform-io-aggregate-hooks") {
         return false;
     }
     // If freetype feature is enabled, only accept prebuilt if manifest declares it

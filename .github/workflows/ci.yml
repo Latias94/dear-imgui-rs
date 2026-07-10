@@ -33,6 +33,9 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
@@ -89,20 +92,18 @@ jobs:
           cargo check -p dear-imgui-ash --lib --features "multi-viewport-winit,dynamic-rendering"
           cargo check -p dear-imgui-ash --lib --features "multi-viewport-sdl3,dynamic-rendering"
 
-      - name: Run renderer backend focused tests
+      - name: Run renderer backend ownership tests
         run: |
-          cargo test -p dear-imgui-wgpu --lib --features "multi-viewport-winit" renderer_destroy_window_ignores_foreign_renderer_user_data
-          cargo test -p dear-imgui-wgpu --lib --features "multi-viewport-sdl3" renderer_destroy_window_ignores_foreign_renderer_user_data
-          cargo test -p dear-imgui-ash --lib --features "multi-viewport-sdl3,dynamic-rendering" take_viewport_data_ignores_foreign_renderer_user_data
-          cargo test -p dear-imgui-ash --lib --features "multi-viewport-sdl3,dynamic-rendering" viewport_user_data_mut_ignores_unregistered_renderer_user_data
+          cargo nextest run -p dear-imgui-wgpu --lib --features "multi-viewport-winit"
+          cargo nextest run -p dear-imgui-wgpu --lib --features "multi-viewport-sdl3"
+          cargo nextest run -p dear-imgui-ash --lib --features "multi-viewport-winit,dynamic-rendering"
+          cargo nextest run -p dear-imgui-ash --lib --features "multi-viewport-sdl3,dynamic-rendering"
 
       - name: Check dear-imgui-rs multi-viewport tests compile
         run: cargo test -p dear-imgui-rs --features multi-viewport --no-run
 
-      - name: Run winit backend focused tests
-        run: |
-          cargo test -p dear-imgui-winit --lib --no-default-features ime_window_ptr_falls_back_to_platform_ime_user_data
-          cargo test -p dear-imgui-winit --lib --features "multi-viewport" window_ptr_for_viewport
+      - name: Run winit backend multi-viewport tests
+        run: cargo nextest run -p dear-imgui-winit --lib --features "multi-viewport"
 
       - name: Build dear-app with all add-ons
         run: cargo build -p dear-app --features "implot imnodes implot3d"
@@ -212,6 +213,45 @@ jobs:
 
       - name: Check Bevy backend wasm (render)
         run: cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --features render
+
+  windows-platform-io-abi:
+    name: PlatformIO C++ ABI (MSVC ${{ matrix.crt }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - crt: md
+            rustflags: -Cdebuginfo=0
+          - crt: mt
+            rustflags: -Cdebuginfo=0 -C target-feature=+crt-static
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Init required nested submodules (selective)
+        shell: bash
+        run: bash tools/ci/update_submodules.sh
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: "false"
+          key: platform-io-${{ matrix.crt }}
+
+      - name: Run C++ aggregate callback probe and lifecycle tests
+        run: cargo +stable nextest run -p dear-imgui-rs --features multi-viewport
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+          RUSTFLAGS: ${{ matrix.rustflags }}
 
   sys-bindgen-defaults:
     name: Sys crates without bindgen

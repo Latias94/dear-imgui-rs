@@ -18,7 +18,7 @@ use std::ffi::CString;
 use std::time::Instant;
 
 use ash::khr::{surface as khr_surface, swapchain as khr_swapchain};
-use ash::{Device, Entry, Instance, vk};
+use ash::{vk, Device, Entry, Instance};
 use dear_imgui_ash::{AshRenderer, Options as AshOptions};
 use dear_imgui_rs::{Condition, ConfigFlags, Context};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode};
@@ -1261,7 +1261,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             app.vk.ctx.queue,
             app.vk.ctx.queue_family_index,
             app.vk.ctx.queue_family_index,
-        );
+        )?;
     }
 
     app.run()

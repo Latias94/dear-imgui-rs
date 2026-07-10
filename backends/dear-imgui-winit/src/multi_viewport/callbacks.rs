@@ -7,6 +7,10 @@ use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::window::{WindowAttributes, WindowLevel};
 
 pub(super) fn install_platform_callbacks(ctx: &mut Context) {
+    assert!(
+        dear_imgui_rs::sys::HAS_PLATFORM_IO_AGGREGATE_HOOKS,
+        "dear-imgui-winit multi-viewport requires PlatformIO aggregate ABI hooks"
+    );
     let _context_guard = unsafe { CurrentContextGuard::bind(ctx.as_raw()) };
 
     // Set up platform callbacks using direct C API
@@ -43,7 +47,10 @@ pub(super) fn install_platform_callbacks(ctx: &mut Context) {
         (*pio_sys).Platform_SetWindowAlpha = Some(winit_set_window_alpha);
         (*pio_sys).Platform_RenderWindow = Some(winit_platform_render_window);
         (*pio_sys).Platform_SwapBuffers = Some(winit_platform_swap_buffers);
-        (*pio_sys).Platform_CreateVkSurface = Some(winit_platform_create_vk_surface);
+        // Winit does not implement Dear ImGui's platform Vulkan surface callback. Ash's Winit
+        // renderer creates surfaces through raw-window-handle instead, so advertising this slot
+        // would be a false capability.
+        (*pio_sys).Platform_CreateVkSurface = None;
 
         // Audit: print which callbacks are null/non-null to catch missing ones
         macro_rules! chk {
@@ -79,9 +86,8 @@ pub(super) fn install_platform_callbacks(ctx: &mut Context) {
 }
 
 /// Set up monitors list for multi-viewport support using a reference window
-pub(super) unsafe fn setup_monitors_with_window(window: &Window, ctx: &mut Context) {
-    // Build monitor list from winit and feed into ImGuiPlatformIO.Monitors.
-    // We allocate storage using ImGui's allocator to keep ownership consistent.
+pub(super) fn setup_monitors_with_window(window: &Window, ctx: &mut Context) {
+    // Build monitor list from winit and let PlatformIo own its allocator contract.
     let monitors: Vec<dear_imgui_rs::sys::ImGuiPlatformMonitor> = {
         let mut out = Vec::new();
         let mut iter = window.available_monitors();
@@ -133,33 +139,7 @@ pub(super) unsafe fn setup_monitors_with_window(window: &Window, ctx: &mut Conte
         out
     };
 
-    let pio = ctx.platform_io_mut().as_raw_mut();
-    let vec = unsafe { &mut (*pio).Monitors };
-
-    // Free existing storage if any (owned by ImGui allocator)
-    if vec.Capacity > 0 && !vec.Data.is_null() {
-        dear_imgui_rs::sys::igMemFree(vec.Data as *mut _);
-        vec.Data = std::ptr::null_mut();
-        vec.Size = 0;
-        vec.Capacity = 0;
-    }
-
-    let count = monitors.len();
-    let bytes = count * std::mem::size_of::<dear_imgui_rs::sys::ImGuiPlatformMonitor>();
-    let data_ptr = if bytes > 0 {
-        dear_imgui_rs::sys::igMemAlloc(bytes) as *mut dear_imgui_rs::sys::ImGuiPlatformMonitor
-    } else {
-        std::ptr::null_mut()
-    };
-
-    if !data_ptr.is_null() {
-        for (i, m) in monitors.iter().enumerate() {
-            *data_ptr.add(i) = *m;
-        }
-        vec.Data = data_ptr;
-        vec.Size = count as i32;
-        vec.Capacity = count as i32;
-    }
+    ctx.platform_io_mut().set_monitors(&monitors);
 }
 
 // Platform callback functions following official ImGui backend pattern
@@ -389,12 +369,13 @@ pub(super) unsafe extern "C" fn winit_get_window_pos_out(
 /// Set window position
 pub(super) unsafe extern "C" fn winit_set_window_pos(
     vp: *mut dear_imgui_rs::sys::ImGuiViewport,
-    pos: dear_imgui_rs::sys::ImVec2,
+    pos: *const dear_imgui_rs::sys::ImVec2,
 ) {
     abort_on_panic("winit_set_window_pos", || {
-        if vp.is_null() {
+        if vp.is_null() || pos.is_null() {
             return;
         }
+        let pos = unsafe { *pos };
 
         if let Some(vd) = unsafe { viewport_data_mut(vp) } {
             if let Some(window) = unsafe { vd.window.as_ref() } {
@@ -451,12 +432,13 @@ pub(super) unsafe extern "C" fn winit_get_window_size_out(
 /// Set window size
 pub(super) unsafe extern "C" fn winit_set_window_size(
     vp: *mut dear_imgui_rs::sys::ImGuiViewport,
-    size: dear_imgui_rs::sys::ImVec2,
+    size: *const dear_imgui_rs::sys::ImVec2,
 ) {
     abort_on_panic("winit_set_window_size", || {
-        if vp.is_null() {
+        if vp.is_null() || size.is_null() {
             return;
         }
+        let size = unsafe { *size };
 
         if let Some(vd) = unsafe { viewport_data_mut(vp) } {
             if let Some(window) = unsafe { vd.window.as_ref() } {
@@ -668,21 +650,6 @@ pub(super) unsafe extern "C" fn winit_platform_swap_buffers(
             return;
         }
     });
-}
-
-/// Platform create Vulkan surface (not used; return failure)
-pub(super) unsafe extern "C" fn winit_platform_create_vk_surface(
-    _vp: *mut dear_imgui_rs::sys::ImGuiViewport,
-    _vk_inst: u64,
-    _vk_allocators: *const c_void,
-    out_vk_surface: *mut u64,
-) -> ::std::os::raw::c_int {
-    abort_on_panic("Platform_CreateVkSurface", || {
-        if !out_vk_surface.is_null() {
-            *out_vk_surface = 0;
-        }
-        -1 // Not supported
-    })
 }
 
 /// Update window - called by ImGui for platform-specific updates

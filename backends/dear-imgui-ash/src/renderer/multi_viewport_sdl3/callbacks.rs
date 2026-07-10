@@ -701,7 +701,61 @@ pub unsafe extern "C" fn renderer_swap_buffers(vp: *mut Viewport, _render_arg: *
 ///
 /// Called by Dear ImGui from C with a valid `ImGuiViewport*` belonging to the current ImGui context.
 #[allow(unsafe_op_in_unsafe_fn)]
-pub unsafe extern "C" fn platform_render_window_sys(
+pub unsafe extern "C" fn renderer_create_window_sys(vp: *mut dear_imgui_rs::sys::ImGuiViewport) {
+    if vp.is_null() {
+        return;
+    }
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+        renderer_create_window(vp as *mut Viewport);
+    }));
+    if res.is_err() {
+        eprintln!("[ash-mv-sdl3] panic in Renderer_CreateWindow");
+        std::process::abort();
+    }
+}
+
+/// # Safety
+///
+/// Called by Dear ImGui from C with a valid `ImGuiViewport*` belonging to the current ImGui context.
+#[allow(unsafe_op_in_unsafe_fn)]
+pub unsafe extern "C" fn renderer_destroy_window_sys(vp: *mut dear_imgui_rs::sys::ImGuiViewport) {
+    if vp.is_null() {
+        return;
+    }
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+        renderer_destroy_window(vp as *mut Viewport);
+    }));
+    if res.is_err() {
+        eprintln!("[ash-mv-sdl3] panic in Renderer_DestroyWindow");
+        std::process::abort();
+    }
+}
+
+/// # Safety
+///
+/// Called by the repository-owned C++ aggregate ABI hook with a valid viewport and size pointer.
+#[allow(unsafe_op_in_unsafe_fn)]
+pub unsafe extern "C" fn renderer_set_window_size_sys(
+    vp: *mut dear_imgui_rs::sys::ImGuiViewport,
+    size: *const dear_imgui_rs::sys::ImVec2,
+) {
+    if vp.is_null() || size.is_null() {
+        return;
+    }
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+        renderer_set_window_size(vp as *mut Viewport, *size);
+    }));
+    if res.is_err() {
+        eprintln!("[ash-mv-sdl3] panic in Renderer_SetWindowSize");
+        std::process::abort();
+    }
+}
+
+/// # Safety
+///
+/// Called by Dear ImGui from C with a valid `ImGuiViewport*` belonging to the current ImGui context.
+#[allow(unsafe_op_in_unsafe_fn)]
+pub unsafe extern "C" fn renderer_render_window_sys(
     vp: *mut dear_imgui_rs::sys::ImGuiViewport,
     arg: *mut c_void,
 ) {
@@ -712,7 +766,7 @@ pub unsafe extern "C" fn platform_render_window_sys(
         renderer_render_window(vp as *mut Viewport, arg);
     }));
     if res.is_err() {
-        eprintln!("[ash-mv] panic in Platform_RenderWindow");
+        eprintln!("[ash-mv-sdl3] panic in Renderer_RenderWindow");
         std::process::abort();
     }
 }
@@ -721,7 +775,7 @@ pub unsafe extern "C" fn platform_render_window_sys(
 ///
 /// Called by Dear ImGui from C with a valid `ImGuiViewport*` belonging to the current ImGui context.
 #[allow(unsafe_op_in_unsafe_fn)]
-pub unsafe extern "C" fn platform_swap_buffers_sys(
+pub unsafe extern "C" fn renderer_swap_buffers_sys(
     vp: *mut dear_imgui_rs::sys::ImGuiViewport,
     arg: *mut c_void,
 ) {
@@ -732,7 +786,7 @@ pub unsafe extern "C" fn platform_swap_buffers_sys(
         renderer_swap_buffers(vp as *mut Viewport, arg);
     }));
     if res.is_err() {
-        eprintln!("[ash-mv] panic in Platform_SwapBuffers");
+        eprintln!("[ash-mv-sdl3] panic in Renderer_SwapBuffers");
         std::process::abort();
     }
 }

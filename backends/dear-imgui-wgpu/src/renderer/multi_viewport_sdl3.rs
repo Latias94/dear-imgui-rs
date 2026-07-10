@@ -7,7 +7,7 @@
 use super::*;
 use dear_imgui_rs::Context;
 use dear_imgui_rs::internal::RawCast;
-use dear_imgui_rs::platform_io::Viewport;
+use dear_imgui_rs::platform_io::{PlatformIo, Viewport};
 use std::ffi::c_void;
 use std::ops::{Deref, DerefMut};
 use std::sync::Mutex;
@@ -43,6 +43,18 @@ struct ContextRendererState {
     renderer: usize,
     borrowed: bool,
     global: Option<GlobalHandles>,
+}
+
+/// Failure to acquire the renderer callback table for WGPU multi-viewport rendering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum CallbackOwnershipError {
+    /// Another renderer backend still owns at least one `Renderer_*` callback slot.
+    #[error("ImGuiPlatformIO renderer callbacks are already owned by another backend")]
+    RendererCallbacksOccupied,
+
+    /// The current Dear ImGui artifact cannot safely bridge `Renderer_SetWindowSize`.
+    #[error("dear-imgui-sys was built without PlatformIO aggregate ABI hooks")]
+    AggregateCallbackHooksUnavailable,
 }
 
 struct CurrentContextGuard {
@@ -178,25 +190,92 @@ fn global_handles() -> Option<GlobalHandles> {
         .and_then(|entry| entry.global.clone())
 }
 
-/// Enable WGPU multi-viewport: set per-viewport callbacks and capture renderer pointer.
-pub fn enable(renderer: &mut WgpuRenderer, imgui_context: &mut Context) {
-    let _context_guard = unsafe { CurrentContextGuard::bind(imgui_context.as_raw()) };
-
-    unsafe {
-        let platform_io = imgui_context.platform_io_mut();
-        platform_io.set_renderer_create_window(Some(
-            renderer_create_window as unsafe extern "C" fn(*mut Viewport),
-        ));
-        platform_io.set_renderer_destroy_window(Some(
-            renderer_destroy_window as unsafe extern "C" fn(*mut Viewport),
-        ));
-        platform_io.set_renderer_set_window_size(Some(
-            renderer_set_window_size
-                as unsafe extern "C" fn(*mut Viewport, dear_imgui_rs::sys::ImVec2),
-        ));
-        platform_io.set_platform_render_window_raw(Some(platform_render_window_sys));
-        platform_io.set_platform_swap_buffers_raw(Some(platform_swap_buffers_sys));
+fn has_renderer_state_for_context(ctx: *mut dear_imgui_rs::sys::ImGuiContext) -> bool {
+    if ctx.is_null() {
+        return false;
     }
+
+    let ctx = ctx as usize;
+    RENDERERS
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner())
+        .iter()
+        .any(|entry| entry.ctx == ctx)
+}
+
+fn unary_callback_matches(
+    actual: Option<unsafe extern "C" fn(*mut dear_imgui_rs::sys::ImGuiViewport)>,
+    expected: unsafe extern "C" fn(*mut dear_imgui_rs::sys::ImGuiViewport),
+) -> bool {
+    actual.is_some_and(|actual| std::ptr::fn_addr_eq(actual, expected))
+}
+
+fn render_callback_matches(
+    actual: Option<unsafe extern "C" fn(*mut dear_imgui_rs::sys::ImGuiViewport, *mut c_void)>,
+    expected: unsafe extern "C" fn(*mut dear_imgui_rs::sys::ImGuiViewport, *mut c_void),
+) -> bool {
+    actual.is_some_and(|actual| std::ptr::fn_addr_eq(actual, expected))
+}
+
+fn renderer_callbacks_are_owned_by_wgpu(platform_io: &PlatformIo) -> bool {
+    unary_callback_matches(
+        platform_io.renderer_create_window_raw(),
+        renderer_create_window_sys,
+    ) && unary_callback_matches(
+        platform_io.renderer_destroy_window_raw(),
+        renderer_destroy_window_sys,
+    ) && platform_io.renderer_set_window_size_matches_pointer_callback(renderer_set_window_size_sys)
+        && render_callback_matches(
+            platform_io.renderer_render_window_raw(),
+            renderer_render_window_sys,
+        )
+        && render_callback_matches(
+            platform_io.renderer_swap_buffers_raw(),
+            renderer_swap_buffers_sys,
+        )
+}
+
+fn try_claim_renderer_callbacks(
+    context: *mut dear_imgui_rs::sys::ImGuiContext,
+    platform_io: &mut PlatformIo,
+    aggregate_hooks_available: bool,
+) -> Result<(), CallbackOwnershipError> {
+    if !platform_io.renderer_callbacks_are_empty() {
+        if renderer_callbacks_are_owned_by_wgpu(platform_io)
+            && has_renderer_state_for_context(context)
+        {
+            return Ok(());
+        }
+        return Err(CallbackOwnershipError::RendererCallbacksOccupied);
+    }
+
+    if !aggregate_hooks_available {
+        return Err(CallbackOwnershipError::AggregateCallbackHooksUnavailable);
+    }
+
+    platform_io.set_renderer_create_window_raw(Some(renderer_create_window_sys));
+    platform_io.set_renderer_destroy_window_raw(Some(renderer_destroy_window_sys));
+    platform_io.set_renderer_set_window_size_raw(Some(renderer_set_window_size_sys));
+    // Rendering is owned by the renderer backend. Platform_RenderWindow and
+    // Platform_SwapBuffers remain reserved for the platform backend.
+    platform_io.set_renderer_render_window_raw(Some(renderer_render_window_sys));
+    platform_io.set_renderer_swap_buffers_raw(Some(renderer_swap_buffers_sys));
+    Ok(())
+}
+
+/// Enable WGPU multi-viewport after claiming an empty or already-owned renderer callback table.
+pub fn enable(
+    renderer: &mut WgpuRenderer,
+    imgui_context: &mut Context,
+) -> Result<(), CallbackOwnershipError> {
+    let raw_context = imgui_context.as_raw();
+    let _context_guard = unsafe { CurrentContextGuard::bind(raw_context) };
+
+    try_claim_renderer_callbacks(
+        raw_context,
+        imgui_context.platform_io_mut(),
+        dear_imgui_rs::sys::HAS_PLATFORM_IO_AGGREGATE_HOOKS,
+    )?;
 
     let global = renderer.backend_data.as_ref().map(|backend| GlobalHandles {
         instance: backend.instance.clone(),
@@ -206,7 +285,8 @@ pub fn enable(renderer: &mut WgpuRenderer, imgui_context: &mut Context) {
         queue: backend.queue.clone(),
         render_target_format: backend.render_target_format,
     });
-    upsert_renderer_state(imgui_context.as_raw(), renderer as *mut _, global);
+    upsert_renderer_state(raw_context, renderer as *mut _, global);
+    Ok(())
 }
 
 pub(crate) fn clear_for_drop(renderer: *mut WgpuRenderer) {
@@ -215,17 +295,36 @@ pub(crate) fn clear_for_drop(renderer: *mut WgpuRenderer) {
 
 /// Disable WGPU multi-viewport callbacks and clear stored globals (SDL3 platform).
 pub fn disable(imgui_context: &mut Context) {
-    let _context_guard = unsafe { CurrentContextGuard::bind(imgui_context.as_raw()) };
+    let raw_context = imgui_context.as_raw();
+    let _context_guard = unsafe { CurrentContextGuard::bind(raw_context) };
 
-    unsafe {
-        let platform_io = imgui_context.platform_io_mut();
-        platform_io.set_renderer_create_window(None);
-        platform_io.set_renderer_destroy_window(None);
-        platform_io.set_renderer_set_window_size(None);
-        platform_io.set_platform_render_window_raw(None);
-        platform_io.set_platform_swap_buffers_raw(None);
+    let platform_io = imgui_context.platform_io_mut();
+    if unary_callback_matches(
+        platform_io.renderer_create_window_raw(),
+        renderer_create_window_sys,
+    ) {
+        platform_io.set_renderer_create_window_raw(None);
     }
-    remove_renderer_state_for_context(imgui_context.as_raw());
+    if unary_callback_matches(
+        platform_io.renderer_destroy_window_raw(),
+        renderer_destroy_window_sys,
+    ) {
+        platform_io.set_renderer_destroy_window_raw(None);
+    }
+    platform_io.clear_renderer_set_window_size_if_pointer_callback(renderer_set_window_size_sys);
+    if render_callback_matches(
+        platform_io.renderer_render_window_raw(),
+        renderer_render_window_sys,
+    ) {
+        platform_io.set_renderer_render_window_raw(None);
+    }
+    if render_callback_matches(
+        platform_io.renderer_swap_buffers_raw(),
+        renderer_swap_buffers_sys,
+    ) {
+        platform_io.set_renderer_swap_buffers_raw(None);
+    }
+    remove_renderer_state_for_context(raw_context);
 }
 
 /// Convenience helper that destroys all platform windows and disables callbacks.
@@ -244,12 +343,40 @@ mod tests {
         GUARD.get_or_init(|| TestMutex::new(())).lock().unwrap()
     }
 
+    unsafe extern "C" fn platform_slot_sentinel(
+        _viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+        _render_arg: *mut c_void,
+    ) {
+    }
+
+    unsafe extern "C" fn renderer_slot_sentinel(
+        _viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+        _render_arg: *mut c_void,
+    ) {
+    }
+
+    unsafe extern "C" fn renderer_unary_sentinel(
+        _viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+    ) {
+    }
+
+    unsafe extern "C" fn renderer_size_sentinel(
+        _viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+        _size: *const dear_imgui_rs::sys::ImVec2,
+    ) {
+    }
+
     #[test]
     fn enable_targets_passed_context() {
         let _guard = lock_context();
         let mut ctx_a = Context::create();
         let raw_a = ctx_a.as_raw();
         let pio_a = unsafe { dear_imgui_rs::sys::igGetPlatformIO_ContextPtr(raw_a) };
+
+        unsafe {
+            (*pio_a).Platform_RenderWindow = Some(platform_slot_sentinel);
+            (*pio_a).Platform_SwapBuffers = Some(platform_slot_sentinel);
+        }
 
         unsafe {
             dear_imgui_rs::sys::igSetCurrentContext(std::ptr::null_mut());
@@ -260,19 +387,35 @@ mod tests {
         let pio_b = unsafe { dear_imgui_rs::sys::igGetPlatformIO_ContextPtr(raw_b) };
 
         let mut renderer = WgpuRenderer::empty();
-        enable(&mut renderer, &mut ctx_a);
+        enable(&mut renderer, &mut ctx_a).expect("empty renderer callback table");
 
         unsafe {
             assert_eq!(dear_imgui_rs::sys::igGetCurrentContext(), raw_b);
             assert!((*pio_a).Renderer_CreateWindow.is_some());
             assert!((*pio_a).Renderer_DestroyWindow.is_some());
             assert!((*pio_a).Renderer_SetWindowSize.is_some());
-            assert!((*pio_a).Platform_RenderWindow.is_some());
-            assert!((*pio_a).Platform_SwapBuffers.is_some());
+            assert!(render_callback_matches(
+                (*pio_a).Renderer_RenderWindow,
+                renderer_render_window_sys
+            ));
+            assert!(render_callback_matches(
+                (*pio_a).Renderer_SwapBuffers,
+                renderer_swap_buffers_sys
+            ));
+            assert!(render_callback_matches(
+                (*pio_a).Platform_RenderWindow,
+                platform_slot_sentinel
+            ));
+            assert!(render_callback_matches(
+                (*pio_a).Platform_SwapBuffers,
+                platform_slot_sentinel
+            ));
 
             assert!((*pio_b).Renderer_CreateWindow.is_none());
             assert!((*pio_b).Renderer_DestroyWindow.is_none());
             assert!((*pio_b).Renderer_SetWindowSize.is_none());
+            assert!((*pio_b).Renderer_RenderWindow.is_none());
+            assert!((*pio_b).Renderer_SwapBuffers.is_none());
             assert!((*pio_b).Platform_RenderWindow.is_none());
             assert!((*pio_b).Platform_SwapBuffers.is_none());
         }
@@ -284,8 +427,19 @@ mod tests {
             assert!((*pio_a).Renderer_CreateWindow.is_none());
             assert!((*pio_a).Renderer_DestroyWindow.is_none());
             assert!((*pio_a).Renderer_SetWindowSize.is_none());
-            assert!((*pio_a).Platform_RenderWindow.is_none());
-            assert!((*pio_a).Platform_SwapBuffers.is_none());
+            assert!((*pio_a).Renderer_RenderWindow.is_none());
+            assert!((*pio_a).Renderer_SwapBuffers.is_none());
+            assert!(render_callback_matches(
+                (*pio_a).Platform_RenderWindow,
+                platform_slot_sentinel
+            ));
+            assert!(render_callback_matches(
+                (*pio_a).Platform_SwapBuffers,
+                platform_slot_sentinel
+            ));
+
+            (*pio_a).Platform_RenderWindow = None;
+            (*pio_a).Platform_SwapBuffers = None;
         }
 
         unsafe {
@@ -300,12 +454,134 @@ mod tests {
     }
 
     #[test]
+    fn renderer_callback_conflict_preserves_foreign_slots() {
+        let _guard = lock_context();
+        let mut ctx = Context::create();
+        let platform_io = unsafe { dear_imgui_rs::sys::igGetPlatformIO_ContextPtr(ctx.as_raw()) };
+        let mut renderer = WgpuRenderer::empty();
+
+        unsafe {
+            (*platform_io).Renderer_RenderWindow = Some(renderer_slot_sentinel);
+            (*platform_io).Renderer_SwapBuffers = Some(renderer_slot_sentinel);
+        }
+
+        assert_eq!(
+            enable(&mut renderer, &mut ctx),
+            Err(CallbackOwnershipError::RendererCallbacksOccupied)
+        );
+
+        unsafe {
+            assert!(render_callback_matches(
+                (*platform_io).Renderer_RenderWindow,
+                renderer_slot_sentinel
+            ));
+            assert!(render_callback_matches(
+                (*platform_io).Renderer_SwapBuffers,
+                renderer_slot_sentinel
+            ));
+        }
+
+        disable(&mut ctx);
+
+        unsafe {
+            assert!(render_callback_matches(
+                (*platform_io).Renderer_RenderWindow,
+                renderer_slot_sentinel
+            ));
+            assert!(render_callback_matches(
+                (*platform_io).Renderer_SwapBuffers,
+                renderer_slot_sentinel
+            ));
+            (*platform_io).Renderer_RenderWindow = None;
+            (*platform_io).Renderer_SwapBuffers = None;
+        }
+    }
+
+    #[test]
+    fn missing_aggregate_hooks_reject_install_without_mutation() {
+        let _guard = lock_context();
+        let mut ctx = Context::create();
+        let raw = ctx.as_raw();
+
+        assert_eq!(
+            try_claim_renderer_callbacks(raw, ctx.platform_io_mut(), false),
+            Err(CallbackOwnershipError::AggregateCallbackHooksUnavailable)
+        );
+        assert!(ctx.platform_io().renderer_callbacks_are_empty());
+        assert!(!has_renderer_state_for_context(raw));
+    }
+
+    #[test]
+    fn disable_preserves_renderer_callbacks_replaced_after_enable() {
+        let _guard = lock_context();
+        let mut ctx = Context::create();
+        let mut renderer = WgpuRenderer::empty();
+
+        enable(&mut renderer, &mut ctx).expect("empty renderer callback table");
+        {
+            let platform_io = ctx.platform_io_mut();
+            platform_io.set_renderer_create_window_raw(Some(renderer_unary_sentinel));
+            platform_io.set_renderer_destroy_window_raw(Some(renderer_unary_sentinel));
+            platform_io.set_renderer_set_window_size_raw(Some(renderer_size_sentinel));
+            platform_io.set_renderer_render_window_raw(Some(renderer_slot_sentinel));
+            platform_io.set_renderer_swap_buffers_raw(Some(renderer_slot_sentinel));
+        }
+
+        disable(&mut ctx);
+
+        let platform_io = ctx.platform_io_mut();
+        assert!(unary_callback_matches(
+            platform_io.renderer_create_window_raw(),
+            renderer_unary_sentinel
+        ));
+        assert!(unary_callback_matches(
+            platform_io.renderer_destroy_window_raw(),
+            renderer_unary_sentinel
+        ));
+        assert!(
+            platform_io.renderer_set_window_size_matches_pointer_callback(renderer_size_sentinel)
+        );
+        assert!(render_callback_matches(
+            platform_io.renderer_render_window_raw(),
+            renderer_slot_sentinel
+        ));
+        assert!(render_callback_matches(
+            platform_io.renderer_swap_buffers_raw(),
+            renderer_slot_sentinel
+        ));
+        platform_io.clear_renderer_handlers();
+    }
+
+    #[test]
+    fn same_backend_rebind_updates_renderer_state() {
+        let _guard = lock_context();
+        let mut ctx = Context::create();
+        let raw = ctx.as_raw();
+        let mut renderer_before_move = WgpuRenderer::empty();
+        let mut renderer_after_move = WgpuRenderer::empty();
+
+        enable(&mut renderer_before_move, &mut ctx).expect("empty renderer callback table");
+        enable(&mut renderer_after_move, &mut ctx).expect("same backend owns callback table");
+
+        unsafe {
+            dear_imgui_rs::sys::igSetCurrentContext(raw);
+            let borrowed = borrow_renderer().expect("renderer for rebound context");
+            assert_eq!(
+                (&*borrowed.renderer) as *const _,
+                &renderer_after_move as *const _
+            );
+        }
+
+        disable(&mut ctx);
+    }
+
+    #[test]
     fn renderer_state_is_context_local() {
         let _guard = lock_context();
         let mut ctx_a = Context::create();
         let raw_a = ctx_a.as_raw();
         let mut renderer_a = WgpuRenderer::empty();
-        enable(&mut renderer_a, &mut ctx_a);
+        enable(&mut renderer_a, &mut ctx_a).expect("empty renderer callback table");
 
         unsafe {
             dear_imgui_rs::sys::igSetCurrentContext(std::ptr::null_mut());
@@ -314,7 +590,7 @@ mod tests {
         let mut ctx_b = Context::create();
         let raw_b = ctx_b.as_raw();
         let mut renderer_b = WgpuRenderer::empty();
-        enable(&mut renderer_b, &mut ctx_b);
+        enable(&mut renderer_b, &mut ctx_b).expect("empty renderer callback table");
 
         unsafe {
             dear_imgui_rs::sys::igSetCurrentContext(raw_a);
@@ -352,7 +628,7 @@ mod tests {
         let raw = ctx.as_raw();
         let mut renderer = WgpuRenderer::empty();
 
-        enable(&mut renderer, &mut ctx);
+        enable(&mut renderer, &mut ctx).expect("empty renderer callback table");
 
         unsafe {
             dear_imgui_rs::sys::igSetCurrentContext(raw);
@@ -875,13 +1151,50 @@ pub unsafe extern "C" fn renderer_swap_buffers(vp: *mut Viewport, _render_arg: *
     }
 }
 
-/// Raw sys-platform wrapper to avoid typed trampolines.
+// Raw renderer callback adapters avoid the typed trampoline registry and give this backend stable
+// callback identities for ownership checks.
+//
+// # Safety
+//
+// Called by Dear ImGui from C with a valid `ImGuiViewport*` belonging to the current ImGui context.
+pub unsafe extern "C" fn renderer_create_window_sys(vp: *mut dear_imgui_rs::sys::ImGuiViewport) {
+    if vp.is_null() {
+        return;
+    }
+    unsafe { renderer_create_window(vp.cast()) };
+}
+
+/// # Safety
+///
+/// Called by Dear ImGui from C with a valid `ImGuiViewport*` belonging to the current ImGui context.
+pub unsafe extern "C" fn renderer_destroy_window_sys(vp: *mut dear_imgui_rs::sys::ImGuiViewport) {
+    if vp.is_null() {
+        return;
+    }
+    unsafe { renderer_destroy_window(vp.cast()) };
+}
+
+/// # Safety
+///
+/// Called by the repository-owned C++ aggregate ABI hook with a valid viewport and vector pointer.
+pub unsafe extern "C" fn renderer_set_window_size_sys(
+    vp: *mut dear_imgui_rs::sys::ImGuiViewport,
+    size: *const dear_imgui_rs::sys::ImVec2,
+) {
+    if vp.is_null() || size.is_null() {
+        return;
+    }
+    let size = unsafe { *size };
+    unsafe { renderer_set_window_size(vp.cast(), size) };
+}
+
+/// Raw renderer callback adapter to avoid typed trampolines.
 ///
 /// # Safety
 ///
 /// Called by Dear ImGui from C with a valid `ImGuiViewport*` belonging to the current ImGui context.
 #[allow(unsafe_op_in_unsafe_fn)]
-pub unsafe extern "C" fn platform_render_window_sys(
+pub unsafe extern "C" fn renderer_render_window_sys(
     vp: *mut dear_imgui_rs::sys::ImGuiViewport,
     arg: *mut c_void,
 ) {
@@ -892,18 +1205,18 @@ pub unsafe extern "C" fn platform_render_window_sys(
         renderer_render_window(vp as *mut Viewport, arg);
     }));
     if res.is_err() {
-        eprintln!("[wgpu-mv-sdl3] panic in Platform_RenderWindow");
+        eprintln!("[wgpu-mv-sdl3] panic in Renderer_RenderWindow");
         std::process::abort();
     }
 }
 
-/// Raw sys-platform wrapper to avoid typed trampolines.
+/// Raw renderer callback adapter to avoid typed trampolines.
 ///
 /// # Safety
 ///
 /// Called by Dear ImGui from C with a valid `ImGuiViewport*` belonging to the current ImGui context.
 #[allow(unsafe_op_in_unsafe_fn)]
-pub unsafe extern "C" fn platform_swap_buffers_sys(
+pub unsafe extern "C" fn renderer_swap_buffers_sys(
     vp: *mut dear_imgui_rs::sys::ImGuiViewport,
     arg: *mut c_void,
 ) {
@@ -914,7 +1227,7 @@ pub unsafe extern "C" fn platform_swap_buffers_sys(
         renderer_swap_buffers(vp as *mut Viewport, arg);
     }));
     if res.is_err() {
-        eprintln!("[wgpu-mv-sdl3] panic in Platform_SwapBuffers");
+        eprintln!("[wgpu-mv-sdl3] panic in Renderer_SwapBuffers");
         std::process::abort();
     }
 }

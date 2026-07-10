@@ -109,8 +109,8 @@ const _: [(); 4] = [(); std::mem::size_of::<ImWchar>()];
 
 // cimgui C API avoids C++ ABI pitfalls; no MSVC-specific conversions are required.
 
-/// Whether this build linked the repository-owned PlatformIO out-parameter hook shim.
-pub const HAS_PLATFORM_IO_OUT_PARAM_HOOKS: bool = cfg!(dear_imgui_rs_platform_io_hooks);
+/// Whether this build linked the repository-owned PlatformIO aggregate ABI hook shim.
+pub const HAS_PLATFORM_IO_AGGREGATE_HOOKS: bool = cfg!(dear_imgui_rs_platform_io_hooks);
 
 unsafe extern "C" {
     fn dear_imgui_stack_begin_horizontal_str(
@@ -299,9 +299,19 @@ pub unsafe fn ImGuiStack_ResumeLayout() {
 
 #[cfg(dear_imgui_rs_platform_io_hooks)]
 unsafe extern "C" {
+    fn dear_imgui_rs_platform_io_set_platform_set_window_pos(
+        platform_io: *mut ImGuiPlatformIO,
+        user_callback: Option<unsafe extern "C" fn(vp: *mut ImGuiViewport, pos: *const ImVec2)>,
+    );
+
     fn dear_imgui_rs_platform_io_set_platform_get_window_pos(
         platform_io: *mut ImGuiPlatformIO,
         user_callback: Option<unsafe extern "C" fn(vp: *mut ImGuiViewport, out_pos: *mut ImVec2)>,
+    );
+
+    fn dear_imgui_rs_platform_io_set_platform_set_window_size(
+        platform_io: *mut ImGuiPlatformIO,
+        user_callback: Option<unsafe extern "C" fn(vp: *mut ImGuiViewport, size: *const ImVec2)>,
     );
 
     fn dear_imgui_rs_platform_io_set_platform_get_window_size(
@@ -320,6 +330,77 @@ unsafe extern "C" {
             unsafe extern "C" fn(vp: *mut ImGuiViewport, out_insets: *mut ImVec4),
         >,
     );
+
+    fn dear_imgui_rs_platform_io_set_renderer_set_window_size(
+        platform_io: *mut ImGuiPlatformIO,
+        user_callback: Option<unsafe extern "C" fn(vp: *mut ImGuiViewport, size: *const ImVec2)>,
+    );
+
+    fn dear_imgui_rs_platform_io_renderer_set_window_size_matches_pointer_param(
+        platform_io: *mut ImGuiPlatformIO,
+        user_callback: unsafe extern "C" fn(vp: *mut ImGuiViewport, size: *const ImVec2),
+    ) -> std::os::raw::c_int;
+
+    fn dear_imgui_rs_platform_io_clear_renderer_set_window_size_if_pointer_param(
+        platform_io: *mut ImGuiPlatformIO,
+        user_callback: unsafe extern "C" fn(vp: *mut ImGuiViewport, size: *const ImVec2),
+    ) -> std::os::raw::c_int;
+
+    fn dear_imgui_rs_platform_io_probe_aggregate_callbacks(
+        platform_io: *mut ImGuiPlatformIO,
+        out_result: *mut DearImguiRsPlatformIoAggregateProbeResult,
+    ) -> std::os::raw::c_int;
+
+    fn dear_imgui_rs_platform_io_invoke_platform_set_window_pos(
+        platform_io: *mut ImGuiPlatformIO,
+        viewport: *mut ImGuiViewport,
+        pos: *const ImVec2,
+    ) -> std::os::raw::c_int;
+
+    fn dear_imgui_rs_platform_io_aggregate_callback_storage_count() -> std::os::raw::c_int;
+}
+
+/// Results returned by [`ImGuiPlatformIO_ProbeAggregateCallbacks`].
+///
+/// This test-support ABI is intentionally defined by the repository-owned C++ shim. It lets Rust
+/// tests exercise Dear ImGui's real C++ callback slots without calling Rust trampolines directly.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct DearImguiRsPlatformIoAggregateProbeResult {
+    pub PlatformGetWindowPos: ImVec2,
+    pub PlatformGetWindowSize: ImVec2,
+    pub PlatformGetWindowFramebufferScale: ImVec2,
+    pub PlatformGetWindowWorkAreaInsets: ImVec4,
+}
+
+/// Install a C-compatible pointer-parameter callback for
+/// `ImGuiPlatformIO::Platform_SetWindowPos`.
+///
+/// # Safety
+///
+/// `platform_io` must be null or point to a live `ImGuiPlatformIO`. `user_callback`, when present,
+/// must obey Dear ImGui's platform callback contract and must not unwind.
+#[inline]
+pub unsafe fn ImGuiPlatformIO_Set_Platform_SetWindowPos_PointerParam(
+    platform_io: *mut ImGuiPlatformIO,
+    user_callback: Option<unsafe extern "C" fn(vp: *mut ImGuiViewport, pos: *const ImVec2)>,
+) {
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    unsafe {
+        dear_imgui_rs_platform_io_set_platform_set_window_pos(platform_io, user_callback)
+    }
+
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    {
+        if user_callback.is_some() {
+            panic!(
+                "dear-imgui-sys was built without PlatformIO aggregate ABI hooks; \
+                 rebuild without IMGUI_SYS_SKIP_CC to install Platform_SetWindowPos callbacks"
+            );
+        } else if let Some(platform_io) = unsafe { platform_io.as_mut() } {
+            platform_io.Platform_SetWindowPos = None;
+        }
+    }
 }
 
 /// Install a C-compatible out-parameter callback for `ImGuiPlatformIO::Platform_GetWindowPos`.
@@ -344,12 +425,43 @@ pub unsafe fn ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam(
 
     #[cfg(not(dear_imgui_rs_platform_io_hooks))]
     {
-        let _ = platform_io;
         if user_callback.is_some() {
             panic!(
-                "dear-imgui-sys was built without PlatformIO out-parameter hooks; \
+                "dear-imgui-sys was built without PlatformIO aggregate ABI hooks; \
                  rebuild without IMGUI_SYS_SKIP_CC to install Platform_GetWindowPos callbacks"
             );
+        } else if let Some(platform_io) = unsafe { platform_io.as_mut() } {
+            platform_io.Platform_GetWindowPos = None;
+        }
+    }
+}
+
+/// Install a C-compatible pointer-parameter callback for
+/// `ImGuiPlatformIO::Platform_SetWindowSize`.
+///
+/// # Safety
+///
+/// `platform_io` must be null or point to a live `ImGuiPlatformIO`. `user_callback`, when present,
+/// must obey Dear ImGui's platform callback contract and must not unwind.
+#[inline]
+pub unsafe fn ImGuiPlatformIO_Set_Platform_SetWindowSize_PointerParam(
+    platform_io: *mut ImGuiPlatformIO,
+    user_callback: Option<unsafe extern "C" fn(vp: *mut ImGuiViewport, size: *const ImVec2)>,
+) {
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    unsafe {
+        dear_imgui_rs_platform_io_set_platform_set_window_size(platform_io, user_callback)
+    }
+
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    {
+        if user_callback.is_some() {
+            panic!(
+                "dear-imgui-sys was built without PlatformIO aggregate ABI hooks; \
+                 rebuild without IMGUI_SYS_SKIP_CC to install Platform_SetWindowSize callbacks"
+            );
+        } else if let Some(platform_io) = unsafe { platform_io.as_mut() } {
+            platform_io.Platform_SetWindowSize = None;
         }
     }
 }
@@ -374,12 +486,13 @@ pub unsafe fn ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam(
 
     #[cfg(not(dear_imgui_rs_platform_io_hooks))]
     {
-        let _ = platform_io;
         if user_callback.is_some() {
             panic!(
-                "dear-imgui-sys was built without PlatformIO out-parameter hooks; \
+                "dear-imgui-sys was built without PlatformIO aggregate ABI hooks; \
                  rebuild without IMGUI_SYS_SKIP_CC to install Platform_GetWindowSize callbacks"
             );
+        } else if let Some(platform_io) = unsafe { platform_io.as_mut() } {
+            platform_io.Platform_GetWindowSize = None;
         }
     }
 }
@@ -408,13 +521,14 @@ pub unsafe fn ImGuiPlatformIO_Set_Platform_GetWindowFramebufferScale_OutParam(
 
     #[cfg(not(dear_imgui_rs_platform_io_hooks))]
     {
-        let _ = platform_io;
         if user_callback.is_some() {
             panic!(
-                "dear-imgui-sys was built without PlatformIO out-parameter hooks; \
+                "dear-imgui-sys was built without PlatformIO aggregate ABI hooks; \
                  rebuild without IMGUI_SYS_SKIP_CC to install \
                  Platform_GetWindowFramebufferScale callbacks"
             );
+        } else if let Some(platform_io) = unsafe { platform_io.as_mut() } {
+            platform_io.Platform_GetWindowFramebufferScale = None;
         }
     }
 }
@@ -443,14 +557,178 @@ pub unsafe fn ImGuiPlatformIO_Set_Platform_GetWindowWorkAreaInsets_OutParam(
 
     #[cfg(not(dear_imgui_rs_platform_io_hooks))]
     {
-        let _ = platform_io;
         if user_callback.is_some() {
             panic!(
-                "dear-imgui-sys was built without PlatformIO out-parameter hooks; \
+                "dear-imgui-sys was built without PlatformIO aggregate ABI hooks; \
                  rebuild without IMGUI_SYS_SKIP_CC to install Platform_GetWindowWorkAreaInsets \
                  callbacks"
             );
+        } else if let Some(platform_io) = unsafe { platform_io.as_mut() } {
+            platform_io.Platform_GetWindowWorkAreaInsets = None;
         }
+    }
+}
+
+/// Install a C-compatible pointer-parameter callback for
+/// `ImGuiPlatformIO::Renderer_SetWindowSize`.
+///
+/// # Safety
+///
+/// `platform_io` must be null or point to a live `ImGuiPlatformIO`. `user_callback`, when present,
+/// must obey Dear ImGui's renderer callback contract and must not unwind.
+#[inline]
+pub unsafe fn ImGuiPlatformIO_Set_Renderer_SetWindowSize_PointerParam(
+    platform_io: *mut ImGuiPlatformIO,
+    user_callback: Option<unsafe extern "C" fn(vp: *mut ImGuiViewport, size: *const ImVec2)>,
+) {
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    unsafe {
+        dear_imgui_rs_platform_io_set_renderer_set_window_size(platform_io, user_callback)
+    }
+
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    {
+        if user_callback.is_some() {
+            panic!(
+                "dear-imgui-sys was built without PlatformIO aggregate ABI hooks; \
+                 rebuild without IMGUI_SYS_SKIP_CC to install Renderer_SetWindowSize callbacks"
+            );
+        } else if let Some(platform_io) = unsafe { platform_io.as_mut() } {
+            platform_io.Renderer_SetWindowSize = None;
+        }
+    }
+}
+
+/// Whether `Renderer_SetWindowSize` is currently owned by the given pointer callback.
+///
+/// This is an internal ownership primitive for renderer backends. It recognizes only callbacks
+/// installed through [`ImGuiPlatformIO_Set_Renderer_SetWindowSize_PointerParam`].
+#[doc(hidden)]
+#[inline]
+pub unsafe fn ImGuiPlatformIO_RendererSetWindowSizeMatchesPointerParam(
+    platform_io: *mut ImGuiPlatformIO,
+    user_callback: unsafe extern "C" fn(vp: *mut ImGuiViewport, size: *const ImVec2),
+) -> bool {
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    unsafe {
+        return dear_imgui_rs_platform_io_renderer_set_window_size_matches_pointer_param(
+            platform_io,
+            user_callback,
+        ) != 0;
+    }
+
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    {
+        let _ = platform_io;
+        let _ = user_callback;
+        false
+    }
+}
+
+/// Clear `Renderer_SetWindowSize` only when it is still owned by the given pointer callback.
+///
+/// This is an internal ownership primitive for renderer backends.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn ImGuiPlatformIO_ClearRendererSetWindowSizeIfPointerParam(
+    platform_io: *mut ImGuiPlatformIO,
+    user_callback: unsafe extern "C" fn(vp: *mut ImGuiViewport, size: *const ImVec2),
+) -> bool {
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    unsafe {
+        return dear_imgui_rs_platform_io_clear_renderer_set_window_size_if_pointer_param(
+            platform_io,
+            user_callback,
+        ) != 0;
+    }
+
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    {
+        let _ = platform_io;
+        let _ = user_callback;
+        false
+    }
+}
+
+/// Invoke all aggregate PlatformIO callback slots through C++.
+///
+/// This is a test-support ABI for validating that callbacks installed by the safe layer cross the
+/// C++/Rust seam through pointers or out parameters rather than small aggregates by value.
+///
+/// # Safety
+///
+/// `platform_io` and `out_result` must point to valid live values. The current ImGui context must
+/// own `platform_io`.
+#[inline]
+pub unsafe fn ImGuiPlatformIO_ProbeAggregateCallbacks(
+    platform_io: *mut ImGuiPlatformIO,
+    out_result: *mut DearImguiRsPlatformIoAggregateProbeResult,
+) -> bool {
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    unsafe {
+        return dear_imgui_rs_platform_io_probe_aggregate_callbacks(platform_io, out_result) != 0;
+    }
+
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    {
+        let _ = platform_io;
+        let _ = out_result;
+        false
+    }
+}
+
+/// Invoke `Platform_SetWindowPos` from C++ while passing the input from Rust by pointer.
+///
+/// This test-support helper prevents Rust integration tests from directly calling a C++ callback
+/// slot whose signature contains an aggregate by value.
+///
+/// # Safety
+///
+/// All pointers must be valid live values, and `platform_io` must belong to the current context.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn ImGuiPlatformIO_InvokePlatformSetWindowPos(
+    platform_io: *mut ImGuiPlatformIO,
+    viewport: *mut ImGuiViewport,
+    pos: *const ImVec2,
+) -> bool {
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    unsafe {
+        return dear_imgui_rs_platform_io_invoke_platform_set_window_pos(
+            platform_io,
+            viewport,
+            pos,
+        ) != 0;
+    }
+
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    {
+        let _ = platform_io;
+        let _ = viewport;
+        let _ = pos;
+        false
+    }
+}
+
+/// Return the number of live aggregate callback storage entries.
+///
+/// This is an internal test-support API. It is not a stable public ABI.
+///
+/// # Safety
+///
+/// The C++ hook storage follows Dear ImGui's single-threaded context model. Serialize this read
+/// with every aggregate callback install, clear, and context destruction.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn ImGuiPlatformIO_AggregateCallbackStorageCount() -> usize {
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    unsafe {
+        return dear_imgui_rs_platform_io_aggregate_callback_storage_count() as usize;
+    }
+
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    {
+        0
     }
 }
 
@@ -459,8 +737,10 @@ pub use ImColor as Color;
 pub use ImVec2 as Vector2;
 pub use ImVec4 as Vector4;
 
-/// Version information for the Dear ImGui library
-pub const IMGUI_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Version of this Rust binding release.
+///
+/// Use [`igGetVersion`] when the linked Dear ImGui runtime version is required.
+pub const BINDING_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Docking features are always available in this crate
 pub const HAS_DOCKING: bool = true;

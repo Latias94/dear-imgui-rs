@@ -1,6 +1,6 @@
 use crate::sys;
 
-use super::super::core::assert_platform_io_out_param_hooks_available;
+use super::super::core::assert_platform_io_aggregate_hooks_available;
 use super::super::{PlatformIo, Viewport, trampolines};
 
 impl PlatformIo {
@@ -20,7 +20,7 @@ impl PlatformIo {
 
         self.assert_current_context_platform_io_for_callbacks();
         if callback.is_some() {
-            assert_platform_io_out_param_hooks_available("Platform_GetWindowPos");
+            assert_platform_io_aggregate_hooks_available("Platform_GetWindowPos");
         }
 
         match callback {
@@ -66,7 +66,7 @@ impl PlatformIo {
         use trampolines::*;
         self.assert_current_context_platform_io_for_callbacks();
         if callback.is_some() {
-            assert_platform_io_out_param_hooks_available("Platform_GetWindowPos");
+            assert_platform_io_aggregate_hooks_available("Platform_GetWindowPos");
         }
 
         match callback {
@@ -112,7 +112,7 @@ impl PlatformIo {
 
         self.assert_current_context_platform_io_for_callbacks();
         if callback.is_some() {
-            assert_platform_io_out_param_hooks_available("Platform_GetWindowSize");
+            assert_platform_io_aggregate_hooks_available("Platform_GetWindowSize");
         }
 
         match callback {
@@ -159,7 +159,7 @@ impl PlatformIo {
         use trampolines::*;
         self.assert_current_context_platform_io_for_callbacks();
         if callback.is_some() {
-            assert_platform_io_out_param_hooks_available("Platform_GetWindowSize");
+            assert_platform_io_aggregate_hooks_available("Platform_GetWindowSize");
         }
 
         match callback {
@@ -206,7 +206,7 @@ impl PlatformIo {
 
         self.assert_current_context_platform_io_for_callbacks();
         if callback.is_some() {
-            assert_platform_io_out_param_hooks_available("Platform_GetWindowFramebufferScale");
+            assert_platform_io_aggregate_hooks_available("Platform_GetWindowFramebufferScale");
         }
 
         match callback {
@@ -256,7 +256,7 @@ impl PlatformIo {
         use trampolines::*;
         self.assert_current_context_platform_io_for_callbacks();
         if callback.is_some() {
-            assert_platform_io_out_param_hooks_available("Platform_GetWindowFramebufferScale");
+            assert_platform_io_aggregate_hooks_available("Platform_GetWindowFramebufferScale");
         }
 
         match callback {
@@ -303,7 +303,7 @@ impl PlatformIo {
 
         self.assert_current_context_platform_io_for_callbacks();
         if callback.is_some() {
-            assert_platform_io_out_param_hooks_available("Platform_GetWindowWorkAreaInsets");
+            assert_platform_io_aggregate_hooks_available("Platform_GetWindowWorkAreaInsets");
         }
 
         match callback {
@@ -353,7 +353,7 @@ impl PlatformIo {
         use trampolines::*;
         self.assert_current_context_platform_io_for_callbacks();
         if callback.is_some() {
-            assert_platform_io_out_param_hooks_available("Platform_GetWindowWorkAreaInsets");
+            assert_platform_io_aggregate_hooks_available("Platform_GetWindowWorkAreaInsets");
         }
 
         match callback {

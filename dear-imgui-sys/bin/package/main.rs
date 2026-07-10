@@ -109,6 +109,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut v: Vec<&'static str> = Vec::new();
     v.push("wchar32");
     v.push("stack-layout");
+    v.push("platform-io-aggregate-hooks");
     if features.is_empty() {
         if env::var("CARGO_FEATURE_FREETYPE").is_ok() {
             v.push("freetype");
@@ -128,6 +129,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         if !user.iter().any(|s| s == "stack-layout") {
             user.push("stack-layout".to_string());
+        }
+        if !user.iter().any(|s| s == "platform-io-aggregate-hooks") {
+            user.push("platform-io-aggregate-hooks".to_string());
         }
         features = user.join(",");
     }

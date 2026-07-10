@@ -14,13 +14,12 @@
 //! - The ash renderer caches pipelines per swapchain format to handle per-viewport formats.
 
 use ash::{
-    Device, Entry, Instance,
     khr::{surface as khr_surface, swapchain as khr_swapchain},
-    vk,
+    vk, Device, Entry, Instance,
 };
-use dear_imgui_ash::{AshRenderer, Options as AshOptions, multi_viewport as ash_mvp};
+use dear_imgui_ash::{multi_viewport as ash_mvp, AshRenderer, Options as AshOptions};
 use dear_imgui_rs::{Condition, ConfigFlags, Context};
-use dear_imgui_winit::{HiDpiMode, WinitPlatform, multi_viewport as winit_mvp};
+use dear_imgui_winit::{multi_viewport as winit_mvp, HiDpiMode, WinitPlatform};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use std::{ffi::CString, sync::Arc, time::Instant};
 use tracing::{error, info};
@@ -562,7 +561,7 @@ impl ApplicationHandler for App {
                 // Now that AppWindow is in its final place, (re)install renderer callbacks.
                 if let Some(app) = self.window.as_mut() {
                     if app.enable_viewports {
-                        ash_mvp::enable(
+                        if let Err(err) = ash_mvp::enable(
                             &mut app.imgui.renderer,
                             &mut app.imgui.context,
                             app.vk.ctx.entry.clone(),
@@ -571,7 +570,10 @@ impl ApplicationHandler for App {
                             app.vk.ctx.queue,
                             app.vk.ctx.queue_family_index,
                             app.vk.ctx.queue_family_index,
-                        );
+                        ) {
+                            error!("Failed to enable Ash multi-viewport rendering: {err}");
+                            event_loop.exit();
+                        }
                     }
                 }
             }

@@ -186,7 +186,7 @@ impl AppWindow {
             winit_mvp::init_multi_viewport_support(&mut app.imgui, &app.window);
 
             // Renderer viewport callbacks (install AFTER winit so our callbacks take precedence)
-            dear_imgui_wgpu::multi_viewport::enable(&mut app.renderer, &mut app.imgui);
+            dear_imgui_wgpu::multi_viewport::enable(&mut app.renderer, &mut app.imgui)?;
         }
 
         Ok(app)
@@ -364,7 +364,12 @@ impl ApplicationHandler for App {
 
                 // Now that AppWindow is in its final place, (re)install renderer callbacks
                 if let Some(app) = self.window.as_mut() {
-                    dear_imgui_wgpu::multi_viewport::enable(&mut app.renderer, &mut app.imgui);
+                    if let Err(error) =
+                        dear_imgui_wgpu::multi_viewport::enable(&mut app.renderer, &mut app.imgui)
+                    {
+                        eprintln!("failed to claim renderer callback table: {error}");
+                        event_loop.exit();
+                    }
                 }
             }
             Err(_e) => {

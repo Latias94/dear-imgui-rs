@@ -28,13 +28,15 @@ pub(crate) fn clear_typed_callbacks_for_context(ctx: *mut sys::ImGuiContext) {
 pub(crate) fn clear_typed_callbacks_for_context(_ctx: *mut sys::ImGuiContext) {}
 
 #[cfg(feature = "multi-viewport")]
-pub(crate) unsafe fn clear_out_param_callbacks_for_current_context() {
+pub(crate) unsafe fn clear_platform_aggregate_callbacks_for_current_context() {
     let pio = unsafe { sys::igGetPlatformIO_Nil() };
     if pio.is_null() {
         return;
     }
     unsafe {
+        sys::ImGuiPlatformIO_Set_Platform_SetWindowPos_PointerParam(pio, None);
         sys::ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam(pio, None);
+        sys::ImGuiPlatformIO_Set_Platform_SetWindowSize_PointerParam(pio, None);
         sys::ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam(pio, None);
         sys::ImGuiPlatformIO_Set_Platform_GetWindowFramebufferScale_OutParam(pio, None);
         sys::ImGuiPlatformIO_Set_Platform_GetWindowWorkAreaInsets_OutParam(pio, None);
@@ -42,15 +44,19 @@ pub(crate) unsafe fn clear_out_param_callbacks_for_current_context() {
 }
 
 #[cfg(not(feature = "multi-viewport"))]
-pub(crate) unsafe fn clear_out_param_callbacks_for_current_context() {}
+pub(crate) unsafe fn clear_platform_aggregate_callbacks_for_current_context() {}
 
 #[cfg(feature = "multi-viewport")]
-pub(super) unsafe fn clear_out_param_callbacks_for_platform_io(pio: *mut sys::ImGuiPlatformIO) {
+pub(super) unsafe fn clear_platform_aggregate_callbacks_for_platform_io(
+    pio: *mut sys::ImGuiPlatformIO,
+) {
     if pio.is_null() {
         return;
     }
     unsafe {
+        sys::ImGuiPlatformIO_Set_Platform_SetWindowPos_PointerParam(pio, None);
         sys::ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam(pio, None);
+        sys::ImGuiPlatformIO_Set_Platform_SetWindowSize_PointerParam(pio, None);
         sys::ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam(pio, None);
         sys::ImGuiPlatformIO_Set_Platform_GetWindowFramebufferScale_OutParam(pio, None);
         sys::ImGuiPlatformIO_Set_Platform_GetWindowWorkAreaInsets_OutParam(pio, None);
@@ -58,10 +64,41 @@ pub(super) unsafe fn clear_out_param_callbacks_for_platform_io(pio: *mut sys::Im
 }
 
 #[cfg(feature = "multi-viewport")]
-pub(super) fn assert_platform_io_out_param_hooks_available(callback_name: &str) {
+pub(crate) unsafe fn clear_renderer_aggregate_callbacks_for_current_context() {
+    let pio = unsafe { sys::igGetPlatformIO_Nil() };
+    if !pio.is_null() {
+        unsafe { sys::ImGuiPlatformIO_Set_Renderer_SetWindowSize_PointerParam(pio, None) }
+    }
+}
+
+#[cfg(not(feature = "multi-viewport"))]
+pub(crate) unsafe fn clear_renderer_aggregate_callbacks_for_current_context() {}
+
+#[cfg(feature = "multi-viewport")]
+pub(super) unsafe fn clear_renderer_aggregate_callbacks_for_platform_io(
+    pio: *mut sys::ImGuiPlatformIO,
+) {
+    if !pio.is_null() {
+        unsafe { sys::ImGuiPlatformIO_Set_Renderer_SetWindowSize_PointerParam(pio, None) }
+    }
+}
+
+#[cfg(feature = "multi-viewport")]
+pub(crate) unsafe fn clear_aggregate_callbacks_for_current_context() {
+    unsafe {
+        clear_platform_aggregate_callbacks_for_current_context();
+        clear_renderer_aggregate_callbacks_for_current_context();
+    }
+}
+
+#[cfg(not(feature = "multi-viewport"))]
+pub(crate) unsafe fn clear_aggregate_callbacks_for_current_context() {}
+
+#[cfg(feature = "multi-viewport")]
+pub(super) fn assert_platform_io_aggregate_hooks_available(callback_name: &str) {
     assert!(
-        sys::HAS_PLATFORM_IO_OUT_PARAM_HOOKS,
-        "dear-imgui-sys was built without PlatformIO out-parameter hooks; \
+        sys::HAS_PLATFORM_IO_AGGREGATE_HOOKS,
+        "dear-imgui-sys was built without PlatformIO aggregate ABI hooks; \
          rebuild without IMGUI_SYS_SKIP_CC to install {callback_name} callbacks"
     );
 }

@@ -34,17 +34,20 @@ type PlatformCreateVkSurfaceFn = unsafe extern "C" fn(
 ) -> std::os::raw::c_int;
 
 pub use self::callbacks::{
-    platform_render_window_sys, platform_swap_buffers_sys, renderer_create_window,
-    renderer_destroy_window, renderer_render_window, renderer_set_window_size,
-    renderer_swap_buffers,
+    renderer_create_window, renderer_create_window_sys, renderer_destroy_window,
+    renderer_destroy_window_sys, renderer_render_window, renderer_render_window_sys,
+    renderer_set_window_size, renderer_set_window_size_sys, renderer_swap_buffers,
+    renderer_swap_buffers_sys,
 };
 use self::frame_sync::{FrameSync, create_command_pool, create_frame_syncs};
 pub(crate) use self::registry::clear_for_drop;
+pub use self::registry::{
+    CallbackOwnershipError, disable, enable, shutdown_multi_viewport_support,
+};
 use self::registry::{
     GlobalHandles, borrow_renderer, global_handles, register_viewport_data, take_viewport_data,
     viewport_user_data_mut,
 };
-pub use self::registry::{disable, enable, shutdown_multi_viewport_support};
 #[cfg(test)]
 use self::registry::{remove_renderer_state_for_context, upsert_renderer_state};
 use self::surface::ViewportAshData;

@@ -133,7 +133,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     renderer.set_gamma_mode(GammaMode::Auto);
 
     if ENABLE_VIEWPORTS {
-        dear_imgui_wgpu::multi_viewport_sdl3::enable(&mut renderer, &mut imgui);
+        dear_imgui_wgpu::multi_viewport_sdl3::enable(&mut renderer, &mut imgui)?;
     }
 
     let mut last_frame = Instant::now();

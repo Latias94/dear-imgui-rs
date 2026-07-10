@@ -427,7 +427,7 @@ fn viewport_platform_io_callbacks_capture_commands_and_bevy_system_applies_them(
         viewport.set_flags(imgui::ViewportFlags::IS_PLATFORM_WINDOW);
     }
 
-    let (create_window, set_window_pos, destroy_window) = {
+    let (platform_io, create_window, destroy_window) = {
         let context = app
             .world()
             .get_non_send::<ImguiContext>()
@@ -435,12 +435,10 @@ fn viewport_platform_io_callbacks_capture_commands_and_bevy_system_applies_them(
         let platform_io = context.context().platform_io().as_raw();
         unsafe {
             (
+                platform_io.cast_mut(),
                 (*platform_io)
                     .Platform_CreateWindow
                     .expect("bridge should install Platform_CreateWindow"),
-                (*platform_io)
-                    .Platform_SetWindowPos
-                    .expect("bridge should install Platform_SetWindowPos"),
                 (*platform_io)
                     .Platform_DestroyWindow
                     .expect("bridge should install Platform_DestroyWindow"),
@@ -450,7 +448,12 @@ fn viewport_platform_io_callbacks_capture_commands_and_bevy_system_applies_them(
 
     unsafe {
         create_window(raw_viewport);
-        set_window_pos(raw_viewport, sys::ImVec2 { x: 88.0, y: 99.0 });
+        let pos = sys::ImVec2 { x: 88.0, y: 99.0 };
+        assert!(sys::ImGuiPlatformIO_InvokePlatformSetWindowPos(
+            platform_io,
+            raw_viewport,
+            &pos,
+        ));
         assert!(!(*raw_viewport).PlatformHandle.is_null());
         assert_eq!(
             (*raw_viewport).PlatformHandle,

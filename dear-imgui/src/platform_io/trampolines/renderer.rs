@@ -27,14 +27,20 @@ pub unsafe extern "C" fn renderer_destroy_window(vp: *mut sys::ImGuiViewport) {
         );
     }
 }
-pub unsafe extern "C" fn renderer_set_window_size(vp: *mut sys::ImGuiViewport, s: sys::ImVec2) {
-    if vp.is_null() {
+pub unsafe extern "C" fn renderer_set_window_size(
+    vp: *mut sys::ImGuiViewport,
+    size: *const sys::ImVec2,
+) {
+    if vp.is_null() || size.is_null() {
         return;
     }
     if let Some(cb) = load_cb(&RENDERER_SET_WINDOW_SIZE_CB) {
+        let size = unsafe { *size };
         abort_if_panicked(
             "Renderer_SetWindowSize",
-            catch_unwind(AssertUnwindSafe(|| unsafe { cb(vp as *mut Viewport, s) })),
+            catch_unwind(AssertUnwindSafe(|| unsafe {
+                cb(vp as *mut Viewport, size)
+            })),
         );
     }
 }

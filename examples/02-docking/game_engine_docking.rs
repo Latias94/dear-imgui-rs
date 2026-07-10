@@ -2619,7 +2619,13 @@ impl ApplicationHandler for App {
                             // Install platform (winit) viewport handlers first.
                             winit_mvp::init_multi_viewport_support(&mut imgui.context, &app.window);
                             // Then install renderer viewport callbacks.
-                            wgpu_mvp::enable(&mut imgui.renderer, &mut imgui.context);
+                            if let Err(error) =
+                                wgpu_mvp::enable(&mut imgui.renderer, &mut imgui.context)
+                            {
+                                eprintln!(
+                                    "failed to enable WGPU multi-viewport callbacks: {error}"
+                                );
+                            }
                         }
                     }
                 }
