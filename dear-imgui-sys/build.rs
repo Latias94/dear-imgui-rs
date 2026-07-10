@@ -1000,6 +1000,7 @@ fn try_link_prebuilt(dir: &Path, cfg: &BuildConfig) -> bool {
     }
     println!("cargo:rustc-link-search=native={}", dir.display());
     println!("cargo:rustc-link-lib=static=dear_imgui");
+    build_support::emit_prebuilt_cpp_runtime_linkage(&cfg.target_os, &cfg.target_env);
     #[cfg(feature = "freetype")]
     {
         // A freetype-enabled dear_imgui static prebuilt still references the

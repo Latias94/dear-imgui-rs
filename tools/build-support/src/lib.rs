@@ -1197,11 +1197,60 @@ pub fn should_static_link_cpp_stdlib(target_os: &str, target_env: &str) -> bool 
     target_os == "windows" && target_env == "gnu"
 }
 
-pub fn configure_cpp_runtime_linkage(build: &mut cc::Build, target_os: &str, target_env: &str) {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CppRuntimeLinkage {
+    None,
+    Dynamic(&'static str),
+    StaticBundle(&'static str),
+}
+
+pub fn prebuilt_cpp_runtime_linkage(target_os: &str, target_env: &str) -> CppRuntimeLinkage {
+    if target_env == "msvc" {
+        return CppRuntimeLinkage::None;
+    }
     if should_static_link_cpp_stdlib(target_os, target_env) {
-        build.cpp_link_stdlib(None);
-        if !STATIC_CPP_STDLIB_LINK_EMITTED.swap(true, Ordering::Relaxed) {
-            println!("cargo:rustc-link-lib=static:-bundle=stdc++");
+        return CppRuntimeLinkage::StaticBundle("stdc++");
+    }
+    if matches!(
+        target_os,
+        "macos" | "ios" | "tvos" | "watchos" | "visionos" | "freebsd" | "openbsd" | "aix" | "wasi"
+    ) || (target_os == "linux" && target_env == "ohos")
+    {
+        return CppRuntimeLinkage::Dynamic("c++");
+    }
+    if target_os == "android" {
+        return CppRuntimeLinkage::Dynamic("c++_shared");
+    }
+    CppRuntimeLinkage::Dynamic("stdc++")
+}
+
+pub fn emit_prebuilt_cpp_runtime_linkage(target_os: &str, target_env: &str) {
+    match prebuilt_cpp_runtime_linkage(target_os, target_env) {
+        CppRuntimeLinkage::None => {}
+        CppRuntimeLinkage::Dynamic(library) => {
+            println!("cargo:rustc-link-lib={library}");
+        }
+        CppRuntimeLinkage::StaticBundle(library) => {
+            if !STATIC_CPP_STDLIB_LINK_EMITTED.swap(true, Ordering::Relaxed) {
+                println!("cargo:rustc-link-lib=static:-bundle={library}");
+            }
+        }
+    }
+}
+
+pub fn configure_cpp_runtime_linkage(build: &mut cc::Build, target_os: &str, target_env: &str) {
+    match prebuilt_cpp_runtime_linkage(target_os, target_env) {
+        CppRuntimeLinkage::None => {
+            build.cpp_link_stdlib(None);
+        }
+        CppRuntimeLinkage::Dynamic(library) => {
+            // Keep source builds and prebuilt consumers on the same deterministic platform
+            // policy instead of allowing an untracked CXXSTDLIB override.
+            build.cpp_link_stdlib(library);
+        }
+        CppRuntimeLinkage::StaticBundle(_) => {
+            build.cpp_link_stdlib(None);
+            emit_prebuilt_cpp_runtime_linkage(target_os, target_env);
         }
     }
 }
@@ -1408,29 +1457,128 @@ fn extract_archive_to_cache_impl(
 ) -> Result<PathBuf, String> {
     let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
     let extract_dir = prebuilt_extract_dir_env(cache_root, &target_env);
-    if extract_dir.exists() {
-        let lib_dir = extract_dir.join("lib");
-        if lib_dir.join(lib_name).exists() || extract_dir.join(lib_name).exists() {
-            return Ok(lib_dir);
-        }
-        let _ = std::fs::remove_dir_all(&extract_dir);
+    extract_archive_to_dir(archive_path, &extract_dir, lib_name, || {})
+}
+
+#[cfg(feature = "archive")]
+fn extract_archive_to_dir(
+    archive_path: &Path,
+    extract_dir: &Path,
+    lib_name: &str,
+    after_lock: impl FnOnce(),
+) -> Result<PathBuf, String> {
+    let parent = extract_dir.parent().ok_or_else(|| {
+        format!(
+            "prebuilt extraction directory has no parent: {}",
+            extract_dir.display()
+        )
+    })?;
+    std::fs::create_dir_all(parent)
+        .map_err(|e| format!("create dir {}: {}", parent.display(), e))?;
+    let lock_path = extraction_lock_path(extract_dir);
+    let extraction_lock = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        .map_err(|error| format!("open extraction lock {}: {error}", lock_path.display()))?;
+    extraction_lock
+        .lock()
+        .map_err(|error| format!("lock extraction cache {}: {error}", lock_path.display()))?;
+    after_lock();
+
+    if let Some(lib_dir) = extracted_library_dir(extract_dir, lib_name) {
+        return Ok(lib_dir);
     }
-    std::fs::create_dir_all(&extract_dir)
-        .map_err(|e| format!("create dir {}: {}", extract_dir.display(), e))?;
+    if extract_dir.exists() {
+        let stale_dir = unique_staging_path(extract_dir);
+        std::fs::rename(extract_dir, &stale_dir).map_err(|error| {
+            format!(
+                "retire stale extraction directory {}: {error}",
+                extract_dir.display()
+            )
+        })?;
+        std::fs::remove_dir_all(&stale_dir)
+            .map_err(|error| format!("remove stale dir {}: {error}", stale_dir.display()))?;
+    }
+    let staging_dir = unique_staging_path(extract_dir);
+    if staging_dir.exists() {
+        let _ = std::fs::remove_dir_all(&staging_dir);
+    }
+    std::fs::create_dir_all(&staging_dir)
+        .map_err(|e| format!("create dir {}: {}", staging_dir.display(), e))?;
     let file = std::fs::File::open(archive_path)
         .map_err(|e| format!("open {}: {}", archive_path.display(), e))?;
     let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(file));
-    archive
-        .unpack(&extract_dir)
-        .map_err(|e| format!("unpack {}: {}", archive_path.display(), e))?;
-    let lib_dir = extract_dir.join("lib");
-    if lib_dir.join(lib_name).exists() {
-        return Ok(lib_dir);
+    if let Err(error) = archive.unpack(&staging_dir) {
+        let _ = std::fs::remove_dir_all(&staging_dir);
+        return Err(format!("unpack {}: {}", archive_path.display(), error));
     }
-    if extract_dir.join(lib_name).exists() {
-        return Ok(extract_dir);
+    let staged_lib_dir = extracted_library_dir(&staging_dir, lib_name).ok_or_else(|| {
+        let _ = std::fs::remove_dir_all(&staging_dir);
+        "extracted archive did not contain the expected library and manifest".to_owned()
+    })?;
+    let uses_lib_subdir = staged_lib_dir != staging_dir;
+
+    match std::fs::rename(&staging_dir, extract_dir) {
+        Ok(()) => Ok(if uses_lib_subdir {
+            extract_dir.join("lib")
+        } else {
+            extract_dir.to_path_buf()
+        }),
+        Err(error) => {
+            // Another process may have completed the same extraction first. Its atomic rename is
+            // safe to reuse only after validating the expected library is present.
+            if let Some(lib_dir) = extracted_library_dir(extract_dir, lib_name) {
+                let _ = std::fs::remove_dir_all(&staging_dir);
+                return Ok(lib_dir);
+            }
+            let _ = std::fs::remove_dir_all(&staging_dir);
+            Err(format!(
+                "install extracted archive at {}: {}",
+                extract_dir.display(),
+                error
+            ))
+        }
     }
-    Err("extracted archive did not contain expected library".into())
+}
+
+#[cfg(feature = "archive")]
+fn extraction_lock_path(extract_dir: &Path) -> PathBuf {
+    let lock_name = extract_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("prebuilt");
+    extract_dir.with_file_name(format!(".{lock_name}.extract.lock"))
+}
+
+#[cfg(feature = "archive")]
+fn extracted_library_dir(root: &Path, lib_name: &str) -> Option<PathBuf> {
+    if !root.join("manifest.txt").is_file() {
+        return None;
+    }
+    let lib_dir = root.join("lib");
+    if lib_dir.join(lib_name).is_file() {
+        Some(lib_dir)
+    } else if root.join(lib_name).is_file() {
+        Some(root.to_path_buf())
+    } else {
+        None
+    }
+}
+
+#[cfg(feature = "archive")]
+fn unique_staging_path(destination: &Path) -> PathBuf {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let name = destination
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("prebuilt");
+    destination.with_file_name(format!(".{name}.tmp-{}-{nonce}", std::process::id()))
 }
 
 pub fn download_prebuilt(
@@ -1465,9 +1613,7 @@ fn local_path_from_urlish(url: &str) -> Option<PathBuf> {
     }
 
     if let Some(rest) = trimmed.strip_prefix("file://") {
-        // Accept both file:///C:/... and file://C:/...
-        let rest = rest.trim_start_matches('/');
-        let p = PathBuf::from(rest);
+        let p = file_url_path(rest);
         if p.exists() {
             return Some(p);
         }
@@ -1476,6 +1622,25 @@ fn local_path_from_urlish(url: &str) -> Option<PathBuf> {
 
     let p = PathBuf::from(trimmed);
     if p.exists() { Some(p) } else { None }
+}
+
+fn file_url_path(rest: &str) -> PathBuf {
+    #[cfg(windows)]
+    {
+        // Windows accepts both file:///C:/... and file://C:/.... Remove exactly the URL root
+        // slash only when the remainder starts with a drive letter; preserve UNC prefixes.
+        let bytes = rest.as_bytes();
+        if bytes.len() >= 3
+            && bytes[0] == b'/'
+            && bytes[1].is_ascii_alphabetic()
+            && bytes[2] == b':'
+        {
+            return PathBuf::from(&rest[1..]);
+        }
+    }
+
+    // On Unix the leading slash is the filesystem root and must not be discarded.
+    PathBuf::from(rest)
 }
 
 fn stage_or_extract_local(
@@ -1502,7 +1667,8 @@ fn stage_or_extract_local(
     let _ = std::fs::create_dir_all(&dl_dir);
     let dst = dl_dir.join(lib_name);
     if !dst.exists() {
-        std::fs::copy(path, &dst).map_err(|e| format!("copy {}: {}", path.display(), e))?;
+        let bytes = std::fs::read(path).map_err(|e| format!("read {}: {}", path.display(), e))?;
+        write_atomic(&dst, &bytes)?;
     }
     Ok(dl_dir)
 }
@@ -1539,8 +1705,7 @@ fn download_prebuilt_http(cache_root: &Path, url: &str, lib_name: &str) -> Resul
             reader
                 .read_to_end(&mut bytes)
                 .map_err(|e| format!("read body: {}", e))?;
-            std::fs::write(&archive_path, &bytes)
-                .map_err(|e| format!("write {}: {}", archive_path.display(), e))?;
+            write_atomic(&archive_path, &bytes)?;
         }
         return extract_archive_to_cache(&archive_path, cache_root, lib_name);
     }
@@ -1567,8 +1732,40 @@ fn download_prebuilt_http(cache_root: &Path, url: &str, lib_name: &str) -> Resul
     reader
         .read_to_end(&mut bytes)
         .map_err(|e| format!("read body: {}", e))?;
-    std::fs::write(&dst, &bytes).map_err(|e| format!("write {}: {}", dst.display(), e))?;
+    write_atomic(&dst, &bytes)?;
     Ok(dl_dir)
+}
+
+fn write_atomic(destination: &Path, bytes: &[u8]) -> Result<(), String> {
+    let staging = unique_file_staging_path(destination);
+    std::fs::write(&staging, bytes)
+        .map_err(|error| format!("write {}: {error}", staging.display()))?;
+    match std::fs::rename(&staging, destination) {
+        Ok(()) => Ok(()),
+        Err(_error) if destination.is_file() => {
+            let _ = std::fs::remove_file(&staging);
+            Ok(())
+        }
+        Err(error) => {
+            let _ = std::fs::remove_file(&staging);
+            Err(format!(
+                "install downloaded artifact at {}: {error}",
+                destination.display()
+            ))
+        }
+    }
+}
+
+fn unique_file_staging_path(destination: &Path) -> PathBuf {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let name = destination
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("prebuilt");
+    destination.with_file_name(format!(".{name}.tmp-{}-{nonce}", std::process::id()))
 }
 
 pub fn prebuilt_cache_root_from_env_or_target(
@@ -1968,9 +2165,9 @@ fn find_cargo_target_include(out_dir: &Path, dir_prefix: &str, header: &str) -> 
         }
     }
 
-    if !cargo_build_dir
+    if cargo_build_dir
         .file_name()
-        .is_some_and(|name| name == "build")
+        .is_none_or(|name| name != "build")
     {
         return None;
     }
@@ -2440,6 +2637,30 @@ mod tests {
         assert!(!should_static_link_cpp_stdlib("macos", ""));
     }
 
+    #[test]
+    fn prebuilt_cpp_runtime_matches_cc_defaults_and_windows_policy() {
+        assert_eq!(
+            prebuilt_cpp_runtime_linkage("windows", "msvc"),
+            CppRuntimeLinkage::None
+        );
+        assert_eq!(
+            prebuilt_cpp_runtime_linkage("windows", "gnu"),
+            CppRuntimeLinkage::StaticBundle("stdc++")
+        );
+        assert_eq!(
+            prebuilt_cpp_runtime_linkage("macos", ""),
+            CppRuntimeLinkage::Dynamic("c++")
+        );
+        assert_eq!(
+            prebuilt_cpp_runtime_linkage("linux", "gnu"),
+            CppRuntimeLinkage::Dynamic("stdc++")
+        );
+        assert_eq!(
+            prebuilt_cpp_runtime_linkage("android", ""),
+            CppRuntimeLinkage::Dynamic("c++_shared")
+        );
+    }
+
     fn unique_tmp_dir(suffix: &str) -> PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -2619,6 +2840,164 @@ mod tests {
         assert!(!prebuilt_manifest_has_feature(&root, "freetype"));
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn absolute_file_url_preserves_the_filesystem_root() {
+        let root = unique_tmp_dir("absolute-file-url");
+        std::fs::create_dir_all(&root).unwrap();
+        let archive = root.join("artifact.tar.gz");
+        std::fs::write(&archive, b"test").unwrap();
+        let url = format!("file://{}", archive.display());
+
+        assert_eq!(local_path_from_urlish(&url), Some(archive.clone()));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn plain_local_prebuilt_path_remains_supported() {
+        let root = unique_tmp_dir("plain-local-path");
+        std::fs::create_dir_all(&root).unwrap();
+        let archive = root.join("artifact.tar.gz");
+        std::fs::write(&archive, b"test").unwrap();
+
+        assert_eq!(
+            local_path_from_urlish(archive.to_str().unwrap()),
+            Some(archive.clone())
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(feature = "archive")]
+    #[test]
+    fn archive_extraction_is_installed_from_atomic_staging() {
+        use std::io::Write as _;
+
+        let root = unique_tmp_dir("atomic-archive");
+        let source = root.join("source");
+        let cache = root.join("cache");
+        std::fs::create_dir_all(source.join("lib")).unwrap();
+        std::fs::write(source.join("lib/libdear_imgui.a"), b"archive").unwrap();
+        std::fs::write(source.join("manifest.txt"), b"features=wchar32\n").unwrap();
+        let archive_path = root.join("artifact.tar.gz");
+        let file = std::fs::File::create(&archive_path).unwrap();
+        let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::fast());
+        let mut archive = tar::Builder::new(encoder);
+        archive
+            .append_path_with_name(source.join("lib/libdear_imgui.a"), "lib/libdear_imgui.a")
+            .unwrap();
+        archive
+            .append_path_with_name(source.join("manifest.txt"), "manifest.txt")
+            .unwrap();
+        archive
+            .into_inner()
+            .unwrap()
+            .finish()
+            .unwrap()
+            .flush()
+            .unwrap();
+
+        let lib_dir = extract_archive_to_cache(&archive_path, &cache, "libdear_imgui.a").unwrap();
+
+        assert_eq!(
+            std::fs::read(lib_dir.join("libdear_imgui.a")).unwrap(),
+            b"archive"
+        );
+        assert!(
+            std::fs::read_dir(lib_dir.parent().unwrap())
+                .unwrap()
+                .all(|entry| !entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".tmp-"))
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(feature = "archive")]
+    #[test]
+    fn archive_extraction_lock_serializes_check_cleanup_and_install() {
+        use std::io::Write as _;
+        use std::sync::mpsc;
+
+        let root = unique_tmp_dir("locked-archive");
+        let source = root.join("source");
+        let extract_dir = root.join("cache/shared");
+        std::fs::create_dir_all(source.join("lib")).unwrap();
+        std::fs::create_dir_all(&extract_dir).unwrap();
+        std::fs::write(extract_dir.join("stale.partial"), b"partial").unwrap();
+        std::fs::write(source.join("lib/libdear_imgui.a"), b"archive").unwrap();
+        std::fs::write(source.join("manifest.txt"), b"features=wchar32\n").unwrap();
+        let archive_path = root.join("artifact.tar.gz");
+        let file = std::fs::File::create(&archive_path).unwrap();
+        let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::fast());
+        let mut archive = tar::Builder::new(encoder);
+        archive
+            .append_path_with_name(source.join("lib/libdear_imgui.a"), "lib/libdear_imgui.a")
+            .unwrap();
+        archive
+            .append_path_with_name(source.join("manifest.txt"), "manifest.txt")
+            .unwrap();
+        archive
+            .into_inner()
+            .unwrap()
+            .finish()
+            .unwrap()
+            .flush()
+            .unwrap();
+
+        let (locked_tx, locked_rx) = mpsc::sync_channel(0);
+        let (release_tx, release_rx) = mpsc::sync_channel(0);
+        let first_archive = archive_path.clone();
+        let first_extract = extract_dir.clone();
+        let first = std::thread::spawn(move || {
+            extract_archive_to_dir(&first_archive, &first_extract, "libdear_imgui.a", || {
+                locked_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            })
+        });
+        locked_rx.recv().unwrap();
+
+        let lock_path = extraction_lock_path(&extract_dir);
+        let competing_lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .unwrap();
+        assert!(matches!(
+            competing_lock.try_lock(),
+            Err(std::fs::TryLockError::WouldBlock)
+        ));
+
+        release_tx.send(()).unwrap();
+        let first_lib_dir = first.join().unwrap().unwrap();
+        let second_lib_dir =
+            extract_archive_to_dir(&archive_path, &extract_dir, "libdear_imgui.a", || {}).unwrap();
+
+        assert_eq!(first_lib_dir, second_lib_dir);
+        assert_eq!(
+            std::fs::read(second_lib_dir.join("libdear_imgui.a")).unwrap(),
+            b"archive"
+        );
+        assert!(!extract_dir.join("stale.partial").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_file_url_removes_only_the_drive_root_slash() {
+        assert_eq!(
+            file_url_path("/C:/artifacts/dear-imgui.tar.gz"),
+            PathBuf::from("C:/artifacts/dear-imgui.tar.gz")
+        );
+        assert_eq!(
+            file_url_path("//server/share/dear-imgui.tar.gz"),
+            PathBuf::from("//server/share/dear-imgui.tar.gz")
+        );
     }
 
     #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]

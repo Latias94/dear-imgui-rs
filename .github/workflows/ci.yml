@@ -132,8 +132,17 @@ jobs:
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
 
-      - name: Check dear-imgui-rs multi-viewport tests compile
-        run: cargo test -p dear-imgui-rs --features multi-viewport --no-run
+      - name: Run dear-imgui-rs multi-viewport acceptance tests
+        run: cargo nextest run -p dear-imgui-rs --features multi-viewport
+
+      - name: Run reflection acceptance tests
+        run: cargo nextest run -p dear-imgui-reflect
+
+      - name: Run file browser acceptance tests
+        run: cargo nextest run -p dear-file-browser
+
+      - name: Run dear-app lifecycle acceptance tests
+        run: cargo nextest run -p dear-app
 
       - name: Run winit backend multi-viewport tests
         run: cargo nextest run -p dear-imgui-winit --lib --features "multi-viewport"
@@ -199,56 +208,7 @@ jobs:
         run: cargo nextest run -p dear-imgui-build-support --features binding-spec
 
       - name: Verify exact vendored source provenance
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import re
-          import subprocess
-          import tomllib
-          from pathlib import Path
-
-          manifest_path = Path("dear-imgui-sys/Cargo.toml")
-          with manifest_path.open("rb") as manifest_file:
-              manifest = tomllib.load(manifest_file)
-          metadata = manifest["package"]["metadata"]["dear-imgui-sources"]
-          required = {"cimgui-revision", "imgui-revision"}
-          if set(metadata) != required:
-              raise SystemExit(
-                  f"source metadata keys differ: expected {sorted(required)}, "
-                  f"found {sorted(metadata)}"
-              )
-
-          sources = (
-              (Path("dear-imgui-sys/third-party/cimgui"), "cimgui-revision"),
-              (Path("dear-imgui-sys/third-party/cimgui/imgui"), "imgui-revision"),
-          )
-          for source_path, metadata_key in sources:
-              status = subprocess.run(
-                  ["git", "status", "--porcelain=v1", "--untracked-files=all"],
-                  cwd=source_path,
-                  check=True,
-                  capture_output=True,
-                  text=True,
-              ).stdout
-              if status:
-                  raise SystemExit(f"vendored source is dirty: {source_path}\n{status}")
-              revision = subprocess.run(
-                  ["git", "rev-parse", "HEAD"],
-                  cwd=source_path,
-                  check=True,
-                  capture_output=True,
-                  text=True,
-              ).stdout.strip()
-              expected = metadata[metadata_key]
-              if re.fullmatch(r"[0-9a-f]{40}", expected) is None:
-                  raise SystemExit(f"{metadata_key} is not an exact revision: {expected}")
-              if revision != expected:
-                  raise SystemExit(
-                      f"{source_path} revision mismatch: expected {expected}, found {revision}"
-                  )
-              print(f"{metadata_key}={revision}")
-          PY
+        run: python3 tools/source_metadata.py verify
 
       - name: Regenerate and verify every core binding profile
         run: cargo run -p xtask -- verify-bindings --allow-dirty
@@ -546,7 +506,7 @@ jobs:
 
       - name: Test standalone core stack-layout profile
         if: matrix.profile == 'core'
-        run: cargo nextest run -p dear-imgui-rs --lib --no-default-features --features stack-layout
+        run: cargo nextest run -p dear-imgui-rs --no-default-features --features stack-layout
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
 
@@ -1213,8 +1173,8 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Test release metadata and publish topology
-        run: python3 -B -m unittest discover -s tools/tests -p 'test_release_workflow.py' -v
+      - name: Test release tooling and source provenance
+        run: python3 -B -m unittest discover -s tools/tests -p 'test_*.py' -v
 
       - name: Package, unpack, and consume core crates
         shell: bash

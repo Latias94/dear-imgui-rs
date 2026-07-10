@@ -154,7 +154,7 @@ jobs:
         run: |
           brew update
           brew install freetype pkg-config
-          echo "PKG_CONFIG_PATH=$(brew --prefix)/opt/freetype/lib/pkgconfig" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=$(brew --prefix)/opt/freetype/lib/pkgconfig" >> "$GITHUB_ENV"
 
 
       - name: Select static CRT (Windows MT)
@@ -364,6 +364,19 @@ jobs:
           IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
           IMGUIZMO_QUAT_SYS_PKG_CRT: ${{ matrix.crt }}
           TARGET: ${{ matrix.target }}
+
+      - name: Consume normal and stack-layout Dear ImGui artifacts
+        if: |
+          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-imgui-sys-v'))) ||
+          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imgui-sys'))) ||
+          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-imgui-sys-v'))
+        shell: bash
+        run: |
+          bash tools/ci/verify_packaged_core.sh \
+            --verify-prebuilt-packages \
+            "${{ github.workspace }}/packages" \
+            "${{ matrix.target }}" \
+            "${{ matrix.crt }}"
 
       - name: Upload to release
         uses: softprops/action-gh-release@v3

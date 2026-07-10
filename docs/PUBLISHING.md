@@ -35,6 +35,7 @@ Before publishing, ensure:
   cargo run -p xtask -- release-version 0.16.0
   ```
   - The root `workspace.package.version` is the single source of truth.
+  - `[workspace.metadata.dear-imgui-release]` is the single policy for the core package and private package paths/versions; package counts are derived from workspace members.
   - All 27 publishable manifests use `version.workspace = true`.
   - Internal package dependencies inherit the root workspace dependency declarations.
   - Examples and workspace-only tools retain their independent package versions.

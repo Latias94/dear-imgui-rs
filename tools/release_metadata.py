@@ -15,13 +15,6 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 
-CORE_PACKAGE = "dear-imgui-rs"
-EXPECTED_PUBLISHABLE_COUNT = 27
-PRIVATE_PACKAGE_VERSIONS = {
-    "dear-imgui-examples": "0.1.0",
-    "dear-imgui-web-demo": "0.1.0",
-    "xtask": "0.1.0",
-}
 PUBLISH_ORDER = [
     ("dear-imgui-build-support", "tools/build-support"),
     ("dear-imgui-sys", "dear-imgui-sys"),
@@ -73,6 +66,27 @@ class MetadataError(ValueError):
 
 
 @dataclass(frozen=True)
+class PrivatePackagePolicy:
+    """One private workspace package declared by the release policy."""
+
+    name: str
+    relative_path: Path
+    version: str
+
+
+@dataclass(frozen=True)
+class ReleasePolicy:
+    """Release topology policy read from workspace Cargo metadata."""
+
+    core_package: str
+    private_packages: tuple[PrivatePackagePolicy, ...]
+
+    @property
+    def private_by_name(self) -> dict[str, PrivatePackagePolicy]:
+        return {package.name: package for package in self.private_packages}
+
+
+@dataclass(frozen=True)
 class WorkspaceDependency:
     """A dependency entry resolved by Cargo metadata."""
 
@@ -109,6 +123,8 @@ class WorkspaceMetadata:
     """The workspace-member subset of one ``cargo metadata --locked`` result."""
 
     packages: tuple[WorkspacePackage, ...]
+    release_policy: ReleasePolicy
+    workspace_root: Path
 
     @classmethod
     def from_json(cls, payload: Mapping[str, Any]) -> WorkspaceMetadata:
@@ -116,8 +132,10 @@ class WorkspaceMetadata:
         try:
             workspace_members = set(payload["workspace_members"])
             raw_packages = payload["packages"]
+            workspace_root = Path(payload["workspace_root"])
         except (KeyError, TypeError) as error:
             raise MetadataError("cargo metadata is missing workspace package data") from error
+        release_policy = _release_policy_from_json(payload.get("metadata"))
 
         packages = []
         for raw in raw_packages:
@@ -174,7 +192,7 @@ class WorkspaceMetadata:
                 "workspace package names must be unique: " + ", ".join(duplicate_names)
             )
 
-        return cls(tuple(packages))
+        return cls(tuple(packages), release_policy, workspace_root)
 
     @property
     def by_name(self) -> dict[str, WorkspacePackage]:
@@ -196,7 +214,67 @@ class WorkspaceMetadata:
 
     @property
     def release_version(self) -> str:
-        return self.package(CORE_PACKAGE).version
+        return self.package(self.release_policy.core_package).version
+
+
+def _release_policy_from_json(raw_metadata: Any) -> ReleasePolicy:
+    if not isinstance(raw_metadata, Mapping):
+        raise MetadataError(
+            "cargo metadata is missing workspace.metadata.dear-imgui-release"
+        )
+    raw_policy = raw_metadata.get("dear-imgui-release")
+    if not isinstance(raw_policy, Mapping):
+        raise MetadataError(
+            "cargo metadata is missing workspace.metadata.dear-imgui-release"
+        )
+    unknown_fields = sorted(set(raw_policy) - {"core-package", "private-packages"})
+    if unknown_fields:
+        raise MetadataError(
+            "release policy contains unknown field(s): " + ", ".join(unknown_fields)
+        )
+    core_package = raw_policy.get("core-package")
+    if not isinstance(core_package, str) or not core_package:
+        raise MetadataError("release policy core-package must be a non-empty string")
+    raw_private = raw_policy.get("private-packages")
+    if not isinstance(raw_private, Mapping) or not raw_private:
+        raise MetadataError("release policy private-packages must be a non-empty table")
+
+    private_packages = []
+    for name, raw_package in sorted(raw_private.items()):
+        if not isinstance(name, str) or not name:
+            raise MetadataError("release policy private package names must be non-empty")
+        if not isinstance(raw_package, Mapping):
+            raise MetadataError(f"private package policy {name} must be a table")
+        unknown_package_fields = sorted(set(raw_package) - {"path", "version"})
+        if unknown_package_fields:
+            raise MetadataError(
+                f"private package policy {name} contains unknown field(s): "
+                + ", ".join(unknown_package_fields)
+            )
+        raw_path = raw_package.get("path")
+        if not isinstance(raw_path, str) or not raw_path:
+            raise MetadataError(f"private package policy {name} is missing path")
+        relative_path = Path(raw_path)
+        if relative_path.is_absolute() or ".." in relative_path.parts:
+            raise MetadataError(
+                f"private package policy {name} path must stay within the workspace"
+            )
+        version = raw_package.get("version")
+        if not isinstance(version, str) or SEMVER_RE.fullmatch(version) is None:
+            raise MetadataError(
+                f"private package policy {name} has an invalid semantic version"
+            )
+        private_packages.append(
+            PrivatePackagePolicy(
+                name=name,
+                relative_path=relative_path,
+                version=version,
+            )
+        )
+
+    if core_package in raw_private:
+        raise MetadataError(f"release core package {core_package} cannot be private")
+    return ReleasePolicy(core_package, tuple(private_packages))
 
 
 CommandRunner = Callable[..., subprocess.CompletedProcess[str]]
@@ -250,26 +328,21 @@ def validate_release_workspace(metadata: WorkspaceMetadata) -> list[str]:
     """Validate release versions and every internal path requirement."""
     errors = []
     packages = metadata.by_name
+    policy = metadata.release_policy
 
     try:
-        core_package = metadata.package(CORE_PACKAGE)
+        core_package = metadata.package(policy.core_package)
         release_version = core_package.version
         expected_internal_requirement(release_version)
     except MetadataError as error:
         return [str(error)]
 
     if not core_package.publishable:
-        errors.append(f"release package {CORE_PACKAGE} must be publishable")
-
-    publishable_count = len(metadata.publishable_packages)
-    if publishable_count != EXPECTED_PUBLISHABLE_COUNT:
-        errors.append(
-            f"workspace has {publishable_count} publishable packages; "
-            f"expected {EXPECTED_PUBLISHABLE_COUNT}"
-        )
+        errors.append(f"release package {policy.core_package} must be publishable")
 
     private_packages = {package.name: package for package in metadata.private_packages}
-    expected_private_names = set(PRIVATE_PACKAGE_VERSIONS)
+    expected_private = policy.private_by_name
+    expected_private_names = set(expected_private)
     actual_private_names = set(private_packages)
     missing_private = sorted(expected_private_names - actual_private_names)
     unexpected_private = sorted(actual_private_names - expected_private_names)
@@ -280,12 +353,22 @@ def validate_release_workspace(metadata: WorkspaceMetadata) -> list[str]:
             "workspace has unexpected private package(s): "
             + ", ".join(unexpected_private)
         )
-    for name, expected_version in PRIVATE_PACKAGE_VERSIONS.items():
+    for name, private_policy in expected_private.items():
         package = private_packages.get(name)
-        if package is not None and package.version != expected_version:
+        if package is None:
+            continue
+        if package.version != private_policy.version:
             errors.append(
                 f"private package {name} uses {package.version}; "
-                f"expected {expected_version}"
+                f"expected {private_policy.version}"
+            )
+        expected_directory = (
+            metadata.workspace_root / private_policy.relative_path
+        ).resolve()
+        if package.manifest_path.parent.resolve() != expected_directory:
+            errors.append(
+                f"private package {name} is at {package.manifest_path.parent}; "
+                f"expected {expected_directory}"
             )
 
     for package in sorted(metadata.publishable_packages, key=lambda item: item.name):

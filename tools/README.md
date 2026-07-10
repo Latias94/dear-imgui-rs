@@ -67,7 +67,7 @@ python3 tools/tasks.py release-check
 
 ### 2. `xtask release-version` - Unified Version Update
 
-The workspace root is the single version source. Publishable manifests use `version.workspace = true`, and internal dependencies inherit their root workspace declarations. Update the release train with:
+The workspace root is the single version source. Publishable manifests use `version.workspace = true`, and internal dependencies inherit their root workspace declarations. `[workspace.metadata.dear-imgui-release]` is the shared policy for the core package and private package paths/versions; Rust and Python release validators derive package counts from the actual workspace members. Update the release train with:
 
 ```bash
 cargo run -p xtask -- release-version 0.16.0

@@ -23,13 +23,12 @@ Requirements:
 """
 
 import argparse
-import re
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+import source_metadata
 from release_metadata import (
     MetadataError,
     PUBLISH_ORDER,
@@ -61,9 +60,16 @@ DOC_CRATES = [
     ),
 ]
 
-SOURCE_METADATA_SECTION = "package.metadata.dear-imgui-sources"
-SOURCE_METADATA_KEYS = {"cimgui-revision", "imgui-revision"}
-GIT_REVISION_RE = re.compile(r"^[0-9a-fA-F]{40}$")
+# Run release tests one package at a time. A workspace-wide nextest invocation asks
+# nextest to enumerate every binary concurrently and also unifies unrelated Cargo
+# features. Besides being less deterministic, that has deadlocked the macOS dynamic
+# loader during the `--list` phase. Keeping this list tied to PUBLISH_ORDER makes the
+# release gate fail closed when the publish topology changes.
+RELEASE_TEST_PACKAGES = tuple(name for name, _path in PUBLISH_ORDER)
+PRIVATE_RELEASE_TEST_PACKAGES = ("xtask",)
+PACKAGE_TEST_FEATURES = {
+    "dear-imgui-build-support": ("binding-spec",),
+}
 
 
 class Colors:
@@ -140,6 +146,93 @@ def cargo_nextest_available(repo_root: Path) -> bool:
         capture=True,
     )
     return code == 0
+
+
+def release_test_commands(use_nextest: bool) -> list[tuple[str, list[str]]]:
+    """Build deterministic per-package and feature-profile test commands."""
+    commands: list[tuple[str, list[str]]] = []
+    for package_name in RELEASE_TEST_PACKAGES:
+        if use_nextest:
+            command = [
+                "cargo",
+                "nextest",
+                "run",
+                "--no-tests",
+                "pass",
+                "-p",
+                package_name,
+            ]
+        else:
+            command = ["cargo", "test", "-p", package_name]
+
+        features = PACKAGE_TEST_FEATURES.get(package_name, ())
+        if features:
+            command += ["--features", ",".join(features)]
+        if not use_nextest:
+            command += ["--", "--test-threads=1"]
+        commands.append((package_name, command))
+
+    for package_name in PRIVATE_RELEASE_TEST_PACKAGES:
+        if use_nextest:
+            command = [
+                "cargo",
+                "nextest",
+                "run",
+                "--no-tests",
+                "pass",
+                "-p",
+                package_name,
+            ]
+        else:
+            command = [
+                "cargo",
+                "test",
+                "-p",
+                package_name,
+                "--",
+                "--test-threads=1",
+            ]
+        commands.append((package_name, command))
+
+    feature_profiles = (
+        (
+            "dear-imgui-rs multi-viewport",
+            ["-p", "dear-imgui-rs", "--features", "multi-viewport"],
+        ),
+        (
+            "dear-imgui-rs stack-layout integration",
+            [
+                "-p",
+                "dear-imgui-rs",
+                "--no-default-features",
+                "--features",
+                "stack-layout",
+                "--test",
+                "stack_layout_context",
+            ],
+        ),
+    )
+    for label, cargo_args in feature_profiles:
+        if use_nextest:
+            command = [
+                "cargo",
+                "nextest",
+                "run",
+                "--no-tests",
+                "pass",
+                *cargo_args,
+            ]
+        else:
+            command = [
+                "cargo",
+                "test",
+                *cargo_args,
+                "--",
+                "--test-threads=1",
+            ]
+        commands.append((label, command))
+
+    return commands
 
 
 def read_locked_workspace_metadata(
@@ -230,77 +323,18 @@ def check_pregenerated_bindings(repo_root: Path) -> Tuple[bool, List[str]]:
         return False, errors
 
 
-def read_core_source_metadata(manifest_path: Path) -> dict[str, str]:
-    """Read the exact source provenance schema from the packaged manifest."""
-    with manifest_path.open("rb") as manifest_file:
-        data = tomllib.load(manifest_file)
-    try:
-        metadata = data["package"]["metadata"]["dear-imgui-sources"]
-    except (KeyError, TypeError) as error:
-        raise ValueError(f"missing [{SOURCE_METADATA_SECTION}]") from error
-    if not isinstance(metadata, dict) or set(metadata) != SOURCE_METADATA_KEYS:
-        found = sorted(metadata) if isinstance(metadata, dict) else type(metadata).__name__
-        raise ValueError(
-            f"[{SOURCE_METADATA_SECTION}] must contain exactly "
-            f"{sorted(SOURCE_METADATA_KEYS)}, found {found}"
-        )
-    for key, value in metadata.items():
-        if not isinstance(value, str) or not GIT_REVISION_RE.fullmatch(value):
-            raise ValueError(f"{key} must be a 40-character hexadecimal git revision")
-    return metadata
-
-
 def check_core_source_contract(repo_root: Path) -> Tuple[bool, List[str]]:
     """Require clean vendored sources whose HEADs match packaged metadata."""
     print_check("Dear ImGui source provenance")
-    errors = []
     try:
-        metadata = read_core_source_metadata(repo_root / "dear-imgui-sys" / "Cargo.toml")
-    except (OSError, ValueError, tomllib.TOMLDecodeError) as error:
-        print_error(str(error))
-        return False, [str(error)]
+        revisions = source_metadata.verify_core_source_metadata(repo_root)
+    except source_metadata.SourceMetadataError as error:
+        for message in error.errors:
+            print_error(message)
+        return False, list(error.errors)
 
-    sources = (
-        (
-            "cimgui",
-            repo_root / "dear-imgui-sys" / "third-party" / "cimgui",
-            "cimgui-revision",
-        ),
-        (
-            "Dear ImGui",
-            repo_root / "dear-imgui-sys" / "third-party" / "cimgui" / "imgui",
-            "imgui-revision",
-        ),
-    )
-    for label, source_path, metadata_key in sources:
-        status_code, status, status_error = run_command(
-            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
-            cwd=source_path,
-        )
-        if status_code != 0:
-            errors.append(f"Could not inspect {label}: {status_error.strip()}")
-            continue
-        if status:
-            errors.append(f"{label} source tree is dirty: {source_path}\n{status.rstrip()}")
-
-        revision_code, revision, revision_error = run_command(
-            ["git", "rev-parse", "HEAD"], cwd=source_path
-        )
-        revision = revision.strip()
-        if revision_code != 0 or not GIT_REVISION_RE.fullmatch(revision):
-            errors.append(f"Could not read {label} revision: {revision_error.strip()}")
-        elif revision != metadata[metadata_key]:
-            errors.append(
-                f"{label} metadata mismatch: expected {revision}, "
-                f"found {metadata[metadata_key]}"
-            )
-        else:
-            print_success(f"{label}: {revision}")
-
-    if errors:
-        for error in errors:
-            print_error(error)
-        return False, errors
+    for source in source_metadata.CORE_SOURCE_SPECS:
+        print_success(f"{source.label}: {revisions[source.metadata_key]}")
     return True, []
 
 
@@ -471,78 +505,23 @@ def check_tests(repo_root: Path) -> Tuple[bool, List[str]]:
     """Check that tests pass."""
     print_check("Running tests")
 
-    # NOTE: The workspace contains `dear-imgui-test-engine(-sys)`, which enables
-    # `IMGUI_ENABLE_TEST_ENGINE` in `dear-imgui-sys` via Cargo feature unification.
-    # Running `cargo test --workspace` would then try to link test binaries that do
-    # not depend on the test engine library, causing unresolved hook symbols on
-    # some platforms (notably MSVC).
-    #
-    # We run tests in two passes:
-    # 1) All crates except the test-engine crates (no test-engine hooks enabled).
-    # 2) The safe test-engine crate itself (ensures the feature-gated path builds/links).
-    # 3) dear-imgui-rs with multi-viewport enabled, covering feature-gated PlatformIO callbacks.
-    #
-    # Prefer nextest when available. Several core tests create Dear ImGui contexts,
-    # and the C++ context is a process-global resource. nextest isolates tests more
-    # effectively than a single cargo test binary. The cargo-test fallback runs
-    # with one test thread for the same reason.
-
     use_nextest = cargo_nextest_available(repo_root)
     if use_nextest:
-        print("  Using cargo nextest")
-        base_cmd = ["cargo", "nextest", "run", "--no-tests", "pass", "--workspace", "--lib"]
-        test_engine_cmd = [
-            "cargo", "nextest", "run", "--no-tests", "pass",
-            "-p", "dear-imgui-test-engine", "--lib",
-        ]
-        multi_viewport_cmd = [
-            "cargo", "nextest", "run", "--no-tests", "pass",
-            "-p", "dear-imgui-rs", "--features", "multi-viewport",
-        ]
-        cargo_test_serial_args: List[str] = []
+        print("  Using cargo nextest with one package per invocation")
     else:
         print_warning("cargo-nextest not found; falling back to serial cargo test")
-        base_cmd = ["cargo", "test", "--workspace", "--lib"]
-        test_engine_cmd = ["cargo", "test", "-p", "dear-imgui-test-engine", "--lib"]
-        multi_viewport_cmd = ["cargo", "test", "-p", "dear-imgui-rs", "--features", "multi-viewport"]
-        cargo_test_serial_args = ["--", "--test-threads=1"]
 
-    base_cmd += ["--exclude", "dear-imgui-test-engine", "--exclude", "dear-imgui-test-engine-sys"]
-    base_cmd += cargo_test_serial_args
-    test_engine_cmd += cargo_test_serial_args
-    multi_viewport_cmd += cargo_test_serial_args
-
-    # Pass 1: core/backends/extensions (excluding test-engine crates)
-    code, _stdout, _stderr = run_command(
-        base_cmd,
-        cwd=repo_root,
-        capture=False,  # Stream output in real-time
-    )
-    if code != 0:
-        print_error("Tests failed (workspace without test-engine)")
-        return False, ["Tests failed (workspace without test-engine)"]
-
-    # Pass 2: test-engine crate
-    code, _stdout, _stderr = run_command(
-        test_engine_cmd,
-        cwd=repo_root,
-        capture=False,  # Stream output in real-time
-    )
-
-    if code != 0:
-        print_error("Tests failed (dear-imgui-test-engine)")
-        return False, ["Tests failed (dear-imgui-test-engine)"]
-
-    # Pass 3: core multi-viewport feature path
-    code, _stdout, _stderr = run_command(
-        multi_viewport_cmd,
-        cwd=repo_root,
-        capture=False,
-    )
-
-    if code != 0:
-        print_error("Tests failed (dear-imgui-rs multi-viewport)")
-        return False, ["Tests failed (dear-imgui-rs multi-viewport)"]
+    for label, command in release_test_commands(use_nextest):
+        print(f"\n  Testing {label}...")
+        code, _stdout, _stderr = run_command(
+            command,
+            cwd=repo_root,
+            capture=False,
+        )
+        if code != 0:
+            error = f"Tests failed ({label})"
+            print_error(error)
+            return False, [error]
 
     print_success("All tests passed")
     return True, []

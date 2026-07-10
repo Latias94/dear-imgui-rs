@@ -50,6 +50,14 @@ documentation = "https://docs.rs/dear-imgui-rs"
 categories = ["gui", "api-bindings"]
 keywords = ["imgui", "ui", "graphics", "docking", "multiview"]
 
+[workspace.metadata.dear-imgui-release]
+core-package = "dear-imgui-rs"
+
+[workspace.metadata.dear-imgui-release.private-packages]
+dear-imgui-examples = { path = "examples", version = "0.1.0" }
+dear-imgui-web-demo = { path = "examples-wasm", version = "0.1.0" }
+xtask = { path = "xtask", version = "0.1.0" }
+
 [workspace.dependencies]
 # Workspace release catalog. Keep every publishable package here so member
 # manifests inherit one path and one registry requirement for internal edges.

@@ -28,6 +28,12 @@ def load_tool(name: str):
 PREPUBLISH = load_tool("pre_publish_check")
 PUBLISH = load_tool("publish")
 
+TEST_PRIVATE_PACKAGES = (
+    "dear-imgui-examples",
+    "dear-imgui-web-demo",
+    "xtask",
+)
+
 
 def package(
     name: str,
@@ -58,10 +64,31 @@ def dependency(name: str, path: str, requirement: str, *, kind=None):
 
 def metadata_for(packages):
     packages = list(packages)
+    private_policy = {
+        item["name"]: {
+            "path": Path(item["manifest_path"])
+            .parent.relative_to("/repo")
+            .as_posix(),
+            "version": item["version"],
+        }
+        for item in packages
+        if item.get("publish") == []
+    }
+    if not private_policy:
+        private_policy = {
+            "fixture-private": {"path": "private/fixture", "version": "0.1.0"}
+        }
     return release_metadata.WorkspaceMetadata.from_json(
         {
+            "workspace_root": "/repo",
             "workspace_members": [item["id"] for item in packages],
             "packages": packages,
+            "metadata": {
+                "dear-imgui-release": {
+                    "core-package": "dear-imgui-rs",
+                    "private-packages": private_policy,
+                }
+            },
         }
     )
 
@@ -97,12 +124,20 @@ def complete_release_metadata(
         package(
             name,
             f"private/{name}",
-            version=private_versions.get(name, expected_version),
+            version=private_versions.get(name, "0.1.0"),
             publish=False,
         )
-        for name, expected_version in release_metadata.PRIVATE_PACKAGE_VERSIONS.items()
+        for name in TEST_PRIVATE_PACKAGES
     )
-    return metadata_for(packages)
+    metadata = metadata_for(packages)
+    policy = replace(
+        metadata.release_policy,
+        private_packages=tuple(
+            replace(package, version="0.1.0")
+            for package in metadata.release_policy.private_packages
+        ),
+    )
+    return replace(metadata, release_policy=policy)
 
 
 class MetadataTests(unittest.TestCase):
@@ -124,6 +159,7 @@ class MetadataTests(unittest.TestCase):
 
     def test_loads_locked_cargo_metadata_once(self):
         payload = {
+            "workspace_root": "/repo",
             "workspace_members": ["core-id"],
             "packages": [
                 {
@@ -135,6 +171,17 @@ class MetadataTests(unittest.TestCase):
                     "dependencies": [],
                 }
             ],
+            "metadata": {
+                "dear-imgui-release": {
+                    "core-package": "dear-imgui-rs",
+                    "private-packages": {
+                        "fixture-private": {
+                            "path": "private/fixture",
+                            "version": "0.1.0",
+                        }
+                    },
+                }
+            },
         }
         runner = Mock(
             return_value=subprocess.CompletedProcess(
@@ -200,15 +247,17 @@ class MetadataTests(unittest.TestCase):
 
         self.assertTrue(any("cannot contain build metadata" in error for error in errors))
 
-    def test_rejects_publishable_package_count_drift(self):
+    def test_publishable_package_count_is_derived_from_workspace_members(self):
         metadata = complete_release_metadata()
-        metadata = release_metadata.WorkspaceMetadata(
-            metadata.packages[:-4] + metadata.packages[-3:]
+        metadata = replace(
+            metadata,
+            packages=metadata.packages[:-4] + metadata.packages[-3:],
         )
 
         errors = release_metadata.validate_release_workspace(metadata)
 
-        self.assertTrue(any("26 publishable packages" in error for error in errors), errors)
+        self.assertEqual(len(metadata.publishable_packages), 26)
+        self.assertFalse(any("publishable packages" in error for error in errors), errors)
 
     def test_rejects_private_package_identity_and_version_drift(self):
         metadata = complete_release_metadata(
@@ -230,7 +279,7 @@ class MetadataTests(unittest.TestCase):
         )
 
         errors = release_metadata.validate_release_workspace(
-            release_metadata.WorkspaceMetadata(packages)
+            replace(metadata, packages=packages)
         )
 
         self.assertTrue(any("missing: dear-imgui-web-demo" in error for error in errors))
@@ -248,7 +297,7 @@ class MetadataTests(unittest.TestCase):
         )
 
         errors = release_metadata.validate_release_workspace(
-            release_metadata.WorkspaceMetadata(packages)
+            replace(metadata, packages=packages)
         )
 
         self.assertTrue(any("only targets crates.io" in error for error in errors))
@@ -265,7 +314,7 @@ class MetadataTests(unittest.TestCase):
         )
 
         errors = release_metadata.validate_release_workspace(
-            release_metadata.WorkspaceMetadata(packages)
+            replace(metadata, packages=packages)
         )
 
         self.assertTrue(any("must use the local workspace path" in error for error in errors))
@@ -508,13 +557,14 @@ class PublishCommandTests(unittest.TestCase):
             else dependency
             for dependency in core.dependencies
         )
-        metadata = release_metadata.WorkspaceMetadata(
-            tuple(
+        metadata = replace(
+            self.metadata,
+            packages=tuple(
                 replace(package, dependencies=dependencies)
                 if package.name == core.name
                 else package
                 for package in self.metadata.packages
-            )
+            ),
         )
         order = list(PUBLISH.PUBLISH_ORDER)
         sys_index = next(
@@ -603,6 +653,43 @@ class PrepublishTests(unittest.TestCase):
             capture=True,
             show_output=True,
         )
+
+    def test_package_gate_verifies_every_source_archive(self):
+        script = (REPO_ROOT / "tools/ci/verify_packaged_core.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertNotIn("--no-verify", script)
+        self.assertIn("Create every publishable workspace source archive", script)
+
+    def test_nextest_release_tests_are_per_package_and_cover_integrations(self):
+        commands = PREPUBLISH.release_test_commands(use_nextest=True)
+        labels = [label for label, _command in commands]
+        package_labels = labels[: len(release_metadata.PUBLISH_ORDER)]
+
+        self.assertEqual(
+            package_labels,
+            [name for name, _path in release_metadata.PUBLISH_ORDER],
+        )
+        self.assertIn("dear-imgui-reflect", package_labels)
+        self.assertIn("dear-file-browser", package_labels)
+        self.assertIn("dear-app", package_labels)
+        self.assertIn("xtask", labels)
+        for _label, command in commands:
+            self.assertNotIn("--workspace", command)
+            self.assertNotIn("--lib", command)
+
+        stack_command = dict(commands)["dear-imgui-rs stack-layout integration"]
+        self.assertEqual(stack_command[-2:], ["--test", "stack_layout_context"])
+        self.assertIn("stack-layout", stack_command)
+
+    def test_cargo_test_fallback_is_serial_for_every_profile(self):
+        commands = PREPUBLISH.release_test_commands(use_nextest=False)
+
+        for _label, command in commands:
+            self.assertEqual(command[-2:], ["--", "--test-threads=1"])
+            self.assertNotIn("--workspace", command)
+            self.assertNotIn("--lib", command)
 
     def test_skip_git_requires_skipping_head_only_package_gate(self):
         stderr = io.StringIO()

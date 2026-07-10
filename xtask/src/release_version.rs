@@ -10,9 +10,6 @@ use std::{
 use tempfile::NamedTempFile;
 use toml_edit::{DocumentMut, Formatted, Item, Table, Value};
 
-const MEMBER_COUNT: usize = 30;
-const PUBLISHABLE_COUNT: usize = 27;
-const AUXILIARY_VERSION: &str = "0.1.0";
 const DEPENDENCY_SECTIONS: [&str; 3] = ["dependencies", "dev-dependencies", "build-dependencies"];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -51,11 +48,24 @@ struct Member {
 }
 
 #[derive(Debug)]
+struct PrivatePackagePolicy {
+    directory: PathBuf,
+    version: String,
+}
+
+#[derive(Debug)]
+struct ReleasePolicy {
+    core_package: String,
+    private_packages: BTreeMap<String, PrivatePackagePolicy>,
+}
+
+#[derive(Debug)]
 struct Graph {
     root: PathBuf,
     root_manifest: PathBuf,
     root_source: String,
     root_document: DocumentMut,
+    release_policy: ReleasePolicy,
     members: Vec<Member>,
 }
 
@@ -66,12 +76,8 @@ impl Graph {
         let root_manifest = root.join("Cargo.toml");
         let root_source = read_source(&root_manifest)?;
         let root_document = parse_document(&root_source, &root_manifest)?;
+        let release_policy = release_policy(&root_document, &root_manifest)?;
         let member_paths = workspace_member_paths(&root_document)?;
-        ensure!(
-            member_paths.len() == MEMBER_COUNT,
-            "release graph must contain exactly {MEMBER_COUNT} members, found {}",
-            member_paths.len()
-        );
 
         let mut seen_directories = BTreeSet::new();
         let mut members = Vec::with_capacity(member_paths.len());
@@ -108,6 +114,7 @@ impl Graph {
             root_manifest,
             root_source,
             root_document,
+            release_policy,
             members,
         })
     }
@@ -129,6 +136,8 @@ struct Plan {
     requirement: String,
     updated_root: String,
     edge_count: usize,
+    publishable_count: usize,
+    private_count: usize,
 }
 
 impl Plan {
@@ -157,6 +166,8 @@ impl Plan {
             requirement,
             updated_root,
             edge_count: validation.edge_count,
+            publishable_count: validation.publishable_count,
+            private_count: validation.private_count,
         })
     }
 
@@ -170,8 +181,8 @@ pub(crate) fn run(root: &Path, args: &[String]) -> Result<()> {
     let plan = Plan::build(root, options.version)?;
     if plan.is_idempotent() {
         eprintln!(
-            "release graph is already at {} ({PUBLISHABLE_COUNT} publishable packages, {} internal edges)",
-            plan.target, plan.edge_count
+            "release graph is already at {} ({} publishable packages, {} internal edges)",
+            plan.target, plan.publishable_count, plan.edge_count
         );
         return Ok(());
     }
@@ -185,8 +196,8 @@ pub(crate) fn run(root: &Path, args: &[String]) -> Result<()> {
         plan.current, plan.target, plan.requirement
     );
     eprintln!(
-        "validated {PUBLISHABLE_COUNT} publishable packages, 3 auxiliary packages, and {} internal edges",
-        plan.edge_count
+        "validated {} publishable packages, {} private packages, and {} internal edges",
+        plan.publishable_count, plan.private_count, plan.edge_count
     );
     if options.dry_run {
         return Ok(());
@@ -197,6 +208,8 @@ pub(crate) fn run(root: &Path, args: &[String]) -> Result<()> {
 struct Validation {
     version: Version,
     edge_count: usize,
+    publishable_count: usize,
+    private_count: usize,
 }
 
 struct CatalogEntry {
@@ -207,14 +220,11 @@ struct CatalogEntry {
 fn validate_graph(graph: &Graph, root: &DocumentMut) -> Result<Validation> {
     let version = workspace_version(root, &graph.root_manifest)?;
     let requirement = release_requirement(&version)?;
-    let expected_auxiliary = BTreeMap::from([
-        ("dear-imgui-examples", Path::new("examples")),
-        ("dear-imgui-web-demo", Path::new("examples-wasm")),
-        ("xtask", Path::new("xtask")),
-    ]);
+    let expected_private = &graph.release_policy.private_packages;
     let mut publishable_by_directory = BTreeMap::new();
-    let mut auxiliary_count = 0;
+    let mut private_count = 0;
     let mut names = BTreeSet::new();
+    let mut core_is_publishable = false;
 
     for member in &graph.members {
         ensure!(
@@ -223,6 +233,9 @@ fn validate_graph(graph: &Graph, root: &DocumentMut) -> Result<Validation> {
             member.name
         );
         let package = package_table(&member.document, &member.manifest_path)?;
+        if member.name == graph.release_policy.core_package {
+            core_is_publishable = member.publishable;
+        }
         if member.publishable {
             ensure!(
                 package
@@ -235,31 +248,33 @@ fn validate_graph(graph: &Graph, root: &DocumentMut) -> Result<Validation> {
             );
             publishable_by_directory.insert(member.directory.clone(), member.name.clone());
         } else {
-            auxiliary_count += 1;
-            let expected = expected_auxiliary
+            private_count += 1;
+            let expected = expected_private
                 .get(member.name.as_str())
                 .with_context(|| format!("unexpected non-publishable package {}", member.name))?;
             ensure!(
-                member.relative_manifest.parent() == Some(*expected),
-                "auxiliary package {} must remain at {}",
+                member.relative_manifest.parent() == Some(expected.directory.as_path()),
+                "private package {} must remain at {}",
                 member.name,
-                expected.display()
+                expected.directory.display()
             );
             ensure!(
-                package.get("version").and_then(Item::as_str) == Some(AUXILIARY_VERSION),
-                "auxiliary package {} must remain at {AUXILIARY_VERSION}",
-                member.name
+                package.get("version").and_then(Item::as_str) == Some(expected.version.as_str()),
+                "private package {} must remain at {}",
+                member.name,
+                expected.version
             );
         }
     }
     ensure!(
-        publishable_by_directory.len() == PUBLISHABLE_COUNT,
-        "release graph must contain exactly {PUBLISHABLE_COUNT} publishable packages, found {}",
-        publishable_by_directory.len()
+        core_is_publishable,
+        "release core package {} must exist and be publishable",
+        graph.release_policy.core_package
     );
     ensure!(
-        auxiliary_count == 3,
-        "release graph must contain exactly 3 auxiliary packages"
+        private_count == expected_private.len(),
+        "release graph contains {private_count} private packages, but policy declares {}",
+        expected_private.len()
     );
 
     let dependencies = root
@@ -335,8 +350,9 @@ fn validate_graph(graph: &Graph, root: &DocumentMut) -> Result<Validation> {
         );
     }
     ensure!(
-        catalog.len() == PUBLISHABLE_COUNT,
-        "root release catalog must contain exactly {PUBLISHABLE_COUNT} internal path entries, found {}",
+        catalog.len() == publishable_by_directory.len(),
+        "root release catalog must contain one entry per publishable package (expected {}, found {})",
+        publishable_by_directory.len(),
         catalog.len()
     );
     for (directory, package) in &publishable_by_directory {
@@ -368,6 +384,8 @@ fn validate_graph(graph: &Graph, root: &DocumentMut) -> Result<Validation> {
     Ok(Validation {
         version,
         edge_count,
+        publishable_count: publishable_by_directory.len(),
+        private_count,
     })
 }
 
@@ -615,6 +633,83 @@ fn validate_git_status(success: bool, stdout: &[u8], stderr: &[u8]) -> Result<()
     Ok(())
 }
 
+fn release_policy(document: &DocumentMut, path: &Path) -> Result<ReleasePolicy> {
+    let policy = document
+        .get("workspace")
+        .and_then(|item| item.get("metadata"))
+        .and_then(|item| item.get("dear-imgui-release"))
+        .and_then(Item::as_table)
+        .with_context(|| {
+            format!(
+                "{} is missing [workspace.metadata.dear-imgui-release]",
+                path.display()
+            )
+        })?;
+    for (field, _) in policy.iter() {
+        ensure!(
+            matches!(field, "core-package" | "private-packages"),
+            "release policy contains unknown field {field}"
+        );
+    }
+    let core_package = policy
+        .get("core-package")
+        .and_then(Item::as_str)
+        .filter(|name| !name.is_empty())
+        .context("release policy core-package must be a non-empty string")?
+        .to_owned();
+    let private_table = policy
+        .get("private-packages")
+        .and_then(Item::as_table)
+        .context("release policy private-packages must be a table")?;
+    ensure!(
+        !private_table.is_empty(),
+        "release policy must declare at least one private package"
+    );
+    let mut private_packages = BTreeMap::new();
+    for (name, item) in private_table.iter() {
+        let fields = item
+            .as_table_like()
+            .with_context(|| format!("private package policy {name} must be a table"))?;
+        for (field, _) in fields.iter() {
+            ensure!(
+                matches!(field, "path" | "version"),
+                "private package policy {name} contains unknown field {field}"
+            );
+        }
+        let directory = PathBuf::from(
+            dependency_string(item, "path")
+                .with_context(|| format!("private package policy {name} is missing path"))?,
+        );
+        ensure!(
+            !directory.as_os_str().is_empty()
+                && !directory.is_absolute()
+                && !directory
+                    .components()
+                    .any(|component| component == std::path::Component::ParentDir),
+            "private package policy {name} path must stay within the workspace"
+        );
+        let private_version = dependency_string(item, "version")
+            .with_context(|| format!("private package policy {name} is missing version"))?;
+        Version::parse(private_version)
+            .with_context(|| format!("private package policy {name} has invalid version"))?;
+        private_packages.insert(
+            name.to_owned(),
+            PrivatePackagePolicy {
+                directory,
+                version: private_version.to_owned(),
+            },
+        );
+    }
+    ensure!(
+        !private_packages.contains_key(&core_package),
+        "release core package {core_package} cannot be private"
+    );
+    Ok(ReleasePolicy {
+        core_package,
+        private_packages,
+    })
+}
+
 fn workspace_member_paths(document: &DocumentMut) -> Result<Vec<PathBuf>> {
     document
         .get("workspace")
@@ -775,8 +870,18 @@ mod tests {
             }
             fs::write(
                 root.join("Cargo.toml"),
-                format!("[workspace]\nmembers = [\n{members}]\n[workspace.package]\nversion = \"0.16.0\" # release\n[workspace.dependencies]\n{catalog}"),
-            ).unwrap();
+                format!(
+                    "[workspace]\nmembers = [\n{members}]\n\
+[workspace.package]\nversion = \"0.16.0\" # release\n\
+[workspace.metadata.dear-imgui-release]\ncore-package = \"pkg-00\"\n\
+[workspace.metadata.dear-imgui-release.private-packages]\n\
+dear-imgui-examples = {{ path = \"examples\", version = \"0.1.0\" }}\n\
+dear-imgui-web-demo = {{ path = \"examples-wasm\", version = \"0.1.0\" }}\n\
+xtask = {{ path = \"xtask\", version = \"0.1.0\" }}\n\
+[workspace.dependencies]\n{catalog}"
+                ),
+            )
+            .unwrap();
             Self {
                 directory,
                 manifests,
@@ -883,7 +988,36 @@ mod tests {
             Plan::build(fixture.root(), Version::parse("0.17.0").unwrap())
                 .unwrap_err()
                 .to_string()
-                .contains("exactly 27")
+                .contains("one entry per publishable package")
+        );
+    }
+
+    #[test]
+    fn release_policy_owns_private_package_identity_path_and_version() {
+        let fixture = Fixture::new();
+        let root = fixture.root_manifest();
+        let source = fs::read_to_string(&root)
+            .unwrap()
+            .replace("path = \"examples\"", "path = \"wrong-examples\"");
+        fs::write(&root, source).unwrap();
+        assert!(
+            Plan::build(fixture.root(), Version::parse("0.17.0").unwrap())
+                .unwrap_err()
+                .to_string()
+                .contains("must remain at wrong-examples")
+        );
+
+        let fixture = Fixture::new();
+        let root = fixture.root_manifest();
+        let source = fs::read_to_string(&root)
+            .unwrap()
+            .replace("xtask = { path = \"xtask\", version = \"0.1.0\" }", "");
+        fs::write(&root, source).unwrap();
+        assert!(
+            Plan::build(fixture.root(), Version::parse("0.17.0").unwrap())
+                .unwrap_err()
+                .to_string()
+                .contains("unexpected non-publishable package xtask")
         );
     }
 

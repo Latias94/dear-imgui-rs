@@ -22,53 +22,78 @@ fn project_root() -> PathBuf {
 
 fn run() -> Result<()> {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
-    let cmd = args.first().map(|s| s.as_str()).unwrap_or("wasm-bindgen");
+    let Some(cmd) = args.first().map(String::as_str) else {
+        print_help();
+        anyhow::bail!("an explicit xtask command is required");
+    };
     match cmd {
         "wasm-bindgen" => {
-            reject_command_arguments(cmd, &args[1..])?;
+            reject_extra_arguments(cmd, &args[1..])?;
             gen_wasm_bindings()?;
         }
         "wasm-bindgen-implot" => {
-            reject_command_arguments(cmd, &args[1..])?;
+            reject_extra_arguments(cmd, &args[1..])?;
             gen_implot_wasm_bindings()?;
         }
         "wasm-bindgen-implot3d" => {
-            reject_command_arguments(cmd, &args[1..])?;
+            reject_extra_arguments(cmd, &args[1..])?;
             gen_implot3d_wasm_bindings()?;
         }
         "wasm-bindgen-imnodes" => {
-            reject_command_arguments(cmd, &args[1..])?;
+            reject_extra_arguments(cmd, &args[1..])?;
             gen_imnodes_wasm_bindings()?;
         }
         "wasm-bindgen-imguizmo" => {
-            reject_command_arguments(cmd, &args[1..])?;
+            reject_extra_arguments(cmd, &args[1..])?;
             gen_imguizmo_wasm_bindings()?;
         }
         "wasm-bindgen-imguizmo-quat" => {
-            reject_command_arguments(cmd, &args[1..])?;
+            reject_extra_arguments(cmd, &args[1..])?;
             gen_imguizmo_quat_wasm_bindings()?;
         }
         "verify-bindings" => verify_core_bindings(&args[1..])?,
         "release-version" => release_version::run(&project_root(), &args[1..])?,
-        "web-demo" => build_web_demo(args.get(1).map(|s| s.as_str()))?,
-        "build-cimgui-provider" => build_cimgui_provider()?,
+        "web-demo" => build_web_demo(optional_single_argument(cmd, &args[1..])?)?,
+        "build-cimgui-provider" => {
+            reject_extra_arguments(cmd, &args[1..])?;
+            build_cimgui_provider()?;
+        }
+        "help" | "-h" | "--help" => {
+            reject_extra_arguments(cmd, &args[1..])?;
+            print_help();
+        }
         _ => {
-            eprintln!(
-                "Unknown command: {}\nCommands:\n  wasm-bindgen\n  wasm-bindgen-implot\n  wasm-bindgen-implot3d\n  wasm-bindgen-imnodes\n  wasm-bindgen-imguizmo\n  wasm-bindgen-imguizmo-quat\n  verify-bindings [--check-only | --update] [--allow-dirty]\n  release-version <semver> [--dry-run]\n  web-demo [feature_list]\n  build-cimgui-provider\n\nExamples:\n  # Verify checked-in core bindings and git state\n  xtask verify-bindings\n  # Regenerate all supported core binding profiles\n  xtask verify-bindings --update --allow-dirty\n  # Preview the single-source workspace release update\n  xtask release-version 0.16.0 --dry-run\n  # Core ImGui only\n  xtask web-demo\n  # ImGui + ImPlot\n  xtask web-demo implot\n  # ImGui + ImPlot + ImNodes\n  xtask web-demo implot,imnodes",
-                cmd
-            );
+            print_help();
+            anyhow::bail!("unknown xtask command: {cmd}");
         }
     }
     Ok(())
 }
 
-fn reject_command_arguments(command: &str, arguments: &[String]) -> Result<()> {
+fn print_help() {
+    eprintln!(
+        "Commands:\n  wasm-bindgen\n  wasm-bindgen-implot\n  wasm-bindgen-implot3d\n  wasm-bindgen-imnodes\n  wasm-bindgen-imguizmo\n  wasm-bindgen-imguizmo-quat\n  verify-bindings [--check-only | --update] [--allow-dirty]\n  release-version <semver> [--dry-run]\n  web-demo [feature_list]\n  build-cimgui-provider\n  help\n\nExamples:\n  # Verify checked-in core bindings and git state\n  xtask verify-bindings\n  # Regenerate all supported core binding profiles\n  xtask verify-bindings --update --allow-dirty\n  # Preview the single-source workspace release update\n  xtask release-version 0.16.0 --dry-run\n  # Core ImGui only\n  xtask web-demo\n  # ImGui + ImPlot\n  xtask web-demo implot\n  # ImGui + ImPlot + ImNodes\n  xtask web-demo implot,imnodes"
+    );
+}
+
+fn reject_extra_arguments(command: &str, arguments: &[String]) -> Result<()> {
     if !arguments.is_empty() {
         anyhow::bail!(
-            "{command} does not accept a provider argument; the supported provider is {CORE_WASM_IMPORT_MODULE}"
+            "{command} does not accept arguments: {}",
+            arguments.join(" ")
         );
     }
     Ok(())
+}
+
+fn optional_single_argument<'a>(command: &str, arguments: &'a [String]) -> Result<Option<&'a str>> {
+    if arguments.len() > 1 {
+        anyhow::bail!(
+            "{command} accepts at most one argument, got: {}",
+            arguments.join(" ")
+        );
+    }
+    Ok(arguments.first().map(String::as_str))
 }
 
 fn gen_wasm_bindings() -> Result<()> {
@@ -201,9 +226,12 @@ impl VerifyBindingOptions {
         let mut options = Self::default();
         for arg in args {
             match arg.as_str() {
-                "--check-only" => options.check_only = true,
-                "--allow-dirty" => options.allow_dirty = true,
-                "--update" => options.update = true,
+                "--check-only" if !options.check_only => options.check_only = true,
+                "--allow-dirty" if !options.allow_dirty => options.allow_dirty = true,
+                "--update" if !options.update => options.update = true,
+                "--check-only" | "--allow-dirty" | "--update" => {
+                    anyhow::bail!("verify-bindings option may only be specified once: {arg}")
+                }
                 _ => anyhow::bail!("unknown verify-bindings option: {arg}"),
             }
         }

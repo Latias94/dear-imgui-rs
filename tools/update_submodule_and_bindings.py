@@ -52,17 +52,12 @@ Requirements:
 
 import argparse
 import os
-import re
 import shutil
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
 
-
-SOURCE_METADATA_SECTION = "package.metadata.dear-imgui-sources"
-SOURCE_METADATA_KEYS = {"cimgui-revision", "imgui-revision"}
-GIT_REVISION_RE = re.compile(r"^[0-9a-fA-F]{40}$")
+import source_metadata
 
 
 def run(cmd, cwd=None, env=None, dry=False):
@@ -90,103 +85,6 @@ def find_bindings(target_dir: Path, profile: str, crate: str) -> Path:
     # prefer the most recently modified bindings.
     matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return matches[0]
-
-
-def read_core_source_metadata(manifest_path: Path):
-    data = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
-    try:
-        metadata = data["package"]["metadata"]["dear-imgui-sources"]
-    except (KeyError, TypeError) as error:
-        raise RuntimeError(f"missing [{SOURCE_METADATA_SECTION}] in {manifest_path}") from error
-    if set(metadata) != SOURCE_METADATA_KEYS:
-        raise RuntimeError(
-            f"[{SOURCE_METADATA_SECTION}] must contain exactly "
-            f"{sorted(SOURCE_METADATA_KEYS)}, found {sorted(metadata)}"
-        )
-    for key, value in metadata.items():
-        if not isinstance(value, str) or not GIT_REVISION_RE.fullmatch(value):
-            raise RuntimeError(f"{key} must be a 40-character hexadecimal git revision")
-    return metadata
-
-
-def git_revision(path: Path) -> str:
-    revision = subprocess.check_output(
-        ["git", "-C", str(path), "rev-parse", "HEAD"], text=True
-    ).strip()
-    if not GIT_REVISION_RE.fullmatch(revision):
-        raise RuntimeError(f"invalid git revision from {path}: {revision!r}")
-    return revision
-
-
-def require_clean_git_tree(path: Path):
-    status = subprocess.check_output(
-        [
-            "git",
-            "-C",
-            str(path),
-            "status",
-            "--porcelain=v1",
-            "--untracked-files=all",
-            "--ignore-submodules=none",
-        ],
-        text=True,
-    )
-    if status:
-        raise RuntimeError(f"source tree is dirty: {path}\n{status.rstrip()}")
-
-
-def sync_core_source_metadata(manifest_path: Path, cimgui_path: Path, dry: bool):
-    imgui_path = cimgui_path / "imgui"
-    require_clean_git_tree(cimgui_path)
-    require_clean_git_tree(imgui_path)
-    revisions = {
-        "cimgui-revision": git_revision(cimgui_path),
-        "imgui-revision": git_revision(imgui_path),
-    }
-    current = read_core_source_metadata(manifest_path)
-    if current == revisions:
-        print("Core source metadata already matches clean submodule revisions")
-        return
-
-    print(
-        "Updating core source metadata: "
-        f"cimgui={revisions['cimgui-revision']} imgui={revisions['imgui-revision']}"
-    )
-    if dry:
-        return
-
-    lines = manifest_path.read_text(encoding="utf-8").splitlines(keepends=True)
-    section_header = f"[{SOURCE_METADATA_SECTION}]"
-    try:
-        section_start = next(
-            index for index, line in enumerate(lines) if line.strip() == section_header
-        )
-    except StopIteration as error:
-        raise RuntimeError(f"missing {section_header} in {manifest_path}") from error
-    section_end = next(
-        (
-            index
-            for index in range(section_start + 1, len(lines))
-            if lines[index].lstrip().startswith("[")
-        ),
-        len(lines),
-    )
-    found = set()
-    for index in range(section_start + 1, section_end):
-        match = re.match(r"^(\s*)([A-Za-z0-9_-]+)(\s*=).*$", lines[index])
-        if match is None or match.group(2) not in revisions:
-            continue
-        key = match.group(2)
-        newline = "\n" if lines[index].endswith("\n") else ""
-        lines[index] = f'{match.group(1)}{key}{match.group(3)} "{revisions[key]}"{newline}'
-        found.add(key)
-    if found != SOURCE_METADATA_KEYS:
-        raise RuntimeError(
-            f"could not update all source metadata keys in {manifest_path}: found {sorted(found)}"
-        )
-    manifest_path.write_text("".join(lines), encoding="utf-8")
-    if read_core_source_metadata(manifest_path) != revisions:
-        raise RuntimeError("source metadata update did not round-trip through TOML parsing")
 
 
 def core_binding_commands():
@@ -314,11 +212,23 @@ def main() -> int:
                 return rc
 
     if core_requested:
-        sync_core_source_metadata(
-            crate_roots["dear-imgui-sys"] / "Cargo.toml",
-            submodules["dear-imgui-sys"][0],
-            args.dry_run,
-        )
+        try:
+            metadata_update = source_metadata.update_core_source_metadata(
+                repo_root, dry_run=args.dry_run
+            )
+        except source_metadata.SourceMetadataError as error:
+            for message in error.errors:
+                print(f"Source metadata error: {message}", file=sys.stderr)
+            return 2
+        if metadata_update.changed:
+            action = "Would update" if args.dry_run else "Updated"
+            print(
+                f"{action} core source metadata: "
+                f"cimgui={metadata_update.revisions['cimgui-revision']} "
+                f"imgui={metadata_update.revisions['imgui-revision']}"
+            )
+        else:
+            print("Core source metadata already matches clean submodule revisions")
 
     if core_requested and not args.skip_core_bindings:
         print("Generating and validating all core native/WASM binding profiles via xtask...")
