@@ -1,6 +1,6 @@
 [package]
 name = "dear-imgui-build-support"
-version = "0.15.2"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

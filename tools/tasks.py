@@ -86,13 +86,18 @@ def task_bump(args, repo_root: Path) -> int:
         print("Usage: python3 tools/tasks.py bump <version>")
         return 1
     
-    cmd = [sys.executable, "tools/bump_version.py", args.version]
+    cmd = [
+        "cargo",
+        "run",
+        "-p",
+        "xtask",
+        "--",
+        "release-version",
+        args.version,
+    ]
     
     if getattr(args, "dry_run", False):
         cmd.append("--dry-run")
-    if getattr(args, "old_version", None):
-        cmd.extend(["--old-version", args.old_version])
-    
     return run_command(cmd, cwd=repo_root)
 
 
@@ -306,7 +311,6 @@ def main() -> int:
     # bump task
     bump_parser = subparsers.add_parser("bump", help="Bump version")
     bump_parser.add_argument("version", nargs="?", help="New version (e.g., 0.5.0)")
-    bump_parser.add_argument("--old-version", help="Old version to replace")
     bump_parser.add_argument("--dry-run", action="store_true", help="Dry run")
     
     # bindings task
@@ -344,7 +348,6 @@ def main() -> int:
     # release-prep task (all-in-one)
     release_prep_parser = subparsers.add_parser("release-prep", help="Prepare for release (all-in-one)")
     release_prep_parser.add_argument("version", nargs="?", help="New version (e.g., 0.5.0)")
-    release_prep_parser.add_argument("--old-version", help="Old version to replace")
     release_prep_parser.add_argument("--crates", help="Comma-separated list of crates (for bindings)")
     release_prep_parser.add_argument("--update-submodules", action="store_true", help="Update submodules when generating bindings")
     release_prep_parser.add_argument("--dry-run", action="store_true", help="Dry run where supported")

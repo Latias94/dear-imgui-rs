@@ -1,8 +1,8 @@
 [package]
 name = "dear-imgui-rs"
-version = "0.15.1"
+version.workspace = true
 edition.workspace = true
-description = "High-level Rust bindings to Dear ImGui v1.92.7 with docking, WGPU/GL backends, and extensions (ImPlot/ImPlot3D, ImNodes, ImGuizmo, file browser, reflection-based UI)"
+description = "High-level Rust bindings to Dear ImGui v1.92.8 with docking, WGPU/GL backends, and extensions (ImPlot/ImPlot3D, ImNodes, ImGuizmo, file browser, reflection-based UI)"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -17,7 +17,7 @@ features = ["freetype"]
 
 [dependencies]
 bitflags.workspace = true
-dear-imgui-sys = { path = "../dear-imgui-sys", version = "0.15" }
+dear-imgui-sys.workspace = true
 mint.workspace = true
 parking_lot.workspace = true
 cfg-if.workspace = true
