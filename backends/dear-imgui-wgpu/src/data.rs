@@ -66,7 +66,7 @@ impl WgpuRenderState {
 pub struct WgpuInitInfo {
     /// WGPU instance (required for multi-viewport to create per-window surfaces)
     pub instance: Option<Instance>,
-    /// WGPU adapter (optional, but recommended for multi-viewport to query surface capabilities)
+    /// WGPU adapter (required by multi-viewport; optional for single-window rendering)
     pub adapter: Option<Adapter>,
     /// WGPU device
     pub device: Device,
@@ -125,7 +125,7 @@ impl WgpuInitInfo {
         self
     }
 
-    /// Provide an adapter for querying per-surface capabilities (recommended for multi-viewport)
+    /// Provide the adapter required to negotiate multi-viewport surface capabilities
     pub fn with_adapter(mut self, adapter: Adapter) -> Self {
         self.adapter = Some(adapter);
         self
@@ -138,9 +138,9 @@ impl WgpuInitInfo {
 pub struct WgpuBackendData {
     /// Initialization info
     pub init_info: WgpuInitInfo,
-    /// WGPU instance (if provided)
+    /// WGPU instance (required by multi-viewport; optional for single-window rendering)
     pub instance: Option<Instance>,
-    /// WGPU adapter (if provided)
+    /// WGPU adapter (required by multi-viewport; optional for single-window rendering)
     pub adapter: Option<Adapter>,
     /// WGPU device
     pub device: Device,

@@ -2,10 +2,11 @@ use crate::{GammaMode, ShaderManager, WgpuBackendData, WgpuTextureManager};
 use wgpu::TextureView;
 
 #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+use std::sync::atomic::AtomicBool;
+#[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
 use wgpu::Color;
 
 /// Main WGPU renderer for Dear ImGui
-
 ///
 /// This corresponds to the main renderer functionality in imgui_impl_wgpu.cpp
 pub struct WgpuRenderer {
@@ -22,6 +23,23 @@ pub struct WgpuRenderer {
     /// Clear color used for secondary viewports (multi-viewport mode)
     #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
     pub(super) viewport_clear_color: Color,
+    /// Prevents safe lifecycle APIs from replacing GPU state behind registered raw callbacks.
+    #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+    pub(super) multi_viewport_active: AtomicBool,
+}
+
+#[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+impl WgpuRenderer {
+    pub(super) fn ensure_multi_viewport_inactive(&self) -> crate::RendererResult<()> {
+        if self
+            .multi_viewport_active
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            Err(crate::RendererError::MultiViewportActive)
+        } else {
+            Ok(())
+        }
+    }
 }
 
 #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]

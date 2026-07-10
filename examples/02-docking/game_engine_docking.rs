@@ -185,7 +185,7 @@ impl Default for GameEngineState {
 
 struct ImguiState {
     platform: WinitPlatform,
-    renderer: WgpuRenderer,
+    renderer: Box<WgpuRenderer>,
     #[allow(dead_code)] // Only used when the multi-viewport feature is enabled.
     enable_viewports: bool,
     clear_color: wgpu::Color,
@@ -207,6 +207,7 @@ impl Drop for ImguiState {
         // context is dropped.
         #[cfg(feature = "multi-viewport")]
         if self.enable_viewports {
+            wgpu_mvp::shutdown_multi_viewport_support(&mut self.context);
             winit_mvp::shutdown_multi_viewport_support(&mut self.context);
         }
     }
@@ -995,7 +996,7 @@ impl AppWindow {
 
         self.imgui = Some(ImguiState {
             platform,
-            renderer,
+            renderer: Box::new(renderer),
             enable_viewports,
             clear_color,
             last_frame: Instant::now(),
@@ -2576,7 +2577,7 @@ impl ApplicationHandler for App {
                             winit_mvp::init_multi_viewport_support(&mut imgui.context, &app.window);
                             // Then install renderer viewport callbacks.
                             if let Err(error) =
-                                wgpu_mvp::enable(&mut imgui.renderer, &mut imgui.context)
+                                unsafe { wgpu_mvp::enable(&mut imgui.renderer, &mut imgui.context) }
                             {
                                 eprintln!(
                                     "failed to enable WGPU multi-viewport callbacks: {error}"

@@ -108,9 +108,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         let io = imgui.io_mut();
         let mut flags = io.config_flags();
         flags.insert(ConfigFlags::DOCKING_ENABLE);
-        if ENABLE_VIEWPORTS {
-            flags.insert(ConfigFlags::VIEWPORTS_ENABLE);
-        }
         io.set_config_flags(flags);
 
         let style = imgui.style_mut();
@@ -129,11 +126,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let init_info = WgpuInitInfo::new(device.clone(), queue.clone(), surface_config.format)
         .with_instance(instance.clone())
         .with_adapter(adapter.clone());
-    let mut renderer = WgpuRenderer::new(init_info, &mut imgui)?;
+    let mut renderer = Box::new(WgpuRenderer::new(init_info, &mut imgui)?);
     renderer.set_gamma_mode(GammaMode::Auto);
 
     if ENABLE_VIEWPORTS {
-        dear_imgui_wgpu::multi_viewport_sdl3::enable(&mut renderer, &mut imgui)?;
+        unsafe {
+            dear_imgui_wgpu::multi_viewport_sdl3::enable(&mut renderer, &mut imgui)?;
+        }
     }
 
     let mut last_frame = Instant::now();
