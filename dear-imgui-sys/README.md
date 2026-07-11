@@ -300,8 +300,9 @@ Scope notes:
 - The Rust-facing ABI uses `dear_imgui_stack_*` symbols and is owned by this
   crate. Downstream code should prefer the safe `dear-imgui-rs` wrappers.
 - Normal native builds compile the original Dear ImGui core and do not export the shim symbols.
-- Prebuilt profiles match exactly: normal manifests omit `stack-layout`; patched manifests include
-  it and use a `-stack-layout` archive suffix.
+- Official release prebuilt profiles match exactly: stack-layout artifacts use a `-stack-layout`
+  archive suffix, or `-stack-layout-freetype` when FreeType is also enabled. Their manifests declare
+  the same feature set, so neither can substitute for a normal or FreeType-only artifact.
 - `stack-layout` is native-only and cannot be combined with the WASM feature or target.
 
 ### Cargo Metadata for Backend Authors

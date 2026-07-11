@@ -102,7 +102,7 @@ Canonical generation rejects `BINDGEN_EXTRA_CLANG_ARGS*`; target facts, header s
 
 The exact 40-hex cimgui and nested Dear ImGui revisions are package metadata, not values discovered from Git during a consumer build. They survive `cargo package` and are available in an unpacked crate with no `.git` directory.
 
-A `dear-imgui-sys` core native prebuilt is accepted only when its manifest exactly matches crate/version, target triple, static link type, MSVC CRT, normalized features, both source revisions, and binding-spec hash. Normal and `stack-layout` archives have different names and manifests. Missing, duplicate, unknown, or mismatched fields reject the core artifact.
+A `dear-imgui-sys` core native prebuilt is accepted only when its manifest exactly matches crate/version, target triple, static link type, MSVC CRT, normalized features, both source revisions, and binding-spec hash. The normal, freetype, stack-layout, and stack-layout + freetype combinations have different names and manifests. Missing, duplicate, unknown, or mismatched fields reject the core artifact.
 
 ## Pre-publish checks
 Verify all `-sys` crates have pregenerated bindings and build in docs mode locally:

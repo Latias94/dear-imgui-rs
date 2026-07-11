@@ -169,9 +169,11 @@ requested artifact profile:
 
 Missing, duplicate, mismatched, or unknown manifest fields reject the artifact.
 This applies equally to release downloads and explicit `IMGUI_SYS_LIB_DIR` or
-`IMGUI_SYS_PREBUILT_URL` inputs. Normal and `stack-layout` archives have
-different names, cache identities, and manifests, so a normal build cannot
-silently consume the patched blueprint core or vice versa.
+`IMGUI_SYS_PREBUILT_URL` inputs. The independent `stack-layout` and `freetype`
+feature dimensions produce four exact combinations: normal, freetype,
+stack-layout, and stack-layout + freetype. Each has a distinct archive name,
+cache identity, and manifest, so no build can silently consume another
+combination.
 
 ### Raw binding migration
 

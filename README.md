@@ -117,7 +117,7 @@ cargo run --bin dear_app_docking
 # Extension examples (using wgpu + winit directly)
 cargo run --bin imguizmo_basic --features imguizmo
 cargo run --bin imnodes_basic --features imnodes
-# imgui-node-editor: basic interaction and blueprints-style showcase
+# imgui-node-editor: basic uses the normal core; showcase opts into blueprint stack layout
 cargo run -p dear-imgui-examples --bin node_editor_basic --features node-editor
 cargo run -p dear-imgui-examples --bin node_editor_showcase --features node-editor-blueprints
 cargo run --bin implot_basic --features implot
@@ -338,9 +338,9 @@ Common env-var shapes used by `-sys` crates (consult each crate README for its e
 - `IMPLOT_SYS_USE_CMAKE` — prefer CMake for `dear-implot-sys` when available; otherwise cc
 - `CARGO_NET_OFFLINE=true` — forbid network; use only local packages or repo prebuilt
 
-Freetype: enable once anywhere. Turning on `freetype` in any extension (imnodes/node-editor/imguizmo/implot) propagates to `dear-imgui-sys`. Source builds probe `pkg-config freetype2` first and then vcpkg's `freetype` port; if neither is available, the build fails instead of silently disabling FreeType. When using a prebuilt `dear-imgui-sys` with freetype, ensure the package manifest includes `features=freetype` (our packager writes this).
+FreeType: enable once anywhere. Turning on `freetype` in `dear-implot`, `dear-imnodes`, `dear-node-editor`, `dear-imguizmo`, `dear-imguizmo-quat`, or `dear-imgui-test-engine` propagates to `dear-imgui-sys`. Source builds probe `pkg-config freetype2` first and then vcpkg's `freetype` port; if neither is available, the build fails instead of silently disabling FreeType. When using a prebuilt `dear-imgui-sys` with freetype, ensure the package manifest includes `features=freetype` (our packager writes this).
 
-Blueprint stack layout is native-only and opt-in. Enable `dear-node-editor/blueprints` (or `dear-imgui-rs/stack-layout` for direct use) to select the patched Dear ImGui core artifact. Prebuilt manifests must match exactly: normal artifacts omit `stack-layout`, while blueprint artifacts declare it and use the `-stack-layout` archive suffix. The two profiles are never substituted for each other.
+Blueprint stack layout is native-only and opt-in. Enable `dear-node-editor/blueprints` (or `dear-imgui-rs/stack-layout` for direct use) to select the patched Dear ImGui core artifact. Prebuilt manifests must match exactly: normal and freetype-only artifacts omit `stack-layout`, while blueprint artifacts declare it and use the `-stack-layout` archive suffix. When `freetype` is also enabled, the manifest and archive name declare both features. The four feature combinations (normal, freetype, stack-layout, and stack-layout + freetype) are never substituted for each other.
 
 Quick examples (enable auto prebuilt download):
 

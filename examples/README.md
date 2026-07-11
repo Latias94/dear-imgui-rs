@@ -122,7 +122,7 @@ This is the intended organization.
   - `sdl3_ash_multi_viewport.rs`: SDL3 + Vulkan/Ash native multi-viewport example using the Rust Vulkan renderer backend.
     - Run with: `cargo run -p dear-imgui-examples --bin sdl3_ash_multi_viewport --features sdl3-ash-multi-viewport`
     - Uses SDL3 platform backend for window management and `dear-imgui-ash` to render all viewports via `Platform_CreateVkSurface`.
-  - `sdl3_sdlgpu_multi_view.rs`: SDL3 + SDL3 multi-viewport example using official C++ backends. (feature `sdl3-sdlgpu3`)
+  - `sdl3_sdlgpu_multi_view.rs`: SDL3 + SDL3 multi-viewport example using official C++ backends. (feature `sdl3-gpu-multi-viewport`)
     - Run with: `cargo run -p dear-imgui-examples --bin sdl3_sdlgpu_multi_view --features sdl3-gpu-multi-viewport`
     - Uses SDL3 platform backend for window management and `sdl3::gpu` to render all viewports via `sdl3::gpu::Device`.
 
