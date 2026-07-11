@@ -82,21 +82,75 @@ pub mod binding {
         "ImWcharClass",
     ];
     const CORE_HEADER_PREAMBLE: &str = "";
-    const CORE_HEADER_SHIMS: &[HeaderShim] = &[HeaderShim {
-        name: "stdio.h",
-        contents: r#"
+    const CORE_HEADER_SHIMS: &[HeaderShim] = &[
+        HeaderShim {
+            name: "stdio.h",
+            contents: r#"
 #ifndef DEAR_IMGUI_RS_STDIO_H
 #define DEAR_IMGUI_RS_STDIO_H
+#ifndef DEAR_IMGUI_RS_SIZE_T_DEFINED
+#define DEAR_IMGUI_RS_SIZE_T_DEFINED
 typedef __SIZE_TYPE__ size_t;
+#endif
 typedef void FILE;
 #endif
 "#,
-    }];
+        },
+        HeaderShim {
+            name: "stdint.h",
+            contents: r#"
+#ifndef DEAR_IMGUI_RS_STDINT_H
+#define DEAR_IMGUI_RS_STDINT_H
+typedef __INT8_TYPE__ int8_t;
+typedef __UINT8_TYPE__ uint8_t;
+typedef __INT16_TYPE__ int16_t;
+typedef __UINT16_TYPE__ uint16_t;
+typedef __INT32_TYPE__ int32_t;
+typedef __UINT32_TYPE__ uint32_t;
+typedef __INT64_TYPE__ int64_t;
+typedef __UINT64_TYPE__ uint64_t;
+typedef __INTPTR_TYPE__ intptr_t;
+typedef __UINTPTR_TYPE__ uintptr_t;
+typedef __INTMAX_TYPE__ intmax_t;
+typedef __UINTMAX_TYPE__ uintmax_t;
+#endif
+"#,
+        },
+        HeaderShim {
+            name: "stdarg.h",
+            contents: r#"
+#ifndef DEAR_IMGUI_RS_STDARG_H
+#define DEAR_IMGUI_RS_STDARG_H
+typedef __builtin_va_list va_list;
+#define va_start(args, last) __builtin_va_start(args, last)
+#define va_end(args) __builtin_va_end(args)
+#define va_arg(args, type) __builtin_va_arg(args, type)
+#define va_copy(dest, src) __builtin_va_copy(dest, src)
+#endif
+"#,
+        },
+        HeaderShim {
+            name: "stdbool.h",
+            contents: r#"
+#ifndef DEAR_IMGUI_RS_STDBOOL_H
+#define DEAR_IMGUI_RS_STDBOOL_H
+#ifndef __cplusplus
+#define bool _Bool
+#define true 1
+#define false 0
+#endif
+#define __bool_true_false_are_defined 1
+#endif
+"#,
+        },
+    ];
     const CORE_TYPE_ALLOWLISTS: &[&str] = &["Im.*"];
     const CORE_VAR_ALLOWLISTS: &[&str] = &["Im.*"];
-    const CORE_NATIVE_WINDOWS64_CLANG_ARGS: &[&str] = &["--target=x86_64-pc-windows-msvc"];
-    const CORE_NATIVE_NON_WINDOWS_CLANG_ARGS: &[&str] = &["--target=x86_64-unknown-linux-gnu"];
-    const CORE_WASM_CLANG_ARGS: &[&str] = &["--target=wasm32-unknown-unknown"];
+    const CORE_NATIVE_WINDOWS64_CLANG_ARGS: &[&str] =
+        &["--target=x86_64-pc-windows-msvc", "-nostdinc"];
+    const CORE_NATIVE_NON_WINDOWS_CLANG_ARGS: &[&str] =
+        &["--target=x86_64-unknown-linux-gnu", "-nostdinc"];
+    const CORE_WASM_CLANG_ARGS: &[&str] = &["--target=wasm32-unknown-unknown", "-nostdinc"];
     const CORE_NATIVE_DEFINES: &[&str] = &["CIMGUI_DEFINE_ENUMS_AND_STRUCTS", "IMGUI_USE_WCHAR32"];
     const CORE_WASM_DEFINES: &[&str] = &[
         "CIMGUI_DEFINE_ENUMS_AND_STRUCTS",
@@ -2208,8 +2262,9 @@ pub const DEFAULT_GITHUB_REPO: &str = "dear-imgui";
 mod binding_contract_tests {
     use super::binding::{
         ArtifactProfile, BindingSpec, BuildRequest, BuildRequestInput, CORE_BUILD_ENV_VARS,
-        CORE_WASM_TARGET, NativeAbiProfile, SourceRevisions, TargetFacts, bindgen_rerun_env_vars,
-        is_supported_wasm_target, validate_bindgen_environment, validate_wasm_feature_contract,
+        CORE_WASM_TARGET, HeaderShim, NativeAbiProfile, SourceRevisions, TargetFacts,
+        bindgen_rerun_env_vars, is_supported_wasm_target, validate_bindgen_environment,
+        validate_wasm_feature_contract,
     };
 
     fn request_with_env(values: Vec<(&str, Option<&str>)>) -> BuildRequest {
@@ -2285,6 +2340,69 @@ mod binding_contract_tests {
             shifted.deterministic_hash(),
             "list field boundaries must participate in the canonical hash"
         );
+    }
+
+    #[test]
+    fn core_binding_specs_pin_every_direct_standard_header() {
+        let expected_headers = ["stdio.h", "stdint.h", "stdarg.h", "stdbool.h"];
+        let specs = [
+            BindingSpec::core_native(NativeAbiProfile::Windows64),
+            BindingSpec::core_native(NativeAbiProfile::NonWindows),
+            BindingSpec::core_wasm("imgui-sys-v0"),
+        ];
+
+        for spec in specs {
+            assert_eq!(
+                spec.header_shims
+                    .iter()
+                    .map(|shim| shim.name)
+                    .collect::<Vec<_>>(),
+                expected_headers
+            );
+            assert_eq!(
+                spec.clang_args
+                    .iter()
+                    .filter(|arg| **arg == "-nostdinc")
+                    .count(),
+                1,
+                "system include fallback must stay disabled"
+            );
+            assert!(
+                spec.header_shims
+                    .iter()
+                    .find(|shim| shim.name == "stdint.h")
+                    .unwrap()
+                    .contents
+                    .contains("__INTPTR_TYPE__")
+            );
+            assert!(
+                spec.header_shims
+                    .iter()
+                    .find(|shim| shim.name == "stdarg.h")
+                    .unwrap()
+                    .contents
+                    .contains("__builtin_va_list")
+            );
+        }
+    }
+
+    #[test]
+    fn header_shim_contents_participate_in_binding_spec_identity() {
+        const FIRST_SHIM: &[HeaderShim] = &[HeaderShim {
+            name: "stdint.h",
+            contents: "typedef __INT32_TYPE__ int32_t;",
+        }];
+        const SECOND_SHIM: &[HeaderShim] = &[HeaderShim {
+            name: "stdint.h",
+            contents: "typedef signed int int32_t;",
+        }];
+
+        let mut first = BindingSpec::core_native(NativeAbiProfile::NonWindows);
+        first.header_shims = FIRST_SHIM;
+        let mut second = first.clone();
+        second.header_shims = SECOND_SHIM;
+
+        assert_ne!(first.deterministic_hash(), second.deterministic_hash());
     }
 
     #[test]
