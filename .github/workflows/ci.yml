@@ -1187,6 +1187,9 @@ jobs:
         with:
           submodules: true
 
+      - name: Validate changelog structure
+        run: python3 -B tools/changelog.py check-unreleased
+
       - name: Init required nested submodules (selective)
         shell: bash
         run: bash tools/ci/update_submodules.sh

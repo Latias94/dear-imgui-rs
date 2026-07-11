@@ -7,6 +7,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import replace
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 
@@ -27,6 +28,7 @@ def load_tool(name: str):
 
 PREPUBLISH = load_tool("pre_publish_check")
 PUBLISH = load_tool("publish")
+CHANGELOG = load_tool("changelog")
 
 TEST_PRIVATE_PACKAGES = (
     "dear-imgui-examples",
@@ -588,6 +590,40 @@ class PublishCommandTests(unittest.TestCase):
         )
 
 
+class ChangelogTests(unittest.TestCase):
+    def test_accepts_unreleased_as_first_release_section(self):
+        with TemporaryDirectory() as directory:
+            changelog = Path(directory) / "CHANGELOG.md"
+            changelog.write_text(
+                "# Changelog\n\n## [Unreleased]\n\n## [0.16.0]\n\n- Notes.\n",
+                encoding="utf-8",
+            )
+
+            CHANGELOG.validate_unreleased_first(changelog)
+
+    def test_rejects_version_before_unreleased(self):
+        with TemporaryDirectory() as directory:
+            changelog = Path(directory) / "CHANGELOG.md"
+            changelog.write_text(
+                "# Changelog\n\n## [0.16.0]\n\n- Notes.\n",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "must keep .*Unreleased"):
+                CHANGELOG.validate_unreleased_first(changelog)
+
+    def test_publish_check_validates_changelog_structure(self):
+        workflow = (REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        job_start = workflow.index("  publish-check:")
+        job_end = workflow.index("\n  fmt:", job_start)
+        job = workflow[job_start:job_end]
+
+        self.assertIn(
+            "run: python3 -B tools/changelog.py check-unreleased",
+            job,
+        )
+
+
 class PrepublishTests(unittest.TestCase):
     def setUp(self):
         self.metadata = metadata_for(
@@ -606,19 +642,25 @@ class PrepublishTests(unittest.TestCase):
         self.assertTrue(success)
         self.assertEqual(errors, [])
         commands = [call.args[0] for call in run.call_args_list]
+        changelog_tool = str(Path("/repo") / "tools" / "changelog.py")
         self.assertEqual(
             commands,
             [
                 [
                     sys.executable,
-                    "/repo/tools/changelog.py",
+                    changelog_tool,
+                    "check-unreleased",
+                ],
+                [
+                    sys.executable,
+                    changelog_tool,
                     "extract",
                     "--version",
                     "0.16.0",
                 ],
                 [
                     sys.executable,
-                    "/repo/tools/changelog.py",
+                    changelog_tool,
                     "check-soft-wrap",
                     "--version",
                     "0.16.0",

@@ -43,6 +43,24 @@ def find_version_section(changelog: Path, version: str) -> str:
     return section + "\n"
 
 
+def validate_unreleased_first(changelog: Path) -> None:
+    lines = changelog.read_text(encoding="utf-8").splitlines()
+    for line in lines:
+        match = HEADING_RE.match(line)
+        if match is None:
+            continue
+
+        first = normalize_version(match.group("version"))
+        if first != "Unreleased":
+            raise ValueError(
+                f"{changelog} must keep ## [Unreleased] as its first release section; "
+                f"found {first}"
+            )
+        return
+
+    raise ValueError(f"{changelog} has no release sections")
+
+
 def likely_hard_wrap_violations(section: str) -> list[str]:
     violations = []
     in_fenced_code = False
@@ -115,6 +133,15 @@ def command_check_soft_wrap(args: argparse.Namespace) -> int:
     return 1
 
 
+def command_check_unreleased(args: argparse.Namespace) -> int:
+    try:
+        validate_unreleased_first(args.changelog)
+    except ValueError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -132,6 +159,13 @@ def build_parser() -> argparse.ArgumentParser:
     check = subparsers.add_parser("check-soft-wrap", help="Reject manually wrapped prose in one release section")
     add_common(check)
     check.set_defaults(func=command_check_soft_wrap)
+
+    unreleased = subparsers.add_parser(
+        "check-unreleased",
+        help="Require Unreleased to remain the first release section",
+    )
+    unreleased.add_argument("--changelog", type=Path, default=Path("CHANGELOG.md"))
+    unreleased.set_defaults(func=command_check_unreleased)
 
     return parser
 

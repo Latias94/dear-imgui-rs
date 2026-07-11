@@ -176,7 +176,7 @@ git push origin v0.16.0
 Before tagging and publishing, verify the following:
 
 - Root `workspace.package.version` is correct, all 27 publishable manifests inherit it, internal dependencies inherit root workspace declarations, and `CHANGELOG.md` is updated.
-- Changelog prose is soft-wrapped, and the current release notes can be extracted with `python3 tools/changelog.py extract --version <version>`.
+- The changelog keeps `## [Unreleased]` as its first release section, its prose is soft-wrapped, and the current release notes can be extracted with `python3 tools/changelog.py extract --version <version>`.
 - Compatibility docs are in sync:
   - Root `README.md` “Compatibility (0.16.0)” table updated.
   - `docs/COMPATIBILITY.md` updated with the new release train and notes.
