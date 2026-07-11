@@ -5,7 +5,7 @@ use super::*;
 /// This mirrors the behavior of the built-in `ImGuiValue` implementation but
 /// lets callers supply per-member vector settings.
 pub fn imgui_vec_with_settings<T>(
-    ui: &imgui::Ui,
+    inspector: &mut Inspector<'_, '_>,
     label: &str,
     value: &mut Vec<T>,
     vec_settings: &VecSettings,
@@ -13,23 +13,24 @@ pub fn imgui_vec_with_settings<T>(
 where
     T: ImGuiValue + Default,
 {
+    let ui = inspector.ui();
     // Show element count in the header label.
     let header_label = format!("{label} [{}]", value.len());
 
     if vec_settings.dropdown {
         if let Some(_node) = ui.tree_node(&header_label) {
-            imgui_vec_body(ui, label, value, vec_settings)
+            imgui_vec_body(inspector, label, value, vec_settings)
         } else {
             false
         }
     } else {
         ui.text(&header_label);
-        imgui_vec_body(ui, label, value, vec_settings)
+        imgui_vec_body(inspector, label, value, vec_settings)
     }
 }
 
 pub(super) fn imgui_vec_body<T>(
-    ui: &imgui::Ui,
+    inspector: &mut Inspector<'_, '_>,
     label: &str,
     value: &mut Vec<T>,
     vec_settings: &VecSettings,
@@ -37,6 +38,7 @@ pub(super) fn imgui_vec_body<T>(
 where
     T: ImGuiValue + Default,
 {
+    let ui = inspector.ui();
     enum VecOp {
         Insert { index: usize },
         Remove { index: usize },
@@ -54,8 +56,8 @@ where
         if ui.small_button(&add_label) {
             let new_index = value.len();
             value.push(T::default());
-            response::record_event(response::ReflectEvent::VecInserted {
-                path: response::current_field_path(),
+            inspector.record_event(crate::ReflectEvent::VecInserted {
+                path: inspector.current_path(),
                 index: new_index,
             });
             changed = true;
@@ -68,8 +70,8 @@ where
         if ui.small_button(&remove_label) {
             let removed_index = value.len().saturating_sub(1);
             value.pop();
-            response::record_event(response::ReflectEvent::VecRemoved {
-                path: response::current_field_path(),
+            inspector.record_event(crate::ReflectEvent::VecRemoved {
+                path: inspector.current_path(),
                 index: removed_index,
             });
             changed = true;
@@ -100,15 +102,14 @@ where
         }
 
         let elem_label = format!("{label}[{index}]");
-        let (elem_changed, elem_right_clicked) = if response::is_field_path_active() {
+        let (elem_changed, elem_right_clicked) = if inspector.is_path_active() {
             let segment = format!("[{index}]");
-            response::with_field_path(&segment, || {
-                let local_changed = T::imgui_value(ui, &elem_label, &mut value[index]);
-                let right_clicked = ui.is_item_clicked_with_button(imgui::MouseButton::Right);
-                (local_changed, right_clicked)
-            })
+            let _path = inspector.push_path(segment);
+            let local_changed = T::imgui_value(inspector, &elem_label, &mut value[index]);
+            let right_clicked = ui.is_item_clicked_with_button(imgui::MouseButton::Right);
+            (local_changed, right_clicked)
         } else {
-            let local_changed = T::imgui_value(ui, &elem_label, &mut value[index]);
+            let local_changed = T::imgui_value(inspector, &elem_label, &mut value[index]);
             let right_clicked = ui.is_item_clicked_with_button(imgui::MouseButton::Right);
             (local_changed, right_clicked)
         };
@@ -207,8 +208,8 @@ where
             VecOp::Insert { index } => {
                 let index = index.min(value.len());
                 value.insert(index, T::default());
-                response::record_event(response::ReflectEvent::VecInserted {
-                    path: response::current_field_path(),
+                inspector.record_event(crate::ReflectEvent::VecInserted {
+                    path: inspector.current_path(),
                     index,
                 });
                 changed = true;
@@ -216,8 +217,8 @@ where
             VecOp::Remove { index } => {
                 if index < value.len() {
                     value.remove(index);
-                    response::record_event(response::ReflectEvent::VecRemoved {
-                        path: response::current_field_path(),
+                    inspector.record_event(crate::ReflectEvent::VecRemoved {
+                        path: inspector.current_path(),
                         index,
                     });
                     changed = true;
@@ -228,8 +229,8 @@ where
                 if from < len && to < len && from != to {
                     let item = value.remove(from);
                     value.insert(to, item);
-                    response::record_event(response::ReflectEvent::VecReordered {
-                        path: response::current_field_path(),
+                    inspector.record_event(crate::ReflectEvent::VecReordered {
+                        path: inspector.current_path(),
                         from,
                         to,
                     });
@@ -240,8 +241,8 @@ where
                 if !value.is_empty() {
                     let previous_len = value.len();
                     value.clear();
-                    response::record_event(response::ReflectEvent::VecCleared {
-                        path: response::current_field_path(),
+                    inspector.record_event(crate::ReflectEvent::VecCleared {
+                        path: inspector.current_path(),
                         previous_len,
                     });
                     changed = true;
@@ -254,8 +255,8 @@ where
             let item = value.remove(from);
             let insert_index = if from < to { to.saturating_sub(1) } else { to };
             value.insert(insert_index, item);
-            response::record_event(response::ReflectEvent::VecReordered {
-                path: response::current_field_path(),
+            inspector.record_event(crate::ReflectEvent::VecReordered {
+                path: inspector.current_path(),
                 from,
                 to: insert_index,
             });

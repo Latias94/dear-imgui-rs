@@ -257,7 +257,7 @@ pub fn gen_string_field(
     } else {
         quote! {
             __changed |= ::dear_imgui_reflect::ImGuiValue::imgui_value(
-                ui,
+                inspector,
                 #label,
                 __field,
             );
@@ -376,7 +376,7 @@ pub fn gen_imstring_field(
     } else {
         quote! {
             __changed |= ::dear_imgui_reflect::ImGuiValue::imgui_value(
-                ui,
+                inspector,
                 #label,
                 __field,
             );

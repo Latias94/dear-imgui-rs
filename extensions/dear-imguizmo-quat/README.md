@@ -19,9 +19,9 @@ Safe, idiomatic Rust bindings for ImGuIZMO.quat (quaternion + 3D gizmo helpers) 
 
 | Item                   | Version |
 |------------------------|---------|
-| Crate                  | 0.15.1   |
-| dear-imgui-rs          | 0.15.1   |
-| dear-imguizmo-quat-sys | 0.15.1   |
+| Crate                  | 0.16.0  |
+| dear-imgui-rs          | 0.16.0  |
+| dear-imguizmo-quat-sys | 0.16.0  |
 
 See also: docs/COMPATIBILITY.md in the workspace for the full matrix.
 
@@ -41,8 +41,8 @@ To try the web demo with ImGuIZMO.quat enabled:
 
 ```bash
 # 1) Generate pregenerated wasm bindings (Dear ImGui core + ImGuIZMO.quat)
-cargo run -p xtask -- wasm-bindgen imgui-sys-v0
-cargo run -p xtask -- wasm-bindgen-imguizmo-quat imgui-sys-v0
+cargo run -p xtask -- wasm-bindgen
+cargo run -p xtask -- wasm-bindgen-imguizmo-quat
 
 # 2) Build the main wasm + JS (includes an "ImGuIZMO.quat (Web)" window)
 cargo run -p xtask -- web-demo imguizmo-quat
@@ -56,7 +56,7 @@ python -m http.server -d target/web-demo 8080
 
 Notes:
 - The `dear-imgui-web-demo` crate in `examples-wasm` can enable the `imguizmo-quat` feature; when present, an “ImGuIZMO.quat (Web)” window is shown if bindings + provider are available.
-- This is an early, experimental path; API and build steps may evolve in future releases. For production use, pin to a specific `0.6.x` release and follow changes in `docs/WASM.md`.
+- This is an early, experimental path; API and build steps may evolve in future releases. For production use, pin to a specific compatible `0.16` release and follow changes in `docs/WASM.md`.
 
 ## Features
 
@@ -95,8 +95,8 @@ use one saved value rather than a stack, so avoid nesting `set_*`/`restore_*` or
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.15.1"
-dear-imguizmo-quat = "0.15.1"
+dear-imgui-rs = "0.16.0"
+dear-imguizmo-quat = "0.16.0"
 ```
 
 Minimal usage with the Ui extension and builder API:

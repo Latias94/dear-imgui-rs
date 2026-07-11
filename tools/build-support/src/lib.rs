@@ -4,6 +4,1220 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 static STATIC_CPP_STDLIB_LINK_EMITTED: AtomicBool = AtomicBool::new(false);
 
+#[cfg(any(feature = "binding-spec", test))]
+pub mod binding {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    pub const CORE_BUILD_ENV_VARS: &[&str] = &[
+        "BUILD_SUPPORT_GH_OWNER",
+        "BUILD_SUPPORT_GH_REPO",
+        "BINDGEN_EXTRA_CLANG_ARGS",
+        "CARGO_CFG_TARGET_ARCH",
+        "CARGO_CFG_TARGET_ENDIAN",
+        "CARGO_CFG_TARGET_ENV",
+        "CARGO_CFG_TARGET_FEATURE",
+        "CARGO_CFG_TARGET_OS",
+        "CARGO_CFG_TARGET_POINTER_WIDTH",
+        "CARGO_NET_OFFLINE",
+        "CARGO_TARGET_DIR",
+        "DEAR_IMGUI_RS_REGEN_BINDINGS",
+        "DOCS_RS",
+        "IMGUI_SYS_CACHE_DIR",
+        "IMGUI_SYS_FORCE_BUILD",
+        "IMGUI_SYS_LIB_DIR",
+        "IMGUI_SYS_PACKAGE_DIR",
+        "IMGUI_SYS_PREBUILT_URL",
+        "IMGUI_SYS_SKIP_CC",
+        "IMGUI_SYS_USE_PREBUILT",
+        "PROFILE",
+        "TARGET",
+    ];
+
+    const CORE_FUNCTION_ALLOWLISTS: &[&str] = &["ig.*", "Im.*"];
+    const CORE_FUNCTION_BLOCKLISTS: &[&str] = &[
+        "ImGuiPlatformIO_Set_Platform_GetWindowPos",
+        "ImGuiPlatformIO_Set_Platform_GetWindowSize",
+        "ImGuiTextBuffer_appendfv",
+        "igBulletTextV",
+        "igDebugLogV",
+        "igImFormatStringToTempBufferV",
+        "igImFormatStringV",
+        "igLabelTextV",
+        "igLogTextV",
+        "igSetItemTooltipV",
+        "igSetTooltipV",
+        "igTextAlignedV",
+        "igTextColoredV",
+        "igTextDisabledV",
+        "igTextV",
+        "igTextWrappedV",
+        "igTreeNodeExV_Ptr",
+        "igTreeNodeExV_Str",
+        "igTreeNodeV_Ptr",
+        "igTreeNodeV_Str",
+    ];
+    const CORE_TYPE_BLOCKLISTS: &[&str] = &["FILE", "ImGuiDockNode", ".*va_list.*"];
+    const CORE_OPAQUE_TYPES: &[&str] = &["ImGuiDockNode"];
+    const CORE_RAW_LINES: &[&str] = &[
+        "pub type FILE = ::std::os::raw::c_void;",
+        "pub type ImU64 = ::std::os::raw::c_ulonglong;",
+        "#[repr(C)]\npub struct ImGuiDockNode { _unused: [u8; 0] }",
+    ];
+    const CORE_SIGNED_ENUM_ALIASES: &[&str] = &[
+        "ImGuiContextHookType",
+        "ImGuiDockNodeState",
+        "ImGuiInputEventType",
+        "ImGuiInputSource",
+        "ImGuiKey",
+        "ImGuiLocKey",
+        "ImGuiMouseSource",
+        "ImGuiNavLayer",
+        "ImGuiPlotType",
+        "ImGuiPopupPositionPolicy",
+        "ImGuiSelectionRequestType",
+        "ImGuiSortDirection",
+        "ImGuiWindowDockStyleCol",
+        "ImTextureFormat",
+        "ImTextureStatus",
+        "ImWcharClass",
+    ];
+    const CORE_HEADER_PREAMBLE: &str = "";
+    const CORE_HEADER_SHIMS: &[HeaderShim] = &[
+        HeaderShim {
+            name: "stdio.h",
+            contents: r#"
+#ifndef DEAR_IMGUI_RS_STDIO_H
+#define DEAR_IMGUI_RS_STDIO_H
+#ifndef DEAR_IMGUI_RS_SIZE_T_DEFINED
+#define DEAR_IMGUI_RS_SIZE_T_DEFINED
+typedef __SIZE_TYPE__ size_t;
+#endif
+typedef void FILE;
+#endif
+"#,
+        },
+        HeaderShim {
+            name: "stdint.h",
+            contents: r#"
+#ifndef DEAR_IMGUI_RS_STDINT_H
+#define DEAR_IMGUI_RS_STDINT_H
+typedef __INT8_TYPE__ int8_t;
+typedef __UINT8_TYPE__ uint8_t;
+typedef __INT16_TYPE__ int16_t;
+typedef __UINT16_TYPE__ uint16_t;
+typedef __INT32_TYPE__ int32_t;
+typedef __UINT32_TYPE__ uint32_t;
+typedef __INT64_TYPE__ int64_t;
+typedef __UINT64_TYPE__ uint64_t;
+typedef __INTPTR_TYPE__ intptr_t;
+typedef __UINTPTR_TYPE__ uintptr_t;
+typedef __INTMAX_TYPE__ intmax_t;
+typedef __UINTMAX_TYPE__ uintmax_t;
+#endif
+"#,
+        },
+        HeaderShim {
+            name: "stdarg.h",
+            contents: r#"
+#ifndef DEAR_IMGUI_RS_STDARG_H
+#define DEAR_IMGUI_RS_STDARG_H
+typedef __builtin_va_list va_list;
+#define va_start(args, last) __builtin_va_start(args, last)
+#define va_end(args) __builtin_va_end(args)
+#define va_arg(args, type) __builtin_va_arg(args, type)
+#define va_copy(dest, src) __builtin_va_copy(dest, src)
+#endif
+"#,
+        },
+        HeaderShim {
+            name: "stdbool.h",
+            contents: r#"
+#ifndef DEAR_IMGUI_RS_STDBOOL_H
+#define DEAR_IMGUI_RS_STDBOOL_H
+#ifndef __cplusplus
+#define bool _Bool
+#define true 1
+#define false 0
+#endif
+#define __bool_true_false_are_defined 1
+#endif
+"#,
+        },
+    ];
+    const CORE_TYPE_ALLOWLISTS: &[&str] = &["Im.*"];
+    const CORE_VAR_ALLOWLISTS: &[&str] = &["Im.*"];
+    const CORE_NATIVE_WINDOWS64_CLANG_ARGS: &[&str] =
+        &["--target=x86_64-pc-windows-msvc", "-nostdinc"];
+    const CORE_NATIVE_NON_WINDOWS_CLANG_ARGS: &[&str] =
+        &["--target=x86_64-unknown-linux-gnu", "-nostdinc"];
+    const CORE_WASM_CLANG_ARGS: &[&str] = &["--target=wasm32-unknown-unknown", "-nostdinc"];
+    const CORE_NATIVE_DEFINES: &[&str] = &["CIMGUI_DEFINE_ENUMS_AND_STRUCTS", "IMGUI_USE_WCHAR32"];
+    const CORE_WASM_DEFINES: &[&str] = &[
+        "CIMGUI_DEFINE_ENUMS_AND_STRUCTS",
+        "IMGUI_DISABLE_FILE_FUNCTIONS",
+        "IMGUI_DISABLE_OSX_FUNCTIONS",
+        "IMGUI_DISABLE_WIN32_FUNCTIONS",
+        "IMGUI_USE_WCHAR32",
+    ];
+    const CORE_INCLUDE_PATHS: &[&str] = &[".", "imgui"];
+    pub const CORE_BINDGEN_GENERATOR: &str = "rust-bindgen 0.72.1";
+    pub const BINDGEN_EXTRA_CLANG_ARGS_PREFIX: &str = "BINDGEN_EXTRA_CLANG_ARGS";
+    pub const CORE_WASM_TARGET: &str = "wasm32-unknown-unknown";
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum NativeAbiProfile {
+        Windows64,
+        NonWindows,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct TargetFacts<'a> {
+        pub triple: &'a str,
+        pub os: &'a str,
+        pub env: &'a str,
+        pub arch: &'a str,
+        pub endian: &'a str,
+        pub pointer_width: &'a str,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct NativeAbiTarget {
+        pub rust_target: &'static str,
+        pub clang_target: &'static str,
+        pub os: &'static str,
+        pub env: &'static str,
+        pub arch: &'static str,
+        pub endian: &'static str,
+        pub pointer_width: &'static str,
+    }
+
+    const fn native_target(
+        rust_target: &'static str,
+        clang_target: &'static str,
+        os: &'static str,
+        env: &'static str,
+        arch: &'static str,
+        pointer_width: &'static str,
+    ) -> NativeAbiTarget {
+        NativeAbiTarget {
+            rust_target,
+            clang_target,
+            os,
+            env,
+            arch,
+            endian: "little",
+            pointer_width,
+        }
+    }
+
+    const WINDOWS64_TARGETS: &[NativeAbiTarget] = &[
+        native_target(
+            "x86_64-pc-windows-msvc",
+            "x86_64-pc-windows-msvc",
+            "windows",
+            "msvc",
+            "x86_64",
+            "64",
+        ),
+        native_target(
+            "aarch64-pc-windows-msvc",
+            "aarch64-pc-windows-msvc",
+            "windows",
+            "msvc",
+            "aarch64",
+            "64",
+        ),
+        native_target(
+            "x86_64-pc-windows-gnu",
+            "x86_64-w64-windows-gnu",
+            "windows",
+            "gnu",
+            "x86_64",
+            "64",
+        ),
+    ];
+
+    const NON_WINDOWS_TARGETS: &[NativeAbiTarget] = &[
+        native_target(
+            "x86_64-unknown-linux-gnu",
+            "x86_64-unknown-linux-gnu",
+            "linux",
+            "gnu",
+            "x86_64",
+            "64",
+        ),
+        native_target(
+            "aarch64-unknown-linux-gnu",
+            "aarch64-unknown-linux-gnu",
+            "linux",
+            "gnu",
+            "aarch64",
+            "64",
+        ),
+        native_target(
+            "x86_64-unknown-linux-musl",
+            "x86_64-unknown-linux-musl",
+            "linux",
+            "musl",
+            "x86_64",
+            "64",
+        ),
+        native_target(
+            "aarch64-unknown-linux-musl",
+            "aarch64-unknown-linux-musl",
+            "linux",
+            "musl",
+            "aarch64",
+            "64",
+        ),
+        native_target(
+            "i686-unknown-linux-gnu",
+            "i686-unknown-linux-gnu",
+            "linux",
+            "gnu",
+            "x86",
+            "32",
+        ),
+        native_target(
+            "i686-unknown-linux-musl",
+            "i686-unknown-linux-musl",
+            "linux",
+            "musl",
+            "x86",
+            "32",
+        ),
+        native_target(
+            "x86_64-apple-darwin",
+            "x86_64-apple-darwin",
+            "macos",
+            "",
+            "x86_64",
+            "64",
+        ),
+        native_target(
+            "aarch64-apple-darwin",
+            "arm64-apple-darwin",
+            "macos",
+            "",
+            "aarch64",
+            "64",
+        ),
+        native_target(
+            "aarch64-apple-ios",
+            "arm64-apple-ios",
+            "ios",
+            "",
+            "aarch64",
+            "64",
+        ),
+        native_target(
+            "aarch64-apple-ios-sim",
+            "arm64-apple-ios-simulator",
+            "ios",
+            "sim",
+            "aarch64",
+            "64",
+        ),
+        native_target(
+            "x86_64-apple-ios",
+            "x86_64-apple-ios",
+            "ios",
+            "sim",
+            "x86_64",
+            "64",
+        ),
+        native_target(
+            "aarch64-linux-android",
+            "aarch64-linux-android",
+            "android",
+            "",
+            "aarch64",
+            "64",
+        ),
+        native_target(
+            "x86_64-linux-android",
+            "x86_64-linux-android",
+            "android",
+            "",
+            "x86_64",
+            "64",
+        ),
+        native_target(
+            "i686-linux-android",
+            "i686-linux-android",
+            "android",
+            "",
+            "x86",
+            "32",
+        ),
+        native_target(
+            "armv7-linux-androideabi",
+            "armv7-linux-androideabi",
+            "android",
+            "",
+            "arm",
+            "32",
+        ),
+        native_target(
+            "armv7-unknown-linux-gnueabihf",
+            "armv7-unknown-linux-gnueabihf",
+            "linux",
+            "gnu",
+            "arm",
+            "32",
+        ),
+        native_target(
+            "armv7-unknown-linux-musleabihf",
+            "armv7-unknown-linux-musleabihf",
+            "linux",
+            "musl",
+            "arm",
+            "32",
+        ),
+    ];
+
+    impl NativeAbiProfile {
+        pub fn for_target(target: TargetFacts<'_>) -> Result<Self, String> {
+            for profile in [Self::Windows64, Self::NonWindows] {
+                if let Some(expected) = profile
+                    .compatibility_targets()
+                    .iter()
+                    .find(|candidate| candidate.rust_target == target.triple)
+                {
+                    if (
+                        target.os,
+                        target.env,
+                        target.arch,
+                        target.endian,
+                        target.pointer_width,
+                    ) == (
+                        expected.os,
+                        expected.env,
+                        expected.arch,
+                        expected.endian,
+                        expected.pointer_width,
+                    ) {
+                        return Ok(profile);
+                    }
+                    return Err(format!(
+                        "Dear ImGui target facts do not match Rust target {}: \
+                         os={}, env={}, arch={}, endian={}, pointer_width={}",
+                        target.triple,
+                        target.os,
+                        target.env,
+                        target.arch,
+                        target.endian,
+                        target.pointer_width
+                    ));
+                }
+            }
+            Err(format!(
+                "unsupported Dear ImGui pregenerated binding Rust target: {}",
+                target.triple
+            ))
+        }
+
+        pub const fn id(self) -> &'static str {
+            match self {
+                Self::Windows64 => "windows64",
+                Self::NonWindows => "non-windows",
+            }
+        }
+
+        pub const fn canonical_clang_target(self) -> &'static str {
+            match self {
+                Self::Windows64 => "x86_64-pc-windows-msvc",
+                Self::NonWindows => "x86_64-unknown-linux-gnu",
+            }
+        }
+
+        pub const fn pregenerated_file(self) -> &'static str {
+            match self {
+                Self::Windows64 => "src/bindings_pregenerated_windows.rs",
+                Self::NonWindows => "src/bindings_pregenerated.rs",
+            }
+        }
+
+        pub const fn compatibility_targets(self) -> &'static [NativeAbiTarget] {
+            match self {
+                Self::Windows64 => WINDOWS64_TARGETS,
+                Self::NonWindows => NON_WINDOWS_TARGETS,
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum BindingTarget {
+        Native { profile: NativeAbiProfile },
+        WasmImport { module_name: String },
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct DerivePolicy {
+        pub default: bool,
+        pub debug: bool,
+        pub copy: bool,
+        pub eq: bool,
+        pub partial_eq: bool,
+        pub hash: bool,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct SanitizationPolicy {
+        pub remove_inner_attributes: bool,
+        pub remove_following_blank_line: bool,
+        pub deduplicate_raw_lines: bool,
+        pub normalize_imgui_enum_repr: bool,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct HeaderShim {
+        pub name: &'static str,
+        pub contents: &'static str,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum BindingFormatter {
+        Rustfmt,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum BindingRustEdition {
+        Rust2021,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct BindingSpec {
+        pub header: &'static str,
+        pub header_preamble: &'static str,
+        pub header_shims: &'static [HeaderShim],
+        pub include_paths: &'static [&'static str],
+        pub clang_args: &'static [&'static str],
+        pub clang_defines: &'static [&'static str],
+        pub allowlisted_functions: &'static [&'static str],
+        pub blocklisted_functions: &'static [&'static str],
+        pub allowlisted_types: &'static [&'static str],
+        pub blocklisted_types: &'static [&'static str],
+        pub opaque_types: &'static [&'static str],
+        pub allowlisted_vars: &'static [&'static str],
+        pub raw_lines: &'static [&'static str],
+        pub signed_enum_aliases: &'static [&'static str],
+        pub generator_contract: &'static str,
+        pub formatter: BindingFormatter,
+        pub rust_edition: BindingRustEdition,
+        pub derives: DerivePolicy,
+        pub prepend_enum_name: bool,
+        pub layout_tests: bool,
+        pub sanitization: SanitizationPolicy,
+        pub target: BindingTarget,
+    }
+
+    impl BindingSpec {
+        pub fn core_native(profile: NativeAbiProfile) -> Self {
+            let clang_args = match profile {
+                NativeAbiProfile::Windows64 => CORE_NATIVE_WINDOWS64_CLANG_ARGS,
+                NativeAbiProfile::NonWindows => CORE_NATIVE_NON_WINDOWS_CLANG_ARGS,
+            };
+            Self::core(
+                BindingTarget::Native { profile },
+                clang_args,
+                CORE_NATIVE_DEFINES,
+            )
+        }
+
+        pub fn core_wasm(module_name: impl Into<String>) -> Self {
+            Self::core(
+                BindingTarget::WasmImport {
+                    module_name: module_name.into(),
+                },
+                CORE_WASM_CLANG_ARGS,
+                CORE_WASM_DEFINES,
+            )
+        }
+
+        fn core(
+            target: BindingTarget,
+            clang_args: &'static [&'static str],
+            clang_defines: &'static [&'static str],
+        ) -> Self {
+            Self {
+                header: "cimgui.h",
+                header_preamble: CORE_HEADER_PREAMBLE,
+                header_shims: CORE_HEADER_SHIMS,
+                include_paths: CORE_INCLUDE_PATHS,
+                clang_args,
+                clang_defines,
+                allowlisted_functions: CORE_FUNCTION_ALLOWLISTS,
+                blocklisted_functions: CORE_FUNCTION_BLOCKLISTS,
+                allowlisted_types: CORE_TYPE_ALLOWLISTS,
+                blocklisted_types: CORE_TYPE_BLOCKLISTS,
+                opaque_types: CORE_OPAQUE_TYPES,
+                allowlisted_vars: CORE_VAR_ALLOWLISTS,
+                raw_lines: CORE_RAW_LINES,
+                signed_enum_aliases: CORE_SIGNED_ENUM_ALIASES,
+                generator_contract: CORE_BINDGEN_GENERATOR,
+                formatter: BindingFormatter::Rustfmt,
+                rust_edition: BindingRustEdition::Rust2021,
+                derives: DerivePolicy {
+                    default: true,
+                    debug: true,
+                    copy: true,
+                    eq: true,
+                    partial_eq: true,
+                    hash: true,
+                },
+                prepend_enum_name: false,
+                layout_tests: false,
+                sanitization: SanitizationPolicy {
+                    remove_inner_attributes: true,
+                    remove_following_blank_line: true,
+                    deduplicate_raw_lines: true,
+                    normalize_imgui_enum_repr: true,
+                },
+                target,
+            }
+        }
+
+        pub fn forbidden_symbols(&self) -> &'static [&'static str] {
+            self.blocklisted_functions
+        }
+
+        pub fn deterministic_hash(&self) -> String {
+            let mut hash = StableHash::new();
+            hash.field("schema", "core-binding-spec-v2");
+            hash.field("header", self.header);
+            hash.field("header_preamble", self.header_preamble);
+            hash.begin_list("header_shims", self.header_shims.len());
+            for (index, shim) in self.header_shims.iter().enumerate() {
+                hash.list_item(index);
+                hash.field("name", shim.name);
+                hash.field("contents", shim.contents);
+            }
+            hash.fields("include_paths", self.include_paths);
+            hash.fields("clang_args", self.clang_args);
+            hash.fields("clang_defines", self.clang_defines);
+            hash.fields("allowlisted_functions", self.allowlisted_functions);
+            hash.fields("blocklisted_functions", self.blocklisted_functions);
+            hash.fields("allowlisted_types", self.allowlisted_types);
+            hash.fields("blocklisted_types", self.blocklisted_types);
+            hash.fields("opaque_types", self.opaque_types);
+            hash.fields("allowlisted_vars", self.allowlisted_vars);
+            hash.fields("raw_lines", self.raw_lines);
+            hash.fields("signed_enum_aliases", self.signed_enum_aliases);
+            hash.field("generator_contract", self.generator_contract);
+            hash.field(
+                "formatter",
+                match self.formatter {
+                    BindingFormatter::Rustfmt => "rustfmt",
+                },
+            );
+            hash.field(
+                "rust_edition",
+                match self.rust_edition {
+                    BindingRustEdition::Rust2021 => "rust-edition-2021",
+                },
+            );
+            hash.bool_field("derive_default", self.derives.default);
+            hash.bool_field("derive_debug", self.derives.debug);
+            hash.bool_field("derive_copy", self.derives.copy);
+            hash.bool_field("derive_eq", self.derives.eq);
+            hash.bool_field("derive_partial_eq", self.derives.partial_eq);
+            hash.bool_field("derive_hash", self.derives.hash);
+            hash.bool_field("prepend_enum_name", self.prepend_enum_name);
+            hash.bool_field("layout_tests", self.layout_tests);
+            hash.bool_field(
+                "sanitize_remove_inner_attributes",
+                self.sanitization.remove_inner_attributes,
+            );
+            hash.bool_field(
+                "sanitize_remove_following_blank_line",
+                self.sanitization.remove_following_blank_line,
+            );
+            hash.bool_field(
+                "sanitize_deduplicate_raw_lines",
+                self.sanitization.deduplicate_raw_lines,
+            );
+            hash.bool_field(
+                "sanitize_normalize_imgui_enum_repr",
+                self.sanitization.normalize_imgui_enum_repr,
+            );
+            match &self.target {
+                BindingTarget::Native { profile } => {
+                    hash.field("target_kind", "native");
+                    hash.field("native_profile", profile.id());
+                    let targets = profile.compatibility_targets();
+                    hash.begin_list("native_compatibility_targets", targets.len());
+                    for (index, target) in targets.iter().enumerate() {
+                        hash.list_item(index);
+                        hash.field("rust_target", target.rust_target);
+                        hash.field("clang_target", target.clang_target);
+                        hash.field("target_os", target.os);
+                        hash.field("target_env", target.env);
+                        hash.field("target_arch", target.arch);
+                        hash.field("target_endian", target.endian);
+                        hash.field("target_pointer_width", target.pointer_width);
+                    }
+                }
+                BindingTarget::WasmImport { module_name } => {
+                    hash.field("target_kind", "wasm-import");
+                    hash.field("wasm_target", CORE_WASM_TARGET);
+                    hash.field("wasm_module_name", module_name);
+                }
+            }
+            hash.finish()
+        }
+
+        pub fn sanitize(&self, content: &str) -> String {
+            let mut output = String::with_capacity(content.len());
+            let mut skip_next_blank = false;
+            let mut seen_raw_lines = BTreeSet::new();
+            for line in content.lines() {
+                let trimmed = line.trim_start();
+                if self.sanitization.remove_inner_attributes && trimmed.starts_with("#![") {
+                    skip_next_blank = self.sanitization.remove_following_blank_line;
+                    continue;
+                }
+                if skip_next_blank && trimmed.is_empty() {
+                    continue;
+                }
+                skip_next_blank = false;
+                if self.sanitization.deduplicate_raw_lines
+                    && self.raw_lines.contains(&trimmed)
+                    && !seen_raw_lines.insert(trimmed.to_owned())
+                {
+                    continue;
+                }
+                if self.sanitization.normalize_imgui_enum_repr {
+                    let signed_alias = self.signed_enum_aliases.iter().any(|alias| {
+                        trimmed == format!("pub type {alias} = ::std::os::raw::c_uint;")
+                    });
+                    if trimmed.starts_with("pub type Im")
+                        && (trimmed.ends_with("_ = ::std::os::raw::c_uint;") || signed_alias)
+                    {
+                        output.push_str(
+                            &line
+                                .replace(" = ::std::os::raw::c_uint;", " = ::std::os::raw::c_int;"),
+                        );
+                    } else {
+                        output.push_str(line);
+                    }
+                } else {
+                    output.push_str(line);
+                }
+                output.push('\n');
+            }
+            output
+        }
+
+        pub fn validate_generated_bindings(&self, content: &str) -> Result<(), String> {
+            let generator_banner =
+                format!("automatically generated by {}", self.generator_contract);
+            if !content.contains(&generator_banner) {
+                return Err(format!(
+                    "generated bindings do not declare generator contract {}",
+                    self.generator_contract
+                ));
+            }
+            for opaque in self.opaque_types {
+                for by_value in [
+                    format!(": {opaque},"),
+                    format!(": {opaque})"),
+                    format!("-> {opaque}"),
+                    format!("[{opaque};"),
+                ] {
+                    if content.contains(&by_value) {
+                        return Err(format!(
+                            "opaque type {opaque} appears in a by-value generated ABI"
+                        ));
+                    }
+                }
+            }
+            let forbidden = self
+                .forbidden_symbols()
+                .iter()
+                .copied()
+                .filter(|symbol| content.contains(symbol))
+                .collect::<Vec<_>>();
+            if forbidden.is_empty() {
+                Ok(())
+            } else {
+                Err(format!(
+                    "generated bindings expose forbidden raw symbols: {}",
+                    forbidden.join(", ")
+                ))
+            }
+        }
+    }
+
+    pub fn bindgen_rerun_env_vars(target: &str) -> Vec<String> {
+        let mut names = vec![BINDGEN_EXTRA_CLANG_ARGS_PREFIX.to_owned()];
+        if !target.is_empty() {
+            names.push(format!("{BINDGEN_EXTRA_CLANG_ARGS_PREFIX}_{target}"));
+            names.push(format!(
+                "{BINDGEN_EXTRA_CLANG_ARGS_PREFIX}_{}",
+                target.replace('-', "_")
+            ));
+        }
+        names.sort_unstable();
+        names.dedup();
+        names
+    }
+
+    pub fn validate_bindgen_environment<I, K>(names: I) -> Result<(), String>
+    where
+        I: IntoIterator<Item = K>,
+        K: AsRef<str>,
+    {
+        let mut forbidden = names
+            .into_iter()
+            .map(|name| name.as_ref().to_owned())
+            .filter(|name| name.starts_with(BINDGEN_EXTRA_CLANG_ARGS_PREFIX))
+            .collect::<Vec<_>>();
+        forbidden.sort_unstable();
+        forbidden.dedup();
+        if forbidden.is_empty() {
+            Ok(())
+        } else {
+            Err(format!(
+                "canonical core binding generation rejects environment overrides: {}",
+                forbidden.join(", ")
+            ))
+        }
+    }
+
+    pub fn is_supported_wasm_target(target_triple: &str) -> bool {
+        target_triple == CORE_WASM_TARGET
+    }
+
+    pub fn validate_wasm_feature_contract(
+        target_triple: &str,
+        wasm_feature_enabled: bool,
+    ) -> Result<(), String> {
+        if is_supported_wasm_target(target_triple) {
+            if wasm_feature_enabled {
+                Ok(())
+            } else {
+                Err(format!(
+                    "{CORE_WASM_TARGET} requires the explicit `wasm` feature"
+                ))
+            }
+        } else if target_triple.starts_with("wasm32") {
+            Err(format!(
+                "unsupported Dear ImGui WASM target `{target_triple}`; \
+                 only `{CORE_WASM_TARGET}` with the `wasm` feature is supported"
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct BuildRequestInput<'a> {
+        pub target_triple: &'a str,
+        pub target_os: &'a str,
+        pub target_env: &'a str,
+        pub target_arch: &'a str,
+        pub target_endian: &'a str,
+        pub target_pointer_width: &'a str,
+        pub cargo_profile: &'a str,
+        pub artifact_features: Vec<&'a str>,
+        pub environment: Vec<(&'a str, Option<&'a str>)>,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct BuildRequest {
+        pub target_triple: String,
+        pub target_os: String,
+        pub target_env: String,
+        pub target_arch: String,
+        pub target_endian: String,
+        pub target_pointer_width: String,
+        pub cargo_profile: String,
+        pub artifact_features: Vec<String>,
+        pub environment: Vec<(String, Option<String>)>,
+    }
+
+    impl BuildRequest {
+        pub fn new(input: BuildRequestInput<'_>) -> Self {
+            let mut artifact_features = normalize_values(input.artifact_features);
+            artifact_features.sort_unstable();
+
+            let mut environment = input
+                .environment
+                .into_iter()
+                .map(|(name, value)| (name.to_owned(), value.map(str::to_owned)))
+                .collect::<Vec<_>>();
+            environment.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+            environment.dedup_by(|left, right| left.0 == right.0);
+
+            Self {
+                target_triple: input.target_triple.to_owned(),
+                target_os: input.target_os.to_owned(),
+                target_env: input.target_env.to_owned(),
+                target_arch: input.target_arch.to_owned(),
+                target_endian: input.target_endian.to_owned(),
+                target_pointer_width: input.target_pointer_width.to_owned(),
+                cargo_profile: input.cargo_profile.to_owned(),
+                artifact_features,
+                environment,
+            }
+        }
+
+        pub fn deterministic_hash(&self) -> String {
+            let mut hash = StableHash::new();
+            hash.field("schema", "core-build-request-v2");
+            hash.field("target_triple", &self.target_triple);
+            hash.field("target_os", &self.target_os);
+            hash.field("target_env", &self.target_env);
+            hash.field("target_arch", &self.target_arch);
+            hash.field("target_endian", &self.target_endian);
+            hash.field("target_pointer_width", &self.target_pointer_width);
+            hash.field("cargo_profile", &self.cargo_profile);
+            hash.fields("artifact_features", &self.artifact_features);
+            hash.begin_list("environment", self.environment.len());
+            for (index, (name, value)) in self.environment.iter().enumerate() {
+                hash.list_item(index);
+                hash.field("name", name);
+                match value {
+                    Some(value) => {
+                        hash.field("state", "set");
+                        hash.field("value", value);
+                    }
+                    None => hash.field("state", "unset"),
+                }
+            }
+            hash.finish()
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct SourceRevisions {
+        pub cimgui: String,
+        pub imgui: String,
+    }
+
+    impl SourceRevisions {
+        pub fn new(cimgui: impl Into<String>, imgui: impl Into<String>) -> Self {
+            Self {
+                cimgui: cimgui.into(),
+                imgui: imgui.into(),
+            }
+        }
+
+        pub fn from_cargo_manifest(content: &str) -> Result<Self, String> {
+            const SECTION: &str = "package.metadata.dear-imgui-sources";
+            let mut current_section = "";
+            let mut values = BTreeMap::new();
+
+            for line in content.lines() {
+                let line = line.split('#').next().unwrap_or_default().trim();
+                if line.is_empty() {
+                    continue;
+                }
+                if let Some(section) = line
+                    .strip_prefix('[')
+                    .and_then(|line| line.strip_suffix(']'))
+                {
+                    current_section = section.trim();
+                    continue;
+                }
+                if current_section != SECTION {
+                    continue;
+                }
+                let Some((key, value)) = line.split_once('=') else {
+                    continue;
+                };
+                let key = key.trim();
+                if !matches!(key, "cimgui-revision" | "imgui-revision") {
+                    return Err(format!("unknown key {key} in [{SECTION}]"));
+                }
+                let value = value.trim();
+                let value = value
+                    .strip_prefix('"')
+                    .and_then(|value| value.strip_suffix('"'))
+                    .ok_or_else(|| format!("{key} in [{SECTION}] must be a quoted string"))?;
+                if values.insert(key.to_owned(), value.to_owned()).is_some() {
+                    return Err(format!("duplicate key {key} in [{SECTION}]"));
+                }
+            }
+
+            let cimgui = values
+                .remove("cimgui-revision")
+                .ok_or_else(|| format!("missing cimgui-revision in [{SECTION}]"))?;
+            let imgui = values
+                .remove("imgui-revision")
+                .ok_or_else(|| format!("missing imgui-revision in [{SECTION}]"))?;
+            validate_git_revision("cimgui-revision", &cimgui)?;
+            validate_git_revision("imgui-revision", &imgui)?;
+            Ok(Self { cimgui, imgui })
+        }
+    }
+
+    fn validate_git_revision(name: &str, value: &str) -> Result<(), String> {
+        if value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            Ok(())
+        } else {
+            Err(format!(
+                "{name} must be exactly 40 ASCII hexadecimal characters"
+            ))
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct ArtifactProfile {
+        pub crate_name: String,
+        pub version: String,
+        pub target: String,
+        pub link_type: String,
+        pub crt: String,
+        pub features: Vec<String>,
+        pub source_revisions: SourceRevisions,
+        pub binding_spec_hash: String,
+    }
+
+    impl ArtifactProfile {
+        #[allow(clippy::too_many_arguments)]
+        pub fn new<I, S>(
+            crate_name: impl Into<String>,
+            version: impl Into<String>,
+            target: impl Into<String>,
+            link_type: impl Into<String>,
+            crt: impl Into<String>,
+            features: I,
+            source_revisions: SourceRevisions,
+            binding_spec_hash: impl Into<String>,
+        ) -> Self
+        where
+            I: IntoIterator<Item = S>,
+            S: AsRef<str>,
+        {
+            Self {
+                crate_name: crate_name.into(),
+                version: version.into(),
+                target: target.into(),
+                link_type: link_type.into(),
+                crt: crt.into(),
+                features: normalize_values(features),
+                source_revisions,
+                binding_spec_hash: binding_spec_hash.into(),
+            }
+        }
+
+        pub fn deterministic_hash(&self) -> String {
+            let mut hash = StableHash::new();
+            hash.field("schema", "core-artifact-profile-v2");
+            hash.field("crate_name", &self.crate_name);
+            hash.field("version", &self.version);
+            hash.field("target", &self.target);
+            hash.field("link_type", &self.link_type);
+            hash.field("crt", &self.crt);
+            hash.fields("features", &self.features);
+            hash.field("cimgui_revision", &self.source_revisions.cimgui);
+            hash.field("imgui_revision", &self.source_revisions.imgui);
+            hash.field("binding_spec_hash", &self.binding_spec_hash);
+            hash.finish()
+        }
+
+        pub fn manifest_bytes(&self) -> Vec<u8> {
+            format!(
+                "{} prebuilt\nversion={}\ntarget={}\nlink={}\ncrt={}\nfeatures={}\ncimgui_revision={}\nimgui_revision={}\nbinding_spec_hash={}\n",
+                self.crate_name,
+                self.version,
+                self.target,
+                self.link_type,
+                self.crt,
+                self.features.join(","),
+                self.source_revisions.cimgui,
+                self.source_revisions.imgui,
+                self.binding_spec_hash,
+            )
+            .into_bytes()
+        }
+
+        pub fn validate_manifest_bytes(&self, bytes: &[u8]) -> Result<(), String> {
+            let manifest = ParsedManifest::parse(bytes)?;
+            let features = self.features.join(",");
+            let expected = [
+                ("crate_name", self.crate_name.as_str()),
+                ("version", self.version.as_str()),
+                ("target", self.target.as_str()),
+                ("link", self.link_type.as_str()),
+                ("crt", self.crt.as_str()),
+                ("features", features.as_str()),
+                ("cimgui_revision", self.source_revisions.cimgui.as_str()),
+                ("imgui_revision", self.source_revisions.imgui.as_str()),
+                ("binding_spec_hash", self.binding_spec_hash.as_str()),
+            ];
+
+            for &(field, expected) in &expected {
+                let actual = manifest.field(field);
+                if actual != Some(expected) {
+                    return Err(format!(
+                        "artifact manifest {field} mismatch: expected {expected:?}, found {actual:?}"
+                    ));
+                }
+            }
+            let expected_fields = expected
+                .iter()
+                .map(|(field, _)| *field)
+                .collect::<BTreeSet<_>>();
+            let unknown_fields = manifest
+                .fields
+                .keys()
+                .map(String::as_str)
+                .filter(|field| !expected_fields.contains(field))
+                .collect::<Vec<_>>();
+            if !unknown_fields.is_empty() {
+                return Err(format!(
+                    "artifact manifest contains unknown fields: {}",
+                    unknown_fields.join(", ")
+                ));
+            }
+            Ok(())
+        }
+    }
+
+    struct ParsedManifest {
+        fields: BTreeMap<String, String>,
+    }
+
+    impl ParsedManifest {
+        fn parse(bytes: &[u8]) -> Result<Self, String> {
+            let content = std::str::from_utf8(bytes)
+                .map_err(|error| format!("artifact manifest is not UTF-8: {error}"))?;
+            let mut lines = content.lines();
+            let heading = lines
+                .next()
+                .ok_or_else(|| "artifact manifest is empty".to_owned())?;
+            let crate_name = heading
+                .strip_suffix(" prebuilt")
+                .filter(|name| !name.is_empty())
+                .ok_or_else(|| "artifact manifest has an invalid heading".to_owned())?;
+            let mut fields = BTreeMap::from([("crate_name".to_owned(), crate_name.to_owned())]);
+            for line in lines {
+                let line = line.trim();
+                if line.is_empty() {
+                    continue;
+                }
+                let (key, value) = line
+                    .split_once('=')
+                    .ok_or_else(|| format!("artifact manifest has an invalid line: {line}"))?;
+                if fields.insert(key.to_owned(), value.to_owned()).is_some() {
+                    return Err(format!("artifact manifest repeats field {key}"));
+                }
+            }
+            Ok(Self { fields })
+        }
+
+        fn field(&self, field: &str) -> Option<&str> {
+            self.fields.get(field).map(String::as_str)
+        }
+    }
+
+    fn normalize_values<I, S>(values: I) -> Vec<String>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut values = values
+            .into_iter()
+            .map(|value| value.as_ref().trim().to_ascii_lowercase())
+            .filter(|value| !value.is_empty())
+            .collect::<Vec<_>>();
+        values.sort_unstable();
+        values.dedup();
+        values
+    }
+
+    struct StableHash(u64);
+
+    impl StableHash {
+        const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+        const PRIME: u64 = 0x0000_0100_0000_01b3;
+
+        fn new() -> Self {
+            Self(Self::OFFSET)
+        }
+
+        fn field(&mut self, label: &str, value: &str) {
+            self.bytes(b"field");
+            self.string(label);
+            self.string(value);
+        }
+
+        fn bool_field(&mut self, label: &str, value: bool) {
+            self.field(label, if value { "true" } else { "false" });
+        }
+
+        fn begin_list(&mut self, label: &str, len: usize) {
+            self.bytes(b"list");
+            self.string(label);
+            self.u64(len as u64);
+        }
+
+        fn list_item(&mut self, index: usize) {
+            self.bytes(b"item");
+            self.u64(index as u64);
+        }
+
+        fn fields<I, S>(&mut self, label: &str, values: I)
+        where
+            I: IntoIterator<Item = S>,
+            S: AsRef<str>,
+        {
+            let values = values.into_iter().collect::<Vec<_>>();
+            self.begin_list(label, values.len());
+            for (index, value) in values.into_iter().enumerate() {
+                self.list_item(index);
+                self.string(value.as_ref());
+            }
+        }
+
+        fn string(&mut self, value: &str) {
+            self.u64(value.len() as u64);
+            self.bytes(value.as_bytes());
+        }
+
+        fn u64(&mut self, value: u64) {
+            self.bytes(&value.to_le_bytes());
+        }
+
+        fn bytes(&mut self, bytes: &[u8]) {
+            for byte in bytes {
+                self.0 ^= u64::from(*byte);
+                self.0 = self.0.wrapping_mul(Self::PRIME);
+            }
+        }
+
+        fn finish(self) -> String {
+            format!("fnv1a64:{:016x}", self.0)
+        }
+    }
+
+    #[cfg(test)]
+    mod stable_hash_tests {
+        use super::StableHash;
+
+        #[test]
+        fn canonical_encoding_distinguishes_labels_and_list_boundaries() {
+            let mut separated = StableHash::new();
+            separated.fields("include_paths", ["a"]);
+            separated.fields("clang_args", ["b"]);
+
+            let mut shifted = StableHash::new();
+            shifted.fields("include_paths", ["a", "b"]);
+            shifted.fields("clang_args", std::iter::empty::<&str>());
+            assert_ne!(separated.finish(), shifted.finish());
+
+            let mut first_label = StableHash::new();
+            first_label.field("first", "same-value");
+            let mut second_label = StableHash::new();
+            second_label.field("second", "same-value");
+            assert_ne!(first_label.finish(), second_label.finish());
+        }
+    }
+}
+
 pub fn parse_bool_env(key: &str) -> bool {
     match env::var(key) {
         Ok(v) => matches!(
@@ -37,11 +1251,60 @@ pub fn should_static_link_cpp_stdlib(target_os: &str, target_env: &str) -> bool 
     target_os == "windows" && target_env == "gnu"
 }
 
-pub fn configure_cpp_runtime_linkage(build: &mut cc::Build, target_os: &str, target_env: &str) {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CppRuntimeLinkage {
+    None,
+    Dynamic(&'static str),
+    StaticBundle(&'static str),
+}
+
+pub fn prebuilt_cpp_runtime_linkage(target_os: &str, target_env: &str) -> CppRuntimeLinkage {
+    if target_env == "msvc" {
+        return CppRuntimeLinkage::None;
+    }
     if should_static_link_cpp_stdlib(target_os, target_env) {
-        build.cpp_link_stdlib(None);
-        if !STATIC_CPP_STDLIB_LINK_EMITTED.swap(true, Ordering::Relaxed) {
-            println!("cargo:rustc-link-lib=static:-bundle=stdc++");
+        return CppRuntimeLinkage::StaticBundle("stdc++");
+    }
+    if matches!(
+        target_os,
+        "macos" | "ios" | "tvos" | "watchos" | "visionos" | "freebsd" | "openbsd" | "aix" | "wasi"
+    ) || (target_os == "linux" && target_env == "ohos")
+    {
+        return CppRuntimeLinkage::Dynamic("c++");
+    }
+    if target_os == "android" {
+        return CppRuntimeLinkage::Dynamic("c++_shared");
+    }
+    CppRuntimeLinkage::Dynamic("stdc++")
+}
+
+pub fn emit_prebuilt_cpp_runtime_linkage(target_os: &str, target_env: &str) {
+    match prebuilt_cpp_runtime_linkage(target_os, target_env) {
+        CppRuntimeLinkage::None => {}
+        CppRuntimeLinkage::Dynamic(library) => {
+            println!("cargo:rustc-link-lib={library}");
+        }
+        CppRuntimeLinkage::StaticBundle(library) => {
+            if !STATIC_CPP_STDLIB_LINK_EMITTED.swap(true, Ordering::Relaxed) {
+                println!("cargo:rustc-link-lib=static:-bundle={library}");
+            }
+        }
+    }
+}
+
+pub fn configure_cpp_runtime_linkage(build: &mut cc::Build, target_os: &str, target_env: &str) {
+    match prebuilt_cpp_runtime_linkage(target_os, target_env) {
+        CppRuntimeLinkage::None => {
+            build.cpp_link_stdlib(None);
+        }
+        CppRuntimeLinkage::Dynamic(library) => {
+            // Keep source builds and prebuilt consumers on the same deterministic platform
+            // policy instead of allowing an untracked CXXSTDLIB override.
+            build.cpp_link_stdlib(library);
+        }
+        CppRuntimeLinkage::StaticBundle(_) => {
+            build.cpp_link_stdlib(None);
+            emit_prebuilt_cpp_runtime_linkage(target_os, target_env);
         }
     }
 }
@@ -116,6 +1379,11 @@ pub fn compose_manifest_bytes(
         let _ = writeln!(&mut buf, "features={}", f);
     }
     buf
+}
+
+#[cfg(feature = "binding-spec")]
+pub fn compose_manifest_bytes_with_profile(profile: &binding::ArtifactProfile) -> Vec<u8> {
+    profile.manifest_bytes()
 }
 
 pub fn prebuilt_manifest_features(dir: &Path) -> Option<Vec<String>> {
@@ -243,29 +1511,127 @@ fn extract_archive_to_cache_impl(
 ) -> Result<PathBuf, String> {
     let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
     let extract_dir = prebuilt_extract_dir_env(cache_root, &target_env);
-    if extract_dir.exists() {
-        let lib_dir = extract_dir.join("lib");
-        if lib_dir.join(lib_name).exists() || extract_dir.join(lib_name).exists() {
-            return Ok(lib_dir);
-        }
-        let _ = std::fs::remove_dir_all(&extract_dir);
+    extract_archive_to_dir(archive_path, &extract_dir, lib_name, || {})
+}
+
+#[cfg(feature = "archive")]
+fn extract_archive_to_dir(
+    archive_path: &Path,
+    extract_dir: &Path,
+    lib_name: &str,
+    after_lock: impl FnOnce(),
+) -> Result<PathBuf, String> {
+    let parent = extract_dir.parent().ok_or_else(|| {
+        format!(
+            "prebuilt extraction directory has no parent: {}",
+            extract_dir.display()
+        )
+    })?;
+    std::fs::create_dir_all(parent)
+        .map_err(|e| format!("create dir {}: {}", parent.display(), e))?;
+    let lock_path = extraction_lock_path(extract_dir);
+    let extraction_lock = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        .map_err(|error| format!("open extraction lock {}: {error}", lock_path.display()))?;
+    extraction_lock
+        .lock()
+        .map_err(|error| format!("lock extraction cache {}: {error}", lock_path.display()))?;
+    after_lock();
+
+    if let Some(lib_dir) = extracted_library_dir(extract_dir, lib_name) {
+        return Ok(lib_dir);
     }
-    std::fs::create_dir_all(&extract_dir)
-        .map_err(|e| format!("create dir {}: {}", extract_dir.display(), e))?;
+    if extract_dir.exists() {
+        let stale_dir = unique_staging_path(extract_dir);
+        std::fs::rename(extract_dir, &stale_dir).map_err(|error| {
+            format!(
+                "retire stale extraction directory {}: {error}",
+                extract_dir.display()
+            )
+        })?;
+        std::fs::remove_dir_all(&stale_dir)
+            .map_err(|error| format!("remove stale dir {}: {error}", stale_dir.display()))?;
+    }
+    let staging_dir = unique_staging_path(extract_dir);
+    if staging_dir.exists() {
+        let _ = std::fs::remove_dir_all(&staging_dir);
+    }
+    std::fs::create_dir_all(&staging_dir)
+        .map_err(|e| format!("create dir {}: {}", staging_dir.display(), e))?;
     let file = std::fs::File::open(archive_path)
         .map_err(|e| format!("open {}: {}", archive_path.display(), e))?;
     let mut archive = tar::Archive::new(flate2::read::GzDecoder::new(file));
-    archive
-        .unpack(&extract_dir)
-        .map_err(|e| format!("unpack {}: {}", archive_path.display(), e))?;
-    let lib_dir = extract_dir.join("lib");
-    if lib_dir.join(lib_name).exists() {
-        return Ok(lib_dir);
+    if let Err(error) = archive.unpack(&staging_dir) {
+        let _ = std::fs::remove_dir_all(&staging_dir);
+        return Err(format!("unpack {}: {}", archive_path.display(), error));
     }
-    if extract_dir.join(lib_name).exists() {
-        return Ok(extract_dir);
+    let staged_lib_dir = extracted_library_dir(&staging_dir, lib_name).ok_or_else(|| {
+        let _ = std::fs::remove_dir_all(&staging_dir);
+        "extracted archive did not contain the expected library and manifest".to_owned()
+    })?;
+    let uses_lib_subdir = staged_lib_dir != staging_dir;
+
+    match std::fs::rename(&staging_dir, extract_dir) {
+        Ok(()) => Ok(if uses_lib_subdir {
+            extract_dir.join("lib")
+        } else {
+            extract_dir.to_path_buf()
+        }),
+        Err(error) => {
+            // Another process may have completed the same extraction first. Its atomic rename is
+            // safe to reuse only after validating the expected library is present.
+            if let Some(lib_dir) = extracted_library_dir(extract_dir, lib_name) {
+                let _ = std::fs::remove_dir_all(&staging_dir);
+                return Ok(lib_dir);
+            }
+            let _ = std::fs::remove_dir_all(&staging_dir);
+            Err(format!(
+                "install extracted archive at {}: {}",
+                extract_dir.display(),
+                error
+            ))
+        }
     }
-    Err("extracted archive did not contain expected library".into())
+}
+
+#[cfg(feature = "archive")]
+fn extraction_lock_path(extract_dir: &Path) -> PathBuf {
+    let lock_name = extract_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("prebuilt");
+    extract_dir.with_file_name(format!(".{lock_name}.extract.lock"))
+}
+
+#[cfg(feature = "archive")]
+fn extracted_library_dir(root: &Path, lib_name: &str) -> Option<PathBuf> {
+    if !root.join("manifest.txt").is_file() {
+        return None;
+    }
+    let lib_dir = root.join("lib");
+    if lib_dir.join(lib_name).is_file() {
+        Some(lib_dir)
+    } else if root.join(lib_name).is_file() {
+        Some(root.to_path_buf())
+    } else {
+        None
+    }
+}
+
+fn unique_staging_path(destination: &Path) -> PathBuf {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let name = destination
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("prebuilt");
+    destination.with_file_name(format!(".{name}.tmp-{}-{nonce}", std::process::id()))
 }
 
 pub fn download_prebuilt(
@@ -300,9 +1666,7 @@ fn local_path_from_urlish(url: &str) -> Option<PathBuf> {
     }
 
     if let Some(rest) = trimmed.strip_prefix("file://") {
-        // Accept both file:///C:/... and file://C:/...
-        let rest = rest.trim_start_matches('/');
-        let p = PathBuf::from(rest);
+        let p = file_url_path(rest);
         if p.exists() {
             return Some(p);
         }
@@ -311,6 +1675,25 @@ fn local_path_from_urlish(url: &str) -> Option<PathBuf> {
 
     let p = PathBuf::from(trimmed);
     if p.exists() { Some(p) } else { None }
+}
+
+fn file_url_path(rest: &str) -> PathBuf {
+    #[cfg(windows)]
+    {
+        // Windows accepts both file:///C:/... and file://C:/.... Remove exactly the URL root
+        // slash only when the remainder starts with a drive letter; preserve UNC prefixes.
+        let bytes = rest.as_bytes();
+        if bytes.len() >= 3
+            && bytes[0] == b'/'
+            && bytes[1].is_ascii_alphabetic()
+            && bytes[2] == b':'
+        {
+            return PathBuf::from(&rest[1..]);
+        }
+    }
+
+    // On Unix the leading slash is the filesystem root and must not be discarded.
+    PathBuf::from(rest)
 }
 
 fn stage_or_extract_local(
@@ -337,7 +1720,8 @@ fn stage_or_extract_local(
     let _ = std::fs::create_dir_all(&dl_dir);
     let dst = dl_dir.join(lib_name);
     if !dst.exists() {
-        std::fs::copy(path, &dst).map_err(|e| format!("copy {}: {}", path.display(), e))?;
+        let bytes = std::fs::read(path).map_err(|e| format!("read {}: {}", path.display(), e))?;
+        write_atomic(&dst, &bytes)?;
     }
     Ok(dl_dir)
 }
@@ -374,8 +1758,7 @@ fn download_prebuilt_http(cache_root: &Path, url: &str, lib_name: &str) -> Resul
             reader
                 .read_to_end(&mut bytes)
                 .map_err(|e| format!("read body: {}", e))?;
-            std::fs::write(&archive_path, &bytes)
-                .map_err(|e| format!("write {}: {}", archive_path.display(), e))?;
+            write_atomic(&archive_path, &bytes)?;
         }
         return extract_archive_to_cache(&archive_path, cache_root, lib_name);
     }
@@ -402,8 +1785,28 @@ fn download_prebuilt_http(cache_root: &Path, url: &str, lib_name: &str) -> Resul
     reader
         .read_to_end(&mut bytes)
         .map_err(|e| format!("read body: {}", e))?;
-    std::fs::write(&dst, &bytes).map_err(|e| format!("write {}: {}", dst.display(), e))?;
+    write_atomic(&dst, &bytes)?;
     Ok(dl_dir)
+}
+
+fn write_atomic(destination: &Path, bytes: &[u8]) -> Result<(), String> {
+    let staging = unique_staging_path(destination);
+    std::fs::write(&staging, bytes)
+        .map_err(|error| format!("write {}: {error}", staging.display()))?;
+    match std::fs::rename(&staging, destination) {
+        Ok(()) => Ok(()),
+        Err(_error) if destination.is_file() => {
+            let _ = std::fs::remove_file(&staging);
+            Ok(())
+        }
+        Err(error) => {
+            let _ = std::fs::remove_file(&staging);
+            Err(format!(
+                "install downloaded artifact at {}: {error}",
+                destination.display()
+            ))
+        }
+    }
 }
 
 pub fn prebuilt_cache_root_from_env_or_target(
@@ -803,9 +2206,9 @@ fn find_cargo_target_include(out_dir: &Path, dir_prefix: &str, header: &str) -> 
         }
     }
 
-    if !cargo_build_dir
+    if cargo_build_dir
         .file_name()
-        .is_some_and(|name| name == "build")
+        .is_none_or(|name| name != "build")
     {
         return None;
     }
@@ -856,6 +2259,459 @@ pub const DEFAULT_GITHUB_OWNER: &str = "Latias94";
 pub const DEFAULT_GITHUB_REPO: &str = "dear-imgui";
 
 #[cfg(test)]
+mod binding_contract_tests {
+    use super::binding::{
+        ArtifactProfile, BindingSpec, BuildRequest, BuildRequestInput, CORE_BUILD_ENV_VARS,
+        CORE_WASM_TARGET, HeaderShim, NativeAbiProfile, SourceRevisions, TargetFacts,
+        bindgen_rerun_env_vars, is_supported_wasm_target, validate_bindgen_environment,
+        validate_wasm_feature_contract,
+    };
+
+    fn request_with_env(values: Vec<(&str, Option<&str>)>) -> BuildRequest {
+        BuildRequest::new(BuildRequestInput {
+            target_triple: "x86_64-pc-windows-msvc",
+            target_os: "windows",
+            target_env: "msvc",
+            target_arch: "x86_64",
+            target_endian: "little",
+            target_pointer_width: "64",
+            cargo_profile: "release",
+            artifact_features: vec!["platform-io-aggregate-hooks", "wchar32"],
+            environment: values,
+        })
+    }
+
+    fn profile() -> ArtifactProfile {
+        ArtifactProfile::new(
+            "dear-imgui",
+            "0.15.1",
+            "x86_64-pc-windows-msvc",
+            "static",
+            "md",
+            ["platform-io-aggregate-hooks", "wchar32"],
+            SourceRevisions::new("cimgui-revision", "imgui-revision"),
+            BindingSpec::core_native(NativeAbiProfile::Windows64).deterministic_hash(),
+        )
+    }
+
+    #[test]
+    fn native_and_wasm_share_forbidden_aggregate_helpers() {
+        let native = BindingSpec::core_native(NativeAbiProfile::Windows64);
+        let wasm = BindingSpec::core_wasm("imgui-sys-v0");
+
+        assert_eq!(native.blocklisted_functions, wasm.blocklisted_functions);
+        assert_eq!(native.forbidden_symbols(), wasm.forbidden_symbols());
+        assert!(
+            native
+                .forbidden_symbols()
+                .contains(&"ImGuiPlatformIO_Set_Platform_GetWindowPos")
+        );
+        assert!(
+            native
+                .forbidden_symbols()
+                .contains(&"ImGuiPlatformIO_Set_Platform_GetWindowSize")
+        );
+    }
+
+    #[test]
+    fn binding_spec_hash_is_stable_and_covers_target_policy() {
+        let native = BindingSpec::core_native(NativeAbiProfile::Windows64);
+        let wasm = BindingSpec::core_wasm("imgui-sys-v0");
+
+        assert_eq!(native.deterministic_hash(), native.deterministic_hash());
+        assert_ne!(
+            native.deterministic_hash(),
+            BindingSpec::core_native(NativeAbiProfile::NonWindows).deterministic_hash()
+        );
+        assert_ne!(native.deterministic_hash(), wasm.deterministic_hash());
+        assert_ne!(
+            wasm.deterministic_hash(),
+            BindingSpec::core_wasm("different-provider").deterministic_hash()
+        );
+
+        let mut separated = BindingSpec::core_native(NativeAbiProfile::NonWindows);
+        separated.include_paths = &["boundary-a"];
+        separated.clang_args = &["boundary-b"];
+        let mut shifted = separated.clone();
+        shifted.include_paths = &["boundary-a", "boundary-b"];
+        shifted.clang_args = &[];
+        assert_ne!(
+            separated.deterministic_hash(),
+            shifted.deterministic_hash(),
+            "list field boundaries must participate in the canonical hash"
+        );
+    }
+
+    #[test]
+    fn core_binding_specs_pin_every_direct_standard_header() {
+        let expected_headers = ["stdio.h", "stdint.h", "stdarg.h", "stdbool.h"];
+        let specs = [
+            BindingSpec::core_native(NativeAbiProfile::Windows64),
+            BindingSpec::core_native(NativeAbiProfile::NonWindows),
+            BindingSpec::core_wasm("imgui-sys-v0"),
+        ];
+
+        for spec in specs {
+            assert_eq!(
+                spec.header_shims
+                    .iter()
+                    .map(|shim| shim.name)
+                    .collect::<Vec<_>>(),
+                expected_headers
+            );
+            assert_eq!(
+                spec.clang_args
+                    .iter()
+                    .filter(|arg| **arg == "-nostdinc")
+                    .count(),
+                1,
+                "system include fallback must stay disabled"
+            );
+            assert!(
+                spec.header_shims
+                    .iter()
+                    .find(|shim| shim.name == "stdint.h")
+                    .unwrap()
+                    .contents
+                    .contains("__INTPTR_TYPE__")
+            );
+            assert!(
+                spec.header_shims
+                    .iter()
+                    .find(|shim| shim.name == "stdarg.h")
+                    .unwrap()
+                    .contents
+                    .contains("__builtin_va_list")
+            );
+        }
+    }
+
+    #[test]
+    fn header_shim_contents_participate_in_binding_spec_identity() {
+        const FIRST_SHIM: &[HeaderShim] = &[HeaderShim {
+            name: "stdint.h",
+            contents: "typedef __INT32_TYPE__ int32_t;",
+        }];
+        const SECOND_SHIM: &[HeaderShim] = &[HeaderShim {
+            name: "stdint.h",
+            contents: "typedef signed int int32_t;",
+        }];
+
+        let mut first = BindingSpec::core_native(NativeAbiProfile::NonWindows);
+        first.header_shims = FIRST_SHIM;
+        let mut second = first.clone();
+        second.header_shims = SECOND_SHIM;
+
+        assert_ne!(first.deterministic_hash(), second.deterministic_hash());
+    }
+
+    #[test]
+    fn native_abi_profiles_cover_only_the_verified_target_matrix() {
+        for profile in [NativeAbiProfile::Windows64, NativeAbiProfile::NonWindows] {
+            for target in profile.compatibility_targets() {
+                assert_eq!(
+                    NativeAbiProfile::for_target(TargetFacts {
+                        triple: target.rust_target,
+                        os: target.os,
+                        env: target.env,
+                        arch: target.arch,
+                        endian: target.endian,
+                        pointer_width: target.pointer_width,
+                    })
+                    .unwrap(),
+                    profile
+                );
+            }
+        }
+
+        let windows_gnu = NativeAbiProfile::Windows64
+            .compatibility_targets()
+            .iter()
+            .find(|target| target.rust_target == "x86_64-pc-windows-gnu")
+            .unwrap();
+        assert_eq!(windows_gnu.clang_target, "x86_64-w64-windows-gnu");
+
+        for facts in [
+            TargetFacts {
+                triple: "aarch64-pc-windows-gnu",
+                os: "windows",
+                env: "gnu",
+                arch: "aarch64",
+                endian: "little",
+                pointer_width: "64",
+            },
+            TargetFacts {
+                triple: "armv5te-unknown-linux-gnueabi",
+                os: "linux",
+                env: "gnu",
+                arch: "arm",
+                endian: "little",
+                pointer_width: "32",
+            },
+            TargetFacts {
+                triple: "armv7-unknown-linux-gnu",
+                os: "linux",
+                env: "gnu",
+                arch: "arm",
+                endian: "little",
+                pointer_width: "32",
+            },
+            TargetFacts {
+                triple: "aarch64-apple-ios-macabi",
+                os: "ios",
+                env: "macabi",
+                arch: "aarch64",
+                endian: "little",
+                pointer_width: "64",
+            },
+        ] {
+            assert!(NativeAbiProfile::for_target(facts).is_err());
+        }
+
+        assert!(
+            NativeAbiProfile::for_target(TargetFacts {
+                triple: "aarch64-unknown-linux-gnu",
+                os: "linux",
+                env: "gnu",
+                arch: "aarch64",
+                endian: "big",
+                pointer_width: "64",
+            })
+            .is_err()
+        );
+        assert!(
+            NativeAbiProfile::for_target(TargetFacts {
+                triple: "x86_64-unknown-freebsd",
+                os: "freebsd",
+                env: "",
+                arch: "x86_64",
+                endian: "little",
+                pointer_width: "64",
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn canonical_bindgen_environment_rejects_every_extra_clang_arg_route() {
+        assert!(validate_bindgen_environment(["PATH", "HOME"]).is_ok());
+        for name in bindgen_rerun_env_vars("x86_64-pc-windows-msvc") {
+            let error = validate_bindgen_environment([name.as_str()]).unwrap_err();
+            assert!(error.contains(&name), "unexpected error: {error}");
+        }
+        assert!(validate_bindgen_environment(["BINDGEN_EXTRA_CLANG_ARGS_other_target"]).is_err());
+    }
+
+    #[test]
+    fn wasm_target_requires_the_explicit_provider_feature() {
+        assert!(is_supported_wasm_target(CORE_WASM_TARGET));
+        assert!(validate_wasm_feature_contract(CORE_WASM_TARGET, false).is_err());
+        assert!(validate_wasm_feature_contract(CORE_WASM_TARGET, true).is_ok());
+        for unsupported in [
+            "wasm32-wasip1",
+            "wasm32-wasip2",
+            "wasm32-unknown-emscripten",
+        ] {
+            assert!(!is_supported_wasm_target(unsupported));
+            assert!(validate_wasm_feature_contract(unsupported, false).is_err());
+            assert!(validate_wasm_feature_contract(unsupported, true).is_err());
+        }
+        assert!(validate_wasm_feature_contract("x86_64-unknown-linux-gnu", false).is_ok());
+        assert!(validate_wasm_feature_contract("x86_64-unknown-linux-gnu", true).is_ok());
+    }
+
+    #[test]
+    fn sanitization_is_part_of_the_shared_contract() {
+        let source = "#![allow(dead_code)]\n\npub const VALUE: u32 = 1;\n";
+        let expected = "pub const VALUE: u32 = 1;\n";
+
+        assert_eq!(
+            BindingSpec::core_native(NativeAbiProfile::Windows64).sanitize(source),
+            expected
+        );
+        assert_eq!(
+            BindingSpec::core_wasm("imgui-sys-v0").sanitize(source),
+            expected
+        );
+    }
+
+    #[test]
+    fn sanitization_policies_are_independent() {
+        let source = concat!(
+            "#![allow(dead_code)]\n",
+            "\n",
+            "pub type ImU64 = ::std::os::raw::c_ulonglong;\n",
+            "pub type ImU64 = ::std::os::raw::c_ulonglong;\n",
+            "pub type ImGuiKey = ::std::os::raw::c_uint;\n",
+        );
+        let mut spec = BindingSpec::core_native(NativeAbiProfile::NonWindows);
+        spec.sanitization.remove_inner_attributes = false;
+        assert_eq!(
+            spec.sanitize(source),
+            concat!(
+                "#![allow(dead_code)]\n",
+                "\n",
+                "pub type ImU64 = ::std::os::raw::c_ulonglong;\n",
+                "pub type ImGuiKey = ::std::os::raw::c_int;\n",
+            )
+        );
+
+        spec.sanitization.remove_inner_attributes = true;
+        spec.sanitization.remove_following_blank_line = false;
+        spec.sanitization.deduplicate_raw_lines = false;
+        spec.sanitization.normalize_imgui_enum_repr = false;
+        assert_eq!(
+            spec.sanitize(source),
+            concat!(
+                "\n",
+                "pub type ImU64 = ::std::os::raw::c_ulonglong;\n",
+                "pub type ImU64 = ::std::os::raw::c_ulonglong;\n",
+                "pub type ImGuiKey = ::std::os::raw::c_uint;\n",
+            )
+        );
+    }
+
+    #[test]
+    fn every_supported_environment_input_changes_the_build_request() {
+        let baseline = request_with_env(
+            CORE_BUILD_ENV_VARS
+                .iter()
+                .copied()
+                .map(|name| (name, None))
+                .collect(),
+        );
+
+        for changed in CORE_BUILD_ENV_VARS {
+            let request = request_with_env(
+                CORE_BUILD_ENV_VARS
+                    .iter()
+                    .copied()
+                    .map(|name| (name, (name == *changed).then_some("changed")))
+                    .collect(),
+            );
+            assert_ne!(
+                baseline.deterministic_hash(),
+                request.deterministic_hash(),
+                "environment input {changed} did not affect BuildRequest"
+            );
+        }
+
+        let separated = BuildRequest::new(BuildRequestInput {
+            target_triple: "x86_64-unknown-linux-gnu",
+            target_os: "linux",
+            target_env: "gnu",
+            target_arch: "x86_64",
+            target_endian: "little",
+            target_pointer_width: "64",
+            cargo_profile: "release",
+            artifact_features: vec!["alpha"],
+            environment: vec![("beta", None)],
+        });
+        let shifted = BuildRequest::new(BuildRequestInput {
+            target_triple: "x86_64-unknown-linux-gnu",
+            target_os: "linux",
+            target_env: "gnu",
+            target_arch: "x86_64",
+            target_endian: "little",
+            target_pointer_width: "64",
+            cargo_profile: "release",
+            artifact_features: vec!["alpha", "beta", "unset"],
+            environment: vec![],
+        });
+        assert_ne!(
+            separated.deterministic_hash(),
+            shifted.deterministic_hash(),
+            "feature/environment list boundaries must participate in BuildRequest hashes"
+        );
+    }
+
+    #[test]
+    fn artifact_manifest_round_trips_and_rejects_every_provenance_mismatch() {
+        let expected = profile();
+        let manifest = expected.manifest_bytes();
+        expected.validate_manifest_bytes(&manifest).unwrap();
+
+        let mut changed_hash_field = expected.clone();
+        changed_hash_field.binding_spec_hash = expected.version.clone();
+        changed_hash_field.version = expected.binding_spec_hash.clone();
+        assert_ne!(
+            expected.deterministic_hash(),
+            changed_hash_field.deterministic_hash(),
+            "ArtifactProfile field roles must participate in the canonical hash"
+        );
+
+        for (field, replacement) in [
+            ("cimgui_revision", "wrong-cimgui"),
+            ("imgui_revision", "wrong-imgui"),
+            ("binding_spec_hash", "wrong-binding-hash"),
+            ("crt", "mt"),
+            ("features", "stack-layout,wchar32"),
+        ] {
+            let manifest = String::from_utf8(expected.manifest_bytes()).unwrap();
+            let manifest = manifest
+                .lines()
+                .map(|line| {
+                    line.strip_prefix(&format!("{field}="))
+                        .map_or_else(|| line.to_owned(), |_| format!("{field}={replacement}"))
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            let error = expected
+                .validate_manifest_bytes(manifest.as_bytes())
+                .unwrap_err();
+            assert!(
+                error.contains(field),
+                "unexpected error for {field}: {error}"
+            );
+        }
+
+        let mut manifest = String::from_utf8(expected.manifest_bytes()).unwrap();
+        manifest.push_str("unexpected_field=unexpected-value\n");
+        let error = expected
+            .validate_manifest_bytes(manifest.as_bytes())
+            .unwrap_err();
+        assert!(
+            error.contains("unknown fields"),
+            "unexpected error: {error}"
+        );
+        assert!(
+            error.contains("unexpected_field"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn source_revisions_are_read_from_packaged_cargo_metadata() {
+        const CIMGUI: &str = "1261b231939fc210032f30c4ee8a8f0440372237";
+        const IMGUI: &str = "b61e56346a92cfcaf1f43a545ca37b0b32239654";
+        let manifest = r#"
+[package]
+name = "dear-imgui-sys"
+
+[package.metadata.dear-imgui-sources]
+cimgui-revision = "1261b231939fc210032f30c4ee8a8f0440372237"
+imgui-revision = "b61e56346a92cfcaf1f43a545ca37b0b32239654"
+"#;
+
+        assert_eq!(
+            SourceRevisions::from_cargo_manifest(manifest).unwrap(),
+            SourceRevisions::new(CIMGUI, IMGUI)
+        );
+
+        for invalid in [
+            manifest.replace(IMGUI, "short"),
+            manifest.replace(
+                "imgui-revision =",
+                "imgui-revision = \"b61e56346a92cfcaf1f43a545ca37b0b32239654\"\nimgui-revision =",
+            ),
+            manifest.replace("imgui-revision =", "exclude = []\nimgui-revision ="),
+        ] {
+            assert!(SourceRevisions::from_cargo_manifest(&invalid).is_err());
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
@@ -884,6 +2740,30 @@ mod tests {
         assert!(!should_static_link_cpp_stdlib("windows", "msvc"));
         assert!(!should_static_link_cpp_stdlib("linux", "gnu"));
         assert!(!should_static_link_cpp_stdlib("macos", ""));
+    }
+
+    #[test]
+    fn prebuilt_cpp_runtime_matches_cc_defaults_and_windows_policy() {
+        assert_eq!(
+            prebuilt_cpp_runtime_linkage("windows", "msvc"),
+            CppRuntimeLinkage::None
+        );
+        assert_eq!(
+            prebuilt_cpp_runtime_linkage("windows", "gnu"),
+            CppRuntimeLinkage::StaticBundle("stdc++")
+        );
+        assert_eq!(
+            prebuilt_cpp_runtime_linkage("macos", ""),
+            CppRuntimeLinkage::Dynamic("c++")
+        );
+        assert_eq!(
+            prebuilt_cpp_runtime_linkage("linux", "gnu"),
+            CppRuntimeLinkage::Dynamic("stdc++")
+        );
+        assert_eq!(
+            prebuilt_cpp_runtime_linkage("android", ""),
+            CppRuntimeLinkage::Dynamic("c++_shared")
+        );
     }
 
     fn unique_tmp_dir(suffix: &str) -> PathBuf {
@@ -1065,6 +2945,164 @@ mod tests {
         assert!(!prebuilt_manifest_has_feature(&root, "freetype"));
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn absolute_file_url_preserves_the_filesystem_root() {
+        let root = unique_tmp_dir("absolute-file-url");
+        std::fs::create_dir_all(&root).unwrap();
+        let archive = root.join("artifact.tar.gz");
+        std::fs::write(&archive, b"test").unwrap();
+        let url = format!("file://{}", archive.display());
+
+        assert_eq!(local_path_from_urlish(&url), Some(archive.clone()));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn plain_local_prebuilt_path_remains_supported() {
+        let root = unique_tmp_dir("plain-local-path");
+        std::fs::create_dir_all(&root).unwrap();
+        let archive = root.join("artifact.tar.gz");
+        std::fs::write(&archive, b"test").unwrap();
+
+        assert_eq!(
+            local_path_from_urlish(archive.to_str().unwrap()),
+            Some(archive.clone())
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(feature = "archive")]
+    #[test]
+    fn archive_extraction_is_installed_from_atomic_staging() {
+        use std::io::Write as _;
+
+        let root = unique_tmp_dir("atomic-archive");
+        let source = root.join("source");
+        let cache = root.join("cache");
+        std::fs::create_dir_all(source.join("lib")).unwrap();
+        std::fs::write(source.join("lib/libdear_imgui.a"), b"archive").unwrap();
+        std::fs::write(source.join("manifest.txt"), b"features=wchar32\n").unwrap();
+        let archive_path = root.join("artifact.tar.gz");
+        let file = std::fs::File::create(&archive_path).unwrap();
+        let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::fast());
+        let mut archive = tar::Builder::new(encoder);
+        archive
+            .append_path_with_name(source.join("lib/libdear_imgui.a"), "lib/libdear_imgui.a")
+            .unwrap();
+        archive
+            .append_path_with_name(source.join("manifest.txt"), "manifest.txt")
+            .unwrap();
+        archive
+            .into_inner()
+            .unwrap()
+            .finish()
+            .unwrap()
+            .flush()
+            .unwrap();
+
+        let lib_dir = extract_archive_to_cache(&archive_path, &cache, "libdear_imgui.a").unwrap();
+
+        assert_eq!(
+            std::fs::read(lib_dir.join("libdear_imgui.a")).unwrap(),
+            b"archive"
+        );
+        assert!(
+            std::fs::read_dir(lib_dir.parent().unwrap())
+                .unwrap()
+                .all(|entry| !entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".tmp-"))
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(feature = "archive")]
+    #[test]
+    fn archive_extraction_lock_serializes_check_cleanup_and_install() {
+        use std::io::Write as _;
+        use std::sync::mpsc;
+
+        let root = unique_tmp_dir("locked-archive");
+        let source = root.join("source");
+        let extract_dir = root.join("cache/shared");
+        std::fs::create_dir_all(source.join("lib")).unwrap();
+        std::fs::create_dir_all(&extract_dir).unwrap();
+        std::fs::write(extract_dir.join("stale.partial"), b"partial").unwrap();
+        std::fs::write(source.join("lib/libdear_imgui.a"), b"archive").unwrap();
+        std::fs::write(source.join("manifest.txt"), b"features=wchar32\n").unwrap();
+        let archive_path = root.join("artifact.tar.gz");
+        let file = std::fs::File::create(&archive_path).unwrap();
+        let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::fast());
+        let mut archive = tar::Builder::new(encoder);
+        archive
+            .append_path_with_name(source.join("lib/libdear_imgui.a"), "lib/libdear_imgui.a")
+            .unwrap();
+        archive
+            .append_path_with_name(source.join("manifest.txt"), "manifest.txt")
+            .unwrap();
+        archive
+            .into_inner()
+            .unwrap()
+            .finish()
+            .unwrap()
+            .flush()
+            .unwrap();
+
+        let (locked_tx, locked_rx) = mpsc::sync_channel(0);
+        let (release_tx, release_rx) = mpsc::sync_channel(0);
+        let first_archive = archive_path.clone();
+        let first_extract = extract_dir.clone();
+        let first = std::thread::spawn(move || {
+            extract_archive_to_dir(&first_archive, &first_extract, "libdear_imgui.a", || {
+                locked_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            })
+        });
+        locked_rx.recv().unwrap();
+
+        let lock_path = extraction_lock_path(&extract_dir);
+        let competing_lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .unwrap();
+        assert!(matches!(
+            competing_lock.try_lock(),
+            Err(std::fs::TryLockError::WouldBlock)
+        ));
+
+        release_tx.send(()).unwrap();
+        let first_lib_dir = first.join().unwrap().unwrap();
+        let second_lib_dir =
+            extract_archive_to_dir(&archive_path, &extract_dir, "libdear_imgui.a", || {}).unwrap();
+
+        assert_eq!(first_lib_dir, second_lib_dir);
+        assert_eq!(
+            std::fs::read(second_lib_dir.join("libdear_imgui.a")).unwrap(),
+            b"archive"
+        );
+        assert!(!extract_dir.join("stale.partial").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_file_url_removes_only_the_drive_root_slash() {
+        assert_eq!(
+            file_url_path("/C:/artifacts/dear-imgui.tar.gz"),
+            PathBuf::from("C:/artifacts/dear-imgui.tar.gz")
+        );
+        assert_eq!(
+            file_url_path("//server/share/dear-imgui.tar.gz"),
+            PathBuf::from("//server/share/dear-imgui.tar.gz")
+        );
     }
 
     #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]

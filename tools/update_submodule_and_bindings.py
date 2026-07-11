@@ -17,7 +17,7 @@ Supported crates (native bindings):
   - extensions/dear-imgui-test-engine-sys (imgui_test_engine)
 
 WASM pregenerated bindings:
-  - dear-imgui-sys: via `xtask wasm-bindgen`
+  - dear-imgui-sys: regenerated with the native profiles via `xtask verify-bindings --update`
   - optional extensions via `--wasm-ext`:
     - dear-implot-sys: `xtask wasm-bindgen-implot`
     - dear-implot3d-sys: `xtask wasm-bindgen-implot3d`
@@ -28,12 +28,13 @@ WASM pregenerated bindings:
 Usage examples:
   - Update cimgui and regenerate bindings for dear-imgui-sys (Debug):
       python3 tools/update_submodule_and_bindings.py --crates dear-imgui-sys \
-        --submodules update
+        --submodules auto
 
   - Update all submodules to specific branches and pregen bindings (Release):
       python3 tools/update_submodule_and_bindings.py --crates all --profile release \
         --submodules update \
         --cimgui-branch docking_inter --cimplot-branch master \
+        --cimplot3d-branch main \
         --cimnodes-branch master --cimguizmo-branch master \
         --cimnodes-editor-branch main --imgui-test-engine-branch main
 
@@ -46,7 +47,7 @@ Usage examples:
 
 Requirements:
   - git, cargo in PATH
-  - Python 3.7+
+  - Python 3.11+
 """
 
 import argparse
@@ -55,6 +56,8 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+import source_metadata
 
 
 def run(cmd, cwd=None, env=None, dry=False):
@@ -84,6 +87,30 @@ def find_bindings(target_dir: Path, profile: str, crate: str) -> Path:
     return matches[0]
 
 
+def core_binding_commands():
+    return [
+        [
+            "cargo",
+            "run",
+            "-p",
+            "xtask",
+            "--",
+            "verify-bindings",
+            "--update",
+            "--allow-dirty",
+        ],
+        [
+            "cargo",
+            "run",
+            "-p",
+            "xtask",
+            "--",
+            "verify-bindings",
+            "--allow-dirty",
+        ],
+    ]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Update third-party submodules and pregenerate bindings for sys crates (incl. wasm)")
     parser.add_argument("--crates", default="dear-imgui-sys", help="Comma-separated list of crates to process (or 'all')")
@@ -103,7 +130,11 @@ def main() -> int:
     )
     parser.add_argument("--remote", default="origin", help="Remote name for submodules")
     parser.add_argument("--wasm", action="store_true", help="Additionally generate wasm pregenerated bindings for dear-imgui-sys")
-    parser.add_argument("--wasm-import", default="imgui-sys-v0", help="WASM import module name for generated bindings")
+    parser.add_argument(
+        "--skip-core-bindings",
+        action="store_true",
+        help="Skip core generation after source/metadata sync; a caller will run the core xtask",
+    )
     parser.add_argument(
         "--wasm-ext",
         default="",
@@ -153,6 +184,7 @@ def main() -> int:
         if unknown:
             print(f"Unknown crates: {unknown}", file=sys.stderr)
             return 2
+    core_requested = "dear-imgui-sys" in crates or args.wasm or args.submodules == "update"
 
     # Optionally update submodules
     if args.submodules != "skip":
@@ -172,7 +204,38 @@ def main() -> int:
             rc = run(["git", "-C", str(path), "pull", args.remote, branch], dry=args.dry_run)
             if rc != 0:
                 return rc
-            run(["git", "-C", str(path), "submodule", "update", "--init", "--recursive"], dry=args.dry_run)
+            rc = run(
+                ["git", "-C", str(path), "submodule", "update", "--init", "--recursive"],
+                dry=args.dry_run,
+            )
+            if rc != 0:
+                return rc
+
+    if core_requested:
+        try:
+            metadata_update = source_metadata.update_core_source_metadata(
+                repo_root, dry_run=args.dry_run
+            )
+        except source_metadata.SourceMetadataError as error:
+            for message in error.errors:
+                print(f"Source metadata error: {message}", file=sys.stderr)
+            return 2
+        if metadata_update.changed:
+            action = "Would update" if args.dry_run else "Updated"
+            print(
+                f"{action} core source metadata: "
+                f"cimgui={metadata_update.revisions['cimgui-revision']} "
+                f"imgui={metadata_update.revisions['imgui-revision']}"
+            )
+        else:
+            print("Core source metadata already matches clean submodule revisions")
+
+    if core_requested and not args.skip_core_bindings:
+        print("Generating and validating all core native/WASM binding profiles via xtask...")
+        for command in core_binding_commands():
+            rc = run(command, cwd=str(repo_root), dry=args.dry_run)
+            if rc != 0:
+                return rc
 
     # Generate pregenerated bindings for selected crates
     env_base = os.environ.copy()
@@ -191,6 +254,8 @@ def main() -> int:
     }
     target_dir = Path(env_base.get("CARGO_TARGET_DIR", repo_root / "target"))
     for crate in crates:
+        if crate == "dear-imgui-sys":
+            continue
         env = env_base.copy()
         if crate != "dear-imgui-test-engine-sys":
             env[crate_skip_env[crate]] = "1"
@@ -208,43 +273,34 @@ def main() -> int:
         )
         if rc != 0:
             return rc
+        dest = crate_roots[crate] / "src" / "bindings_pregenerated.rs"
+        if args.dry_run:
+            print(f"Would update pregenerated bindings: {dest}")
+            continue
         bindings = find_bindings(target_dir, args.profile, crate)
         if bindings is None or not bindings.exists():
             print(f"Generated bindings.rs not found for {crate} under {target_dir / args.profile / 'build'}", file=sys.stderr)
             return 3
-        dest = crate_roots[crate] / "src" / "bindings_pregenerated.rs"
         header = (
             "// AUTOGENERATED: pregenerated bindings for docs.rs/offline builds\n"
             "// Note: inner attributes are intentionally omitted to avoid include-context errors.\n\n"
         )
-        if not args.dry_run:
-            content = bindings.read_text(encoding="utf-8", errors="ignore")
-            dest.write_text(header + content, encoding="utf-8")
+        content = bindings.read_text(encoding="utf-8", errors="ignore")
+        dest.write_text(header + content, encoding="utf-8")
         print(f"Updated pregenerated bindings: {dest}")
 
-    # Optionally generate wasm pregenerated bindings for dear-imgui-sys
+    # Optionally compile-check the explicit core WASM provider contract.
     if args.wasm:
-        xtask = repo_root / "xtask"
-        if not xtask.exists():
-            print("xtask workspace member not found; cannot generate wasm bindings", file=sys.stderr)
-            return 4
-        print(f"Generating wasm pregenerated bindings (import='{args.wasm_import}') via xtask...")
-        rc = run(["cargo", "run", "-p", "xtask", "--", "wasm-bindgen", args.wasm_import], cwd=str(repo_root), dry=args.dry_run)
-        if rc != 0:
-            return rc
         wasm_preg = crate_roots["dear-imgui-sys"] / "src" / "wasm_bindings_pregenerated.rs"
         if not wasm_preg.exists():
             print(f"WASM pregenerated bindings not found: {wasm_preg}", file=sys.stderr)
             return 5
         print(f"WASM pregenerated bindings ready: {wasm_preg}")
 
-        # Quick compile-check under wasm target (skip native C/C++)
-        print("Running cargo check for wasm32-unknown-unknown (skip native cc)...")
-        env = os.environ.copy()
-        env["IMGUI_SYS_SKIP_CC"] = "1"
+        print("Running cargo check for the explicit wasm32 provider feature...")
         rc = run([
             "cargo", "check", "-p", "dear-imgui-rs", "-F", "wasm", "--target", "wasm32-unknown-unknown"
-        ], cwd=str(repo_root), env=env, dry=args.dry_run)
+        ], cwd=str(repo_root), dry=args.dry_run)
         if rc != 0:
             return rc
 
@@ -280,9 +336,12 @@ def main() -> int:
                 return 7
             cmd = ext_to_cmd[ext]
             sys_crate = ext_to_sys_crate[ext]
-            print(f"Generating wasm pregenerated bindings for {sys_crate} (ext='{ext}', import='{args.wasm_import}') via xtask...")
+            print(
+                f"Generating wasm pregenerated bindings for {sys_crate} "
+                f"(ext='{ext}', provider='imgui-sys-v0') via xtask..."
+            )
             rc = run(
-                ["cargo", "run", "-p", "xtask", "--", cmd, args.wasm_import],
+                ["cargo", "run", "-p", "xtask", "--", cmd],
                 cwd=str(repo_root),
                 dry=args.dry_run,
             )

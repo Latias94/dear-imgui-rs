@@ -42,7 +42,6 @@ python tools/update_submodule_and_bindings.py `
   --cimguizmo-branch master `
   --imgui-test-engine-branch main `
   --wasm `
-  --wasm-import imgui-sys-v0 `
   --wasm-ext implot,implot3d,imnodes,imguizmo,imguizmo-quat
 ```
 
@@ -51,19 +50,22 @@ Narrow `--crates` / `--wasm-ext` if only part of the stack changed.
 ### Bump unified release version
 
 ```powershell
-python tools/bump_version.py 0.11.0
+cargo run -p xtask -- release-version 0.16.0
 ```
 
-This updates published workspace crate versions and internal dependency minors. After a version bump, refresh lockfiles:
+The root workspace version is the single source of truth. Publishable packages
+inherit it, and internal path dependencies inherit the matching root dependency
+requirements. After a version update, refresh and verify the lockfile:
 
 ```powershell
-cargo update -w
+cargo metadata --format-version 1 --no-deps | Out-Null
+cargo metadata --locked --format-version 1 --no-deps
 ```
 
-Also refresh example lockfiles if their local path dependencies changed version:
+Also refresh standalone example lockfiles if their local path dependencies changed version:
 
 ```powershell
-cargo update -p dear-imgui-build-support --precise 0.11.0
+cargo update
 ```
 
 Run that in each standalone example workspace that carries its own `Cargo.lock`.
@@ -96,11 +98,11 @@ Run that in each standalone example workspace that carries its own `Cargo.lock`.
    - Update `README.md` compatibility/release references if version baselines changed
    - Update `docs/COMPATIBILITY.md`
    - Update `docs/PUBLISHING.md` and `docs/RELEASING.md` if publish order, helper crates, or release tooling changed
-   - Check `tools/publish.py`, `tools/pre_publish_check.py`, `tools/bump_version.py`, and `tools/tasks.py` if release mechanics changed
+   - Check `xtask release-version`, `tools/publish.py`, `tools/pre_publish_check.py`, and `tools/tasks.py` if release mechanics changed
 
 6. Helper crate/versioning
    - Keep `tools/build-support` on the unified release train unless there is a deliberate reason not to.
-   - If `dear-imgui-build-support` changes version, update every `*-sys` crate dependency and validate packaging/publish ordering again.
+   - `dear-imgui-build-support` inherits the unified workspace release version. Validate packaging and publish ordering whenever its contract changes.
 
 ## Validation matrix
 
@@ -138,6 +140,7 @@ $env:DOCS_RS = '1'; cargo check -p dear-imgui-sys
 $env:DOCS_RS = '1'; cargo check -p dear-implot-sys
 $env:DOCS_RS = '1'; cargo check -p dear-implot3d-sys
 $env:DOCS_RS = '1'; cargo check -p dear-imnodes-sys
+$env:DOCS_RS = '1'; cargo check -p dear-node-editor-sys
 $env:DOCS_RS = '1'; cargo check -p dear-imguizmo-sys
 $env:DOCS_RS = '1'; cargo check -p dear-imguizmo-quat-sys
 $env:DOCS_RS = '1'; cargo check -p dear-imgui-test-engine-sys
@@ -149,7 +152,7 @@ $env:DOCS_RS = '1'; cargo check -p dear-imgui-test-engine-sys
 cargo check -p dear-imgui-examples --bin implot_basic --features implot
 cargo check -p dear-imgui-examples --bin implot3d_basic --features implot3d
 cargo check -p dear-imgui-examples --bin imgui_test_engine_basic --features test-engine
-cargo check -p dear-imgui-examples --bin node_editor_showcase --features node-editor
+cargo check -p dear-imgui-examples --bin node_editor_showcase --features node-editor-blueprints
 ```
 
 If backend or mobile integration changed, also re-run the relevant repository-local iOS / Android smoke checks from CI.

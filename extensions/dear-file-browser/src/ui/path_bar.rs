@@ -8,18 +8,17 @@ use dear_imgui_rs::{
 
 use crate::dialog_core::CoreEvent;
 use crate::dialog_state::{FileDialogState, PathBarStyle};
-use crate::fs::FileSystem;
 
-struct PathBarCallback<'a> {
+struct PathBarCallback {
     cwd: PathBuf,
-    fs: &'a dyn FileSystem,
+    completion_dirs: Vec<String>,
     recent_paths: Vec<String>,
     history_index: *mut Option<usize>,
     history_saved_buffer: *mut Option<String>,
     programmatic_edit: *mut bool,
 }
 
-impl PathBarCallback<'_> {
+impl PathBarCallback {
     fn set_text(&mut self, mut data: TextCallbackData, text: &str) {
         let old = data.str();
         if old == text {
@@ -71,9 +70,7 @@ impl PathBarCallback<'_> {
     }
 
     fn last_sep_pos(s: &str) -> Option<(usize, char)> {
-        s.char_indices()
-            .filter(|(_, c)| *c == '/' || *c == '\\')
-            .last()
+        s.char_indices().rfind(|(_, c)| *c == '/' || *c == '\\')
     }
 
     fn try_complete_path(&mut self, data: TextCallbackData) {
@@ -102,15 +99,15 @@ impl PathBarCallback<'_> {
             }
         };
 
-        let Ok(entries) = self.fs.read_dir(&base_dir) else {
+        if base_dir != self.cwd {
             return;
-        };
+        }
 
-        let mut matches = entries
-            .into_iter()
-            .filter(|e| e.is_dir)
-            .filter(|e| Self::starts_with_case_insensitive(&e.name, frag))
-            .map(|e| e.name)
+        let mut matches = self
+            .completion_dirs
+            .iter()
+            .filter(|name| Self::starts_with_case_insensitive(name, frag))
+            .cloned()
             .collect::<Vec<_>>();
         if matches.is_empty() {
             return;
@@ -188,7 +185,7 @@ impl PathBarCallback<'_> {
     }
 }
 
-impl InputTextCallbackHandler for PathBarCallback<'_> {
+impl InputTextCallbackHandler for PathBarCallback {
     fn on_completion(&mut self, data: TextCallbackData) {
         self.try_complete_path(data);
     }
@@ -201,7 +198,6 @@ impl InputTextCallbackHandler for PathBarCallback<'_> {
 pub(super) fn draw_path_input_text(
     ui: &Ui,
     state: &mut FileDialogState,
-    fs: &dyn FileSystem,
     recent_paths: &[PathBuf],
     path_w: f32,
     show_go_button: bool,
@@ -223,7 +219,13 @@ pub(super) fn draw_path_input_text(
     let programmatic_edit_ptr: *mut bool = &mut state.ui.runtime.path.programmatic_edit;
     let callback = PathBarCallback {
         cwd: state.core.cwd.clone(),
-        fs,
+        completion_dirs: state
+            .core
+            .entries()
+            .iter()
+            .filter(|entry| entry.is_dir)
+            .map(|entry| entry.name.clone())
+            .collect(),
         recent_paths: callback_recent_paths,
         history_index: history_index_ptr,
         history_saved_buffer: history_saved_ptr,
@@ -251,14 +253,14 @@ pub(super) fn draw_path_input_text(
     if show_go_button {
         ui.same_line();
         if ui.button("Go") || (path_active && submitted) {
-            submit_path_edit(state, fs);
+            submit_path_edit(state);
         }
     } else if path_active && submitted {
-        submit_path_edit(state, fs);
+        submit_path_edit(state);
     }
 }
 
-fn submit_path_edit(state: &mut FileDialogState, fs: &dyn FileSystem) {
+fn submit_path_edit(state: &mut FileDialogState) {
     let input = state.ui.runtime.path.buffer.trim();
     if input.is_empty() {
         state.ui.runtime.error = Some("Path is empty".into());
@@ -271,8 +273,13 @@ fn submit_path_edit(state: &mut FileDialogState, fs: &dyn FileSystem) {
     } else {
         state.core.cwd.join(&raw_p)
     };
-    let p = fs.canonicalize(&raw_p).unwrap_or(raw_p.clone());
-    match fs.metadata(&p) {
+    let (p, metadata) = {
+        let fs = state.filesystem.as_file_system();
+        let p = fs.canonicalize(&raw_p).unwrap_or(raw_p.clone());
+        let metadata = fs.metadata(&p);
+        (p, metadata)
+    };
+    match metadata {
         Ok(md) => {
             if md.is_dir {
                 let _ = state.core.handle_event(CoreEvent::NavigateTo(p));
@@ -393,7 +400,6 @@ pub(super) fn estimate_breadcrumbs_total_width(
 pub(super) fn draw_breadcrumbs(
     ui: &Ui,
     state: &mut FileDialogState,
-    _fs: &dyn FileSystem,
     max_segments: usize,
     newline_at_end: bool,
     auto_scroll_end: bool,

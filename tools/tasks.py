@@ -8,18 +8,22 @@ Usage:
   python3 tools/tasks.py <task> [options]
 
 Available tasks:
-  check           - Run pre-publish validation checks
-  bump <version>  - Bump version to specified version
-  bindings        - Update pregenerated bindings for all -sys crates
-  publish         - Publish all crates to crates.io
-  test            - Run all tests
-  doc             - Build documentation
-  clean           - Clean build artifacts
+  check                     - Run configurable pre-publish checks
+  bump <version>            - Update the unified workspace release version
+  bindings                  - Update all core and extension bindings
+  release-prepare <version> - Generate a release diff from a clean tree
+  release-check             - Validate a committed clean release candidate
+  publish                   - Publish all crates to crates.io
+  test                      - Run all tests
+  doc                       - Build documentation
+  clean                     - Clean build artifacts
 
 Examples:
   python3 tools/tasks.py check
-  python3 tools/tasks.py bump 0.7.1
+  python3 tools/tasks.py bump 0.16.0 --dry-run
   python3 tools/tasks.py bindings
+  python3 tools/tasks.py release-prepare 0.16.0
+  python3 tools/tasks.py release-check
   python3 tools/tasks.py publish --dry-run
 """
 
@@ -27,10 +31,12 @@ import argparse
 import subprocess
 import sys
 from pathlib import Path
-from typing import List
+from typing import Callable, List
 
 
-def run_command(cmd: List[str], cwd=None, quiet: bool = False) -> int:
+def run_command(
+    cmd: List[str], cwd=None, quiet: bool = False, capture: bool = False
+) -> int:
     """
     Run a command and return its exit code.
 
@@ -38,12 +44,23 @@ def run_command(cmd: List[str], cwd=None, quiet: bool = False) -> int:
         cmd: Command to run
         cwd: Working directory
         quiet: If True, suppress the command echo
+        capture: If True, suppress successful output and show it only on failure
     """
     if not quiet:
         print(f"$ {' '.join(str(c) for c in cmd)}")
     try:
-        # Always stream output in real-time (don't capture)
-        result = subprocess.run(cmd, cwd=cwd, check=False)
+        result = subprocess.run(
+            cmd,
+            cwd=cwd,
+            check=False,
+            capture_output=capture,
+            text=capture,
+        )
+        if capture and result.returncode != 0:
+            if result.stdout:
+                print(result.stdout, file=sys.stderr)
+            if result.stderr:
+                print(result.stderr, file=sys.stderr)
         return result.returncode
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -66,56 +83,101 @@ def cargo_nextest_available(cwd=None) -> bool:
 
 
 def task_check(args, repo_root: Path) -> int:
-    """Run pre-publish validation checks."""
+    """Run configurable pre-publish validation checks."""
     cmd = [sys.executable, "tools/pre_publish_check.py"]
-    
+
+    if getattr(args, "skip_git", False) and not getattr(
+        args, "skip_package", False
+    ):
+        print(
+            "Error: --skip-git requires --skip-package because package checks "
+            "validate a clean clone of HEAD",
+            file=sys.stderr,
+        )
+        return 1
     if getattr(args, "skip_git", False):
         cmd.append("--skip-git-check")
     if getattr(args, "skip_doc", False):
         cmd.append("--skip-doc-check")
     if getattr(args, "skip_test", False):
         cmd.append("--skip-test-check")
-    
+    if getattr(args, "skip_package", False):
+        cmd.append("--skip-package-check")
+
     return run_command(cmd, cwd=repo_root)
 
 
 def task_bump(args, repo_root: Path) -> int:
-    """Bump version across workspace."""
-    if not args.version:
-        print("Error: version argument required", file=sys.stderr)
-        print("Usage: python3 tools/tasks.py bump <version>")
-        return 1
-    
-    cmd = [sys.executable, "tools/bump_version.py", args.version]
-    
+    """Update the unified workspace release version."""
+    cmd = [
+        "cargo",
+        "run",
+        "--locked",
+        "-p",
+        "xtask",
+        "--",
+        "release-version",
+        args.version,
+    ]
+
     if getattr(args, "dry_run", False):
         cmd.append("--dry-run")
-    if getattr(args, "old_version", None):
-        cmd.extend(["--old-version", args.old_version])
-    
     return run_command(cmd, cwd=repo_root)
 
 
 def task_bindings(args, repo_root: Path) -> int:
-    """Update pregenerated bindings."""
+    """Update core ABI profiles through xtask and extensions through their builders."""
+    crates = getattr(args, "crates", None) or "all"
+    selected = {crate.strip() for crate in crates.split(",") if crate.strip()}
+    includes_core = crates.strip().lower() == "all" or "dear-imgui-sys" in selected
+
     cmd = [sys.executable, "tools/update_submodule_and_bindings.py"]
-    
-    if getattr(args, "crates", None):
-        cmd.extend(["--crates", args.crates])
-    else:
-        cmd.extend(["--crates", "all"])
-    
+    cmd.extend(["--crates", crates])
     cmd.extend(["--profile", "release"])
-    
     if getattr(args, "update_submodules", False):
         cmd.extend(["--submodules", "update"])
     else:
         cmd.extend(["--submodules", "skip"])
-    
+    if includes_core:
+        cmd.append("--skip-core-bindings")
     if getattr(args, "dry_run", False):
         cmd.append("--dry-run")
-    
-    return run_command(cmd, cwd=repo_root)
+
+    rc = run_command(cmd, cwd=repo_root)
+    if rc != 0 or not includes_core:
+        return rc
+
+    core_commands = [
+        [
+            "cargo",
+            "run",
+            "-p",
+            "xtask",
+            "--",
+            "verify-bindings",
+            "--update",
+            "--allow-dirty",
+        ],
+        [
+            "cargo",
+            "run",
+            "-p",
+            "xtask",
+            "--",
+            "verify-bindings",
+            "--allow-dirty",
+        ],
+    ]
+    if getattr(args, "dry_run", False):
+        for core_command in core_commands:
+            print(f"$ {' '.join(core_command)}")
+        return 0
+
+    for core_command in core_commands:
+        rc = run_command(core_command, cwd=repo_root)
+        if rc != 0:
+            return rc
+    return 0
 
 
 def task_publish(args, repo_root: Path) -> int:
@@ -212,47 +274,143 @@ def task_clean(args, repo_root: Path) -> int:
     return run_command(cmd, cwd=repo_root)
 
 
-def task_release_prep(args, repo_root: Path) -> int:
-    """Prepare for release (all-in-one)."""
-    if not args.version:
-        print("Error: version argument required", file=sys.stderr)
-        print("Usage: python3 tools/tasks.py release-prep <version>")
+def require_clean_worktree(repo_root: Path) -> int:
+    """Require all tracked, untracked, and submodule state to be clean."""
+    command = [
+        "git",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all",
+        "--ignore-submodules=none",
+    ]
+    print(f"$ {' '.join(command)}")
+    try:
+        result = subprocess.run(
+            command,
+            cwd=repo_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except Exception as error:
+        print(f"Error: could not inspect worktree: {error}", file=sys.stderr)
         return 1
-    
+
+    if result.returncode != 0:
+        detail = result.stderr.strip() or "git status failed"
+        print(f"Error: {detail}", file=sys.stderr)
+        return result.returncode
+    if result.stdout.strip():
+        print(
+            "Error: release-prepare requires a completely clean worktree:",
+            file=sys.stderr,
+        )
+        print(result.stdout.rstrip(), file=sys.stderr)
+        return 1
+    return 0
+
+
+def refresh_cargo_lock(repo_root: Path, dry_run: bool) -> int:
+    """Refresh Cargo.lock, then prove that locked metadata resolves."""
+    refresh = ["cargo", "metadata", "--no-deps", "--format-version", "1"]
+    verify = [
+        "cargo",
+        "metadata",
+        "--locked",
+        "--no-deps",
+        "--format-version",
+        "1",
+    ]
+
+    if dry_run:
+        print(f"$ {' '.join(refresh)}  # skipped by --dry-run")
+    else:
+        result = run_command(refresh, cwd=repo_root, capture=True)
+        if result != 0:
+            return result
+    return run_command(verify, cwd=repo_root, capture=True)
+
+
+def run_release_step(label: str, operation: Callable[[], int]) -> int:
+    """Run one release preparation step and stop on its first failure."""
+    print(f"\n{'=' * 80}")
+    print(f"Step: {label}")
+    print("=" * 80 + "\n")
+    result = operation()
+    if result != 0:
+        print(f"\nError: {label} failed", file=sys.stderr)
+    return result
+
+
+def task_release_prepare(args, repo_root: Path) -> int:
+    """Generate a release diff without invoking strict committed-tree checks."""
     print("\n" + "=" * 80)
     print("RELEASE PREPARATION WORKFLOW")
     print("=" * 80 + "\n")
-    
+
+    if require_clean_worktree(repo_root) != 0:
+        return 1
+
     steps = [
-        ("1. Bump version", lambda: task_bump(args, repo_root)),
-        ("2. Update bindings", lambda: task_bindings(args, repo_root)),
+        ("1. Update unified release version", lambda: task_bump(args, repo_root)),
+        (
+            "2. Refresh and verify Cargo.lock",
+            lambda: refresh_cargo_lock(repo_root, args.dry_run),
+        ),
+        (
+            "3. Regenerate bindings without updating submodules",
+            lambda: task_bindings(args, repo_root),
+        ),
     ]
-    if not getattr(args, "skip_test", False):
-        steps.append(("3. Run tests", lambda: task_test(args, repo_root)))
-    steps.append(("4. Run checks", lambda: task_check(args, repo_root)))
-    
-    for step_name, step_func in steps:
-        print(f"\n{'=' * 80}")
-        print(f"Step: {step_name}")
-        print("=" * 80 + "\n")
-        
-        result = step_func()
+    if not args.skip_tool_tests:
+        steps.append(
+            (
+                "4. Run release-tool unit tests",
+                lambda: run_command(
+                    [
+                        sys.executable,
+                        "-B",
+                        "-m",
+                        "unittest",
+                        "discover",
+                        "-s",
+                        "tools/tests",
+                        "-p",
+                        "test_*.py",
+                    ],
+                    cwd=repo_root,
+                ),
+            )
+        )
+
+    for label, operation in steps:
+        result = run_release_step(label, operation)
         if result != 0:
-            print(f"\nError: {step_name} failed", file=sys.stderr)
             return result
-    
+
     print("\n" + "=" * 80)
     print("RELEASE PREPARATION COMPLETE")
     print("=" * 80 + "\n")
+    if args.dry_run:
+        print("Dry run complete; no release files were intentionally modified.")
     print("Next steps:")
-    print("  1. Review changes: git diff")
-    print("  2. Update CHANGELOG.md")
-    print("  3. Update README.md and docs/COMPATIBILITY.md")
-    print("  4. Commit: git add -A && git commit -m 'chore: prepare release v" + args.version + "'")
-    print("  5. Publish: python3 tools/tasks.py publish")
+    print("  1. Review the generated diff: git diff")
+    print("  2. Update CHANGELOG.md, README.md, and release documentation")
+    print(
+        "  3. Commit the release candidate: "
+        f"git commit -m 'chore: prepare release v{args.version}'"
+    )
+    print("  4. From the committed clean tree: python3 tools/tasks.py release-check")
     print()
-    
     return 0
+
+
+def task_release_check(_args, repo_root: Path) -> int:
+    """Run the strict release gate against a committed clean tree."""
+    return run_command(
+        [sys.executable, "tools/pre_publish_check.py"],
+        cwd=repo_root,
+    )
 
 
 def main() -> int:
@@ -265,19 +423,36 @@ def main() -> int:
     subparsers = parser.add_subparsers(dest="task", help="Task to run")
     
     # check task
-    check_parser = subparsers.add_parser("check", help="Run pre-publish validation")
-    check_parser.add_argument("--skip-git", action="store_true", help="Skip git checks")
+    check_parser = subparsers.add_parser(
+        "check", help="Run configurable pre-publish validation"
+    )
+    check_parser.add_argument(
+        "--skip-git",
+        action="store_true",
+        help="Skip git checks (requires --skip-package)",
+    )
     check_parser.add_argument("--skip-doc", action="store_true", help="Skip doc checks")
     check_parser.add_argument("--skip-test", action="store_true", help="Skip test checks")
+    check_parser.add_argument(
+        "--skip-package",
+        action="store_true",
+        help="Skip clean-clone package and offline-consumer checks",
+    )
     
     # bump task
-    bump_parser = subparsers.add_parser("bump", help="Bump version")
-    bump_parser.add_argument("version", nargs="?", help="New version (e.g., 0.5.0)")
-    bump_parser.add_argument("--old-version", help="Old version to replace")
-    bump_parser.add_argument("--dry-run", action="store_true", help="Dry run")
+    bump_parser = subparsers.add_parser(
+        "bump", help="Update the unified workspace release version"
+    )
+    bump_parser.add_argument("version", help="New complete version (e.g., 0.16.0)")
+    bump_parser.add_argument(
+        "--dry-run", action="store_true", help="Validate and preview without writing"
+    )
     
     # bindings task
-    bindings_parser = subparsers.add_parser("bindings", help="Update pregenerated bindings")
+    bindings_parser = subparsers.add_parser(
+        "bindings",
+        help="Update Windows, non-Windows, WASM, and extension bindings",
+    )
     bindings_parser.add_argument("--crates", help="Comma-separated list of crates")
     bindings_parser.add_argument("--update-submodules", action="store_true", help="Update submodules")
     bindings_parser.add_argument("--dry-run", action="store_true", help="Dry run")
@@ -305,16 +480,28 @@ def main() -> int:
     clean_parser = subparsers.add_parser("clean", help="Clean build artifacts")
     clean_parser.add_argument("-p", "--package", help="Clean specific package")
     
-    # release-prep task (all-in-one)
-    release_prep_parser = subparsers.add_parser("release-prep", help="Prepare for release (all-in-one)")
-    release_prep_parser.add_argument("version", nargs="?", help="New version (e.g., 0.5.0)")
-    release_prep_parser.add_argument("--old-version", help="Old version to replace")
-    release_prep_parser.add_argument("--crates", help="Comma-separated list of crates (for bindings)")
-    release_prep_parser.add_argument("--update-submodules", action="store_true", help="Update submodules when generating bindings")
-    release_prep_parser.add_argument("--dry-run", action="store_true", help="Dry run where supported")
-    release_prep_parser.add_argument("--skip-git", action="store_true", help="Skip git checks")
-    release_prep_parser.add_argument("--skip-doc", action="store_true", help="Skip doc checks")
-    release_prep_parser.add_argument("--skip-test", action="store_true", help="Skip the test step and pre-publish test checks")
+    release_prepare_parser = subparsers.add_parser(
+        "release-prepare",
+        help="Generate a release diff from a completely clean worktree",
+    )
+    release_prepare_parser.add_argument(
+        "version", help="New complete release version (e.g., 0.16.0)"
+    )
+    release_prepare_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate and display mutating steps without writing release files",
+    )
+    release_prepare_parser.add_argument(
+        "--skip-tool-tests",
+        action="store_true",
+        help="Skip the focused Python release-tool unit tests",
+    )
+
+    subparsers.add_parser(
+        "release-check",
+        help="Run every strict release gate against a committed clean tree",
+    )
     
     args = parser.parse_args()
     
@@ -332,7 +519,8 @@ def main() -> int:
         "test": task_test,
         "doc": task_doc,
         "clean": task_clean,
-        "release-prep": task_release_prep,
+        "release-prepare": task_release_prepare,
+        "release-check": task_release_check,
     }
     
     task_func = tasks.get(args.task)

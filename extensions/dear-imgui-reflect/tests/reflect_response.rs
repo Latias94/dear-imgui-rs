@@ -29,13 +29,14 @@ fn reflect_response_tracks_container_events_with_paths() {
     let _ = ctx.font_atlas_mut().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 
-    let ui = ctx.frame();
-
     let mut demo = ResponseDemo::default();
-    let mut resp = reflect::ReflectResponse::default();
+    let session = reflect::ReflectSession::new();
 
     // First pass: no changes should produce no events.
-    let _changed = reflect::input_with_response(ui, "ResponseDemo", &mut demo, &mut resp);
+    let ui = ctx.frame();
+    let mut inspector = session.inspector(ui);
+    let _changed = inspector.input("ResponseDemo", &mut demo);
+    let resp = inspector.into_response();
     assert!(resp.is_empty());
 
     // Mutate the data before the next frame so that container editors have
@@ -48,10 +49,11 @@ fn reflect_response_tracks_container_events_with_paths() {
     ctx.render();
 
     let ui = ctx.frame();
-    resp.clear();
 
     // Second pass: containers have elements; we still don't simulate clicks,
     // but this ensures that simply reflecting does not spuriously emit events.
-    let _changed = reflect::input_with_response(ui, "ResponseDemo", &mut demo, &mut resp);
+    let mut inspector = session.inspector(ui);
+    let _changed = inspector.input("ResponseDemo", &mut demo);
+    let resp = inspector.into_response();
     assert!(resp.is_empty());
 }

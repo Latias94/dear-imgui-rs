@@ -21,7 +21,7 @@ use ash::khr::{surface as khr_surface, swapchain as khr_swapchain};
 use ash::{Device, Entry, Instance, vk};
 use dear_imgui_ash::{AshRenderer, Options as AshOptions};
 use dear_imgui_rs::{Condition, ConfigFlags, Context};
-use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode};
+use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode, Sdl3PlatformBackend};
 use sdl3::event::Event;
 use sdl3::keyboard::Keycode;
 use sdl3::video::{SwapInterval, WindowPos};
@@ -114,6 +114,7 @@ struct SwapchainState {
     images: Vec<vk::Image>,
     image_views: Vec<vk::ImageView>,
     framebuffers: Vec<vk::Framebuffer>,
+    present_semaphores: Vec<vk::Semaphore>,
 }
 
 impl SwapchainState {
@@ -122,6 +123,22 @@ impl SwapchainState {
         window: &sdl3::video::Window,
         render_pass: vk::RenderPass,
         surface_format: vk::SurfaceFormatKHR,
+    ) -> Result<Self, Box<dyn Error>> {
+        Self::new_with_old(
+            ctx,
+            window,
+            render_pass,
+            surface_format,
+            vk::SwapchainKHR::null(),
+        )
+    }
+
+    fn new_with_old(
+        ctx: &VulkanContext,
+        window: &sdl3::video::Window,
+        render_pass: vk::RenderPass,
+        surface_format: vk::SurfaceFormatKHR,
+        old_swapchain: vk::SwapchainKHR,
     ) -> Result<Self, Box<dyn Error>> {
         let loader = khr_swapchain::Device::new(&ctx.instance, &ctx.device);
 
@@ -168,12 +185,42 @@ impl SwapchainState {
             .pre_transform(caps.current_transform)
             .composite_alpha(composite_alpha)
             .present_mode(present_mode)
-            .clipped(true);
+            .clipped(true)
+            .old_swapchain(old_swapchain);
 
         let swapchain = unsafe { loader.create_swapchain(&swapchain_create_info, None)? };
-        let images = unsafe { loader.get_swapchain_images(swapchain)? };
-        let image_views = create_image_views(&ctx.device, &images, surface_format.format)?;
-        let framebuffers = create_framebuffers(&ctx.device, render_pass, extent, &image_views)?;
+        let images = match unsafe { loader.get_swapchain_images(swapchain) } {
+            Ok(images) => images,
+            Err(error) => {
+                unsafe { loader.destroy_swapchain(swapchain, None) };
+                return Err(Box::new(error));
+            }
+        };
+        let image_views = match create_image_views(&ctx.device, &images, surface_format.format) {
+            Ok(image_views) => image_views,
+            Err(error) => {
+                unsafe { loader.destroy_swapchain(swapchain, None) };
+                return Err(Box::new(error));
+            }
+        };
+        let framebuffers = match create_framebuffers(&ctx.device, render_pass, extent, &image_views)
+        {
+            Ok(framebuffers) => framebuffers,
+            Err(error) => {
+                destroy_image_views(&ctx.device, image_views);
+                unsafe { loader.destroy_swapchain(swapchain, None) };
+                return Err(Box::new(error));
+            }
+        };
+        let present_semaphores = match create_present_semaphores(&ctx.device, images.len()) {
+            Ok(semaphores) => semaphores,
+            Err(error) => {
+                destroy_framebuffers(&ctx.device, framebuffers);
+                destroy_image_views(&ctx.device, image_views);
+                unsafe { loader.destroy_swapchain(swapchain, None) };
+                return Err(Box::new(error));
+            }
+        };
 
         Ok(Self {
             loader,
@@ -183,7 +230,26 @@ impl SwapchainState {
             images,
             image_views,
             framebuffers,
+            present_semaphores,
         })
+    }
+
+    fn destroy_resources(&mut self, device: &Device) {
+        unsafe {
+            for framebuffer in self.framebuffers.drain(..) {
+                device.destroy_framebuffer(framebuffer, None);
+            }
+            for image_view in self.image_views.drain(..) {
+                device.destroy_image_view(image_view, None);
+            }
+            for semaphore in self.present_semaphores.drain(..) {
+                device.destroy_semaphore(semaphore, None);
+            }
+            if self.swapchain != vk::SwapchainKHR::null() {
+                self.loader.destroy_swapchain(self.swapchain, None);
+                self.swapchain = vk::SwapchainKHR::null();
+            }
+        }
     }
 
     fn recreate(
@@ -192,26 +258,24 @@ impl SwapchainState {
         window: &sdl3::video::Window,
         render_pass: vk::RenderPass,
     ) -> Result<(), Box<dyn Error>> {
-        unsafe {
-            let _ = ctx.device.device_wait_idle();
-            for fb in self.framebuffers.drain(..) {
-                ctx.device.destroy_framebuffer(fb, None);
-            }
-            for v in self.image_views.drain(..) {
-                ctx.device.destroy_image_view(v, None);
-            }
-            self.loader.destroy_swapchain(self.swapchain, None);
-        }
-
+        unsafe { ctx.device.device_wait_idle()? };
         let new_format = pick_surface_format(ctx)?;
-        *self = Self::new(ctx, window, render_pass, new_format)?;
+        let replacement =
+            match Self::new_with_old(ctx, window, render_pass, new_format, self.swapchain) {
+                Ok(replacement) => replacement,
+                Err(error) => {
+                    self.destroy_resources(&ctx.device);
+                    return Err(error);
+                }
+            };
+        let mut previous = std::mem::replace(self, replacement);
+        previous.destroy_resources(&ctx.device);
         Ok(())
     }
 }
 
 struct FrameSync {
     image_available: vk::Semaphore,
-    render_finished: vk::Semaphore,
     fence: vk::Fence,
     command_buffer: vk::CommandBuffer,
 }
@@ -224,24 +288,69 @@ fn create_frame_sync(
     let fence_info = vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
 
     let image_available = unsafe { device.create_semaphore(&semaphore_info, None)? };
-    let render_finished = unsafe { device.create_semaphore(&semaphore_info, None)? };
-    let fence = unsafe { device.create_fence(&fence_info, None)? };
+    let fence = match unsafe { device.create_fence(&fence_info, None) } {
+        Ok(fence) => fence,
+        Err(error) => {
+            unsafe { device.destroy_semaphore(image_available, None) };
+            return Err(error);
+        }
+    };
 
-    let command_buffer = unsafe {
+    let command_buffer = match unsafe {
         device.allocate_command_buffers(
             &vk::CommandBufferAllocateInfo::default()
                 .command_pool(command_pool)
                 .level(vk::CommandBufferLevel::PRIMARY)
                 .command_buffer_count(1),
-        )?[0]
+        )
+    } {
+        Ok(command_buffers) => command_buffers[0],
+        Err(error) => {
+            unsafe {
+                device.destroy_fence(fence, None);
+                device.destroy_semaphore(image_available, None);
+            }
+            return Err(error);
+        }
     };
 
     Ok(FrameSync {
         image_available,
-        render_finished,
         fence,
         command_buffer,
     })
+}
+
+fn create_frame_syncs(
+    device: &Device,
+    command_pool: vk::CommandPool,
+    count: usize,
+) -> Result<Vec<FrameSync>, vk::Result> {
+    let mut frames = Vec::with_capacity(count);
+    for _ in 0..count {
+        match create_frame_sync(device, command_pool) {
+            Ok(frame) => frames.push(frame),
+            Err(error) => {
+                destroy_frame_syncs(device, command_pool, &mut frames);
+                return Err(error);
+            }
+        }
+    }
+    Ok(frames)
+}
+
+fn destroy_frame_syncs(
+    device: &Device,
+    command_pool: vk::CommandPool,
+    frames: &mut Vec<FrameSync>,
+) {
+    unsafe {
+        for frame in frames.drain(..) {
+            device.destroy_semaphore(frame.image_available, None);
+            device.destroy_fence(frame.fence, None);
+            device.free_command_buffers(command_pool, &[frame.command_buffer]);
+        }
+    }
 }
 
 fn record_command_buffer<
@@ -297,8 +406,7 @@ fn create_render_pass(device: &Device, format: vk::Format) -> Result<vk::RenderP
         .store_op(vk::AttachmentStoreOp::STORE)
         .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
         .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
-        // Swapchain images are in PRESENT_SRC_KHR when acquired.
-        .initial_layout(vk::ImageLayout::PRESENT_SRC_KHR)
+        .initial_layout(vk::ImageLayout::UNDEFINED)
         .final_layout(vk::ImageLayout::PRESENT_SRC_KHR)];
 
     let color_attachment_refs = [vk::AttachmentReference::default()
@@ -343,10 +451,24 @@ fn create_image_views(
                 base_array_layer: 0,
                 layer_count: 1,
             });
-        let view = unsafe { device.create_image_view(&create_info, None)? };
+        let view = match unsafe { device.create_image_view(&create_info, None) } {
+            Ok(view) => view,
+            Err(error) => {
+                destroy_image_views(device, image_views);
+                return Err(error);
+            }
+        };
         image_views.push(view);
     }
     Ok(image_views)
+}
+
+fn destroy_image_views(device: &Device, image_views: Vec<vk::ImageView>) {
+    unsafe {
+        for image_view in image_views {
+            device.destroy_image_view(image_view, None);
+        }
+    }
 }
 
 fn create_framebuffers(
@@ -357,7 +479,7 @@ fn create_framebuffers(
 ) -> Result<Vec<vk::Framebuffer>, vk::Result> {
     let mut framebuffers = Vec::with_capacity(image_views.len());
     for &view in image_views {
-        let fb = unsafe {
+        let framebuffer = match unsafe {
             device.create_framebuffer(
                 &vk::FramebufferCreateInfo::default()
                     .render_pass(render_pass)
@@ -366,11 +488,46 @@ fn create_framebuffers(
                     .height(extent.height)
                     .layers(1),
                 None,
-            )?
+            )
+        } {
+            Ok(framebuffer) => framebuffer,
+            Err(error) => {
+                destroy_framebuffers(device, framebuffers);
+                return Err(error);
+            }
         };
-        framebuffers.push(fb);
+        framebuffers.push(framebuffer);
     }
     Ok(framebuffers)
+}
+
+fn destroy_framebuffers(device: &Device, framebuffers: Vec<vk::Framebuffer>) {
+    unsafe {
+        for framebuffer in framebuffers {
+            device.destroy_framebuffer(framebuffer, None);
+        }
+    }
+}
+
+fn create_present_semaphores(
+    device: &Device,
+    count: usize,
+) -> Result<Vec<vk::Semaphore>, vk::Result> {
+    let mut semaphores = Vec::with_capacity(count);
+    for _ in 0..count {
+        match unsafe { device.create_semaphore(&vk::SemaphoreCreateInfo::default(), None) } {
+            Ok(semaphore) => semaphores.push(semaphore),
+            Err(error) => {
+                unsafe {
+                    for semaphore in semaphores {
+                        device.destroy_semaphore(semaphore, None);
+                    }
+                }
+                return Err(error);
+            }
+        }
+    }
+    Ok(semaphores)
 }
 
 fn pick_surface_format(ctx: &VulkanContext) -> Result<vk::SurfaceFormatKHR, vk::Result> {
@@ -777,45 +934,35 @@ impl Drop for VulkanState {
     fn drop(&mut self) {
         unsafe {
             let _ = self.ctx.device.device_wait_idle();
-            for f in self.frames.drain(..) {
-                self.ctx.device.destroy_semaphore(f.image_available, None);
-                self.ctx.device.destroy_semaphore(f.render_finished, None);
-                self.ctx.device.destroy_fence(f.fence, None);
-                self.ctx
-                    .device
-                    .free_command_buffers(self.ctx.command_pool, &[f.command_buffer]);
-            }
-            for fb in self.swapchain.framebuffers.drain(..) {
-                self.ctx.device.destroy_framebuffer(fb, None);
-            }
-            for v in self.swapchain.image_views.drain(..) {
-                self.ctx.device.destroy_image_view(v, None);
-            }
-            self.swapchain
-                .loader
-                .destroy_swapchain(self.swapchain.swapchain, None);
+            destroy_frame_syncs(&self.ctx.device, self.ctx.command_pool, &mut self.frames);
+            self.swapchain.destroy_resources(&self.ctx.device);
             self.ctx.device.destroy_render_pass(self.render_pass, None);
         }
     }
 }
 
 struct App {
-    window: sdl3::video::Window,
     enable_viewports: bool,
+    // Keep the backend owner before ImguiState so its Drop runs while Context is alive.
+    sdl3_backend: Option<Sdl3PlatformBackend>,
     imgui: ImguiState,
     vk: VulkanState,
+    // Keep the platform window alive until renderer, swapchains, and surfaces have been dropped.
+    window: sdl3::video::Window,
 }
 
 impl Drop for App {
     fn drop(&mut self) {
-        self.destroy_external_texture();
         if self.enable_viewports {
             // Avoid shutdown assertions by ensuring platform windows are destroyed before the
             // ImGui context and renderer are dropped.
-            dear_imgui_ash::multi_viewport_sdl3::shutdown_multi_viewport_support(
+            let _ = dear_imgui_ash::multi_viewport_sdl3::shutdown_multi_viewport_support(
                 &mut self.imgui.context,
             );
         }
+        let _ = unsafe { self.vk.ctx.device.device_wait_idle() };
+        self.destroy_external_texture();
+        self.shutdown_platform_backend();
     }
 }
 
@@ -859,9 +1006,6 @@ impl App {
             let io = context.io_mut();
             let mut flags = io.config_flags();
             flags.insert(ConfigFlags::DOCKING_ENABLE);
-            if ENABLE_VIEWPORTS {
-                flags.insert(ConfigFlags::VIEWPORTS_ENABLE);
-            }
             io.set_config_flags(flags);
 
             let style = context.style_mut();
@@ -873,8 +1017,8 @@ impl App {
         }
 
         // SDL3 platform backend for Vulkan (sets Platform_CreateVkSurface for multi-viewport).
-        imgui_sdl3_backend::init_for_vulkan(&mut context, &window)?;
-        imgui_sdl3_backend::set_gamepad_mode(GamepadMode::AutoAll);
+        let mut sdl3_backend = Sdl3PlatformBackend::init_for_vulkan(&mut context, &window)?;
+        sdl3_backend.set_gamepad_mode(&mut context, GamepadMode::AutoAll);
 
         // Create a managed ImGui texture (CPU-side pixels; backend will create GPU texture).
         let tex_w: u32 = 128;
@@ -918,14 +1062,13 @@ impl App {
         renderer.set_viewport_clear_color([0.1, 0.12, 0.15, 1.0]);
 
         // Frame sync objects.
-        let frames = (0..FRAMES_IN_FLIGHT)
-            .map(|_| create_frame_sync(&ctx.device, ctx.command_pool))
-            .collect::<Result<Vec<_>, _>>()?;
+        let frames = create_frame_syncs(&ctx.device, ctx.command_pool, FRAMES_IN_FLIGHT)?;
         let images_in_flight = vec![vk::Fence::null(); swapchain.images.len()];
 
         Ok(Self {
             window,
             enable_viewports: ENABLE_VIEWPORTS,
+            sdl3_backend: Some(sdl3_backend),
             imgui: ImguiState {
                 _registered_user_textures: registered_user_textures,
                 context,
@@ -992,6 +1135,12 @@ impl App {
         }
     }
 
+    fn shutdown_platform_backend(&mut self) {
+        if let Some(backend) = self.sdl3_backend.take() {
+            backend.shutdown(&mut self.imgui.context);
+        }
+    }
+
     fn update_texture(&mut self) {
         let (w, h) = self.imgui.tex_size;
         let mut pixels = vec![0u8; (w * h * 4) as usize];
@@ -1017,7 +1166,11 @@ impl App {
 
         'main: loop {
             while let Some(raw) = imgui_sdl3_backend::sdl3_poll_event_ll() {
-                let _ = imgui_sdl3_backend::process_sys_event(&raw);
+                let backend = self
+                    .sdl3_backend
+                    .as_mut()
+                    .expect("SDL3 backend must be active while the app is running");
+                let _ = backend.process_event(&mut self.imgui.context, &raw);
 
                 let event = Event::from_ll(raw);
                 match event {
@@ -1053,7 +1206,10 @@ impl App {
             // Update animated texture (marks WantUpdates).
             self.update_texture();
 
-            imgui_sdl3_backend::sdl3_new_frame(&mut self.imgui.context);
+            self.sdl3_backend
+                .as_mut()
+                .expect("SDL3 backend must be active while the app is running")
+                .new_frame(&mut self.imgui.context);
             let ui = self.imgui.context.frame();
 
             ui.dockspace_over_main_viewport();
@@ -1125,8 +1281,15 @@ impl App {
             }
         }
 
+        if self.enable_viewports {
+            dear_imgui_ash::multi_viewport_sdl3::shutdown_multi_viewport_support(
+                &mut self.imgui.context,
+            )?;
+            self.enable_viewports = false;
+        }
+        unsafe { self.vk.ctx.device.device_wait_idle()? };
         self.destroy_external_texture();
-        imgui_sdl3_backend::shutdown(&mut self.imgui.context);
+        self.shutdown_platform_backend();
         Ok(())
     }
 }
@@ -1138,6 +1301,10 @@ fn render_main_window(
     clear_color: [f32; 4],
     draw_data: &mut dear_imgui_rs::render::DrawData,
 ) -> Result<(), Box<dyn Error>> {
+    let (width, height) = window.size_in_pixels();
+    if width == 0 || height == 0 {
+        return Ok(());
+    }
     if vk_state.swapchain_dirty {
         vk_state
             .swapchain
@@ -1163,14 +1330,16 @@ fn render_main_window(
         )
     };
 
-    let (image_index, _suboptimal) = match acquire {
+    let (image_index, suboptimal) = match acquire {
         Ok(v) => v,
-        Err(vk::Result::ERROR_OUT_OF_DATE_KHR) => {
+        Err(vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR) => {
             vk_state.swapchain_dirty = true;
             return Ok(());
         }
         Err(e) => return Err(Box::new(e)),
     };
+    vk_state.swapchain_dirty |= suboptimal;
+    let present_semaphore = vk_state.swapchain.present_semaphores[image_index as usize];
 
     if vk_state.images_in_flight[image_index as usize] != vk::Fence::null() {
         unsafe {
@@ -1206,7 +1375,7 @@ fn render_main_window(
         .wait_semaphores(std::slice::from_ref(&frame.image_available))
         .wait_dst_stage_mask(&wait_stages)
         .command_buffers(std::slice::from_ref(&frame.command_buffer))
-        .signal_semaphores(std::slice::from_ref(&frame.render_finished));
+        .signal_semaphores(std::slice::from_ref(&present_semaphore));
 
     unsafe {
         vk_state.ctx.device.queue_submit(
@@ -1217,7 +1386,7 @@ fn render_main_window(
     }
 
     let present_info = vk::PresentInfoKHR::default()
-        .wait_semaphores(std::slice::from_ref(&frame.render_finished))
+        .wait_semaphores(std::slice::from_ref(&present_semaphore))
         .swapchains(std::slice::from_ref(&vk_state.swapchain.swapchain))
         .image_indices(std::slice::from_ref(&image_index));
 
@@ -1228,7 +1397,7 @@ fn render_main_window(
             .queue_present(vk_state.ctx.queue, &present_info)
     };
     match present {
-        Ok(_) => {}
+        Ok(suboptimal) => vk_state.swapchain_dirty |= suboptimal,
         Err(vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR) => {
             vk_state.swapchain_dirty = true;
         }
@@ -1252,16 +1421,21 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut app = Box::new(App::new(&video)?);
 
     if app.enable_viewports {
-        dear_imgui_ash::multi_viewport_sdl3::enable(
-            &mut app.imgui.renderer,
-            &mut app.imgui.context,
-            app.vk.ctx.entry.clone(),
-            app.vk.ctx.instance.clone(),
-            app.vk.ctx.physical_device,
-            app.vk.ctx.queue,
-            app.vk.ctx.queue_family_index,
-            app.vk.ctx.queue_family_index,
-        );
+        unsafe {
+            dear_imgui_ash::multi_viewport_sdl3::enable(
+                &mut app.imgui.renderer,
+                &mut app.imgui.context,
+                dear_imgui_ash::multi_viewport_sdl3::VulkanViewportConfig {
+                    entry: app.vk.ctx.entry.clone(),
+                    instance: app.vk.ctx.instance.clone(),
+                    physical_device: app.vk.ctx.physical_device,
+                    validation_surface: app.vk.ctx.surface,
+                    present_queue: app.vk.ctx.queue,
+                    graphics_queue_family_index: app.vk.ctx.queue_family_index,
+                    present_queue_family_index: app.vk.ctx.queue_family_index,
+                },
+            )?;
+        }
     }
 
     app.run()

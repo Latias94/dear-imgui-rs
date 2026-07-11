@@ -1,6 +1,7 @@
+#![cfg(feature = "glam")]
+
 mod common;
 
-#[cfg(feature = "glam")]
 mod glam_tests {
     use dear_imgui_reflect as reflect;
     use dear_imgui_reflect::imgui::Context;
@@ -21,6 +22,7 @@ mod glam_tests {
     #[test]
     fn glam_vec_types_can_be_reflected() {
         let _guard = test_guard();
+        let session = reflect::ReflectSession::new();
         let mut ctx = Context::create();
         {
             let io = ctx.io_mut();
@@ -31,8 +33,9 @@ mod glam_tests {
         let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 
         let ui = ctx.frame();
+        let mut inspector = session.inspector(ui);
         let mut settings = GlamSettings::default();
 
-        let _changed = reflect::input(ui, "GlamSettings", &mut settings);
+        let _changed = inspector.input("GlamSettings", &mut settings);
     }
 }

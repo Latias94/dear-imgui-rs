@@ -1199,7 +1199,7 @@ pub(crate) fn derive_for_struct(
                             None => {
                                 quote! {
                                     __changed |= ::dear_imgui_reflect::ImGuiValue::imgui_value(
-                                        ui,
+                                        inspector,
                                         #label,
                                         __field,
                                     );
@@ -1219,14 +1219,14 @@ pub(crate) fn derive_for_struct(
                     // Fallback: use the generic ImGuiValue implementation.
                     quote! {
                         __changed |= ::dear_imgui_reflect::ImGuiValue::imgui_value(
-                            ui,
+                            inspector,
                             #label,
                             __field,
                         );
                     }
                 } else {
                     // Build TupleSettings for this member by layering:
-                    //  - global ReflectSettings::tuples()
+                    //  - session ReflectSettings::tuples()
                     //  - optional MemberSettings::tuples for this field
                     //  - optional per-field attributes overriding mode/dropdown/columns/min_width.
                     let _has_columns = tuple_columns_expr.is_some();
@@ -1626,7 +1626,7 @@ pub(crate) fn derive_for_struct(
                                 None => {
                                     quote! {
                                         ::dear_imgui_reflect::ImGuiValue::imgui_value(
-                                            ui,
+                                            inspector,
                                             #element_label,
                                             &mut __field.#idx,
                                         )
@@ -1679,11 +1679,11 @@ pub(crate) fn derive_for_struct(
                             #min_width_stmt
 
                             let local_changed = ::dear_imgui_reflect::imgui_tuple_body(
-                                ui,
+                                inspector,
                                 #label,
                                 #len,
                                 &tuple_settings,
-                                |ui, index| {
+                                |inspector, index| {
                                     match index {
                                         #arms
                                     }
@@ -1695,7 +1695,7 @@ pub(crate) fn derive_for_struct(
                 }
             }
             FieldTypeKind::Vec => {
-                // For Vec<T> fields, layer per-member VecSettings on top of global
+                // For Vec<T> fields, layer per-member VecSettings on top of session
                 // defaults and call the shared helper so insertable/removable/
                 // reorderable/dropdown flags can be customized per field.
                 match &ty {
@@ -1717,7 +1717,7 @@ pub(crate) fn derive_for_struct(
                                             }
                                         };
                                         __changed |= ::dear_imgui_reflect::imgui_vec_with_settings(
-                                            ui,
+                                            inspector,
                                             #label,
                                             __field,
                                             &vec_settings,
@@ -1727,7 +1727,7 @@ pub(crate) fn derive_for_struct(
                             } else {
                                 quote! {
                                     __changed |= ::dear_imgui_reflect::ImGuiValue::imgui_value(
-                                        ui,
+                                        inspector,
                                         #label,
                                         __field,
                                     );
@@ -1736,7 +1736,7 @@ pub(crate) fn derive_for_struct(
                         } else {
                             quote! {
                                 __changed |= ::dear_imgui_reflect::ImGuiValue::imgui_value(
-                                    ui,
+                                    inspector,
                                     #label,
                                     __field,
                                 );
@@ -1746,7 +1746,7 @@ pub(crate) fn derive_for_struct(
                     _ => {
                         quote! {
                             __changed |= ::dear_imgui_reflect::ImGuiValue::imgui_value(
-                                ui,
+                                inspector,
                                 #label,
                                 __field,
                             );
@@ -1773,7 +1773,7 @@ pub(crate) fn derive_for_struct(
                                     }
                                 };
                                 __changed |= ::dear_imgui_reflect::imgui_array_with_settings(
-                                    ui,
+                                    inspector,
                                     #label,
                                     __field,
                                     &arr_settings,
@@ -1784,7 +1784,7 @@ pub(crate) fn derive_for_struct(
                     _ => {
                         quote! {
                             __changed |= ::dear_imgui_reflect::ImGuiValue::imgui_value(
-                                ui,
+                                inspector,
                                 #label,
                                 __field,
                             );
@@ -1815,7 +1815,7 @@ pub(crate) fn derive_for_struct(
                                             }
                                         };
                                         __changed |= ::dear_imgui_reflect::imgui_hash_map_with_settings(
-                                            ui,
+                                            inspector,
                                             #label,
                                             __field,
                                             &map_settings,
@@ -1838,7 +1838,7 @@ pub(crate) fn derive_for_struct(
                                             }
                                         };
                                         __changed |= ::dear_imgui_reflect::imgui_btree_map_with_settings(
-                                            ui,
+                                            inspector,
                                             #label,
                                             __field,
                                             &map_settings,
@@ -1848,7 +1848,7 @@ pub(crate) fn derive_for_struct(
                             } else {
                                 quote! {
                                     __changed |= ::dear_imgui_reflect::ImGuiValue::imgui_value(
-                                        ui,
+                                        inspector,
                                         #label,
                                         __field,
                                     );
@@ -1857,7 +1857,7 @@ pub(crate) fn derive_for_struct(
                         } else {
                             quote! {
                                 __changed |= ::dear_imgui_reflect::ImGuiValue::imgui_value(
-                                    ui,
+                                    inspector,
                                     #label,
                                     __field,
                                 );
@@ -1867,7 +1867,7 @@ pub(crate) fn derive_for_struct(
                     _ => {
                         quote! {
                             __changed |= ::dear_imgui_reflect::ImGuiValue::imgui_value(
-                                ui,
+                                inspector,
                                 #label,
                                 __field,
                             );
@@ -1878,7 +1878,7 @@ pub(crate) fn derive_for_struct(
             FieldTypeKind::Other => {
                 quote! {
                     __changed |= ::dear_imgui_reflect::ImGuiValue::imgui_value(
-                        ui,
+                        inspector,
                         #label,
                         __field,
                     );
@@ -1892,24 +1892,24 @@ pub(crate) fn derive_for_struct(
         let field_read_only = read_only;
         let stmt = quote! {
             {
-                ::dear_imgui_reflect::with_field_path_static(#field_name_lit, || {
-                    let __field = &mut #field_access_expr;
-                    let __member_read_only = {
-                        let settings = &#reflect_settings_ident;
-                        if let Some(member) = settings.member::<Self>(#field_name_lit) {
-                            member.read_only
-                        } else {
-                            false
-                        }
-                    };
-                    if #field_read_only || __member_read_only {
-                        let _disabled = ui.begin_disabled();
-                        #inner_stmt
-                        drop(_disabled);
+                let __field_path = inspector.push_path_static(#field_name_lit);
+                let __field = &mut #field_access_expr;
+                let __member_read_only = {
+                    let settings = &#reflect_settings_ident;
+                    if let Some(member) = settings.member::<Self>(#field_name_lit) {
+                        member.read_only
                     } else {
-                        #inner_stmt
+                        false
                     }
-                });
+                };
+                if #field_read_only || __member_read_only {
+                    let _disabled = ui.begin_disabled();
+                    #inner_stmt
+                    drop(_disabled);
+                } else {
+                    #inner_stmt
+                }
+                drop(__field_path);
             }
         };
 
@@ -1936,10 +1936,11 @@ pub(crate) fn derive_for_struct(
         impl #impl_generics ::dear_imgui_reflect::ImGuiReflect for #ident #ty_generics #where_clause {
             fn imgui_reflect(
                 &mut self,
-                ui: &::dear_imgui_reflect::imgui::Ui,
+                inspector: &mut ::dear_imgui_reflect::Inspector<'_, '_>,
                 label: &str,
             ) -> bool {
-                let #reflect_settings_ident = ::dear_imgui_reflect::current_settings();
+                let ui = inspector.ui();
+                let #reflect_settings_ident = inspector.settings();
                 let mut __changed = false;
                 if let Some(__node) = ui.tree_node(label) {
                     let _ = __node;

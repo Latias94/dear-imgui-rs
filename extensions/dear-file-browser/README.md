@@ -23,7 +23,7 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
 - Architecture: `docs/FEARLESS_REFACTOR_ARCHITECTURE.md`
 - IGFD source reference map: `docs/IGFD_SOURCE_REFERENCE_MAP.md` (1:1 UI/behavior alignment guide)
 - P2 performance/async design: `docs/FEARLESS_REFACTOR_P2_PERF_ASYNC_DESIGN.md`
-- P2 synthetic perf baseline: `docs/P2_PERF_BASELINE_2026-02-06.md`
+- Background scan runtime: `docs/FEARLESS_REFACTOR_P2_PERF_ASYNC_DESIGN.md`
 - Roadmap / TODO: `docs/FEARLESS_REFACTOR_TODO_MILESTONES.md`
 - Parity + deviations (non-C-API): `docs/IGFD_PARITY_AND_DEVIATIONS.md`
 - Thumbnails cookbook: `docs/THUMBNAILS_INTEGRATION_COOKBOOK.md`
@@ -33,8 +33,8 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
 
 | Item          | Version |
 |---------------|---------|
-| Crate         | 0.15.1   |
-| dear-imgui-rs | 0.15.1   |
+| Crate         | 0.16.0  |
+| dear-imgui-rs | 0.16.0  |
 
 ## Features
 
@@ -51,7 +51,7 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
   - Navigation toolbar: back/forward/up/refresh with history
   - Toolbar density + optional icon labels (host-provided glyphs)
     - If you use `ToolbarIconMode::IconOnly`, ensure your font contains the glyphs; otherwise prefer `IconAndText` for a safe text fallback.
-  - File-dialog style address bar (typed path + Go + history + Tab completion) + breadcrumbs (auto-compress on long paths)
+  - File-dialog style address bar (typed path + Go + history + snapshot-backed Tab completion) + breadcrumbs (auto-compress on long paths)
   - Bottom action row: status text + filter selector + OK/Cancel
   - Click behavior for directories: `Select` or `Navigate`
   - Double-click to navigate/confirm (configurable)
@@ -60,7 +60,7 @@ File dialogs and in-UI file browser for `dear-imgui-rs` with two backends:
   - File styles: icons/colors/tooltips via `FileStyleRegistry`
   - Thumbnails: request queue + LRU cache (host-provided decode/upload backend)
   - Multi-selection (OpenFiles): Ctrl/Shift + click, Ctrl+A select all
-  - Generation-safe incremental scan policy with tuned presets (default; set `ScanPolicy::Sync` to disable)
+  - Native background directory enumeration with bounded UI-thread batch application
 - Keyboard navigation: Up/Down arrows + Enter, Backspace, Ctrl+L (focus path), Ctrl+F (focus search)
 - Empty-state hint with configurable color/message
 - CJK/emoji supported via user-provided fonts
@@ -92,7 +92,7 @@ let selection = pollster::block_on(
         .open_async()
 );
 
-// ImGui-embedded browser (non-blocking):
+// ImGui-embedded browser (native background scan by default):
 # use dear_imgui_rs::*;
 # let mut ctx = Context::create();
 # let ui = ctx.frame();
@@ -130,6 +130,63 @@ ui.window("Open")
         }
     });
 ```
+
+### Filesystem Ownership and Scan Policy
+
+Each `FileDialogState` owns its filesystem capability. Draw methods never borrow a
+filesystem for one frame, so a worker cannot outlive caller-owned data.
+
+On native targets, `FileDialogState::new` owns an
+`Arc<dyn FileSystem + Send + Sync>` and selects `ScanPolicy::tuned_background()`.
+The worker invokes `FileSystem::visit_dir` directly and sends bounded raw-entry
+batches to the UI thread. Scan hooks, filtering, sorting, selection reconciliation,
+and rendering remain on the UI thread. During a partial scan, the projector filters
+only the newly accepted batch, then inserts visible entries into an ordered index.
+Arrival sequence breaks equal sort keys, so entries from earlier batches remain first
+without walking or moving the accumulated view. The full index is rebuilt only when
+projection inputs change.
+
+Scan hooks may capture owner-thread state such as `Rc<RefCell<_>>`; they never cross
+into the worker and run only on the thread that applies scan batches.
+
+Each native scan runtime owns one worker and keeps one running request plus one
+latest pending request. Repeated navigation cancels the running generation and
+coalesces intermediate destinations without waiting for filesystem I/O. Destroying
+the `FileDialogState` cancels its session, closes the worker channel, and waits for
+that worker after releasing core/UI state. A filesystem blocked inside an
+uninterruptible call can therefore delay destruction of its owning dialog, but it
+cannot starve scans belonging to other dialogs. Custom filesystems should return
+promptly after their visitor returns `ScanVisit::Stop`.
+
+```rust
+use std::sync::Arc;
+use dear_file_browser::{DialogMode, FileDialogState, ScanPolicy, StdFileSystem};
+
+let fs = Arc::new(StdFileSystem);
+let mut state = FileDialogState::with_background_filesystem(DialogMode::OpenFile, fs);
+state.set_scan_policy(ScanPolicy::Background {
+    batch_entries: 256,
+    max_batches_per_tick: 2,
+}).expect("native background filesystem supports worker scans");
+```
+
+Non-`Send` filesystems, including JS-backed adapters, use the explicit blocking
+capability:
+
+```rust
+use dear_file_browser::{DialogMode, FileDialogState, StdFileSystem};
+
+let state = FileDialogState::with_blocking_filesystem(
+    DialogMode::OpenFile,
+    Box::new(StdFileSystem),
+);
+```
+
+`ScanPolicy::Background` is never silently downgraded. It returns
+`BackgroundScanRequiresThreadSafeFileSystem` for a native blocking capability and
+`BackgroundScanUnsupported` on `wasm32`. Custom `visit_dir` implementations must
+stop when their visitor returns `ScanVisit::Stop`; cancellation is cooperative,
+while generation filtering is the final stale-result guard.
 
 ### Reopen Semantics (IGFD-style Open/Display/Close)
 
@@ -270,10 +327,9 @@ let cfg = ModalHostConfig {
     max_size: Some([1600.0, 1000.0]),
 };
 
-let fs = dear_file_browser::StdFileSystem;
 if let Some(res) = ui
     .file_browser()
-    .show_modal_with(&mut state, &cfg, &fs, None, None)
+    .show_modal_with(&mut state, &cfg, None, None)
 {
     // handle res
 }
@@ -338,7 +394,7 @@ impl CustomPane for MyPane {
 let mut pane = MyPane::default();
 if let Some(res) = ui
     .file_browser()
-    .draw_contents_with(&mut state, &dear_file_browser::StdFileSystem, Some(&mut pane), None)
+    .draw_contents_with(&mut state, Some(&mut pane), None)
 {
     // handle res
 }
@@ -480,7 +536,7 @@ let mut backend = ThumbnailBackend {
 // The UI will call `state.ui.thumbnails.maintain(&mut backend)` internally when drawing.
 let _ = ui
     .file_browser()
-    .draw_contents_with(&mut state, &dear_file_browser::StdFileSystem, None, Some(&mut backend));
+    .draw_contents_with(&mut state, None, Some(&mut backend));
 ```
 
 Optional decoder (`thumbnails-image` feature):
@@ -497,8 +553,34 @@ let mut provider = ImageThumbnailProvider::default();
 
 ## WASM
 
-- Native: `rfd` uses the browser file picker and is the recommended way to access user files.
-- ImGui: the pure UI browser relies on `std::fs` to enumerate directories. In the browser this cannot access the OS filesystem, so the view will be empty. Prefer the native `rfd` backend on wasm.
+- Native dialog route (`native-rfd`): supported asynchronously through the Web
+  File Picker. Browser security rules expose only files or directories selected
+  by the user; this is not arbitrary host filesystem access.
+- In-UI route (`imgui`): `FileDialogState::new` owns a blocking
+  `StdFileSystem` capability on wasm32. The browser cannot enumerate host paths
+  through `std::fs`, so that default capability normally produces no useful OS
+  directory listing.
+- Background scanning is native-only. Selecting `ScanPolicy::Background` on
+  wasm32 returns `FileDialogError::BackgroundScanUnsupported`; it is never
+  silently downgraded and never creates a pseudo-worker.
+
+A custom blocking JavaScript or virtual-filesystem adapter is supported. Implement
+`FileSystem`, then pass it to `FileDialogState::with_blocking_filesystem`. The
+trait deliberately has no `Send` bound, so the adapter may own JS values and is
+called on the browser/UI thread:
+
+```rust,ignore
+let state = FileDialogState::with_blocking_filesystem(
+    DialogMode::OpenFile,
+    Box::new(JsFileSystem::new()),
+);
+```
+
+`FileSystem::visit_dir` is synchronous. A JS adapter should enumerate a virtual
+filesystem or a snapshot already granted by a picker; complete asynchronous JS
+permission/picker work before drawing the browser. Stop enumeration when the
+visitor returns `ScanVisit::Stop` so cancellation and generation filtering keep
+their normal semantics.
 
 ## Fonts (CJK/Emoji)
 
@@ -507,4 +589,3 @@ Dear ImGui’s default font does not include CJK glyphs or emoji. If your filesy
 ## License
 
 MIT OR Apache-2.0
-

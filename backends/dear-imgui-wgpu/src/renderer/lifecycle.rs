@@ -46,14 +46,19 @@ impl WgpuRenderer {
     ///
     /// This corresponds to ImGui_ImplWGPU_Shutdown in the C++ implementation.
     ///
-    /// If multi-viewport support was enabled, this also makes renderer callbacks no-op for this
-    /// renderer. Call the matching multi-viewport shutdown helper when you also need to uninstall
-    /// callbacks from the ImGui context and destroy platform windows.
-    pub fn shutdown(&mut self) {
+    /// Returns [`RendererError::MultiViewportActive`](crate::RendererError::MultiViewportActive)
+    /// while multi-viewport callbacks are registered. Call the matching
+    /// `shutdown_multi_viewport_support` helper first so platform windows and callback-owned
+    /// surfaces are destroyed before renderer GPU state is invalidated.
+    pub fn shutdown(&mut self) -> RendererResult<()> {
+        #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+        self.ensure_multi_viewport_inactive()?;
+
         #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
         self.clear_multi_viewport_renderer_state();
         self.invalidate_device_objects().ok();
         self.backend_data = None;
+        Ok(())
     }
 
     #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]

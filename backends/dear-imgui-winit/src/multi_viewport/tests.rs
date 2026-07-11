@@ -28,6 +28,7 @@ fn install_platform_callbacks_targets_passed_context() {
         assert!((*pio_a).Platform_GetWindowFramebufferScale.is_some());
         assert!((*pio_a).Platform_GetWindowDpiScale.is_some());
         assert!((*pio_a).Platform_OnChangedViewport.is_some());
+        assert!((*pio_a).Platform_CreateVkSurface.is_none());
 
         assert!((*pio_b).Platform_CreateWindow.is_none());
         assert!((*pio_b).Platform_GetWindowPos.is_none());
@@ -35,6 +36,7 @@ fn install_platform_callbacks_targets_passed_context() {
         assert!((*pio_b).Platform_GetWindowFramebufferScale.is_none());
         assert!((*pio_b).Platform_GetWindowDpiScale.is_none());
         assert!((*pio_b).Platform_OnChangedViewport.is_none());
+        assert!((*pio_b).Platform_CreateVkSurface.is_none());
 
         dear_imgui_rs::sys::igSetCurrentContext(raw_a);
     }

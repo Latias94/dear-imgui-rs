@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use dear_file_browser::{FileSystem, StdFileSystem};
+use dear_file_browser::{FileSystem, ScanVisit, StdFileSystem};
 
 fn unique_temp_dir(prefix: &str) -> PathBuf {
     let mut p = std::env::temp_dir();
@@ -85,5 +85,26 @@ fn std_fs_remove_dir_all() {
     fs.remove_dir_all(&sub).unwrap();
     assert!(!sub.exists());
 
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn std_fs_visit_dir_honors_stop() {
+    let fs = StdFileSystem;
+    let dir = unique_temp_dir("visit_stop");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    for name in ["a.txt", "b.txt", "c.txt"] {
+        std::fs::write(dir.join(name), b"entry").unwrap();
+    }
+
+    let mut visited = 0usize;
+    fs.visit_dir(&dir, &mut |_| {
+        visited += 1;
+        ScanVisit::Stop
+    })
+    .unwrap();
+
+    assert_eq!(visited, 1);
     std::fs::remove_dir_all(&dir).unwrap();
 }

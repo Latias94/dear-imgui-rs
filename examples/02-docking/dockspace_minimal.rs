@@ -35,7 +35,6 @@ struct AppWindow {
     surface: Surface<WindowSurface>,
     context: PossiblyCurrentContext,
     imgui: ImguiState,
-    first_layout_applied: bool,
 }
 
 #[derive(Default)]
@@ -117,7 +116,6 @@ impl AppWindow {
             surface,
             context,
             imgui,
-            first_layout_applied: false,
         })
     }
 
@@ -147,7 +145,8 @@ impl AppWindow {
 
         // 1) Host a fullscreen window for the DockSpace (mirrors minimal C++ docking example)
         use dear_imgui_rs::{
-            DockBuilder, DockNodeFlags, SplitDirection, StyleColor, StyleVar, WindowFlags,
+            DockLayout, DockLayoutApply, DockSplit, DockspaceTarget, StyleColor, StyleVar,
+            WindowFlags,
         };
 
         let viewport = ui.main_viewport();
@@ -168,6 +167,25 @@ impl AppWindow {
         let rounding = ui.push_style_var(StyleVar::WindowRounding(0.0));
         let border = ui.push_style_var(StyleVar::WindowBorderSize(0.0));
         let padding = ui.push_style_var(StyleVar::WindowPadding([0.0, 0.0]));
+        let dockspace_id = ui.get_id("MyDockspace");
+        let dockspace_target = DockspaceTarget::new(dockspace_id, pos, size)?;
+        let dockspace_layout = DockLayout::split(
+            DockSplit::Left,
+            0.20,
+            DockLayout::tabs(["James_1"]),
+            DockLayout::split(
+                DockSplit::Right,
+                0.20,
+                DockLayout::tabs(["James_3"]),
+                DockLayout::split(
+                    DockSplit::Down,
+                    0.20,
+                    DockLayout::tabs(["James_4"]),
+                    DockLayout::tabs(["James_2"]),
+                ),
+            ),
+        );
+        let mut dockspace_result = Ok(dockspace_id);
 
         ui.window("DockSpace Demo")
             .flags(window_flags)
@@ -179,38 +197,16 @@ impl AppWindow {
                 border.pop();
                 rounding.pop();
 
-                let dockspace_id = ui.get_id("MyDockspace");
-                // Configure DockBuilder only once (if node doesn't exist yet)
-                if !DockBuilder::node_exists(&ui, dockspace_id) {
-                    DockBuilder::remove_node(&ui, dockspace_id);
-                    DockBuilder::add_node(&ui, dockspace_id, DockNodeFlags::NONE);
-                    DockBuilder::set_node_size(&ui, dockspace_id, size);
-
-                    let mut dock_main_id = dockspace_id;
-                    let (dock_id_left, new_main) =
-                        DockBuilder::split_node(&ui, dock_main_id, SplitDirection::Left, 0.20);
-                    dock_main_id = new_main;
-
-                    let (dock_id_right, new_main) =
-                        DockBuilder::split_node(&ui, dock_main_id, SplitDirection::Right, 0.20);
-                    dock_main_id = new_main;
-
-                    let (dock_id_bottom, new_main) =
-                        DockBuilder::split_node(&ui, dock_main_id, SplitDirection::Down, 0.20);
-                    dock_main_id = new_main;
-
-                    DockBuilder::dock_window(&ui, "James_1", dock_id_left);
-                    DockBuilder::dock_window(&ui, "James_2", dock_main_id);
-                    DockBuilder::dock_window(&ui, "James_3", dock_id_right);
-                    DockBuilder::dock_window(&ui, "James_4", dock_id_bottom);
-                    DockBuilder::finish(&ui, dockspace_id);
-                }
-
                 // Render DockSpace inside the host window
                 let color = ui.push_style_color(StyleColor::DockingEmptyBg, [1.0, 0.0, 0.0, 1.0]);
-                let _ = ui.dock_space(dockspace_id, [0.0, 0.0]);
+                dockspace_result = ui.dock_space_with_layout(
+                    &dockspace_target,
+                    &dockspace_layout,
+                    DockLayoutApply::IfMissing,
+                );
                 color.pop();
             });
+        dockspace_result?;
 
         // 2) Create docked windows
         ui.window("James_1").build(|| ui.text("Text 1"));

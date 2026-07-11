@@ -322,6 +322,11 @@ pub(crate) fn install_viewport_bridge(_app: &mut App) {
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 fn attach_bridge_to_imgui_context(world: &mut World) {
+    assert!(
+        sys::HAS_PLATFORM_IO_AGGREGATE_HOOKS,
+        "dear-imgui-bevy multi-viewport requires PlatformIO aggregate ABI hooks"
+    );
+
     let bridge_ptr = {
         let Some(mut bridge) = world.get_non_send_mut::<ImguiViewportBridge>() else {
             return;

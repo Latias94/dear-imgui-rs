@@ -85,7 +85,7 @@ fn generate_bindings(cfg: &BuildConfig, cimplot_root: &Path, imgui_src: &Path, c
         }
         panic!(
             "dear-implot-sys: wasm32 target detected but src/wasm_bindings_pregenerated.rs not found.\n\
-             Run: cargo run -p xtask -- wasm-bindgen-implot imgui-sys-v0"
+             Run: cargo run -p xtask -- wasm-bindgen-implot"
         );
     }
 

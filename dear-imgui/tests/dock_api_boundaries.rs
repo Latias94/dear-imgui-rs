@@ -76,93 +76,268 @@ fn dockspace_over_viewport_keeps_zero_id_auto_generation_but_rejects_private_fla
 }
 
 #[test]
-fn dock_builder_rejects_invalid_flags_and_geometry_before_ffi() {
+fn invalid_declarative_layout_returns_before_dockspace_submission() {
     let _guard = test_guard();
-
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
-
     let ui = ctx.frame();
-    let private_dockspace =
-        imgui::DockNodeFlags::from_bits_retain(imgui::sys::ImGuiDockNodeFlags_DockSpace);
-
-    assert!(
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _ = imgui::DockBuilder::add_node(&ui, 0.into(), private_dockspace);
-        }))
-        .is_err()
+    let root_id = ui.get_id("Invalid declarative dock layout");
+    let target = imgui::DockspaceTarget::new(root_id, [0.0, 0.0], [800.0, 600.0]).unwrap();
+    let invalid = imgui::DockLayout::split(
+        imgui::DockSplit::Left,
+        1.0,
+        imgui::DockLayout::tabs(["Left"]),
+        imgui::DockLayout::tabs(["Right"]),
     );
 
-    let node_id = imgui::DockBuilder::add_node(&ui, 0.into(), imgui::DockNodeFlags::NONE);
-    assert_ne!(node_id.raw(), 0);
-
-    assert!(
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            imgui::DockBuilder::set_node_size(&ui, node_id, [0.0, 100.0]);
-        }))
-        .is_err()
-    );
-    assert!(
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            imgui::DockBuilder::set_node_pos(&ui, node_id, [f32::INFINITY, 0.0]);
-        }))
-        .is_err()
-    );
-    assert!(
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _ =
-                imgui::DockBuilder::split_node(&ui, node_id, imgui::SplitDirection::Left, f32::NAN);
-        }))
-        .is_err()
-    );
-    assert!(
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _ = imgui::DockBuilder::split_node(&ui, node_id, imgui::SplitDirection::Left, 1.5);
-        }))
-        .is_err()
-    );
+    assert!(matches!(
+        ui.dockspace_over_main_viewport_with_layout(
+            &target,
+            &invalid,
+            imgui::DockLayoutApply::Replace,
+        ),
+        Err(imgui::DockLayoutError::InvalidSplitRatio { ratio: 1.0 })
+    ));
+    assert!(unsafe { imgui::sys::igDockBuilderGetNode(root_id.raw()).is_null() });
 }
 
 #[test]
-fn dock_builder_copy_helpers_pass_required_remap_vectors() {
+fn declarative_layout_preserves_if_missing_and_rebuilds_on_replace() {
     let _guard = test_guard();
-
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
 
-    let ui = ctx.frame();
-    let src = imgui::DockBuilder::add_node(&ui, 0.into(), imgui::DockNodeFlags::NONE);
-    let dst = imgui::DockBuilder::add_node(&ui, 0.into(), imgui::DockNodeFlags::NONE);
+    let root_id;
+    {
+        let ui = ctx.frame();
+        root_id = ui.get_id("Declarative dock layout lifecycle");
+        let viewport = ui.main_viewport();
+        let target =
+            imgui::DockspaceTarget::new(root_id, viewport.work_pos(), viewport.work_size())
+                .unwrap();
+        let initial = imgui::DockLayout::split(
+            imgui::DockSplit::Left,
+            0.35,
+            imgui::DockLayout::tabs(["Left"]),
+            imgui::DockLayout::tabs(["Right"]),
+        );
+        ui.dockspace_over_main_viewport_with_layout(
+            &target,
+            &initial,
+            imgui::DockLayoutApply::Replace,
+        )
+        .unwrap();
 
-    imgui::DockBuilder::copy_node(&ui, src, dst);
-    let remap = imgui::DockBuilder::copy_node_with_remap_out(&ui, dst, src);
-    assert!(!remap.is_empty());
+        let root = unsafe { imgui::sys::igDockBuilderGetNode(root_id.raw()) };
+        assert!(!root.is_null());
+        assert!(unsafe { imgui::sys::ImGuiDockNode_IsSplitNode(root) });
+        ui.window("Left").build(|| ui.text("left"));
+        ui.window("Right").build(|| ui.text("right"));
+    }
+    let _ = ctx.render();
 
-    imgui::DockBuilder::copy_dock_space(&ui, src, dst);
-    imgui::DockBuilder::copy_dock_space_with_window_remap(&ui, src, dst, &[]);
+    {
+        let ui = ctx.frame();
+        let viewport = ui.main_viewport();
+        let target =
+            imgui::DockspaceTarget::new(root_id, viewport.work_pos(), viewport.work_size())
+                .unwrap();
+        ui.dockspace_over_main_viewport_with_layout(
+            &target,
+            &imgui::DockLayout::tabs(["Replacement"]),
+            imgui::DockLayoutApply::IfMissing,
+        )
+        .unwrap();
+
+        let root = unsafe { imgui::sys::igDockBuilderGetNode(root_id.raw()) };
+        assert!(!root.is_null());
+        assert!(unsafe { imgui::sys::ImGuiDockNode_IsSplitNode(root) });
+        ui.window("Left").build(|| ui.text("left"));
+        ui.window("Right").build(|| ui.text("right"));
+    }
+    let _ = ctx.render();
+
+    {
+        let ui = ctx.frame();
+        let viewport = ui.main_viewport();
+        let target =
+            imgui::DockspaceTarget::new(root_id, viewport.work_pos(), viewport.work_size())
+                .unwrap();
+        ui.dockspace_over_main_viewport_with_layout(
+            &target,
+            &imgui::DockLayout::tabs(["Replacement"]),
+            imgui::DockLayoutApply::Replace,
+        )
+        .unwrap();
+
+        let root = unsafe { imgui::sys::igDockBuilderGetNode(root_id.raw()) };
+        assert!(!root.is_null());
+        assert!(unsafe { imgui::sys::ImGuiDockNode_IsLeafNode(root) });
+        assert!(!unsafe { imgui::sys::ImGuiDockNode_IsSplitNode(root) });
+        ui.window("Replacement").build(|| ui.text("replacement"));
+    }
+    let _ = ctx.render();
 }
 
 #[test]
-fn dock_builder_copy_helpers_reject_missing_source_nodes_before_ffi() {
+fn replace_creates_the_submitted_dockspace_geometry() {
     let _guard = test_guard();
-
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
 
     let ui = ctx.frame();
+    let viewport = ui.main_viewport();
+    let root_id = ui.get_id("Declarative dock layout metadata");
+    let class_id = ui.get_id("Declarative dock layout class");
+    let target = imgui::DockspaceTarget::new(root_id, viewport.work_pos(), viewport.work_size())
+        .unwrap()
+        .flags(imgui::DockNodeFlags::NO_RESIZE)
+        .window_class(imgui::WindowClass::new(class_id));
 
+    ui.dockspace_over_main_viewport_with_layout(
+        &target,
+        &imgui::DockLayout::tabs([] as [&str; 0]),
+        imgui::DockLayoutApply::Replace,
+    )
+    .unwrap();
+
+    let root = unsafe { imgui::sys::igDockBuilderGetNode(root_id.raw()) };
+    assert!(!root.is_null());
+    assert!(unsafe { imgui::sys::ImGuiDockNode_IsDockSpace(root) });
+    let rect = unsafe { imgui::sys::ImGuiDockNode_Rect(root) };
+    assert!((rect.Min.x - viewport.work_pos()[0]).abs() <= f32::EPSILON);
+    assert!((rect.Min.y - viewport.work_pos()[1]).abs() <= f32::EPSILON);
     assert!(
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            imgui::DockBuilder::copy_node(&ui, 0.into(), 1.into());
-        }))
-        .is_err()
+        (rect.Max.x - (viewport.work_pos()[0] + viewport.work_size()[0])).abs() <= f32::EPSILON
     );
     assert!(
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            imgui::DockBuilder::copy_dock_space(&ui, 999_999.into(), 1.into());
-        }))
-        .is_err()
+        (rect.Max.y - (viewport.work_pos()[1] + viewport.work_size()[1])).abs() <= f32::EPSILON
     );
+
+    let _ = ctx.render();
+}
+
+#[test]
+fn current_window_layout_uses_the_actual_cursor_position() {
+    let _guard = test_guard();
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+
+    let ui = ctx.frame();
+    let root_id = ui.get_id("Current-window declarative dock layout");
+    ui.window("Current-window dock host")
+        .position([80.0, 90.0], imgui::Condition::Always)
+        .size([400.0, 300.0], imgui::Condition::Always)
+        .build(|| {
+            let cursor = ui.cursor_screen_pos();
+            let target =
+                imgui::DockspaceTarget::new(root_id, [500.0, 500.0], [200.0, 150.0]).unwrap();
+            ui.dock_space_with_layout(
+                &target,
+                &imgui::DockLayout::tabs([] as [&str; 0]),
+                imgui::DockLayoutApply::Replace,
+            )
+            .unwrap();
+
+            let root = unsafe { imgui::sys::igDockBuilderGetNode(root_id.raw()) };
+            assert!(!root.is_null());
+            let rect = unsafe { imgui::sys::ImGuiDockNode_Rect(root) };
+            assert!((rect.Min.x - cursor[0]).abs() <= f32::EPSILON);
+            assert!((rect.Min.y - cursor[1]).abs() <= f32::EPSILON);
+        });
+    let _ = ctx.render();
+}
+
+#[test]
+fn declarative_layout_binds_its_owner_context_and_restores_the_foreign_context() {
+    let _guard = test_guard();
+    let mut owner = imgui::Context::create();
+    prepare_context(&mut owner);
+    let owner_raw = owner.as_raw();
+    let foreign_raw = unsafe { imgui::sys::igCreateContext(std::ptr::null_mut()) };
+    assert!(!foreign_raw.is_null());
+    unsafe {
+        imgui::sys::igSetCurrentContext(owner_raw);
+    }
+    let ui = owner.frame();
+    let root_id = ui.get_id("Owner-bound declarative dock layout");
+    let target = imgui::DockspaceTarget::new(root_id, [0.0, 0.0], [800.0, 600.0]).unwrap();
+
+    unsafe {
+        imgui::sys::igSetCurrentContext(foreign_raw);
+    }
+    assert_eq!(unsafe { imgui::sys::igGetCurrentContext() }, foreign_raw);
+
+    ui.dockspace_over_main_viewport_with_layout(
+        &target,
+        &imgui::DockLayout::tabs(["Owner window"]),
+        imgui::DockLayoutApply::Replace,
+    )
+    .unwrap();
+    assert_eq!(unsafe { imgui::sys::igGetCurrentContext() }, foreign_raw);
+
+    unsafe {
+        imgui::sys::igSetCurrentContext(owner_raw);
+        assert!(!imgui::sys::igDockBuilderGetNode(root_id.raw()).is_null());
+    }
+    let _ = owner.render();
+    unsafe {
+        imgui::sys::igDestroyContext(foreign_raw);
+    }
+}
+
+#[test]
+fn if_missing_preserves_a_layout_restored_from_ini() {
+    let _guard = test_guard();
+    let mut ini = String::new();
+
+    {
+        let mut ctx = imgui::Context::create();
+        prepare_context(&mut ctx);
+        let ui = ctx.frame();
+        let root_id = ui.get_id("Persisted declarative dock layout");
+        let viewport = ui.main_viewport();
+        let target =
+            imgui::DockspaceTarget::new(root_id, viewport.work_pos(), viewport.work_size())
+                .unwrap();
+        let layout = imgui::DockLayout::split(
+            imgui::DockSplit::Left,
+            0.4,
+            imgui::DockLayout::tabs(["Persisted left"]),
+            imgui::DockLayout::tabs(["Persisted right"]),
+        );
+        ui.dockspace_over_main_viewport_with_layout(
+            &target,
+            &layout,
+            imgui::DockLayoutApply::Replace,
+        )
+        .unwrap();
+        ui.window("Persisted left").build(|| ui.text("left"));
+        ui.window("Persisted right").build(|| ui.text("right"));
+        let _ = ctx.render();
+        ctx.save_ini_settings(&mut ini);
+    }
+    assert!(ini.contains("[Docking][Data]"));
+
+    let mut restored = imgui::Context::create();
+    prepare_context(&mut restored);
+    restored.load_ini_settings(&ini);
+    let ui = restored.frame();
+    let root_id = ui.get_id("Persisted declarative dock layout");
+    let viewport = ui.main_viewport();
+    let target =
+        imgui::DockspaceTarget::new(root_id, viewport.work_pos(), viewport.work_size()).unwrap();
+    ui.dockspace_over_main_viewport_with_layout(
+        &target,
+        &imgui::DockLayout::tabs(["Replacement"]),
+        imgui::DockLayoutApply::IfMissing,
+    )
+    .unwrap();
+
+    let root = unsafe { imgui::sys::igDockBuilderGetNode(root_id.raw()) };
+    assert!(!root.is_null());
+    assert!(unsafe { imgui::sys::ImGuiDockNode_IsSplitNode(root) });
+    let _ = restored.render();
 }
 
 #[test]

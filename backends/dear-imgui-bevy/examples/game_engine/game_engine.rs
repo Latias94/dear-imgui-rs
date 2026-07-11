@@ -19,7 +19,7 @@ use dear_imgui_bevy::{
     render::{ImguiOverlayCamera, ImguiOverlayDisabled},
 };
 use dear_imgui_rs::{
-    Condition, DockBuilder, DockNodeFlags, SplitDirection, TextureId, WindowFlags,
+    Condition, DockLayout, DockLayoutApply, DockSplit, DockspaceTarget, TextureId, WindowFlags,
 };
 
 const SCENE_SIZE: [u32; 2] = [960, 540];
@@ -39,7 +39,6 @@ struct ScenePreview {
 
 #[derive(Resource, Debug)]
 struct EditorState {
-    dockspace_seeded: bool,
     selected: Option<Entity>,
     playing: bool,
     scene_hovered: bool,
@@ -49,7 +48,6 @@ struct EditorState {
 impl Default for EditorState {
     fn default() -> Self {
         Self {
-            dockspace_seeded: false,
             selected: None,
             playing: true,
             scene_hovered: false,
@@ -225,11 +223,26 @@ fn editor_ui(
         return;
     };
 
-    let dockspace_id = ui.dockspace_over_main_viewport_with_flags(
-        ui.get_id("DearImguiBevyGameEngineDockspace"),
-        DockNodeFlags::NONE,
-    );
-    seed_dockspace(ui, dockspace_id, &mut editor);
+    let root_id = ui.get_id("DearImguiBevyGameEngineDockspace");
+    let viewport = ui.main_viewport();
+    let target = match DockspaceTarget::new(root_id, viewport.work_pos(), viewport.work_size()) {
+        Ok(target) => target,
+        Err(error) => {
+            error!("invalid game-engine dockspace target: {error}");
+            return;
+        }
+    };
+    let dockspace_id = match ui.dockspace_over_main_viewport_with_layout(
+        &target,
+        &game_engine_dock_layout(),
+        DockLayoutApply::IfMissing,
+    ) {
+        Ok(id) => id,
+        Err(error) => {
+            error!("failed to apply game-engine dock layout: {error}");
+            return;
+        }
+    };
 
     ui.set_next_window_dock_id_with_cond(dockspace_id, Condition::FirstUseEver);
     ui.window("Scene")
@@ -268,32 +281,23 @@ fn editor_ui(
     }
 }
 
-fn seed_dockspace(
-    ui: &dear_imgui_rs::Ui,
-    dockspace_id: dear_imgui_rs::Id,
-    editor: &mut EditorState,
-) {
-    if editor.dockspace_seeded {
-        return;
-    }
-
-    let viewport = ui.main_viewport();
-    DockBuilder::remove_node(ui, dockspace_id);
-    let root = DockBuilder::add_node(ui, dockspace_id, DockNodeFlags::NONE);
-    DockBuilder::set_node_pos(ui, root, viewport.pos());
-    DockBuilder::set_node_size(ui, root, viewport.size());
-    let (hierarchy_id, center_id) = DockBuilder::split_node(ui, root, SplitDirection::Left, 0.20);
-    let (inspector_id, scene_id) =
-        DockBuilder::split_node(ui, center_id, SplitDirection::Right, 0.25);
-    let (diagnostics_id, scene_id) =
-        DockBuilder::split_node(ui, scene_id, SplitDirection::Down, 0.24);
-    DockBuilder::dock_window(ui, "Hierarchy", hierarchy_id);
-    DockBuilder::dock_window(ui, "Scene", scene_id);
-    DockBuilder::dock_window(ui, "Inspector", inspector_id);
-    DockBuilder::dock_window(ui, "Diagnostics", diagnostics_id);
-    DockBuilder::finish(ui, root);
-
-    editor.dockspace_seeded = true;
+fn game_engine_dock_layout() -> DockLayout {
+    DockLayout::split(
+        DockSplit::Left,
+        0.20,
+        DockLayout::tabs(["Hierarchy"]),
+        DockLayout::split(
+            DockSplit::Right,
+            0.25,
+            DockLayout::tabs(["Inspector"]),
+            DockLayout::split(
+                DockSplit::Down,
+                0.24,
+                DockLayout::tabs(["Diagnostics"]),
+                DockLayout::tabs(["Scene"]),
+            ),
+        ),
+    )
 }
 
 fn render_scene_window(ui: &dear_imgui_rs::Ui, preview: &ScenePreview, editor: &mut EditorState) {

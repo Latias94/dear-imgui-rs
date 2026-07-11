@@ -26,9 +26,9 @@ This project is a Rust wrapper around the C shim (cimguizmo), not a direct C++ b
 
 | Item              | Version |
 |-------------------|---------|
-| Crate             | 0.15.1   |
-| dear-imgui-rs     | 0.15.1   |
-| dear-imguizmo-sys | 0.15.1   |
+| Crate             | 0.16.0  |
+| dear-imgui-rs     | 0.16.0  |
+| dear-imguizmo-sys | 0.16.0  |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 
@@ -47,8 +47,8 @@ To try the web demo with ImGuizmo enabled:
 
 ```bash
 # 1) Generate pregenerated wasm bindings (Dear ImGui core + ImGuizmo)
-cargo run -p xtask -- wasm-bindgen imgui-sys-v0
-cargo run -p xtask -- wasm-bindgen-imguizmo imgui-sys-v0
+cargo run -p xtask -- wasm-bindgen
+cargo run -p xtask -- wasm-bindgen-imguizmo
 
 # 2) Build the main wasm + JS (includes an "ImGuizmo (Web)" window)
 cargo run -p xtask -- web-demo imguizmo
@@ -62,7 +62,7 @@ python -m http.server -d target/web-demo 8080
 
 Notes:
 - The `dear-imgui-web-demo` crate in `examples-wasm` can enable the `imguizmo` feature; when present, an “ImGuizmo (Web)” window is shown if bindings + provider are available.
-- This is an early, experimental path; API and build steps may evolve in future releases. For production use, pin to a specific `0.6.x` release and follow changes in `docs/WASM.md`.
+- This is an early, experimental path; API and build steps may evolve in future releases. For production use, pin to a specific compatible `0.16` release and follow changes in `docs/WASM.md`.
 
 ## Features
 
@@ -76,8 +76,8 @@ All matrix arguments in the API are generic over a `Mat4Like` trait, implemented
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.15.1"
-dear-imguizmo = "0.15.1"
+dear-imgui-rs = "0.16.0"
+dear-imguizmo = "0.16.0"
 ```
 
 Minimal usage (dear-imgui-style API):

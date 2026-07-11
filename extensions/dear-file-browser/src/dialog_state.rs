@@ -3,10 +3,15 @@ use std::time::Duration;
 
 use dear_imgui_rs::FontId;
 
-use crate::core::{ClickAction, DialogMode, LayoutStyle};
-use crate::dialog_core::{EntryId, FileDialogCore, ScanPolicy, ScanStatus};
+use crate::core::{ClickAction, DialogMode, FileDialogError, LayoutStyle};
+use crate::dialog_core::{ConfirmGate, EntryId, FileDialogCore, ScanPolicy, ScanStatus};
 use crate::file_style::FileStyleRegistry;
+use crate::fs::{FileSystem, StdFileSystem};
+use crate::scan::FileSystemCapability;
 use crate::thumbnails::{ThumbnailCache, ThumbnailCacheConfig};
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
 
 /// View mode for the file list region.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -955,17 +960,70 @@ pub struct FileDialogState {
     pub core: FileDialogCore,
     /// UI-only state.
     pub ui: FileDialogUiState,
+    pub(crate) filesystem: FileSystemCapability,
 }
 
 impl FileDialogState {
     /// Creates a new dialog state for a mode.
     pub fn new(mode: DialogMode) -> Self {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            Self::with_background_filesystem(mode, Arc::new(StdFileSystem))
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            Self::with_blocking_filesystem(mode, Box::new(StdFileSystem))
+        }
+    }
+
+    /// Creates a dialog whose filesystem always remains on the caller thread.
+    ///
+    /// This constructor accepts non-`Send` implementations such as browser/JS
+    /// adapters. Selecting [`ScanPolicy::Background`] on this state returns an
+    /// error instead of silently changing execution mode.
+    pub fn with_blocking_filesystem(mode: DialogMode, filesystem: Box<dyn FileSystem>) -> Self {
         let mut core = FileDialogCore::new(mode);
-        core.set_scan_policy(ScanPolicy::tuned_incremental());
+        core.set_scan_policy(ScanPolicy::Blocking);
         Self {
             core,
             ui: FileDialogUiState::default(),
+            filesystem: FileSystemCapability::blocking(filesystem),
         }
+    }
+
+    /// Creates a native dialog with a filesystem that can be scanned on a worker.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn with_background_filesystem(
+        mode: DialogMode,
+        filesystem: Arc<dyn FileSystem + Send + Sync>,
+    ) -> Self {
+        let mut core = FileDialogCore::new(mode);
+        core.set_scan_policy(ScanPolicy::tuned_background());
+        Self {
+            core,
+            ui: FileDialogUiState::default(),
+            filesystem: FileSystemCapability::background(filesystem),
+        }
+    }
+
+    /// Replaces the filesystem with a caller-thread-only implementation.
+    pub fn set_blocking_filesystem(&mut self, filesystem: Box<dyn FileSystem>) {
+        self.core.cancel_scan();
+        self.filesystem = FileSystemCapability::blocking(filesystem);
+        self.core.set_scan_policy(ScanPolicy::Blocking);
+    }
+
+    /// Replaces the filesystem with a native thread-safe implementation.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_background_filesystem(&mut self, filesystem: Arc<dyn FileSystem + Send + Sync>) {
+        self.core.cancel_scan();
+        self.filesystem = FileSystemCapability::background(filesystem);
+    }
+
+    /// Returns the state-owned filesystem used for file operations.
+    pub fn file_system(&self) -> &dyn FileSystem {
+        self.filesystem.as_file_system()
     }
 
     /// Opens (or reopens) the dialog.
@@ -988,6 +1046,7 @@ impl FileDialogState {
     /// This mirrors IGFD's `Close` call.
     pub fn close(&mut self) {
         self.ui.visible = false;
+        self.core.cancel_scan();
     }
 
     /// Returns whether the dialog is currently open.
@@ -1001,8 +1060,17 @@ impl FileDialogState {
     }
 
     /// Sets scan policy for future directory refreshes.
-    pub fn set_scan_policy(&mut self, policy: ScanPolicy) {
+    pub fn set_scan_policy(&mut self, policy: ScanPolicy) -> Result<(), FileDialogError> {
+        if matches!(policy, ScanPolicy::Background { .. }) && !self.filesystem.supports_background()
+        {
+            #[cfg(target_arch = "wasm32")]
+            return Err(FileDialogError::BackgroundScanUnsupported);
+
+            #[cfg(not(target_arch = "wasm32"))]
+            return Err(FileDialogError::BackgroundScanRequiresThreadSafeFileSystem);
+        }
         self.core.set_scan_policy(policy);
+        Ok(())
     }
 
     /// Returns the latest scan status from core.
@@ -1017,7 +1085,8 @@ impl FileDialogState {
 
     /// Installs a scan hook on the core listing pipeline.
     ///
-    /// The hook runs during directory scan and can mutate or drop entries.
+    /// The hook runs while the owning thread applies scan batches and can mutate
+    /// or drop entries. It never crosses into the background scan worker.
     pub fn set_scan_hook<F>(&mut self, hook: F)
     where
         F: FnMut(&mut crate::FsEntry) -> crate::ScanHookAction + 'static,
@@ -1028,6 +1097,19 @@ impl FileDialogState {
     /// Clears the scan hook and restores raw filesystem listing.
     pub fn clear_scan_hook(&mut self) {
         self.core.clear_scan_hook();
+    }
+
+    pub(crate) fn tick_scan(&mut self) {
+        self.core.rescan_if_needed(&self.filesystem);
+    }
+
+    pub(crate) fn confirm(
+        &mut self,
+        gate: &ConfirmGate,
+        typed_footer_name: Option<&str>,
+    ) -> Result<(), FileDialogError> {
+        self.core
+            .confirm(self.filesystem.as_file_system(), gate, typed_footer_name)
     }
 
     /// Applies an "IGFD classic" preset for both UI and core.
@@ -1088,9 +1170,38 @@ mod tests {
     }
 
     #[test]
-    fn default_scan_policy_is_tuned_incremental() {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn default_scan_policy_is_tuned_background() {
         let state = FileDialogState::new(DialogMode::OpenFile);
-        assert_eq!(state.scan_policy(), ScanPolicy::tuned_incremental());
+        assert_eq!(state.scan_policy(), ScanPolicy::tuned_background());
+    }
+
+    #[test]
+    fn blocking_filesystem_rejects_background_policy() {
+        let mut state = FileDialogState::with_blocking_filesystem(
+            DialogMode::OpenFile,
+            Box::new(StdFileSystem),
+        );
+        let error = state
+            .set_scan_policy(ScanPolicy::tuned_background())
+            .expect_err("blocking filesystems must not silently move to a worker");
+
+        #[cfg(not(target_arch = "wasm32"))]
+        assert!(matches!(
+            error,
+            FileDialogError::BackgroundScanRequiresThreadSafeFileSystem
+        ));
+
+        #[cfg(target_arch = "wasm32")]
+        assert!(matches!(error, FileDialogError::BackgroundScanUnsupported));
+        assert_eq!(state.scan_policy(), ScanPolicy::Blocking);
+    }
+
+    #[test]
+    #[cfg(target_arch = "wasm32")]
+    fn wasm_default_is_explicitly_blocking() {
+        let state = FileDialogState::new(DialogMode::OpenFile);
+        assert_eq!(state.scan_policy(), ScanPolicy::Blocking);
     }
 
     #[test]

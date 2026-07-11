@@ -6,7 +6,6 @@ use crate::dialog_core::{CoreEvent, CoreEventOutcome, DirEntry, EntryId, Modifie
 use crate::dialog_state::{
     ClipboardOp, FileDialogState, FileListDataColumn, FileListViewMode, HeaderStyle,
 };
-use crate::fs::FileSystem;
 use crate::thumbnails::ThumbnailBackend;
 use dear_imgui_rs::Ui;
 use dear_imgui_rs::input::{Key, MouseButton};
@@ -86,34 +85,19 @@ pub(super) fn draw_file_table(
     ui: &Ui,
     state: &mut FileDialogState,
     size: [f32; 2],
-    fs: &dyn FileSystem,
     request_confirm: &mut bool,
     thumbnails_backend: Option<&mut ThumbnailBackend<'_>>,
 ) {
     match state.ui.config.file_list_view {
-        FileListViewMode::List => draw_file_table_view(
-            ui,
-            state,
-            size,
-            fs,
-            request_confirm,
-            thumbnails_backend,
-            false,
-        ),
+        FileListViewMode::List => {
+            draw_file_table_view(ui, state, size, request_confirm, thumbnails_backend, false)
+        }
         FileListViewMode::ThumbnailsList => {
             state.ui.config.thumbnails_enabled = true;
-            draw_file_table_view(
-                ui,
-                state,
-                size,
-                fs,
-                request_confirm,
-                thumbnails_backend,
-                true,
-            )
+            draw_file_table_view(ui, state, size, request_confirm, thumbnails_backend, true)
         }
         FileListViewMode::Grid => {
-            draw_file_grid_view(ui, state, size, fs, request_confirm, thumbnails_backend)
+            draw_file_grid_view(ui, state, size, request_confirm, thumbnails_backend)
         }
     }
 }
@@ -121,7 +105,6 @@ pub(super) fn draw_file_table(
 fn draw_entry_context_menu(
     ui: &Ui,
     state: &mut FileDialogState,
-    fs: &dyn FileSystem,
     request_confirm: &mut bool,
     entry_id: EntryId,
     selected: bool,
@@ -185,7 +168,7 @@ fn draw_entry_context_menu(
     if ui.menu_item_enabled_selected("Paste", Some("Ctrl+V"), false, can_paste) {
         state.ui.runtime.error = None;
         start_paste_into_cwd(state);
-        if let Err(e) = run_paste_job_until_wait_or_done(state, fs) {
+        if let Err(e) = run_paste_job_until_wait_or_done(state) {
             state.ui.runtime.error = Some(e);
             state.ui.operations.paste.job = None;
         }
@@ -196,7 +179,6 @@ fn draw_entry_context_menu(
 fn draw_file_list_window_context_menu(
     ui: &Ui,
     state: &mut FileDialogState,
-    fs: &dyn FileSystem,
     has_thumbnail_backend: bool,
 ) {
     let can_paste = state
@@ -298,7 +280,7 @@ fn draw_file_list_window_context_menu(
     if ui.menu_item_enabled_selected("Paste", Some("Ctrl+V"), false, can_paste) {
         state.ui.runtime.error = None;
         start_paste_into_cwd(state);
-        if let Err(e) = run_paste_job_until_wait_or_done(state, fs) {
+        if let Err(e) = run_paste_job_until_wait_or_done(state) {
             state.ui.runtime.error = Some(e);
             state.ui.operations.paste.job = None;
         }
@@ -310,12 +292,11 @@ fn draw_file_table_view(
     ui: &Ui,
     state: &mut FileDialogState,
     size: [f32; 2],
-    fs: &dyn FileSystem,
     request_confirm: &mut bool,
     thumbnails_backend: Option<&mut ThumbnailBackend<'_>>,
     force_preview: bool,
 ) {
-    state.core.rescan_if_needed(fs);
+    state.tick_scan();
     if state.ui.config.thumbnails_enabled {
         state.ui.thumbnails.advance_frame();
     }
@@ -450,7 +431,7 @@ fn draw_file_table_view(
                     };
                     state.core.sort_by = by;
                     state.core.sort_ascending = asc;
-                    state.core.rescan_if_needed(fs);
+                    state.tick_scan();
                 }
                 specs.clear_dirty();
             }
@@ -474,7 +455,7 @@ fn draw_file_table_view(
             if modifiers.ctrl && ui.is_key_pressed(Key::V) && !modifiers.shift {
                 state.ui.runtime.error = None;
                 start_paste_into_cwd(state);
-                if let Err(e) = run_paste_job_until_wait_or_done(state, fs) {
+                if let Err(e) = run_paste_job_until_wait_or_done(state) {
                     state.ui.runtime.error = Some(e);
                     state.ui.operations.paste.job = None;
                 }
@@ -586,7 +567,7 @@ fn draw_file_table_view(
                         }
 
                         if let Some(_popup) = ui.begin_popup_context_item() {
-                            draw_entry_context_menu(ui, state, fs, request_confirm, e.id, selected);
+                            draw_entry_context_menu(ui, state, request_confirm, e.id, selected);
                         }
 
                         if ui.is_item_hovered() && ui.is_mouse_double_clicked(MouseButton::Left) {
@@ -637,7 +618,7 @@ fn draw_file_table_view(
         }
 
         if let Some(_popup) = ui.begin_popup_context_window() {
-            draw_file_list_window_context_menu(ui, state, fs, has_thumbnail_backend);
+            draw_file_list_window_context_menu(ui, state, has_thumbnail_backend);
         }
 
         sync_runtime_column_order_from_table(&layout, &mut state.ui.config.file_list_columns);
@@ -661,11 +642,10 @@ fn draw_file_grid_view(
     ui: &Ui,
     state: &mut FileDialogState,
     size: [f32; 2],
-    fs: &dyn FileSystem,
     request_confirm: &mut bool,
     thumbnails_backend: Option<&mut ThumbnailBackend<'_>>,
 ) {
-    state.core.rescan_if_needed(fs);
+    state.tick_scan();
     let has_thumbnail_backend = thumbnails_backend.is_some();
     if state.ui.config.thumbnails_enabled {
         state.ui.thumbnails.advance_frame();
@@ -740,7 +720,7 @@ fn draw_file_grid_view(
                 if modifiers.ctrl && ui.is_key_pressed(Key::V) && !modifiers.shift {
                     state.ui.runtime.error = None;
                     start_paste_into_cwd(state);
-                    if let Err(e) = run_paste_job_until_wait_or_done(state, fs) {
+                    if let Err(e) = run_paste_job_until_wait_or_done(state) {
                         state.ui.runtime.error = Some(e);
                         state.ui.operations.paste.job = None;
                     }
@@ -911,7 +891,7 @@ fn draw_file_grid_view(
                     }
 
                     if let Some(_popup) = ui.begin_popup_context_item() {
-                        draw_entry_context_menu(ui, state, fs, request_confirm, e.id, selected);
+                        draw_entry_context_menu(ui, state, request_confirm, e.id, selected);
                     }
 
                     if ui.is_item_hovered() && ui.is_mouse_double_clicked(MouseButton::Left) {
@@ -926,7 +906,7 @@ fn draw_file_grid_view(
                 }
             }
             if let Some(_popup) = ui.begin_popup_context_window() {
-                draw_file_list_window_context_menu(ui, state, fs, has_thumbnail_backend);
+                draw_file_list_window_context_menu(ui, state, has_thumbnail_backend);
             }
         });
 

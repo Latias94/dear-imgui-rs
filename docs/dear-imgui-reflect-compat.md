@@ -21,6 +21,27 @@ Notes column can indicate partial coverage or subtle differences.
 Core Architecture
 -----------------
 
+Breaking session migration:
+
+```rust
+use dear_imgui_reflect::ImGuiReflectExt;
+
+let mut session = dear_imgui_reflect::ReflectSession::new();
+session.settings_mut().vec_mut().reorderable = false;
+
+// Once per frame/pass:
+let mut inspector = ui.inspector(&session);
+let changed = inspector.input("Settings", &mut settings);
+let events = inspector.response().events();
+```
+
+The former global `with_settings`/`current_settings`/`with_settings_scope`
+functions, no-session `input`/`input_with_response` functions, and the
+no-session `ImGuiReflectExt::input_reflect` method were removed. The
+`ImGuiReflectExt` trait now provides the session-aware `ui.inspector(&session)`
+entry point. Manual `ImGuiValue` and `ImGuiReflect` implementations receive
+`&mut Inspector` explicitly.
+
 - [~] Reflection-based per-type UI generation (ImGuiInput-style)
   - `dear-imgui-reflect::ImGuiValue` and `ImGuiReflect` derive correspond to
     `ImInput`'s per-type customization points: `ImGuiValue` is the low-level
@@ -29,10 +50,13 @@ Core Architecture
     ImReflect, this keeps the customization surface focused on Rust traits and
     derive macros instead of a more general reflected type graph; behavior is
     equivalent for the covered Rust types, but does not attempt to model the
-    full generality of ImReflect's type system.
+    full generality of ImReflect's type system. Both traits receive an
+    explicit `&mut Inspector`, so nested rendering shares response and path
+    state without globals or thread-local side channels.
 - [~] Type- and member-level settings object (ImSettings)
   - ImReflect uses `ImSettings` with `push<T>()` / `push_member<&T::field>()`.
-  - `dear-imgui-reflect` now includes a global `ReflectSettings` with
+  - `dear-imgui-reflect` stores `ReflectSettings` in an explicit
+    `ReflectSession`, with
     type-level defaults for containers (`Vec<T>` insertable/removable/
     reorderable, map/tuple dropdown/line vs grid) and for primitive numerics
     (`NumericTypeSettings` controlling default widget/range/format/flags for
@@ -40,13 +64,17 @@ Core Architecture
     `ReflectSettings::for_member::<T>("field") -> MemberSettings`. Member
     settings can adjust bool style, numeric defaults, tuple/map/vec/array
     settings, and a `read_only` flag. Tuple members additionally support
-    per-element overrides using paths like `"tuple_field[0]"`. Compared to
-    ImReflect's `ImSettings`, this currently models a single global settings
-    object (no full push/pop stack API) but covers the core type-level and
-    member-level customization concepts for the supported Rust types. For
-    scoped overrides, `dear-imgui-reflect` provides `with_settings_scope`,
-    which snapshots the current global `ReflectSettings`, runs a closure, and
-    restores the previous snapshot afterwards.
+    per-element overrides using paths like `"tuple_field[0]"`. Separate
+    sessions provide isolated configuration for separate inspectors. Settings
+    cannot mutate while an inspector borrows the session; there is no global
+    settings object or snapshot/restore stack.
+- [x] Explicit render-pass and draft ownership
+  - `Inspector` owns one pass's `ReflectResponse` and logical path stack.
+    Scoped path guards restore during normal return and panic unwind.
+  - `ReflectSession` owns map insertion drafts. Draft identity includes the
+    value `TypeId`, active Dear ImGui ID scope, and owning `ImGuiContext`.
+    Drafts are removed from storage while nested values render and restored by
+    an unwind-safe guard, avoiding global mutex re-lock and `RefCell` reborrow.
 
 Primitive Numerics (Scalars)
 ----------------------------
@@ -224,7 +252,7 @@ Booleans
     `true_false_text<T>` settings.
 - [x] Type-level default bool style
   - ImReflect can configure default bool style via `ImSettings`.
-  - `dear-imgui-reflect` exposes a global `ReflectSettings::bools()` which
+  - `dear-imgui-reflect` exposes session `ReflectSettings::bools()`, which
     controls the default widget style (`Checkbox`/`Button`/`Radio`/`Dropdown`)
     for `bool` fields when no per-field attributes are present; attributes
     (`bool_style`, `true_text`, `false_text`) still override these type-level
@@ -329,7 +357,7 @@ Containers and Option Types
   - Elements can be reordered via a small drag handle per row, using ImGui's
     drag-and-drop API to move items within the vector, analogous to ImReflect's
     `reorderable_mixin` support and `container_input` drag-to-reorder UI. A
-    type-level `VecSettings` controls global defaults (insertable/removable/
+    type-level `VecSettings` controls session defaults (insertable/removable/
     reorderable/dropdown).
 - [x] Fixed-size arrays `[f32; 2/3/4]`, `[i32; 2/3/4]`
   - Rendered similarly to small containers: a header `label [N]` plus one
@@ -358,7 +386,7 @@ Containers and Option Types
   - Struct fields whose type is a tuple of any length (including arities
     greater than 8) are rendered via a shared helper (`imgui_tuple_body`)
     that applies `TupleSettings` layered as:
-    global `ReflectSettings::tuples()`
+    session `ReflectSettings::tuples()`
     → optional `MemberSettings::tuples` (via `for_member::<T>("field")`)
     → optional field attributes (`tuple_render`, `tuple_dropdown`,
     `tuple_columns`, `tuple_min_width`). For tuples with more than 8
@@ -448,7 +476,7 @@ Examples and Tests
     - String-keyed `HashMap<String, i32>` / `BTreeMap<String, f32>` with
       inline editing, add-entry popup, and per-row context menu.
     - Small tuples `(i32, f32)`, `(bool, i32, f32)`, `(i32, i32, i32, i32)`
-      rendered in grid mode, driven by global `TupleSettings`.
+      rendered in grid mode, driven by session `TupleSettings`.
   - "Pointers" section:
     - `Box<T>`, `Rc<T>`, and `Arc<T>` wrappers around `PrimitivesDemo`.
   - "Type-level Numerics" section:

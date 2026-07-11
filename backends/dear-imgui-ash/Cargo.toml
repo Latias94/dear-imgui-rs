@@ -1,6 +1,6 @@
 [package]
 name = "dear-imgui-ash"
-version = "0.15.1"
+version.workspace = true
 edition.workspace = true
 description = "Vulkan (Ash) renderer backend for dear-imgui-rs"
 license.workspace = true
@@ -12,7 +12,7 @@ categories.workspace = true
 keywords.workspace = true
 
 [dependencies]
-dear-imgui-rs = { path = "../../dear-imgui", version = "0.15" }
+dear-imgui-rs.workspace = true
 thiserror.workspace = true
 log.workspace = true
 
@@ -37,9 +37,11 @@ dynamic-rendering = []
 
 # Experimental multi-viewport rendering via winit platform backend.
 # Requires `dear-imgui-rs/multi-viewport` (PlatformIO callbacks) and `ash-window` (surface creation).
+# Mutually exclusive with `multi-viewport-sdl3`.
 multi-viewport-winit = ["dear-imgui-rs/multi-viewport", "dep:winit", "dep:ash-window"]
 
 # Experimental multi-viewport rendering via the SDL3 platform backend.
 # Requires `dear-imgui-rs/multi-viewport`. Surface creation is delegated to the platform backend via
 # `ImGuiPlatformIO::Platform_CreateVkSurface` (see `imgui_impl_sdl3.cpp`).
+# Mutually exclusive with `multi-viewport-winit`.
 multi-viewport-sdl3 = ["dear-imgui-rs/multi-viewport"]

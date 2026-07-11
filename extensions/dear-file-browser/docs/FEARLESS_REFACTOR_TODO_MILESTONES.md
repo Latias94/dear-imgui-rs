@@ -24,24 +24,24 @@ Current parity status vs IGFD (excluding C API by product decision):
   - host-level size constraints (`min_size` / `max_size`) for window/modal configs (commit: `591cb49`)
   - parity/deviation baseline document (`docs/IGFD_PARITY_AND_DEVIATIONS.md`) (commit: `975f1dc`)
   - unified host/content entrypoints (`*_with` API) to remove redundant method matrix (commit: `60b4a12`)
-  - P2 performance/async architecture design doc (scan coordinator/runtime + generation model) (docs-only)
-  - Stage E scan-policy tuning (`max_batches_per_tick` + tuned presets + budget sweep baseline)
+  - P2 background scan architecture (streaming visitor + bounded worker channel + generation model)
+  - Background scan-policy tuning (`max_batches_per_tick` + tuned preset)
+  - Incremental partial-scan projection (per-batch filtering + stable ordered index)
   - IGFD-like path composer: breadcrumb style + edit toggle + devices/reset + quick path selection popups
-  - IGFD-like path popup: separator quick-select popup is a path table (IGFD `m_DisplayPathPopup` semantics)
+  - Path popup: separator quick-select uses known recent descendants without synchronous filesystem I/O
   - IGFD-like places: toolbar "Places" control + show/hide + splitter-resizable pane (Standard layout), popup access in Minimal layout
   - Places pane UX polish: per-group quick add (`+`), per-place edit button (`E`), double-click-to-navigate, right-click context actions
   - Demo: default to a repo image directory for visible thumbnails; use icon+text toolbar labels to avoid missing glyph confusion
 - Remaining high-priority gaps (non-C API):
   - none in core feature parity scope
-- P2 design baseline:
-  - published `docs/FEARLESS_REFACTOR_P2_PERF_ASYNC_DESIGN.md` for async/incremental scanning architecture
+- P2 implementation baseline:
+  - published `docs/FEARLESS_REFACTOR_P2_PERF_ASYNC_DESIGN.md` for the native background scan runtime
 
 Execution plan (next implementation wave):
 
 1. P2 Stage F: publish migration snippets and rollout notes
 2. P2 Stage G: extend benchmark matrix (batch size + mixed metadata)
-3. P2 Stage H: evaluate projection delta path under partial scan
-4. P3 UX/config parity wave (Rust-first, capability-first):
+3. P3 UX/config parity wave (Rust-first, capability-first):
    - dockable custom pane (right/bottom) + resizable splitter
    - IGFD-classic UI preset (layout/labels/density)
    - explicit config toggles for “IGFD flags”-like behavior (disable new-folder, hide columns, natural sort toggle, etc.)
@@ -180,7 +180,7 @@ Goal: allow alternative filesystem backends and system devices integration.
 
 ### Epic 4.1 — `FileSystem` trait + default implementation
 
-- [x] Task: Add a minimal `FileSystem` trait (`read_dir`, `canonicalize`, `metadata`, `create_dir`)
+- [x] Task: Add a minimal `FileSystem` trait (`visit_dir`, `canonicalize`, `metadata`, `create_dir`)
   - Acceptance: default uses `std::fs` and tests can swap in a mock filesystem.
 
 ### Epic 4.2 — Replace direct `std::fs` usage in core/UI
@@ -591,37 +591,46 @@ Goal: keep parity behavior stable while making large-directory navigation respon
 
 Reference design: `docs/FEARLESS_REFACTOR_P2_PERF_ASYNC_DESIGN.md`
 
-### Epic 17.1 - Scan pipeline scaffolding (Stage A)
+### Epic 17.1 - Streaming filesystem boundary
 
-- [x] Task: introduce scan contracts in core (`ScanPolicy`, `ScanRequest`, `ScanBatch`, `ScanStatus`)
+- [x] Task: replace eager `read_dir -> Vec` with object-safe `visit_dir`
   - Acceptance:
-    - types are internal-first and unit-testable
-    - default behavior remains synchronous and deterministic
-- [x] Task: add generation-based request ownership in `FileDialogCore`
+    - custom filesystems observe cooperative `ScanVisit::Stop`
+    - workers enumerate directly instead of receiving a UI-built snapshot
+- [x] Task: make filesystem capability state-owned
   - Acceptance:
-    - each rescan increments generation
-    - stale generations are ignored in batch apply path
+    - native background uses `Arc<dyn FileSystem + Send + Sync>`
+    - blocking/wasm uses `Box<dyn FileSystem>`
 
-### Epic 17.2 - Optional worker runtime (Stage B)
+### Epic 17.2 - Native worker lifecycle
 
-- [x] Task: add `ScanRuntime` abstraction with `SyncRuntime` + `WorkerRuntime`
+- [x] Task: add bounded-channel background scan sessions
   - Acceptance:
-    - sync path remains baseline fallback
-    - worker path can emit partial batches
-- [x] Task: add cancellation + stale-batch drop guarantees
+    - submission returns before gated enumeration completes
+    - supersession cancels without joining on the navigation path
+    - repeated supersession coalesces to one latest pending request
+- [x] Task: add explicit cancellation + owned-worker teardown guarantees
   - Acceptance:
-    - switching directories quickly does not leak stale entries
-    - tests cover `N` -> `N+1` request supersession
+    - stale generations cannot apply entries or errors
+    - runtime drop cancels, closes channels, and joins without holding core/UI locks
+    - a blocked filesystem delays only its owning runtime and does not starve another dialog
 
 ### Epic 17.3 - Projection/selection stability under partial data (Stage C)
 
 - [x] Task: add bounded per-frame batch apply budget
   - Acceptance:
     - UI frame budget remains stable under large scans
-- [x] Task: stabilize selection/anchor/focus reconciliation during incremental updates
+- [x] Task: stabilize selection/anchor/focus reconciliation during partial background updates
   - Acceptance:
     - selected IDs persist when entries remain resolvable
     - unresolved IDs are dropped deterministically
+- [x] Task: incrementally project accepted partial batches
+  - Acceptance:
+    - old snapshot entries are not cloned, filtered, or sorted for each batch
+    - visible batch entries enter a stable ordered index without traversing the
+      accumulated projection
+    - measured order comparisons and historical-entry visits stay `O(N log N)`
+    - completion reconciles selection without a redundant full rebuild
 
 ### Epic 17.4 - Observability and tuning (Stage D)
 
@@ -632,23 +641,23 @@ Reference design: `docs/FEARLESS_REFACTOR_P2_PERF_ASYNC_DESIGN.md`
   - Acceptance:
     - baseline numbers are recorded for before/after comparisons
 
-### Epic 17.5 - Incremental defaults and budget tuning (Stage E)
+### Epic 17.5 - Background defaults and budget tuning (Stage E)
 
-- [x] Task: extend `ScanPolicy` incremental mode with `max_batches_per_tick`
+- [x] Task: expose `ScanPolicy::Background` with `max_batches_per_tick`
   - Acceptance:
     - hosts can tune throughput vs frame pacing explicitly
     - normalization guards keep `batch_entries` and `max_batches_per_tick` >= 1
-- [x] Task: publish tuned presets and baseline sweep (`1/2/4` batches per tick)
+- [x] Task: publish the tuned native preset
   - Acceptance:
-    - `ScanPolicy::tuned_incremental()` available
+    - `ScanPolicy::tuned_background()` available
     - benchmark record updated with sweep table and recommendation
 
 Exit criteria:
 
-- Incremental scan mode is available and generation-safe.
+- Background scan mode is real, bounded, and generation-safe.
 - Large directory scans no longer block UI interaction.
 - Scan/projection costs are observable via tracing metrics.
-- Incremental policy has documented tuned presets for throughput/frame-pacing tradeoff.
+- Background policy has a documented tuned preset for throughput/frame-pacing tradeoff.
 
 ---
 

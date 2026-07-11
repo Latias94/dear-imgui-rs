@@ -5,12 +5,11 @@ use crate::dialog_core::EntryId;
 use crate::dialog_state::{
     FileDialogState, FileListColumnsConfig, FileListViewMode, PasteConflictAction,
 };
-use crate::fs::FileSystem;
 use dear_imgui_rs::Ui;
 
 use super::file_table;
 
-pub(super) fn draw_new_folder_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSystem) {
+pub(super) fn draw_new_folder_modal(ui: &Ui, state: &mut FileDialogState) {
     const POPUP_ID: &str = "New Folder";
 
     if !state.ui.config.new_folder_enabled {
@@ -46,10 +45,8 @@ pub(super) fn draw_new_folder_modal(ui: &Ui, state: &mut FileDialogState, fs: &d
             ui.close_current_popup();
         }
 
-        if create {
-            if try_create_new_folder_in_cwd(state, fs) {
-                ui.close_current_popup();
-            }
+        if create && try_create_new_folder_in_cwd(state) {
+            ui.close_current_popup();
         }
 
         if let Some(err) = &state.ui.operations.new_folder.error {
@@ -59,10 +56,7 @@ pub(super) fn draw_new_folder_modal(ui: &Ui, state: &mut FileDialogState, fs: &d
     }
 }
 
-pub(super) fn try_create_new_folder_in_cwd(
-    state: &mut FileDialogState,
-    fs: &dyn FileSystem,
-) -> bool {
+pub(super) fn try_create_new_folder_in_cwd(state: &mut FileDialogState) -> bool {
     state.ui.operations.new_folder.error = None;
     let name = state.ui.operations.new_folder.name.trim();
     let invalid = name.is_empty()
@@ -78,7 +72,8 @@ pub(super) fn try_create_new_folder_in_cwd(
 
     let name = name.to_string();
     let path = state.core.cwd.join(&name);
-    match fs.create_dir(&path) {
+    let create_result = state.filesystem.as_file_system().create_dir(&path);
+    match create_result {
         Ok(()) => {
             state.ui.operations.new_folder.name.clear();
             let id = EntryId::from_path(&path);
@@ -264,7 +259,7 @@ pub(super) fn draw_options_popup(
     }
 }
 
-pub(super) fn draw_rename_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSystem) {
+pub(super) fn draw_rename_modal(ui: &Ui, state: &mut FileDialogState) {
     const POPUP_ID: &str = "Rename";
 
     if state.ui.operations.rename.open_next {
@@ -341,10 +336,15 @@ pub(super) fn draw_rename_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn F
                 let to_name = to_name.to_string();
                 let to_path = from_path.with_file_name(&to_name);
 
-                if fs.metadata(&to_path).is_ok() {
+                let target_exists = state.filesystem.as_file_system().metadata(&to_path).is_ok();
+                if target_exists {
                     state.ui.operations.rename.error = Some("Target already exists".into());
                 } else {
-                    match fs.rename(&from_path, &to_path) {
+                    let rename_result = state
+                        .filesystem
+                        .as_file_system()
+                        .rename(&from_path, &to_path);
+                    match rename_result {
                         Ok(()) => {
                             let id = EntryId::from_path(&to_path);
                             state.core.focus_and_select_by_id(id);
@@ -370,7 +370,7 @@ pub(super) fn draw_rename_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn F
     }
 }
 
-pub(super) fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSystem) {
+pub(super) fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState) {
     const POPUP_ID: &str = "Delete";
 
     if state.ui.operations.delete.open_next {
@@ -447,9 +447,12 @@ pub(super) fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState, fs
 
         ui.separator();
 
-        let any_dir = delete_targets
-            .iter()
-            .any(|path| fs.metadata(path).map(|m| m.is_dir).unwrap_or(false));
+        let any_dir = {
+            let fs = state.filesystem.as_file_system();
+            delete_targets
+                .iter()
+                .any(|path| fs.metadata(path).map(|m| m.is_dir).unwrap_or(false))
+        };
         if any_dir {
             ui.checkbox("Recursive", &mut state.ui.operations.delete.recursive);
             ui.same_line();
@@ -472,23 +475,28 @@ pub(super) fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState, fs
         if del {
             state.ui.operations.delete.error = None;
             let recursive = state.ui.operations.delete.recursive;
-            for (path, name) in delete_targets.iter().zip(delete_target_names.iter()) {
-                let is_dir = fs.metadata(path).map(|m| m.is_dir).unwrap_or(false);
-                let result = if is_dir {
-                    if recursive {
-                        fs.remove_dir_all(path)
+            let delete_error = {
+                let fs = state.filesystem.as_file_system();
+                let mut error = None;
+                for (path, name) in delete_targets.iter().zip(delete_target_names.iter()) {
+                    let is_dir = fs.metadata(path).map(|m| m.is_dir).unwrap_or(false);
+                    let result = if is_dir {
+                        if recursive {
+                            fs.remove_dir_all(path)
+                        } else {
+                            fs.remove_dir(path)
+                        }
                     } else {
-                        fs.remove_dir(path)
+                        fs.remove_file(path)
+                    };
+                    if let Err(cause) = result {
+                        error = Some(format!("Failed to delete '{name}': {cause}"));
+                        break;
                     }
-                } else {
-                    fs.remove_file(path)
-                };
-                if let Err(e) = result {
-                    state.ui.operations.delete.error =
-                        Some(format!("Failed to delete '{name}': {e}"));
-                    break;
                 }
-            }
+                error
+            };
+            state.ui.operations.delete.error = delete_error;
 
             if state.ui.operations.delete.error.is_none() {
                 state.core.clear_selection();
@@ -506,7 +514,7 @@ pub(super) fn draw_delete_confirm_modal(ui: &Ui, state: &mut FileDialogState, fs
     }
 }
 
-pub(super) fn draw_paste_conflict_modal(ui: &Ui, state: &mut FileDialogState, fs: &dyn FileSystem) {
+pub(super) fn draw_paste_conflict_modal(ui: &Ui, state: &mut FileDialogState) {
     const POPUP_ID: &str = "Paste Conflict";
 
     if state.ui.operations.paste.conflict_open_next {
@@ -583,7 +591,7 @@ pub(super) fn draw_paste_conflict_modal(ui: &Ui, state: &mut FileDialogState, fs
             }
             ui.close_current_popup();
             state.ui.runtime.error = None;
-            if let Err(e) = super::ops::run_paste_job_until_wait_or_done(state, fs) {
+            if let Err(e) = super::ops::run_paste_job_until_wait_or_done(state) {
                 state.ui.runtime.error = Some(e);
                 state.ui.operations.paste.job = None;
             }

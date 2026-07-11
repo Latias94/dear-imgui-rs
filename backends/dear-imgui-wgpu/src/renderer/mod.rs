@@ -26,8 +26,14 @@ mod external_textures;
 mod font_atlas;
 #[cfg(feature = "multi-viewport-winit")]
 pub mod multi_viewport;
+#[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+mod multi_viewport_runtime;
 #[cfg(feature = "multi-viewport-sdl3")]
 pub mod multi_viewport_sdl3;
+#[cfg(feature = "multi-viewport-sdl3")]
+mod multi_viewport_sdl3_adapter;
+#[cfg(feature = "multi-viewport-winit")]
+mod multi_viewport_winit_adapter;
 mod pipeline;
 #[cfg(feature = "multi-viewport-sdl3")]
 mod sdl3_raw_window_handle;

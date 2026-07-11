@@ -240,8 +240,10 @@ impl Drop for Context {
                 }
                 crate::platform_io::clear_typed_callbacks_for_context(self.raw);
                 with_bound_context(self.raw, || {
-                    crate::platform_io::clear_out_param_callbacks_for_current_context();
+                    crate::platform_io::clear_aggregate_callbacks_for_current_context();
                 });
+                #[cfg(feature = "stack-layout")]
+                sys::ImGuiStack_DestroyContextState(self.raw);
                 if sys::igGetCurrentContext() == self.raw {
                     clear_current_context();
                 }

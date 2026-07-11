@@ -1,4 +1,5 @@
-use build_support::{compose_archive_name, compose_manifest_bytes};
+use build_support::binding::{ArtifactProfile, SourceRevisions};
+use build_support::{compose_archive_name, compose_manifest_bytes_with_profile};
 use flate2::{Compression, write::GzEncoder};
 use std::{
     env, fs,
@@ -13,86 +14,27 @@ fn expected_lib_name() -> &'static str {
     }
 }
 
-fn default_target_triple() -> String {
-    // Try env first
-    if let Ok(t) = env::var("TARGET") {
-        return t;
-    }
-    if let Ok(t) = env::var("CARGO_CFG_TARGET_TRIPLE") {
-        return t;
-    }
-    // Fallback compose
-    let arch = std::env::consts::ARCH;
-    let os = std::env::consts::OS;
-    match os {
-        "windows" => format!("{}-pc-windows-msvc", arch),
-        "macos" => format!("{}-apple-darwin", arch),
-        "linux" => format!("{}-unknown-linux-gnu", arch),
-        _ => format!("{}-unknown-{}", arch, os),
-    }
-}
-
-fn locate_sys_out_dir(workspace_root: &std::path::Path, target: &str) -> Result<PathBuf, String> {
-    let profile = env::var("PROFILE").unwrap_or_else(|_| "release".into());
-    let target_dir = env::var("CARGO_TARGET_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| workspace_root.join("target"));
-    let build_root = target_dir.join(target).join(&profile).join("build");
-    if !build_root.exists() {
-        return Err(format!("Build root not found at {}", build_root.display()));
-    }
-    let mut candidates: Vec<PathBuf> = match std::fs::read_dir(&build_root) {
-        Ok(rd) => rd
-            .filter_map(|e| e.ok())
-            .filter_map(|e| {
-                let p = e.path();
-                let name = p.file_name()?.to_string_lossy().to_string();
-                if name.starts_with("dear-imgui-sys-") {
-                    let out = p.join("out");
-                    if out.exists() { Some(out) } else { None }
-                } else {
-                    None
-                }
-            })
-            .collect(),
-        Err(_) => Vec::new(),
-    };
-    if candidates.is_empty() {
-        return Err(format!(
-            "No dear-imgui-sys build out directories found under {}",
-            build_root.display()
-        ));
-    }
-    candidates.sort_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
-    let from_dir = candidates.pop().unwrap();
-    Ok(from_dir)
+fn sys_out_dir() -> PathBuf {
+    // This path belongs to the exact Cargo feature profile that compiled this package binary.
+    // Scanning target/build by mtime can select a stale artifact from another feature profile.
+    PathBuf::from(env!("OUT_DIR"))
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir.parent().unwrap();
-    let _out_dir = PathBuf::from(
-        env::var("OUT_DIR").unwrap_or_else(|_| workspace_root.join("target").display().to_string()),
-    );
 
-    let target = default_target_triple();
-    let crate_version = env::var("CARGO_PKG_VERSION").unwrap();
-    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
-    let target_features = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
-    let mut crt = if target_os == "windows" && target_env == "msvc" {
-        if target_features.split(',').any(|f| f == "crt-static") {
-            "mt"
-        } else {
-            "md"
-        }
-    } else {
-        ""
-    };
+    let target = env!("DEAR_IMGUI_ARTIFACT_TARGET").to_string();
+    let crate_version = env!("CARGO_PKG_VERSION").to_string();
+    let crt = env!("DEAR_IMGUI_ARTIFACT_CRT");
     if let Ok(v) = env::var("IMGUI_SYS_PKG_CRT")
         && !v.is_empty()
+        && v != crt
     {
-        crt = Box::leak(v.into_boxed_str());
+        return Err(format!(
+            "IMGUI_SYS_PKG_CRT declares {v}, but this package binary was built for CRT profile {crt}"
+        )
+        .into());
     }
 
     let link_type = "static"; // we package static lib
@@ -101,45 +43,62 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //
     // We always compile with `IMGUI_USE_WCHAR32`, so this is always declared to allow the sys
     // build script to reject ABI-incompatible prebuilts.
-    // Stack layout is also always compiled into native prebuilts because the safe Rust API
-    // exposes the imgui-node-editor-compatible BeginHorizontal/BeginVertical/Spring helpers.
-    //
-    // Prefer explicit env override, otherwise infer from cargo feature env.
-    let mut features = env::var("IMGUI_SYS_PKG_FEATURES").unwrap_or_default();
-    let mut v: Vec<&'static str> = Vec::new();
-    v.push("wchar32");
-    v.push("stack-layout");
-    if features.is_empty() {
-        if env::var("CARGO_FEATURE_FREETYPE").is_ok() {
-            v.push("freetype");
+    // Artifact-changing features must match the Cargo profile that built this binary. The
+    // optional environment list may add metadata but cannot claim an unavailable artifact.
+    let explicit_features = env::var("IMGUI_SYS_PKG_FEATURES").unwrap_or_default();
+    let declared_features: Vec<String> = explicit_features
+        .split(',')
+        .map(|feature| feature.trim().to_ascii_lowercase())
+        .filter(|feature| !feature.is_empty())
+        .collect();
+    for feature in &declared_features {
+        let enabled = match feature.as_str() {
+            "stack-layout" => cfg!(feature = "stack-layout"),
+            "freetype" => cfg!(feature = "freetype"),
+            "test-engine" => cfg!(feature = "test-engine"),
+            "wchar32" | "platform-io-aggregate-hooks" => true,
+            _ => {
+                return Err(
+                    format!("IMGUI_SYS_PKG_FEATURES contains unknown feature {feature}").into(),
+                );
+            }
+        };
+        if !enabled {
+            return Err(format!(
+                "IMGUI_SYS_PKG_FEATURES declares {feature}, but this package binary was built without feature `{feature}`"
+            )
+            .into());
         }
-        if env::var("CARGO_FEATURE_TEST_ENGINE").is_ok() {
-            v.push("test-engine");
-        }
-        features = v.join(",");
-    } else {
-        let mut user: Vec<String> = features
-            .split(',')
-            .map(|s| s.trim().to_ascii_lowercase())
-            .filter(|s| !s.is_empty())
-            .collect();
-        if !user.iter().any(|s| s == "wchar32") {
-            user.push("wchar32".to_string());
-        }
-        if !user.iter().any(|s| s == "stack-layout") {
-            user.push("stack-layout".to_string());
-        }
-        features = user.join(",");
     }
 
+    let mut features = vec![
+        "platform-io-aggregate-hooks".to_string(),
+        "wchar32".to_string(),
+    ];
+    for (feature, enabled) in [
+        ("stack-layout", cfg!(feature = "stack-layout")),
+        ("freetype", cfg!(feature = "freetype")),
+        ("test-engine", cfg!(feature = "test-engine")),
+    ] {
+        if enabled {
+            features.push(feature.to_string());
+        }
+    }
+    features.sort_unstable();
+    features.dedup();
+
     let pkg_dir = PathBuf::from(
-        env::var("IMGUI_SYS_PACKAGE_DIR").unwrap_or_else(|_| env::var("OUT_DIR").unwrap()),
+        env::var("IMGUI_SYS_PACKAGE_DIR").unwrap_or_else(|_| env!("OUT_DIR").to_string()),
     );
     fs::create_dir_all(&pkg_dir)?;
 
-    let has_freetype = features.split(',').any(|f| f.trim() == "freetype");
-    let has_test_engine = features.split(',').any(|f| f.trim() == "test-engine");
+    let has_freetype = cfg!(feature = "freetype");
+    let has_test_engine = cfg!(feature = "test-engine");
+    let has_stack_layout = cfg!(feature = "stack-layout");
     let mut suffix = String::new();
+    if has_stack_layout {
+        suffix.push_str("-stack-layout");
+    }
     if has_freetype {
         suffix.push_str("-freetype");
     }
@@ -169,7 +128,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("  Package dir: {}", pkg_dir.display());
 
-    let sys_out = locate_sys_out_dir(workspace_root, &target)?;
+    let sys_out = sys_out_dir();
     println!("Using sys build out dir: {}", sys_out.display());
 
     // Create tar.gz
@@ -246,14 +205,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Added lib: {}", lib_path.display());
 
     // Add simple manifest txt
-    let manifest_txt = compose_manifest_bytes(
+    let artifact_profile = ArtifactProfile::new(
         "dear-imgui",
         &crate_version,
         &target,
         link_type,
         crt,
-        Some(&features),
+        &features,
+        SourceRevisions::new(
+            env!("DEAR_IMGUI_CIMGUI_REVISION"),
+            env!("DEAR_IMGUI_IMGUI_REVISION"),
+        ),
+        env!("DEAR_IMGUI_BINDING_SPEC_HASH"),
     );
+    let manifest_txt = compose_manifest_bytes_with_profile(&artifact_profile);
     let mut hdr = tar::Header::new_gnu();
     hdr.set_size(manifest_txt.len() as u64);
     hdr.set_mode(0o644);

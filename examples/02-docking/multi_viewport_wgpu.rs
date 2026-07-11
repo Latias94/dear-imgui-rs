@@ -43,7 +43,7 @@ struct AppWindow {
     queue: wgpu::Queue,
     imgui: Context,
     platform: WinitPlatform,
-    renderer: WgpuRenderer,
+    renderer: Box<WgpuRenderer>,
     start_time: Instant,
     enable_viewports: bool,
     // Offscreen "game view" texture and view
@@ -58,6 +58,8 @@ impl Drop for AppWindow {
         // Avoid ImGui's shutdown assertion by ensuring platform windows are destroyed before the
         // context is dropped.
         if self.enable_viewports {
+            dear_imgui_wgpu::multi_viewport::shutdown_multi_viewport_support(&mut self.imgui)
+                .expect("WGPU multi-viewport shutdown failed");
             winit_mvp::shutdown_multi_viewport_support(&mut self.imgui);
         }
     }
@@ -158,13 +160,12 @@ impl AppWindow {
         let init_info = WgpuInitInfo::new(device.clone(), queue.clone(), surface_config.format)
             .with_instance(instance.clone())
             .with_adapter(adapter.clone());
-        let mut renderer = WgpuRenderer::new(init_info, &mut imgui)?;
+        let mut renderer = Box::new(WgpuRenderer::new(init_info, &mut imgui)?);
         renderer.set_gamma_mode(GammaMode::Auto);
 
         // Register the offscreen texture as an external ImGui texture.
         let game_tex_id = renderer.register_external_texture(&game_tex, &game_tex_view);
 
-        // Build Self first to pin renderer and imgui in their final locations
         let mut app = Self {
             window,
             surface,
@@ -186,7 +187,9 @@ impl AppWindow {
             winit_mvp::init_multi_viewport_support(&mut app.imgui, &app.window);
 
             // Renderer viewport callbacks (install AFTER winit so our callbacks take precedence)
-            dear_imgui_wgpu::multi_viewport::enable(&mut app.renderer, &mut app.imgui);
+            unsafe {
+                dear_imgui_wgpu::multi_viewport::enable(&mut app.renderer, &mut app.imgui)?;
+            }
         }
 
         Ok(app)
@@ -358,14 +361,8 @@ impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         match AppWindow::new(event_loop) {
             Ok(win) => {
-                // Place the window struct first so its address is stable
                 win.window.request_redraw();
                 self.window = Some(win);
-
-                // Now that AppWindow is in its final place, (re)install renderer callbacks
-                if let Some(app) = self.window.as_mut() {
-                    dear_imgui_wgpu::multi_viewport::enable(&mut app.renderer, &mut app.imgui);
-                }
             }
             Err(_e) => {
                 event_loop.exit();

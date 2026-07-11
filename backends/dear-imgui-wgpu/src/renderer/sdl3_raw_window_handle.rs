@@ -29,6 +29,19 @@ use raw_window_handle::{
     RawWindowHandle, WindowHandle,
 };
 
+#[cfg(all(
+    unix,
+    not(target_os = "macos"),
+    not(target_os = "ios"),
+    not(target_os = "android")
+))]
+fn xlib_window_number(value: i64) -> Result<u64, HandleError> {
+    u64::try_from(value)
+        .ok()
+        .filter(|value| *value != 0)
+        .ok_or(HandleError::Unavailable)
+}
+
 /// A surface target backed by an SDL3 window.
 ///
 /// This implements `HasWindowHandle`/`HasDisplayHandle` so it can be passed to
@@ -187,7 +200,7 @@ impl HasWindowHandle for Sdl3SurfaceTarget {
                         sdl3_sys::video::SDL_PROP_WINDOW_X11_WINDOW_NUMBER,
                         0,
                     );
-                    let handle = XlibWindowHandle::new(window_num as u64);
+                    let handle = XlibWindowHandle::new(xlib_window_number(window_num)?);
                     Ok(WindowHandle::borrow_raw(RawWindowHandle::Xlib(handle)))
                 }
                 b"wayland" => {
@@ -295,5 +308,23 @@ impl HasDisplayHandle for Sdl3SurfaceTarget {
                 _ => Err(HandleError::Unavailable),
             }
         }
+    }
+}
+
+#[cfg(all(
+    test,
+    unix,
+    not(target_os = "macos"),
+    not(target_os = "ios"),
+    not(target_os = "android")
+))]
+mod tests {
+    use super::xlib_window_number;
+
+    #[test]
+    fn rejects_missing_or_invalid_xlib_window_numbers() {
+        assert!(xlib_window_number(0).is_err());
+        assert!(xlib_window_number(-1).is_err());
+        assert_eq!(xlib_window_number(17).unwrap(), 17);
     }
 }

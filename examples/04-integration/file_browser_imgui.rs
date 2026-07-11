@@ -204,7 +204,6 @@ impl AppWindow {
                     };
                     if let Some(res) = ui.file_browser().draw_contents_with(
                         &mut self.browser,
-                        &dear_file_browser::StdFileSystem,
                         None,
                         Some(&mut backend),
                     ) {

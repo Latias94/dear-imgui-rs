@@ -1,6 +1,6 @@
 [package]
 name = "dear-imgui-build-support"
-version = "0.15.1"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -24,6 +24,8 @@ vcpkg = { workspace = true, optional = true }
 
 [features]
 default = []
+# Pure-data binding generation and native artifact identity contracts.
+binding-spec = []
 # Enable HTTP(S) download support for build scripts.
 download = ["dep:ureq", "archive"]
 # Enable `.tar.gz` extraction support.

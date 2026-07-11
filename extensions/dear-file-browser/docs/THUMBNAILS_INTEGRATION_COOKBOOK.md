@@ -43,7 +43,6 @@ state.ui.thumbnails_enabled = true;
 // Pass backend when drawing:
 ui.file_browser().draw_contents_with(
     &mut state,
-    &dear_file_browser::StdFileSystem,
     None,
     Some(&mut backend),
 );
@@ -90,4 +89,3 @@ Notes:
   custom `ThumbnailProvider` and a filesystem strategy suitable for your platform.
 - Custom filesystem backends: thumbnails requests include absolute `PathBuf`. If your host uses a
   virtual filesystem, implement a provider that can read and decode through that system.
-

@@ -96,14 +96,27 @@ impl PlatformIo {
         self.store_current_context_cb(&PLATFORM_SHOW_WINDOW_CB, callback);
     }
 
-    /// Set platform set window position callback (raw)
+    /// Set platform set window position callback through the aggregate ABI shim.
+    ///
+    /// The callback receives a pointer because Dear ImGui's C++ slot accepts `ImVec2` by value.
     #[cfg(feature = "multi-viewport")]
     pub fn set_platform_set_window_pos_raw(
         &mut self,
-        callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, sys::ImVec2)>,
+        callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *const sys::ImVec2)>,
     ) {
-        self.inner_mut().Platform_SetWindowPos = callback;
-        self.clear_platform_io_cb(&trampolines::PLATFORM_SET_WINDOW_POS_CB);
+        self.assert_current_context_platform_io_for_callbacks();
+        if callback.is_some() {
+            super::super::core::assert_platform_io_aggregate_hooks_available(
+                "Platform_SetWindowPos",
+            );
+        }
+        self.clear_current_context_cb(&trampolines::PLATFORM_SET_WINDOW_POS_CB);
+        unsafe {
+            sys::ImGuiPlatformIO_Set_Platform_SetWindowPos_PointerParam(
+                self.as_raw_mut(),
+                callback,
+            );
+        }
     }
 
     /// Set platform set window position callback (typed Viewport).
@@ -120,19 +133,32 @@ impl PlatformIo {
         use trampolines::*;
         self.set_platform_set_window_pos_raw(callback.map(|_| {
             trampolines::platform_set_window_pos
-                as unsafe extern "C" fn(*mut sys::ImGuiViewport, sys::ImVec2)
+                as unsafe extern "C" fn(*mut sys::ImGuiViewport, *const sys::ImVec2)
         }));
         self.store_current_context_cb(&PLATFORM_SET_WINDOW_POS_CB, callback);
     }
 
-    /// Set platform set window size callback (raw)
+    /// Set platform set window size callback through the aggregate ABI shim.
+    ///
+    /// The callback receives a pointer because Dear ImGui's C++ slot accepts `ImVec2` by value.
     #[cfg(feature = "multi-viewport")]
     pub fn set_platform_set_window_size_raw(
         &mut self,
-        callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, sys::ImVec2)>,
+        callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *const sys::ImVec2)>,
     ) {
-        self.inner_mut().Platform_SetWindowSize = callback;
-        self.clear_platform_io_cb(&trampolines::PLATFORM_SET_WINDOW_SIZE_CB);
+        self.assert_current_context_platform_io_for_callbacks();
+        if callback.is_some() {
+            super::super::core::assert_platform_io_aggregate_hooks_available(
+                "Platform_SetWindowSize",
+            );
+        }
+        self.clear_current_context_cb(&trampolines::PLATFORM_SET_WINDOW_SIZE_CB);
+        unsafe {
+            sys::ImGuiPlatformIO_Set_Platform_SetWindowSize_PointerParam(
+                self.as_raw_mut(),
+                callback,
+            );
+        }
     }
 
     /// Set platform set window size callback (typed Viewport).
@@ -149,7 +175,7 @@ impl PlatformIo {
         use trampolines::*;
         self.set_platform_set_window_size_raw(callback.map(|_| {
             trampolines::platform_set_window_size
-                as unsafe extern "C" fn(*mut sys::ImGuiViewport, sys::ImVec2)
+                as unsafe extern "C" fn(*mut sys::ImGuiViewport, *const sys::ImVec2)
         }));
         self.store_current_context_cb(&PLATFORM_SET_WINDOW_SIZE_CB, callback);
     }

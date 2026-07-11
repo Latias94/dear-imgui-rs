@@ -12,7 +12,7 @@ use dear_imgui_bevy::{
     ImguiContext, ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, configure_example_context,
     render::ImguiOverlayCamera,
 };
-use dear_imgui_rs::{Condition, DockBuilder, DockNodeFlags, SplitDirection};
+use dear_imgui_rs::{Condition, DockLayout, DockLayoutApply, DockSplit, DockspaceTarget};
 use dear_imguizmo::{DrawListTarget, GuizmoExt, Mat4Like};
 use dear_imnodes::ImNodesExt;
 use dear_implot::ImPlotExt;
@@ -29,7 +29,6 @@ struct EcosystemState {
     cpu_ms: [f64; 16],
     gpu_ms: [f64; 16],
     frame_index: u64,
-    dockspace_seeded: bool,
     graph_positions_initialized: bool,
 }
 
@@ -47,7 +46,6 @@ impl Default for EcosystemState {
                 5.1, 5.4, 6.2, 5.8, 5.6, 6.5, 6.1, 5.7, 6.8, 7.3, 6.9, 6.0, 5.5, 6.3, 7.0, 6.4,
             ],
             frame_index: 0,
-            dockspace_seeded: false,
             graph_positions_initialized: false,
         }
     }
@@ -116,11 +114,26 @@ fn ecosystem_ui(
     };
     state.frame_index = frame_index;
 
-    let dockspace_id = ui.dockspace_over_main_viewport_with_flags(
-        ui.get_id("DearImguiBevyEcosystemDockspace"),
-        DockNodeFlags::NONE,
-    );
-    seed_ecosystem_dockspace(ui, dockspace_id, &mut state.dockspace_seeded);
+    let root_id = ui.get_id("DearImguiBevyEcosystemDockspace");
+    let viewport = ui.main_viewport();
+    let target = match DockspaceTarget::new(root_id, viewport.work_pos(), viewport.work_size()) {
+        Ok(target) => target,
+        Err(error) => {
+            error!("invalid ecosystem dockspace target: {error}");
+            return;
+        }
+    };
+    let dockspace_id = match ui.dockspace_over_main_viewport_with_layout(
+        &target,
+        &ecosystem_dock_layout(),
+        DockLayoutApply::IfMissing,
+    ) {
+        Ok(id) => id,
+        Err(error) => {
+            error!("failed to apply ecosystem dock layout: {error}");
+            return;
+        }
+    };
 
     ui.set_next_window_dock_id_with_cond(dockspace_id, Condition::FirstUseEver);
     ui.window("Profiler Plot")
@@ -149,28 +162,18 @@ fn ecosystem_ui(
         });
 }
 
-fn seed_ecosystem_dockspace(
-    ui: &dear_imgui_rs::Ui,
-    dockspace_id: dear_imgui_rs::Id,
-    seeded: &mut bool,
-) {
-    if *seeded {
-        return;
-    }
-
-    let viewport = ui.main_viewport();
-    DockBuilder::remove_node(ui, dockspace_id);
-    let root = DockBuilder::add_node(ui, dockspace_id, DockNodeFlags::NONE);
-    DockBuilder::set_node_pos(ui, root, viewport.pos());
-    DockBuilder::set_node_size(ui, root, viewport.size());
-    let (left_id, graph_id) = DockBuilder::split_node(ui, root, SplitDirection::Left, 0.42);
-    let (plot_id, gizmo_id) = DockBuilder::split_node(ui, left_id, SplitDirection::Up, 0.48);
-    DockBuilder::dock_window(ui, "Profiler Plot", plot_id);
-    DockBuilder::dock_window(ui, "Gizmo", gizmo_id);
-    DockBuilder::dock_window(ui, "Frame Graph", graph_id);
-    DockBuilder::finish(ui, root);
-
-    *seeded = true;
+fn ecosystem_dock_layout() -> DockLayout {
+    DockLayout::split(
+        DockSplit::Left,
+        0.42,
+        DockLayout::split(
+            DockSplit::Up,
+            0.48,
+            DockLayout::tabs(["Profiler Plot"]),
+            DockLayout::tabs(["Gizmo"]),
+        ),
+        DockLayout::tabs(["Frame Graph"]),
+    )
 }
 
 fn render_profiler_plot(

@@ -84,3 +84,40 @@ fn layout_and_scroll_helpers_reject_non_finite_or_invalid_ratios_before_ffi() {
         }
     });
 }
+
+#[test]
+fn indent_token_restores_layout_after_drop_end_and_panic() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+
+    let ui = ctx.frame();
+    let _ = ui.window("indent token").build(|| {
+        let cursor_x = ui.cursor_pos_x();
+
+        {
+            let _indent = ui.begin_indent();
+            assert!(ui.cursor_pos_x() > cursor_x);
+        }
+        assert_eq!(ui.cursor_pos_x(), cursor_x);
+
+        let indent = ui.begin_indent();
+        let _spacing = ui.push_style_var(imgui::StyleVar::IndentSpacing(73.0));
+        indent.end();
+        assert_eq!(ui.cursor_pos_x(), cursor_x);
+        drop(_spacing);
+
+        let indent = ui.begin_indent_by(17.0);
+        assert_eq!(ui.cursor_pos_x(), cursor_x + 17.0);
+        indent.end();
+        assert_eq!(ui.cursor_pos_x(), cursor_x);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _indent = ui.begin_indent();
+            panic!("indent token unwind probe");
+        }));
+        assert!(result.is_err());
+        assert_eq!(ui.cursor_pos_x(), cursor_x);
+    });
+}

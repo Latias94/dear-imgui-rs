@@ -67,7 +67,7 @@ struct MapDemo {
 /// Containers demo to exercise per-member Vec/Array/Map settings.
 #[derive(ImGuiReflect, Default)]
 struct ContainerSettingsDemo {
-    /// Fully editable vector (insert/remove/reorder) using global VecSettings.
+    /// Fully editable vector using this test's session VecSettings.
     full_vec: Vec<i32>,
     /// Vector that is reorderable only: no insert/remove buttons.
     reorder_only_vec: Vec<i32>,
@@ -190,6 +190,7 @@ struct AdvancedNumericAndBool {
 #[test]
 fn derive_compiles_and_runs_basic_ui() {
     let _guard = test_guard();
+    let session = reflect::ReflectSession::new();
     let mut ctx = Context::create();
     {
         let io = ctx.io_mut();
@@ -200,6 +201,7 @@ fn derive_compiles_and_runs_basic_ui() {
     let _ = ctx.font_atlas_mut().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     let ui = ctx.frame();
+    let mut inspector = session.inspector(ui);
 
     let mut settings = GameSettings {
         volume: 50,
@@ -209,18 +211,19 @@ fn derive_compiles_and_runs_basic_ui() {
     };
 
     // This should compile and not panic. We do not assert on ImGui state here.
-    let _changed = reflect::input(ui, "Settings", &mut settings);
+    let _changed = inspector.input("Settings", &mut settings);
 
     let mut advanced = AdvancedSettings {
         optional_mode: Some(Quality::Medium),
         ..Default::default()
     };
-    let _changed2 = reflect::input(ui, "Advanced", &mut advanced);
+    let _changed2 = inspector.input("Advanced", &mut advanced);
 }
 
 #[test]
 fn advanced_numeric_and_bool_styles_no_panic() {
     let _guard = test_guard();
+    let session = reflect::ReflectSession::new();
     let mut ctx = Context::create();
     {
         let io = ctx.io_mut();
@@ -230,14 +233,16 @@ fn advanced_numeric_and_bool_styles_no_panic() {
     let _ = ctx.font_atlas_mut().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     let ui = ctx.frame();
+    let mut inspector = session.inspector(ui);
 
     let mut advanced = AdvancedNumericAndBool::default();
-    let _changed = reflect::input(ui, "AdvancedNumericAndBool", &mut advanced);
+    let _changed = inspector.input("AdvancedNumericAndBool", &mut advanced);
 }
 
 #[test]
 fn boxed_settings_no_panic() {
     let _guard = test_guard();
+    let session = reflect::ReflectSession::new();
     let mut ctx = Context::create();
     {
         let io = ctx.io_mut();
@@ -247,14 +252,16 @@ fn boxed_settings_no_panic() {
     let _ = ctx.font_atlas_mut().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     let ui = ctx.frame();
+    let mut inspector = session.inspector(ui);
 
     let mut boxed = BoxedSettings::default();
-    let _changed = reflect::input(ui, "BoxedSettings", &mut boxed);
+    let _changed = inspector.input("BoxedSettings", &mut boxed);
 }
 
 #[test]
 fn shared_settings_no_panic() {
     let _guard = test_guard();
+    let session = reflect::ReflectSession::new();
     let mut ctx = Context::create();
     {
         let io = ctx.io_mut();
@@ -264,14 +271,16 @@ fn shared_settings_no_panic() {
     let _ = ctx.font_atlas_mut().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     let ui = ctx.frame();
+    let mut inspector = session.inspector(ui);
 
     let mut shared = SharedSettings::default();
-    let _changed = reflect::input(ui, "SharedSettings", &mut shared);
+    let _changed = inspector.input("SharedSettings", &mut shared);
 }
 
 #[test]
 fn map_demo_no_panic() {
     let _guard = test_guard();
+    let session = reflect::ReflectSession::new();
     let mut ctx = Context::create();
     {
         let io = ctx.io_mut();
@@ -281,14 +290,16 @@ fn map_demo_no_panic() {
     let _ = ctx.font_atlas_mut().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     let ui = ctx.frame();
+    let mut inspector = session.inspector(ui);
 
     let mut maps = MapDemo::default();
-    let _changed = reflect::input(ui, "MapDemo", &mut maps);
+    let _changed = inspector.input("MapDemo", &mut maps);
 }
 
 #[test]
 fn tuple_demo_no_panic() {
     let _guard = test_guard();
+    let session = reflect::ReflectSession::new();
     let mut ctx = Context::create();
     {
         let io = ctx.io_mut();
@@ -298,17 +309,20 @@ fn tuple_demo_no_panic() {
     let _ = ctx.font_atlas_mut().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     let ui = ctx.frame();
+    let mut inspector = session.inspector(ui);
 
     let mut tuples = TupleDemo::default();
-    let _changed = reflect::input(ui, "TupleDemo", &mut tuples);
+    let _changed = inspector.input("TupleDemo", &mut tuples);
 }
 
 #[test]
 fn large_tuple_and_member_read_only_no_panic() {
     let _guard = test_guard();
+    let mut session = reflect::ReflectSession::new();
 
     // Configure member-level read-only both at field level and per-tuple-element.
-    reflect::with_settings(|s| {
+    {
+        let s = session.settings_mut();
         // Entire field read-only (quad_tuple).
         s.for_member::<TupleDemo>("quad_tuple").read_only = true;
         // Per-element read-only on a tuple element: second element of triple_mixed.
@@ -316,7 +330,7 @@ fn large_tuple_and_member_read_only_no_panic() {
         // Per-element read-only on a larger tuple type.
         s.for_member::<LargeTupleDemo>("five[0]").read_only = true;
         s.for_member::<LargeTupleDemo>("eight_mixed[7]").read_only = true;
-    });
+    }
 
     let mut ctx = Context::create();
     {
@@ -327,17 +341,19 @@ fn large_tuple_and_member_read_only_no_panic() {
     let _ = ctx.font_atlas_mut().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     let ui = ctx.frame();
+    let mut inspector = session.inspector(ui);
 
     let mut tuples = TupleDemo::default();
-    let _ = reflect::input(ui, "TupleDemoWithReadOnly", &mut tuples);
+    let _ = inspector.input("TupleDemoWithReadOnly", &mut tuples);
 
     let mut large = LargeTupleDemo::default();
-    let _ = reflect::input(ui, "LargeTupleDemo", &mut large);
+    let _ = inspector.input("LargeTupleDemo", &mut large);
 }
 
 #[test]
 fn enum_reflect_no_panic() {
     let _guard = test_guard();
+    let session = reflect::ReflectSession::new();
     let mut ctx = Context::create();
     {
         let io = ctx.io_mut();
@@ -347,18 +363,21 @@ fn enum_reflect_no_panic() {
     let _ = ctx.font_atlas_mut().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     let ui = ctx.frame();
+    let mut inspector = session.inspector(ui);
 
     let mut q = Quality::Low;
-    let _ = reflect::input(ui, "QualityEnum", &mut q);
+    let _ = inspector.input("QualityEnum", &mut q);
 }
 
 #[test]
 fn complex_container_graph_no_panic() {
     let _guard = test_guard();
+    let mut session = reflect::ReflectSession::new();
 
     // Configure some member-level container settings to ensure nested settings
     // are exercised inside the complex graph.
-    reflect::with_settings(|s| {
+    {
+        let s = session.settings_mut();
         // Make history reorderable-only: no insert/remove via vector buttons.
         s.for_member::<ComplexContainerDemo>("history")
             .vec_reorder_only();
@@ -367,7 +386,7 @@ fn complex_container_graph_no_panic() {
         // while still allowing edits within the inner vectors.
         s.for_member::<ComplexContainerDemo>("map_of_vecs")
             .maps_const();
-    });
+    }
 
     let mut ctx = Context::create();
     {
@@ -378,6 +397,7 @@ fn complex_container_graph_no_panic() {
     let _ = ctx.font_atlas_mut().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     let ui = ctx.frame();
+    let mut inspector = session.inspector(ui);
 
     let mut demo = ComplexContainerDemo {
         secondary: Some(Box::new(GameSettings {
@@ -415,16 +435,18 @@ fn complex_container_graph_no_panic() {
         ..Default::default()
     };
 
-    let _ = reflect::input(ui, "ComplexContainerDemo", &mut demo);
+    let _ = inspector.input("ComplexContainerDemo", &mut demo);
 }
 
 #[test]
 fn container_member_settings_no_panic() {
     let _guard = test_guard();
+    let mut session = reflect::ReflectSession::new();
 
     // Configure member-level container settings to mimic ImSettings-style
     // insertable/removable/reorderable toggles.
-    reflect::with_settings(|s| {
+    {
+        let s = session.settings_mut();
         // reorder_only_vec: disable insertion/removal, keep reordering enabled.
         s.for_member::<ContainerSettingsDemo>("reorder_only_vec")
             .vec_reorder_only();
@@ -437,7 +459,7 @@ fn container_member_settings_no_panic() {
         // table layout to emphasize MapSettings.
         s.for_member::<ContainerSettingsDemo>("const_map")
             .maps_const();
-    });
+    }
 
     let mut ctx = Context::create();
     {
@@ -448,6 +470,7 @@ fn container_member_settings_no_panic() {
     let _ = ctx.font_atlas_mut().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     let ui = ctx.frame();
+    let mut inspector = session.inspector(ui);
 
     let mut demo = ContainerSettingsDemo {
         reorder_only_vec: vec![1, 2, 3],
@@ -456,5 +479,5 @@ fn container_member_settings_no_panic() {
         ..Default::default()
     };
 
-    let _ = reflect::input(ui, "ContainerSettingsDemo", &mut demo);
+    let _ = inspector.input("ContainerSettingsDemo", &mut demo);
 }

@@ -196,7 +196,8 @@ pub fn derive_for_enum(
                     );
 
                     field_stmts.push(quote! {
-                        let local_changed = ::dear_imgui_reflect::with_field_path_static(#field_segment_lit, || {
+                        let __field_path = inspector.push_path_static(#field_segment_lit);
+                        let local_changed = {
                             let __member_read_only = {
                                 let settings = &#reflect_settings_ident;
                                 if let Some(member) = settings.member::<Self>(#member_key_lit) {
@@ -207,31 +208,32 @@ pub fn derive_for_enum(
                             };
                             if #field_read_only || __member_read_only {
                                 let _disabled = ui.begin_disabled();
-                                let changed = ::dear_imgui_reflect::ImGuiValue::imgui_value(ui, #label_lit, #binding_ident);
+                                let changed = ::dear_imgui_reflect::ImGuiValue::imgui_value(inspector, #label_lit, #binding_ident);
                                 drop(_disabled);
                                 changed
                             } else {
-                                ::dear_imgui_reflect::ImGuiValue::imgui_value(ui, #label_lit, #binding_ident)
+                                ::dear_imgui_reflect::ImGuiValue::imgui_value(inspector, #label_lit, #binding_ident)
                             }
-                        });
+                        };
+                        drop(__field_path);
                         __changed |= local_changed;
                     });
                 }
 
                 quote! {
                     Self::#v_ident( #(#patterns),* ) => {
-                        ::dear_imgui_reflect::with_field_path_static(#variant_segment_lit, || {
-                            ui.indent();
-                            #(#field_stmts)*
-                            ui.unindent();
-                        });
+                        let __variant_path = inspector.push_path_static(#variant_segment_lit);
+                        let _indent = ui.begin_indent();
+                        #(#field_stmts)*
+                        drop(_indent);
+                        drop(__variant_path);
                     }
                 }
             }
             Fields::Named(fields) => {
                 let mut field_stmts = Vec::new();
-                let mut bindings: Vec<Ident> = Vec::new();
-                for field in fields.named.iter() {
+                let mut patterns: Vec<TokenStream2> = Vec::new();
+                for (field_index, field) in fields.named.iter().enumerate() {
                     let Some(name) = field.ident.as_ref() else {
                         continue;
                     };
@@ -264,7 +266,11 @@ pub fn derive_for_enum(
                     continue;
                 }
 
-                bindings.push(name.clone());
+                let binding_ident = syn::Ident::new(
+                    &format!("__imgui_reflect_named_field_{field_index}"),
+                    proc_macro2::Span::mixed_site(),
+                );
+                patterns.push(quote! { #name: #binding_ident });
 
                 let label_lit = label_override
                     .unwrap_or_else(|| syn::LitStr::new(&name.to_string(), name.span()));
@@ -274,7 +280,8 @@ pub fn derive_for_enum(
                     syn::LitStr::new(&format!("{}.{}", v_ident, name), v_ident.span());
 
                     field_stmts.push(quote! {
-                        let local_changed = ::dear_imgui_reflect::with_field_path_static(#field_segment_lit, || {
+                        let __field_path = inspector.push_path_static(#field_segment_lit);
+                        let local_changed = {
                             let __member_read_only = {
                                 let settings = &#reflect_settings_ident;
                                 if let Some(member) = settings.member::<Self>(#member_key_lit) {
@@ -285,30 +292,31 @@ pub fn derive_for_enum(
                             };
                             if #field_read_only || __member_read_only {
                                 let _disabled = ui.begin_disabled();
-                                let changed = ::dear_imgui_reflect::ImGuiValue::imgui_value(ui, #label_lit, #name);
+                                let changed = ::dear_imgui_reflect::ImGuiValue::imgui_value(inspector, #label_lit, #binding_ident);
                                 drop(_disabled);
                                 changed
                             } else {
-                                ::dear_imgui_reflect::ImGuiValue::imgui_value(ui, #label_lit, #name)
+                                ::dear_imgui_reflect::ImGuiValue::imgui_value(inspector, #label_lit, #binding_ident)
                             }
-                        });
+                        };
+                        drop(__field_path);
                         __changed |= local_changed;
                     });
                 }
 
-                let match_pat = if bindings.is_empty() {
+                let match_pat = if patterns.is_empty() {
                     quote! { Self::#v_ident { .. } }
                 } else {
-                    quote! { Self::#v_ident { #(#bindings),*, .. } }
+                    quote! { Self::#v_ident { #(#patterns),*, .. } }
                 };
 
                 quote! {
                     #match_pat => {
-                        ::dear_imgui_reflect::with_field_path_static(#variant_segment_lit, || {
-                            ui.indent();
-                            #(#field_stmts)*
-                            ui.unindent();
-                        });
+                        let __variant_path = inspector.push_path_static(#variant_segment_lit);
+                        let _indent = ui.begin_indent();
+                        #(#field_stmts)*
+                        drop(_indent);
+                        drop(__variant_path);
                     }
                 }
             }
@@ -343,9 +351,9 @@ pub fn derive_for_enum(
         quote! {
             let mut changed_select = false;
             ui.text(label);
-            ui.indent();
+            let _indent = ui.begin_indent();
             #(#radio_arms)*
-            ui.unindent();
+            drop(_indent);
         }
     } else {
         quote! {
@@ -354,7 +362,7 @@ pub fn derive_for_enum(
     };
 
     let body = quote! {
-        let #reflect_settings_ident = ::dear_imgui_reflect::current_settings();
+        let #reflect_settings_ident = inspector.settings();
         #labels_decl
 
         let mut index: usize = match self {
@@ -384,9 +392,10 @@ pub fn derive_for_enum(
         impl #impl_generics ::dear_imgui_reflect::ImGuiReflect for #ident #ty_generics #where_clause {
             fn imgui_reflect(
                 &mut self,
-                ui: &::dear_imgui_reflect::imgui::Ui,
+                inspector: &mut ::dear_imgui_reflect::Inspector<'_, '_>,
                 label: &str,
             ) -> bool {
+                let ui = inspector.ui();
                 #body
             }
         }

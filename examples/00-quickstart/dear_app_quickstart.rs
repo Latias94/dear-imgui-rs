@@ -1,29 +1,11 @@
-use dear_app::{AddOnsConfig, RunnerConfig, run};
+use dear_app::{AppConfig, Application, FrameContext, RunError, run};
 use dear_imgui_rs::*;
 
-fn main() {
-    // Basic info logs
-    dear_imgui_rs::logging::init_tracing_with_filter(
-        "dear_imgui=info,dear_app_quickstart=info,wgpu=warn",
-    );
+struct Quickstart;
 
-    let runner = RunnerConfig {
-        window_title: "Dear App Quickstart".to_string(),
-        window_size: (1280.0, 720.0),
-        present_mode: wgpu::PresentMode::Fifo,
-        clear_color: [0.1, 0.2, 0.3, 1.0],
-        docking: Default::default(),
-        ini_filename: None,
-        restore_previous_geometry: true,
-        redraw: dear_app::RedrawMode::Poll,
-        io_config_flags: None,
-        ..Default::default()
-    };
-
-    // Enable add-ons compiled into dear-app via features
-    let addons = AddOnsConfig::auto();
-
-    run(runner, addons, |ui, _addons| {
+impl Application for Quickstart {
+    fn frame(&mut self, context: &mut FrameContext<'_, '_>) -> Result<(), RunError> {
+        let ui = context.ui();
         ui.window("Dear App")
             .size([420.0, 260.0], Condition::FirstUseEver)
             .build(|| {
@@ -37,9 +19,26 @@ fn main() {
                 ));
 
                 ui.bullet_text("Winit + WGPU backend");
-                ui.bullet_text("Per-frame closure API");
-                ui.bullet_text("Optional add-ons (ImPlot, ImNodes)");
+                ui.bullet_text("Persistent Application state");
+                ui.bullet_text("Generation-safe GPU recovery");
             });
-    })
-    .unwrap();
+        Ok(())
+    }
+}
+
+fn main() {
+    // Basic info logs
+    dear_imgui_rs::logging::init_tracing_with_filter(
+        "dear_imgui=info,dear_app_quickstart=info,wgpu=warn",
+    );
+
+    let config = AppConfig {
+        window_title: "Dear App Quickstart".to_string(),
+        window_size: (1280.0, 720.0),
+        present_mode: wgpu::PresentMode::Fifo,
+        clear_color: [0.1, 0.2, 0.3, 1.0],
+        ..Default::default()
+    };
+
+    run(config, Quickstart).unwrap();
 }

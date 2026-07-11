@@ -27,11 +27,14 @@ mod group;
 mod metrics;
 mod separator;
 mod spacing;
+#[cfg(feature = "stack-layout")]
 mod stack_layout;
 mod validation;
 
 pub use clip_rect::ClipRectToken;
 pub use group::GroupToken;
+pub use spacing::IndentToken;
+#[cfg(feature = "stack-layout")]
 pub use stack_layout::{
     HorizontalStackLayoutToken, StackLayoutId, StackLayoutSuspensionToken, VerticalStackLayoutToken,
 };

@@ -4,19 +4,19 @@ Low-level Rust bindings for Dear ImGui via cimgui (C API) and checked-in pregene
 
 ## Overview
 
-This crate provides unsafe Rust bindings to Dear ImGui v1.92.8 (docking branch) using the [cimgui](https://github.com/cimgui/cimgui) C API. By using cimgui's C interface instead of directly binding to the C++ API, we avoid C++ ABI compatibility issues for the core `ig*` API while maintaining full access to Dear ImGui's functionality.
+This crate provides unsafe Rust bindings to Dear ImGui v1.92.8 (docking branch) using the [cimgui](https://github.com/cimgui/cimgui) C API. The core `ig*` API crosses a C ABI boundary. C++ backend integration and callback-bearing platform APIs use explicit repository-owned shims because their compiler ABI still matters, especially on MSVC.
 
 ## Key Features
 
-- **cimgui C API**: Clean C interface eliminates C++ ABI issues across platforms and compilers
-- **Docking Support**: Full support for docking and multi-viewport features (multi-viewport WIP)
+- **cimgui C API**: A deliberate C boundary for the core `ig*` API
+- **Docking Support**: Full docking support; PlatformIO primitives for backend-specific native multi-viewport routes
 - **Modern Dear ImGui**: Based on Dear ImGui v1.92.8 docking branch
 - **Cross-platform**: Consistent builds on Windows (MSVC/MinGW), Linux, macOS, and WebAssembly
 - **Prebuilt Binaries**: Optional prebuilt static libraries for faster builds
 - **Offline-friendly**: Pregenerated bindings for normal builds, docs.rs, and offline environments
 - **Optional backend shim ABI**: Shared low-level self-contained backend shim modules for downstream backend crates and engine integrations
-- **Stack layout compatibility shim**: Repository-owned C ABI for the `BeginHorizontal`,
-  `BeginVertical`, and `Spring` layout helpers used by imgui-node-editor blueprint examples
+- **Optional stack layout artifact**: The native-only `stack-layout` feature enables a patched
+  core and repository-owned C ABI for blueprint-style layout helpers
 
 ## Build Strategies
 
@@ -27,16 +27,17 @@ This crate supports multiple build strategies to fit different development workf
 The fastest way to get started. Use prebuilt static libraries instead of compiling from source:
 
 ```bash
-# Option A: Point to a local directory containing the static library
-export IMGUI_SYS_LIB_DIR=/path/to/lib/dir  # Contains dear_imgui.lib (Windows) or libdear_imgui.a (Unix)
+# Option A: Point to the library directory inside an extracted core artifact.
+# The strict manifest.txt may be in this directory or its parent artifact root.
+export IMGUI_SYS_LIB_DIR=/path/to/extracted/dear-imgui-artifact/lib
 
-# Option B: Use a local file path (library or .tar.gz archive)
-export IMGUI_SYS_PREBUILT_URL=/path/to/dear_imgui.lib
+# Option B: Use a package-tool-generated local archive or HTTP(S) URL.
+export IMGUI_SYS_PREBUILT_URL=/path/to/dear-imgui-prebuilt-0.16.0-<target>-static.tar.gz
+cargo build -p dear-imgui-sys --features prebuilt
 
 # Option C: Enable HTTP(S) downloads / auto-download from GitHub releases
-cargo build -p dear-imgui-sys --features prebuilt
-# optional (requires the feature above)
 export IMGUI_SYS_USE_PREBUILT=1
+cargo build -p dear-imgui-sys --features prebuilt
 ```
 
 ### 2. Build from Source
@@ -59,9 +60,8 @@ If Cargo reports a missing header such as
 `dear-imgui-sys/third-party/cimgui/imgui/imgui.h`, the cimgui submodule is not
 initialized.
 
-Source builds currently use the `cc` crate on every platform. `IMGUI_SYS_USE_CMAKE`
-is accepted for compatibility, but the build script warns and ignores it because
-the native stack-layout ABI patches the `imgui.cpp` build copy in `OUT_DIR`.
+Source builds use the `cc` crate on every platform. There is no alternate CMake
+core build route.
 
 Normal source builds use the checked-in pregenerated Rust bindings and do not require libclang.
 Bindgen is only needed when regenerating bindings.
@@ -106,27 +106,32 @@ This crate supports offline builds and docs.rs compilation through pregenerated 
 
 When building on docs.rs (`DOCS_RS=1`), the build script:
 
-- Uses pregenerated bindings from `src/bindings_pregenerated.rs` if available
-- Falls back to generating bindings from vendored cimgui headers (no network required)
+- Selects the checked-in native ABI profile for the docs.rs target
+- Falls back to the same shared binding specification only when the profile file
+  is unavailable and the `bindgen` feature is present
 - Skips native C/C++ compilation entirely
 
 ### Updating Pregenerated Bindings
 
-To refresh the pregenerated bindings file:
+Core bindings are generated as Windows, non-Windows, and WASM profiles from one
+shared specification. To reproduce and compare all checked-in profiles:
 
 ```bash
-# Generate new bindings without C++ compilation
-DEAR_IMGUI_RS_REGEN_BINDINGS=1 cargo build -p dear-imgui-sys --features bindgen
-
-# Copy generated bindings to source tree
-cp target/debug/build/dear-imgui-sys-*/out/bindings.rs dear-imgui-sys/src/bindings_pregenerated.rs
+cargo run -p xtask -- verify-bindings
 ```
 
-Or use the provided update script:
+After an intentional source or specification change, update all profiles and
+then verify them:
 
 ```bash
-python3 tools/update_submodule_and_bindings.py --branch docking_inter
+cargo run -p xtask -- verify-bindings --update --allow-dirty
+python3 tools/update_submodule_and_bindings.py \
+  --crates dear-imgui-sys --submodules auto --wasm
 ```
+
+Canonical generation rejects `BINDGEN_EXTRA_CLANG_ARGS*`. The target profile,
+generator policy, header shims, enum normalization, formatter, and WASM provider
+all participate in the binding-spec hash.
 
 ## WebAssembly Support
 
@@ -136,7 +141,14 @@ WebAssembly support for Dear ImGui in this workspace follows the same **import-s
 - The main application (Rust + winit + wgpu) targets `wasm32-unknown-unknown` and uses `wasm-bindgen`.
 - A separate provider module (`imgui-sys-v0`) is built once (currently via Emscripten) and contains Dear ImGui + cimgui and, optionally, selected extensions.
 
-The `dear-imgui-sys` crate participates in this flow via its `wasm` feature, but end users typically interact with it indirectly through:
+The `wasm` feature is mandatory for `wasm32-unknown-unknown`, the only supported
+WASM target. WASI (`wasip1`/`wasip2`) and Emscripten targets are rejected even
+with the feature because their runtime ABI cannot consume these import bindings.
+The provider name is fixed; generation commands do not accept an alternate
+import module. Enabling `wasm` on a native target is allowed and does not select
+the WASM binding profile.
+
+End users typically interact with the flow indirectly through:
 
 - `dear-imgui-rs` with the `wasm` feature enabled.
 - The `xtask` commands (`wasm-bindgen`, `web-demo`, `build-cimgui-provider`) that wire the main module and provider together.
@@ -152,10 +164,10 @@ This is a low-level sys crate providing unsafe FFI bindings. Most users should u
 
 ```toml
 [dependencies]
-dear-imgui-sys = "0.15.1"
+dear-imgui-sys = "0.16.0"
 
 # Enable features as needed
-dear-imgui-sys = { version = "0.15.1", features = ["freetype", "wasm"] }
+dear-imgui-sys = { version = "0.16.0", features = ["freetype", "wasm"] }
 ```
 
 ### Direct FFI Usage (Advanced)
@@ -188,7 +200,7 @@ can expose optional backend shim modules behind `backend-shim-*` features:
 
 ```toml
 [dependencies]
-dear-imgui-sys = { version = "0.15.1", features = ["backend-shim-opengl3"] }
+dear-imgui-sys = { version = "0.16.0", features = ["backend-shim-opengl3"] }
 ```
 
 These features expose self-contained modules such as:
@@ -265,9 +277,13 @@ shims for self-contained backends such as OpenGL3.
 
 ## Stack Layout Compatibility Shim
 
-`dear-imgui-sys` also builds a small repository-owned stack layout shim that
+With feature `stack-layout`, `dear-imgui-sys` builds a repository-owned stack layout shim that
 backs the safe `dear-imgui-rs` helpers named `begin_horizontal`,
 `begin_vertical`, and `spring`.
+
+```bash
+cargo build -p dear-imgui-sys --features stack-layout
+```
 
 Scope notes:
 
@@ -283,9 +299,11 @@ Scope notes:
   [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 - The Rust-facing ABI uses `dear_imgui_stack_*` symbols and is owned by this
   crate. Downstream code should prefer the safe `dear-imgui-rs` wrappers.
-- The shim is compiled for native source/prebuilt builds. It is intentionally
-  outside the current import-style WASM provider path because
-  `dear-node-editor` is native-only.
+- Normal native builds compile the original Dear ImGui core and do not export the shim symbols.
+- Official release prebuilt profiles match exactly: stack-layout artifacts use a `-stack-layout`
+  archive suffix, or `-stack-layout-freetype` when FreeType is also enabled. Their manifests declare
+  the same feature set, so neither can substitute for a normal or FreeType-only artifact.
+- `stack-layout` is native-only and cannot be combined with the WASM feature or target.
 
 ### Cargo Metadata for Backend Authors
 
@@ -315,8 +333,8 @@ There are two first-class Android directions.
 
    ```toml
    [dependencies]
-   dear-imgui-rs = "0.15.1"
-   dear-imgui-sys = { version = "0.15.1", features = ["backend-shim-android", "backend-shim-opengl3"] }
+   dear-imgui-rs = "0.16.0"
+   dear-imgui-sys = { version = "0.16.0", features = ["backend-shim-android", "backend-shim-opengl3"] }
    ```
 
    Use `dear-imgui-rs` for the safe core (`Context`, IO, frame lifecycle,
@@ -366,17 +384,33 @@ outside the core crates.
 
 This crate uses [cimgui](https://github.com/cimgui/cimgui) as the C API layer:
 
-- **No C++ ABI Issues**: cimgui provides a pure C interface, eliminating cross-platform ABI compatibility problems
+- **Core C ABI**: cimgui exposes the core `ig*` calls through C; backend shims
+  and callback signatures retain explicit platform/compiler ABI contracts
 - **Complete API Coverage**: All Dear ImGui functions are available through the C API
 - **Consistent Naming**: Functions follow the `ig*` naming convention (e.g., `igText`, `igButton`)
 - **Pregenerated by default**: Checked-in bindings are copied into `OUT_DIR` for normal builds
 - **Explicit regeneration**: Set `DEAR_IMGUI_RS_REGEN_BINDINGS=1` to run bindgen from cimgui headers
 
+Two native binding files are selected by target facts rather than by the host
+that published the crate:
+
+- `bindings_pregenerated_windows.rs` for supported 64-bit Windows MSVC/GNU ABIs
+- `bindings_pregenerated.rs` for supported Linux, Android, macOS, and iOS ABIs
+
+WASM uses `wasm_bindings_pregenerated.rs` and imports the fixed
+`imgui-sys-v0` provider. `ImGuiDockNode` is intentionally opaque and pointer-only;
+C/C++ `va_list` APIs are omitted because neither has one portable Rust layout.
+
+The packaged Cargo manifest records exact cimgui and nested Dear ImGui revisions
+under `[package.metadata.dear-imgui-sources]`. Builds and artifact packaging use
+that metadata without requiring a `.git` directory. Update and release checks
+require both source submodules to be clean and to match the recorded revisions.
+
 ### Version Information
 
 - **Dear ImGui Version**: v1.92.8 (docking branch)
 - **cimgui Version**: Latest compatible with Dear ImGui v1.92.8
-- **Supported Features**: Docking, multi-viewport (WIP), FreeType font rendering
+- **Supported Features**: Docking, FreeType font rendering, and low-level PlatformIO/multi-viewport primitives; end-to-end status is documented per backend route
 
 ### Environment Variables
 
@@ -384,13 +418,16 @@ Control build behavior with these environment variables:
 
 | Variable | Description |
 |----------|-------------|
-| `IMGUI_SYS_LIB_DIR` | Path to directory containing prebuilt static library |
-| `IMGUI_SYS_PREBUILT_URL` | Local file path or direct URL to a prebuilt library/archive (HTTP(S) and `.tar.gz` extraction require feature `prebuilt`) |
+| `IMGUI_SYS_LIB_DIR` | Directory containing the core static library; a matching strict `manifest.txt` must be in that directory or its parent |
+| `IMGUI_SYS_PREBUILT_URL` | Local path or direct URL to a package-tool-generated core archive; HTTP(S) and `.tar.gz` extraction require feature `prebuilt` |
 | `IMGUI_SYS_USE_PREBUILT` | Enable automatic download from GitHub releases (`1`, requires feature `prebuilt`) |
-| `IMGUI_SYS_USE_CMAKE` | Accepted for compatibility; currently warns and uses the cc source build because stack-layout patches the `imgui.cpp` build copy |
 | `IMGUI_SYS_SKIP_CC` | Skip C/C++ compilation, use pregenerated bindings only (`1`) |
 | `IMGUI_SYS_FORCE_BUILD` | Force build from source, ignore prebuilt options (`1`) |
 | `DEAR_IMGUI_RS_REGEN_BINDINGS` | Regenerate Rust bindings with bindgen (`1`; requires `--features bindgen` and libclang) |
+
+Bare `.a`/`.lib` inputs are not trusted core artifacts. An explicit library is
+accepted only when its directory or parent artifact root also contains the
+complete matching `manifest.txt`; using the packaged `.tar.gz` is recommended.
 
 ## Related Crates
 

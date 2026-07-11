@@ -29,5 +29,5 @@ pub use core::PlatformIo;
 pub use viewport::Viewport;
 
 pub(crate) use core::{
-    clear_out_param_callbacks_for_current_context, clear_typed_callbacks_for_context,
+    clear_aggregate_callbacks_for_current_context, clear_typed_callbacks_for_context,
 };

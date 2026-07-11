@@ -192,7 +192,7 @@ impl WindowClass {
     }
 
     /// Converts to ImGui's internal representation
-    pub(super) fn to_imgui(&self, caller: &str) -> sys::ImGuiWindowClass {
+    pub(crate) fn to_imgui(&self, caller: &str) -> sys::ImGuiWindowClass {
         self.validate(caller);
         sys::ImGuiWindowClass {
             ClassId: optional_nonzero_id_raw(caller, "class_id", self.class_id),

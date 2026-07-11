@@ -9,7 +9,7 @@ pub struct FsMetadata {
     pub is_symlink: bool,
 }
 
-/// Directory entry returned by [`FileSystem::read_dir`].
+/// Directory entry yielded by [`FileSystem::visit_dir`].
 #[derive(Clone, Debug)]
 pub struct FsEntry {
     /// Base name (no parent path)
@@ -26,13 +26,38 @@ pub struct FsEntry {
     pub modified: Option<std::time::SystemTime>,
 }
 
+/// Flow control returned from a [`FileSystem::visit_dir`] visitor.
+///
+/// Directory implementations must stop enumerating as soon as the visitor returns
+/// [`Self::Stop`]. This lets a background scan observe cancellation without giving
+/// filesystem implementations access to internal worker state.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ScanVisit {
+    /// Continue enumerating directory entries.
+    #[default]
+    Continue,
+    /// Stop enumerating the current directory.
+    Stop,
+}
+
 /// File system abstraction (IGFD `IFileSystem`-like).
 ///
-/// This is a first incremental step; the API will expand as Places/devices,
-/// directory creation, symlink support, and async enumeration are added.
+/// The enumeration boundary is deliberately streaming and object-safe. A
+/// background scan can stop a cooperative filesystem between entries without
+/// constructing an eager directory snapshot on the UI thread.
 pub trait FileSystem {
-    /// List entries of a directory.
-    fn read_dir(&self, dir: &Path) -> std::io::Result<Vec<FsEntry>>;
+    /// Visit entries of a directory one at a time.
+    ///
+    /// Implementations must stop when `visit` returns [`ScanVisit::Stop`] and
+    /// should return promptly afterward. The visitor is invoked on the scan
+    /// worker for background scans and on the caller thread for
+    /// [`crate::ScanPolicy::Blocking`] scans. Destroying a background dialog
+    /// waits for its worker to return after cancellation.
+    fn visit_dir(
+        &self,
+        dir: &Path,
+        visit: &mut dyn FnMut(FsEntry) -> ScanVisit,
+    ) -> std::io::Result<()>;
     /// Canonicalize a path (best-effort absolute normalization).
     fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf>;
     /// Fetch minimal metadata for a path.
@@ -58,8 +83,11 @@ pub trait FileSystem {
 pub struct StdFileSystem;
 
 impl FileSystem for StdFileSystem {
-    fn read_dir(&self, dir: &Path) -> std::io::Result<Vec<FsEntry>> {
-        let mut out = Vec::new();
+    fn visit_dir(
+        &self,
+        dir: &Path,
+        visit: &mut dyn FnMut(FsEntry) -> ScanVisit,
+    ) -> std::io::Result<()> {
         let rd = std::fs::read_dir(dir)?;
         for e in rd {
             let e = match e {
@@ -81,16 +109,21 @@ impl FileSystem for StdFileSystem {
             } else {
                 meta.as_ref().filter(|m| m.is_file()).map(|m| m.len())
             };
-            out.push(FsEntry {
-                name,
-                path,
-                is_dir,
-                is_symlink,
-                size,
-                modified,
-            });
+            if matches!(
+                visit(FsEntry {
+                    name,
+                    path,
+                    is_dir,
+                    is_symlink,
+                    size,
+                    modified,
+                }),
+                ScanVisit::Stop
+            ) {
+                break;
+            }
         }
-        Ok(out)
+        Ok(())
     }
 
     fn canonicalize(&self, path: &Path) -> std::io::Result<PathBuf> {

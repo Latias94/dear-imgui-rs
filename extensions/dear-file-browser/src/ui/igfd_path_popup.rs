@@ -6,12 +6,10 @@ use dear_imgui_rs::sys;
 use crate::core::SortMode;
 use crate::dialog_state::FileDialogState;
 use crate::file_style::EntryKind;
-use crate::fs::FileSystem;
 
 pub(super) fn draw_igfd_path_popup(
     ui: &Ui,
     state: &mut FileDialogState,
-    fs: &dyn FileSystem,
     ref_size: [f32; 2],
 ) -> Option<PathBuf> {
     let mut out: Option<PathBuf> = None;
@@ -36,7 +34,7 @@ pub(super) fn draw_igfd_path_popup(
             ui.text_disabled("No path");
             return None;
         };
-        draw_igfd_path_table_popup(ui, state, fs, parent.as_path(), &mut out);
+        draw_igfd_path_table_popup(ui, state, parent.as_path(), &mut out);
     }
     out
 }
@@ -44,35 +42,39 @@ pub(super) fn draw_igfd_path_popup(
 fn draw_igfd_path_table_popup(
     ui: &Ui,
     state: &mut FileDialogState,
-    fs: &dyn FileSystem,
     parent: &Path,
     out: &mut Option<PathBuf>,
 ) {
-    let Ok(rd) = fs.read_dir(parent) else {
-        ui.text_disabled("Failed to read directory");
-        return;
-    };
-
     // IGFD uses the global search tag for path popup filtering.
     let needle = state.core.search.trim().to_lowercase();
-    let mut dirs: Vec<_> = rd
-        .into_iter()
-        .filter(|e| {
-            if !e.is_dir {
-                return false;
-            }
+    let mut dirs: Vec<(String, PathBuf)> = state
+        .core
+        .recent_paths()
+        .filter_map(|path| immediate_child(parent, path))
+        .filter_map(|path| {
+            let name = path.file_name()?.to_string_lossy().to_string();
             if needle.is_empty() {
-                return true;
+                return Some((name, path));
             }
-            e.name.to_lowercase().contains(&needle)
+            name.to_lowercase()
+                .contains(&needle)
+                .then_some((name, path))
         })
         .collect();
-    dirs.sort_by(|a, b| match state.core.sort_mode {
-        SortMode::Natural => {
-            crate::dialog_core::natural_cmp_lower(&a.name.to_lowercase(), &b.name.to_lowercase())
-        }
-        SortMode::Lexicographic => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-    });
+    dirs.sort_by(
+        |a: &(String, PathBuf), b: &(String, PathBuf)| match state.core.sort_mode {
+            SortMode::Natural => {
+                crate::dialog_core::natural_cmp_lower(&a.0.to_lowercase(), &b.0.to_lowercase())
+            }
+            SortMode::Lexicographic => a.0.to_lowercase().cmp(&b.0.to_lowercase()),
+        },
+    );
+    dirs.dedup_by(|a, b| a.1 == b.1);
+
+    if dirs.is_empty() {
+        ui.text_disabled("No known recent path");
+        return;
+    }
 
     let flags = dear_imgui_rs::TableFlags::HIDEABLE
         | dear_imgui_rs::TableFlags::ROW_BG
@@ -97,13 +99,13 @@ fn draw_igfd_path_table_popup(
             .items_height(ui.text_line_height_with_spacing())
             .begin(ui);
         for idx in clipper.iter() {
-            let e = &dirs[idx];
+            let (name, path) = &dirs[idx];
             let style = state
                 .ui
                 .config
                 .file_styles
-                .style_for_owned(&e.name, EntryKind::Dir);
-            let mut label = e.name.as_str().to_string();
+                .style_for_owned(name, EntryKind::Dir);
+            let mut label = name.to_string();
             if let Some(icon) = style.as_ref().and_then(|s| s.icon.as_deref()) {
                 label = format!("{icon} {label}");
             }
@@ -114,13 +116,21 @@ fn draw_igfd_path_table_popup(
                 .flags(dear_imgui_rs::SelectableFlags::SPAN_ALL_COLUMNS)
                 .build()
             {
-                *out = Some(e.path.clone());
+                *out = Some(path.clone());
                 ui.close_current_popup();
                 break;
             }
             if ui.is_item_hovered() {
-                ui.tooltip_text(e.path.display().to_string());
+                ui.tooltip_text(path.display().to_string());
             }
         }
     }
+}
+
+fn immediate_child(parent: &Path, descendant: &Path) -> Option<PathBuf> {
+    let relative = descendant.strip_prefix(parent).ok()?;
+    let component = relative.components().next()?;
+    let mut child = parent.to_path_buf();
+    child.push(component.as_os_str());
+    (child != parent).then_some(child)
 }

@@ -14,8 +14,8 @@
 //! ```text
 //! cargo +stable check -p dear-imgui-bevy --no-default-features
 //! cargo +stable check -p dear-imgui-bevy --features render
-//! cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --no-default-features
-//! cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --features render
+//! cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --no-default-features --features wasm
+//! cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --no-default-features --features render,wasm
 //! cargo +stable nextest run -p dear-imgui-bevy
 //! ```
 //!

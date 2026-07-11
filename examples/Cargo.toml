@@ -11,6 +11,11 @@ implot = ["dep:dear-implot", "dear-app/implot"]
 imguizmo = ["dep:dear-imguizmo"]
 imnodes = ["dep:dear-imnodes", "dear-app/imnodes"]
 node-editor = ["dep:dear-node-editor"]
+node-editor-blueprints = [
+    "node-editor",
+    "dear-imgui-rs/stack-layout",
+    "dear-node-editor/blueprints",
+]
 imguizmo-quat = ["dep:dear-imguizmo-quat"]
 implot3d = ["dep:dear-implot3d", "dear-app/implot3d"]
 freetype = ["dear-imgui-rs/freetype"]
@@ -219,7 +224,7 @@ required-features = ["node-editor"]
 [[bin]]
 name = "node_editor_showcase"
 path = "node_editor_showcase.rs"
-required-features = ["node-editor"]
+required-features = ["node-editor-blueprints"]
 
 [[bin]]
 name = "imguizmo_quat_basic"
@@ -285,23 +290,23 @@ path = "02-docking/sdl3_sdlgpu_multi_view.rs"
 required-features = ["sdl3-sdlgpu3", "multi-viewport"]
 
 [dependencies]
-dear-imgui-rs = { path = "../dear-imgui", version = "0.15" }
-dear-imgui-winit = { path = "../backends/dear-imgui-winit", version = "0.15" }
-dear-imgui-wgpu = { path = "../backends/dear-imgui-wgpu", version = "0.15" }
-dear-imgui-glow = { path = "../backends/dear-imgui-glow", version = "0.15" }
-dear-imgui-sdl3 = { path = "../backends/dear-imgui-sdl3", version = "0.15", optional = true }
-dear-imgui-ash = { path = "../backends/dear-imgui-ash", version = "0.15" }
-dear-app = { path = "../dear-app", version = "0.15" }
+dear-imgui-rs.workspace = true
+dear-imgui-winit.workspace = true
+dear-imgui-wgpu.workspace = true
+dear-imgui-glow.workspace = true
+dear-imgui-sdl3 = { workspace = true, optional = true }
+dear-imgui-ash.workspace = true
+dear-app.workspace = true
 arboard = "3"
-dear-implot = { path = "../extensions/dear-implot", optional = true }
-dear-imguizmo = { path = "../extensions/dear-imguizmo", optional = true }
-dear-imnodes = { path = "../extensions/dear-imnodes", optional = true }
-dear-node-editor = { path = "../extensions/dear-node-editor", optional = true }
-dear-imguizmo-quat = { path = "../extensions/dear-imguizmo-quat", optional = true }
-dear-implot3d = { path = "../extensions/dear-implot3d", optional = true }
-dear-file-browser = { path = "../extensions/dear-file-browser", optional = true }
-dear-imgui-reflect = { path = "../extensions/dear-imgui-reflect", optional = true, features = ["glam"] }
-dear-imgui-test-engine = { path = "../extensions/dear-imgui-test-engine", optional = true }
+dear-implot = { workspace = true, optional = true }
+dear-imguizmo = { workspace = true, optional = true }
+dear-imnodes = { workspace = true, optional = true }
+dear-node-editor = { workspace = true, optional = true }
+dear-imguizmo-quat = { workspace = true, optional = true }
+dear-implot3d = { workspace = true, optional = true }
+dear-file-browser = { workspace = true, optional = true }
+dear-imgui-reflect = { workspace = true, optional = true, features = ["glam"] }
+dear-imgui-test-engine = { workspace = true, optional = true }
 wgpu = { workspace = true }
 winit = { workspace = true }
 glam = { workspace = true }

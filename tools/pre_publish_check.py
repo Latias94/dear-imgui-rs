@@ -8,15 +8,17 @@ This script performs various checks to ensure the workspace is ready for publish
 - Git working tree is clean
 - Cargo.lock is up-to-date
 - Documentation builds successfully
+- Packaged core crates build from an offline consumer
 
 Usage:
   python3 tools/pre_publish_check.py
 
   # Skip specific checks
-  python3 tools/pre_publish_check.py --skip-git-check --skip-doc-check
+  python3 tools/pre_publish_check.py \
+    --skip-git-check --skip-doc-check --skip-package-check
 
 Requirements:
-  - Python 3.7+
+  - Python 3.11+
   - cargo, git in PATH
 """
 
@@ -24,7 +26,17 @@ import argparse
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Tuple, Optional, Dict
+from typing import List, Optional, Tuple
+
+import source_metadata
+from release_metadata import (
+    MetadataError,
+    PUBLISH_ORDER,
+    WorkspaceMetadata,
+    load_workspace_metadata,
+    validate_publish_order,
+    validate_release_workspace,
+)
 
 
 # Crates that should have pregenerated bindings
@@ -48,36 +60,16 @@ DOC_CRATES = [
     ),
 ]
 
-# All publishable crates
-ALL_CRATES = [
-    ("dear-imgui-build-support", "tools/build-support"),
-    ("dear-imgui-sys", "dear-imgui-sys"),
-    ("dear-imgui-rs", "dear-imgui"),
-    ("dear-imgui-winit", "backends/dear-imgui-winit"),
-    ("dear-imgui-wgpu", "backends/dear-imgui-wgpu"),
-    ("dear-imgui-glow", "backends/dear-imgui-glow"),
-    ("dear-imgui-ash", "backends/dear-imgui-ash"),
-    ("dear-imgui-sdl3", "backends/dear-imgui-sdl3"),
-    ("dear-imgui-bevy", "backends/dear-imgui-bevy"),
-    ("dear-app", "dear-app"),
-    ("dear-implot-sys", "extensions/dear-implot-sys"),
-    ("dear-implot", "extensions/dear-implot"),
-    ("dear-imnodes-sys", "extensions/dear-imnodes-sys"),
-    ("dear-imnodes", "extensions/dear-imnodes"),
-    ("dear-node-editor-sys", "extensions/dear-node-editor-sys"),
-    ("dear-node-editor", "extensions/dear-node-editor"),
-    ("dear-imguizmo-sys", "extensions/dear-imguizmo-sys"),
-    ("dear-imguizmo", "extensions/dear-imguizmo"),
-    ("dear-implot3d-sys", "extensions/dear-implot3d-sys"),
-    ("dear-implot3d", "extensions/dear-implot3d"),
-    ("dear-imguizmo-quat-sys", "extensions/dear-imguizmo-quat-sys"),
-    ("dear-imguizmo-quat", "extensions/dear-imguizmo-quat"),
-    ("dear-imgui-test-engine-sys", "extensions/dear-imgui-test-engine-sys"),
-    ("dear-imgui-test-engine", "extensions/dear-imgui-test-engine"),
-    ("dear-file-browser", "extensions/dear-file-browser"),
-    ("dear-imgui-reflect-derive", "extensions/dear-imgui-reflect-derive"),
-    ("dear-imgui-reflect", "extensions/dear-imgui-reflect"),
-]
+# Run release tests one package at a time. A workspace-wide nextest invocation asks
+# nextest to enumerate every binary concurrently and also unifies unrelated Cargo
+# features. Besides being less deterministic, that has deadlocked the macOS dynamic
+# loader during the `--list` phase. Keeping this list tied to PUBLISH_ORDER makes the
+# release gate fail closed when the publish topology changes.
+RELEASE_TEST_PACKAGES = tuple(name for name, _path in PUBLISH_ORDER)
+PRIVATE_RELEASE_TEST_PACKAGES = ("xtask",)
+PACKAGE_TEST_FEATURES = {
+    "dear-imgui-build-support": ("binding-spec",),
+}
 
 
 class Colors:
@@ -156,62 +148,130 @@ def cargo_nextest_available(repo_root: Path) -> bool:
     return code == 0
 
 
-def get_crate_version(crate_path: Path) -> Optional[str]:
-    """Extract version from Cargo.toml."""
-    cargo_toml = crate_path / "Cargo.toml"
-    if not cargo_toml.exists():
-        return None
-    
-    try:
-        with open(cargo_toml, 'r', encoding='utf-8') as f:
-            for line in f:
-                if line.strip().startswith('version'):
-                    parts = line.split('=')
-                    if len(parts) == 2:
-                        version = parts[1].strip().strip('"').strip("'")
-                        if not version.startswith('{'):
-                            return version
-    except Exception:
-        pass
-    
-    return None
-
-
-def check_version_consistency(repo_root: Path) -> Tuple[bool, List[str]]:
-    """Check that all crates have consistent versions."""
-    print_check("Version consistency across crates")
-    
-    versions: Dict[str, str] = {}
-    errors = []
-    
-    for name, path in ALL_CRATES:
-        full_path = repo_root / path
-        version = get_crate_version(full_path)
-        
-        if version is None:
-            errors.append(f"Could not read version for {name}")
+def release_test_commands(use_nextest: bool) -> list[tuple[str, list[str]]]:
+    """Build deterministic per-package and feature-profile test commands."""
+    commands: list[tuple[str, list[str]]] = []
+    for package_name in RELEASE_TEST_PACKAGES:
+        if use_nextest:
+            command = [
+                "cargo",
+                "nextest",
+                "run",
+                "--no-tests",
+                "pass",
+                "-p",
+                package_name,
+            ]
         else:
-            versions[name] = version
-    
+            command = ["cargo", "test", "-p", package_name]
+
+        features = PACKAGE_TEST_FEATURES.get(package_name, ())
+        if features:
+            command += ["--features", ",".join(features)]
+        if not use_nextest:
+            command += ["--", "--test-threads=1"]
+        commands.append((package_name, command))
+
+    for package_name in PRIVATE_RELEASE_TEST_PACKAGES:
+        if use_nextest:
+            command = [
+                "cargo",
+                "nextest",
+                "run",
+                "--no-tests",
+                "pass",
+                "-p",
+                package_name,
+            ]
+        else:
+            command = [
+                "cargo",
+                "test",
+                "-p",
+                package_name,
+                "--",
+                "--test-threads=1",
+            ]
+        commands.append((package_name, command))
+
+    feature_profiles = (
+        (
+            "dear-imgui-rs multi-viewport",
+            ["-p", "dear-imgui-rs", "--features", "multi-viewport"],
+        ),
+        (
+            "dear-imgui-rs stack-layout integration",
+            [
+                "-p",
+                "dear-imgui-rs",
+                "--no-default-features",
+                "--features",
+                "stack-layout",
+                "--test",
+                "stack_layout_context",
+            ],
+        ),
+    )
+    for label, cargo_args in feature_profiles:
+        if use_nextest:
+            command = [
+                "cargo",
+                "nextest",
+                "run",
+                "--no-tests",
+                "pass",
+                *cargo_args,
+            ]
+        else:
+            command = [
+                "cargo",
+                "test",
+                *cargo_args,
+                "--",
+                "--test-threads=1",
+            ]
+        commands.append((label, command))
+
+    return commands
+
+
+def read_locked_workspace_metadata(
+    repo_root: Path,
+) -> tuple[Optional[WorkspaceMetadata], Tuple[bool, List[str]]]:
+    """Load the one Cargo metadata snapshot used by every release check."""
+    print_check("Locked Cargo workspace metadata")
+    try:
+        metadata = load_workspace_metadata(repo_root)
+    except MetadataError as error:
+        print_error(str(error))
+        return None, (False, [str(error)])
+
+    print_success(
+        f"Cargo.lock resolves {len(metadata.publishable_packages)} publishable and "
+        f"{len(metadata.private_packages)} private workspace packages"
+    )
+    return metadata, (True, [])
+
+
+def check_version_consistency(
+    repo_root: Path, metadata: WorkspaceMetadata
+) -> Tuple[bool, List[str]]:
+    """Check release versions and every internal workspace dependency edge."""
+    print_check("Release versions and internal path requirements")
+    errors = [
+        *validate_release_workspace(metadata),
+        *validate_publish_order(metadata, PUBLISH_ORDER, repo_root),
+    ]
     if errors:
         for error in errors:
             print_error(error)
         return False, errors
-    
-    # Check if all versions are the same
-    unique_versions = set(versions.values())
-    
-    if len(unique_versions) == 1:
-        version = list(unique_versions)[0]
-        print_success(f"All crates use version {version}")
-        return True, []
-    else:
-        errors.append("Version mismatch detected:")
-        for name, version in sorted(versions.items()):
-            errors.append(f"  {name}: {version}")
-        for error in errors:
-            print_error(error)
-        return False, errors
+
+    print_success(
+        f"All {len(metadata.publishable_packages)} publishable packages use "
+        f"{metadata.release_version}; internal path requirements match their targets"
+    )
+    return True, []
 
 
 def check_pregenerated_bindings(repo_root: Path) -> Tuple[bool, List[str]]:
@@ -234,6 +294,26 @@ def check_pregenerated_bindings(repo_root: Path) -> Tuple[bool, List[str]]:
                 print_error(f"Too small: {full_path} ({size} bytes)")
             else:
                 print_success(f"{name}: {size:,} bytes")
+
+    for label, relative_path in (
+        (
+            "dear-imgui-sys Windows ABI profile",
+            "dear-imgui-sys/src/bindings_pregenerated_windows.rs",
+        ),
+        (
+            "dear-imgui-sys WASM import profile",
+            "dear-imgui-sys/src/wasm_bindings_pregenerated.rs",
+        ),
+    ):
+        path = repo_root / relative_path
+        if not path.exists():
+            errors.append(f"Missing pregenerated bindings: {label}")
+            print_error(f"Missing: {path}")
+        elif path.stat().st_size < 1000:
+            errors.append(f"Pregenerated bindings too small: {label}")
+            print_error(f"Too small: {path} ({path.stat().st_size} bytes)")
+        else:
+            print_success(f"{label}: {path.stat().st_size:,} bytes")
     
     if not errors:
         print_success("All -sys crates have pregenerated bindings")
@@ -243,11 +323,48 @@ def check_pregenerated_bindings(repo_root: Path) -> Tuple[bool, List[str]]:
         return False, errors
 
 
+def check_core_source_contract(repo_root: Path) -> Tuple[bool, List[str]]:
+    """Require clean vendored sources whose HEADs match packaged metadata."""
+    print_check("Dear ImGui source provenance")
+    try:
+        revisions = source_metadata.verify_core_source_metadata(repo_root)
+    except source_metadata.SourceMetadataError as error:
+        for message in error.errors:
+            print_error(message)
+        return False, list(error.errors)
+
+    for source in source_metadata.CORE_SOURCE_SPECS:
+        print_success(f"{source.label}: {revisions[source.metadata_key]}")
+    return True, []
+
+
+def check_core_binding_contract(
+    repo_root: Path, allow_dirty: bool
+) -> Tuple[bool, List[str]]:
+    """Regenerate every supported core ABI profile and require exact parity."""
+    print_check("Core binding specification and ABI profiles")
+    command = ["cargo", "run", "-p", "xtask", "--", "verify-bindings"]
+    if allow_dirty:
+        command.append("--allow-dirty")
+    code, stdout, stderr = run_command(command, cwd=repo_root, capture=True)
+    if code != 0:
+        detail = stderr.strip() or stdout.strip() or "core binding verification failed"
+        print_error(detail)
+        return False, [detail]
+    if stderr.strip():
+        print(stderr.strip())
+    print_success("Core native/WASM bindings match the shared binding specification")
+    return True, []
+
+
 def check_git_status(repo_root: Path) -> Tuple[bool, List[str]]:
     """Check that git working tree is clean."""
     print_check("Git working tree status")
     
-    code, stdout, stderr = run_command(["git", "status", "--porcelain"], cwd=repo_root)
+    code, stdout, stderr = run_command(
+        ["git", "status", "--porcelain", "--ignore-submodules=none"],
+        cwd=repo_root,
+    )
     
     if code != 0:
         print_error(f"Git command failed: {stderr}")
@@ -262,39 +379,17 @@ def check_git_status(repo_root: Path) -> Tuple[bool, List[str]]:
         return True, []
 
 
-def check_cargo_lock(repo_root: Path) -> Tuple[bool, List[str]]:
-    """Check that Cargo.lock is up-to-date."""
-    print_check("Cargo.lock is up-to-date")
-    
-    # Run cargo update --dry-run to check if lock file needs updating
-    code, stdout, stderr = run_command(
-        ["cargo", "update", "--workspace", "--dry-run"],
-        cwd=repo_root
-    )
-    
-    if code != 0:
-        print_error(f"Cargo update check failed: {stderr}")
-        return False, ["Cargo update check failed"]
-    
-    # Check if any updates are available
-    if "Updating" in stdout or "Adding" in stdout:
-        print_warning("Cargo.lock may need updating:")
-        print(stdout)
-        print_warning("Run: cargo update")
-        return False, ["Cargo.lock may be outdated"]
-    else:
-        print_success("Cargo.lock is up-to-date")
-        return True, []
-
-
-def check_changelog_release_notes(repo_root: Path) -> Tuple[bool, List[str]]:
+def check_changelog_release_notes(
+    repo_root: Path, metadata: WorkspaceMetadata
+) -> Tuple[bool, List[str]]:
     """Check that the current release has extractable, soft-wrapped release notes."""
     print_check("Changelog release notes")
 
-    version = get_crate_version(repo_root / "dear-imgui")
-    if version is None:
-        print_error("Could not determine current dear-imgui-rs version")
-        return False, ["Could not determine current dear-imgui-rs version"]
+    try:
+        version = metadata.release_version
+    except MetadataError as error:
+        print_error(str(error))
+        return False, [str(error)]
 
     errors = []
     changelog_tool = repo_root / "tools" / "changelog.py"
@@ -318,6 +413,25 @@ def check_changelog_release_notes(repo_root: Path) -> Tuple[bool, List[str]]:
         return False, errors
 
     print_success(f"CHANGELOG.md has release notes for {version}")
+    return True, []
+
+
+def check_packaged_core(repo_root: Path) -> Tuple[bool, List[str]]:
+    """Package and consume the core crates from a clean isolated checkout."""
+    print_check("Packaged core crates and offline consumption")
+    command = ["bash", "tools/ci/verify_packaged_core.sh"]
+    code, stdout, stderr = run_command(
+        command,
+        cwd=repo_root,
+        capture=True,
+        show_output=True,
+    )
+    if code != 0:
+        detail = stderr.strip() or stdout.strip() or "packaged core verification failed"
+        print_error(detail)
+        return False, [detail]
+
+    print_success("Packaged dear-imgui-sys builds offline with its packaged helper")
     return True, []
 
 
@@ -391,78 +505,23 @@ def check_tests(repo_root: Path) -> Tuple[bool, List[str]]:
     """Check that tests pass."""
     print_check("Running tests")
 
-    # NOTE: The workspace contains `dear-imgui-test-engine(-sys)`, which enables
-    # `IMGUI_ENABLE_TEST_ENGINE` in `dear-imgui-sys` via Cargo feature unification.
-    # Running `cargo test --workspace` would then try to link test binaries that do
-    # not depend on the test engine library, causing unresolved hook symbols on
-    # some platforms (notably MSVC).
-    #
-    # We run tests in two passes:
-    # 1) All crates except the test-engine crates (no test-engine hooks enabled).
-    # 2) The safe test-engine crate itself (ensures the feature-gated path builds/links).
-    # 3) dear-imgui-rs with multi-viewport enabled, covering feature-gated PlatformIO callbacks.
-    #
-    # Prefer nextest when available. Several core tests create Dear ImGui contexts,
-    # and the C++ context is a process-global resource. nextest isolates tests more
-    # effectively than a single cargo test binary. The cargo-test fallback runs
-    # with one test thread for the same reason.
-
     use_nextest = cargo_nextest_available(repo_root)
     if use_nextest:
-        print("  Using cargo nextest")
-        base_cmd = ["cargo", "nextest", "run", "--no-tests", "pass", "--workspace", "--lib"]
-        test_engine_cmd = [
-            "cargo", "nextest", "run", "--no-tests", "pass",
-            "-p", "dear-imgui-test-engine", "--lib",
-        ]
-        multi_viewport_cmd = [
-            "cargo", "nextest", "run", "--no-tests", "pass",
-            "-p", "dear-imgui-rs", "--features", "multi-viewport",
-        ]
-        cargo_test_serial_args: List[str] = []
+        print("  Using cargo nextest with one package per invocation")
     else:
         print_warning("cargo-nextest not found; falling back to serial cargo test")
-        base_cmd = ["cargo", "test", "--workspace", "--lib"]
-        test_engine_cmd = ["cargo", "test", "-p", "dear-imgui-test-engine", "--lib"]
-        multi_viewport_cmd = ["cargo", "test", "-p", "dear-imgui-rs", "--features", "multi-viewport"]
-        cargo_test_serial_args = ["--", "--test-threads=1"]
 
-    base_cmd += ["--exclude", "dear-imgui-test-engine", "--exclude", "dear-imgui-test-engine-sys"]
-    base_cmd += cargo_test_serial_args
-    test_engine_cmd += cargo_test_serial_args
-    multi_viewport_cmd += cargo_test_serial_args
-
-    # Pass 1: core/backends/extensions (excluding test-engine crates)
-    code, _stdout, _stderr = run_command(
-        base_cmd,
-        cwd=repo_root,
-        capture=False,  # Stream output in real-time
-    )
-    if code != 0:
-        print_error("Tests failed (workspace without test-engine)")
-        return False, ["Tests failed (workspace without test-engine)"]
-
-    # Pass 2: test-engine crate
-    code, _stdout, _stderr = run_command(
-        test_engine_cmd,
-        cwd=repo_root,
-        capture=False,  # Stream output in real-time
-    )
-
-    if code != 0:
-        print_error("Tests failed (dear-imgui-test-engine)")
-        return False, ["Tests failed (dear-imgui-test-engine)"]
-
-    # Pass 3: core multi-viewport feature path
-    code, _stdout, _stderr = run_command(
-        multi_viewport_cmd,
-        cwd=repo_root,
-        capture=False,
-    )
-
-    if code != 0:
-        print_error("Tests failed (dear-imgui-rs multi-viewport)")
-        return False, ["Tests failed (dear-imgui-rs multi-viewport)"]
+    for label, command in release_test_commands(use_nextest):
+        print(f"\n  Testing {label}...")
+        code, _stdout, _stderr = run_command(
+            command,
+            cwd=repo_root,
+            capture=False,
+        )
+        if code != 0:
+            error = f"Tests failed ({label})"
+            print_error(error)
+            return False, [error]
 
     print_success("All tests passed")
     return True, []
@@ -489,8 +548,28 @@ def main() -> int:
         action="store_true",
         help="Skip test execution check"
     )
+    parser.add_argument(
+        "--skip-package-check",
+        action="store_true",
+        help="Skip the clean-clone package and offline-consumer release gate"
+    )
+    parser.add_argument(
+        "--core-contract-only",
+        action="store_true",
+        help="Only verify core source provenance and reproducible binding profiles"
+    )
     
     args = parser.parse_args()
+
+    if (
+        args.skip_git_check
+        and not args.skip_package_check
+        and not args.core_contract_only
+    ):
+        parser.error(
+            "--skip-git-check must be paired with --skip-package-check: "
+            "the package gate verifies a clean clone of HEAD, not dirty worktree changes"
+        )
     
     repo_root = Path(__file__).resolve().parents[1]
     
@@ -498,22 +577,46 @@ def main() -> int:
     print(f"Repository: {repo_root}\n")
     
     checks = []
+
+    metadata: Optional[WorkspaceMetadata] = None
+    if not args.core_contract_only:
+        metadata, metadata_check = read_locked_workspace_metadata(repo_root)
+        checks.append(("Locked Workspace Metadata", metadata_check))
     
-    # Run checks
-    checks.append(("Version Consistency", check_version_consistency(repo_root)))
-    checks.append(("Pregenerated Bindings", check_pregenerated_bindings(repo_root)))
-    
-    if not args.skip_git_check:
-        checks.append(("Git Status", check_git_status(repo_root)))
-    
-    checks.append(("Cargo.lock", check_cargo_lock(repo_root)))
-    checks.append(("Changelog", check_changelog_release_notes(repo_root)))
-    
-    if not args.skip_doc_check:
-        checks.append(("Documentation", check_docs_build(repo_root)))
-    
-    if not args.skip_test_check:
-        checks.append(("Tests", check_tests(repo_root)))
+    checks.append(("Core Source Provenance", check_core_source_contract(repo_root)))
+    checks.append(
+        (
+            "Core Binding Contract",
+            check_core_binding_contract(repo_root, allow_dirty=args.skip_git_check),
+        )
+    )
+
+    if not args.core_contract_only:
+        if metadata is not None:
+            checks.append(
+                (
+                    "Version Consistency",
+                    check_version_consistency(repo_root, metadata),
+                )
+            )
+        checks.append(("Pregenerated Bindings", check_pregenerated_bindings(repo_root)))
+
+        if not args.skip_git_check:
+            checks.append(("Git Status", check_git_status(repo_root)))
+
+        if metadata is not None:
+            checks.append(
+                ("Changelog", check_changelog_release_notes(repo_root, metadata))
+            )
+
+        if not args.skip_doc_check:
+            checks.append(("Documentation", check_docs_build(repo_root)))
+
+        if not args.skip_test_check:
+            checks.append(("Tests", check_tests(repo_root)))
+
+        if not args.skip_package_check:
+            checks.append(("Packaged Core", check_packaged_core(repo_root)))
     
     # Print summary
     print_header("Validation Summary")
@@ -537,6 +640,9 @@ def main() -> int:
     
     if failed == 0:
         print()
+        if args.core_contract_only:
+            print_success("Core source and binding contracts passed.")
+            return 0
         print_success("All checks passed! Ready to publish.")
         print()
         print("Next steps:")

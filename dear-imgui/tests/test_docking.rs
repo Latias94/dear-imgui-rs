@@ -129,37 +129,17 @@ fn test_window_class() {
 }
 
 #[test]
-fn test_dock_builder_basic() {
+fn test_declarative_dock_layout_model() {
     let _guard = TEST_MUTEX.lock().unwrap();
+    let layout = DockLayout::split(
+        DockSplit::Left,
+        0.25,
+        DockLayout::tabs(["Tools"]),
+        DockLayout::tabs(["Scene", "Game"]),
+    );
 
-    // Test that DockBuilder functions are available
-    // We don't actually call them to avoid potential crashes without proper ImGui context
-
-    println!("DockBuilder module is available with functions:");
-    println!("- add_node");
-    println!("- remove_node");
-    println!("- split_node");
-    println!("- dock_window");
-    println!("- set_node_pos");
-    println!("- set_node_size");
-    println!("- finish");
-
-    println!("✅ DockBuilder basic test passed");
-}
-
-#[test]
-fn test_split_direction_enum() {
-    // Test SplitDirection enum conversion
-    assert_eq!(SplitDirection::Left as i32, sys::ImGuiDir_Left);
-    assert_eq!(SplitDirection::Right as i32, sys::ImGuiDir_Right);
-    assert_eq!(SplitDirection::Up as i32, sys::ImGuiDir_Up);
-    assert_eq!(SplitDirection::Down as i32, sys::ImGuiDir_Down);
-
-    // Test conversion to ImGuiDir
-    let dir: sys::ImGuiDir = SplitDirection::Left.into();
-    assert_eq!(dir, sys::ImGuiDir_Left);
-
-    println!("✅ SplitDirection enum test passed");
+    assert!(layout.validate().is_ok());
+    assert_eq!(DockLayoutApply::default(), DockLayoutApply::IfMissing);
 }
 
 #[test]
@@ -182,7 +162,7 @@ fn test_docking_integration() {
     println!("  Tool window class ID: {:?}", tool_class.class_id);
     println!("  Dockspace flags: {:?}", dockspace_flags);
     println!("  Panel flags: {:?}", panel_flags);
-    println!("  Split directions available: Left, Right, Up, Down");
+    println!("  Declarative split directions available: Left, Right, Up, Down");
 
     println!("✅ Docking integration test passed");
 }

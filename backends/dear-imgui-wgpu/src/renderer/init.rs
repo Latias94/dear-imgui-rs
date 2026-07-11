@@ -83,6 +83,8 @@ impl WgpuRenderer {
             gamma_mode: GammaMode::Auto,
             #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
             viewport_clear_color: Color::BLACK,
+            #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+            multi_viewport_active: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -90,6 +92,9 @@ impl WgpuRenderer {
     ///
     /// This corresponds to ImGui_ImplWGPU_Init in the C++ implementation
     pub fn init(&mut self, init_info: WgpuInitInfo) -> RendererResult<()> {
+        #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+        self.ensure_multi_viewport_inactive()?;
+
         // Create backend data
         let mut backend_data = WgpuBackendData::new(init_info);
 
@@ -216,12 +221,6 @@ impl WgpuRenderer {
         flags.insert(BackendFlags::RENDERER_HAS_VTX_OFFSET);
         // We can honor ImGuiPlatformIO::Textures[] requests during render.
         flags.insert(BackendFlags::RENDERER_HAS_TEXTURES);
-
-        #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
-        {
-            // We can render additional platform windows
-            flags.insert(BackendFlags::RENDERER_HAS_VIEWPORTS);
-        }
 
         io.set_backend_flags(flags);
 

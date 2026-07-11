@@ -305,38 +305,6 @@ Renderer checklist:
   caller must reset state after rendering.
 - Clip/scissor in framebuffer coordinates, not logical window coordinates.
 
-## Optional Unified Traits
-
-`dear-imgui-rs` exposes `ImGuiPlatform` and `ImGuiRenderer` as small common
-traits. They are useful for application-local abstraction, but first-party
-backend crates may expose richer APIs when their framework needs concrete
-window, device, queue, command encoder, or render-pass types.
-
-```rust,no_run
-use dear_imgui_rs::{ImGuiRenderer, render::DrawData};
-
-pub struct MyRenderer;
-
-#[derive(Debug, thiserror::Error)]
-#[error("renderer error")]
-pub struct MyRendererError;
-
-impl ImGuiRenderer for MyRenderer {
-    type Error = MyRendererError;
-
-    fn init(&mut self) -> Result<(), Self::Error> {
-        Ok(())
-    }
-
-    fn render(&mut self, _draw_data: &mut DrawData) -> Result<(), Self::Error> {
-        Ok(())
-    }
-}
-```
-
-Use these traits when they make your application cleaner. Do not force them
-when the backend naturally needs a concrete render pass or command buffer.
-
 ## Threaded Or Render-Graph Backends
 
 If rendering happens off the UI thread, do not send live `DrawData` references
@@ -364,9 +332,83 @@ correct. Multi-viewport requires both platform and renderer support:
 - Backend user-data pointers must be cleared when viewports or renderer state
   are destroyed.
 
+Install the platform backend first and the renderer backend second, before any
+secondary platform window exists. A renderer owns only the five `Renderer_*`
+slots and each viewport's renderer user data; it must not replace `Platform_*`
+slots or foreign `RendererUserData`. Registration should fail atomically when a
+slot is occupied. Shutdown runs in reverse ownership order: destroy secondary
+windows and release renderer callbacks/resources, then release the platform
+callbacks and windows.
+
 For first-party patterns, compare `dear-imgui-winit`,
 `dear-imgui-sdl3`, `dear-imgui-wgpu`, `dear-imgui-glow`, and
 `dear-imgui-ash`.
+
+### Aggregate callback ABI
+
+Seven pinned `ImGuiPlatformIO` callbacks cross C++ with an aggregate passed or
+returned by value. A direct Rust `extern "C"` callback is not a portable match
+for a C++ callback slot here, especially with the MSVC x64 aggregate ABI. Never
+write these generated struct fields directly and never transmute a Rust
+function pointer into their types.
+
+`dear-imgui-rs` routes all seven through the repository-owned C++ shim. The C++
+thunk has the exact Dear ImGui callback type; its Rust-facing side uses only
+pointers or out parameters:
+
+| Dear ImGui slot | Rust raw setter | Rust-facing callback argument |
+| --- | --- | --- |
+| `Platform_SetWindowPos` | `set_platform_set_window_pos_raw` | `*const ImVec2` |
+| `Platform_GetWindowPos` | `set_platform_get_window_pos_raw` | `*mut ImVec2` out parameter |
+| `Platform_SetWindowSize` | `set_platform_set_window_size_raw` | `*const ImVec2` |
+| `Platform_GetWindowSize` | `set_platform_get_window_size_raw` | `*mut ImVec2` out parameter |
+| `Platform_GetWindowFramebufferScale` | `set_platform_get_window_framebuffer_scale_raw` | `*mut ImVec2` out parameter |
+| `Platform_GetWindowWorkAreaInsets` | `set_platform_get_window_work_area_insets_raw` | `*mut ImVec4` out parameter |
+| `Renderer_SetWindowSize` | `set_renderer_set_window_size_raw` | `*const ImVec2` |
+
+The three `ImVec2`-returning getters use the same raw signature:
+
+```rust,ignore
+unsafe extern "C" fn(
+    viewport: *mut dear_imgui_sys::ImGuiViewport,
+    out_value: *mut dear_imgui_sys::ImVec2,
+)
+```
+
+The three `ImVec2` input callbacks use this pointer signature:
+
+```rust,ignore
+unsafe extern "C" fn(
+    viewport: *mut dear_imgui_sys::ImGuiViewport,
+    value: *const dear_imgui_sys::ImVec2,
+)
+```
+
+The work-area getter is identical to the getter form except that its out
+parameter is `*mut dear_imgui_sys::ImVec4`. The pointers are valid only for the
+duration of the callback, and callbacks must not unwind.
+
+Prefer the typed `PlatformIo::set_platform_*` and
+`PlatformIo::set_renderer_set_window_size` methods unless a backend genuinely
+needs sys pointers. The typed input setters still install the C++ thunk, so
+their by-value `ImVec2` callbacks never occupy the C++ slot directly; typed
+getters retain the out-parameter form. Installation must target the active
+context's `PlatformIo`. `clear_platform_handlers`,
+`clear_renderer_handlers`, and `Context` destruction clear both Rust callback
+registries and the shim's per-`PlatformIo` storage.
+
+The bulk clear methods are appropriate only when the caller owns the complete
+corresponding table. A composable renderer shutdown must compare every
+`Renderer_*` slot with its installed thunk and clear only matches; if another
+backend replaced a slot, preserve it and its capability flag. Apply the same
+ownership check before releasing viewport `RendererUserData`. The WGPU and Ash
+helpers implement this conditional teardown and are the reference behavior.
+
+The shim must be compiled with the native artifact. Builds that omit native C++
+hooks cannot install these callbacks, and compatible prebuilts declare
+`platform-io-aggregate-hooks`. The repository probe invokes all seven real C++
+slots and runs on MSVC with both dynamic (`/MD`) and static (`/MT`) CRT profiles;
+use an equivalent ABI probe when maintaining an out-of-tree native artifact.
 
 ## Build Script And Native Sources
 

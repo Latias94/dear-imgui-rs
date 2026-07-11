@@ -46,11 +46,15 @@ impl Context {
         }
     }
 
-    /// Enable multi-viewport support flags
+    /// Enable Dear ImGui's multi-viewport capability.
+    ///
+    /// Docking is an independent capability and must be enabled explicitly by the caller.
     #[cfg(feature = "multi-viewport")]
     pub fn enable_multi_viewport(&mut self) {
-        // Enable viewport flags
-        crate::viewport_backend::utils::enable_viewport_flags(self.io_mut());
+        let io = self.io_mut();
+        let mut flags = io.config_flags();
+        flags.insert(crate::ConfigFlags::VIEWPORTS_ENABLE);
+        io.set_config_flags(flags);
     }
 
     /// Update platform windows

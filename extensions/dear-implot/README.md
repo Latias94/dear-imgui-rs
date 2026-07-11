@@ -21,9 +21,9 @@ For native build/link options (source, system/prebuilt, remote prebuilt), see `e
 
 | Item              | Version |
 |-------------------|---------|
-| Crate             | 0.15.1   |
-| dear-imgui-rs     | 0.15.1   |
-| dear-implot-sys   | 0.15.1   |
+| Crate             | 0.16.0  |
+| dear-imgui-rs     | 0.16.0  |
+| dear-implot-sys   | 0.16.0  |
 
 ### WASM (WebAssembly) support
 
@@ -40,8 +40,8 @@ To try the web demo with ImPlot enabled:
 
 ```bash
 # 1) Generate pregenerated wasm bindings (Dear ImGui core + ImPlot)
-cargo run -p xtask -- wasm-bindgen imgui-sys-v0
-cargo run -p xtask -- wasm-bindgen-implot imgui-sys-v0
+cargo run -p xtask -- wasm-bindgen
+cargo run -p xtask -- wasm-bindgen-implot
 
 # 2) Build the main wasm + JS (includes ImPlot demo window)
 cargo run -p xtask -- web-demo implot
@@ -55,7 +55,7 @@ python -m http.server -d target/web-demo 8080
 
 Notes:
 - The `dear-imgui-web-demo` crate in `examples-wasm` enables the `implot` feature by default, so the “ImPlot (Web)” window is shown when ImPlot bindings + provider are available.
-- This is an early, experimental path; API and build steps may evolve in future releases. For production use, pin to a specific `0.6.x` release and follow changes in `docs/WASM.md`.
+- This is an early, experimental path; API and build steps may evolve in future releases. For production use, pin to a specific compatible `0.16` release and follow changes in `docs/WASM.md`.
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 
@@ -66,8 +66,8 @@ This crate integrates with `dear-imgui-rs` directly — add both crates, then bu
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.15.1"
-dear-implot = "0.15.1"
+dear-imgui-rs = "0.16.0"
+dear-implot = "0.16.0"
 ```
 
 ```rust
@@ -118,8 +118,8 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.15.1"
-dear-implot = "0.15.1"
+dear-imgui-rs = "0.16.0"
+dear-implot = "0.16.0"
 ```
 
 Basic usage:

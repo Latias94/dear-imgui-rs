@@ -9,6 +9,53 @@ fn platform_io_shared_and_mut_views_match() {
     assert_eq!(shared, mutable);
 }
 
+#[cfg(feature = "multi-viewport")]
+#[test]
+fn enable_multi_viewport_does_not_enable_docking() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut ctx = Context::create();
+    let mut flags = ctx.io().config_flags();
+    flags.remove(crate::ConfigFlags::VIEWPORTS_ENABLE | crate::ConfigFlags::DOCKING_ENABLE);
+    ctx.io_mut().set_config_flags(flags);
+
+    ctx.enable_multi_viewport();
+
+    let flags = ctx.io().config_flags();
+    assert!(flags.contains(crate::ConfigFlags::VIEWPORTS_ENABLE));
+    assert!(!flags.contains(crate::ConfigFlags::DOCKING_ENABLE));
+}
+
+#[cfg(feature = "multi-viewport")]
+#[test]
+fn set_monitors_replaces_and_clears_imgui_owned_storage() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut ctx = Context::create();
+    let mut first = crate::sys::ImGuiPlatformMonitor::default();
+    first.MainPos = crate::sys::ImVec2 { x: 10.0, y: 20.0 };
+    first.DpiScale = 1.5;
+    let mut second = crate::sys::ImGuiPlatformMonitor::default();
+    second.MainPos = crate::sys::ImVec2 { x: 30.0, y: 40.0 };
+    second.DpiScale = 2.0;
+
+    ctx.platform_io_mut().set_monitors(&[first, second]);
+
+    let raw = unsafe { &(*ctx.platform_io().as_raw()).Monitors };
+    assert_eq!(raw.Size, 2);
+    assert_eq!(raw.Capacity, 2);
+    assert!(!raw.Data.is_null());
+    let stored = unsafe { std::slice::from_raw_parts(raw.Data, raw.Size as usize) };
+    assert_eq!(stored[0].MainPos.x, 10.0);
+    assert_eq!(stored[1].MainPos.y, 40.0);
+    assert_eq!(stored[1].DpiScale, 2.0);
+
+    ctx.platform_io_mut().set_monitors(&[]);
+
+    let raw = unsafe { &(*ctx.platform_io().as_raw()).Monitors };
+    assert_eq!(raw.Size, 0);
+    assert_eq!(raw.Capacity, 0);
+    assert!(raw.Data.is_null());
+}
+
 #[test]
 fn with_bound_context_restores_previous_context_after_panic() {
     let _guard = crate::test_support::imgui_context_guard();

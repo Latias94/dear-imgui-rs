@@ -22,9 +22,9 @@ the ergonomics of `dear-implot`.
 
 | Item               | Version |
 |--------------------|---------|
-| Crate              | 0.15.1   |
-| dear-imgui-rs      | 0.15.1   |
-| dear-implot3d-sys  | 0.15.1   |
+| Crate              | 0.16.0  |
+| dear-imgui-rs      | 0.16.0  |
+| dear-implot3d-sys  | 0.16.0  |
 
 See also: docs/COMPATIBILITY.md in the workspace for the full matrix.
 
@@ -44,8 +44,8 @@ To try the web demo with ImPlot3D enabled:
 
 ```bash
 # 1) Generate pregenerated wasm bindings (Dear ImGui core + ImPlot3D)
-cargo run -p xtask -- wasm-bindgen imgui-sys-v0
-cargo run -p xtask -- wasm-bindgen-implot3d imgui-sys-v0
+cargo run -p xtask -- wasm-bindgen
+cargo run -p xtask -- wasm-bindgen-implot3d
 
 # 2) Build the main wasm + JS (includes ImPlot3D demo window)
 cargo run -p xtask -- web-demo implot3d
@@ -61,8 +61,8 @@ Notes:
 - The `dear-imgui-web-demo` crate in `examples-wasm` enables the `implot3d` feature when
   you pass `implot3d` to `xtask web-demo`, which shows an “ImPlot3D (Web)” window when
   ImPlot3D bindings + provider are available.
-- This is an early, experimental path shipped in the 0.7.x release train; API and build
-  steps may evolve. For production use, pin to a specific release and follow changes in
+- This is an early, experimental path in the current 0.16 release train; API and build
+  steps may evolve. For production use, pin to a specific compatible release and follow changes in
   `docs/WASM.md`.
 
 ## Features
@@ -113,8 +113,6 @@ See `examples/implot3d_basic.rs` for a comprehensive demo that replicates the of
 Run with:
 ```bash
 cargo run -p dear-imgui-examples --bin implot3d_basic --features "implot3d"
-# If your workspace does not pre-enable the dear-app ImPlot3D add-on feature:
-# cargo run -p dear-imgui-examples --bin implot3d_basic --features "implot3d, dear-app/implot3d"
 ```
 
 ## Predefined Meshes

@@ -1,6 +1,6 @@
 [package]
 name = "dear-node-editor"
-version = "0.15.1"
+version.workspace = true
 edition.workspace = true
 description = "Safe Rust bindings for imgui-node-editor for Dear ImGui"
 license.workspace = true
@@ -11,14 +11,15 @@ categories.workspace = true
 keywords.workspace = true
 
 [dependencies]
-dear-imgui-rs = { path = "../../dear-imgui", version = "0.15" }
-dear-node-editor-sys = { path = "../dear-node-editor-sys", version = "0.15" }
+dear-imgui-rs.workspace = true
+dear-node-editor-sys.workspace = true
 bitflags.workspace = true
 thiserror.workspace = true
 
 [features]
 default = []
 freetype = ["dear-imgui-rs/freetype", "dear-node-editor-sys/freetype"]
+blueprints = ["dear-imgui-rs/stack-layout", "dear-node-editor-sys/stack-layout"]
 
 [dev-dependencies]
 static_assertions = "1.1"

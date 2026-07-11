@@ -357,14 +357,11 @@ pub use self::drag_drop::*;
 // Text filtering system
 pub use self::text_filter::*;
 
-// Column layout system (included in layout module)
-pub use self::columns::*;
-
 // Internal modules
 mod clipboard;
 mod colors;
 mod context;
-mod dock_builder;
+mod dock_layout;
 mod dock_space;
 mod draw;
 mod error;
@@ -384,8 +381,6 @@ pub mod texture;
 mod tokens;
 mod ui;
 mod utils;
-#[cfg(feature = "multi-viewport")]
-pub mod viewport_backend;
 // mod math;
 mod widget;
 mod window;
@@ -402,9 +397,6 @@ mod drag_drop;
 // Text filtering system
 mod text_filter;
 
-// Column layout system
-mod columns;
-
 // Logging utilities
 pub mod logging;
 
@@ -420,7 +412,7 @@ pub(crate) mod test_support {
 
 // Re-export public API
 pub use colors::*;
-pub use dock_builder::*;
+pub use dock_layout::*;
 pub use dock_space::*;
 // Export draw-list helpers for extensions and downstream custom drawing.
 pub use draw::{

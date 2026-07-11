@@ -27,6 +27,7 @@ shim; they are not official Dear ImGui APIs.
 
 - Normal builds use `src/bindings_pregenerated.rs` and compile the native C++ sources with `cc`.
 - Binding regeneration requires `DEAR_IMGUI_RS_REGEN_BINDINGS=1` and `--features bindgen`.
+- The `stack-layout` feature forwards the patched native core artifact profile to `dear-imgui-sys`.
 - `NODE_EDITOR_SYS_SKIP_CC=1` skips native compilation and uses pregenerated bindings.
 - `NODE_EDITOR_SYS_LIB_DIR`, `NODE_EDITOR_SYS_PREBUILT_URL`, and the `prebuilt` feature follow
   the same prebuilt-library flow as the other workspace `*-sys` crates.

@@ -6,7 +6,7 @@ use crate::ArraySettings;
 /// This mirrors the behavior of the built-in `ImGuiValue` implementations for
 /// arrays, while allowing callers to provide per-member settings.
 pub fn imgui_array_with_settings<T, const N: usize>(
-    ui: &imgui::Ui,
+    inspector: &mut Inspector<'_, '_>,
     label: &str,
     value: &mut [T; N],
     arr_settings: &ArraySettings,
@@ -14,22 +14,23 @@ pub fn imgui_array_with_settings<T, const N: usize>(
 where
     T: ImGuiValue,
 {
+    let ui = inspector.ui();
     let header_label = format!("{label} [{N}]");
 
     if arr_settings.dropdown {
         if let Some(_node) = ui.tree_node(&header_label) {
-            imgui_array_body_inner(ui, label, value, arr_settings)
+            imgui_array_body_inner(inspector, label, value, arr_settings)
         } else {
             false
         }
     } else {
         ui.text(&header_label);
-        imgui_array_body_inner(ui, label, value, arr_settings)
+        imgui_array_body_inner(inspector, label, value, arr_settings)
     }
 }
 
 pub(super) fn imgui_array_body_inner<T, const N: usize>(
-    ui: &imgui::Ui,
+    inspector: &mut Inspector<'_, '_>,
     label: &str,
     value: &mut [T; N],
     arr_settings: &ArraySettings,
@@ -37,6 +38,7 @@ pub(super) fn imgui_array_body_inner<T, const N: usize>(
 where
     T: ImGuiValue,
 {
+    let ui = inspector.ui();
     let mut changed = false;
     let mut move_op: Option<(usize, usize)> = None;
 
@@ -56,11 +58,12 @@ where
         }
 
         let elem_label = format!("{label}[{index}]");
-        let local_changed = if response::is_field_path_active() {
+        let local_changed = if inspector.is_path_active() {
             let segment = format!("[{index}]");
-            response::with_field_path(&segment, || T::imgui_value(ui, &elem_label, elem))
+            let _path = inspector.push_path(segment);
+            T::imgui_value(inspector, &elem_label, elem)
         } else {
-            T::imgui_value(ui, &elem_label, elem)
+            T::imgui_value(inspector, &elem_label, elem)
         };
         changed |= local_changed;
 
@@ -86,8 +89,8 @@ where
         && from != to
     {
         value.swap(from, to);
-        response::record_event(response::ReflectEvent::ArrayReordered {
-            path: response::current_field_path(),
+        inspector.record_event(crate::ReflectEvent::ArrayReordered {
+            path: inspector.current_path(),
             from,
             to,
         });

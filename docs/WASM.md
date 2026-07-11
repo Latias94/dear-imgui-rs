@@ -1,256 +1,163 @@
-# WebAssembly (WASM) support
+# WebAssembly support
 
-This project supports compiling Dear ImGui + backends to WebAssembly using an import-style design. It follows the approach used by imgui-rs: Rust code links to a WASM import module named `imgui-sys-v0` that provides the cimgui (C API) implementation.
+Dear ImGui uses an import-provider architecture on WebAssembly. The Rust
+application targets `wasm32-unknown-unknown`; all cimgui functions are imported
+from one Emscripten-built provider named `imgui-sys-v0`.
 
-## Quick start
+The provider name is part of the ABI. It is not configurable. Core and
+extension binding commands reject provider arguments so a locally generated
+artifact cannot silently use a different module name.
 
-- Status: the import-style WASM path is developed on `main` and shipped in the 0.7.x release train. For crates.io releases prior to 0.7, these bindings and `xtask` flows are available only when depending on this repository directly (e.g. via a git dependency).
+## Feature contract
 
-- Prerequisites
-  - `rustup target add wasm32-unknown-unknown`
-  - `cargo install -f wasm-bindgen-cli --version 0.2.105`
-  - `cargo install -f wasm-tools`
-  - Emscripten SDK (for provider). On Windows run `emsdk_env.bat`/`.ps1` so `emcc/em++` are on PATH, or set `EMSDK` to emsdk root.
+WASM support is explicit and target-specific. The only supported Rust target is
+`wasm32-unknown-unknown`, and every dependency path to the core crate must
+enable the `wasm` feature:
 
-- Build and run (core ImGui + optional ImPlot/ImNodes/ImGuizmo demos)
-  1) Generate pregenerated WASM bindings (import-style, `imgui-sys-v0` provider)
-     - Dear ImGui core:
-       - `cargo run -p xtask -- wasm-bindgen imgui-sys-v0`
-     - ImPlot (optional; enables ImPlot for wasm targets):
-       - `cargo run -p xtask -- wasm-bindgen-implot imgui-sys-v0`
-     - ImPlot3D (optional; enables ImPlot3D for wasm targets):
-       - `cargo run -p xtask -- wasm-bindgen-implot3d imgui-sys-v0`
-     - ImNodes (optional; enables ImNodes for wasm targets):
-       - `cargo run -p xtask -- wasm-bindgen-imnodes imgui-sys-v0`
-     - ImGuizmo (optional; enables ImGuizmo for wasm targets):
-       - `cargo run -p xtask -- wasm-bindgen-imguizmo imgui-sys-v0`
-     - ImGuIZMO.quat (optional; enables ImGuIZMO.quat for wasm targets):
-       - `cargo run -p xtask -- wasm-bindgen-imguizmo-quat imgui-sys-v0`
-     - `dear-node-editor` is not part of the WASM provider in its first integration phase; use
-       `dear-imnodes` for the current wasm-capable node editor path.
-  2) Build the main WASM + JS and patch for shared memory
-     - `cargo run -p xtask -- web-demo`
-       - By default, the `dear-imgui-web-demo` crate enables:
-         - `web-backends` (wgpu/webgl + dear-imgui-wgpu webgl/webgpu)
-         - `implot` (ImPlot integration, guarded by the `implot` feature)
-  3) Build the cimgui provider (Emscripten)
-     - `cargo run -p xtask -- build-cimgui-provider`
-       - Builds `imgui-sys-v0` as a single provider module containing:
-         - Dear ImGui + cimgui
-         - ImPlot + cimplot (when `wasm-bindgen-implot` has been run and bindings exist)
-         - ImPlot3D + cimplot3d (when `wasm-bindgen-implot3d` has been run and bindings exist)
-         - ImNodes + cimnodes (when `wasm-bindgen-imnodes` has been run and bindings exist)
-         - ImGuizmo + cimguizmo (when `wasm-bindgen-imguizmo` has been run and bindings exist)
-         - ImGuIZMO.quat + cimguizmo_quat (when `wasm-bindgen-imguizmo-quat` has been run and bindings exist)
-  4) Serve and open in browser
-     - `python -m http.server -d target/web-demo 8080`
-     - Open http://127.0.0.1:8080 and hard-refresh (Ctrl+F5)
-
-- Expected console logs
-  - `[imgui-sys-v0] Shared memory pages= …` and `Module.wasmMemory===memory true`
-  - `IO set: logical=… framebuffer_scale=… physical=… surface=…`
-
-## Why Emscripten?
-
-This repo deliberately keeps **two roles** separate:
-
-- The main application (Rust + winit + wgpu) targets `wasm32-unknown-unknown` and uses `wasm-bindgen`.
-- The cimgui + Dear ImGui implementation is compiled once as a **provider** module (`imgui-sys-v0`).
-
-For the provider we currently use Emscripten because it solves several hard problems for us:
-
-- **Import‑style + shared memory**:
-  - Emscripten has first‑class support for importing a shared memory via `-s IMPORTED_MEMORY=1`.
-  - This lets the provider reuse the same `WebAssembly.Memory` that wasm‑bindgen exports, so all ImGui IO/state written by Rust is visible to cimgui.
-- **Symbol export and ES modules**:
-  - We can feed Emscripten a JSON list of symbols derived from the pregenerated wasm bindings and let it emit an ES module that exports exactly those functions.
-  - It handles `EXPORTED_FUNCTIONS`, startup, and runtime glue, so the provider can be imported as a normal JS module.
-- **Debuggability and decoupling**:
-  - The provider build is independent from the Rust build: you can tweak its initial memory, `GLOBAL_BASE`, logging, and assertions without rebuilding Rust.
-  - Warnings, logs, and crashes in cimgui/ImGui are isolated in the provider, which simplifies debugging.
-- **Portability**:
-  - Emscripten ships a battle‑tested sysroot for C/C++ to WebAssembly, including the minimum runtime pieces we need, and is well supported on all major platforms.
-
-In principle, it is possible to build the provider with a “pure” `wasm32-unknown-unknown` toolchain and hand‑write the glue (imports/exports, memory wiring, JS module), but that significantly increases maintenance complexity for relatively little benefit. For now we intentionally keep:
-
-- **Main module**: `wasm32-unknown-unknown` + wasm‑bindgen.
-- **Provider module**: Emscripten‑built cimgui + Dear ImGui (`imgui-sys-v0`).
-
-We do *not* currently plan to replace the provider build with a custom single‑module (`wasm32-unknown-unknown` only) design in the short term.
-
-## Overview
-
-- Import-style: the Rust WASM module imports functions from a separate provider module (`imgui-sys-v0`). This avoids compiling C/C++ during the Rust build and keeps the Rust artifact lean.
-- We ship xtask commands that:
-  - Generate WASM bindings for `dear-imgui-sys` (importing from `imgui-sys-v0`).
-  - Build a minimal web demo (wgpu + winit + Dear ImGui).
-  - Build the cimgui provider WASM with Emscripten and generate a small ES module that re-exports its symbols under the `imgui-sys-v0` import name.
-
-## Requirements
-
-- Rust target: `wasm32-unknown-unknown`
-  - `rustup target add wasm32-unknown-unknown`
-- wasm-bindgen CLI (version must match the crate’s dependency)
-  - `cargo install -f wasm-bindgen-cli --version 0.2.105`
-- wasm-tools (used by xtask to patch the main Wasm to import memory so it can share memory with the provider)
-  - `cargo install -f wasm-tools`
-- Emscripten SDK (for provider build)
-  - Install emsdk and either:
-    - Run its environment script (adds `emcc/em++` to PATH), or
-    - Set `EMSDK` env var to the emsdk root.
-
-On Windows, run `emsdk.bat` for setup and `emsdk_env.bat` to update PATH for the current shell (PowerShell users can also run `emsdk_env.ps1`).
-
-## Commands (local)
-
-1) Generate WASM bindings (import-style, defaults to `imgui-sys-v0`):
-
-- Dear ImGui core:
-
-```bash
-cargo run -p xtask -- wasm-bindgen imgui-sys-v0
+```toml
+[dependencies]
+dear-imgui-rs = { version = "0.16.0", features = ["wasm"] }
 ```
 
-- ImPlot (optional extension for 2D plotting on wasm):
+For Bevy, enable `wasm` alongside the features needed by the application:
 
-```bash
-cargo run -p xtask -- wasm-bindgen-implot imgui-sys-v0
+```toml
+[dependencies]
+dear-imgui-bevy = { version = "0.16.0", features = ["render", "wasm"] }
 ```
 
-- ImNodes (optional node editor extension on wasm):
+A `wasm32-unknown-unknown` build without this feature fails at compile time
+instead of selecting a native binding artifact. Other wasm32 families, including
+`wasm32-wasip1`, `wasm32-wasip2`, and `wasm32-unknown-emscripten`, are rejected
+even when the feature is enabled; they cannot consume the unknown-unknown import
+ABI. `dear_imgui_rs::HAS_WASM` is true only for the exact supported target plus
+feature. Enabling the feature on a native target remains valid and leaves
+`HAS_WASM` false.
+
+Use these checks when changing feature forwarding:
 
 ```bash
-cargo run -p xtask -- wasm-bindgen-imnodes imgui-sys-v0
+# Expected to fail: the target alone is insufficient.
+cargo check -p dear-imgui-sys --target wasm32-unknown-unknown
+
+# Expected to pass.
+cargo check -p dear-imgui-rs --target wasm32-unknown-unknown --features wasm
+cargo check -p dear-imgui-bevy --target wasm32-unknown-unknown \
+  --no-default-features --features wasm
+cargo check -p dear-imgui-bevy --target wasm32-unknown-unknown \
+  --features render,wasm
 ```
 
-- ImGuizmo (optional gizmo extension on wasm):
+The following paths remain native-only:
+
+- `stack-layout` and `dear-node-editor/blueprints`
+- `dear-node-editor` in its current integration
+- native Winit, SDL3, WGPU, and Ash multi-viewport routes
+
+`stack-layout` and `wasm` are rejected together. Use `dear-imnodes` for the
+current WASM-capable node editor. Browser integrations render one main canvas
+and do not install native platform-window callbacks.
+
+## Binding artifacts
+
+Core generation is owned by the shared binding specification. One command
+regenerates and cross-checks the two native ABI profiles and the WASM import
+profile:
 
 ```bash
-cargo run -p xtask -- wasm-bindgen-imguizmo imgui-sys-v0
+# Reproduce and compare all checked-in artifacts.
+cargo run -p xtask -- verify-bindings
+
+# Maintainer-only update after an intentional source/spec change.
+cargo run -p xtask -- verify-bindings --update --allow-dirty
 ```
 
-- ImGuIZMO.quat (optional quaternion gizmo extension on wasm):
+The compatibility matrix includes Windows MSVC/GNU and supported Linux,
+Android, macOS, and iOS clang targets. Canonical generation rejects every
+`BINDGEN_EXTRA_CLANG_ARGS*` override. This keeps checked-in output tied to the
+reviewed generator contract instead of a maintainer's shell environment.
+
+The update workflow also synchronizes the exact cimgui and nested Dear ImGui
+revisions in `dear-imgui-sys/Cargo.toml` and refuses dirty source submodules:
 
 ```bash
-cargo run -p xtask -- wasm-bindgen-imguizmo-quat imgui-sys-v0
+python3 tools/update_submodule_and_bindings.py \
+  --crates dear-imgui-sys --submodules auto --wasm
 ```
 
-2) Build the web demo (main WASM + JS; xtask will also patch it to import memory so it can share memory with the provider):
+Optional extension import bindings use the same fixed provider:
 
 ```bash
-# Core ImGui only
+cargo run -p xtask -- wasm-bindgen-implot
+cargo run -p xtask -- wasm-bindgen-implot3d
+cargo run -p xtask -- wasm-bindgen-imnodes
+cargo run -p xtask -- wasm-bindgen-imguizmo
+cargo run -p xtask -- wasm-bindgen-imguizmo-quat
+```
+
+## Local demo
+
+Prerequisites:
+
+- `rustup target add wasm32-unknown-unknown`
+- a `wasm-bindgen-cli` version matching `Cargo.lock`
+- `wasm-tools`
+- Emscripten SDK for the provider build
+
+Re-read the lockfile after dependency updates before installing
+`wasm-bindgen-cli`; do not maintain a second version constant in scripts or
+documentation.
+
+Build the Rust application, then the provider:
+
+```bash
+# Core only, or pass a comma-separated extension list.
 cargo run -p xtask -- web-demo
-
-# Core ImGui + ImPlot demo
-cargo run -p xtask -- web-demo implot
-
-# Core ImGui + ImPlot3D demo
-cargo run -p xtask -- web-demo implot3d
-
-# Core ImGui + ImNodes demo
-cargo run -p xtask -- web-demo imnodes
-
-# Core ImGui + ImPlot + ImNodes demos
 cargo run -p xtask -- web-demo implot,imnodes
 
-# Core ImGui + ImGuizmo demo
-cargo run -p xtask -- web-demo imguizmo
-
-# Core ImGui + ImGuIZMO.quat demo
-cargo run -p xtask -- web-demo imguizmo-quat
-
-# Core ImGui + ImPlot + ImPlot3D + ImNodes + ImGuizmo + ImGuIZMO.quat demos
-cargo run -p xtask -- web-demo implot,implot3d,imnodes,imguizmo,imguizmo-quat
-```
-
-This builds `examples-wasm/dear-imgui-web-demo` with:
-
-- Always: `web-backends` feature (wgpu/webgl + dear-imgui-wgpu/webgl/webgpu)
-- Optional: `implot` feature when `web-demo implot` is used; this shows an “ImPlot (Web)” window
-- Optional: `implot3d` feature when `web-demo implot3d` is used; this shows an “ImPlot3D (Web)” window
-- Optional: `imnodes` feature when `web-demo imnodes` is used; this shows an “ImNodes (Web)” window
-- Optional: `imguizmo` feature when `web-demo imguizmo` is used; this shows an “ImGuizmo (Web)” window
-- Optional: `imguizmo-quat` feature when `web-demo imguizmo-quat` is used; this shows an “ImGuIZMO.quat (Web)” window
-
-Outputs go to `target/web-demo`.
-
-3) Build the cimgui provider and glue (Emscripten, like imgui-rs):
-
-```bash
-# Ensure emsdk is on PATH (Windows: run emsdk_env.bat / emsdk_env.ps1) or set EMSDK env var
+# Requires emcc/em++ on PATH, or EMSDK set to the SDK root.
 cargo run -p xtask -- build-cimgui-provider
+
+python3 -m http.server -d target/web-demo 8080
 ```
 
-This creates:
+Open `http://127.0.0.1:8080`. The provider command emits
+`imgui-sys-v0.wasm`, its JavaScript loader, a shared-memory wrapper, and the
+import map used by the web demo.
 
-- `target/web-demo/imgui-sys-v0.wasm` (Emscripten-built provider; imports `env.memory`)
-- `target/web-demo/imgui-sys-v0.js` (ES module that instantiates the provider)
-- `target/web-demo/imgui-sys-v0-wrapper.js` (wrapper that wires shared memory + logs)
-- Patches `target/web-demo/index.html` to add an import map that maps the bare import `imgui-sys-v0` to `./imgui-sys-v0-wrapper.js`.
+## Runtime model
 
-4) Serve locally:
+The Rust and C++ modules share one `WebAssembly.Memory`:
 
-```bash
-python -m http.server -d target/web-demo 8080
-```
+1. The page creates `globalThis.__imgui_shared_memory`.
+2. `xtask web-demo` patches the wasm-bindgen module to import and re-export
+   `env.memory`.
+3. `xtask build-cimgui-provider` builds cimgui with imported memory and passes
+   the same object to the Emscripten module.
+4. The browser resolves all generated cimgui imports through `imgui-sys-v0`.
 
-Open http://localhost:8080
-
-If your server serves `.mjs` as `text/plain`, modern browsers will reject it as a module. `xtask` now emits the provider as `.js` for better default MIME (`text/javascript`), and the import map points to `./imgui-sys-v0.js`. If you run a custom server, ensure these MIME types exist:
-
-- `.js` → `text/javascript` or `application/javascript`
-- `.wasm` → `application/wasm` (optional if using non-streaming instantiate; `xtask` glue falls back when not set)
-
-## Notes
-
-- Provider flags: the provider build disables OS/file functions and uses `IMGUI_USE_WCHAR32` to match our bindings.
-- Web backends: the demo enables both `wgpu/webgl` and `wgpu/webgpu`; the runtime selects an available backend.
-- If you see a runtime error like “Failed to resolve import imgui-sys-v0”: run `build-cimgui-provider` and ensure the import map is present in `index.html`.
-- If you see link errors about `env.memory` / `memchr` / `qsort` etc. or "function import requires a callable": ensure `wasm-tools` is installed so `xtask web-demo` can patch the main module to import memory, and that `examples-wasm/web/index.html` creates `globalThis.__imgui_shared_memory` (already present).
-
-## Implementation details
-
-- Import‑style linkage
-  - `dear-imgui-sys` (Rust) imports all cimgui symbols from module `imgui-sys-v0`.
-  - The provider is an Emscripten build of cimgui + Dear ImGui, emitted as an ES module with a thin wrapper.
-
-- Shared memory flow
-  - `examples-wasm/web/index.html` creates `globalThis.__imgui_shared_memory` (default 128MiB).
-  - `xtask web-demo` uses `wasm-tools` to WAT‑patch `dear-imgui-web-demo_bg.wasm` so it imports `env.memory` and re‑exports it.
-  - `xtask web-demo` also patches wasm-bindgen JS (`__wbg_get_imports()`) to inject `imports.env.memory = __imgui_shared_memory`.
-  - `xtask build-cimgui-provider` compiles the provider with `-s IMPORTED_MEMORY=1`, and our wrapper passes the same memory via `{ wasmMemory: memory }`.
-  - We place provider static data high with `-s GLOBAL_BASE=67108864` to avoid overlap. The shared memory initial size is increased accordingly.
-
-- Canvas/DPI/Surface
-  - The canvas backing store is kept in sync with CSS size × `devicePixelRatio`.
-  - Each frame we set `io.DisplaySize = logical` and `io.DisplayFramebufferScale = [dpi, dpi]`.
-  - The wgpu `Surface` is configured to the physical size and reconfigured when the canvas size changes.
-
-## CI suggestions
-
-- Install target and wasm-bindgen-cli:
-  - `rustup target add wasm32-unknown-unknown`
-  - `cargo install -f wasm-bindgen-cli --version 0.2.105`
-- Build demo:
-  - `cargo run -p xtask -- wasm-bindgen imgui-sys-v0`
-  - `cargo run -p xtask -- web-demo`
-- Optionally build provider (requires emsdk):
-  - Ensure PATH includes emsdk (`emcc/em++`) or set `EMSDK` env var to the emsdk root.
-  - `cargo run -p xtask -- build-cimgui-provider`
-
-## Known limitations
-
-- Filesystem is disabled in provider builds (`-s FILESYSTEM=0`).
-- FreeType is not included in the provider yet.
-- Multi-viewport is not enabled for web builds.
+This is why the provider cannot be replaced by arbitrary Rust-side imports or
+by compiling native C++ through Cargo on a WASM target. A custom single-module
+design would require a separate reviewed ABI, memory, startup, and symbol-export
+contract; it is not a supported fallback.
 
 ## Troubleshooting
 
-- ImGui aborts with “Invalid DisplaySize value”
-  - The two modules aren’t sharing the same memory. Ensure `wasm-tools` is installed and check the console for the shared memory logs. Rebuild with `cargo run -p xtask -- web-demo` and hard refresh.
+- `wasm32-unknown-unknown requires the explicit wasm feature`: enable `wasm` at
+  the highest workspace crate in the dependency path; Cargo feature forwarding
+  must reach `dear-imgui-sys/wasm`.
+- `unsupported Dear ImGui WASM target`: switch to `wasm32-unknown-unknown`.
+  WASI and Emscripten targets require different imports/runtime contracts and
+  are intentionally not aliases for this provider ABI.
+- `Failed to resolve import imgui-sys-v0`: build the provider and verify the
+  generated import map points to `imgui-sys-v0-wrapper.js`.
+- `env.memory` or callable import errors: install `wasm-tools`, rebuild the web
+  demo, then rebuild the provider so both artifacts use the same memory wiring.
+- Browser module MIME errors: serve `.js` as JavaScript and `.wasm` as
+  `application/wasm`.
+- Stale binding errors: run `xtask verify-bindings`; only use `--update` after
+  confirming the source revisions and binding specification changed together.
 
-- “Scissor rect is not contained in the render target”
-  - The surface must use the physical size. Pull latest and rebuild; we now configure the surface with the physical size and reconfigure on resize.
-
-- Provider link error: “initial memory too small”
-  - Increase initial memory (we default to 128MiB) or reduce assets. Our wrapper sets a larger shared memory in `index.html`.
+The provider currently disables filesystem functions and does not include
+FreeType. Browser multi-viewport and native blueprint stack layout are not
+supported.

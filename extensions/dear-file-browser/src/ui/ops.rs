@@ -5,7 +5,6 @@ use crate::dialog_state::{
     ClipboardOp, FileClipboard, FileDialogState, PasteConflictAction, PasteConflictPrompt,
     PendingPasteJob,
 };
-use crate::fs::FileSystem;
 use crate::fs_ops::{
     ExistingTargetDecision, ExistingTargetPolicy, apply_existing_target_policy, copy_tree,
     move_tree,
@@ -107,7 +106,8 @@ fn try_complete_paste_job(state: &mut FileDialogState) {
     }
 }
 
-fn step_paste_job(state: &mut FileDialogState, fs: &dyn FileSystem) -> Result<bool, String> {
+fn step_paste_job(state: &mut FileDialogState) -> Result<bool, String> {
+    let fs = state.filesystem.as_file_system();
     let Some(job) = state.ui.operations.paste.job.as_mut() else {
         return Ok(false);
     };
@@ -184,11 +184,8 @@ fn step_paste_job(state: &mut FileDialogState, fs: &dyn FileSystem) -> Result<bo
     Ok(true)
 }
 
-pub(super) fn run_paste_job_until_wait_or_done(
-    state: &mut FileDialogState,
-    fs: &dyn FileSystem,
-) -> Result<(), String> {
-    if step_paste_job(state, fs)? {
+pub(super) fn run_paste_job_until_wait_or_done(state: &mut FileDialogState) -> Result<(), String> {
+    if step_paste_job(state)? {
         try_complete_paste_job(state);
     }
 
