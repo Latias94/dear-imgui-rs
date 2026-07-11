@@ -79,9 +79,10 @@ Shut down in ownership order:
 # use dear_imgui_rs::Context;
 # use dear_imgui_wgpu::multi_viewport as wgpu_mvp;
 # use dear_imgui_winit::multi_viewport as winit_mvp;
-# fn shutdown(imgui: &mut Context) {
+# fn shutdown(imgui: &mut Context) -> Result<(), wgpu_mvp::CallbackOwnershipError> {
 wgpu_mvp::shutdown_multi_viewport_support(imgui)?;
 winit_mvp::shutdown_multi_viewport_support(imgui);
+# Ok(())
 # }
 ```
 

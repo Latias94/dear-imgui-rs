@@ -64,33 +64,9 @@ pub(super) unsafe fn framebuffer_size(_viewport: &Viewport) -> Option<[u32; 2]> 
     None
 }
 
-pub(super) fn logical_size_to_framebuffer(size: [f32; 2], scale: [f32; 2]) -> [u32; 2] {
-    let scale_x = valid_scale(scale[0]);
-    let scale_y = valid_scale(scale[1]);
-    [
-        physical_dimension(size[0], scale_x),
-        physical_dimension(size[1], scale_y),
-    ]
-}
-
-fn valid_scale(scale: f32) -> f32 {
-    if scale.is_finite() && scale > 0.0 {
-        scale
-    } else {
-        1.0
-    }
-}
-
-fn physical_dimension(logical: f32, scale: f32) -> u32 {
-    if !logical.is_finite() {
-        return 1;
-    }
-    (logical * scale).max(1.0).round().min(u32::MAX as f32) as u32
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{framebuffer_size, logical_size_to_framebuffer};
+    use super::framebuffer_size;
 
     #[test]
     fn rejects_null_platform_handle() {
@@ -98,21 +74,5 @@ mod tests {
         let viewport =
             unsafe { dear_imgui_rs::platform_io::Viewport::from_raw_mut(&mut raw_viewport) };
         assert!(unsafe { framebuffer_size(viewport) }.is_none());
-    }
-
-    #[test]
-    fn converts_logical_size_with_framebuffer_scale() {
-        assert_eq!(
-            logical_size_to_framebuffer([320.0, 200.0], [1.5, 2.0]),
-            [480, 400]
-        );
-    }
-
-    #[test]
-    fn clamps_invalid_dimensions_and_scale() {
-        assert_eq!(
-            logical_size_to_framebuffer([0.0, f32::NAN], [0.0, f32::INFINITY]),
-            [1, 1]
-        );
     }
 }

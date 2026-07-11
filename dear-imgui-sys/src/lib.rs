@@ -814,6 +814,132 @@ mod target_contract_tests {
     }
 }
 
+#[cfg(all(test, not(dear_imgui_rs_platform_io_hooks)))]
+mod aggregate_setter_fallback_tests {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::ptr;
+
+    use super::*;
+
+    unsafe extern "C" fn set_vec2_pointer(_viewport: *mut ImGuiViewport, _value: *const ImVec2) {}
+
+    unsafe extern "C" fn get_vec2_out(_viewport: *mut ImGuiViewport, _value: *mut ImVec2) {}
+
+    unsafe extern "C" fn get_vec4_out(_viewport: *mut ImGuiViewport, _value: *mut ImVec4) {}
+
+    unsafe extern "C" fn raw_set_vec2(_viewport: *mut ImGuiViewport, _value: ImVec2) {}
+
+    unsafe extern "C" fn raw_get_vec2(_viewport: *mut ImGuiViewport) -> ImVec2 {
+        ImVec2::zero()
+    }
+
+    unsafe extern "C" fn raw_get_vec4(_viewport: *mut ImGuiViewport) -> ImVec4 {
+        ImVec4::zero()
+    }
+
+    fn assert_panics(action: impl FnOnce()) {
+        assert!(catch_unwind(AssertUnwindSafe(action)).is_err());
+    }
+
+    #[test]
+    fn aggregate_setters_without_cpp_hooks_reject_some_callbacks() {
+        assert_panics(|| unsafe {
+            ImGuiPlatformIO_Set_Platform_SetWindowPos_PointerParam(
+                ptr::null_mut(),
+                Some(set_vec2_pointer),
+            );
+        });
+        assert_panics(|| unsafe {
+            ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam(ptr::null_mut(), Some(get_vec2_out));
+        });
+        assert_panics(|| unsafe {
+            ImGuiPlatformIO_Set_Platform_SetWindowSize_PointerParam(
+                ptr::null_mut(),
+                Some(set_vec2_pointer),
+            );
+        });
+        assert_panics(|| unsafe {
+            ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam(
+                ptr::null_mut(),
+                Some(get_vec2_out),
+            );
+        });
+        assert_panics(|| unsafe {
+            ImGuiPlatformIO_Set_Platform_GetWindowFramebufferScale_OutParam(
+                ptr::null_mut(),
+                Some(get_vec2_out),
+            );
+        });
+        assert_panics(|| unsafe {
+            ImGuiPlatformIO_Set_Platform_GetWindowWorkAreaInsets_OutParam(
+                ptr::null_mut(),
+                Some(get_vec4_out),
+            );
+        });
+        assert_panics(|| unsafe {
+            ImGuiPlatformIO_Set_Renderer_SetWindowSize_PointerParam(
+                ptr::null_mut(),
+                Some(set_vec2_pointer),
+            );
+        });
+    }
+
+    #[test]
+    fn aggregate_setters_without_cpp_hooks_clear_matching_raw_slots() {
+        let mut platform_io = ImGuiPlatformIO {
+            Platform_SetWindowPos: Some(raw_set_vec2),
+            Platform_GetWindowPos: Some(raw_get_vec2),
+            Platform_SetWindowSize: Some(raw_set_vec2),
+            Platform_GetWindowSize: Some(raw_get_vec2),
+            Platform_GetWindowFramebufferScale: Some(raw_get_vec2),
+            Platform_GetWindowWorkAreaInsets: Some(raw_get_vec4),
+            Renderer_SetWindowSize: Some(raw_set_vec2),
+            ..ImGuiPlatformIO::default()
+        };
+
+        unsafe {
+            ImGuiPlatformIO_Set_Platform_SetWindowPos_PointerParam(&mut platform_io, None);
+        }
+        assert!(platform_io.Platform_SetWindowPos.is_none());
+        assert!(platform_io.Platform_GetWindowPos.is_some());
+
+        unsafe {
+            ImGuiPlatformIO_Set_Platform_GetWindowPos_OutParam(&mut platform_io, None);
+        }
+        assert!(platform_io.Platform_GetWindowPos.is_none());
+        assert!(platform_io.Platform_SetWindowSize.is_some());
+
+        unsafe {
+            ImGuiPlatformIO_Set_Platform_SetWindowSize_PointerParam(&mut platform_io, None);
+        }
+        assert!(platform_io.Platform_SetWindowSize.is_none());
+        assert!(platform_io.Platform_GetWindowSize.is_some());
+
+        unsafe {
+            ImGuiPlatformIO_Set_Platform_GetWindowSize_OutParam(&mut platform_io, None);
+        }
+        assert!(platform_io.Platform_GetWindowSize.is_none());
+        assert!(platform_io.Platform_GetWindowFramebufferScale.is_some());
+
+        unsafe {
+            ImGuiPlatformIO_Set_Platform_GetWindowFramebufferScale_OutParam(&mut platform_io, None);
+        }
+        assert!(platform_io.Platform_GetWindowFramebufferScale.is_none());
+        assert!(platform_io.Platform_GetWindowWorkAreaInsets.is_some());
+
+        unsafe {
+            ImGuiPlatformIO_Set_Platform_GetWindowWorkAreaInsets_OutParam(&mut platform_io, None);
+        }
+        assert!(platform_io.Platform_GetWindowWorkAreaInsets.is_none());
+        assert!(platform_io.Renderer_SetWindowSize.is_some());
+
+        unsafe {
+            ImGuiPlatformIO_Set_Renderer_SetWindowSize_PointerParam(&mut platform_io, None);
+        }
+        assert!(platform_io.Renderer_SetWindowSize.is_none());
+    }
+}
+
 // (No wasm-specific shims are required when using shared memory import style.)
 
 impl ImVec2 {

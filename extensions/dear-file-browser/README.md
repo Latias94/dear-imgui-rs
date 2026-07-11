@@ -149,12 +149,14 @@ projection inputs change.
 Scan hooks may capture owner-thread state such as `Rc<RefCell<_>>`; they never cross
 into the worker and run only on the thread that applies scan batches.
 
-Native scans share a fixed-size process-wide executor. Each dialog keeps one
-running request and coalesces repeated navigation into one latest pending request.
-Dropping a dialog cancels and disconnects its session without joining on the UI
-thread. A filesystem blocked inside an uninterruptible call may delay that session's
-latest scan, but cannot create an unbounded number of worker threads or queued
-generations.
+Each native scan runtime owns one worker and keeps one running request plus one
+latest pending request. Repeated navigation cancels the running generation and
+coalesces intermediate destinations without waiting for filesystem I/O. Destroying
+the `FileDialogState` cancels its session, closes the worker channel, and waits for
+that worker after releasing core/UI state. A filesystem blocked inside an
+uninterruptible call can therefore delay destruction of its owning dialog, but it
+cannot starve scans belonging to other dialogs. Custom filesystems should return
+promptly after their visitor returns `ScanVisit::Stop`.
 
 ```rust
 use std::sync::Arc;

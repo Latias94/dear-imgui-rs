@@ -35,9 +35,16 @@ struct CurrentContextGuard {
 }
 
 impl CurrentContextGuard {
+    /// # Safety
+    ///
+    /// `target` must be null or a live context for the current thread. Neither it nor the context
+    /// that is current on entry may be destroyed before the returned guard is dropped.
     unsafe fn bind(target: *mut sys::ImGuiContext) -> Self {
+        // SAFETY: reading the current context does not dereference it; the caller owns both
+        // contexts' lifetimes and thread-affinity while the guard is alive.
         let previous = unsafe { sys::igGetCurrentContext() };
         if previous != target {
+            // SAFETY: the caller contract guarantees `target` remains live until guard drop.
             unsafe { sys::igSetCurrentContext(target) };
         }
         Self { previous, target }
@@ -47,6 +54,7 @@ impl CurrentContextGuard {
 impl Drop for CurrentContextGuard {
     fn drop(&mut self) {
         if self.previous != self.target {
+            // SAFETY: `bind` requires the previously current context to outlive this guard.
             unsafe { sys::igSetCurrentContext(self.previous) };
         }
     }
@@ -107,6 +115,7 @@ pub(super) fn register_viewport_data(ptr: *mut ViewportAshData) {
         return;
     }
 
+    // SAFETY: this reads the current-context pointer without dereferencing it.
     let context = unsafe { sys::igGetCurrentContext() } as usize;
     if context == 0 {
         return;
@@ -137,6 +146,7 @@ pub(super) fn is_ash_viewport_data(ptr: *mut ViewportAshData) -> bool {
         return false;
     }
 
+    // SAFETY: this reads the current-context pointer without dereferencing it.
     let context = unsafe { sys::igGetCurrentContext() } as usize;
     let data = ptr as usize;
     VIEWPORT_DATA
@@ -157,6 +167,7 @@ fn has_viewport_data_for_context(ctx: *mut sys::ImGuiContext) -> bool {
 }
 
 pub(super) fn global_handles() -> Option<GlobalHandles> {
+    // SAFETY: this reads the current-context pointer without dereferencing it.
     let ctx = unsafe { sys::igGetCurrentContext() } as usize;
     if ctx == 0 {
         return None;
@@ -340,6 +351,8 @@ pub(super) fn validate_queue_family_selection(
 
 fn validate_vulkan_config(global: &GlobalHandles) -> Result<(), CallbackOwnershipError> {
     validate_vulkan_handles(global.physical_device, global.present_queue)?;
+    // SAFETY: `GlobalHandles` can only be built by `enable_with_adapter`, whose safety contract
+    // requires this physical device to be live and owned by `global.instance`.
     let queue_families = unsafe {
         global
             .instance
@@ -361,6 +374,8 @@ pub(super) fn query_surface_support(
     }
 
     let loader = khr_surface::Instance::new(&global.entry, &global.instance);
+    // SAFETY: the enable contract requires the physical device, queue family, and validation
+    // surface to be live handles created from this entry/instance pair.
     let present_supported = unsafe {
         loader.get_physical_device_surface_support(
             global.physical_device,
@@ -375,6 +390,7 @@ pub(super) fn query_surface_support(
         });
     }
 
+    // SAFETY: the same-instance handle invariant described above remains valid for this query.
     let capabilities =
         unsafe { loader.get_physical_device_surface_capabilities(global.physical_device, surface) }
             .map_err(SurfaceSupportError::CapabilitiesQuery)?;
@@ -385,6 +401,7 @@ pub(super) fn query_surface_support(
         return Err(SurfaceSupportError::ColorAttachmentUnsupported);
     }
 
+    // SAFETY: the physical device and surface are live and originate from `global.instance`.
     let formats =
         unsafe { loader.get_physical_device_surface_formats(global.physical_device, surface) }
             .map_err(SurfaceSupportError::FormatsQuery)?;
@@ -392,6 +409,7 @@ pub(super) fn query_surface_support(
         return Err(SurfaceSupportError::NoFormats);
     }
 
+    // SAFETY: the physical device and surface are live and originate from `global.instance`.
     let present_modes = unsafe {
         loader.get_physical_device_surface_present_modes(global.physical_device, surface)
     }
@@ -536,6 +554,7 @@ pub(super) fn try_install_renderer_callbacks_after_preflight(
 pub(super) fn validate_platform_callbacks(
     platform_io: &dear_imgui_rs::platform_io::PlatformIo,
 ) -> Result<(), CallbackOwnershipError> {
+    // SAFETY: `PlatformIo::as_raw` points to the table borrowed by `platform_io` for this call.
     let raw = unsafe { &*platform_io.as_raw() };
     if raw.Platform_CreateWindow.is_none() || raw.Platform_DestroyWindow.is_none() {
         return Err(CallbackOwnershipError::PlatformCallbacksUnavailable);
@@ -604,6 +623,11 @@ pub(super) fn clear_renderer_callbacks(platform_io: &mut dear_imgui_rs::platform
     }
 }
 
+/// # Safety
+///
+/// Every Vulkan handle in `config` must be live, mutually compatible, and remain valid until the
+/// viewport runtime is shut down. `renderer` must stay at a stable address, and callbacks must run
+/// on the thread that owns `imgui_context`.
 pub(crate) unsafe fn enable_with_adapter(
     renderer: &mut AshRenderer,
     imgui_context: &mut Context,
@@ -611,6 +635,8 @@ pub(crate) unsafe fn enable_with_adapter(
     surface_adapter: Arc<dyn SurfaceAdapter>,
 ) -> Result<(), CallbackOwnershipError> {
     let context_raw = imgui_context.as_raw();
+    // SAFETY: the mutable context borrow proves `context_raw` is live for the guard, and the caller
+    // guarantees its thread-affinity and that the previously current context is not destroyed.
     let _context_guard = unsafe { CurrentContextGuard::bind(context_raw) };
     let renderer_raw = renderer as *mut _;
 
@@ -665,6 +691,8 @@ pub(crate) fn clear_for_drop(renderer: *mut AshRenderer) {
 }
 
 pub(crate) fn disable(imgui_context: &mut Context) -> Result<(), CallbackOwnershipError> {
+    // SAFETY: the mutable context borrow keeps this context live; disable does not destroy either
+    // it or the previously current context before the guard restores that pointer.
     let _context_guard = unsafe { CurrentContextGuard::bind(imgui_context.as_raw()) };
 
     if has_viewport_data_for_context(imgui_context.as_raw()) {
@@ -688,6 +716,8 @@ pub(crate) fn disable(imgui_context: &mut Context) -> Result<(), CallbackOwnersh
 pub fn shutdown_multi_viewport_support(
     context: &mut Context,
 ) -> Result<(), CallbackOwnershipError> {
+    // SAFETY: the mutable context borrow keeps this context live through platform-window teardown
+    // and restoration of the previously current context.
     let _context_guard = unsafe { CurrentContextGuard::bind(context.as_raw()) };
     if !has_renderer_state_for_context(context.as_raw()) {
         return Ok(());
@@ -701,6 +731,8 @@ pub fn shutdown_multi_viewport_support(
 
 #[allow(unsafe_op_in_unsafe_fn)]
 pub(super) unsafe fn borrow_renderer() -> Option<RendererBorrowGuard> {
+    // SAFETY: this reads the current-context pointer without dereferencing it. Registry lookup and
+    // the borrow flag validate ownership before any renderer pointer is dereferenced.
     let ctx = unsafe { sys::igGetCurrentContext() } as usize;
     if ctx == 0 {
         return None;
@@ -748,12 +780,15 @@ impl std::ops::Deref for RendererBorrowGuard {
     type Target = AshRenderer;
 
     fn deref(&self) -> &Self::Target {
+        // SAFETY: registration requires a stable renderer address, and this guard owns the
+        // context-local callback borrow until `Drop` clears the registry flag.
         unsafe { &*self.renderer }
     }
 }
 
 impl std::ops::DerefMut for RendererBorrowGuard {
     fn deref_mut(&mut self) -> &mut Self::Target {
+        // SAFETY: the registry permits only one active mutable renderer borrow for this context.
         unsafe { &mut *self.renderer }
     }
 }
@@ -765,6 +800,8 @@ pub(super) unsafe fn viewport_user_data_mut(vpm: &mut Viewport) -> Option<&mut V
     if !is_ash_viewport_data(data) {
         None
     } else {
+        // SAFETY: the context-local registry proves this live pointer came from `Box::into_raw`,
+        // and renderer callbacks serialize mutable access to viewport user data.
         Some(&mut *data)
     }
 }
@@ -778,5 +815,7 @@ pub(super) unsafe fn take_viewport_data(vpm: &mut Viewport) -> Option<Box<Viewpo
 
     unregister_viewport_data(data);
     vpm.set_renderer_user_data(std::ptr::null_mut());
+    // SAFETY: registry ownership proves `data` came from `Box::into_raw`; unregistering and
+    // clearing the viewport slot transfer that allocation exactly once back into this Box.
     Some(Box::from_raw(data))
 }

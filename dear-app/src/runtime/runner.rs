@@ -610,24 +610,46 @@ fn resolve_run_result(
     }
 }
 
+fn initialize_runtime_once<R, E>(
+    runtime: &mut Option<R>,
+    shutdown_started: bool,
+    initialize: impl FnOnce() -> Result<R, E>,
+) -> Option<Result<(), E>> {
+    if runtime.is_some() || shutdown_started {
+        return None;
+    }
+
+    Some(initialize().map(|initialized| {
+        *runtime = Some(initialized);
+    }))
+}
+
+fn dispatch_live_window_event<T>(
+    live_window_id: WindowId,
+    event_window_id: WindowId,
+    dispatch: impl FnOnce() -> T,
+) -> Option<T> {
+    (live_window_id == event_window_id).then(dispatch)
+}
+
 impl<A: Application + 'static> ApplicationHandler<RuntimeEvent> for Runner<A> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.runtime.is_some() || self.shutdown.started() {
-            return;
-        }
-
-        match Runtime::new(
-            event_loop,
-            self.event_proxy.clone(),
-            &self.config,
-            &mut self.application,
-        ) {
-            Ok(runtime) => {
+        let shutdown_started = self.shutdown.started();
+        let event_proxy = self.event_proxy.clone();
+        match initialize_runtime_once(&mut self.runtime, shutdown_started, || {
+            Runtime::new(event_loop, event_proxy, &self.config, &mut self.application)
+        }) {
+            Some(Ok(())) => {
                 info!("Dear App window and initial GPU generation are ready");
-                runtime.window.window.request_redraw();
-                self.runtime = Some(runtime);
+                self.runtime
+                    .as_ref()
+                    .expect("successful initialization stores the runtime")
+                    .window
+                    .window
+                    .request_redraw();
             }
-            Err(error) => self.terminate(event_loop, error),
+            Some(Err(error)) => self.terminate(event_loop, error),
+            None => {}
         }
     }
 
@@ -693,11 +715,15 @@ impl<A: Application + 'static> ApplicationHandler<RuntimeEvent> for Runner<A> {
         let Some(runtime) = self.runtime.as_mut() else {
             return;
         };
-        if runtime.window.window.id() != window_id {
+        let Some(handle_result) =
+            dispatch_live_window_event(runtime.window.window.id(), window_id, || {
+                runtime.handle_event(&mut self.application, window_id, &event)
+            })
+        else {
             return;
-        }
+        };
 
-        let exit_requested = match runtime.handle_event(&mut self.application, window_id, &event) {
+        let exit_requested = match handle_result {
             Ok(exit_requested) => exit_requested,
             Err(error) => {
                 self.terminate(event_loop, error);
@@ -761,9 +787,11 @@ mod tests {
 
     use dear_imgui_rs::FrameLifecycleState;
     use winit::error::EventLoopError;
+    use winit::window::WindowId;
 
     use super::{
-        RuntimeShutdownErrors, ShutdownCoordinator, build_and_render_frame, resolve_run_result,
+        RuntimeShutdownErrors, ShutdownCoordinator, build_and_render_frame,
+        dispatch_live_window_event, initialize_runtime_once, resolve_run_result,
         should_process_runtime_event,
     };
     use crate::RunError;
@@ -791,6 +819,62 @@ mod tests {
         assert!(!should_process_runtime_event(true, false));
         assert!(!should_process_runtime_event(false, true));
         assert!(!should_process_runtime_event(true, true));
+    }
+
+    #[test]
+    fn resumed_initializes_once_and_never_after_shutdown_starts() {
+        let calls = Cell::new(0);
+        let mut runtime = None;
+        let initialize = || {
+            calls.set(calls.get() + 1);
+            Ok::<_, ()>(())
+        };
+
+        assert_eq!(
+            initialize_runtime_once(&mut runtime, false, initialize),
+            Some(Ok(()))
+        );
+        assert_eq!(calls.get(), 1);
+        assert!(runtime.is_some());
+
+        assert_eq!(
+            initialize_runtime_once(&mut runtime, false, initialize),
+            None
+        );
+        assert_eq!(calls.get(), 1);
+
+        runtime = None;
+        assert_eq!(
+            initialize_runtime_once(&mut runtime, true, initialize),
+            None
+        );
+        assert_eq!(calls.get(), 1);
+        assert!(runtime.is_none());
+    }
+
+    #[test]
+    fn only_the_live_window_id_dispatches_an_event() {
+        let live = WindowId::from(41_u64);
+        let foreign = WindowId::from(42_u64);
+        let calls = Cell::new(0);
+
+        assert_eq!(
+            dispatch_live_window_event(live, foreign, || {
+                calls.set(calls.get() + 1);
+                "foreign"
+            }),
+            None
+        );
+        assert_eq!(calls.get(), 0);
+
+        assert_eq!(
+            dispatch_live_window_event(live, live, || {
+                calls.set(calls.get() + 1);
+                "live"
+            }),
+            Some("live")
+        );
+        assert_eq!(calls.get(), 1);
     }
 
     #[test]

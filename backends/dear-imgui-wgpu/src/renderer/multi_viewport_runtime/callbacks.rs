@@ -107,6 +107,8 @@ pub(super) unsafe fn enable(
     context: &mut Context,
 ) -> Result<(), CallbackOwnershipError> {
     let raw_context = context.as_raw();
+    // SAFETY: the mutable context borrow keeps `raw_context` live, and registration cannot destroy
+    // either it or the previously current context before the guard is dropped.
     let _context_guard = unsafe { CurrentContextGuard::bind(raw_context) };
     let globals = renderer_globals(renderer)?;
     if !context
@@ -144,6 +146,8 @@ pub(super) unsafe fn enable(
 
 pub(super) fn disable_after_platform_shutdown(context: &mut Context) {
     let raw_context = context.as_raw();
+    // SAFETY: the mutable context borrow keeps both the target and restored context lifetimes valid
+    // throughout callback and registry teardown.
     let _context_guard = unsafe { CurrentContextGuard::bind(raw_context) };
     let had_state = has_renderer_state(raw_context);
     let registered_renderer = registered_renderer_for_context(raw_context);
@@ -198,6 +202,8 @@ pub(super) fn shutdown_multi_viewport_support(
     context: &mut Context,
 ) -> Result<(), CallbackOwnershipError> {
     let raw_context = context.as_raw();
+    // SAFETY: the mutable context borrow keeps this context live through platform-window teardown
+    // and restoration of the previously current context.
     let _context_guard = unsafe { CurrentContextGuard::bind(raw_context) };
     if !has_renderer_state(raw_context) {
         return Ok(());
@@ -241,10 +247,7 @@ unsafe fn renderer_set_window_size(viewport: *mut Viewport, size: dear_imgui_rs:
     let Some(pointer) = (unsafe { viewport_data_pointer(viewport) }) else {
         return;
     };
-    let pixels = platform_adapter::logical_size_to_framebuffer(
-        [size.x, size.y],
-        viewport.framebuffer_scale(),
-    );
+    let pixels = super::logical_size_to_framebuffer([size.x, size.y], viewport.framebuffer_scale());
     // SAFETY: `viewport_data_pointer` validates the pointer against this context's registry.
     let data = unsafe { &mut *pointer };
     if data.config.width != pixels[0] || data.config.height != pixels[1] {
@@ -448,7 +451,6 @@ pub(super) unsafe fn renderer_render_window(viewport: *mut Viewport) {
 unsafe fn renderer_swap_buffers(viewport: *mut Viewport) {
     // SAFETY: callback entry points reject null pointers and Dear ImGui owns this live viewport.
     let viewport = unsafe { &mut *viewport };
-    let refreshed_size = unsafe { platform_adapter::framebuffer_size(viewport) };
     let Some(pointer) = (unsafe { viewport_data_pointer(viewport) }) else {
         return;
     };
@@ -461,6 +463,10 @@ unsafe fn renderer_swap_buffers(viewport: *mut Viewport) {
     data.queue.present(frame);
     #[cfg(not(feature = "wgpu-30"))]
     frame.present();
+    let refreshed_size = framebuffer_size_for_reconfigure(data.pending_reconfigure, || {
+        // SAFETY: the live viewport remains owned by the active platform adapter.
+        unsafe { platform_adapter::framebuffer_size(viewport) }
+    });
     if data.pending_reconfigure {
         if let Some(size) = refreshed_size {
             data.config.width = size[0].max(1);
@@ -469,6 +475,13 @@ unsafe fn renderer_swap_buffers(viewport: *mut Viewport) {
         data.surface.configure(&data.device, &data.config);
         data.pending_reconfigure = false;
     }
+}
+
+pub(super) fn framebuffer_size_for_reconfigure(
+    pending_reconfigure: bool,
+    query: impl FnOnce() -> Option<[u32; 2]>,
+) -> Option<[u32; 2]> {
+    pending_reconfigure.then(query).flatten()
 }
 
 fn run_callback(name: &str, callback: impl FnOnce()) {
@@ -482,6 +495,8 @@ unsafe extern "C" fn renderer_create_window_sys(viewport: *mut dear_imgui_rs::sy
     if viewport.is_null() {
         return;
     }
+    // SAFETY: Dear ImGui supplied a live viewport for the current context and the null check above
+    // makes the cast valid for the duration of this callback.
     run_callback("Renderer_CreateWindow", || unsafe {
         renderer_create_window(viewport.cast())
     });
@@ -493,6 +508,8 @@ pub(super) unsafe extern "C" fn renderer_destroy_window_sys(
     if viewport.is_null() {
         return;
     }
+    // SAFETY: Dear ImGui supplied a live viewport for the current context and the null check above
+    // makes the cast valid for the duration of this callback.
     run_callback("Renderer_DestroyWindow", || unsafe {
         renderer_destroy_window(viewport.cast())
     });
@@ -507,6 +524,8 @@ unsafe extern "C" fn renderer_set_window_size_sys(
     if viewport.is_null() || size.is_null() {
         return;
     }
+    // SAFETY: the aggregate ABI hook guarantees both pointers remain live for this call; both were
+    // checked before dereferencing or casting.
     run_callback("Renderer_SetWindowSize", || unsafe {
         renderer_set_window_size(viewport.cast(), *size)
     });
@@ -519,6 +538,8 @@ unsafe extern "C" fn renderer_render_window_sys(
     if viewport.is_null() {
         return;
     }
+    // SAFETY: Dear ImGui supplied a live viewport for the current context and the null check above
+    // makes the cast valid for the duration of this callback.
     run_callback("Renderer_RenderWindow", || unsafe {
         renderer_render_window(viewport.cast())
     });
@@ -531,6 +552,8 @@ unsafe extern "C" fn renderer_swap_buffers_sys(
     if viewport.is_null() {
         return;
     }
+    // SAFETY: Dear ImGui supplied a live viewport for the current context and the null check above
+    // makes the cast valid for the duration of this callback.
     run_callback("Renderer_SwapBuffers", || unsafe {
         renderer_swap_buffers(viewport.cast())
     });

@@ -42,14 +42,14 @@ This is an intentionally source-breaking architecture release. It replaces shall
 - Replace `dear-imgui-reflect` global/thread-local settings, free `input`, and `ImGuiReflectExt::input_reflect` with `ReflectSession` and one-frame `Inspector` values. A session owns settings and persistent map drafts for one UI owner; an inspector owns response and logical path state for one render pass.
 - Make `FileDialogState` own its filesystem capability. Native callers choose `with_background_filesystem(Arc<dyn FileSystem + Send + Sync>)`; caller-thread and browser adapters use `with_blocking_filesystem(Box<dyn FileSystem>)`. Draw methods no longer borrow a filesystem that a worker could outlive.
 - Replace `FileSystem::read_dir` with streaming `FileSystem::visit_dir` and `ScanVisit::{Continue,Stop}`. Replace incremental/synchronous scan presets with explicit `ScanPolicy::Blocking` and native-only `ScanPolicy::Background`. Requesting a background scan without a thread-safe native capability returns an error instead of silently changing execution mode.
-- Keep scan hooks on the owner/UI thread without a `Send` bound. Background filesystem batches remain bounded, queue capacity follows the active apply policy, and stale generations do not consume the current generation's per-tick budget.
+- Keep scan hooks on the owner/UI thread without a `Send` bound. Each background runtime owns one bounded worker queue, and stale generations do not consume the current generation's per-tick budget.
 
 ### Added
 
 - Add a deterministic binding specification shared by build scripts, regeneration, verification, packaging, and CI. It hashes the generator contract, exact compatibility targets, formatter, allow/block lists, enum normalization, header shims, opaque types, and fixed WASM provider.
 - Add exact cimgui and nested Dear ImGui source revisions to package metadata so source identity survives `cargo package` without a `.git` directory.
 - Add strict `dear-imgui-sys` core native prebuilt manifests covering crate/version, target, link type, MSVC CRT, normalized artifact features, exact source revisions, and binding-spec hash. Missing, duplicate, unknown, or mismatched fields reject the core artifact.
-- Add a bounded shared native file-scan executor with per-dialog cancellation, latest-request coalescing, bounded UI-thread batch application, and generation filtering for stale results.
+- Add a bounded native per-runtime scan worker with per-dialog cancellation, latest-request coalescing, bounded UI-thread batch application, owned-worker teardown, and generation filtering for stale results.
 
 ### Changed
 

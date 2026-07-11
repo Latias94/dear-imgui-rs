@@ -14,6 +14,8 @@ unsafe fn renderer_create_window(viewport: *mut Viewport) {
     if viewport.is_null() {
         return;
     }
+    // SAFETY: Dear ImGui owns this live viewport for the current context. The registry enforces a
+    // single renderer borrow, and every Vulkan resource destroyed on failure was created here.
     unsafe {
         let Some(mut renderer) = borrow_renderer() else {
             return;
@@ -103,6 +105,8 @@ unsafe fn renderer_destroy_window(viewport: *mut Viewport) {
     if viewport.is_null() {
         return;
     }
+    // SAFETY: Dear ImGui owns this live viewport, and the context-local registry proves both the
+    // renderer borrow and viewport allocation belong to this runtime before reclamation.
     unsafe {
         let Some(mut renderer) = borrow_renderer() else {
             return;
@@ -140,6 +144,8 @@ unsafe fn renderer_set_window_size(viewport: *mut Viewport, size: sys::ImVec2) {
     if viewport.is_null() {
         return;
     }
+    // SAFETY: Dear ImGui owns this live viewport, and registry checks serialize renderer and
+    // viewport-data mutation before any raw pointer is dereferenced.
     unsafe {
         let Some(mut renderer) = borrow_renderer() else {
             return;
@@ -167,6 +173,8 @@ unsafe fn recover_aborted_acquire(
 ) {
     data.pending_present = None;
     data.state = ViewportRuntimeState::RebuildRequired;
+    // SAFETY: the renderer registry keeps this logical device live and exclusively borrowed while
+    // recovery waits for all submitted viewport work to become idle.
     if let Err(error) = unsafe { renderer.device.device_wait_idle() } {
         eprintln!("[ash-mv] device wait failed during frame recovery: {error:?}");
         data.mark_failed();
@@ -208,6 +216,8 @@ fn fail_viewport(
     error: vk::Result,
 ) {
     eprintln!("[ash-mv] {operation} failed; disabling viewport runtime: {error:?}");
+    // SAFETY: the callback borrow keeps the renderer and its logical device live until this
+    // failure path finishes quiescing outstanding work.
     let _ = unsafe { renderer.device.device_wait_idle() };
     data.mark_failed();
 }
@@ -222,6 +232,8 @@ pub(super) unsafe fn renderer_render_window(viewport: *mut Viewport, _render_arg
     if viewport.is_null() {
         return;
     }
+    // SAFETY: Dear ImGui owns this live viewport, and registry checks serialize all renderer,
+    // viewport-data, and Vulkan command access for this callback.
     unsafe {
         let viewport = &mut *viewport;
         let desired_extent = desired_extent_from_viewport(viewport);
@@ -524,6 +536,8 @@ unsafe fn renderer_swap_buffers(viewport: *mut Viewport, _render_arg: *mut c_voi
     if viewport.is_null() {
         return;
     }
+    // SAFETY: Dear ImGui owns this live viewport, and registry checks serialize the renderer and
+    // pending-present state before Vulkan presentation or resource rebuild.
     unsafe {
         let Some(mut renderer) = borrow_renderer() else {
             return;
@@ -572,6 +586,13 @@ unsafe fn renderer_swap_buffers(viewport: *mut Viewport, _render_arg: *mut c_voi
     }
 }
 
+fn run_callback(name: &str, callback: impl FnOnce()) {
+    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(callback)).is_err() {
+        eprintln!("[ash-mv] panic in {name}");
+        std::process::abort();
+    }
+}
+
 /// # Safety
 ///
 /// Called by Dear ImGui from C with a valid `ImGuiViewport*` belonging to the current ImGui context.
@@ -580,13 +601,11 @@ pub unsafe extern "C" fn renderer_create_window_sys(viewport: *mut sys::ImGuiVie
     if viewport.is_null() {
         return;
     }
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+    // SAFETY: Dear ImGui supplied a live viewport for the current context and the null check above
+    // makes the cast valid for the duration of this callback.
+    run_callback("Renderer_CreateWindow", || unsafe {
         renderer_create_window(viewport.cast());
-    }));
-    if result.is_err() {
-        eprintln!("[ash-mv] panic in Renderer_CreateWindow");
-        std::process::abort();
-    }
+    });
 }
 
 /// # Safety
@@ -597,13 +616,11 @@ pub unsafe extern "C" fn renderer_destroy_window_sys(viewport: *mut sys::ImGuiVi
     if viewport.is_null() {
         return;
     }
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+    // SAFETY: Dear ImGui supplied a live viewport for the current context and the null check above
+    // makes the cast valid for the duration of this callback.
+    run_callback("Renderer_DestroyWindow", || unsafe {
         renderer_destroy_window(viewport.cast());
-    }));
-    if result.is_err() {
-        eprintln!("[ash-mv] panic in Renderer_DestroyWindow");
-        std::process::abort();
-    }
+    });
 }
 
 /// # Safety
@@ -617,13 +634,11 @@ pub unsafe extern "C" fn renderer_set_window_size_sys(
     if viewport.is_null() || size.is_null() {
         return;
     }
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+    // SAFETY: the aggregate ABI hook guarantees both pointers remain live for this call; both were
+    // checked before dereferencing or casting.
+    run_callback("Renderer_SetWindowSize", || unsafe {
         renderer_set_window_size(viewport.cast(), *size);
-    }));
-    if result.is_err() {
-        eprintln!("[ash-mv] panic in Renderer_SetWindowSize");
-        std::process::abort();
-    }
+    });
 }
 
 /// # Safety
@@ -637,13 +652,11 @@ pub unsafe extern "C" fn renderer_render_window_sys(
     if viewport.is_null() {
         return;
     }
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+    // SAFETY: Dear ImGui supplied a live viewport for the current context and the null check above
+    // makes the cast valid for the duration of this callback.
+    run_callback("Renderer_RenderWindow", || unsafe {
         renderer_render_window(viewport.cast(), argument);
-    }));
-    if result.is_err() {
-        eprintln!("[ash-mv] panic in Renderer_RenderWindow");
-        std::process::abort();
-    }
+    });
 }
 
 /// # Safety
@@ -657,11 +670,9 @@ pub unsafe extern "C" fn renderer_swap_buffers_sys(
     if viewport.is_null() {
         return;
     }
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
+    // SAFETY: Dear ImGui supplied a live viewport for the current context and the null check above
+    // makes the cast valid for the duration of this callback.
+    run_callback("Renderer_SwapBuffers", || unsafe {
         renderer_swap_buffers(viewport.cast(), argument);
-    }));
-    if result.is_err() {
-        eprintln!("[ash-mv] panic in Renderer_SwapBuffers");
-        std::process::abort();
-    }
+    });
 }

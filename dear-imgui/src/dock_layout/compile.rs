@@ -148,7 +148,11 @@ pub(crate) fn submit_and_apply(
     let initial_size = target.initial_size();
 
     ui.run_with_bound_context(|| {
+        // SAFETY: `run_with_bound_context` keeps this Ui's context current, and `root_id` is an
+        // opaque value that Dear ImGui accepts for lookup without dereferencing Rust memory.
         let existed_before_submission = unsafe { !sys::igDockBuilderGetNode(root_id).is_null() };
+        // SAFETY: the Ui context is current, the optional window class remains borrowed for this
+        // call, and the compiled target supplied finite size/flag values.
         let submitted_id = unsafe {
             match submission {
                 DockspaceSubmission::CurrentWindow => sys::igDockSpace(
@@ -169,6 +173,7 @@ pub(crate) fn submit_and_apply(
             }
         };
 
+        // SAFETY: the bound context remains current and `root_id` is the submitted dockspace ID.
         let submitted_root = unsafe { sys::igDockBuilderGetNode(root_id) };
         if submitted_id != root_id || submitted_root.is_null() {
             return Err(DockLayoutError::DockspaceSubmissionFailed {
@@ -181,10 +186,13 @@ pub(crate) fn submit_and_apply(
         }
 
         if apply == DockLayoutApply::Replace {
+            // SAFETY: the successful submission above proves `root_id` names a live dock node in
+            // the current context. These calls only reset that node's owned layout state.
             unsafe {
                 sys::igDockBuilderRemoveNodeDockedWindows(root_id, true);
                 sys::igDockBuilderRemoveNodeChildNodes(root_id);
             }
+            // SAFETY: the bound context and root dockspace remain live after child removal.
             if unsafe { sys::igDockBuilderGetNode(root_id) }.is_null() {
                 return Err(DockLayoutError::RootResetFailed {
                     root_id: target.root_id(),
@@ -192,6 +200,8 @@ pub(crate) fn submit_and_apply(
             }
         }
 
+        // SAFETY: `root_id` is a live node in the bound context and the validated target owns the
+        // finite position and size values copied into these calls.
         unsafe {
             sys::igDockBuilderSetNodePos(
                 root_id,
@@ -238,6 +248,8 @@ impl CommandExecutor for ImGuiCommandExecutor {
     ) -> Option<(sys::ImGuiID, sys::ImGuiID)> {
         let mut first = 0;
         let mut second = 0;
+        // SAFETY: execution runs under the Ui's bound context, `parent` resolves from a live node
+        // produced by this transaction, and both output pointers reference initialized locals.
         unsafe {
             sys::igDockBuilderSplitNode(
                 parent,
@@ -251,18 +263,23 @@ impl CommandExecutor for ImGuiCommandExecutor {
     }
 
     fn dock_window(&mut self, title: &CStr, node: sys::ImGuiID) {
+        // SAFETY: `title` is NUL-terminated for the duration of the call and `node` was produced by
+        // the active DockBuilder transaction in the current context.
         unsafe {
             sys::igDockBuilderDockWindow(title.as_ptr(), node);
         }
     }
 
     fn finish(&mut self, root: sys::ImGuiID) {
+        // SAFETY: `root` is the live root of the active transaction in the current context.
         unsafe {
             sys::igDockBuilderFinish(root);
         }
     }
 
     fn rollback(&mut self, root: sys::ImGuiID) {
+        // SAFETY: rollback executes before leaving the bound context and only removes the root
+        // owned by the failed transaction.
         unsafe {
             sys::igDockBuilderRemoveNodeDockedWindows(root, true);
             sys::igDockBuilderRemoveNode(root);

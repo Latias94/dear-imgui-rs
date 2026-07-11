@@ -48,9 +48,11 @@ pub enum ScanVisit {
 pub trait FileSystem {
     /// Visit entries of a directory one at a time.
     ///
-    /// Implementations must stop when `visit` returns [`ScanVisit::Stop`].
-    /// The visitor is invoked on the scan worker for background scans and on
-    /// the caller thread for [`crate::ScanPolicy::Blocking`] scans.
+    /// Implementations must stop when `visit` returns [`ScanVisit::Stop`] and
+    /// should return promptly afterward. The visitor is invoked on the scan
+    /// worker for background scans and on the caller thread for
+    /// [`crate::ScanPolicy::Blocking`] scans. Destroying a background dialog
+    /// waits for its worker to return after cancellation.
     fn visit_dir(
         &self,
         dir: &Path,

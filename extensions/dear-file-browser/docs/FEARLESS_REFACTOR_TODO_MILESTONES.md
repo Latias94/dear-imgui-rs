@@ -609,11 +609,11 @@ Reference design: `docs/FEARLESS_REFACTOR_P2_PERF_ASYNC_DESIGN.md`
     - submission returns before gated enumeration completes
     - supersession cancels without joining on the navigation path
     - repeated supersession coalesces to one latest pending request
-- [x] Task: add explicit cancellation + non-blocking teardown guarantees
+- [x] Task: add explicit cancellation + owned-worker teardown guarantees
   - Acceptance:
     - stale generations cannot apply entries or errors
-    - runtime drop never joins a blocked filesystem on the UI thread
-    - a fixed process-wide executor bounds threads and queued sessions
+    - runtime drop cancels, closes channels, and joins without holding core/UI locks
+    - a blocked filesystem delays only its owning runtime and does not starve another dialog
 
 ### Epic 17.3 - Projection/selection stability under partial data (Stage C)
 

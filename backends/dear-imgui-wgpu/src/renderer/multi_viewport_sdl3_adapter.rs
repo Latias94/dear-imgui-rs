@@ -43,15 +43,6 @@ pub(super) unsafe fn framebuffer_size(viewport: &Viewport) -> Option<[u32; 2]> {
     window_size(&target)
 }
 
-pub(super) fn logical_size_to_framebuffer(size: [f32; 2], scale: [f32; 2]) -> [u32; 2] {
-    let scale_x = valid_scale(scale[0]);
-    let scale_y = valid_scale(scale[1]);
-    [
-        physical_dimension(size[0], scale_x),
-        physical_dimension(size[1], scale_y),
-    ]
-}
-
 fn window_id_from_platform_handle(
     handle: *mut std::ffi::c_void,
 ) -> Option<sdl3_sys::video::SDL_WindowID> {
@@ -76,28 +67,13 @@ fn window_size(target: &Sdl3SurfaceTarget) -> Option<[u32; 2]> {
     ok.then(|| [clamp_pixels(width), clamp_pixels(height)])
 }
 
-fn valid_scale(scale: f32) -> f32 {
-    if scale.is_finite() && scale > 0.0 {
-        scale
-    } else {
-        1.0
-    }
-}
-
-fn physical_dimension(logical: f32, scale: f32) -> u32 {
-    if !logical.is_finite() {
-        return 1;
-    }
-    (logical * scale).max(1.0).round().min(u32::MAX as f32) as u32
-}
-
 fn clamp_pixels(pixels: i32) -> u32 {
     pixels.max(1) as u32
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{clamp_pixels, logical_size_to_framebuffer, window_id_from_platform_handle};
+    use super::{clamp_pixels, window_id_from_platform_handle};
 
     #[test]
     fn rejects_null_window_id() {
@@ -116,17 +92,5 @@ mod tests {
         assert_eq!(clamp_pixels(-5), 1);
         assert_eq!(clamp_pixels(0), 1);
         assert_eq!(clamp_pixels(17), 17);
-    }
-
-    #[test]
-    fn converts_logical_size_with_framebuffer_scale() {
-        assert_eq!(
-            logical_size_to_framebuffer([320.0, 200.0], [1.5, 2.0]),
-            [480, 400]
-        );
-        assert_eq!(
-            logical_size_to_framebuffer([0.0, f32::NAN], [0.0, f32::INFINITY]),
-            [1, 1]
-        );
     }
 }

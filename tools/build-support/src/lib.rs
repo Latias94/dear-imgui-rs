@@ -1568,7 +1568,6 @@ fn extracted_library_dir(root: &Path, lib_name: &str) -> Option<PathBuf> {
     }
 }
 
-#[cfg(feature = "archive")]
 fn unique_staging_path(destination: &Path) -> PathBuf {
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1737,7 +1736,7 @@ fn download_prebuilt_http(cache_root: &Path, url: &str, lib_name: &str) -> Resul
 }
 
 fn write_atomic(destination: &Path, bytes: &[u8]) -> Result<(), String> {
-    let staging = unique_file_staging_path(destination);
+    let staging = unique_staging_path(destination);
     std::fs::write(&staging, bytes)
         .map_err(|error| format!("write {}: {error}", staging.display()))?;
     match std::fs::rename(&staging, destination) {
@@ -1754,18 +1753,6 @@ fn write_atomic(destination: &Path, bytes: &[u8]) -> Result<(), String> {
             ))
         }
     }
-}
-
-fn unique_file_staging_path(destination: &Path) -> PathBuf {
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let name = destination
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("prebuilt");
-    destination.with_file_name(format!(".{name}.tmp-{}-{nonce}", std::process::id()))
 }
 
 pub fn prebuilt_cache_root_from_env_or_target(

@@ -2,6 +2,27 @@ use super::validation::{assert_finite_f32, assert_finite_vec2};
 use crate::Ui;
 use crate::sys;
 
+/// Tracks an indentation scope started with [`Ui::begin_indent`] or
+/// [`Ui::begin_indent_by`].
+#[must_use]
+pub struct IndentToken<'ui> {
+    ui: &'ui Ui,
+    width: f32,
+}
+
+impl IndentToken<'_> {
+    /// Ends the indentation scope explicitly.
+    pub fn end(self) {
+        // Drop restores the previous indentation.
+    }
+}
+
+impl Drop for IndentToken<'_> {
+    fn drop(&mut self) {
+        self.ui.unindent_by(self.width);
+    }
+}
+
 impl Ui {
     /// Call between widgets or groups to layout them horizontally.
     ///
@@ -72,6 +93,30 @@ impl Ui {
     pub fn indent_by(&self, width: f32) {
         assert_finite_f32("Ui::indent_by()", "width", width);
         self.run_with_bound_context(|| unsafe { sys::igIndent(width) });
+    }
+
+    /// Starts an indentation scope using `Style::indent_spacing`.
+    ///
+    /// The returned token restores the previous indentation when it is dropped
+    /// or explicitly ended.
+    #[doc(alias = "Indent")]
+    pub fn begin_indent(&self) -> IndentToken<'_> {
+        let width = self.run_with_bound_context(|| {
+            // SAFETY: the bound Ui owns a live current context, so `igGetStyle` is non-null. The
+            // spacing value is copied immediately and no reference escapes this call.
+            unsafe { (*sys::igGetStyle()).IndentSpacing }
+        });
+        self.begin_indent_by(width)
+    }
+
+    /// Starts an indentation scope with a custom width.
+    ///
+    /// The returned token restores the previous indentation when it is dropped
+    /// or explicitly ended.
+    #[doc(alias = "Indent")]
+    pub fn begin_indent_by(&self, width: f32) -> IndentToken<'_> {
+        self.indent_by(width);
+        IndentToken { ui: self, width }
     }
 
     /// Moves content position to the left by `Style::indent_spacing`

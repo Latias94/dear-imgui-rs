@@ -1,8 +1,8 @@
 use super::callbacks::{
-    callbacks_owned, claim_callbacks, disable_after_platform_shutdown, render_callback_matches,
-    renderer_create_window, renderer_destroy_window, renderer_destroy_window_sys,
-    renderer_render_window, shutdown_multi_viewport_support, unary_callback_matches,
-    validate_secondary_viewports,
+    callbacks_owned, claim_callbacks, disable_after_platform_shutdown,
+    framebuffer_size_for_reconfigure, render_callback_matches, renderer_create_window,
+    renderer_destroy_window, renderer_destroy_window_sys, renderer_render_window,
+    shutdown_multi_viewport_support, unary_callback_matches, validate_secondary_viewports,
 };
 use super::registry::{
     CurrentContextGuard, borrow_renderer, has_renderer_state, insert_renderer_state,
@@ -13,10 +13,11 @@ use super::surface::{
     SurfaceAction, SurfaceEvent, ViewportWgpuData, request_close_after_surface_creation_failure,
     should_clear_viewport, surface_action,
 };
-use super::{CallbackOwnershipError, enable};
+use super::{CallbackOwnershipError, enable, logical_size_to_framebuffer};
 use crate::renderer::WgpuRenderer;
 use dear_imgui_rs::platform_io::Viewport;
 use dear_imgui_rs::{BackendFlags, Context, ViewportFlags};
+use std::cell::Cell;
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::sync::atomic::Ordering;
@@ -28,6 +29,35 @@ fn lock_context() -> MutexGuard<'static, ()> {
         .get_or_init(|| TestMutex::new(()))
         .lock()
         .unwrap_or_else(|poison| poison.into_inner())
+}
+
+#[test]
+fn logical_size_conversion_clamps_invalid_dimensions_and_scale() {
+    assert_eq!(
+        logical_size_to_framebuffer([320.0, 200.0], [1.5, 2.0]),
+        [480, 400]
+    );
+    assert_eq!(
+        logical_size_to_framebuffer([0.0, f32::NAN], [0.0, f32::INFINITY]),
+        [1, 1]
+    );
+}
+
+#[test]
+fn framebuffer_size_is_queried_only_for_pending_reconfigure() {
+    let calls = Cell::new(0);
+    let query = || {
+        calls.set(calls.get() + 1);
+        Some([640, 480])
+    };
+
+    assert_eq!(framebuffer_size_for_reconfigure(false, query), None);
+    assert_eq!(calls.get(), 0);
+    assert_eq!(
+        framebuffer_size_for_reconfigure(true, query),
+        Some([640, 480])
+    );
+    assert_eq!(calls.get(), 1);
 }
 
 unsafe fn install_test_renderer(

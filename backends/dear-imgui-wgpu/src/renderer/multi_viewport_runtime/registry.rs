@@ -42,9 +42,16 @@ pub(super) struct CurrentContextGuard {
 }
 
 impl CurrentContextGuard {
+    /// # Safety
+    ///
+    /// `target` must be null or a live context for the current thread. Neither it nor the context
+    /// that is current on entry may be destroyed before the returned guard is dropped.
     pub(super) unsafe fn bind(target: *mut dear_imgui_rs::sys::ImGuiContext) -> Self {
+        // SAFETY: reading the current context does not dereference it; the caller owns context
+        // lifetime and thread-affinity for the duration of the guard.
         let previous = unsafe { dear_imgui_rs::sys::igGetCurrentContext() };
         if previous != target {
+            // SAFETY: `target` satisfies the caller contract above and remains live until drop.
             unsafe { dear_imgui_rs::sys::igSetCurrentContext(target) };
         }
         Self { previous, target }
@@ -54,12 +61,14 @@ impl CurrentContextGuard {
 impl Drop for CurrentContextGuard {
     fn drop(&mut self) {
         if self.previous != self.target {
+            // SAFETY: `bind` requires the previously current context to outlive this guard.
             unsafe { dear_imgui_rs::sys::igSetCurrentContext(self.previous) };
         }
     }
 }
 
 pub(super) fn current_context() -> *mut dear_imgui_rs::sys::ImGuiContext {
+    // SAFETY: this reads the current-context pointer without dereferencing it.
     unsafe { dear_imgui_rs::sys::igGetCurrentContext() }
 }
 

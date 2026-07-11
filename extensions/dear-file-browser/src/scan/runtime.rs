@@ -36,9 +36,9 @@ pub(crate) enum RuntimeBatchKind {
 
 /// A scan coordinator with a synchronous fallback and a native worker path.
 ///
-/// Native scans run on a fixed process-wide executor. Each runtime has at most
+/// Native scans run on a worker owned by this runtime. Each runtime has at most
 /// one running and one coalesced pending request, so a filesystem that ignores
-/// cancellation cannot cause unbounded thread or request growth.
+/// cancellation cannot cause unbounded request growth or starve another dialog.
 #[derive(Debug, Default)]
 pub(crate) struct ScanRuntime {
     blocking_batches: VecDeque<RuntimeBatch>,
@@ -128,18 +128,16 @@ impl ScanRuntime {
                 "background scanning requires a shared thread-safe filesystem",
             ));
         };
-        let queue_capacity = max_batches_per_tick.saturating_mul(2).clamp(2, 64);
-        if self
-            .background_session
-            .as_ref()
-            .is_some_and(|session| session.queue_capacity() != queue_capacity)
-            && let Some(session) = self.background_session.take()
-        {
-            session.close();
+        if self.background_session.is_none() {
+            // Keep one channel for the runtime lifetime so policy changes never
+            // join an in-flight worker merely to resize its bounded queue.
+            let queue_capacity = max_batches_per_tick.saturating_mul(2).clamp(2, 64);
+            self.background_session = Some(BackgroundSession::new(queue_capacity)?);
         }
         let session = self
             .background_session
-            .get_or_insert_with(|| BackgroundSession::new(queue_capacity));
+            .as_ref()
+            .expect("background session was just created");
         session.submit(ScanJob {
             generation,
             cwd,
@@ -228,7 +226,7 @@ impl ScanRuntime {
 impl Drop for ScanRuntime {
     fn drop(&mut self) {
         #[cfg(not(target_arch = "wasm32"))]
-        if let Some(session) = self.background_session.as_ref() {
+        if let Some(mut session) = self.background_session.take() {
             session.close();
         }
     }

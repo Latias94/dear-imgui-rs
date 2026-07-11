@@ -53,6 +53,16 @@ impl ControlledFileSystem {
     }
 }
 
+struct ReleaseOnDrop(Vec<Arc<ControlledFileSystem>>);
+
+impl Drop for ReleaseOnDrop {
+    fn drop(&mut self) {
+        for filesystem in &self.0 {
+            filesystem.release();
+        }
+    }
+}
+
 impl FileSystem for ControlledFileSystem {
     fn visit_dir(
         &self,
@@ -164,6 +174,7 @@ fn background_submit_returns_before_filesystem_unblocks_and_streams_batches() {
     let filesystem = Arc::new(ControlledFileSystem::new(entries(5), started_tx, false));
     let capability = FileSystemCapability::background(filesystem.clone());
     let mut runtime = ScanRuntime::default();
+    let _release_on_drop = ReleaseOnDrop(vec![filesystem.clone()]);
 
     let (returned_tx, returned_rx) = mpsc::channel();
     let (timely_tx, timely_rx) = mpsc::channel();
@@ -211,6 +222,7 @@ fn superseding_scan_cancels_old_worker_without_waiting_for_it() {
     let new_filesystem = Arc::new(ControlledFileSystem::new(entries(1), new_started_tx, true));
     let new_capability = FileSystemCapability::background(new_filesystem);
     let mut runtime = ScanRuntime::default();
+    let _release_on_drop = ReleaseOnDrop(vec![old_filesystem.clone()]);
 
     runtime
         .submit_background(
@@ -259,6 +271,7 @@ fn repeated_supersession_coalesces_to_latest_request_without_spawning_more_worke
     let filesystem = Arc::new(ControlledFileSystem::new(entries(1), started_tx, false));
     let capability = FileSystemCapability::background(filesystem.clone());
     let mut runtime = ScanRuntime::default();
+    let _release_on_drop = ReleaseOnDrop(vec![filesystem.clone()]);
 
     runtime
         .submit_background(
@@ -321,11 +334,64 @@ fn repeated_supersession_coalesces_to_latest_request_without_spawning_more_worke
 }
 
 #[test]
-fn runtime_drop_is_non_blocking_while_filesystem_is_blocked() {
+fn blocked_runtime_workers_do_not_starve_a_new_runtime() {
+    let mut runtimes = Vec::new();
+    let mut release_on_drop = ReleaseOnDrop(Vec::new());
+
+    for generation in 1..=4 {
+        let (started_tx, started_rx) = mpsc::channel();
+        let filesystem = Arc::new(ControlledFileSystem::new(entries(1), started_tx, false));
+        let capability = FileSystemCapability::background(filesystem.clone());
+        let mut runtime = ScanRuntime::default();
+
+        runtime
+            .submit_background(
+                ScanGeneration::new(generation),
+                PathBuf::from(format!("/blocked-{generation}")),
+                1,
+                1,
+                &capability,
+            )
+            .expect("blocked worker should start");
+
+        release_on_drop.0.push(filesystem);
+        runtimes.push(runtime);
+        started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("blocked scan did not start");
+    }
+
+    let (started_tx, started_rx) = mpsc::channel();
+    let filesystem = Arc::new(ControlledFileSystem::new(entries(1), started_tx, true));
+    let capability = FileSystemCapability::background(filesystem.clone());
+    let mut runtime = ScanRuntime::default();
+    release_on_drop.0.push(filesystem);
+
+    runtime
+        .submit_background(
+            ScanGeneration::new(5),
+            PathBuf::from("/fresh"),
+            1,
+            1,
+            &capability,
+        )
+        .expect("fresh worker should start");
+    started_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("blocked runtimes starved a fresh scan");
+
+    drop(release_on_drop);
+    drop(runtime);
+    drop(runtimes);
+}
+
+#[test]
+fn runtime_drop_waits_for_a_blocked_worker_to_finish() {
     let (started_tx, started_rx) = mpsc::channel();
     let filesystem = Arc::new(ControlledFileSystem::new(entries(8), started_tx, false));
     let capability = FileSystemCapability::background(filesystem.clone());
     let mut runtime = ScanRuntime::default();
+    let _release_on_drop = ReleaseOnDrop(vec![filesystem.clone()]);
     runtime
         .submit_background(
             ScanGeneration::new(1),
@@ -347,14 +413,23 @@ fn runtime_drop_is_non_blocking_while_filesystem_is_blocked() {
         drop(runtime);
         dropped_tx.send(()).expect("drop observer disappeared");
     });
-    if dropped_rx.recv_timeout(Duration::from_secs(1)).is_err() {
-        filesystem.release();
-        let _ = drop_thread.join();
-        panic!("runtime drop waited for a blocked filesystem");
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while !cancel.load(Ordering::Acquire) {
+        assert!(
+            Instant::now() < deadline,
+            "runtime drop did not request cancellation"
+        );
+        std::thread::yield_now();
     }
-    assert!(cancel.load(Ordering::Acquire));
+    assert!(
+        dropped_rx.recv_timeout(Duration::from_millis(100)).is_err(),
+        "runtime drop returned before the blocked worker finished"
+    );
 
     filesystem.release();
+    dropped_rx
+        .recv_timeout(Duration::from_secs(1))
+        .expect("runtime drop did not finish after the worker returned");
     drop_thread.join().expect("runtime drop panicked");
 
     let deadline = Instant::now() + Duration::from_secs(1);
@@ -370,11 +445,12 @@ fn runtime_drop_is_non_blocking_while_filesystem_is_blocked() {
 }
 
 #[test]
-fn background_queue_capacity_tracks_policy_changes() {
+fn background_queue_capacity_is_stable_for_runtime_lifetime() {
     let (started_tx, started_rx) = mpsc::channel();
     let filesystem = Arc::new(ControlledFileSystem::new(entries(8), started_tx, false));
     let capability = FileSystemCapability::background(filesystem.clone());
     let mut runtime = ScanRuntime::default();
+    let _release_on_drop = ReleaseOnDrop(vec![filesystem.clone()]);
 
     runtime
         .submit_background(
@@ -399,7 +475,7 @@ fn background_queue_capacity_tracks_policy_changes() {
             &capability,
         )
         .expect("replacement worker should start");
-    assert_eq!(runtime.background_queue_capacity(), Some(2));
+    assert_eq!(runtime.background_queue_capacity(), Some(64));
 
     filesystem.release();
 }

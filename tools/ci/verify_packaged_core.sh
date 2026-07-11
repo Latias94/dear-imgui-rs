@@ -11,7 +11,7 @@ Usage:
 
 The default mode validates every publishable .crate from a clean clone and performs
 host round-trips for the normal and stack-layout Dear ImGui native artifacts. The
-prebuilt-only mode consumes artifacts already produced by the binary workflow.
+prebuilt-only mode consumes all four artifacts produced by the binary workflow.
 EOF
 }
 
@@ -33,7 +33,17 @@ from pathlib import Path
 destination = Path(sys.argv[1])
 dependency_path = Path(sys.argv[2]).resolve()
 profile = sys.argv[3]
-features = ', features = ["stack-layout"]' if profile == "stack-layout" else ""
+profile_features = {
+    "normal": [],
+    "freetype": ["freetype"],
+    "stack-layout": ["stack-layout"],
+    "stack-layout-freetype": ["stack-layout", "freetype"],
+}
+try:
+    selected_features = profile_features[profile]
+except KeyError as error:
+    raise SystemExit(f"unsupported prebuilt consumer profile: {profile}") from error
+features = f", features = {json.dumps(selected_features)}" if selected_features else ""
 destination.joinpath("Cargo.toml").write_text(
     "\n".join(
         (
@@ -56,7 +66,7 @@ destination.joinpath("Cargo.toml").write_text(
     encoding="utf-8",
 )
 
-if profile == "stack-layout":
+if "stack-layout" in selected_features:
     frame_body = """
         let layout = ui.begin_horizontal("artifact-row", [0.0, 0.0], -1.0);
         ui.text("stack-layout artifact");
@@ -89,8 +99,9 @@ select_core_prebuilt_archives() {
     local target="$2"
     local crt="$3"
     local output_dir="$4"
+    local profile_scope="$5"
 
-    python3 - "$package_dir" "$target" "$crt" "$output_dir" <<'PY'
+    python3 - "$package_dir" "$target" "$crt" "$output_dir" "$profile_scope" <<'PY'
 import sys
 import tarfile
 from pathlib import Path
@@ -99,9 +110,23 @@ package_dir = Path(sys.argv[1]).resolve()
 expected_target = sys.argv[2]
 expected_crt = sys.argv[3]
 output_dir = Path(sys.argv[4])
-profiles = {
+profile_scope = sys.argv[5]
+all_profiles = {
     frozenset(("platform-io-aggregate-hooks", "wchar32")): "normal",
+    frozenset(("platform-io-aggregate-hooks", "freetype", "wchar32")): "freetype",
     frozenset(("platform-io-aggregate-hooks", "stack-layout", "wchar32")): "stack-layout",
+    frozenset(("platform-io-aggregate-hooks", "stack-layout", "freetype", "wchar32")): "stack-layout-freetype",
+}
+if profile_scope == "base":
+    required_profiles = {"normal", "stack-layout"}
+elif profile_scope == "all":
+    required_profiles = set(all_profiles.values())
+else:
+    raise SystemExit(f"unsupported prebuilt profile scope: {profile_scope}")
+profiles = {
+    features: name
+    for features, name in all_profiles.items()
+    if name in required_profiles
 }
 matches = {name: [] for name in profiles.values()}
 
@@ -208,38 +233,40 @@ verify_core_prebuilt_packages() {
     local target="$2"
     local crt="${3:-}"
     local source_root="${4:-$workspace_root}"
+    local profile_scope="${5:-base}"
+    local profiles=(normal stack-layout)
+    if [[ "$profile_scope" == "all" ]]; then
+        profiles+=(freetype stack-layout-freetype)
+    elif [[ "$profile_scope" != "base" ]]; then
+        echo "::error::unsupported prebuilt profile scope: $profile_scope"
+        exit 2
+    fi
     local roundtrip_work_dir
     roundtrip_work_dir="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/dear-imgui-prebuilt-consumer.XXXXXX")"
 
-    select_core_prebuilt_archives "$package_dir" "$target" "$crt" "$roundtrip_work_dir"
-    local normal_archive stack_archive
-    normal_archive="$(<"$roundtrip_work_dir/normal.path")"
-    stack_archive="$(<"$roundtrip_work_dir/stack-layout.path")"
-
-    mkdir -p "$roundtrip_work_dir/artifacts/normal" "$roundtrip_work_dir/artifacts/stack-layout"
-    tar -xzf "$normal_archive" -C "$roundtrip_work_dir/artifacts/normal"
-    tar -xzf "$stack_archive" -C "$roundtrip_work_dir/artifacts/stack-layout"
-    test -f "$roundtrip_work_dir/artifacts/normal/manifest.txt"
-    test -f "$roundtrip_work_dir/artifacts/stack-layout/manifest.txt"
-
-    write_prebuilt_consumer "$roundtrip_work_dir/consumers/normal" "$source_root" normal
-    write_prebuilt_consumer \
-        "$roundtrip_work_dir/consumers/stack-layout" \
-        "$source_root" \
-        stack-layout
-
-    run_prebuilt_consumer \
-        normal \
-        "$roundtrip_work_dir/consumers/normal" \
-        "$roundtrip_work_dir/artifacts/normal" \
+    select_core_prebuilt_archives \
+        "$package_dir" \
         "$target" \
-        "$roundtrip_work_dir/targets/normal"
-    run_prebuilt_consumer \
-        stack-layout \
-        "$roundtrip_work_dir/consumers/stack-layout" \
-        "$roundtrip_work_dir/artifacts/stack-layout" \
-        "$target" \
-        "$roundtrip_work_dir/targets/stack-layout"
+        "$crt" \
+        "$roundtrip_work_dir" \
+        "$profile_scope"
+    for profile in "${profiles[@]}"; do
+        local archive
+        archive="$(<"$roundtrip_work_dir/$profile.path")"
+        mkdir -p "$roundtrip_work_dir/artifacts/$profile"
+        tar -xzf "$archive" -C "$roundtrip_work_dir/artifacts/$profile"
+        test -f "$roundtrip_work_dir/artifacts/$profile/manifest.txt"
+        write_prebuilt_consumer \
+            "$roundtrip_work_dir/consumers/$profile" \
+            "$source_root" \
+            "$profile"
+        run_prebuilt_consumer \
+            "$profile" \
+            "$roundtrip_work_dir/consumers/$profile" \
+            "$roundtrip_work_dir/artifacts/$profile" \
+            "$target" \
+            "$roundtrip_work_dir/targets/$profile"
+    done
 
     reject_prebuilt_profile_mismatch \
         normal-consumer-with-stack-layout-artifact \
@@ -257,7 +284,7 @@ verify_core_prebuilt_packages() {
         "$roundtrip_work_dir/mismatch-stack-layout.log"
 
     rm -rf "$roundtrip_work_dir"
-    echo "Verified normal and stack-layout prebuilt consumer round-trips for $target."
+    echo "Verified ${profiles[*]} prebuilt consumer round-trips for $target."
 }
 
 if [[ "${1:-}" == "--verify-prebuilt-packages" ]]; then
@@ -265,7 +292,7 @@ if [[ "${1:-}" == "--verify-prebuilt-packages" ]]; then
         usage >&2
         exit 2
     fi
-    verify_core_prebuilt_packages "$2" "$3" "${4:-}" "$workspace_root"
+    verify_core_prebuilt_packages "$2" "$3" "${4:-}" "$workspace_root" all
     exit 0
 elif [[ $# -ne 0 ]]; then
     usage >&2
@@ -632,6 +659,7 @@ verify_core_prebuilt_packages \
     "$native_package_dir" \
     "$(host_target)" \
     "" \
-    "$package_workspace"
+    "$package_workspace" \
+    base
 
 echo "Verified packaged core consumers and $publishable_count publishable source archives."

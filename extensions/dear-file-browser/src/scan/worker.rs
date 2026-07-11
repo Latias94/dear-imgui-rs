@@ -1,6 +1,7 @@
 use std::io;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, mpsc};
+use std::thread;
 
 use crate::dialog_core::ScanGeneration;
 use crate::fs::{FileSystem, ScanVisit};
@@ -8,96 +9,73 @@ use crate::fs::{FileSystem, ScanVisit};
 use super::session::{ScanJob, ScanSessionState};
 use super::{RuntimeBatch, RuntimeBatchKind};
 
-const BACKGROUND_WORKER_COUNT: usize = 4;
-const BACKGROUND_SESSION_QUEUE_CAPACITY: usize = 64;
-
-pub(super) struct BackgroundExecutor {
-    sender: std::sync::mpsc::SyncSender<Arc<ScanSessionState>>,
-    _workers: Vec<std::thread::JoinHandle<()>>,
+/// One native worker owned by a scan session.
+pub(super) struct ScanWorker {
+    state: Arc<ScanSessionState>,
+    wake_sender: Option<mpsc::SyncSender<()>>,
+    handle: Option<thread::JoinHandle<()>>,
 }
 
-impl BackgroundExecutor {
-    fn new() -> io::Result<Self> {
-        let (sender, receiver) = std::sync::mpsc::sync_channel(BACKGROUND_SESSION_QUEUE_CAPACITY);
-        let receiver = Arc::new(Mutex::new(receiver));
-        let mut workers = Vec::with_capacity(BACKGROUND_WORKER_COUNT);
-        for index in 0..BACKGROUND_WORKER_COUNT {
-            let receiver = Arc::clone(&receiver);
-            match std::thread::Builder::new()
-                .name(format!("dear-file-browser-scan-{index}"))
-                .spawn(move || executor_worker_loop(receiver))
-            {
-                Ok(worker) => workers.push(worker),
-                Err(error) => {
-                    drop(sender);
-                    for worker in workers {
-                        let _ = worker.join();
-                    }
-                    return Err(error);
-                }
-            }
-        }
+impl ScanWorker {
+    pub(super) fn spawn(state: Arc<ScanSessionState>) -> io::Result<Self> {
+        let (wake_sender, wake_receiver) = mpsc::sync_channel(1);
+        let worker_state = Arc::clone(&state);
+        let handle = thread::Builder::new()
+            .name("dear-file-browser-scan".to_owned())
+            .spawn(move || worker_loop(worker_state, wake_receiver))?;
+
         Ok(Self {
-            sender,
-            _workers: workers,
+            state,
+            wake_sender: Some(wake_sender),
+            handle: Some(handle),
         })
     }
 
-    pub(super) fn schedule(&self, session: Arc<ScanSessionState>) -> io::Result<()> {
-        self.sender.try_send(session).map_err(|error| match error {
-            std::sync::mpsc::TrySendError::Full(_) => io::Error::new(
-                io::ErrorKind::WouldBlock,
-                "background scan executor queue is full",
-            ),
-            std::sync::mpsc::TrySendError::Disconnected(_) => io::Error::new(
+    pub(super) fn wake(&self) -> io::Result<()> {
+        let Some(wake_sender) = self.wake_sender.as_ref() else {
+            return Err(io::Error::new(
                 io::ErrorKind::BrokenPipe,
-                "background scan executor is unavailable",
-            ),
-        })
-    }
-}
-
-pub(super) fn background_executor() -> io::Result<&'static BackgroundExecutor> {
-    static EXECUTOR: OnceLock<BackgroundExecutor> = OnceLock::new();
-    static INIT: Mutex<()> = Mutex::new(());
-
-    if let Some(executor) = EXECUTOR.get() {
-        return Ok(executor);
-    }
-    let _guard = INIT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    if let Some(executor) = EXECUTOR.get() {
-        return Ok(executor);
-    }
-    let executor = BackgroundExecutor::new()?;
-    let _ = EXECUTOR.set(executor);
-    EXECUTOR.get().ok_or_else(|| {
-        io::Error::other("background executor initialization did not publish an instance")
-    })
-}
-
-fn executor_worker_loop(receiver: Arc<Mutex<std::sync::mpsc::Receiver<Arc<ScanSessionState>>>>) {
-    loop {
-        let session = {
-            let receiver = receiver
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            match receiver.recv() {
-                Ok(session) => session,
-                Err(_) => return,
-            }
+                "background scan worker is closed",
+            ));
         };
 
-        while let Some((job, cancel)) = session.take_next() {
+        match wake_sender.try_send(()) {
+            Ok(()) | Err(mpsc::TrySendError::Full(())) => Ok(()),
+            Err(mpsc::TrySendError::Disconnected(())) => Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "background scan worker is unavailable",
+            )),
+        }
+    }
+
+    pub(super) fn close(&mut self) {
+        self.state.close();
+        self.wake_sender.take();
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+impl Drop for ScanWorker {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
+fn worker_loop(state: Arc<ScanSessionState>, wake_receiver: mpsc::Receiver<()>) {
+    while wake_receiver.recv().is_ok() {
+        while let Some((job, cancel)) = state.take_next() {
             let generation = job.generation;
-            run_scan_job(job, session.batch_sender(), Arc::clone(&cancel));
-            session.finish(generation, &cancel);
+            run_scan_job(job, state.batch_sender(), Arc::clone(&cancel));
+            state.finish(generation, &cancel);
         }
     }
 }
 
 fn run_scan_job(
     job: ScanJob,
-    sender: std::sync::mpsc::SyncSender<RuntimeBatch>,
+    sender: mpsc::SyncSender<RuntimeBatch>,
     cancel: Arc<std::sync::atomic::AtomicBool>,
 ) {
     let ScanJob {
@@ -132,7 +110,7 @@ fn run_worker(
     cwd: PathBuf,
     batch_entries: usize,
     filesystem: Arc<dyn FileSystem + Send + Sync>,
-    sender: std::sync::mpsc::SyncSender<RuntimeBatch>,
+    sender: mpsc::SyncSender<RuntimeBatch>,
     cancel: Arc<std::sync::atomic::AtomicBool>,
 ) {
     if !send_cancellable(
@@ -226,7 +204,7 @@ fn run_worker(
 }
 
 fn send_cancellable(
-    sender: &std::sync::mpsc::SyncSender<RuntimeBatch>,
+    sender: &mpsc::SyncSender<RuntimeBatch>,
     cancel: &std::sync::atomic::AtomicBool,
     mut batch: RuntimeBatch,
 ) -> bool {
@@ -236,10 +214,10 @@ fn send_cancellable(
         }
         match sender.try_send(batch) {
             Ok(()) => return true,
-            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => return false,
-            Err(std::sync::mpsc::TrySendError::Full(returned)) => {
+            Err(mpsc::TrySendError::Disconnected(_)) => return false,
+            Err(mpsc::TrySendError::Full(returned)) => {
                 batch = returned;
-                std::thread::sleep(std::time::Duration::from_millis(1));
+                thread::sleep(std::time::Duration::from_millis(1));
             }
         }
     }

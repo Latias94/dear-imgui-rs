@@ -136,7 +136,7 @@ jobs:
         run: cargo nextest run -p dear-imgui-rs --features multi-viewport
 
       - name: Run reflection acceptance tests
-        run: cargo nextest run -p dear-imgui-reflect
+        run: cargo nextest run -p dear-imgui-reflect --features glam,mint
 
       - name: Run file browser acceptance tests
         run: cargo nextest run -p dear-file-browser
@@ -230,18 +230,23 @@ jobs:
           - wgpu: '27'
             platform: Winit
             features: wgpu-27,multi-viewport-winit
+            lint_features: wgpu-27
           - wgpu: '28'
             platform: Winit
             features: wgpu-28,multi-viewport-winit
+            lint_features: wgpu-28
           - wgpu: '29'
             platform: Winit
             features: wgpu-29,multi-viewport-winit
+            lint_features: wgpu-29
           - wgpu: '30'
             platform: Winit
             features: wgpu-30,multi-viewport-winit
+            lint_features: wgpu-30,multi-viewport-winit
           - wgpu: '30'
             platform: SDL3
             features: wgpu-30,multi-viewport-sdl3
+            lint_features: wgpu-30,multi-viewport-sdl3
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -254,6 +259,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
@@ -281,6 +288,16 @@ jobs:
 
       - name: Test exact WGPU route
         run: cargo nextest run -p dear-imgui-wgpu --lib --no-default-features --features "${{ matrix.features }}"
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+
+      - name: Lint exact WGPU release route
+        shell: bash
+        run: |
+          set -euo pipefail
+          read -r -a historical_lints <<< "$CLIPPY_HISTORICAL_LINTS"
+          cargo clippy -p dear-imgui-wgpu --all-targets --no-default-features --features "${{ matrix.lint_features }}" -- \
+            -D warnings "${historical_lints[@]}"
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
 
@@ -315,6 +332,8 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
@@ -340,6 +359,17 @@ jobs:
 
       - name: Test exact Ash route including NoRendererClear policy
         run: cargo nextest run -p dear-imgui-ash --lib --no-default-features --features "${{ matrix.features }}"
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+
+      - name: Lint exact classic Ash release route
+        if: matrix.rendering == 'classic'
+        shell: bash
+        run: |
+          set -euo pipefail
+          read -r -a historical_lints <<< "$CLIPPY_HISTORICAL_LINTS"
+          cargo clippy -p dear-imgui-ash --all-targets --no-default-features --features "${{ matrix.features }}" -- \
+            -D warnings "${historical_lints[@]}"
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
 
@@ -630,24 +660,6 @@ jobs:
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
 
-      - name: Lint WGPU 30 Winit multi-viewport route
-        run: |
-          set -euo pipefail
-          read -r -a historical_lints <<< "$CLIPPY_HISTORICAL_LINTS"
-          cargo clippy -p dear-imgui-wgpu --lib --no-default-features --features wgpu-30,multi-viewport-winit -- \
-            -D warnings "${historical_lints[@]}"
-        env:
-          IMGUI_SYS_FORCE_BUILD: "1"
-
-      - name: Lint Ash dynamic Winit multi-viewport route
-        run: |
-          set -euo pipefail
-          read -r -a historical_lints <<< "$CLIPPY_HISTORICAL_LINTS"
-          cargo clippy -p dear-imgui-ash --lib --no-default-features --features multi-viewport-winit,dynamic-rendering -- \
-            -D warnings "${historical_lints[@]}"
-        env:
-          IMGUI_SYS_FORCE_BUILD: "1"
-
       - name: Lint node editor blueprints route
         run: |
           set -euo pipefail
@@ -797,6 +809,9 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
@@ -833,6 +848,12 @@ jobs:
               fi
             done
           done
+
+      - name: Run aggregate setter fallbacks without native C++ hooks
+        env:
+          LIBCLANG_PATH: ${{ github.workspace }}/ci-missing-libclang
+          IMGUI_SYS_SKIP_CC: "1"
+        run: cargo nextest run -p dear-imgui-sys aggregate_setters_without_cpp_hooks
 
       - name: Check sys crates without libclang or native C/C++
         shell: bash
@@ -1234,6 +1255,9 @@ jobs:
 
       - name: Check explicit core WASM feature
         run: cargo check -p dear-imgui-rs --target wasm32-unknown-unknown --no-default-features --features wasm
+
+      - name: Check file browser WASM scan policy branches
+        run: cargo check -p dear-file-browser --target wasm32-unknown-unknown --tests --no-default-features --features "imgui,dear-imgui-rs/wasm"
 
       - name: Reject core WASM target without the explicit feature
         shell: bash

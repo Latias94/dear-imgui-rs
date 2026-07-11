@@ -33,6 +33,7 @@ mod validation;
 
 pub use clip_rect::ClipRectToken;
 pub use group::GroupToken;
+pub use spacing::IndentToken;
 #[cfg(feature = "stack-layout")]
 pub use stack_layout::{
     HorizontalStackLayoutToken, StackLayoutId, StackLayoutSuspensionToken, VerticalStackLayoutToken,

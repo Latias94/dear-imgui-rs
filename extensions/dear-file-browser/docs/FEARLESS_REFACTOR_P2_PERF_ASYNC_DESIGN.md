@@ -13,8 +13,8 @@ draw API no longer accepts a frame-borrowed `&dyn FileSystem`.
 ```text
 native Background
   Arc<dyn FileSystem + Send + Sync>
-    -> fixed process-wide executor
-    -> coalesced per-dialog scan session
+    -> per-dialog ScanWorker
+    -> coalesced scan session
     -> FileSystem::visit_dir
     -> bounded raw FsEntry channel
     -> UI poll budget
@@ -68,24 +68,30 @@ silently downgrades the policy.
 
 ## Worker Lifecycle
 
-Native scans use a fixed four-thread process-wide executor and a bounded session
-queue. A dialog runtime owns a scan session with:
+Each native `ScanRuntime` owns one `ScanWorker` and a bounded session queue. The
+worker owns its wake channel, cooperative cancellation state, and `JoinHandle`. A
+dialog runtime has:
 
 - one bounded raw-batch `sync_channel`,
 - at most one running request,
 - at most one pending request, and
 - an atomic cooperative cancel flag for the running generation.
 
+The raw-batch channel is sized from the first background policy used by the
+runtime and remains stable for that runtime's lifetime. Later policy changes alter
+the UI apply budget without joining an in-flight worker just to resize its queue.
+
 Starting a new generation cancels the running generation and replaces the pending
 request. Repeated navigation therefore coalesces to the latest destination without
-creating another thread or retaining every intermediate filesystem/path. If a
+retaining every intermediate filesystem/path or waiting for the old call. If a
 filesystem is blocked before it can observe cancellation, the latest request starts
 when that call returns; navigation and submission still return immediately.
 
-`ScanRuntime::drop` marks the session closed and drops its receiver without joining.
-The fixed executor owns worker lifetimes, observes the disconnected receiver, and
-releases the closed session after any in-flight filesystem call returns. This keeps
-UI teardown non-blocking while placing a hard bound on threads and queued sessions.
+`ScanRuntime::drop` marks its session closed, requests cancellation, closes the
+worker wake channel, and joins the worker after releasing the session mutex. No
+worker outlives its runtime. A filesystem blocked in an uninterruptible call delays
+destruction of that dialog until the call returns, but cannot occupy capacity needed
+by another dialog's worker.
 
 The bounded sender retries while checking cancellation. This prevents a worker
 from remaining blocked forever when its receiver is dropped or its generation is
@@ -132,7 +138,9 @@ sleeps. It proves:
 - repeated blocked generations retain only the latest pending request,
 - stale entries and errors cannot replace the new cwd, status, or selection,
 - cancellation reaches the streaming visitor, and
-- runtime drop returns before a blocked filesystem is released.
+- runtime drop requests cancellation, waits for its worker, and finishes once a
+  blocked filesystem is released, and
+- blocked workers belonging to several dialogs do not starve a fresh dialog scan.
 
 Run:
 

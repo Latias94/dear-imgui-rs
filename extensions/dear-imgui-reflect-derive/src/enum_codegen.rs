@@ -223,9 +223,9 @@ pub fn derive_for_enum(
                 quote! {
                     Self::#v_ident( #(#patterns),* ) => {
                         let __variant_path = inspector.push_path_static(#variant_segment_lit);
-                        ui.indent();
+                        let _indent = ui.begin_indent();
                         #(#field_stmts)*
-                        ui.unindent();
+                        drop(_indent);
                         drop(__variant_path);
                     }
                 }
@@ -313,9 +313,9 @@ pub fn derive_for_enum(
                 quote! {
                     #match_pat => {
                         let __variant_path = inspector.push_path_static(#variant_segment_lit);
-                        ui.indent();
+                        let _indent = ui.begin_indent();
                         #(#field_stmts)*
-                        ui.unindent();
+                        drop(_indent);
                         drop(__variant_path);
                     }
                 }
@@ -351,9 +351,9 @@ pub fn derive_for_enum(
         quote! {
             let mut changed_select = false;
             ui.text(label);
-            ui.indent();
+            let _indent = ui.begin_indent();
             #(#radio_arms)*
-            ui.unindent();
+            drop(_indent);
         }
     } else {
         quote! {

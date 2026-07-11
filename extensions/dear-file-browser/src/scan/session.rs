@@ -6,12 +6,14 @@ use crate::dialog_core::ScanGeneration;
 use crate::fs::FileSystem;
 
 use super::RuntimeBatch;
-use super::executor::background_executor;
+use super::worker::ScanWorker;
 
 pub(super) struct BackgroundSession {
+    #[cfg(test)]
     queue_capacity: usize,
     state: Arc<ScanSessionState>,
     receiver: std::sync::mpsc::Receiver<RuntimeBatch>,
+    worker: ScanWorker,
 }
 
 impl std::fmt::Debug for BackgroundSession {
@@ -23,16 +25,20 @@ impl std::fmt::Debug for BackgroundSession {
 }
 
 impl BackgroundSession {
-    pub(super) fn new(queue_capacity: usize) -> Self {
+    pub(super) fn new(queue_capacity: usize) -> io::Result<Self> {
         let (sender, receiver) = std::sync::mpsc::sync_channel(queue_capacity);
-        Self {
+        let state = Arc::new(ScanSessionState {
+            sender,
+            inner: Mutex::new(ScanSessionInner::default()),
+        });
+        let worker = ScanWorker::spawn(Arc::clone(&state))?;
+        Ok(Self {
+            #[cfg(test)]
             queue_capacity,
-            state: Arc::new(ScanSessionState {
-                sender,
-                inner: Mutex::new(ScanSessionInner::default()),
-            }),
+            state,
             receiver,
-        }
+            worker,
+        })
     }
 
     pub(super) fn submit(&self, job: ScanJob) -> io::Result<()> {
@@ -40,7 +46,7 @@ impl BackgroundSession {
             return Ok(());
         }
 
-        if let Err(error) = background_executor()?.schedule(Arc::clone(&self.state)) {
+        if let Err(error) = self.worker.wake() {
             self.state.rollback_schedule();
             return Err(error);
         }
@@ -51,12 +57,13 @@ impl BackgroundSession {
         self.state.cancel_current();
     }
 
+    #[cfg(test)]
     pub(super) fn queue_capacity(&self) -> usize {
         self.queue_capacity
     }
 
-    pub(super) fn close(&self) {
-        self.state.close();
+    pub(super) fn close(&mut self) {
+        self.worker.close();
     }
 
     pub(super) fn poll_batch(&self) -> Option<RuntimeBatch> {
@@ -98,6 +105,12 @@ impl BackgroundSession {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         inner.current.as_ref().map(|scan| Arc::clone(&scan.cancel))
+    }
+}
+
+impl Drop for BackgroundSession {
+    fn drop(&mut self) {
+        self.close();
     }
 }
 
@@ -151,7 +164,7 @@ impl std::fmt::Debug for ScanSessionState {
 
 impl ScanSessionState {
     /// Replaces any pending request. Returns true when the session must be
-    /// inserted into the executor queue.
+    /// signaled for work.
     fn coalesce(&self, job: ScanJob) -> bool {
         let mut inner = self
             .inner
@@ -194,7 +207,7 @@ impl ScanSessionState {
         inner.pending = None;
     }
 
-    fn close(&self) {
+    pub(super) fn close(&self) {
         let mut inner = self
             .inner
             .lock()

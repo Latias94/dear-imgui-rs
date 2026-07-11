@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -59,6 +60,10 @@ METADATA_COMMAND = (
     "--format-version",
     "1",
 )
+
+
+def _duplicates(values: Sequence[str]) -> list[str]:
+    return sorted(value for value, count in Counter(values).items() if count > 1)
 
 
 class MetadataError(ValueError):
@@ -184,9 +189,7 @@ class WorkspaceMetadata:
             )
 
         names = [package.name for package in packages]
-        duplicate_names = sorted(
-            name for name in set(names) if names.count(name) > 1
-        )
+        duplicate_names = _duplicates(names)
         if duplicate_names:
             raise MetadataError(
                 "workspace package names must be unique: " + ", ".join(duplicate_names)
@@ -430,14 +433,10 @@ def validate_publish_order(
     ordered_paths = [path for _name, path in publish_order]
     publishable = {package.name: package for package in metadata.publishable_packages}
 
-    duplicate_names = sorted(
-        name for name in set(ordered_names) if ordered_names.count(name) > 1
-    )
+    duplicate_names = _duplicates(ordered_names)
     if duplicate_names:
         errors.append("PUBLISH_ORDER repeats package(s): " + ", ".join(duplicate_names))
-    duplicate_paths = sorted(
-        path for path in set(ordered_paths) if ordered_paths.count(path) > 1
-    )
+    duplicate_paths = _duplicates(ordered_paths)
     if duplicate_paths:
         errors.append("PUBLISH_ORDER repeats path(s): " + ", ".join(duplicate_paths))
 

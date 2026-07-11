@@ -1,7 +1,7 @@
+use std::cell::Cell;
 use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering as AtomicOrdering};
+use std::rc::Rc;
 use std::{
     collections::{BTreeSet, HashSet, VecDeque, btree_set, hash_map::DefaultHasher},
     hash::Hasher,
@@ -442,17 +442,17 @@ impl ProjectionOrder {
 
 #[derive(Debug)]
 struct ProjectionComparisonMetrics {
-    comparisons: AtomicUsize,
-    existing_entry_visits: AtomicUsize,
-    batch_start_sequence: AtomicU64,
+    comparisons: Cell<usize>,
+    existing_entry_visits: Cell<usize>,
+    batch_start_sequence: Cell<u64>,
 }
 
 impl Default for ProjectionComparisonMetrics {
     fn default() -> Self {
         Self {
-            comparisons: AtomicUsize::new(0),
-            existing_entry_visits: AtomicUsize::new(0),
-            batch_start_sequence: AtomicU64::new(Self::NO_BATCH),
+            comparisons: Cell::new(0),
+            existing_entry_visits: Cell::new(0),
+            batch_start_sequence: Cell::new(Self::NO_BATCH),
         }
     }
 }
@@ -461,39 +461,35 @@ impl ProjectionComparisonMetrics {
     const NO_BATCH: u64 = u64::MAX;
 
     fn begin_batch(&self, batch_start_sequence: u64) -> ProjectionMetricSnapshot {
-        self.batch_start_sequence
-            .store(batch_start_sequence, AtomicOrdering::Relaxed);
+        self.batch_start_sequence.set(batch_start_sequence);
         ProjectionMetricSnapshot {
-            comparisons: self.comparisons.load(AtomicOrdering::Relaxed),
-            existing_entry_visits: self.existing_entry_visits.load(AtomicOrdering::Relaxed),
+            comparisons: self.comparisons.get(),
+            existing_entry_visits: self.existing_entry_visits.get(),
         }
     }
 
     fn finish_batch(&self, before: ProjectionMetricSnapshot) -> ProjectionBatchWork {
-        self.batch_start_sequence
-            .store(Self::NO_BATCH, AtomicOrdering::Relaxed);
+        self.batch_start_sequence.set(Self::NO_BATCH);
         ProjectionBatchWork {
-            comparisons: self
-                .comparisons
-                .load(AtomicOrdering::Relaxed)
-                .saturating_sub(before.comparisons),
+            comparisons: self.comparisons.get().saturating_sub(before.comparisons),
             existing_entry_visits: self
                 .existing_entry_visits
-                .load(AtomicOrdering::Relaxed)
+                .get()
                 .saturating_sub(before.existing_entry_visits),
         }
     }
 
     fn record_comparison(&self, left_sequence: u64, right_sequence: u64) {
-        self.comparisons.fetch_add(1, AtomicOrdering::Relaxed);
-        let batch_start = self.batch_start_sequence.load(AtomicOrdering::Relaxed);
+        self.comparisons
+            .set(self.comparisons.get().saturating_add(1));
+        let batch_start = self.batch_start_sequence.get();
         if batch_start == Self::NO_BATCH {
             return;
         }
         let visits_existing = (left_sequence < batch_start) != (right_sequence < batch_start);
         if visits_existing {
             self.existing_entry_visits
-                .fetch_add(1, AtomicOrdering::Relaxed);
+                .set(self.existing_entry_visits.get().saturating_add(1));
         }
     }
 }
@@ -516,7 +512,7 @@ struct ProjectedEntry {
     name_lower: String,
     sequence: u64,
     order: ProjectionOrder,
-    metrics: Arc<ProjectionComparisonMetrics>,
+    metrics: Rc<ProjectionComparisonMetrics>,
 }
 
 impl ProjectedEntry {
@@ -524,7 +520,7 @@ impl ProjectedEntry {
         entry: DirEntry,
         sequence: u64,
         order: ProjectionOrder,
-        metrics: Arc<ProjectionComparisonMetrics>,
+        metrics: Rc<ProjectionComparisonMetrics>,
     ) -> Self {
         let name_lower = entry.name.to_lowercase();
         Self {
@@ -553,7 +549,7 @@ impl PartialOrd for ProjectedEntry {
 
 impl Ord for ProjectedEntry {
     fn cmp(&self, other: &Self) -> Ordering {
-        if Arc::ptr_eq(&self.metrics, &other.metrics) {
+        if Rc::ptr_eq(&self.metrics, &other.metrics) {
             self.metrics
                 .record_comparison(self.sequence, other.sequence);
         }
@@ -573,7 +569,7 @@ struct EntryProjection {
     visible_ids: HashSet<EntryId>,
     order: Option<ProjectionOrder>,
     next_sequence: u64,
-    metrics: Arc<ProjectionComparisonMetrics>,
+    metrics: Rc<ProjectionComparisonMetrics>,
 }
 
 impl EntryProjection {
@@ -611,7 +607,7 @@ impl EntryProjection {
             entry,
             sequence,
             order,
-            Arc::clone(&self.metrics),
+            Rc::clone(&self.metrics),
         ));
     }
 
@@ -3515,13 +3511,13 @@ mod tests {
             dirs_first: false,
             type_dots_to_extract: 1,
         };
-        let metrics = Arc::new(ProjectionComparisonMetrics::default());
+        let metrics = Rc::new(ProjectionComparisonMetrics::default());
         let mut old = make_file_entry("old.txt");
         old.size = Some(7);
         let mut new = make_file_entry("new.txt");
         new.size = Some(7);
-        let old_projected = ProjectedEntry::new(old.clone(), 0, order, Arc::clone(&metrics));
-        let new_projected = ProjectedEntry::new(new.clone(), 1, order, Arc::clone(&metrics));
+        let old_projected = ProjectedEntry::new(old.clone(), 0, order, Rc::clone(&metrics));
+        let new_projected = ProjectedEntry::new(new.clone(), 1, order, Rc::clone(&metrics));
 
         let before_metrics = old_projected.cmp(&new_projected);
         let metric_snapshot = metrics.begin_batch(1);

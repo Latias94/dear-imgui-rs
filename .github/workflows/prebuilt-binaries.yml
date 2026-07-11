@@ -365,7 +365,7 @@ jobs:
           IMGUIZMO_QUAT_SYS_PKG_CRT: ${{ matrix.crt }}
           TARGET: ${{ matrix.target }}
 
-      - name: Consume normal and stack-layout Dear ImGui artifacts
+      - name: Consume every Dear ImGui artifact profile
         if: |
           (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-imgui-sys-v'))) ||
           (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imgui-sys'))) ||
