@@ -6,7 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text just to fit a fixed column width.
 
-## [0.16.0] - 2026-07-10
+## [Unreleased]
+
+## [0.16.0]
 
 This is an intentionally source-breaking architecture release. It replaces shallow safe mirrors of Dear ImGui internals with explicit state owners, makes native callback and renderer lifetime contracts visible, and turns pregenerated bindings and prebuilts into reproducible target-specific artifacts.
 
@@ -32,7 +34,6 @@ This is an intentionally source-breaking architecture release. It replaces shall
 - Default `dear-imgui-wgpu` to WGPU 30 and keep WGPU 29, 28, and 27 behind separate mutually exclusive compatibility features.
 - Make WGPU and Ash multi-viewport `enable` entry points `unsafe`. The renderer must have a stable address, remain single-thread serialized with callback execution, and outlive every registered callback and secondary viewport. A pinned owner or `Box` is the normal integration pattern.
 - Require explicit ordered multi-viewport shutdown. Shut down renderer support first, then the platform backend, then drop the renderer, context, secondary/main windows, and GPU or Vulkan objects in their documented ownership order. Renderer reinitialization and explicit renderer shutdown reject an active callback runtime. Rust `Drop` is non-fallible best-effort cleanup and is not a substitute for the required ordered shutdown.
-- Replace duplicated Winit and SDL3 renderer implementations with one private shared runtime per renderer backend. Each adapter now shares callback ownership, viewport data, recovery, and teardown logic while retaining its platform-specific surface creation seam.
 - WGPU secondary surfaces now require the originating `Instance` and `Adapter`, recover lost/outdated/suboptimal surfaces, and treat timeout, occlusion, validation, and out-of-memory outcomes explicitly. `ViewportFlags::NO_RENDERER_CLEAR` loads the existing target instead of clearing it.
 - Ash secondary viewports now share one swapchain runtime for classic render-pass and dynamic-rendering routes, use per-image synchronization, retire old swapchains safely, clamp or pause zero-sized surfaces, and rebuild after out-of-date or suboptimal acquire/present results. `ViewportFlags::NO_RENDERER_CLEAR` uses Vulkan discard semantics rather than issuing a clear.
 - Replace dear-app's `AppBuilder`, `RunnerCallbacks`, `RunnerConfig`, `run_simple`, and `run_with_callbacks` APIs with `AppConfig`, one state-owning `Application`, and `dear_app::run`. The application, main window, add-ons, and Dear ImGui context survive WGPU device loss; only generation-scoped GPU resources are recreated, and stale external texture handles are rejected.
@@ -46,21 +47,22 @@ This is an intentionally source-breaking architecture release. It replaces shall
 
 ### Added
 
-- Add a deterministic binding specification shared by build scripts, regeneration, verification, packaging, and CI. It hashes the generator contract, exact compatibility targets, formatter, allow/block lists, enum normalization, header shims, opaque types, and fixed WASM provider.
+- Add a deterministic, host-independent binding specification shared by build scripts, regeneration, verification, packaging, and CI. It supplies self-contained standard-header shims, disables host include fallback, and hashes the generator contract, exact compatibility targets, formatter, allow/block lists, enum normalization, opaque types, and fixed WASM provider.
 - Add exact cimgui and nested Dear ImGui source revisions to package metadata so source identity survives `cargo package` without a `.git` directory.
 - Add strict `dear-imgui-sys` core native prebuilt manifests covering crate/version, target, link type, MSVC CRT, normalized artifact features, exact source revisions, and binding-spec hash. Missing, duplicate, unknown, or mismatched fields reject the core artifact.
 - Add a bounded native per-runtime scan worker with per-dialog cancellation, latest-request coalescing, bounded UI-thread batch application, owned-worker teardown, and generation filtering for stale results.
 
 ### Changed
 
+- Share callback ownership, viewport recovery, and teardown through one private runtime across the Winit and SDL3 adapters for each renderer backend.
 - Update `dear-app`, renderer examples, and the browser demo to WGPU 30 surface color-space and queue-present APIs.
 - Regenerate and verify the Windows, non-Windows, and WASM core binding profiles from one canonical command while keeping extension generation on the fixed `imgui-sys-v0` provider contract.
 
 ### Fixed
 
 - Statically link the C++ standard library for Windows GNU native C++ builds so downstream executables no longer require a separate `libstdc++-6.dll` at runtime. The Windows GNU CI job checks the produced test binary import table for this regression. Fixes #36, thanks @HampusMat.
+- Use the same path-only `EntryId` contract for file-browser operations and directory scans so created, renamed, and symbolic-link entries remain selectable after rescans, including on Windows.
 - Exercise aggregate PlatformIO callbacks through the real C++ slots on both MSVC `/MD` and `/MT`, preventing Rust declarations from drifting away from the compiler ABI actually used by Dear ImGui.
-- Prevent WGPU and Ash multi-viewport backends from treating foreign `RendererUserData` as their own state or clearing callbacks installed by another backend during teardown.
 
 ### Migration Examples
 

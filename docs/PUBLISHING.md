@@ -44,6 +44,7 @@ Before publishing, ensure:
   - Keep changelog prose soft-wrapped. Do not hard-wrap paragraphs or bullet text just to fit a fixed column width.
   - Verify the GitHub Release body that CI will use:
     ```bash
+    python3 tools/changelog.py check-unreleased
     python3 tools/changelog.py extract --version 0.16.0
     python3 tools/changelog.py check-soft-wrap --version 0.16.0
     ```

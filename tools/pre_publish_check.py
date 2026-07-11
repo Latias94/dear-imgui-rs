@@ -382,7 +382,7 @@ def check_git_status(repo_root: Path) -> Tuple[bool, List[str]]:
 def check_changelog_release_notes(
     repo_root: Path, metadata: WorkspaceMetadata
 ) -> Tuple[bool, List[str]]:
-    """Check that the current release has extractable, soft-wrapped release notes."""
+    """Check changelog structure and the current release notes."""
     print_check("Changelog release notes")
 
     try:
@@ -394,6 +394,7 @@ def check_changelog_release_notes(
     errors = []
     changelog_tool = repo_root / "tools" / "changelog.py"
     for command in (
+        ["check-unreleased"],
         ["extract", "--version", version],
         ["check-soft-wrap", "--version", version],
     ):
