@@ -3,9 +3,10 @@ use std::io;
 use std::path::PathBuf;
 
 use crate::dialog_core::ScanGeneration;
-use crate::fs::{FileSystem, FsEntry, ScanVisit};
+use crate::fs::{FileSystem, FsEntry};
 
 use super::FileSystemCapability;
+use super::producer::produce_scan_batches;
 #[cfg(not(target_arch = "wasm32"))]
 use super::session::{BackgroundSession, ScanJob};
 
@@ -57,56 +58,17 @@ impl ScanRuntime {
         self.cancel_current();
 
         let mut batches = VecDeque::new();
-        batches.push_back(RuntimeBatch {
+        produce_scan_batches(
             generation,
-            kind: RuntimeBatchKind::Begin { cwd: cwd.clone() },
-        });
-
-        let batch_entries = batch_entries.max(1);
-        let mut pending = Vec::with_capacity(batch_entries);
-        let mut loaded = 0usize;
-        let result = filesystem.visit_dir(&cwd, &mut |entry| {
-            pending.push(entry);
-            if pending.len() >= batch_entries {
-                loaded += pending.len();
-                batches.push_back(RuntimeBatch {
-                    generation,
-                    kind: RuntimeBatchKind::Entries {
-                        cwd: cwd.clone(),
-                        entries: std::mem::take(&mut pending),
-                        loaded,
-                    },
-                });
-            }
-            ScanVisit::Continue
-        });
-
-        match result {
-            Ok(()) => {
-                if !pending.is_empty() {
-                    loaded += pending.len();
-                    batches.push_back(RuntimeBatch {
-                        generation,
-                        kind: RuntimeBatchKind::Entries {
-                            cwd: cwd.clone(),
-                            entries: pending,
-                            loaded,
-                        },
-                    });
-                }
-                batches.push_back(RuntimeBatch {
-                    generation,
-                    kind: RuntimeBatchKind::Complete { loaded },
-                });
-            }
-            Err(error) => batches.push_back(RuntimeBatch {
-                generation,
-                kind: RuntimeBatchKind::Error {
-                    cwd,
-                    message: error.to_string(),
-                },
-            }),
-        }
+            cwd,
+            batch_entries,
+            filesystem,
+            |batch| {
+                batches.push_back(batch);
+                true
+            },
+            || false,
+        );
 
         self.blocking_batches = batches;
     }

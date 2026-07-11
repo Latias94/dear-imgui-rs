@@ -4,8 +4,9 @@ use std::sync::{Arc, mpsc};
 use std::thread;
 
 use crate::dialog_core::ScanGeneration;
-use crate::fs::{FileSystem, ScanVisit};
+use crate::fs::FileSystem;
 
+use super::producer::produce_scan_batches;
 use super::session::{ScanJob, ScanSessionState};
 use super::{RuntimeBatch, RuntimeBatchKind};
 
@@ -113,94 +114,14 @@ fn run_worker(
     sender: mpsc::SyncSender<RuntimeBatch>,
     cancel: Arc<std::sync::atomic::AtomicBool>,
 ) {
-    if !send_cancellable(
-        &sender,
-        &cancel,
-        RuntimeBatch {
-            generation,
-            kind: RuntimeBatchKind::Begin { cwd: cwd.clone() },
-        },
-    ) {
-        return;
-    }
-
-    let mut pending = Vec::with_capacity(batch_entries);
-    let mut loaded = 0usize;
-    let result = filesystem.visit_dir(&cwd, &mut |entry| {
-        if is_cancelled(&cancel) {
-            return ScanVisit::Stop;
-        }
-
-        pending.push(entry);
-        if pending.len() < batch_entries {
-            return ScanVisit::Continue;
-        }
-
-        loaded += pending.len();
-        if send_cancellable(
-            &sender,
-            &cancel,
-            RuntimeBatch {
-                generation,
-                kind: RuntimeBatchKind::Entries {
-                    cwd: cwd.clone(),
-                    entries: std::mem::take(&mut pending),
-                    loaded,
-                },
-            },
-        ) {
-            ScanVisit::Continue
-        } else {
-            ScanVisit::Stop
-        }
-    });
-
-    if is_cancelled(&cancel) {
-        return;
-    }
-
-    match result {
-        Ok(()) => {
-            if !pending.is_empty() {
-                loaded += pending.len();
-                if !send_cancellable(
-                    &sender,
-                    &cancel,
-                    RuntimeBatch {
-                        generation,
-                        kind: RuntimeBatchKind::Entries {
-                            cwd: cwd.clone(),
-                            entries: pending,
-                            loaded,
-                        },
-                    },
-                ) {
-                    return;
-                }
-            }
-            let _ = send_cancellable(
-                &sender,
-                &cancel,
-                RuntimeBatch {
-                    generation,
-                    kind: RuntimeBatchKind::Complete { loaded },
-                },
-            );
-        }
-        Err(error) => {
-            let _ = send_cancellable(
-                &sender,
-                &cancel,
-                RuntimeBatch {
-                    generation,
-                    kind: RuntimeBatchKind::Error {
-                        cwd,
-                        message: error.to_string(),
-                    },
-                },
-            );
-        }
-    }
+    produce_scan_batches(
+        generation,
+        cwd,
+        batch_entries,
+        filesystem.as_ref(),
+        |batch| send_cancellable(&sender, &cancel, batch),
+        || is_cancelled(&cancel),
+    );
 }
 
 fn send_cancellable(

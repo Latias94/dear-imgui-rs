@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::{
     collections::{BTreeSet, HashSet, VecDeque, btree_set, hash_map::DefaultHasher},
-    hash::Hasher,
+    hash::{Hash, Hasher},
 };
 
 use crate::core::{
@@ -115,9 +115,13 @@ impl EntryId {
     }
 
     /// Build a stable entry id from an absolute or relative path.
+    ///
+    /// The path is the complete identity: file type and other metadata do not
+    /// affect the result. Directory scans use this same constructor, so an id
+    /// created before a create, rename, or paste rescan resolves afterward.
     pub fn from_path(path: &Path) -> Self {
         let mut hasher = DefaultHasher::new();
-        hasher.write(path.to_string_lossy().as_bytes());
+        path.hash(&mut hasher);
         Self::new(hasher.finish())
     }
 }
@@ -2476,14 +2480,6 @@ fn scan_number(bytes: &[u8], start: usize) -> (usize, usize, usize) {
     (end, trim, end)
 }
 
-fn entry_id_from_path(path: &Path, is_dir: bool, is_symlink: bool) -> EntryId {
-    let mut hasher = DefaultHasher::new();
-    hasher.write(path.to_string_lossy().as_bytes());
-    hasher.write_u8(if is_dir { 1 } else { 0 });
-    hasher.write_u8(if is_symlink { 1 } else { 0 });
-    EntryId::new(hasher.finish())
-}
-
 fn sanitize_scanned_entry(mut entry: FsEntry, dir: &Path) -> Option<FsEntry> {
     if entry.path.as_os_str().is_empty() {
         if entry.name.trim().is_empty() {
@@ -2511,7 +2507,7 @@ fn sanitize_scanned_entry(mut entry: FsEntry, dir: &Path) -> Option<FsEntry> {
 fn scanned_entry_from_raw(entry: FsEntry, dir: &Path) -> Option<DirEntry> {
     let entry = sanitize_scanned_entry(entry, dir)?;
     Some(DirEntry {
-        id: entry_id_from_path(&entry.path, entry.is_dir, entry.is_symlink),
+        id: EntryId::from_path(&entry.path),
         name: entry.name,
         path: entry.path,
         is_dir: entry.is_dir,
@@ -2657,7 +2653,7 @@ mod tests {
     fn make_file_entry(name: &str) -> DirEntry {
         let path = PathBuf::from("/tmp").join(name);
         DirEntry {
-            id: entry_id_from_path(&path, false, false),
+            id: EntryId::from_path(&path),
             name: name.to_string(),
             path,
             is_dir: false,
@@ -2670,12 +2666,23 @@ mod tests {
     fn make_dir_entry(name: &str) -> DirEntry {
         let path = PathBuf::from("/tmp").join(name);
         DirEntry {
-            id: entry_id_from_path(&path, true, false),
+            id: EntryId::from_path(&path),
             name: name.to_string(),
             path,
             is_dir: true,
             is_symlink: false,
             size: None,
+            modified: None,
+        }
+    }
+
+    fn make_raw_entry(dir: &Path, name: &str, is_dir: bool, is_symlink: bool) -> FsEntry {
+        FsEntry {
+            name: name.to_owned(),
+            path: dir.join(name),
+            is_dir,
+            is_symlink,
+            size: (!is_dir).then_some(0),
             modified: None,
         }
     }
@@ -2994,6 +3001,80 @@ mod tests {
     }
 
     #[test]
+    fn entry_id_from_path_resolves_all_scanned_entry_kinds() {
+        let cwd = PathBuf::from("/tmp");
+        let fs = TestFs {
+            entries: vec![
+                make_raw_entry(&cwd, "file.txt", false, false),
+                make_raw_entry(&cwd, "directory", true, false),
+                make_raw_entry(&cwd, "file-link", false, true),
+                make_raw_entry(&cwd, "directory-link", true, true),
+            ],
+            ..Default::default()
+        };
+        let mut core = FileDialogCore::new(DialogMode::OpenFiles);
+        core.set_cwd(cwd.clone());
+
+        core.rescan_if_needed(&fs);
+
+        for name in ["file.txt", "directory", "file-link", "directory-link"] {
+            let path = cwd.join(name);
+            let id = EntryId::from_path(&path);
+            assert_eq!(core.entry_path_by_id(id), Some(path.as_path()));
+            assert_eq!(entry_id(&core, name), id);
+        }
+    }
+
+    #[test]
+    fn created_entry_selection_resolves_after_rescan() {
+        let cwd = PathBuf::from("/tmp");
+        let created_path = cwd.join("new-directory");
+        let created_id = EntryId::from_path(&created_path);
+        let fs = TestFs {
+            entries: vec![make_raw_entry(&cwd, "new-directory", true, false)],
+            ..Default::default()
+        };
+        let mut core = FileDialogCore::new(DialogMode::OpenFiles);
+        core.set_cwd(cwd);
+        core.focus_and_select_by_id(created_id);
+        assert!(core.entry_path_by_id(created_id).is_none());
+
+        core.rescan_if_needed(&fs);
+
+        assert_eq!(core.selected_entry_ids(), vec![created_id]);
+        assert_eq!(core.focused_entry_id(), Some(created_id));
+        assert_eq!(core.selected_entry_paths(), vec![created_path]);
+    }
+
+    #[test]
+    fn renamed_entry_selection_resolves_after_rescan() {
+        let cwd = PathBuf::from("/tmp");
+        let old_path = cwd.join("before.txt");
+        let old_fs = TestFs {
+            entries: vec![make_raw_entry(&cwd, "before.txt", false, false)],
+            ..Default::default()
+        };
+        let renamed_path = cwd.join("after.txt");
+        let renamed_id = EntryId::from_path(&renamed_path);
+        let renamed_fs = TestFs {
+            entries: vec![make_raw_entry(&cwd, "after.txt", false, false)],
+            ..Default::default()
+        };
+        let mut core = FileDialogCore::new(DialogMode::OpenFiles);
+        core.set_cwd(cwd);
+        core.rescan_if_needed(&old_fs);
+        core.focus_and_select_by_id(EntryId::from_path(&old_path));
+
+        core.focus_and_select_by_id(renamed_id);
+        core.request_rescan();
+        core.rescan_if_needed(&renamed_fs);
+
+        assert_eq!(core.selected_entry_ids(), vec![renamed_id]);
+        assert_eq!(core.focused_entry_id(), Some(renamed_id));
+        assert_eq!(core.selected_entry_paths(), vec![renamed_path]);
+    }
+
+    #[test]
     fn entry_path_by_id_resolves_visible_entry_path() {
         let mut core = FileDialogCore::new(DialogMode::OpenFiles);
         set_view_files(&mut core, &["a.txt", "b.txt"]);
@@ -3007,7 +3088,7 @@ mod tests {
         let mut core = FileDialogCore::new(DialogMode::OpenFiles);
         set_view_files(&mut core, &["a.txt"]);
 
-        let missing = entry_id_from_path(Path::new("/tmp/missing.txt"), false, false);
+        let missing = EntryId::from_path(Path::new("/tmp/missing.txt"));
         assert!(core.entry_path_by_id(missing).is_none());
     }
     #[test]
@@ -3016,7 +3097,7 @@ mod tests {
         set_view_files(&mut core, &["a.txt", "b.txt"]);
 
         let a = entry_id(&core, "a.txt");
-        let missing = entry_id_from_path(Path::new("/tmp/missing.txt"), false, false);
+        let missing = EntryId::from_path(Path::new("/tmp/missing.txt"));
         core.replace_selection_by_ids([a, missing]);
 
         assert_eq!(
@@ -3035,7 +3116,7 @@ mod tests {
 
         let a = entry_id(&core, "a.txt");
         let folder = entry_id(&core, "folder");
-        let missing = entry_id_from_path(Path::new("/tmp/missing.txt"), false, false);
+        let missing = EntryId::from_path(Path::new("/tmp/missing.txt"));
         core.replace_selection_by_ids([a, folder, missing]);
 
         assert_eq!(core.selected_entry_counts(), (1, 1));
@@ -3896,7 +3977,7 @@ mod tests {
         }
 
         core.set_cwd(PathBuf::from("/new"));
-        let new_id = entry_id_from_path(Path::new("/new/new.txt"), false, false);
+        let new_id = EntryId::from_path(&Path::new("/new").join("new.txt"));
         core.focus_and_select_by_id(new_id);
         core.rescan_if_needed(&capability);
 
@@ -3972,7 +4053,7 @@ mod tests {
         }
 
         core.set_cwd(PathBuf::from("/new"));
-        let new_id = entry_id_from_path(Path::new("/new/new.txt"), false, false);
+        let new_id = EntryId::from_path(&Path::new("/new").join("new.txt"));
         core.focus_and_select_by_id(new_id);
         core.rescan_if_needed(&capability);
 
@@ -4478,7 +4559,7 @@ mod tests {
             ..Default::default()
         };
 
-        let delayed = entry_id_from_path(Path::new("/tmp/c.txt"), false, false);
+        let delayed = EntryId::from_path(Path::new("/tmp/c.txt"));
         let mut core = FileDialogCore::new(DialogMode::OpenFiles);
         core.cwd = PathBuf::from("/tmp");
         core.set_scan_policy(ScanPolicy::Background {
@@ -4528,7 +4609,7 @@ mod tests {
             ..Default::default()
         };
 
-        let missing = entry_id_from_path(Path::new("/tmp/missing.txt"), false, false);
+        let missing = EntryId::from_path(Path::new("/tmp/missing.txt"));
         let mut core = FileDialogCore::new(DialogMode::OpenFiles);
         core.cwd = PathBuf::from("/tmp");
         core.set_scan_policy(ScanPolicy::Background {

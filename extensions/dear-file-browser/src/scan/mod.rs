@@ -1,4 +1,5 @@
 mod capability;
+mod producer;
 mod runtime;
 #[cfg(not(target_arch = "wasm32"))]
 mod session;
