@@ -1194,6 +1194,16 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install Linux deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential pkg-config \
+            libasound2-dev \
+            libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev \
+            libxkbcommon-dev libwayland-dev libudev-dev \
+            mesa-common-dev libgl1-mesa-dev cmake
+
       - name: Test release tooling and source provenance
         run: python3 -B -m unittest discover -s tools/tests -p 'test_*.py' -v
 
