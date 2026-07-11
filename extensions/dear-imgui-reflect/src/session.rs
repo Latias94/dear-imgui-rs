@@ -12,6 +12,31 @@ use std::rc::Rc;
 
 use crate::{ReflectEvent, ReflectResponse, ReflectSettings, imgui};
 
+/// Extension methods for starting a reflection pass from a Dear ImGui [`imgui::Ui`].
+///
+/// Import this trait and call [`ImGuiReflectExt::inspector`] once per rendered
+/// inspector. The [`ReflectSession`] remains the explicit owner of persistent
+/// settings and map-popup drafts.
+pub trait ImGuiReflectExt {
+    /// Starts a reflection pass backed by `session`.
+    ///
+    /// The UI and session are borrowed independently for the lifetime of the
+    /// returned [`Inspector`].
+    fn inspector<'ui, 'session>(
+        &'ui self,
+        session: &'session ReflectSession,
+    ) -> Inspector<'ui, 'session>;
+}
+
+impl ImGuiReflectExt for imgui::Ui {
+    fn inspector<'ui, 'session>(
+        &'ui self,
+        session: &'session ReflectSession,
+    ) -> Inspector<'ui, 'session> {
+        session.inspector(self)
+    }
+}
+
 /// Persistent state shared by reflection passes for one UI owner.
 ///
 /// A session is intentionally UI-thread oriented. It owns settings and popup
@@ -49,7 +74,13 @@ impl ReflectSession {
     /// session is normally owned beside one Dear ImGui context. Reusing it
     /// with a different live context clears old popup drafts automatically;
     /// when a context is destroyed and rebuilt, rebuild its session too.
-    pub fn inspector<'ui>(&self, ui: &'ui imgui::Ui) -> Inspector<'ui, '_> {
+    ///
+    /// [`ImGuiReflectExt::inspector`] is the canonical per-frame entry point;
+    /// this method is its equivalent session-oriented form.
+    pub fn inspector<'ui, 'session>(
+        &'session self,
+        ui: &'ui imgui::Ui,
+    ) -> Inspector<'ui, 'session> {
         let context = ui.with_bound_context(|| unsafe {
             // SAFETY: `with_bound_context` makes this Ui's owning context
             // current for the duration of the raw Dear ImGui query.

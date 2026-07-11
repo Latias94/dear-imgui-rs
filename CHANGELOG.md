@@ -39,7 +39,7 @@ This is an intentionally source-breaking architecture release. It replaces shall
 
 #### Extensions
 
-- Replace `dear-imgui-reflect` global/thread-local settings, free `input`, and `ImGuiReflectExt::input_reflect` with `ReflectSession` and one-frame `Inspector` values. A session owns settings and persistent map drafts for one UI owner; an inspector owns response and logical path state for one render pass.
+- Replace `dear-imgui-reflect` global/thread-local settings, free `input`, and no-session `ImGuiReflectExt::input_reflect` with `ReflectSession` and one-frame `Inspector` values. The session-aware `ImGuiReflectExt::inspector` starts a pass through `ui.inspector(&session)`. A session owns settings and persistent map drafts for one UI owner; an inspector owns response and logical path state for one render pass.
 - Make `FileDialogState` own its filesystem capability. Native callers choose `with_background_filesystem(Arc<dyn FileSystem + Send + Sync>)`; caller-thread and browser adapters use `with_blocking_filesystem(Box<dyn FileSystem>)`. Draw methods no longer borrow a filesystem that a worker could outlive.
 - Replace `FileSystem::read_dir` with streaming `FileSystem::visit_dir` and `ScanVisit::{Continue,Stop}`. Replace incremental/synchronous scan presets with explicit `ScanPolicy::Blocking` and native-only `ScanPolicy::Background`. Requesting a background scan without a thread-safe native capability returns an error instead of silently changing execution mode.
 - Keep scan hooks on the owner/UI thread without a `Send` bound. Each background runtime owns one bounded worker queue, and stale generations do not consume the current generation's per-tick budget.
@@ -189,7 +189,9 @@ if ui.input_reflect("Game Settings", &mut settings) {
 In 0.16, keep a session beside the UI owner and create one inspector per frame:
 
 ```rust
-let mut inspector = editor.reflect_session.inspector(ui);
+use dear_imgui_reflect::ImGuiReflectExt;
+
+let mut inspector = ui.inspector(&editor.reflect_session);
 if inspector.input("Game Settings", &mut editor.settings) {
     save(&editor.settings);
 }

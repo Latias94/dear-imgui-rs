@@ -294,7 +294,7 @@ Typical flow:
 
 ```rust
 use dear_imgui_reflect as reflect;
-use reflect::ImGuiReflect;
+use reflect::{ImGuiReflect, ImGuiReflectExt};
 
 #[derive(ImGuiReflect, Default)]
 struct Settings {
@@ -308,7 +308,7 @@ fn ui_frame(
     ui: &reflect::imgui::Ui,
     settings: &mut Settings,
 ) {
-    let mut inspector = session.inspector(ui);
+    let mut inspector = ui.inspector(session);
     inspector.input("Settings", settings);
 }
 ```

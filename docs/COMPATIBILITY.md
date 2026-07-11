@@ -109,7 +109,7 @@ WGPU and Ash renderer ownership is per `ImGuiPlatformIO` and per `Renderer_*` sl
 
 | 0.15 shape | 0.16 owner | Contract |
 | --- | --- | --- |
-| Global/thread-local reflection settings and `Ui::input_reflect` | `ReflectSession` plus one-frame `Inspector` | The session owns settings and map drafts; the inspector owns response and logical field paths. |
+| Global/thread-local reflection settings and `Ui::input_reflect` | `ReflectSession` plus `ui.inspector(&session)` | The session owns settings and map drafts; the one-frame inspector owns response and logical field paths. |
 | File browser draw methods borrow `&dyn FileSystem` | `FileDialogState` owns a blocking or background filesystem capability | Workers cannot outlive borrowed caller state; `FileSystem::visit_dir` streams entries and cooperates with cancellation through `ScanVisit`. |
 | Incremental/synchronous scan presets | `ScanPolicy::Blocking` or native `ScanPolicy::Background` | Background mode requires `Arc<dyn FileSystem + Send + Sync>` and never silently downgrades; browser/JS adapters stay on the caller thread. |
 | Raw monitor vector access | `PlatformIo::set_monitors` | Dear ImGui's allocator owns the replacement vector storage. |

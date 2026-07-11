@@ -24,19 +24,23 @@ Core Architecture
 Breaking session migration:
 
 ```rust
+use dear_imgui_reflect::ImGuiReflectExt;
+
 let mut session = dear_imgui_reflect::ReflectSession::new();
 session.settings_mut().vec_mut().reorderable = false;
 
 // Once per frame/pass:
-let mut inspector = session.inspector(ui);
+let mut inspector = ui.inspector(&session);
 let changed = inspector.input("Settings", &mut settings);
 let events = inspector.response().events();
 ```
 
 The former global `with_settings`/`current_settings`/`with_settings_scope`
-functions, no-session `input`/`input_with_response` functions, and
-`ImGuiReflectExt` UI extension were removed. Manual `ImGuiValue` and
-`ImGuiReflect` implementations now receive `&mut Inspector` explicitly.
+functions, no-session `input`/`input_with_response` functions, and the
+no-session `ImGuiReflectExt::input_reflect` method were removed. The
+`ImGuiReflectExt` trait now provides the session-aware `ui.inspector(&session)`
+entry point. Manual `ImGuiValue` and `ImGuiReflect` implementations receive
+`&mut Inspector` explicitly.
 
 - [~] Reflection-based per-type UI generation (ImGuiInput-style)
   - `dear-imgui-reflect::ImGuiValue` and `ImGuiReflect` derive correspond to

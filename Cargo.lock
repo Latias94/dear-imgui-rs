@@ -2651,6 +2651,7 @@ dependencies = [
  "dear-imgui-rs",
  "glam",
  "mint",
+ "static_assertions",
 ]
 
 [[package]]

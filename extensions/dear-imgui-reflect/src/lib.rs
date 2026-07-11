@@ -7,7 +7,8 @@
 //! At a high level:
 //! - derive [`ImGuiReflect`](trait.ImGuiReflect.html) for your structs/enums;
 //! - keep a [`ReflectSession`] beside the owning Dear ImGui context;
-//! - create an [`Inspector`] each frame and call [`Inspector::input`];
+//! - import [`ImGuiReflectExt`], then create an [`Inspector`] each frame with
+//!   [`ImGuiReflectExt::inspector`] and call [`Inspector::input`];
 //! - optionally customize container / numeric behavior via
 //!   [`ReflectSession::settings_mut`] and [`MemberSettings`];
 //! - inspect structural change events through [`Inspector::response`].
@@ -21,6 +22,7 @@
 //!
 //! ```no_run
 //! use dear_imgui_reflect as reflect;
+//! use reflect::ImGuiReflectExt;
 //!
 //! #[derive(reflect::ImGuiReflect, Default)]
 //! struct Player {
@@ -36,7 +38,7 @@
 //!     ui: &reflect::imgui::Ui,
 //!     player: &mut Player,
 //! ) {
-//!     let mut inspector = session.inspector(ui);
+//!     let mut inspector = ui.inspector(session);
 //!     // Returns true if any field changed this frame.
 //!     if inspector.input("Player", player) {
 //!         // React to edits (save, mark dirty, etc).
@@ -138,6 +140,7 @@
 //!
 //! ```no_run
 //! use dear_imgui_reflect as reflect;
+//! use reflect::ImGuiReflectExt;
 //!
 //! #[derive(reflect::ImGuiReflect, Default)]
 //! struct AppState {
@@ -149,7 +152,7 @@
 //!     ui: &reflect::imgui::Ui,
 //!     state: &mut AppState,
 //! ) {
-//!     let mut inspector = session.inspector(ui);
+//!     let mut inspector = ui.inspector(session);
 //!     let _changed = inspector.input("Tags", state);
 //!
 //!     for event in inspector.response().events() {
@@ -183,6 +186,7 @@
 //!
 //! ```no_run
 //! use dear_imgui_reflect as reflect;
+//! use reflect::ImGuiReflectExt;
 //!
 //! #[derive(reflect::ImGuiReflect, Default)]
 //! struct Transform {
@@ -216,7 +220,7 @@
 //!
 //! impl EnemyInspector {
 //!     fn ui(&mut self, ui: &reflect::imgui::Ui) {
-//!         let mut inspector = self.reflect_session.inspector(ui);
+//!         let mut inspector = ui.inspector(&self.reflect_session);
 //!         ui.window("Enemies").build(|| {
 //!             // Left side: list of enemies with selection.
 //!             ui.child_window("EnemyList")
@@ -290,7 +294,7 @@ pub use containers::{
     imgui_vec_with_settings,
 };
 pub use response::{ReflectEvent, ReflectResponse};
-pub use session::{Inspector, InspectorPathGuard, ReflectSession};
+pub use session::{ImGuiReflectExt, Inspector, InspectorPathGuard, ReflectSession};
 pub use settings::{
     ArraySettings, BoolSettings, BoolStyle, MapSettings, MemberSettings, NumericDefaultRange,
     NumericRange, NumericTypeSettings, NumericWidgetKind, ReflectSettings, TupleRenderMode,

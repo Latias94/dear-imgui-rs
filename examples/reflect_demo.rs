@@ -5,8 +5,8 @@
 
 use dear_app::{AddOnsConfig, AppConfig, Application, FrameContext, RunError, run};
 use dear_imgui_reflect as reflect;
-use reflect::ImGuiReflect;
 use reflect::imgui::*;
+use reflect::{ImGuiReflect, ImGuiReflectExt};
 
 use glam::{Vec2, Vec3, Vec4};
 use std::collections::{BTreeMap, HashMap};
@@ -241,7 +241,7 @@ impl Application for ReflectApp {
     fn frame(&mut self, context: &mut FrameContext<'_, '_>) -> Result<(), RunError> {
         let ui = context.ui();
         let state = &mut self.state;
-        let mut inspector = self.reflect_session.inspector(ui);
+        let mut inspector = ui.inspector(&self.reflect_session);
 
         ui.window("Reflect Demo")
             .size([520.0, 640.0], Condition::FirstUseEver)

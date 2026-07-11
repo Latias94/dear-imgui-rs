@@ -6,10 +6,11 @@
 Reflection-driven Dear ImGui editors for Rust structs and enums, inspired by
 the C++ [ImReflect](https://github.com/Sven-vh/ImReflect) library.
 
-The public model has four parts:
+The public model has five parts:
 
 - `ReflectSession` owns persistent settings and map-popup drafts for one UI owner.
 - `Inspector` owns response and path state for one render pass.
+- `ImGuiReflectExt` starts each pass through `ui.inspector(&session)`.
 - `ImGuiValue` renders one value through an explicit `&mut Inspector`.
 - `ImGuiReflect` walks a struct or enum; the default `derive` feature generates it.
 
@@ -36,7 +37,7 @@ mint = "0.5"
 
 ```rust
 use dear_imgui_reflect as reflect;
-use reflect::ImGuiReflect;
+use reflect::{ImGuiReflect, ImGuiReflectExt};
 
 #[derive(ImGuiReflect, Default)]
 struct GameSettings {
@@ -53,7 +54,7 @@ struct Editor {
 
 impl Editor {
     fn frame(&mut self, ui: &reflect::imgui::Ui) {
-        let mut inspector = self.reflect.inspector(ui);
+        let mut inspector = ui.inspector(&self.reflect);
         ui.window("Settings").build(|| {
             inspector.input("Game Settings", &mut self.settings);
         });
@@ -68,6 +69,22 @@ impl Editor {
 `Inspector::input` returns `true` when a field changes. Container insert,
 remove, clear, reorder, and map rename operations are also recorded in the
 inspector's `ReflectResponse`.
+
+### Migrating from 0.15
+
+Global reflection settings and the no-session `ui.input_reflect(...)` entry
+were removed. Own a `ReflectSession`, import `ImGuiReflectExt`, and create the
+one-frame inspector from the `Ui` instead:
+
+```rust
+use dear_imgui_reflect::ImGuiReflectExt;
+
+let mut inspector = ui.inspector(&reflect_session);
+inspector.input("Game Settings", &mut settings);
+```
+
+The equivalent `reflect_session.inspector(ui)` form remains available, but the
+`Ui` extension is the canonical per-frame entry point.
 
 ## Session Settings
 
