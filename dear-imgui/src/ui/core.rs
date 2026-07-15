@@ -2,7 +2,7 @@ use super::*;
 use crate::context::binding::{CTX_MUTEX, with_bound_context};
 
 impl Ui {
-    pub(super) fn assert_finite_f32(caller: &str, name: &str, value: f32) {
+    pub(crate) fn assert_finite_f32(caller: &str, name: &str, value: f32) {
         assert!(value.is_finite(), "{caller} {name} must be finite");
     }
 
@@ -64,6 +64,17 @@ impl Ui {
         unsafe {
             let handle = &mut *self.buffer.get();
             handle.scratch_txt(txt)
+        }
+    }
+
+    /// Stages an explicit text range with a readable NUL sentinel at its end.
+    pub(crate) fn scratch_txt_range(
+        &self,
+        txt: impl AsRef<str>,
+    ) -> std::ops::Range<*const std::os::raw::c_char> {
+        unsafe {
+            let handle = &mut *self.buffer.get();
+            handle.scratch_txt_range(txt)
         }
     }
 

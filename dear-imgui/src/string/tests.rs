@@ -41,6 +41,16 @@ fn ui_buffer_sanitizes_interior_nul() {
 }
 
 #[test]
+fn ui_buffer_text_range_preserves_bytes_and_appends_readable_nul() {
+    let mut buf = UiBuffer::new(1024);
+    let range = buf.scratch_txt_range("a\0b#");
+    let len = unsafe { range.end.offset_from(range.start) as usize };
+    let bytes = unsafe { std::slice::from_raw_parts(range.start.cast::<u8>(), len + 1) };
+
+    assert_eq!(bytes, b"a\0b#\0");
+}
+
+#[test]
 fn tls_scratch_txt_is_nul_terminated() {
     let ptr = tls_scratch_txt("hello");
     let s = unsafe { CStr::from_ptr(ptr) }.to_str().unwrap();
