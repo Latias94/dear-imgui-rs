@@ -337,7 +337,8 @@ mod tests {
         let ui = ctx.frame();
 
         ui.window("list_clipper_invalid_includes").build(|| {
-            for range in [5..4, 0..11] {
+            for (start, end) in [(5usize, 4usize), (0, 11)] {
+                let range = std::ops::Range { start, end };
                 let mut clipper = ListClipper::new(10usize).begin(ui);
                 assert!(
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
