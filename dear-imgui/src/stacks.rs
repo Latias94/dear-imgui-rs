@@ -12,10 +12,12 @@
 
 mod font;
 mod id;
+mod item;
 mod layout;
 mod style;
 
 pub use font::FontStackToken;
 pub use id::{FocusScopeToken, IdStackToken};
+pub use item::{ItemFlagStackToken, ItemFlags, ItemStateFlags};
 pub use layout::{ItemWidthStackToken, TextWrapPosStackToken};
 pub use style::{ColorStackToken, StyleStackToken};

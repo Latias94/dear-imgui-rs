@@ -3,6 +3,7 @@ use crate::ui::Ui;
 
 /// Tracks a table that can be ended by calling `.end()` or by dropping
 #[must_use]
+#[doc(alias = "EndTable")]
 pub struct TableToken<'ui> {
     _ui: &'ui Ui,
 }

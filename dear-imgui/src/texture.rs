@@ -20,5 +20,6 @@ pub use format::{TextureFormat, get_format_bytes_per_pixel, get_format_name};
 pub use id::{ManagedTextureId, RawTextureId, TextureId};
 pub use owned::OwnedTextureData;
 pub use rect::TextureRect;
+pub(crate) use reference::effective_texture_id;
 pub use reference::{TextureRef, create_texture_ref};
 pub use status::{TextureStatus, get_status_name};

@@ -274,9 +274,9 @@ pub(super) fn record_draw_commands(
                 dear_imgui_rs::render::DrawCmd::Elements {
                     count,
                     cmd_params,
-                    raw_cmd,
+                    raw_cmd: _,
                 } => {
-                    let tex_id = resolve_effective_texture_id(cmd_params.texture_id, raw_cmd);
+                    let tex_id = cmd_params.texture_id;
                     let ds = textures
                         .get_descriptor_set(tex_id.id())
                         .or_else(|| {
@@ -376,17 +376,4 @@ pub(super) fn record_draw_commands(
     }
 
     Ok(())
-}
-
-fn resolve_effective_texture_id(
-    legacy: TextureId,
-    raw_cmd: *const dear_imgui_rs::sys::ImDrawCmd,
-) -> TextureId {
-    if raw_cmd.is_null() {
-        return legacy;
-    }
-    unsafe {
-        let mut copy = *raw_cmd;
-        TextureId::from(dear_imgui_rs::sys::ImDrawCmd_GetTexID(&mut copy))
-    }
 }

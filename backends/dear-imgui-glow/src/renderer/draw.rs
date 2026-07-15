@@ -281,18 +281,13 @@ impl GlowRenderer {
                     DrawCmd::Elements {
                         count,
                         cmd_params,
-                        raw_cmd,
+                        raw_cmd: _,
                     } => {
-                        let tex_id_u64 = unsafe {
-                            let mut cmd_copy = *raw_cmd;
-                            dear_imgui_rs::sys::ImDrawCmd_GetTexID(&mut cmd_copy)
-                        } as u64;
-                        let tex_id = dear_imgui_rs::TextureId::from(tex_id_u64);
                         self.render_elements(
                             gl,
                             texture_map,
                             count,
-                            tex_id,
+                            cmd_params.texture_id,
                             &cmd_params,
                             draw_data,
                             sampler_filter,

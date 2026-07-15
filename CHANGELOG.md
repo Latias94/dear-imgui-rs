@@ -28,6 +28,7 @@ This is an intentionally source-breaking architecture release. It replaces shall
 - Make `ImGuiDockNode` opaque in core bindings and omit C/C++ `va_list` entry points. Private C++ layouts and `va_list` representations are not portable Rust ABI contracts.
 - Gate the blueprint stack-layout API and patched Dear ImGui core artifact behind `dear-imgui-rs/stack-layout` and `dear-node-editor/blueprints`. Normal node-editor builds use the unpatched core; the normal, freetype, stack-layout, and stack-layout + freetype feature combinations have distinct names, manifests, and cache identities. `stack-layout` remains required for the blueprints showcase and is rejected on WASM.
 - Make WASM support explicit. Only `wasm32-unknown-unknown` with the `wasm` feature may select the `imgui-sys-v0` import binding profile. Missing feature forwarding, WASI targets, Emscripten Rust targets, and `wasm + stack-layout` combinations fail at build time.
+- Replace the incomplete `FontLoader::{new,with_loader_init}` custom-loader stubs with `FontLoader::stb_truetype()`. Custom native loaders must now enter through `unsafe FontLoader::from_raw`, whose contract covers the complete callback table and all referenced state.
 
 #### Backends and runtime
 
@@ -47,6 +48,13 @@ This is an intentionally source-breaking architecture release. It replaces shall
 
 ### Added
 
+- Add typed item-state scopes through `ItemFlags`, `ItemStateFlags`, and `Ui::{push_item_flag,with_item_flag}`, plus typed X/Y style-variable overrides through `StyleVarVec2` and `Ui::{push_style_var_x,push_style_var_y}`.
+- Add `Ui::{calc_text_size,calc_text_size_with_opts}` for measuring text with the current font, including `##` suffix hiding and explicit wrap widths, without changing the next item width. Fixes #40, thanks @TheDaChicken.
+- Add safe IO coverage for analog keys, UTF-16 and UTF-8 text, native key metadata, event acceptance and clearing, F13-F24, app navigation keys, and the complete public gamepad key set.
+- Add checked list-clipper item and range inclusion with call-order and bounds validation.
+- Add explicit bitmap and vector embedded default fonts, font cache compaction, and loaded/debug-name queries.
+- Add safe style size scaling, style-color flashing, text-encoding diagnostics, and item-picker startup helpers.
+- Add effective managed or legacy texture ID lookup through `TextureRef::texture_id` and `DrawCmdParams::texture_id`.
 - Add a deterministic, host-independent binding specification shared by build scripts, regeneration, verification, packaging, and CI. It supplies self-contained standard-header shims, disables host include fallback, and hashes the generator contract, exact compatibility targets, formatter, allow/block lists, enum normalization, opaque types, and fixed WASM provider.
 - Add exact cimgui and nested Dear ImGui source revisions to package metadata so source identity survives `cargo package` without a `.git` directory.
 - Add strict `dear-imgui-sys` core native prebuilt manifests covering crate/version, target, link type, MSVC CRT, normalized artifact features, exact source revisions, and binding-spec hash. Missing, duplicate, unknown, or mismatched fields reject the core artifact.
@@ -54,6 +62,8 @@ This is an intentionally source-breaking architecture release. It replaces shall
 
 ### Changed
 
+- Guard every public cimgui generator declaration with a source-pinned API snapshot, and require every top-level `ImGui` function to map to a public safe Rust item or an explicit policy decision so CI rejects raw API drift and unreviewed safe API gaps.
+- Allow `TableColumnSetup::user_id` and the chainable table column builder to accept `u32` values directly while preserving typed `Id` inputs and non-zero validation. Fixes #39, thanks @TheDaChicken.
 - Share callback ownership, viewport recovery, and teardown through one private runtime across the Winit and SDL3 adapters for each renderer backend.
 - Update `dear-app`, renderer examples, and the browser demo to WGPU 30 surface color-space and queue-present APIs.
 - Regenerate and verify the Windows, non-Windows, and WASM core binding profiles from one canonical command while keeping extension generation on the fixed `imgui-sys-v0` provider contract.
@@ -63,6 +73,11 @@ This is an intentionally source-breaking architecture release. It replaces shall
 - Statically link the C++ standard library for Windows GNU native C++ builds so downstream executables no longer require a separate `libstdc++-6.dll` at runtime. The Windows GNU CI job checks the produced test binary import table for this regression. Fixes #36, thanks @HampusMat.
 - Use the same path-only `EntryId` contract for file-browser operations and directory scans so created, renamed, and symbolic-link entries remain selectable after rescans, including on Windows.
 - Exercise aggregate PlatformIO callbacks through the real C++ slots on both MSVC `/MD` and `/MT`, preventing Rust declarations from drifting away from the compiler ABI actually used by Dear ImGui.
+- Preserve tree-node ID semantics and push/pop pairing for string, pointer, and integer IDs, including `NO_TREE_PUSH_ON_OPEN`, and add explicit RAII tree scopes.
+- Submit the current combo entry as selected before applying default focus.
+- Apply backward multi-select ranges in Dear ImGui's requested direction with checked index conversion.
+- Resolve managed texture IDs in draw command parameters after processing texture requests, while allowing pending textures to be inspected without triggering Dear ImGui's renderer-upload assertion.
+- Avoid an out-of-bounds read when measuring text ending in a single `#`, and share the same sentinel-safe measurement path with `push_item_width_text`.
 
 ### Migration Examples
 

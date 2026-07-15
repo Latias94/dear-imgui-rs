@@ -13,6 +13,7 @@ impl Ui {
     /// `EndMultiSelect()` pair. It does not drive any selection storage by
     /// itself; use `begin_io()` / `end().io()` and the helper methods to
     /// implement custom patterns.
+    #[doc(alias = "BeginMultiSelect", alias = "EndMultiSelect")]
     pub fn begin_multi_select_raw(
         &self,
         flags: impl Into<MultiSelectOptions>,
@@ -50,6 +51,7 @@ impl Ui {
     ///   stored entirely on the application side.
     /// - Per-item selection toggles can be queried via
     ///   [`Ui::is_item_toggled_selection`].
+    #[doc(alias = "SetNextItemSelectionUserData")]
     pub fn multi_select_indexed<S, F>(
         &self,
         storage: &mut S,

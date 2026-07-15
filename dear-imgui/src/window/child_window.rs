@@ -128,6 +128,7 @@ impl<'ui> ChildWindow<'ui> {
     }
 
     /// Builds the child window and calls the provided closure
+    #[doc(alias = "BeginChild", alias = "EndChild")]
     pub fn build<F, R>(self, ui: &'ui Ui, f: F) -> Option<R>
     where
         F: FnOnce() -> R,

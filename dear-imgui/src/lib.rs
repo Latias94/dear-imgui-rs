@@ -125,9 +125,8 @@
 //!   - `WantUpdates`: upload pending `UpdateRect`s, then set status to `OK`.
 //!   - `WantDestroy`: delete/free the GPU texture and set status to `Destroyed`.
 //! - Use `DrawData::textures()` only for read-only inspection or snapshots.
-//! - When binding textures for draw commands, do not rely only on `DrawCmdParams.texture_id`.
-//!   With the modern system it may be `0`. Resolve the effective id at bind time using
-//!   `ImDrawCmd_GetTexID(raw_cmd)` along with your renderer state.
+//! - Bind [`DrawCmdParams::texture_id`](render::DrawCmdParams::texture_id). Command iteration
+//!   resolves the effective ID for both legacy and managed texture references.
 //! - Optional: some backends perform a font-atlas fallback upload on initialization.
 //!   This affects only the font texture for the first frame; user textures go through
 //!   the modern `ImTextureData` path.
@@ -148,12 +147,11 @@
 //!     }
 //! }
 //!
-//! // 3) Rendering: resolve texture at bind-time
+//! // 3) Rendering: use the already resolved effective texture ID
 //! for cmd in draw_list.commands() {
 //!     match cmd {
-//!         Elements { cmd_params, raw_cmd, .. } => {
-//!             let effective = unsafe { sys::ImDrawCmd_GetTexID(raw_cmd) };
-//!             bind_texture(effective);
+//!         Elements { cmd_params, .. } => {
+//!             bind_texture(cmd_params.texture_id);
 //!             draw(cmd_params);
 //!         }
 //!         _ => { /* ... */ }
@@ -276,6 +274,15 @@ pub extern crate dear_imgui_sys as sys;
 ///
 /// This avoids leaking the `sys` type in safe APIs and improves clarity
 /// when passing/returning identifiers (e.g., dock ids, viewport ids).
+///
+/// Construct an explicit user-defined ID with [`Id::from`] and a `u32`. When
+/// the ID should follow Dear ImGui's current ID stack, prefer [`Ui::get_id`].
+///
+/// ```
+/// # use dear_imgui_rs::Id;
+/// let id = Id::from(42_u32);
+/// assert_eq!(id.raw(), 42);
+/// ```
 #[repr(transparent)]
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Default)]
 pub struct Id(pub(crate) sys::ImGuiID);

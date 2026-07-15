@@ -88,6 +88,29 @@ impl<'tex> TextureRef<'tex> {
     pub fn raw(self) -> sys::ImTextureRef {
         self.raw
     }
+
+    /// Resolve the effective texture ID.
+    ///
+    /// For managed references this reads the current ID from the borrowed
+    /// [`TextureData`]; legacy references return their embedded ID.
+    #[doc(alias = "GetTexID")]
+    pub fn texture_id(self) -> TextureId {
+        unsafe { effective_texture_id(&self.raw) }
+    }
+}
+
+/// Resolve a raw texture reference without asserting that a managed texture
+/// has already been uploaded by a renderer.
+///
+/// # Safety
+///
+/// A non-null `_TexData` pointer must be valid for reads.
+pub(crate) unsafe fn effective_texture_id(raw: &sys::ImTextureRef) -> TextureId {
+    if raw._TexData.is_null() {
+        TextureId::from(raw._TexID)
+    } else {
+        unsafe { TextureId::from((*raw._TexData).TexID) }
+    }
 }
 
 impl<'tex> From<TextureId> for TextureRef<'tex> {
@@ -143,5 +166,21 @@ pub fn create_texture_ref(texture_id: TextureId) -> sys::ImTextureRef {
     sys::ImTextureRef {
         _TexData: std::ptr::null_mut(),
         _TexID: texture_id.id() as sys::ImTextureID,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn texture_ref_resolves_legacy_and_managed_ids() {
+        let legacy_id = TextureId::new(7);
+        assert_eq!(TextureRef::from(legacy_id).texture_id(), legacy_id);
+
+        let mut texture = TextureData::new();
+        let managed_id = TextureId::new(11);
+        texture.set_tex_id(managed_id);
+        assert_eq!(texture.texture_ref().texture_id(), managed_id);
     }
 }

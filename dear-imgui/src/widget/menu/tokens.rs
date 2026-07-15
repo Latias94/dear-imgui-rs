@@ -3,6 +3,7 @@ use crate::ui::Ui;
 
 /// Tracks a main menu bar that can be ended by calling `.end()` or by dropping
 #[must_use]
+#[doc(alias = "EndMainMenuBar")]
 pub struct MainMenuBarToken<'ui> {
     _ui: &'ui Ui,
 }
@@ -28,6 +29,7 @@ impl Drop for MainMenuBarToken<'_> {
 
 /// Tracks a menu bar that can be ended by calling `.end()` or by dropping
 #[must_use]
+#[doc(alias = "EndMenuBar")]
 pub struct MenuBarToken<'ui> {
     _ui: &'ui Ui,
 }
@@ -53,6 +55,7 @@ impl Drop for MenuBarToken<'_> {
 
 /// Tracks a menu that can be ended by calling `.end()` or by dropping
 #[must_use]
+#[doc(alias = "EndMenu")]
 pub struct MenuToken<'ui> {
     _ui: &'ui Ui,
 }

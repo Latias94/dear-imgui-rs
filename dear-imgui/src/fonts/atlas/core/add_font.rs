@@ -161,19 +161,31 @@ impl FontAtlas {
     /// Add the default font to the atlas
     #[doc(alias = "AddFontDefault")]
     pub fn add_font_default(&mut self, font_cfg: Option<&FontConfig>) -> &mut Font {
-        if let Some(cfg) = font_cfg {
-            cfg.validate_for_add_font_default("FontAtlas::add_font_default()");
-        }
-        unsafe {
-            let cfg_ptr = font_cfg.map_or(ptr::null(), |cfg| cfg.raw());
-            let font_ptr = sys::ImFontAtlas_AddFontDefault(self.raw, cfg_ptr);
-            if let Some(cfg) = font_cfg {
-                if cfg.raw.MergeMode {
-                    self.discard_bakes(0);
-                }
-            }
-            Font::from_raw_mut(font_ptr)
-        }
+        self.add_embedded_default_font(
+            font_cfg,
+            "FontAtlas::add_font_default()",
+            sys::ImFontAtlas_AddFontDefault,
+        )
+    }
+
+    /// Add Dear ImGui's scalable embedded default font.
+    #[doc(alias = "AddFontDefaultVector")]
+    pub fn add_font_default_vector(&mut self, font_cfg: Option<&FontConfig>) -> &mut Font {
+        self.add_embedded_default_font(
+            font_cfg,
+            "FontAtlas::add_font_default_vector()",
+            sys::ImFontAtlas_AddFontDefaultVector,
+        )
+    }
+
+    /// Add Dear ImGui's pixel-clean embedded default font.
+    #[doc(alias = "AddFontDefaultBitmap")]
+    pub fn add_font_default_bitmap(&mut self, font_cfg: Option<&FontConfig>) -> &mut Font {
+        self.add_embedded_default_font(
+            font_cfg,
+            "FontAtlas::add_font_default_bitmap()",
+            sys::ImFontAtlas_AddFontDefaultBitmap,
+        )
     }
 
     /// Add a font from a TTF file
@@ -392,6 +404,34 @@ impl FontAtlas {
                 }
                 Some(Font::from_raw_mut(font_ptr))
             }
+        }
+    }
+}
+
+impl FontAtlas {
+    fn add_embedded_default_font(
+        &mut self,
+        font_cfg: Option<&FontConfig>,
+        caller: &str,
+        add_font: unsafe extern "C" fn(
+            *mut sys::ImFontAtlas,
+            *const sys::ImFontConfig,
+        ) -> *mut sys::ImFont,
+    ) -> &mut Font {
+        if let Some(cfg) = font_cfg {
+            cfg.validate_for_add_font_default(caller);
+        }
+        unsafe {
+            let cfg_ptr = font_cfg.map_or(ptr::null(), FontConfig::raw);
+            let font_ptr = add_font(self.raw, cfg_ptr);
+            assert!(
+                !font_ptr.is_null(),
+                "{caller} failed to add the embedded font"
+            );
+            if font_cfg.is_some_and(|cfg| cfg.raw.MergeMode) {
+                self.discard_bakes(0);
+            }
+            Font::from_raw_mut(font_ptr)
         }
     }
 }

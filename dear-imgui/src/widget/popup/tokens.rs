@@ -3,6 +3,7 @@ use crate::ui::Ui;
 
 /// Tracks a popup that can be ended by calling `.end()` or by dropping
 #[must_use]
+#[doc(alias = "EndPopup")]
 pub struct PopupToken<'ui> {
     _ui: &'ui Ui,
 }

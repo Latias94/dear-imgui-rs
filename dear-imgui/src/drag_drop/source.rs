@@ -59,6 +59,7 @@ impl<'ui, T: AsRef<str>> DragDropSource<'ui, T> {
     ///
     /// Returns a tooltip token if dragging started, `None` otherwise.
     #[inline]
+    #[doc(alias = "BeginDragDropSource", alias = "SetDragDropPayload")]
     pub fn begin_payload<P: Copy + 'static>(
         self,
         payload: P,
@@ -122,6 +123,7 @@ impl<'ui, T: AsRef<str>> DragDropSource<'ui, T> {
 /// While this token exists, you can add UI elements that will be shown
 /// as a tooltip during the drag operation.
 #[derive(Debug)]
+#[doc(alias = "EndDragDropSource")]
 pub struct DragDropSourceTooltip<'ui> {
     _ui: &'ui Ui,
 }

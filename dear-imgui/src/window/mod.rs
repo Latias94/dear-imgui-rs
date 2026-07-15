@@ -212,6 +212,7 @@ impl<'ui> Window<'ui> {
     }
 
     /// Sets window size
+    #[doc(alias = "SetNextWindowSize")]
     pub fn size(mut self, size: [f32; 2], condition: Condition) -> Self {
         self.size = Some(size);
         self.size_condition = condition;
@@ -229,6 +230,7 @@ impl<'ui> Window<'ui> {
     }
 
     /// Sets window position
+    #[doc(alias = "SetNextWindowPos")]
     pub fn position(mut self, pos: [f32; 2], condition: Condition) -> Self {
         self.pos = Some(pos);
         self.pos_condition = condition;
@@ -236,12 +238,14 @@ impl<'ui> Window<'ui> {
     }
 
     /// Sets window content size
+    #[doc(alias = "SetNextWindowContentSize")]
     pub fn content_size(mut self, size: [f32; 2]) -> Self {
         self.content_size = Some(size);
         self
     }
 
     /// Sets window collapsed state
+    #[doc(alias = "SetNextWindowCollapsed")]
     pub fn collapsed(mut self, collapsed: bool, condition: Condition) -> Self {
         self.collapsed = Some(collapsed);
         self.collapsed_condition = condition;
@@ -249,12 +253,14 @@ impl<'ui> Window<'ui> {
     }
 
     /// Sets window focused state
+    #[doc(alias = "SetNextWindowFocus")]
     pub fn focused(mut self, focused: bool) -> Self {
         self.focused = Some(focused);
         self
     }
 
     /// Sets window background alpha
+    #[doc(alias = "SetNextWindowBgAlpha")]
     pub fn bg_alpha(mut self, alpha: f32) -> Self {
         self.bg_alpha = Some(alpha);
         self
@@ -402,6 +408,7 @@ impl<'ui> Window<'ui> {
 }
 
 /// Token representing an active window
+#[doc(alias = "End")]
 pub struct WindowToken<'ui> {
     ui: &'ui Ui,
 }

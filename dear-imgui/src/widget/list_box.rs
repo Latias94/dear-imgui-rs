@@ -58,6 +58,7 @@ impl<T: AsRef<str>> ListBox<T> {
     ///
     /// Returns `None` if the list box is not open and no content should be rendered.
     #[must_use]
+    #[doc(alias = "BeginListBox", alias = "ListBox")]
     pub fn begin(self, ui: &Ui) -> Option<ListBoxToken<'_>> {
         assert_finite_vec2("ListBox::begin()", "size", self.size);
         let size_vec = sys::ImVec2 {
@@ -84,6 +85,7 @@ impl<T: AsRef<str>> ListBox<T> {
 
 /// Tracks a list box that can be ended by calling `.end()`
 /// or by dropping
+#[doc(alias = "EndListBox")]
 pub struct ListBoxToken<'ui> {
     _ui: &'ui Ui,
 }

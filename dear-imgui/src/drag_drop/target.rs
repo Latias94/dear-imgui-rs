@@ -11,6 +11,7 @@ use crate::{Ui, sys};
 /// This struct is created by [`Ui::drag_drop_target`] and provides
 /// methods for accepting different types of payloads.
 #[derive(Debug)]
+#[doc(alias = "EndDragDropTarget")]
 pub struct DragDropTarget<'ui>(pub(super) &'ui Ui);
 
 impl<'ui> DragDropTarget<'ui> {
@@ -48,6 +49,7 @@ impl<'ui> DragDropTarget<'ui> {
     /// * `flags` - Accept flags
     ///
     /// Returns `Some(Result<payload, error>)` if payload exists, `None` otherwise.
+    #[doc(alias = "AcceptDragDropPayload")]
     pub fn accept_payload<T: 'static + Copy, Name: AsRef<str>>(
         &self,
         name: Name,
