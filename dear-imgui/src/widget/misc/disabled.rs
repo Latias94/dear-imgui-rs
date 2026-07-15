@@ -7,6 +7,7 @@ use crate::sys;
 
 /// Tracks a disabled scope begun with [`Ui::begin_disabled`] and ended on drop.
 #[must_use]
+#[doc(alias = "EndDisabled")]
 pub struct DisabledToken<'ui> {
     _ui: &'ui Ui,
 }

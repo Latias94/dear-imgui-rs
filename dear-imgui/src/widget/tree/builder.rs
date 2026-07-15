@@ -141,6 +141,7 @@ impl<'a, T: AsRef<str>, L: AsRef<str>> TreeNode<'a, T, L> {
     ///
     /// Returns `None` if the tree node is not open and no content should be rendered.
     pub fn push(self) -> Option<TreeNodeToken<'a>> {
+        let pushes_tree = !self.flags.contains(TreeNodeFlags::NO_TREE_PUSH_ON_OPEN);
         let open = self.ui.run_with_bound_context(|| unsafe {
             if let Some(opened_cond) = self.opened_cond {
                 sys::igSetNextItemOpen(self.opened, opened_cond as i32);
@@ -149,37 +150,41 @@ impl<'a, T: AsRef<str>, L: AsRef<str>> TreeNode<'a, T, L> {
             match &self.id {
                 TreeNodeId::Str(s) => {
                     if let Some(label) = self.label.as_ref() {
+                        const FMT: &[u8; 3] = b"%s\0";
                         let (id_ptr, label_ptr) = self.ui.scratch_txt_two(s, label);
-                        sys::igPushID_Str(id_ptr);
-                        let open = sys::igTreeNodeEx_Str(label_ptr, self.flags.bits());
-                        sys::igPopID();
-                        open
+                        sys::igTreeNodeEx_StrStr(
+                            id_ptr,
+                            self.flags.bits(),
+                            FMT.as_ptr().cast(),
+                            label_ptr,
+                        )
                     } else {
                         let label_ptr = self.ui.scratch_txt(s);
                         sys::igTreeNodeEx_Str(label_ptr, self.flags.bits())
                     }
                 }
                 TreeNodeId::Ptr(ptr) => {
+                    const FMT: &[u8; 3] = b"%s\0";
                     let label = self.label.as_ref().map_or("", |l| l.as_ref());
                     let label_ptr = self.ui.scratch_txt(label);
-                    sys::igPushID_Ptr(*ptr as *const std::os::raw::c_void);
-                    let open = sys::igTreeNodeEx_Str(label_ptr, self.flags.bits());
-                    sys::igPopID();
-                    open
+                    sys::igTreeNodeEx_Ptr(
+                        ptr.cast(),
+                        self.flags.bits(),
+                        FMT.as_ptr().cast(),
+                        label_ptr,
+                    )
                 }
                 TreeNodeId::Int(i) => {
                     let label = self.label.as_ref().map_or("", |l| l.as_ref());
                     let label_ptr = self.ui.scratch_txt(label);
-                    sys::igPushID_Int(*i);
-                    let open = sys::igTreeNodeEx_Str(label_ptr, self.flags.bits());
-                    sys::igPopID();
-                    open
+                    let id = sys::igGetID_Int(*i);
+                    sys::igTreeNodeBehavior(id, self.flags.bits(), label_ptr, std::ptr::null())
                 }
             }
         });
 
         if open {
-            Some(TreeNodeToken::new(self.ui))
+            Some(TreeNodeToken::from_tree_node(self.ui, pushes_tree))
         } else {
             None
         }

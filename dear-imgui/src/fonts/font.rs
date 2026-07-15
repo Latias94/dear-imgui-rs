@@ -65,6 +65,25 @@ impl Font {
         self.0.get()
     }
 
+    /// Return whether this font has loaded runtime data.
+    #[doc(alias = "IsLoaded")]
+    pub fn is_loaded(&self) -> bool {
+        unsafe { sys::ImFont_IsLoaded(self.raw()) }
+    }
+
+    /// Return the font name used by Dear ImGui's debug tools.
+    #[doc(alias = "GetDebugName")]
+    pub fn debug_name(&self) -> &str {
+        unsafe {
+            let name = sys::ImFont_GetDebugName(self.raw());
+            if name.is_null() {
+                ""
+            } else {
+                std::ffi::CStr::from_ptr(name).to_str().unwrap_or("")
+            }
+        }
+    }
+
     /// Check if a glyph is available in this font
     #[doc(alias = "IsGlyphInFont")]
     pub fn is_glyph_in_font(&self, c: char) -> bool {
@@ -206,6 +225,16 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn loaded_font_exposes_its_debug_name() {
+        let mut ctx = setup_context();
+        let ui = ctx.frame();
+        let font = ui.current_font();
+
+        assert!(font.is_loaded());
+        assert!(!font.debug_name().is_empty());
     }
 
     #[test]

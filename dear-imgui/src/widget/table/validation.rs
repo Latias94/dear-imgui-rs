@@ -124,7 +124,8 @@ pub(crate) fn assert_current_table_row(caller: &str) {
     );
 }
 
-pub(crate) fn assert_explicit_user_id(id: Id, caller: &str) -> Id {
+pub(crate) fn assert_explicit_user_id(id: impl Into<Id>, caller: &str) -> Id {
+    let id = id.into();
     assert!(
         id.raw() != 0,
         "{caller} user_id must be non-zero; use None for automatic user id"

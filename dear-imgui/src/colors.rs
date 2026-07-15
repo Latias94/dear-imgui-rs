@@ -49,6 +49,7 @@ impl Color {
     ///
     /// ImGui packs colors with IM_COL32(R,G,B,A) into `(A<<24)|(B<<16)|(G<<8)|R`.
     /// This converts that ABGR-packed u32 into an RGBA float Color.
+    #[doc(alias = "ColorConvertU32ToFloat4")]
     pub fn from_imgui_u32(abgr: u32) -> Self {
         unsafe {
             let v = sys::igColorConvertU32ToFloat4(abgr);
@@ -67,6 +68,7 @@ impl Color {
     }
 
     /// Pack to ImGui ImU32 ABGR order `(A<<24)|(B<<16)|(G<<8)|R`.
+    #[doc(alias = "ColorConvertFloat4ToU32")]
     pub fn to_imgui_u32(self) -> u32 {
         unsafe {
             sys::igColorConvertFloat4ToU32(sys::ImVec4_c {

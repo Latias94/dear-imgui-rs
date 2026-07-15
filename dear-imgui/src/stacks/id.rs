@@ -52,6 +52,7 @@ impl Ui {
 create_token!(
     /// Tracks an ID pushed to the ID stack that can be popped by calling `.pop()`
     /// or by dropping. See [`crate::Ui::push_id`] for more details.
+    #[doc(alias = "PopID")]
     pub struct IdStackToken<'ui>;
 
     /// Pops a change from the ID stack

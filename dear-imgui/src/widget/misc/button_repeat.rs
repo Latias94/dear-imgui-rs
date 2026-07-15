@@ -1,24 +1,11 @@
-use crate::{Ui, sys};
+use crate::{ItemFlagStackToken, ItemFlags, Ui};
 
 // ============================================================================
 // Button repeat (convenience over item flag)
 // ============================================================================
 
-create_token!(
-    /// Tracks a button repeat item flag pushed with [`Ui::push_button_repeat`].
-    pub struct ButtonRepeatToken<'ui>;
-
-    /// Pops the button repeat item flag.
-    #[doc(alias = "PopButtonRepeat")]
-    drop { unsafe { sys::igPopItemFlag() } }
-);
-
-impl ButtonRepeatToken<'_> {
-    /// Pops the button repeat item flag.
-    pub fn pop(self) {
-        self.end()
-    }
-}
+/// Tracks a button repeat item flag pushed with [`Ui::push_button_repeat`].
+pub type ButtonRepeatToken<'ui> = ItemFlagStackToken<'ui>;
 
 impl Ui {
     /// Enable/disable repeating behavior for subsequent buttons.
@@ -26,10 +13,7 @@ impl Ui {
     /// Internally uses `PushItemFlag(ImGuiItemFlags_ButtonRepeat, repeat)`.
     #[doc(alias = "PushButtonRepeat")]
     pub fn push_button_repeat(&self, repeat: bool) -> ButtonRepeatToken<'_> {
-        self.run_with_bound_context(|| unsafe {
-            sys::igPushItemFlag(sys::ImGuiItemFlags_ButtonRepeat as i32, repeat)
-        });
-        ButtonRepeatToken::new(self)
+        self.push_item_flag(ItemFlags::BUTTON_REPEAT, repeat)
     }
 
     /// Push a button repeat item flag, run `f`, then pop the flag.

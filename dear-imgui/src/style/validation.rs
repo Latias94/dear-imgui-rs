@@ -1,4 +1,4 @@
-use super::{Direction, StyleVar};
+use super::{Direction, StyleVar, StyleVarVec2};
 
 const TABLE_ANGLED_HEADERS_MAX_ANGLE: f32 = 50.0 * std::f32::consts::PI / 180.0;
 
@@ -150,5 +150,19 @@ pub(crate) fn validate_style_var(caller: &str, style_var: StyleVar) {
         DockingSeparatorSize(value) => {
             assert_non_negative_f32(caller, "DockingSeparatorSize", value);
         }
+    }
+}
+
+pub(crate) fn validate_style_var_component(caller: &str, style_var: StyleVarVec2, value: f32) {
+    use StyleVarVec2::*;
+
+    match style_var {
+        WindowTitleAlign
+        | TableAngledHeadersTextAlign
+        | ButtonTextAlign
+        | SelectableTextAlign
+        | SeparatorTextAlign => assert_unit_f32(caller, "value", value),
+        WindowPadding | WindowMinSize | FramePadding | ItemSpacing | ItemInnerSpacing
+        | CellPadding | SeparatorTextPadding => assert_non_negative_f32(caller, "value", value),
     }
 }

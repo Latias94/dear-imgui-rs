@@ -1,5 +1,4 @@
-use crate::Id;
-use crate::ui::Ui;
+use crate::{Id, ui::Ui};
 
 use super::{
     TableColumnFlags, TableColumnIndent, TableColumnSetup, TableColumnWidth, TableFlags,
@@ -78,28 +77,16 @@ impl<'ui> TableBuilder<'ui> {
         mut self,
         cols: impl IntoIterator<Item = TableColumnSetup<Name>>,
     ) -> Self {
-        self.columns.clear();
-        for c in cols {
-            self.columns.push(TableColumnSetup {
-                name: c.name.into(),
-                flags: c.flags,
-                width: c.width,
-                indent: c.indent,
-                user_id: c.user_id,
-            });
-        }
+        self.columns = cols
+            .into_iter()
+            .map(|column| column.map_name(Into::into))
+            .collect();
         self
     }
 
     /// Add a single column setup
     pub fn add_column<Name: Into<Cow<'ui, str>>>(mut self, col: TableColumnSetup<Name>) -> Self {
-        self.columns.push(TableColumnSetup {
-            name: col.name.into(),
-            flags: col.flags,
-            width: col.width,
-            indent: col.indent,
-            user_id: col.user_id,
-        });
+        self.columns.push(col.map_name(Into::into));
         self
     }
 
@@ -155,52 +142,44 @@ impl<'ui> TableBuilder<'ui> {
 #[derive(Debug)]
 pub struct ColumnBuilder<'ui> {
     parent: TableBuilder<'ui>,
-    name: Cow<'ui, str>,
-    flags: TableColumnFlags,
-    width: Option<TableColumnWidth>,
-    indent: Option<TableColumnIndent>,
-    user_id: Option<Id>,
+    column: TableColumnSetup<Cow<'ui, str>>,
 }
 
 impl<'ui> ColumnBuilder<'ui> {
     fn new(parent: TableBuilder<'ui>, name: impl Into<Cow<'ui, str>>) -> Self {
         Self {
             parent,
-            name: name.into(),
-            flags: TableColumnFlags::NONE,
-            width: None,
-            indent: None,
-            user_id: None,
+            column: TableColumnSetup::new(name.into()),
         }
     }
 
     /// Set column flags.
     pub fn flags(mut self, flags: TableColumnFlags) -> Self {
-        self.flags = flags;
+        self.column.flags = flags;
         self
     }
 
     /// Set fixed width or stretch weight (ImGui uses same field for both).
     pub fn width(mut self, width: f32) -> Self {
-        self.width = Some(TableColumnWidth::Fixed(width));
+        self.column.width = Some(TableColumnWidth::Fixed(width));
         self
     }
 
     /// Alias of `width()` to express stretch weights.
     pub fn weight(mut self, weight: f32) -> Self {
-        self.width = Some(TableColumnWidth::Stretch(weight));
+        self.column.width = Some(TableColumnWidth::Stretch(weight));
         self
     }
 
     /// Set this column's indentation policy.
     pub fn indent(mut self, indent: TableColumnIndent) -> Self {
-        self.indent = Some(indent);
+        self.column.indent = Some(indent);
         self
     }
 
     /// Enable or disable indentation for this column.
     pub fn indent_enabled(mut self, enabled: bool) -> Self {
-        self.indent = Some(if enabled {
+        self.column.indent = Some(if enabled {
             TableColumnIndent::Enable
         } else {
             TableColumnIndent::Disable
@@ -211,28 +190,24 @@ impl<'ui> ColumnBuilder<'ui> {
     /// Toggle angled header flag.
     pub fn angled_header(mut self, enabled: bool) -> Self {
         if enabled {
-            self.flags.insert(TableColumnFlags::ANGLED_HEADER);
+            self.column.flags.insert(TableColumnFlags::ANGLED_HEADER);
         } else {
-            self.flags.remove(TableColumnFlags::ANGLED_HEADER);
+            self.column.flags.remove(TableColumnFlags::ANGLED_HEADER);
         }
         self
     }
 
-    /// Set user id for this column.
-    pub fn user_id(mut self, id: Id) -> Self {
-        self.user_id = Some(assert_explicit_user_id(id, "ColumnBuilder::user_id()"));
+    /// Sets the non-zero user ID associated with this column.
+    ///
+    /// See [`TableColumnSetup::user_id`] for accepted inputs and value semantics.
+    pub fn user_id(mut self, id: impl Into<Id>) -> Self {
+        self.column.user_id = Some(assert_explicit_user_id(id, "ColumnBuilder::user_id()"));
         self
     }
 
     /// Finish this column and return to the table builder.
     pub fn done(mut self) -> TableBuilder<'ui> {
-        self.parent.columns.push(TableColumnSetup {
-            name: self.name,
-            flags: self.flags,
-            width: self.width,
-            indent: self.indent,
-            user_id: self.user_id,
-        });
+        self.parent.columns.push(self.column);
         self.parent
     }
 }

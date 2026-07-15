@@ -114,11 +114,13 @@ impl Ui {
         ) {
             for (idx, item) in items.iter().enumerate() {
                 let is_selected = idx == *current_item;
+                let clicked = self
+                    .selectable_config(label_fn(item).as_ref())
+                    .selected(is_selected)
+                    .build();
                 if is_selected {
                     self.set_item_default_focus();
                 }
-
-                let clicked = self.selectable(label_fn(item).as_ref());
 
                 if clicked {
                     *current_item = idx;
@@ -165,11 +167,13 @@ impl Ui {
                 }
                 let idx_i32 = idx as i32;
                 let is_selected = idx_i32 == *current_item;
+                let clicked = self
+                    .selectable_config(label_fn(item).as_ref())
+                    .selected(is_selected)
+                    .build();
                 if is_selected {
                     self.set_item_default_focus();
                 }
-
-                let clicked = self.selectable(label_fn(item).as_ref());
                 if clicked {
                     *current_item = idx_i32;
                     result = true;
@@ -203,10 +207,9 @@ impl Ui {
         self.combo_i32(label, current_item, items, |s| Cow::Borrowed(s.as_ref()))
     }
 
-    /// Sets the default focus for the next item
+    /// Makes the last submitted item the default focus of a newly appearing window.
+    #[doc(alias = "SetItemDefaultFocus")]
     pub fn set_item_default_focus(&self) {
-        unsafe {
-            sys::igSetItemDefaultFocus();
-        }
+        self.run_with_bound_context(|| unsafe { sys::igSetItemDefaultFocus() });
     }
 }

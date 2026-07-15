@@ -1,4 +1,7 @@
-use crate::style::{StyleColor, StyleVar, validate_style_color, validate_style_var};
+use crate::style::{
+    StyleColor, StyleVar, StyleVarVec2, validate_style_color, validate_style_var,
+    validate_style_var_component,
+};
 use crate::{Ui, sys};
 
 impl Ui {
@@ -60,11 +63,28 @@ impl Ui {
         self.run_with_bound_context(|| unsafe { push_style_var(style_var) });
         StyleStackToken::new(self)
     }
+
+    /// Overrides the X component of a two-component style variable.
+    #[doc(alias = "PushStyleVarX")]
+    pub fn push_style_var_x(&self, style_var: StyleVarVec2, value: f32) -> StyleStackToken<'_> {
+        validate_style_var_component("Ui::push_style_var_x()", style_var, value);
+        self.run_with_bound_context(|| unsafe { sys::igPushStyleVarX(style_var.raw(), value) });
+        StyleStackToken::new(self)
+    }
+
+    /// Overrides the Y component of a two-component style variable.
+    #[doc(alias = "PushStyleVarY")]
+    pub fn push_style_var_y(&self, style_var: StyleVarVec2, value: f32) -> StyleStackToken<'_> {
+        validate_style_var_component("Ui::push_style_var_y()", style_var, value);
+        self.run_with_bound_context(|| unsafe { sys::igPushStyleVarY(style_var.raw(), value) });
+        StyleStackToken::new(self)
+    }
 }
 
 create_token!(
     /// Tracks a color pushed to the color stack that can be popped by calling `.end()`
     /// or by dropping.
+    #[doc(alias = "PopStyleColor")]
     pub struct ColorStackToken<'ui>;
 
     /// Pops a change from the color stack.
@@ -81,6 +101,7 @@ impl ColorStackToken<'_> {
 create_token!(
     /// Tracks a style pushed to the style stack that can be popped by calling `.end()`
     /// or by dropping.
+    #[doc(alias = "PopStyleVar")]
     pub struct StyleStackToken<'ui>;
 
     /// Pops a change from the style stack.
@@ -251,5 +272,58 @@ unsafe fn push_style_var(style_var: StyleVar) {
         DockingSeparatorSize(v) => unsafe {
             sys::igPushStyleVar_Float(sys::ImGuiStyleVar_DockingSeparatorSize as i32, v)
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup_context() -> crate::Context {
+        let mut ctx = crate::Context::create();
+        ctx.io_mut().set_display_size([128.0, 128.0]);
+        ctx.io_mut().set_delta_time(1.0 / 60.0);
+        let _ = ctx.font_atlas_mut().build();
+        ctx
+    }
+
+    #[test]
+    fn style_var_component_scopes_are_typed_and_restore_values() {
+        let mut ctx = setup_context();
+        let ui = ctx.frame();
+        let original = ui.clone_style().window_padding();
+
+        {
+            let _x = ui.push_style_var_x(StyleVarVec2::WindowPadding, 17.0);
+            assert_eq!(ui.clone_style().window_padding(), [17.0, original[1]]);
+        }
+        assert_eq!(ui.clone_style().window_padding(), original);
+
+        {
+            let _y = ui.push_style_var_y(StyleVarVec2::WindowPadding, 23.0);
+            assert_eq!(ui.clone_style().window_padding(), [original[0], 23.0]);
+        }
+        assert_eq!(ui.clone_style().window_padding(), original);
+    }
+
+    #[test]
+    fn style_var_components_validate_values_before_ffi() {
+        let mut ctx = setup_context();
+        let ui = ctx.frame();
+
+        for value in [-1.0, f32::NAN, f32::INFINITY] {
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let _token = ui.push_style_var_x(StyleVarVec2::WindowPadding, value);
+                }))
+                .is_err()
+            );
+        }
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _token = ui.push_style_var_y(StyleVarVec2::WindowTitleAlign, 1.1);
+            }))
+            .is_err()
+        );
     }
 }

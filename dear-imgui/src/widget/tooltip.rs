@@ -94,7 +94,7 @@ impl Ui {
     /// Sets a tooltip for the last item with simple text content.
     ///
     /// Uses the non-variadic `BeginItemTooltip` path and renders unformatted text.
-    #[doc(alias = "SetItemTooltip")]
+    #[doc(alias = "SetItemTooltip", alias = "BeginItemTooltip")]
     pub fn set_item_tooltip(&self, text: impl AsRef<str>) {
         let s = text.as_ref();
         self.run_with_bound_context(|| unsafe {

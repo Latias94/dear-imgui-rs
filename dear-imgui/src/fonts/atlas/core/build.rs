@@ -52,4 +52,25 @@ impl FontAtlas {
             sys::igImFontAtlasBuildDiscardBakes(self.raw, unused_frames);
         }
     }
+
+    /// Compact cached glyphs and the current atlas texture.
+    ///
+    /// This is a no-op before the atlas builder and texture have been created.
+    /// It must not be called while the atlas is locked by a frame.
+    #[doc(alias = "CompactCache")]
+    pub fn compact_cache(&mut self) {
+        if self.raw.is_null() {
+            return;
+        }
+        unsafe {
+            assert!(
+                !(*self.raw).Locked,
+                "FontAtlas::compact_cache() cannot modify a locked font atlas"
+            );
+            if (*self.raw).Builder.is_null() || (*self.raw).TexData.is_null() {
+                return;
+            }
+            sys::ImFontAtlas_CompactCache(self.raw);
+        }
+    }
 }

@@ -3,6 +3,7 @@ use crate::ui::Ui;
 
 /// Tracks a combo box that can be ended by calling `.end()` or by dropping
 #[must_use]
+#[doc(alias = "EndCombo")]
 pub struct ComboBoxToken<'ui> {
     _ui: &'ui Ui,
 }

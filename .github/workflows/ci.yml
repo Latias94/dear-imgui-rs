@@ -210,6 +210,9 @@ jobs:
       - name: Verify exact vendored source provenance
         run: python3 tools/source_metadata.py verify
 
+      - name: Verify high-level API coverage policy
+        run: python3 tools/api_surface_report.py --check
+
       - name: Regenerate and verify every core binding profile
         run: cargo run -p xtask -- verify-bindings --allow-dirty
 

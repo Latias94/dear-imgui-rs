@@ -15,6 +15,21 @@ const _: [(); std::mem::size_of::<sys::ImGuiStyle>()] = [(); std::mem::size_of::
 const _: [(); std::mem::align_of::<sys::ImGuiStyle>()] = [(); std::mem::align_of::<Style>()];
 
 impl Style {
+    /// Scale every size and spacing value using Dear ImGui's DPI-aware rules.
+    ///
+    /// This also updates Dear ImGui's internal main style scale and preserves
+    /// sentinel values used by selected style fields.
+    #[doc(alias = "ScaleAllSizes")]
+    pub fn scale_all_sizes(&mut self, scale_factor: f32) {
+        assert!(
+            scale_factor.is_finite() && scale_factor > 0.0,
+            "Style::scale_all_sizes() scale_factor must be finite and positive"
+        );
+        unsafe {
+            sys::ImGuiStyle_ScaleAllSizes(self.inner_mut(), scale_factor);
+        }
+    }
+
     #[inline]
     pub(super) fn inner(&self) -> &sys::ImGuiStyle {
         // Safety: `Style` is a view into ImGui-owned style data. Dear ImGui can update style state
@@ -51,5 +66,26 @@ impl RawWrapper for Style {
 
     unsafe fn raw_mut(&mut self) -> &mut Self::Raw {
         self.inner_mut()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn scale_all_sizes_uses_upstream_rounding_and_rejects_invalid_factors() {
+        let mut ctx = crate::Context::create();
+        let style = ctx.style_mut();
+        style.set_window_padding([3.0, 5.0]);
+        style.scale_all_sizes(2.0);
+        assert_eq!(style.window_padding(), [6.0, 10.0]);
+
+        for scale_factor in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    style.scale_all_sizes(scale_factor);
+                }))
+                .is_err()
+            );
+        }
     }
 }

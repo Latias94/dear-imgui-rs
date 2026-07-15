@@ -162,6 +162,30 @@ pub enum Key {
     F11 = sys::ImGuiKey_F11 as i32,
     /// F12 key
     F12 = sys::ImGuiKey_F12 as i32,
+    /// F13 key
+    F13 = sys::ImGuiKey_F13 as i32,
+    /// F14 key
+    F14 = sys::ImGuiKey_F14 as i32,
+    /// F15 key
+    F15 = sys::ImGuiKey_F15 as i32,
+    /// F16 key
+    F16 = sys::ImGuiKey_F16 as i32,
+    /// F17 key
+    F17 = sys::ImGuiKey_F17 as i32,
+    /// F18 key
+    F18 = sys::ImGuiKey_F18 as i32,
+    /// F19 key
+    F19 = sys::ImGuiKey_F19 as i32,
+    /// F20 key
+    F20 = sys::ImGuiKey_F20 as i32,
+    /// F21 key
+    F21 = sys::ImGuiKey_F21 as i32,
+    /// F22 key
+    F22 = sys::ImGuiKey_F22 as i32,
+    /// F23 key
+    F23 = sys::ImGuiKey_F23 as i32,
+    /// F24 key
+    F24 = sys::ImGuiKey_F24 as i32,
 
     // --- Punctuation and extra named keys ---
     /// Apostrophe (') key
@@ -233,8 +257,62 @@ pub enum Key {
     /// Numpad equal
     KeypadEqual = sys::ImGuiKey_KeypadEqual as i32,
 
+    /// Application back navigation key
+    AppBack = sys::ImGuiKey_AppBack as i32,
+    /// Application forward navigation key
+    AppForward = sys::ImGuiKey_AppForward as i32,
+
     /// OEM 102 key (ISO < > |)
     Oem102 = sys::ImGuiKey_Oem102 as i32,
+
+    /// Gamepad start button
+    GamepadStart = sys::ImGuiKey_GamepadStart as i32,
+    /// Gamepad back/select button
+    GamepadBack = sys::ImGuiKey_GamepadBack as i32,
+    /// Gamepad left face button
+    GamepadFaceLeft = sys::ImGuiKey_GamepadFaceLeft as i32,
+    /// Gamepad right face button
+    GamepadFaceRight = sys::ImGuiKey_GamepadFaceRight as i32,
+    /// Gamepad upper face button
+    GamepadFaceUp = sys::ImGuiKey_GamepadFaceUp as i32,
+    /// Gamepad lower face button
+    GamepadFaceDown = sys::ImGuiKey_GamepadFaceDown as i32,
+    /// Gamepad D-pad left
+    GamepadDpadLeft = sys::ImGuiKey_GamepadDpadLeft as i32,
+    /// Gamepad D-pad right
+    GamepadDpadRight = sys::ImGuiKey_GamepadDpadRight as i32,
+    /// Gamepad D-pad up
+    GamepadDpadUp = sys::ImGuiKey_GamepadDpadUp as i32,
+    /// Gamepad D-pad down
+    GamepadDpadDown = sys::ImGuiKey_GamepadDpadDown as i32,
+    /// Gamepad left shoulder button
+    GamepadL1 = sys::ImGuiKey_GamepadL1 as i32,
+    /// Gamepad right shoulder button
+    GamepadR1 = sys::ImGuiKey_GamepadR1 as i32,
+    /// Gamepad left analog trigger
+    GamepadL2 = sys::ImGuiKey_GamepadL2 as i32,
+    /// Gamepad right analog trigger
+    GamepadR2 = sys::ImGuiKey_GamepadR2 as i32,
+    /// Gamepad left stick button
+    GamepadL3 = sys::ImGuiKey_GamepadL3 as i32,
+    /// Gamepad right stick button
+    GamepadR3 = sys::ImGuiKey_GamepadR3 as i32,
+    /// Gamepad left stick leaning left
+    GamepadLStickLeft = sys::ImGuiKey_GamepadLStickLeft as i32,
+    /// Gamepad left stick leaning right
+    GamepadLStickRight = sys::ImGuiKey_GamepadLStickRight as i32,
+    /// Gamepad left stick leaning up
+    GamepadLStickUp = sys::ImGuiKey_GamepadLStickUp as i32,
+    /// Gamepad left stick leaning down
+    GamepadLStickDown = sys::ImGuiKey_GamepadLStickDown as i32,
+    /// Gamepad right stick leaning left
+    GamepadRStickLeft = sys::ImGuiKey_GamepadRStickLeft as i32,
+    /// Gamepad right stick leaning right
+    GamepadRStickRight = sys::ImGuiKey_GamepadRStickRight as i32,
+    /// Gamepad right stick leaning up
+    GamepadRStickUp = sys::ImGuiKey_GamepadRStickUp as i32,
+    /// Gamepad right stick leaning down
+    GamepadRStickDown = sys::ImGuiKey_GamepadRStickDown as i32,
 }
 
 impl From<Key> for sys::ImGuiKey {

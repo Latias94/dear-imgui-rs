@@ -8,6 +8,7 @@ impl Context {
     ///
     /// Note: `ImGuiPlatformIO` exists even when multi-viewport is disabled. We expose it
     /// unconditionally so callers can use ImGui 1.92+ texture management via `PlatformIO.Textures[]`.
+    #[doc(alias = "GetPlatformIO")]
     pub fn platform_io(&self) -> &crate::platform_io::PlatformIo {
         let _guard = CTX_MUTEX.lock();
         unsafe {
@@ -62,6 +63,7 @@ impl Context {
     /// This function should be called every frame when multi-viewport is enabled.
     /// It updates all platform windows and handles viewport management.
     #[cfg(feature = "multi-viewport")]
+    #[doc(alias = "UpdatePlatformWindows")]
     pub fn update_platform_windows(&mut self) {
         let _guard = CTX_MUTEX.lock();
         unsafe {
@@ -86,6 +88,7 @@ impl Context {
     /// This function renders all platform windows using the default implementation.
     /// It calls the platform and renderer backends to render each viewport.
     #[cfg(feature = "multi-viewport")]
+    #[doc(alias = "RenderPlatformWindowsDefault")]
     pub fn render_platform_windows_default(&mut self) {
         let _guard = CTX_MUTEX.lock();
         unsafe {
@@ -100,6 +103,7 @@ impl Context {
     /// This function should be called during shutdown to properly clean up
     /// all platform windows and their associated resources.
     #[cfg(feature = "multi-viewport")]
+    #[doc(alias = "DestroyPlatformWindows")]
     pub fn destroy_platform_windows(&mut self) {
         let _guard = CTX_MUTEX.lock();
         unsafe {

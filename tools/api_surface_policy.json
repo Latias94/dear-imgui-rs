@@ -1,0 +1,70 @@
+{
+  "schema_version": 2,
+  "scope": "ImGui",
+  "groups": [
+    {
+      "classification": "intentional-sys-only",
+      "name": "c-variadic-formatting",
+      "reason": "C variadic formatting is not type-safe; Rust string and non-variadic alternatives are exposed instead.",
+      "functions": [
+        "BulletTextV",
+        "DebugLog",
+        "DebugLogV",
+        "LabelTextV",
+        "LogText",
+        "LogTextV",
+        "SetItemTooltipV",
+        "SetTooltipV",
+        "TextColoredV",
+        "TextDisabledV",
+        "TextV",
+        "TextWrappedV",
+        "TreeNodeExV",
+        "TreeNodeV"
+      ]
+    },
+    {
+      "classification": "intentional-sys-only",
+      "name": "legacy-columns",
+      "reason": "The obsolete Columns API is intentionally excluded in favor of tables.",
+      "functions": [
+        "Columns",
+        "GetColumnIndex",
+        "GetColumnOffset",
+        "GetColumnWidth",
+        "GetColumnsCount",
+        "NextColumn",
+        "SetColumnOffset",
+        "SetColumnWidth"
+      ]
+    },
+    {
+      "classification": "intentional-sys-only",
+      "name": "low-level-global-hooks",
+      "reason": "These APIs expose process-global allocators, ABI checks, or context-owned raw draw-list internals.",
+      "functions": [
+        "DebugCheckVersionAndDataLayout",
+        "GetAllocatorFunctions",
+        "GetDrawListSharedData",
+        "SetAllocatorFunctions"
+      ]
+    },
+    {
+      "classification": "intentional-sys-only",
+      "name": "internal-allocation",
+      "reason": "Raw ImGui allocation is used internally where ownership is immediately recovered; it is not a safe public allocator contract.",
+      "functions": [
+        "MemAlloc",
+        "MemFree"
+      ]
+    },
+    {
+      "classification": "deferred-design",
+      "name": "font-baked-lifetime",
+      "reason": "A safe ImFontBaked wrapper must tie atlas mutation, density, and context-owned lifetimes together.",
+      "functions": [
+        "GetFontBaked"
+      ]
+    }
+  ]
+}

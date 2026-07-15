@@ -58,9 +58,24 @@ impl<Name> TableColumnSetup<Name> {
         self
     }
 
-    /// Sets the user ID
-    pub fn user_id(mut self, id: Id) -> Self {
+    /// Sets the non-zero user ID associated with this column.
+    ///
+    /// Accepts an [`Id`] or a `u32` value. Dear ImGui returns the value unchanged
+    /// in table sort specifications; unlike [`Ui::push_id`](crate::Ui::push_id),
+    /// it is not hashed through the ID stack. Omit this method to leave the user
+    /// ID unspecified.
+    pub fn user_id(mut self, id: impl Into<Id>) -> Self {
         self.user_id = Some(assert_explicit_user_id(id, "TableColumnSetup::user_id()"));
         self
+    }
+
+    pub(crate) fn map_name<M>(self, map: impl FnOnce(Name) -> M) -> TableColumnSetup<M> {
+        TableColumnSetup {
+            name: map(self.name),
+            flags: self.flags,
+            width: self.width,
+            indent: self.indent,
+            user_id: self.user_id,
+        }
     }
 }

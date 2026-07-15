@@ -62,7 +62,7 @@ impl ListClipper {
                 panic!("ImGuiListClipper_ImGuiListClipper() returned null");
             }
             sys::ImGuiListClipper_Begin(ptr, items_count, self.items_height);
-            ListClipperToken::new(ui, ptr)
+            ListClipperToken::new(ui, ptr, self.items_count)
         })
     }
 }
@@ -75,16 +75,64 @@ impl ListClipper {
 pub struct ListClipperToken<'ui> {
     ui: &'ui Ui,
     list_clipper: *mut sys::ImGuiListClipper,
+    items_count: usize,
+    stepped: bool,
     ended: bool,
 }
 
 impl<'ui> ListClipperToken<'ui> {
-    fn new(ui: &'ui Ui, list_clipper: *mut sys::ImGuiListClipper) -> Self {
+    fn new(ui: &'ui Ui, list_clipper: *mut sys::ImGuiListClipper, items_count: usize) -> Self {
         Self {
             ui,
             list_clipper,
+            items_count,
+            stepped: false,
             ended: false,
         }
+    }
+
+    /// Keep one item from being clipped, regardless of its visibility.
+    ///
+    /// This must be called before the first [`Self::step`].
+    #[doc(alias = "IncludeItemByIndex")]
+    pub fn include_item_by_index(&mut self, item_index: usize) {
+        let item_end = item_index
+            .checked_add(1)
+            .expect("ListClipperToken::include_item_by_index() index overflowed");
+        self.include_items_by_index(item_index..item_end);
+    }
+
+    /// Keep a half-open item range from being clipped, regardless of visibility.
+    ///
+    /// This must be called before the first [`Self::step`]. Empty ranges are a no-op.
+    #[doc(alias = "IncludeItemsByIndex")]
+    pub fn include_items_by_index(&mut self, items: Range<usize>) {
+        assert!(
+            !self.ended && !self.stepped,
+            "ListClipperToken::include_items_by_index() must be called before the first step()"
+        );
+        assert!(
+            items.start <= items.end,
+            "ListClipperToken::include_items_by_index() range start must not exceed its end"
+        );
+        assert!(
+            items.end <= self.items_count,
+            "ListClipperToken::include_items_by_index() range exceeds the item count"
+        );
+        if items.is_empty() {
+            return;
+        }
+        let item_begin = items_count_to_i32(
+            items.start,
+            "ListClipperToken::include_items_by_index() range start",
+        );
+        let item_end = items_count_to_i32(
+            items.end,
+            "ListClipperToken::include_items_by_index() range end",
+        );
+        self.ui.run_with_bound_context(|| unsafe {
+            sys::ImGuiListClipper_IncludeItemsByIndex(self.list_clipper, item_begin, item_end);
+        });
     }
 
     /// Progress the list clipper.
@@ -101,6 +149,7 @@ impl<'ui> ListClipperToken<'ui> {
         if self.ended {
             panic!("ListClipperToken::step() called after the clipper has ended");
         }
+        self.stepped = true;
         let ret = self
             .ui
             .run_with_bound_context(|| unsafe { sys::ImGuiListClipper_Step(self.list_clipper) });
@@ -245,6 +294,60 @@ mod tests {
                     .collect();
                 assert_eq!(indices, vec![0, 1, 2]);
             });
+    }
+
+    #[test]
+    fn include_items_returns_non_visible_ranges_and_enforces_call_order() {
+        let mut ctx = setup_context();
+        let ui = ctx.frame();
+
+        ui.window("list_clipper_includes")
+            .size([96.0, 96.0], crate::Condition::Always)
+            .build(|| {
+                let mut clipper = ListClipper::new(1_000usize).items_height(16.0).begin(ui);
+                clipper.include_item_by_index(900);
+                clipper.include_items_by_index(950..953);
+
+                let mut included = [false; 4];
+                while clipper.step() {
+                    for index in clipper.display_range() {
+                        if index == 900 {
+                            included[0] = true;
+                        }
+                        if (950..953).contains(&index) {
+                            included[index - 949] = true;
+                        }
+                        ui.text(format!("row {index}"));
+                    }
+                }
+                assert!(included.into_iter().all(|seen| seen));
+
+                assert!(
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        clipper.include_item_by_index(1);
+                    }))
+                    .is_err()
+                );
+            });
+    }
+
+    #[test]
+    fn include_items_rejects_invalid_ranges_before_ffi() {
+        let mut ctx = setup_context();
+        let ui = ctx.frame();
+
+        ui.window("list_clipper_invalid_includes").build(|| {
+            for (start, end) in [(5usize, 4usize), (0, 11)] {
+                let range = std::ops::Range { start, end };
+                let mut clipper = ListClipper::new(10usize).begin(ui);
+                assert!(
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        clipper.include_items_by_index(range.clone());
+                    }))
+                    .is_err()
+                );
+            }
+        });
     }
 }
 

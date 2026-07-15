@@ -267,6 +267,19 @@ fn font_sources_reject_invalid_sizes_before_ffi() {
 }
 
 #[test]
+fn explicit_embedded_fonts_and_cache_compaction_are_safe() {
+    let mut ctx = crate::Context::create();
+
+    ctx.font_atlas_mut().compact_cache();
+    let bitmap = ctx.font_atlas_mut().add_font_default_bitmap(None).id();
+    let vector = ctx.font_atlas_mut().add_font_default_vector(None).id();
+    assert_ne!(bitmap, vector);
+
+    assert!(ctx.font_atlas_mut().build());
+    ctx.font_atlas_mut().compact_cache();
+}
+
+#[test]
 fn set_texture_id_preserves_managed_tex_data_reference() {
     let mut ctx = crate::Context::create();
     let mut fonts = ctx.font_atlas_mut();

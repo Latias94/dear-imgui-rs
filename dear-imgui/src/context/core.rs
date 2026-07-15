@@ -35,6 +35,12 @@ use super::texture_registry::unregister_user_textures_for_context;
 ///
 /// let ctx2 = dear_imgui_rs::Context::create(); // PANIC
 /// ```
+#[doc(
+    alias = "CreateContext",
+    alias = "DestroyContext",
+    alias = "GetCurrentContext",
+    alias = "SetCurrentContext"
+)]
 #[derive(Debug)]
 pub struct Context {
     pub(super) raw: *mut sys::ImGuiContext,

@@ -44,6 +44,7 @@ impl Ui {
     /// [begin_table_header](Self::begin_table_header) or the more complex
     /// [table_setup_column](Self::table_setup_column).
     #[must_use = "if return is dropped immediately, table is ended immediately."]
+    #[doc(alias = "BeginTable")]
     pub fn begin_table(
         &self,
         str_id: impl AsRef<str>,
@@ -153,6 +154,7 @@ impl Ui {
     }
 
     /// Setup a column for the current table
+    #[doc(alias = "TableSetupColumn")]
     pub fn table_setup_column(
         &self,
         label: impl AsRef<str>,
@@ -224,6 +226,7 @@ impl Ui {
     }
 
     /// Submit all headers cells based on data provided to TableSetupColumn() + submit context menu
+    #[doc(alias = "TableHeadersRow")]
     pub fn table_headers_row(&self) {
         self.run_with_bound_context(|| {
             assert_current_table("Ui::table_headers_row()");
@@ -234,11 +237,13 @@ impl Ui {
     }
 
     /// Append into the next column (or first column of next row if currently in last column)
+    #[doc(alias = "TableNextColumn")]
     pub fn table_next_column(&self) -> bool {
         self.run_with_bound_context(|| unsafe { sys::igTableNextColumn() })
     }
 
     /// Append into the specified column
+    #[doc(alias = "TableSetColumnIndex")]
     pub fn table_set_column_index(&self, column: impl Into<TableColumnIndex>) -> bool {
         let column = column.into();
         let column_n = column.into_i32("Ui::table_set_column_index()");
@@ -251,6 +256,7 @@ impl Ui {
     }
 
     /// Append into the next row
+    #[doc(alias = "TableNextRow")]
     pub fn table_next_row(&self) {
         self.table_next_row_with_flags(TableRowFlags::NONE, 0.0);
     }

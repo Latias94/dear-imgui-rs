@@ -19,6 +19,63 @@ use crate::style::StyleColor;
 use crate::sys;
 
 impl Ui {
+    /// Calculates the size required to render text with the current font and font size.
+    ///
+    /// This is equivalent to [`Ui::calc_text_size_with_opts`] with
+    /// `hide_text_after_double_hash` set to `false` and wrapping disabled.
+    #[doc(alias = "CalcTextSize")]
+    pub fn calc_text_size(&self, text: impl AsRef<str>) -> [f32; 2] {
+        self.calc_text_size_with_opts(text, false, -1.0)
+    }
+
+    /// Calculates the size required to render text with explicit display options.
+    ///
+    /// When `hide_text_after_double_hash` is `true`, the `##` label suffix is
+    /// excluded from the measurement. A positive `wrap_width` enables wrapping;
+    /// values at or below zero disable it.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `wrap_width` is not finite.
+    #[doc(alias = "CalcTextSize")]
+    pub fn calc_text_size_with_opts(
+        &self,
+        text: impl AsRef<str>,
+        hide_text_after_double_hash: bool,
+        wrap_width: f32,
+    ) -> [f32; 2] {
+        Self::assert_finite_f32("Ui::calc_text_size_with_opts()", "wrap_width", wrap_width);
+        let text = text.as_ref();
+
+        self.run_with_bound_context(|| unsafe {
+            self.calc_text_size_bound(text, hide_text_after_double_hash, wrap_width)
+        })
+    }
+
+    /// Measures text while the owning ImGui context is already current.
+    ///
+    /// # Safety
+    ///
+    /// The caller must bind this `Ui`'s live ImGui context for the duration of
+    /// the call.
+    pub(crate) unsafe fn calc_text_size_bound(
+        &self,
+        text: &str,
+        hide_text_after_double_hash: bool,
+        wrap_width: f32,
+    ) -> [f32; 2] {
+        let text_range = self.scratch_txt_range(text);
+        let size = unsafe {
+            sys::igCalcTextSize(
+                text_range.start,
+                text_range.end,
+                hide_text_after_double_hash,
+                wrap_width,
+            )
+        };
+        [size.x, size.y]
+    }
+
     /// Display colored text
     ///
     /// This implementation uses zero-copy optimization with `igTextEx`,
@@ -119,5 +176,46 @@ impl Ui {
     pub fn text_link_open_url(&self, label: impl AsRef<str>, url: impl AsRef<str>) -> bool {
         let (label_ptr, url_ptr) = self.scratch_txt_two(label, url);
         self.run_with_bound_context(|| unsafe { sys::igTextLinkOpenURL(label_ptr, url_ptr) })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    fn setup_context() -> crate::Context {
+        let mut ctx = crate::Context::create();
+        ctx.io_mut().set_display_size([128.0, 128.0]);
+        ctx.io_mut().set_delta_time(1.0 / 60.0);
+        let _ = ctx.font_atlas_mut().build();
+        ctx
+    }
+
+    #[test]
+    fn calc_text_size_supports_default_and_advanced_options() {
+        let mut ctx = setup_context();
+        let ui = ctx.frame();
+
+        let default_size = ui.calc_text_size("Column##sort_key");
+        let explicit_default = ui.calc_text_size_with_opts("Column##sort_key", false, -1.0);
+        let visible_label = ui.calc_text_size_with_opts("Column##sort_key", true, -1.0);
+        let trailing_hash = ui.calc_text_size_with_opts("Column#", true, -1.0);
+
+        assert_eq!(default_size, explicit_default);
+        assert!(visible_label[0] < default_size[0]);
+        assert_eq!(visible_label[1], default_size[1]);
+        assert_eq!(trailing_hash, ui.calc_text_size("Column#"));
+
+        let unwrapped = ui.calc_text_size("one two three four");
+        let wrapped = ui.calc_text_size_with_opts("one two three four", false, unwrapped[0] / 2.0);
+        assert!(wrapped[0] < unwrapped[0]);
+        assert!(wrapped[1] > unwrapped[1]);
+
+        for wrap_width in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let _ = ui.calc_text_size_with_opts("text", false, wrap_width);
+                }))
+                .is_err()
+            );
+        }
     }
 }

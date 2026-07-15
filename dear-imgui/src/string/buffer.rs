@@ -1,3 +1,4 @@
+use std::ops::Range;
 use std::os::raw::c_char;
 
 /// Internal buffer for UI string operations
@@ -24,6 +25,21 @@ impl UiBuffer {
 
         let start_of_substr = self.push(txt);
         unsafe { self.offset(start_of_substr) }
+    }
+
+    /// Stages an explicit text range followed by a readable NUL sentinel.
+    ///
+    /// Unlike [`Self::scratch_txt`], this preserves interior NUL bytes because
+    /// range-based Dear ImGui APIs receive the end pointer separately.
+    pub fn scratch_txt_range(&mut self, txt: impl AsRef<str>) -> Range<*const c_char> {
+        self.refresh_buffer();
+
+        let start = self.buffer.len();
+        self.buffer.extend_from_slice(txt.as_ref().as_bytes());
+        let end = self.buffer.len();
+        self.buffer.push(0);
+
+        unsafe { self.offset(start)..self.offset(end) }
     }
 
     /// Internal method to push an option text to our scratch buffer.

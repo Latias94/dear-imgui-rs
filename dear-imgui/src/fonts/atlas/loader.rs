@@ -1,53 +1,44 @@
-use std::ffi::CString;
-
 use crate::sys;
 
-use super::core::FontAtlas;
-
-/// Font loader interface for custom font backends
+/// Borrowed handle to a complete Dear ImGui font-loader callback table.
 ///
-/// This provides a safe Rust interface to Dear ImGui's ImFontLoader system,
-/// allowing custom font loading implementations.
-pub struct FontLoader {
-    raw: sys::ImFontLoader,
-    _name: CString,
-}
+/// Safe code can obtain the built-in stb_truetype loader. Custom loaders must
+/// be created in native code and enter through [`FontLoader::from_raw`], whose
+/// safety contract covers every callback and stored pointer.
+#[repr(transparent)]
+pub struct FontLoader(sys::ImFontLoader);
 
 impl FontLoader {
-    /// Creates a new font loader with the given name
-    pub fn new(name: &str) -> Result<Self, std::ffi::NulError> {
-        let name_cstring = CString::new(name)?;
-        // Initialize via ImGui constructor to future-proof defaults
-        let mut raw = unsafe {
-            let p = sys::ImFontLoader_ImFontLoader();
-            if p.is_null() {
-                panic!("ImFontLoader_ImFontLoader() returned null");
-            }
-            let v = *p;
-            sys::ImFontLoader_destroy(p);
-            v
-        };
-        raw.Name = name_cstring.as_ptr();
-
-        Ok(Self {
-            raw,
-            _name: name_cstring,
-        })
+    /// Return Dear ImGui's built-in stb_truetype loader.
+    #[doc(alias = "ImFontAtlasGetFontLoaderForStbTruetype")]
+    pub fn stb_truetype() -> &'static Self {
+        let raw = unsafe { sys::igImFontAtlasGetFontLoaderForStbTruetype() };
+        assert!(
+            !raw.is_null(),
+            "Dear ImGui returned a null stb_truetype font loader"
+        );
+        unsafe { &*raw.cast::<Self>() }
     }
 
-    /// Returns a pointer to the raw ImFontLoader
+    /// Borrow an externally owned font loader.
+    ///
+    /// # Safety
+    ///
+    /// `raw` must point to a fully initialized `ImFontLoader`. Its name and all
+    /// callback pointers, callback userdata, and referenced native state must
+    /// remain valid for `'a`. Every callback must obey Dear ImGui's ABI, must not
+    /// unwind across FFI, and must satisfy the callback-specific ownership rules.
+    pub unsafe fn from_raw<'a>(raw: *const sys::ImFontLoader) -> &'a Self {
+        assert!(
+            !raw.is_null(),
+            "FontLoader::from_raw() received a null pointer"
+        );
+        unsafe { &*raw.cast::<Self>() }
+    }
+
+    /// Return the borrowed raw loader pointer.
     pub(crate) fn as_ptr(&self) -> *const sys::ImFontLoader {
-        &self.raw
-    }
-
-    /// Sets the loader initialization callback
-    pub fn with_loader_init<F>(self, _callback: F) -> Self
-    where
-        F: Fn(&mut FontAtlas) -> bool + 'static,
-    {
-        // Note: For now, we'll use the default STB TrueType loader
-        // Custom callbacks would require more complex lifetime management
-        self
+        &self.0
     }
 }
 
@@ -105,5 +96,17 @@ impl std::ops::BitOr for FontLoaderFlags {
 impl std::ops::BitOrAssign for FontLoaderFlags {
     fn bitor_assign(&mut self, rhs: Self) {
         self.0 |= rhs.0;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn builtin_font_loader_has_required_callbacks() {
+        let loader = super::FontLoader::stb_truetype();
+        let raw = loader.as_ptr();
+        assert!(!raw.is_null());
+        assert!(!unsafe { (*raw).Name }.is_null());
+        assert!(unsafe { (*raw).FontBakedLoadGlyph }.is_some());
     }
 }

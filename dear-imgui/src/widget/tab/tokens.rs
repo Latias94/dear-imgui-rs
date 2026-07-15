@@ -4,6 +4,7 @@ use crate::ui::Ui;
 /// Token representing an active tab bar
 #[derive(Debug)]
 #[must_use]
+#[doc(alias = "EndTabBar")]
 pub struct TabBarToken<'ui> {
     _ui: &'ui Ui,
 }
@@ -30,6 +31,7 @@ impl<'ui> Drop for TabBarToken<'ui> {
 /// Token representing an active tab item
 #[derive(Debug)]
 #[must_use]
+#[doc(alias = "EndTabItem")]
 pub struct TabItemToken<'ui> {
     _ui: &'ui Ui,
 }

@@ -3,6 +3,7 @@ use crate::sys;
 
 create_token!(
     /// Tracks a layout group that can be ended with `end` or by dropping.
+    #[doc(alias = "EndGroup")]
     pub struct GroupToken<'ui>;
 
     /// Drops the layout group manually. You can also just allow this token

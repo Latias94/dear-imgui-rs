@@ -66,6 +66,7 @@ impl FramePrepareOptions {
 /// system consumes the token to render or snapshot the frame. The existing [`Context::frame`] and
 /// [`Context::render`] calls remain available for traditional immediate-mode loops.
 #[must_use = "dropping FrameToken ends the frame without rendering; call render() or render_snapshot() to produce draw data"]
+#[doc(alias = "EndFrame")]
 pub struct FrameToken<'ctx> {
     ctx: &'ctx mut Context,
     closed: bool,
@@ -121,6 +122,7 @@ impl Context {
     ///
     /// Note: you must update `io.DisplaySize` (and usually `io.DeltaTime`) before calling this,
     /// unless you are using a platform backend that does it for you (e.g. `dear-imgui-winit`).
+    #[doc(alias = "NewFrame")]
     pub fn frame(&mut self) -> &mut crate::ui::Ui {
         let _guard = CTX_MUTEX.lock();
         self.assert_current_context("Context::frame()");
@@ -178,6 +180,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     ///
     /// Renderer backends receive mutable draw data because ImGui 1.92 texture requests require
     /// backends to write `TexID`/`Status` feedback into `ImTextureData`.
+    #[doc(alias = "Render", alias = "GetDrawData")]
     pub fn render(&mut self) -> &mut crate::render::DrawData {
         let _guard = CTX_MUTEX.lock();
         self.assert_current_context("Context::render()");

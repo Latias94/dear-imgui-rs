@@ -63,6 +63,37 @@ impl Ui {
         });
     }
 
+    /// Renders a table that breaks `text` down into UTF-8 bytes and codepoints.
+    ///
+    /// This is intended for diagnosing text encoding and missing-glyph issues.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `text` contains an interior NUL byte, which the upstream
+    /// NUL-terminated API cannot represent.
+    #[doc(alias = "DebugTextEncoding")]
+    pub fn debug_text_encoding(&self, text: impl AsRef<str>) {
+        let text = text.as_ref();
+        assert!(
+            !text.contains('\0'),
+            "Ui::debug_text_encoding() text must not contain interior NUL bytes"
+        );
+        let text = self.scratch_txt(text);
+        self.run_with_bound_context(|| unsafe { sys::igDebugTextEncoding(text) });
+    }
+
+    /// Temporarily flashes a style color in Dear ImGui's debug tools.
+    #[doc(alias = "DebugFlashStyleColor")]
+    pub fn debug_flash_style_color(&self, color: crate::StyleColor) {
+        self.run_with_bound_context(|| unsafe { sys::igDebugFlashStyleColor(color as i32) });
+    }
+
+    /// Starts Dear ImGui's interactive item picker debug tool.
+    #[doc(alias = "DebugStartItemPicker")]
+    pub fn debug_start_item_picker(&self) {
+        self.run_with_bound_context(|| unsafe { sys::igDebugStartItemPicker() });
+    }
+
     /// Returns the Dear ImGui version string
     #[doc(alias = "GetVersion")]
     pub fn get_version(&self) -> &str {
@@ -74,5 +105,33 @@ impl Ui {
             let c_str = std::ffi::CStr::from_ptr(version_ptr);
             c_str.to_str().unwrap_or("Unknown")
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn public_debug_helpers_are_safe_to_call_in_a_frame() {
+        let mut ctx = crate::Context::create();
+        ctx.io_mut().set_display_size([128.0, 128.0]);
+        ctx.io_mut().set_delta_time(1.0 / 60.0);
+        let _ = ctx.font_atlas_mut().build();
+        let ui = ctx.frame();
+
+        ui.window("debug_helpers").build(|| {
+            let cursor_y = ui.cursor_pos_y();
+            ui.debug_text_encoding("A UTF-8 string: 界");
+            assert!(ui.cursor_pos_y() > cursor_y);
+
+            ui.debug_flash_style_color(crate::StyleColor::Text);
+            ui.debug_start_item_picker();
+        });
+
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                ui.debug_text_encoding("A\0B");
+            }))
+            .is_err()
+        );
     }
 }

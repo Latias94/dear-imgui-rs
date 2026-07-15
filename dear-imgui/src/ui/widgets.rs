@@ -2,7 +2,7 @@ use super::*;
 
 impl Ui {
     /// Display text
-    #[doc(alias = "TextUnformatted")]
+    #[doc(alias = "Text", alias = "TextUnformatted")]
     pub fn text<T: AsRef<str>>(&self, text: T) {
         let s = text.as_ref();
         self.run_with_bound_context(|| unsafe {
