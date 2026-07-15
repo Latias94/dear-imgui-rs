@@ -29,6 +29,50 @@ fn table_user_ids_hide_zero_sentinel() {
     );
 }
 
+#[test]
+fn table_user_id_builders_accept_integer_ids() {
+    let setup_id = 7;
+    let setup = TableColumnSetup::new("column").user_id(setup_id);
+    assert_eq!(setup.user_id, Some(crate::Id::from(7u32)));
+
+    let mut ctx = setup_context();
+    let ui = ctx.frame();
+    let setup_id = 8;
+    let builder_id = 9;
+    let _ = ui.window("table_integer_user_id").build(|| {
+        {
+            let _table = ui.begin_table("setup", 1).unwrap();
+            ui.table_setup_column(
+                "column",
+                TableColumnFlags::NONE,
+                None,
+                Some(setup_id.into()),
+            );
+            assert_eq!(unsafe { current_table_column_user_id(0) }, setup_id);
+        }
+
+        ui.table("table")
+            .column("column")
+            .user_id(builder_id)
+            .done()
+            .build(|_| {
+                assert_eq!(unsafe { current_table_column_user_id(0) }, builder_id);
+            });
+    });
+}
+
+unsafe fn current_table_column_user_id(column: usize) -> u32 {
+    let table = unsafe { sys::igGetCurrentTable() };
+    assert!(!table.is_null());
+    let columns = unsafe { (*table).Columns.Data };
+    let columns_end = unsafe { (*table).Columns.DataEnd };
+    assert!(!columns.is_null());
+    assert!(!columns_end.is_null());
+    let column_count = unsafe { columns_end.offset_from(columns) as usize };
+    assert!(column < column_count);
+    unsafe { (*columns.add(column)).UserID }
+}
+
 unsafe fn current_table_draw_channel() -> i32 {
     let table = assert_current_table("current_table_draw_channel()");
     let draw_list = unsafe { (*(*table).InnerWindow).DrawList };
