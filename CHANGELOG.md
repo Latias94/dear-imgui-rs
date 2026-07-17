@@ -79,6 +79,7 @@ This is an intentionally source-breaking architecture release. It replaces shall
 - Share callback ownership, viewport recovery, and teardown through one private runtime across the Winit and SDL3 adapters for each renderer backend.
 - Update `dear-app`, renderer examples, and the browser demo to WGPU 30 surface color-space and queue-present APIs.
 - Regenerate and verify the Windows, non-Windows, and WASM core binding profiles from one canonical command while keeping extension generation on the fixed `imgui-sys-v0` provider contract.
+- Make the `style_and_fonts` example self-contained: vendored Roboto exercises runtime font insertion, scoped `FontId` rendering, baked glyph queries, and text measurement; CJK and Emoji loading falls back to common system fonts and reports the selected source; an interactive checker covers managed custom-rectangle updates.
 
 ### Fixed
 

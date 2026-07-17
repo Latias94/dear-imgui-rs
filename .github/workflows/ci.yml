@@ -154,6 +154,9 @@ jobs:
       - name: Build examples (all extensions)
         run: cargo build -p dear-imgui-examples --features "imguizmo imnodes implot reflect implot3d imguizmo-quat"
 
+      - name: Test self-contained font example assets
+        run: cargo nextest run -p dear-imgui-examples --bin style_and_fonts
+
       - name: Check multi-viewport examples
         run: |
           cargo check -p dear-imgui-examples --features "multi-viewport" --bin multi_viewport_wgpu --bin multi_viewport_ash

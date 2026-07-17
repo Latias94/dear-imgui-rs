@@ -5,7 +5,13 @@
 //! - Global font scaling (FontScaleMain) and rounding sliders
 
 use std::ffi::CStr;
-use std::{fs, num::NonZeroU32, path::PathBuf, sync::Arc, time::Instant};
+use std::{
+    fs,
+    num::NonZeroU32,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Instant,
+};
 
 use dear_imgui_glow::GlowRenderer;
 use dear_imgui_rs::*;
@@ -30,6 +36,163 @@ use winit::{
 
 #[path = "../support/font_validation.rs"]
 mod font_validation;
+
+const BUNDLED_ROBOTO_RELATIVE_PATH: &str =
+    "../dear-imgui-sys/third-party/cimgui/imgui/misc/fonts/Roboto-Medium.ttf";
+const CHECKER_SIZE: [u16; 2] = [16, 16];
+const CHECKER_CELL_SIZE: usize = 4;
+const ROBOTO_PREVIEW: &str = "Sphinx of black quartz, judge my vow.";
+
+fn example_path(path: impl AsRef<Path>) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(path)
+}
+
+fn bundled_roboto_path() -> PathBuf {
+    example_path(BUNDLED_ROBOTO_RELATIVE_PATH)
+}
+
+fn push_unique(candidates: &mut Vec<PathBuf>, path: impl Into<PathBuf>) {
+    let path = path.into();
+    if !candidates.contains(&path) {
+        candidates.push(path);
+    }
+}
+
+fn cjk_font_candidates(freetype: bool) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    push_unique(
+        &mut candidates,
+        example_path("assets/NotoSansSC-Regular.ttf"),
+    );
+    if freetype {
+        push_unique(
+            &mut candidates,
+            example_path("assets/NotoSansCJKsc-Regular.otf"),
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let windows = std::env::var_os("WINDIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+        let fonts = windows.join("Fonts");
+        for name in ["NotoSansSC-VF.ttf", "msyh.ttc", "simhei.ttf"] {
+            push_unique(&mut candidates, fonts.join(name));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        if freetype {
+            for path in [
+                "/System/Library/Fonts/PingFang.ttc",
+                "/System/Library/Fonts/Hiragino Sans GB.ttc",
+                "/Library/Fonts/NotoSansCJKsc-Regular.otf",
+            ] {
+                push_unique(&mut candidates, path);
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        if freetype {
+            for path in [
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
+                "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+            ] {
+                push_unique(&mut candidates, path);
+            }
+        }
+        for path in [
+            "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+            "/usr/share/fonts/wenquanyi/wqy-zenhei/wqy-zenhei.ttc",
+        ] {
+            push_unique(&mut candidates, path);
+        }
+    }
+
+    candidates
+}
+
+fn emoji_font_candidates(freetype: bool) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if freetype {
+        push_unique(
+            &mut candidates,
+            example_path("assets/emoji/NotoColorEmoji.ttf"),
+        );
+        push_unique(&mut candidates, example_path("assets/emoji/OpenMoji.ttf"));
+    }
+    push_unique(
+        &mut candidates,
+        example_path("assets/emoji/OpenMoji-Black.ttf"),
+    );
+
+    #[cfg(target_os = "windows")]
+    {
+        let windows = std::env::var_os("WINDIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+        let fonts = windows.join("Fonts");
+        if freetype {
+            push_unique(&mut candidates, fonts.join("seguiemj.ttf"));
+        }
+        push_unique(&mut candidates, fonts.join("seguisym.ttf"));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        if freetype {
+            push_unique(
+                &mut candidates,
+                "/System/Library/Fonts/Apple Color Emoji.ttc",
+            );
+        }
+        push_unique(&mut candidates, "/System/Library/Fonts/Apple Symbols.ttf");
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        if freetype {
+            for path in [
+                "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+                "/usr/share/fonts/noto/NotoColorEmoji.ttf",
+                "/usr/share/fonts/google-noto-color-emoji-fonts/NotoColorEmoji.ttf",
+            ] {
+                push_unique(&mut candidates, path);
+            }
+        }
+        for path in [
+            "/usr/share/fonts/truetype/noto/NotoEmoji-Regular.ttf",
+            "/usr/share/fonts/truetype/ancient-scripts/Symbola_hint.ttf",
+        ] {
+            push_unique(&mut candidates, path);
+        }
+    }
+
+    candidates
+}
+
+fn checker_pixels(inverted: bool) -> Vec<u8> {
+    let width = usize::from(CHECKER_SIZE[0]);
+    let height = usize::from(CHECKER_SIZE[1]);
+    let mut pixels = Vec::with_capacity(width * height * 4);
+    for y in 0..height {
+        for x in 0..width {
+            let alternate = ((x / CHECKER_CELL_SIZE) + (y / CHECKER_CELL_SIZE)).is_multiple_of(2);
+            let color = if alternate ^ inverted {
+                [40, 44, 52, 255]
+            } else {
+                [230, 90, 72, 255]
+            };
+            pixels.extend_from_slice(&color);
+        }
+    }
+    pixels
+}
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum AppTheme {
@@ -59,12 +222,20 @@ struct AppWindow {
     style_demo_alpha: f32,
     style_demo_rounding: f32,
     font_scale: f32,
+    roboto_font: Option<FontId>,
+    roboto_source: Option<PathBuf>,
     cjk_loaded: bool,
+    cjk_source: Option<PathBuf>,
     emoji_loaded: bool,
+    emoji_source: Option<PathBuf>,
+    checker_rect: CustomRectId,
+    checker_inverted: bool,
     status: String,
     pending_theme: Option<AppTheme>,
+    pending_load_roboto: bool,
     pending_load_cjk: bool,
     pending_load_emoji: bool,
+    pending_update_checker: bool,
 }
 
 #[derive(Default)]
@@ -152,6 +323,11 @@ impl AppWindow {
         };
         let mut renderer = GlowRenderer::new(gl, &mut context_imgui)?;
         renderer.set_framebuffer_srgb_enabled(false);
+        let checker = checker_pixels(false);
+        let checker_rect = context_imgui
+            .font_atlas()
+            .add_custom_rect(CustomRectData::rgba32(CHECKER_SIZE, &checker))
+            .ok_or_else(|| std::io::Error::other("font atlas could not allocate checker rect"))?;
         renderer.new_frame()?;
 
         let imgui = ImguiState {
@@ -169,12 +345,20 @@ impl AppWindow {
             style_demo_alpha: 1.0,
             style_demo_rounding: 5.0,
             font_scale: 1.0,
+            roboto_font: None,
+            roboto_source: None,
             cjk_loaded: false,
+            cjk_source: None,
             emoji_loaded: false,
+            emoji_source: None,
+            checker_rect,
+            checker_inverted: false,
             status: String::new(),
             pending_theme: None,
+            pending_load_roboto: false,
             pending_load_cjk: false,
             pending_load_emoji: false,
+            pending_update_checker: false,
         })
     }
 
@@ -1096,21 +1280,28 @@ impl AppWindow {
         self.theme = t;
     }
 
-    /// Load a font from one of this example's fixed asset paths.
+    /// Load a font from one of this example's fixed repository or system paths.
     ///
     /// # Safety
     ///
     /// `path` must identify trusted application data that remains valid for the selected native
     /// loader. Structural validation rejects malformed containers before FFI, but cannot make an
     /// untrusted asset safe to load.
-    unsafe fn try_load_trusted_font_file(&mut self, path: &str, size: f32, merge: bool) -> bool {
-        let p = PathBuf::from(path);
-        if !p.exists() {
-            return false;
+    unsafe fn try_load_trusted_font_file(
+        &mut self,
+        path: &Path,
+        size: f32,
+        merge: bool,
+    ) -> Option<FontId> {
+        if !path.exists() {
+            return None;
         }
-        let data = match fs::read(&p) {
+        let data = match fs::read(path) {
             Ok(d) => d,
-            Err(_) => return false,
+            Err(error) => {
+                self.status = format!("[WARN] Could not read font {}: {error}", path.display());
+                return None;
+            }
         };
         let loader = if Self::freetype_active() {
             font_validation::LoaderKind::FreeType
@@ -1120,88 +1311,147 @@ impl AppWindow {
         if let Err(error) = font_validation::validate_font_data(&data, loader) {
             self.status = format!(
                 "[WARN] Unsupported or malformed font {}: {error}",
-                p.display(),
+                path.display(),
             );
-            return false;
+            return None;
         }
         let cfg = FontConfig::new().size_pixels(size).merge_mode(merge);
         let fonts = self.imgui.context.font_atlas();
         // SAFETY: upheld by this function's explicit trusted-font precondition after structural
         // validation confirmed a representation accepted by the selected native loader.
         let source = unsafe { FontSource::ttf_data_with_size(&data, size) }.with_config(cfg);
-        let _id = fonts.add_font(&[source]);
-        true
+        Some(fonts.add_font(&[source]))
     }
 
     /// # Safety
     ///
-    /// Any existing candidate file must be a trusted, complete application font asset.
+    /// The repository-owned Roboto file must remain a trusted, complete font asset.
+    unsafe fn ensure_roboto_font(&mut self) -> Option<FontId> {
+        if let Some(font) = self.roboto_font {
+            return Some(font);
+        }
+
+        let path = bundled_roboto_path();
+        // SAFETY: this exact file is vendored with Dear ImGui and validated before FFI.
+        let font = unsafe { self.try_load_trusted_font_file(&path, 18.0, false) }?;
+        self.roboto_font = Some(font);
+        self.roboto_source = Some(path);
+        Some(font)
+    }
+
+    /// # Safety
+    ///
+    /// The repository-owned Roboto file must remain a trusted, complete font asset.
+    unsafe fn load_bundled_roboto(&mut self) {
+        let already_loaded = self.roboto_font.is_some();
+        // SAFETY: forwarded from this function's repository-asset precondition.
+        if unsafe { self.ensure_roboto_font() }.is_some() {
+            let source = self.roboto_source.as_ref().map_or_else(
+                || "bundled asset".to_owned(),
+                |path| path.display().to_string(),
+            );
+            self.status = if already_loaded {
+                format!("[OK] Roboto is already loaded from {source}")
+            } else {
+                format!("[OK] Loaded bundled Roboto from {source}")
+            };
+        }
+    }
+
+    /// # Safety
+    ///
+    /// Any existing candidate file must be a trusted, complete repository or system font asset.
     unsafe fn load_cjk_font(&mut self) {
-        // Attempt several common paths under examples/assets
-        let candidates: Vec<&str> = if Self::freetype_active() {
-            vec![
-                // FreeType path: allow OTF/TTF
-                "examples/assets/NotoSansSC-Regular.ttf",
-                "examples/assets/NotoSansCJKsc-Regular.otf",
-            ]
-        } else {
-            vec![
-                // STB path: prefer TTF
-                "examples/assets/NotoSansSC-Regular.ttf",
-            ]
-        };
-        let ok = candidates
-            .iter()
-            .any(|p| unsafe { self.try_load_trusted_font_file(p, 18.0, true) });
-        self.cjk_loaded = ok;
-        self.status = if ok {
-            "[OK] CJK font merged".to_string()
-        } else {
-            "[WARN] CJK font not found. Place NotoSansSC-Regular.ttf under examples/assets/"
-                .to_string()
-        };
+        if self.cjk_loaded {
+            self.status = "[OK] CJK font is already merged".to_owned();
+            return;
+        }
+        // SAFETY: forwarded from this function's repository-asset precondition.
+        if unsafe { self.ensure_roboto_font() }.is_none() {
+            return;
+        }
+
+        let candidates = cjk_font_candidates(Self::freetype_active());
+        let had_existing_candidate = candidates.iter().any(|path| path.exists());
+        for path in candidates {
+            // SAFETY: candidates are fixed repository asset or OS font locations and are
+            // structurally validated before reaching the native loader.
+            if let Some(font) = unsafe { self.try_load_trusted_font_file(&path, 18.0, true) } {
+                self.imgui.context.font_atlas().discard_bakes(0);
+                self.roboto_font = Some(font);
+                self.cjk_loaded = true;
+                self.cjk_source = Some(path.clone());
+                self.status = format!("[OK] Merged CJK font from {}", path.display());
+                return;
+            }
+        }
+
+        if !had_existing_candidate {
+            self.status =
+                "[WARN] CJK font not found in examples/assets or known system font directories"
+                    .to_owned();
+        }
     }
 
     /// # Safety
     ///
-    /// Any existing candidate file must be a trusted, complete application font asset.
+    /// Any existing candidate file must be a trusted, complete repository or system font asset.
     unsafe fn load_emoji_font(&mut self) {
-        // Try common emoji font files if present
-        let candidates: Vec<&str> = if Self::freetype_active() {
-            vec![
-                // FreeType supports color emoji fonts
-                "examples/assets/emoji/NotoColorEmoji.ttf",
-                "examples/assets/emoji/OpenMoji.ttf",
-                "examples/assets/emoji/OpenMoji-Black.ttf",
-            ]
-        } else {
-            vec![
-                // STB path: prefer monochrome TTF variants
-                "examples/assets/emoji/OpenMoji-Black.ttf",
-            ]
-        };
-        // If FreeType is active, enable color glyph loading
-        if Self::freetype_active() {
+        if self.emoji_loaded {
+            self.status = "[OK] Emoji font is already merged".to_owned();
+            return;
+        }
+        // SAFETY: forwarded from this function's repository-asset precondition.
+        if unsafe { self.ensure_roboto_font() }.is_none() {
+            return;
+        }
+
+        let freetype = Self::freetype_active();
+        if freetype {
             let fonts = self.imgui.context.font_atlas();
             let cur = fonts.font_loader_flags();
             fonts.set_font_loader_flags(cur | FontLoaderFlags::LOAD_COLOR);
         }
-        let ok = candidates
-            .iter()
-            .any(|p| unsafe { self.try_load_trusted_font_file(p, 20.0, true) });
-        self.emoji_loaded = ok;
-        self.status = if ok {
-            "[OK] Emoji font merged".to_string()
-        } else {
-            // Better diagnostics for common cases
-            let noto = PathBuf::from("examples/assets/emoji/NotoColorEmoji.ttf");
-            if !Self::freetype_active() && noto.exists() {
-                "[WARN] Color emoji requires FreeType loader; current loader is stb_truetype (see examples/README.md to install/link FreeType)".to_string()
-            } else {
-                "[WARN] Emoji font not found. Put NotoColorEmoji.ttf under examples/assets/emoji/"
-                    .to_string()
+
+        let candidates = emoji_font_candidates(freetype);
+        let had_existing_candidate = candidates.iter().any(|path| path.exists());
+        for path in candidates {
+            // SAFETY: candidates are fixed repository asset or OS font locations and are
+            // structurally validated before reaching the native loader.
+            if let Some(font) = unsafe { self.try_load_trusted_font_file(&path, 20.0, true) } {
+                self.imgui.context.font_atlas().discard_bakes(0);
+                self.roboto_font = Some(font);
+                self.emoji_loaded = true;
+                self.emoji_source = Some(path.clone());
+                self.status = format!("[OK] Merged Emoji font from {}", path.display());
+                return;
             }
-        };
+        }
+
+        if !had_existing_candidate {
+            let color_asset = example_path("assets/emoji/NotoColorEmoji.ttf");
+            self.status = if !freetype && color_asset.exists() {
+                "[WARN] NotoColorEmoji requires the FreeType loader; the active loader is stb_truetype"
+                    .to_owned()
+            } else {
+                "[WARN] Emoji font not found in examples/assets or known system font directories"
+                    .to_owned()
+            };
+        }
+    }
+
+    fn update_checker_rect(&mut self) {
+        let inverted = !self.checker_inverted;
+        let pixels = checker_pixels(inverted);
+        if self.imgui.context.font_atlas().write_custom_rect(
+            self.checker_rect,
+            CustomRectData::rgba32(CHECKER_SIZE, &pixels),
+        ) {
+            self.checker_inverted = inverted;
+            self.status = "[OK] Updated the checker with a partial atlas texture upload".to_owned();
+        } else {
+            self.status = "[WARN] The checker custom rect is no longer available".to_owned();
+        }
     }
 
     fn render(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -1217,15 +1467,26 @@ impl AppWindow {
         if let Some(t) = self.pending_theme.take() {
             self.apply_theme_now(t);
         }
+        if self.pending_load_roboto {
+            // SAFETY: the example loads the exact Roboto file vendored with Dear ImGui.
+            unsafe { self.load_bundled_roboto() };
+            self.pending_load_roboto = false;
+        }
         if self.pending_load_cjk {
-            // SAFETY: the example loads only its documented, fixed application asset paths.
+            // SAFETY: the example loads only documented repository or OS font paths and
+            // validates the complete bytes before FFI.
             unsafe { self.load_cjk_font() };
             self.pending_load_cjk = false;
         }
         if self.pending_load_emoji {
-            // SAFETY: the example loads only its documented, fixed application asset paths.
+            // SAFETY: the example loads only documented repository or OS font paths and
+            // validates the complete bytes before FFI.
             unsafe { self.load_emoji_font() };
             self.pending_load_emoji = false;
+        }
+        if self.pending_update_checker {
+            self.update_checker_rect();
+            self.pending_update_checker = false;
         }
         // Apply font scale to style before frame to avoid borrowing during UI building
         {
@@ -1236,8 +1497,10 @@ impl AppWindow {
         // (No style/context mutations here; only record intents from UI.)
 
         let mut theme_change: Option<AppTheme> = None;
+        let mut want_roboto = false;
         let mut want_cjk = false;
         let mut want_emoji = false;
+        let mut want_checker_update = false;
 
         ui.window("Style & Fonts")
                 .size([840.0, 620.0], Condition::FirstUseEver)
@@ -1307,23 +1570,49 @@ impl AppWindow {
                 ui.separator();
 
                 // Fonts
-                ui.text("Fonts (optional merge)");
+                ui.text("Fonts");
                 let loader = if Self::freetype_active() { "FreeType" } else { "stb_truetype" };
-                ui.text_disabled(&format!("Font Loader: {}", loader));
-                if ui.button("Load + Merge CJK (NotoSansSC)") { want_cjk = true; }
+                ui.text_disabled(format!("Font Loader: {}", loader));
+                {
+                    let _disabled = ui.begin_disabled_with_cond(self.roboto_font.is_some());
+                    if ui.button("Load bundled Roboto") { want_roboto = true; }
+                }
                 ui.same_line();
-                if ui.button("Load + Merge Emoji") { want_emoji = true; }
+                {
+                    let _disabled = ui.begin_disabled_with_cond(self.cjk_loaded);
+                    if ui.button("Load + Merge CJK") { want_cjk = true; }
+                }
                 ui.same_line();
-                ui.text_disabled(&self.status);
+                {
+                    let _disabled = ui.begin_disabled_with_cond(self.emoji_loaded);
+                    if ui.button("Load + Merge Emoji") { want_emoji = true; }
+                }
+                if !self.status.is_empty() {
+                    ui.text_wrapped(&self.status);
+                }
+                if let Some(path) = &self.roboto_source {
+                    ui.text_wrapped(format!("Roboto source: {}", path.display()));
+                }
+                if let Some(path) = &self.cjk_source {
+                    ui.text_wrapped(format!("CJK source: {}", path.display()));
+                }
+                if let Some(path) = &self.emoji_source {
+                    ui.text_wrapped(format!("Emoji source: {}", path.display()));
+                }
 
                 ui.separator();
-                ui.text("Preview: 你好, 世界! こんにちは! Hello! 🙂🚀");
-                ui.text("如果看不到中文或 Emoji，请点击上面的按钮加载字体，或把字体放到 examples/assets 下。");
-                // Diagnostics: help validate whether the current font contains the glyphs we expect.
+                // Keep the selected font scoped so measurements and baked metrics exercise the
+                // same persistent FontId that the preview renders with.
                 {
+                    let _preview_font = self.roboto_font.map(|font| ui.push_font(font));
+                    ui.text(ROBOTO_PREVIEW);
+                    ui.text("你好, 世界! こんにちは! Hello! 🙂🚀");
+
                     let wchar_bytes = std::mem::size_of::<dear_imgui_rs::sys::ImWchar>();
                     let font = ui.current_font();
-                    let baked = ui.current_baked_font();
+                    let mut baked = ui.current_baked_font();
+                    let measured = ui.calc_text_size(ROBOTO_PREVIEW);
+                    let glyph_r_advance = baked.glyph('R').map(|glyph| glyph.advance_x());
                     let font_sources = font.source_count();
                     let in_ni = font.is_glyph_in_font('你');
                     let loaded_ni = baked.is_glyph_loaded('你');
@@ -1345,7 +1634,17 @@ impl AppWindow {
                             )
                         }
                     };
-                    ui.text_disabled(&format!(
+                    ui.text_disabled(format!(
+                        "FontId: {} | calc_text_size={:.1} x {:.1} | BakedFont size={:.1} density={:.1} surface={} | glyph R advance={}",
+                        font.debug_name(),
+                        measured[0],
+                        measured[1],
+                        baked.size(),
+                        baked.rasterizer_density(),
+                        baked.metrics_total_surface(),
+                        glyph_r_advance.map_or_else(|| "missing".to_owned(), |advance| format!("{advance:.1}")),
+                    ));
+                    ui.text_disabled(format!(
                         "Diagnostics: BackendFlags=0x{:X} Locked={} | atlas fonts={} sources={} | font sources={} | U+4F60(in={}, loaded={}) U+4E16(in={}, loaded={}) U+3053(in={}, loaded={}) | ImWchar={} bytes",
                         backend_flags,
                         atlas_locked,
@@ -1364,6 +1663,19 @@ impl AppWindow {
                         ui.text_disabled("Note: most emoji (e.g. 🙂) require IMGUI_USE_WCHAR32 (not enabled on this target).");
                     }
                 }
+                if let Some(font) = self.roboto_font {
+                    let _large_font = ui.push_font_with_size(Some(font), 26.0);
+                    ui.text("Roboto rendered through push_font_with_size at 26 px");
+                }
+
+                ui.separator();
+                ui.text("Managed atlas custom rect");
+                let checker_drawn = ui.image_custom_rect(self.checker_rect, [64.0, 64.0]);
+                ui.same_line();
+                if ui.button("Invert checker") { want_checker_update = true; }
+                if !checker_drawn {
+                    ui.text_disabled("The checker custom rect is unavailable");
+                }
 
                 ui.separator();
                 ui.text("Built-in Style Editor");
@@ -1372,9 +1684,7 @@ impl AppWindow {
                 unsafe { ui.show_style_editor(&mut style_copy) };
             });
 
-        self.imgui
-            .platform
-            .prepare_render_with_ui(&ui, &self.window);
+        self.imgui.platform.prepare_render_with_ui(ui, &self.window);
         let draw_data = self.imgui.context.render();
 
         // Clear + render
@@ -1392,11 +1702,17 @@ impl AppWindow {
         if let Some(t) = theme_change {
             self.pending_theme = Some(t);
         }
+        if want_roboto {
+            self.pending_load_roboto = true;
+        }
         if want_cjk {
             self.pending_load_cjk = true;
         }
         if want_emoji {
             self.pending_load_emoji = true;
+        }
+        if want_checker_update {
+            self.pending_update_checker = true;
         }
         Ok(())
     }
@@ -1439,10 +1755,10 @@ impl ApplicationHandler for App {
                 window.window.request_redraw();
             }
             WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::KeyboardInput { event, .. } => {
-                if event.logical_key == Key::Named(NamedKey::Escape) {
-                    event_loop.exit();
-                }
+            WindowEvent::KeyboardInput { event, .. }
+                if event.logical_key == Key::Named(NamedKey::Escape) =>
+            {
+                event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
                 if let Err(e) = window.render() {
@@ -1458,6 +1774,126 @@ impl ApplicationHandler for App {
         if let Some(w) = &self.window {
             w.window.request_redraw();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use super::*;
+
+    #[test]
+    fn bundled_roboto_is_present_and_supported_by_both_loaders() {
+        let path = bundled_roboto_path();
+        let data = fs::read(&path).unwrap_or_else(|error| {
+            panic!("failed to read bundled font {}: {error}", path.display())
+        });
+
+        for loader in [
+            font_validation::LoaderKind::StbTrueType,
+            font_validation::LoaderKind::FreeType,
+        ] {
+            assert!(
+                font_validation::validate_font_data(&data, loader).is_ok(),
+                "bundled Roboto must remain valid for {loader:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn platform_font_candidates_are_stable_and_unique() {
+        for freetype in [false, true] {
+            let cjk = cjk_font_candidates(freetype);
+            assert_eq!(
+                cjk.first(),
+                Some(&example_path("assets/NotoSansSC-Regular.ttf"))
+            );
+
+            let emoji = emoji_font_candidates(freetype);
+            let expected_emoji = if freetype {
+                example_path("assets/emoji/NotoColorEmoji.ttf")
+            } else {
+                example_path("assets/emoji/OpenMoji-Black.ttf")
+            };
+            assert_eq!(emoji.first(), Some(&expected_emoji));
+
+            for candidates in [&cjk, &emoji] {
+                let unique: HashSet<_> = candidates.iter().collect();
+                assert_eq!(
+                    unique.len(),
+                    candidates.len(),
+                    "candidate paths must not be retried"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn checker_pixels_have_exact_rgba_shape_and_distinct_phases() {
+        let normal = checker_pixels(false);
+        let inverted = checker_pixels(true);
+        let expected_len = usize::from(CHECKER_SIZE[0]) * usize::from(CHECKER_SIZE[1]) * 4;
+
+        assert_eq!(normal.len(), expected_len);
+        assert_eq!(inverted.len(), expected_len);
+        assert_ne!(normal, inverted);
+        assert!(normal.chunks_exact(4).all(|pixel| pixel[3] == 255));
+
+        let data = CustomRectData::rgba32(CHECKER_SIZE, &normal);
+        assert_eq!(data.size(), CHECKER_SIZE);
+        assert_eq!(data.format(), TextureFormat::RGBA32);
+    }
+
+    #[test]
+    fn runtime_font_and_custom_rect_flow_runs_headless() {
+        let mut context = Context::create();
+        context.io_mut().set_display_size([320.0, 200.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context
+            .io_mut()
+            .set_backend_flags(BackendFlags::RENDERER_HAS_TEXTURES);
+        context
+            .font_atlas()
+            .add_font(&[FontSource::default_font_with_size(16.0)]);
+
+        let initial_checker = checker_pixels(false);
+        let checker = context
+            .font_atlas()
+            .add_custom_rect(CustomRectData::rgba32(CHECKER_SIZE, &initial_checker))
+            .expect("the initial checker should fit in the managed atlas");
+        {
+            let ui = context.frame();
+            assert!(ui.image_custom_rect(checker, [32.0, 32.0]));
+        }
+        let _ = context.render();
+
+        let path = bundled_roboto_path();
+        let font_bytes = fs::read(&path).unwrap_or_else(|error| {
+            panic!("failed to read bundled font {}: {error}", path.display())
+        });
+        font_validation::validate_font_data(&font_bytes, font_validation::LoaderKind::StbTrueType)
+            .expect("bundled Roboto should pass structural validation");
+        // SAFETY: these are the complete, structurally validated bytes of the vendored font.
+        let source = unsafe { FontSource::ttf_data_with_size(&font_bytes, 18.0) };
+        let roboto = context.font_atlas().add_font(&[source]);
+
+        let inverted_checker = checker_pixels(true);
+        assert!(context.font_atlas().write_custom_rect(
+            checker,
+            CustomRectData::rgba32(CHECKER_SIZE, &inverted_checker),
+        ));
+
+        {
+            let ui = context.frame();
+            let _font = ui.push_font(roboto);
+            assert_eq!(ui.current_font(), roboto);
+            assert!(ui.calc_text_size(ROBOTO_PREVIEW)[0] > 0.0);
+            let mut baked = ui.current_baked_font();
+            assert!(baked.glyph('R').is_some());
+            assert!(ui.image_custom_rect(checker, [32.0, 32.0]));
+        }
+        let _ = context.render();
     }
 }
 

@@ -53,7 +53,8 @@ Quick picks:
 - Asset browser: `cargo run --bin asset_browser_grid`
 - File dialog (native): `cargo run --features file-browser --bin file_dialog_native`
 - File browser (ImGui): `cargo run --features file-browser --bin file_browser_imgui`
-- Style & Fonts + FreeType: `cargo run --features freetype --bin style_and_fonts`
+- Style & Fonts (bundled Roboto + runtime atlas/custom-rect checks): `cargo run --bin style_and_fonts`
+  - With FreeType for OTF/CFF and color Emoji: `cargo run --features freetype --bin style_and_fonts`
 - ImPlot3D Demo: `cargo run --bin implot3d_basic --features "implot3d"`
 - Reflect demo: `cargo run --bin reflect_demo --features reflect`
 - ImGui Test Engine: `cargo run --bin imgui_test_engine_basic --features test-engine`
@@ -82,7 +83,7 @@ This is the intended organization.
   - `menus_and_popups.rs`: main/window menu bars, context menu, modal popup.
   - `tables_property_grid.rs`: 2-column property grid (labels + editors).
   - `list_clipper_log.rs`: virtualized log with filtering and context actions.
-  - `style_and_fonts.rs`: theme switching, StyleVar demo, and font merging.
+  - `style_and_fonts.rs`: theme switching, scoped runtime fonts, CJK/Emoji merging, baked glyph diagnostics, and managed atlas custom rectangles.
 
 - 01-renderers (single-file, backend topics)
   - `glow_textures.rs`: modern texture system (register/update).
@@ -194,7 +195,8 @@ Tip: On Windows/macOS, CWD may differ when launching from an IDE. Prefer absolut
   - vcpkg `freetype` is tried next, which is usually the simplest MSVC route on Windows.
   - With vcpkg dynamic triplets such as `x64-windows`, set `VCPKGRS_DYNAMIC=1`; otherwise use the vcpkg-rs default/static triplet that matches your Rust target.
 - If `freetype` is enabled and FreeType cannot be found, the build fails fast.
-- With `freetype` enabled, `style_and_fonts` can load OTF/CFF and color emoji fonts (e.g. `NotoColorEmoji.ttf`).
+- `style_and_fonts` ships with a Roboto test font from the vendored Dear ImGui assets and loads it on demand. Optional CJK/Emoji buttons check `examples/assets` first, then common system font locations, and report the selected source.
+- With `freetype` enabled, `style_and_fonts` can additionally load OTF/CFF and color Emoji fonts (e.g. `NotoColorEmoji.ttf`).
 
 ## Example ideas (next up)
 
