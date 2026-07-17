@@ -294,7 +294,7 @@ impl Application for TexDemoState {
 }
 
 fn main() {
-    dear_imgui_rs::logging::init_tracing_with_filter(
+    dear_imgui_examples::init_tracing_with_filter(
         "dear_imgui=info,dear_app_wgpu_textures=info,wgpu=warn",
     );
 

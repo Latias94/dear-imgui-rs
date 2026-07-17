@@ -106,11 +106,21 @@ pub(super) unsafe fn enable(
     renderer: &mut WgpuRenderer,
     context: &mut Context,
 ) -> Result<(), CallbackOwnershipError> {
+    if !renderer.is_initialized() {
+        return Err(CallbackOwnershipError::RendererNotInitialized);
+    }
+    renderer
+        .ensure_context_matches(context)
+        .map_err(|error| match error {
+            crate::RendererError::ContextDropped => CallbackOwnershipError::RendererContextDropped,
+            _ => CallbackOwnershipError::RendererContextMismatch,
+        })?;
+    let globals = renderer_globals(renderer)?;
+
     let raw_context = context.as_raw();
     // SAFETY: the mutable context borrow keeps `raw_context` live, and registration cannot destroy
     // either it or the previously current context before the guard is dropped.
     let _context_guard = unsafe { CurrentContextGuard::bind(raw_context) };
-    let globals = renderer_globals(renderer)?;
     if !context
         .io()
         .backend_flags()

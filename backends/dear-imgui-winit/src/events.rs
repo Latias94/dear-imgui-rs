@@ -312,7 +312,7 @@ mod tests {
         io.set_backend_flags(
             io.backend_flags() | dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES,
         );
-        ctx.fonts().build();
+        ctx.font_atlas().build();
 
         let macos_behaviors = ctx.io().config_macosx_behaviors();
         let modifiers: winit::event::Modifiers = ModifiersState::CONTROL.into();

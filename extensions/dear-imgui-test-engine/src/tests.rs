@@ -43,8 +43,8 @@ fn script_limit_preserves_all_sentinel_and_rejects_overflow() {
 
 #[test]
 fn test_engine_methods_reject_dropped_bound_imgui_context_before_ffi() {
-    let mut ctx = Context::create();
-    let _ = ctx.font_atlas_mut().build();
+    let ctx = Context::create();
+    let _ = ctx.font_atlas().build();
 
     let mut engine = TestEngine::create();
     engine.start(&ctx);
@@ -59,8 +59,8 @@ fn test_engine_methods_reject_dropped_bound_imgui_context_before_ffi() {
 
 #[test]
 fn test_engine_methods_remain_available_after_explicit_shutdown() {
-    let mut ctx = Context::create();
-    let _ = ctx.font_atlas_mut().build();
+    let ctx = Context::create();
+    let _ = ctx.font_atlas().build();
 
     let mut engine = TestEngine::create();
     engine.start(&ctx);
@@ -73,8 +73,8 @@ fn test_engine_methods_remain_available_after_explicit_shutdown() {
 
 #[test]
 fn test_engine_try_start_rejects_rebinding_after_bound_context_drop() {
-    let mut ctx_a = Context::create();
-    let _ = ctx_a.font_atlas_mut().build();
+    let ctx_a = Context::create();
+    let _ = ctx_a.font_atlas().build();
 
     let mut engine = TestEngine::create();
     engine.start(&ctx_a);

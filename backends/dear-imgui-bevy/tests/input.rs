@@ -52,7 +52,7 @@ fn prepare_imgui_context(app: &mut App) {
     let ctx = context.context_mut();
     ctx.io_mut().set_delta_time(1.0 / 60.0);
     ctx.io_mut().set_config_input_trickle_event_queue(false);
-    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.font_atlas().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 }
 

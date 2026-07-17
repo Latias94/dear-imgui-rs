@@ -110,9 +110,7 @@ impl Application for ImPlot3dApp {
 }
 
 fn main() {
-    dear_imgui_rs::logging::init_tracing_with_filter(
-        "dear_imgui=info,implot3d_basic=info,wgpu=warn",
-    );
+    dear_imgui_examples::init_tracing_with_filter("dear_imgui=info,implot3d_basic=info,wgpu=warn");
 
     let config = AppConfig {
         window_title: "ImPlot3D Demo - Rust vs C++ Comparison".to_string(),
@@ -1379,18 +1377,22 @@ fn demo_tools(ui: &Ui, plot_ui: &Plot3DUi) {
     }
     if imgui_metrics {
         let mut opened = true;
-        ui.show_metrics_window(&mut opened);
+        // SAFETY: This demo assumes the destructive font-atlas controls are not activated.
+        unsafe { ui.show_metrics_window(&mut opened) };
         if !opened {
             SHOW_IMGUI_METRICS.with(|c| c.set(false));
         }
     }
     if imgui_style {
-        ui.window("Style Editor (ImGui)")
-            .build(|| ui.show_default_style_editor());
+        ui.window("Style Editor (ImGui)").build(|| {
+            // SAFETY: This demo assumes the destructive font-atlas controls are not activated.
+            unsafe { ui.show_default_style_editor() }
+        });
     }
     if imgui_demo {
         let mut opened = true;
-        ui.show_demo_window(&mut opened);
+        // SAFETY: This demo assumes the destructive font-atlas controls are not activated.
+        unsafe { ui.show_demo_window(&mut opened) };
         if !opened {
             SHOW_IMGUI_DEMO.with(|c| c.set(false));
         }

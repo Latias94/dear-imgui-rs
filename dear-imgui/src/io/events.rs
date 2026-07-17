@@ -170,7 +170,7 @@ mod tests {
         let mut ctx = crate::Context::create();
         ctx.io_mut().set_display_size([128.0, 128.0]);
         ctx.io_mut().set_delta_time(1.0 / 60.0);
-        let _ = ctx.font_atlas_mut().build();
+        let _ = ctx.font_atlas().build();
 
         ctx.io_mut().set_app_accepting_events(true);
         ctx.io_mut().add_key_analog_event(crate::Key::A, true, 0.5);

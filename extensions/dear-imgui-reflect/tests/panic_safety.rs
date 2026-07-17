@@ -87,7 +87,7 @@ fn test_context() -> Context {
         io.set_display_size([640.0, 480.0]);
         io.set_delta_time(1.0 / 60.0);
     }
-    let _ = context.font_atlas_mut().build();
+    let _ = context.font_atlas().build();
     let _ = context.set_ini_filename::<std::path::PathBuf>(None);
     context
 }

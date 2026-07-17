@@ -540,7 +540,8 @@ impl AppWindow {
             });
 
         if self.imgui.demo_open {
-            ui.show_demo_window(&mut self.imgui.demo_open);
+            // SAFETY: This demo assumes the destructive font-atlas controls are not activated.
+            unsafe { ui.show_demo_window(&mut self.imgui.demo_open) };
         }
 
         self.imgui
@@ -765,7 +766,7 @@ impl ApplicationHandler for App {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    dear_imgui_rs::logging::init_tracing_with_filter("dear_imgui=debug,multi_viewport_ash=info");
+    dear_imgui_examples::init_tracing_with_filter("dear_imgui=debug,multi_viewport_ash=info");
     info!("Starting Dear ImGui Multi-Viewport (ash) Example");
 
     let event_loop = EventLoop::new().unwrap();

@@ -31,7 +31,7 @@ impl<'ui> DrawListMut<'ui> {
     #[doc(alias = "AddText")]
     pub fn add_text_with_font(
         &self,
-        font: &crate::fonts::Font,
+        font: crate::fonts::FontId,
         font_size: f32,
         pos: impl Into<sys::ImVec2>,
         col: impl Into<ImColor32>,
@@ -49,7 +49,7 @@ impl<'ui> DrawListMut<'ui> {
             wrap_width,
         );
         let col = col.into();
-        let font_ptr = crate::fonts::validate_font_for_current_context(
+        let font_ptr = crate::fonts::validate_font_id_for_current_context(
             font,
             "DrawListMut::add_text_with_font()",
         );

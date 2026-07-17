@@ -11,7 +11,6 @@ use winit::{
 
 use super::{
     lifecycle::{LifecycleAction, SurfaceEvent},
-    managed_textures::reset_for_new_gpu_generation,
     recovery::{RecoveryEffects, RecoveryOutcome, RuntimeFactory, RuntimeGenerations},
     state::{RuntimeEvent, RuntimeGeneration, UiState, WgpuRuntimeFactory, WindowState},
 };
@@ -431,11 +430,10 @@ impl<A: Application> RecoveryEffects<RuntimeGeneration> for RuntimeRecovery<'_, 
     }
 
     fn invalidate_resources(&mut self, generation: &mut RuntimeGeneration) -> Result<(), RunError> {
-        reset_for_new_gpu_generation(&mut self.ui.context);
         generation
             .gpu
             .renderer
-            .invalidate_device_objects()
+            .invalidate_device_objects(&mut self.ui.context)
             .map_err(RunError::GpuInvalidation)
     }
 
@@ -804,7 +802,7 @@ mod tests {
             dear_imgui_rs::FramePrepareOptions::new([640.0, 480.0], 1.0 / 60.0)
                 .renderer_has_textures(),
         );
-        let _ = context.font_atlas_mut().build();
+        let _ = context.font_atlas().build();
 
         let result = build_and_render_frame(&mut context, |_ui| {
             Err(RunError::application("frame", "injected frame failure"))

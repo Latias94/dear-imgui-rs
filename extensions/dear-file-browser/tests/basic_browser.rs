@@ -13,7 +13,7 @@ fn imgui_file_browser_smoke_test() {
         io.set_delta_time(1.0 / 60.0);
     }
 
-    let _ = imgui.font_atlas_mut().build();
+    let _ = imgui.font_atlas().build();
     let _ = imgui.set_ini_filename::<std::path::PathBuf>(None);
 
     let ui = imgui.frame();

@@ -230,9 +230,7 @@ pub(super) fn estimate_footer_height(ui: &Ui, _state: &FileDialogState) -> f32 {
 fn calc_filter_combo_width(ui: &Ui, preview: &str) -> f32 {
     const MIN_W: f32 = 150.0;
     let style = ui.clone_style();
-    let font = ui.current_font();
-    let font_size = ui.current_font_size();
-    let text_w = font.calc_text_size(font_size, f32::MAX, 0.0, preview)[0];
+    let text_w = ui.calc_text_size(preview)[0];
     // Match IGFD: text width + arrow area (frame height) + inner spacing.
     (text_w + ui.frame_height() + style.item_inner_spacing()[0]).max(MIN_W)
 }
@@ -254,11 +252,8 @@ fn validation_buttons_layout(ui: &Ui, state: &FileDialogState) -> (String, Strin
     let style = ui.clone_style();
     let spacing_x = style.item_spacing()[0];
     let pad_x = style.frame_padding()[0];
-    let font = ui.current_font();
-    let font_size = ui.current_font_size();
-
     let calc_button_width = |label: &str| -> f32 {
-        let text_w = font.calc_text_size(font_size, f32::MAX, 0.0, label)[0];
+        let text_w = ui.calc_text_size(label)[0];
         text_w + pad_x * 2.0
     };
 
@@ -350,11 +345,8 @@ fn draw_validation_buttons_row(
     let style = ui.clone_style();
     let spacing_x = style.item_spacing()[0];
     let pad_x = style.frame_padding()[0];
-    let font = ui.current_font();
-    let font_size = ui.current_font_size();
-
     let calc_button_width = |label: &str| -> f32 {
-        let text_w = font.calc_text_size(font_size, f32::MAX, 0.0, label)[0];
+        let text_w = ui.calc_text_size(label)[0];
         text_w + pad_x * 2.0
     };
 

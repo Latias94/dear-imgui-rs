@@ -73,6 +73,7 @@ fn simple_ui(mut contexts: ImguiContexts, mut state: ResMut<SimpleUiState>) {
         });
 
     if state.show_demo_window {
-        ui.show_demo_window(&mut state.show_demo_window);
+        // SAFETY: This demo assumes the destructive font-atlas controls are not activated.
+        unsafe { ui.show_demo_window(&mut state.show_demo_window) };
     }
 }

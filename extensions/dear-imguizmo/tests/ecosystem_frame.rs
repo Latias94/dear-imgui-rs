@@ -12,7 +12,7 @@ fn test_guard() -> std::sync::MutexGuard<'static, ()> {
 
 fn prepare_context(ctx: &mut Context) {
     ctx.prepare_frame(FramePrepareOptions::new([800.0, 600.0], 1.0 / 60.0).renderer_has_textures());
-    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.font_atlas().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 }
 

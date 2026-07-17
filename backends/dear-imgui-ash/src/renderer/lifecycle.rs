@@ -191,6 +191,9 @@ impl AshRenderer {
         };
 
         renderer.default_texture_id = renderer.create_default_texture()?;
+        imgui
+            .platform_io_mut()
+            .invalidate_renderer_texture_bindings();
         renderer.configure_imgui_context(imgui);
         Ok(renderer)
     }

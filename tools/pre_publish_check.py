@@ -211,6 +211,16 @@ def release_test_commands(use_nextest: bool) -> list[tuple[str, list[str]]]:
                 "stack_layout_context",
             ],
         ),
+        (
+            "dear-imgui-wgpu tracing",
+            [
+                "-p",
+                "dear-imgui-wgpu",
+                "--no-default-features",
+                "--features",
+                "wgpu-30,tracing",
+            ],
+        ),
     )
     for label, cargo_args in feature_profiles:
         if use_nextest:
@@ -420,7 +430,10 @@ def check_changelog_release_notes(
 def check_packaged_core(repo_root: Path) -> Tuple[bool, List[str]]:
     """Package and consume the core crates from a clean isolated checkout."""
     print_check("Packaged core crates and offline consumption")
-    command = ["bash", "tools/ci/verify_packaged_core.sh"]
+    command = [
+        sys.executable,
+        str(repo_root / "tools" / "ci" / "verify_packaged_core.py"),
+    ]
     code, stdout, stderr = run_command(
         command,
         cwd=repo_root,

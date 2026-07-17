@@ -247,11 +247,18 @@ pub(crate) struct GpuState {
 }
 
 impl GpuState {
-    pub(crate) fn teardown(mut self) {
-        self.renderer
-            .shutdown()
-            .expect("dear-app renderer must not retain multi-viewport callbacks during teardown");
-        self.device.destroy();
+    pub(crate) fn teardown(self) {
+        let Self {
+            adapter,
+            device,
+            queue,
+            renderer,
+        } = self;
+        drop(renderer);
+        device.destroy();
+        drop(queue);
+        drop(device);
+        drop(adapter);
     }
 }
 

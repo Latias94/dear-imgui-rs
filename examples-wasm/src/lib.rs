@@ -132,7 +132,7 @@ impl AppWindow {
         #[cfg(feature = "experimental-fonts")]
         {
             use dear_imgui_rs::{FontConfig, FontSource};
-            let mut fonts = context.font_atlas_mut();
+            let fonts = context.font_atlas();
             let cfg = FontConfig::default()
                 .size_pixels(18.0)
                 .name("Web Default 18px");
@@ -289,7 +289,8 @@ impl AppWindow {
             });
 
         if self.imgui.demo_open {
-            ui.show_demo_window(&mut self.imgui.demo_open);
+            // SAFETY: This demo assumes the destructive font-atlas controls are not activated.
+            unsafe { ui.show_demo_window(&mut self.imgui.demo_open) };
         }
 
         #[cfg(feature = "implot")]

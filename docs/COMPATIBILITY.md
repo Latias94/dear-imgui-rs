@@ -8,8 +8,8 @@ paths, see `docs/workstreams/apple-platform-support.md`.
 ## Versioning Policy
 
 - Unified release train: all published `dear-*` crates in this workspace are versioned and released together under the same semver, so consumers can depend on a single minor across the board.
-- Current train: unified `v0.16.0` (use `version = "0.16"`).
-- Previous train: unified `v0.15.1` (use `version = "0.15"`).
+- Next train (unreleased): unified `v0.16.0`; use Git `main` to test it before publication.
+- Current published train: unified `v0.15.1` (use `version = "0.15"`).
 - Previous train: unified `v0.14.1` (use `version = "0.14"`).
 - Previous train: unified `v0.13.0` (use `version = "0.13"`).
 - Previous train: unified `v0.12.0` (use `version = "0.12"`).
@@ -19,7 +19,7 @@ paths, see `docs/workstreams/apple-platform-support.md`.
 - Previous train: unified `v0.8.0` (use `version = "0.8"`).
 - Internal dependency constraints in this repo also pin to the unified minor (for example, `0.16`). Mixing different minors across our crates is unsupported.
 
-## Current Release (0.16.0)
+## Next Release (0.16.0, Unreleased)
 
 Core
 
@@ -67,7 +67,7 @@ Extensions
 
 ## 0.16 Architecture Contracts
 
-Version 0.16.0 is not source-compatible with 0.15.x. The baseline is Dear ImGui v1.92.8 docking via cimgui, Rust 1.92 for the workspace, Rust 1.95 for the Bevy backend, WGPU 30 by default with explicit 29/28/27 routes, and Bevy 0.19. Migration details and before/after examples live in the `0.16.0` section of `CHANGELOG.md`.
+The upcoming 0.16.0 release is not source-compatible with 0.15.x. The baseline is Dear ImGui v1.92.8 docking via cimgui, Rust 1.92 for the workspace, Rust 1.95 for the Bevy backend, WGPU 30 by default with explicit 29/28/27 routes, and Bevy 0.19. Migration details and before/after examples live in the `0.16.0` section of `CHANGELOG.md`.
 
 The safe Rust layer intentionally breaks APIs that expose C++ lifecycle
 protocols, wrong-context state, stale GPU handles, or platform-specific ABI
@@ -80,9 +80,12 @@ target.
 | Route | 0.16 contract |
 | --- | --- |
 | Native core | Uses the target-selected `windows64` or `non-windows` pregenerated binding profile. |
+| Native core build strategy | Source is the default. Enable `dear-imgui-rs/prebuilt` for verified release archives or `dear-imgui-rs/build-from-source` to force source; source wins when both are unified. |
+| Native test engine | `test-engine` is source-only, implies `build-from-source`, and is excluded from prebuilt package profiles. |
 | Native blueprint stack layout | Enable `dear-imgui-rs/stack-layout` directly or `dear-node-editor/blueprints`; this selects a distinct patched native artifact. |
 | WASM core | Only `wasm32-unknown-unknown` is supported; it must explicitly enable `dear-imgui-rs/wasm` and use the `imgui-sys-v0` provider. WASI and Emscripten targets are rejected. |
 | WASM stack layout / blueprints | Unsupported; `stack-layout` and `wasm` are rejected together. Use `dear-imnodes` for the WASM node-editor route. |
+| WASM test engine / prebuilt | Unsupported; `test-engine` needs native source hooks and `prebuilt` contains native static libraries. |
 | WGPU renderer | WGPU 30 is the default; 29, 28, and 27 are separate mutually exclusive features. Native Winit and SDL3 multi-viewport adapters are also mutually exclusive. |
 | Ash renderer | Native Vulkan via Ash 0.38. Winit and SDL3 multi-viewport surface adapters are mutually exclusive and share one swapchain runtime. |
 | Browser multi-viewport | Unsupported. Browser integrations render one main canvas. |
@@ -147,7 +150,7 @@ import-style binding artifact. `xtask verify-bindings` regenerates and compares
 all supported profiles; arbitrary bindgen clang-argument overrides are rejected
 for canonical artifacts.
 
-The binding generator contract, formatter, allow/block lists, enum normalization, header shims, opaque types, provider name, and exact compatibility target facts all participate in the deterministic binding-spec hash. `dear-imgui-build-support` ships on the same 0.16.0 train as every other publishable crate.
+The binding generator contract, formatter, allow/block lists, enum normalization, header shims, opaque types, provider name, and exact compatibility target facts all participate in the deterministic binding-spec hash. `dear-imgui-build-support` will ship on the same 0.16.0 train as every other publishable crate.
 
 Source identity is package data rather than repository state. The exact 40-hex
 cimgui and nested Dear ImGui revisions live in
@@ -174,6 +177,11 @@ feature dimensions produce four exact combinations: normal, freetype,
 stack-layout, and stack-layout + freetype. Each has a distinct archive name,
 cache identity, and manifest, so no build can silently consume another
 combination.
+
+High-level users select this route through `dear-imgui-rs/prebuilt`; direct sys
+consumers use `dear-imgui-sys/prebuilt`. `test-engine` always forces a source
+build and cannot be emitted by the package binary, even if Cargo also unifies
+`prebuilt`.
 
 ### Raw binding migration
 

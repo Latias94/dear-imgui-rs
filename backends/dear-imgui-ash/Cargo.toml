@@ -14,7 +14,6 @@ keywords.workspace = true
 [dependencies]
 dear-imgui-rs.workspace = true
 thiserror.workspace = true
-log.workspace = true
 
 # Vulkan (native only)
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

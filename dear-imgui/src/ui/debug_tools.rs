@@ -3,8 +3,14 @@ use super::*;
 impl Ui {
     /// Renders a demo window (previously called a test window), which demonstrates most
     /// Dear ImGui features.
+    ///
+    /// # Safety
+    ///
+    /// The upstream demo can open font-atlas debug panels whose destructive controls mutate or
+    /// delete fonts during the frame and may continue using invalidated native pointers. The
+    /// caller must ensure those panels and controls cannot be activated.
     #[doc(alias = "ShowDemoWindow")]
-    pub fn show_demo_window(&self, opened: &mut bool) {
+    pub unsafe fn show_demo_window(&self, opened: &mut bool) {
         self.run_with_bound_context(|| unsafe {
             crate::sys::igShowDemoWindow(opened);
         });
@@ -24,8 +30,14 @@ impl Ui {
     ///
     /// Displays Dear ImGui internals: draw commands (with individual draw calls and vertices),
     /// window list, basic internal state, etc.
+    ///
+    /// # Safety
+    ///
+    /// The upstream metrics window exposes font-atlas controls that can mutate or delete fonts
+    /// during the frame and may continue using invalidated native pointers. The caller must ensure
+    /// the Fonts section and its destructive controls cannot be activated.
     #[doc(alias = "ShowMetricsWindow")]
-    pub fn show_metrics_window(&self, opened: &mut bool) {
+    pub unsafe fn show_metrics_window(&self, opened: &mut bool) {
         self.run_with_bound_context(|| unsafe {
             crate::sys::igShowMetricsWindow(opened);
         });
@@ -111,11 +123,17 @@ impl Ui {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn font_atlas_debug_windows_are_explicitly_unsafe() {
+        let _: unsafe fn(&crate::Ui, &mut bool) = crate::Ui::show_demo_window;
+        let _: unsafe fn(&crate::Ui, &mut bool) = crate::Ui::show_metrics_window;
+    }
+
+    #[test]
     fn public_debug_helpers_are_safe_to_call_in_a_frame() {
         let mut ctx = crate::Context::create();
         ctx.io_mut().set_display_size([128.0, 128.0]);
         ctx.io_mut().set_delta_time(1.0 / 60.0);
-        let _ = ctx.font_atlas_mut().build();
+        let _ = ctx.font_atlas().build();
         let ui = ctx.frame();
 
         ui.window("debug_helpers").build(|| {

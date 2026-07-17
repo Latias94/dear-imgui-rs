@@ -2537,7 +2537,6 @@ dependencies = [
  "ash-window",
  "dear-imgui-rs",
  "gpu-allocator 0.28.0",
- "log",
  "thiserror 2.0.18",
  "vk-mem",
  "winit",
@@ -2626,6 +2625,7 @@ dependencies = [
  "sdl3",
  "tracing",
  "tracing-subscriber",
+ "ttf-parser",
  "wgpu 30.0.0",
  "winit",
 ]
@@ -2637,7 +2637,6 @@ dependencies = [
  "dear-imgui-rs",
  "env_logger",
  "glow 0.17.0",
- "memoffset",
  "pollster",
  "thiserror 2.0.18",
  "winit",
@@ -2669,7 +2668,6 @@ version = "0.16.0"
 dependencies = [
  "approx",
  "bitflags 2.13.0",
- "cfg-if",
  "dear-imgui-sys",
  "glam",
  "mint",
@@ -2679,8 +2677,6 @@ dependencies = [
  "serde",
  "static_assertions",
  "thiserror 2.0.18",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -2702,7 +2698,6 @@ version = "0.16.0"
 dependencies = [
  "bindgen",
  "cc",
- "cfg-if",
  "dear-imgui-build-support",
  "flate2",
  "glam",
@@ -2745,8 +2740,6 @@ dependencies = [
  "dear-implot3d",
  "log",
  "pollster",
- "tracing",
- "tracing-subscriber",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -2762,8 +2755,10 @@ dependencies = [
  "bytemuck",
  "dear-imgui-rs",
  "objc2 0.6.4",
+ "pollster",
  "raw-window-handle",
  "sdl3-sys",
+ "static_assertions",
  "thiserror 2.0.18",
  "tracing",
  "wgpu 27.0.1",
@@ -2818,7 +2813,6 @@ version = "0.16.0"
 dependencies = [
  "bindgen",
  "cc",
- "cfg-if",
  "dear-imgui-build-support",
  "dear-imgui-sys",
  "flate2",
@@ -2833,7 +2827,6 @@ version = "0.16.0"
 dependencies = [
  "bindgen",
  "cc",
- "cfg-if",
  "dear-imgui-build-support",
  "dear-imgui-sys",
  "flate2",
@@ -2860,7 +2853,6 @@ version = "0.16.0"
 dependencies = [
  "bindgen",
  "cc",
- "cfg-if",
  "dear-imgui-build-support",
  "dear-imgui-sys",
  "flate2",
@@ -2915,7 +2907,6 @@ version = "0.16.0"
 dependencies = [
  "bindgen",
  "cc",
- "cfg-if",
  "dear-imgui-build-support",
  "dear-imgui-sys",
  "flate2",
@@ -2941,7 +2932,6 @@ version = "0.16.0"
 dependencies = [
  "bindgen",
  "cc",
- "cfg-if",
  "dear-imgui-build-support",
  "dear-imgui-sys",
  "flate2",
@@ -4371,15 +4361,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "714098028fe011992e1c3962653c96b2d578c4b4bce9036e15ff220319b1e0e3"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "memoffset"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
-dependencies = [
- "autocfg",
 ]
 
 [[package]]

@@ -69,7 +69,7 @@ dear-imgui-bevy = { version = "0.16", path = "backends/dear-imgui-bevy" }
 dear-imgui-glow = { version = "0.16", path = "backends/dear-imgui-glow" }
 dear-imgui-reflect = { version = "0.16", path = "extensions/dear-imgui-reflect" }
 dear-imgui-reflect-derive = { version = "0.16", path = "extensions/dear-imgui-reflect-derive" }
-dear-imgui-rs = { version = "0.16", path = "dear-imgui" }
+dear-imgui-rs = { version = "0.16", path = "dear-imgui", default-features = false }
 dear-imgui-sdl3 = { version = "0.16", path = "backends/dear-imgui-sdl3" }
 dear-imgui-sys = { version = "0.16", path = "dear-imgui-sys" }
 dear-imgui-test-engine = { version = "0.16", path = "extensions/dear-imgui-test-engine" }
@@ -92,7 +92,6 @@ dear-node-editor-sys = { version = "0.16", path = "extensions/dear-node-editor-s
 # Core dependencies
 bitflags = "2.11"
 parking_lot = "0.12"
-cfg-if = "1.0"
 serde = { version = "1", features = ["derive"] }
 glam = "0.32"
 
@@ -138,7 +137,7 @@ js-sys = "0.3"
 flate2 = "1"
 tar = "0.4"
 bytemuck = "1.25"
-memoffset = "0.9"
+ttf-parser = "0.25.1"
 semver = "1"
 tempfile = "3"
 toml_edit = "0.25"

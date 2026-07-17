@@ -1,4 +1,5 @@
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use build_support::binding::{
@@ -85,6 +86,27 @@ impl BuildConfig {
         }
         features
     }
+    fn artifact_suffix(&self) -> String {
+        let mut suffix = String::new();
+        if cfg!(feature = "stack-layout") {
+            suffix.push_str("-stack-layout");
+        }
+        if cfg!(feature = "freetype") {
+            suffix.push_str("-freetype");
+        }
+        suffix
+    }
+    fn archive_name(&self, crt: &str) -> String {
+        let suffix = self.artifact_suffix();
+        build_support::compose_archive_name(
+            "dear-imgui",
+            env!("CARGO_PKG_VERSION"),
+            &self.target_triple,
+            "static",
+            (!suffix.is_empty()).then_some(suffix.as_str()),
+            crt,
+        )
+    }
     fn source_revisions(&self) -> SourceRevisions {
         SourceRevisions::from_cargo_manifest(include_str!("Cargo.toml")).unwrap_or_else(|error| {
             panic!("invalid checked-in Dear ImGui source metadata: {error}")
@@ -152,14 +174,33 @@ fn is_archive_urlish(s: &str) -> bool {
     s.ends_with(".tar.gz") || s.ends_with(".tgz")
 }
 
+fn write_package_metadata(cfg: &BuildConfig, profile: &ArtifactProfile) {
+    let archive_name = cfg.archive_name(cfg.crt_profile());
+    fs::write(cfg.out_dir.join("prebuilt-archive-name.txt"), archive_name)
+        .expect("failed to write package archive name");
+    fs::write(
+        cfg.out_dir.join("prebuilt-manifest.txt"),
+        profile.manifest_bytes(),
+    )
+    .expect("failed to write package manifest");
+}
+
 fn main() {
     let cfg = BuildConfig::new();
+    if cfg!(all(feature = "package-bin", feature = "test-engine")) {
+        panic!(
+            "dear-imgui-sys: feature `test-engine` is source-only and cannot be packaged as a prebuilt core artifact"
+        );
+    }
     validate_wasm_feature_contract(&cfg.target_triple, cfg!(feature = "wasm"))
         .unwrap_or_else(|error| panic!("dear-imgui-sys: {error}"));
     let skip_cc = env::var("IMGUI_SYS_SKIP_CC").is_ok();
     let mut has_platform_io_hooks = false;
     let artifact_profile = cfg.artifact_profile();
     let build_request = cfg.build_request();
+    if cfg!(feature = "package-bin") {
+        write_package_metadata(&cfg, &artifact_profile);
+    }
 
     // Re-run triggers
     println!("cargo:rerun-if-changed=build.rs");
@@ -262,12 +303,11 @@ fn main() {
         build_backend_shims(&cfg);
     }
 
-    // Build strategy selection via features + env var override
-    // Force native build when explicitly requested or when sandboxed
-    // (we still prefer prebuilt if compatible, including freetype variants).
-    let force_build = cfg!(feature = "build-from-source")
-        || cfg!(feature = "test-engine")
-        || env::var("IMGUI_SYS_FORCE_BUILD").is_ok();
+    // Build strategy selection via features + env var override. `test-engine`
+    // enables `build-from-source` in Cargo.toml because its hooks alter the
+    // native artifact profile.
+    let force_build =
+        cfg!(feature = "build-from-source") || env::var("IMGUI_SYS_FORCE_BUILD").is_ok();
 
     // Try prebuilt dear_imgui first (static lib) unless force_build
     let linked_prebuilt = if force_build || cfg.is_core_wasm_target() {
@@ -1030,45 +1070,15 @@ fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
     }
 
     let version = env::var("CARGO_PKG_VERSION").unwrap_or_default();
-    let link_type = "static";
-    let crt = if cfg.is_windows() && cfg.is_msvc() {
-        if cfg.use_static_crt() { "mt" } else { "md" }
-    } else {
-        ""
-    };
 
     // Candidate archive names match the complete native profile. We still validate the manifest
     // in `try_link_prebuilt()`, but distinct names prevent a normal build from even trying a
     // patched stack-layout artifact (and vice versa).
-    let mut candidates: Vec<String> = Vec::new();
-    let target = &cfg.target_triple;
-    let mut suffix = String::new();
-    if cfg!(feature = "stack-layout") {
-        suffix.push_str("-stack-layout");
+    let mut candidates = vec![cfg.archive_name(cfg.crt_profile())];
+    let crt_fallback = cfg.archive_name("");
+    if crt_fallback != candidates[0] {
+        candidates.push(crt_fallback);
     }
-    if cfg!(feature = "freetype") {
-        suffix.push_str("-freetype");
-    }
-    if cfg!(feature = "test-engine") {
-        suffix.push_str("-test-engine");
-    }
-    let suffix = (!suffix.is_empty()).then_some(suffix.as_str());
-    candidates.push(build_support::compose_archive_name(
-        "dear-imgui",
-        &version,
-        target,
-        link_type,
-        suffix,
-        crt,
-    ));
-    candidates.push(build_support::compose_archive_name(
-        "dear-imgui",
-        &version,
-        target,
-        link_type,
-        suffix,
-        "",
-    ));
 
     let tags = build_support::release_tags("dear-imgui-sys", &version);
 

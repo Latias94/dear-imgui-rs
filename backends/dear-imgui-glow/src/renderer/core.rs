@@ -1,5 +1,3 @@
-use dear_imgui_rs::sys;
-
 use crate::{
     GlBuffer, GlTexture, GlVertexArray, shaders::Shaders, state::GlStateBackup,
     texture::TextureMap, versions::GlVersion,
@@ -16,8 +14,7 @@ pub struct GlowRenderer {
     pub(super) state_backup: GlStateBackup,
     pub vbo_handle: Option<GlBuffer>,
     pub ebo_handle: Option<GlBuffer>,
-    pub font_atlas_texture: Option<GlTexture>,
-    pub(super) font_atlas_texture_data: *mut sys::ImTextureData,
+    pub(super) owned_textures: Vec<GlTexture>,
     #[cfg(feature = "bind_vertex_array_support")]
     pub vertex_array_object: Option<GlVertexArray>,
     pub gl_version: GlVersion,
@@ -34,4 +31,16 @@ pub struct GlowRenderer {
     // Clear color used for secondary viewports (multi-viewport). Main framebuffer
     // clear remains responsibility of the application.
     pub(super) viewport_clear_color: [f32; 4],
+}
+
+impl GlowRenderer {
+    pub(super) fn track_owned_texture(&mut self, texture: GlTexture) {
+        if !self.owned_textures.contains(&texture) {
+            self.owned_textures.push(texture);
+        }
+    }
+
+    pub(super) fn forget_owned_texture(&mut self, texture: GlTexture) {
+        self.owned_textures.retain(|owned| *owned != texture);
+    }
 }

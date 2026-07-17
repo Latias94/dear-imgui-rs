@@ -580,8 +580,6 @@ pub(super) fn draw_chrome(ui: &Ui, state: &mut FileDialogState, has_thumbnail_ba
         ("List", "Thumbs", "Grid")
     };
     let style = ui.clone_style();
-    let font = ui.current_font();
-    let font_size = ui.current_font_size();
     let spacing_x = style.item_spacing()[0];
     let frame_pad_x = style.frame_padding()[0];
     let history_button_w = ui.frame_height();
@@ -599,7 +597,7 @@ pub(super) fn draw_chrome(ui: &Ui, state: &mut FileDialogState, has_thumbnail_ba
         220.0
     };
 
-    let action_label_w = font.calc_text_size(font_size, f32::MAX, 0.0, action_label)[0];
+    let action_label_w = ui.calc_text_size(action_label)[0];
     let action_w = action_label_w + frame_pad_x * 2.0;
 
     let has_devices_button = breadcrumbs_mode
@@ -611,13 +609,13 @@ pub(super) fn draw_chrome(ui: &Ui, state: &mut FileDialogState, has_thumbnail_ba
             .find(|g| g.label == Places::SYSTEM_GROUP)
             .is_some_and(|g| g.places.iter().any(|p| !p.is_separator()));
     let reset_label_w = if breadcrumbs_mode {
-        font.calc_text_size(font_size, f32::MAX, 0.0, reset_label)[0]
+        ui.calc_text_size(reset_label)[0]
     } else {
         0.0
     };
     let reset_w = reset_label_w + frame_pad_x * 2.0;
     let devices_label_w = if has_devices_button {
-        font.calc_text_size(font_size, f32::MAX, 0.0, "Devices")[0]
+        ui.calc_text_size("Devices")[0]
     } else {
         0.0
     };
@@ -634,17 +632,14 @@ pub(super) fn draw_chrome(ui: &Ui, state: &mut FileDialogState, has_thumbnail_ba
         action_w
     };
 
-    let search_label_w = font.calc_text_size(font_size, f32::MAX, 0.0, "Search:")[0];
+    let search_label_w = ui.calc_text_size("Search:")[0];
     let search_reset_w = ui.frame_height();
     let search_total_w =
         search_reset_w + spacing_x + search_label_w + spacing_x + min_search_input_w;
     let view_controls_w = if matches!(header_style, HeaderStyle::IgfdClassic) {
-        let list_w =
-            font.calc_text_size(font_size, f32::MAX, 0.0, view_list_label)[0] + frame_pad_x * 2.0;
-        let thumbs_w =
-            font.calc_text_size(font_size, f32::MAX, 0.0, view_thumbs_label)[0] + frame_pad_x * 2.0;
-        let grid_w =
-            font.calc_text_size(font_size, f32::MAX, 0.0, view_grid_label)[0] + frame_pad_x * 2.0;
+        let list_w = ui.calc_text_size(view_list_label)[0] + frame_pad_x * 2.0;
+        let thumbs_w = ui.calc_text_size(view_thumbs_label)[0] + frame_pad_x * 2.0;
+        let grid_w = ui.calc_text_size(view_grid_label)[0] + frame_pad_x * 2.0;
         let buttons_w = list_w + spacing_x + thumbs_w + spacing_x + grid_w;
         let sep_w = 1.0;
         // Buttons + spacing + vertical separator + spacing.

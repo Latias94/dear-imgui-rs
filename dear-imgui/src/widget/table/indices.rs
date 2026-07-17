@@ -122,7 +122,7 @@ impl From<usize> for TableColumnRef {
     }
 }
 
-/// Result of [`Ui::table_get_hovered_column`].
+/// Result of [`crate::Ui::table_get_hovered_column`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum TableHoveredColumn {
@@ -190,7 +190,7 @@ impl PartialEq<TableRowIndex> for usize {
     }
 }
 
-/// Result of [`Ui::table_get_hovered_row`].
+/// Result of [`crate::Ui::table_get_hovered_row`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum TableHoveredRow {

@@ -10,6 +10,11 @@
 //! cargo run --bin multi_viewport_wgpu --features multi-viewport
 //! ```
 //!
+//! Automated native viewport smoke (builds Dear ImGui from source):
+//! ```bash
+//! DEAR_IMGUI_VIEWPORT_SMOKE=1 cargo run --bin multi_viewport_wgpu --features "multi-viewport test-engine"
+//! ```
+//!
 //! What this example demonstrates:
 //! - Creates a main window with WGPU rendering
 //! - Enables Dear ImGui multi-viewport (experimental)
@@ -23,6 +28,10 @@
 //!   (Windows/macOS/Linux); Linux is currently untested.
 
 use dear_imgui_rs::{Condition, Context, TextureId};
+#[cfg(feature = "test-engine")]
+use dear_imgui_test_engine::{
+    RunFlags, RunSpeed, ScriptCount, TestEngine, TestGroup, VerboseLevel,
+};
 use dear_imgui_wgpu::{GammaMode, WgpuInitInfo, WgpuRenderer};
 use dear_imgui_winit::{HiDpiMode, WinitPlatform, multi_viewport as winit_mvp};
 use pollster::block_on;
@@ -51,15 +60,28 @@ struct AppWindow {
     _game_tex: wgpu::Texture,
     game_tex_view: wgpu::TextureView,
     game_tex_id: TextureId,
+    #[cfg(feature = "test-engine")]
+    test_engine: Option<TestEngine>,
+    #[cfg(feature = "test-engine")]
+    viewport_smoke_complete: bool,
 }
 
 impl Drop for AppWindow {
     fn drop(&mut self) {
+        #[cfg(feature = "test-engine")]
+        if let Some(engine) = self.test_engine.as_mut() {
+            engine.shutdown();
+        }
         // Avoid ImGui's shutdown assertion by ensuring platform windows are destroyed before the
         // context is dropped.
         if self.enable_viewports {
             dear_imgui_wgpu::multi_viewport::shutdown_multi_viewport_support(&mut self.imgui)
                 .expect("WGPU multi-viewport shutdown failed");
+        }
+        self.renderer
+            .shutdown(&mut self.imgui)
+            .expect("WGPU renderer shutdown failed");
+        if self.enable_viewports {
             winit_mvp::shutdown_multi_viewport_support(&mut self.imgui);
         }
     }
@@ -75,6 +97,9 @@ impl AppWindow {
             target_os = "macos",
             target_os = "linux"
         ));
+        #[cfg(feature = "test-engine")]
+        let run_viewport_smoke =
+            std::env::var("DEAR_IMGUI_VIEWPORT_SMOKE").is_ok_and(|value| value == "1");
 
         // Create WGPU instance first (also used by renderer for per-viewport surfaces)
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
@@ -142,6 +167,10 @@ impl AppWindow {
 
         // Dear ImGui context + platform
         let mut imgui = Context::create();
+        #[cfg(feature = "test-engine")]
+        if run_viewport_smoke {
+            imgui.set_ini_filename(None::<String>)?;
+        }
 
         if enable_viewports {
             imgui.enable_multi_viewport();
@@ -166,6 +195,39 @@ impl AppWindow {
         // Register the offscreen texture as an external ImGui texture.
         let game_tex_id = renderer.register_external_texture(&game_tex, &game_tex_view);
 
+        #[cfg(feature = "test-engine")]
+        let test_engine = if run_viewport_smoke {
+            let scale = window.scale_factor();
+            let main_pos = window.outer_position()?.to_logical::<f32>(scale);
+            let main_size = window.outer_size().to_logical::<f32>(scale);
+            let external_pos = [main_pos.x + main_size.width + 100.0, main_pos.y + 100.0];
+            let merged_pos = [main_pos.x + 100.0, main_pos.y + 100.0];
+
+            let mut engine = TestEngine::try_create()?;
+            engine.set_capture_enabled(false);
+            engine.set_run_speed(RunSpeed::Fast);
+            engine.set_verbose_level(VerboseLevel::Info);
+            engine.add_script_test("wgpu", "multi_viewport_surface_smoke", move |test| {
+                test.wait_for_item("Main/Viewport Count", ScriptCount::new(240))?;
+                test.window_move("Game View", external_pos[0], external_pos[1])?;
+                test.yield_frames(ScriptCount::new(30));
+                test.assert_item_read_int_eq("Main/Viewport Count", 2)?;
+                test.window_move("Game View", merged_pos[0], merged_pos[1])?;
+                test.yield_frames(ScriptCount::new(30));
+                test.assert_item_read_int_eq("Main/Viewport Count", 1)?;
+                Ok(())
+            })?;
+            engine.try_start(&imgui)?;
+            engine.queue_tests(
+                TestGroup::Tests,
+                Some("multi_viewport_surface_smoke"),
+                RunFlags::RUN_FROM_COMMAND_LINE,
+            )?;
+            Some(engine)
+        } else {
+            None
+        };
+
         let mut app = Self {
             window,
             surface,
@@ -180,6 +242,10 @@ impl AppWindow {
             _game_tex: game_tex,
             game_tex_view,
             game_tex_id,
+            #[cfg(feature = "test-engine")]
+            test_engine,
+            #[cfg(feature = "test-engine")]
+            viewport_smoke_complete: false,
         };
 
         if app.enable_viewports {
@@ -252,6 +318,9 @@ impl AppWindow {
         }
 
         self.platform.prepare_frame(&self.window, &mut self.imgui);
+        #[cfg(feature = "test-engine")]
+        let mut viewport_count =
+            i32::try_from(self.imgui.platform_io().viewports_iter().count()).unwrap_or(i32::MAX);
         let ui = self.imgui.frame();
 
         // Keep a dockspace in the main viewport so it always has content
@@ -271,6 +340,12 @@ impl AppWindow {
                     ui.text("Use the SDL3 + OpenGL example for a stable multi-viewport demo:");
                     ui.text("  cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features \"multi-viewport sdl3-opengl3\"");
                 }
+                #[cfg(feature = "test-engine")]
+                if self.test_engine.is_some() {
+                    ui.input_int_config("Viewport Count")
+                        .flags(dear_imgui_rs::InputScalarFlags::READ_ONLY)
+                        .build(&mut viewport_count);
+                }
             });
 
         // "Game View" window showing the offscreen texture; you can drag this window
@@ -288,7 +363,8 @@ impl AppWindow {
             });
 
         // Optionally show demo to validate interaction
-        // let mut show_demo = true; ui.show_demo_window(&mut show_demo);
+        // let mut show_demo = true;
+        // unsafe { ui.show_demo_window(&mut show_demo) };
 
         let mut encoder = self
             .device
@@ -340,6 +416,27 @@ impl AppWindow {
             self.imgui.update_platform_windows();
             self.imgui.render_platform_windows_default();
         }
+
+        #[cfg(feature = "test-engine")]
+        if let Some(engine) = self.test_engine.as_mut() {
+            engine.post_swap();
+            if !self.viewport_smoke_complete
+                && engine.is_test_queue_empty()
+                && !engine.is_running_tests()
+            {
+                engine.stop();
+                let summary = engine.result_summary();
+                if summary.count_tested != 1 || summary.count_success != 1 {
+                    return Err(format!(
+                        "viewport smoke failed: tested={}, success={}",
+                        summary.count_tested, summary.count_success
+                    )
+                    .into());
+                }
+                println!("WGPU multi-viewport Test Engine smoke passed");
+                self.viewport_smoke_complete = true;
+            }
+        }
         Ok(())
     }
 
@@ -355,6 +452,7 @@ impl AppWindow {
 #[derive(Default)]
 struct App {
     window: Option<AppWindow>,
+    error: Option<String>,
 }
 
 impl ApplicationHandler for App {
@@ -364,7 +462,8 @@ impl ApplicationHandler for App {
                 win.window.request_redraw();
                 self.window = Some(win);
             }
-            Err(_e) => {
+            Err(error) => {
+                self.error = Some(error.to_string());
                 event_loop.exit();
             }
         }
@@ -430,8 +529,20 @@ impl ApplicationHandler for App {
                     } else {
                         None
                     };
-                    if let Err(_e) = app.redraw() {}
-                    app.window.request_redraw();
+                    match app.redraw() {
+                        Ok(()) => {
+                            #[cfg(feature = "test-engine")]
+                            if app.viewport_smoke_complete {
+                                event_loop.exit();
+                                return;
+                            }
+                            app.window.request_redraw();
+                        }
+                        Err(error) => {
+                            self.error = Some(error.to_string());
+                            event_loop.exit();
+                        }
+                    }
                 }
             }
             _ => {}
@@ -445,5 +556,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut app = App::default();
     event_loop.run_app(&mut app)?;
+    if let Some(error) = app.error {
+        return Err(error.into());
+    }
     Ok(())
 }

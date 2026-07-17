@@ -211,7 +211,8 @@ impl AppWindow {
             });
 
         if self.imgui.show_demo_window {
-            ui.show_demo_window(&mut self.imgui.show_demo_window);
+            // SAFETY: This demo assumes the destructive font-atlas controls are not activated.
+            unsafe { ui.show_demo_window(&mut self.imgui.show_demo_window) };
         }
 
         self.imgui

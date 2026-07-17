@@ -28,7 +28,7 @@ impl Application for Quickstart {
 
 fn main() {
     // Basic info logs
-    dear_imgui_rs::logging::init_tracing_with_filter(
+    dear_imgui_examples::init_tracing_with_filter(
         "dear_imgui=info,dear_app_quickstart=info,wgpu=warn",
     );
 

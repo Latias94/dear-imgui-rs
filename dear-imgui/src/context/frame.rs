@@ -144,6 +144,17 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
                     (*io).DisplaySize.y
                 );
             }
+            crate::fonts::assert_no_font_atlas_texture_borrows((*io).Fonts, "Context::frame()");
+            let renderer_has_textures =
+                ((*io).BackendFlags & sys::ImGuiBackendFlags_RendererHasTextures as i32) != 0;
+            crate::fonts::assert_font_atlas_renderer_mode(
+                (*io).Fonts,
+                renderer_has_textures,
+                "Context::frame()",
+            );
+            if let Some(shared_font_atlas) = &self.shared_font_atlas {
+                shared_font_atlas.prepare_frame(renderer_has_textures);
+            }
             sys::igNewFrame();
         }
         &mut self.ui
@@ -187,6 +198,13 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
         self.assert_can_render_unlocked("Context::render()");
 
         unsafe {
+            let abandoned_clippers = crate::list_clipper::forget_context_clippers(self.raw);
+            if abandoned_clippers != 0 {
+                sys::igEndFrame();
+                panic!(
+                    "Context::render() rejected a frame with {abandoned_clippers} list clipper token(s) still active or forgotten"
+                );
+            }
             sys::igRender();
             let dd = sys::igGetDrawData();
             if dd.is_null() {
@@ -275,7 +293,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
         }
     }
 
-    fn frame_lifecycle_state_unlocked(&self) -> FrameLifecycleState {
+    pub(super) fn frame_lifecycle_state_unlocked(&self) -> FrameLifecycleState {
         unsafe {
             let raw = &*self.raw;
             if raw.WithinFrameScope {
@@ -363,7 +381,12 @@ impl Drop for FrameToken<'_> {
 
         let _guard = CTX_MUTEX.lock();
         if self.ctx.frame_lifecycle_state_unlocked() == FrameLifecycleState::InFrame {
-            unsafe { with_bound_context(self.ctx.raw, || sys::igEndFrame()) };
+            unsafe {
+                with_bound_context(self.ctx.raw, || {
+                    let _ = crate::list_clipper::forget_context_clippers(self.ctx.raw);
+                    sys::igEndFrame();
+                })
+            };
         }
         self.closed = true;
     }

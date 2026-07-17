@@ -22,7 +22,7 @@ thread_local! {
 
 /// Object implementing the custom draw API.
 ///
-/// Called from [`Ui::get_window_draw_list`], [`Ui::get_background_draw_list`] or [`Ui::get_foreground_draw_list`].
+/// Called from [`crate::Ui::get_window_draw_list`], [`crate::Ui::get_background_draw_list`] or [`crate::Ui::get_foreground_draw_list`].
 /// Only one mutable wrapper can exist for the same raw draw list on the same thread at a time.
 /// The program will panic when attempting to wrap the same draw list twice.
 pub struct DrawListMut<'ui> {

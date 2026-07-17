@@ -70,23 +70,40 @@ Notes:
 - Namespaced APIs such as `ImFontAtlas`, `ImFontBaked`, `ImDrawList`, and `ImTextureData` are guarded
   against generator drift but still need a manual safe-layer audit during upgrades.
 
-## Known deferred namespaced designs
+## Completed lifetime-sensitive designs
 
-The current audit intentionally leaves these raw capabilities without a public safe wrapper:
+The safe layer models the previously deferred namespaced capabilities through lifetime- and
+state-aware APIs:
 
-- `ImGui::GetFontBaked`, `ImFont::GetFontBaked`, and the `ImFontBaked` query methods need a
-  frame-bound `BakedFont` view. Upstream states that these pointers are valid only for the current
-  frame, and atlas mutation or density changes can replace the underlying cache.
-- `ImFontAtlas::{AddCustomRect,GetCustomRect,RemoveCustomRect}` need a typed rectangle ID, copy-out
-  snapshots for UV data that upstream may invalidate at any time, and an API that marks the affected
-  managed texture region for renderer upload after pixel writes.
-- `ImGuiListClipper::SeekCursorForItem` is useful only with the `INT_MAX` unknown-item-count mode. A
-  safe wrapper should model known versus unknown counts explicitly and permit the final seek only in
-  the correct post-step state.
+- `Ui::current_font()` returns an atlas-validated `FontId`, and metadata methods copy owned values
+  instead of exposing a borrowed `ImFont` view. `Ui::{current_baked_font,baked_font,
+  baked_font_with_density}` returns `BakedFont<'ui>`, which revalidates the font and resolves native
+  baked storage on each access. Glyph queries return owned `Glyph` metric copies. The safe glyph API
+  intentionally omits UVs because another lazy glyph load may repack the atlas within the same frame.
+- `FontAtlas::tex_data()` returns a read-only `FontAtlasTexture<'_>` lease. Atlas rebuilds, clears,
+  custom-rectangle pixel writes, and context frame advancement reject a live lease rather than
+  invalidating borrowed texture memory.
+- `FontSource` is opaque, and constructors for external TTF/OTF, compressed, Base85, and file inputs
+  are unsafe because the native parsers do not consistently enforce their input bounds. Direct
+  include ranges use structured `(start, end)` pairs stored for the native source lifetime.
+- `FontAtlas::{add_custom_rect,write_custom_rect,remove_custom_rect,custom_rect}` uses an
+  atlas-validated `CustomRectId`, strict `CustomRectData`, and copy-out `CustomRectSnapshot` values.
+  Pixel writes queue the exact managed texture region for renderer upload; `Ui::image_custom_rect`
+  resolves current texture and UV data at submission time.
+- `Ui::{show_demo_window,show_metrics_window,show_style_editor,show_default_style_editor}` remains an
+  explicit unsafe boundary because upstream Fonts panels can perform destructive atlas operations
+  during the call; the safe layer does not claim control over later user interaction.
+- `ListClipper::unknown_count()` returns a distinct token whose `next_range()` protocol is finalized
+  by consuming `finish(final_items_count)`. Known counts reject the native `INT_MAX` sentinel.
+  Clipper tokens enforce native LIFO plus their exact frame, window `Begin`, and table instance. An
+  out-of-order drop defers cleanup until the stack recovers, wrong-scope cleanup suppresses cursor
+  seeking while letting native code restore its temporary stack, and a forgotten token rejects and
+  recovers only the current frame.
 
-These are design tasks, not aliases to add mechanically. Obsolete functions such as
-`ImFontAtlas::ClearInputData` remain intentionally sys-only, while low-level font rendering already
-has safe draw-list equivalents.
+Obsolete functions such as `ImFontAtlas::ClearInputData` remain intentionally sys-only, while
+low-level font rendering already has safe draw-list equivalents. `ImFontLoader` remains an unsafe
+native extension boundary because upstream still declares its callback table as internal and
+evolving.
 
 ## Avoiding duplicate wrappers (required)
 

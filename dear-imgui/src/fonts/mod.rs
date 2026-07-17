@@ -4,6 +4,7 @@
 //! individual fonts, glyph ranges, and font configuration.
 
 pub mod atlas;
+mod baked;
 pub mod font;
 pub mod glyph;
 /// Deprecated glyph ranges helpers.
@@ -19,7 +20,7 @@ pub mod glyph;
 pub mod glyph_ranges;
 
 pub use atlas::*;
-pub use font::*;
+pub use baked::*;
 pub use glyph::*;
 #[allow(deprecated)]
 pub use glyph_ranges::*;
@@ -38,11 +39,11 @@ fn assert_positive_finite_f32(caller: &str, name: &str, value: f32) {
 
 /// # Fonts
 impl Ui {
-    /// Returns the current font
+    /// Return the persistent, atlas-validated ID of the current font.
     #[doc(alias = "GetFont")]
-    pub fn current_font(&self) -> &Font {
+    pub fn current_font(&self) -> FontId {
         self.run_with_bound_context(|| unsafe {
-            Font::from_raw(crate::sys::igGetFont() as *const _)
+            FontId::from_font(crate::sys::igGetFont(), "Ui::current_font()")
         })
     }
 
@@ -58,13 +59,17 @@ impl Ui {
     /// Pass None for font to use the current font with the new size.
     ///
     /// Returns a `FontStackToken` that pops the font stack when dropped or when
-    /// [`FontStackToken::pop`] is called.
+    /// [`crate::FontStackToken::pop`] is called.
     #[doc(alias = "PushFont")]
-    pub fn push_font_with_size(&self, font: Option<&Font>, size: f32) -> crate::FontStackToken<'_> {
+    pub fn push_font_with_size(
+        &self,
+        font: Option<FontId>,
+        size: f32,
+    ) -> crate::FontStackToken<'_> {
         assert_non_negative_finite_f32("Ui::push_font_with_size()", "size", size);
         self.run_with_bound_context(|| unsafe {
-            let font_ptr = font.map_or(std::ptr::null_mut(), |f| {
-                crate::fonts::validate_font_for_current_context(f, "Ui::push_font_with_size()")
+            let font_ptr = font.map_or(std::ptr::null_mut(), |id| {
+                crate::fonts::validate_font_id_for_current_context(id, "Ui::push_font_with_size()")
             });
             crate::sys::igPushFont(font_ptr, size);
         });
@@ -72,7 +77,7 @@ impl Ui {
     }
 
     /// Execute a closure with a specific font and size (v1.92+ dynamic fonts)
-    pub fn with_font_and_size<F, R>(&self, font: Option<&Font>, size: f32, f: F) -> R
+    pub fn with_font_and_size<F, R>(&self, font: Option<FontId>, size: f32, f: F) -> R
     where
         F: FnOnce() -> R,
     {
@@ -113,7 +118,7 @@ impl Ui {
 mod tests {
     fn setup_context() -> crate::Context {
         let mut ctx = crate::Context::create();
-        let _ = ctx.font_atlas_mut().build();
+        let _ = ctx.font_atlas().build();
         ctx.io_mut().set_display_size([128.0, 128.0]);
         ctx.io_mut().set_delta_time(1.0 / 60.0);
         ctx

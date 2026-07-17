@@ -9,6 +9,27 @@ fn platform_io_shared_and_mut_views_match() {
     assert_eq!(shared, mutable);
 }
 
+#[test]
+fn suspend_rejects_an_open_frame_and_context_drop_recovers() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut ctx = Context::create();
+        assert!(ctx.font_atlas().build());
+        ctx.io_mut().set_display_size([128.0, 128.0]);
+        ctx.io_mut().set_delta_time(1.0 / 60.0);
+        let _ = ctx.frame();
+        let _ = ctx.suspend();
+    }));
+    assert!(result.is_err());
+
+    let mut ctx = Context::create();
+    assert!(ctx.font_atlas().build());
+    ctx.io_mut().set_display_size([128.0, 128.0]);
+    ctx.io_mut().set_delta_time(1.0 / 60.0);
+    ctx.frame().text("context recovered after rejected suspend");
+    assert!(ctx.render().valid());
+}
+
 #[cfg(feature = "multi-viewport")]
 #[test]
 fn enable_multi_viewport_does_not_enable_docking() {
@@ -175,7 +196,7 @@ fn ui_stack_tokens_drop_on_owner_context_and_restore_previous_current_context() 
     let raw_b = suspended_b.0.raw;
 
     unsafe { crate::sys::igSetCurrentContext(raw_a) };
-    let _ = ctx_a.font_atlas_mut().build();
+    let _ = ctx_a.font_atlas().build();
     ctx_a.io_mut().set_display_size([128.0, 128.0]);
     ctx_a.io_mut().set_delta_time(1.0 / 60.0);
 
@@ -215,7 +236,7 @@ fn ui_methods_run_on_owner_context_and_restore_previous_current_context() {
     let raw_b = suspended_b.0.raw;
 
     unsafe { crate::sys::igSetCurrentContext(raw_a) };
-    let _ = ctx_a.font_atlas_mut().build();
+    let _ = ctx_a.font_atlas().build();
     ctx_a.io_mut().set_display_size([128.0, 128.0]);
     ctx_a.io_mut().set_delta_time(1.0 / 60.0);
 
@@ -266,7 +287,7 @@ fn ui_methods_run_on_owner_context_and_restore_previous_current_context() {
 }
 
 #[test]
-fn context_stack_tokens_drop_on_owner_context_and_restore_previous_current_context() {
+fn font_stack_token_drops_on_owner_context_and_restores_previous_current_context() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx_a = Context::create();
     let raw_a = ctx_a.raw;
@@ -274,13 +295,12 @@ fn context_stack_tokens_drop_on_owner_context_and_restore_previous_current_conte
     let raw_b = suspended_b.0.raw;
 
     unsafe { crate::sys::igSetCurrentContext(raw_a) };
-    let font = ctx_a.font_atlas_mut().add_font_default(None) as *const crate::Font;
-    let _ = ctx_a.font_atlas_mut().build();
+    let font = ctx_a.font_atlas().add_font_default(None);
+    let _ = ctx_a.font_atlas().build();
+    ctx_a.io_mut().set_display_size([128.0, 128.0]);
+    ctx_a.io_mut().set_delta_time(1.0 / 60.0);
 
-    let token = {
-        let font = unsafe { &*font };
-        ctx_a.push_font(font)
-    };
+    let token = ctx_a.frame().push_font(font);
 
     unsafe { crate::sys::igSetCurrentContext(raw_b) };
     assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw_b);
@@ -290,6 +310,7 @@ fn context_stack_tokens_drop_on_owner_context_and_restore_previous_current_conte
     assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw_b);
 
     unsafe { crate::sys::igSetCurrentContext(raw_a) };
+    let _ = ctx_a.render();
 
     drop(ctx_a);
     drop(suspended_b);
@@ -300,7 +321,7 @@ fn context_stack_tokens_drop_on_owner_context_and_restore_previous_current_conte
 fn platform_viewport_snapshot_requires_rendered_frame_and_reuses_current_draw_data() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
-    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.font_atlas().build();
     ctx.prepare_frame(super::FramePrepareOptions::new([320.0, 240.0], 1.0 / 60.0));
 
     let before_render = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

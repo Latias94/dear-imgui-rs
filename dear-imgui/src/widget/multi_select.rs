@@ -3,9 +3,9 @@
 //! This module provides a small, safe wrapper around Dear ImGui's multi-select
 //! API introduced in 1.92 (`BeginMultiSelect` / `EndMultiSelect`), following
 //! the "external storage" pattern described in the official docs:
-//! https://github.com/ocornut/imgui/wiki/Multi-Select
+//! <https://github.com/ocornut/imgui/wiki/Multi-Select>
 //!
-//! The main entry point is [`Ui::multi_select_indexed`], which:
+//! The main entry point is [`crate::Ui::multi_select_indexed`], which:
 //! - wraps `BeginMultiSelect()` / `EndMultiSelect()`
 //! - wires `SetNextItemSelectionUserData()` for each item (index-based)
 //! - applies selection requests to your storage using a simple trait.

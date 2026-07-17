@@ -39,7 +39,9 @@ MANIFEST_TOML = REPO_ROOT / "dear-imgui-sys" / "Cargo.toml"
 POLICY_JSON = REPO_ROOT / "tools" / "api_surface_policy.json"
 SNAPSHOT_JSON = REPO_ROOT / "tools" / "api_surface_snapshot.json"
 
-POLICY_CLASSIFICATIONS = frozenset({"intentional-sys-only", "deferred-design"})
+POLICY_CLASSIFICATIONS = frozenset(
+    {"intentional-sys-only", "unsafe-wrapper", "deferred-design"}
+)
 POLICY_KEYS = frozenset({"schema_version", "scope", "groups"})
 POLICY_GROUP_KEYS = frozenset({"classification", "name", "reason", "functions"})
 SNAPSHOT_KEYS = frozenset({"schema_version", "source_revisions", "declarations"})

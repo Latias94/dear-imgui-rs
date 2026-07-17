@@ -43,10 +43,8 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 mint.workspace = true
-cfg-if.workspace = true
 flate2 = { version = "1", optional = true }
 tar = { version = "0.4", optional = true }
-build-support = { workspace = true, features = ["binding-spec"], optional = true }
 glam = { workspace = true, optional = true }
 
 [build-dependencies]
@@ -65,8 +63,9 @@ bindgen = ["dep:bindgen"]
 # Docking is always enabled; feature removed.
 # Enable multi-viewport support (commented out while WIP)
 # multi-viewport = []
-# Enable Dear ImGui test engine hooks (requires linking dear-imgui-test-engine-sys)
-test-engine = []
+# Enable Dear ImGui test engine hooks (requires linking dear-imgui-test-engine-sys).
+# Test engine hooks alter the native core artifact and therefore require a source build.
+test-engine = ["build-from-source"]
 # Enable freetype font rasterizer
 freetype = ["pkg-config", "vcpkg"]
 pkg-config = ["build-support/pkg-config"]
@@ -75,7 +74,7 @@ vcpkg = ["build-support/vcpkg"]
 wasm = []
 # Enable the native patched Dear ImGui artifact used by blueprint-style stack layouts.
 stack-layout = []
-package-bin = ["dep:flate2", "dep:tar", "dep:build-support"]
+package-bin = ["dep:flate2", "dep:tar"]
 prebuilt = ["build-support/download"]
 build-from-source = []
 glam = ["dep:glam"]

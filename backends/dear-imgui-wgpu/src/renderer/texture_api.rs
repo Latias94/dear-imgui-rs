@@ -14,7 +14,11 @@ impl WgpuRenderer {
 
     /// Check if the renderer is initialized
     pub fn is_initialized(&self) -> bool {
-        self.backend_data.is_some()
+        self.context_binding.is_some()
+            && self
+                .backend_data
+                .as_ref()
+                .is_some_and(crate::WgpuBackendData::is_initialized)
     }
 
     /// Update a single texture manually

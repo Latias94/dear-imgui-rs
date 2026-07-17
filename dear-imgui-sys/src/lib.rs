@@ -9,6 +9,9 @@
 //! - **freetype**: Enable FreeType font rasterizer support
 //! - **wasm**: Enable WebAssembly compatibility
 //! - **stack-layout**: Enable the native patched core artifact used by blueprint-style layouts
+//! - **prebuilt**: Allow downloading a compatible native prebuilt artifact
+//! - **build-from-source**: Force compilation of the native artifact from vendored sources
+//! - **test-engine**: Enable native test engine hooks and force a source build
 //! - **backend-shim-\***: Expose selected repository-owned backend shim modules
 //!   for low-level integrations
 //!
@@ -87,11 +90,14 @@
 // New Clippy lint warns these comparisons are unpredictable; suppress for raw FFI types.
 #![allow(unpredictable_function_pointer_comparisons)]
 
-#[cfg(all(
-    feature = "stack-layout",
-    any(feature = "wasm", target_arch = "wasm32")
-))]
+#[cfg(all(feature = "stack-layout", dear_imgui_rs_wasm_import_target))]
 compile_error!("feature `stack-layout` is native-only and cannot be combined with WASM");
+
+#[cfg(all(feature = "test-engine", dear_imgui_rs_wasm_import_target))]
+compile_error!("feature `test-engine` is native source-only and cannot be combined with WASM");
+
+#[cfg(all(feature = "prebuilt", dear_imgui_rs_wasm_import_target))]
+compile_error!("feature `prebuilt` is native-only and cannot be combined with WASM");
 
 // Bindings are generated into OUT_DIR and included via a submodule so that
 // possible inner attributes in the generated file are accepted at module root.

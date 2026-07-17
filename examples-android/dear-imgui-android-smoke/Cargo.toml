@@ -43,7 +43,7 @@ categories = ["android.intent.category.LAUNCHER"]
 [dependencies]
 android-activity = { version = "0.6", features = ["native-activity"] }
 android_logger = "0.15"
-dear-imgui-rs = { path = "../../dear-imgui" }
+dear-imgui-rs = { path = "../../dear-imgui", default-features = false }
 dear-imgui-sys = { path = "../../dear-imgui-sys", features = ["backend-shim-android", "backend-shim-opengl3"] }
 log = "0.4"
 ndk = { version = "0.9", features = ["nativewindow"] }

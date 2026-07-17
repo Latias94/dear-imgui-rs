@@ -195,7 +195,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             });
 
         if show_demo {
-            ui.show_demo_window(&mut show_demo);
+            // SAFETY: This demo assumes the destructive font-atlas controls are not activated.
+            unsafe { ui.show_demo_window(&mut show_demo) };
         }
 
         let draw_data = imgui.render();
@@ -274,6 +275,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         dear_imgui_wgpu::multi_viewport_sdl3::shutdown_multi_viewport_support(&mut imgui)
             .expect("WGPU multi-viewport shutdown failed");
     }
+    renderer.shutdown(&mut imgui)?;
     imgui_sdl3_backend::shutdown(&mut imgui);
     Ok(())
 }

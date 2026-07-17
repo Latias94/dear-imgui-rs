@@ -198,7 +198,7 @@ fn derive_compiles_and_runs_basic_ui() {
         io.set_delta_time(1.0 / 60.0);
     }
     // Build font atlas so widgets that rely on fonts do not assert.
-    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.font_atlas().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     let ui = ctx.frame();
     let mut inspector = session.inspector(ui);
@@ -230,7 +230,7 @@ fn advanced_numeric_and_bool_styles_no_panic() {
         io.set_display_size([1024.0, 768.0]);
         io.set_delta_time(1.0 / 60.0);
     }
-    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.font_atlas().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     let ui = ctx.frame();
     let mut inspector = session.inspector(ui);
@@ -249,7 +249,7 @@ fn boxed_settings_no_panic() {
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
     }
-    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.font_atlas().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     let ui = ctx.frame();
     let mut inspector = session.inspector(ui);
@@ -268,7 +268,7 @@ fn shared_settings_no_panic() {
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
     }
-    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.font_atlas().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     let ui = ctx.frame();
     let mut inspector = session.inspector(ui);
@@ -287,7 +287,7 @@ fn map_demo_no_panic() {
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
     }
-    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.font_atlas().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     let ui = ctx.frame();
     let mut inspector = session.inspector(ui);
@@ -306,7 +306,7 @@ fn tuple_demo_no_panic() {
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
     }
-    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.font_atlas().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     let ui = ctx.frame();
     let mut inspector = session.inspector(ui);
@@ -338,7 +338,7 @@ fn large_tuple_and_member_read_only_no_panic() {
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
     }
-    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.font_atlas().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     let ui = ctx.frame();
     let mut inspector = session.inspector(ui);
@@ -360,7 +360,7 @@ fn enum_reflect_no_panic() {
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
     }
-    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.font_atlas().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     let ui = ctx.frame();
     let mut inspector = session.inspector(ui);
@@ -394,7 +394,7 @@ fn complex_container_graph_no_panic() {
         io.set_display_size([1024.0, 768.0]);
         io.set_delta_time(1.0 / 60.0);
     }
-    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.font_atlas().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     let ui = ctx.frame();
     let mut inspector = session.inspector(ui);
@@ -467,7 +467,7 @@ fn container_member_settings_no_panic() {
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
     }
-    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.font_atlas().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     let ui = ctx.frame();
     let mut inspector = session.inspector(ui);

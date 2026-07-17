@@ -50,7 +50,7 @@ impl Ui {
 
     /// Creates a new tab item and returns a token if its contents are visible.
     ///
-    /// By default, this doesn't pass any flags. See [tab_item_with_flags] for more.
+    /// By default, this doesn't pass any flags. See [`Self::tab_item_with_flags`] for more.
     #[doc(alias = "BeginTabItem")]
     pub fn tab_item_with_opened(
         &self,

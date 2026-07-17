@@ -230,8 +230,7 @@ mod tests {
             state_backup: GlStateBackup::default(),
             vbo_handle: None,
             ebo_handle: None,
-            font_atlas_texture: None,
-            font_atlas_texture_data: std::ptr::null_mut(),
+            owned_textures: Vec::new(),
             #[cfg(feature = "bind_vertex_array_support")]
             vertex_array_object: None,
             gl_version: GlVersion {
@@ -376,7 +375,7 @@ mod tests {
                 }
             })
         };
-        renderer.destroy(&gl);
+        renderer.destroy(&gl, &mut ctx);
 
         unsafe {
             sys::igSetCurrentContext(raw);

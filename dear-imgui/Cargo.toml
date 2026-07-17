@@ -18,13 +18,8 @@ features = ["freetype"]
 [dependencies]
 bitflags.workspace = true
 dear-imgui-sys.workspace = true
-mint.workspace = true
 parking_lot.workspace = true
-cfg-if.workspace = true
 thiserror.workspace = true
-tracing = { workspace = true, optional = true }
-tracing-subscriber = { workspace = true, optional = true }
-glam = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 
 [features]
@@ -32,11 +27,14 @@ default = []
 # Docking is always enabled; feature removed.
 # Enable multi-viewport support (define feature to satisfy cfg checks; opt-in)
 multi-viewport = []
-tracing = ["dep:tracing", "dep:tracing-subscriber"]
 # Enable freetype font rasterizer
 freetype = ["dear-imgui-sys/freetype"]
 # Enable Dear ImGui test engine hooks in dear-imgui-sys.
 test-engine = ["dear-imgui-sys/test-engine"]
+# Allow dear-imgui-sys to download a compatible native prebuilt artifact.
+prebuilt = ["dear-imgui-sys/prebuilt"]
+# Force dear-imgui-sys to compile the native Dear ImGui artifact from source.
+build-from-source = ["dear-imgui-sys/build-from-source"]
 serde = ["dep:serde"]
 # Enable for WASM targets (import-style provider)
 wasm = ["dear-imgui-sys/wasm"]
@@ -47,10 +45,12 @@ stack-layout = ["dear-imgui-sys/stack-layout"]
 wasm-font-atlas-experimental = []
 # Optional math interop: enable glam support in the sys crate so draw/list APIs
 # taking Into<sys::ImVec2>/ImVec4 can accept glam vectors directly.
-glam = ["dep:glam", "dear-imgui-sys/glam"]
+glam = ["dear-imgui-sys/glam"]
 
 [dev-dependencies]
 approx = "0.5"
 pretty_assertions = "1.4"
 static_assertions = "1.1"
 once_cell = "1.21"
+glam.workspace = true
+mint.workspace = true

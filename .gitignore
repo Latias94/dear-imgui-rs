@@ -6,5 +6,5 @@ implot3d_demo.ini
 extensions/target
 *.ttf
 repo-ref/
-tools/__pycache__
+__pycache__/
 docs/plans/

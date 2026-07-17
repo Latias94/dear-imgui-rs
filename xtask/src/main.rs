@@ -4,6 +4,7 @@ use build_support::binding::{
     validate_bindgen_environment,
 };
 use std::{
+    borrow::Cow,
     fs,
     path::{Path, PathBuf},
 };
@@ -381,13 +382,25 @@ fn validate_checked_in_bindings(path: &Path, spec: &BindingSpec) -> Result<()> {
 fn compare_binding_contents(path: &Path, generated: &str) -> Result<()> {
     let checked_in = std::fs::read_to_string(path)
         .with_context(|| format!("read checked-in bindings from {}", path.display()))?;
-    if checked_in != generated {
+    if !binding_contents_equal(&checked_in, generated) {
         anyhow::bail!(
             "{} differs from the shared BindingSpec output; regenerate core bindings",
             path.display()
         );
     }
     Ok(())
+}
+
+fn binding_contents_equal(checked_in: &str, generated: &str) -> bool {
+    normalize_line_endings(checked_in) == normalize_line_endings(generated)
+}
+
+fn normalize_line_endings(contents: &str) -> Cow<'_, str> {
+    if contents.contains('\r') {
+        Cow::Owned(contents.replace("\r\n", "\n").replace('\r', "\n"))
+    } else {
+        Cow::Borrowed(contents)
+    }
 }
 
 fn gen_implot_wasm_bindings() -> Result<()> {
@@ -1490,7 +1503,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::VerifyBindingOptions;
+    use super::{VerifyBindingOptions, binding_contents_equal};
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_owned()).collect()
@@ -1516,5 +1529,18 @@ mod tests {
         );
         assert!(VerifyBindingOptions::parse(&args(&["--update", "--check-only"])).is_err());
         assert!(VerifyBindingOptions::parse(&args(&["--unknown"])).is_err());
+    }
+
+    #[test]
+    fn binding_comparison_ignores_only_line_ending_style() {
+        assert!(binding_contents_equal(
+            "first\r\nsecond\r\n",
+            "first\nsecond\n"
+        ));
+        assert!(binding_contents_equal("first\rsecond\r", "first\nsecond\n"));
+        assert!(!binding_contents_equal(
+            "first\r\nsecond\r\n",
+            "first\nchanged\n"
+        ));
     }
 }

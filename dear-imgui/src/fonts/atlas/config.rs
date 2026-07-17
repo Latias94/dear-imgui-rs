@@ -7,7 +7,8 @@ use super::loader::{FontLoader, FontLoaderFlags};
 use super::validation::{
     RASTERIZER_MULTIPLY_MAX, assert_finite_f32, assert_finite_vec2,
     assert_font_source_for_add_font, assert_non_negative_f32, assert_non_negative_i8,
-    assert_positive_f32, assert_reference_font_size_for_metrics, validate_font_size_pixels,
+    assert_positive_f32, assert_reference_font_size_for_metrics, encode_glyph_ranges,
+    validate_font_size_pixels,
 };
 
 /// Font configuration for loading fonts with v1.92+ features
@@ -50,9 +51,8 @@ impl FontConfig {
         }
     }
 
-    /// Returns the raw ImFontConfig pointer
-    pub(crate) fn raw(&self) -> *const sys::ImFontConfig {
-        &self.raw
+    pub(super) fn owned_glyph_exclude_ranges(&self) -> Option<&[sys::ImWchar]> {
+        self.glyph_exclude_ranges.as_deref()
     }
 
     fn has_reference_size_dependent_metrics(&self) -> bool {
@@ -129,17 +129,6 @@ impl FontConfig {
         self
     }
 
-    /// Control whether the atlas takes ownership of `FontData` passed from memory.
-    ///
-    /// Dear ImGui's `AddFontFromMemoryTTF()` stores the `FontData` pointer for potential rebuilds.
-    /// When this flag is `true`, the atlas will later free `FontData` using Dear ImGui's allocator.
-    /// When it is `false`, Dear ImGui will *not* free the pointer and the caller must ensure the
-    /// memory stays valid for as long as the atlas may use it.
-    pub fn font_data_owned_by_atlas(mut self, owned: bool) -> Self {
-        self.raw.FontDataOwnedByAtlas = owned;
-        self
-    }
-
     /// Set font loader flags for this specific font
     ///
     /// These flags override the global atlas flags for this font.
@@ -159,37 +148,11 @@ impl FontConfig {
             return self;
         }
 
-        const IMWCHAR_MAX: u32 = if std::mem::size_of::<sys::ImWchar>() == 2 {
-            0xFFFF
-        } else {
-            0x10FFFF
-        };
-        let mut converted: Vec<sys::ImWchar> = Vec::with_capacity(ranges.len() * 2 + 1);
-        for &(start, end) in ranges {
-            assert!(
-                start <= end,
-                "glyph_exclude_ranges range start must be <= end: {start:#x}..={end:#x}"
-            );
-            assert!(
-                start <= IMWCHAR_MAX,
-                "glyph_exclude_ranges value out of range for ImWchar (max {IMWCHAR_MAX:#x}): {start:#x}"
-            );
-            assert!(
-                end <= IMWCHAR_MAX,
-                "glyph_exclude_ranges value out of range for ImWchar (max {IMWCHAR_MAX:#x}): {end:#x}"
-            );
-            let start = sys::ImWchar::try_from(start).unwrap_or_else(|_| {
-                panic!("glyph_exclude_ranges value {start:#x} was not representable as ImWchar")
-            });
-            let end = sys::ImWchar::try_from(end).unwrap_or_else(|_| {
-                panic!("glyph_exclude_ranges value {end:#x} was not representable as ImWchar")
-            });
-            converted.push(start);
-            converted.push(end);
-        }
-        if converted.last().copied() != Some(0) {
-            converted.push(0);
-        }
+        assert!(
+            ranges.len() <= 32,
+            "FontConfig::glyph_exclude_ranges() accepts at most 32 ranges"
+        );
+        let converted = encode_glyph_ranges("FontConfig::glyph_exclude_ranges()", ranges);
 
         self.raw.GlyphExcludeRanges = converted.as_ptr();
         self.glyph_exclude_ranges = Some(converted);

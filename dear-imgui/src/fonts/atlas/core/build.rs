@@ -1,3 +1,4 @@
+use crate::fonts::atlas::state::bump_custom_rect_generation;
 use crate::fonts::atlas::validation::frame_count_to_i32;
 use crate::sys;
 
@@ -15,16 +16,20 @@ impl FontAtlas {
     /// In particular, calling `build()` before the renderer sets `RendererHasTextures`
     /// may cause Dear ImGui to assert on the next frame.
     #[doc(alias = "Build")]
-    pub fn build(&mut self) -> bool {
-        if self.raw.is_null() {
-            return false;
-        }
+    pub fn build(&self) -> bool {
+        self.assert_mutation_allowed("FontAtlas::build()");
+        let raw = self.raw();
         // NOTE: In Dear ImGui, `ImFontAtlasBuildMain()` will call `ImFontAtlasBuildInit()`
         // lazily if needed (Builder == NULL). Calling BuildInit unconditionally would leak
         // the builder and is not idempotent.
         unsafe {
-            sys::igImFontAtlasBuildMain(self.raw);
-            (*self.raw).TexIsBuilt
+            let rebuilds_builder =
+                !(*raw).TexData.is_null() && (*(*raw).TexData).Format != (*raw).TexDesiredFormat;
+            sys::igImFontAtlasBuildMain(raw);
+            if rebuilds_builder {
+                bump_custom_rect_generation(raw);
+            }
+            (*raw).TexIsBuilt
         }
     }
 
@@ -39,17 +44,16 @@ impl FontAtlas {
     /// - Only call this when the atlas is not locked (typically before `Context::frame()`).
     /// - No-op if the atlas builder hasn't been created yet.
     #[doc(alias = "ImFontAtlasBuildDiscardBakes")]
-    pub fn discard_bakes(&mut self, unused_frames: usize) {
-        if self.raw.is_null() {
-            return;
-        }
+    pub fn discard_bakes(&self, unused_frames: usize) {
+        self.assert_mutation_allowed("FontAtlas::discard_bakes()");
+        let raw = self.raw();
         let unused_frames =
             frame_count_to_i32("FontAtlas::discard_bakes()", "unused_frames", unused_frames);
         unsafe {
-            if (*self.raw).Builder.is_null() {
+            if (*raw).Builder.is_null() {
                 return;
             }
-            sys::igImFontAtlasBuildDiscardBakes(self.raw, unused_frames);
+            sys::igImFontAtlasBuildDiscardBakes(raw, unused_frames);
         }
     }
 
@@ -58,19 +62,14 @@ impl FontAtlas {
     /// This is a no-op before the atlas builder and texture have been created.
     /// It must not be called while the atlas is locked by a frame.
     #[doc(alias = "CompactCache")]
-    pub fn compact_cache(&mut self) {
-        if self.raw.is_null() {
-            return;
-        }
+    pub fn compact_cache(&self) {
+        self.assert_mutation_allowed("FontAtlas::compact_cache()");
+        let raw = self.raw();
         unsafe {
-            assert!(
-                !(*self.raw).Locked,
-                "FontAtlas::compact_cache() cannot modify a locked font atlas"
-            );
-            if (*self.raw).Builder.is_null() || (*self.raw).TexData.is_null() {
+            if (*raw).Builder.is_null() || (*raw).TexData.is_null() {
                 return;
             }
-            sys::ImFontAtlas_CompactCache(self.raw);
+            sys::ImFontAtlas_CompactCache(raw);
         }
     }
 }

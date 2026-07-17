@@ -145,6 +145,14 @@ class ApiSurfaceReportTests(unittest.TestCase):
             "safe-equivalent",
             {decision.classification for decision in policy.values()},
         )
+        self.assertEqual(
+            {
+                name
+                for name, decision in policy.items()
+                if decision.classification == "unsafe-wrapper"
+            },
+            {"ShowDemoWindow", "ShowMetricsWindow", "ShowStyleEditor"},
+        )
 
     def test_alias_collector_accepts_only_public_safe_items(self):
         source = r'''

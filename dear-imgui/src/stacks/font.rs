@@ -20,7 +20,7 @@ impl Ui {
     /// # let mut ctx = Context::create();
     /// # let font_data_sources = [];
     /// // At initialization time
-    /// let my_custom_font = ctx.fonts().add_font(&font_data_sources);
+    /// let my_custom_font = ctx.font_atlas().add_font(&font_data_sources);
     /// # let ui = ctx.frame();
     /// // During UI construction
     /// let font = ui.push_font(my_custom_font);
@@ -41,6 +41,7 @@ impl Ui {
 create_token!(
     /// Tracks a font pushed to the font stack that can be popped by calling `.end()`
     /// or by dropping.
+    #[doc(alias = "PopFont")]
     pub struct FontStackToken<'ui>;
 
     /// Pops a change from the font stack.

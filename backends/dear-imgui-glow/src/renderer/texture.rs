@@ -8,15 +8,6 @@ use crate::{
 };
 
 impl GlowRenderer {
-    #[inline]
-    fn is_font_atlas_texture(&self, texture_data: &dear_imgui_rs::TextureData) -> bool {
-        !self.font_atlas_texture_data.is_null()
-            && std::ptr::eq(
-                texture_data.as_raw(),
-                self.font_atlas_texture_data.cast_const(),
-            )
-    }
-
     fn convert_subrect_to_rgba(
         texture_data: &dear_imgui_rs::TextureData,
         rect: dear_imgui_rs::texture::TextureRect,
@@ -110,7 +101,6 @@ impl GlowRenderer {
         gl: &Context,
         texture_data: &mut dear_imgui_rs::TextureData,
     ) -> RenderResult<()> {
-        let is_font_atlas = self.is_font_atlas_texture(texture_data);
         let width = texture_data.width();
         let height = texture_data.height();
         let (width_i32, height_i32) =
@@ -225,11 +215,9 @@ impl GlowRenderer {
             let tex_id = self
                 .texture_map_mut()
                 .register_texture(gl_texture, width, height, format);
+            self.track_owned_texture(gl_texture);
             texture_data.set_tex_id(tex_id);
             texture_data.set_status(dear_imgui_rs::TextureStatus::OK);
-            if is_font_atlas {
-                self.font_atlas_texture = Some(gl_texture);
-            }
         }
 
         Ok(())
@@ -241,7 +229,6 @@ impl GlowRenderer {
         gl: &Context,
         texture_data: &mut dear_imgui_rs::TextureData,
     ) -> RenderResult<()> {
-        let is_font_atlas = self.is_font_atlas_texture(texture_data);
         let tex_id = texture_data.tex_id();
         let gl_texture = match self.texture_map().get(tex_id) {
             Some(t) => t,
@@ -336,9 +323,6 @@ impl GlowRenderer {
 
         // Mark status OK after updates
         texture_data.set_status(dear_imgui_rs::TextureStatus::OK);
-        if is_font_atlas {
-            self.font_atlas_texture = Some(gl_texture);
-        }
         Ok(())
     }
 
@@ -348,13 +332,15 @@ impl GlowRenderer {
         gl: Option<&Context>,
         texture_data: &mut dear_imgui_rs::TextureData,
     ) -> RenderResult<()> {
-        let is_font_atlas = self.is_font_atlas_texture(texture_data);
         let texture_id = texture_data.tex_id();
 
         if let Some(gl_texture) = self.texture_map().get(texture_id) {
-            let gl = Self::required_gl_context(gl)?;
-            unsafe {
-                gl.delete_texture(gl_texture);
+            if self.owned_textures.contains(&gl_texture) {
+                let gl = Self::required_gl_context(gl)?;
+                unsafe {
+                    gl.delete_texture(gl_texture);
+                }
+                self.forget_owned_texture(gl_texture);
             }
             self.texture_map_mut().remove(texture_id);
         }
@@ -363,9 +349,6 @@ impl GlowRenderer {
             (*texture_data.as_raw_mut()).WantDestroyNextFrame = true;
         }
         texture_data.set_status(dear_imgui_rs::TextureStatus::Destroyed);
-        if is_font_atlas {
-            self.font_atlas_texture = None;
-        }
 
         Ok(())
     }
@@ -445,6 +428,7 @@ impl GlowRenderer {
         let texture_id = self
             .texture_map_mut()
             .register_texture(gl_texture, width, height, format);
+        self.track_owned_texture(gl_texture);
 
         Ok(texture_id)
     }
@@ -469,11 +453,18 @@ mod tests {
         shaders::Shaders, state::GlStateBackup, texture::SimpleTextureMap, versions::GlVersion,
     };
     use dear_imgui_rs::{
-        TextureData, TextureFormat, TextureId, TextureStatus, texture::TextureRect,
+        Context, FramePrepareOptions, TextureData, TextureFormat, TextureId, TextureStatus,
+        texture::TextureRect,
     };
-    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::{
+        Mutex,
+        atomic::{AtomicU32, Ordering},
+    };
 
     static LAST_BOUND_TEXTURE: AtomicU32 = AtomicU32::new(0);
+    static NEXT_TEXTURE: AtomicU32 = AtomicU32::new(100);
+    static DELETED_TEXTURES: AtomicU32 = AtomicU32::new(0);
+    static GL_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     fn make_test_renderer() -> GlowRenderer {
         GlowRenderer {
@@ -489,8 +480,7 @@ mod tests {
             state_backup: GlStateBackup::default(),
             vbo_handle: None,
             ebo_handle: None,
-            font_atlas_texture: None,
-            font_atlas_texture_data: std::ptr::null_mut(),
+            owned_textures: Vec::new(),
             #[cfg(feature = "bind_vertex_array_support")]
             vertex_array_object: None,
             gl_version: GlVersion {
@@ -531,12 +521,23 @@ mod tests {
         }
 
         unsafe extern "system" fn fake_gl_active_texture(_texture: u32) {}
+        unsafe extern "system" fn fake_gl_gen_textures(count: i32, textures: *mut u32) {
+            for index in 0..count.max(0) as usize {
+                unsafe {
+                    *textures.add(index) = NEXT_TEXTURE.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+        }
+        unsafe extern "system" fn fake_gl_delete_textures(count: i32, _textures: *const u32) {
+            DELETED_TEXTURES.fetch_add(count.max(0) as u32, Ordering::SeqCst);
+        }
         unsafe extern "system" fn fake_gl_bind_texture(_target: u32, texture: u32) {
             if texture != 0 {
                 LAST_BOUND_TEXTURE.store(texture, Ordering::SeqCst);
             }
         }
         unsafe extern "system" fn fake_gl_pixel_store_i(_pname: u32, _param: i32) {}
+        unsafe extern "system" fn fake_gl_tex_parameter_i(_target: u32, _pname: u32, _param: i32) {}
         unsafe extern "system" fn fake_gl_tex_image_2d(
             _target: u32,
             _level: i32,
@@ -561,9 +562,16 @@ mod tests {
                     "glActiveTexture" => {
                         fake_gl_active_texture as *const () as *const std::ffi::c_void
                     }
+                    "glGenTextures" => fake_gl_gen_textures as *const () as *const std::ffi::c_void,
+                    "glDeleteTextures" => {
+                        fake_gl_delete_textures as *const () as *const std::ffi::c_void
+                    }
                     "glBindTexture" => fake_gl_bind_texture as *const () as *const std::ffi::c_void,
                     "glPixelStorei" => {
                         fake_gl_pixel_store_i as *const () as *const std::ffi::c_void
+                    }
+                    "glTexParameteri" => {
+                        fake_gl_tex_parameter_i as *const () as *const std::ffi::c_void
                     }
                     "glTexImage2D" => fake_gl_tex_image_2d as *const () as *const std::ffi::c_void,
                     _ => std::ptr::null(),
@@ -649,7 +657,29 @@ mod tests {
     }
 
     #[test]
+    fn destroying_an_external_texture_removes_the_mapping_without_deleting_the_gl_resource() {
+        let _guard = GL_TEST_LOCK.lock().unwrap();
+        let mut renderer = make_test_renderer();
+        let texture_id = TextureId::new(43);
+        let gl_texture = glow::NativeTexture(std::num::NonZeroU32::new(77).unwrap());
+        renderer.texture_map_mut().set(texture_id, gl_texture);
+        DELETED_TEXTURES.store(0, Ordering::SeqCst);
+
+        let mut texture = TextureData::new();
+        texture.set_tex_id(texture_id);
+        texture.set_status(TextureStatus::WantDestroy);
+        renderer
+            .update_texture_from_data(None, &mut texture)
+            .expect("external texture removal should not require or use a GL context");
+
+        assert_eq!(texture.status(), TextureStatus::Destroyed);
+        assert!(renderer.texture_map().get(texture_id).is_none());
+        assert_eq!(DELETED_TEXTURES.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
     fn update_texture_with_context_uses_registered_gl_texture() {
+        let _guard = GL_TEST_LOCK.lock().unwrap();
         let mut renderer = make_test_renderer();
         let texture_id = TextureId::from(42u64);
         let gl_texture = glow::NativeTexture(std::num::NonZeroU32::new(99).unwrap());
@@ -664,5 +694,54 @@ mod tests {
             .expect("update should use the registered GL texture");
 
         assert_eq!(LAST_BOUND_TEXTURE.load(Ordering::SeqCst), 99);
+    }
+
+    #[test]
+    fn managed_texture_replacement_tracks_the_new_gl_resource_without_cached_identity() {
+        let _guard = GL_TEST_LOCK.lock().unwrap();
+        let mut renderer = make_test_renderer();
+        let gl = make_fake_gl();
+        DELETED_TEXTURES.store(0, Ordering::SeqCst);
+
+        let mut original = TextureData::new();
+        original.create(TextureFormat::RGBA32, 1, 1);
+        original.set_data(&[255, 255, 255, 255]);
+        original.set_status(TextureStatus::WantCreate);
+        renderer
+            .update_texture_from_data(Some(&gl), &mut original)
+            .expect("original managed texture should upload");
+
+        let mut replacement = TextureData::new();
+        replacement.create(TextureFormat::RGBA32, 2, 1);
+        replacement.set_data(&[255; 8]);
+        replacement.set_status(TextureStatus::WantCreate);
+        renderer
+            .update_texture_from_data(Some(&gl), &mut replacement)
+            .expect("replacement managed texture should upload");
+        let replacement_texture_id = replacement.tex_id();
+        let mut imgui_context = Context::create();
+        imgui_context.register_user_texture(&mut replacement);
+        imgui_context.prepare_frame(
+            FramePrepareOptions::new([640.0, 480.0], 1.0 / 60.0).renderer_has_textures(),
+        );
+        let _ = imgui_context.font_atlas().build();
+        let _ = imgui_context.begin_frame().render();
+
+        assert_eq!(renderer.owned_textures.len(), 2);
+        assert_ne!(original.tex_id(), replacement.tex_id());
+
+        original.set_status(TextureStatus::WantDestroy);
+        renderer
+            .update_texture_from_data(Some(&gl), &mut original)
+            .expect("superseded managed texture should be destroyed");
+        assert_eq!(renderer.owned_textures.len(), 1);
+
+        renderer.destroy_device_objects(&gl, &mut imgui_context);
+        assert!(renderer.owned_textures.is_empty());
+        assert_eq!(replacement.status(), TextureStatus::WantCreate);
+        assert!(replacement.tex_id().is_null());
+        assert!(replacement.backend_user_data().is_null());
+        assert!(renderer.texture_map().get(replacement_texture_id).is_none());
+        assert_eq!(DELETED_TEXTURES.load(Ordering::SeqCst), 2);
     }
 }

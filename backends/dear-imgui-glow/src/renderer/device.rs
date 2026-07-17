@@ -1,3 +1,4 @@
+use dear_imgui_rs::Context as ImGuiContext;
 use glow::{Context, HasContext};
 
 use super::GlowRenderer;
@@ -13,38 +14,20 @@ impl GlowRenderer {
     /// If multi-viewport support was enabled, this also makes renderer callbacks no-op for this
     /// renderer. Call the matching multi-viewport shutdown helper when you also need to uninstall
     /// callbacks from the ImGui context and destroy platform windows.
-    pub fn destroy(&mut self, gl: &Context) {
+    pub fn destroy(&mut self, gl: &Context, imgui_context: &mut ImGuiContext) {
         #[cfg(feature = "multi-viewport")]
         self.clear_multi_viewport_renderer_state();
 
-        if self.is_destroyed {
-            return;
-        }
-
-        if let Some(h) = self.vbo_handle {
-            unsafe { gl.delete_buffer(h) };
-            self.vbo_handle = None;
-        }
-        if let Some(h) = self.ebo_handle {
-            unsafe { gl.delete_buffer(h) };
-            self.ebo_handle = None;
-        }
-        if let Some(p) = self.shaders.program {
-            unsafe { gl.delete_program(p) };
-            self.shaders.program = None;
-        }
-        if let Some(h) = self.font_atlas_texture {
-            unsafe { gl.delete_texture(h) };
-            self.font_atlas_texture = None;
-        }
+        self.destroy_device_objects_only(gl);
 
         #[cfg(feature = "bind_vertex_array_support")]
-        if let Some(vao) = self.vertex_array_object {
+        if let Some(vao) = self.vertex_array_object.take() {
             unsafe { gl.delete_vertex_array(vao) };
-            self.vertex_array_object = None;
         }
 
-        self.is_destroyed = true;
+        imgui_context
+            .platform_io_mut()
+            .invalidate_renderer_texture_bindings();
     }
 
     #[cfg(feature = "multi-viewport")]
@@ -141,8 +124,15 @@ impl GlowRenderer {
         Ok(())
     }
 
-    /// Destroy OpenGL device objects
-    pub fn destroy_device_objects(&mut self, gl: &Context) {
+    /// Destroy OpenGL device objects and detach their managed texture bindings.
+    pub fn destroy_device_objects(&mut self, gl: &Context, imgui_context: &mut ImGuiContext) {
+        self.destroy_device_objects_only(gl);
+        imgui_context
+            .platform_io_mut()
+            .invalidate_renderer_texture_bindings();
+    }
+
+    fn destroy_device_objects_only(&mut self, gl: &Context) {
         if let Some(vbo) = self.vbo_handle.take() {
             unsafe { gl.delete_buffer(vbo) };
         }
@@ -152,9 +142,10 @@ impl GlowRenderer {
         if let Some(program) = self.shaders.program.take() {
             unsafe { gl.delete_program(program) };
         }
-        if let Some(texture) = self.font_atlas_texture.take() {
+        for texture in self.owned_textures.drain(..) {
             unsafe { gl.delete_texture(texture) };
         }
+        self.texture_map_mut().clear();
         self.is_destroyed = true;
     }
 }
@@ -166,7 +157,7 @@ impl Drop for GlowRenderer {
             self.clear_multi_viewport_renderer_state();
         }
         if let Some(gl) = self.gl_context.take() {
-            self.destroy_device_objects(&gl);
+            self.destroy_device_objects_only(&gl);
         }
     }
 }

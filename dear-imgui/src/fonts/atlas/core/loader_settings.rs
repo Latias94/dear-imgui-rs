@@ -9,9 +9,10 @@ impl FontAtlas {
     /// This allows using custom font backends like FreeType with additional features.
     /// Must be called before adding any fonts.
     /// The loader must be static because Dear ImGui stores the raw `ImFontLoader*`.
-    pub fn set_font_loader(&mut self, loader: &'static FontLoader) {
+    pub fn set_font_loader(&self, loader: &'static FontLoader) {
+        self.assert_mutation_allowed("FontAtlas::set_font_loader()");
         unsafe {
-            sys::ImFontAtlas_SetFontLoader(self.raw, loader.as_ptr());
+            sys::ImFontAtlas_SetFontLoader(self.raw(), loader.as_ptr());
         }
     }
 
@@ -25,14 +26,15 @@ impl FontAtlas {
     ///
     /// These flags apply to all fonts loaded with this atlas unless overridden
     /// in individual FontConfig instances.
-    pub fn set_font_loader_flags(&mut self, flags: FontLoaderFlags) {
+    pub fn set_font_loader_flags(&self, flags: FontLoaderFlags) {
+        self.assert_mutation_allowed("FontAtlas::set_font_loader_flags()");
         unsafe {
-            (*self.raw).FontLoaderFlags = flags.0;
+            (*self.raw()).FontLoaderFlags = flags.0;
         }
     }
 
     /// Gets the current font loader flags
     pub fn font_loader_flags(&self) -> FontLoaderFlags {
-        unsafe { FontLoaderFlags((*self.raw).FontLoaderFlags) }
+        unsafe { FontLoaderFlags((*self.raw()).FontLoaderFlags) }
     }
 }

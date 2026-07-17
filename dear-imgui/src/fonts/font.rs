@@ -1,259 +1,87 @@
-//! Font runtime data and operations
+//! Validated font source metadata.
 //!
-//! This module provides the Font type which represents a single font instance
-//! with its associated runtime data and rendering operations.
+//! Size- and density-specific runtime data lives in [`BakedFont`](super::BakedFont).
 
-use super::FontId;
+use super::{FontId, atlas::validate_font_id};
 use crate::sys;
-use std::cell::UnsafeCell;
 
-fn assert_finite_f32(caller: &str, name: &str, value: f32) {
-    assert!(value.is_finite(), "{caller} {name} must be finite");
-}
-
-fn assert_non_negative_f32(caller: &str, name: &str, value: f32) {
-    assert_finite_f32(caller, name, value);
-    assert!(value >= 0.0, "{caller} {name} must be non-negative");
-}
-
-fn assert_positive_f32(caller: &str, name: &str, value: f32) {
-    assert_finite_f32(caller, name, value);
-    assert!(value > 0.0, "{caller} {name} must be positive");
-}
-
-/// A font instance with runtime data
-///
-/// This represents a single font that can be used for text rendering.
-/// Fonts are managed by the FontAtlas and should not be created directly.
-///
-/// TODO: Currently using pointer wrapper approach for simplicity.
-/// Future improvement: Implement complete field mapping like imgui-rs for better type safety.
-///
-/// Note: Our dear-imgui-sys uses newer ImGui version with ImFontBaked architecture,
-/// while imgui-rs uses older version with direct field mapping. This difference
-/// requires careful consideration when implementing full mapping.
-#[repr(transparent)]
-#[derive(Debug)]
-pub struct Font(UnsafeCell<sys::ImFont>);
-
-// Ensure the wrapper stays layout-compatible with the sys bindings.
-const _: [(); std::mem::size_of::<sys::ImFont>()] = [(); std::mem::size_of::<Font>()];
-const _: [(); std::mem::align_of::<sys::ImFont>()] = [(); std::mem::align_of::<Font>()];
-
-impl Font {
-    /// Constructs a shared reference from a raw pointer.
-    ///
-    /// Safety: caller guarantees the pointer is valid for the returned lifetime.
-    pub(crate) unsafe fn from_raw<'a>(raw: *const sys::ImFont) -> &'a Self {
-        unsafe { &*(raw as *const Self) }
-    }
-
-    /// Constructs a mutable reference from a raw pointer.
-    ///
-    /// Safety: caller guarantees the pointer is valid and uniquely borrowed for the returned lifetime.
-    pub(crate) unsafe fn from_raw_mut<'a>(raw: *mut sys::ImFont) -> &'a mut Self {
-        unsafe { &mut *(raw as *mut Self) }
-    }
-
-    /// Returns the identifier of this font
-    pub fn id(&self) -> FontId {
-        unsafe { FontId::from_font(self.raw(), "Font::id()") }
-    }
-
-    /// Returns the raw ImFont pointer
-    pub fn raw(&self) -> *mut sys::ImFont {
-        self.0.get()
-    }
-
+impl FontId {
     /// Return whether this font has loaded runtime data.
     #[doc(alias = "IsLoaded")]
-    pub fn is_loaded(&self) -> bool {
-        unsafe { sys::ImFont_IsLoaded(self.raw()) }
+    pub fn is_loaded(self) -> bool {
+        let raw = validate_font_id(self, "FontId::is_loaded()");
+        unsafe { sys::ImFont_IsLoaded(raw) }
     }
 
-    /// Return the font name used by Dear ImGui's debug tools.
+    /// Return an owned copy of the name used by Dear ImGui's debug tools.
     #[doc(alias = "GetDebugName")]
-    pub fn debug_name(&self) -> &str {
+    pub fn debug_name(self) -> String {
+        let raw = validate_font_id(self, "FontId::debug_name()");
         unsafe {
-            let name = sys::ImFont_GetDebugName(self.raw());
+            let name = sys::ImFont_GetDebugName(raw);
             if name.is_null() {
-                ""
+                String::new()
             } else {
-                std::ffi::CStr::from_ptr(name).to_str().unwrap_or("")
+                std::ffi::CStr::from_ptr(name)
+                    .to_string_lossy()
+                    .into_owned()
             }
         }
     }
 
-    /// Check if a glyph is available in this font
+    /// Return the number of source configurations merged into this font.
+    pub fn source_count(self) -> usize {
+        let raw = validate_font_id(self, "FontId::source_count()");
+        usize::try_from(unsafe { (*raw).Sources.Size }).unwrap_or(0)
+    }
+
+    /// Check whether a glyph is available in this font.
     #[doc(alias = "IsGlyphInFont")]
-    pub fn is_glyph_in_font(&self, c: char) -> bool {
+    pub fn is_glyph_in_font(self, c: char) -> bool {
         let codepoint = c as u32;
-        if std::mem::size_of::<sys::ImWchar>() == 2 && codepoint > 0xFFFF {
+        if std::mem::size_of::<sys::ImWchar>() == 2 && codepoint > u16::MAX as u32 {
             return false;
         }
-        unsafe { sys::ImFont_IsGlyphInFont(self.raw(), codepoint as sys::ImWchar) }
+        let raw = validate_font_id(self, "FontId::is_glyph_in_font()");
+        unsafe { sys::ImFont_IsGlyphInFont(raw, codepoint as sys::ImWchar) }
     }
 
-    /// Calculate text size for the given text
-    #[doc(alias = "CalcTextSizeA")]
-    pub fn calc_text_size(
-        &self,
-        size: f32,
-        max_width: f32,
-        wrap_width: f32,
-        text: &str,
-    ) -> [f32; 2] {
-        assert_positive_f32("Font::calc_text_size()", "size", size);
-        assert_non_negative_f32("Font::calc_text_size()", "max_width", max_width);
-        assert_non_negative_f32("Font::calc_text_size()", "wrap_width", wrap_width);
-
-        unsafe {
-            let text_start = text.as_ptr() as *const std::os::raw::c_char;
-            let text_end = text_start.add(text.len());
-            let mut out_remaining: *const std::os::raw::c_char = std::ptr::null();
-            let out = sys::ImFont_CalcTextSizeA(
-                self.raw(),
-                size,
-                max_width,
-                wrap_width,
-                text_start,
-                text_end,
-                &mut out_remaining,
-            );
-            [out.x, out.y]
-        }
-    }
-
-    /// Calculate word wrap position for the given text
-    #[doc(alias = "CalcWordWrapPosition")]
-    pub fn calc_word_wrap_position(&self, size: f32, text: &str, wrap_width: f32) -> usize {
-        assert_positive_f32("Font::calc_word_wrap_position()", "size", size);
-        assert_non_negative_f32("Font::calc_word_wrap_position()", "wrap_width", wrap_width);
-
-        unsafe {
-            let text_start = text.as_ptr() as *const std::os::raw::c_char;
-            let text_end = text_start.add(text.len());
-            let wrap_pos = sys::ImFont_CalcWordWrapPosition(
-                self.raw(),
-                size,
-                text_start,
-                text_end,
-                wrap_width,
-            );
-            let off = wrap_pos.offset_from(text_start);
-            if off <= 0 {
-                0
-            } else {
-                (off as usize).min(text.len())
-            }
-        }
-    }
-
-    /// Clear output data (glyphs storage, UV coordinates)
-    #[doc(alias = "ClearOutputData")]
-    pub fn clear_output_data(&mut self) {
-        unsafe { sys::ImFont_ClearOutputData(self.raw()) }
-    }
-
-    /// Add character remapping
-    #[doc(alias = "AddRemapChar")]
-    pub fn add_remap_char(&mut self, from: char, to: char) {
-        let from = from as u32;
-        let to = to as u32;
-        if std::mem::size_of::<sys::ImWchar>() == 2 && (from > 0xFFFF || to > 0xFFFF) {
-            return;
-        }
-        unsafe { sys::ImFont_AddRemapChar(self.raw(), from as sys::ImWchar, to as sys::ImWchar) }
-    }
-
-    /// Check if a glyph range is unused
+    /// Check whether a glyph range is unused by this font.
     #[doc(alias = "IsGlyphRangeUnused")]
-    pub fn is_glyph_range_unused(&self, c_begin: u32, c_last: u32) -> bool {
+    pub fn is_glyph_range_unused(self, c_begin: u32, c_last: u32) -> bool {
         const IMWCHAR_MAX: u32 = if std::mem::size_of::<sys::ImWchar>() == 2 {
-            0xFFFF
+            u16::MAX as u32
         } else {
             0x10FFFF
         };
         if c_begin > IMWCHAR_MAX {
             return true;
         }
+        let raw = validate_font_id(self, "FontId::is_glyph_range_unused()");
         let c_last = c_last.min(IMWCHAR_MAX);
         unsafe {
-            sys::ImFont_IsGlyphRangeUnused(
-                self.raw(),
-                c_begin as sys::ImWchar,
-                c_last as sys::ImWchar,
-            )
+            sys::ImFont_IsGlyphRangeUnused(raw, c_begin as sys::ImWchar, c_last as sys::ImWchar)
         }
     }
 }
-
-// NOTE: Do not mark Font as Send/Sync. It refers to memory owned by ImGui
-// context and is not thread-safe to move/share across threads.
 
 #[cfg(test)]
 mod tests {
     fn setup_context() -> crate::Context {
         let mut ctx = crate::Context::create();
-        let _ = ctx.font_atlas_mut().build();
+        let _ = ctx.font_atlas().build();
         ctx.io_mut().set_display_size([128.0, 128.0]);
         ctx.io_mut().set_delta_time(1.0 / 60.0);
         ctx
     }
 
     #[test]
-    fn calc_text_size_validates_runtime_sizes_before_ffi() {
-        let mut ctx = setup_context();
-        let ui = ctx.frame();
-        let font = ui.current_font();
-
-        assert!(
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _ = font.calc_text_size(0.0, f32::MAX, 0.0, "hello");
-            }))
-            .is_err()
-        );
-        assert!(
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _ = font.calc_text_size(13.0, f32::NAN, 0.0, "hello");
-            }))
-            .is_err()
-        );
-        assert!(
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _ = font.calc_text_size(13.0, f32::MAX, -1.0, "hello");
-            }))
-            .is_err()
-        );
-    }
-
-    #[test]
-    fn loaded_font_exposes_its_debug_name() {
+    fn loaded_font_id_exposes_owned_metadata() {
         let mut ctx = setup_context();
         let ui = ctx.frame();
         let font = ui.current_font();
 
         assert!(font.is_loaded());
         assert!(!font.debug_name().is_empty());
-    }
-
-    #[test]
-    fn calc_word_wrap_position_validates_runtime_sizes_before_ffi() {
-        let mut ctx = setup_context();
-        let ui = ctx.frame();
-        let font = ui.current_font();
-
-        assert!(
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _ = font.calc_word_wrap_position(f32::INFINITY, "hello", 32.0);
-            }))
-            .is_err()
-        );
-        assert!(
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _ = font.calc_word_wrap_position(13.0, "hello", -1.0);
-            }))
-            .is_err()
-        );
     }
 }

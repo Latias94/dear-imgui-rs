@@ -12,7 +12,7 @@ fn prepare_context(ctx: &mut imgui::Context) {
             .framebuffer_scale([2.0, 2.0])
             .renderer_has_textures(),
     );
-    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.font_atlas().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 }
 

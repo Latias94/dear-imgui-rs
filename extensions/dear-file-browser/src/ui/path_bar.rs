@@ -318,18 +318,16 @@ pub(super) fn estimate_breadcrumbs_total_width(
     let style = ui.clone_style();
     let spacing_x = style.item_spacing()[0];
     let pad_x = style.frame_padding()[0];
-    let font = ui.current_font();
-    let font_size = ui.current_font_size();
 
     let button_w = |label: &str| -> f32 {
-        let tw = font.calc_text_size(font_size, f32::MAX, 0.0, label)[0];
+        let tw = ui.calc_text_size(label)[0];
         tw + pad_x * 2.0
     };
     let sep_w = |label: &str| -> f32 {
         if quick_select {
-            (font.calc_text_size(font_size, f32::MAX, 0.0, label)[0] + pad_x * 2.0).max(1.0)
+            (ui.calc_text_size(label)[0] + pad_x * 2.0).max(1.0)
         } else {
-            font.calc_text_size(font_size, f32::MAX, 0.0, label)[0]
+            ui.calc_text_size(label)[0]
         }
     };
 

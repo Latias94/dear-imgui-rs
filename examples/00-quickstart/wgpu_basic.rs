@@ -140,9 +140,7 @@ impl AppWindow {
         renderer.set_gamma_mode(dear_imgui_wgpu::GammaMode::Auto);
 
         // Log successful initialization
-        dear_imgui_rs::logging::log_context_created();
-        dear_imgui_rs::logging::log_platform_init("Winit");
-        dear_imgui_rs::logging::log_renderer_init("WGPU");
+        info!("Dear ImGui context and Winit/WGPU backends initialized");
 
         let imgui = ImguiState {
             context,
@@ -192,7 +190,11 @@ impl AppWindow {
         // Log frame statistics every 60 frames
         if self.imgui.frame_count % 60 == 0 {
             let avg_frame_time = self.imgui.total_frame_time / 60.0;
-            dear_imgui_rs::logging::log_frame_stats(avg_frame_time, 1.0 / avg_frame_time);
+            debug!(
+                frame_time_ms = avg_frame_time * 1000.0,
+                fps = 1.0 / avg_frame_time,
+                "frame statistics"
+            );
             self.imgui.total_frame_time = 0.0;
         }
 
@@ -312,7 +314,8 @@ impl AppWindow {
 
         // Show demo window if requested
         if self.imgui.demo_open {
-            ui.show_demo_window(&mut self.imgui.demo_open);
+            // SAFETY: This demo assumes the destructive font-atlas controls are not activated.
+            unsafe { ui.show_demo_window(&mut self.imgui.demo_open) };
         }
 
         let view = frame
@@ -439,7 +442,7 @@ impl ApplicationHandler for App {
 
 fn main() {
     // Initialize tracing with custom filter for demo
-    dear_imgui_rs::logging::init_tracing_with_filter("dear_imgui=debug,wgpu_basic=info,wgpu=warn");
+    dear_imgui_examples::init_tracing_with_filter("dear_imgui=debug,wgpu_basic=info,wgpu=warn");
 
     info!("Starting Dear ImGui WGPU Basic Example with Logging Demo");
     info!("This example demonstrates:");

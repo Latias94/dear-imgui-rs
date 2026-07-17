@@ -91,7 +91,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             });
 
         if show_demo {
-            ui.show_demo_window(&mut show_demo);
+            // SAFETY: This demo assumes the destructive font-atlas controls are not activated.
+            unsafe { ui.show_demo_window(&mut show_demo) };
         }
         if show_debug {
             ui.show_debug_log_window(&mut show_debug);

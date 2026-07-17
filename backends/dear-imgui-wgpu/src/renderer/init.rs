@@ -10,11 +10,11 @@ use crate::{
     GammaMode, RendererError, RendererResult, ShaderManager, WgpuBackendData, WgpuInitInfo,
     WgpuTextureManager,
 };
-use dear_imgui_rs::{BackendFlags, Context, TextureId, sys};
+use dear_imgui_rs::{BackendFlags, Context};
 use wgpu::*;
 
 impl WgpuRenderer {
-    /// Create a new WGPU renderer with full initialization (recommended)
+    /// Create a WGPU renderer bound to one Dear ImGui context (recommended)
     ///
     /// This is the preferred way to create a WGPU renderer as it ensures proper
     /// initialization order and is consistent with other backends.
@@ -26,7 +26,7 @@ impl WgpuRenderer {
     /// # Example
     /// ```rust,no_run
     /// use dear_imgui_rs::Context;
-    /// use dear_imgui_wgpu::{WgpuRenderer, WgpuInitInfo};
+    /// use dear_imgui_wgpu::{WgpuRenderer, WgpuInitInfo, wgpu};
     ///
     /// # fn main() -> Result<(), dear_imgui_wgpu::RendererError> {
     /// # let (device, queue) = todo!("initialize a WGPU Device/Queue");
@@ -55,7 +55,7 @@ impl WgpuRenderer {
         }
     }
 
-    /// Create an empty WGPU renderer for advanced usage
+    /// Create an empty, unbound WGPU renderer for advanced usage
     ///
     /// This creates an uninitialized renderer that must be initialized later
     /// using `init_with_context()`. Most users should use `new()` instead.
@@ -63,7 +63,7 @@ impl WgpuRenderer {
     /// # Example
     /// ```rust,no_run
     /// use dear_imgui_rs::Context;
-    /// use dear_imgui_wgpu::{WgpuRenderer, WgpuInitInfo};
+    /// use dear_imgui_wgpu::{WgpuRenderer, WgpuInitInfo, wgpu};
     ///
     /// # fn main() -> Result<(), dear_imgui_wgpu::RendererError> {
     /// # let (device, queue) = todo!("initialize a WGPU Device/Queue");
@@ -76,6 +76,7 @@ impl WgpuRenderer {
     /// ```
     pub fn empty() -> Self {
         Self {
+            context_binding: None,
             backend_data: None,
             shader_manager: ShaderManager::new(),
             texture_manager: WgpuTextureManager::new(),
@@ -88,12 +89,15 @@ impl WgpuRenderer {
         }
     }
 
-    /// Initialize the renderer
+    /// Initialize renderer-owned GPU state.
     ///
-    /// This corresponds to ImGui_ImplWGPU_Init in the C++ implementation
-    pub fn init(&mut self, init_info: WgpuInitInfo) -> RendererResult<()> {
+    /// Public initialization always goes through [`Self::init_with_context`] so renderer resources
+    /// and Dear ImGui texture bindings cannot be replaced independently.
+    fn initialize_device(&mut self, init_info: WgpuInitInfo) -> RendererResult<()> {
         #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
         self.ensure_multi_viewport_inactive()?;
+
+        self.ensure_uninitialized()?;
 
         // Create backend data
         let mut backend_data = WgpuBackendData::new(init_info);
@@ -118,24 +122,89 @@ impl WgpuRenderer {
             }
         }
 
-        // Initialize render resources
-        backend_data
-            .render_resources
-            .initialize(&backend_data.device)?;
-
-        // Initialize shaders
-        self.shader_manager.initialize(&backend_data.device)?;
-
-        // Create default texture (1x1 white pixel)
-        let default_texture =
-            self.create_default_texture(&backend_data.device, &backend_data.queue)?;
-        self.default_texture = Some(default_texture);
-
-        // Create device objects (pipeline, etc.)
-        self.create_device_objects(&mut backend_data)?;
+        if let Err(error) = self.create_device_objects(&mut backend_data) {
+            self.shader_manager = ShaderManager::new();
+            self.default_texture = None;
+            return Err(error);
+        }
 
         self.backend_data = Some(backend_data);
         Ok(())
+    }
+
+    fn ensure_uninitialized(&self) -> RendererResult<()> {
+        if self.backend_data.is_some() || self.context_binding.is_some() {
+            return Err(RendererError::InvalidRenderState(
+                "renderer is already initialized; call shutdown() with its ImGui context before reinitializing"
+                    .to_owned(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn initialize_for_context(
+        &mut self,
+        init_info: WgpuInitInfo,
+        imgui_ctx: &mut Context,
+        prepare_font_atlas: bool,
+    ) -> RendererResult<()> {
+        #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+        self.ensure_multi_viewport_inactive()?;
+
+        self.ensure_uninitialized()?;
+        Self::ensure_context_available(imgui_ctx)?;
+        self.initialize_device(init_info)?;
+
+        if let Err(error) = self.attach_context(imgui_ctx, prepare_font_atlas) {
+            self.invalidate_device_objects_only();
+            self.backend_data = None;
+            return Err(error);
+        }
+
+        Ok(())
+    }
+
+    fn attach_context(
+        &mut self,
+        imgui_ctx: &mut Context,
+        prepare_font_atlas: bool,
+    ) -> RendererResult<()> {
+        let renderer_flags_added = Self::configure_imgui_context(imgui_ctx)?;
+        if let Err(error) = self.bind_context(imgui_ctx, renderer_flags_added) {
+            Self::unconfigure_imgui_context(imgui_ctx, renderer_flags_added);
+            return Err(error);
+        }
+
+        // A newly attached renderer cannot inherit GPU bindings from a previous renderer/device.
+        imgui_ctx
+            .platform_io_mut()
+            .invalidate_renderer_texture_bindings();
+
+        if prepare_font_atlas && let Err(error) = self.prepare_font_atlas(imgui_ctx) {
+            imgui_ctx
+                .platform_io_mut()
+                .invalidate_renderer_texture_bindings();
+            Self::unconfigure_imgui_context(imgui_ctx, renderer_flags_added);
+            self.clear_context_binding();
+            return Err(error);
+        }
+
+        Ok(())
+    }
+
+    fn ensure_context_available(imgui_context: &Context) -> RendererResult<()> {
+        let platform_io = imgui_context.platform_io();
+        let draw_callbacks_occupied = platform_io.draw_callback_reset_render_state_raw().is_some()
+            || platform_io.draw_callback_set_sampler_linear_raw().is_some()
+            || platform_io
+                .draw_callback_set_sampler_nearest_raw()
+                .is_some();
+
+        if imgui_context.io().backend_renderer_name().is_some() || draw_callbacks_occupied {
+            Err(RendererError::ContextAlreadyHasRenderer)
+        } else {
+            Ok(())
+        }
     }
 
     /// Initialize the renderer with ImGui context configuration (without font atlas for WASM)
@@ -147,20 +216,11 @@ impl WgpuRenderer {
         imgui_ctx: &mut Context,
     ) -> RendererResult<Self> {
         let mut renderer = Self::empty();
-
-        // First initialize the renderer
-        renderer.init(init_info)?;
-
-        // Then configure the ImGui context with backend capabilities
-        renderer.configure_imgui_context(imgui_ctx);
-
-        // Skip font atlas preparation for WASM
-        // The default font will be used automatically by Dear ImGui
-
+        renderer.initialize_for_context(init_info, imgui_ctx, false)?;
         Ok(renderer)
     }
 
-    /// Initialize the renderer with ImGui context configuration
+    /// Initialize the renderer and bind it to one ImGui context
     ///
     /// This is a convenience method that combines init() and configure_imgui_context()
     /// to ensure proper initialization order, similar to the glow backend approach.
@@ -169,17 +229,7 @@ impl WgpuRenderer {
         init_info: WgpuInitInfo,
         imgui_ctx: &mut Context,
     ) -> RendererResult<()> {
-        // First initialize the renderer
-        self.init(init_info)?;
-
-        // Then configure the ImGui context with backend capabilities
-        // This must be done BEFORE preparing the font atlas
-        self.configure_imgui_context(imgui_ctx);
-
-        // Finally prepare the font atlas
-        self.prepare_font_atlas(imgui_ctx)?;
-
-        Ok(())
+        self.initialize_for_context(init_info, imgui_ctx, true)
     }
 
     /// Set gamma mode
@@ -203,26 +253,27 @@ impl WgpuRenderer {
         self.viewport_clear_color
     }
 
-    /// Configure Dear ImGui context with WGPU backend capabilities
-    pub fn configure_imgui_context(&self, imgui_context: &mut Context) {
-        let should_set_name = imgui_context.io().backend_renderer_name().is_none();
-        if should_set_name {
-            let _ = imgui_context.set_renderer_name(Some(format!(
+    fn configure_imgui_context(imgui_context: &mut Context) -> RendererResult<BackendFlags> {
+        imgui_context
+            .set_renderer_name(Some(format!(
                 "dear-imgui-wgpu {}",
                 env!("CARGO_PKG_VERSION")
-            )));
-        }
+            )))
+            .map_err(|error| {
+                RendererError::InvalidRenderState(format!(
+                    "failed to configure Dear ImGui renderer name: {error}"
+                ))
+            })?;
 
         let io = imgui_context.io_mut();
-        let mut flags = io.backend_flags();
+        let previous_flags = io.backend_flags();
+        let renderer_flags =
+            BackendFlags::RENDERER_HAS_VTX_OFFSET | BackendFlags::RENDERER_HAS_TEXTURES;
 
         // Set WGPU renderer capabilities
         // We can honor the ImDrawCmd::VtxOffset field, allowing for large meshes.
-        flags.insert(BackendFlags::RENDERER_HAS_VTX_OFFSET);
-        // We can honor ImGuiPlatformIO::Textures[] requests during render.
-        flags.insert(BackendFlags::RENDERER_HAS_TEXTURES);
-
-        io.set_backend_flags(flags);
+        // We can also honor ImGuiPlatformIO::Textures[] requests during render.
+        io.set_backend_flags(previous_flags | renderer_flags);
 
         let platform_io = imgui_context.platform_io_mut();
         platform_io
@@ -231,10 +282,13 @@ impl WgpuRenderer {
             .set_draw_callback_set_sampler_linear_raw(Some(draw_callback_set_sampler_linear));
         platform_io
             .set_draw_callback_set_sampler_nearest_raw(Some(draw_callback_set_sampler_nearest));
+
+        Ok(renderer_flags & !previous_flags)
     }
 
-    /// Prepare font atlas for rendering
-    pub fn prepare_font_atlas(&mut self, imgui_ctx: &mut Context) -> RendererResult<()> {
+    /// Prepare the bound context's font atlas for rendering.
+    pub(super) fn prepare_font_atlas(&mut self, imgui_ctx: &mut Context) -> RendererResult<()> {
+        self.ensure_context_matches(imgui_ctx)?;
         if let Some(backend_data) = &self.backend_data {
             let device = backend_data.device.clone();
             let queue = backend_data.queue.clone();
@@ -253,28 +307,38 @@ impl WgpuRenderer {
             // WGPU texture. This keeps the backend idempotent without carrying a separate
             // renderer-side font texture cache now that the managed ImTextureData path is the
             // primary mode.
-            let mut tex_ref = imgui_ctx.font_atlas().get_tex_ref();
-            let existing_tex_id = unsafe { sys::ImTextureRef_GetTexID(&mut tex_ref) };
-            let existing_tex_id = TextureId::from(existing_tex_id);
+            let existing_tex_id = imgui_ctx.font_atlas().texture_id();
             let has_live_font_texture = !existing_tex_id.is_null()
                 && self.texture_manager.contains_texture(existing_tex_id);
 
             if !has_live_font_texture
-                && let Some(tex_id) =
+                && let Some(_tex_id) =
                     self.try_upload_font_atlas_legacy(imgui_ctx, &device, &queue)?
                 && cfg!(debug_assertions)
             {
-                tracing::debug!(
-                    target: "dear-imgui-wgpu",
+                backend_debug!(
+                    target: "dear_imgui_wgpu",
                     "[dear-imgui-wgpu][debug] Font atlas uploaded via legacy fallback path. tex_id={}",
-                    tex_id.id()
+                    _tex_id.id()
                 );
             }
         }
         Ok(())
     }
 
-    // create_device_objects moved to renderer/pipeline.rs
+    /// Recreate every resource discarded by `invalidate_device_objects()`.
+    pub(super) fn create_device_objects(
+        &mut self,
+        backend_data: &mut WgpuBackendData,
+    ) -> RendererResult<()> {
+        backend_data
+            .render_resources
+            .initialize(&backend_data.device)?;
+        self.shader_manager.initialize(&backend_data.device)?;
+        self.default_texture =
+            Some(self.create_default_texture(&backend_data.device, &backend_data.queue)?);
+        self.create_render_pipeline(backend_data)
+    }
 
     /// Create a default 1x1 white texture
     fn create_default_texture(
@@ -325,5 +389,48 @@ impl WgpuRenderer {
 impl Default for WgpuRenderer {
     fn default() -> Self {
         Self::empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn context_preflight_rejects_an_existing_renderer_name() {
+        let mut context = Context::create();
+        context
+            .set_renderer_name(Some("foreign-renderer"))
+            .expect("test renderer name should be valid");
+
+        assert!(matches!(
+            WgpuRenderer::ensure_context_available(&context),
+            Err(RendererError::ContextAlreadyHasRenderer)
+        ));
+    }
+
+    #[test]
+    fn unconfigure_removes_only_flags_added_by_wgpu() {
+        let mut context = Context::create();
+        context
+            .io_mut()
+            .set_backend_flags(BackendFlags::RENDERER_HAS_TEXTURES);
+
+        let added = WgpuRenderer::configure_imgui_context(&mut context)
+            .expect("fresh context should accept WGPU renderer state");
+        assert_eq!(added, BackendFlags::RENDERER_HAS_VTX_OFFSET);
+
+        WgpuRenderer::unconfigure_imgui_context(&mut context, added);
+        assert_eq!(
+            context.io().backend_flags(),
+            BackendFlags::RENDERER_HAS_TEXTURES
+        );
+        assert!(context.io().backend_renderer_name().is_none());
+        assert!(
+            context
+                .platform_io()
+                .draw_callback_reset_render_state_raw()
+                .is_none()
+        );
     }
 }

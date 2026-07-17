@@ -30,7 +30,6 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 dear-imgui-sys.workspace = true
-cfg-if.workspace = true
 flate2 = { workspace = true, optional = true }
 tar = { workspace = true, optional = true }
 build-support = { workspace = true, optional = true }

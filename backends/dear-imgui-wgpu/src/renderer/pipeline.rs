@@ -5,10 +5,10 @@ use crate::wgpu;
 use wgpu::*;
 
 impl WgpuRenderer {
-    /// Create device objects (pipeline, etc.)
+    /// Create the render pipeline from initialized device resources.
     ///
     /// This corresponds to ImGui_ImplWGPU_CreateDeviceObjects in the C++ implementation
-    pub(super) fn create_device_objects(
+    pub(super) fn create_render_pipeline(
         &mut self,
         backend_data: &mut WgpuBackendData,
     ) -> RendererResult<()> {

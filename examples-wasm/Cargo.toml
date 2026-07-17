@@ -47,6 +47,4 @@ web-sys = { workspace = true, features = [
 console_error_panic_hook = { workspace = true }
 console_log = { workspace = true }
 log = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 pollster = { workspace = true }

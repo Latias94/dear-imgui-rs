@@ -16,14 +16,14 @@ enable the `wasm` feature:
 
 ```toml
 [dependencies]
-dear-imgui-rs = { version = "0.16.0", features = ["wasm"] }
+dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", features = ["wasm"] }
 ```
 
 For Bevy, enable `wasm` alongside the features needed by the application:
 
 ```toml
 [dependencies]
-dear-imgui-bevy = { version = "0.16.0", features = ["render", "wasm"] }
+dear-imgui-bevy = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", features = ["render", "wasm"] }
 ```
 
 A `wasm32-unknown-unknown` build without this feature fails at compile time
@@ -51,12 +51,17 @@ cargo check -p dear-imgui-bevy --target wasm32-unknown-unknown \
 The following paths remain native-only:
 
 - `stack-layout` and `dear-node-editor/blueprints`
+- `test-engine`, which requires a native source build
+- `prebuilt`, whose archives contain native static libraries
 - `dear-node-editor` in its current integration
 - native Winit, SDL3, WGPU, and Ash multi-viewport routes
 
-`stack-layout` and `wasm` are rejected together. Use `dear-imnodes` for the
-current WASM-capable node editor. Browser integrations render one main canvas
-and do not install native platform-window callbacks.
+These features may coexist with the `wasm` feature when Cargo unifies features
+for a native target; the build selects behavior from the actual target, not the
+feature name. On `wasm32-unknown-unknown`, `stack-layout`, `test-engine`, and
+`prebuilt` are rejected. Use `dear-imnodes` for the current WASM-capable node
+editor. Browser integrations render one main canvas and do not install native
+platform-window callbacks.
 
 ## Binding artifacts
 
