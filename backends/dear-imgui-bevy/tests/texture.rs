@@ -9,8 +9,8 @@ use bevy_image::Image;
 use bevy_render::{Render, RenderApp, extract_plugin::ExtractPlugin};
 use bevy_window::{PrimaryWindow, Window, WindowRef, WindowResolution};
 use dear_imgui_bevy::{
-    ImguiBevyTextures, ImguiContext, ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass,
-    ImguiTextureFeedbackQueue, render::ImguiExtractedBevyTextures,
+    ImguiBevyTextures, ImguiContext, ImguiContexts, ImguiFrameOutput, ImguiPlugin,
+    ImguiPrimaryContextPass, ImguiTextureFeedbackQueue, render::ImguiExtractedBevyTextures,
 };
 use dear_imgui_rs::{self as imgui, render::TextureBinding};
 use std::sync::{Mutex, OnceLock};
@@ -20,7 +20,7 @@ fn imgui_context_guard() -> std::sync::MutexGuard<'static, ()> {
     GUARD.get_or_init(|| Mutex::new(())).lock().unwrap()
 }
 
-struct ManagedTexture(imgui::texture::OwnedTextureData);
+struct ManagedTexture(imgui::ManagedTextureId);
 
 #[derive(Resource, Clone)]
 struct BevyImageTexture {
@@ -58,35 +58,40 @@ fn app_with_render_world() -> App {
 }
 
 fn register_managed_texture(app: &mut App) -> imgui::render::snapshot::ManagedTextureId {
-    let mut texture = imgui::texture::TextureData::new();
+    let mut texture = imgui::texture::OwnedTextureData::new();
     texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
     texture.set_data(&[255, 0, 255, 255]);
-    texture.set_status(imgui::texture::TextureStatus::WantCreate);
-    let texture_id = texture.unique_id();
-
     let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
-    context.context_mut().register_user_texture(&mut texture);
+    let texture_id = context.context_mut().register_texture(texture);
+    drop(context);
 
-    app.insert_non_send(ManagedTexture(texture));
+    app.insert_non_send(ManagedTexture(texture_id));
     texture_id
 }
 
-fn draw_managed_texture(mut contexts: ImguiContexts, mut texture: NonSendMut<ManagedTexture>) {
+fn draw_managed_texture(mut contexts: ImguiContexts, texture: NonSend<ManagedTexture>) {
     let ui = contexts
         .primary_ui_mut()
         .expect("texture test should run inside an open ImGui frame");
-    ui.image(&mut *texture.0, [16.0, 16.0]);
+    ui.image(texture.0, [16.0, 16.0]);
 }
 
 fn draw_bevy_image(mut contexts: ImguiContexts, texture: Res<BevyImageTexture>) {
     let ui = contexts
         .primary_ui_mut()
         .expect("texture test should run inside an open ImGui frame");
-    ui.image(texture.texture_id, [32.0, 24.0]);
+    ui.get_foreground_draw_list().add_image(
+        texture.texture_id,
+        [0.0, 0.0],
+        [32.0, 24.0],
+        [0.0, 0.0],
+        [1.0, 1.0],
+        [1.0, 1.0, 1.0, 1.0],
+    );
 }
 
 #[test]
-fn managed_texture_feedback_round_trips_from_render_world_before_next_frame() {
+fn managed_texture_frames_require_context_owned_capture_without_emitting_feedback() {
     let _guard = imgui_context_guard();
     let mut app = app_with_render_world();
     let texture_id = register_managed_texture(&mut app);
@@ -94,68 +99,50 @@ fn managed_texture_feedback_round_trips_from_render_world_before_next_frame() {
 
     app.update();
 
-    {
-        let extracted = app
-            .sub_app(RenderApp)
-            .world()
-            .resource::<dear_imgui_bevy::render::ImguiExtractedRenderFrame>();
-        let snapshot = extracted.snapshot().expect("snapshot should be extracted");
-        assert!(
-            snapshot
-                .texture_requests
-                .iter()
-                .any(|request| request.id == texture_id),
-            "managed texture create requests must reach the render world"
-        );
-    }
-
-    {
-        let queue = app
-            .sub_app_mut(RenderApp)
-            .world_mut()
-            .resource::<ImguiTextureFeedbackQueue>()
-            .clone();
-        queue.push(imgui::render::snapshot::TextureFeedback::with_tex_id(
-            texture_id,
-            imgui::texture::TextureStatus::OK,
-            imgui::TextureId::new(777),
-        ));
-    }
-
-    app.update();
-
-    let queue = app.world().resource::<ImguiTextureFeedbackQueue>();
-    assert_eq!(queue.len(), 0, "begin-frame should drain feedback");
-    assert_eq!(queue.last_applied(), 1);
-
-    {
-        let texture = app.world().get_non_send::<ManagedTexture>().unwrap();
-        assert_eq!(texture.0.status(), imgui::texture::TextureStatus::OK);
-        assert_eq!(texture.0.tex_id(), imgui::TextureId::new(777));
-    }
-
-    app.update();
-
-    let queue = app.world().resource::<ImguiTextureFeedbackQueue>();
-    assert_eq!(
-        queue.last_applied(),
-        0,
-        "a later empty feedback frame should not report the previous apply count"
+    let output = app.world().resource::<ImguiFrameOutput>();
+    assert_eq!(output.frame_index(), 1);
+    assert!(output.snapshot().is_none());
+    assert!(
+        output
+            .snapshot_error()
+            .is_some_and(|error| error.contains("Context-owned snapshot capture")),
+        "managed draws must fail before the detached renderer can observe native pointers"
     );
+
+    let extracted = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<dear_imgui_bevy::render::ImguiExtractedRenderFrame>();
+    assert_eq!(extracted.frame_index(), Some(1));
+    assert!(extracted.snapshot().is_none());
+
+    let main_feedback = app.world().resource::<ImguiTextureFeedbackQueue>();
+    assert_eq!(main_feedback.len(), 0);
+    assert_eq!(main_feedback.last_applied(), 0);
+    let render_feedback = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<ImguiTextureFeedbackQueue>();
+    assert_eq!(render_feedback.len(), 0);
+
+    let texture = app.world().get_non_send::<ManagedTexture>().unwrap().0;
+    let context = app.world().get_non_send::<ImguiContext>().unwrap();
+    context
+        .context()
+        .with_texture(texture, |texture| {
+            assert_eq!(texture.status(), imgui::texture::TextureStatus::WantCreate);
+            assert!(texture.tex_id().is_null());
+        })
+        .expect("managed texture should remain active");
 
     let prepared = app
         .sub_app(RenderApp)
         .world()
         .resource::<dear_imgui_bevy::render::ImguiPreparedRenderFrame>();
-    assert!(
-        prepared
-            .draws()
-            .iter()
-            .any(|draw| matches!(draw.texture, TextureBinding::Managed(id) if id == texture_id)),
-        "managed texture draws should remain keyed by ImGui's managed texture identity"
-    );
+    assert!(prepared.draws().is_empty());
+    assert_eq!(prepared.texture_request_count(), 0);
     let texture = app.world().get_non_send::<ManagedTexture>().unwrap();
-    assert_eq!(texture_id, texture.0.unique_id());
+    assert_eq!(texture_id, texture.0);
 }
 
 #[test]

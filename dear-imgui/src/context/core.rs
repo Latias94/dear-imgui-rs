@@ -15,7 +15,7 @@ use super::binding::{
     CTX_MUTEX, ContextAliveToken, ContextBinding, ContextId, ContextState, RawBoundContextGuard,
     no_current_context, set_current_context, with_bound_context,
 };
-use super::texture_registry::unregister_user_textures_for_context;
+use super::texture_registry::{ManagedTextureRegistry, SharedTextureRegistry};
 
 /// An imgui context.
 ///
@@ -53,6 +53,7 @@ pub struct Context {
     pub(super) raw: *mut sys::ImGuiContext,
     pub(super) state: Rc<ContextState>,
     pub(super) attachments: AttachmentRegistry,
+    pub(crate) texture_registry: SharedTextureRegistry,
     pub(in crate::context) shared_font_atlas: Option<SharedFontAtlas>,
     pub(in crate::context) ini_filename: Option<CString>,
     pub(in crate::context) log_filename: Option<CString>,
@@ -193,12 +194,14 @@ impl Context {
         }
 
         let state = ContextState::new(id, raw);
-        let ui = crate::ui::Ui::new(raw, ContextBinding::new(&state));
+        let texture_registry = ManagedTextureRegistry::new(id);
+        let ui = crate::ui::Ui::new(raw, ContextBinding::new(&state), texture_registry.clone());
 
         Ok(Context {
             raw,
             state,
             attachments: AttachmentRegistry::default(),
+            texture_registry,
             shared_font_atlas,
             ini_filename: None,
             log_filename: None,
@@ -309,7 +312,7 @@ impl Drop for Context {
                     sys::igEndFrame();
                 }
             });
-            unregister_user_textures_for_context(raw);
+            self.texture_registry.borrow_mut().teardown();
             crate::platform_io::clear_typed_callbacks_for_context(raw);
             with_bound_context(raw, || {
                 crate::platform_io::clear_aggregate_callbacks_for_current_context();

@@ -23,6 +23,7 @@ mod window;
 
 use crate::Id;
 use crate::context::ContextBinding;
+use crate::context::SharedTextureRegistry;
 use crate::draw::DrawListMut;
 use crate::input::MouseCursor;
 use crate::internal::RawWrapper;
@@ -37,6 +38,7 @@ pub struct Ui {
     /// Dear ImGui context that owns this per-frame UI entry point.
     pub(crate) ctx: *mut sys::ImGuiContext,
     pub(crate) ctx_binding: ContextBinding,
+    pub(crate) texture_registry: SharedTextureRegistry,
     /// Internal buffer for string operations
     buffer: UnsafeCell<UiBuffer>,
 }

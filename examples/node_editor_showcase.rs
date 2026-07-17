@@ -359,8 +359,6 @@ const NODES: [NodeSpec; 6] = [
 ];
 
 struct ImguiState {
-    #[allow(dead_code)]
-    registered_user_textures: Vec<RegisteredUserTexture>,
     node_editor: EditorContext,
     renderer: WgpuRenderer,
     platform: WinitPlatform,
@@ -376,7 +374,8 @@ struct AppWindow {
     surface_desc: wgpu::SurfaceConfiguration,
     surface: wgpu::Surface<'static>,
     imgui: ImguiState,
-    header_background: texture::OwnedTextureData,
+    header_background: ManagedTextureId,
+    header_background_size: [f32; 2],
     graph: GraphState,
 }
 
@@ -420,12 +419,14 @@ impl AppWindow {
         let node_editor = EditorContext::create_with_config(&context, config);
         apply_style_preset(&node_editor, StylePreset::Blueprint);
 
-        let mut header_background = load_header_background_texture()?;
-        let registered_user_textures =
-            vec![context.register_user_texture_token(&mut header_background)];
+        let header_background = load_header_background_texture()?;
+        let header_background_size = [
+            header_background.width() as f32,
+            header_background.height() as f32,
+        ];
+        let header_background = context.register_texture(header_background);
 
         let imgui = ImguiState {
-            registered_user_textures,
             node_editor,
             renderer,
             platform,
@@ -447,6 +448,7 @@ impl AppWindow {
             surface,
             imgui,
             header_background,
+            header_background_size,
             graph: GraphState::default(),
         })
     }
@@ -477,7 +479,8 @@ impl AppWindow {
         draw_blueprints_window(
             &ui,
             &self.imgui.node_editor,
-            &mut self.header_background,
+            self.header_background,
+            self.header_background_size,
             &mut self.graph,
         );
 
@@ -622,7 +625,8 @@ fn load_header_background_texture() -> Result<texture::OwnedTextureData, Box<dyn
 fn draw_blueprints_window(
     ui: &Ui,
     node_editor: &EditorContext,
-    header_background: &mut texture::OwnedTextureData,
+    header_background: ManagedTextureId,
+    header_background_size: [f32; 2],
     graph: &mut GraphState,
 ) {
     ui.window("Blueprints Example")
@@ -636,7 +640,13 @@ fn draw_blueprints_window(
             ui.same_line_with_spacing(0.0, 12.0);
 
             ui.group(|| {
-                draw_editor_pane(ui, node_editor, header_background, graph);
+                draw_editor_pane(
+                    ui,
+                    node_editor,
+                    header_background,
+                    header_background_size,
+                    graph,
+                );
             });
         });
 }
@@ -698,7 +708,8 @@ fn draw_left_pane(ui: &Ui, node_editor: &EditorContext, graph: &mut GraphState) 
 fn draw_editor_pane(
     ui: &Ui,
     node_editor: &EditorContext,
-    header_background: &mut texture::OwnedTextureData,
+    header_background: ManagedTextureId,
+    header_background_size: [f32; 2],
     graph: &mut GraphState,
 ) {
     let editor = ui.node_editor(node_editor, "blueprints_editor", [0.0, 610.0]);
@@ -730,7 +741,14 @@ fn draw_editor_pane(
     }
 
     for node in &NODES {
-        draw_blueprint_node(&editor, ui, graph, node, header_background);
+        draw_blueprint_node(
+            &editor,
+            ui,
+            graph,
+            node,
+            header_background,
+            header_background_size,
+        );
     }
     draw_comment_node(&editor, ui);
 
@@ -794,7 +812,8 @@ fn draw_blueprint_node(
     ui: &Ui,
     graph: &mut GraphState,
     node: &NodeSpec,
-    header_background: &mut texture::OwnedTextureData,
+    header_background: ManagedTextureId,
+    header_background_size: [f32; 2],
 ) {
     let _node_bg = editor.push_style_color(
         StyleColor::NodeBackground,
@@ -853,7 +872,7 @@ fn draw_blueprint_node(
         });
     }
 
-    builder.end(header_background);
+    builder.end(header_background, header_background_size);
 }
 
 fn pin_is_connected(graph: &GraphState, pin: PinId) -> bool {

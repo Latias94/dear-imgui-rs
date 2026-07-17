@@ -251,17 +251,14 @@ impl Drop for VulkanState {
 }
 
 struct ImguiState {
-    // Ensure registered textures are unregistered before the ImGui context is destroyed.
-    #[allow(dead_code)]
-    registered_user_textures: Vec<dear_imgui_rs::RegisteredUserTexture>,
     context: Context,
     platform: WinitPlatform,
     renderer: AshRenderer,
     last_frame: Instant,
     clear_color: [f32; 4],
     // Texture demo state (managed by ImGui modern texture system)
-    img_tex: dear_imgui_rs::texture::OwnedTextureData,
-    photo_tex: Option<dear_imgui_rs::texture::OwnedTextureData>,
+    img_tex: dear_imgui_rs::ManagedTextureId,
+    photo_tex: Option<(dear_imgui_rs::ManagedTextureId, (u32, u32))>,
     tex_size: (u32, u32),
     frame: u32,
 }
@@ -339,13 +336,11 @@ impl AppWindow {
             photo.set_status(dear_imgui_rs::texture::TextureStatus::WantCreate);
         }
 
-        // Register user-created textures so renderer backends can see them via DrawData::textures().
-        // This avoids TexID==0 assertions and lets the backend handle Create/Update/Destroy.
-        let mut registered_user_textures = Vec::new();
-        registered_user_textures.push(context.register_user_texture_token(&mut img_tex));
-        if let Some(photo) = photo_tex.as_mut() {
-            registered_user_textures.push(context.register_user_texture_token(photo));
-        }
+        let img_tex = context.register_texture(img_tex);
+        let photo_tex = photo_tex.map(|photo| {
+            let size = (photo.width(), photo.height());
+            (context.register_texture(photo), size)
+        });
 
         // Frame sync objects
         let frames = (0..FRAMES_IN_FLIGHT)
@@ -356,7 +351,6 @@ impl AppWindow {
         Ok(Self {
             window,
             imgui: ImguiState {
-                registered_user_textures,
                 context,
                 platform,
                 renderer,
@@ -420,7 +414,10 @@ impl AppWindow {
                 pixels[i + 3] = 255;
             }
         }
-        self.imgui.img_tex.set_data(&pixels);
+        self.imgui
+            .context
+            .with_texture_mut(self.imgui.img_tex, |texture| texture.set_data(&pixels))
+            .expect("animated texture should remain active");
         self.imgui.frame = self.imgui.frame.wrapping_add(1);
     }
 
@@ -459,13 +456,12 @@ impl AppWindow {
                 ui.separator();
 
                 ui.text("Animated texture:");
-                ui.image(&mut *self.imgui.img_tex, [256.0, 256.0]);
+                ui.image(self.imgui.img_tex, [256.0, 256.0]);
 
-                if let Some(photo) = self.imgui.photo_tex.as_mut() {
+                if let Some((photo, (width, height))) = self.imgui.photo_tex {
                     ui.separator();
                     ui.text("Loaded image (1:1):");
-                    let (w, h) = (photo.width() as f32, photo.height() as f32);
-                    ui.image(&mut **photo, [w, h]);
+                    ui.image(photo, [width as f32, height as f32]);
                 } else {
                     ui.separator();
                     ui.text_wrapped("Place examples/assets/texture_clean.ppm or texture.jpg to show a loaded image.");

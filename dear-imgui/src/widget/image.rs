@@ -77,10 +77,12 @@ fn im_vec4(value: [f32; 4]) -> sys::ImVec4 {
 /// - Using an ImGui-managed texture:
 /// ```no_run
 /// # use dear_imgui_rs::*;
-/// # fn demo(ui: &Ui) {
-/// let mut tex = texture::TextureData::new();
+/// # fn demo(context: &mut Context) {
+/// let mut tex = texture::OwnedTextureData::new();
 /// tex.create(texture::TextureFormat::RGBA32, 64, 64);
-/// ui.image(&mut *tex, [64.0, 64.0]);
+/// let tex = context.register_texture(tex);
+/// let ui = context.frame();
+/// ui.image(tex, [64.0, 64.0]);
 /// # }
 /// ```
 impl Ui {
@@ -204,15 +206,20 @@ impl<'ui, 'tex> Image<'ui, 'tex> {
             self._ui
                 .push_style_color(StyleColor::Border, self.border_color)
         });
+        let texture = self._ui.run_with_bound_context(|| {
+            self._ui
+                .resolve_texture_ref(self.texture)
+                .unwrap_or_else(|error| panic!("Image::build() rejected texture: {error}"))
+        });
 
         if is_default_tint_color(self.tint_color) && is_transparent_color(self.border_color) {
             self._ui.run_with_bound_context(|| unsafe {
-                sys::igImage(self.texture.raw(), size_vec, uv0_vec, uv1_vec)
+                sys::igImage(texture, size_vec, uv0_vec, uv1_vec)
             })
         } else {
             self._ui.run_with_bound_context(|| unsafe {
                 sys::igImageWithBg(
-                    self.texture.raw(),
+                    texture,
                     size_vec,
                     uv0_vec,
                     uv1_vec,
@@ -247,10 +254,15 @@ impl<'ui, 'tex> Image<'ui, 'tex> {
             self._ui
                 .push_style_color(StyleColor::Border, self.border_color)
         });
+        let texture = self._ui.run_with_bound_context(|| {
+            self._ui
+                .resolve_texture_ref(self.texture)
+                .unwrap_or_else(|error| panic!("Image::build_with_bg() rejected texture: {error}"))
+        });
 
         self._ui.run_with_bound_context(|| unsafe {
             sys::igImageWithBg(
-                self.texture.raw(),
+                texture,
                 size_vec,
                 uv0_vec,
                 uv1_vec,
@@ -332,16 +344,22 @@ impl<'ui, 'tex> ImageButton<'ui, 'tex> {
         let uv0_vec: sys::ImVec2 = self.uv0.into();
         let uv1_vec: sys::ImVec2 = self.uv1.into();
 
-        self.ui.run_with_bound_context(|| unsafe {
-            sys::igImageButton(
-                str_id_ptr,
-                self.texture.raw(),
-                size_vec,
-                uv0_vec,
-                uv1_vec,
-                im_vec4(self.bg_color),
-                im_vec4(self.tint_color),
-            )
+        self.ui.run_with_bound_context(|| {
+            let texture = self
+                .ui
+                .resolve_texture_ref(self.texture)
+                .unwrap_or_else(|error| panic!("ImageButton::build() rejected texture: {error}"));
+            unsafe {
+                sys::igImageButton(
+                    str_id_ptr,
+                    texture,
+                    size_vec,
+                    uv0_vec,
+                    uv1_vec,
+                    im_vec4(self.bg_color),
+                    im_vec4(self.tint_color),
+                )
+            }
         })
     }
 }

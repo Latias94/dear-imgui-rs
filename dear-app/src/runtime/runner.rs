@@ -16,7 +16,7 @@ use super::{
 };
 use crate::{
     AddOns, AppConfig, Application, DockingApi, FrameContext, GpuGeneration, InitContext,
-    RedrawMode, RunError, ShutdownContext,
+    PrepareFrameContext, RedrawMode, RunError, ShutdownContext,
 };
 
 pub(crate) fn run<A: Application + 'static>(
@@ -207,6 +207,11 @@ impl Runtime {
             docking,
         } = &mut self.ui;
 
+        let mut prepare_frame = PrepareFrameContext {
+            imgui: context,
+            window: &self.window.window,
+        };
+        application.prepare_frame(&mut prepare_frame)?;
         platform.prepare_frame(&self.window.window, context);
         let mut exit_requested = false;
         let draw_data = build_and_render_frame(context, |ui| {

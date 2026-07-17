@@ -867,6 +867,8 @@ struct ImguiViewportTarget {
 pub struct ImguiTextureBindGroups {
     textures: HashMap<TextureBinding, ImguiRenderTexture>,
     bevy_image_bindings: HashSet<TextureBinding>,
+    managed_texture_ids: HashMap<imgui::ManagedTextureId, imgui::TextureId>,
+    next_managed_texture_id: u64,
 }
 
 impl ImguiTextureBindGroups {
@@ -917,6 +919,31 @@ impl ImguiTextureBindGroups {
     ) {
         self.bevy_image_bindings.remove(&texture);
         self.textures.insert(texture, render_texture);
+    }
+
+    fn managed_texture_id(&mut self, id: imgui::ManagedTextureId) -> imgui::TextureId {
+        if let Some(texture_id) = self.managed_texture_ids.get(&id) {
+            return *texture_id;
+        }
+        let sequence = self
+            .next_managed_texture_id
+            .checked_add(1)
+            .expect("Bevy managed texture ID space exhausted");
+        assert!(
+            sequence < MANAGED_TEXTURE_NAMESPACE,
+            "Bevy managed texture ID namespace exhausted"
+        );
+        self.next_managed_texture_id = sequence;
+        let texture_id = imgui::TextureId::new(MANAGED_TEXTURE_NAMESPACE | sequence);
+        self.managed_texture_ids.insert(id, texture_id);
+        texture_id
+    }
+
+    fn remove_managed_texture(&mut self, id: imgui::ManagedTextureId) {
+        self.remove(&TextureBinding::Managed(id));
+        if let Some(texture_id) = self.managed_texture_ids.remove(&id) {
+            self.remove(&TextureBinding::Legacy(texture_id));
+        }
     }
 
     fn insert_bevy_image(&mut self, texture: TextureBinding, bind_group: BindGroup) {
@@ -1418,7 +1445,7 @@ fn prepare_imgui_texture_bind_groups(
                         pixels,
                     },
                 ) {
-                    let tex_id = managed_texture_id(request.id);
+                    let tex_id = texture_bind_groups.managed_texture_id(request.id);
                     texture_bind_groups.insert_render_texture(
                         TextureBinding::Legacy(tex_id),
                         render_texture.clone_for_legacy_id(),
@@ -1481,8 +1508,7 @@ fn prepare_imgui_texture_bind_groups(
                 }
             }
             imgui::render::TextureOp::Destroy => {
-                texture_bind_groups.remove(&TextureBinding::Managed(request.id));
-                texture_bind_groups.remove(&TextureBinding::Legacy(managed_texture_id(request.id)));
+                texture_bind_groups.remove_managed_texture(request.id);
                 params
                     .texture_feedback
                     .push(imgui::render::snapshot::TextureFeedback::status(
@@ -1501,10 +1527,6 @@ fn prepare_imgui_texture_bind_groups(
         &params.pipeline,
         &mut texture_bind_groups,
     );
-}
-
-fn managed_texture_id(id: imgui::render::snapshot::ManagedTextureId) -> imgui::TextureId {
-    imgui::TextureId::new(MANAGED_TEXTURE_NAMESPACE | (u64::from(id.raw() as u32) + 1))
 }
 
 fn validate_managed_texture_extent(render_device: &RenderDevice, width: u32, height: u32) -> bool {

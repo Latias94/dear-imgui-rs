@@ -10,7 +10,6 @@ struct PlatformMarker;
 struct RendererMarker;
 struct ExtensionMarker;
 struct PanickingExtensionMarker;
-struct TextureDroppingMarker;
 
 struct RecordingAttachment {
     log: Rc<RefCell<Vec<&'static str>>>,
@@ -67,16 +66,6 @@ impl ContextAttachment for RecordingAttachment {
 
     fn context_destroyed(&self, _context: ContextDestroyed) {
         self.log.borrow_mut().push("post");
-    }
-}
-
-struct TextureDroppingAttachment {
-    texture: RefCell<Option<crate::texture::OwnedTextureData>>,
-}
-
-impl ContextAttachment for TextureDroppingAttachment {
-    fn quiesce(&self, _context: &ContextTeardown<'_>) {
-        self.texture.borrow_mut().take();
     }
 }
 
@@ -382,27 +371,6 @@ fn detaching_attachment_releases_context_ownership_immediately() {
     assert!(lease.detach());
     assert_eq!(Rc::strong_count(&attachment), 1);
     drop(ctx);
-}
-
-#[test]
-fn texture_owner_can_drop_during_context_quiescence() {
-    let _guard = crate::test_support::imgui_context_guard();
-    let mut ctx = Context::create();
-    let mut texture = crate::texture::OwnedTextureData::new();
-    ctx.register_user_texture(&mut texture);
-    let attachment = Rc::new(TextureDroppingAttachment {
-        texture: RefCell::new(Some(texture)),
-    });
-    let _lease = ctx
-        .register_attachment::<TextureDroppingMarker>(
-            ContextAttachmentRole::Extension,
-            attachment.clone(),
-        )
-        .unwrap();
-
-    drop(ctx);
-
-    assert!(attachment.texture.borrow().is_none());
 }
 
 #[test]
@@ -744,41 +712,4 @@ fn platform_io_get_window_pos_and_size_setters_install_handlers() {
     assert!(raw.Platform_GetWindowSize.is_none());
     assert!(raw.Platform_GetWindowFramebufferScale.is_none());
     assert!(raw.Platform_GetWindowWorkAreaInsets.is_none());
-}
-
-#[test]
-fn registered_user_texture_token_survives_context_drop() {
-    let _guard = crate::test_support::imgui_context_guard();
-    let mut ctx = Context::create();
-    let mut texture = crate::texture::OwnedTextureData::new();
-
-    let token = ctx.register_user_texture_token(&mut texture);
-    drop(ctx);
-    drop(token);
-    drop(texture);
-}
-
-#[test]
-fn registered_user_texture_token_survives_texture_drop() {
-    let _guard = crate::test_support::imgui_context_guard();
-    let mut ctx = Context::create();
-    let token = {
-        let mut texture = crate::texture::OwnedTextureData::new();
-        ctx.register_user_texture_token(&mut texture)
-    };
-
-    drop(token);
-    drop(ctx);
-}
-
-#[test]
-fn user_texture_registration_is_idempotent_and_unregister_is_noop_when_missing() {
-    let _guard = crate::test_support::imgui_context_guard();
-    let mut ctx = Context::create();
-    let mut texture = crate::texture::OwnedTextureData::new();
-
-    ctx.register_user_texture(&mut texture);
-    ctx.register_user_texture(&mut texture);
-    ctx.unregister_user_texture(&mut texture);
-    ctx.unregister_user_texture(&mut texture);
 }

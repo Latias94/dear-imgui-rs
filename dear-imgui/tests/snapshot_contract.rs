@@ -60,59 +60,28 @@ fn snapshot_preserves_draw_metadata_and_legacy_texture_binding() {
 }
 
 #[test]
-fn snapshot_preserves_managed_texture_bindings_and_requests() {
+fn arbitrary_draw_data_snapshot_rejects_context_owned_managed_textures() {
     let _guard = test_guard();
 
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
 
-    let mut texture = imgui::texture::TextureData::new();
+    let mut texture = imgui::texture::OwnedTextureData::new();
     texture.create(imgui::texture::TextureFormat::RGBA32, 2, 2);
     texture.set_data(&[
         255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255,
     ]);
-    texture.set_status(imgui::texture::TextureStatus::WantCreate);
-    let texture_id = texture.unique_id();
-    ctx.register_user_texture(&mut texture);
+    let texture_id = ctx.register_texture(texture);
 
     let frame = ctx.begin_frame();
-    frame.ui().image(&mut *texture, [24.0, 24.0]);
-    let snapshot = frame
+    frame.ui().image(texture_id, [24.0, 24.0]);
+    let error = frame
         .render_snapshot(imgui::render::snapshot::SnapshotOptions::default())
-        .expect("snapshot should include managed texture binding and request");
-
-    assert!(snapshot.draw.draw_lists.iter().any(|list| {
-        list.commands.iter().any(|cmd| {
-            matches!(
-                cmd,
-                imgui::render::snapshot::DrawCmdSnapshot::Elements {
-                    texture: imgui::render::snapshot::TextureBinding::Managed(id),
-                    ..
-                } if *id == texture_id
-            )
-        })
-    }));
-
-    let request = snapshot
-        .texture_requests
-        .iter()
-        .find(|request| request.id == texture_id)
-        .expect("managed texture request should be captured");
-    match &request.op {
-        imgui::render::snapshot::TextureOp::Create {
-            format,
-            width,
-            height,
-            row_pitch,
-            pixels,
-        } => {
-            assert_eq!(*format, imgui::texture::TextureFormat::RGBA32);
-            assert_eq!((*width, *height), (2, 2));
-            assert_eq!(*row_pitch, 8);
-            assert_eq!(pixels.len(), 16);
-        }
-        other => panic!("expected create request, got {other:?}"),
-    }
+        .expect_err("managed capture must enter through a Context-owned consumer");
+    assert!(matches!(
+        error,
+        imgui::render::snapshot::SnapshotError::ManagedTextureRequiresContext
+    ));
 }
 
 #[test]
@@ -171,92 +140,58 @@ fn snapshot_preserves_standard_sampler_callbacks() {
 }
 
 #[test]
-fn snapshot_can_disable_texture_request_capture_for_pure_draw_handoff() {
+fn disabling_request_capture_cannot_bypass_managed_texture_ownership() {
     let _guard = test_guard();
 
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
 
-    let mut texture = imgui::texture::TextureData::new();
+    let mut texture = imgui::texture::OwnedTextureData::new();
     texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
     texture.set_data(&[255, 255, 255, 255]);
-    texture.set_status(imgui::texture::TextureStatus::WantCreate);
-    ctx.register_user_texture(&mut texture);
+    let texture_id = ctx.register_texture(texture);
 
     let frame = ctx.begin_frame();
-    frame.ui().image(&mut *texture, [8.0, 8.0]);
-    let snapshot = frame
+    frame.ui().image(texture_id, [8.0, 8.0]);
+    let error = frame
         .render_snapshot(imgui::render::snapshot::SnapshotOptions {
             capture_texture_requests: false,
             ..Default::default()
         })
-        .expect("draw-only snapshot should still succeed");
-
-    assert!(snapshot.texture_requests.is_empty());
-    assert!(snapshot.draw.draw_lists.iter().any(|list| {
-        list.commands.iter().any(|cmd| {
-            matches!(
-                cmd,
-                imgui::render::snapshot::DrawCmdSnapshot::Elements {
-                    texture: imgui::render::snapshot::TextureBinding::Managed(_),
-                    ..
-                }
-            )
-        })
-    }));
+        .expect_err("managed draw bindings cannot be detached without a consumer");
+    assert!(matches!(
+        error,
+        imgui::render::snapshot::SnapshotError::ManagedTextureRequiresContext
+    ));
 }
 
 #[test]
-fn snapshot_captures_texture_update_rects_as_tight_uploads() {
+fn managed_mutation_remains_context_scoped_before_snapshot_capture() {
     let _guard = test_guard();
 
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
 
-    let mut texture = imgui::texture::TextureData::new();
+    let mut texture = imgui::texture::OwnedTextureData::new();
     texture.create(imgui::texture::TextureFormat::RGBA32, 4, 4);
     texture.set_data(&[
         0, 0, 0, 255, 1, 0, 0, 255, 2, 0, 0, 255, 3, 0, 0, 255, 0, 1, 0, 255, 1, 1, 0, 255, 2, 1,
         0, 255, 3, 1, 0, 255, 0, 2, 0, 255, 1, 2, 0, 255, 2, 2, 0, 255, 3, 2, 0, 255, 0, 3, 0, 255,
         1, 3, 0, 255, 2, 3, 0, 255, 3, 3, 0, 255,
     ]);
-    texture.set_status(imgui::texture::TextureStatus::WantUpdates);
-    let texture_id = texture.unique_id();
-    ctx.register_user_texture(&mut texture);
+    let texture_id = ctx.register_texture(texture);
+    ctx.with_texture_mut(texture_id, |texture| {
+        texture.set_data(&[7; 64]);
+    })
+    .expect("owner Context should mutate an active texture");
 
     let frame = ctx.begin_frame();
-    frame.ui().image(&mut *texture, [16.0, 16.0]);
-    let snapshot = frame
+    frame.ui().image(texture_id, [16.0, 16.0]);
+    let error = frame
         .render_snapshot(imgui::render::snapshot::SnapshotOptions::default())
-        .expect("snapshot should include managed texture update request");
-
-    let request = snapshot
-        .texture_requests
-        .iter()
-        .find(|request| request.id == texture_id)
-        .expect("managed texture update request should be captured");
-    match &request.op {
-        imgui::render::snapshot::TextureOp::Update {
-            format,
-            width,
-            height,
-            rects,
-        } => {
-            assert_eq!(*format, imgui::texture::TextureFormat::RGBA32);
-            assert_eq!((*width, *height), (4, 4));
-            assert_eq!(rects.len(), 1);
-            assert_eq!(
-                rects[0].rect,
-                imgui::texture::TextureRect {
-                    x: 0,
-                    y: 0,
-                    w: 4,
-                    h: 4,
-                }
-            );
-            assert_eq!(rects[0].row_pitch, 16);
-            assert_eq!(rects[0].data.len(), 64);
-        }
-        other => panic!("expected update request, got {other:?}"),
-    }
+        .expect_err("U3 Context-owned capture is required for managed requests");
+    assert!(matches!(
+        error,
+        imgui::render::snapshot::SnapshotError::ManagedTextureRequiresContext
+    ));
 }

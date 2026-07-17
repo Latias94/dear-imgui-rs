@@ -39,7 +39,6 @@ impl<'ui> ChannelsSplit<'ui> {
 mod channels_tests {
     use super::*;
     use crate::internal::len_i32;
-    use std::marker::PhantomData;
 
     #[test]
     fn with_clip_rect_pops_after_panic() {
@@ -118,7 +117,7 @@ mod channels_tests {
 
         let draw_list = DrawListMut {
             draw_list: raw_draw_list,
-            _phantom: PhantomData,
+            ui: None,
         };
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -149,7 +148,7 @@ mod channels_tests {
 
         let draw_list = DrawListMut {
             draw_list: raw_draw_list,
-            _phantom: PhantomData,
+            ui: None,
         };
         let initial_count = unsafe { (*raw_draw_list)._Splitter._Count };
         let initial_current = unsafe { (*raw_draw_list)._Splitter._Current };
@@ -179,7 +178,7 @@ mod channels_tests {
 
         let draw_list = DrawListMut {
             draw_list: raw_draw_list,
-            _phantom: PhantomData,
+            ui: None,
         };
         let initial_count = unsafe { (*raw_draw_list)._Splitter._Count };
         let initial_current = unsafe { (*raw_draw_list)._Splitter._Current };

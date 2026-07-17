@@ -27,7 +27,7 @@ impl FontAtlas {
 
     /// Resolve the current atlas texture ID.
     pub fn texture_id(&self) -> crate::texture::TextureId {
-        unsafe { crate::texture::TextureRef::from_raw((*self.raw()).TexRef).texture_id() }
+        unsafe { crate::texture::effective_texture_id(&(*self.raw()).TexRef) }
     }
 
     /// Convenience: set atlas texture id and mark status OK

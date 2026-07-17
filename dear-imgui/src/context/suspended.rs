@@ -11,6 +11,7 @@ use super::binding::{
     set_current_context,
 };
 use super::frame::FrameLifecycleState;
+use super::texture_registry::ManagedTextureRegistry;
 
 impl Context {
     /// Suspends this context so another context can be the active context
@@ -96,12 +97,14 @@ impl SuspendedContext {
         }
 
         let state = ContextState::new(id, raw);
-        let ui = crate::ui::Ui::new(raw, ContextBinding::new(&state));
+        let texture_registry = ManagedTextureRegistry::new(id);
+        let ui = crate::ui::Ui::new(raw, ContextBinding::new(&state), texture_registry.clone());
 
         let ctx = Context {
             raw,
             state,
             attachments: AttachmentRegistry::default(),
+            texture_registry,
             shared_font_atlas,
             ini_filename: None,
             log_filename: None,

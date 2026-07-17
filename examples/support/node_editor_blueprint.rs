@@ -1,6 +1,6 @@
 use dear_imgui_rs::{
     DrawCornerFlags, DrawListMut, DrawSegmentCount, HorizontalStackLayoutToken, IdStackToken,
-    PolylineFlags, StackLayoutId, Ui, VerticalStackLayoutToken, texture::TextureData,
+    ManagedTextureId, PolylineFlags, StackLayoutId, Ui, VerticalStackLayoutToken,
 };
 use dear_node_editor::{
     NodeEditorFrame, NodeId, NodeToken, PinId, PinKind, PinToken, StyleVar, StyleVarToken,
@@ -144,11 +144,11 @@ impl<'ui, 'frame> BlueprintNodeBuilder<'ui, 'frame> {
         result
     }
 
-    pub fn end(mut self, header_texture: &mut TextureData) {
-        self.end_inner(header_texture);
+    pub fn end(mut self, header_texture: ManagedTextureId, texture_size: [f32; 2]) {
+        self.end_inner(header_texture, texture_size);
     }
 
-    fn end_inner(&mut self, header_texture: &mut TextureData) {
+    fn end_inner(&mut self, header_texture: ManagedTextureId, texture_size: [f32; 2]) {
         if self.ended {
             return;
         }
@@ -159,7 +159,7 @@ impl<'ui, 'frame> BlueprintNodeBuilder<'ui, 'frame> {
         }
 
         if self.ui.is_item_visible() {
-            self.draw_header(header_texture);
+            self.draw_header(header_texture, texture_size);
         }
 
         self.current_node_id = NodeId::new(0);
@@ -263,7 +263,7 @@ impl<'ui, 'frame> BlueprintNodeBuilder<'ui, 'frame> {
         true
     }
 
-    fn draw_header(&self, header_texture: &mut TextureData) {
+    fn draw_header(&self, header_texture: ManagedTextureId, texture_size: [f32; 2]) {
         if self.header_max[0] <= self.header_min[0] || self.header_max[1] <= self.header_min[1] {
             return;
         }
@@ -272,8 +272,8 @@ impl<'ui, 'frame> BlueprintNodeBuilder<'ui, 'frame> {
         let imgui_style = self.ui.clone_style();
         let alpha = imgui_style.alpha();
         let half_border_width = node_style.node_border_width * 0.5;
-        let texture_width = header_texture.width().max(1) as f32;
-        let texture_height = header_texture.height().max(1) as f32;
+        let texture_width = texture_size[0].max(1.0);
+        let texture_height = texture_size[1].max(1.0);
         let uv = [
             (self.header_max[0] - self.header_min[0]) / (4.0 * texture_width),
             (self.header_max[1] - self.header_min[1]) / (4.0 * texture_height),

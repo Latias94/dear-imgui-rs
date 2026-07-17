@@ -40,7 +40,6 @@ impl OwnedTextureData {
 
 impl Drop for OwnedTextureData {
     fn drop(&mut self) {
-        crate::context::unregister_user_texture_from_all_contexts(self.raw.as_ptr());
         unsafe { sys::ImTextureData_destroy(self.raw.as_ptr()) }
     }
 }

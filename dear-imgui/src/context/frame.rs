@@ -127,6 +127,7 @@ impl Context {
         let _guard = CTX_MUTEX.lock();
         self.assert_current_context("Context::frame()");
         self.assert_can_begin_frame_unlocked("Context::frame()");
+        self.collect_retired_textures();
 
         unsafe {
             // Dear ImGui initializes DisplaySize to (-1, -1). Calling NewFrame() without a

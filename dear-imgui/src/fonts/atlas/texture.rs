@@ -25,7 +25,7 @@ pub struct FontAtlasTexture<'atlas> {
 }
 
 impl<'atlas> FontAtlasTexture<'atlas> {
-    pub(super) unsafe fn from_raw(
+    pub(crate) unsafe fn from_raw(
         atlas: *mut sys::ImFontAtlas,
         texture: *mut sys::ImTextureData,
     ) -> Option<Self> {
@@ -38,6 +38,26 @@ impl<'atlas> FontAtlasTexture<'atlas> {
             atlas_stamp,
             _atlas: PhantomData,
             _not_send_sync: PhantomData,
+        })
+    }
+
+    /// Returns an owner-backed logical reference for image and plotting APIs.
+    pub fn texture_ref(&self) -> crate::texture::TextureRef<'_> {
+        let texture = unsafe { sys::ImTextureData_GetTexRef(self.texture.as_ptr()) };
+        crate::texture::TextureRef::from_font_atlas_raw(self.atlas.as_ptr(), texture)
+    }
+}
+
+impl crate::Ui {
+    /// Lease the current Context's font-atlas texture for immediate image submission.
+    pub fn font_atlas_texture(&self) -> Option<FontAtlasTexture<'_>> {
+        self.run_with_bound_context(|| unsafe {
+            let io = sys::igGetIO_ContextPtr(self.context_raw());
+            if io.is_null() || (*io).Fonts.is_null() {
+                return None;
+            }
+            let atlas = (*io).Fonts;
+            FontAtlasTexture::from_raw(atlas, (*atlas).TexData)
         })
     }
 }
@@ -54,7 +74,7 @@ impl fmt::Debug for FontAtlasTexture<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("FontAtlasTexture")
-            .field("unique_id", &self.unique_id())
+            .field("native_unique_id", &self.native_unique_id())
             .field("status", &self.status())
             .field("format", &self.format())
             .field("width", &self.width())

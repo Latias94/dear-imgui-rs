@@ -28,9 +28,7 @@ pub use self::binding::{
 pub use self::core::Context;
 pub use self::frame::{FrameLifecycleState, FramePrepareOptions, FrameResult, FrameToken};
 pub use self::suspended::SuspendedContext;
-pub use self::texture_registry::RegisteredUserTexture;
-
-pub(crate) use self::texture_registry::unregister_user_texture_from_all_contexts;
+pub(crate) use self::texture_registry::SharedTextureRegistry;
 
 // Dear ImGui is not thread-safe. The Context must not be sent or shared across
 // threads. If you need multi-threaded rendering, capture render data via

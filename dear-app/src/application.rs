@@ -103,8 +103,6 @@ pub enum RunError {
     FramePrepare(#[source] dear_imgui_wgpu::RendererError),
     #[error("WGPU renderer draw failed: {0}")]
     Render(#[source] dear_imgui_wgpu::RendererError),
-    #[error("WGPU managed texture update failed: {0}")]
-    TextureUpdate(#[source] dear_imgui_wgpu::RendererError),
     #[error("WGPU resource invalidation failed: {0}")]
     GpuInvalidation(#[source] dear_imgui_wgpu::RendererError),
     #[error("WGPU surface validation failed while acquiring the next frame")]
@@ -156,6 +154,11 @@ pub trait Application {
 
     /// Receives events for the live main window only.
     fn event(&mut self, _context: &mut EventContext<'_>) -> Result<(), RunError> {
+        Ok(())
+    }
+
+    /// Mutates Context-owned resources before Dear ImGui opens the next frame.
+    fn prepare_frame(&mut self, _context: &mut PrepareFrameContext<'_>) -> Result<(), RunError> {
         Ok(())
     }
 
@@ -221,6 +224,24 @@ pub struct ShutdownContext<'a> {
     pub(crate) imgui: &'a mut imgui::Context,
     pub(crate) window: &'a Window,
     pub(crate) generation: Option<GpuGeneration>,
+}
+
+/// Pre-frame access to Context-owned resources.
+pub struct PrepareFrameContext<'a> {
+    pub(crate) imgui: &'a mut imgui::Context,
+    pub(crate) window: &'a Window,
+}
+
+impl PrepareFrameContext<'_> {
+    /// Returns the Context before its Dear ImGui frame is opened.
+    pub fn imgui(&mut self) -> &mut imgui::Context {
+        self.imgui
+    }
+
+    #[must_use]
+    pub fn window(&self) -> &Window {
+        self.window
+    }
 }
 
 impl ShutdownContext<'_> {
@@ -349,18 +370,6 @@ impl GpuApi<'_> {
     ) -> Result<(), ExternalTextureError> {
         self.assert_generation(handle)?;
         self.renderer.unregister_texture(handle.id);
-        Ok(())
-    }
-
-    pub fn update_texture_data(
-        &mut self,
-        texture_data: &mut imgui::TextureData,
-    ) -> Result<(), RunError> {
-        let result = self
-            .renderer
-            .update_texture(texture_data)
-            .map_err(RunError::TextureUpdate)?;
-        result.apply_to(texture_data);
         Ok(())
     }
 

@@ -7,7 +7,7 @@ use std::{num::NonZeroU32, sync::Arc, time::Instant};
 
 use dear_imgui_glow::{GlowRenderer, SimpleTextureMap};
 use dear_imgui_rs::{
-    Condition, Context as ImguiContext, RegisteredUserTexture, TextureId,
+    Condition, Context as ImguiContext, ManagedTextureError, ManagedTextureId, TextureId,
     texture::{OwnedTextureData, TextureStatus},
 };
 use dear_imgui_winit::WinitPlatform;
@@ -60,9 +60,7 @@ impl RegressionStage {
 }
 
 struct ImguiState {
-    // Drop order matters: unregister before dropping the texture and context.
-    _registered_user_textures: Vec<RegisteredUserTexture>,
-    managed_texture: OwnedTextureData,
+    managed_texture: ManagedTextureId,
     renderer: GlowRenderer,
     platform: WinitPlatform,
     context: ImguiContext,
@@ -151,11 +149,9 @@ impl AppWindow {
         fill_texture_pixels(&mut managed_texture, 0);
         managed_texture.set_status(TextureStatus::WantCreate);
 
-        let registered_user_textures =
-            vec![imgui_context.register_user_texture_token(&mut managed_texture)];
+        let managed_texture = imgui_context.register_texture(managed_texture);
 
         let imgui = ImguiState {
-            _registered_user_textures: registered_user_textures,
             managed_texture,
             renderer,
             platform,
@@ -189,14 +185,21 @@ impl AppWindow {
     fn prepare_regression_step(&mut self) {
         match self.imgui.stage {
             RegressionStage::SubmitUpdate => {
-                fill_texture_pixels(&mut self.imgui.managed_texture, self.imgui.frame_count);
+                let phase = self.imgui.frame_count;
+                self.imgui
+                    .context
+                    .with_texture_mut(self.imgui.managed_texture, |texture| {
+                        fill_texture_pixels(texture, phase)
+                    })
+                    .expect("managed texture should remain active for update");
                 self.imgui.stage = RegressionStage::AwaitUpdate;
                 println!("Submitted managed texture update request");
             }
             RegressionStage::SubmitDestroy => {
                 self.imgui
-                    .managed_texture
-                    .set_status(TextureStatus::WantDestroy);
+                    .context
+                    .remove_texture(self.imgui.managed_texture)
+                    .expect("managed texture should begin retirement once");
                 self.imgui.stage = RegressionStage::AwaitDestroy;
                 println!("Submitted managed texture destroy request");
             }
@@ -207,8 +210,14 @@ impl AppWindow {
     fn verify_regression_step(&mut self) -> Result<Option<String>, Box<dyn std::error::Error>> {
         match self.imgui.stage {
             RegressionStage::AwaitCreate => {
-                if self.imgui.managed_texture.status() == TextureStatus::OK {
-                    let tex_id = self.imgui.managed_texture.tex_id();
+                let (status, tex_id) = self
+                    .imgui
+                    .context
+                    .with_texture(self.imgui.managed_texture, |texture| {
+                        (texture.status(), texture.tex_id())
+                    })
+                    .map_err(|error| boxed_error(error.to_string()))?;
+                if status == TextureStatus::OK {
                     if tex_id.is_null() {
                         return Err(boxed_error(
                             "managed texture create completed without assigning a TextureId",
@@ -225,11 +234,18 @@ impl AppWindow {
                 }
             }
             RegressionStage::AwaitUpdate => {
-                if self.imgui.managed_texture.status() == TextureStatus::OK {
+                let (status, current_id) = self
+                    .imgui
+                    .context
+                    .with_texture(self.imgui.managed_texture, |texture| {
+                        (texture.status(), texture.tex_id())
+                    })
+                    .map_err(|error| boxed_error(error.to_string()))?;
+                if status == TextureStatus::OK {
                     let tex_id = self.imgui.live_texture_id.ok_or_else(|| {
                         boxed_error("missing TextureId after create verification")
                     })?;
-                    if self.imgui.managed_texture.tex_id() != tex_id {
+                    if current_id != tex_id {
                         return Err(boxed_error(
                             "managed texture update unexpectedly changed the TextureId",
                         ));
@@ -244,27 +260,31 @@ impl AppWindow {
                 }
             }
             RegressionStage::AwaitDestroy => {
-                if self.imgui.managed_texture.status() == TextureStatus::Destroyed {
-                    let tex_id = self.imgui.live_texture_id.ok_or_else(|| {
-                        boxed_error("missing TextureId before destroy verification")
-                    })?;
-                    if !self.imgui.managed_texture.tex_id().is_null() {
-                        return Err(boxed_error(
-                            "managed texture destroy completed without clearing TextureId",
-                        ));
+                match self
+                    .imgui
+                    .context
+                    .with_texture(self.imgui.managed_texture, |_| ())
+                {
+                    Err(ManagedTextureError::Retiring(_)) => {}
+                    Err(ManagedTextureError::AlreadyRemoved(_)) => {
+                        let tex_id = self.imgui.live_texture_id.ok_or_else(|| {
+                            boxed_error("missing TextureId before destroy verification")
+                        })?;
+                        if self.imgui.renderer.texture_map().get(tex_id).is_some() {
+                            return Err(boxed_error(
+                                "managed texture destroy completed but renderer texture map still contains the GPU texture",
+                            ));
+                        }
+                        self.imgui.stage = RegressionStage::Verified;
+                        let message = format!(
+                            "Regression passed: external-context Glow renderer handled managed texture create/update/destroy in {} frames.",
+                            self.imgui.frame_count
+                        );
+                        println!("{message}");
+                        return Ok(Some(message));
                     }
-                    if self.imgui.renderer.texture_map().get(tex_id).is_some() {
-                        return Err(boxed_error(
-                            "managed texture destroy completed but renderer texture map still contains the GPU texture",
-                        ));
-                    }
-                    self.imgui.stage = RegressionStage::Verified;
-                    let message = format!(
-                        "Regression passed: external-context Glow renderer handled managed texture create/update/destroy in {} frames.",
-                        self.imgui.frame_count
-                    );
-                    println!("{message}");
-                    return Ok(Some(message));
+                    Ok(()) => {}
+                    Err(error) => return Err(boxed_error(error.to_string())),
                 }
             }
             RegressionStage::Verified => {
@@ -289,14 +309,29 @@ impl AppWindow {
 
         self.prepare_regression_step();
 
+        let (texture_status, texture_id) = self
+            .imgui
+            .context
+            .with_texture(self.imgui.managed_texture, |texture| {
+                (texture.status(), texture.tex_id())
+            })
+            .unwrap_or_else(|error| match error {
+                ManagedTextureError::Retiring(_) => (
+                    TextureStatus::WantDestroy,
+                    self.imgui.live_texture_id.unwrap_or(TextureId::null()),
+                ),
+                ManagedTextureError::AlreadyRemoved(_) => {
+                    (TextureStatus::Destroyed, TextureId::null())
+                }
+                _ => panic!("managed texture inspection failed: {error}"),
+            });
+
         self.imgui
             .platform
             .prepare_frame(&self.window, &mut self.imgui.context);
         let ui = self.imgui.context.frame();
 
         let stage = self.imgui.stage;
-        let texture_status = self.imgui.managed_texture.status();
-        let texture_id = self.imgui.managed_texture.tex_id();
         let show_texture = !matches!(
             stage,
             RegressionStage::SubmitDestroy
@@ -326,7 +361,7 @@ impl AppWindow {
                 if show_texture {
                     ui.separator();
                     ui.text("Managed texture preview:");
-                    ui.image(&mut *self.imgui.managed_texture, [256.0, 256.0]);
+                    ui.image(self.imgui.managed_texture, [256.0, 256.0]);
                 }
             });
 

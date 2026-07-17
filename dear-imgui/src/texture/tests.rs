@@ -104,21 +104,6 @@ fn unused_frames_is_a_checked_usize_count() {
 }
 
 #[test]
-fn managed_texture_id_is_a_typed_texture_identity() {
-    let mut texture = TextureData::new();
-    unsafe {
-        (*texture.as_raw_mut()).UniqueID = 42;
-    }
-
-    let id: ManagedTextureId = texture.unique_id();
-    let snapshot_id: crate::render::snapshot::ManagedTextureId = id;
-
-    assert_eq!(id, ManagedTextureId::from_raw(42));
-    assert_eq!(id.raw(), 42);
-    assert_eq!(snapshot_id, id);
-}
-
-#[test]
 fn set_data_checks_byte_count_before_allocating_or_copying() {
     let mut texture = TextureData::new();
     unsafe {
@@ -153,4 +138,18 @@ fn set_data_checks_byte_count_before_allocating_or_copying() {
         .is_err()
     );
     assert!(unsafe { (*texture.as_raw()).Pixels.is_null() });
+}
+
+#[test]
+fn initial_pixel_upload_preserves_the_create_request() {
+    let mut texture = OwnedTextureData::new();
+    texture.create(TextureFormat::RGBA32, 1, 1);
+    assert_eq!(texture.status(), TextureStatus::WantCreate);
+
+    texture.set_data(&[1, 2, 3, 4]);
+    assert_eq!(texture.status(), TextureStatus::WantCreate);
+
+    texture.set_status(TextureStatus::OK);
+    texture.set_data(&[4, 3, 2, 1]);
+    assert_eq!(texture.status(), TextureStatus::WantUpdates);
 }

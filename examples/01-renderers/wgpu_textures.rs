@@ -17,9 +17,6 @@ use winit::{
 };
 
 struct ImguiState {
-    // Ensure registered textures are unregistered before the ImGui context is destroyed.
-    #[allow(dead_code)]
-    registered_user_textures: Vec<dear_imgui_rs::RegisteredUserTexture>,
     context: Context,
     platform: WinitPlatform,
     renderer: WgpuRenderer,
@@ -34,8 +31,8 @@ struct AppWindow {
     surface: wgpu::Surface<'static>,
     imgui: ImguiState,
     // Texture demo state (managed by ImGui modern texture system)
-    img_tex: dear_imgui_rs::texture::OwnedTextureData,
-    photo_tex: Option<dear_imgui_rs::texture::OwnedTextureData>,
+    img_tex: dear_imgui_rs::ManagedTextureId,
+    photo_tex: Option<(dear_imgui_rs::ManagedTextureId, (u32, u32))>,
     tex_size: (u32, u32),
     frame: u32,
 }
@@ -134,16 +131,13 @@ impl AppWindow {
             photo.set_status(dear_imgui_rs::texture::TextureStatus::WantCreate);
         }
 
-        // Register user-created textures so renderer backends can see them via DrawData::textures().
-        // This avoids TexID==0 assertions and lets the backend handle Create/Update/Destroy.
-        let mut registered_user_textures = Vec::new();
-        registered_user_textures.push(context.register_user_texture_token(&mut img_tex));
-        if let Some(photo) = photo_tex.as_mut() {
-            registered_user_textures.push(context.register_user_texture_token(photo));
-        }
+        let img_tex = context.register_texture(img_tex);
+        let photo_tex = photo_tex.map(|photo| {
+            let size = (photo.width(), photo.height());
+            (context.register_texture(photo), size)
+        });
 
         let imgui = ImguiState {
-            registered_user_textures,
             context,
             platform,
             renderer,
@@ -237,7 +231,10 @@ impl AppWindow {
             }
         }
 
-        self.img_tex.set_data(&pixels);
+        self.imgui
+            .context
+            .with_texture_mut(self.img_tex, |texture| texture.set_data(&pixels))
+            .expect("animated texture should remain active");
 
         self.frame = self.frame.wrapping_add(1);
     }
@@ -276,16 +273,12 @@ impl AppWindow {
             .build(|| {
                 ui.text("This texture is updated every frame (CPU → backend → GPU)");
                 ui.separator();
-                // Pass &mut TextureData. Backend will create/update/destroy GPU texture as needed.
-                Image::new(ui, &mut *self.img_tex, [256.0, 256.0]).build();
+                Image::new(ui, self.img_tex, [256.0, 256.0]).build();
 
-                if let Some(photo) = self.photo_tex.as_mut() {
+                if let Some((photo, (width, height))) = self.photo_tex {
                     ui.separator();
                     ui.text("Loaded Image (1:1):");
-                    // Render at native resolution (no scaling)
-                    let w = photo.width() as f32;
-                    let h = photo.height() as f32;
-                    Image::new(ui, &mut **photo, [w, h]).build();
+                    Image::new(ui, photo, [width as f32, height as f32]).build();
                 } else {
                     ui.separator();
                     ui.text_wrapped(

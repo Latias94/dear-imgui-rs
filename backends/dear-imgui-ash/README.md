@@ -27,13 +27,13 @@ This backend is compatible with both `ash` loader modes:
 `DrawData::textures()` is derived from ImGui's internal `PlatformIO.Textures[]` list.
 
 - Font atlas textures are registered by ImGui itself.
-- If you create `TextureData` yourself (e.g. `OwnedTextureData::new()`), register it once via
-  `Context::register_user_texture(&mut tex)` so the renderer can receive Create/Update/Destroy
-  requests.
-  - Prefer `Context::register_user_texture_token(&mut tex)` to automatically unregister on drop.
+- Register an `OwnedTextureData` with `Context::register_texture(texture)`. Registration transfers
+  ownership to the Context and returns a `ManagedTextureId` for widgets and draw lists.
+- Use `Context::with_texture_mut(id, |texture| ...)` for later pixel updates and
+  `Context::remove_texture(id)` to begin renderer-aware retirement.
 
-If you skip registration and still use `&mut TextureData` in widgets, `ImDrawCmd_GetTexID()` may
-assert in debug builds when the draw command refers to a texture that was never uploaded (TexID=0).
+Safe image APIs do not accept borrowed `TextureData`; this prevents native draw commands from
+retaining a pointer after the Rust borrow ends.
 
 ## External textures & custom sampler
 

@@ -5,6 +5,7 @@
 //! status management, and automatic texture updates.
 
 mod data;
+mod error;
 mod format;
 mod id;
 mod owned;
@@ -16,10 +17,11 @@ mod tests;
 mod validation;
 
 pub use data::TextureData;
+pub use error::ManagedTextureError;
 pub use format::{TextureFormat, get_format_bytes_per_pixel, get_format_name};
 pub use id::{ManagedTextureId, RawTextureId, TextureId};
 pub use owned::OwnedTextureData;
 pub use rect::TextureRect;
-pub(crate) use reference::effective_texture_id;
-pub use reference::{TextureRef, create_texture_ref};
+pub use reference::TextureRef;
+pub(crate) use reference::{TextureSource, effective_texture_id};
 pub use status::{TextureStatus, get_status_name};

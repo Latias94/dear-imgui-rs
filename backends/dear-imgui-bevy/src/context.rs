@@ -215,8 +215,8 @@ fn begin_primary_frame_system(mut params: BeginFrameParams) {
         let applied = params
             .imgui_context
             .context_mut()
-            .platform_io_mut()
-            .apply_texture_feedback(&feedback);
+            .apply_texture_feedback(&feedback)
+            .unwrap_or_else(|error| panic!("invalid managed texture feedback: {error}"));
         params.texture_feedback.set_last_applied(applied);
         params
             .output
@@ -226,7 +226,9 @@ fn begin_primary_frame_system(mut params: BeginFrameParams) {
 
     let context = params.imgui_context.context_mut();
     let feedback = params.texture_feedback.drain();
-    let applied = context.platform_io_mut().apply_texture_feedback(&feedback);
+    let applied = context
+        .apply_texture_feedback(&feedback)
+        .unwrap_or_else(|error| panic!("invalid managed texture feedback: {error}"));
     params.texture_feedback.set_last_applied(applied);
 
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]

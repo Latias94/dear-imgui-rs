@@ -19,7 +19,8 @@ use bevy_window::{PrimaryWindow, Window, WindowRef, WindowResolution};
 #[cfg(feature = "multi-viewport")]
 use dear_imgui_bevy::ImguiBackendConfig;
 use dear_imgui_bevy::{
-    ImguiContext, ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, ImguiViewportWindow,
+    ImguiContext, ImguiContexts, ImguiFrameOutput, ImguiPlugin, ImguiPrimaryContextPass,
+    ImguiViewportWindow,
     render::{
         IMGUI_FRAGMENT_ENTRY_POINT, IMGUI_SHADER_HANDLE, IMGUI_SHADER_SOURCE,
         IMGUI_VERTEX_ENTRY_POINT, ImguiExtractedRenderFrame, ImguiOverlayCamera,
@@ -35,7 +36,9 @@ fn imgui_context_guard() -> std::sync::MutexGuard<'static, ()> {
     GUARD.get_or_init(|| Mutex::new(())).lock().unwrap()
 }
 
-struct ManagedTexture(imgui::texture::OwnedTextureData);
+struct ManagedTexture(imgui::ManagedTextureId);
+
+const LEGACY_RENDER_TEXTURE_ID: imgui::TextureId = imgui::TextureId::new(0xD1A6);
 
 #[derive(Resource, Default)]
 #[cfg(feature = "multi-viewport")]
@@ -92,80 +95,86 @@ fn app_with_primary_window() -> (
         ImguiOverlayDisabled,
     ));
 
-    let mut texture = imgui::texture::TextureData::new();
+    let mut texture = imgui::texture::OwnedTextureData::new();
     texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
     texture.set_data(&[255, 0, 255, 255]);
-    texture.set_status(imgui::texture::TextureStatus::WantCreate);
-    let texture_id = texture.unique_id();
-
-    {
+    let texture_id = {
         let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
         let ctx = context.context_mut();
         ctx.io_mut().set_config_input_trickle_event_queue(false);
         let _ = ctx.font_atlas().build();
         let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
-        ctx.register_user_texture(&mut texture);
-    }
-
-    app.insert_non_send(ManagedTexture(texture));
+        ctx.register_texture(texture)
+    };
+    app.insert_non_send(ManagedTexture(texture_id));
 
     (app, primary_window, camera, texture_id)
 }
 
-fn draw_managed_texture(mut contexts: ImguiContexts, mut texture: NonSendMut<ManagedTexture>) {
+fn draw_managed_texture(mut contexts: ImguiContexts, texture: NonSend<ManagedTexture>) {
     let ui = contexts
         .primary_ui_mut()
         .expect("render extraction test should run inside an open ImGui frame");
-    ui.image(&mut *texture.0, [16.0, 16.0]);
+    ui.image(texture.0, [16.0, 16.0]);
+}
+
+fn draw_legacy_texture(mut contexts: ImguiContexts) {
+    let Some(ui) = contexts.primary_ui_mut() else {
+        return;
+    };
+    ui.get_foreground_draw_list().add_image(
+        LEGACY_RENDER_TEXTURE_ID,
+        [0.0, 0.0],
+        [16.0, 16.0],
+        [0.0, 0.0],
+        [1.0, 1.0],
+        [1.0, 1.0, 1.0, 1.0],
+    );
 }
 
 #[test]
-fn render_extract_clones_snapshot_texture_requests_and_camera_targets() {
+fn render_extract_rejects_managed_frames_until_context_owned_capture() {
     let _guard = imgui_context_guard();
     let (mut app, primary_window, camera, texture_id) = app_with_primary_window();
     app.add_systems(ImguiPrimaryContextPass, draw_managed_texture);
 
     app.update();
 
+    let output = app.world().resource::<ImguiFrameOutput>();
+    assert_eq!(output.frame_index(), 1);
+    assert!(output.snapshot().is_none());
     assert!(
-        !app.world().contains_resource::<ImguiExtractedRenderFrame>(),
-        "extracted frame should live in Bevy's render sub-app, not the main world"
+        output
+            .snapshot_error()
+            .is_some_and(|error| error.contains("Context-owned snapshot capture"))
     );
+
     let extracted = app
         .sub_app(RenderApp)
         .world()
         .resource::<ImguiExtractedRenderFrame>();
     assert_eq!(extracted.frame_index(), Some(1));
-    let snapshot = extracted.snapshot().expect("snapshot should be extracted");
-    assert_eq!(snapshot.draw.display_size, [640.0, 360.0]);
-    assert!(
-        snapshot
-            .texture_requests
-            .iter()
-            .any(|request| request.id == texture_id),
-        "managed texture requests must cross the extraction boundary"
-    );
+    assert!(extracted.snapshot().is_none());
+    assert!(extracted.camera_targets().is_empty());
 
-    let targets = extracted.camera_targets();
-    assert_eq!(targets.len(), 1, "inactive cameras should not be extracted");
-    assert_eq!(targets[0].camera, camera);
-    assert_eq!(targets[0].order, 3);
-    assert_eq!(
-        targets[0].target,
-        NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap())
-    );
+    let prepared = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<ImguiPreparedRenderFrame>();
+    assert_eq!(prepared.frame_index(), Some(1));
+    assert!(prepared.draws().is_empty());
+    assert_eq!(prepared.texture_request_count(), 0);
+
+    let context = app.world().get_non_send::<ImguiContext>().unwrap();
+    assert!(context.context().with_texture(texture_id, |_| ()).is_ok());
+    let _ = (primary_window, camera);
 }
 
 #[test]
 fn render_extract_clears_stale_snapshot_after_primary_window_is_removed() {
     let _guard = imgui_context_guard();
     let (mut app, primary_window, _camera, _texture_id) = app_with_primary_window();
-    app.add_systems(ImguiPrimaryContextPass, |mut contexts: ImguiContexts| {
-        let Some(ui) = contexts.primary_ui_mut() else {
-            return;
-        };
-        ui.text("render extract guard");
-    });
+    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
 
     app.update();
     assert!(
@@ -209,7 +218,7 @@ fn render_extract_uses_one_overlay_camera_per_render_target() {
             RenderTarget::Window(WindowRef::Primary),
         ))
         .id();
-    app.add_systems(ImguiPrimaryContextPass, draw_managed_texture);
+    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
 
     app.update();
 
@@ -253,7 +262,7 @@ fn render_extract_prefers_explicit_overlay_camera_over_higher_order_fallback() {
         },
         RenderTarget::Window(WindowRef::Primary),
     ));
-    app.add_systems(ImguiPrimaryContextPass, draw_managed_texture);
+    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
 
     app.update();
 
@@ -295,7 +304,7 @@ fn render_extract_preserves_explicit_overlay_camera_viewport_for_render_pass() {
             ImguiOverlayCamera,
         ))
         .id();
-    app.add_systems(ImguiPrimaryContextPass, draw_managed_texture);
+    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
 
     app.update();
 
@@ -347,7 +356,7 @@ fn render_extract_routes_overlay_to_primary_and_secondary_windows() {
             RenderTarget::Window(WindowRef::Entity(secondary_window)),
         ))
         .id();
-    app.add_systems(ImguiPrimaryContextPass, draw_managed_texture);
+    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
 
     app.update();
 
@@ -420,7 +429,7 @@ fn render_extract_ignores_viewport_window_mapping_until_multi_viewport_is_suppor
             RenderTarget::Window(WindowRef::Entity(secondary_window)),
         ))
         .id();
-    app.add_systems(ImguiPrimaryContextPass, draw_managed_texture);
+    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
 
     app.update();
 
@@ -604,8 +613,8 @@ fn renderer_prepare_routes_secondary_viewport_draws_only_to_matching_window() {
 #[test]
 fn renderer_prepare_flattens_extracted_snapshot_for_pipeline_consumption() {
     let _guard = imgui_context_guard();
-    let (mut app, primary_window, _camera, texture_id) = app_with_primary_window();
-    app.add_systems(ImguiPrimaryContextPass, draw_managed_texture);
+    let (mut app, primary_window, _camera, _texture_id) = app_with_primary_window();
+    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
 
     app.update();
 
@@ -616,16 +625,13 @@ fn renderer_prepare_flattens_extracted_snapshot_for_pipeline_consumption() {
     assert_eq!(prepared.frame_index(), Some(1));
     assert!(!prepared.vertices().is_empty());
     assert!(!prepared.indices().is_empty());
-    assert!(
-        prepared.texture_request_count() >= 1,
-        "managed texture requests stay associated with prepared renderer data"
-    );
+    assert_eq!(prepared.texture_request_count(), 0);
 
     let draw = prepared
         .draws()
         .iter()
-        .find(|draw| matches!(draw.texture, TextureBinding::Managed(id) if id == texture_id))
-        .expect("the managed texture draw should be prepared");
+        .find(|draw| draw.texture == TextureBinding::Legacy(LEGACY_RENDER_TEXTURE_ID))
+        .expect("the legacy texture draw should be prepared");
     assert_eq!(
         draw.target,
         NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap())

@@ -134,7 +134,7 @@ fn render_without_beginning_frame_panics_before_entering_ffi() {
 }
 
 #[test]
-fn frame_token_can_capture_thread_safe_snapshot_on_end() {
+fn frame_token_rejects_font_managed_draws_without_a_snapshot_consumer() {
     let _guard = test_guard();
 
     let mut ctx = imgui::Context::create();
@@ -143,12 +143,13 @@ fn frame_token_can_capture_thread_safe_snapshot_on_end() {
     let frame = ctx.begin_frame();
     frame.ui().text("snapshot me");
 
-    let snapshot = frame
+    let error = frame
         .render_snapshot(imgui::render::snapshot::SnapshotOptions::default())
-        .expect("snapshot should be created from a rendered frame");
-
-    assert!(snapshot.draw.display_size[0] > 0.0);
-    assert!(snapshot.draw.display_size[1] > 0.0);
+        .expect_err("managed font draws require Context-owned snapshot capture");
+    assert!(matches!(
+        error,
+        imgui::render::snapshot::SnapshotError::ManagedTextureRequiresContext
+    ));
 }
 
 #[test]
@@ -173,33 +174,23 @@ fn frame_with_result_lets_engines_run_multiple_ui_steps_before_rendering() {
 }
 
 #[test]
-fn frame_token_snapshot_reports_managed_texture_requests() {
+fn frame_token_snapshot_requires_a_managed_texture_consumer() {
     let _guard = test_guard();
 
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
-    let mut texture = imgui::texture::TextureData::new();
+    let mut texture = imgui::texture::OwnedTextureData::new();
     texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
     texture.set_data(&[255, 255, 255, 255]);
-    texture.set_status(imgui::texture::TextureStatus::WantCreate);
-    let texture_id = texture.unique_id();
-    ctx.register_user_texture(&mut texture);
+    let texture_id = ctx.register_texture(texture);
 
     let frame = ctx.begin_frame();
-    frame.ui().image(&mut *texture, [16.0, 16.0]);
-    let snapshot = frame
+    frame.ui().image(texture_id, [16.0, 16.0]);
+    let error = frame
         .render_snapshot(imgui::render::snapshot::SnapshotOptions::default())
-        .expect("snapshot should include managed texture requests");
-
-    assert!(snapshot.texture_requests.iter().any(|request| {
-        request.id == texture_id
-            && matches!(
-                request.op,
-                imgui::render::snapshot::TextureOp::Create {
-                    width: 1,
-                    height: 1,
-                    ..
-                }
-            )
-    }));
+        .expect_err("managed snapshot capture must use the U3 consumer contract");
+    assert!(matches!(
+        error,
+        imgui::render::snapshot::SnapshotError::ManagedTextureRequiresContext
+    ));
 }

@@ -181,7 +181,7 @@ mod tests {
         texture.set_tex_id(TextureId::new(77));
         texture.set_backend_user_data(std::ptr::dangling_mut::<c_void>());
         texture.set_status(TextureStatus::OK);
-        context.register_user_texture(&mut texture);
+        let texture = context.register_texture(texture);
         context.prepare_frame(
             FramePrepareOptions::new([640.0, 480.0], 1.0 / 60.0).renderer_has_textures(),
         );
@@ -192,9 +192,13 @@ mod tests {
         let result = renderer.invalidate_device_objects(&mut context);
 
         assert!(matches!(result, Err(RendererError::ContextNotBound)));
-        assert_eq!(texture.status(), TextureStatus::OK);
-        assert_eq!(texture.tex_id(), TextureId::new(77));
-        assert!(!texture.backend_user_data().is_null());
+        context
+            .with_texture(texture, |texture| {
+                assert_eq!(texture.status(), TextureStatus::OK);
+                assert_eq!(texture.tex_id(), TextureId::new(77));
+                assert!(!texture.backend_user_data().is_null());
+            })
+            .expect("registered texture should remain active");
     }
 
     #[test]

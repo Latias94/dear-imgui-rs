@@ -3,10 +3,7 @@ use super::validation::{
     checked_texture_byte_len, checked_texture_byte_len_if_valid, checked_texture_dimension_to_i32,
     non_negative_texture_count_from_i32,
 };
-use super::{
-    ManagedTextureId, OwnedTextureData, TextureFormat, TextureId, TextureRect, TextureRef,
-    TextureStatus,
-};
+use super::{OwnedTextureData, TextureFormat, TextureId, TextureRect, TextureStatus};
 use crate::sys;
 use std::cell::UnsafeCell;
 use std::ffi::c_void;
@@ -21,17 +18,16 @@ use std::ffi::c_void;
 /// - Create an instance (e.g. via `OwnedTextureData::new()` + `create()`)
 /// - Mutate pixels, set flags/rects (e.g. call `set_data()` or directly write `Pixels` then
 ///   set `UpdateRect`), and set status to `WantCreate`/`WantUpdates`.
-/// - Register user-created owned textures once via `Context::register_user_texture(&mut tex)`. Dear
+/// - Transfer user-created owned textures via `Context::register_texture(tex)`. Dear
 ///   ImGui builds `DrawData::textures()` from its internal `PlatformIO.Textures[]` list (font atlas
 ///   textures are registered by ImGui itself).
 /// - Your renderer backend iterates `DrawData::textures_mut()` and performs the requested
 ///   create/update/destroy operations, then updates status to `OK`/`Destroyed`.
 /// - You can also set/get a `TexID` (e.g., GPU handle) via `set_tex_id()/tex_id()` after creation.
 ///
-/// Lifetime Note: If using the managed path, you must keep the underlying `ImTextureData` alive at
-/// least until the end of the frame where it is referenced by UI calls. If you create textures
-/// yourself, use [`OwnedTextureData`] to ensure the object is correctly constructed and destroyed
-/// by the C++ side.
+/// Context owns every registered user allocation through retirement. Application mutation uses
+/// `Context::with_texture_mut`, so safe code cannot drop the allocation while native draw data or a
+/// renderer still refers to it.
 #[repr(transparent)]
 pub struct TextureData {
     raw: UnsafeCell<sys::ImTextureData>,
@@ -101,9 +97,12 @@ impl TextureData {
         self.raw.get()
     }
 
-    /// Get this managed texture's stable ImGui identity.
-    pub fn unique_id(&self) -> ManagedTextureId {
-        ManagedTextureId::from_raw(self.inner().UniqueID)
+    /// Get Dear ImGui's debug-only native texture number.
+    ///
+    /// This value is not a safe identity: user textures default to zero and atlas values are only
+    /// unique within one atlas.
+    pub(crate) fn native_unique_id(&self) -> i32 {
+        self.inner().UniqueID
     }
 
     /// Get the current status of this texture
@@ -149,12 +148,6 @@ impl TextureData {
         unsafe {
             sys::ImTextureData_SetTexID(self.as_raw_mut(), tex_id.id() as sys::ImTextureID);
         }
-    }
-
-    /// Get the current texture reference for this managed texture.
-    #[inline]
-    pub fn texture_ref(&mut self) -> TextureRef<'_> {
-        unsafe { TextureRef::from_raw(sys::ImTextureData_GetTexRef(self.as_raw_mut())) }
     }
 
     /// Get the texture format
@@ -355,14 +348,16 @@ impl TextureData {
 
             std::ptr::copy_nonoverlapping(data.as_ptr(), (*raw).Pixels as *mut u8, copy_bytes);
 
-            // Mark entire texture as updated
+            // Mark the entire texture as updated without downgrading an initial create request.
             (*raw).UpdateRect = sys::ImTextureRect {
                 x: 0u16,
                 y: 0u16,
                 w: (*raw).Width.clamp(0, u16::MAX as i32) as u16,
                 h: (*raw).Height.clamp(0, u16::MAX as i32) as u16,
             };
-            sys::ImTextureData_SetStatus(raw, sys::ImTextureStatus_WantUpdates);
+            if (*raw).Status != sys::ImTextureStatus_WantCreate {
+                sys::ImTextureData_SetStatus(raw, sys::ImTextureStatus_WantUpdates);
+            }
         }
     }
 

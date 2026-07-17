@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::marker::PhantomData;
 
 use dear_imgui_rs::texture::TextureRef;
 
@@ -12,8 +11,7 @@ use crate::{
 pub struct Image3DByAxesBuilder<'ui, 'tex> {
     pub(crate) _ui: &'ui Plot3DUi<'ui>,
     pub(crate) label: Cow<'ui, str>,
-    pub(crate) tex_ref: sys::ImTextureRef_c,
-    pub(crate) _texture: PhantomData<&'tex mut dear_imgui_rs::texture::TextureData>,
+    pub(crate) texture: TextureRef<'tex>,
     pub(crate) center: [f32; 3],
     pub(crate) axis_u: [f32; 3],
     pub(crate) axis_v: [f32; 3],
@@ -41,6 +39,7 @@ impl<'ui, 'tex> Image3DByAxesBuilder<'ui, 'tex> {
     }
     pub fn plot(self) {
         self._ui.with_bound_context(|| {
+            let tex_ref = to_sys_texture_ref(self._ui, self.texture);
             let label = self.label.as_ref();
             let label = if label.contains('\0') { "image" } else { label };
             dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
@@ -52,7 +51,7 @@ impl<'ui, 'tex> Image3DByAxesBuilder<'ui, 'tex> {
                 );
                 sys::ImPlot3D_PlotImage_Vec2(
                     label_ptr,
-                    self.tex_ref,
+                    tex_ref,
                     sys::ImPlot3DPoint_c {
                         x: self.center[0] as f64,
                         y: self.center[1] as f64,
@@ -82,8 +81,7 @@ impl<'ui, 'tex> Image3DByAxesBuilder<'ui, 'tex> {
 pub struct Image3DByCornersBuilder<'ui, 'tex> {
     pub(crate) _ui: &'ui Plot3DUi<'ui>,
     pub(crate) label: Cow<'ui, str>,
-    pub(crate) tex_ref: sys::ImTextureRef_c,
-    pub(crate) _texture: PhantomData<&'tex mut dear_imgui_rs::texture::TextureData>,
+    pub(crate) texture: TextureRef<'tex>,
     pub(crate) p0: [f32; 3],
     pub(crate) p1: [f32; 3],
     pub(crate) p2: [f32; 3],
@@ -116,6 +114,7 @@ impl<'ui, 'tex> Image3DByCornersBuilder<'ui, 'tex> {
     }
     pub fn plot(self) {
         self._ui.with_bound_context(|| {
+            let tex_ref = to_sys_texture_ref(self._ui, self.texture);
             let label = self.label.as_ref();
             let label = if label.contains('\0') { "image" } else { label };
             dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
@@ -127,7 +126,7 @@ impl<'ui, 'tex> Image3DByCornersBuilder<'ui, 'tex> {
                 );
                 sys::ImPlot3D_PlotImage_Plot3DPoint(
                     label_ptr,
-                    self.tex_ref,
+                    tex_ref,
                     sys::ImPlot3DPoint_c {
                         x: self.p0[0] as f64,
                         y: self.p0[1] as f64,
@@ -170,29 +169,20 @@ impl<'ui> Plot3DUi<'ui> {
         axis_u: [f32; 3],
         axis_v: [f32; 3],
     ) -> Image3DByAxesBuilder<'ui, 'tex> {
-        self.with_bound_context(|| {
-            let tr = tex.into().raw();
-            let tex_ref = sys::ImTextureRef_c {
-                _TexData: tr._TexData as *mut sys::ImTextureData,
-                _TexID: tr._TexID as sys::ImTextureID,
-            };
-            debug_before_plot();
-            Image3DByAxesBuilder {
-                _ui: self,
-                label: label.into(),
-                tex_ref,
-                _texture: PhantomData,
-                center,
-                axis_u,
-                axis_v,
-                uv0: [0.0, 0.0],
-                uv1: [1.0, 1.0],
-                tint: [1.0, 1.0, 1.0, 1.0],
-                flags: Image3DFlags::NONE,
-                item_flags: Item3DFlags::NONE,
-                style: Plot3DItemStyle::default(),
-            }
-        })
+        Image3DByAxesBuilder {
+            _ui: self,
+            label: label.into(),
+            texture: tex.into(),
+            center,
+            axis_u,
+            axis_v,
+            uv0: [0.0, 0.0],
+            uv1: [1.0, 1.0],
+            tint: [1.0, 1.0, 1.0, 1.0],
+            flags: Image3DFlags::NONE,
+            item_flags: Item3DFlags::NONE,
+            style: Plot3DItemStyle::default(),
+        }
     }
 
     /// Image by 4 corner points (p0..p3)
@@ -205,31 +195,31 @@ impl<'ui> Plot3DUi<'ui> {
         p2: [f32; 3],
         p3: [f32; 3],
     ) -> Image3DByCornersBuilder<'ui, 'tex> {
-        self.with_bound_context(|| {
-            let tr = tex.into().raw();
-            let tex_ref = sys::ImTextureRef_c {
-                _TexData: tr._TexData as *mut sys::ImTextureData,
-                _TexID: tr._TexID as sys::ImTextureID,
-            };
-            debug_before_plot();
-            Image3DByCornersBuilder {
-                _ui: self,
-                label: label.into(),
-                tex_ref,
-                _texture: PhantomData,
-                p0,
-                p1,
-                p2,
-                p3,
-                uv0: [0.0, 0.0],
-                uv1: [1.0, 0.0],
-                uv2: [1.0, 1.0],
-                uv3: [0.0, 1.0],
-                tint: [1.0, 1.0, 1.0, 1.0],
-                flags: Image3DFlags::NONE,
-                item_flags: Item3DFlags::NONE,
-                style: Plot3DItemStyle::default(),
-            }
-        })
+        Image3DByCornersBuilder {
+            _ui: self,
+            label: label.into(),
+            texture: tex.into(),
+            p0,
+            p1,
+            p2,
+            p3,
+            uv0: [0.0, 0.0],
+            uv1: [1.0, 0.0],
+            uv2: [1.0, 1.0],
+            uv3: [0.0, 1.0],
+            tint: [1.0, 1.0, 1.0, 1.0],
+            flags: Image3DFlags::NONE,
+            item_flags: Item3DFlags::NONE,
+            style: Plot3DItemStyle::default(),
+        }
+    }
+}
+
+fn to_sys_texture_ref(ui: &Plot3DUi<'_>, texture: TextureRef<'_>) -> sys::ImTextureRef_c {
+    let texture = unsafe { ui._ui.resolve_texture_ref_raw(texture) }
+        .unwrap_or_else(|error| panic!("ImPlot3D image rejected texture: {error}"));
+    sys::ImTextureRef_c {
+        _TexData: texture._TexData as *mut sys::ImTextureData,
+        _TexID: texture._TexID as sys::ImTextureID,
     }
 }

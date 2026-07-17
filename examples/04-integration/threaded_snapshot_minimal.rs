@@ -31,14 +31,13 @@ fn main() {
     ctx.io_mut().set_backend_flags(flags);
 
     // Create and register a managed texture so `DrawData::textures()` has something to request.
-    let mut managed_tex = dear_imgui_rs::texture::TextureData::new();
+    let mut managed_tex = dear_imgui_rs::texture::OwnedTextureData::new();
     managed_tex.create(TextureFormat::RGBA32, 2, 2);
     managed_tex.set_data(&[
         255, 0, 0, 255, 0, 255, 0, 255, //
         0, 0, 255, 255, 255, 255, 255, 255,
     ]);
-    managed_tex.set_status(TextureStatus::WantCreate);
-    ctx.register_user_texture(&mut managed_tex);
+    let managed_tex = ctx.register_texture(managed_tex);
 
     let (snapshot_tx, snapshot_rx) = mpsc::channel::<FrameSnapshot>();
     let (feedback_tx, feedback_rx) = mpsc::channel::<Vec<TextureFeedback>>();
@@ -51,18 +50,21 @@ fn main() {
         // Apply feedback from the previous frame.
         if !pending_feedback.is_empty() {
             let applied = ctx
-                .platform_io_mut()
-                .apply_texture_feedback(&pending_feedback);
+                .apply_texture_feedback(&pending_feedback)
+                .expect("renderer feedback should match the owner Context");
             println!("[ui] applied {applied} feedback items");
             pending_feedback.clear();
         }
 
         // Frame 1: request a partial update (simulated).
         if frame_idx == 1 {
-            managed_tex.set_data(&[
-                0, 0, 0, 255, 255, 0, 255, 255, //
-                0, 255, 255, 255, 255, 255, 0, 255,
-            ]);
+            ctx.with_texture_mut(managed_tex, |texture| {
+                texture.set_data(&[
+                    0, 0, 0, 255, 255, 0, 255, 255, //
+                    0, 255, 255, 255, 255, 255, 0, 255,
+                ]);
+            })
+            .expect("managed texture should remain active");
         }
 
         let ui = ctx.frame();
@@ -71,7 +73,7 @@ fn main() {
             .build(|| {
                 ui.text(format!("Frame: {frame_idx}"));
                 ui.text("This example does not render to a GPU.");
-                ui.image(&mut *managed_tex, [64.0, 64.0]);
+                ui.image(managed_tex, [64.0, 64.0]);
             });
 
         let draw_data = ctx.render();

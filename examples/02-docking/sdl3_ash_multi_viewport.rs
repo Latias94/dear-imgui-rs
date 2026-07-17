@@ -897,13 +897,11 @@ fn create_external_rgba_texture(
 }
 
 struct ImguiState {
-    // Ensure registered textures are unregistered before the ImGui context is destroyed.
-    _registered_user_textures: Vec<dear_imgui_rs::RegisteredUserTexture>,
     context: Context,
     renderer: AshRenderer,
     last_frame: Instant,
     clear_color: [f32; 4],
-    img_tex: dear_imgui_rs::texture::OwnedTextureData,
+    img_tex: dear_imgui_rs::ManagedTextureId,
     tex_size: (u32, u32),
     frame: u32,
     show_demo: bool,
@@ -1038,10 +1036,7 @@ impl App {
         img_tex.set_data(&pixels);
         img_tex.set_status(dear_imgui_rs::texture::TextureStatus::WantCreate);
 
-        // Register user-created textures so renderer backends can see them via DrawData::textures().
-        // This avoids TexID==0 assertions and lets the backend handle Create/Update/Destroy.
-        let mut registered_user_textures = Vec::new();
-        registered_user_textures.push(context.register_user_texture_token(&mut img_tex));
+        let img_tex = context.register_texture(img_tex);
 
         // Renderer.
         let framebuffer_srgb = is_srgb_format(swapchain.surface_format.format);
@@ -1070,7 +1065,6 @@ impl App {
             enable_viewports: ENABLE_VIEWPORTS,
             sdl3_backend: Some(sdl3_backend),
             imgui: ImguiState {
-                _registered_user_textures: registered_user_textures,
                 context,
                 renderer,
                 last_frame: Instant::now(),
@@ -1156,7 +1150,10 @@ impl App {
                 pixels[i + 3] = 255;
             }
         }
-        self.imgui.img_tex.set_data(&pixels);
+        self.imgui
+            .context
+            .with_texture_mut(self.imgui.img_tex, |texture| texture.set_data(&pixels))
+            .expect("animated texture should remain active");
         self.imgui.frame = self.imgui.frame.wrapping_add(1);
     }
 
@@ -1223,7 +1220,7 @@ impl App {
                     ui.color_edit4("Clear color", &mut self.imgui.clear_color);
                     ui.separator();
                     ui.text("Animated ImGui-managed texture:");
-                    ui.image(&mut *self.imgui.img_tex, [256.0, 256.0]);
+                    ui.image(self.imgui.img_tex, [256.0, 256.0]);
 
                     if let Some(external) = self.imgui.external.as_mut() {
                         ui.separator();

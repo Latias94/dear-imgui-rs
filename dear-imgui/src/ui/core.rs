@@ -15,10 +15,15 @@ impl Ui {
     /// Creates a new Ui instance
     ///
     /// This should only be called by Context::create()
-    pub(crate) fn new(ctx: *mut sys::ImGuiContext, ctx_binding: crate::ContextBinding) -> Self {
+    pub(crate) fn new(
+        ctx: *mut sys::ImGuiContext,
+        ctx_binding: crate::ContextBinding,
+        texture_registry: crate::context::SharedTextureRegistry,
+    ) -> Self {
         Ui {
             ctx,
             ctx_binding,
+            texture_registry,
             buffer: UnsafeCell::new(UiBuffer::new(1024)),
         }
     }
@@ -39,6 +44,42 @@ impl Ui {
 
     pub(crate) fn run_with_bound_context<R>(&self, f: impl FnOnce() -> R) -> R {
         self.ctx_binding.with_bound_context(f)
+    }
+
+    pub(crate) fn resolve_texture_ref(
+        &self,
+        texture: crate::texture::TextureRef<'_>,
+    ) -> Result<sys::ImTextureRef, crate::texture::ManagedTextureError> {
+        match texture.source() {
+            crate::texture::TextureSource::Legacy(id) => Ok(sys::ImTextureRef {
+                _TexData: std::ptr::null_mut(),
+                _TexID: id.id() as sys::ImTextureID,
+            }),
+            crate::texture::TextureSource::Managed(id) => {
+                self.texture_registry.borrow().resolve(id)
+            }
+            crate::texture::TextureSource::FontAtlas { atlas, texture } => {
+                let io = unsafe { sys::igGetIO_ContextPtr(self.ctx) };
+                if io.is_null() || !std::ptr::eq(unsafe { (*io).Fonts }, atlas) {
+                    return Err(crate::texture::ManagedTextureError::ForeignFontAtlas);
+                }
+                Ok(texture)
+            }
+        }
+    }
+
+    /// Resolve a logical texture for an adjacent extension FFI call.
+    ///
+    /// # Safety
+    ///
+    /// A returned managed pointer is valid only for an immediate native call while this `Ui` and
+    /// its frame remain borrowed. It must not be stored, sent, or used after the call returns.
+    #[doc(hidden)]
+    pub unsafe fn resolve_texture_ref_raw(
+        &self,
+        texture: crate::texture::TextureRef<'_>,
+    ) -> Result<sys::ImTextureRef, crate::texture::ManagedTextureError> {
+        self.run_with_bound_context(|| self.resolve_texture_ref(texture))
     }
 
     /// Runs a closure while this `Ui`'s owning ImGui context is current.

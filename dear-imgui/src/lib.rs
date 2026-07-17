@@ -58,59 +58,47 @@
 //!
 //! ## Textures (ImGui 1.92+)
 //!
-//! You can pass either a legacy `TextureId` or an ImGui-managed `TextureData` (preferred):
+//! You can pass either a legacy `TextureId` or a Context-owned managed texture handle:
 //!
 //! ```no_run
 //! # use dear_imgui_rs::*;
-//! # fn demo(ui: &Ui) {
+//! # fn demo(context: &mut Context) {
 //! // 1) Legacy handle
 //! let tex_id = texture::TextureId::new(0x1234);
-//! ui.image(tex_id, [64.0, 64.0]);
-//!
-//! // 2) Managed texture (created/updated/destroyed via DrawData::textures_mut())
-//! let mut tex = texture::TextureData::new();
+//! // 2) Transfer an owned texture into this Context.
+//! let mut tex = texture::OwnedTextureData::new();
 //! tex.create(texture::TextureFormat::RGBA32, 256, 256);
-//! // fill pixels / request updates ...
-//! ui.image(&mut *tex, [256.0, 256.0]);
+//! tex.set_data(&vec![255; 256 * 256 * 4]);
+//! let managed = context.register_texture(tex);
+//! let ui = context.frame();
+//! ui.image(tex_id, [64.0, 64.0]);
+//! ui.image(managed, [256.0, 256.0]);
 //! # }
 //! ```
 //!
-//! `TextureRef<'tex>` carries the lifetime of managed texture data. Passing `&mut TextureData`
-//! gives ImGui a managed `ImTextureData*` for the frame; passing `TextureId` keeps the legacy
-//! value-handle path. Passing `&TextureData` is intentionally treated as legacy TexID-only access,
-//! because a shared Rust borrow must not let ImGui or a renderer mutate the underlying texture data.
-//!
-//! Note: `DrawData::textures()` and `DrawData::textures_mut()` are built from ImGui's internal
-//! `PlatformIO.Textures[]` list. If you create `OwnedTextureData` yourself (as above), call
-//! `Context::register_user_texture(&mut tex)` once to register it, otherwise renderer backends may
-//! not receive texture requests for it.
-//!
-//! Raw `ImTextureRef` conversion is unsafe:
-//!
-//! ```no_run
-//! # use dear_imgui_rs::{sys, texture::TextureRef};
-//! # fn demo(raw: sys::ImTextureRef) {
-//! // Safety: caller must prove any raw _TexData pointer remains valid for the chosen lifetime.
-//! let tex = unsafe { TextureRef::from_raw(raw) };
-//! let _ = tex.raw();
-//! # }
-//! ```
+//! `TextureRef<'tex>` is pointer-free for user textures. It stores either a legacy value handle, a
+//! Context/slot/generation managed identity, or an internal font-atlas reference backed by an owner
+//! lease. The owning `Ui` resolves managed handles immediately before FFI and rejects foreign,
+//! stale, or retiring handles first.
 //!
 //! ### Texture Management Guide
 //!
 //! - Concepts:
 //!   - `TextureId`: legacy plain handle (e.g., GL texture name, Vk descriptor).
 //!   - `TextureData`: managed CPU-side description with status flags and pixel buffer.
-//!   - `TextureRef<'tex>`: a small wrapper used by widgets/drawlist, constructed from either of
-//!     the above. Managed refs borrow texture data; legacy ids do not.
+//!   - `ManagedTextureId`: opaque Context/slot/generation identity used by widgets and draw lists.
+//!   - `TextureRef<'tex>`: logical image source constructed from `TextureId`, `ManagedTextureId`,
+//!     or an owner-backed font-atlas texture lease.
 //! - Basic flow:
-//!   1. Create `TextureData` and call `create(format, w, h)` to allocate pixels.
+//!   1. Create `OwnedTextureData` and call `create(format, w, h)` to allocate pixels.
 //!   2. Fill/modify pixels; call `set_status(WantCreate)` for initial upload, or `WantUpdates` with
 //!      `UpdateRect` for sub-updates. `TextureData::set_data()` is a convenience which copies data and
 //!      marks an update.
-//!   3. Register user-created `OwnedTextureData` once via `Context::register_user_texture(&mut tex)`.
-//!   4. Use the texture in UI via `ui.image(&mut tex, size)` or drawlist APIs.
-//!   5. In your renderer, during `render()`, iterate `DrawData::textures_mut()` and honor the requests
+//!   3. Transfer ownership with `Context::register_texture(tex)` and retain its handle.
+//!   4. Mutate before a frame with `Context::with_texture_mut(handle, |tex| ...)`.
+//!   5. Use the handle in UI via `ui.image(handle, size)` or draw-list APIs.
+//!   6. Call `Context::remove_texture(handle)` to begin generation-safe retirement.
+//!   7. In a synchronous renderer, iterate `DrawData::textures_mut()` and honor the requests
 //!      (Create/Update/Destroy), then set status back to `OK`/`Destroyed`.
 //! - Alternatives: when you already have a GPU handle, pass `TextureId` directly.
 //!
@@ -168,9 +156,9 @@
 //! The safe layer intentionally rejects old patterns that depended on hidden C current-context or
 //! aliasing state:
 //!
-//! - Use `TextureId` for legacy handles and `&mut TextureData` for managed textures. Do not store a
-//!   managed `TextureRef<'_>` beyond the texture data it borrows.
-//! - `TextureRef::from_raw` is unsafe because raw `ImTextureRef` may carry a managed pointer.
+//! - Use `TextureId` for legacy handles and `ManagedTextureId` for Context-owned textures.
+//! - Borrowed `&mut TextureData` is intentionally not an image source; transfer ownership with
+//!   `Context::register_texture` and mutate it through a Context-scoped closure.
 //! - Renderer backends should accept `&mut DrawData` and use `textures_mut()` for status/TexID
 //!   feedback. Shared `textures()` iterators are read-only.
 //! - `FontId` is a persistent, atlas-validated handle. It may be stored in style state, but

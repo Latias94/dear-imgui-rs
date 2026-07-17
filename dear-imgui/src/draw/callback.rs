@@ -81,7 +81,6 @@ impl<'ui, F: FnOnce() + 'static> Callback<'ui, F> {
 #[cfg(test)]
 mod callback_tests {
     use super::*;
-    use std::marker::PhantomData;
 
     #[test]
     fn safe_draw_callback_uses_direct_user_data_pointer() {
@@ -97,7 +96,7 @@ mod callback_tests {
 
         let draw_list = DrawListMut {
             draw_list: raw_draw_list,
-            _phantom: PhantomData,
+            ui: None,
         };
         draw_list.add_callback_safe(noop).build();
 
@@ -151,7 +150,7 @@ mod callback_tests {
 
         let draw_list = DrawListMut {
             draw_list: raw_draw_list,
-            _phantom: PhantomData,
+            ui: None,
         };
         draw_list.add_callback_safe(noop).build();
 

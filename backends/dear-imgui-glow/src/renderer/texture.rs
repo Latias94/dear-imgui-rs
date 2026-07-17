@@ -720,7 +720,7 @@ mod tests {
             .expect("replacement managed texture should upload");
         let replacement_texture_id = replacement.tex_id();
         let mut imgui_context = Context::create();
-        imgui_context.register_user_texture(&mut replacement);
+        let replacement = imgui_context.register_texture(replacement);
         imgui_context.prepare_frame(
             FramePrepareOptions::new([640.0, 480.0], 1.0 / 60.0).renderer_has_textures(),
         );
@@ -728,7 +728,11 @@ mod tests {
         let _ = imgui_context.begin_frame().render();
 
         assert_eq!(renderer.owned_textures.len(), 2);
-        assert_ne!(original.tex_id(), replacement.tex_id());
+        imgui_context
+            .with_texture(replacement, |replacement| {
+                assert_ne!(original.tex_id(), replacement.tex_id());
+            })
+            .expect("replacement should remain active");
 
         original.set_status(TextureStatus::WantDestroy);
         renderer
@@ -738,9 +742,13 @@ mod tests {
 
         renderer.destroy_device_objects(&gl, &mut imgui_context);
         assert!(renderer.owned_textures.is_empty());
-        assert_eq!(replacement.status(), TextureStatus::WantCreate);
-        assert!(replacement.tex_id().is_null());
-        assert!(replacement.backend_user_data().is_null());
+        imgui_context
+            .with_texture(replacement, |replacement| {
+                assert_eq!(replacement.status(), TextureStatus::WantCreate);
+                assert!(replacement.tex_id().is_null());
+                assert!(replacement.backend_user_data().is_null());
+            })
+            .expect("replacement should remain active");
         assert!(renderer.texture_map().get(replacement_texture_id).is_none());
         assert_eq!(DELETED_TEXTURES.load(Ordering::SeqCst), 2);
     }
