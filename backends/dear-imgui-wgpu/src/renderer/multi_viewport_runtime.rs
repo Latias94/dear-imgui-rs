@@ -65,6 +65,12 @@ pub enum CallbackOwnershipError {
     /// The renderer has not been initialized with GPU backend data.
     #[error("WGPU renderer is not initialized")]
     RendererNotInitialized,
+    /// The renderer was initialized for another Dear ImGui context.
+    #[error("WGPU renderer is bound to a different Dear ImGui context")]
+    RendererContextMismatch,
+    /// The renderer's bound Dear ImGui context no longer exists.
+    #[error("the Dear ImGui context bound to this WGPU renderer has been dropped")]
+    RendererContextDropped,
     /// Per-window surfaces require the WGPU instance used by the renderer.
     #[error("WGPU multi-viewport requires WgpuInitInfo::with_instance")]
     MissingInstance,
@@ -100,7 +106,7 @@ pub enum CallbackOwnershipError {
 /// `renderer` must remain at the same address until [`shutdown_multi_viewport_support`] completes.
 /// All callbacks and renderer access must occur on the enabling thread. While enabled, callers must
 /// not concurrently access, reinitialize, shut down, move, or drop the renderer, or replace any
-/// viewport's `RendererUserData`.
+/// viewport's `RendererUserData`. `context` must be the context used to initialize `renderer`.
 pub unsafe fn enable(
     renderer: &mut WgpuRenderer,
     context: &mut Context,

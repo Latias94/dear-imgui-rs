@@ -208,7 +208,7 @@ fn ini_disk_helpers_no_panic() {
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
     }
-    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.font_atlas().build();
 
     let path = std::env::temp_dir().join("dear-imgui-rs-test-imgui.ini");
     let _ = ctx.load_ini_settings_from_disk(&path);

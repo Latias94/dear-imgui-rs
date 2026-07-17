@@ -9,7 +9,7 @@ fn prepare_headless_context(
     ctx.prepare_frame(
         imgui::FramePrepareOptions::new(display_size, 1.0 / 60.0).renderer_has_textures(),
     );
-    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.font_atlas().build();
     Ok(())
 }
 

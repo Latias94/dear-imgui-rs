@@ -1,17 +1,29 @@
 use super::*;
 
 impl Ui {
-    /// Renders a style editor block (not a window) for the given `Style` structure
+    /// Renders a style editor block (not a window) for the given `Style` structure.
+    ///
+    /// # Safety
+    ///
+    /// The upstream Fonts tab exposes controls that can mutate or delete fonts during the frame
+    /// and may continue using invalidated native pointers. The caller must ensure that tab and its
+    /// destructive controls cannot be activated.
     #[doc(alias = "ShowStyleEditor")]
-    pub fn show_style_editor(&self, style: &mut crate::style::Style) {
+    pub unsafe fn show_style_editor(&self, style: &mut crate::style::Style) {
         self.run_with_bound_context(|| unsafe {
             crate::sys::igShowStyleEditor(style.raw_mut());
         });
     }
 
-    /// Renders a style editor block (not a window) for the currently active style
+    /// Renders a style editor block (not a window) for the currently active style.
+    ///
+    /// # Safety
+    ///
+    /// The upstream Fonts tab exposes controls that can mutate or delete fonts during the frame
+    /// and may continue using invalidated native pointers. The caller must ensure that tab and its
+    /// destructive controls cannot be activated.
     #[doc(alias = "ShowStyleEditor")]
-    pub fn show_default_style_editor(&self) {
+    pub unsafe fn show_default_style_editor(&self) {
         self.run_with_bound_context(|| unsafe {
             crate::sys::igShowStyleEditor(std::ptr::null_mut());
         });
@@ -21,7 +33,7 @@ impl Ui {
     // Style Access
     // ============================================================================
 
-    /// Returns a shared reference to the current [`Style`].
+    /// Returns a shared reference to the current [`crate::Style`].
     ///
     /// ## Safety
     ///
@@ -66,7 +78,7 @@ impl Ui {
         self.run_with_bound_context(|| unsafe { sys::igStyleColorsClassic(std::ptr::null_mut()) });
     }
 
-    /// Write the Dark style values into the provided [`Style`] object.
+    /// Write the Dark style values into the provided [`crate::Style`] object.
     #[doc(alias = "StyleColorsDark")]
     pub fn style_colors_dark_into(&self, dst: &mut crate::Style) {
         self.run_with_bound_context(|| unsafe {
@@ -74,7 +86,7 @@ impl Ui {
         });
     }
 
-    /// Write the Light style values into the provided [`Style`] object.
+    /// Write the Light style values into the provided [`crate::Style`] object.
     #[doc(alias = "StyleColorsLight")]
     pub fn style_colors_light_into(&self, dst: &mut crate::Style) {
         self.run_with_bound_context(|| unsafe {
@@ -82,7 +94,7 @@ impl Ui {
         });
     }
 
-    /// Write the Classic style values into the provided [`Style`] object.
+    /// Write the Classic style values into the provided [`crate::Style`] object.
     #[doc(alias = "StyleColorsClassic")]
     pub fn style_colors_classic_into(&self, dst: &mut crate::Style) {
         self.run_with_bound_context(|| unsafe {

@@ -1,5 +1,3 @@
-use build_support::binding::{ArtifactProfile, SourceRevisions};
-use build_support::{compose_archive_name, compose_manifest_bytes_with_profile};
 use flate2::{Compression, write::GzEncoder};
 use std::{
     env, fs,
@@ -71,53 +69,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let mut features = vec![
-        "platform-io-aggregate-hooks".to_string(),
-        "wchar32".to_string(),
-    ];
-    for (feature, enabled) in [
-        ("stack-layout", cfg!(feature = "stack-layout")),
-        ("freetype", cfg!(feature = "freetype")),
-        ("test-engine", cfg!(feature = "test-engine")),
-    ] {
-        if enabled {
-            features.push(feature.to_string());
-        }
-    }
-    features.sort_unstable();
-    features.dedup();
-
     let pkg_dir = PathBuf::from(
         env::var("IMGUI_SYS_PACKAGE_DIR").unwrap_or_else(|_| env!("OUT_DIR").to_string()),
     );
     fs::create_dir_all(&pkg_dir)?;
 
-    let has_freetype = cfg!(feature = "freetype");
-    let has_test_engine = cfg!(feature = "test-engine");
-    let has_stack_layout = cfg!(feature = "stack-layout");
-    let mut suffix = String::new();
-    if has_stack_layout {
-        suffix.push_str("-stack-layout");
-    }
-    if has_freetype {
-        suffix.push_str("-freetype");
-    }
-    if has_test_engine {
-        suffix.push_str("-test-engine");
-    }
-    let suffix = if suffix.is_empty() {
-        None
-    } else {
-        Some(suffix)
-    };
-    let ar_name = compose_archive_name(
-        "dear-imgui",
-        &crate_version,
-        &target,
-        link_type,
-        suffix.as_deref(),
-        crt,
-    );
+    let ar_name = include_str!(concat!(env!("OUT_DIR"), "/prebuilt-archive-name.txt")).trim();
 
     println!("Packaging dear-imgui prebuilt:");
     println!("  Target: {}", target);
@@ -132,7 +89,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Using sys build out dir: {}", sys_out.display());
 
     // Create tar.gz
-    let file = fs::File::create(pkg_dir.join(&ar_name))?;
+    let file = fs::File::create(pkg_dir.join(ar_name))?;
     let enc = GzEncoder::new(file, Compression::best());
     let mut tar = tar::Builder::new(enc);
 
@@ -205,20 +162,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Added lib: {}", lib_path.display());
 
     // Add simple manifest txt
-    let artifact_profile = ArtifactProfile::new(
-        "dear-imgui",
-        &crate_version,
-        &target,
-        link_type,
-        crt,
-        &features,
-        SourceRevisions::new(
-            env!("DEAR_IMGUI_CIMGUI_REVISION"),
-            env!("DEAR_IMGUI_IMGUI_REVISION"),
-        ),
-        env!("DEAR_IMGUI_BINDING_SPEC_HASH"),
-    );
-    let manifest_txt = compose_manifest_bytes_with_profile(&artifact_profile);
+    let manifest_txt = include_bytes!(concat!(env!("OUT_DIR"), "/prebuilt-manifest.txt"));
     let mut hdr = tar::Header::new_gnu();
     hdr.set_size(manifest_txt.len() as u64);
     hdr.set_mode(0o644);
@@ -226,7 +170,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tar.append_data(&mut hdr, "manifest.txt", manifest_txt.as_slice())?;
 
     tar.finish()?;
-    println!("Package created: {}", pkg_dir.join(&ar_name).display());
+    println!("Package created: {}", pkg_dir.join(ar_name).display());
     Ok(())
 }
 

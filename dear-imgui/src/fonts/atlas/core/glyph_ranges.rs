@@ -6,10 +6,7 @@ impl FontAtlas {
     /// Get default glyph ranges (Basic Latin + Latin Supplement)
     #[doc(alias = "GetGlyphRangesDefault")]
     pub fn get_glyph_ranges_default_ptr(&self) -> *const sys::ImWchar {
-        if self.raw.is_null() {
-            return std::ptr::null();
-        }
-        unsafe { sys::ImFontAtlas_GetGlyphRangesDefault(self.raw) }
+        unsafe { sys::ImFontAtlas_GetGlyphRangesDefault(self.raw()) }
     }
 
     /// Get default glyph ranges (Basic Latin + Latin Supplement)

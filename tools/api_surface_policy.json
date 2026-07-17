@@ -59,11 +59,13 @@
       ]
     },
     {
-      "classification": "deferred-design",
-      "name": "font-baked-lifetime",
-      "reason": "A safe ImFontBaked wrapper must tie atlas mutation, density, and context-owned lifetimes together.",
+      "classification": "unsafe-wrapper",
+      "name": "destructive-native-font-debug-ui",
+      "reason": "Upstream Demo, Metrics, and Style Editor font panels can mutate or delete atlas-owned fonts during the call and may continue using invalidated native pointers; the Rust wrappers therefore require an explicit unsafe precondition.",
       "functions": [
-        "GetFontBaked"
+        "ShowDemoWindow",
+        "ShowMetricsWindow",
+        "ShowStyleEditor"
       ]
     }
   ]

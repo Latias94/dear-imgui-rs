@@ -1,6 +1,6 @@
 fn setup_context() -> crate::Context {
     let mut ctx = crate::Context::create();
-    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.font_atlas().build();
     ctx.io_mut().set_display_size([128.0, 128.0]);
     ctx.io_mut().set_delta_time(1.0 / 60.0);
     ctx

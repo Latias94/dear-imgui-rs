@@ -1,7 +1,6 @@
 use std::marker::PhantomData;
 use std::rc::Rc;
 
-use crate::fonts::Font;
 use crate::sys;
 
 use super::state::{current_context_font_atlas, font_atlas_contains_font, font_atlas_state};
@@ -12,8 +11,8 @@ use super::state::{current_context_font_atlas, font_atlas_contains_font, font_at
 /// [`Ui::push_font`](crate::Ui::push_font), but it is not just a raw `ImFont*`.
 /// The handle records the originating atlas and atlas generation. Safe push
 /// APIs validate that the handle still belongs to the current context's atlas
-/// and has not been invalidated by [`FontAtlas::clear`],
-/// [`FontAtlas::clear_fonts`], or [`FontAtlas::remove_font`] before calling
+/// and has not been invalidated by [`crate::FontAtlas::clear`],
+/// [`crate::FontAtlas::clear_fonts`], or [`crate::FontAtlas::remove_font`] before calling
 /// Dear ImGui.
 #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
 pub struct FontId {
@@ -57,9 +56,8 @@ pub(crate) fn validate_font_id_for_current_context(id: FontId, caller: &str) -> 
     validate_font_id_for_atlas(id, atlas, caller)
 }
 
-pub(crate) fn validate_font_for_current_context(font: &Font, caller: &str) -> *mut sys::ImFont {
-    let atlas = current_context_font_atlas(caller);
-    validate_font_for_atlas(font, atlas, caller)
+pub(crate) fn validate_font_id(id: FontId, caller: &str) -> *mut sys::ImFont {
+    validate_font_id_for_atlas(id, id.atlas, caller)
 }
 
 pub(crate) fn validate_font_id_for_atlas(
@@ -86,25 +84,4 @@ pub(crate) fn validate_font_id_for_atlas(
         "{caller} received a FontId that is not present in the current font atlas"
     );
     id.raw
-}
-
-pub(crate) fn validate_font_for_atlas(
-    font: &Font,
-    atlas: *mut sys::ImFontAtlas,
-    caller: &str,
-) -> *mut sys::ImFont {
-    let raw = font.raw();
-    assert!(!raw.is_null(), "{caller} received a null font");
-    unsafe {
-        let owner = (*raw).OwnerAtlas;
-        assert!(
-            std::ptr::addr_eq(owner.cast_const(), atlas.cast_const()),
-            "{caller} received a font from a different font atlas"
-        );
-    }
-    assert!(
-        font_atlas_contains_font(atlas, raw),
-        "{caller} received a font that is not present in the current font atlas"
-    );
-    raw
 }

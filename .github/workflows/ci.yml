@@ -169,8 +169,45 @@ jobs:
       - name: Build examples (test-engine)
         run: cargo build -p dear-imgui-examples --features "test-engine" --bin imgui_test_engine_basic
 
+      - name: Check WGPU multi-viewport Test Engine smoke harness
+        run: cargo check -p dear-imgui-examples --features "multi-viewport,test-engine" --bin multi_viewport_wgpu
+
       - name: Check test-engine (no capture)
         run: cargo check -p dear-imgui-test-engine --no-default-features
+
+      - name: Check native-only features unified with the WASM feature on native targets
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+        run: |
+          cargo check -p dear-imgui-rs --lib --no-default-features --features wasm,stack-layout
+          cargo check -p dear-imgui-rs --lib --no-default-features --features wasm,test-engine
+          cargo check -p dear-imgui-rs --lib --no-default-features --features wasm,prebuilt
+
+      - name: Check unified prebuilt and test-engine source profile
+        shell: bash
+        run: |
+          set -euo pipefail
+          invalid_prebuilt="$RUNNER_TEMP/dear-imgui-invalid-prebuilt"
+          mkdir -p "$invalid_prebuilt"
+          : > "$invalid_prebuilt/libdear_imgui.a"
+          : > "$invalid_prebuilt/dear_imgui.lib"
+          IMGUI_SYS_LIB_DIR="$invalid_prebuilt" \
+            cargo check -p dear-imgui-rs --lib --no-default-features --features prebuilt,test-engine
+
+      - name: Reject packaging source-only test-engine hooks
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          cargo check -p dear-imgui-sys --no-default-features --features package-bin,test-engine 2>&1 | tee package-test-engine.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [[ "$status" -eq 0 ]]; then
+            echo "::error::dear-imgui-sys unexpectedly packaged source-only test-engine hooks"
+            exit 1
+          fi
+          grep -F 'feature `test-engine` is source-only and cannot be packaged as a prebuilt core artifact' package-test-engine.log
 
   binding-contract:
     name: Core binding contract
@@ -286,6 +323,12 @@ jobs:
 
       - name: Check exact WGPU route
         run: cargo check -p dear-imgui-wgpu --lib --no-default-features --features "${{ matrix.features }}"
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+
+      - name: Check opt-in WGPU tracing route
+        if: matrix.wgpu == '30' && matrix.platform == 'Winit'
+        run: cargo check -p dear-imgui-wgpu --lib --no-default-features --features wgpu-30,tracing
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
 
@@ -1306,6 +1349,38 @@ jobs:
           # Match rustc's literal backticks.
           # shellcheck disable=SC2016
           grep -F 'feature `stack-layout` is native-only and cannot be combined with WASM' wasm-stack-layout.log
+
+      - name: Reject native test-engine hooks on WASM
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          cargo check -p dear-imgui-rs --target wasm32-unknown-unknown --no-default-features --features wasm,test-engine 2>&1 | tee wasm-test-engine.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [[ "$status" -eq 0 ]]; then
+            echo "::error::dear-imgui-rs unexpectedly accepted WASM with native test-engine hooks"
+            exit 1
+          fi
+          # Match rustc's literal backticks.
+          # shellcheck disable=SC2016
+          grep -F 'feature `test-engine` is native source-only and cannot be combined with WASM' wasm-test-engine.log
+
+      - name: Reject native prebuilt artifacts on WASM
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          cargo check -p dear-imgui-rs --target wasm32-unknown-unknown --no-default-features --features wasm,prebuilt 2>&1 | tee wasm-prebuilt.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [[ "$status" -eq 0 ]]; then
+            echo "::error::dear-imgui-rs unexpectedly accepted WASM with native prebuilt artifacts"
+            exit 1
+          fi
+          # Match rustc's literal backticks.
+          # shellcheck disable=SC2016
+          grep -F 'feature `prebuilt` is native-only and cannot be combined with WASM' wasm-prebuilt.log
 
       - name: Generate WASM bindings for extensions (ImPlot/ImPlot3D/ImNodes/ImGuizmo/ImGuIZMO.quat)
         run: |

@@ -25,6 +25,26 @@ pub enum RendererError {
     #[error("Invalid render state: {0}")]
     InvalidRenderState(String),
 
+    /// The renderer has not been attached to a Dear ImGui context.
+    #[error("WGPU renderer is not bound to a Dear ImGui context")]
+    ContextNotBound,
+
+    /// The Dear ImGui context used to initialize the renderer has been dropped.
+    #[error("the Dear ImGui context bound to this WGPU renderer has been dropped")]
+    ContextDropped,
+
+    /// A context-taking operation received a context other than the renderer owner.
+    #[error("WGPU renderer received a different Dear ImGui context than its bound context")]
+    ContextMismatch,
+
+    /// A contextless render operation ran while another context was current.
+    #[error("the Dear ImGui context bound to this WGPU renderer is not current")]
+    ContextNotCurrent,
+
+    /// The context already has renderer-owned state that this renderer cannot claim safely.
+    #[error("Dear ImGui context is already configured for a renderer backend")]
+    ContextAlreadyHasRenderer,
+
     /// Renderer GPU state cannot change while multi-viewport callbacks are registered.
     #[error(
         "WGPU multi-viewport is active; shut it down before reinitializing or shutting down the renderer"

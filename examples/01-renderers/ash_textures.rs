@@ -472,7 +472,8 @@ impl AppWindow {
                 }
             });
 
-        ui.show_demo_window(&mut true);
+        // SAFETY: This demo assumes the destructive font-atlas controls are not activated.
+        unsafe { ui.show_demo_window(&mut true) };
 
         // Finalize inputs on platform and build draw data.
         self.imgui
@@ -642,7 +643,7 @@ impl ApplicationHandler for App {
 }
 
 fn main() {
-    dear_imgui_rs::logging::init_tracing_with_filter("dear_imgui=debug,ash_textures=info");
+    dear_imgui_examples::init_tracing_with_filter("dear_imgui=debug,ash_textures=info");
     info!("Starting Dear ImGui Ash Texture Example");
 
     let event_loop = EventLoop::new().unwrap();

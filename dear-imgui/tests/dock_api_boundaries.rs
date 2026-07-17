@@ -12,7 +12,7 @@ fn prepare_context(ctx: &mut imgui::Context) {
     io.set_delta_time(1.0 / 60.0);
     io.set_config_flags(io.config_flags() | imgui::ConfigFlags::DOCKING_ENABLE);
 
-    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.font_atlas().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 }
 

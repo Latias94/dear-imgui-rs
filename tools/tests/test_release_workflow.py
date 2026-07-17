@@ -725,6 +725,10 @@ class PrepublishTests(unittest.TestCase):
         self.assertEqual(stack_command[-2:], ["--test", "stack_layout_context"])
         self.assertIn("stack-layout", stack_command)
 
+        tracing_command = dict(commands)["dear-imgui-wgpu tracing"]
+        self.assertIn("--no-default-features", tracing_command)
+        self.assertEqual(tracing_command[-2:], ["--features", "wgpu-30,tracing"])
+
     def test_cargo_test_fallback_is_serial_for_every_profile(self):
         commands = PREPUBLISH.release_test_commands(use_nextest=False)
 

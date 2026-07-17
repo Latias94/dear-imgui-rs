@@ -55,9 +55,9 @@ impl GlyphRangesBuilder {
         }
     }
 
-    /// Add a range of characters
+    /// Adds inclusive character ranges.
     #[doc(alias = "AddRanges")]
-    pub fn add_ranges(&mut self, ranges: &[u32]) {
+    pub fn add_ranges(&mut self, ranges: &[(u32, u32)]) {
         if ranges.is_empty() {
             return;
         }
@@ -66,20 +66,29 @@ impl GlyphRangesBuilder {
         } else {
             0x10FFFF
         };
-        let mut tmp: Vec<sys::ImWchar> = Vec::with_capacity(ranges.len());
-        for &v in ranges {
+        let capacity = ranges
+            .len()
+            .checked_mul(2)
+            .and_then(|length| length.checked_add(1))
+            .expect("glyph range count overflowed usize");
+        let mut tmp: Vec<sys::ImWchar> = Vec::with_capacity(capacity);
+        for &(start, end) in ranges {
             assert!(
-                v <= IMWCHAR_MAX,
-                "glyph range value {v:#X} exceeded ImWchar max ({IMWCHAR_MAX:#X})"
+                start != 0,
+                "glyph range cannot start at the U+0000 terminator"
             );
-            let v = sys::ImWchar::try_from(v).unwrap_or_else(|_| {
-                panic!("glyph range value {v:#X} was not representable as ImWchar")
-            });
-            tmp.push(v);
+            assert!(
+                start <= end,
+                "glyph range start {start:#X} must not exceed end {end:#X}"
+            );
+            assert!(
+                end <= IMWCHAR_MAX,
+                "glyph range end {end:#X} exceeded ImWchar max ({IMWCHAR_MAX:#X})"
+            );
+            tmp.push(start as sys::ImWchar);
+            tmp.push(end as sys::ImWchar);
         }
-        if tmp.last().copied() != Some(0) {
-            tmp.push(0);
-        }
+        tmp.push(0);
         unsafe { sys::ImFontGlyphRangesBuilder_AddRanges(self.raw, tmp.as_ptr()) };
     }
 
@@ -136,14 +145,14 @@ mod tests {
     use super::*;
 
     #[allow(deprecated)]
-    fn build_ranges_from(input: &[u32]) -> Vec<u32> {
+    fn build_ranges_from(input: &[(u32, u32)]) -> Vec<u32> {
         let mut b = GlyphRangesBuilder::new();
         b.add_ranges(input);
         b.build_ranges()
     }
 
     #[allow(deprecated)]
-    fn add_ranges_expect_panic(input: &[u32]) {
+    fn add_ranges_expect_panic(input: &[(u32, u32)]) {
         let mut b = GlyphRangesBuilder::new();
         b.add_ranges(input);
     }
@@ -153,14 +162,20 @@ mod tests {
         if std::mem::size_of::<sys::ImWchar>() != 2 {
             return;
         }
-        let res = std::panic::catch_unwind(|| add_ranges_expect_panic(&[0x1_0000, 0]));
+        let res = std::panic::catch_unwind(|| add_ranges_expect_panic(&[(0x1_0000, 0x1_0001)]));
         assert!(res.is_err());
     }
 
     #[test]
-    fn add_ranges_appends_terminator_if_missing() {
-        let ranges = build_ranges_from(&[0x20, 0x7E]);
+    fn add_ranges_appends_terminator() {
+        let ranges = build_ranges_from(&[(0x20, 0x7E)]);
         assert_eq!(ranges.last().copied(), Some(0));
+    }
+
+    #[test]
+    fn add_ranges_rejects_reversed_or_zero_start_ranges() {
+        assert!(std::panic::catch_unwind(|| add_ranges_expect_panic(&[(0x7e, 0x20)])).is_err());
+        assert!(std::panic::catch_unwind(|| add_ranges_expect_panic(&[(0, 1)])).is_err());
     }
 
     #[test]
@@ -168,7 +183,7 @@ mod tests {
         if std::mem::size_of::<sys::ImWchar>() != 4 {
             return;
         }
-        let ranges = build_ranges_from(&[0x1_0000, 0x1_0001]);
+        let ranges = build_ranges_from(&[(0x1_0000, 0x1_0001)]);
         assert_eq!(ranges.last().copied(), Some(0));
         assert!(ranges.contains(&0x1_0000));
         assert!(ranges.contains(&0x1_0001));

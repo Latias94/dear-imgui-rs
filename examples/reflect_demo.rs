@@ -366,7 +366,7 @@ impl Application for ReflectApp {
 }
 
 fn main() {
-    dear_imgui_rs::logging::init_tracing_with_filter("dear_imgui=info,reflect_demo=info,wgpu=warn");
+    dear_imgui_examples::init_tracing_with_filter("dear_imgui=info,reflect_demo=info,wgpu=warn");
 
     let config = AppConfig {
         window_title: "Dear ImGui Reflect Demo".to_string(),

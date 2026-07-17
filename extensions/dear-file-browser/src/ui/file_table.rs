@@ -39,23 +39,18 @@ use super::apply_file_list_view_from_ui;
 #[cfg(test)]
 pub(in crate::ui) use columns::{ListColumnLayout, list_column_layout, merged_order_with_current};
 
-fn ellipsize_text<'a>(
-    font: &dear_imgui_rs::Font,
-    font_size: f32,
-    text: &'a str,
-    max_w: f32,
-) -> Cow<'a, str> {
+fn ellipsize_text<'a>(ui: &Ui, text: &'a str, max_w: f32) -> Cow<'a, str> {
     if max_w <= 1.0 || text.is_empty() {
         return Cow::Borrowed(text);
     }
 
-    let w = font.calc_text_size(font_size, f32::MAX, 0.0, text)[0];
+    let w = ui.calc_text_size(text)[0];
     if w <= max_w {
         return Cow::Borrowed(text);
     }
 
     let ell = "…";
-    let ell_w = font.calc_text_size(font_size, f32::MAX, 0.0, ell)[0];
+    let ell_w = ui.calc_text_size(ell)[0];
     if ell_w >= max_w {
         return Cow::Borrowed(ell);
     }
@@ -69,7 +64,7 @@ fn ellipsize_text<'a>(
     while lo < hi {
         let mid = (lo + hi + 1) / 2;
         let s = &text[..indices[mid]];
-        let sw = font.calc_text_size(font_size, f32::MAX, 0.0, s)[0];
+        let sw = ui.calc_text_size(s)[0];
         if sw <= target {
             lo = mid;
         } else {
@@ -699,7 +694,6 @@ fn draw_file_grid_view(
         .headers(false)
         .build(|ui| {
             let dl = ui.get_window_draw_list();
-            let font = ui.current_font();
             let font_size = ui.current_font_size();
 
             if ui.is_window_focused() && !ui.io().want_text_input() {
@@ -863,7 +857,7 @@ fn draw_file_grid_view(
                     let _font = visual.font_id.map(|id| ui.push_font(id));
                     {
                         let max_label_w = (item_max[0] - item_min[0] - pad_x * 2.0).max(0.0);
-                        let display_label = ellipsize_text(font, font_size, &label, max_label_w);
+                        let display_label = ellipsize_text(ui, &label, max_label_w);
                         dl.with_clip_rect(label_min, label_max, || {
                             dl.add_text(text_pos, col, display_label.as_ref());
                         });

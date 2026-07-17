@@ -48,7 +48,7 @@ impl<'ui> TableBuilder<'ui> {
         self
     }
 
-    /// Set outer size (width, height). Default [0,0]
+    /// Set outer size (width, height). Default `[0, 0]`.
     pub fn outer_size(mut self, size: [f32; 2]) -> Self {
         self.outer_size = size;
         self

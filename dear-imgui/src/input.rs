@@ -4,7 +4,7 @@
 //! keys used by Dear ImGui. Backends typically translate platform events into
 //! these enums when feeding input into `Io`.
 //!
-//! See [`io`] for the per-frame input state and configuration.
+//! See [`crate::Io`] for the per-frame input state and configuration.
 //!
 #![allow(
     clippy::cast_possible_truncation,

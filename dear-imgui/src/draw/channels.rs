@@ -49,7 +49,7 @@ mod channels_tests {
             io.set_display_size([128.0, 128.0]);
             io.set_delta_time(1.0 / 60.0);
         }
-        let _ = ctx.font_atlas_mut().build();
+        let _ = ctx.font_atlas().build();
         let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 
         let ui = ctx.frame();
@@ -82,7 +82,7 @@ mod channels_tests {
             io.set_display_size([128.0, 128.0]);
             io.set_delta_time(1.0 / 60.0);
         }
-        let _ = ctx.font_atlas_mut().build();
+        let _ = ctx.font_atlas().build();
         let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 
         let ui = ctx.frame();

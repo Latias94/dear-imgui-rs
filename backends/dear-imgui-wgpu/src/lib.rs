@@ -10,6 +10,7 @@
 //!   - `wgpu-29`
 //!   - `wgpu-28`
 //!   - `wgpu-27` (for ecosystems pinned to wgpu 27.x, e.g. some Bevy version trains)
+//! - **Diagnostics**: `tracing` emits renderer debug and warning events and is off by default
 //! - **Modern texture management**: Full integration with Dear ImGui's ImTextureData system
 //! - **External textures**: Register existing `wgpu::Texture` resources for UI display,
 //!   with optional per-texture custom samplers.
@@ -22,20 +23,16 @@
 //!
 //! ```rust,no_run
 //! use dear_imgui_rs::Context;
-//! use dear_imgui_wgpu::{WgpuRenderer, WgpuInitInfo};
-//! use wgpu::*;
+//! use dear_imgui_wgpu::{WgpuRenderer, WgpuInitInfo, wgpu};
 //!
-//! // Initialize WGPU device and queue
-//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-//! let instance = Instance::new(&InstanceDescriptor::default());
-//! let adapter = instance.request_adapter(&RequestAdapterOptions::default()).await.unwrap();
-//! let (device, queue) = adapter.request_device(&DeviceDescriptor::default()).await?;
+//! # fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! # let (device, queue) = todo!("initialize a WGPU Device/Queue");
 //!
 //! // Create Dear ImGui context
 //! let mut imgui = Context::create();
 //!
 //! // Create renderer (recommended path)
-//! let init_info = WgpuInitInfo::new(device, queue, TextureFormat::Bgra8UnormSrgb);
+//! let init_info = WgpuInitInfo::new(device, queue, wgpu::TextureFormat::Bgra8UnormSrgb);
 //! let mut renderer = WgpuRenderer::new(init_info, &mut imgui)?;
 //!
 //! // In your render loop:
@@ -205,6 +202,26 @@ pub extern crate wgpu28 as wgpu;
 pub extern crate wgpu29 as wgpu;
 #[cfg(feature = "wgpu-30")]
 pub extern crate wgpu30 as wgpu;
+
+#[cfg(feature = "tracing")]
+macro_rules! backend_debug {
+    ($($arg:tt)*) => { tracing::debug!($($arg)*); };
+}
+
+#[cfg(not(feature = "tracing"))]
+macro_rules! backend_debug {
+    ($($arg:tt)*) => {};
+}
+
+#[cfg(feature = "tracing")]
+macro_rules! backend_warn {
+    ($($arg:tt)*) => { tracing::warn!($($arg)*); };
+}
+
+#[cfg(not(feature = "tracing"))]
+macro_rules! backend_warn {
+    ($($arg:tt)*) => {};
+}
 
 // Module declarations
 mod data;

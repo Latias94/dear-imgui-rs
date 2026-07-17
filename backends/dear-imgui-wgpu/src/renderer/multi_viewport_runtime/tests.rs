@@ -71,6 +71,11 @@ unsafe fn install_test_renderer(
         context.platform_io_mut(),
         dear_imgui_rs::sys::HAS_PLATFORM_IO_AGGREGATE_HOOKS,
     )?;
+    if renderer.context_binding.is_none() {
+        renderer
+            .bind_context(context, BackendFlags::empty())
+            .expect("test renderer should bind to its registration context");
+    }
     insert_renderer_state(raw_context, renderer, None);
     renderer
         .multi_viewport_active
@@ -598,14 +603,14 @@ fn renderer_lifecycle_mutation_is_blocked_until_runtime_shutdown() {
     let io = context.io_mut();
     io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_VIEWPORTS);
     assert!(matches!(
-        renderer.shutdown(),
+        renderer.shutdown(&mut context),
         Err(crate::RendererError::MultiViewportActive)
     ));
     assert!(has_renderer_state(raw));
     disable_after_platform_shutdown(&mut context);
     assert!(!renderer.multi_viewport_active.load(Ordering::Acquire));
     assert!(renderer.ensure_multi_viewport_inactive().is_ok());
-    assert!(renderer.shutdown().is_ok());
+    assert!(renderer.shutdown(&mut context).is_ok());
     assert!(!has_renderer_state(raw));
     assert!(
         !context

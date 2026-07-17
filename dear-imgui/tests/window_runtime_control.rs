@@ -16,7 +16,7 @@ fn window_runtime_control_helpers_no_panic() {
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
     }
-    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.font_atlas().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 
     let ui = ctx.frame();
@@ -46,7 +46,7 @@ fn window_runtime_control_rejects_non_finite_geometry_before_ffi() {
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
     }
-    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.font_atlas().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 
     let ui = ctx.frame();

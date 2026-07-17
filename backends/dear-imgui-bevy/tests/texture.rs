@@ -51,7 +51,7 @@ fn app_with_render_world() -> App {
     let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
     let ctx = context.context_mut();
     ctx.io_mut().set_config_input_trickle_event_queue(false);
-    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.font_atlas().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 
     app

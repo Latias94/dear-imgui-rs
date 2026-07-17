@@ -39,7 +39,7 @@ fn app_with_primary_window() -> App {
         .expect("ImguiPlugin should install an ImGui context");
     let ctx = context.context_mut();
     ctx.io_mut().set_config_input_trickle_event_queue(false);
-    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.font_atlas().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 
     app
@@ -62,7 +62,7 @@ fn app_with_primary_window_and_config(config: ImguiBackendConfig) -> App {
         .expect("ImguiPlugin should install an ImGui context");
     let ctx = context.context_mut();
     ctx.io_mut().set_config_input_trickle_event_queue(false);
-    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.font_atlas().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 
     app
@@ -337,7 +337,7 @@ fn lifecycle_multi_viewport_request_advertises_viewports_after_render_app_instal
             .expect("ImguiPlugin should install an ImGui context");
         let ctx = context.context_mut();
         ctx.io_mut().set_config_input_trickle_event_queue(false);
-        let _ = ctx.font_atlas_mut().build();
+        let _ = ctx.font_atlas().build();
         let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     }
 

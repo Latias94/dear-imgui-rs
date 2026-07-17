@@ -5,9 +5,6 @@
 
 use thiserror::Error;
 
-#[cfg(feature = "tracing")]
-use tracing::{debug, error, warn};
-
 /// Result type for Dear ImGui operations
 pub type ImGuiResult<T> = Result<T, ImGuiError>;
 
@@ -59,64 +56,48 @@ impl ImGuiError {
     /// Create a context creation error
     pub fn context_creation(reason: impl Into<String>) -> Self {
         let reason = reason.into();
-        #[cfg(feature = "tracing")]
-        error!("Context creation failed: {}", reason);
         Self::ContextCreation { reason }
     }
 
     /// Create an invalid operation error
     pub fn invalid_operation(operation: impl Into<String>) -> Self {
         let operation = operation.into();
-        #[cfg(feature = "tracing")]
-        warn!("Invalid operation: {}", operation);
         Self::InvalidOperation { operation }
     }
 
     /// Create a resource allocation error
     pub fn resource_allocation(resource: impl Into<String>) -> Self {
         let resource = resource.into();
-        #[cfg(feature = "tracing")]
-        error!("Resource allocation failed: {}", resource);
         Self::ResourceAllocation { resource }
     }
 
     /// Create a font loading error
     pub fn font_loading(reason: impl Into<String>) -> Self {
         let reason = reason.into();
-        #[cfg(feature = "tracing")]
-        error!("Font loading failed: {}", reason);
         Self::FontLoading { reason }
     }
 
     /// Create a texture operation error
     pub fn texture_operation(operation: impl Into<String>) -> Self {
         let operation = operation.into();
-        #[cfg(feature = "tracing")]
-        error!("Texture operation failed: {}", operation);
         Self::TextureOperation { operation }
     }
 
     /// Create an IO operation error
     pub fn io_operation(operation: impl Into<String>) -> Self {
         let operation = operation.into();
-        #[cfg(feature = "tracing")]
-        warn!("IO operation failed: {}", operation);
         Self::IoOperation { operation }
     }
 
     /// Create a configuration error
     pub fn configuration(setting: impl Into<String>) -> Self {
         let setting = setting.into();
-        #[cfg(feature = "tracing")]
-        warn!("Configuration error: {}", setting);
         Self::Configuration { setting }
     }
 
     /// Create a generic error
     pub fn generic(message: impl Into<String>) -> Self {
         let message = message.into();
-        #[cfg(feature = "tracing")]
-        debug!("Generic error: {}", message);
         Self::Generic { message }
     }
 }

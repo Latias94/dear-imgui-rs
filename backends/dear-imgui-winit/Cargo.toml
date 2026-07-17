@@ -14,7 +14,6 @@ keywords.workspace = true
 [dependencies]
 dear-imgui-rs.workspace = true
 winit.workspace = true
-#cfg-if.workspace = true
 
 # WASM-specific dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]

@@ -19,7 +19,7 @@ pub(crate) fn tls_scratch_txt(txt: impl AsRef<str>) -> *const c_char {
 /// Calls `f` with a temporary, NUL-terminated C string pointer backed by a thread-local scratch buffer.
 ///
 /// The pointer is only valid for the duration of the call (and will be overwritten by subsequent
-/// scratch-string operations on the same thread). Like [`tls_scratch_txt`], this is not re-entrant.
+/// scratch-string operations on the same thread). Like `tls_scratch_txt`, this is not re-entrant.
 pub fn with_scratch_txt<R>(txt: impl AsRef<str>, f: impl FnOnce(*const c_char) -> R) -> R {
     TLS_SCRATCH.with(|buf| {
         let mut buf = buf.borrow_mut();

@@ -22,7 +22,6 @@ dear-implot-sys.workspace = true
 dear-imgui-sys.workspace = true
 #mint.workspace = true
 #parking_lot.workspace = true
-#cfg-if.workspace = true
 #thiserror.workspace = true
 
 [features]

@@ -7,6 +7,7 @@ use crate::sys;
 
 use super::Context;
 use super::binding::{CTX_MUTEX, clear_current_context, no_current_context};
+use super::frame::FrameLifecycleState;
 
 impl Context {
     /// Suspends this context so another context can be the active context
@@ -15,6 +16,11 @@ impl Context {
         assert!(
             self.is_current_context(),
             "context to be suspended is not the active context"
+        );
+        assert_ne!(
+            self.frame_lifecycle_state_unlocked(),
+            FrameLifecycleState::InFrame,
+            "cannot suspend a context while a Dear ImGui frame is open"
         );
         clear_current_context();
         SuspendedContext(self)
@@ -54,20 +60,31 @@ impl SuspendedContext {
     // removed legacy create_or_panic variants (use create()/try_create())
 
     fn try_create_internal(
-        mut shared_font_atlas: Option<SharedFontAtlas>,
+        shared_font_atlas: Option<SharedFontAtlas>,
     ) -> crate::error::ImGuiResult<Self> {
         let _guard = CTX_MUTEX.lock();
+        let previous_context = unsafe { sys::igGetCurrentContext() };
 
-        let shared_font_atlas_ptr = match &mut shared_font_atlas {
-            Some(atlas) => atlas.as_ptr_mut(),
+        let shared_font_atlas_ptr = match &shared_font_atlas {
+            Some(atlas) => atlas.as_ptr(),
             None => ptr::null_mut(),
         };
 
         let raw = unsafe { sys::igCreateContext(shared_font_atlas_ptr) };
         if raw.is_null() {
+            unsafe { sys::igSetCurrentContext(previous_context) };
             return Err(crate::error::ImGuiError::ContextCreation {
                 reason: "ImGui_CreateContext returned null".to_string(),
             });
+        }
+
+        unsafe {
+            let io = sys::igGetIO_ContextPtr(raw);
+            assert!(
+                !io.is_null(),
+                "new ImGui context returned a null IO pointer"
+            );
+            crate::fonts::register_font_atlas_context((*io).Fonts, raw);
         }
 
         let alive = Rc::new(());
@@ -85,9 +102,10 @@ impl SuspendedContext {
             ui,
         };
 
-        // If the context was activated during creation, deactivate it
-        if ctx.is_current_context() {
+        if previous_context.is_null() {
             clear_current_context();
+        } else {
+            unsafe { sys::igSetCurrentContext(previous_context) };
         }
 
         Ok(SuspendedContext(ctx))

@@ -9,17 +9,17 @@ use dear_imgui_rs::Context;
 use dear_imgui_wgpu::{WgpuRenderer, WgpuInitInfo, GammaMode};
 
 // device, queue, surface_format prepared ahead
+let mut imgui = Context::create();
 let mut renderer = WgpuRenderer::new(WgpuInitInfo::new(device, queue, surface_format), &mut imgui)?;
 
 // Optional: unify gamma policy across backends
 renderer.set_gamma_mode(GammaMode::Auto); // Auto | Linear | Gamma22
 
 // per-frame
-renderer.render_draw_data(&imgui.render(), &mut render_pass)?;
+renderer.render_draw_data(imgui.render(), &mut render_pass)?;
 ```
 
-For multi-context applications, use `render_context()` or `render_context_with_fb_size()` so
-draw callbacks read `Renderer_RenderState` from the matching ImGui context's `PlatformIO`.
+Each `WgpuRenderer` is bound to the `Context` passed to `new` or `init_with_context`. Create one renderer per context in multi-context applications. `render_context()` and `render_context_with_fb_size()` finalize only that bound context and return `RendererError::ContextMismatch` for another context. The draw-data entry points likewise use the bound context's `PlatformIO` and require that context to be current.
 
 ## Native multi-viewport
 
@@ -73,43 +73,48 @@ that already exist, and prevents one renderer from backing multiple ImGui contex
 registered, do not move, reinitialize, shut down, concurrently access, or drop the renderer, and
 do not replace viewport `RendererUserData`.
 
+From a repository checkout, run the native Winit/WGPU Test Engine smoke to move a window into a real secondary OS viewport, render its surface, merge it back, and verify ordered teardown. `test-engine` is source-only, so this command intentionally builds Dear ImGui from source:
+
+```bash
+DEAR_IMGUI_VIEWPORT_SMOKE=1 cargo run -p dear-imgui-examples --bin multi_viewport_wgpu --features "multi-viewport test-engine"
+```
+
 Shut down in ownership order:
 
 ```rust,no_run
 # use dear_imgui_rs::Context;
 # use dear_imgui_wgpu::multi_viewport as wgpu_mvp;
 # use dear_imgui_winit::multi_viewport as winit_mvp;
-# fn shutdown(imgui: &mut Context) -> Result<(), wgpu_mvp::CallbackOwnershipError> {
+# use dear_imgui_wgpu::WgpuRenderer;
+# fn shutdown(renderer: &mut WgpuRenderer, imgui: &mut Context) -> Result<(), Box<dyn std::error::Error>> {
 wgpu_mvp::shutdown_multi_viewport_support(imgui)?;
+renderer.shutdown(imgui)?;
 winit_mvp::shutdown_multi_viewport_support(imgui);
 # Ok(())
 # }
 ```
 
-The renderer helper destroys secondary windows before releasing renderer resources and clears only
-the callback slots it still owns. Explicit shutdown is required before the renderer, context,
-platform backend, windows, instance, adapter, device, or queue is dropped. `WgpuRenderer::shutdown`
-and renderer reinitialization return an error while the viewport runtime is active.
+The renderer helper destroys secondary windows before releasing renderer resources and clears only the callback slots it still owns. Explicit shutdown is required before the renderer, context, platform backend, windows, instance, adapter, device, or queue is dropped. `WgpuRenderer::shutdown` requires the matching context so GPU resources and managed texture IDs are invalidated together; shutdown and renderer reinitialization return an error while the viewport runtime is active. Shut down before dropping the bound context. The renderer retains a context liveness token and remains on the context's UI thread.
 
 ## Selecting wgpu version
 
-`dear-imgui-wgpu` 0.16.0 defaults to WGPU 30.
+The current `main` branch, which is targeting the unpublished 0.16.0 release, defaults to WGPU 30.
 
 If your ecosystem is pinned to `wgpu` v29, v28, or v27, select it explicitly:
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { version = "0.16.0", default-features = false, features = ["wgpu-29"] }
+dear-imgui-wgpu = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", default-features = false, features = ["wgpu-29"] }
 ```
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { version = "0.16.0", default-features = false, features = ["wgpu-28"] }
+dear-imgui-wgpu = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", default-features = false, features = ["wgpu-28"] }
 ```
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { version = "0.16.0", default-features = false, features = ["wgpu-27"] }
+dear-imgui-wgpu = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", default-features = false, features = ["wgpu-27"] }
 ```
 
 ## What You Get
@@ -128,7 +133,7 @@ dear-imgui-wgpu = { version = "0.16.0", default-features = false, features = ["w
 
 | Track | wgpu support |
 |-------|--------------|
-| 0.16.0 | 30 (default), 29 (`wgpu-29`), 28 (`wgpu-28`), 27 (`wgpu-27`) |
+| `main` (unpublished 0.16.0) | 30 (default), 29 (`wgpu-29`), 28 (`wgpu-28`), 27 (`wgpu-27`) |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 
@@ -146,6 +151,8 @@ See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob
   - `wgpu-29`
   - `wgpu-28`
   - `wgpu-27`
+- Diagnostics
+  - `tracing` enables renderer debug and warning events; it is off by default
 - WASM targets
   - `webgl` / `webgpu` select the WASM route for the default `wgpu-30` build
   - With `wgpu-29`, use `webgl-wgpu29` / `webgpu-wgpu29` instead

@@ -23,6 +23,8 @@ use winit::{
     window::{Window, WindowId},
 };
 
+#[path = "../support/font_validation.rs"]
+mod font_validation;
 #[path = "../support/wgpu_init.rs"]
 mod wgpu_init;
 
@@ -31,41 +33,39 @@ mod wgpu_init;
 /// - Always ensure a default font is present.
 /// - If a CJK font is available under `examples/assets`, merge it so IME
 ///   input (e.g. Chinese/Japanese) renders instead of showing `?`.
-fn try_merge_noto_sans_sc(context: &mut Context) -> Result<(), String> {
+/// Load the example's optional, application-controlled CJK font asset.
+///
+/// # Safety
+///
+/// `examples/assets/NotoSansSC-Regular.ttf` must be trusted application data that remains valid
+/// for the selected native loader. Structural validation rejects malformed containers before the
+/// font bytes cross the FFI boundary, but it cannot make an untrusted asset safe to load.
+unsafe fn try_merge_noto_sans_sc(context: &mut Context) -> Result<(), String> {
     let path = "examples/assets/NotoSansSC-Regular.ttf";
     let data = std::fs::read(path).map_err(|e| format!("Failed to read {} ({}).", path, e))?;
 
-    // Minimal sanity check: classic TrueType header (0x00010000) or 'true'.
-    if data.len() < 4 {
-        return Err(format!("{} is too small to be a valid TTF.", path));
-    }
-    let tag = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
-    const TAG_TRUE: u32 = 0x7472_7565; // 'true'
-    if !(tag == 0x0001_0000 || tag == TAG_TRUE) {
-        return Err(format!(
-            "{} does not look like a TrueType font (unexpected header).",
-            path
-        ));
-    }
+    let loader = if cfg!(feature = "freetype") {
+        font_validation::LoaderKind::FreeType
+    } else {
+        font_validation::LoaderKind::StbTrueType
+    };
+    font_validation::validate_font_data(&data, loader)
+        .map_err(|error| format!("{} is not a supported CJK font: {error}", path))?;
 
-    let mut fonts = context.fonts();
+    let fonts = context.font_atlas();
     let cfg = FontConfig::new().size_pixels(18.0).merge_mode(true);
-    let _id = fonts.add_font(&[FontSource::TtfData {
-        data: &data,
-        size_pixels: Some(18.0),
-        config: Some(cfg),
-    }]);
+    // SAFETY: upheld by this function's explicit trusted-font precondition after structural
+    // validation confirmed a representation accepted by the selected loader.
+    let source = unsafe { FontSource::ttf_data_with_size(&data, 18.0) }.with_config(cfg);
+    let _id = fonts.add_font(&[source]);
     Ok(())
 }
 
 fn init_fonts(context: &mut Context) -> bool {
-    let mut fonts = context.fonts();
+    let fonts = context.font_atlas();
 
     // Make sure we have a default Latin font.
-    fonts.add_font(&[FontSource::DefaultFontData {
-        size_pixels: Some(16.0),
-        config: None,
-    }]);
+    fonts.add_font(&[FontSource::default_font_with_size(16.0)]);
 
     // Optional debug mode: skip the initial CJK merge so we can reproduce/test runtime merging.
     // If you render CJK before merging, Dear ImGui may cache "missing glyph" results in baked
@@ -79,7 +79,9 @@ fn init_fonts(context: &mut Context) -> bool {
 
     // Optional: merge a CJK font if present.
     // If the file is missing or invalid, we skip it and keep ASCII-only rendering.
-    match try_merge_noto_sans_sc(context) {
+    // SAFETY: this example treats its fixed asset path as trusted application data. Do not copy
+    // this pattern for files supplied by an untrusted user.
+    match unsafe { try_merge_noto_sans_sc(context) } {
         Ok(()) => true,
         Err(msg) => {
             eprintln!(
@@ -120,7 +122,9 @@ impl AppWindow {
             return;
         }
 
-        match try_merge_noto_sans_sc(&mut self.imgui.context) {
+        // SAFETY: this example treats its fixed asset path as trusted application data. Do not
+        // pass untrusted font files to the native loader.
+        match unsafe { try_merge_noto_sans_sc(&mut self.imgui.context) } {
             Ok(()) => {
                 self.cjk_merged = true;
                 self.font_status = "[OK] CJK font merged (runtime)".to_string();

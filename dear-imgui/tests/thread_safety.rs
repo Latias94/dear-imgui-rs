@@ -7,11 +7,14 @@ fn thread_safety_context_and_render_markers() {
     // Context must NOT be Send/Sync
     assert_not_impl_any!(dear_imgui_rs::Context: Send, Sync);
 
-    // Font and FontAtlas must NOT be Send/Sync
-    assert_not_impl_any!(dear_imgui_rs::Font: Send, Sync);
+    // Font handles and FontAtlas must NOT be Send/Sync
     assert_not_impl_any!(dear_imgui_rs::FontAtlas: Send, Sync);
-    assert_not_impl_any!(dear_imgui_rs::FontAtlasRef<'static>: Send, Sync);
+    assert_not_impl_any!(dear_imgui_rs::SharedFontAtlas: Send, Sync);
     assert_not_impl_any!(dear_imgui_rs::FontId: Send, Sync);
+    assert_not_impl_any!(dear_imgui_rs::BakedFont<'static>: Send, Sync);
+    assert_not_impl_any!(dear_imgui_rs::CustomRectId: Send, Sync);
+    assert_not_impl_any!(dear_imgui_rs::CustomRectSnapshot<'static>: Send, Sync);
+    assert_not_impl_any!(dear_imgui_rs::FontAtlasTexture<'static>: Send, Sync);
 
     // OwnedDrawData must NOT be Send/Sync (retains shared textures list pointer)
     assert_not_impl_any!(dear_imgui_rs::render::draw_data::OwnedDrawData: Send, Sync);
@@ -53,6 +56,7 @@ fn thread_safety_core_scope_tokens_are_ui_bound() {
     assert_not_impl_any!(dear_imgui_rs::GroupToken<'static>: Send, Sync);
     assert_not_impl_any!(dear_imgui_rs::ClipRectToken<'static>: Send, Sync);
     assert_not_impl_any!(dear_imgui_rs::ListClipperToken<'static>: Send, Sync);
+    assert_not_impl_any!(dear_imgui_rs::UnknownCountListClipperToken<'static>: Send, Sync);
     assert_not_impl_any!(dear_imgui_rs::DragDropSourceTooltip<'static>: Send, Sync);
     assert_not_impl_any!(dear_imgui_rs::DragDropTarget<'static>: Send, Sync);
 

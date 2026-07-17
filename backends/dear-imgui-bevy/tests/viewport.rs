@@ -71,7 +71,7 @@ fn app_with_multi_viewport_bridge(name: &str) -> App {
     }));
     {
         let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
-        let _ = context.context_mut().font_atlas_mut().build();
+        let _ = context.context_mut().font_atlas().build();
     }
     app
 }
@@ -161,7 +161,7 @@ fn ensure_primary_window(app: &mut App) -> Entity {
             .id()
     });
     if let Some(mut context) = app.world_mut().get_non_send_mut::<ImguiContext>() {
-        let _ = context.context_mut().font_atlas_mut().build();
+        let _ = context.context_mut().font_atlas().build();
     }
     entity
 }
@@ -606,7 +606,7 @@ fn viewport_platform_feedback_queries_return_mapped_bevy_window_state() {
     app.world_mut().spawn((Window::default(), PrimaryWindow));
     {
         let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
-        let _ = context.context_mut().font_atlas_mut().build();
+        let _ = context.context_mut().font_atlas().build();
     }
 
     let id = imgui::Id::from(0x201);

@@ -85,7 +85,7 @@ The safe API intentionally encodes Dear ImGui FFI invariants in Rust types. Sour
 accepted when the previous safe wrapper shape could preserve stale handles, unchecked sizes,
 invalid sentinels, wrong-context access, or other states that should remain outside safe Rust.
 
-Version 0.16.0 is an intentionally breaking architecture release. The main migrations are:
+Version 0.16.0 is the next, intentionally breaking architecture release and has not been published yet. The main migrations are:
 
 - legacy Columns to Tables and imperative `DockBuilder` code to declarative `DockLayout`;
 - global reflection helpers to an owned `ReflectSession` and per-frame `Inspector`;
@@ -94,7 +94,7 @@ Version 0.16.0 is an intentionally breaking architecture release. The main migra
 - implicit WASM target selection to the explicit `wasm32-unknown-unknown` plus `wasm` feature contract; and
 - `dear_imgui_sys::IMGUI_VERSION` to `BINDING_VERSION`, without a compatibility alias.
 
-The complete before/after examples and callback ABI notes are in the [0.16.0 changelog](CHANGELOG.md#0160---2026-07-10).
+The complete before/after examples and callback ABI notes are in the [0.16.0 changelog](CHANGELOG.md#0160).
 
 ## Examples
 
@@ -172,23 +172,25 @@ cargo run --bin file_browser_imgui --features file-browser
 
 ## Installation
 
+The latest crates.io release is `0.15.1`; use the [v0.15.1 README](https://github.com/Latias94/dear-imgui-rs/blob/v0.15.1/README.md) for its API and installation snippets. This main-branch README documents the unreleased `0.16.0` API, so the examples below use Git dependencies until that release is published.
+
 ### Core + Backends
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.16.0"
+dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
 # Choose a backend + platform integration
-dear-imgui-wgpu = "0.16.0"   # or dear-imgui-glow / dear-imgui-ash
-dear-imgui-winit = "0.16.0"  # or dear-imgui-sdl3
+dear-imgui-wgpu = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }  # or dear-imgui-glow / dear-imgui-ash
+dear-imgui-winit = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" } # or dear-imgui-sdl3
 ```
 
-`dear-imgui-wgpu` 0.16.0 defaults to WGPU 30. WGPU 29, 28, and 27 remain available as separate, mutually exclusive compatibility features:
+The upcoming `dear-imgui-wgpu` 0.16.0 defaults to WGPU 30. WGPU 29, 28, and 27 remain available as separate, mutually exclusive compatibility features:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.16.0"
-dear-imgui-wgpu = { version = "0.16.0", default-features = false, features = ["wgpu-29"] }
-dear-imgui-winit = "0.16.0"
+dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
+dear-imgui-wgpu = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", default-features = false, features = ["wgpu-29"] }
+dear-imgui-winit = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
 ```
 
 Replace `wgpu-29` with `wgpu-28` or `wgpu-27` when integrating an older WGPU application.
@@ -197,7 +199,7 @@ Replace `wgpu-29` with `wgpu-28` or `wgpu-27` when integrating an older WGPU app
 
 ```toml
 [dependencies]
-dear-app = "0.16.0"  # State-owning Winit + WGPU runtime with docking support
+dear-app = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" } # State-owning Winit + WGPU runtime with docking support
 ```
 
 ### Apple Platform Examples
@@ -234,8 +236,8 @@ Example: low-level Android route without a dedicated Android convenience crate:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.16.0"
-dear-imgui-sys = { version = "0.16.0", features = ["backend-shim-android", "backend-shim-opengl3"] }
+dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
+dear-imgui-sys = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", features = ["backend-shim-android", "backend-shim-opengl3"] }
 ```
 
 Recommended ownership split:
@@ -265,25 +267,25 @@ assembly.
 ```toml
 [dependencies]
 # Plotting
-dear-implot = "0.16.0"      # 2D plotting
-dear-implot3d = "0.16.0"    # 3D plotting
+dear-implot = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }   # 2D plotting
+dear-implot3d = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" } # 3D plotting
 
 # 3D Gizmos
-dear-imguizmo = "0.16.0"         # Standard 3D gizmo + GraphEditor
-dear-imguizmo-quat = "0.16.0"    # Quaternion-based gizmo
+dear-imguizmo = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }      # Standard 3D gizmo + GraphEditor
+dear-imguizmo-quat = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" } # Quaternion-based gizmo
 
 # Node Editor
-dear-imnodes = "0.16.0"
-dear-node-editor = "0.16.0"  # native-only; add feature "blueprints" for stack layout
+dear-imnodes = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
+dear-node-editor = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" } # native-only; add feature "blueprints" for stack layout
 
 # Test automation
-dear-imgui-test-engine = "0.16.0"
+dear-imgui-test-engine = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
 
 # File Browser
-dear-file-browser = "0.16.0"  # Native dialogs + ImGui file browser
+dear-file-browser = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" } # Native dialogs + ImGui file browser
 
 # Reflection-based UI helpers
-dear-imgui-reflect = "0.16.0"
+dear-imgui-reflect = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
 ```
 
 ### Reflection-based UI (dear-imgui-reflect)
@@ -318,12 +320,13 @@ fn ui_frame(
 - Default: build from source on all platforms. Prebuilt binaries are optional and off by default.
 - Source builds from a repository checkout require initialized submodules because the native C/C++ sources live under `dear-imgui-sys/third-party/cimgui` and extension `third-party/` directories. Use `git clone --recursive ...` for a fresh checkout, or `git submodule update --init --recursive` inside an existing checkout.
 - Windows core packages cover both MSVC CRT modes (MD/MT), with optional `freetype` and a distinct `stack-layout` artifact profile. Linux and macOS core archives are also eligible for opt-in release download on their supported targets; source builds remain the default everywhere.
-- Opt-in core prebuilt download from Release: enable `dear-imgui-sys/prebuilt` (the env toggle `IMGUI_SYS_USE_PREBUILT=1` is still accepted but requires that feature). `IMGUI_SYS_LIB_DIR` points to the static-library directory and requires its matching `manifest.txt` there or in the parent artifact root, while `IMGUI_SYS_PREBUILT_URL` should point to a package-tool-generated archive. Bare core `.a`/`.lib` files without adjacent provenance are rejected.
+- Opt-in core prebuilt download from Release: enable `dear-imgui-rs/prebuilt`, or `dear-imgui-sys/prebuilt` when depending on the low-level crate directly (the env toggle `IMGUI_SYS_USE_PREBUILT=1` is still accepted but requires that feature). `IMGUI_SYS_LIB_DIR` points to the static-library directory and requires its matching `manifest.txt` there or in the parent artifact root, while `IMGUI_SYS_PREBUILT_URL` should point to a package-tool-generated archive. Bare core `.a`/`.lib` files without adjacent provenance are rejected.
 - Every accepted core prebuilt manifest records crate/version, target, link type, MSVC CRT, normalized features, cimgui and Dear ImGui revisions, and the binding-spec hash. Missing, unknown, duplicate, or mismatched fields reject the core artifact instead of falling back to an ABI guess. Extension `*-sys` crates retain their crate-specific prebuilt contracts.
 
 Test engine hooks (important):
 
 - Enabling `dear-imgui-sys/test-engine` defines `IMGUI_ENABLE_TEST_ENGINE` and makes the ImGui objects reference hook symbols (e.g. `ImGuiTestEngineHook_*`).
+  - Test-engine hooks are native source-only: the feature implies `build-from-source`, takes precedence if Cargo also unifies `prebuilt`, and is rejected for the WASM import provider.
   - When enabled, `dear-imgui-sys` also provides the hook symbols, so workspace feature-unification won't cause linker errors.
   - To actually run UI automation/tests, link `dear-imgui-test-engine` (or `dear-imgui-test-engine-sys`), which registers the real hook implementations at runtime.
 
@@ -344,13 +347,13 @@ Blueprint stack layout is native-only and opt-in. Enable `dear-node-editor/bluep
 
 Quick examples (enable auto prebuilt download):
 
-- Feature: `cargo build -p dear-imgui-sys --features prebuilt`
-- Env (Unix): `IMGUI_SYS_USE_PREBUILT=1 cargo build -p dear-imgui-sys --features prebuilt`
-- Env (Windows PowerShell): `$env:IMGUI_SYS_USE_PREBUILT='1'; cargo build -p dear-imgui-sys --features prebuilt`
+- Feature: `cargo build -p dear-imgui-rs --features prebuilt`
+- Env (Unix): `IMGUI_SYS_USE_PREBUILT=1 cargo build -p dear-imgui-rs --features prebuilt`
+- Env (Windows PowerShell): `$env:IMGUI_SYS_USE_PREBUILT='1'; cargo build -p dear-imgui-rs --features prebuilt`
 
-## Compatibility (0.16.0)
+## Compatibility (0.16.0, Unreleased)
 
-The workspace follows a release-train model. The table below lists the latest, recommended combinations. See [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for version history and compatibility policy.
+The workspace follows a release-train model. The table below lists the combinations planned for the next release. See [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the current published train, version history, and compatibility policy.
 
 Core
 
@@ -453,7 +456,7 @@ The supported Rust target is exactly `wasm32-unknown-unknown`. Every dependency 
 
 ```toml
 [dependencies]
-dear-imgui-rs = { version = "0.16.0", features = ["wasm"] }
+dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", features = ["wasm"] }
 ```
 
 The Rust module imports cimgui from the fixed provider name `imgui-sys-v0`, and both modules share one `WebAssembly.Memory`. The provider name is part of the ABI and is not configurable. Builds for WASI, Rust Emscripten targets, missing `wasm` feature forwarding, or `wasm + stack-layout` fail rather than falling back to another binding profile.

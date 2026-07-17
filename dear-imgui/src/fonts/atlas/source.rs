@@ -1,151 +1,166 @@
 use super::config::FontConfig;
 
-/// A source for font data with v1.92+ dynamic font support
+/// A font source with v1.92+ dynamic font support.
+///
+/// External font parsers used by Dear ImGui do not receive a reliable input
+/// boundary for every format. Consequently, raw font sources can only be
+/// created through the `unsafe` constructors on this type. The embedded
+/// default font remains entirely safe.
 #[derive(Clone, Debug)]
-pub enum FontSource<'a> {
-    /// Default font included with the library (ProggyClean.ttf)
-    ///
-    /// With v1.92+, size_pixels can be 0.0 for dynamic sizing
-    DefaultFontData {
-        size_pixels: Option<f32>,
-        config: Option<FontConfig>,
-    },
+pub struct FontSource<'a> {
+    pub(super) kind: FontSourceKind<'a>,
+    pub(super) size_pixels: Option<f32>,
+    pub(super) config: Option<FontConfig>,
+}
 
-    /// Binary TTF/OTF font data
-    ///
-    /// With v1.92+, size_pixels can be 0.0 for dynamic sizing
-    TtfData {
-        data: &'a [u8],
-        size_pixels: Option<f32>,
-        config: Option<FontConfig>,
-    },
-
-    /// Compressed TTF font data (stb-compressed)
-    ///
-    /// Dear ImGui decompresses immediately and keeps the decompressed buffer owned by the atlas.
-    CompressedTtfData {
-        data: &'a [u8],
-        size_pixels: Option<f32>,
-        config: Option<FontConfig>,
-    },
-
-    /// Compressed + base85-encoded TTF font data
-    ///
-    /// The provided string is converted into a NUL-terminated `CString` for Dear ImGui.
-    CompressedTtfBase85 {
-        data: &'a str,
-        size_pixels: Option<f32>,
-        config: Option<FontConfig>,
-    },
-
-    /// Font from file path
-    ///
-    /// With v1.92+, size_pixels can be 0.0 for dynamic sizing
-    TtfFile {
-        path: &'a str,
-        size_pixels: Option<f32>,
-        config: Option<FontConfig>,
-    },
+#[derive(Clone, Copy, Debug)]
+pub(super) enum FontSourceKind<'a> {
+    Default,
+    TtfData(&'a [u8]),
+    CompressedTtfData(&'a [u8]),
+    CompressedTtfBase85(&'a str),
+    TtfFile(&'a str),
 }
 
 impl<'a> FontSource<'a> {
-    /// Creates a default font source with dynamic sizing
+    /// Creates an embedded default font source with dynamic sizing.
     pub fn default_font() -> Self {
-        Self::DefaultFontData {
+        Self {
+            kind: FontSourceKind::Default,
             size_pixels: None,
             config: None,
         }
     }
 
-    /// Creates a default font source with specific size
+    /// Creates an embedded default font source with a specific size.
     pub fn default_font_with_size(size: f32) -> Self {
-        Self::DefaultFontData {
+        Self {
             size_pixels: Some(size),
-            config: None,
+            ..Self::default_font()
         }
     }
 
-    /// Creates a TTF data source with dynamic sizing
-    pub fn ttf_data(data: &'a [u8]) -> Self {
-        Self::TtfData {
-            data,
+    /// Creates a TTF/OTF memory source with dynamic sizing.
+    ///
+    /// # Safety
+    ///
+    /// `data` must contain a complete font that is valid for the loader selected
+    /// by this source's eventual [`FontConfig`]. The data must remain unchanged
+    /// until it is passed to [`crate::FontAtlas::add_font`]. Native font loaders
+    /// may otherwise read beyond the slice boundary.
+    pub unsafe fn ttf_data(data: &'a [u8]) -> Self {
+        Self {
+            kind: FontSourceKind::TtfData(data),
             size_pixels: None,
             config: None,
         }
     }
 
-    /// Creates a TTF data source with specific size
-    pub fn ttf_data_with_size(data: &'a [u8], size: f32) -> Self {
-        Self::TtfData {
-            data,
+    /// Creates a TTF/OTF memory source with a specific size.
+    ///
+    /// # Safety
+    ///
+    /// The requirements of [`FontSource::ttf_data`] apply.
+    pub unsafe fn ttf_data_with_size(data: &'a [u8], size: f32) -> Self {
+        Self {
             size_pixels: Some(size),
-            config: None,
+            ..unsafe { Self::ttf_data(data) }
         }
     }
 
-    /// Creates a compressed TTF data source with dynamic sizing
-    pub fn compressed_ttf_data(data: &'a [u8]) -> Self {
-        Self::CompressedTtfData {
-            data,
+    /// Creates an stb-compressed TTF source with dynamic sizing.
+    ///
+    /// # Safety
+    ///
+    /// `data` must be the complete, unmodified output of Dear ImGui's
+    /// `binary_to_compressed_c` tool. Its decompressed payload must be a complete
+    /// font that is valid for the loader selected by this source's eventual
+    /// [`FontConfig`]. The data must remain unchanged until it is passed to
+    /// [`crate::FontAtlas::add_font`]. Dear ImGui's stb decompressor does not
+    /// enforce the supplied input length, and its font parser may not enforce the
+    /// decompressed allocation boundary.
+    pub unsafe fn compressed_ttf_data(data: &'a [u8]) -> Self {
+        Self {
+            kind: FontSourceKind::CompressedTtfData(data),
             size_pixels: None,
             config: None,
         }
     }
 
-    /// Creates a compressed TTF data source with specific size
-    pub fn compressed_ttf_data_with_size(data: &'a [u8], size: f32) -> Self {
-        Self::CompressedTtfData {
-            data,
+    /// Creates an stb-compressed TTF source with a specific size.
+    ///
+    /// # Safety
+    ///
+    /// The requirements of [`FontSource::compressed_ttf_data`] apply.
+    pub unsafe fn compressed_ttf_data_with_size(data: &'a [u8], size: f32) -> Self {
+        Self {
             size_pixels: Some(size),
-            config: None,
+            ..unsafe { Self::compressed_ttf_data(data) }
         }
     }
 
-    /// Creates a base85 compressed TTF source with dynamic sizing
-    pub fn compressed_ttf_base85(data: &'a str) -> Self {
-        Self::CompressedTtfBase85 {
-            data,
+    /// Creates a base85-encoded stb-compressed TTF source with dynamic sizing.
+    ///
+    /// # Safety
+    ///
+    /// `data` must be the complete, unmodified base85 output of Dear ImGui's
+    /// `binary_to_compressed_c` tool. Its decoded and decompressed payload must be
+    /// a complete font that is valid for the loader selected by this source's
+    /// eventual [`FontConfig`]. The data must remain unchanged until it is passed
+    /// to [`crate::FontAtlas::add_font`]. Dear ImGui's decoder assumes complete
+    /// five-character groups and an internally terminated compressed stream, and
+    /// its font parser may not enforce the decompressed allocation boundary.
+    pub unsafe fn compressed_ttf_base85(data: &'a str) -> Self {
+        Self {
+            kind: FontSourceKind::CompressedTtfBase85(data),
             size_pixels: None,
             config: None,
         }
     }
 
-    /// Creates a base85 compressed TTF source with specific size
-    pub fn compressed_ttf_base85_with_size(data: &'a str, size: f32) -> Self {
-        Self::CompressedTtfBase85 {
-            data,
+    /// Creates a base85-encoded stb-compressed TTF source with a specific size.
+    ///
+    /// # Safety
+    ///
+    /// The requirements of [`FontSource::compressed_ttf_base85`] apply.
+    pub unsafe fn compressed_ttf_base85_with_size(data: &'a str, size: f32) -> Self {
+        Self {
             size_pixels: Some(size),
-            config: None,
+            ..unsafe { Self::compressed_ttf_base85(data) }
         }
     }
 
-    /// Creates a TTF file source with dynamic sizing
-    pub fn ttf_file(path: &'a str) -> Self {
-        Self::TtfFile {
-            path,
+    /// Creates a font-file source with dynamic sizing.
+    ///
+    /// # Safety
+    ///
+    /// If `path` exists when [`crate::FontAtlas::add_font`] is called, it must
+    /// identify a complete font that is valid for the loader selected by this
+    /// source's eventual [`FontConfig`]. The file must not be replaced or
+    /// modified while it is being added.
+    pub unsafe fn ttf_file(path: &'a str) -> Self {
+        Self {
+            kind: FontSourceKind::TtfFile(path),
             size_pixels: None,
             config: None,
         }
     }
 
-    /// Creates a TTF file source with specific size
-    pub fn ttf_file_with_size(path: &'a str, size: f32) -> Self {
-        Self::TtfFile {
-            path,
+    /// Creates a font-file source with a specific size.
+    ///
+    /// # Safety
+    ///
+    /// The requirements of [`FontSource::ttf_file`] apply.
+    pub unsafe fn ttf_file_with_size(path: &'a str, size: f32) -> Self {
+        Self {
             size_pixels: Some(size),
-            config: None,
+            ..unsafe { Self::ttf_file(path) }
         }
     }
 
-    /// Sets the font configuration for this source
+    /// Sets the font configuration for this source.
     pub fn with_config(mut self, config: FontConfig) -> Self {
-        match &mut self {
-            Self::DefaultFontData { config: cfg, .. } => *cfg = Some(config),
-            Self::TtfData { config: cfg, .. } => *cfg = Some(config),
-            Self::CompressedTtfData { config: cfg, .. } => *cfg = Some(config),
-            Self::CompressedTtfBase85 { config: cfg, .. } => *cfg = Some(config),
-            Self::TtfFile { config: cfg, .. } => *cfg = Some(config),
-        }
+        self.config = Some(config);
         self
     }
 }

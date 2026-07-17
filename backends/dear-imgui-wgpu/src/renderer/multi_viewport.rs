@@ -16,7 +16,8 @@ use dear_imgui_rs::Context;
 /// `winit::Window` until the renderer destroy callback completes. While enabled, all callbacks and
 /// renderer access must stay on one thread; the renderer must not be concurrently accessed,
 /// reinitialized, shut down, moved, or dropped, and viewport `RendererUserData` must not be
-/// replaced. Both the context and renderer must remain alive. Call
+/// replaced. `imgui_context` must be the context used to initialize `renderer`. Both the context
+/// and renderer must remain alive. Call
 /// [`shutdown_multi_viewport_support`] before either one is dropped.
 pub unsafe fn enable(
     renderer: &mut WgpuRenderer,

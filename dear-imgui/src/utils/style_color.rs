@@ -57,9 +57,7 @@ impl crate::ui::Ui {
 
     /// Returns the name of a style color.
     ///
-    /// This is just a wrapper around calling [`name`] on [StyleColor].
-    ///
-    /// [`name`]: StyleColor::name
+    /// This queries Dear ImGui's static name table for the provided [`StyleColor`].
     #[doc(alias = "GetStyleColorName")]
     pub fn style_color_name(&self, style_color: StyleColor) -> &'static str {
         self.run_with_bound_context(|| unsafe {

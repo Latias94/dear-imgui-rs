@@ -29,9 +29,19 @@ This is an intentionally source-breaking architecture release. It replaces shall
 - Gate the blueprint stack-layout API and patched Dear ImGui core artifact behind `dear-imgui-rs/stack-layout` and `dear-node-editor/blueprints`. Normal node-editor builds use the unpatched core; the normal, freetype, stack-layout, and stack-layout + freetype feature combinations have distinct names, manifests, and cache identities. `stack-layout` remains required for the blueprints showcase and is rejected on WASM.
 - Make WASM support explicit. Only `wasm32-unknown-unknown` with the `wasm` feature may select the `imgui-sys-v0` import binding profile. Missing feature forwarding, WASI targets, Emscripten Rust targets, and `wasm + stack-layout` combinations fail at build time.
 - Replace the incomplete `FontLoader::{new,with_loader_init}` custom-loader stubs with `FontLoader::stb_truetype()`. Custom native loaders must now enter through `unsafe FontLoader::from_raw`, whose contract covers the complete callback table and all referenced state.
+- Replace the mixed owning/non-owning font atlas API with context-borrowed `&FontAtlas` views and sole standalone ownership through `SharedFontAtlas`. Remove `FontAtlas::new`, `FontAtlasRef`, the borrowed `Font` view, `Context::{fonts,font_atlas_mut}`, and frame-outside `Context::{push_font,current_font,current_font_size}`; atlas mutation now uses Dear ImGui's lock protocol through the shared view instead of claiming a false unique Rust borrow across shared contexts. `Ui::current_font()` and font-add methods return atlas-validated `FontId` values whose metadata queries copy owned data, while `BakedFont<'ui>` revalidates its font and resolves native baked storage on each access. `Glyph` copies only stable metrics because UVs may be invalidated by same-frame lazy glyph loading and repacking. Shared atlases reject mixed renderer texture capabilities. Switching a legacy-built atlas to managed textures requires a full clear and repopulation; switching a managed atlas to a legacy renderer requires `FontAtlas::build()` after configuring the legacy context. Typed custom rectangles use persistent validated IDs, strict pixel buffers, exact managed-renderer upload regions, and `Ui::image_custom_rect`. Measure the currently scoped font through `Ui::{calc_text_size,calc_text_size_with_opts}`.
+- Make external font data an explicit unsafe boundary. `FontSource` is now opaque; its TTF/OTF, compressed TTF, Base85, and file constructors, plus the corresponding direct `FontAtlas::add_font_from_*` methods, are `unsafe` because the upstream native parsers do not consistently enforce input bounds. Remove `FontConfig::font_data_owned_by_atlas`; memory inputs are copied into Dear ImGui-owned allocations. Direct glyph ranges and `GlyphRangesBuilder::add_ranges` now accept structured `&[(u32, u32)]` pairs instead of raw sentinel arrays.
+- Remove safe raw font-atlas texture escape hatches `FontAtlas::{get_tex_ref,set_tex_ref,get_tex_data,get_tex_data_ptr,tex_data_mut}`. Use `FontAtlas::texture_id()` for the current legacy handle, `FontAtlas::tex_data()` for a read-only `FontAtlasTexture<'_>` lease, and `set_texture_id` for legacy renderer feedback. While a texture lease is alive, atlas operations or frame advancement that could invalidate it are rejected; custom-rectangle updates after a legacy atlas upload also fail explicitly because only `RENDERER_HAS_TEXTURES` backends can consume partial updates.
+- Reject every structural `FontAtlas` mutator while any registered context is inside a frame, including managed frames where Dear ImGui leaves `FontAtlas::Locked` clear; perform such changes before `Context::frame()` or after `Context::render()`.
+- Make `Ui::{show_demo_window,show_metrics_window,show_style_editor,show_default_style_editor}` unsafe because upstream Fonts panels expose destructive atlas controls, including a Remove path that can continue using a deleted native font. Call them only when those panels and controls cannot be activated, or replace them with application-owned diagnostics.
+- Remove the core `tracing` feature, `dear_imgui_rs::logging`, exported `imgui_*` logging macros, process-global subscriber helpers, and logging side effects from error constructors. Applications now own subscriber policy; `dear-imgui-wgpu` emits its existing diagnostics only with its opt-in `tracing` feature. This expands the direction proposed in PR #42, thanks @DBLouis.
+- Make `test-engine` a native source-only feature. It now implies `build-from-source` and is rejected with the WASM import provider instead of compiling without its promised native hooks.
+- Make `prebuilt` native-only and reject it with the WASM import provider. Its download/extraction stack is now confined to the host build graph, while the package helper consumes build-script-generated artifact metadata without adding build-support to the target dependency graph.
 
 #### Backends and runtime
 
+- Remove Glow's public cached `font_atlas_texture` field. Font-atlas GPU resources are now renderer-internal and may change when the atlas grows or repacks.
+- Make `GlowRenderer::{destroy,destroy_device_objects}` and `WgpuRenderer::{invalidate_device_objects,shutdown}` take the matching `&mut Context`, so clearing GPU texture maps also invalidates managed `TexID` values and requeues live uploads. Each `WgpuRenderer` now owns exactly one context's renderer state and stays on that context's UI thread; context-taking render and lifecycle methods reject another context before mutation, while contextless draw-data rendering uses the bound context's `PlatformIO`. Create one renderer per context and shut it down before dropping the bound context. Remove contextless `WgpuRenderer::init` and manual `configure_imgui_context`/`prepare_font_atlas`; use `new` or `init_with_context` so GPU state and Dear ImGui renderer state cannot be replaced independently. New Glow, WGPU, and Ash renderers invalidate bindings inherited from an earlier renderer or device; custom backends can use `PlatformIo::invalidate_renderer_texture_bindings()` for the same transition. Textures shared by multiple contexts remain bound until their owners coordinate teardown and only one reference remains.
 - Default `dear-imgui-wgpu` to WGPU 30 and keep WGPU 29, 28, and 27 behind separate mutually exclusive compatibility features.
 - Make WGPU and Ash multi-viewport `enable` entry points `unsafe`. The renderer must have a stable address, remain single-thread serialized with callback execution, and outlive every registered callback and secondary viewport. A pinned owner or `Box` is the normal integration pattern.
 - Require explicit ordered multi-viewport shutdown. Shut down renderer support first, then the platform backend, then drop the renderer, context, secondary/main windows, and GPU or Vulkan objects in their documented ownership order. Renderer reinitialization and explicit renderer shutdown reject an active callback runtime. Rust `Drop` is non-fallible best-effort cleanup and is not a substitute for the required ordered shutdown.
@@ -51,14 +61,15 @@ This is an intentionally source-breaking architecture release. It replaces shall
 - Add typed item-state scopes through `ItemFlags`, `ItemStateFlags`, and `Ui::{push_item_flag,with_item_flag}`, plus typed X/Y style-variable overrides through `StyleVarVec2` and `Ui::{push_style_var_x,push_style_var_y}`.
 - Add `Ui::{calc_text_size,calc_text_size_with_opts}` for measuring text with the current font, including `##` suffix hiding and explicit wrap widths, without changing the next item width. Fixes #40, thanks @TheDaChicken.
 - Add safe IO coverage for analog keys, UTF-16 and UTF-8 text, native key metadata, event acceptance and clearing, F13-F24, app navigation keys, and the complete public gamepad key set.
-- Add checked list-clipper item and range inclusion with call-order and bounds validation.
+- Add checked list-clipper item and range inclusion with call-order and bounds validation, plus a distinct `ListClipper::unknown_count()` protocol with fused `next_range()` and consuming `finish(final_items_count)`. Known counts reject `i32::MAX`, which Dear ImGui reserves as the unknown-count sentinel. Tokens enforce native LIFO and the exact frame, window `Begin`, and table instance where they began; out-of-order or wrong-scope drops perform layout-neutral native cleanup, while a forgotten token makes `Context::render()` reject and recover only the current frame.
 - Add explicit bitmap and vector embedded default fonts, font cache compaction, and loaded/debug-name queries.
 - Add safe style size scaling, style-color flashing, text-encoding diagnostics, and item-picker startup helpers.
 - Add effective managed or legacy texture ID lookup through `TextureRef::texture_id` and `DrawCmdParams::texture_id`.
 - Add a deterministic, host-independent binding specification shared by build scripts, regeneration, verification, packaging, and CI. It supplies self-contained standard-header shims, disables host include fallback, and hashes the generator contract, exact compatibility targets, formatter, allow/block lists, enum normalization, opaque types, and fixed WASM provider.
 - Add exact cimgui and nested Dear ImGui source revisions to package metadata so source identity survives `cargo package` without a `.git` directory.
-- Add strict `dear-imgui-sys` core native prebuilt manifests covering crate/version, target, link type, MSVC CRT, normalized artifact features, exact source revisions, and binding-spec hash. Missing, duplicate, unknown, or mismatched fields reject the core artifact.
+- Add strict `dear-imgui-sys` core native prebuilt manifests covering crate/version, target, link type, MSVC CRT, normalized artifact features, exact source revisions, and binding-spec hash. Missing, duplicate, unknown, or mismatched fields reject the core artifact. `dear-imgui-rs` now forwards `prebuilt` and `build-from-source`; Cargo may unify both, with source building taking precedence, and packaged consumers exercise the high-level `prebuilt` feature.
 - Add a bounded native per-runtime scan worker with per-dialog cancellation, latest-request coalescing, bounded UI-thread batch application, owned-worker teardown, and generation filtering for stale results.
+- Add an opt-in native Winit/WGPU Test Engine smoke that moves a window into a real secondary OS viewport, renders its surface, merges it back into the main viewport, verifies teardown, and exits with a test result.
 
 ### Changed
 
@@ -77,9 +88,146 @@ This is an intentionally source-breaking architecture release. It replaces shall
 - Submit the current combo entry as selected before applying default focus.
 - Apply backward multi-select ranges in Dear ImGui's requested direction with checked index conversion.
 - Resolve managed texture IDs in draw command parameters after processing texture requests, while allowing pending textures to be inspected without triggering Dear ImGui's renderer-upload assertion.
+- Follow Glow atlas texture replacements through the managed request stream and delete only renderer-owned GL textures; removing an externally mapped texture no longer destroys the application's GL resource.
+- Recreate WGPU shaders, bind layouts, fallback texture, pipeline, and managed texture uploads after device-object invalidation instead of leaving the renderer in a partially initialized state.
 - Avoid an out-of-bounds read when measuring text ending in a single `#`, and share the same sentinel-safe measurement path with `push_item_width_text`.
 
 ### Migration Examples
+
+#### Font atlas ownership and frame-local runtime data
+
+Before 0.16, atlas access returned an unbound view and several font operations returned or accepted borrowed `Font` values:
+
+```rust
+let mut atlas = ctx.fonts();
+let font = atlas.add_font_default(None);
+let measured = font.calc_text_size(18.0, f32::MAX, 0.0, "Hello");
+let _font = ctx.push_font(font);
+```
+
+In 0.16, retain a `FontId`, establish the font scope on `Ui`, and query frame-local runtime data through `BakedFont`:
+
+```rust
+let font = ctx.font_atlas().add_font_default(None);
+
+let ui = ctx.frame();
+let _font = ui.push_font_with_size(Some(font), 18.0);
+let measured = ui.calc_text_size("Hello");
+let current = ui.current_font();
+let current_name = current.debug_name();
+let mut baked = ui.current_baked_font();
+let glyph = baked.glyph('H');
+```
+
+Use `SharedFontAtlas::create()` only when multiple contexts intentionally share one standalone atlas. Both context-owned and shared atlases are borrowed through `font_atlas()`; mutating methods validate Dear ImGui's atlas lock internally.
+
+`Glyph` is an owned metrics snapshot and intentionally has no safe UV accessor: lazy loading can repack the texture again within the same frame. Renderer integrations should read pixels and metadata through the `FontAtlasTexture<'_>` returned by `ctx.font_atlas().tex_data()`, drop that lease before rebuilding the atlas or advancing a frame, query a legacy handle through `texture_id()`, and report a new legacy GPU handle through `set_texture_id(texture_id)`.
+
+#### Built-in font debug tools
+
+Dear ImGui's Demo, Metrics, and Style Editor windows can open upstream Fonts panels with controls that mutate the atlas during a frame. Those wrappers are now unsafe because the Remove control can delete a font and continue using its native pointer in the same call:
+
+```rust
+// SAFETY: This integration prevents the upstream Fonts panels and destructive controls from being activated.
+unsafe { ui.show_demo_window(&mut demo_open) };
+```
+
+Do not use these wrappers when arbitrary users can reach those controls; build application-owned diagnostics instead.
+
+#### WGPU context ownership and renderer device invalidation
+
+Create one WGPU renderer per context. Pass that same context to explicit render and lifecycle methods so managed textures lose stale backend bindings and are uploaded again:
+
+```rust
+let mut wgpu_renderer = WgpuRenderer::new(init_info, &mut ctx)?;
+wgpu_renderer.render_context(&mut ctx, &mut render_pass)?;
+wgpu_renderer.invalidate_device_objects(&mut ctx)?;
+wgpu_renderer.shutdown(&mut ctx)?;
+glow_renderer.destroy_device_objects(&gl, &mut ctx);
+```
+
+Passing another context returns `RendererError::ContextMismatch` without changing either context or the renderer. For multiple contexts, construct a separate renderer for each; `render_context` no longer turns one renderer into a shared multi-context backend. Contextless `render_draw_data` variants use the bound context and require it to be current.
+
+Custom managed-texture backends should call `ctx.platform_io_mut().invalidate_renderer_texture_bindings()` whenever they discard every renderer texture resource. The helper follows upstream shutdown semantics and skips textures whose reference count is not exactly one; pause and coordinate every context sharing an atlas before releasing the final renderer resource.
+
+#### External font data and glyph ranges
+
+Before 0.16, public `FontSource` variants and direct font-add methods accepted arbitrary byte slices through safe Rust:
+
+```rust
+let font = ctx.font_atlas().add_font(&[FontSource::TtfData {
+    data: &bytes,
+    size_pixels: Some(18.0),
+    config: None,
+}]);
+```
+
+In 0.16, establish the native parser invariant explicitly and use structured inclusive glyph ranges when needed:
+
+```rust
+// SAFETY: `bytes` is a complete font supported by the selected native loader.
+let source = unsafe { FontSource::ttf_data_with_size(&bytes, 18.0) };
+let font = ctx.font_atlas().add_font(&[source]);
+
+// SAFETY: the same complete-font invariant applies to direct entry points.
+let font = unsafe {
+    ctx.font_atlas().add_font_from_memory_ttf(
+        &bytes,
+        18.0,
+        None,
+        Some(&[(0x20, 0x7e)]),
+    )
+};
+```
+
+The atlas copies memory-font bytes and retains encoded include ranges for as long as native font sources may read them. File sources are fully read before a multi-source `add_font()` call begins mutating the atlas.
+
+#### Logging belongs to the application
+
+Before 0.16, the core crate installed a global subscriber:
+
+```rust
+dear_imgui_rs::logging::init_tracing_with_filter("dear_imgui=debug,wgpu=warn");
+```
+
+In 0.16, initialize tracing in the executable and opt the WGPU backend into events when needed:
+
+```toml
+dear-imgui-wgpu = { version = "0.16", features = ["tracing"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+```
+
+```rust
+tracing_subscriber::fmt()
+    .with_env_filter("dear_imgui_wgpu=debug,wgpu=warn")
+    .init();
+```
+
+#### Unknown-count list clipping
+
+Do not pass Dear ImGui's `i32::MAX` sentinel to `ListClipper::new`. Use the explicit protocol and finalize it with the discovered count:
+
+```rust
+let mut clipper = ListClipper::unknown_count()
+    .items_height(ui.text_line_height_with_spacing())
+    .begin(ui);
+
+let final_items_count = 'list: loop {
+    let Some(display_range) = clipper.next_range() else {
+        break i32::MAX as usize;
+    };
+    for index in display_range {
+        let Some(item) = source.item(index) else {
+            break 'list index;
+        };
+        ui.text(item.label());
+    }
+};
+
+clipper.finish(final_items_count);
+```
+
+With automatic item-height measurement, a non-empty list must submit the first measurement range and call `next_range()` again before finishing early. A fixed-height clipper can call `finish()` immediately.
 
 #### Columns to Tables
 

@@ -22,6 +22,6 @@ pub fn configure_example_context(imgui: &mut ImguiContext, enable_docking: bool)
     }
     context.io_mut().set_config_flags(flags);
 
-    let _ = context.font_atlas_mut().build();
+    let _ = context.font_atlas().build();
     let _ = context.set_ini_filename::<std::path::PathBuf>(None);
 }

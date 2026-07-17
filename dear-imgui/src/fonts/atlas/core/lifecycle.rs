@@ -1,79 +1,46 @@
-use std::marker::PhantomData;
-
 use crate::fonts::atlas::id::FontId;
-use crate::fonts::atlas::loader::FontLoader;
-use crate::fonts::atlas::state::{font_atlas_state, forget_font_atlas_generation};
+use crate::fonts::atlas::state::{
+    assert_no_font_atlas_texture_borrows, assert_no_open_font_atlas_frames, font_atlas_state,
+};
 use crate::sys;
 
 use super::FontAtlas;
 
 impl FontAtlas {
-    /// Creates a new font atlas with default settings
-    pub fn new() -> Self {
-        unsafe {
-            let raw = sys::ImFontAtlas_ImFontAtlas();
-            if raw.is_null() {
-                panic!("ImFontAtlas_ImFontAtlas() returned null");
-            }
-            font_atlas_state(raw);
-            Self {
-                raw,
-                owned: true,
-                _phantom: PhantomData,
-            }
-        }
-    }
-
-    /// Creates a new font atlas with a custom font loader.
-    ///
-    /// The loader must be static because Dear ImGui stores the raw `ImFontLoader*`.
-    pub fn with_font_loader(loader: &'static FontLoader) -> Self {
-        let mut atlas = Self::new();
-        atlas.set_font_loader(loader);
-        atlas
-    }
-
-    /// Creates a FontAtlas wrapper from a raw ImFontAtlas pointer
+    /// Creates a shared font-atlas view from a raw pointer.
     ///
     /// # Safety
-    /// The caller must ensure that the pointer is valid and points to a valid ImFontAtlas
-    pub(crate) unsafe fn from_raw(raw: *mut sys::ImFontAtlas) -> Self {
+    /// The pointer must remain valid and immutable for the returned lifetime.
+    pub(crate) unsafe fn from_raw<'a>(raw: *const sys::ImFontAtlas) -> &'a Self {
         assert!(
             !raw.is_null(),
             "FontAtlas::from_raw() requires non-null pointer"
         );
-        font_atlas_state(raw);
-        Self {
-            raw,
-            owned: false,
-            _phantom: PhantomData,
-        }
+        font_atlas_state(raw.cast_mut());
+        unsafe { &*raw.cast::<Self>() }
     }
 
-    /// Returns the raw ImFontAtlas pointer
+    /// Returns the raw `ImFontAtlas` pointer for explicit FFI interop.
+    ///
+    /// The pointer is valid only while the atlas owner remains alive. Dereferencing it or passing
+    /// it to native code is unsafe; mutating the atlas outside this wrapper can violate its handle,
+    /// texture-lease, and frame-lifecycle checks.
     pub fn raw(&self) -> *mut sys::ImFontAtlas {
-        self.raw
+        self.0.get()
     }
 
     pub(crate) fn font_id_for_raw(&self, font: *mut sys::ImFont) -> FontId {
-        FontId::from_raw_parts(font, self.raw)
+        FontId::from_raw_parts(font, self.raw())
     }
-}
 
-impl Default for FontAtlas {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Drop for FontAtlas {
-    fn drop(&mut self) {
-        if self.owned && !self.raw.is_null() {
-            unsafe {
-                forget_font_atlas_generation(self.raw);
-                sys::ImFontAtlas_destroy(self.raw);
-            }
-        }
+    pub(crate) fn assert_mutation_allowed(&self, caller: &str) {
+        let raw = self.raw();
+        assert_no_font_atlas_texture_borrows(raw, caller);
+        assert_no_open_font_atlas_frames(raw, caller);
+        assert!(
+            !unsafe { (*raw).Locked },
+            "{caller} cannot modify a locked font atlas"
+        );
     }
 }
 

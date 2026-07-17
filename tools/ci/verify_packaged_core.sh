@@ -33,17 +33,18 @@ from pathlib import Path
 destination = Path(sys.argv[1])
 dependency_path = Path(sys.argv[2]).resolve()
 profile = sys.argv[3]
-profile_features = {
+artifact_features = {
     "normal": [],
     "freetype": ["freetype"],
     "stack-layout": ["stack-layout"],
     "stack-layout-freetype": ["stack-layout", "freetype"],
 }
 try:
-    selected_features = profile_features[profile]
+    selected_artifact_features = artifact_features[profile]
 except KeyError as error:
     raise SystemExit(f"unsupported prebuilt consumer profile: {profile}") from error
-features = f", features = {json.dumps(selected_features)}" if selected_features else ""
+selected_features = ["prebuilt", *selected_artifact_features]
+features = f", features = {json.dumps(selected_features)}"
 destination.joinpath("Cargo.toml").write_text(
     "\n".join(
         (
@@ -66,7 +67,7 @@ destination.joinpath("Cargo.toml").write_text(
     encoding="utf-8",
 )
 
-if "stack-layout" in selected_features:
+if "stack-layout" in selected_artifact_features:
     frame_body = """
         let layout = ui.begin_horizontal("artifact-row", [0.0, 0.0], -1.0);
         ui.text("stack-layout artifact");
@@ -80,7 +81,7 @@ destination.joinpath("src/main.rs").write_text(
     let mut context = dear_imgui_rs::Context::create();
     context.io_mut().set_display_size([320.0, 240.0]);
     context.io_mut().set_delta_time(1.0 / 60.0);
-    let _ = context.font_atlas_mut().build();
+    let _ = context.font_atlas().build();
     {{
         let ui = context.frame();
 {frame_body}    }}
@@ -123,12 +124,11 @@ elif profile_scope == "all":
     required_profiles = set(all_profiles.values())
 else:
     raise SystemExit(f"unsupported prebuilt profile scope: {profile_scope}")
-profiles = {
-    features: name
-    for features, name in all_profiles.items()
+matches = {
+    name: []
+    for name in all_profiles.values()
     if name in required_profiles
 }
-matches = {name: [] for name in profiles.values()}
 
 for archive in sorted(package_dir.glob("dear-imgui-*.tar.gz")):
     with tarfile.open(archive, "r:gz") as package:
@@ -148,8 +148,14 @@ for archive in sorted(package_dir.glob("dear-imgui-*.tar.gz")):
     if expected_crt and fields.get("crt") != expected_crt:
         continue
     features = frozenset(filter(None, fields.get("features", "").split(",")))
-    profile = profiles.get(features)
-    if profile is not None:
+    profile = all_profiles.get(features)
+    if profile is None:
+        rendered_features = ",".join(sorted(features)) or "<none>"
+        raise SystemExit(
+            f"unsupported dear_imgui artifact profile in {archive}: "
+            f"features={rendered_features}"
+        )
+    if profile in required_profiles:
         matches[profile].append(archive)
 
 for profile, archives in matches.items():

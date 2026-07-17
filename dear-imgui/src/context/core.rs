@@ -138,7 +138,7 @@ impl Context {
     }
 
     fn try_create_internal(
-        mut shared_font_atlas: Option<SharedFontAtlas>,
+        shared_font_atlas: Option<SharedFontAtlas>,
     ) -> crate::error::ImGuiResult<Context> {
         let _guard = CTX_MUTEX.lock();
 
@@ -146,8 +146,8 @@ impl Context {
             return Err(crate::error::ImGuiError::ContextAlreadyActive);
         }
 
-        let shared_font_atlas_ptr = match &mut shared_font_atlas {
-            Some(atlas) => atlas.as_ptr_mut(),
+        let shared_font_atlas_ptr = match &shared_font_atlas {
+            Some(atlas) => atlas.as_ptr(),
             None => ptr::null_mut(),
         };
 
@@ -162,6 +162,15 @@ impl Context {
         // Set it as the current context
         unsafe {
             sys::igSetCurrentContext(raw);
+        }
+
+        unsafe {
+            let io = sys::igGetIO_ContextPtr(raw);
+            assert!(
+                !io.is_null(),
+                "new ImGui context returned a null IO pointer"
+            );
+            crate::fonts::register_font_atlas_context((*io).Fonts, raw);
         }
 
         let alive = Rc::new(());
@@ -237,23 +246,41 @@ impl Drop for Context {
         let _guard = CTX_MUTEX.lock();
         unsafe {
             if !self.raw.is_null() {
-                unregister_user_textures_for_context(self.raw);
-                if self.shared_font_atlas.is_none() {
-                    let io = sys::igGetIO_ContextPtr(self.raw);
-                    if !io.is_null() {
-                        crate::fonts::forget_font_atlas_generation((*io).Fonts);
+                let _ = crate::list_clipper::forget_context_clippers(self.raw);
+                let io = sys::igGetIO_ContextPtr(self.raw);
+                let font_atlas = if io.is_null() {
+                    std::ptr::null_mut()
+                } else {
+                    (*io).Fonts
+                };
+                let owned_font_atlas = if self.shared_font_atlas.is_none() {
+                    font_atlas
+                } else {
+                    std::ptr::null_mut()
+                };
+                with_bound_context(self.raw, || {
+                    if (*self.raw).WithinFrameScope {
+                        sys::igEndFrame();
                     }
-                }
+                });
+                unregister_user_textures_for_context(self.raw);
                 crate::platform_io::clear_typed_callbacks_for_context(self.raw);
                 with_bound_context(self.raw, || {
                     crate::platform_io::clear_aggregate_callbacks_for_current_context();
                 });
                 #[cfg(feature = "stack-layout")]
                 sys::ImGuiStack_DestroyContextState(self.raw);
+                crate::fonts::unregister_font_atlas_context(font_atlas, self.raw);
+                if let Some(shared_font_atlas) = &self.shared_font_atlas {
+                    with_bound_context(self.raw, || {
+                        shared_font_atlas.unregister_from_current_context();
+                    });
+                }
                 if sys::igGetCurrentContext() == self.raw {
                     clear_current_context();
                 }
                 sys::igDestroyContext(self.raw);
+                crate::fonts::forget_font_atlas_generation(owned_font_atlas);
             }
         }
     }

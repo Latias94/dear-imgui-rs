@@ -18,26 +18,30 @@ impl WgpuRenderer {
     /// Render Dear ImGui draw data
     ///
     /// This corresponds to ImGui_ImplWGPU_RenderDrawData in the C++ implementation
+    ///
+    /// `draw_data` must originate from this renderer's bound context, and that context must be
+    /// current for the duration of the call. Use [`Self::render_context`] to finalize and render a
+    /// frame in one operation.
     pub fn render_draw_data(
         &mut self,
         draw_data: &mut DrawData,
         render_pass: &mut RenderPass,
     ) -> RendererResult<()> {
-        let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
+        let platform_io = self.render_platform_io()?;
         self.render_draw_data_ex(draw_data, render_pass, platform_io)
     }
 
-    /// Finalize and render the frame for an explicit ImGui context.
+    /// Finalize and render the frame for this renderer's bound ImGui context.
     ///
-    /// This is the preferred entry point for multi-context applications because the temporary
-    /// `PlatformIO.Renderer_RenderState` pointer used by draw callbacks is written to the
-    /// provided context instead of whichever Dear ImGui context is current.
+    /// Returns [`RendererError::ContextMismatch`] when `ctx` is not the context used to initialize
+    /// this renderer. Multi-context applications must create one renderer per context.
     pub fn render_context(
         &mut self,
         ctx: &mut Context,
         render_pass: &mut RenderPass,
     ) -> RendererResult<()> {
-        let platform_io = ctx.platform_io_mut().as_raw_mut();
+        self.ensure_context_matches(ctx)?;
+        let platform_io = self.render_platform_io()?;
         let draw_data = ctx.render();
         self.render_draw_data_ex(draw_data, render_pass, platform_io)
     }
@@ -107,24 +111,20 @@ impl WgpuRenderer {
             )?;
 
             // Render draw lists with the render state exposed
-            let result = Self::render_draw_lists_static(
+            Self::render_draw_lists_static(
                 &mut self.texture_manager,
                 &self.default_texture,
                 draw_data,
                 render_pass,
                 backend_data,
                 gamma,
-            );
-
-            if let Err(e) = result {
-                eprintln!("[wgpu-mv] render_draw_lists_static error: {:?}", e);
-                return Err(e);
-            }
+            )?;
         }
 
         Ok(())
     }
 
+    /// Render draw data from the bound, current context with explicit framebuffer dimensions.
     pub fn render_draw_data_with_fb_size(
         &mut self,
         draw_data: &mut DrawData,
@@ -132,7 +132,7 @@ impl WgpuRenderer {
         fb_width: u32,
         fb_height: u32,
     ) -> RendererResult<()> {
-        let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
+        let platform_io = self.render_platform_io()?;
         // Public helper used by the main window: advance frame resources as usual.
         self.render_draw_data_with_fb_size_ex(
             draw_data,
@@ -144,10 +144,10 @@ impl WgpuRenderer {
         )
     }
 
-    /// Finalize and render the frame for an explicit ImGui context and framebuffer size.
+    /// Finalize and render the frame for the bound ImGui context and framebuffer size.
     ///
-    /// Use this variant in multi-context applications when overriding framebuffer dimensions.
-    /// Draw callbacks read the render state through the matching context's `PlatformIO`.
+    /// Returns [`RendererError::ContextMismatch`] when `ctx` is not the context used to initialize
+    /// this renderer.
     pub fn render_context_with_fb_size(
         &mut self,
         ctx: &mut Context,
@@ -155,7 +155,8 @@ impl WgpuRenderer {
         fb_width: u32,
         fb_height: u32,
     ) -> RendererResult<()> {
-        let platform_io = ctx.platform_io_mut().as_raw_mut();
+        self.ensure_context_matches(ctx)?;
+        let platform_io = self.render_platform_io()?;
         let draw_data = ctx.render();
         self.render_draw_data_with_fb_size_ex(
             draw_data,

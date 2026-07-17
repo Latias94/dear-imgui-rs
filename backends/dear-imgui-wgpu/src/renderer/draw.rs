@@ -303,8 +303,8 @@ impl WgpuRenderer {
                         }
                     }
                     dear_imgui_rs::render::DrawCmd::RawCallback { .. } => {
-                        tracing::warn!(
-                            target: "dear-imgui-wgpu",
+                        backend_warn!(
+                            target: "dear_imgui_wgpu",
                             "Warning: Raw callbacks are not supported in WGPU renderer",
                         );
                     }

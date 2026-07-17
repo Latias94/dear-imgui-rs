@@ -223,10 +223,9 @@ impl GlowRenderer {
             gl.enable_vertex_attrib_array(self.shaders.attrib_location_vtx_uv);
             gl.enable_vertex_attrib_array(self.shaders.attrib_location_vtx_color);
 
-            // Use memoffset to calculate correct field offsets, following the original implementation
-            let pos_offset = memoffset::offset_of!(DrawVert, pos) as i32;
-            let uv_offset = memoffset::offset_of!(DrawVert, uv) as i32;
-            let color_offset = memoffset::offset_of!(DrawVert, col) as i32;
+            let pos_offset = std::mem::offset_of!(DrawVert, pos) as i32;
+            let uv_offset = std::mem::offset_of!(DrawVert, uv) as i32;
+            let color_offset = std::mem::offset_of!(DrawVert, col) as i32;
 
             gl.vertex_attrib_pointer_f32(
                 self.shaders.attrib_location_vtx_pos,
@@ -383,14 +382,9 @@ impl GlowRenderer {
         sampler_filter: u32,
     ) -> RenderResult<()> {
         // Get texture
-        let texture = if let Some(tex) = texture_map.get(effective_tex_id) {
-            tex
-        } else {
-            // Use font atlas texture as fallback
-            self.font_atlas_texture.ok_or_else(|| {
-                RenderError::InvalidTexture(format!("Texture ID {:?} not found", effective_tex_id))
-            })?
-        };
+        let texture = texture_map.get(effective_tex_id).ok_or_else(|| {
+            RenderError::InvalidTexture(format!("Texture ID {:?} not found", effective_tex_id))
+        })?;
 
         unsafe {
             // Bind texture

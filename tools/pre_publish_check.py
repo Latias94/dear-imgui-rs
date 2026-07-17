@@ -211,6 +211,16 @@ def release_test_commands(use_nextest: bool) -> list[tuple[str, list[str]]]:
                 "stack_layout_context",
             ],
         ),
+        (
+            "dear-imgui-wgpu tracing",
+            [
+                "-p",
+                "dear-imgui-wgpu",
+                "--no-default-features",
+                "--features",
+                "wgpu-30,tracing",
+            ],
+        ),
     )
     for label, cargo_args in feature_profiles:
         if use_nextest:

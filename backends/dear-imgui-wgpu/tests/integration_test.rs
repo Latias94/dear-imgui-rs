@@ -2,11 +2,138 @@
 //!
 //! This test verifies that our improvements maintain compatibility with the C++ implementation
 
-use dear_imgui_rs::{TextureData, TextureId};
+use dear_imgui_rs::{BackendFlags, Condition, Context, TextureData, TextureId, TextureStatus};
 use dear_imgui_wgpu::wgpu::*;
 use dear_imgui_wgpu::{
-    RenderResources, RendererResult, Uniforms, WgpuRenderer, WgpuTexture, WgpuTextureManager,
+    RenderResources, RendererError, RendererResult, Uniforms, WgpuInitInfo, WgpuRenderer,
+    WgpuTexture, WgpuTextureManager,
 };
+use static_assertions::assert_not_impl_any;
+
+fn request_test_device() -> Option<(Device, Queue)> {
+    #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
+    let instance = Instance::new(&InstanceDescriptor::default());
+    #[cfg(any(feature = "wgpu-29", feature = "wgpu-30"))]
+    let instance = Instance::new(InstanceDescriptor::new_without_display_handle());
+    let request_adapter = |force_fallback_adapter| {
+        pollster::block_on(instance.request_adapter(&RequestAdapterOptions {
+            power_preference: PowerPreference::LowPower,
+            force_fallback_adapter,
+            ..Default::default()
+        }))
+    };
+    let adapter = request_adapter(true)
+        .or_else(|_| request_adapter(false))
+        .ok()?;
+    pollster::block_on(adapter.request_device(&DeviceDescriptor::default())).ok()
+}
+
+#[test]
+fn renderer_is_bound_to_the_context_ui_thread() {
+    assert_not_impl_any!(WgpuRenderer: Send, Sync);
+}
+
+fn render_test_frame(
+    renderer: &mut WgpuRenderer,
+    context: &mut Context,
+    device: &Device,
+    queue: &Queue,
+) -> RendererResult<()> {
+    context.io_mut().set_display_size([64.0, 64.0]);
+    context.io_mut().set_delta_time(1.0 / 60.0);
+    let ui = context.frame();
+    ui.window("device lifecycle test")
+        .position([0.0, 0.0], Condition::Always)
+        .size([64.0, 64.0], Condition::Always)
+        .build(|| ui.text("rebuild"));
+
+    let target = device.create_texture(&TextureDescriptor {
+        label: Some("dear-imgui-wgpu lifecycle test target"),
+        size: Extent3d {
+            width: 64,
+            height: 64,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: TextureDimension::D2,
+        format: TextureFormat::Rgba8Unorm,
+        usage: TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    let view = target.create_view(&TextureViewDescriptor::default());
+    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
+        label: Some("dear-imgui-wgpu lifecycle test encoder"),
+    });
+    {
+        let color_attachments = [Some(RenderPassColorAttachment {
+            view: &view,
+            resolve_target: None,
+            ops: Operations {
+                load: LoadOp::Clear(Color::BLACK),
+                store: StoreOp::Store,
+            },
+            depth_slice: None,
+        })];
+        let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
+            label: Some("dear-imgui-wgpu lifecycle test pass"),
+            color_attachments: &color_attachments,
+            depth_stencil_attachment: None,
+            occlusion_query_set: None,
+            #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
+            multiview_mask: None,
+            timestamp_writes: None,
+        });
+        renderer.new_frame()?;
+        renderer.render_context(context, &mut render_pass)?;
+    }
+    queue.submit([encoder.finish()]);
+    Ok(())
+}
+
+fn render_context_without_open_frame(
+    renderer: &mut WgpuRenderer,
+    context: &mut Context,
+    device: &Device,
+) -> RendererResult<()> {
+    let target = device.create_texture(&TextureDescriptor {
+        label: Some("dear-imgui-wgpu context identity test target"),
+        size: Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: TextureDimension::D2,
+        format: TextureFormat::Rgba8Unorm,
+        usage: TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    let view = target.create_view(&TextureViewDescriptor::default());
+    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
+        label: Some("dear-imgui-wgpu context identity test encoder"),
+    });
+    let color_attachments = [Some(RenderPassColorAttachment {
+        view: &view,
+        resolve_target: None,
+        ops: Operations {
+            load: LoadOp::Clear(Color::BLACK),
+            store: StoreOp::Store,
+        },
+        depth_slice: None,
+    })];
+    let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
+        label: Some("dear-imgui-wgpu context identity test pass"),
+        color_attachments: &color_attachments,
+        depth_stencil_attachment: None,
+        occlusion_query_set: None,
+        #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
+        multiview_mask: None,
+        timestamp_writes: None,
+    });
+    renderer.render_context(context, &mut render_pass)
+}
 
 /// Test that gamma correction values match the C++ implementation
 #[test]
@@ -150,6 +277,136 @@ fn test_renderer_creation() {
     // Test default creation
     let default_renderer = WgpuRenderer::default();
     assert!(!default_renderer.is_initialized());
+}
+
+#[test]
+fn device_objects_and_managed_textures_survive_invalidate_and_reinitialize() -> RendererResult<()> {
+    let Some((device, queue)) = request_test_device() else {
+        eprintln!("skipping WGPU lifecycle test because no headless adapter is available");
+        return Ok(());
+    };
+    let format = TextureFormat::Rgba8Unorm;
+    let mut context = Context::create();
+    let mut renderer = WgpuRenderer::new(
+        WgpuInitInfo::new(device.clone(), queue.clone(), format),
+        &mut context,
+    )?;
+
+    render_test_frame(&mut renderer, &mut context, &device, &queue)?;
+    let first_texture_id = context
+        .platform_io()
+        .texture(0)
+        .expect("the first rendered frame should expose the font texture")
+        .tex_id();
+    assert!(!first_texture_id.is_null());
+    assert!(
+        renderer
+            .texture_manager()
+            .contains_texture(first_texture_id)
+    );
+
+    renderer.invalidate_device_objects(&mut context)?;
+    assert!(!renderer.is_initialized());
+    let invalidated = context
+        .platform_io()
+        .texture(0)
+        .expect("the font texture should remain registered after invalidation");
+    assert_eq!(invalidated.status(), TextureStatus::WantCreate);
+    assert!(invalidated.tex_id().is_null());
+
+    render_test_frame(&mut renderer, &mut context, &device, &queue)?;
+    assert!(renderer.is_initialized());
+    let recreated_texture_id = context
+        .platform_io()
+        .texture(0)
+        .expect("the rebuilt renderer should recreate the font texture")
+        .tex_id();
+    assert!(!recreated_texture_id.is_null());
+    assert!(
+        renderer
+            .texture_manager()
+            .contains_texture(recreated_texture_id)
+    );
+
+    let suspended_owner = context.suspend();
+    let mut foreign_context = Context::create();
+    let foreign_flags = foreign_context.io().backend_flags();
+    assert!(matches!(
+        renderer.invalidate_device_objects(&mut foreign_context),
+        Err(RendererError::ContextMismatch)
+    ));
+    assert!(matches!(
+        renderer.shutdown(&mut foreign_context),
+        Err(RendererError::ContextMismatch)
+    ));
+    assert!(matches!(
+        render_context_without_open_frame(&mut renderer, &mut foreign_context, &device),
+        Err(RendererError::ContextMismatch)
+    ));
+    #[cfg(feature = "multi-viewport-winit")]
+    assert_eq!(
+        // SAFETY: context identity validation rejects this call before callbacks retain renderer.
+        unsafe { dear_imgui_wgpu::multi_viewport::enable(&mut renderer, &mut foreign_context) },
+        Err(dear_imgui_wgpu::multi_viewport::CallbackOwnershipError::RendererContextMismatch)
+    );
+    #[cfg(feature = "multi-viewport-sdl3")]
+    assert_eq!(
+        // SAFETY: context identity validation rejects this call before callbacks retain renderer.
+        unsafe {
+            dear_imgui_wgpu::multi_viewport_sdl3::enable(&mut renderer, &mut foreign_context)
+        },
+        Err(dear_imgui_wgpu::multi_viewport_sdl3::CallbackOwnershipError::RendererContextMismatch)
+    );
+    assert!(renderer.is_initialized());
+    assert_eq!(foreign_context.io().backend_flags(), foreign_flags);
+
+    let suspended_foreign = foreign_context.suspend();
+    let mut context = suspended_owner
+        .activate()
+        .expect("renderer owner context should reactivate");
+    render_test_frame(&mut renderer, &mut context, &device, &queue)?;
+
+    renderer.shutdown(&mut context)?;
+    assert!(!renderer.is_initialized());
+    assert!(
+        !context.io().backend_flags().intersects(
+            BackendFlags::RENDERER_HAS_TEXTURES | BackendFlags::RENDERER_HAS_VTX_OFFSET
+        )
+    );
+    assert_eq!(
+        context
+            .platform_io()
+            .texture(0)
+            .expect("shutdown should preserve managed font pixels")
+            .status(),
+        TextureStatus::WantCreate
+    );
+
+    let suspended_owner = context.suspend();
+    let mut context = suspended_foreign
+        .activate()
+        .expect("replacement context should activate after owner shutdown");
+    drop(suspended_owner);
+
+    renderer.init_with_context(
+        WgpuInitInfo::new(device.clone(), queue.clone(), format),
+        &mut context,
+    )?;
+    render_test_frame(&mut renderer, &mut context, &device, &queue)?;
+    let reinitialized_texture_id = context
+        .platform_io()
+        .texture(0)
+        .expect("reinitialization should recreate the font texture")
+        .tex_id();
+    assert!(!reinitialized_texture_id.is_null());
+    assert!(
+        renderer
+            .texture_manager()
+            .contains_texture(reinitialized_texture_id)
+    );
+    renderer.shutdown(&mut context)?;
+
+    Ok(())
 }
 
 /// Test uniforms structure size and alignment

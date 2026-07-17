@@ -28,7 +28,7 @@ fn new_test_ctx() -> Context {
         io.add_focus_event(true);
         io.add_mouse_pos_event([0.0, 0.0]);
     }
-    let _ = ctx.font_atlas_mut().build();
+    let _ = ctx.font_atlas().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
     ctx
 }

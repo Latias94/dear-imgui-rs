@@ -230,7 +230,7 @@ mod tests {
         let mut imgui = ImGuiContext::create();
         imgui.io_mut().set_display_size([640.0, 480.0]);
         imgui.io_mut().set_delta_time(1.0 / 60.0);
-        let _ = imgui.font_atlas_mut().build();
+        let _ = imgui.font_atlas().build();
 
         let _editor = EditorContext::create(&imgui);
 
@@ -244,7 +244,7 @@ mod tests {
         let mut imgui = ImGuiContext::create();
         imgui.io_mut().set_display_size([640.0, 480.0]);
         imgui.io_mut().set_delta_time(1.0 / 60.0);
-        let _ = imgui.font_atlas_mut().build();
+        let _ = imgui.font_atlas().build();
 
         let editor_context = EditorContext::create(&imgui);
         let node_a = NodeId::new(1);
@@ -337,7 +337,7 @@ mod tests {
         let mut imgui = ImGuiContext::create();
         imgui.io_mut().set_display_size([640.0, 480.0]);
         imgui.io_mut().set_delta_time(1.0 / 60.0);
-        let _ = imgui.font_atlas_mut().build();
+        let _ = imgui.font_atlas().build();
 
         let editor_a = EditorContext::create(&imgui);
         let editor_b = EditorContext::create(&imgui);

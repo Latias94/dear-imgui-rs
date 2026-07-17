@@ -151,8 +151,8 @@ impl WgpuTextureManager {
                     );
                 }
                 if cfg!(debug_assertions) {
-                    tracing::debug!(
-                        target: "dear-imgui-wgpu",
+                    backend_debug!(
+                        target: "dear_imgui_wgpu",
                         "[dear-imgui-wgpu][debug] Updated texture id={} subrect x={} y={} w={} h={}",
                         texture_id.id(), rect.x, rect.y, rect.w, rect.h
                     );
@@ -160,8 +160,8 @@ impl WgpuTextureManager {
             } else {
                 // No pixels available, cannot update this rect
                 if cfg!(debug_assertions) {
-                    tracing::debug!(
-                        target: "dear-imgui-wgpu",
+                    backend_debug!(
+                        target: "dear_imgui_wgpu",
                         "[dear-imgui-wgpu][debug] Skipped subrect update: no pixels available"
                     );
                 }
@@ -262,8 +262,8 @@ impl WgpuTextureManager {
 
         // Create WGPU texture (matches the descriptor setup in imgui_impl_wgpu.cpp)
         if cfg!(debug_assertions) {
-            tracing::debug!(
-                target: "dear-imgui-wgpu",
+            backend_debug!(
+                target: "dear_imgui_wgpu",
                 "[dear-imgui-wgpu][debug] Create texture: {}x{} format={:?}",
                 width, height, format
             );
@@ -356,8 +356,8 @@ impl WgpuTextureManager {
                 },
             );
             if cfg!(debug_assertions) {
-                tracing::debug!(
-                    target: "dear-imgui-wgpu",
+                backend_debug!(
+                    target: "dear_imgui_wgpu",
                     "[dear-imgui-wgpu][debug] Upload texture with padded row pitch: unpadded={} padded={}",
                     unpadded_bytes_per_row, padded_bytes_per_row
                 );
@@ -373,8 +373,8 @@ impl WgpuTextureManager {
         // Register and return ID
         let texture_id = self.register_texture(wgpu_texture);
         if cfg!(debug_assertions) {
-            tracing::debug!(
-                target: "dear-imgui-wgpu",
+            backend_debug!(
+                target: "dear_imgui_wgpu",
                 "[dear-imgui-wgpu][debug] Texture registered: id={}",
                 texture_id.id()
             );

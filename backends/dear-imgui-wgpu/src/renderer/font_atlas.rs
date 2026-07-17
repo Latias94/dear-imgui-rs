@@ -32,46 +32,25 @@ impl WgpuRenderer {
         device: &Device,
         queue: &Queue,
     ) -> RendererResult<Option<dear_imgui_rs::TextureId>> {
-        // SAFETY: Access raw TexData/bytes only to copy pixels. Requires fonts.build() called.
         let fonts = imgui_ctx.font_atlas();
-        // Try to read raw texture data to determine bytes-per-pixel
-        let raw_tex = fonts.get_tex_data();
-        if raw_tex.is_null() {
+        let Some(texture_data) = fonts.tex_data() else {
             if cfg!(debug_assertions) {
-                tracing::debug!(
-                    target: "dear-imgui-wgpu",
+                backend_debug!(
+                    target: "dear_imgui_wgpu",
                     "[dear-imgui-wgpu][debug] Font atlas TexData is null; skip legacy upload"
                 );
             }
             return Ok(None);
-        }
-        // Read metadata
-        let (width, height, bpp, pixels_slice): (u32, u32, i32, Option<&[u8]>) = unsafe {
-            let w = (*raw_tex).Width as u32;
-            let h = (*raw_tex).Height as u32;
-            let bpp = (*raw_tex).BytesPerPixel;
-            let px_ptr = (*raw_tex).Pixels as *const u8;
-            if px_ptr.is_null() || w == 0 || h == 0 || bpp <= 0 {
-                (w, h, bpp, None)
-            } else {
-                let bpp_usize = match usize::try_from(bpp) {
-                    Ok(v) if v > 0 => v,
-                    _ => 0,
-                };
-                let size = (w as usize)
-                    .checked_mul(h as usize)
-                    .and_then(|v| v.checked_mul(bpp_usize));
-                match size {
-                    Some(size) => (w, h, bpp, Some(std::slice::from_raw_parts(px_ptr, size))),
-                    None => (w, h, bpp, None),
-                }
-            }
         };
+        let width = texture_data.width();
+        let height = texture_data.height();
+        let bpp = texture_data.bytes_per_pixel();
+        let pixels_slice = texture_data.pixels();
 
         if let Some(src) = pixels_slice {
             if cfg!(debug_assertions) {
-                tracing::debug!(
-                    target: "dear-imgui-wgpu",
+                backend_debug!(
+                    target: "dear_imgui_wgpu",
                     "[dear-imgui-wgpu][debug] Font atlas texdata: {}x{} bpp={} (fallback upload for font atlas)",
                     width, height, bpp
                 );
@@ -97,8 +76,8 @@ impl WgpuRenderer {
             } else {
                 // Unexpected format; don't proceed
                 if cfg!(debug_assertions) {
-                    tracing::debug!(
-                        target: "dear-imgui-wgpu",
+                    backend_debug!(
+                        target: "dear_imgui_wgpu",
                         "[dear-imgui-wgpu][debug] Unexpected font atlas bpp={} -> skip",
                         bpp
                     );
@@ -175,8 +154,8 @@ impl WgpuRenderer {
                     },
                 );
                 if cfg!(debug_assertions) {
-                    tracing::debug!(
-                        target: "dear-imgui-wgpu",
+                    backend_debug!(
+                        target: "dear_imgui_wgpu",
                         "[dear-imgui-wgpu][debug] Upload font atlas with padded row pitch: unpadded={} padded={}",
                         unpadded, padded
                     );
@@ -190,12 +169,12 @@ impl WgpuRenderer {
 
             // Set atlas texture id + status OK (updates TexRef and TexData)
             {
-                let mut fonts_mut = imgui_ctx.font_atlas_mut();
+                let fonts_mut = imgui_ctx.font_atlas();
                 fonts_mut.set_texture_id(tex_id);
             }
             if cfg!(debug_assertions) {
-                tracing::debug!(
-                    target: "dear-imgui-wgpu",
+                backend_debug!(
+                    target: "dear_imgui_wgpu",
                     "[dear-imgui-wgpu][debug] Font atlas fallback upload complete: tex_id={}",
                     tex_id.id()
                 );
@@ -204,8 +183,8 @@ impl WgpuRenderer {
             return Ok(Some(tex_id));
         }
         if cfg!(debug_assertions) {
-            tracing::debug!(
-                target: "dear-imgui-wgpu",
+            backend_debug!(
+                target: "dear_imgui_wgpu",
                 "[dear-imgui-wgpu][debug] Font atlas has no CPU pixel buffer; skipping fallback upload (renderer will use modern texture updates)"
             );
         }
