@@ -145,6 +145,15 @@ class UpdateSubmodulesTests(unittest.TestCase):
 
 
 class RepositoryScriptContractTests(unittest.TestCase):
+    def test_binding_updater_uses_canonical_xtask_without_out_dir_guessing(self):
+        content = (
+            REPO_ROOT / "tools" / "update_submodule_and_bindings.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("verify-bindings", content)
+        self.assertNotIn("find_bindings", content)
+        self.assertNotIn("st_mtime", content)
+
     def test_repository_has_no_tracked_non_python_script_entry_points(self):
         result = subprocess.run(
             [

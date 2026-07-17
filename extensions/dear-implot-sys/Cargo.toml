@@ -22,6 +22,9 @@ exclude = [
     "third-party/cimplot/implot/docs/**",
 ]
 
+[package.metadata.dear-imgui-binding]
+source-revision = "9768a1d229a660748fb6aaf7ffb42b730755290f"
+
 # docs.rs configuration for offline builds
 [package.metadata.docs.rs]
 no-default-features = true
@@ -42,7 +45,7 @@ cc.workspace = true
 xshell = "0.2"
 pkg-config = "0.3"
 cmake = "0.1"
-build-support.workspace = true
+build-support = { workspace = true, features = ["binding-spec"] }
 
 [[bin]]
 name = "package"

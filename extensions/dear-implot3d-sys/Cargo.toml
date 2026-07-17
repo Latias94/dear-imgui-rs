@@ -21,6 +21,9 @@ exclude = [
     "third-party/cimplot3d/implot3d/.github/**",
 ]
 
+[package.metadata.dear-imgui-binding]
+source-revision = "8c1c16e98fdddc4b3ee78bf0f89e0dd708be79e0"
+
 [package.metadata.docs.rs]
 no-default-features = true
 all-features = false
@@ -38,7 +41,7 @@ bindgen = { workspace = true, optional = true }
 cc.workspace = true
 pkg-config = { workspace = true, optional = true }
 xshell = { workspace = true }
-build-support.workspace = true
+build-support = { workspace = true, features = ["binding-spec"] }
 
 [[bin]]
 name = "package"

@@ -66,62 +66,35 @@ fn resolve_imgui_includes(cfg: &BuildConfig) -> (PathBuf, PathBuf) {
 }
 
 fn use_pregenerated_bindings(out_dir: &Path) -> bool {
-    if build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS") {
-        return false;
-    }
-
-    let preg = Path::new("src").join("bindings_pregenerated.rs");
-    if preg.exists() {
-        match std::fs::read_to_string(&preg).and_then(|content| {
-            let sanitized = sanitize_bindings_string(&content);
-            std::fs::write(out_dir.join("bindings.rs"), sanitized)
-        }) {
-            Ok(()) => {
-                println!(
-                    "cargo:warning=Using pregenerated bindings: {}",
-                    preg.display()
-                );
-                true
-            }
-            Err(e) => {
-                println!("cargo:warning=Failed to write pregenerated bindings: {}", e);
-                false
-            }
-        }
-    } else {
-        false
-    }
+    use_validated_pregenerated_bindings(out_dir, "native")
 }
 
 fn use_pregenerated_wasm_bindings(out_dir: &Path) -> bool {
+    use_validated_pregenerated_bindings(out_dir, "wasm")
+}
+
+fn use_validated_pregenerated_bindings(out_dir: &Path, target: &str) -> bool {
     if build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS") {
         return false;
     }
 
-    let preg = Path::new("src").join("wasm_bindings_pregenerated.rs");
-    if preg.exists() {
-        match std::fs::read_to_string(&preg).and_then(|content| {
-            let sanitized = sanitize_bindings_string(&content);
-            std::fs::write(out_dir.join("bindings.rs"), sanitized)
-        }) {
-            Ok(()) => {
-                println!(
-                    "cargo:warning=Using pregenerated wasm bindings: {}",
-                    preg.display()
-                );
-                true
-            }
-            Err(e) => {
-                println!(
-                    "cargo:warning=Failed to write pregenerated wasm bindings: {}",
-                    e
-                );
-                false
-            }
-        }
-    } else {
-        false
+    let spec = build_support::binding::CrateBindingSpec::for_crate_and_target(
+        env!("CARGO_PKG_NAME"),
+        target,
+    )
+    .unwrap_or_else(|| panic!("missing {} {target} binding spec", env!("CARGO_PKG_NAME")));
+    let crate_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let preg = crate_root.join(spec.checked_in_path);
+    if !preg.exists() {
+        return false;
     }
+    spec.copy_checked_in_to_out_dir(&crate_root, out_dir)
+        .unwrap_or_else(|error| panic!("invalid pregenerated bindings: {error}"));
+    println!(
+        "cargo:warning=Using validated pregenerated bindings: {}",
+        preg.display()
+    );
+    true
 }
 
 #[cfg(feature = "bindgen")]
@@ -132,6 +105,7 @@ fn sanitize_bindings_file(path: &Path) {
     }
 }
 
+#[cfg(feature = "bindgen")]
 fn sanitize_bindings_string(content: &str) -> String {
     let mut out = String::with_capacity(content.len());
     let mut skip_next_blank = false;

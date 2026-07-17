@@ -22,6 +22,9 @@ exclude = [
     "third-party/cimnodes_editor/imgui-node-editor/misc/**",
 ]
 
+[package.metadata.dear-imgui-binding]
+source-revision = "552cc280792e3cde4d7012ff31b4c85cf083ada8"
+
 [package.metadata.docs.rs]
 no-default-features = true
 all-features = false
@@ -38,7 +41,7 @@ build-support = { workspace = true, optional = true }
 bindgen = { workspace = true, optional = true }
 cc.workspace = true
 pkg-config.workspace = true
-build-support.workspace = true
+build-support = { workspace = true, features = ["binding-spec"] }
 
 [[bin]]
 name = "package"

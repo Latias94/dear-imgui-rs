@@ -31,6 +31,9 @@ exclude = [
     "third-party/cimguizmo_quat/**/.vscode/**",
 ]
 
+[package.metadata.dear-imgui-binding]
+source-revision = "705e700c0f011f91df3b72a521a040906cbdfe25"
+
 [package.metadata.docs.rs]
 no-default-features = true
 all-features = false
@@ -48,7 +51,7 @@ bindgen = { workspace = true, optional = true }
 cc.workspace = true
 xshell = { workspace = true }
 pkg-config = { workspace = true }
-build-support.workspace = true
+build-support = { workspace = true, features = ["binding-spec"] }
 
 [[bin]]
 name = "package"

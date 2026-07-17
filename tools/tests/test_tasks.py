@@ -25,7 +25,7 @@ UPDATER_SPEC.loader.exec_module(UPDATER)
 
 class BindingTaskTests(unittest.TestCase):
     def test_updater_regenerates_again_to_prove_idempotence(self):
-        commands = UPDATER.core_binding_commands()
+        commands = UPDATER.binding_commands()
         self.assertEqual(
             commands[0][-3:],
             ["verify-bindings", "--update", "--allow-dirty"],
@@ -320,16 +320,12 @@ class ReleaseTaskTests(unittest.TestCase):
                     "--dry-run",
                 ],
             ),
-            patch.object(
-                UPDATER,
-                "find_bindings",
-                side_effect=AssertionError("dry-run must not inspect artifacts"),
-            ),
             redirect_stdout(io.StringIO()) as output,
         ):
             self.assertEqual(UPDATER.main(), 0)
 
-        self.assertIn("Would update pregenerated bindings", output.getvalue())
+        self.assertIn("verify-bindings --update --allow-dirty", output.getvalue())
+        self.assertFalse(hasattr(UPDATER, "find_bindings"))
 
 
 if __name__ == "__main__":

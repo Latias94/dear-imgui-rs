@@ -26,6 +26,9 @@ exclude = [
     "third-party/cimguizmo/generator/**",
 ]
 
+[package.metadata.dear-imgui-binding]
+source-revision = "f1eb553091e9e512ec811c4c17561fd2a13a3701"
+
 # docs.rs configuration for offline builds
 [package.metadata.docs.rs]
 no-default-features = true
@@ -45,7 +48,7 @@ bindgen = { workspace = true, optional = true }
 cc.workspace = true
 xshell = { workspace = true }
 pkg-config = { workspace = true }
-build-support.workspace = true
+build-support = { workspace = true, features = ["binding-spec"] }
 
 [[bin]]
 name = "package"

@@ -201,7 +201,7 @@ jobs:
           -- cargo check -p dear-imgui-sys --no-default-features --features package-bin,test-engine
 
   binding-contract:
-    name: Core binding contract
+    name: Core and extension binding contract
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -213,7 +213,10 @@ jobs:
         run: python3 tools/ci/update_submodules.py
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.95.0'
+          components: rustfmt
 
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
@@ -229,26 +232,40 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           cache-bin: "false"
-          key: core-binding-contract
+          key: binding-contract
 
       - name: Test binding specification and provenance models
         run: cargo nextest run -p dear-imgui-build-support --features binding-spec
 
       - name: Verify exact vendored source provenance
-        run: python3 tools/source_metadata.py verify
+        run: |
+          python3 tools/source_metadata.py verify
+          python3 tools/source_metadata.py verify-bindings
 
       - name: Verify high-level API coverage policy
         run: python3 tools/api_surface_report.py --check
 
-      - name: Regenerate and verify every core binding profile
+      - name: Regenerate and verify every maintained binding profile
         run: cargo run -p xtask -- verify-bindings --allow-dirty
 
-      - name: Assert checked-in core bindings did not drift
+      - name: Assert checked-in bindings did not drift
         run: |
           git diff --exit-code -- \
             dear-imgui-sys/src/bindings_pregenerated.rs \
             dear-imgui-sys/src/bindings_pregenerated_windows.rs \
-            dear-imgui-sys/src/wasm_bindings_pregenerated.rs
+            dear-imgui-sys/src/wasm_bindings_pregenerated.rs \
+            extensions/dear-imgui-test-engine-sys/src/bindings_pregenerated.rs \
+            extensions/dear-implot-sys/src/bindings_pregenerated.rs \
+            extensions/dear-implot-sys/src/wasm_bindings_pregenerated.rs \
+            extensions/dear-implot3d-sys/src/bindings_pregenerated.rs \
+            extensions/dear-implot3d-sys/src/wasm_bindings_pregenerated.rs \
+            extensions/dear-imnodes-sys/src/bindings_pregenerated.rs \
+            extensions/dear-imnodes-sys/src/wasm_bindings_pregenerated.rs \
+            extensions/dear-node-editor-sys/src/bindings_pregenerated.rs \
+            extensions/dear-imguizmo-sys/src/bindings_pregenerated.rs \
+            extensions/dear-imguizmo-sys/src/wasm_bindings_pregenerated.rs \
+            extensions/dear-imguizmo-quat-sys/src/bindings_pregenerated.rs \
+            extensions/dear-imguizmo-quat-sys/src/wasm_bindings_pregenerated.rs
 
   wgpu-routes:
     name: WGPU ${{ matrix.wgpu }} + ${{ matrix.platform }}
@@ -1238,13 +1255,8 @@ jobs:
           -- cargo check -p dear-imgui-rs --target wasm32-unknown-unknown
           --no-default-features --features wasm,prebuilt
 
-      - name: Generate WASM bindings for extensions (ImPlot/ImPlot3D/ImNodes/ImGuizmo/ImGuIZMO.quat)
-        run: |
-          cargo run -p xtask -- wasm-bindgen-implot
-          cargo run -p xtask -- wasm-bindgen-implot3d
-          cargo run -p xtask -- wasm-bindgen-imnodes
-          cargo run -p xtask -- wasm-bindgen-imguizmo
-          cargo run -p xtask -- wasm-bindgen-imguizmo-quat
+      - name: Validate checked-in extension WASM binding provenance
+        run: cargo run -p xtask -- verify-bindings --check-only --allow-dirty
 
       - name: Build web demo crate for wasm32-unknown-unknown (core + extensions)
         run: cargo build -p dear-imgui-web-demo --target wasm32-unknown-unknown --no-default-features --features "web-backends,implot,implot3d,imnodes,imguizmo,imguizmo-quat"

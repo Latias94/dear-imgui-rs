@@ -7,6 +7,7 @@ static STATIC_CPP_STDLIB_LINK_EMITTED: AtomicBool = AtomicBool::new(false);
 #[cfg(any(feature = "binding-spec", test))]
 pub mod binding {
     use std::collections::{BTreeMap, BTreeSet};
+    use std::path::Path;
 
     pub const CORE_BUILD_ENV_VARS: &[&str] = &[
         "BUILD_SUPPORT_GH_OWNER",
@@ -748,6 +749,805 @@ typedef __builtin_va_list va_list;
             }
         }
     }
+
+    pub const CRATE_BINDING_METADATA_SECTION: &str = "package.metadata.dear-imgui-binding";
+    pub const CRATE_BINDING_PROVENANCE_PREFIX: &str = "// dear-imgui-rs-binding-provenance-v1";
+    pub const CANONICAL_BINDING_LIBCLANG_VERSION: (u32, u32) = (14, 0);
+    pub const CANONICAL_BINDING_RUSTC_VERSION: &str = "rustc 1.95.0";
+    pub const CANONICAL_BINDING_RUSTFMT_VERSION: &str = "rustfmt 1.9.0-stable";
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    pub enum ExtensionBinding {
+        ImPlot,
+        ImPlot3d,
+        ImNodes,
+        NodeEditor,
+        ImGuizmo,
+        ImGuizmoQuat,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    pub enum BindingOwner {
+        TestEngine,
+        Extension(ExtensionBinding),
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum CrateBindingTarget {
+        Native,
+        WasmImport { module_name: &'static str },
+    }
+
+    impl CrateBindingTarget {
+        pub const fn id(self) -> &'static str {
+            match self {
+                Self::Native => "native",
+                Self::WasmImport { .. } => "wasm",
+            }
+        }
+
+        pub const fn import_module(self) -> Option<&'static str> {
+            match self {
+                Self::Native => None,
+                Self::WasmImport { module_name } => Some(module_name),
+            }
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct CrateBindingSpec {
+        pub owner: BindingOwner,
+        pub crate_name: &'static str,
+        pub crate_root: &'static str,
+        pub source_root: &'static str,
+        pub input_paths: &'static [&'static str],
+        pub header_shims: &'static [HeaderShim],
+        pub clang_args: &'static [&'static str],
+        pub generator_options: &'static [&'static str],
+        pub required_symbols: &'static [&'static str],
+        pub checked_in_path: &'static str,
+        pub target: CrateBindingTarget,
+    }
+
+    impl CrateBindingSpec {
+        pub fn maintained() -> &'static [Self] {
+            MAINTAINED_CRATE_BINDING_SPECS
+        }
+
+        pub fn for_owner(owner: BindingOwner) -> impl Iterator<Item = &'static Self> {
+            Self::maintained()
+                .iter()
+                .filter(move |spec| spec.owner == owner)
+        }
+
+        pub fn for_crate_and_target(crate_name: &str, target_id: &str) -> Option<&'static Self> {
+            Self::maintained()
+                .iter()
+                .find(|spec| spec.crate_name == crate_name && spec.target.id() == target_id)
+        }
+
+        pub fn deterministic_hash(&self) -> String {
+            let mut hash = StableHash::new();
+            hash.field("schema", "crate-binding-spec-v1");
+            hash.field("crate_name", self.crate_name);
+            hash.field("crate_root", self.crate_root);
+            hash.field("source_root", self.source_root);
+            hash.fields("input_paths", self.input_paths);
+            hash.begin_list("header_shims", self.header_shims.len());
+            for (index, shim) in self.header_shims.iter().enumerate() {
+                hash.list_item(index);
+                hash.field("name", shim.name);
+                hash.field("contents", shim.contents);
+            }
+            hash.fields("clang_args", self.clang_args);
+            hash.fields("common_generator_options", COMMON_OPTIONS);
+            hash.fields("generator_options", self.generator_options);
+            hash.fields("required_symbols", self.required_symbols);
+            hash.field("checked_in_path", self.checked_in_path);
+            hash.field("target", self.target.id());
+            hash.field(
+                "wasm_import_module",
+                self.target.import_module().unwrap_or_default(),
+            );
+            hash.finish()
+        }
+
+        pub fn validate_checked_in<I, P, C>(
+            &self,
+            source_revision: &str,
+            inputs: I,
+            checked_in: &str,
+        ) -> Result<(), String>
+        where
+            I: IntoIterator<Item = (P, C)>,
+            P: AsRef<str>,
+            C: AsRef<str>,
+        {
+            validate_git_revision("source-revision", source_revision)?;
+            let inputs = inputs
+                .into_iter()
+                .map(|(path, content)| (path.as_ref().to_owned(), content.as_ref().to_owned()))
+                .collect::<Vec<_>>();
+            let actual_paths = inputs
+                .iter()
+                .map(|(path, _)| path.as_str())
+                .collect::<BTreeSet<_>>();
+            let expected_paths = self.input_paths.iter().copied().collect::<BTreeSet<_>>();
+            if actual_paths != expected_paths || inputs.len() != self.input_paths.len() {
+                return Err(format!(
+                    "{} {} binding inputs mismatch: expected {:?}, found {:?}",
+                    self.crate_name,
+                    self.target.id(),
+                    expected_paths,
+                    actual_paths
+                ));
+            }
+
+            let (marker, body) = split_binding_provenance(checked_in)?;
+            for symbol in self.required_symbols {
+                if !body.contains(&format!("pub fn {symbol}(")) {
+                    return Err(format!(
+                        "{} {} bindings are missing required symbol {symbol}",
+                        self.crate_name,
+                        self.target.id()
+                    ));
+                }
+            }
+            let expected = CrateBindingProvenance::new(self, source_revision, inputs, body);
+            if marker != expected.marker() {
+                return Err(format!(
+                    "{} {} binding provenance mismatch: expected {:?}, found {:?}",
+                    self.crate_name,
+                    self.target.id(),
+                    expected.marker(),
+                    marker
+                ));
+            }
+            Ok(())
+        }
+
+        pub fn load_and_validate(&self, crate_root: &Path) -> Result<String, String> {
+            let manifest_path = crate_root.join("Cargo.toml");
+            let manifest = std::fs::read_to_string(&manifest_path)
+                .map_err(|error| format!("read {}: {error}", manifest_path.display()))?;
+            let revision = parse_crate_binding_source_revision(&manifest)?;
+            let mut inputs = Vec::with_capacity(self.input_paths.len());
+            for relative_path in self.input_paths {
+                let path = crate_root.join(relative_path);
+                let content = std::fs::read_to_string(&path)
+                    .map_err(|error| format!("read {}: {error}", path.display()))?;
+                inputs.push((*relative_path, content));
+            }
+            let checked_in_path = crate_root.join(self.checked_in_path);
+            let checked_in = std::fs::read_to_string(&checked_in_path)
+                .map_err(|error| format!("read {}: {error}", checked_in_path.display()))?;
+            self.validate_checked_in(
+                &revision,
+                inputs
+                    .iter()
+                    .map(|(path, content)| (*path, content.as_str())),
+                &checked_in,
+            )?;
+            Ok(checked_in)
+        }
+
+        pub fn copy_checked_in_to_out_dir(
+            &self,
+            crate_root: &Path,
+            out_dir: &Path,
+        ) -> Result<(), String> {
+            let checked_in = self.load_and_validate(crate_root)?;
+            let output = out_dir.join("bindings.rs");
+            std::fs::write(&output, checked_in)
+                .map_err(|error| format!("write {}: {error}", output.display()))
+        }
+
+        pub fn stamp(&self, crate_root: &Path, generated: &str) -> Result<String, String> {
+            let manifest_path = crate_root.join("Cargo.toml");
+            let manifest = std::fs::read_to_string(&manifest_path)
+                .map_err(|error| format!("read {}: {error}", manifest_path.display()))?;
+            let revision = parse_crate_binding_source_revision(&manifest)?;
+            let mut inputs = Vec::with_capacity(self.input_paths.len());
+            for relative_path in self.input_paths {
+                let path = crate_root.join(relative_path);
+                let content = std::fs::read_to_string(&path)
+                    .map_err(|error| format!("read {}: {error}", path.display()))?;
+                inputs.push((*relative_path, content));
+            }
+            let (_, body) = split_optional_binding_provenance(generated)?;
+            for symbol in self.required_symbols {
+                if !body.contains(&format!("pub fn {symbol}(")) {
+                    return Err(format!(
+                        "{} {} generated bindings are missing required symbol {symbol}",
+                        self.crate_name,
+                        self.target.id()
+                    ));
+                }
+            }
+            Ok(CrateBindingProvenance::new(
+                self,
+                revision,
+                inputs
+                    .iter()
+                    .map(|(path, content)| (*path, content.as_str())),
+                body,
+            )
+            .embed(body))
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct CrateBindingProvenance {
+        pub crate_name: String,
+        pub target: String,
+        pub source_revision: String,
+        pub spec_hash: String,
+        pub input_hash: String,
+        pub output_hash: String,
+    }
+
+    impl CrateBindingProvenance {
+        pub fn new<I, P, C>(
+            spec: &CrateBindingSpec,
+            source_revision: impl Into<String>,
+            inputs: I,
+            binding_body: &str,
+        ) -> Self
+        where
+            I: IntoIterator<Item = (P, C)>,
+            P: AsRef<str>,
+            C: AsRef<str>,
+        {
+            let mut inputs = inputs
+                .into_iter()
+                .map(|(path, content)| {
+                    (
+                        path.as_ref().to_owned(),
+                        normalize_newlines(content.as_ref()),
+                    )
+                })
+                .collect::<Vec<_>>();
+            inputs.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+
+            let mut input_hash = StableHash::new();
+            input_hash.field("schema", "crate-binding-inputs-v1");
+            input_hash.begin_list("inputs", inputs.len());
+            for (index, (path, content)) in inputs.iter().enumerate() {
+                input_hash.list_item(index);
+                input_hash.field("path", path);
+                input_hash.field("content", content);
+            }
+
+            let mut output_hash = StableHash::new();
+            output_hash.field("schema", "crate-binding-output-v1");
+            output_hash.field("content", &normalize_newlines(binding_body));
+
+            Self {
+                crate_name: spec.crate_name.to_owned(),
+                target: spec.target.id().to_owned(),
+                source_revision: source_revision.into(),
+                spec_hash: spec.deterministic_hash(),
+                input_hash: input_hash.finish(),
+                output_hash: output_hash.finish(),
+            }
+        }
+
+        pub fn marker(&self) -> String {
+            format!(
+                "{CRATE_BINDING_PROVENANCE_PREFIX} crate={} target={} source={} spec={} inputs={} output={}",
+                self.crate_name,
+                self.target,
+                self.source_revision,
+                self.spec_hash,
+                self.input_hash,
+                self.output_hash
+            )
+        }
+
+        pub fn embed(&self, binding_body: &str) -> String {
+            format!("{}\n{}", self.marker(), binding_body)
+        }
+    }
+
+    pub fn parse_crate_binding_source_revision(content: &str) -> Result<String, String> {
+        let mut current_section = "";
+        let mut revision = None;
+        for line in content.lines() {
+            let line = line.split('#').next().unwrap_or_default().trim();
+            if line.is_empty() {
+                continue;
+            }
+            if let Some(section) = line
+                .strip_prefix('[')
+                .and_then(|line| line.strip_suffix(']'))
+            {
+                current_section = section.trim();
+                continue;
+            }
+            if current_section != CRATE_BINDING_METADATA_SECTION {
+                continue;
+            }
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
+            let key = key.trim();
+            if key != "source-revision" {
+                return Err(format!(
+                    "unknown key {key} in [{CRATE_BINDING_METADATA_SECTION}]"
+                ));
+            }
+            let value = value.trim();
+            let value = value
+                .strip_prefix('"')
+                .and_then(|value| value.strip_suffix('"'))
+                .ok_or_else(|| {
+                    format!(
+                        "source-revision in [{CRATE_BINDING_METADATA_SECTION}] must be a quoted string"
+                    )
+                })?;
+            if revision.replace(value.to_owned()).is_some() {
+                return Err(format!(
+                    "duplicate source-revision in [{CRATE_BINDING_METADATA_SECTION}]"
+                ));
+            }
+        }
+        let revision = revision.ok_or_else(|| {
+            format!("missing source-revision in [{CRATE_BINDING_METADATA_SECTION}]")
+        })?;
+        validate_git_revision("source-revision", &revision)?;
+        Ok(revision)
+    }
+
+    fn split_binding_provenance(content: &str) -> Result<(&str, &str), String> {
+        let (marker, body) = content
+            .split_once('\n')
+            .ok_or_else(|| "checked-in bindings are missing a provenance body".to_owned())?;
+        let marker = marker.trim_end_matches('\r');
+        if !marker.starts_with(CRATE_BINDING_PROVENANCE_PREFIX) {
+            return Err("checked-in bindings are missing crate binding provenance".to_owned());
+        }
+        if body
+            .lines()
+            .any(|line| line.starts_with(CRATE_BINDING_PROVENANCE_PREFIX))
+        {
+            return Err("checked-in bindings contain duplicate provenance markers".to_owned());
+        }
+        Ok((marker, body))
+    }
+
+    fn split_optional_binding_provenance(content: &str) -> Result<(Option<&str>, &str), String> {
+        if content.starts_with(CRATE_BINDING_PROVENANCE_PREFIX) {
+            split_binding_provenance(content).map(|(marker, body)| (Some(marker), body))
+        } else if content
+            .lines()
+            .any(|line| line.starts_with(CRATE_BINDING_PROVENANCE_PREFIX))
+        {
+            Err("binding provenance marker must be the first line".to_owned())
+        } else {
+            Ok((None, content))
+        }
+    }
+
+    fn normalize_newlines(content: &str) -> String {
+        content.replace("\r\n", "\n").replace('\r', "\n")
+    }
+
+    const WASM_IMPORT_MODULE: &str = "imgui-sys-v0";
+    const CRATE_NATIVE_CLANG_ARGS: &[&str] = &["--target=x86_64-pc-windows-msvc", "-nostdinc"];
+    const CRATE_WASM_CLANG_ARGS: &[&str] = &["--target=wasm32-unknown-unknown", "-nostdinc"];
+    const CRATE_HEADER_SHIMS: &[HeaderShim] = &[
+        HeaderShim {
+            name: "stdio.h",
+            contents: r#"
+#ifndef DEAR_IMGUI_RS_CRATE_STDIO_H
+#define DEAR_IMGUI_RS_CRATE_STDIO_H
+#include <stdarg.h>
+#ifndef DEAR_IMGUI_RS_SIZE_T_DEFINED
+#define DEAR_IMGUI_RS_SIZE_T_DEFINED
+typedef __SIZE_TYPE__ size_t;
+#endif
+typedef void FILE;
+#endif
+"#,
+        },
+        HeaderShim {
+            name: "stddef.h",
+            contents: r#"
+#ifndef DEAR_IMGUI_RS_CRATE_STDDEF_H
+#define DEAR_IMGUI_RS_CRATE_STDDEF_H
+#ifndef DEAR_IMGUI_RS_SIZE_T_DEFINED
+#define DEAR_IMGUI_RS_SIZE_T_DEFINED
+typedef __SIZE_TYPE__ size_t;
+#endif
+typedef __PTRDIFF_TYPE__ ptrdiff_t;
+#endif
+"#,
+        },
+        HeaderShim {
+            name: "stdint.h",
+            contents: r#"
+#ifndef DEAR_IMGUI_RS_CRATE_STDINT_H
+#define DEAR_IMGUI_RS_CRATE_STDINT_H
+typedef __INT8_TYPE__ int8_t;
+typedef __UINT8_TYPE__ uint8_t;
+typedef __INT16_TYPE__ int16_t;
+typedef __UINT16_TYPE__ uint16_t;
+typedef __INT32_TYPE__ int32_t;
+typedef __UINT32_TYPE__ uint32_t;
+typedef __INT64_TYPE__ int64_t;
+typedef __UINT64_TYPE__ uint64_t;
+typedef __INTPTR_TYPE__ intptr_t;
+typedef __UINTPTR_TYPE__ uintptr_t;
+typedef __INTMAX_TYPE__ intmax_t;
+typedef __UINTMAX_TYPE__ uintmax_t;
+#endif
+"#,
+        },
+        HeaderShim {
+            name: "stdarg.h",
+            contents: r#"
+#ifndef DEAR_IMGUI_RS_CRATE_STDARG_H
+#define DEAR_IMGUI_RS_CRATE_STDARG_H
+typedef __builtin_va_list va_list;
+#define va_start(args, last) __builtin_va_start(args, last)
+#define va_end(args) __builtin_va_end(args)
+#define va_arg(args, type) __builtin_va_arg(args, type)
+#define va_copy(dest, src) __builtin_va_copy(dest, src)
+#endif
+"#,
+        },
+        HeaderShim {
+            name: "stdbool.h",
+            contents: r#"
+#ifndef DEAR_IMGUI_RS_CRATE_STDBOOL_H
+#define DEAR_IMGUI_RS_CRATE_STDBOOL_H
+#ifndef __cplusplus
+#define bool _Bool
+#define true 1
+#define false 0
+#endif
+#define __bool_true_false_are_defined 1
+#endif
+"#,
+        },
+        HeaderShim {
+            name: "time.h",
+            contents: r#"
+#ifndef DEAR_IMGUI_RS_CRATE_TIME_H
+#define DEAR_IMGUI_RS_CRATE_TIME_H
+typedef __INT64_TYPE__ time_t;
+struct tm {
+    int tm_sec;
+    int tm_min;
+    int tm_hour;
+    int tm_mday;
+    int tm_mon;
+    int tm_year;
+    int tm_wday;
+    int tm_yday;
+    int tm_isdst;
+};
+#endif
+"#,
+        },
+    ];
+    const COMMON_OPTIONS: &[&str] = &[
+        "generator=rust-bindgen-0.72.1",
+        "libclang=14.0.x",
+        "rustfmt=1.9.0-rust-1.95.0",
+        "formatter=rustfmt",
+        "rust-edition=2021",
+        "derive-default=true",
+        "derive-debug=true",
+        "derive-copy=true",
+        "prepend-enum-name=false",
+        "layout-tests=false",
+    ];
+    const TEST_ENGINE_INPUTS: &[&str] = &["shim/cimgui_test_engine.h"];
+    const TEST_ENGINE_OPTIONS: &[&str] = &[
+        "allowlist-function=imgui_test_engine_.*",
+        "allowlist-type=ImGuiTestEngine.*",
+        "allowlist-var=ImGuiTestEngine.*",
+        "blocklist-type=ImGuiContext",
+        "derive-eq=true",
+        "derive-partialeq=true",
+        "derive-hash=true",
+    ];
+    const TEST_ENGINE_SYMBOLS: &[&str] = &[
+        "imgui_test_engine_create_context",
+        "imgui_test_engine_register_script_test",
+    ];
+    const IMPLOT_INPUTS: &[&str] = &["third-party/cimplot/cimplot.h"];
+    const IMPLOT_OPTIONS: &[&str] = &[
+        "allowlist-function=ImPlot.*",
+        "allowlist-type=ImPlot.*",
+        "allowlist-type=ImWchar32",
+        "allowlist-var=ImPlot.*",
+        "allowlist-var=IMPLOT_.*",
+        "blocklist-types=ImVec2,ImVec4,ImGuiCond,ImTextureID,ImGuiContext,ImDrawList,ImGuiMouseButton,ImGuiDragDropFlags,ImGuiIO,ImFontAtlas,ImDrawData,ImGuiStyle,ImGuiKeyModFlags",
+        "clang-defines=IMGUI_USE_WCHAR32,CIMGUI_DEFINE_ENUMS_AND_STRUCTS,CIMGUI_VARGS0",
+        "language=c++17",
+        "derive-eq=true",
+        "derive-partialeq=true",
+        "derive-hash=true",
+    ];
+    const IMPLOT_SYMBOLS: &[&str] = &[
+        "ImPlot_Annotation_Str0",
+        "ImPlot_TagX_Str0",
+        "ImPlot_TagY_Str0",
+        "ImPlot_GetPlotPos",
+        "ImPlot_GetPlotSize",
+    ];
+    const IMPLOT3D_INPUTS: &[&str] = &["third-party/cimplot3d/cimplot3d.h"];
+    const IMPLOT3D_OPTIONS: &[&str] = &[
+        "allowlist-function=ImPlot3D_.*",
+        "allowlist-type=ImPlot3D.*",
+        "allowlist-type=ImWchar32",
+        "allowlist-var=ImPlot3D.*",
+        "blocklist-types=ImVec2,ImVec4,ImGuiContext,ImDrawList,ImGuiID,ImTextureID",
+        "clang-defines=IMGUI_USE_WCHAR32,CIMGUI_DEFINE_ENUMS_AND_STRUCTS",
+        "language=c++17",
+        "derive-eq=true",
+        "derive-partialeq=true",
+        "derive-hash=true",
+    ];
+    const IMPLOT3D_SYMBOLS: &[&str] = &[
+        "ImPlot3D_PlotToPixels_double",
+        "ImPlot3D_GetPlotRectPos",
+        "ImPlot3D_GetPlotRectSize",
+        "ImPlot3D_NextColormapColor",
+        "ImPlot3D_GetColormapColor",
+    ];
+    const IMNODES_INPUTS: &[&str] = &["third-party/cimnodes/cimnodes.h", "shim/imnodes_extra.h"];
+    const IMNODES_OPTIONS: &[&str] = &[
+        "allowlist-functions=imnodes_.*,EmulateThreeButtonMouse_.*,LinkDetachWithModifierClick_.*,MultipleSelectModifier_.*,getIOKeyCtrlPtr,imnodes_getIOKeyShiftPtr,imnodes_getIOKeyAltPtr",
+        "allowlist-type=ImNodes.*",
+        "allowlist-type=ImWchar32",
+        "allowlist-var=ImNodes.*",
+        "blocklist-types=ImVec2,ImVec4,ImGuiContext,ImDrawList",
+        "clang-defines=IMGUI_USE_WCHAR32,CIMGUI_DEFINE_ENUMS_AND_STRUCTS",
+        "language=c++17",
+        "derive-eq=true",
+        "derive-partialeq=true",
+        "derive-hash=true",
+    ];
+    const IMNODES_SYMBOLS: &[&str] = &[
+        "imnodes_EditorContextGetPanning",
+        "imnodes_GetNodeScreenSpacePos",
+        "imnodes_GetNodeEditorSpacePos",
+        "imnodes_GetNodeDimensions",
+    ];
+    const NODE_EDITOR_INPUTS: &[&str] = &["shim/node_editor_extra.h"];
+    const NODE_EDITOR_OPTIONS: &[&str] = &[
+        "allowlist-recursively=false",
+        "allowlist-function=dne_.*",
+        "allowlist-type=Dne.*",
+        "allowlist-var=DNE_.*",
+        "blocklist-type=Im.*",
+        "clang-defines=IMGUI_USE_WCHAR32,CIMGUI_DEFINE_ENUMS_AND_STRUCTS",
+        "language=c++17",
+        "derive-eq=false",
+        "derive-partialeq=false",
+        "derive-hash=false",
+    ];
+    const NODE_EDITOR_SYMBOLS: &[&str] = &["dne_create_editor", "dne_pin_rect"];
+    const IMGUIZMO_INPUTS: &[&str] = &["third-party/cimguizmo/cimguizmo.h"];
+    const IMGUIZMO_OPTIONS: &[&str] = &[
+        "allowlist-functions=ImGuizmo_.*,Style_.*",
+        "allowlist-type=(Style|COLOR|MODE|OPERATION)",
+        "allowlist-type=ImWchar32",
+        "allowlist-var=(COLOR|MODE|OPERATION|COUNT|TRANSLATE.*|ROTATE.*|SCALE.*|UNIVERSAL)",
+        "blocklist-types=ImVec2,ImVec4,ImGuiContext,ImDrawList,ImGuiID",
+        "clang-defines=IMGUI_USE_WCHAR32,CIMGUI_DEFINE_ENUMS_AND_STRUCTS",
+        "language=c++17",
+        "derive-eq=true",
+        "derive-partialeq=true",
+        "derive-hash=true",
+    ];
+    const IMGUIZMO_SYMBOLS: &[&str] = &["ImGuizmo_BeginFrame", "ImGuizmo_Manipulate"];
+    const IMGUIZMO_QUAT_INPUTS: &[&str] = &["third-party/cimguizmo_quat/cimguizmo_quat.h"];
+    const IMGUIZMO_QUAT_OPTIONS: &[&str] = &[
+        "allowlist-functions=imguiGizmo_.*,iggizmo3D_.*,(mat4|quat)_.*",
+        "blocklist-types=ImVec2,ImDrawList,ImGuiContext,ImGuiID,ImVec4",
+        "clang-defines=IMGUI_USE_WCHAR32,CIMGUI_DEFINE_ENUMS_AND_STRUCTS",
+        "language=c++17",
+        "derive-eq=true",
+        "derive-partialeq=true",
+        "derive-hash=true",
+    ];
+    const IMGUIZMO_QUAT_SYMBOLS: &[&str] = &["imguiGizmo_buildPlane", "quat_cast"];
+
+    #[derive(Clone, Copy)]
+    struct CrateBindingSourceSpec {
+        owner: BindingOwner,
+        crate_name: &'static str,
+        crate_root: &'static str,
+        source_root: &'static str,
+        input_paths: &'static [&'static str],
+        generator_options: &'static [&'static str],
+        required_symbols: &'static [&'static str],
+    }
+
+    const fn source_spec(
+        owner: BindingOwner,
+        crate_name: &'static str,
+        crate_root: &'static str,
+        source_root: &'static str,
+        input_paths: &'static [&'static str],
+        generator_options: &'static [&'static str],
+        required_symbols: &'static [&'static str],
+    ) -> CrateBindingSourceSpec {
+        CrateBindingSourceSpec {
+            owner,
+            crate_name,
+            crate_root,
+            source_root,
+            input_paths,
+            generator_options,
+            required_symbols,
+        }
+    }
+
+    const fn spec(
+        source: CrateBindingSourceSpec,
+        checked_in_path: &'static str,
+        target: CrateBindingTarget,
+    ) -> CrateBindingSpec {
+        let clang_args = match target {
+            CrateBindingTarget::Native => CRATE_NATIVE_CLANG_ARGS,
+            CrateBindingTarget::WasmImport { .. } => CRATE_WASM_CLANG_ARGS,
+        };
+        CrateBindingSpec {
+            owner: source.owner,
+            crate_name: source.crate_name,
+            crate_root: source.crate_root,
+            source_root: source.source_root,
+            input_paths: source.input_paths,
+            header_shims: CRATE_HEADER_SHIMS,
+            clang_args,
+            generator_options: source.generator_options,
+            required_symbols: source.required_symbols,
+            checked_in_path,
+            target,
+        }
+    }
+
+    const TEST_ENGINE_SOURCE: CrateBindingSourceSpec = source_spec(
+        BindingOwner::TestEngine,
+        "dear-imgui-test-engine-sys",
+        "extensions/dear-imgui-test-engine-sys",
+        "third-party/imgui_test_engine",
+        TEST_ENGINE_INPUTS,
+        TEST_ENGINE_OPTIONS,
+        TEST_ENGINE_SYMBOLS,
+    );
+    const IMPLOT_SOURCE: CrateBindingSourceSpec = source_spec(
+        BindingOwner::Extension(ExtensionBinding::ImPlot),
+        "dear-implot-sys",
+        "extensions/dear-implot-sys",
+        "third-party/cimplot",
+        IMPLOT_INPUTS,
+        IMPLOT_OPTIONS,
+        IMPLOT_SYMBOLS,
+    );
+    const IMPLOT3D_SOURCE: CrateBindingSourceSpec = source_spec(
+        BindingOwner::Extension(ExtensionBinding::ImPlot3d),
+        "dear-implot3d-sys",
+        "extensions/dear-implot3d-sys",
+        "third-party/cimplot3d",
+        IMPLOT3D_INPUTS,
+        IMPLOT3D_OPTIONS,
+        IMPLOT3D_SYMBOLS,
+    );
+    const IMNODES_SOURCE: CrateBindingSourceSpec = source_spec(
+        BindingOwner::Extension(ExtensionBinding::ImNodes),
+        "dear-imnodes-sys",
+        "extensions/dear-imnodes-sys",
+        "third-party/cimnodes",
+        IMNODES_INPUTS,
+        IMNODES_OPTIONS,
+        IMNODES_SYMBOLS,
+    );
+    const NODE_EDITOR_SOURCE: CrateBindingSourceSpec = source_spec(
+        BindingOwner::Extension(ExtensionBinding::NodeEditor),
+        "dear-node-editor-sys",
+        "extensions/dear-node-editor-sys",
+        "third-party/cimnodes_editor",
+        NODE_EDITOR_INPUTS,
+        NODE_EDITOR_OPTIONS,
+        NODE_EDITOR_SYMBOLS,
+    );
+    const IMGUIZMO_SOURCE: CrateBindingSourceSpec = source_spec(
+        BindingOwner::Extension(ExtensionBinding::ImGuizmo),
+        "dear-imguizmo-sys",
+        "extensions/dear-imguizmo-sys",
+        "third-party/cimguizmo",
+        IMGUIZMO_INPUTS,
+        IMGUIZMO_OPTIONS,
+        IMGUIZMO_SYMBOLS,
+    );
+    const IMGUIZMO_QUAT_SOURCE: CrateBindingSourceSpec = source_spec(
+        BindingOwner::Extension(ExtensionBinding::ImGuizmoQuat),
+        "dear-imguizmo-quat-sys",
+        "extensions/dear-imguizmo-quat-sys",
+        "third-party/cimguizmo_quat",
+        IMGUIZMO_QUAT_INPUTS,
+        IMGUIZMO_QUAT_OPTIONS,
+        IMGUIZMO_QUAT_SYMBOLS,
+    );
+
+    const MAINTAINED_CRATE_BINDING_SPECS: &[CrateBindingSpec] = &[
+        spec(
+            TEST_ENGINE_SOURCE,
+            "src/bindings_pregenerated.rs",
+            CrateBindingTarget::Native,
+        ),
+        spec(
+            IMPLOT_SOURCE,
+            "src/bindings_pregenerated.rs",
+            CrateBindingTarget::Native,
+        ),
+        spec(
+            IMPLOT_SOURCE,
+            "src/wasm_bindings_pregenerated.rs",
+            CrateBindingTarget::WasmImport {
+                module_name: WASM_IMPORT_MODULE,
+            },
+        ),
+        spec(
+            IMPLOT3D_SOURCE,
+            "src/bindings_pregenerated.rs",
+            CrateBindingTarget::Native,
+        ),
+        spec(
+            IMPLOT3D_SOURCE,
+            "src/wasm_bindings_pregenerated.rs",
+            CrateBindingTarget::WasmImport {
+                module_name: WASM_IMPORT_MODULE,
+            },
+        ),
+        spec(
+            IMNODES_SOURCE,
+            "src/bindings_pregenerated.rs",
+            CrateBindingTarget::Native,
+        ),
+        spec(
+            IMNODES_SOURCE,
+            "src/wasm_bindings_pregenerated.rs",
+            CrateBindingTarget::WasmImport {
+                module_name: WASM_IMPORT_MODULE,
+            },
+        ),
+        spec(
+            NODE_EDITOR_SOURCE,
+            "src/bindings_pregenerated.rs",
+            CrateBindingTarget::Native,
+        ),
+        spec(
+            IMGUIZMO_SOURCE,
+            "src/bindings_pregenerated.rs",
+            CrateBindingTarget::Native,
+        ),
+        spec(
+            IMGUIZMO_SOURCE,
+            "src/wasm_bindings_pregenerated.rs",
+            CrateBindingTarget::WasmImport {
+                module_name: WASM_IMPORT_MODULE,
+            },
+        ),
+        spec(
+            IMGUIZMO_QUAT_SOURCE,
+            "src/bindings_pregenerated.rs",
+            CrateBindingTarget::Native,
+        ),
+        spec(
+            IMGUIZMO_QUAT_SOURCE,
+            "src/wasm_bindings_pregenerated.rs",
+            CrateBindingTarget::WasmImport {
+                module_name: WASM_IMPORT_MODULE,
+            },
+        ),
+    ];
 
     pub fn bindgen_rerun_env_vars(target: &str) -> Vec<String> {
         let mut names = vec![BINDGEN_EXTRA_CLANG_ARGS_PREFIX.to_owned()];
@@ -2261,10 +3061,11 @@ pub const DEFAULT_GITHUB_REPO: &str = "dear-imgui";
 #[cfg(test)]
 mod binding_contract_tests {
     use super::binding::{
-        ArtifactProfile, BindingSpec, BuildRequest, BuildRequestInput, CORE_BUILD_ENV_VARS,
-        CORE_WASM_TARGET, HeaderShim, NativeAbiProfile, SourceRevisions, TargetFacts,
-        bindgen_rerun_env_vars, is_supported_wasm_target, validate_bindgen_environment,
-        validate_wasm_feature_contract,
+        ArtifactProfile, BindingOwner, BindingSpec, BuildRequest, BuildRequestInput,
+        CORE_BUILD_ENV_VARS, CORE_WASM_TARGET, CrateBindingProvenance, CrateBindingSpec,
+        CrateBindingTarget, ExtensionBinding, HeaderShim, NativeAbiProfile, SourceRevisions,
+        TargetFacts, bindgen_rerun_env_vars, is_supported_wasm_target,
+        validate_bindgen_environment, validate_wasm_feature_contract,
     };
 
     fn request_with_env(values: Vec<(&str, Option<&str>)>) -> BuildRequest {
@@ -2708,6 +3509,177 @@ imgui-revision = "b61e56346a92cfcaf1f43a545ca37b0b32239654"
         ] {
             assert!(SourceRevisions::from_cargo_manifest(&invalid).is_err());
         }
+    }
+
+    #[test]
+    fn maintained_binding_specs_cover_test_engine_and_six_extensions() {
+        let specs = CrateBindingSpec::maintained();
+        let owners = specs
+            .iter()
+            .map(|spec| spec.owner)
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert!(owners.contains(&BindingOwner::TestEngine));
+        for extension in [
+            ExtensionBinding::ImPlot,
+            ExtensionBinding::ImPlot3d,
+            ExtensionBinding::ImNodes,
+            ExtensionBinding::NodeEditor,
+            ExtensionBinding::ImGuizmo,
+            ExtensionBinding::ImGuizmoQuat,
+        ] {
+            assert!(owners.contains(&BindingOwner::Extension(extension)));
+        }
+        assert_eq!(owners.len(), 7);
+        assert_eq!(
+            specs
+                .iter()
+                .filter(|spec| {
+                    spec.owner == BindingOwner::Extension(ExtensionBinding::NodeEditor)
+                })
+                .count(),
+            1,
+            "node-editor is the only native-only maintained extension"
+        );
+        assert_eq!(specs.len(), 12);
+    }
+
+    #[test]
+    fn maintained_crate_binding_specs_are_independent_of_host_headers() {
+        for spec in CrateBindingSpec::maintained() {
+            assert!(spec.clang_args.contains(&"-nostdinc"));
+            let expected_target = match spec.target {
+                CrateBindingTarget::Native => "--target=x86_64-pc-windows-msvc",
+                CrateBindingTarget::WasmImport { .. } => "--target=wasm32-unknown-unknown",
+            };
+            assert!(spec.clang_args.contains(&expected_target));
+
+            for required_header in [
+                "stdio.h",
+                "stddef.h",
+                "stdint.h",
+                "stdarg.h",
+                "stdbool.h",
+                "time.h",
+            ] {
+                assert!(
+                    spec.header_shims
+                        .iter()
+                        .any(|shim| shim.name == required_header),
+                    "{} {} is missing the {required_header} shim",
+                    spec.crate_name,
+                    spec.target.id()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn crate_binding_provenance_covers_source_inputs_spec_target_and_output() {
+        let spec = CrateBindingSpec::for_owner(BindingOwner::Extension(ExtensionBinding::ImPlot))
+            .find(|spec| spec.target.id() == "native")
+            .unwrap();
+        let base = CrateBindingProvenance::new(
+            spec,
+            "1".repeat(40),
+            [("third-party/cimplot/cimplot.h", "header-a")],
+            "pub fn ImPlot_GetPlotPos();\n",
+        );
+
+        assert_eq!(base, base.clone());
+        assert_ne!(
+            base,
+            CrateBindingProvenance::new(
+                spec,
+                "2".repeat(40),
+                [("third-party/cimplot/cimplot.h", "header-a")],
+                "pub fn ImPlot_GetPlotPos();\n",
+            )
+        );
+        assert_ne!(
+            base,
+            CrateBindingProvenance::new(
+                spec,
+                "1".repeat(40),
+                [("third-party/cimplot/cimplot.h", "header-b")],
+                "pub fn ImPlot_GetPlotPos();\n",
+            )
+        );
+        assert_ne!(
+            base,
+            CrateBindingProvenance::new(
+                spec,
+                "1".repeat(40),
+                [("third-party/cimplot/cimplot.h", "header-a")],
+                "pub fn ImPlot_GetPlotSize();\n",
+            )
+        );
+    }
+
+    #[test]
+    fn test_engine_binding_provenance_never_changes_core_artifact_identity() {
+        let artifact = profile();
+        let spec = CrateBindingSpec::for_owner(BindingOwner::TestEngine)
+            .next()
+            .unwrap();
+        let first = CrateBindingProvenance::new(
+            spec,
+            "a".repeat(40),
+            [("shim/cimgui_test_engine.h", "first")],
+            "pub fn imgui_test_engine_create_context();\n",
+        );
+        let second = CrateBindingProvenance::new(
+            spec,
+            "b".repeat(40),
+            [("shim/cimgui_test_engine.h", "second")],
+            "pub fn imgui_test_engine_create_context();\n",
+        );
+
+        assert_ne!(first, second);
+        assert_eq!(
+            artifact.deterministic_hash(),
+            profile().deterministic_hash()
+        );
+        assert_eq!(artifact.manifest_bytes(), profile().manifest_bytes());
+        assert!(
+            !String::from_utf8(artifact.manifest_bytes())
+                .unwrap()
+                .contains("test_engine")
+        );
+    }
+
+    #[test]
+    fn checked_in_binding_validation_rejects_missing_symbols_and_provenance_drift() {
+        let spec = CrateBindingSpec::for_owner(BindingOwner::Extension(ExtensionBinding::ImPlot))
+            .find(|spec| spec.target.id() == "wasm")
+            .unwrap();
+        let revision = "1".repeat(40);
+        let inputs = [("third-party/cimplot/cimplot.h", "header")];
+        let body = spec
+            .required_symbols
+            .iter()
+            .map(|symbol| format!("pub fn {symbol}();\n"))
+            .collect::<String>();
+        let provenance = CrateBindingProvenance::new(spec, &revision, inputs, &body);
+        let checked_in = provenance.embed(&body);
+
+        spec.validate_checked_in(&revision, inputs, &checked_in)
+            .unwrap();
+
+        let missing = checked_in.replace("pub fn ImPlot_TagY_Str0();\n", "");
+        assert!(
+            spec.validate_checked_in(&revision, inputs, &missing)
+                .is_err()
+        );
+
+        let drifted = checked_in.replace(
+            "pub fn ImPlot_TagX_Str0();",
+            "pub fn ImPlot_TagX_Str0(i: i32);",
+        );
+        assert!(
+            spec.validate_checked_in(&revision, inputs, &drifted)
+                .is_err()
+        );
     }
 }
 
