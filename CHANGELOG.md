@@ -73,6 +73,7 @@ This is an intentionally source-breaking architecture release. It replaces shall
 
 ### Changed
 
+- Replace repository-maintained Bash release and submodule helpers with cross-platform Python entry points, so release and prebuilt gates no longer require Bash and archive extraction rejects unsafe paths.
 - Guard every public cimgui generator declaration with a source-pinned API snapshot, and require every top-level `ImGui` function to map to a public safe Rust item or an explicit policy decision so CI rejects raw API drift and unreviewed safe API gaps.
 - Allow `TableColumnSetup::user_id` and the chainable table column builder to accept `u32` values directly while preserving typed `Id` inputs and non-zero validation. Fixes #39, thanks @TheDaChicken.
 - Share callback ownership, viewport recovery, and teardown through one private runtime across the Winit and SDL3 adapters for each renderer backend.

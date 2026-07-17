@@ -173,6 +173,38 @@ python3 tools/update_submodule_and_bindings.py \
   --wasm-ext implot,implot3d,imnodes,imguizmo,imguizmo-quat
 ```
 
+### 6. CI Package and Submodule Helpers
+
+Repository-maintained CI helpers are Python entry points and run on Windows,
+macOS, and Linux without Bash.
+
+Initialize the exact nested submodules needed by CI:
+
+```bash
+python3 tools/ci/update_submodules.py
+```
+
+Top-level repository submodules must already be initialized, as they are when
+`actions/checkout` uses `submodules: true`. For a local clone, initialize the
+top-level submodules before running this helper.
+
+Run the complete clean-clone source-package, offline-consumer, and host-prebuilt
+gate:
+
+```bash
+python3 tools/ci/verify_packaged_core.py full
+```
+
+Consume all prebuilt profiles for one target and optional CRT:
+
+```bash
+python3 tools/ci/verify_packaged_core.py prebuilt PACKAGE_DIR TARGET [CRT]
+```
+
+The no-argument form remains equivalent to `full`. The legacy
+`--verify-prebuilt-packages PACKAGE_DIR TARGET [CRT]` spelling is accepted for
+existing automation, but new callers should use the `prebuilt` command.
+
 ## Typical Release Workflow
 
 ### Option 1: Recommended Two-Phase Workflow

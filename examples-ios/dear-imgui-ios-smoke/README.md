@@ -69,9 +69,6 @@ Debug variant:
 python3 examples-ios/dear-imgui-ios-smoke/scripts/build-xcframework.py --profile debug
 ```
 
-If you prefer a shell entry point, `scripts/build-xcframework.sh` forwards to the
-same Python implementation.
-
 The default output path is:
 
 ```text

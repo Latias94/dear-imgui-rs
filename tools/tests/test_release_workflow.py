@@ -690,14 +690,17 @@ class PrepublishTests(unittest.TestCase):
         self.assertTrue(success)
         self.assertEqual(errors, [])
         run.assert_called_once_with(
-            ["bash", "tools/ci/verify_packaged_core.sh"],
+            [
+                sys.executable,
+                str(Path("/repo") / "tools" / "ci" / "verify_packaged_core.py"),
+            ],
             cwd=Path("/repo"),
             capture=True,
             show_output=True,
         )
 
     def test_package_gate_verifies_every_source_archive(self):
-        script = (REPO_ROOT / "tools/ci/verify_packaged_core.sh").read_text(
+        script = (REPO_ROOT / "tools/ci/_source_packages.py").read_text(
             encoding="utf-8"
         )
 

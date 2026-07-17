@@ -308,11 +308,13 @@ class SourceMetadataIntegrationTests(unittest.TestCase):
                 self.assertNotIn("GIT_REVISION_RE =", content)
 
     def test_package_gate_imports_the_shared_schema(self):
-        content = (REPO_ROOT / "tools/ci/verify_packaged_core.sh").read_text(
+        content = (REPO_ROOT / "tools/ci/_source_packages.py").read_text(
             encoding="utf-8"
         )
 
-        self.assertIn("from source_metadata import read_core_source_metadata", content)
+        self.assertIn(
+            "from source_metadata import read_core_source_metadata", content
+        )
         self.assertNotIn('required_keys = {"cimgui-revision"', content)
         self.assertNotIn("re.fullmatch", content)
 
