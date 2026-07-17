@@ -31,45 +31,46 @@ impl<'ui> Surface3DBuilder<'ui> {
         self
     }
     pub fn plot(self) {
-        let _guard = self._ui.bind();
-        let x_count = match i32::try_from(self.xs.len()) {
-            Ok(v) => v,
-            Err(_) => return,
-        };
-        let y_count = match i32::try_from(self.ys.len()) {
-            Ok(v) => v,
-            Err(_) => return,
-        };
-        let expected = match self.xs.len().checked_mul(self.ys.len()) {
-            Some(v) => v,
-            None => return,
-        };
-        if self.zs.len() != expected {
-            return;
-        }
-        let label = self.label.as_ref();
-        let label = if label.contains('\0') {
-            "surface"
-        } else {
-            label
-        };
-        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_with_style(
-                self.style,
-                self.flags.bits() | self.item_flags.bits(),
-                Plot3DDataLayout::DEFAULT,
-            );
-            sys::ImPlot3D_PlotSurface_FloatPtr(
-                label_ptr,
-                self.xs.as_ptr(),
-                self.ys.as_ptr(),
-                self.zs.as_ptr(),
-                x_count,
-                y_count,
-                self.scale_min,
-                self.scale_max,
-                spec,
-            );
+        self._ui.with_bound_context(|| {
+            let x_count = match i32::try_from(self.xs.len()) {
+                Ok(v) => v,
+                Err(_) => return,
+            };
+            let y_count = match i32::try_from(self.ys.len()) {
+                Ok(v) => v,
+                Err(_) => return,
+            };
+            let expected = match self.xs.len().checked_mul(self.ys.len()) {
+                Some(v) => v,
+                None => return,
+            };
+            if self.zs.len() != expected {
+                return;
+            }
+            let label = self.label.as_ref();
+            let label = if label.contains('\0') {
+                "surface"
+            } else {
+                label
+            };
+            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+                let spec = plot3d_spec_with_style(
+                    self.style,
+                    self.flags.bits() | self.item_flags.bits(),
+                    Plot3DDataLayout::DEFAULT,
+                );
+                sys::ImPlot3D_PlotSurface_FloatPtr(
+                    label_ptr,
+                    self.xs.as_ptr(),
+                    self.ys.as_ptr(),
+                    self.zs.as_ptr(),
+                    x_count,
+                    y_count,
+                    self.scale_min,
+                    self.scale_max,
+                    spec,
+                );
+            })
         })
     }
 }
@@ -83,8 +84,7 @@ impl<'ui> Plot3DUi<'ui> {
         ys: &'ui [f32],
         zs: &'ui [f32],
     ) -> Surface3DBuilder<'ui> {
-        let _guard = self.bind();
-        Surface3DBuilder {
+        self.with_bound_context(|| Surface3DBuilder {
             _ui: self,
             label: label.into(),
             xs,
@@ -95,7 +95,7 @@ impl<'ui> Plot3DUi<'ui> {
             flags: Surface3DFlags::NONE,
             item_flags: Item3DFlags::NONE,
             style: Plot3DItemStyle::default(),
-        }
+        })
     }
 
     /// Raw surface plot (f32) with an explicit data layout.
@@ -110,52 +110,53 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Surface3DFlags,
         layout: Plot3DDataLayout,
     ) {
-        let _guard = self.bind();
-        debug_before_plot();
-        let x_count = xs.len();
-        let y_count = ys.len();
-        let Some(x_count_i32) = surface_count_to_i32(x_count) else {
-            return;
-        };
-        let Some(y_count_i32) = surface_count_to_i32(y_count) else {
-            return;
-        };
-        let expected = match x_count.checked_mul(y_count) {
-            Some(v) => v,
-            None => return,
-        };
-        if zs.len() != expected {
-            // Invalid grid: require zs to be x_count * y_count
-            return;
-        }
-
-        // Flatten xs/ys to per-vertex arrays expected by the C++ API (length = x_count * y_count)
-        let mut xs_flat = Vec::with_capacity(expected);
-        let mut ys_flat = Vec::with_capacity(expected);
-        for yi in 0..y_count {
-            for xi in 0..x_count {
-                xs_flat.push(xs[xi]);
-                ys_flat.push(ys[yi]);
+        self.with_bound_context(|| {
+            debug_before_plot();
+            let x_count = xs.len();
+            let y_count = ys.len();
+            let Some(x_count_i32) = surface_count_to_i32(x_count) else {
+                return;
+            };
+            let Some(y_count_i32) = surface_count_to_i32(y_count) else {
+                return;
+            };
+            let expected = match x_count.checked_mul(y_count) {
+                Some(v) => v,
+                None => return,
+            };
+            if zs.len() != expected {
+                // Invalid grid: require zs to be x_count * y_count
+                return;
             }
-        }
 
-        let label = label.as_ref();
-        if label.contains('\0') {
-            return;
-        }
-        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), layout);
-            sys::ImPlot3D_PlotSurface_FloatPtr(
-                label_ptr,
-                xs_flat.as_ptr(),
-                ys_flat.as_ptr(),
-                zs.as_ptr(),
-                x_count_i32,
-                y_count_i32,
-                scale_min,
-                scale_max,
-                spec,
-            );
+            // Flatten xs/ys to per-vertex arrays expected by the C++ API (length = x_count * y_count)
+            let mut xs_flat = Vec::with_capacity(expected);
+            let mut ys_flat = Vec::with_capacity(expected);
+            for yi in 0..y_count {
+                for xi in 0..x_count {
+                    xs_flat.push(xs[xi]);
+                    ys_flat.push(ys[yi]);
+                }
+            }
+
+            let label = label.as_ref();
+            if label.contains('\0') {
+                return;
+            }
+            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+                let spec = plot3d_spec_from(flags.bits(), layout);
+                sys::ImPlot3D_PlotSurface_FloatPtr(
+                    label_ptr,
+                    xs_flat.as_ptr(),
+                    ys_flat.as_ptr(),
+                    zs.as_ptr(),
+                    x_count_i32,
+                    y_count_i32,
+                    scale_min,
+                    scale_max,
+                    spec,
+                );
+            })
         })
     }
 
@@ -176,37 +177,38 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Surface3DFlags,
         layout: Plot3DDataLayout,
     ) {
-        let _guard = self.bind();
-        debug_before_plot();
-        let Some(x_count_i32) = surface_count_to_i32(x_count) else {
-            return;
-        };
-        let Some(y_count_i32) = surface_count_to_i32(y_count) else {
-            return;
-        };
-        let Some(expected) = x_count.checked_mul(y_count) else {
-            return;
-        };
-        if xs_flat.len() != expected || ys_flat.len() != expected || zs.len() != expected {
-            return;
-        }
-        let label = label.as_ref();
-        if label.contains('\0') {
-            return;
-        }
-        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), layout);
-            sys::ImPlot3D_PlotSurface_FloatPtr(
-                label_ptr,
-                xs_flat.as_ptr(),
-                ys_flat.as_ptr(),
-                zs.as_ptr(),
-                x_count_i32,
-                y_count_i32,
-                scale_min,
-                scale_max,
-                spec,
-            );
+        self.with_bound_context(|| {
+            debug_before_plot();
+            let Some(x_count_i32) = surface_count_to_i32(x_count) else {
+                return;
+            };
+            let Some(y_count_i32) = surface_count_to_i32(y_count) else {
+                return;
+            };
+            let Some(expected) = x_count.checked_mul(y_count) else {
+                return;
+            };
+            if xs_flat.len() != expected || ys_flat.len() != expected || zs.len() != expected {
+                return;
+            }
+            let label = label.as_ref();
+            if label.contains('\0') {
+                return;
+            }
+            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+                let spec = plot3d_spec_from(flags.bits(), layout);
+                sys::ImPlot3D_PlotSurface_FloatPtr(
+                    label_ptr,
+                    xs_flat.as_ptr(),
+                    ys_flat.as_ptr(),
+                    zs.as_ptr(),
+                    x_count_i32,
+                    y_count_i32,
+                    scale_min,
+                    scale_max,
+                    spec,
+                );
+            })
         })
     }
 }

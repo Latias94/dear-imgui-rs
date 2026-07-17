@@ -1,9 +1,10 @@
 use super::registry::{
-    disable, has_renderer_state_for_context, render_callback_matches,
-    try_install_renderer_callbacks, try_install_renderer_callbacks_after_preflight,
-    unary_callback_matches, validate_empty_renderer_user_data,
-    validate_no_created_platform_windows, validate_platform_backend, validate_platform_callbacks,
-    validate_queue_family_selection, validate_vulkan_handles,
+    disable, has_renderer_state_for_context, remove_renderer_state_for_renderer,
+    render_callback_matches, try_install_renderer_callbacks,
+    try_install_renderer_callbacks_after_preflight, unary_callback_matches,
+    validate_empty_renderer_user_data, validate_no_created_platform_windows,
+    validate_platform_backend, validate_platform_callbacks, validate_queue_family_selection,
+    validate_vulkan_handles,
 };
 use super::*;
 use ash::vk::Handle;
@@ -233,6 +234,21 @@ fn missing_platform_capability_fails_without_mutating_renderer_state() {
 }
 
 #[test]
+fn dead_context_renderer_state_is_not_visible_by_raw_address() {
+    let _guard = lock_context();
+    let context = Context::create();
+    let raw = context.as_raw();
+    let mut renderer = MaybeUninit::<AshRenderer>::uninit();
+    let renderer = renderer.as_mut_ptr();
+    insert_renderer_state(&context, renderer, None).unwrap();
+
+    drop(context);
+
+    assert!(!has_renderer_state_for_context(raw));
+    remove_renderer_state_for_renderer(renderer);
+}
+
+#[test]
 fn foreign_renderer_user_data_preflight_is_transactional() {
     let _guard = lock_context();
     let context = Context::create();
@@ -303,7 +319,7 @@ fn live_viewport_data_blocks_callback_rebind_and_is_context_owned() {
     let mut ctx_a = Context::create();
     let raw_a = ctx_a.as_raw();
     let data = std::ptr::NonNull::<ViewportAshData>::dangling().as_ptr();
-    register_viewport_data(data);
+    register_viewport_data(&ctx_a.binding(), data);
     assert!(is_ash_viewport_data(data));
 
     unsafe { sys::igSetCurrentContext(std::ptr::null_mut()) };
@@ -333,7 +349,7 @@ fn existing_ash_callback_table_cannot_rebind_renderer_state() {
     let mut renderer = MaybeUninit::<AshRenderer>::uninit();
 
     try_install(&mut ctx).expect("empty renderer callback table");
-    insert_renderer_state(raw, renderer.as_mut_ptr(), None).unwrap();
+    insert_renderer_state(&ctx, renderer.as_mut_ptr(), None).unwrap();
 
     assert_eq!(
         try_install(&mut ctx),
@@ -353,7 +369,7 @@ fn disable_preserves_renderer_callbacks_replaced_by_another_backend() {
     let mut renderer = MaybeUninit::<AshRenderer>::uninit();
 
     try_install(&mut ctx).expect("empty renderer callback table");
-    insert_renderer_state(raw, renderer.as_mut_ptr(), None).unwrap();
+    insert_renderer_state(&ctx, renderer.as_mut_ptr(), None).unwrap();
     {
         let platform_io = ctx.platform_io_mut();
         platform_io.set_renderer_create_window_raw(Some(foreign_renderer_create_window));
@@ -438,9 +454,9 @@ fn shutdown_rejects_missing_callback_before_mutating_live_runtime() {
     let mut renderer = MaybeUninit::<AshRenderer>::uninit();
 
     try_install(&mut ctx).expect("empty renderer callback table");
-    insert_renderer_state(raw, renderer.as_mut_ptr(), None).unwrap();
+    insert_renderer_state(&ctx, renderer.as_mut_ptr(), None).unwrap();
     let pointer = std::ptr::NonNull::<ViewportAshData>::dangling().as_ptr();
-    register_viewport_data(pointer);
+    register_viewport_data(&ctx.binding(), pointer);
     ctx.platform_io_mut().set_renderer_destroy_window_raw(None);
 
     assert_eq!(
@@ -465,7 +481,7 @@ fn renderer_state_is_context_local() {
     let raw_a = ctx_a.as_raw();
     let mut renderer_a = MaybeUninit::<AshRenderer>::uninit();
     let renderer_a_ptr = renderer_a.as_mut_ptr();
-    insert_renderer_state(raw_a, renderer_a_ptr, None).unwrap();
+    insert_renderer_state(&ctx_a, renderer_a_ptr, None).unwrap();
 
     unsafe {
         sys::igSetCurrentContext(std::ptr::null_mut());
@@ -475,7 +491,7 @@ fn renderer_state_is_context_local() {
     let raw_b = ctx_b.as_raw();
     let mut renderer_b = MaybeUninit::<AshRenderer>::uninit();
     let renderer_b_ptr = renderer_b.as_mut_ptr();
-    insert_renderer_state(raw_b, renderer_b_ptr, None).unwrap();
+    insert_renderer_state(&ctx_b, renderer_b_ptr, None).unwrap();
 
     unsafe {
         sys::igSetCurrentContext(raw_a);
@@ -518,13 +534,13 @@ fn one_renderer_cannot_be_registered_to_two_contexts() {
     let raw_a = ctx_a.as_raw();
     let mut renderer = MaybeUninit::<AshRenderer>::uninit();
     let renderer = renderer.as_mut_ptr();
-    insert_renderer_state(raw_a, renderer, None).unwrap();
+    insert_renderer_state(&ctx_a, renderer, None).unwrap();
 
     unsafe { sys::igSetCurrentContext(std::ptr::null_mut()) };
     let ctx_b = Context::create();
     let raw_b = ctx_b.as_raw();
     assert_eq!(
-        insert_renderer_state(raw_b, renderer, None),
+        insert_renderer_state(&ctx_b, renderer, None),
         Err(CallbackOwnershipError::RendererAlreadyRegistered)
     );
     assert!(!has_renderer_state_for_context(raw_b));
@@ -544,7 +560,7 @@ fn clear_for_drop_removes_renderer_state() {
     let mut renderer = MaybeUninit::<AshRenderer>::uninit();
     let renderer_ptr = renderer.as_mut_ptr();
 
-    insert_renderer_state(raw, renderer_ptr, None).unwrap();
+    insert_renderer_state(&ctx, renderer_ptr, None).unwrap();
     unsafe {
         sys::igSetCurrentContext(raw);
         assert!(borrow_renderer().is_some());

@@ -1,5 +1,5 @@
 use super::validation::assert_finite_vec2;
-use crate::{EditorContext, context::CurrentEditorGuard, sys, vec2};
+use crate::{EditorContext, sys, vec2};
 use dear_imgui_rs::Ui;
 use std::{cell::Cell, ffi::CString};
 
@@ -19,11 +19,15 @@ impl<'ui> NodeEditorFrame<'ui> {
         size: [f32; 2],
     ) -> Self {
         assert_finite_vec2("Ui::node_editor()", "size", size);
+        assert_eq!(
+            ui.context_id(),
+            editor.imgui_context_id(),
+            "Ui::node_editor() requires a Ui from the editor's owning Dear ImGui context"
+        );
         let id = CString::new(id.as_ref()).expect("node editor id cannot contain NUL bytes");
-        {
-            let _current_editor = editor.bind_current("Ui::node_editor");
-            unsafe { sys::dne_begin(id.as_ptr(), vec2(size)) };
-        }
+        editor.with_current("Ui::node_editor", || unsafe {
+            sys::dne_begin(id.as_ptr(), vec2(size))
+        });
         Self {
             _ui: ui,
             _editor: editor,
@@ -32,8 +36,9 @@ impl<'ui> NodeEditorFrame<'ui> {
         }
     }
 
-    pub(super) fn bind(&self, caller: &str) -> CurrentEditorGuard<'_> {
-        self._editor.bind_current(caller)
+    #[inline]
+    pub(super) fn with_current<R>(&self, caller: &str, f: impl FnOnce() -> R) -> R {
+        self._editor.with_current(caller, f)
     }
 
     pub fn end(mut self) {
@@ -42,8 +47,8 @@ impl<'ui> NodeEditorFrame<'ui> {
 
     fn end_inner(&mut self) {
         if !self.ended {
-            let _current_editor = self._editor.bind_current("NodeEditorFrame::end()");
-            unsafe { sys::dne_end() };
+            self._editor
+                .with_current("NodeEditorFrame::end()", || unsafe { sys::dne_end() });
             self.ended = true;
         }
     }

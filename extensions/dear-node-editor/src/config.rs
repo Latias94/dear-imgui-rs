@@ -190,7 +190,7 @@ impl EditorConfig {
         }
     }
 
-    pub(crate) fn to_sys(&mut self) -> sys::DneConfig {
+    pub(crate) fn as_sys(&mut self) -> sys::DneConfig {
         let has_callbacks = self.callbacks.is_some();
         sys::DneConfig {
             settings_file: self

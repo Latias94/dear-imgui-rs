@@ -37,10 +37,6 @@ pub enum RendererError {
     #[error("WGPU renderer received a different Dear ImGui context than its bound context")]
     ContextMismatch,
 
-    /// A contextless render operation ran while another context was current.
-    #[error("the Dear ImGui context bound to this WGPU renderer is not current")]
-    ContextNotCurrent,
-
     /// The context already has renderer-owned state that this renderer cannot claim safely.
     #[error("Dear ImGui context is already configured for a renderer backend")]
     ContextAlreadyHasRenderer,

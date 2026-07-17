@@ -5,15 +5,14 @@ use std::os::raw::c_void;
 impl<'ui> NodeEditor<'ui> {
     /// Draw a minimap in the editor
     pub fn minimap(&self, size_fraction: f32, location: crate::MiniMapLocation) {
-        let _guard = self.bind();
-        unsafe {
+        self.with_bound_context(|| unsafe {
             sys::imnodes_MiniMap(
                 size_fraction,
                 location as sys::ImNodesMiniMapLocation,
                 None,
                 std::ptr::null_mut(),
             )
-        }
+        });
     }
 
     /// Draw a minimap with a node-hover callback (invoked during this call)
@@ -41,7 +40,6 @@ impl<'ui> NodeEditor<'ui> {
 
         // ImNodes may invoke the callback during EndNodeEditor(). Keep the closure alive for the
         // whole editor frame by storing it inside the NodeEditor token.
-        let _guard = self.bind();
         self.minimap_callbacks.push(Box::new(MiniMapCallbackHolder {
             callback: Box::new(callback),
         }));
@@ -50,13 +48,13 @@ impl<'ui> NodeEditor<'ui> {
             .last_mut()
             .map(|b| b.as_mut() as *mut MiniMapCallbackHolder<'ui> as *mut c_void)
             .unwrap_or(std::ptr::null_mut());
-        unsafe {
+        self.with_bound_context(|| unsafe {
             sys::imnodes_MiniMap(
                 size_fraction,
                 location as sys::ImNodesMiniMapLocation,
                 Some(trampoline),
                 user_ptr,
             )
-        }
+        });
     }
 }

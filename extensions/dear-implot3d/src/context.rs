@@ -1,6 +1,6 @@
+use crate::sys;
 use crate::ui::{Plot3DContextBinding, Plot3DUi};
-use crate::{imgui_sys, sys};
-use dear_imgui_rs::{Context, Ui};
+use dear_imgui_rs::{Context, ContextBinding, Ui};
 
 /// Plot3D context wrapper
 ///
@@ -22,8 +22,7 @@ use dear_imgui_rs::{Context, Ui};
 /// ```
 pub struct Plot3DContext {
     pub(crate) raw: *mut sys::ImPlot3DContext,
-    pub(crate) imgui_ctx_raw: *mut imgui_sys::ImGuiContext,
-    pub(crate) imgui_alive: Option<dear_imgui_rs::ContextAliveToken>,
+    pub(crate) imgui_binding: ContextBinding,
     pub(crate) owns_context: bool,
 }
 
@@ -31,13 +30,7 @@ impl Plot3DContext {
     pub(crate) fn binding(&self) -> Plot3DContextBinding {
         Plot3DContextBinding {
             plot_ctx_raw: self.raw,
-            imgui_ctx_raw: self.imgui_ctx_raw,
-        }
-    }
-
-    pub(crate) fn assert_imgui_alive(&self, caller: &str) {
-        if let Some(alive) = &self.imgui_alive {
-            assert!(alive.is_alive(), "{caller}: ImGui context has been dropped");
+            imgui_binding: self.imgui_binding.clone(),
         }
     }
 
@@ -45,34 +38,26 @@ impl Plot3DContext {
     ///
     /// This should be called once after creating your ImGui context.
     pub fn try_create(imgui: &Context) -> dear_imgui_rs::ImGuiResult<Self> {
-        let imgui_ctx_raw = imgui.as_raw();
-        let imgui_alive = Some(imgui.alive_token());
-        let prev_imgui = unsafe { imgui_sys::igGetCurrentContext() };
-        let prev_plot = unsafe { sys::ImPlot3D_GetCurrentContext() };
-        unsafe {
-            if prev_imgui != imgui_ctx_raw {
-                imgui_sys::igSetCurrentContext(imgui_ctx_raw);
-            }
+        let imgui_binding = imgui.binding();
+        let ctx = imgui_binding.with_bound_context(|| unsafe {
+            let prev_plot = sys::ImPlot3D_GetCurrentContext();
             let ctx = sys::ImPlot3D_CreateContext();
             if sys::ImPlot3D_GetCurrentContext() != prev_plot {
                 sys::ImPlot3D_SetCurrentContext(prev_plot);
             }
-            if prev_imgui != imgui_ctx_raw {
-                imgui_sys::igSetCurrentContext(prev_imgui);
-            }
-            if ctx.is_null() {
-                return Err(dear_imgui_rs::ImGuiError::context_creation(
-                    "ImPlot3D_CreateContext returned null",
-                ));
-            }
-
-            Ok(Self {
-                raw: ctx,
-                imgui_ctx_raw,
-                imgui_alive,
-                owns_context: true,
-            })
+            ctx
+        });
+        if ctx.is_null() {
+            return Err(dear_imgui_rs::ImGuiError::context_creation(
+                "ImPlot3D_CreateContext returned null",
+            ));
         }
+
+        Ok(Self {
+            raw: ctx,
+            imgui_binding,
+            owns_context: true,
+        })
     }
 
     /// Create a new ImPlot3D context (panics on error).
@@ -100,15 +85,14 @@ impl Plot3DContext {
     /// Call this once per frame to get access to plotting functions.
     /// The returned `Plot3DUi` is tied to the lifetime of the `Ui` frame.
     pub fn get_plot_ui<'ui>(&self, ui: &'ui Ui) -> Plot3DUi<'ui> {
-        let ui_ctx_raw = ui.with_bound_context(|| unsafe { imgui_sys::igGetCurrentContext() });
         assert_eq!(
-            ui_ctx_raw, self.imgui_ctx_raw,
+            ui.context_id(),
+            self.imgui_binding.id(),
             "dear-implot3d: Plot3DContext::get_plot_ui() requires a Ui from the owning ImGui context"
         );
         Plot3DUi {
             _ui: ui,
             binding: self.binding(),
-            imgui_alive: self.imgui_alive.clone(),
         }
     }
 }
@@ -119,34 +103,22 @@ impl Drop for Plot3DContext {
             return;
         }
 
-        if let Some(alive) = &self.imgui_alive {
-            if !alive.is_alive() {
-                // Avoid calling into ImGui allocators after the context has been dropped.
-                // Best-effort: leak the Plot3D context instead of risking UB.
-                return;
-            }
-        }
-
-        unsafe {
-            let prev_imgui = imgui_sys::igGetCurrentContext();
+        let _ = self.imgui_binding.try_with_bound_context(|| unsafe {
             let prev_plot = sys::ImPlot3D_GetCurrentContext();
             let restore_plot = if prev_plot == self.raw {
                 std::ptr::null_mut()
             } else {
                 prev_plot
             };
-            imgui_sys::igSetCurrentContext(self.imgui_ctx_raw);
             sys::ImPlot3D_DestroyContext(self.raw);
             sys::ImPlot3D_SetCurrentContext(restore_plot);
-            imgui_sys::igSetCurrentContext(prev_imgui);
-        }
+        });
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::Plot3DContext;
-    use crate::ui::Plot3DContextBinding;
     use crate::{Context, sys};
     use std::mem::{align_of, size_of};
     use std::sync::{Mutex, OnceLock};
@@ -176,15 +148,9 @@ mod tests {
 
         unsafe { sys::ImPlot3D_SetCurrentContext(raw_b) };
 
-        {
-            let _guard = Plot3DContextBinding {
-                plot_ctx_raw: plot_a.raw,
-                imgui_ctx_raw: plot_a.imgui_ctx_raw,
-            }
-            .bind();
-
+        plot_a.binding().with_bound_context(|| {
             assert_eq!(unsafe { sys::ImPlot3D_GetCurrentContext() }, raw_a);
-        }
+        });
 
         assert_eq!(unsafe { sys::ImPlot3D_GetCurrentContext() }, raw_b);
 
@@ -262,6 +228,7 @@ mod tests {
         let _guard = test_guard();
         let imgui_a = Context::create();
         let plot_a = Plot3DContext::create(&imgui_a);
+        let imgui_a_raw = imgui_a.as_raw();
         let suspended_a = imgui_a.suspend();
         let imgui_b = Context::create();
 
@@ -269,17 +236,12 @@ mod tests {
             unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
             imgui_b.as_raw()
         );
-        {
-            let _guard = Plot3DContextBinding {
-                plot_ctx_raw: plot_a.raw,
-                imgui_ctx_raw: plot_a.imgui_ctx_raw,
-            }
-            .bind();
+        plot_a.binding().with_bound_context(|| {
             assert_eq!(
                 unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
-                plot_a.imgui_ctx_raw
+                imgui_a_raw
             );
-        }
+        });
         assert_eq!(
             unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
             imgui_b.as_raw()

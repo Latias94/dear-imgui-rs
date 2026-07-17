@@ -39,7 +39,6 @@ mod validation;
 pub use core::Io;
 pub use flags::{BackendFlags, ConfigFlags, ViewportFlags};
 
-pub(crate) use core::BoundContextGuard;
 pub(crate) use flags::{validate_backend_flags, validate_config_flags, validate_viewport_flags};
 pub(crate) use validation::{
     assert_display_framebuffer_scale, assert_display_size, assert_finite_f32, assert_finite_vec2,

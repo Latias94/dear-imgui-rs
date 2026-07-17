@@ -3,7 +3,7 @@
 use super::CallbackOwnershipError;
 use super::platform_adapter;
 use super::registry::{
-    CurrentContextGuard, borrow_renderer, current_context, destroy_viewport_data,
+    binding_for_current_context, borrow_renderer, current_context, destroy_viewport_data,
     globals_for_current_context, has_renderer_state, insert_renderer_state, register_viewport_data,
     registered_renderer_for_context, remove_renderer_state_for_context, renderer_globals,
     validate_new_registration, viewport_data_pointer,
@@ -118,116 +118,120 @@ pub(super) unsafe fn enable(
     let globals = renderer_globals(renderer)?;
 
     let raw_context = context.as_raw();
-    // SAFETY: the mutable context borrow keeps `raw_context` live, and registration cannot destroy
-    // either it or the previously current context before the guard is dropped.
-    let _context_guard = unsafe { CurrentContextGuard::bind(raw_context) };
-    if !context
-        .io()
-        .backend_flags()
-        .contains(BackendFlags::PLATFORM_HAS_VIEWPORTS)
-    {
-        return Err(CallbackOwnershipError::PlatformBackendUnavailable);
-    }
-    validate_new_registration(raw_context, renderer)?;
-    let secondary_viewports = context
-        .platform_io()
-        .viewports_iter()
-        .skip(1)
-        .map(|viewport| {
-            (
-                viewport.platform_window_created(),
-                viewport.renderer_user_data(),
-            )
-        })
-        .collect::<Vec<_>>();
-    validate_secondary_viewports(&secondary_viewports)?;
-    claim_callbacks(
-        context.platform_io_mut(),
-        dear_imgui_rs::sys::HAS_PLATFORM_IO_AGGREGATE_HOOKS,
-    )?;
-    insert_renderer_state(raw_context, renderer, Some(globals));
-    renderer
-        .multi_viewport_active
-        .store(true, Ordering::Release);
-    let io = context.io_mut();
-    io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_VIEWPORTS);
-    Ok(())
+    let binding = context.binding();
+    binding.with_bound_context(|| {
+        if !context
+            .io()
+            .backend_flags()
+            .contains(BackendFlags::PLATFORM_HAS_VIEWPORTS)
+        {
+            return Err(CallbackOwnershipError::PlatformBackendUnavailable);
+        }
+        validate_new_registration(raw_context, renderer)?;
+        let secondary_viewports = context
+            .platform_io()
+            .viewports_iter()
+            .skip(1)
+            .map(|viewport| {
+                (
+                    viewport.platform_window_created(),
+                    viewport.renderer_user_data(),
+                )
+            })
+            .collect::<Vec<_>>();
+        validate_secondary_viewports(&secondary_viewports)?;
+        claim_callbacks(
+            context.platform_io_mut(),
+            dear_imgui_rs::sys::HAS_PLATFORM_IO_AGGREGATE_HOOKS,
+        )?;
+        insert_renderer_state(context, renderer, Some(globals));
+        renderer
+            .multi_viewport_active
+            .store(true, Ordering::Release);
+        let io = context.io_mut();
+        io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_VIEWPORTS);
+        Ok(())
+    })
 }
 
 pub(super) fn disable_after_platform_shutdown(context: &mut Context) {
     let raw_context = context.as_raw();
-    // SAFETY: the mutable context borrow keeps both the target and restored context lifetimes valid
-    // throughout callback and registry teardown.
-    let _context_guard = unsafe { CurrentContextGuard::bind(raw_context) };
-    let had_state = has_renderer_state(raw_context);
-    let registered_renderer = registered_renderer_for_context(raw_context);
-    let platform_io = context.platform_io_mut();
-    let had_owned_callbacks = any_callback_owned(platform_io);
-    for viewport in platform_io.viewports_iter_mut() {
-        unsafe { destroy_viewport_data(raw_context, viewport) };
-    }
-    if unary_callback_matches(
-        platform_io.renderer_create_window_raw(),
-        renderer_create_window_sys,
-    ) {
-        platform_io.set_renderer_create_window_raw(None);
-    }
-    if unary_callback_matches(
-        platform_io.renderer_destroy_window_raw(),
-        renderer_destroy_window_sys,
-    ) {
-        platform_io.set_renderer_destroy_window_raw(None);
-    }
-    platform_io.clear_renderer_set_window_size_if_pointer_callback(renderer_set_window_size_sys);
-    if render_callback_matches(
-        platform_io.renderer_render_window_raw(),
-        renderer_render_window_sys,
-    ) {
-        platform_io.set_renderer_render_window_raw(None);
-    }
-    if render_callback_matches(
-        platform_io.renderer_swap_buffers_raw(),
-        renderer_swap_buffers_sys,
-    ) {
-        platform_io.set_renderer_swap_buffers_raw(None);
-    }
-    let renderer_callbacks_are_empty = platform_io.renderer_callbacks_are_empty();
-    if let Some(renderer) = registered_renderer {
-        // SAFETY: the registry entry is removed below while the owning context and renderer are
-        // still required to be alive by the runtime shutdown contract.
-        unsafe { &*renderer }
-            .multi_viewport_active
-            .store(false, Ordering::Release);
-    }
-    remove_renderer_state_for_context(raw_context);
-    if (had_state || had_owned_callbacks) && renderer_callbacks_are_empty {
-        let io = context.io_mut();
-        let mut flags = io.backend_flags();
-        flags.remove(BackendFlags::RENDERER_HAS_VIEWPORTS);
-        io.set_backend_flags(flags);
-    }
+    let binding = context.binding();
+    binding.with_bound_context(|| {
+        let had_state = has_renderer_state(raw_context);
+        let registered_renderer = registered_renderer_for_context(raw_context);
+        let platform_io = context.platform_io_mut();
+        let had_owned_callbacks = any_callback_owned(platform_io);
+        for viewport in platform_io.viewports_iter_mut() {
+            unsafe { destroy_viewport_data(raw_context, viewport) };
+        }
+        if unary_callback_matches(
+            platform_io.renderer_create_window_raw(),
+            renderer_create_window_sys,
+        ) {
+            platform_io.set_renderer_create_window_raw(None);
+        }
+        if unary_callback_matches(
+            platform_io.renderer_destroy_window_raw(),
+            renderer_destroy_window_sys,
+        ) {
+            platform_io.set_renderer_destroy_window_raw(None);
+        }
+        platform_io
+            .clear_renderer_set_window_size_if_pointer_callback(renderer_set_window_size_sys);
+        if render_callback_matches(
+            platform_io.renderer_render_window_raw(),
+            renderer_render_window_sys,
+        ) {
+            platform_io.set_renderer_render_window_raw(None);
+        }
+        if render_callback_matches(
+            platform_io.renderer_swap_buffers_raw(),
+            renderer_swap_buffers_sys,
+        ) {
+            platform_io.set_renderer_swap_buffers_raw(None);
+        }
+        let renderer_callbacks_are_empty = platform_io.renderer_callbacks_are_empty();
+        if let Some(renderer) = registered_renderer {
+            // SAFETY: the registry entry is removed below while the owning context and renderer
+            // are still required to be alive by the runtime shutdown contract.
+            unsafe { &*renderer }
+                .multi_viewport_active
+                .store(false, Ordering::Release);
+        }
+        remove_renderer_state_for_context(raw_context);
+        if (had_state || had_owned_callbacks) && renderer_callbacks_are_empty {
+            let io = context.io_mut();
+            let mut flags = io.backend_flags();
+            flags.remove(BackendFlags::RENDERER_HAS_VIEWPORTS);
+            io.set_backend_flags(flags);
+        }
+    });
 }
 
 pub(super) fn shutdown_multi_viewport_support(
     context: &mut Context,
 ) -> Result<(), CallbackOwnershipError> {
     let raw_context = context.as_raw();
-    // SAFETY: the mutable context borrow keeps this context live through platform-window teardown
-    // and restoration of the previously current context.
-    let _context_guard = unsafe { CurrentContextGuard::bind(raw_context) };
-    if !has_renderer_state(raw_context) {
-        return Ok(());
-    }
-    if !callbacks_owned(context.platform_io()) {
-        return Err(CallbackOwnershipError::RendererCallbacksReplaced);
-    }
-    context.destroy_platform_windows();
-    disable_after_platform_shutdown(context);
-    Ok(())
+    let binding = context.binding();
+    binding.with_bound_context(|| {
+        if !has_renderer_state(raw_context) {
+            return Ok(());
+        }
+        if !callbacks_owned(context.platform_io()) {
+            return Err(CallbackOwnershipError::RendererCallbacksReplaced);
+        }
+        context.destroy_platform_windows();
+        disable_after_platform_shutdown(context);
+        Ok(())
+    })
 }
 
 pub(super) unsafe fn renderer_create_window(viewport: *mut Viewport) {
     let context = current_context();
+    let Some(context_binding) = binding_for_current_context() else {
+        return;
+    };
     // SAFETY: callback entry points reject null pointers and Dear ImGui owns this live viewport.
     let viewport = unsafe { &mut *viewport };
     if !viewport.renderer_user_data().is_null() {
@@ -241,7 +245,7 @@ pub(super) unsafe fn renderer_create_window(viewport: *mut Viewport) {
         return;
     };
     let pointer = Box::into_raw(Box::new(data));
-    register_viewport_data(context, pointer);
+    register_viewport_data(&context_binding, pointer);
     viewport.set_renderer_user_data(pointer.cast());
 }
 
@@ -495,7 +499,13 @@ pub(super) fn framebuffer_size_for_reconfigure(
 }
 
 fn run_callback(name: &str, callback: impl FnOnce()) {
-    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(callback)).is_err() {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let Some(binding) = binding_for_current_context() else {
+            return;
+        };
+        let _ = binding.try_with_bound_context(callback);
+    }));
+    if result.is_err() {
         eprintln!("[wgpu-mv] panic in {name}");
         std::process::abort();
     }

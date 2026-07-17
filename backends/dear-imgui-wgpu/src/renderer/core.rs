@@ -1,7 +1,7 @@
 use crate::{
     GammaMode, RendererError, RendererResult, ShaderManager, WgpuBackendData, WgpuTextureManager,
 };
-use dear_imgui_rs::{BackendFlags, Context, ContextAliveToken, sys};
+use dear_imgui_rs::{BackendFlags, Context, ContextBinding};
 use wgpu::TextureView;
 
 #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
@@ -10,23 +10,21 @@ use std::sync::atomic::AtomicBool;
 use wgpu::Color;
 
 #[derive(Clone, Debug)]
-pub(super) struct ContextBinding {
-    raw: *mut sys::ImGuiContext,
-    alive: ContextAliveToken,
+pub(super) struct RendererContextBinding {
+    context: ContextBinding,
     renderer_flags_added: BackendFlags,
 }
 
-impl ContextBinding {
+impl RendererContextBinding {
     pub(super) fn capture(context: &Context, renderer_flags_added: BackendFlags) -> Self {
         Self {
-            raw: context.as_raw(),
-            alive: context.alive_token(),
+            context: context.binding(),
             renderer_flags_added,
         }
     }
 
     fn ensure_alive(&self) -> RendererResult<()> {
-        if self.alive.is_alive() {
+        if self.context.is_alive() {
             Ok(())
         } else {
             Err(RendererError::ContextDropped)
@@ -35,37 +33,19 @@ impl ContextBinding {
 
     pub(super) fn ensure_matches(&self, context: &Context) -> RendererResult<()> {
         self.ensure_alive()?;
-        if self.raw == context.as_raw() {
+        if self.context.id() == context.id() {
             Ok(())
         } else {
             Err(RendererError::ContextMismatch)
         }
     }
 
-    pub(super) fn ensure_current(&self) -> RendererResult<()> {
-        self.ensure_alive()?;
-        let current = unsafe { sys::igGetCurrentContext() };
-        if self.raw == current {
-            Ok(())
-        } else {
-            Err(RendererError::ContextNotCurrent)
-        }
+    pub(super) fn context(&self) -> ContextBinding {
+        self.context.clone()
     }
 
     pub(super) fn renderer_flags_added(&self) -> BackendFlags {
         self.renderer_flags_added
-    }
-
-    fn platform_io(&self) -> RendererResult<*mut sys::ImGuiPlatformIO> {
-        self.ensure_current()?;
-        let platform_io = unsafe { sys::igGetPlatformIO_ContextPtr(self.raw) };
-        if platform_io.is_null() {
-            Err(RendererError::InvalidRenderState(
-                "bound Dear ImGui context has no PlatformIO".to_owned(),
-            ))
-        } else {
-            Ok(platform_io)
-        }
     }
 }
 
@@ -75,11 +55,11 @@ impl ContextBinding {
 ///
 /// An initialized renderer owns the renderer state of exactly one [`Context`]. Create a separate
 /// renderer for every Dear ImGui context and call [`Self::shutdown`](WgpuRenderer::shutdown) with
-/// the matching context before dropping either value. The retained context liveness token makes
+/// the matching context before dropping either value. The retained context binding makes
 /// this renderer UI-thread-bound.
 pub struct WgpuRenderer {
     /// Dear ImGui context whose renderer state this instance owns.
-    pub(super) context_binding: Option<ContextBinding>,
+    pub(super) context_binding: Option<RendererContextBinding>,
     /// Backend data
     pub(super) backend_data: Option<WgpuBackendData>,
     /// Shader manager
@@ -109,7 +89,10 @@ impl WgpuRenderer {
                 "renderer is already bound to a Dear ImGui context".to_owned(),
             ));
         }
-        self.context_binding = Some(ContextBinding::capture(context, renderer_flags_added));
+        self.context_binding = Some(RendererContextBinding::capture(
+            context,
+            renderer_flags_added,
+        ));
         Ok(())
     }
 
@@ -135,11 +118,12 @@ impl WgpuRenderer {
             .renderer_flags_added())
     }
 
-    pub(super) fn render_platform_io(&self) -> RendererResult<*mut sys::ImGuiPlatformIO> {
-        self.context_binding
+    pub(super) fn bound_context(&self) -> RendererResult<ContextBinding> {
+        Ok(self
+            .context_binding
             .as_ref()
             .ok_or(RendererError::ContextNotBound)?
-            .platform_io()
+            .context())
     }
 
     pub(super) fn clear_context_binding(&mut self) {
@@ -175,7 +159,7 @@ mod tests {
     #[test]
     fn dropped_owner_is_not_confused_with_a_reused_context_address() {
         let owner = Context::create();
-        let binding = ContextBinding::capture(&owner, BackendFlags::empty());
+        let binding = RendererContextBinding::capture(&owner, BackendFlags::empty());
         drop(owner);
 
         let replacement = Context::create();

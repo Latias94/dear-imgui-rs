@@ -142,22 +142,23 @@ impl<'a> BarGroupsPlot<'a> {
         let Ok(group_count) = i32::try_from(self.group_count) else {
             return;
         };
-        let _guard = plot_ui.bind();
-        with_plot_str_slice(&self.label_ids, |label_ptrs| unsafe {
-            let spec = plot_spec_with_style(
-                self.style,
-                self.flags.bits() | self.item_flags.bits(),
-                PlotDataLayout::DEFAULT,
-            );
-            sys::ImPlot_PlotBarGroups_doublePtr(
-                label_ptrs.as_ptr(),
-                self.values.as_ptr(),
-                item_count,
-                group_count,
-                self.group_size,
-                self.shift,
-                spec,
-            );
+        plot_ui.with_bound_context(|| {
+            with_plot_str_slice(&self.label_ids, |label_ptrs| unsafe {
+                let spec = plot_spec_with_style(
+                    self.style,
+                    self.flags.bits() | self.item_flags.bits(),
+                    PlotDataLayout::DEFAULT,
+                );
+                sys::ImPlot_PlotBarGroups_doublePtr(
+                    label_ptrs.as_ptr(),
+                    self.values.as_ptr(),
+                    item_count,
+                    group_count,
+                    self.group_size,
+                    self.shift,
+                    spec,
+                );
+            })
         })
     }
 }
@@ -303,22 +304,23 @@ impl<'a> BarGroupsPlotF32<'a> {
         let Ok(group_count) = i32::try_from(self.group_count) else {
             return;
         };
-        let _guard = plot_ui.bind();
-        with_plot_str_slice(&self.label_ids, |label_ptrs| unsafe {
-            let spec = plot_spec_with_style(
-                self.style,
-                self.flags.bits() | self.item_flags.bits(),
-                PlotDataLayout::DEFAULT,
-            );
-            sys::ImPlot_PlotBarGroups_FloatPtr(
-                label_ptrs.as_ptr(),
-                self.values.as_ptr(),
-                item_count,
-                group_count,
-                self.group_size,
-                self.shift,
-                spec,
-            );
+        plot_ui.with_bound_context(|| {
+            with_plot_str_slice(&self.label_ids, |label_ptrs| unsafe {
+                let spec = plot_spec_with_style(
+                    self.style,
+                    self.flags.bits() | self.item_flags.bits(),
+                    PlotDataLayout::DEFAULT,
+                );
+                sys::ImPlot_PlotBarGroups_FloatPtr(
+                    label_ptrs.as_ptr(),
+                    self.values.as_ptr(),
+                    item_count,
+                    group_count,
+                    self.group_size,
+                    self.shift,
+                    spec,
+                );
+            })
         })
     }
 }

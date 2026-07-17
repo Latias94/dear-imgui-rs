@@ -1,16 +1,15 @@
 use std::cell::RefCell;
-use std::rc::{Rc, Weak};
 
 use crate::sys;
 
-use super::Context;
 use super::binding::{CTX_MUTEX, with_bound_context};
+use super::{Context, ContextBinding, ContextLifecycle};
 
 #[derive(Clone)]
 struct UserTextureRegistration {
     ctx: *mut sys::ImGuiContext,
     tex: *mut sys::ImTextureData,
-    alive: Weak<()>,
+    binding: ContextBinding,
 }
 
 thread_local! {
@@ -18,7 +17,9 @@ thread_local! {
 }
 
 fn prune_dead_user_texture_registrations(registrations: &mut Vec<UserTextureRegistration>) {
-    registrations.retain(|registration| registration.alive.upgrade().is_some());
+    registrations.retain(|registration| {
+        registration.binding.lifecycle() != ContextLifecycle::NativeDestroyed
+    });
 }
 
 fn is_user_texture_registered(ctx: *mut sys::ImGuiContext, tex: *mut sys::ImTextureData) -> bool {
@@ -34,12 +35,12 @@ fn is_user_texture_registered(ctx: *mut sys::ImGuiContext, tex: *mut sys::ImText
 fn track_user_texture_registration(
     ctx: *mut sys::ImGuiContext,
     tex: *mut sys::ImTextureData,
-    alive: Weak<()>,
+    binding: ContextBinding,
 ) {
     USER_TEXTURE_REGISTRATIONS.with(|registrations| {
         let mut registrations = registrations.borrow_mut();
         prune_dead_user_texture_registrations(&mut registrations);
-        registrations.push(UserTextureRegistration { ctx, tex, alive });
+        registrations.push(UserTextureRegistration { ctx, tex, binding });
     });
 }
 
@@ -58,10 +59,26 @@ fn take_user_texture_registration(
 }
 
 fn unregister_user_texture_registration(registration: UserTextureRegistration) {
-    if registration.ctx.is_null()
-        || registration.tex.is_null()
-        || registration.alive.upgrade().is_none()
-    {
+    if registration.ctx.is_null() || registration.tex.is_null() {
+        return;
+    }
+
+    match registration.binding.lifecycle() {
+        ContextLifecycle::Alive => {
+            let tex = registration.tex;
+            let _ = registration
+                .binding
+                .try_with_bound_context(|| unsafe { sys::igUnregisterUserTexture(tex) });
+        }
+        ContextLifecycle::Dropping => {
+            unregister_user_texture_registration_during_teardown(registration);
+        }
+        ContextLifecycle::NativeDestroyed => {}
+    }
+}
+
+fn unregister_user_texture_registration_during_teardown(registration: UserTextureRegistration) {
+    if registration.ctx.is_null() || registration.tex.is_null() {
         return;
     }
 
@@ -82,7 +99,7 @@ pub(crate) fn unregister_user_texture_from_all_contexts(tex: *mut sys::ImTexture
         let mut taken = Vec::new();
         let mut index = 0;
         while index < registrations.len() {
-            if registrations[index].alive.upgrade().is_none() {
+            if registrations[index].binding.lifecycle() == ContextLifecycle::NativeDestroyed {
                 registrations.remove(index);
             } else if registrations[index].tex == tex {
                 taken.push(registrations.remove(index));
@@ -109,7 +126,9 @@ pub(super) fn unregister_user_textures_for_context(ctx: *mut sys::ImGuiContext) 
         let mut taken = Vec::new();
         let mut index = 0;
         while index < registrations.len() {
-            if registrations[index].alive.upgrade().is_none() || registrations[index].ctx == ctx {
+            if registrations[index].binding.lifecycle() == ContextLifecycle::NativeDestroyed
+                || registrations[index].ctx == ctx
+            {
                 let registration = registrations.remove(index);
                 if registration.ctx == ctx {
                     taken.push(registration);
@@ -122,7 +141,7 @@ pub(super) fn unregister_user_textures_for_context(ctx: *mut sys::ImGuiContext) 
     });
 
     for registration in registrations {
-        unregister_user_texture_registration(registration);
+        unregister_user_texture_registration_during_teardown(registration);
     }
 }
 
@@ -167,7 +186,7 @@ impl Context {
         unsafe {
             sys::igRegisterUserTexture(texture);
         }
-        track_user_texture_registration(self.raw, texture, Rc::downgrade(&self.alive));
+        track_user_texture_registration(self.raw, texture, self.binding());
     }
 
     /// Register a user-created texture and return an RAII token which unregisters on drop.
@@ -181,7 +200,7 @@ impl Context {
         RegisteredUserTexture {
             ctx: self.raw,
             tex: texture.as_mut().as_raw_mut(),
-            alive: Rc::downgrade(&self.alive),
+            binding: self.binding(),
         }
     }
 
@@ -226,12 +245,15 @@ impl Context {
 pub struct RegisteredUserTexture {
     ctx: *mut sys::ImGuiContext,
     tex: *mut sys::ImTextureData,
-    alive: Weak<()>,
+    binding: ContextBinding,
 }
 
 impl Drop for RegisteredUserTexture {
     fn drop(&mut self) {
-        if self.ctx.is_null() || self.tex.is_null() || self.alive.upgrade().is_none() {
+        if self.ctx.is_null()
+            || self.tex.is_null()
+            || self.binding.lifecycle() == ContextLifecycle::NativeDestroyed
+        {
             return;
         }
 

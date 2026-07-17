@@ -32,18 +32,11 @@ use super::binding::Plot3DContextBinding;
 pub struct Plot3DUi<'ui> {
     pub(crate) _ui: &'ui Ui,
     pub(crate) binding: Plot3DContextBinding,
-    pub(crate) imgui_alive: Option<dear_imgui_rs::ContextAliveToken>,
 }
 
 impl<'ui> Plot3DUi<'ui> {
-    pub(crate) fn bind(&self) -> super::binding::Plot3DContextBindingGuard {
-        if let Some(alive) = &self.imgui_alive {
-            assert!(
-                alive.is_alive(),
-                "dear-implot3d: ImGui context has been dropped"
-            );
-        }
-        self.binding.bind()
+    pub(crate) fn with_bound_context<R>(&self, f: impl FnOnce() -> R) -> R {
+        self.binding.with_bound_context(f)
     }
 
     /// Builder to configure and begin a 3D plot
@@ -66,16 +59,14 @@ impl<'ui> Plot3DUi<'ui> {
     /// }
     /// ```
     pub fn begin_plot<S: AsRef<str>>(&self, title: S) -> Plot3DBuilder<'ui> {
-        let _guard = self.bind();
-        Plot3DBuilder {
-            binding: self.binding,
-            imgui_alive: self.imgui_alive.clone(),
+        self.with_bound_context(|| Plot3DBuilder {
+            binding: self.binding.clone(),
             ui: self._ui,
             title: title.as_ref().into(),
             size: None,
             flags: Plot3DFlags::empty(),
             _lifetime: PhantomData,
-        }
+        })
     }
 
     /// Convenience: plot a simple 3D line (f32)
@@ -110,27 +101,28 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f32],
         flags: Line3DFlags,
     ) {
-        let _guard = self.bind();
-        if xs.len() != ys.len() || ys.len() != zs.len() {
-            return;
-        }
-        let Some(count) = len_i32(xs.len()) else {
-            return;
-        };
-        let label = label.as_ref();
-        if label.contains('\0') {
-            return;
-        }
-        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
-            sys::ImPlot3D_PlotLine_FloatPtr(
-                label_ptr,
-                xs.as_ptr(),
-                ys.as_ptr(),
-                zs.as_ptr(),
-                count,
-                spec,
-            );
+        self.with_bound_context(|| {
+            if xs.len() != ys.len() || ys.len() != zs.len() {
+                return;
+            }
+            let Some(count) = len_i32(xs.len()) else {
+                return;
+            };
+            let label = label.as_ref();
+            if label.contains('\0') {
+                return;
+            }
+            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+                let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
+                sys::ImPlot3D_PlotLine_FloatPtr(
+                    label_ptr,
+                    xs.as_ptr(),
+                    ys.as_ptr(),
+                    zs.as_ptr(),
+                    count,
+                    spec,
+                );
+            })
         })
     }
 
@@ -144,27 +136,28 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Line3DFlags,
         layout: Plot3DDataLayout,
     ) {
-        let _guard = self.bind();
-        if xs.len() != ys.len() || ys.len() != zs.len() {
-            return;
-        }
-        let Some(count) = len_i32(xs.len()) else {
-            return;
-        };
-        let label = label.as_ref();
-        if label.contains('\0') {
-            return;
-        }
-        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), layout);
-            sys::ImPlot3D_PlotLine_FloatPtr(
-                label_ptr,
-                xs.as_ptr(),
-                ys.as_ptr(),
-                zs.as_ptr(),
-                count,
-                spec,
-            );
+        self.with_bound_context(|| {
+            if xs.len() != ys.len() || ys.len() != zs.len() {
+                return;
+            }
+            let Some(count) = len_i32(xs.len()) else {
+                return;
+            };
+            let label = label.as_ref();
+            if label.contains('\0') {
+                return;
+            }
+            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+                let spec = plot3d_spec_from(flags.bits(), layout);
+                sys::ImPlot3D_PlotLine_FloatPtr(
+                    label_ptr,
+                    xs.as_ptr(),
+                    ys.as_ptr(),
+                    zs.as_ptr(),
+                    count,
+                    spec,
+                );
+            })
         })
     }
 
@@ -177,27 +170,28 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f64],
         flags: Line3DFlags,
     ) {
-        let _guard = self.bind();
-        if xs.len() != ys.len() || ys.len() != zs.len() {
-            return;
-        }
-        let Some(count) = len_i32(xs.len()) else {
-            return;
-        };
-        let label = label.as_ref();
-        if label.contains('\0') {
-            return;
-        }
-        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
-            sys::ImPlot3D_PlotLine_doublePtr(
-                label_ptr,
-                xs.as_ptr(),
-                ys.as_ptr(),
-                zs.as_ptr(),
-                count,
-                spec,
-            );
+        self.with_bound_context(|| {
+            if xs.len() != ys.len() || ys.len() != zs.len() {
+                return;
+            }
+            let Some(count) = len_i32(xs.len()) else {
+                return;
+            };
+            let label = label.as_ref();
+            if label.contains('\0') {
+                return;
+            }
+            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+                let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
+                sys::ImPlot3D_PlotLine_doublePtr(
+                    label_ptr,
+                    xs.as_ptr(),
+                    ys.as_ptr(),
+                    zs.as_ptr(),
+                    count,
+                    spec,
+                );
+            })
         })
     }
 
@@ -211,27 +205,28 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Line3DFlags,
         layout: Plot3DDataLayout,
     ) {
-        let _guard = self.bind();
-        if xs.len() != ys.len() || ys.len() != zs.len() {
-            return;
-        }
-        let Some(count) = len_i32(xs.len()) else {
-            return;
-        };
-        let label = label.as_ref();
-        if label.contains('\0') {
-            return;
-        }
-        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), layout);
-            sys::ImPlot3D_PlotLine_doublePtr(
-                label_ptr,
-                xs.as_ptr(),
-                ys.as_ptr(),
-                zs.as_ptr(),
-                count,
-                spec,
-            );
+        self.with_bound_context(|| {
+            if xs.len() != ys.len() || ys.len() != zs.len() {
+                return;
+            }
+            let Some(count) = len_i32(xs.len()) else {
+                return;
+            };
+            let label = label.as_ref();
+            if label.contains('\0') {
+                return;
+            }
+            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+                let spec = plot3d_spec_from(flags.bits(), layout);
+                sys::ImPlot3D_PlotLine_doublePtr(
+                    label_ptr,
+                    xs.as_ptr(),
+                    ys.as_ptr(),
+                    zs.as_ptr(),
+                    count,
+                    spec,
+                );
+            })
         })
     }
 
@@ -244,27 +239,28 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f32],
         flags: Scatter3DFlags,
     ) {
-        let _guard = self.bind();
-        if xs.len() != ys.len() || ys.len() != zs.len() {
-            return;
-        }
-        let Some(count) = len_i32(xs.len()) else {
-            return;
-        };
-        let label = label.as_ref();
-        if label.contains('\0') {
-            return;
-        }
-        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
-            sys::ImPlot3D_PlotScatter_FloatPtr(
-                label_ptr,
-                xs.as_ptr(),
-                ys.as_ptr(),
-                zs.as_ptr(),
-                count,
-                spec,
-            );
+        self.with_bound_context(|| {
+            if xs.len() != ys.len() || ys.len() != zs.len() {
+                return;
+            }
+            let Some(count) = len_i32(xs.len()) else {
+                return;
+            };
+            let label = label.as_ref();
+            if label.contains('\0') {
+                return;
+            }
+            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+                let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
+                sys::ImPlot3D_PlotScatter_FloatPtr(
+                    label_ptr,
+                    xs.as_ptr(),
+                    ys.as_ptr(),
+                    zs.as_ptr(),
+                    count,
+                    spec,
+                );
+            })
         })
     }
 
@@ -278,27 +274,28 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Scatter3DFlags,
         layout: Plot3DDataLayout,
     ) {
-        let _guard = self.bind();
-        if xs.len() != ys.len() || ys.len() != zs.len() {
-            return;
-        }
-        let Some(count) = len_i32(xs.len()) else {
-            return;
-        };
-        let label = label.as_ref();
-        if label.contains('\0') {
-            return;
-        }
-        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), layout);
-            sys::ImPlot3D_PlotScatter_FloatPtr(
-                label_ptr,
-                xs.as_ptr(),
-                ys.as_ptr(),
-                zs.as_ptr(),
-                count,
-                spec,
-            );
+        self.with_bound_context(|| {
+            if xs.len() != ys.len() || ys.len() != zs.len() {
+                return;
+            }
+            let Some(count) = len_i32(xs.len()) else {
+                return;
+            };
+            let label = label.as_ref();
+            if label.contains('\0') {
+                return;
+            }
+            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+                let spec = plot3d_spec_from(flags.bits(), layout);
+                sys::ImPlot3D_PlotScatter_FloatPtr(
+                    label_ptr,
+                    xs.as_ptr(),
+                    ys.as_ptr(),
+                    zs.as_ptr(),
+                    count,
+                    spec,
+                );
+            })
         })
     }
 
@@ -311,27 +308,28 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f64],
         flags: Scatter3DFlags,
     ) {
-        let _guard = self.bind();
-        if xs.len() != ys.len() || ys.len() != zs.len() {
-            return;
-        }
-        let Some(count) = len_i32(xs.len()) else {
-            return;
-        };
-        let label = label.as_ref();
-        if label.contains('\0') {
-            return;
-        }
-        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
-            sys::ImPlot3D_PlotScatter_doublePtr(
-                label_ptr,
-                xs.as_ptr(),
-                ys.as_ptr(),
-                zs.as_ptr(),
-                count,
-                spec,
-            );
+        self.with_bound_context(|| {
+            if xs.len() != ys.len() || ys.len() != zs.len() {
+                return;
+            }
+            let Some(count) = len_i32(xs.len()) else {
+                return;
+            };
+            let label = label.as_ref();
+            if label.contains('\0') {
+                return;
+            }
+            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+                let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
+                sys::ImPlot3D_PlotScatter_doublePtr(
+                    label_ptr,
+                    xs.as_ptr(),
+                    ys.as_ptr(),
+                    zs.as_ptr(),
+                    count,
+                    spec,
+                );
+            })
         })
     }
 
@@ -345,27 +343,28 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Scatter3DFlags,
         layout: Plot3DDataLayout,
     ) {
-        let _guard = self.bind();
-        if xs.len() != ys.len() || ys.len() != zs.len() {
-            return;
-        }
-        let Some(count) = len_i32(xs.len()) else {
-            return;
-        };
-        let label = label.as_ref();
-        if label.contains('\0') {
-            return;
-        }
-        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), layout);
-            sys::ImPlot3D_PlotScatter_doublePtr(
-                label_ptr,
-                xs.as_ptr(),
-                ys.as_ptr(),
-                zs.as_ptr(),
-                count,
-                spec,
-            );
+        self.with_bound_context(|| {
+            if xs.len() != ys.len() || ys.len() != zs.len() {
+                return;
+            }
+            let Some(count) = len_i32(xs.len()) else {
+                return;
+            };
+            let label = label.as_ref();
+            if label.contains('\0') {
+                return;
+            }
+            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+                let spec = plot3d_spec_from(flags.bits(), layout);
+                sys::ImPlot3D_PlotScatter_doublePtr(
+                    label_ptr,
+                    xs.as_ptr(),
+                    ys.as_ptr(),
+                    zs.as_ptr(),
+                    count,
+                    spec,
+                );
+            })
         })
     }
 
@@ -378,27 +377,28 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f32],
         flags: Triangle3DFlags,
     ) {
-        let _guard = self.bind();
-        if xs.len() != ys.len() || ys.len() != zs.len() {
-            return;
-        }
-        let Some(count) = len_i32(xs.len()) else {
-            return;
-        };
-        let label = label.as_ref();
-        if label.contains('\0') {
-            return;
-        }
-        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
-            sys::ImPlot3D_PlotTriangle_FloatPtr(
-                label_ptr,
-                xs.as_ptr(),
-                ys.as_ptr(),
-                zs.as_ptr(),
-                count,
-                spec,
-            );
+        self.with_bound_context(|| {
+            if xs.len() != ys.len() || ys.len() != zs.len() {
+                return;
+            }
+            let Some(count) = len_i32(xs.len()) else {
+                return;
+            };
+            let label = label.as_ref();
+            if label.contains('\0') {
+                return;
+            }
+            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+                let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
+                sys::ImPlot3D_PlotTriangle_FloatPtr(
+                    label_ptr,
+                    xs.as_ptr(),
+                    ys.as_ptr(),
+                    zs.as_ptr(),
+                    count,
+                    spec,
+                );
+            })
         })
     }
 
@@ -411,27 +411,28 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Triangle3DFlags,
         layout: Plot3DDataLayout,
     ) {
-        let _guard = self.bind();
-        if xs.len() != ys.len() || ys.len() != zs.len() {
-            return;
-        }
-        let Some(count) = len_i32(xs.len()) else {
-            return;
-        };
-        let label = label.as_ref();
-        if label.contains('\0') {
-            return;
-        }
-        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), layout);
-            sys::ImPlot3D_PlotTriangle_FloatPtr(
-                label_ptr,
-                xs.as_ptr(),
-                ys.as_ptr(),
-                zs.as_ptr(),
-                count,
-                spec,
-            );
+        self.with_bound_context(|| {
+            if xs.len() != ys.len() || ys.len() != zs.len() {
+                return;
+            }
+            let Some(count) = len_i32(xs.len()) else {
+                return;
+            };
+            let label = label.as_ref();
+            if label.contains('\0') {
+                return;
+            }
+            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+                let spec = plot3d_spec_from(flags.bits(), layout);
+                sys::ImPlot3D_PlotTriangle_FloatPtr(
+                    label_ptr,
+                    xs.as_ptr(),
+                    ys.as_ptr(),
+                    zs.as_ptr(),
+                    count,
+                    spec,
+                );
+            })
         })
     }
 
@@ -444,27 +445,28 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f32],
         flags: Quad3DFlags,
     ) {
-        let _guard = self.bind();
-        if xs.len() != ys.len() || ys.len() != zs.len() {
-            return;
-        }
-        let Some(count) = len_i32(xs.len()) else {
-            return;
-        };
-        let label = label.as_ref();
-        if label.contains('\0') {
-            return;
-        }
-        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
-            sys::ImPlot3D_PlotQuad_FloatPtr(
-                label_ptr,
-                xs.as_ptr(),
-                ys.as_ptr(),
-                zs.as_ptr(),
-                count,
-                spec,
-            );
+        self.with_bound_context(|| {
+            if xs.len() != ys.len() || ys.len() != zs.len() {
+                return;
+            }
+            let Some(count) = len_i32(xs.len()) else {
+                return;
+            };
+            let label = label.as_ref();
+            if label.contains('\0') {
+                return;
+            }
+            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+                let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
+                sys::ImPlot3D_PlotQuad_FloatPtr(
+                    label_ptr,
+                    xs.as_ptr(),
+                    ys.as_ptr(),
+                    zs.as_ptr(),
+                    count,
+                    spec,
+                );
+            })
         })
     }
 
@@ -477,27 +479,28 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Quad3DFlags,
         layout: Plot3DDataLayout,
     ) {
-        let _guard = self.bind();
-        if xs.len() != ys.len() || ys.len() != zs.len() {
-            return;
-        }
-        let Some(count) = len_i32(xs.len()) else {
-            return;
-        };
-        let label = label.as_ref();
-        if label.contains('\0') {
-            return;
-        }
-        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), layout);
-            sys::ImPlot3D_PlotQuad_FloatPtr(
-                label_ptr,
-                xs.as_ptr(),
-                ys.as_ptr(),
-                zs.as_ptr(),
-                count,
-                spec,
-            );
+        self.with_bound_context(|| {
+            if xs.len() != ys.len() || ys.len() != zs.len() {
+                return;
+            }
+            let Some(count) = len_i32(xs.len()) else {
+                return;
+            };
+            let label = label.as_ref();
+            if label.contains('\0') {
+                return;
+            }
+            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+                let spec = plot3d_spec_from(flags.bits(), layout);
+                sys::ImPlot3D_PlotQuad_FloatPtr(
+                    label_ptr,
+                    xs.as_ptr(),
+                    ys.as_ptr(),
+                    zs.as_ptr(),
+                    count,
+                    spec,
+                );
+            })
         })
     }
 
@@ -510,27 +513,28 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f64],
         flags: Triangle3DFlags,
     ) {
-        let _guard = self.bind();
-        if xs.len() != ys.len() || ys.len() != zs.len() {
-            return;
-        }
-        let Some(count) = len_i32(xs.len()) else {
-            return;
-        };
-        let label = label.as_ref();
-        if label.contains('\0') {
-            return;
-        }
-        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
-            sys::ImPlot3D_PlotTriangle_doublePtr(
-                label_ptr,
-                xs.as_ptr(),
-                ys.as_ptr(),
-                zs.as_ptr(),
-                count,
-                spec,
-            );
+        self.with_bound_context(|| {
+            if xs.len() != ys.len() || ys.len() != zs.len() {
+                return;
+            }
+            let Some(count) = len_i32(xs.len()) else {
+                return;
+            };
+            let label = label.as_ref();
+            if label.contains('\0') {
+                return;
+            }
+            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+                let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
+                sys::ImPlot3D_PlotTriangle_doublePtr(
+                    label_ptr,
+                    xs.as_ptr(),
+                    ys.as_ptr(),
+                    zs.as_ptr(),
+                    count,
+                    spec,
+                );
+            })
         })
     }
 
@@ -543,27 +547,28 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Triangle3DFlags,
         layout: Plot3DDataLayout,
     ) {
-        let _guard = self.bind();
-        if xs.len() != ys.len() || ys.len() != zs.len() {
-            return;
-        }
-        let Some(count) = len_i32(xs.len()) else {
-            return;
-        };
-        let label = label.as_ref();
-        if label.contains('\0') {
-            return;
-        }
-        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), layout);
-            sys::ImPlot3D_PlotTriangle_doublePtr(
-                label_ptr,
-                xs.as_ptr(),
-                ys.as_ptr(),
-                zs.as_ptr(),
-                count,
-                spec,
-            );
+        self.with_bound_context(|| {
+            if xs.len() != ys.len() || ys.len() != zs.len() {
+                return;
+            }
+            let Some(count) = len_i32(xs.len()) else {
+                return;
+            };
+            let label = label.as_ref();
+            if label.contains('\0') {
+                return;
+            }
+            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+                let spec = plot3d_spec_from(flags.bits(), layout);
+                sys::ImPlot3D_PlotTriangle_doublePtr(
+                    label_ptr,
+                    xs.as_ptr(),
+                    ys.as_ptr(),
+                    zs.as_ptr(),
+                    count,
+                    spec,
+                );
+            })
         })
     }
 
@@ -576,27 +581,28 @@ impl<'ui> Plot3DUi<'ui> {
         zs: &[f64],
         flags: Quad3DFlags,
     ) {
-        let _guard = self.bind();
-        if xs.len() != ys.len() || ys.len() != zs.len() {
-            return;
-        }
-        let Some(count) = len_i32(xs.len()) else {
-            return;
-        };
-        let label = label.as_ref();
-        if label.contains('\0') {
-            return;
-        }
-        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
-            sys::ImPlot3D_PlotQuad_doublePtr(
-                label_ptr,
-                xs.as_ptr(),
-                ys.as_ptr(),
-                zs.as_ptr(),
-                count,
-                spec,
-            );
+        self.with_bound_context(|| {
+            if xs.len() != ys.len() || ys.len() != zs.len() {
+                return;
+            }
+            let Some(count) = len_i32(xs.len()) else {
+                return;
+            };
+            let label = label.as_ref();
+            if label.contains('\0') {
+                return;
+            }
+            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+                let spec = plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT);
+                sys::ImPlot3D_PlotQuad_doublePtr(
+                    label_ptr,
+                    xs.as_ptr(),
+                    ys.as_ptr(),
+                    zs.as_ptr(),
+                    count,
+                    spec,
+                );
+            })
         })
     }
 
@@ -609,27 +615,28 @@ impl<'ui> Plot3DUi<'ui> {
         flags: Quad3DFlags,
         layout: Plot3DDataLayout,
     ) {
-        let _guard = self.bind();
-        if xs.len() != ys.len() || ys.len() != zs.len() {
-            return;
-        }
-        let Some(count) = len_i32(xs.len()) else {
-            return;
-        };
-        let label = label.as_ref();
-        if label.contains('\0') {
-            return;
-        }
-        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            let spec = plot3d_spec_from(flags.bits(), layout);
-            sys::ImPlot3D_PlotQuad_doublePtr(
-                label_ptr,
-                xs.as_ptr(),
-                ys.as_ptr(),
-                zs.as_ptr(),
-                count,
-                spec,
-            );
+        self.with_bound_context(|| {
+            if xs.len() != ys.len() || ys.len() != zs.len() {
+                return;
+            }
+            let Some(count) = len_i32(xs.len()) else {
+                return;
+            };
+            let label = label.as_ref();
+            if label.contains('\0') {
+                return;
+            }
+            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+                let spec = plot3d_spec_from(flags.bits(), layout);
+                sys::ImPlot3D_PlotQuad_doublePtr(
+                    label_ptr,
+                    xs.as_ptr(),
+                    ys.as_ptr(),
+                    zs.as_ptr(),
+                    count,
+                    spec,
+                );
+            })
         })
     }
 }

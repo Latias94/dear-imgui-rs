@@ -4,7 +4,7 @@ use std::sync::{Mutex, OnceLock};
 use super::{ActiveSampler, RendererRenderStateGuard, WgpuRenderer};
 use crate::wgpu;
 use crate::{GammaMode, RendererError, RendererResult, Uniforms};
-use dear_imgui_rs::{Context, TextureId, render::DrawData, sys};
+use dear_imgui_rs::{Context, ContextBinding, TextureId, render::DrawData, sys};
 use wgpu::RenderPass;
 
 #[allow(unused_macros)]
@@ -14,21 +14,45 @@ macro_rules! mvlog {
     }
 }
 
+fn with_bound_context<R>(
+    binding: &ContextBinding,
+    f: impl FnOnce() -> RendererResult<R>,
+) -> RendererResult<R> {
+    binding
+        .try_with_bound_context(f)
+        .map_err(|_| RendererError::ContextDropped)?
+}
+
+fn platform_io_for_current_context() -> RendererResult<*mut sys::ImGuiPlatformIO> {
+    let context = unsafe { sys::igGetCurrentContext() };
+    let platform_io = unsafe { sys::igGetPlatformIO_ContextPtr(context) };
+    if platform_io.is_null() {
+        Err(RendererError::InvalidRenderState(
+            "bound Dear ImGui context has no PlatformIO".to_owned(),
+        ))
+    } else {
+        Ok(platform_io)
+    }
+}
+
 impl WgpuRenderer {
     /// Render Dear ImGui draw data
     ///
     /// This corresponds to ImGui_ImplWGPU_RenderDrawData in the C++ implementation
     ///
-    /// `draw_data` must originate from this renderer's bound context, and that context must be
-    /// current for the duration of the call. Use [`Self::render_context`] to finalize and render a
+    /// `draw_data` must originate from this renderer's bound context. The renderer binds that
+    /// context for the duration of the call. Use [`Self::render_context`] to finalize and render a
     /// frame in one operation.
     pub fn render_draw_data(
         &mut self,
         draw_data: &mut DrawData,
         render_pass: &mut RenderPass,
     ) -> RendererResult<()> {
-        let platform_io = self.render_platform_io()?;
-        self.render_draw_data_ex(draw_data, render_pass, platform_io)
+        let binding = self.bound_context()?;
+        with_bound_context(&binding, || {
+            let platform_io = platform_io_for_current_context()?;
+            self.render_draw_data_ex(draw_data, render_pass, platform_io)
+        })
     }
 
     /// Finalize and render the frame for this renderer's bound ImGui context.
@@ -41,9 +65,12 @@ impl WgpuRenderer {
         render_pass: &mut RenderPass,
     ) -> RendererResult<()> {
         self.ensure_context_matches(ctx)?;
-        let platform_io = self.render_platform_io()?;
-        let draw_data = ctx.render();
-        self.render_draw_data_ex(draw_data, render_pass, platform_io)
+        let binding = self.bound_context()?;
+        with_bound_context(&binding, || {
+            let platform_io = platform_io_for_current_context()?;
+            let draw_data = ctx.render();
+            self.render_draw_data_ex(draw_data, render_pass, platform_io)
+        })
     }
 
     pub(super) fn render_draw_data_ex(
@@ -132,16 +159,19 @@ impl WgpuRenderer {
         fb_width: u32,
         fb_height: u32,
     ) -> RendererResult<()> {
-        let platform_io = self.render_platform_io()?;
-        // Public helper used by the main window: advance frame resources as usual.
-        self.render_draw_data_with_fb_size_ex(
-            draw_data,
-            render_pass,
-            fb_width,
-            fb_height,
-            true,
-            platform_io,
-        )
+        let binding = self.bound_context()?;
+        with_bound_context(&binding, || {
+            let platform_io = platform_io_for_current_context()?;
+            // Public helper used by the main window: advance frame resources as usual.
+            self.render_draw_data_with_fb_size_ex(
+                draw_data,
+                render_pass,
+                fb_width,
+                fb_height,
+                true,
+                platform_io,
+            )
+        })
     }
 
     /// Finalize and render the frame for the bound ImGui context and framebuffer size.
@@ -156,16 +186,19 @@ impl WgpuRenderer {
         fb_height: u32,
     ) -> RendererResult<()> {
         self.ensure_context_matches(ctx)?;
-        let platform_io = self.render_platform_io()?;
-        let draw_data = ctx.render();
-        self.render_draw_data_with_fb_size_ex(
-            draw_data,
-            render_pass,
-            fb_width,
-            fb_height,
-            true,
-            platform_io,
-        )
+        let binding = self.bound_context()?;
+        with_bound_context(&binding, || {
+            let platform_io = platform_io_for_current_context()?;
+            let draw_data = ctx.render();
+            self.render_draw_data_with_fb_size_ex(
+                draw_data,
+                render_pass,
+                fb_width,
+                fb_height,
+                true,
+                platform_io,
+            )
+        })
     }
 
     /// Internal variant that optionally skips advancing the frame index.

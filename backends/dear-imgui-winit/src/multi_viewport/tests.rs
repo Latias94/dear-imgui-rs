@@ -1,5 +1,6 @@
 use super::*;
 use crate::test_util::test_sync::lock_context;
+use std::cell::Cell;
 
 #[test]
 fn install_platform_callbacks_targets_passed_context() {
@@ -56,7 +57,7 @@ fn shutdown_multi_viewport_support_targets_passed_context() {
     let main_viewport_a = unsafe { dear_imgui_rs::sys::igGetMainViewport() };
     let vd_a = unsafe {
         let vd = Box::into_raw(Box::new(ViewportData::new()));
-        register_viewport_data(vd);
+        register_viewport_data(&ctx_a.binding(), vd);
         (*main_viewport_a).PlatformUserData = vd.cast();
         vd
     };
@@ -70,7 +71,7 @@ fn shutdown_multi_viewport_support_targets_passed_context() {
     let main_viewport_b = unsafe { dear_imgui_rs::sys::igGetMainViewport() };
     let vd_b = unsafe {
         let vd = Box::into_raw(Box::new(ViewportData::new()));
-        register_viewport_data(vd);
+        register_viewport_data(&ctx_b.binding(), vd);
         (*main_viewport_b).PlatformUserData = vd.cast();
         vd
     };
@@ -113,7 +114,7 @@ fn window_ptr_for_viewport_targets_passed_context() {
     let vd_a = unsafe {
         let vd = Box::into_raw(Box::new(ViewportData::new()));
         (*vd).window = window_a;
-        register_viewport_data(vd);
+        register_viewport_data(&ctx_a.binding(), vd);
         (*main_viewport_a).PlatformUserData = vd.cast();
         vd
     };
@@ -156,5 +157,33 @@ fn window_ptr_for_viewport_ignores_foreign_platform_user_data() {
         assert!(window_ptr_for_viewport(raw, main_viewport).is_null());
 
         (*main_viewport).PlatformUserData = std::ptr::null_mut();
+    }
+}
+
+#[test]
+fn callback_registry_rejects_destroyed_context() {
+    let _guard = lock_context();
+
+    let ctx = Context::create();
+    let raw = ctx.as_raw();
+    let binding = ctx.binding();
+    let data = Box::into_raw(Box::new(ViewportData::new()));
+    register_viewport_data(&binding, data);
+
+    drop(ctx);
+
+    let called = Cell::new(false);
+    assert_eq!(
+        with_registered_context(raw, |_| {
+            called.set(true);
+            true
+        }),
+        None
+    );
+    assert!(!called.get());
+
+    unregister_viewport_data(data);
+    unsafe {
+        drop(Box::from_raw(data));
     }
 }

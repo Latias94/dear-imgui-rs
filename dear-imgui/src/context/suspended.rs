@@ -1,12 +1,15 @@
 use std::ptr;
-use std::rc::Rc;
 
 use crate::clipboard::ClipboardContext;
 use crate::fonts::SharedFontAtlas;
 use crate::sys;
 
 use super::Context;
-use super::binding::{CTX_MUTEX, clear_current_context, no_current_context};
+use super::attachment::AttachmentRegistry;
+use super::binding::{
+    CTX_MUTEX, ContextBinding, ContextId, ContextState, clear_current_context, no_current_context,
+    set_current_context,
+};
 use super::frame::FrameLifecycleState;
 
 impl Context {
@@ -70,9 +73,14 @@ impl SuspendedContext {
             None => ptr::null_mut(),
         };
 
+        let id =
+            ContextId::allocate().ok_or_else(|| crate::error::ImGuiError::ContextCreation {
+                reason: "process Context identity space is exhausted".to_string(),
+            })?;
+
         let raw = unsafe { sys::igCreateContext(shared_font_atlas_ptr) };
         if raw.is_null() {
-            unsafe { sys::igSetCurrentContext(previous_context) };
+            set_current_context(previous_context);
             return Err(crate::error::ImGuiError::ContextCreation {
                 reason: "ImGui_CreateContext returned null".to_string(),
             });
@@ -87,12 +95,13 @@ impl SuspendedContext {
             crate::fonts::register_font_atlas_context((*io).Fonts, raw);
         }
 
-        let alive = Rc::new(());
-        let ui = crate::ui::Ui::new(raw, super::core::ContextAliveToken::new(&alive));
+        let state = ContextState::new(id, raw);
+        let ui = crate::ui::Ui::new(raw, ContextBinding::new(&state));
 
         let ctx = Context {
             raw,
-            alive,
+            state,
+            attachments: AttachmentRegistry::default(),
             shared_font_atlas,
             ini_filename: None,
             log_filename: None,
@@ -105,7 +114,7 @@ impl SuspendedContext {
         if previous_context.is_null() {
             clear_current_context();
         } else {
-            unsafe { sys::igSetCurrentContext(previous_context) };
+            set_current_context(previous_context);
         }
 
         Ok(SuspendedContext(ctx))
@@ -118,9 +127,7 @@ impl SuspendedContext {
     pub fn activate(self) -> Result<Context, SuspendedContext> {
         let _guard = CTX_MUTEX.lock();
         if no_current_context() {
-            unsafe {
-                sys::igSetCurrentContext(self.0.raw);
-            }
+            set_current_context(self.0.raw);
             Ok(self.0)
         } else {
             Err(self)

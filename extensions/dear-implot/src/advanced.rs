@@ -6,7 +6,6 @@
 use crate::context::PlotScopeGuard;
 use crate::{AxisFlags, YAxis, plots::PlotError, sys};
 use crate::{PlotContextBinding, PlotUi};
-use dear_imgui_rs::ContextAliveToken;
 use std::ffi::CString;
 use std::marker::PhantomData;
 use std::rc::Rc;
@@ -170,41 +169,40 @@ impl<'a> SubplotGrid<'a> {
             .map(|c| c.as_mut_ptr())
             .unwrap_or(std::ptr::null_mut());
 
-        let _guard = plot_ui.bind();
-        let success = unsafe {
-            sys::ImPlot_BeginSubplots(
-                title_cstr.as_ptr(),
-                rows,
-                cols,
-                size_vec,
-                self.flags.bits() as i32,
-                row_ratios_ptr,
-                col_ratios_ptr,
-            )
-        };
+        plot_ui.with_bound_context(|| {
+            let success = unsafe {
+                sys::ImPlot_BeginSubplots(
+                    title_cstr.as_ptr(),
+                    rows,
+                    cols,
+                    size_vec,
+                    self.flags.bits() as i32,
+                    row_ratios_ptr,
+                    col_ratios_ptr,
+                )
+            };
 
-        if success {
-            Ok(SubplotToken {
-                binding: plot_ui.context.binding(),
-                imgui_alive: plot_ui.context.imgui_alive_token(),
-                _title: title_cstr,
-                _row_ratios: row_ratios,
-                _col_ratios: col_ratios,
-                _lifetime: PhantomData,
-                _not_send_or_sync: PhantomData,
-            })
-        } else {
-            Err(PlotError::PlotCreationFailed(
-                "Failed to begin subplots".to_string(),
-            ))
-        }
+            if success {
+                Ok(SubplotToken {
+                    binding: plot_ui.context.binding(),
+                    _title: title_cstr,
+                    _row_ratios: row_ratios,
+                    _col_ratios: col_ratios,
+                    _lifetime: PhantomData,
+                    _not_send_or_sync: PhantomData,
+                })
+            } else {
+                Err(PlotError::PlotCreationFailed(
+                    "Failed to begin subplots".to_string(),
+                ))
+            }
+        })
     }
 }
 
 /// Token representing an active subplot grid
 pub struct SubplotToken<'ui> {
     binding: PlotContextBinding,
-    imgui_alive: Option<ContextAliveToken>,
     _title: CString,
     _row_ratios: Option<Vec<f32>>,
     _col_ratios: Option<Vec<f32>>,
@@ -221,11 +219,9 @@ impl SubplotToken<'_> {
 
 impl Drop for SubplotToken<'_> {
     fn drop(&mut self) {
-        assert_imgui_alive(&self.imgui_alive, "dear-implot: SubplotToken");
-        let _guard = self.binding.bind("dear-implot: SubplotToken");
-        unsafe {
-            sys::ImPlot_EndSubplots();
-        }
+        let _ = self
+            .binding
+            .try_with_bound_context(|| unsafe { sys::ImPlot_EndSubplots() });
     }
 }
 
@@ -295,55 +291,58 @@ impl<'a> MultiAxisPlot<'a> {
             y: size[1],
         };
 
-        let _guard = plot_ui.bind();
-        let success = unsafe { sys::ImPlot_BeginPlot(title_cstr.as_ptr(), size_vec, 0) };
+        plot_ui.with_bound_context(|| {
+            let success = unsafe { sys::ImPlot_BeginPlot(title_cstr.as_ptr(), size_vec, 0) };
 
-        if success {
-            let mut axis_labels: Vec<CString> = Vec::new();
+            if success {
+                let mut axis_labels: Vec<CString> = Vec::new();
 
-            // Setup Y-axes (Y1..), matching `token.set_y_axis(YAxis::Y*)` convention.
-            for (i, axis_config) in self.y_axes.iter().enumerate() {
-                let label_ptr = if let Some(label) = axis_config.label {
-                    let cstr = CString::new(label)
-                        .map_err(|e| PlotError::StringConversion(e.to_string()))?;
-                    let ptr = cstr.as_ptr();
-                    axis_labels.push(cstr);
-                    ptr
-                } else {
-                    std::ptr::null()
-                };
+                // Setup Y-axes (Y1..), matching `token.set_y_axis(YAxis::Y*)` convention.
+                for (i, axis_config) in self.y_axes.iter().enumerate() {
+                    let label_ptr = if let Some(label) = axis_config.label {
+                        let cstr = CString::new(label)
+                            .map_err(|e| PlotError::StringConversion(e.to_string()))?;
+                        let ptr = cstr.as_ptr();
+                        axis_labels.push(cstr);
+                        ptr
+                    } else {
+                        std::ptr::null()
+                    };
 
-                unsafe {
-                    let axis_enum = (i as i32) + 3; // ImAxis_Y1 = 3
-                    sys::ImPlot_SetupAxis(axis_enum, label_ptr, axis_config.flags.bits() as i32);
+                    unsafe {
+                        let axis_enum = (i as i32) + 3; // ImAxis_Y1 = 3
+                        sys::ImPlot_SetupAxis(
+                            axis_enum,
+                            label_ptr,
+                            axis_config.flags.bits() as i32,
+                        );
 
-                    if let Some((min, max)) = axis_config.range {
-                        sys::ImPlot_SetupAxisLimits(axis_enum, min, max, 0);
+                        if let Some((min, max)) = axis_config.range {
+                            sys::ImPlot_SetupAxisLimits(axis_enum, min, max, 0);
+                        }
                     }
                 }
-            }
 
-            Ok(MultiAxisToken {
-                binding: plot_ui.context.binding(),
-                imgui_alive: plot_ui.context.imgui_alive_token(),
-                _title: title_cstr,
-                _axis_labels: axis_labels,
-                _scope: PlotScopeGuard::new(),
-                _lifetime: PhantomData,
-                _not_send_or_sync: PhantomData,
-            })
-        } else {
-            Err(PlotError::PlotCreationFailed(
-                "Failed to begin multi-axis plot".to_string(),
-            ))
-        }
+                Ok(MultiAxisToken {
+                    binding: plot_ui.context.binding(),
+                    _title: title_cstr,
+                    _axis_labels: axis_labels,
+                    _scope: PlotScopeGuard::new(),
+                    _lifetime: PhantomData,
+                    _not_send_or_sync: PhantomData,
+                })
+            } else {
+                Err(PlotError::PlotCreationFailed(
+                    "Failed to begin multi-axis plot".to_string(),
+                ))
+            }
+        })
     }
 }
 
 /// Token representing an active multi-axis plot
 pub struct MultiAxisToken<'ui> {
     binding: PlotContextBinding,
-    imgui_alive: Option<ContextAliveToken>,
     _title: CString,
     _axis_labels: Vec<CString>,
     _scope: PlotScopeGuard,
@@ -354,13 +353,15 @@ pub struct MultiAxisToken<'ui> {
 impl MultiAxisToken<'_> {
     /// Set the current Y-axis for subsequent plots
     pub fn set_y_axis(&self, axis: YAxis) {
-        let _guard = self.binding.bind("dear-implot: MultiAxisToken");
-        unsafe {
-            sys::ImPlot_SetAxes(
-                0, // ImAxis_X1
-                axis as i32,
-            );
-        }
+        self.binding
+            .with_bound_context("dear-implot: MultiAxisToken", || {
+                unsafe {
+                    sys::ImPlot_SetAxes(
+                        0, // ImAxis_X1
+                        axis as i32,
+                    );
+                }
+            })
     }
 
     /// Set the current raw Y-axis for subsequent plots.
@@ -370,13 +371,15 @@ impl MultiAxisToken<'_> {
     /// `axis` must be a valid ImPlot Y-axis value for the active plot. Passing an
     /// out-of-range value lets ImPlot index internal axis arrays out of bounds.
     pub unsafe fn set_y_axis_unchecked(&self, axis: sys::ImAxis) {
-        let _guard = self.binding.bind("dear-implot: MultiAxisToken");
-        unsafe {
-            sys::ImPlot_SetAxes(
-                0, // ImAxis_X1
-                axis,
-            );
-        }
+        self.binding
+            .with_bound_context("dear-implot: MultiAxisToken", || {
+                unsafe {
+                    sys::ImPlot_SetAxes(
+                        0, // ImAxis_X1
+                        axis,
+                    );
+                }
+            })
     }
 
     /// End the multi-axis plot
@@ -387,11 +390,9 @@ impl MultiAxisToken<'_> {
 
 impl Drop for MultiAxisToken<'_> {
     fn drop(&mut self) {
-        assert_imgui_alive(&self.imgui_alive, "dear-implot: MultiAxisToken");
-        let _guard = self.binding.bind("dear-implot: MultiAxisToken");
-        unsafe {
-            sys::ImPlot_EndPlot();
-        }
+        let _ = self
+            .binding
+            .try_with_bound_context(|| unsafe { sys::ImPlot_EndPlot() });
     }
 }
 
@@ -401,10 +402,9 @@ pub struct LegendManager;
 impl LegendManager {
     /// Setup legend with custom position and flags
     pub fn setup(plot_ui: &PlotUi<'_>, location: LegendLocation, flags: LegendFlags) {
-        let _guard = plot_ui.bind();
-        unsafe {
+        plot_ui.with_bound_context(|| unsafe {
             sys::ImPlot_SetupLegend(location as i32, flags.bits() as i32);
-        }
+        })
     }
 
     /// Begin a custom legend popup on a bound ImPlot UI.
@@ -416,27 +416,27 @@ impl LegendManager {
         let label_cstr =
             CString::new(label).map_err(|e| PlotError::StringConversion(e.to_string()))?;
 
-        let _guard = plot_ui.bind();
-        let success = unsafe {
-            sys::ImPlot_BeginLegendPopup(
-                label_cstr.as_ptr(),
-                1, // mouse button
-            )
-        };
+        plot_ui.with_bound_context(|| {
+            let success = unsafe {
+                sys::ImPlot_BeginLegendPopup(
+                    label_cstr.as_ptr(),
+                    1, // mouse button
+                )
+            };
 
-        if success {
-            Ok(LegendToken {
-                binding: plot_ui.context.binding(),
-                imgui_alive: plot_ui.context.imgui_alive_token(),
-                _label: label_cstr,
-                _lifetime: PhantomData,
-                _not_send_or_sync: PhantomData,
-            })
-        } else {
-            Err(PlotError::PlotCreationFailed(
-                "Failed to begin legend".to_string(),
-            ))
-        }
+            if success {
+                Ok(LegendToken {
+                    binding: plot_ui.context.binding(),
+                    _label: label_cstr,
+                    _lifetime: PhantomData,
+                    _not_send_or_sync: PhantomData,
+                })
+            } else {
+                Err(PlotError::PlotCreationFailed(
+                    "Failed to begin legend".to_string(),
+                ))
+            }
+        })
     }
 }
 
@@ -472,7 +472,6 @@ bitflags::bitflags! {
 /// Token representing an active legend
 pub struct LegendToken<'ui> {
     binding: PlotContextBinding,
-    imgui_alive: Option<ContextAliveToken>,
     _label: CString,
     _lifetime: PhantomData<&'ui PlotUi<'ui>>,
     _not_send_or_sync: PhantomData<Rc<()>>,
@@ -487,17 +486,9 @@ impl LegendToken<'_> {
 
 impl Drop for LegendToken<'_> {
     fn drop(&mut self) {
-        assert_imgui_alive(&self.imgui_alive, "dear-implot: LegendToken");
-        let _guard = self.binding.bind("dear-implot: LegendToken");
-        unsafe {
-            sys::ImPlot_EndLegendPopup();
-        }
-    }
-}
-
-fn assert_imgui_alive(alive: &Option<ContextAliveToken>, caller: &str) {
-    if let Some(alive) = alive {
-        assert!(alive.is_alive(), "{caller}: ImGui context has been dropped");
+        let _ = self
+            .binding
+            .try_with_bound_context(|| unsafe { sys::ImPlot_EndLegendPopup() });
     }
 }
 

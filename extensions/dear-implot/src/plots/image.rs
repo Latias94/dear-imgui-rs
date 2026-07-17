@@ -106,23 +106,24 @@ impl<'a, 'tex> Plot for ImagePlot<'a, 'tex> {
             _TexData: self.tex_ref._TexData,
             _TexID: self.tex_ref._TexID,
         };
-        let _guard = plot_ui.bind();
-        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_with_style(
-                self.style,
-                self.flags.bits() | self.item_flags.bits(),
-                PlotDataLayout::DEFAULT,
-            );
-            sys::ImPlot_PlotImage(
-                label_ptr,
-                tex_ref,
-                self.bounds_min,
-                self.bounds_max,
-                uv0,
-                uv1,
-                tint,
-                spec,
-            )
+        plot_ui.with_bound_context(|| {
+            with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+                let spec = plot_spec_with_style(
+                    self.style,
+                    self.flags.bits() | self.item_flags.bits(),
+                    PlotDataLayout::DEFAULT,
+                );
+                sys::ImPlot_PlotImage(
+                    label_ptr,
+                    tex_ref,
+                    self.bounds_min,
+                    self.bounds_max,
+                    uv0,
+                    uv1,
+                    tint,
+                    spec,
+                )
+            })
         })
     }
 

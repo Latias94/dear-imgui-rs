@@ -5,6 +5,7 @@
 //! your chosen backend. See struct-level docs for details and caveats about one
 //! active context at a time.
 
+mod attachment;
 pub(crate) mod binding;
 mod clipboard;
 mod core;
@@ -17,7 +18,14 @@ mod suspended;
 mod tests;
 mod texture_registry;
 
-pub use self::core::{Context, ContextAliveToken};
+pub use self::attachment::{
+    ContextAttachment, ContextAttachmentError, ContextAttachmentLease, ContextAttachmentPhase,
+    ContextAttachmentRole, ContextDestroyed, ContextTeardown,
+};
+pub use self::binding::{
+    ContextAliveToken, ContextBinding, ContextBindingError, ContextId, ContextLifecycle,
+};
+pub use self::core::Context;
 pub use self::frame::{FrameLifecycleState, FramePrepareOptions, FrameResult, FrameToken};
 pub use self::suspended::SuspendedContext;
 pub use self::texture_registry::RegisteredUserTexture;

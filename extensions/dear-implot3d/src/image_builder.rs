@@ -40,39 +40,40 @@ impl<'ui, 'tex> Image3DByAxesBuilder<'ui, 'tex> {
         self
     }
     pub fn plot(self) {
-        let _guard = self._ui.bind();
-        let label = self.label.as_ref();
-        let label = if label.contains('\0') { "image" } else { label };
-        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            debug_before_plot();
-            let spec = plot3d_spec_with_style(
-                self.style,
-                self.flags.bits() | self.item_flags.bits(),
-                Plot3DDataLayout::DEFAULT,
-            );
-            sys::ImPlot3D_PlotImage_Vec2(
-                label_ptr,
-                self.tex_ref,
-                sys::ImPlot3DPoint_c {
-                    x: self.center[0] as f64,
-                    y: self.center[1] as f64,
-                    z: self.center[2] as f64,
-                },
-                sys::ImPlot3DPoint_c {
-                    x: self.axis_u[0] as f64,
-                    y: self.axis_u[1] as f64,
-                    z: self.axis_u[2] as f64,
-                },
-                sys::ImPlot3DPoint_c {
-                    x: self.axis_v[0] as f64,
-                    y: self.axis_v[1] as f64,
-                    z: self.axis_v[2] as f64,
-                },
-                imvec2(self.uv0[0], self.uv0[1]),
-                imvec2(self.uv1[0], self.uv1[1]),
-                imvec4(self.tint[0], self.tint[1], self.tint[2], self.tint[3]),
-                spec,
-            );
+        self._ui.with_bound_context(|| {
+            let label = self.label.as_ref();
+            let label = if label.contains('\0') { "image" } else { label };
+            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+                debug_before_plot();
+                let spec = plot3d_spec_with_style(
+                    self.style,
+                    self.flags.bits() | self.item_flags.bits(),
+                    Plot3DDataLayout::DEFAULT,
+                );
+                sys::ImPlot3D_PlotImage_Vec2(
+                    label_ptr,
+                    self.tex_ref,
+                    sys::ImPlot3DPoint_c {
+                        x: self.center[0] as f64,
+                        y: self.center[1] as f64,
+                        z: self.center[2] as f64,
+                    },
+                    sys::ImPlot3DPoint_c {
+                        x: self.axis_u[0] as f64,
+                        y: self.axis_u[1] as f64,
+                        z: self.axis_u[2] as f64,
+                    },
+                    sys::ImPlot3DPoint_c {
+                        x: self.axis_v[0] as f64,
+                        y: self.axis_v[1] as f64,
+                        z: self.axis_v[2] as f64,
+                    },
+                    imvec2(self.uv0[0], self.uv0[1]),
+                    imvec2(self.uv1[0], self.uv1[1]),
+                    imvec4(self.tint[0], self.tint[1], self.tint[2], self.tint[3]),
+                    spec,
+                );
+            })
         })
     }
 }
@@ -114,46 +115,47 @@ impl<'ui, 'tex> Image3DByCornersBuilder<'ui, 'tex> {
         self
     }
     pub fn plot(self) {
-        let _guard = self._ui.bind();
-        let label = self.label.as_ref();
-        let label = if label.contains('\0') { "image" } else { label };
-        dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-            debug_before_plot();
-            let spec = plot3d_spec_with_style(
-                self.style,
-                self.flags.bits() | self.item_flags.bits(),
-                Plot3DDataLayout::DEFAULT,
-            );
-            sys::ImPlot3D_PlotImage_Plot3DPoint(
-                label_ptr,
-                self.tex_ref,
-                sys::ImPlot3DPoint_c {
-                    x: self.p0[0] as f64,
-                    y: self.p0[1] as f64,
-                    z: self.p0[2] as f64,
-                },
-                sys::ImPlot3DPoint_c {
-                    x: self.p1[0] as f64,
-                    y: self.p1[1] as f64,
-                    z: self.p1[2] as f64,
-                },
-                sys::ImPlot3DPoint_c {
-                    x: self.p2[0] as f64,
-                    y: self.p2[1] as f64,
-                    z: self.p2[2] as f64,
-                },
-                sys::ImPlot3DPoint_c {
-                    x: self.p3[0] as f64,
-                    y: self.p3[1] as f64,
-                    z: self.p3[2] as f64,
-                },
-                imvec2(self.uv0[0], self.uv0[1]),
-                imvec2(self.uv1[0], self.uv1[1]),
-                imvec2(self.uv2[0], self.uv2[1]),
-                imvec2(self.uv3[0], self.uv3[1]),
-                imvec4(self.tint[0], self.tint[1], self.tint[2], self.tint[3]),
-                spec,
-            );
+        self._ui.with_bound_context(|| {
+            let label = self.label.as_ref();
+            let label = if label.contains('\0') { "image" } else { label };
+            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
+                debug_before_plot();
+                let spec = plot3d_spec_with_style(
+                    self.style,
+                    self.flags.bits() | self.item_flags.bits(),
+                    Plot3DDataLayout::DEFAULT,
+                );
+                sys::ImPlot3D_PlotImage_Plot3DPoint(
+                    label_ptr,
+                    self.tex_ref,
+                    sys::ImPlot3DPoint_c {
+                        x: self.p0[0] as f64,
+                        y: self.p0[1] as f64,
+                        z: self.p0[2] as f64,
+                    },
+                    sys::ImPlot3DPoint_c {
+                        x: self.p1[0] as f64,
+                        y: self.p1[1] as f64,
+                        z: self.p1[2] as f64,
+                    },
+                    sys::ImPlot3DPoint_c {
+                        x: self.p2[0] as f64,
+                        y: self.p2[1] as f64,
+                        z: self.p2[2] as f64,
+                    },
+                    sys::ImPlot3DPoint_c {
+                        x: self.p3[0] as f64,
+                        y: self.p3[1] as f64,
+                        z: self.p3[2] as f64,
+                    },
+                    imvec2(self.uv0[0], self.uv0[1]),
+                    imvec2(self.uv1[0], self.uv1[1]),
+                    imvec2(self.uv2[0], self.uv2[1]),
+                    imvec2(self.uv3[0], self.uv3[1]),
+                    imvec4(self.tint[0], self.tint[1], self.tint[2], self.tint[3]),
+                    spec,
+                );
+            })
         })
     }
 }
@@ -168,28 +170,29 @@ impl<'ui> Plot3DUi<'ui> {
         axis_u: [f32; 3],
         axis_v: [f32; 3],
     ) -> Image3DByAxesBuilder<'ui, 'tex> {
-        let _guard = self.bind();
-        let tr = tex.into().raw();
-        let tex_ref = sys::ImTextureRef_c {
-            _TexData: tr._TexData as *mut sys::ImTextureData,
-            _TexID: tr._TexID as sys::ImTextureID,
-        };
-        debug_before_plot();
-        Image3DByAxesBuilder {
-            _ui: self,
-            label: label.into(),
-            tex_ref,
-            _texture: PhantomData,
-            center,
-            axis_u,
-            axis_v,
-            uv0: [0.0, 0.0],
-            uv1: [1.0, 1.0],
-            tint: [1.0, 1.0, 1.0, 1.0],
-            flags: Image3DFlags::NONE,
-            item_flags: Item3DFlags::NONE,
-            style: Plot3DItemStyle::default(),
-        }
+        self.with_bound_context(|| {
+            let tr = tex.into().raw();
+            let tex_ref = sys::ImTextureRef_c {
+                _TexData: tr._TexData as *mut sys::ImTextureData,
+                _TexID: tr._TexID as sys::ImTextureID,
+            };
+            debug_before_plot();
+            Image3DByAxesBuilder {
+                _ui: self,
+                label: label.into(),
+                tex_ref,
+                _texture: PhantomData,
+                center,
+                axis_u,
+                axis_v,
+                uv0: [0.0, 0.0],
+                uv1: [1.0, 1.0],
+                tint: [1.0, 1.0, 1.0, 1.0],
+                flags: Image3DFlags::NONE,
+                item_flags: Item3DFlags::NONE,
+                style: Plot3DItemStyle::default(),
+            }
+        })
     }
 
     /// Image by 4 corner points (p0..p3)
@@ -202,30 +205,31 @@ impl<'ui> Plot3DUi<'ui> {
         p2: [f32; 3],
         p3: [f32; 3],
     ) -> Image3DByCornersBuilder<'ui, 'tex> {
-        let _guard = self.bind();
-        let tr = tex.into().raw();
-        let tex_ref = sys::ImTextureRef_c {
-            _TexData: tr._TexData as *mut sys::ImTextureData,
-            _TexID: tr._TexID as sys::ImTextureID,
-        };
-        debug_before_plot();
-        Image3DByCornersBuilder {
-            _ui: self,
-            label: label.into(),
-            tex_ref,
-            _texture: PhantomData,
-            p0,
-            p1,
-            p2,
-            p3,
-            uv0: [0.0, 0.0],
-            uv1: [1.0, 0.0],
-            uv2: [1.0, 1.0],
-            uv3: [0.0, 1.0],
-            tint: [1.0, 1.0, 1.0, 1.0],
-            flags: Image3DFlags::NONE,
-            item_flags: Item3DFlags::NONE,
-            style: Plot3DItemStyle::default(),
-        }
+        self.with_bound_context(|| {
+            let tr = tex.into().raw();
+            let tex_ref = sys::ImTextureRef_c {
+                _TexData: tr._TexData as *mut sys::ImTextureData,
+                _TexID: tr._TexID as sys::ImTextureID,
+            };
+            debug_before_plot();
+            Image3DByCornersBuilder {
+                _ui: self,
+                label: label.into(),
+                tex_ref,
+                _texture: PhantomData,
+                p0,
+                p1,
+                p2,
+                p3,
+                uv0: [0.0, 0.0],
+                uv1: [1.0, 0.0],
+                uv2: [1.0, 1.0],
+                uv3: [0.0, 1.0],
+                tint: [1.0, 1.0, 1.0, 1.0],
+                flags: Image3DFlags::NONE,
+                item_flags: Item3DFlags::NONE,
+                style: Plot3DItemStyle::default(),
+            }
+        })
     }
 }

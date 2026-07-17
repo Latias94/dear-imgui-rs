@@ -12,8 +12,9 @@ use std::{cell::Cell, marker::PhantomData, rc::Rc};
 
 impl<'ui> NodeEditorFrame<'ui> {
     pub fn begin_node<'a>(&'a self, node: NodeId) -> NodeToken<'a> {
-        let _current_editor = self.bind("NodeEditorFrame::begin_node()");
-        unsafe { sys::dne_begin_node(node.raw()) };
+        self.with_current("NodeEditorFrame::begin_node()", || unsafe {
+            sys::dne_begin_node(node.raw())
+        });
         NodeToken {
             editor: self._editor,
             ended: false,
@@ -29,8 +30,10 @@ impl<'ui> NodeEditorFrame<'ui> {
     }
 
     pub fn begin_group_hint<'a>(&'a self, node: NodeId) -> Option<GroupHintToken<'a>> {
-        let _current_editor = self.bind("NodeEditorFrame::begin_group_hint()");
-        unsafe { sys::dne_begin_group_hint(node.raw()) }.then_some(GroupHintToken {
+        self.with_current("NodeEditorFrame::begin_group_hint()", || unsafe {
+            sys::dne_begin_group_hint(node.raw())
+        })
+        .then_some(GroupHintToken {
             editor: self._editor,
             ui: self._ui,
             ended: false,
@@ -39,8 +42,10 @@ impl<'ui> NodeEditorFrame<'ui> {
     }
 
     pub fn node_background_draw_list(&self, node: NodeId) -> DrawListMut<'_> {
-        let _current_editor = self.bind("NodeEditorFrame::node_background_draw_list()");
-        let draw_list = unsafe { sys::dne_get_node_background_draw_list(node.raw()) };
+        let draw_list = self
+            .with_current("NodeEditorFrame::node_background_draw_list()", || unsafe {
+                sys::dne_get_node_background_draw_list(node.raw())
+            });
         unsafe { DrawListMut::from_raw_mut(self._ui, draw_list.cast()) }
     }
 
@@ -51,14 +56,16 @@ impl<'ui> NodeEditorFrame<'ui> {
 
     pub fn group(&self, size: [f32; 2]) {
         assert_non_negative_finite_vec2("NodeEditorFrame::group()", "size", size);
-        let _current_editor = self.bind("NodeEditorFrame::group()");
-        unsafe { sys::dne_group(vec2(size)) };
+        self.with_current("NodeEditorFrame::group()", || unsafe {
+            sys::dne_group(vec2(size))
+        });
     }
 
     pub fn set_group_size(&self, node: NodeId, size: [f32; 2]) {
         assert_non_negative_finite_vec2("NodeEditorFrame::set_group_size()", "size", size);
-        let _current_editor = self.bind("NodeEditorFrame::set_group_size()");
-        unsafe { sys::dne_set_group_size(node.raw(), vec2(size)) };
+        self.with_current("NodeEditorFrame::set_group_size()", || unsafe {
+            sys::dne_set_group_size(node.raw(), vec2(size))
+        });
     }
 
     pub fn link(&self, link: LinkId, start_pin: PinId, end_pin: PinId) -> bool {
@@ -75,8 +82,7 @@ impl<'ui> NodeEditorFrame<'ui> {
     ) -> bool {
         assert_finite_vec4("NodeEditorFrame::link_colored()", "color", color);
         assert_non_negative_finite_f32("NodeEditorFrame::link_colored()", "thickness", thickness);
-        let _current_editor = self.bind("NodeEditorFrame::link_colored()");
-        unsafe {
+        self.with_current("NodeEditorFrame::link_colored()", || unsafe {
             sys::dne_link(
                 link.raw(),
                 start_pin.raw(),
@@ -84,12 +90,13 @@ impl<'ui> NodeEditorFrame<'ui> {
                 vec4(color),
                 thickness,
             )
-        }
+        })
     }
 
     pub fn flow(&self, link: LinkId, direction: FlowDirection) {
-        let _current_editor = self.bind("NodeEditorFrame::flow()");
-        unsafe { sys::dne_flow(link.raw(), direction.raw()) };
+        self.with_current("NodeEditorFrame::flow()", || unsafe {
+            sys::dne_flow(link.raw(), direction.raw())
+        });
     }
 
     pub fn push_style_color<'a>(
@@ -98,8 +105,9 @@ impl<'ui> NodeEditorFrame<'ui> {
         value: [f32; 4],
     ) -> StyleColorToken<'a> {
         assert_finite_vec4("NodeEditorFrame::push_style_color()", "value", value);
-        let _current_editor = self.bind("NodeEditorFrame::push_style_color()");
-        unsafe { sys::dne_push_style_color(color.raw(), vec4(value)) };
+        self.with_current("NodeEditorFrame::push_style_color()", || unsafe {
+            sys::dne_push_style_color(color.raw(), vec4(value))
+        });
         StyleColorToken {
             editor: self._editor,
             count: 1,
@@ -115,8 +123,9 @@ impl<'ui> NodeEditorFrame<'ui> {
             StyleVarType::Float,
         );
         assert_finite_f32("NodeEditorFrame::push_style_var_float()", "value", value);
-        let _current_editor = self.bind("NodeEditorFrame::push_style_var_float()");
-        unsafe { sys::dne_push_style_var_float(var.raw(), value) };
+        self.with_current("NodeEditorFrame::push_style_var_float()", || unsafe {
+            sys::dne_push_style_var_float(var.raw(), value)
+        });
         StyleVarToken {
             editor: self._editor,
             count: 1,
@@ -132,8 +141,9 @@ impl<'ui> NodeEditorFrame<'ui> {
             StyleVarType::Vec2,
         );
         assert_finite_vec2("NodeEditorFrame::push_style_var_vec2()", "value", value);
-        let _current_editor = self.bind("NodeEditorFrame::push_style_var_vec2()");
-        unsafe { sys::dne_push_style_var_vec2(var.raw(), vec2(value)) };
+        self.with_current("NodeEditorFrame::push_style_var_vec2()", || unsafe {
+            sys::dne_push_style_var_vec2(var.raw(), vec2(value))
+        });
         StyleVarToken {
             editor: self._editor,
             count: 1,
@@ -149,8 +159,9 @@ impl<'ui> NodeEditorFrame<'ui> {
             StyleVarType::Vec4,
         );
         assert_finite_vec4("NodeEditorFrame::push_style_var_vec4()", "value", value);
-        let _current_editor = self.bind("NodeEditorFrame::push_style_var_vec4()");
-        unsafe { sys::dne_push_style_var_vec4(var.raw(), vec4(value)) };
+        self.with_current("NodeEditorFrame::push_style_var_vec4()", || unsafe {
+            sys::dne_push_style_var_vec4(var.raw(), vec4(value))
+        });
         StyleVarToken {
             editor: self._editor,
             count: 1,
@@ -164,8 +175,9 @@ impl<'ui> NodeEditorFrame<'ui> {
             !self.suspended.replace(true),
             "NodeEditorFrame::suspend() cannot be called while the editor is already suspended"
         );
-        let _current_editor = self.bind("NodeEditorFrame::suspend()");
-        unsafe { sys::dne_suspend() };
+        self.with_current("NodeEditorFrame::suspend()", || unsafe {
+            sys::dne_suspend()
+        });
         SuspensionToken {
             editor: self._editor,
             suspended: &self.suspended,
@@ -174,8 +186,10 @@ impl<'ui> NodeEditorFrame<'ui> {
     }
 
     pub fn is_suspended(&self) -> bool {
-        let _current_editor = self.bind("NodeEditorFrame::is_suspended()");
-        self.suspended.get() || unsafe { sys::dne_is_suspended() }
+        self.suspended.get()
+            || self.with_current("NodeEditorFrame::is_suspended()", || unsafe {
+                sys::dne_is_suspended()
+            })
     }
 }
 
@@ -187,8 +201,10 @@ pub struct NodeToken<'a> {
 
 impl NodeToken<'_> {
     pub fn begin_pin<'a>(&'a self, pin: PinId, kind: PinKind) -> PinToken<'a> {
-        let _current_editor = self.editor.bind_current("NodeToken::begin_pin()");
-        unsafe { sys::dne_begin_pin(pin.raw(), kind.raw()) };
+        self.editor
+            .with_current("NodeToken::begin_pin()", || unsafe {
+                sys::dne_begin_pin(pin.raw(), kind.raw())
+            });
         PinToken {
             editor: self.editor,
             ended: false,
@@ -209,8 +225,8 @@ impl NodeToken<'_> {
 
     fn end_inner(&mut self) {
         if !self.ended {
-            let _current_editor = self.editor.bind_current("NodeToken::end()");
-            unsafe { sys::dne_end_node() };
+            self.editor
+                .with_current("NodeToken::end()", || unsafe { sys::dne_end_node() });
             self.ended = true;
         }
     }
@@ -235,38 +251,47 @@ impl PinToken<'_> {
 
     pub fn rect(&self, min: [f32; 2], max: [f32; 2]) {
         assert_finite_rect("PinToken::rect()", min, max);
-        let _current_editor = self.editor.bind_current("PinToken::rect()");
-        unsafe { sys::dne_pin_rect(vec2(min), vec2(max)) };
+        self.editor.with_current("PinToken::rect()", || unsafe {
+            sys::dne_pin_rect(vec2(min), vec2(max))
+        });
     }
 
     pub fn pivot_rect(&self, min: [f32; 2], max: [f32; 2]) {
         assert_finite_rect("PinToken::pivot_rect()", min, max);
-        let _current_editor = self.editor.bind_current("PinToken::pivot_rect()");
-        unsafe { sys::dne_pin_pivot_rect(vec2(min), vec2(max)) };
+        self.editor
+            .with_current("PinToken::pivot_rect()", || unsafe {
+                sys::dne_pin_pivot_rect(vec2(min), vec2(max))
+            });
     }
 
     pub fn pivot_size(&self, size: [f32; 2]) {
         assert_non_negative_finite_vec2("PinToken::pivot_size()", "size", size);
-        let _current_editor = self.editor.bind_current("PinToken::pivot_size()");
-        unsafe { sys::dne_pin_pivot_size(vec2(size)) };
+        self.editor
+            .with_current("PinToken::pivot_size()", || unsafe {
+                sys::dne_pin_pivot_size(vec2(size))
+            });
     }
 
     pub fn pivot_scale(&self, scale: [f32; 2]) {
         assert_finite_vec2("PinToken::pivot_scale()", "scale", scale);
-        let _current_editor = self.editor.bind_current("PinToken::pivot_scale()");
-        unsafe { sys::dne_pin_pivot_scale(vec2(scale)) };
+        self.editor
+            .with_current("PinToken::pivot_scale()", || unsafe {
+                sys::dne_pin_pivot_scale(vec2(scale))
+            });
     }
 
     pub fn pivot_alignment(&self, alignment: [f32; 2]) {
         assert_finite_vec2("PinToken::pivot_alignment()", "alignment", alignment);
-        let _current_editor = self.editor.bind_current("PinToken::pivot_alignment()");
-        unsafe { sys::dne_pin_pivot_alignment(vec2(alignment)) };
+        self.editor
+            .with_current("PinToken::pivot_alignment()", || unsafe {
+                sys::dne_pin_pivot_alignment(vec2(alignment))
+            });
     }
 
     fn end_inner(&mut self) {
         if !self.ended {
-            let _current_editor = self.editor.bind_current("PinToken::end()");
-            unsafe { sys::dne_end_pin() };
+            self.editor
+                .with_current("PinToken::end()", || unsafe { sys::dne_end_pin() });
             self.ended = true;
         }
     }
@@ -287,28 +312,32 @@ pub struct GroupHintToken<'a> {
 
 impl<'a> GroupHintToken<'a> {
     pub fn min(&self) -> [f32; 2] {
-        let _current_editor = self.editor.bind_current("GroupHintToken::min()");
-        from_vec2(unsafe { sys::dne_get_group_min() })
+        self.editor.with_current("GroupHintToken::min()", || {
+            from_vec2(unsafe { sys::dne_get_group_min() })
+        })
     }
 
     pub fn max(&self) -> [f32; 2] {
-        let _current_editor = self.editor.bind_current("GroupHintToken::max()");
-        from_vec2(unsafe { sys::dne_get_group_max() })
+        self.editor.with_current("GroupHintToken::max()", || {
+            from_vec2(unsafe { sys::dne_get_group_max() })
+        })
     }
 
     pub fn foreground_draw_list(&self) -> DrawListMut<'_> {
-        let _current_editor = self
+        let draw_list = self
             .editor
-            .bind_current("GroupHintToken::foreground_draw_list()");
-        let draw_list = unsafe { sys::dne_get_hint_foreground_draw_list() };
+            .with_current("GroupHintToken::foreground_draw_list()", || unsafe {
+                sys::dne_get_hint_foreground_draw_list()
+            });
         unsafe { DrawListMut::from_raw_mut(self.ui, draw_list.cast()) }
     }
 
     pub fn background_draw_list(&self) -> DrawListMut<'_> {
-        let _current_editor = self
+        let draw_list = self
             .editor
-            .bind_current("GroupHintToken::background_draw_list()");
-        let draw_list = unsafe { sys::dne_get_hint_background_draw_list() };
+            .with_current("GroupHintToken::background_draw_list()", || unsafe {
+                sys::dne_get_hint_background_draw_list()
+            });
         unsafe { DrawListMut::from_raw_mut(self.ui, draw_list.cast()) }
     }
 
@@ -318,8 +347,10 @@ impl<'a> GroupHintToken<'a> {
 
     fn end_inner(&mut self) {
         if !self.ended {
-            let _current_editor = self.editor.bind_current("GroupHintToken::end()");
-            unsafe { sys::dne_end_group_hint() };
+            self.editor
+                .with_current("GroupHintToken::end()", || unsafe {
+                    sys::dne_end_group_hint()
+                });
             self.ended = true;
         }
     }
@@ -344,8 +375,8 @@ impl SuspensionToken<'_> {
 
     fn resume_inner(&mut self) {
         if !self.resumed {
-            let _current_editor = self.editor.bind_current("SuspensionToken::resume()");
-            unsafe { sys::dne_resume() };
+            self.editor
+                .with_current("SuspensionToken::resume()", || unsafe { sys::dne_resume() });
             self.suspended.set(false);
             self.resumed = true;
         }
@@ -372,8 +403,10 @@ impl StyleColorToken<'_> {
 
     fn pop_inner(&mut self) {
         if !self.popped {
-            let _current_editor = self.editor.bind_current("StyleColorToken::pop()");
-            unsafe { sys::dne_pop_style_color(self.count) };
+            self.editor
+                .with_current("StyleColorToken::pop()", || unsafe {
+                    sys::dne_pop_style_color(self.count)
+                });
             self.popped = true;
         }
     }
@@ -399,8 +432,9 @@ impl StyleVarToken<'_> {
 
     fn pop_inner(&mut self) {
         if !self.popped {
-            let _current_editor = self.editor.bind_current("StyleVarToken::pop()");
-            unsafe { sys::dne_pop_style_var(self.count) };
+            self.editor.with_current("StyleVarToken::pop()", || unsafe {
+                sys::dne_pop_style_var(self.count)
+            });
             self.popped = true;
         }
     }

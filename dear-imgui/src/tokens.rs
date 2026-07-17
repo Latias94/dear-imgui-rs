@@ -46,8 +46,7 @@ macro_rules! create_token {
         #[must_use]
         $(#[$struct_meta])*
         pub struct $token_name<'a> {
-            ctx: *mut $crate::sys::ImGuiContext,
-            ctx_alive: $crate::ContextAliveToken,
+            ctx_binding: $crate::ContextBinding,
             _phantom: std::marker::PhantomData<&'a $crate::Ui>,
         }
 
@@ -55,8 +54,7 @@ macro_rules! create_token {
             /// Creates a new token type.
             pub(crate) fn new(ui: &'a $crate::Ui) -> Self {
                 Self {
-                    ctx: ui.context_raw(),
-                    ctx_alive: ui.context_alive_token(),
+                    ctx_binding: ui.binding(),
                     _phantom: std::marker::PhantomData,
                 }
             }
@@ -70,12 +68,7 @@ macro_rules! create_token {
 
         impl Drop for $token_name<'_> {
             fn drop(&mut self) {
-                if self.ctx.is_null() || !self.ctx_alive.is_alive() {
-                    return;
-                }
-
-                let _guard = $crate::context::binding::CTX_MUTEX.lock();
-                $crate::context::binding::with_bound_context(self.ctx, || {
+                let _ = self.ctx_binding.try_with_bound_context(|| {
                     // Execute provided drop expression; callers wrap unsafe if needed.
                     $on_drop
                 });

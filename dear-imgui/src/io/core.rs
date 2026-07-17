@@ -11,31 +11,6 @@ pub struct Io(UnsafeCell<sys::ImGuiIO>);
 const _: [(); std::mem::size_of::<sys::ImGuiIO>()] = [(); std::mem::size_of::<Io>()];
 const _: [(); std::mem::align_of::<sys::ImGuiIO>()] = [(); std::mem::align_of::<Io>()];
 
-pub(crate) struct BoundContextGuard {
-    previous: *mut sys::ImGuiContext,
-    target: *mut sys::ImGuiContext,
-}
-
-impl BoundContextGuard {
-    pub(crate) unsafe fn bind(target: *mut sys::ImGuiContext) -> Self {
-        let previous = unsafe { sys::igGetCurrentContext() };
-        if previous != target {
-            unsafe { sys::igSetCurrentContext(target) };
-        }
-        Self { previous, target }
-    }
-}
-
-impl Drop for BoundContextGuard {
-    fn drop(&mut self) {
-        if self.previous != self.target {
-            unsafe {
-                sys::igSetCurrentContext(self.previous);
-            }
-        }
-    }
-}
-
 impl Io {
     #[inline]
     pub(crate) fn inner(&self) -> &sys::ImGuiIO {

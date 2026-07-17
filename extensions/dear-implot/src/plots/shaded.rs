@@ -90,21 +90,22 @@ impl<'a> Plot for ShadedPlot<'a> {
         let Ok(count) = i32::try_from(self.x_data.len()) else {
             return;
         };
-        let _guard = plot_ui.bind();
-        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_with_style(
-                self.style,
-                self.flags.bits() | self.item_flags.bits(),
-                self.layout,
-            );
-            sys::ImPlot_PlotShaded_doublePtrdoublePtrInt(
-                label_ptr,
-                self.x_data.as_ptr(),
-                self.y_data.as_ptr(),
-                count,
-                self.y_ref,
-                spec,
-            );
+        plot_ui.with_bound_context(|| {
+            with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+                let spec = plot_spec_with_style(
+                    self.style,
+                    self.flags.bits() | self.item_flags.bits(),
+                    self.layout,
+                );
+                sys::ImPlot_PlotShaded_doublePtrdoublePtrInt(
+                    label_ptr,
+                    self.x_data.as_ptr(),
+                    self.y_data.as_ptr(),
+                    count,
+                    self.y_ref,
+                    spec,
+                );
+            })
         })
     }
 
@@ -193,21 +194,22 @@ impl<'a> Plot for ShadedBetweenPlot<'a> {
             return;
         };
 
-        let _guard = plot_ui.bind();
-        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_with_style(
-                self.style,
-                self.flags.bits() | self.item_flags.bits(),
-                self.layout,
-            );
-            sys::ImPlot_PlotShaded_doublePtrdoublePtrdoublePtr(
-                label_ptr,
-                self.x_data.as_ptr(),
-                self.y1_data.as_ptr(),
-                self.y2_data.as_ptr(),
-                count,
-                spec,
-            );
+        plot_ui.with_bound_context(|| {
+            with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+                let spec = plot_spec_with_style(
+                    self.style,
+                    self.flags.bits() | self.item_flags.bits(),
+                    self.layout,
+                );
+                sys::ImPlot_PlotShaded_doublePtrdoublePtrdoublePtr(
+                    label_ptr,
+                    self.x_data.as_ptr(),
+                    self.y1_data.as_ptr(),
+                    self.y2_data.as_ptr(),
+                    count,
+                    spec,
+                );
+            })
         })
     }
 
@@ -289,22 +291,23 @@ impl<'a> Plot for SimpleShadedPlot<'a> {
             return;
         };
 
-        let _guard = plot_ui.bind();
-        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_with_style(
-                self.style,
-                self.flags.bits() | self.item_flags.bits(),
-                PlotDataLayout::DEFAULT,
-            );
-            sys::ImPlot_PlotShaded_doublePtrInt(
-                label_ptr,
-                self.values.as_ptr(),
-                count,
-                self.y_ref,
-                self.x_scale,
-                self.x_start,
-                spec,
-            );
+        plot_ui.with_bound_context(|| {
+            with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+                let spec = plot_spec_with_style(
+                    self.style,
+                    self.flags.bits() | self.item_flags.bits(),
+                    PlotDataLayout::DEFAULT,
+                );
+                sys::ImPlot_PlotShaded_doublePtrInt(
+                    label_ptr,
+                    self.values.as_ptr(),
+                    count,
+                    self.y_ref,
+                    self.x_scale,
+                    self.x_start,
+                    spec,
+                );
+            })
         })
     }
 

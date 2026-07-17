@@ -5,9 +5,8 @@ use crate::sanitize;
 use winit::event::{Event, WindowEvent};
 
 pub fn route_event_to_viewports<T>(imgui_ctx: &mut Context, event: &Event<T>) -> bool {
-    let _context_guard = unsafe { CurrentContextGuard::bind(imgui_ctx.as_raw()) };
-
-    match event {
+    let binding = imgui_ctx.binding();
+    binding.with_bound_context(|| match event {
         Event::WindowEvent { window_id, event } => {
             // Iterate ImGui viewports and find the window that matches this event's WindowId
             #[cfg(feature = "multi-viewport")]
@@ -147,7 +146,7 @@ pub fn route_event_to_viewports<T>(imgui_ctx: &mut Context, event: &Event<T>) ->
             false
         }
         _ => false,
-    }
+    })
 }
 
 /// Convenience helper: handle an event for both the main window and all ImGui-created viewports.

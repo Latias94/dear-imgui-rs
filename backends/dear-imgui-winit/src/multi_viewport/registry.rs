@@ -1,17 +1,36 @@
 use super::*;
+use std::cell::RefCell;
 
-pub(super) fn register_viewport_data(ptr: *mut ViewportData) {
+struct RegisteredViewportData {
+    context_raw: *mut dear_imgui_rs::sys::ImGuiContext,
+    context: ContextBinding,
+    data: *mut ViewportData,
+}
+
+thread_local! {
+    static VIEWPORT_DATA: RefCell<Vec<RegisteredViewportData>> = const { RefCell::new(Vec::new()) };
+}
+
+pub(super) fn register_viewport_data(context: &ContextBinding, ptr: *mut ViewportData) {
     if ptr.is_null() {
         return;
     }
-    let ctx = unsafe { dear_imgui_rs::sys::igGetCurrentContext() };
+    let Ok(context_raw) =
+        context.try_with_bound_context(|| unsafe { dear_imgui_rs::sys::igGetCurrentContext() })
+    else {
+        return;
+    };
     VIEWPORT_DATA.with(|items| {
         let mut items = items.borrow_mut();
         if !items
             .iter()
-            .any(|(entry_ctx, entry_ptr)| *entry_ctx == ctx && *entry_ptr == ptr)
+            .any(|entry| entry.context.id() == context.id() && entry.data == ptr)
         {
-            items.push((ctx, ptr));
+            items.push(RegisteredViewportData {
+                context_raw,
+                context: context.clone(),
+                data: ptr,
+            });
         }
     });
 }
@@ -21,22 +40,36 @@ pub(super) fn unregister_viewport_data(ptr: *mut ViewportData) {
         return;
     }
     VIEWPORT_DATA.with(|items| {
-        items
-            .borrow_mut()
-            .retain(|(_, entry_ptr)| *entry_ptr != ptr);
+        items.borrow_mut().retain(|entry| entry.data != ptr);
     });
+}
+
+pub(super) fn with_registered_context<R>(
+    context_raw: *mut dear_imgui_rs::sys::ImGuiContext,
+    f: impl FnOnce(&ContextBinding) -> R,
+) -> Option<R> {
+    if context_raw.is_null() {
+        return None;
+    }
+    let context = VIEWPORT_DATA.with(|items| {
+        items
+            .borrow()
+            .iter()
+            .find(|entry| entry.context_raw == context_raw && entry.context.is_alive())
+            .map(|entry| entry.context.clone())
+    })?;
+    context.try_with_bound_context(|| f(&context)).ok()
 }
 
 pub(super) fn is_winit_viewport_data(ptr: *mut ViewportData) -> bool {
     if ptr.is_null() {
         return false;
     }
-    let ctx = unsafe { dear_imgui_rs::sys::igGetCurrentContext() };
+    let context_raw = unsafe { dear_imgui_rs::sys::igGetCurrentContext() };
     VIEWPORT_DATA.with(|items| {
-        items
-            .borrow()
-            .iter()
-            .any(|(entry_ctx, entry_ptr)| *entry_ctx == ctx && *entry_ptr == ptr)
+        items.borrow().iter().any(|entry| {
+            entry.context_raw == context_raw && entry.context.is_alive() && entry.data == ptr
+        })
     })
 }
 

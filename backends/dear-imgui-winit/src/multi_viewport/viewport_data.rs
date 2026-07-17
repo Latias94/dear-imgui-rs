@@ -69,9 +69,8 @@ pub(super) fn decoration_offset_logical(window: &Window) -> Option<(f64, f64)> {
 }
 
 pub(super) fn init_main_viewport(ctx: &mut Context, main_window: &Window) {
-    let _context_guard = unsafe { CurrentContextGuard::bind(ctx.as_raw()) };
-
-    unsafe {
+    let binding = ctx.binding();
+    binding.with_bound_context(|| unsafe {
         let main_viewport = dear_imgui_rs::sys::igGetMainViewport();
         if main_viewport.is_null() {
             return;
@@ -80,7 +79,7 @@ pub(super) fn init_main_viewport(ctx: &mut Context, main_window: &Window) {
         let existing = (*main_viewport).PlatformUserData as *mut ViewportData;
         let vd = if existing.is_null() {
             let vd = Box::into_raw(Box::new(ViewportData::new()));
-            register_viewport_data(vd);
+            register_viewport_data(&binding, vd);
             vd
         } else if is_winit_viewport_data(existing) {
             existing
@@ -93,7 +92,7 @@ pub(super) fn init_main_viewport(ctx: &mut Context, main_window: &Window) {
 
         (*main_viewport).PlatformUserData = vd as *mut c_void;
         (*main_viewport).PlatformHandle = main_window as *const Window as *mut c_void;
-    }
+    });
 }
 
 pub(super) unsafe fn clear_main_viewport_data_for_current_context() {

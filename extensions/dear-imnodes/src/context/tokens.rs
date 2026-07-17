@@ -16,17 +16,13 @@ impl NodeToken<'_> {
 
         impl Drop for TitleBarToken {
             fn drop(&mut self) {
-                let _guard = self.scope.bind();
-                unsafe {
-                    sys::imnodes_EndNodeTitleBar();
-                }
+                self.scope
+                    .with_bound_context(|| unsafe { sys::imnodes_EndNodeTitleBar() });
             }
         }
 
-        let _guard = self.scope.bind();
-        unsafe {
-            sys::imnodes_BeginNodeTitleBar();
-        }
+        self.scope
+            .with_bound_context(|| unsafe { sys::imnodes_BeginNodeTitleBar() });
         let _title_bar = TitleBarToken {
             scope: self.scope.clone(),
         };
@@ -38,10 +34,8 @@ impl NodeToken<'_> {
 
 impl Drop for NodeToken<'_> {
     fn drop(&mut self) {
-        let _guard = self.scope.bind();
-        unsafe {
-            sys::imnodes_EndNode();
-        }
+        self.scope
+            .with_bound_context(|| unsafe { sys::imnodes_EndNode() });
     }
 }
 
@@ -63,13 +57,12 @@ impl AttributeToken<'_> {
 
 impl Drop for AttributeToken<'_> {
     fn drop(&mut self) {
-        let _guard = self.scope.bind();
-        unsafe {
+        self.scope.with_bound_context(|| unsafe {
             match self.kind {
                 AttrKind::Input => sys::imnodes_EndInputAttribute(),
                 AttrKind::Output => sys::imnodes_EndOutputAttribute(),
                 AttrKind::Static => sys::imnodes_EndStaticAttribute(),
             }
-        }
+        });
     }
 }

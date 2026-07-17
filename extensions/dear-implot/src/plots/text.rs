@@ -85,15 +85,16 @@ impl<'a> TextPlot<'a> {
             x: self.pix_offset_x as f32,
             y: self.pix_offset_y as f32,
         };
-        let _guard = plot_ui.bind();
-        let _ = with_plot_str(self.text, |text_ptr| unsafe {
-            let spec = plot_spec_with_style(
-                self.style,
-                self.flags.bits() | self.item_flags.bits(),
-                PlotDataLayout::DEFAULT,
-            );
-            sys::ImPlot_PlotText(text_ptr, self.x, self.y, pix_offset, spec);
-        });
+        plot_ui.with_bound_context(|| {
+            let _ = with_plot_str(self.text, |text_ptr| unsafe {
+                let spec = plot_spec_with_style(
+                    self.style,
+                    self.flags.bits() | self.item_flags.bits(),
+                    PlotDataLayout::DEFAULT,
+                );
+                sys::ImPlot_PlotText(text_ptr, self.x, self.y, pix_offset, spec);
+            });
+        })
     }
 }
 
@@ -304,15 +305,16 @@ impl FormattedTextPlot {
             x: self.pix_offset_x as f32,
             y: self.pix_offset_y as f32,
         };
-        let _guard = plot_ui.bind();
-        let _ = with_plot_str(&self.text, |text_ptr| unsafe {
-            let spec = plot_spec_with_style(
-                self.style,
-                self.flags.bits() | self.item_flags.bits(),
-                PlotDataLayout::DEFAULT,
-            );
-            sys::ImPlot_PlotText(text_ptr, self.x, self.y, pix_offset, spec);
-        });
+        plot_ui.with_bound_context(|| {
+            let _ = with_plot_str(&self.text, |text_ptr| unsafe {
+                let spec = plot_spec_with_style(
+                    self.style,
+                    self.flags.bits() | self.item_flags.bits(),
+                    PlotDataLayout::DEFAULT,
+                );
+                sys::ImPlot_PlotText(text_ptr, self.x, self.y, pix_offset, spec);
+            });
+        })
     }
 }
 

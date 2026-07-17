@@ -1,99 +1,49 @@
 use super::*;
 
-#[derive(Clone, Debug)]
-pub(super) struct ContextBinding {
-    raw: *mut sys::ImGuiContext,
-    alive: ContextAliveToken,
+pub(super) fn with_context<R>(imgui: &Context, caller: &str, f: impl FnOnce() -> R) -> R {
+    with_captured_context(&imgui.binding(), caller, f)
 }
 
-impl ContextBinding {
-    pub(super) fn capture(imgui: &Context) -> Self {
-        Self {
-            raw: imgui.as_raw(),
-            alive: imgui.alive_token(),
-        }
-    }
-
-    pub(super) fn assert_matches(&self, imgui: &Context, caller: &str) {
-        assert!(
-            self.alive.is_alive(),
-            "{caller} requires the captured Dear ImGui context to still be alive"
-        );
-        assert_eq!(
-            self.raw,
-            imgui.as_raw(),
-            "{caller} received a different Dear ImGui context than the one used during backend initialization"
-        );
-    }
-
-    pub(super) fn bind(&self, caller: &str) -> CurrentContextGuard {
-        assert!(
-            self.alive.is_alive(),
-            "{caller} requires the captured Dear ImGui context to still be alive"
-        );
-        assert!(
-            !self.raw.is_null(),
-            "{caller} requires a non-null Dear ImGui context"
-        );
-        unsafe { CurrentContextGuard::bind(self.raw) }
-    }
-
-    pub(super) fn bind_for_drop(&self) -> Option<CurrentContextGuard> {
-        if self.alive.is_alive() && !self.raw.is_null() {
-            Some(unsafe { CurrentContextGuard::bind(self.raw) })
-        } else {
-            None
-        }
-    }
-
-    #[cfg(any(
-        feature = "opengl3-renderer",
-        feature = "sdlrenderer3-renderer",
-        feature = "sdlgpu3-renderer"
-    ))]
-    pub(super) fn assert_current_draw_data(&self, draw_data: &mut DrawData, caller: &str) {
-        let expected = unsafe { sys::igGetDrawData() as *mut sys::ImDrawData };
-        let actual = draw_data as *mut DrawData as *mut sys::ImDrawData;
-        assert_eq!(
-            expected, actual,
-            "{caller} received draw data that does not belong to the captured Dear ImGui context"
-        );
-    }
+pub(super) fn with_matching_context<R>(
+    context: &ContextBinding,
+    imgui: &Context,
+    caller: &str,
+    f: impl FnOnce() -> R,
+) -> R {
+    assert_eq!(
+        context.id(),
+        imgui.id(),
+        "{caller} received a different Dear ImGui context than the one used during backend initialization"
+    );
+    with_captured_context(context, caller, f)
 }
 
-#[derive(Debug)]
-pub(super) struct CurrentContextGuard {
-    previous: *mut sys::ImGuiContext,
-    restore: bool,
+pub(super) fn with_captured_context<R>(
+    context: &ContextBinding,
+    caller: &str,
+    f: impl FnOnce() -> R,
+) -> R {
+    context
+        .try_with_bound_context(f)
+        .unwrap_or_else(|error| panic!("{caller} could not bind its Dear ImGui context: {error}"))
 }
 
-impl CurrentContextGuard {
-    pub(super) unsafe fn bind(raw: *mut sys::ImGuiContext) -> Self {
-        let previous = unsafe { sys::igGetCurrentContext() };
-        let restore = previous != raw;
-        if restore {
-            unsafe {
-                sys::igSetCurrentContext(raw);
-            }
-        }
-        Self { previous, restore }
-    }
+pub(super) fn try_with_context<R>(context: &ContextBinding, f: impl FnOnce() -> R) -> Option<R> {
+    context.try_with_bound_context(f).ok()
 }
 
-impl Drop for CurrentContextGuard {
-    fn drop(&mut self) {
-        if self.restore {
-            unsafe {
-                sys::igSetCurrentContext(self.previous);
-            }
-        }
-    }
-}
-
-pub(super) fn with_context<R>(imgui: &mut Context, caller: &str, f: impl FnOnce() -> R) -> R {
-    let context = ContextBinding::capture(imgui);
-    let _guard = context.bind(caller);
-    f()
+#[cfg(any(
+    feature = "opengl3-renderer",
+    feature = "sdlrenderer3-renderer",
+    feature = "sdlgpu3-renderer"
+))]
+pub(super) fn assert_current_draw_data(draw_data: &mut DrawData, caller: &str) {
+    let expected = unsafe { sys::igGetDrawData() as *mut sys::ImDrawData };
+    let actual = draw_data as *mut DrawData as *mut sys::ImDrawData;
+    assert_eq!(
+        expected, actual,
+        "{caller} received draw data that does not belong to the captured Dear ImGui context"
+    );
 }
 
 /// FFI bindings to the C wrappers defined in `wrapper.cpp`.

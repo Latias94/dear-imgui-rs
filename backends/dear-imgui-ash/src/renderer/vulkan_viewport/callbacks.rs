@@ -1,3 +1,4 @@
+use super::registry::binding_for_current_context;
 use super::*;
 
 pub(super) fn request_platform_close_after_create_failure(viewport: &mut Viewport) {
@@ -17,6 +18,9 @@ unsafe fn renderer_create_window(viewport: *mut Viewport) {
     // SAFETY: Dear ImGui owns this live viewport for the current context. The registry enforces a
     // single renderer borrow, and every Vulkan resource destroyed on failure was created here.
     unsafe {
+        let Some(context_binding) = binding_for_current_context() else {
+            return;
+        };
         let Some(mut renderer) = borrow_renderer() else {
             return;
         };
@@ -90,7 +94,7 @@ unsafe fn renderer_create_window(viewport: *mut Viewport) {
         }
 
         let data = Box::into_raw(Box::new(data));
-        register_viewport_data(data);
+        register_viewport_data(&context_binding, data);
         viewport.set_renderer_user_data(data.cast());
     }
 }
@@ -587,7 +591,13 @@ unsafe fn renderer_swap_buffers(viewport: *mut Viewport, _render_arg: *mut c_voi
 }
 
 fn run_callback(name: &str, callback: impl FnOnce()) {
-    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(callback)).is_err() {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let Some(binding) = binding_for_current_context() else {
+            return;
+        };
+        let _ = binding.try_with_bound_context(callback);
+    }));
+    if result.is_err() {
         eprintln!("[ash-mv] panic in {name}");
         std::process::abort();
     }

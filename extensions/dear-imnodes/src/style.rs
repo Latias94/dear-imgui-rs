@@ -1,6 +1,5 @@
 use crate::context::ImNodesScope;
 use crate::sys;
-use dear_imgui_rs::sys as imgui_sys;
 use std::marker::PhantomData;
 
 #[repr(u32)]
@@ -46,10 +45,8 @@ impl<'a> ColorToken<'a> {
 }
 impl Drop for ColorToken<'_> {
     fn drop(&mut self) {
-        let _guard = self.scope.bind();
-        unsafe {
-            sys::imnodes_PopColorStyle();
-        }
+        self.scope
+            .with_bound_context(|| unsafe { sys::imnodes_PopColorStyle() });
     }
 }
 
@@ -62,10 +59,8 @@ impl<'a> StyleVarToken<'a> {
 }
 impl Drop for StyleVarToken<'_> {
     fn drop(&mut self) {
-        let _guard = self.scope.bind();
-        unsafe {
-            sys::imnodes_PopStyleVar(1);
-        }
+        self.scope
+            .with_bound_context(|| unsafe { sys::imnodes_PopStyleVar(1) });
     }
 }
 
@@ -83,18 +78,15 @@ impl<'a> AttributeFlagToken<'a> {
 }
 impl Drop for AttributeFlagToken<'_> {
     fn drop(&mut self) {
-        let _guard = self.scope.bind();
-        unsafe {
-            sys::imnodes_PopAttributeFlag();
-        }
+        self.scope
+            .with_bound_context(|| unsafe { sys::imnodes_PopAttributeFlag() });
     }
 }
 
 /// Style helpers available from NodeEditor
 impl<'ui> crate::NodeEditor<'ui> {
     pub fn push_attribute_flag(&self, flag: crate::AttributeFlags) -> AttributeFlagToken<'_> {
-        let _guard = self.bind();
-        unsafe { sys::imnodes_PushAttributeFlag(flag.bits()) };
+        self.with_bound_context(|| unsafe { sys::imnodes_PushAttributeFlag(flag.bits()) });
         AttributeFlagToken {
             scope: self.scope(),
             _phantom: PhantomData,
@@ -102,17 +94,8 @@ impl<'ui> crate::NodeEditor<'ui> {
     }
 
     pub fn push_color(&self, elem: ColorElement, color: [f32; 4]) -> ColorToken<'_> {
-        let _guard = self.bind();
-        // Use Dear ImGui's helper for packing RGBA -> ABGR (u32)
-        let col = unsafe {
-            imgui_sys::igColorConvertFloat4ToU32(imgui_sys::ImVec4 {
-                x: color[0],
-                y: color[1],
-                z: color[2],
-                w: color[3],
-            })
-        };
-        unsafe { sys::imnodes_PushColorStyle(elem as i32, col) };
+        let col = rgba_to_abgr_u32(color);
+        self.with_bound_context(|| unsafe { sys::imnodes_PushColorStyle(elem as i32, col) });
         ColorToken {
             scope: self.scope(),
             _phantom: PhantomData,
@@ -120,13 +103,12 @@ impl<'ui> crate::NodeEditor<'ui> {
     }
 
     pub fn push_style_var(&self, var: crate::StyleVar, value: StyleVarValue) -> StyleVarToken<'_> {
-        let _guard = self.bind();
-        match value {
+        self.with_bound_context(|| match value {
             StyleVarValue::Float(v) => unsafe { sys::imnodes_PushStyleVar_Float(var as i32, v) },
             StyleVarValue::Vec2(v) => unsafe {
                 sys::imnodes_PushStyleVar_Vec2(var as i32, sys::ImVec2_c { x: v[0], y: v[1] })
             },
-        }
+        });
         StyleVarToken {
             scope: self.scope(),
             _phantom: PhantomData,
@@ -134,8 +116,7 @@ impl<'ui> crate::NodeEditor<'ui> {
     }
 
     pub fn push_style_var_f32(&self, var: crate::StyleVar, value: f32) -> StyleVarToken<'_> {
-        let _guard = self.bind();
-        unsafe { sys::imnodes_PushStyleVar_Float(var as i32, value) };
+        self.with_bound_context(|| unsafe { sys::imnodes_PushStyleVar_Float(var as i32, value) });
         StyleVarToken {
             scope: self.scope(),
             _phantom: PhantomData,
@@ -143,8 +124,7 @@ impl<'ui> crate::NodeEditor<'ui> {
     }
 
     pub fn push_style_var_vec2(&self, var: crate::StyleVar, value: [f32; 2]) -> StyleVarToken<'_> {
-        let _guard = self.bind();
-        unsafe {
+        self.with_bound_context(|| unsafe {
             sys::imnodes_PushStyleVar_Vec2(
                 var as i32,
                 sys::ImVec2_c {
@@ -152,7 +132,7 @@ impl<'ui> crate::NodeEditor<'ui> {
                     y: value[1],
                 },
             )
-        };
+        });
         StyleVarToken {
             scope: self.scope(),
             _phantom: PhantomData,
@@ -162,18 +142,34 @@ impl<'ui> crate::NodeEditor<'ui> {
 
 /// Convert RGBA floats [0,1] to ImGui-packed ABGR (u32)
 pub fn rgba_to_abgr_u32(rgba: [f32; 4]) -> u32 {
-    unsafe {
-        imgui_sys::igColorConvertFloat4ToU32(imgui_sys::ImVec4 {
-            x: rgba[0],
-            y: rgba[1],
-            z: rgba[2],
-            w: rgba[3],
-        }) as u32
-    }
+    let [r, g, b, a] = rgba.map(|component| (component.clamp(0.0, 1.0) * 255.0 + 0.5) as u32);
+    r | (g << 8) | (b << 16) | (a << 24)
 }
 
 /// Convert ImGui-packed ABGR (u32) to RGBA floats [0,1]
 pub fn abgr_u32_to_rgba(col: u32) -> [f32; 4] {
-    let out = unsafe { imgui_sys::igColorConvertU32ToFloat4(col) };
-    [out.x, out.y, out.z, out.w]
+    const SCALE: f32 = 1.0 / 255.0;
+    [
+        (col & 0xff) as f32 * SCALE,
+        ((col >> 8) & 0xff) as f32 * SCALE,
+        ((col >> 16) & 0xff) as f32 * SCALE,
+        ((col >> 24) & 0xff) as f32 * SCALE,
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{abgr_u32_to_rgba, rgba_to_abgr_u32};
+
+    #[test]
+    fn color_conversion_matches_default_imgui_packing() {
+        assert_eq!(rgba_to_abgr_u32([1.0, 0.5, 0.0, 1.0]), 0xff00_80ff);
+        assert_eq!(rgba_to_abgr_u32([-1.0, 2.0, 0.0, 1.0]), 0xff00_ff00);
+
+        let rgba = abgr_u32_to_rgba(0x8040_20ff);
+        let expected = [1.0, 32.0 / 255.0, 64.0 / 255.0, 128.0 / 255.0];
+        for (actual, expected) in rgba.into_iter().zip(expected) {
+            assert!((actual - expected).abs() <= f32::EPSILON);
+        }
+    }
 }

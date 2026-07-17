@@ -1,4 +1,6 @@
 use super::*;
+use dear_imgui_rs::{ContextBinding, ContextId};
+use std::cell::RefCell;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -13,81 +15,60 @@ pub(super) struct GlobalHandles {
     pub(super) surface_adapter: Arc<dyn SurfaceAdapter>,
 }
 
-static RENDERERS: Mutex<Vec<ContextRendererState>> = Mutex::new(Vec::new());
-static VIEWPORT_DATA: Mutex<Vec<ViewportDataRegistration>> = Mutex::new(Vec::new());
+thread_local! {
+    static RENDERERS: RefCell<Vec<ContextRendererState>> = const { RefCell::new(Vec::new()) };
+    static VIEWPORT_DATA: RefCell<Vec<ViewportDataRegistration>> = const { RefCell::new(Vec::new()) };
+}
 
-#[derive(Clone, Copy)]
 struct ViewportDataRegistration {
-    context: usize,
+    context_raw: usize,
+    binding: ContextBinding,
     data: usize,
 }
 
 struct ContextRendererState {
     pub(super) ctx: usize,
+    binding: ContextBinding,
     pub(super) renderer: usize,
     borrowed: bool,
     global: Option<GlobalHandles>,
 }
 
-struct CurrentContextGuard {
-    previous: *mut sys::ImGuiContext,
-    target: *mut sys::ImGuiContext,
-}
-
-impl CurrentContextGuard {
-    /// # Safety
-    ///
-    /// `target` must be null or a live context for the current thread. Neither it nor the context
-    /// that is current on entry may be destroyed before the returned guard is dropped.
-    unsafe fn bind(target: *mut sys::ImGuiContext) -> Self {
-        // SAFETY: reading the current context does not dereference it; the caller owns both
-        // contexts' lifetimes and thread-affinity while the guard is alive.
-        let previous = unsafe { sys::igGetCurrentContext() };
-        if previous != target {
-            // SAFETY: the caller contract guarantees `target` remains live until guard drop.
-            unsafe { sys::igSetCurrentContext(target) };
-        }
-        Self { previous, target }
-    }
-}
-
-impl Drop for CurrentContextGuard {
-    fn drop(&mut self) {
-        if self.previous != self.target {
-            // SAFETY: `bind` requires the previously current context to outlive this guard.
-            unsafe { sys::igSetCurrentContext(self.previous) };
-        }
-    }
-}
-
 pub(super) fn insert_renderer_state(
-    ctx: *mut sys::ImGuiContext,
+    context: &Context,
     renderer: *mut AshRenderer,
     global: Option<GlobalHandles>,
 ) -> Result<(), CallbackOwnershipError> {
+    let ctx = context.as_raw();
     if ctx.is_null() {
         return Err(CallbackOwnershipError::AlreadyEnabled);
     }
 
     let ctx = ctx as usize;
+    let binding = context.binding();
     let renderer = renderer as usize;
-    let mut renderers = RENDERERS
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
-    if renderers.iter().any(|entry| entry.ctx == ctx) {
-        return Err(CallbackOwnershipError::AlreadyEnabled);
-    }
-    if renderers.iter().any(|entry| entry.renderer == renderer) {
-        return Err(CallbackOwnershipError::RendererAlreadyRegistered);
-    }
+    RENDERERS.with(|renderers| {
+        let mut renderers = renderers.borrow_mut();
+        renderers.retain(|entry| entry.binding.is_alive());
+        if renderers
+            .iter()
+            .any(|entry| entry.binding.id() == binding.id())
+        {
+            return Err(CallbackOwnershipError::AlreadyEnabled);
+        }
+        if renderers.iter().any(|entry| entry.renderer == renderer) {
+            return Err(CallbackOwnershipError::RendererAlreadyRegistered);
+        }
 
-    renderers.push(ContextRendererState {
-        ctx,
-        renderer,
-        borrowed: false,
-        global,
-    });
-    Ok(())
+        renderers.push(ContextRendererState {
+            ctx,
+            binding,
+            renderer,
+            borrowed: false,
+            global,
+        });
+        Ok(())
+    })
 }
 
 pub(super) fn remove_renderer_state_for_context(ctx: *mut sys::ImGuiContext) {
@@ -96,37 +77,44 @@ pub(super) fn remove_renderer_state_for_context(ctx: *mut sys::ImGuiContext) {
     }
 
     let ctx = ctx as usize;
-    RENDERERS
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner())
-        .retain(|entry| entry.ctx != ctx);
+    RENDERERS.with(|renderers| {
+        renderers.borrow_mut().retain(|entry| entry.ctx != ctx);
+    });
 }
 
 pub(super) fn remove_renderer_state_for_renderer(renderer: *mut AshRenderer) {
     let renderer = renderer as usize;
-    RENDERERS
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner())
-        .retain(|entry| entry.renderer != renderer);
+    RENDERERS.with(|renderers| {
+        renderers
+            .borrow_mut()
+            .retain(|entry| entry.renderer != renderer);
+    });
 }
 
-pub(super) fn register_viewport_data(ptr: *mut ViewportAshData) {
+pub(super) fn register_viewport_data(context: &ContextBinding, ptr: *mut ViewportAshData) {
     if ptr.is_null() {
         return;
     }
 
-    // SAFETY: this reads the current-context pointer without dereferencing it.
-    let context = unsafe { sys::igGetCurrentContext() } as usize;
-    if context == 0 {
+    let Ok(context_raw) = context.try_with_bound_context(|| unsafe { sys::igGetCurrentContext() })
+    else {
         return;
-    }
+    };
     let data = ptr as usize;
-    let mut items = VIEWPORT_DATA
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
-    if !items.iter().any(|item| item.data == data) {
-        items.push(ViewportDataRegistration { context, data });
-    }
+    VIEWPORT_DATA.with(|items| {
+        let mut items = items.borrow_mut();
+        items.retain(|item| item.binding.is_alive());
+        if !items
+            .iter()
+            .any(|item| item.binding.id() == context.id() && item.data == data)
+        {
+            items.push(ViewportDataRegistration {
+                context_raw: context_raw as usize,
+                binding: context.clone(),
+                data,
+            });
+        }
+    });
 }
 
 pub(super) fn unregister_viewport_data(ptr: *mut ViewportAshData) {
@@ -135,10 +123,9 @@ pub(super) fn unregister_viewport_data(ptr: *mut ViewportAshData) {
     }
 
     let data = ptr as usize;
-    VIEWPORT_DATA
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner())
-        .retain(|entry| entry.data != data);
+    VIEWPORT_DATA.with(|items| {
+        items.borrow_mut().retain(|entry| entry.data != data);
+    });
 }
 
 pub(super) fn is_ash_viewport_data(ptr: *mut ViewportAshData) -> bool {
@@ -149,21 +136,22 @@ pub(super) fn is_ash_viewport_data(ptr: *mut ViewportAshData) -> bool {
     // SAFETY: this reads the current-context pointer without dereferencing it.
     let context = unsafe { sys::igGetCurrentContext() } as usize;
     let data = ptr as usize;
-    VIEWPORT_DATA
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner())
-        .iter()
-        .any(|entry| entry.context == context && entry.data == data)
+    VIEWPORT_DATA.with(|items| {
+        items.borrow().iter().any(|entry| {
+            entry.context_raw == context && entry.binding.is_alive() && entry.data == data
+        })
+    })
 }
 
 fn has_viewport_data_for_context(ctx: *mut sys::ImGuiContext) -> bool {
     let context = ctx as usize;
     context != 0
-        && VIEWPORT_DATA
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .iter()
-            .any(|entry| entry.context == context)
+        && VIEWPORT_DATA.with(|items| {
+            items
+                .borrow()
+                .iter()
+                .any(|entry| entry.context_raw == context && entry.binding.is_alive())
+        })
 }
 
 pub(super) fn global_handles() -> Option<GlobalHandles> {
@@ -173,12 +161,28 @@ pub(super) fn global_handles() -> Option<GlobalHandles> {
         return None;
     }
 
-    RENDERERS
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner())
-        .iter()
-        .find(|entry| entry.ctx == ctx)
-        .and_then(|entry| entry.global.clone())
+    RENDERERS.with(|renderers| {
+        renderers
+            .borrow()
+            .iter()
+            .find(|entry| entry.ctx == ctx && entry.binding.is_alive())
+            .and_then(|entry| entry.global.clone())
+    })
+}
+
+pub(super) fn binding_for_current_context() -> Option<ContextBinding> {
+    let ctx = unsafe { sys::igGetCurrentContext() } as usize;
+    if ctx == 0 {
+        return None;
+    }
+
+    RENDERERS.with(|renderers| {
+        renderers
+            .borrow()
+            .iter()
+            .find(|entry| entry.ctx == ctx && entry.binding.is_alive())
+            .map(|entry| entry.binding.clone())
+    })
 }
 
 /// Failure to acquire the renderer callback table for Ash multi-viewport rendering.
@@ -431,11 +435,12 @@ pub(super) fn has_renderer_state_for_context(ctx: *mut sys::ImGuiContext) -> boo
     }
 
     let ctx = ctx as usize;
-    RENDERERS
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner())
-        .iter()
-        .any(|entry| entry.ctx == ctx)
+    RENDERERS.with(|renderers| {
+        renderers
+            .borrow()
+            .iter()
+            .any(|entry| entry.ctx == ctx && entry.binding.is_alive())
+    })
 }
 
 fn validate_renderer_registration(
@@ -444,17 +449,18 @@ fn validate_renderer_registration(
 ) -> Result<(), CallbackOwnershipError> {
     let ctx = ctx as usize;
     let renderer = renderer as usize;
-    let renderers = RENDERERS
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
-    if renderers
-        .iter()
-        .any(|entry| entry.renderer == renderer && entry.ctx != ctx)
-    {
-        Err(CallbackOwnershipError::RendererAlreadyRegistered)
-    } else {
-        Ok(())
-    }
+    RENDERERS.with(|renderers| {
+        let mut renderers = renderers.borrow_mut();
+        renderers.retain(|entry| entry.binding.is_alive());
+        if renderers
+            .iter()
+            .any(|entry| entry.renderer == renderer && entry.ctx != ctx)
+        {
+            Err(CallbackOwnershipError::RendererAlreadyRegistered)
+        } else {
+            Ok(())
+        }
+    })
 }
 
 pub(super) fn unary_callback_matches(
@@ -635,55 +641,57 @@ pub(crate) unsafe fn enable_with_adapter(
     surface_adapter: Arc<dyn SurfaceAdapter>,
 ) -> Result<(), CallbackOwnershipError> {
     let context_raw = imgui_context.as_raw();
-    // SAFETY: the mutable context borrow proves `context_raw` is live for the guard, and the caller
-    // guarantees its thread-affinity and that the previously current context is not destroyed.
-    let _context_guard = unsafe { CurrentContextGuard::bind(context_raw) };
-    let renderer_raw = renderer as *mut _;
+    let binding = imgui_context.binding();
+    binding.with_bound_context(|| {
+        let renderer_raw = renderer as *mut _;
 
-    let global = GlobalHandles {
-        entry: config.entry,
-        instance: config.instance,
-        physical_device: config.physical_device,
-        present_queue: config.present_queue,
-        graphics_queue_family_index: config.graphics_queue_family_index,
-        present_queue_family_index: config.present_queue_family_index,
-        in_flight_frames: renderer.options.in_flight_frames.max(1),
-        surface_adapter,
-    };
+        let global = GlobalHandles {
+            entry: config.entry,
+            instance: config.instance,
+            physical_device: config.physical_device,
+            present_queue: config.present_queue,
+            graphics_queue_family_index: config.graphics_queue_family_index,
+            present_queue_family_index: config.present_queue_family_index,
+            in_flight_frames: renderer.options.in_flight_frames.max(1),
+            surface_adapter,
+        };
 
-    validate_renderer_registration(context_raw, renderer_raw)?;
-    validate_platform_backend(imgui_context)?;
-    validate_platform_callbacks(imgui_context.platform_io())?;
-    validate_empty_renderer_user_data(
-        imgui_context
-            .platform_io()
-            .viewports_iter()
-            .map(Viewport::renderer_user_data),
-    )?;
-    validate_no_created_platform_windows(
-        imgui_context
-            .platform_io()
-            .viewports_iter()
-            .skip(1)
-            .map(Viewport::platform_window_created),
-    )?;
-    try_install_renderer_callbacks_after_preflight(
-        context_raw,
-        imgui_context.platform_io_mut(),
-        || {
-            validate_vulkan_config(&global)?;
-            query_surface_support(&global, config.validation_surface)?;
-            Ok(())
-        },
-    )?;
+        validate_renderer_registration(context_raw, renderer_raw)?;
+        validate_platform_backend(imgui_context)?;
+        validate_platform_callbacks(imgui_context.platform_io())?;
+        validate_empty_renderer_user_data(
+            imgui_context
+                .platform_io()
+                .viewports_iter()
+                .map(Viewport::renderer_user_data),
+        )?;
+        validate_no_created_platform_windows(
+            imgui_context
+                .platform_io()
+                .viewports_iter()
+                .skip(1)
+                .map(Viewport::platform_window_created),
+        )?;
+        try_install_renderer_callbacks_after_preflight(
+            context_raw,
+            imgui_context.platform_io_mut(),
+            || {
+                validate_vulkan_config(&global)?;
+                query_surface_support(&global, config.validation_surface)?;
+                Ok(())
+            },
+        )?;
 
-    if let Err(error) = insert_renderer_state(context_raw, renderer_raw, Some(global)) {
-        clear_renderer_callbacks(imgui_context.platform_io_mut());
-        return Err(error);
-    }
-    let io = imgui_context.io_mut();
-    io.set_backend_flags(io.backend_flags() | dear_imgui_rs::BackendFlags::RENDERER_HAS_VIEWPORTS);
-    Ok(())
+        if let Err(error) = insert_renderer_state(imgui_context, renderer_raw, Some(global)) {
+            clear_renderer_callbacks(imgui_context.platform_io_mut());
+            return Err(error);
+        }
+        let io = imgui_context.io_mut();
+        io.set_backend_flags(
+            io.backend_flags() | dear_imgui_rs::BackendFlags::RENDERER_HAS_VIEWPORTS,
+        );
+        Ok(())
+    })
 }
 
 pub(crate) fn clear_for_drop(renderer: *mut AshRenderer) {
@@ -691,42 +699,41 @@ pub(crate) fn clear_for_drop(renderer: *mut AshRenderer) {
 }
 
 pub(crate) fn disable(imgui_context: &mut Context) -> Result<(), CallbackOwnershipError> {
-    // SAFETY: the mutable context borrow keeps this context live; disable does not destroy either
-    // it or the previously current context before the guard restores that pointer.
-    let _context_guard = unsafe { CurrentContextGuard::bind(imgui_context.as_raw()) };
+    let binding = imgui_context.binding();
+    binding.with_bound_context(|| {
+        if has_viewport_data_for_context(imgui_context.as_raw()) {
+            return Err(CallbackOwnershipError::LiveViewportResources);
+        }
 
-    if has_viewport_data_for_context(imgui_context.as_raw()) {
-        return Err(CallbackOwnershipError::LiveViewportResources);
-    }
-
-    let had_state = has_renderer_state_for_context(imgui_context.as_raw());
-    let had_owned_callbacks = any_renderer_callback_owned(imgui_context.platform_io());
-    clear_renderer_callbacks(imgui_context.platform_io_mut());
-    remove_renderer_state_for_context(imgui_context.as_raw());
-    if (had_state || had_owned_callbacks)
-        && imgui_context.platform_io().renderer_callbacks_are_empty()
-    {
-        let io = imgui_context.io_mut();
-        io.set_backend_flags(io.backend_flags() & !BackendFlags::RENDERER_HAS_VIEWPORTS);
-    }
-    Ok(())
+        let had_state = has_renderer_state_for_context(imgui_context.as_raw());
+        let had_owned_callbacks = any_renderer_callback_owned(imgui_context.platform_io());
+        clear_renderer_callbacks(imgui_context.platform_io_mut());
+        remove_renderer_state_for_context(imgui_context.as_raw());
+        if (had_state || had_owned_callbacks)
+            && imgui_context.platform_io().renderer_callbacks_are_empty()
+        {
+            let io = imgui_context.io_mut();
+            io.set_backend_flags(io.backend_flags() & !BackendFlags::RENDERER_HAS_VIEWPORTS);
+        }
+        Ok(())
+    })
 }
 
 /// Convenience helper that destroys all platform windows and disables callbacks.
 pub fn shutdown_multi_viewport_support(
     context: &mut Context,
 ) -> Result<(), CallbackOwnershipError> {
-    // SAFETY: the mutable context borrow keeps this context live through platform-window teardown
-    // and restoration of the previously current context.
-    let _context_guard = unsafe { CurrentContextGuard::bind(context.as_raw()) };
-    if !has_renderer_state_for_context(context.as_raw()) {
-        return Ok(());
-    }
-    if !renderer_callbacks_owned(context.platform_io()) {
-        return Err(CallbackOwnershipError::RendererCallbacksReplaced);
-    }
-    context.destroy_platform_windows();
-    disable(context)
+    let binding = context.binding();
+    binding.with_bound_context(|| {
+        if !has_renderer_state_for_context(context.as_raw()) {
+            return Ok(());
+        }
+        if !renderer_callbacks_owned(context.platform_io()) {
+            return Err(CallbackOwnershipError::RendererCallbacksReplaced);
+        }
+        context.destroy_platform_windows();
+        disable(context)
+    })
 }
 
 #[allow(unsafe_op_in_unsafe_fn)]
@@ -738,41 +745,41 @@ pub(super) unsafe fn borrow_renderer() -> Option<RendererBorrowGuard> {
         return None;
     }
 
-    let mut renderers = RENDERERS
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
-    let entry = renderers.iter_mut().find(|entry| entry.ctx == ctx)?;
-    if entry.renderer == 0 {
-        return None;
-    }
-    if entry.borrowed {
-        eprintln!("[ash-mv] renderer already mutably borrowed; skipping callback");
-        return None;
-    }
+    RENDERERS.with(|renderers| {
+        let mut renderers = renderers.borrow_mut();
+        let entry = renderers
+            .iter_mut()
+            .find(|entry| entry.ctx == ctx && entry.binding.is_alive())?;
+        if entry.renderer == 0 {
+            return None;
+        }
+        if entry.borrowed {
+            eprintln!("[ash-mv] renderer already mutably borrowed; skipping callback");
+            return None;
+        }
 
-    entry.borrowed = true;
-    Some(RendererBorrowGuard {
-        ctx,
-        renderer: entry.renderer as *mut AshRenderer,
+        entry.borrowed = true;
+        Some(RendererBorrowGuard {
+            context: entry.binding.id(),
+            renderer: entry.renderer as *mut AshRenderer,
+        })
     })
 }
 
 pub(super) struct RendererBorrowGuard {
-    pub(super) ctx: usize,
+    context: ContextId,
     pub(super) renderer: *mut AshRenderer,
 }
 
 impl Drop for RendererBorrowGuard {
     fn drop(&mut self) {
-        let mut renderers = RENDERERS
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        if let Some(entry) = renderers
-            .iter_mut()
-            .find(|entry| entry.ctx == self.ctx && entry.renderer == self.renderer as usize)
-        {
-            entry.borrowed = false;
-        }
+        RENDERERS.with(|renderers| {
+            if let Some(entry) = renderers.borrow_mut().iter_mut().find(|entry| {
+                entry.binding.id() == self.context && entry.renderer == self.renderer as usize
+            }) {
+                entry.borrowed = false;
+            }
+        });
     }
 }
 

@@ -143,29 +143,30 @@ impl<'a> Plot for PieChartPlot<'a> {
         let Ok(count) = i32::try_from(self.values.len()) else {
             return;
         };
-        let _guard = plot_ui.bind();
-        with_plot_str_slice_with_opt(
-            &self.label_ids,
-            self.label_fmt,
-            |label_ptrs, label_fmt_ptr| unsafe {
-                let spec = plot_spec_with_style(
-                    self.style,
-                    self.flags.bits() | self.item_flags.bits(),
-                    PlotDataLayout::DEFAULT,
-                );
-                sys::ImPlot_PlotPieChart_doublePtrStr(
-                    label_ptrs.as_ptr(),
-                    self.values.as_ptr(),
-                    count,
-                    self.center_x,
-                    self.center_y,
-                    self.radius,
-                    label_fmt_ptr,
-                    self.angle0,
-                    spec,
-                );
-            },
-        )
+        plot_ui.with_bound_context(|| {
+            with_plot_str_slice_with_opt(
+                &self.label_ids,
+                self.label_fmt,
+                |label_ptrs, label_fmt_ptr| unsafe {
+                    let spec = plot_spec_with_style(
+                        self.style,
+                        self.flags.bits() | self.item_flags.bits(),
+                        PlotDataLayout::DEFAULT,
+                    );
+                    sys::ImPlot_PlotPieChart_doublePtrStr(
+                        label_ptrs.as_ptr(),
+                        self.values.as_ptr(),
+                        count,
+                        self.center_x,
+                        self.center_y,
+                        self.radius,
+                        label_fmt_ptr,
+                        self.angle0,
+                        spec,
+                    );
+                },
+            )
+        })
     }
 
     fn label(&self) -> &str {
@@ -301,29 +302,30 @@ impl<'a> Plot for PieChartPlotF32<'a> {
         let Ok(count) = i32::try_from(self.values.len()) else {
             return;
         };
-        let _guard = plot_ui.bind();
-        with_plot_str_slice_with_opt(
-            &self.label_ids,
-            self.label_fmt,
-            |label_ptrs, label_fmt_ptr| unsafe {
-                let spec = plot_spec_with_style(
-                    self.style,
-                    self.flags.bits() | self.item_flags.bits(),
-                    PlotDataLayout::DEFAULT,
-                );
-                sys::ImPlot_PlotPieChart_FloatPtrStr(
-                    label_ptrs.as_ptr(),
-                    self.values.as_ptr(),
-                    count,
-                    self.center_x,
-                    self.center_y,
-                    self.radius,
-                    label_fmt_ptr,
-                    self.angle0,
-                    spec,
-                );
-            },
-        )
+        plot_ui.with_bound_context(|| {
+            with_plot_str_slice_with_opt(
+                &self.label_ids,
+                self.label_fmt,
+                |label_ptrs, label_fmt_ptr| unsafe {
+                    let spec = plot_spec_with_style(
+                        self.style,
+                        self.flags.bits() | self.item_flags.bits(),
+                        PlotDataLayout::DEFAULT,
+                    );
+                    sys::ImPlot_PlotPieChart_FloatPtrStr(
+                        label_ptrs.as_ptr(),
+                        self.values.as_ptr(),
+                        count,
+                        self.center_x,
+                        self.center_y,
+                        self.radius,
+                        label_fmt_ptr,
+                        self.angle0,
+                        spec,
+                    );
+                },
+            )
+        })
     }
 
     fn label(&self) -> &str {

@@ -1,3 +1,10 @@
+#[cfg(any(
+    feature = "opengl3-renderer",
+    feature = "sdlrenderer3-renderer",
+    feature = "sdlgpu3-renderer"
+))]
+use super::core::{assert_current_draw_data, with_captured_context};
+use super::core::{try_with_context, with_matching_context};
 use super::*;
 
 /// RAII owner for the SDL3 platform backend without an official renderer shim.
@@ -15,7 +22,7 @@ pub struct Sdl3PlatformBackend {
 impl Sdl3PlatformBackend {
     fn from_initialized_context(imgui: &Context) -> Self {
         Self {
-            context: ContextBinding::capture(imgui),
+            context: imgui.binding(),
             shutdown_on_drop: true,
         }
     }
@@ -82,26 +89,32 @@ impl Sdl3PlatformBackend {
 
     /// Begin a new SDL3 platform frame.
     pub fn new_frame(&mut self, imgui: &mut Context) {
-        self.context
-            .assert_matches(imgui, "Sdl3PlatformBackend::new_frame()");
-        let _guard = self.context.bind("Sdl3PlatformBackend::new_frame()");
-        sdl3_new_frame_impl();
+        with_matching_context(
+            &self.context,
+            imgui,
+            "Sdl3PlatformBackend::new_frame()",
+            sdl3_new_frame_impl,
+        );
     }
 
     /// Process a single low-level SDL3 event with the captured ImGui context.
     pub fn process_event(&mut self, imgui: &mut Context, event: &SDL_Event) -> bool {
-        self.context
-            .assert_matches(imgui, "Sdl3PlatformBackend::process_event()");
-        let _guard = self.context.bind("Sdl3PlatformBackend::process_event()");
-        process_sys_event(event)
+        with_matching_context(
+            &self.context,
+            imgui,
+            "Sdl3PlatformBackend::process_event()",
+            || process_sys_event(event),
+        )
     }
 
     /// Configure how the SDL3 backend handles gamepads for the captured context.
     pub fn set_gamepad_mode(&mut self, imgui: &mut Context, mode: GamepadMode) {
-        self.context
-            .assert_matches(imgui, "Sdl3PlatformBackend::set_gamepad_mode()");
-        let _guard = self.context.bind("Sdl3PlatformBackend::set_gamepad_mode()");
-        set_gamepad_mode(mode);
+        with_matching_context(
+            &self.context,
+            imgui,
+            "Sdl3PlatformBackend::set_gamepad_mode()",
+            || set_gamepad_mode(mode),
+        );
     }
 
     /// Configure SDL3 backend to use manual gamepad selection for the captured context.
@@ -116,24 +129,22 @@ impl Sdl3PlatformBackend {
         imgui: &mut Context,
         gamepads: &[*mut sdl3_sys::gamepad::SDL_Gamepad],
     ) {
-        self.context
-            .assert_matches(imgui, "Sdl3PlatformBackend::set_gamepad_mode_manual()");
-        let _guard = self
-            .context
-            .bind("Sdl3PlatformBackend::set_gamepad_mode_manual()");
-        unsafe {
-            set_gamepad_mode_manual(gamepads);
-        }
+        with_matching_context(
+            &self.context,
+            imgui,
+            "Sdl3PlatformBackend::set_gamepad_mode_manual()",
+            || unsafe { set_gamepad_mode_manual(gamepads) },
+        );
     }
 
     /// Shut down the SDL3 platform backend before dropping the owner.
     pub fn shutdown(mut self, imgui: &mut Context) {
-        self.context
-            .assert_matches(imgui, "Sdl3PlatformBackend::shutdown()");
-        {
-            let _guard = self.context.bind("Sdl3PlatformBackend::shutdown()");
-            shutdown_platform_impl();
-        }
+        with_matching_context(
+            &self.context,
+            imgui,
+            "Sdl3PlatformBackend::shutdown()",
+            shutdown_platform_impl,
+        );
         self.shutdown_on_drop = false;
     }
 }
@@ -141,9 +152,7 @@ impl Sdl3PlatformBackend {
 impl Drop for Sdl3PlatformBackend {
     fn drop(&mut self) {
         if self.shutdown_on_drop {
-            if let Some(_guard) = self.context.bind_for_drop() {
-                shutdown_platform_impl();
-            }
+            let _ = try_with_context(&self.context, shutdown_platform_impl);
         }
     }
 }
@@ -161,7 +170,7 @@ pub struct Sdl3OpenGl3Backend {
 impl Sdl3OpenGl3Backend {
     fn from_initialized_context(imgui: &Context) -> Self {
         Self {
-            context: ContextBinding::capture(imgui),
+            context: imgui.binding(),
             shutdown_on_drop: true,
         }
     }
@@ -189,42 +198,50 @@ impl Sdl3OpenGl3Backend {
 
     /// Begin a new SDL3 + OpenGL3 frame.
     pub fn new_frame(&mut self, imgui: &mut Context) {
-        self.context
-            .assert_matches(imgui, "Sdl3OpenGl3Backend::new_frame()");
-        let _guard = self.context.bind("Sdl3OpenGl3Backend::new_frame()");
-        new_frame_opengl3_impl();
+        with_matching_context(
+            &self.context,
+            imgui,
+            "Sdl3OpenGl3Backend::new_frame()",
+            new_frame_opengl3_impl,
+        );
     }
 
     /// Process a single low-level SDL3 event with the captured ImGui context.
     pub fn process_event(&mut self, imgui: &mut Context, event: &SDL_Event) -> bool {
-        self.context
-            .assert_matches(imgui, "Sdl3OpenGl3Backend::process_event()");
-        let _guard = self.context.bind("Sdl3OpenGl3Backend::process_event()");
-        process_sys_event(event)
+        with_matching_context(
+            &self.context,
+            imgui,
+            "Sdl3OpenGl3Backend::process_event()",
+            || process_sys_event(event),
+        )
     }
 
     /// Render Dear ImGui draw data using the official OpenGL3 renderer.
     pub fn render(&mut self, draw_data: &mut DrawData) {
-        let _guard = self.context.bind("Sdl3OpenGl3Backend::render()");
-        self.context
-            .assert_current_draw_data(draw_data, "Sdl3OpenGl3Backend::render()");
-        render_opengl3_impl(draw_data);
+        with_captured_context(&self.context, "Sdl3OpenGl3Backend::render()", || {
+            assert_current_draw_data(draw_data, "Sdl3OpenGl3Backend::render()");
+            render_opengl3_impl(draw_data);
+        });
     }
 
     /// Update a single ImGui texture using the official OpenGL3 renderer.
     pub fn update_texture(&mut self, imgui: &mut Context, tex: &mut TextureData) {
-        self.context
-            .assert_matches(imgui, "Sdl3OpenGl3Backend::update_texture()");
-        let _guard = self.context.bind("Sdl3OpenGl3Backend::update_texture()");
-        update_texture(tex);
+        with_matching_context(
+            &self.context,
+            imgui,
+            "Sdl3OpenGl3Backend::update_texture()",
+            || update_texture(tex),
+        );
     }
 
     /// Configure how the SDL3 backend handles gamepads for the captured context.
     pub fn set_gamepad_mode(&mut self, imgui: &mut Context, mode: GamepadMode) {
-        self.context
-            .assert_matches(imgui, "Sdl3OpenGl3Backend::set_gamepad_mode()");
-        let _guard = self.context.bind("Sdl3OpenGl3Backend::set_gamepad_mode()");
-        set_gamepad_mode(mode);
+        with_matching_context(
+            &self.context,
+            imgui,
+            "Sdl3OpenGl3Backend::set_gamepad_mode()",
+            || set_gamepad_mode(mode),
+        );
     }
 
     /// Configure SDL3 backend to use manual gamepad selection for the captured context.
@@ -239,44 +256,42 @@ impl Sdl3OpenGl3Backend {
         imgui: &mut Context,
         gamepads: &[*mut sdl3_sys::gamepad::SDL_Gamepad],
     ) {
-        self.context
-            .assert_matches(imgui, "Sdl3OpenGl3Backend::set_gamepad_mode_manual()");
-        let _guard = self
-            .context
-            .bind("Sdl3OpenGl3Backend::set_gamepad_mode_manual()");
-        unsafe {
-            set_gamepad_mode_manual(gamepads);
-        }
+        with_matching_context(
+            &self.context,
+            imgui,
+            "Sdl3OpenGl3Backend::set_gamepad_mode_manual()",
+            || unsafe { set_gamepad_mode_manual(gamepads) },
+        );
     }
 
     /// Create OpenGL3 renderer device objects.
     pub fn create_device_objects(&mut self, imgui: &mut Context) -> bool {
-        self.context
-            .assert_matches(imgui, "Sdl3OpenGl3Backend::create_device_objects()");
-        let _guard = self
-            .context
-            .bind("Sdl3OpenGl3Backend::create_device_objects()");
-        create_device_objects()
+        with_matching_context(
+            &self.context,
+            imgui,
+            "Sdl3OpenGl3Backend::create_device_objects()",
+            create_device_objects,
+        )
     }
 
     /// Destroy OpenGL3 renderer device objects.
     pub fn destroy_device_objects(&mut self, imgui: &mut Context) {
-        self.context
-            .assert_matches(imgui, "Sdl3OpenGl3Backend::destroy_device_objects()");
-        let _guard = self
-            .context
-            .bind("Sdl3OpenGl3Backend::destroy_device_objects()");
-        destroy_device_objects();
+        with_matching_context(
+            &self.context,
+            imgui,
+            "Sdl3OpenGl3Backend::destroy_device_objects()",
+            destroy_device_objects,
+        );
     }
 
     /// Shut down the official OpenGL3 renderer and SDL3 platform backend.
     pub fn shutdown(mut self, imgui: &mut Context) {
-        self.context
-            .assert_matches(imgui, "Sdl3OpenGl3Backend::shutdown()");
-        {
-            let _guard = self.context.bind("Sdl3OpenGl3Backend::shutdown()");
-            shutdown_opengl3_impl();
-        }
+        with_matching_context(
+            &self.context,
+            imgui,
+            "Sdl3OpenGl3Backend::shutdown()",
+            shutdown_opengl3_impl,
+        );
         self.shutdown_on_drop = false;
     }
 }
@@ -285,9 +300,7 @@ impl Sdl3OpenGl3Backend {
 impl Drop for Sdl3OpenGl3Backend {
     fn drop(&mut self) {
         if self.shutdown_on_drop {
-            if let Some(_guard) = self.context.bind_for_drop() {
-                shutdown_opengl3_impl();
-            }
+            let _ = try_with_context(&self.context, shutdown_opengl3_impl);
         }
     }
 }
@@ -304,7 +317,7 @@ pub struct SdlGpu3RendererBackend {
 impl SdlGpu3RendererBackend {
     fn from_initialized_context(imgui: &Context) -> Self {
         Self {
-            context: ContextBinding::capture(imgui),
+            context: imgui.binding(),
             shutdown_on_drop: true,
         }
     }
@@ -331,28 +344,34 @@ impl SdlGpu3RendererBackend {
 
     /// Process a single low-level SDL3 event with the captured ImGui context.
     pub fn process_event(&mut self, imgui: &mut Context, event: &SDL_Event) -> bool {
-        self.context
-            .assert_matches(imgui, "SdlGpu3RendererBackend::process_event()");
-        let _guard = self.context.bind("SdlGpu3RendererBackend::process_event()");
-        process_sys_event(event)
+        with_matching_context(
+            &self.context,
+            imgui,
+            "SdlGpu3RendererBackend::process_event()",
+            || process_sys_event(event),
+        )
     }
 
     /// Begin a new SDL3 + SDLGPU3 frame.
     pub fn new_frame(&mut self, imgui: &mut Context) {
-        self.context
-            .assert_matches(imgui, "SdlGpu3RendererBackend::new_frame()");
-        let _guard = self.context.bind("SdlGpu3RendererBackend::new_frame()");
-        new_frame_sdlgpu3_impl();
+        with_matching_context(
+            &self.context,
+            imgui,
+            "SdlGpu3RendererBackend::new_frame()",
+            new_frame_sdlgpu3_impl,
+        );
     }
 
     /// Render Dear ImGui draw data using the official SDLGPU3 renderer.
     pub fn prepare_render(&mut self, draw_data: &mut DrawData, command_buffer: &mut CommandBuffer) {
-        let _guard = self
-            .context
-            .bind("SdlGpu3RendererBackend::prepare_render()");
-        self.context
-            .assert_current_draw_data(draw_data, "SdlGpu3RendererBackend::prepare_render()");
-        prepare_render_sdlgpu3_impl(draw_data, command_buffer);
+        with_captured_context(
+            &self.context,
+            "SdlGpu3RendererBackend::prepare_render()",
+            || {
+                assert_current_draw_data(draw_data, "SdlGpu3RendererBackend::prepare_render()");
+                prepare_render_sdlgpu3_impl(draw_data, command_buffer);
+            },
+        );
     }
 
     /// Render Dear ImGui draw data using the official SDLGPU3 renderer.
@@ -362,40 +381,40 @@ impl SdlGpu3RendererBackend {
         command_buffer: &CommandBuffer,
         render_pass: &mut RenderPass,
     ) {
-        let _guard = self.context.bind("SdlGpu3RendererBackend::render()");
-        self.context
-            .assert_current_draw_data(draw_data, "SdlGpu3RendererBackend::render()");
-        render_sdlgpu3_impl(draw_data, command_buffer, render_pass);
+        with_captured_context(&self.context, "SdlGpu3RendererBackend::render()", || {
+            assert_current_draw_data(draw_data, "SdlGpu3RendererBackend::render()");
+            render_sdlgpu3_impl(draw_data, command_buffer, render_pass);
+        });
     }
 
     /// Update a single ImGui texture using the official SDLGPU3 renderer.
     pub fn update_texture(&mut self, imgui: &mut Context, tex: &mut TextureData) {
-        self.context
-            .assert_matches(imgui, "SdlGpu3RendererBackend::update_texture()");
-        let _guard = self
-            .context
-            .bind("SdlGpu3RendererBackend::update_texture()");
-        update_gpu3_texture(tex);
+        with_matching_context(
+            &self.context,
+            imgui,
+            "SdlGpu3RendererBackend::update_texture()",
+            || update_gpu3_texture(tex),
+        );
     }
 
     /// Create SDL GPU3 renderer device objects.
     pub fn create_device_objects(&mut self, imgui: &mut Context) {
-        self.context
-            .assert_matches(imgui, "SdlGpu3RendererBackend::create_device_objects()");
-        let _guard = self
-            .context
-            .bind("SdlGpu3RendererBackend::create_device_objects()");
-        create_gpu3_device_objects()
+        with_matching_context(
+            &self.context,
+            imgui,
+            "SdlGpu3RendererBackend::create_device_objects()",
+            create_gpu3_device_objects,
+        )
     }
 
     /// Destroy SDL GPU3 renderer device objects.
     pub fn destroy_device_objects(&mut self, imgui: &mut Context) {
-        self.context
-            .assert_matches(imgui, "SdlGpu3RendererBackend::destroy_device_objects()");
-        let _guard = self
-            .context
-            .bind("SdlGpu3RendererBackend::destroy_device_objects()");
-        destroy_gpu3_device_objects();
+        with_matching_context(
+            &self.context,
+            imgui,
+            "SdlGpu3RendererBackend::destroy_device_objects()",
+            destroy_gpu3_device_objects,
+        );
     }
 }
 
@@ -403,9 +422,7 @@ impl SdlGpu3RendererBackend {
 impl Drop for SdlGpu3RendererBackend {
     fn drop(&mut self) {
         if self.shutdown_on_drop {
-            if let Some(_guard) = self.context.bind_for_drop() {
-                shutdown_sdlgpu3_impl();
-            }
+            let _ = try_with_context(&self.context, shutdown_sdlgpu3_impl);
         }
     }
 }
@@ -423,7 +440,7 @@ pub struct Sdl3RendererBackend {
 impl Sdl3RendererBackend {
     fn from_initialized_context(imgui: &Context) -> Self {
         Self {
-            context: ContextBinding::capture(imgui),
+            context: imgui.binding(),
             shutdown_on_drop: true,
         }
     }
@@ -440,42 +457,50 @@ impl Sdl3RendererBackend {
 
     /// Begin a new SDL3 + SDLRenderer3 frame.
     pub fn new_frame(&mut self, imgui: &mut Context) {
-        self.context
-            .assert_matches(imgui, "Sdl3RendererBackend::new_frame()");
-        let _guard = self.context.bind("Sdl3RendererBackend::new_frame()");
-        new_frame_sdlrenderer3_impl();
+        with_matching_context(
+            &self.context,
+            imgui,
+            "Sdl3RendererBackend::new_frame()",
+            new_frame_sdlrenderer3_impl,
+        );
     }
 
     /// Process a single low-level SDL3 event with the captured ImGui context.
     pub fn process_event(&mut self, imgui: &mut Context, event: &SDL_Event) -> bool {
-        self.context
-            .assert_matches(imgui, "Sdl3RendererBackend::process_event()");
-        let _guard = self.context.bind("Sdl3RendererBackend::process_event()");
-        process_sys_event(event)
+        with_matching_context(
+            &self.context,
+            imgui,
+            "Sdl3RendererBackend::process_event()",
+            || process_sys_event(event),
+        )
     }
 
     /// Render Dear ImGui draw data using the official SDLRenderer3 renderer.
     pub fn render(&mut self, draw_data: &mut DrawData, canvas: &WindowCanvas) {
-        let _guard = self.context.bind("Sdl3RendererBackend::render()");
-        self.context
-            .assert_current_draw_data(draw_data, "Sdl3RendererBackend::render()");
-        render_sdlrenderer3_impl(draw_data, canvas);
+        with_captured_context(&self.context, "Sdl3RendererBackend::render()", || {
+            assert_current_draw_data(draw_data, "Sdl3RendererBackend::render()");
+            render_sdlrenderer3_impl(draw_data, canvas);
+        });
     }
 
     /// Update a single ImGui texture using the official SDLRenderer3 renderer.
     pub fn update_texture(&mut self, imgui: &mut Context, tex: &mut TextureData) {
-        self.context
-            .assert_matches(imgui, "Sdl3RendererBackend::update_texture()");
-        let _guard = self.context.bind("Sdl3RendererBackend::update_texture()");
-        canvas_update_texture(tex);
+        with_matching_context(
+            &self.context,
+            imgui,
+            "Sdl3RendererBackend::update_texture()",
+            || canvas_update_texture(tex),
+        );
     }
 
     /// Configure how the SDL3 backend handles gamepads for the captured context.
     pub fn set_gamepad_mode(&mut self, imgui: &mut Context, mode: GamepadMode) {
-        self.context
-            .assert_matches(imgui, "Sdl3RendererBackend::set_gamepad_mode()");
-        let _guard = self.context.bind("Sdl3RendererBackend::set_gamepad_mode()");
-        set_gamepad_mode(mode);
+        with_matching_context(
+            &self.context,
+            imgui,
+            "Sdl3RendererBackend::set_gamepad_mode()",
+            || set_gamepad_mode(mode),
+        );
     }
 
     /// Configure SDL3 backend to use manual gamepad selection for the captured context.
@@ -490,44 +515,42 @@ impl Sdl3RendererBackend {
         imgui: &mut Context,
         gamepads: &[*mut sdl3_sys::gamepad::SDL_Gamepad],
     ) {
-        self.context
-            .assert_matches(imgui, "Sdl3RendererBackend::set_gamepad_mode_manual()");
-        let _guard = self
-            .context
-            .bind("Sdl3RendererBackend::set_gamepad_mode_manual()");
-        unsafe {
-            set_gamepad_mode_manual(gamepads);
-        }
+        with_matching_context(
+            &self.context,
+            imgui,
+            "Sdl3RendererBackend::set_gamepad_mode_manual()",
+            || unsafe { set_gamepad_mode_manual(gamepads) },
+        );
     }
 
     /// Create SDLRenderer3 renderer device objects.
     pub fn create_device_objects(&mut self, imgui: &mut Context) {
-        self.context
-            .assert_matches(imgui, "Sdl3RendererBackend::create_device_objects()");
-        let _guard = self
-            .context
-            .bind("Sdl3RendererBackend::create_device_objects()");
-        canvas_create_device_objects();
+        with_matching_context(
+            &self.context,
+            imgui,
+            "Sdl3RendererBackend::create_device_objects()",
+            canvas_create_device_objects,
+        );
     }
 
     /// Destroy SDLRenderer3 renderer device objects.
     pub fn destroy_device_objects(&mut self, imgui: &mut Context) {
-        self.context
-            .assert_matches(imgui, "Sdl3RendererBackend::destroy_device_objects()");
-        let _guard = self
-            .context
-            .bind("Sdl3RendererBackend::destroy_device_objects()");
-        canvas_destroy_device_objects();
+        with_matching_context(
+            &self.context,
+            imgui,
+            "Sdl3RendererBackend::destroy_device_objects()",
+            canvas_destroy_device_objects,
+        );
     }
 
     /// Shut down the official SDLRenderer3 renderer and SDL3 platform backend.
     pub fn shutdown(mut self, imgui: &mut Context) {
-        self.context
-            .assert_matches(imgui, "Sdl3RendererBackend::shutdown()");
-        {
-            let _guard = self.context.bind("Sdl3RendererBackend::shutdown()");
-            shutdown_sdlrenderer3_impl();
-        }
+        with_matching_context(
+            &self.context,
+            imgui,
+            "Sdl3RendererBackend::shutdown()",
+            shutdown_sdlrenderer3_impl,
+        );
         self.shutdown_on_drop = false;
     }
 }
@@ -536,9 +559,7 @@ impl Sdl3RendererBackend {
 impl Drop for Sdl3RendererBackend {
     fn drop(&mut self) {
         if self.shutdown_on_drop {
-            if let Some(_guard) = self.context.bind_for_drop() {
-                shutdown_sdlrenderer3_impl();
-            }
+            let _ = try_with_context(&self.context, shutdown_sdlrenderer3_impl);
         }
     }
 }

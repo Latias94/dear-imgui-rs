@@ -11,10 +11,9 @@ pub(super) fn install_platform_callbacks(ctx: &mut Context) {
         dear_imgui_rs::sys::HAS_PLATFORM_IO_AGGREGATE_HOOKS,
         "dear-imgui-winit multi-viewport requires PlatformIO aggregate ABI hooks"
     );
-    let _context_guard = unsafe { CurrentContextGuard::bind(ctx.as_raw()) };
-
-    // Set up platform callbacks using direct C API
-    unsafe {
+    let binding = ctx.binding();
+    binding.with_bound_context(|| unsafe {
+        // Set up platform callbacks using direct C API
         let pio = ctx.platform_io_mut();
         let pio_sys = pio.as_raw_mut();
 
@@ -82,7 +81,7 @@ pub(super) fn install_platform_callbacks(ctx: &mut Context) {
             (*pio_sys).Platform_GetWindowWorkAreaInsets
         );
         chk!("CreateVkSurface", (*pio_sys).Platform_CreateVkSurface);
-    }
+    });
 }
 
 /// Set up monitors list for multi-viewport support using a reference window
@@ -146,7 +145,7 @@ pub(super) fn setup_monitors_with_window(window: &Window, ctx: &mut Context) {
 
 /// Create a new viewport window
 pub(super) unsafe extern "C" fn winit_create_window(vp: *mut dear_imgui_rs::sys::ImGuiViewport) {
-    abort_on_panic("Platform_CreateWindow", || {
+    abort_on_panic("Platform_CreateWindow", (), |context| {
         if vp.is_null() {
             return;
         }
@@ -170,7 +169,7 @@ pub(super) unsafe extern "C" fn winit_create_window(vp: *mut dear_imgui_rs::sys:
 
         // Create ViewportData
         let vd = Box::into_raw(Box::new(ViewportData::new()));
-        register_viewport_data(vd);
+        register_viewport_data(context, vd);
         vp_ref.PlatformUserData = vd as *mut c_void;
 
         // Handle viewport flags
@@ -265,7 +264,7 @@ pub(super) unsafe extern "C" fn winit_create_window(vp: *mut dear_imgui_rs::sys:
 
 /// Destroy a viewport window
 pub(super) unsafe extern "C" fn winit_destroy_window(vp: *mut dear_imgui_rs::sys::ImGuiViewport) {
-    abort_on_panic("Platform_DestroyWindow", || {
+    abort_on_panic("Platform_DestroyWindow", (), |_| {
         if vp.is_null() {
             return;
         }
@@ -299,7 +298,7 @@ pub(super) unsafe extern "C" fn winit_destroy_window(vp: *mut dear_imgui_rs::sys
 
 /// Show a viewport window
 pub(super) unsafe extern "C" fn winit_show_window(vp: *mut dear_imgui_rs::sys::ImGuiViewport) {
-    abort_on_panic("Platform_ShowWindow", || {
+    abort_on_panic("Platform_ShowWindow", (), |_| {
         if vp.is_null() {
             return;
         }
@@ -318,7 +317,7 @@ pub(super) unsafe extern "C" fn winit_get_window_pos_out(
     vp: *mut dear_imgui_rs::sys::ImGuiViewport,
     out_pos: *mut dear_imgui_rs::sys::ImVec2,
 ) {
-    abort_on_panic("winit_get_window_pos_out", || {
+    abort_on_panic("winit_get_window_pos_out", (), |_| {
         let mut r = dear_imgui_rs::sys::ImVec2 { x: 0.0, y: 0.0 };
         if !vp.is_null() {
             let vp_ref = &*vp;
@@ -371,7 +370,7 @@ pub(super) unsafe extern "C" fn winit_set_window_pos(
     vp: *mut dear_imgui_rs::sys::ImGuiViewport,
     pos: *const dear_imgui_rs::sys::ImVec2,
 ) {
-    abort_on_panic("winit_set_window_pos", || {
+    abort_on_panic("winit_set_window_pos", (), |_| {
         if vp.is_null() || pos.is_null() {
             return;
         }
@@ -402,7 +401,7 @@ pub(super) unsafe extern "C" fn winit_get_window_size_out(
     vp: *mut dear_imgui_rs::sys::ImGuiViewport,
     out_size: *mut dear_imgui_rs::sys::ImVec2,
 ) {
-    abort_on_panic("winit_get_window_size_out", || {
+    abort_on_panic("winit_get_window_size_out", (), |_| {
         let mut r = dear_imgui_rs::sys::ImVec2 { x: 0.0, y: 0.0 };
         if !vp.is_null() {
             let vp_ref = &*vp;
@@ -434,7 +433,7 @@ pub(super) unsafe extern "C" fn winit_set_window_size(
     vp: *mut dear_imgui_rs::sys::ImGuiViewport,
     size: *const dear_imgui_rs::sys::ImVec2,
 ) {
-    abort_on_panic("winit_set_window_size", || {
+    abort_on_panic("winit_set_window_size", (), |_| {
         if vp.is_null() || size.is_null() {
             return;
         }
@@ -456,7 +455,7 @@ pub(super) unsafe extern "C" fn winit_set_window_size(
 
 /// Set window focus
 pub(super) unsafe extern "C" fn winit_set_window_focus(vp: *mut dear_imgui_rs::sys::ImGuiViewport) {
-    abort_on_panic("winit_set_window_focus", || {
+    abort_on_panic("winit_set_window_focus", (), |_| {
         if vp.is_null() {
             return;
         }
@@ -474,7 +473,7 @@ pub(super) unsafe extern "C" fn winit_set_window_focus(vp: *mut dear_imgui_rs::s
 pub(super) unsafe extern "C" fn winit_get_window_focus(
     vp: *mut dear_imgui_rs::sys::ImGuiViewport,
 ) -> bool {
-    abort_on_panic("winit_get_window_focus", || {
+    abort_on_panic("winit_get_window_focus", false, |_| {
         if vp.is_null() {
             return false;
         }
@@ -494,7 +493,7 @@ pub(super) unsafe extern "C" fn winit_get_window_focus(
 pub(super) unsafe extern "C" fn winit_get_window_minimized(
     vp: *mut dear_imgui_rs::sys::ImGuiViewport,
 ) -> bool {
-    abort_on_panic("Platform_GetWindowMinimized", || {
+    abort_on_panic("Platform_GetWindowMinimized", false, |_| {
         if vp.is_null() {
             return false;
         }
@@ -515,7 +514,7 @@ pub(super) unsafe extern "C" fn winit_set_window_title(
     vp: *mut dear_imgui_rs::sys::ImGuiViewport,
     title: *const c_char,
 ) {
-    abort_on_panic("Platform_SetWindowTitle", || {
+    abort_on_panic("Platform_SetWindowTitle", (), |_| {
         if vp.is_null() || title.is_null() {
             return;
         }
@@ -535,7 +534,7 @@ pub(super) unsafe extern "C" fn winit_get_window_framebuffer_scale_out(
     vp: *mut dear_imgui_rs::sys::ImGuiViewport,
     out_scale: *mut dear_imgui_rs::sys::ImVec2,
 ) {
-    abort_on_panic("Platform_GetWindowFramebufferScale", || {
+    abort_on_panic("Platform_GetWindowFramebufferScale", (), |_| {
         if out_scale.is_null() {
             return;
         }
@@ -575,7 +574,7 @@ pub(super) unsafe extern "C" fn winit_get_window_framebuffer_scale_out(
 pub(super) unsafe extern "C" fn winit_get_window_dpi_scale(
     vp: *mut dear_imgui_rs::sys::ImGuiViewport,
 ) -> f32 {
-    abort_on_panic("Platform_GetWindowDpiScale", || {
+    abort_on_panic("Platform_GetWindowDpiScale", 1.0, |_| {
         if vp.is_null() {
             return 1.0;
         }
@@ -597,7 +596,7 @@ pub(super) unsafe extern "C" fn winit_get_window_dpi_scale(
 pub(super) unsafe extern "C" fn winit_on_changed_viewport(
     vp: *mut dear_imgui_rs::sys::ImGuiViewport,
 ) {
-    abort_on_panic("Platform_OnChangedViewport", || {
+    abort_on_panic("Platform_OnChangedViewport", (), |_| {
         if vp.is_null() {
             return;
         }
@@ -621,7 +620,7 @@ pub(super) unsafe extern "C" fn winit_set_window_alpha(
     vp: *mut dear_imgui_rs::sys::ImGuiViewport,
     _alpha: f32,
 ) {
-    abort_on_panic("Platform_SetWindowAlpha", || {
+    abort_on_panic("Platform_SetWindowAlpha", (), |_| {
         if vp.is_null() {
             return;
         }
@@ -633,7 +632,7 @@ pub(super) unsafe extern "C" fn winit_platform_render_window(
     vp: *mut dear_imgui_rs::sys::ImGuiViewport,
     _render_arg: *mut c_void,
 ) {
-    abort_on_panic("Platform_RenderWindow", || {
+    abort_on_panic("Platform_RenderWindow", (), |_| {
         if vp.is_null() {
             return;
         }
@@ -645,7 +644,7 @@ pub(super) unsafe extern "C" fn winit_platform_swap_buffers(
     vp: *mut dear_imgui_rs::sys::ImGuiViewport,
     _render_arg: *mut c_void,
 ) {
-    abort_on_panic("Platform_SwapBuffers", || {
+    abort_on_panic("Platform_SwapBuffers", (), |_| {
         if vp.is_null() {
             return;
         }
@@ -654,7 +653,7 @@ pub(super) unsafe extern "C" fn winit_platform_swap_buffers(
 
 /// Update window - called by ImGui for platform-specific updates
 pub(super) unsafe extern "C" fn winit_update_window(vp: *mut dear_imgui_rs::sys::ImGuiViewport) {
-    abort_on_panic("Platform_UpdateWindow", || {
+    abort_on_panic("Platform_UpdateWindow", (), |_| {
         if vp.is_null() {
             return;
         }

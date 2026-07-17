@@ -5,8 +5,8 @@ use super::callbacks::{
     shutdown_multi_viewport_support, unary_callback_matches, validate_secondary_viewports,
 };
 use super::registry::{
-    CurrentContextGuard, borrow_renderer, has_renderer_state, insert_renderer_state,
-    register_viewport_data, unregister_viewport_data, validate_new_registration,
+    borrow_renderer, has_renderer_state, insert_renderer_state, register_viewport_data,
+    registered_renderer_for_context, unregister_viewport_data, validate_new_registration,
     viewport_data_pointer,
 };
 use super::surface::{
@@ -65,22 +65,24 @@ unsafe fn install_test_renderer(
     context: &mut Context,
 ) -> Result<(), CallbackOwnershipError> {
     let raw_context = context.as_raw();
-    let _guard = unsafe { CurrentContextGuard::bind(raw_context) };
-    validate_new_registration(raw_context, renderer)?;
-    claim_callbacks(
-        context.platform_io_mut(),
-        dear_imgui_rs::sys::HAS_PLATFORM_IO_AGGREGATE_HOOKS,
-    )?;
-    if renderer.context_binding.is_none() {
+    let binding = context.binding();
+    binding.with_bound_context(|| {
+        validate_new_registration(raw_context, renderer)?;
+        claim_callbacks(
+            context.platform_io_mut(),
+            dear_imgui_rs::sys::HAS_PLATFORM_IO_AGGREGATE_HOOKS,
+        )?;
+        if renderer.context_binding.is_none() {
+            renderer
+                .bind_context(context, BackendFlags::empty())
+                .expect("test renderer should bind to its registration context");
+        }
+        insert_renderer_state(context, renderer, None);
         renderer
-            .bind_context(context, BackendFlags::empty())
-            .expect("test renderer should bind to its registration context");
-    }
-    insert_renderer_state(raw_context, renderer, None);
-    renderer
-        .multi_viewport_active
-        .store(true, Ordering::Release);
-    Ok(())
+            .multi_viewport_active
+            .store(true, Ordering::Release);
+        Ok(())
+    })
 }
 
 unsafe extern "C" fn unary_sentinel(_viewport: *mut dear_imgui_rs::sys::ImGuiViewport) {}
@@ -224,6 +226,20 @@ fn aggregate_hook_failure_does_not_install_partial_callbacks() {
 }
 
 #[test]
+fn dead_context_renderer_state_is_not_visible_by_raw_address() {
+    let _lock = lock_context();
+    let context = Context::create();
+    let raw = context.as_raw();
+    let mut renderer = Box::new(WgpuRenderer::empty());
+    insert_renderer_state(&context, &mut *renderer, None);
+
+    drop(context);
+
+    assert!(!has_renderer_state(raw));
+    assert!(registered_renderer_for_context(raw).is_none());
+}
+
+#[test]
 fn foreign_renderer_user_data_preflight_is_transactional() {
     let _lock = lock_context();
     let context = Context::create();
@@ -321,7 +337,7 @@ fn shutdown_rejects_callback_drift_before_mutating_runtime_state() {
     let mut renderer = Box::new(WgpuRenderer::empty());
     unsafe { install_test_renderer(&mut renderer, &mut context) }.unwrap();
     let pointer = NonNull::<ViewportWgpuData>::dangling().as_ptr();
-    register_viewport_data(raw, pointer);
+    register_viewport_data(&context.binding(), pointer);
     let mut raw_viewport = dear_imgui_rs::sys::ImGuiViewport {
         RendererUserData: pointer.cast(),
         ..Default::default()
@@ -425,12 +441,11 @@ fn renderer_rebind_is_rejected_while_callback_is_active() {
 fn renderer_rebind_is_rejected_with_live_viewport_data() {
     let _lock = lock_context();
     let mut context = Context::create();
-    let raw = context.as_raw();
     let mut first_renderer = Box::new(WgpuRenderer::empty());
     let mut next_renderer = Box::new(WgpuRenderer::empty());
     unsafe { install_test_renderer(&mut first_renderer, &mut context) }.unwrap();
     let pointer = NonNull::<ViewportWgpuData>::dangling().as_ptr();
-    register_viewport_data(raw, pointer);
+    register_viewport_data(&context.binding(), pointer);
 
     assert_eq!(
         unsafe { install_test_renderer(&mut next_renderer, &mut context) },
@@ -487,7 +502,7 @@ fn viewport_user_data_is_bound_to_its_owner_context() {
     let context_b = Context::create();
     let raw_b = context_b.as_raw();
     let pointer = NonNull::<ViewportWgpuData>::dangling().as_ptr();
-    register_viewport_data(raw_a, pointer);
+    register_viewport_data(&context_a.binding(), pointer);
     let mut raw_viewport = dear_imgui_rs::sys::ImGuiViewport {
         RendererUserData: pointer.cast(),
         ..Default::default()

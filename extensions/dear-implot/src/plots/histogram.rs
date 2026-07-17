@@ -124,22 +124,23 @@ impl<'a> Plot for HistogramPlot<'a> {
             sys::ImPlotRange { Min: 0.0, Max: 0.0 }
         };
 
-        let _guard = plot_ui.bind();
-        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_with_style(
-                self.style,
-                self.flags.bits() | self.item_flags.bits(),
-                PlotDataLayout::DEFAULT,
-            );
-            sys::ImPlot_PlotHistogram_doublePtr(
-                label_ptr,
-                self.values.as_ptr(),
-                count,
-                self.bins.raw("HistogramPlot::plot()"),
-                self.bar_scale,
-                range,
-                spec,
-            );
+        plot_ui.with_bound_context(|| {
+            with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+                let spec = plot_spec_with_style(
+                    self.style,
+                    self.flags.bits() | self.item_flags.bits(),
+                    PlotDataLayout::DEFAULT,
+                );
+                sys::ImPlot_PlotHistogram_doublePtr(
+                    label_ptr,
+                    self.values.as_ptr(),
+                    count,
+                    self.bins.raw("HistogramPlot::plot()"),
+                    self.bar_scale,
+                    range,
+                    spec,
+                );
+            })
         })
     }
 
@@ -269,23 +270,24 @@ impl<'a> Plot for Histogram2DPlot<'a> {
             }
         };
 
-        let _guard = plot_ui.bind();
-        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_with_style(
-                self.style,
-                self.flags.bits() | self.item_flags.bits(),
-                PlotDataLayout::DEFAULT,
-            );
-            sys::ImPlot_PlotHistogram2D_doublePtr(
-                label_ptr,
-                self.x_values.as_ptr(),
-                self.y_values.as_ptr(),
-                count,
-                self.x_bins.raw("Histogram2DPlot::plot()"),
-                self.y_bins.raw("Histogram2DPlot::plot()"),
-                range,
-                spec,
-            );
+        plot_ui.with_bound_context(|| {
+            with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+                let spec = plot_spec_with_style(
+                    self.style,
+                    self.flags.bits() | self.item_flags.bits(),
+                    PlotDataLayout::DEFAULT,
+                );
+                sys::ImPlot_PlotHistogram2D_doublePtr(
+                    label_ptr,
+                    self.x_values.as_ptr(),
+                    self.y_values.as_ptr(),
+                    count,
+                    self.x_bins.raw("Histogram2DPlot::plot()"),
+                    self.y_bins.raw("Histogram2DPlot::plot()"),
+                    range,
+                    spec,
+                );
+            })
         })
     }
 

@@ -126,13 +126,12 @@ impl<'ui, T: Mat4Like> Manipulate<'ui, T> {
 
     /// Executes the manipulation and returns whether it was used this frame.
     pub fn build(self) -> bool {
-        self.giz.bind();
         let mut model_arr = self.model.to_cols_array();
         let mut delta_arr = match &self.delta_out {
             Some(dm) => dm.to_cols_array(),
             None => T::identity().to_cols_array(),
         };
-        let used = unsafe {
+        let used = self.giz.with_bound_context(|| unsafe {
             sys::ImGuizmo_Manipulate(
                 self.view.to_cols_array().as_ptr(),
                 self.projection.to_cols_array().as_ptr(),
@@ -153,7 +152,7 @@ impl<'ui, T: Mat4Like> Manipulate<'ui, T> {
                     .map(|b| b.as_ptr())
                     .unwrap_or(std::ptr::null()),
             )
-        };
+        });
         self.model.set_from_cols_array(model_arr);
         if let Some(dm) = self.delta_out {
             dm.set_from_cols_array(delta_arr);

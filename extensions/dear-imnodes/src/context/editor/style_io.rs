@@ -5,26 +5,28 @@ use dear_imgui_rs::sys as imgui_sys;
 
 impl<'ui> NodeEditor<'ui> {
     fn with_style<R>(&self, f: impl FnOnce(&mut sys::ImNodesStyle) -> R) -> R {
-        let _guard = self.bind();
-        let style = unsafe { sys::imnodes_GetStyle() };
-        assert!(
-            !style.is_null(),
-            "dear-imnodes: imnodes_GetStyle returned null"
-        );
-        unsafe { f(&mut *style) }
+        self.with_bound_context(|| {
+            let style = unsafe { sys::imnodes_GetStyle() };
+            assert!(
+                !style.is_null(),
+                "dear-imnodes: imnodes_GetStyle returned null"
+            );
+            unsafe { f(&mut *style) }
+        })
     }
 
     fn with_io<R>(&self, f: impl FnOnce(&mut sys::ImNodesIO) -> R) -> R {
-        let _guard = self.bind();
-        let io = unsafe { sys::imnodes_GetIO() };
-        assert!(!io.is_null(), "dear-imnodes: imnodes_GetIO returned null");
-        unsafe { f(&mut *io) }
+        self.with_bound_context(|| {
+            let io = unsafe { sys::imnodes_GetIO() };
+            assert!(!io.is_null(), "dear-imnodes: imnodes_GetIO returned null");
+            unsafe { f(&mut *io) }
+        })
     }
 
     /// Toggle style flags (GridLines, GridLinesPrimary, GridSnapping, NodeOutline)
     pub fn set_style_flag(&self, flag: crate::StyleFlags, enabled: bool) {
         self.with_style(|style| {
-            let mut f = style.Flags as i32;
+            let mut f = style.Flags;
             let bit = flag.bits();
             if enabled {
                 f |= bit;
@@ -113,8 +115,7 @@ impl<'ui> NodeEditor<'ui> {
 
     /// Node positions in grid space
     pub fn set_node_pos_grid(&self, node_id: crate::NodeId, pos: [f32; 2]) {
-        let _guard = self.bind();
-        unsafe {
+        self.with_bound_context(|| unsafe {
             sys::imnodes_SetNodeGridSpacePos(
                 node_id.raw(),
                 sys::ImVec2_c {
@@ -122,12 +123,12 @@ impl<'ui> NodeEditor<'ui> {
                     y: pos[1],
                 },
             )
-        }
+        });
     }
 
     pub fn get_node_pos_grid(&self, node_id: crate::NodeId) -> [f32; 2] {
-        let _guard = self.bind();
-        let out = unsafe { sys::imnodes_GetNodeGridSpacePos(node_id.raw()) };
+        let out =
+            self.with_bound_context(|| unsafe { sys::imnodes_GetNodeGridSpacePos(node_id.raw()) });
         [out.x, out.y]
     }
 
@@ -194,28 +195,19 @@ impl<'ui> NodeEditor<'ui> {
     }
 
     pub fn set_color(&self, elem: crate::style::ColorElement, color: [f32; 4]) {
-        let abgr = unsafe {
-            imgui_sys::igColorConvertFloat4ToU32(imgui_sys::ImVec4 {
-                x: color[0],
-                y: color[1],
-                z: color[2],
-                w: color[3],
-            })
-        };
+        let abgr = crate::style::rgba_to_abgr_u32(color);
         self.with_style(|style| style.Colors[elem as u32 as usize] = abgr);
     }
 
     /// Get a style color as RGBA floats [0,1]
     pub fn get_color(&self, elem: crate::style::ColorElement) -> [f32; 4] {
         let col = self.with_style(|style| style.Colors[elem as u32 as usize]);
-        let out = unsafe { imgui_sys::igColorConvertU32ToFloat4(col) };
-        [out.x, out.y, out.z, out.w]
+        crate::style::abgr_u32_to_rgba(col)
     }
 
     /// Node positions in screen/editor space
     pub fn set_node_pos_screen(&self, node_id: crate::NodeId, pos: [f32; 2]) {
-        let _guard = self.bind();
-        unsafe {
+        self.with_bound_context(|| unsafe {
             sys::imnodes_SetNodeScreenSpacePos(
                 node_id.raw(),
                 sys::ImVec2_c {
@@ -223,11 +215,10 @@ impl<'ui> NodeEditor<'ui> {
                     y: pos[1],
                 },
             )
-        }
+        });
     }
     pub fn set_node_pos_editor(&self, node_id: crate::NodeId, pos: [f32; 2]) {
-        let _guard = self.bind();
-        unsafe {
+        self.with_bound_context(|| unsafe {
             sys::imnodes_SetNodeEditorSpacePos(
                 node_id.raw(),
                 sys::ImVec2_c {
@@ -235,31 +226,34 @@ impl<'ui> NodeEditor<'ui> {
                     y: pos[1],
                 },
             )
-        }
+        });
     }
     pub fn get_node_pos_screen(&self, node_id: crate::NodeId) -> [f32; 2] {
-        let _guard = self.bind();
-        let out = unsafe { crate::compat_ffi::imnodes_GetNodeScreenSpacePos(node_id.raw()) };
+        let out = self.with_bound_context(|| unsafe {
+            crate::compat_ffi::imnodes_GetNodeScreenSpacePos(node_id.raw())
+        });
         [out.x, out.y]
     }
     pub fn get_node_pos_editor(&self, node_id: crate::NodeId) -> [f32; 2] {
-        let _guard = self.bind();
-        let out = unsafe { crate::compat_ffi::imnodes_GetNodeEditorSpacePos(node_id.raw()) };
+        let out = self.with_bound_context(|| unsafe {
+            crate::compat_ffi::imnodes_GetNodeEditorSpacePos(node_id.raw())
+        });
         [out.x, out.y]
     }
 
     /// Node drag/size helpers
     pub fn set_node_draggable(&self, node_id: crate::NodeId, draggable: bool) {
-        let _guard = self.bind();
-        unsafe { sys::imnodes_SetNodeDraggable(node_id.raw(), draggable) }
+        self.with_bound_context(|| unsafe {
+            sys::imnodes_SetNodeDraggable(node_id.raw(), draggable)
+        })
     }
     pub fn snap_node_to_grid(&self, node_id: crate::NodeId) {
-        let _guard = self.bind();
-        unsafe { sys::imnodes_SnapNodeToGrid(node_id.raw()) }
+        self.with_bound_context(|| unsafe { sys::imnodes_SnapNodeToGrid(node_id.raw()) })
     }
     pub fn get_node_dimensions(&self, node_id: crate::NodeId) -> [f32; 2] {
-        let _guard = self.bind();
-        let out = unsafe { crate::compat_ffi::imnodes_GetNodeDimensions(node_id.raw()) };
+        let out = self.with_bound_context(|| unsafe {
+            crate::compat_ffi::imnodes_GetNodeDimensions(node_id.raw())
+        });
         [out.x, out.y]
     }
 }

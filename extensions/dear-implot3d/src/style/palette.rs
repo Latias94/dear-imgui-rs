@@ -8,10 +8,8 @@ use std::marker::PhantomData;
 
 impl Plot3DContext {
     #[inline]
-    fn with_bound_palette<R>(&self, caller: &str, f: impl FnOnce() -> R) -> R {
-        self.assert_imgui_alive(caller);
-        let _guard = self.binding().bind();
-        f()
+    fn with_bound_palette<R>(&self, _caller: &str, f: impl FnOnce() -> R) -> R {
+        self.binding().with_bound_context(|| f())
     }
 
     /// Apply ImPlot3D's dark style palette to this context.
@@ -59,20 +57,20 @@ impl<'ui> Plot3DUi<'ui> {
         element: Plot3DColorElement,
         col: [f32; 4],
     ) -> StyleColorToken<'_> {
-        let _guard = self.binding.bind();
-        unsafe {
-            sys::ImPlot3D_PushStyleColor_Vec4(
-                element as sys::ImPlot3DCol,
-                crate::imvec4(col[0], col[1], col[2], col[3]),
-            );
-        }
-        StyleColorToken {
-            binding: self.binding,
-            imgui_alive: self.imgui_alive.clone(),
-            was_popped: false,
-            _lifetime: PhantomData,
-            _not_send_or_sync: PhantomData,
-        }
+        self.binding.with_bound_context(|| {
+            unsafe {
+                sys::ImPlot3D_PushStyleColor_Vec4(
+                    element as sys::ImPlot3DCol,
+                    crate::imvec4(col[0], col[1], col[2], col[3]),
+                );
+            }
+            StyleColorToken {
+                binding: self.binding.clone(),
+                was_popped: false,
+                _lifetime: PhantomData,
+                _not_send_or_sync: PhantomData,
+            }
+        })
     }
 
     /// Push a typed style color override.
@@ -88,53 +86,53 @@ impl<'ui> Plot3DUi<'ui> {
     /// Push a style variable (float variant).
     #[inline]
     pub fn push_style_var_f32(&self, var: Plot3DStyleVar, val: f32) -> StyleVarToken<'_> {
-        let _guard = self.binding.bind();
-        unsafe { sys::ImPlot3D_PushStyleVar_Float(var as sys::ImPlot3DStyleVar, val) }
-        StyleVarToken {
-            binding: self.binding,
-            imgui_alive: self.imgui_alive.clone(),
-            was_popped: false,
-            _lifetime: PhantomData,
-            _not_send_or_sync: PhantomData,
-        }
+        self.binding.with_bound_context(|| {
+            unsafe { sys::ImPlot3D_PushStyleVar_Float(var as sys::ImPlot3DStyleVar, val) }
+            StyleVarToken {
+                binding: self.binding.clone(),
+                was_popped: false,
+                _lifetime: PhantomData,
+                _not_send_or_sync: PhantomData,
+            }
+        })
     }
 
     /// Push the default marker style variable.
     #[inline]
     pub fn push_style_var_marker(&self, marker: Marker3D) -> StyleVarToken<'_> {
-        let _guard = self.binding.bind();
-        unsafe {
-            sys::ImPlot3D_PushStyleVar_Int(
-                Plot3DStyleVar::Marker as sys::ImPlot3DStyleVar,
-                marker as sys::ImPlot3DMarker,
-            )
-        }
-        StyleVarToken {
-            binding: self.binding,
-            imgui_alive: self.imgui_alive.clone(),
-            was_popped: false,
-            _lifetime: PhantomData,
-            _not_send_or_sync: PhantomData,
-        }
+        self.binding.with_bound_context(|| {
+            unsafe {
+                sys::ImPlot3D_PushStyleVar_Int(
+                    Plot3DStyleVar::Marker as sys::ImPlot3DStyleVar,
+                    marker as sys::ImPlot3DMarker,
+                )
+            }
+            StyleVarToken {
+                binding: self.binding.clone(),
+                was_popped: false,
+                _lifetime: PhantomData,
+                _not_send_or_sync: PhantomData,
+            }
+        })
     }
 
     /// Push a style variable (Vec2 variant).
     #[inline]
     pub fn push_style_var_vec2(&self, var: Plot3DStyleVar, val: [f32; 2]) -> StyleVarToken<'_> {
-        let _guard = self.binding.bind();
-        unsafe {
-            sys::ImPlot3D_PushStyleVar_Vec2(
-                var as sys::ImPlot3DStyleVar,
-                crate::imvec2(val[0], val[1]),
-            )
-        }
-        StyleVarToken {
-            binding: self.binding,
-            imgui_alive: self.imgui_alive.clone(),
-            was_popped: false,
-            _lifetime: PhantomData,
-            _not_send_or_sync: PhantomData,
-        }
+        self.binding.with_bound_context(|| {
+            unsafe {
+                sys::ImPlot3D_PushStyleVar_Vec2(
+                    var as sys::ImPlot3DStyleVar,
+                    crate::imvec2(val[0], val[1]),
+                )
+            }
+            StyleVarToken {
+                binding: self.binding.clone(),
+                was_popped: false,
+                _lifetime: PhantomData,
+                _not_send_or_sync: PhantomData,
+            }
+        })
     }
 }
 
@@ -142,20 +140,22 @@ impl Plot3DUi<'_> {
     /// Set the line style for the next ImPlot3D item submitted through this context.
     #[inline]
     pub fn set_next_line_style(&self, col: [f32; 4], weight: f32) {
-        let _guard = self.bind();
-        crate::update_next_plot3d_spec(|spec| {
-            spec.LineColor = crate::imvec4(col[0], col[1], col[2], col[3]);
-            spec.LineWeight = weight;
+        self.with_bound_context(|| {
+            crate::update_next_plot3d_spec(|spec| {
+                spec.LineColor = crate::imvec4(col[0], col[1], col[2], col[3]);
+                spec.LineWeight = weight;
+            })
         })
     }
 
     /// Set the fill style for the next ImPlot3D item submitted through this context.
     #[inline]
     pub fn set_next_fill_style(&self, col: [f32; 4], alpha_mod: f32) {
-        let _guard = self.bind();
-        crate::update_next_plot3d_spec(|spec| {
-            spec.FillColor = crate::imvec4(col[0], col[1], col[2], col[3]);
-            spec.FillAlpha = alpha_mod;
+        self.with_bound_context(|| {
+            crate::update_next_plot3d_spec(|spec| {
+                spec.FillColor = crate::imvec4(col[0], col[1], col[2], col[3]);
+                spec.FillAlpha = alpha_mod;
+            })
         })
     }
 
@@ -169,13 +169,15 @@ impl Plot3DUi<'_> {
         weight: f32,
         outline: [f32; 4],
     ) {
-        let _guard = self.bind();
-        crate::update_next_plot3d_spec(|spec| {
-            spec.Marker = marker as sys::ImPlot3DMarker;
-            spec.MarkerSize = size;
-            spec.MarkerFillColor = crate::imvec4(fill[0], fill[1], fill[2], fill[3]);
-            spec.MarkerLineColor = crate::imvec4(outline[0], outline[1], outline[2], outline[3]);
-            spec.LineWeight = weight;
+        self.with_bound_context(|| {
+            crate::update_next_plot3d_spec(|spec| {
+                spec.Marker = marker as sys::ImPlot3DMarker;
+                spec.MarkerSize = size;
+                spec.MarkerFillColor = crate::imvec4(fill[0], fill[1], fill[2], fill[3]);
+                spec.MarkerLineColor =
+                    crate::imvec4(outline[0], outline[1], outline[2], outline[3]);
+                spec.LineWeight = weight;
+            })
         })
     }
 }

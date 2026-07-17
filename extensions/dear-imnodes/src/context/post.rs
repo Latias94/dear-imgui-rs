@@ -29,117 +29,146 @@ pub struct PostEditor<'ui> {
 impl<'ui> NodeEditor<'ui> {
     /// Explicitly end the node editor and return post-editor query handle
     pub fn end(mut self) -> PostEditor<'ui> {
-        let _guard = self.bind();
-        if !self.ended {
-            unsafe { sys::imnodes_EndNodeEditor() };
-            self.ended = true;
-        }
+        let scope = self.scope.clone();
+        let (
+            editor_hovered,
+            hovered_node,
+            hovered_link,
+            hovered_pin,
+            link_created,
+            link_created_ex,
+            link_destroyed,
+            any_attribute_active,
+            link_started,
+            link_dropped_excluding_detached,
+            link_dropped_including_detached,
+        ) = scope.with_bound_context(|| {
+            if !self.ended {
+                unsafe { sys::imnodes_EndNodeEditor() };
+                self.ended = true;
+            }
 
-        // Capture hover state immediately after EndNodeEditor while the current ImGui window
-        // is still the editor host window. This avoids calling ImNodes hover queries later
-        // from a different window (e.g. a popup), which can lead to inconsistent behavior.
-        let editor_hovered = unsafe { sys::imnodes_IsEditorHovered() };
-        let mut hovered_node = 0i32;
-        let hovered_node = if unsafe { sys::imnodes_IsNodeHovered(&mut hovered_node) } {
-            Some(crate::NodeId::new(hovered_node))
-        } else {
-            None
-        };
-        let mut hovered_link = 0i32;
-        let hovered_link = if unsafe { sys::imnodes_IsLinkHovered(&mut hovered_link) } {
-            Some(crate::LinkId::new(hovered_link))
-        } else {
-            None
-        };
-        let mut hovered_pin = 0i32;
-        let hovered_pin = if unsafe { sys::imnodes_IsPinHovered(&mut hovered_pin) } {
-            Some(crate::PinId::new(hovered_pin))
-        } else {
-            None
-        };
-
-        // Capture post-editor interaction events immediately after EndNodeEditor for the same reason
-        // as hover state (avoid calling these queries from a different ImGui window later in the frame).
-        let link_created_ex = {
-            let mut start_node = 0i32;
-            let mut start_attr = 0i32;
-            let mut end_node = 0i32;
-            let mut end_attr = 0i32;
-            let mut from_snap = false;
-            let created = unsafe {
-                sys::imnodes_IsLinkCreated_IntPtr(
-                    &mut start_node as *mut i32,
-                    &mut start_attr as *mut i32,
-                    &mut end_node as *mut i32,
-                    &mut end_attr as *mut i32,
-                    &mut from_snap as *mut bool,
-                )
+            // Capture hover state immediately after EndNodeEditor while the current ImGui window
+            // is still the editor host window. This avoids calling ImNodes hover queries later
+            // from a different window (e.g. a popup), which can lead to inconsistent behavior.
+            let editor_hovered = unsafe { sys::imnodes_IsEditorHovered() };
+            let mut hovered_node = 0i32;
+            let hovered_node = if unsafe { sys::imnodes_IsNodeHovered(&mut hovered_node) } {
+                Some(crate::NodeId::new(hovered_node))
+            } else {
+                None
             };
-            if created {
-                Some(crate::LinkCreatedEx {
-                    start_node: crate::NodeId::new(start_node),
-                    start_attr: crate::PinId::new(start_attr),
-                    end_node: crate::NodeId::new(end_node),
-                    end_attr: crate::PinId::new(end_attr),
-                    from_snap,
-                })
+            let mut hovered_link = 0i32;
+            let hovered_link = if unsafe { sys::imnodes_IsLinkHovered(&mut hovered_link) } {
+                Some(crate::LinkId::new(hovered_link))
             } else {
                 None
-            }
-        };
-        let link_created = link_created_ex.map(|ex| crate::LinkCreated {
-            start_attr: ex.start_attr,
-            end_attr: ex.end_attr,
-            from_snap: ex.from_snap,
+            };
+            let mut hovered_pin = 0i32;
+            let hovered_pin = if unsafe { sys::imnodes_IsPinHovered(&mut hovered_pin) } {
+                Some(crate::PinId::new(hovered_pin))
+            } else {
+                None
+            };
+
+            // Capture post-editor interaction events immediately after EndNodeEditor for the same reason
+            // as hover state (avoid calling these queries from a different ImGui window later in the frame).
+            let link_created_ex = {
+                let mut start_node = 0i32;
+                let mut start_attr = 0i32;
+                let mut end_node = 0i32;
+                let mut end_attr = 0i32;
+                let mut from_snap = false;
+                let created = unsafe {
+                    sys::imnodes_IsLinkCreated_IntPtr(
+                        &mut start_node as *mut i32,
+                        &mut start_attr as *mut i32,
+                        &mut end_node as *mut i32,
+                        &mut end_attr as *mut i32,
+                        &mut from_snap as *mut bool,
+                    )
+                };
+                if created {
+                    Some(crate::LinkCreatedEx {
+                        start_node: crate::NodeId::new(start_node),
+                        start_attr: crate::PinId::new(start_attr),
+                        end_node: crate::NodeId::new(end_node),
+                        end_attr: crate::PinId::new(end_attr),
+                        from_snap,
+                    })
+                } else {
+                    None
+                }
+            };
+            let link_created = link_created_ex.map(|ex| crate::LinkCreated {
+                start_attr: ex.start_attr,
+                end_attr: ex.end_attr,
+                from_snap: ex.from_snap,
+            });
+
+            let link_destroyed = {
+                let mut id = 0i32;
+                if unsafe { sys::imnodes_IsLinkDestroyed(&mut id as *mut i32) } {
+                    Some(crate::LinkId::new(id))
+                } else {
+                    None
+                }
+            };
+
+            let any_attribute_active = {
+                let mut id = 0i32;
+                if unsafe { sys::imnodes_IsAnyAttributeActive(&mut id) } {
+                    Some(crate::PinId::new(id))
+                } else {
+                    None
+                }
+            };
+
+            let link_started = {
+                let mut id = 0i32;
+                if unsafe { sys::imnodes_IsLinkStarted(&mut id) } {
+                    Some(crate::PinId::new(id))
+                } else {
+                    None
+                }
+            };
+
+            // Only call `IsLinkDropped` twice if the first query returned false, to avoid any
+            // potential "consume-on-true" behavior in upstream implementations.
+            let link_dropped_excluding_detached = {
+                let mut id = 0i32;
+                if unsafe { sys::imnodes_IsLinkDropped(&mut id, false) } {
+                    Some(crate::PinId::new(id))
+                } else {
+                    None
+                }
+            };
+            let link_dropped_including_detached = if let Some(id) = link_dropped_excluding_detached
+            {
+                Some(id)
+            } else {
+                let mut id = 0i32;
+                if unsafe { sys::imnodes_IsLinkDropped(&mut id, true) } {
+                    Some(crate::PinId::new(id))
+                } else {
+                    None
+                }
+            };
+
+            (
+                editor_hovered,
+                hovered_node,
+                hovered_link,
+                hovered_pin,
+                link_created,
+                link_created_ex,
+                link_destroyed,
+                any_attribute_active,
+                link_started,
+                link_dropped_excluding_detached,
+                link_dropped_including_detached,
+            )
         });
-
-        let link_destroyed = {
-            let mut id = 0i32;
-            if unsafe { sys::imnodes_IsLinkDestroyed(&mut id as *mut i32) } {
-                Some(crate::LinkId::new(id))
-            } else {
-                None
-            }
-        };
-
-        let any_attribute_active = {
-            let mut id = 0i32;
-            if unsafe { sys::imnodes_IsAnyAttributeActive(&mut id) } {
-                Some(crate::PinId::new(id))
-            } else {
-                None
-            }
-        };
-
-        let link_started = {
-            let mut id = 0i32;
-            if unsafe { sys::imnodes_IsLinkStarted(&mut id) } {
-                Some(crate::PinId::new(id))
-            } else {
-                None
-            }
-        };
-
-        // Only call `IsLinkDropped` twice if the first query returned false, to avoid any
-        // potential "consume-on-true" behavior in upstream implementations.
-        let link_dropped_excluding_detached = {
-            let mut id = 0i32;
-            if unsafe { sys::imnodes_IsLinkDropped(&mut id, false) } {
-                Some(crate::PinId::new(id))
-            } else {
-                None
-            }
-        };
-        let link_dropped_including_detached = if let Some(id) = link_dropped_excluding_detached {
-            Some(id)
-        } else {
-            let mut id = 0i32;
-            if unsafe { sys::imnodes_IsLinkDropped(&mut id, true) } {
-                Some(crate::PinId::new(id))
-            } else {
-                None
-            }
-        };
 
         PostEditor {
             _ui: self._ui,
@@ -163,8 +192,8 @@ impl<'ui> NodeEditor<'ui> {
 
 impl<'ui> PostEditor<'ui> {
     #[inline]
-    fn bind(&self) -> super::ImNodesScopeGuard {
-        self.scope.bind()
+    fn with_bound_context<R>(&self, f: impl FnOnce() -> R) -> R {
+        self.scope.with_bound_context(f)
     }
 
     /// Save current editor state to an INI string
@@ -173,8 +202,7 @@ impl<'ui> PostEditor<'ui> {
         // buffer and writes its size into `size`. The pointer remains valid
         // until the next save/load call on the same editor, which we do not
         // perform while this slice is alive.
-        unsafe {
-            let _guard = self.bind();
+        self.with_bound_context(|| unsafe {
             let mut size: usize = 0;
             let ptr = sys::imnodes_SaveCurrentEditorStateToIniString(&mut size as *mut usize);
             if ptr.is_null() || size == 0 {
@@ -185,7 +213,7 @@ impl<'ui> PostEditor<'ui> {
                 slice = &slice[..slice.len().saturating_sub(1)];
             }
             String::from_utf8_lossy(slice).into_owned()
-        }
+        })
     }
 
     /// Load editor state from an INI string
@@ -193,13 +221,12 @@ impl<'ui> PostEditor<'ui> {
         // Safety: ImNodes expects a pointer to a valid UTF-8 buffer and its
         // length; `data.as_ptr()` and `data.len()` satisfy this for the
         // duration of the call.
-        unsafe {
-            let _guard = self.bind();
+        self.with_bound_context(|| unsafe {
             sys::imnodes_LoadCurrentEditorStateFromIniString(
                 data.as_ptr() as *const c_char,
                 data.len(),
             );
-        }
+        });
     }
 
     /// Save/Load current editor state to/from INI file
@@ -210,9 +237,10 @@ impl<'ui> PostEditor<'ui> {
             file_name
         };
         // Safety: ImNodes reads a NUL-terminated string for the duration of the call.
-        let _guard = self.bind();
-        dear_imgui_rs::with_scratch_txt(file_name, |ptr| unsafe {
-            sys::imnodes_SaveCurrentEditorStateToIniFile(ptr)
+        self.with_bound_context(|| {
+            dear_imgui_rs::with_scratch_txt(file_name, |ptr| unsafe {
+                sys::imnodes_SaveCurrentEditorStateToIniFile(ptr)
+            })
         })
     }
 
@@ -223,75 +251,71 @@ impl<'ui> PostEditor<'ui> {
             file_name
         };
         // Safety: see `save_state_to_ini_file`.
-        let _guard = self.bind();
-        dear_imgui_rs::with_scratch_txt(file_name, |ptr| unsafe {
-            sys::imnodes_LoadCurrentEditorStateFromIniFile(ptr)
+        self.with_bound_context(|| {
+            dear_imgui_rs::with_scratch_txt(file_name, |ptr| unsafe {
+                sys::imnodes_LoadCurrentEditorStateFromIniFile(ptr)
+            })
         })
     }
 
     /// Selection helpers per id
     pub fn select_node(&self, node_id: crate::NodeId) {
-        let _guard = self.bind();
-        unsafe { sys::imnodes_SelectNode(node_id.raw()) }
+        self.with_bound_context(|| unsafe { sys::imnodes_SelectNode(node_id.raw()) })
     }
 
     pub fn clear_node_selection_of(&self, node_id: crate::NodeId) {
-        let _guard = self.bind();
-        unsafe { sys::imnodes_ClearNodeSelection_Int(node_id.raw()) }
+        self.with_bound_context(|| unsafe { sys::imnodes_ClearNodeSelection_Int(node_id.raw()) })
     }
 
     pub fn is_node_selected(&self, node_id: crate::NodeId) -> bool {
-        let _guard = self.bind();
-        unsafe { sys::imnodes_IsNodeSelected(node_id.raw()) }
+        self.with_bound_context(|| unsafe { sys::imnodes_IsNodeSelected(node_id.raw()) })
     }
 
     pub fn select_link(&self, link_id: crate::LinkId) {
-        let _guard = self.bind();
-        unsafe { sys::imnodes_SelectLink(link_id.raw()) }
+        self.with_bound_context(|| unsafe { sys::imnodes_SelectLink(link_id.raw()) })
     }
 
     pub fn clear_link_selection_of(&self, link_id: crate::LinkId) {
-        let _guard = self.bind();
-        unsafe { sys::imnodes_ClearLinkSelection_Int(link_id.raw()) }
+        self.with_bound_context(|| unsafe { sys::imnodes_ClearLinkSelection_Int(link_id.raw()) })
     }
 
     pub fn is_link_selected(&self, link_id: crate::LinkId) -> bool {
-        let _guard = self.bind();
-        unsafe { sys::imnodes_IsLinkSelected(link_id.raw()) }
+        self.with_bound_context(|| unsafe { sys::imnodes_IsLinkSelected(link_id.raw()) })
     }
 
     pub fn selected_nodes(&self) -> Vec<crate::NodeId> {
         // Safety: ImNodes returns the current count of selected nodes, and
         // `GetSelectedNodes` writes exactly that many IDs into the buffer.
-        let _guard = self.bind();
-        let n = unsafe { sys::imnodes_NumSelectedNodes() };
-        if n <= 0 {
-            return Vec::new();
-        }
-        let mut buf = vec![0i32; n as usize];
-        unsafe { sys::imnodes_GetSelectedNodes(buf.as_mut_ptr()) };
-        buf.into_iter().map(crate::NodeId::new).collect()
+        self.with_bound_context(|| {
+            let n = unsafe { sys::imnodes_NumSelectedNodes() };
+            if n <= 0 {
+                return Vec::new();
+            }
+            let mut buf = vec![0i32; n as usize];
+            unsafe { sys::imnodes_GetSelectedNodes(buf.as_mut_ptr()) };
+            buf.into_iter().map(crate::NodeId::new).collect()
+        })
     }
 
     pub fn selected_links(&self) -> Vec<crate::LinkId> {
         // Safety: ImNodes returns the current count of selected links, and
         // `GetSelectedLinks` writes exactly that many IDs into the buffer.
-        let _guard = self.bind();
-        let n = unsafe { sys::imnodes_NumSelectedLinks() };
-        if n <= 0 {
-            return Vec::new();
-        }
-        let mut buf = vec![0i32; n as usize];
-        unsafe { sys::imnodes_GetSelectedLinks(buf.as_mut_ptr()) };
-        buf.into_iter().map(crate::LinkId::new).collect()
+        self.with_bound_context(|| {
+            let n = unsafe { sys::imnodes_NumSelectedLinks() };
+            if n <= 0 {
+                return Vec::new();
+            }
+            let mut buf = vec![0i32; n as usize];
+            unsafe { sys::imnodes_GetSelectedLinks(buf.as_mut_ptr()) };
+            buf.into_iter().map(crate::LinkId::new).collect()
+        })
     }
 
     pub fn clear_selection(&self) {
-        let _guard = self.bind();
-        unsafe {
+        self.with_bound_context(|| unsafe {
             sys::imnodes_ClearNodeSelection_Nil();
             sys::imnodes_ClearLinkSelection_Nil();
-        }
+        });
     }
 
     pub fn is_link_created(&self) -> Option<crate::LinkCreated> {
@@ -324,8 +348,7 @@ impl<'ui> PostEditor<'ui> {
 
     /// Set a node's position in screen space for the current editor context.
     pub fn set_node_pos_screen(&self, node_id: crate::NodeId, pos: [f32; 2]) {
-        let _guard = self.bind();
-        unsafe {
+        self.with_bound_context(|| unsafe {
             sys::imnodes_SetNodeScreenSpacePos(
                 node_id.raw(),
                 sys::ImVec2_c {
@@ -333,13 +356,12 @@ impl<'ui> PostEditor<'ui> {
                     y: pos[1],
                 },
             )
-        }
+        });
     }
 
     /// Set a node's position in grid space for the current editor context.
     pub fn set_node_pos_grid(&self, node_id: crate::NodeId, pos: [f32; 2]) {
-        let _guard = self.bind();
-        unsafe {
+        self.with_bound_context(|| unsafe {
             sys::imnodes_SetNodeGridSpacePos(
                 node_id.raw(),
                 sys::ImVec2_c {
@@ -347,7 +369,7 @@ impl<'ui> PostEditor<'ui> {
                     y: pos[1],
                 },
             )
-        }
+        });
     }
 
     pub fn is_attribute_active(&self) -> bool {

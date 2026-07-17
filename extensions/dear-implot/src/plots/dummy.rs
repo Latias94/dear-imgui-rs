@@ -62,14 +62,15 @@ impl<'a> DummyPlot<'a> {
 
     /// Plot the dummy entry
     pub fn plot(self, plot_ui: &crate::PlotUi<'_>) {
-        let _guard = plot_ui.bind();
-        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_with_style(
-                self.style,
-                self.flags.bits() | self.item_flags.bits(),
-                PlotDataLayout::DEFAULT,
-            );
-            sys::ImPlot_PlotDummy(label_ptr, spec);
+        plot_ui.with_bound_context(|| {
+            with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+                let spec = plot_spec_with_style(
+                    self.style,
+                    self.flags.bits() | self.item_flags.bits(),
+                    PlotDataLayout::DEFAULT,
+                );
+                sys::ImPlot_PlotDummy(label_ptr, spec);
+            })
         })
     }
 }

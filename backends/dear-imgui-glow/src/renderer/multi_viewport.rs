@@ -1,99 +1,98 @@
 use super::GlowRenderer;
-use dear_imgui_rs::{Context, ViewportFlags, internal::RawCast, render::DrawData, sys};
+use dear_imgui_rs::{
+    Context, ContextBinding, ContextId, ViewportFlags, internal::RawCast, render::DrawData, sys,
+};
 use glow::HasContext;
+use std::cell::RefCell;
 use std::ffi::c_void;
 use std::ops::{Deref, DerefMut};
-use std::sync::Mutex;
 
-static RENDERERS: Mutex<Vec<ContextRendererState>> = Mutex::new(Vec::new());
+thread_local! {
+    static RENDERERS: RefCell<Vec<ContextRendererState>> = const { RefCell::new(Vec::new()) };
+}
 
 struct ContextRendererState {
-    ctx: usize,
-    renderer: usize,
+    context_raw: *mut sys::ImGuiContext,
+    binding: ContextBinding,
+    renderer: *mut GlowRenderer,
     borrowed: bool,
 }
 
-struct CurrentContextGuard {
-    previous: *mut sys::ImGuiContext,
-    target: *mut sys::ImGuiContext,
-}
-
-impl CurrentContextGuard {
-    unsafe fn bind(target: *mut sys::ImGuiContext) -> Self {
-        let previous = unsafe { sys::igGetCurrentContext() };
-        if previous != target {
-            unsafe { sys::igSetCurrentContext(target) };
-        }
-        Self { previous, target }
-    }
-}
-
-impl Drop for CurrentContextGuard {
-    fn drop(&mut self) {
-        if self.previous != self.target {
-            unsafe { sys::igSetCurrentContext(self.previous) };
-        }
-    }
-}
-
-fn upsert_renderer_state(ctx: *mut sys::ImGuiContext, renderer: *mut GlowRenderer) {
-    if ctx.is_null() {
+fn upsert_renderer_state(context: &Context, renderer: *mut GlowRenderer) {
+    let context_raw = context.as_raw();
+    if context_raw.is_null() {
         return;
     }
 
-    let ctx = ctx as usize;
-    let renderer = renderer as usize;
-    let mut renderers = RENDERERS
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
-    if let Some(entry) = renderers.iter_mut().find(|entry| entry.ctx == ctx) {
-        entry.renderer = renderer;
-        return;
-    }
+    let binding = context.binding();
+    RENDERERS.with(|renderers| {
+        let mut renderers = renderers.borrow_mut();
+        renderers.retain(|entry| entry.binding.is_alive());
+        if let Some(entry) = renderers
+            .iter_mut()
+            .find(|entry| entry.binding.id() == binding.id())
+        {
+            entry.context_raw = context_raw;
+            entry.renderer = renderer;
+            return;
+        }
 
-    renderers.push(ContextRendererState {
-        ctx,
-        renderer,
-        borrowed: false,
+        renderers.push(ContextRendererState {
+            context_raw,
+            binding,
+            renderer,
+            borrowed: false,
+        });
     });
 }
 
-fn remove_renderer_state_for_context(ctx: *mut sys::ImGuiContext) {
-    if ctx.is_null() {
-        return;
-    }
-
-    let ctx = ctx as usize;
-    RENDERERS
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner())
-        .retain(|entry| entry.ctx != ctx);
+fn remove_renderer_state_for_context(context: ContextId) {
+    RENDERERS.with(|renderers| {
+        renderers
+            .borrow_mut()
+            .retain(|entry| entry.binding.id() != context);
+    });
 }
 
 fn remove_renderer_state_for_renderer(renderer: *mut GlowRenderer) {
-    let renderer = renderer as usize;
-    RENDERERS
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner())
-        .retain(|entry| entry.renderer != renderer);
+    RENDERERS.with(|renderers| {
+        renderers
+            .borrow_mut()
+            .retain(|entry| entry.renderer != renderer);
+    });
+}
+
+fn binding_for_current_context() -> Option<ContextBinding> {
+    let context_raw = unsafe { sys::igGetCurrentContext() };
+    if context_raw.is_null() {
+        return None;
+    }
+
+    RENDERERS.with(|renderers| {
+        renderers
+            .borrow()
+            .iter()
+            .find(|entry| entry.context_raw == context_raw && entry.binding.is_alive())
+            .map(|entry| entry.binding.clone())
+    })
 }
 
 struct RendererBorrowGuard {
-    ctx: usize,
+    context: ContextId,
     renderer: *mut GlowRenderer,
 }
 
 impl Drop for RendererBorrowGuard {
     fn drop(&mut self) {
-        let mut renderers = RENDERERS
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        if let Some(entry) = renderers
-            .iter_mut()
-            .find(|entry| entry.ctx == self.ctx && entry.renderer == self.renderer as usize)
-        {
-            entry.borrowed = false;
-        }
+        RENDERERS.with(|renderers| {
+            if let Some(entry) = renderers
+                .borrow_mut()
+                .iter_mut()
+                .find(|entry| entry.binding.id() == self.context && entry.renderer == self.renderer)
+            {
+                entry.borrowed = false;
+            }
+        });
     }
 }
 
@@ -115,31 +114,31 @@ impl DerefMut for RendererBorrowGuard {
 
 #[inline]
 fn borrow_renderer() -> Option<RendererBorrowGuard> {
-    let ctx = unsafe { sys::igGetCurrentContext() } as usize;
-    if ctx == 0 {
+    let context_raw = unsafe { sys::igGetCurrentContext() };
+    if context_raw.is_null() {
         return None;
     }
 
-    let mut renderers = RENDERERS
-        .lock()
-        .unwrap_or_else(|poison| poison.into_inner());
-    let Some(entry) = renderers.iter_mut().find(|entry| entry.ctx == ctx) else {
-        return None;
-    };
-    if entry.renderer == 0 {
-        return None;
-    }
-    if entry.borrowed {
-        eprintln!(
-            "dear-imgui-glow: GlowRenderer is already mutably borrowed (multi-viewport reentrancy?); skipping callback"
-        );
-        return None;
-    }
+    RENDERERS.with(|renderers| {
+        let mut renderers = renderers.borrow_mut();
+        let entry = renderers.iter_mut().find(|entry| {
+            entry.context_raw == context_raw && entry.binding.is_alive()
+        })?;
+        if entry.renderer.is_null() {
+            return None;
+        }
+        if entry.borrowed {
+            eprintln!(
+                "dear-imgui-glow: GlowRenderer is already mutably borrowed (multi-viewport reentrancy?); skipping callback"
+            );
+            return None;
+        }
 
-    entry.borrowed = true;
-    Some(RendererBorrowGuard {
-        ctx,
-        renderer: entry.renderer as *mut GlowRenderer,
+        entry.borrowed = true;
+        Some(RendererBorrowGuard {
+            context: entry.binding.id(),
+            renderer: entry.renderer,
+        })
     })
 }
 
@@ -166,22 +165,24 @@ pub(crate) fn clear_for_drop(renderer: *mut GlowRenderer) {
 /// if `GlowRenderer` was created with an external context (`gl_context()` returns
 /// `None`), the multi-viewport callback will early-return and do nothing.
 pub fn enable(renderer: &mut GlowRenderer, imgui_context: &mut Context) {
-    let _context_guard = unsafe { CurrentContextGuard::bind(imgui_context.as_raw()) };
-
-    // Install raw Renderer_RenderWindow callback. We don't need the typed
-    // trampolines here, as we never expose Viewport typed wrappers.
-    let platform_io = imgui_context.platform_io_mut();
-    platform_io.set_renderer_render_window_raw(Some(renderer_render_window_sys));
-    upsert_renderer_state(imgui_context.as_raw(), renderer as *mut _);
+    let binding = imgui_context.binding();
+    binding.with_bound_context(|| {
+        // Install raw Renderer_RenderWindow callback. We don't need the typed
+        // trampolines here, as we never expose Viewport typed wrappers.
+        let platform_io = imgui_context.platform_io_mut();
+        platform_io.set_renderer_render_window_raw(Some(renderer_render_window_sys));
+        upsert_renderer_state(imgui_context, renderer as *mut _);
+    });
 }
 
 /// Disable Glow multi-viewport rendering and clear the renderer callback.
 pub fn disable(imgui_context: &mut Context) {
-    let _context_guard = unsafe { CurrentContextGuard::bind(imgui_context.as_raw()) };
-
-    let platform_io = imgui_context.platform_io_mut();
-    platform_io.set_renderer_render_window_raw(None);
-    remove_renderer_state_for_context(imgui_context.as_raw());
+    let binding = imgui_context.binding();
+    binding.with_bound_context(|| {
+        let platform_io = imgui_context.platform_io_mut();
+        platform_io.set_renderer_render_window_raw(None);
+        remove_renderer_state_for_context(binding.id());
+    });
 }
 
 /// Backwards-compatible helper mirroring older naming.
@@ -402,49 +403,55 @@ pub unsafe extern "C" fn renderer_render_window_sys(
         return;
     }
 
-    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let mut renderer = match borrow_renderer() {
-            Some(r) => r,
-            None => return,
-        };
+    let Some(binding) = binding_for_current_context() else {
+        return;
+    };
 
-        // We currently only support the common case where GlowRenderer owns the
-        // GL context. If the context is externally managed, the application
-        // should render viewports by calling `render_with_context` manually.
-        let gl_rc = match renderer.gl_context() {
-            Some(rc) => rc.clone(),
-            None => return,
-        };
-        let gl = &*gl_rc;
+    let _ = binding.try_with_bound_context(|| {
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut renderer = match borrow_renderer() {
+                Some(r) => r,
+                None => return,
+            };
 
-        // Safety: viewport was checked for null above.
-        let vp_ref = unsafe { &*viewport };
+            // We currently only support the common case where GlowRenderer owns the
+            // GL context. If the context is externally managed, the application
+            // should render viewports by calling `render_with_context` manually.
+            let gl_rc = match renderer.gl_context() {
+                Some(rc) => rc.clone(),
+                None => return,
+            };
+            let gl = &*gl_rc;
 
-        // Clear the viewport if needed using Dear ImGui's ViewportFlags.
-        let flags = ViewportFlags::from_bits_truncate(vp_ref.Flags);
-        if !flags.contains(ViewportFlags::NO_RENDERER_CLEAR) {
-            let c = renderer.viewport_clear_color;
-            unsafe {
-                gl.clear_color(c[0], c[1], c[2], c[3]);
-                gl.clear(glow::COLOR_BUFFER_BIT);
+            // Safety: viewport was checked for null above.
+            let vp_ref = unsafe { &*viewport };
+
+            // Clear the viewport if needed using Dear ImGui's ViewportFlags.
+            let flags = ViewportFlags::from_bits_truncate(vp_ref.Flags);
+            if !flags.contains(ViewportFlags::NO_RENDERER_CLEAR) {
+                let c = renderer.viewport_clear_color;
+                unsafe {
+                    gl.clear_color(c[0], c[1], c[2], c[3]);
+                    gl.clear(glow::COLOR_BUFFER_BIT);
+                }
             }
-        }
 
-        // Render the draw data for this viewport, if present.
-        if !vp_ref.DrawData.is_null() {
-            // Safety: DrawData pointer is owned by Dear ImGui for the duration
-            // of this callback.
-            let raw_dd: &mut sys::ImDrawData = unsafe { &mut *vp_ref.DrawData };
-            let draw_data: &mut DrawData = unsafe { DrawData::from_raw_mut(raw_dd) };
+            // Render the draw data for this viewport, if present.
+            if !vp_ref.DrawData.is_null() {
+                // Safety: DrawData pointer is owned by Dear ImGui for the duration
+                // of this callback.
+                let raw_dd: &mut sys::ImDrawData = unsafe { &mut *vp_ref.DrawData };
+                let draw_data: &mut DrawData = unsafe { DrawData::from_raw_mut(raw_dd) };
 
-            if let Err(err) = renderer.render_with_context(gl, draw_data) {
-                eprintln!("dear-imgui-glow: error rendering viewport: {:?}", err);
+                if let Err(err) = renderer.render_with_context(gl, draw_data) {
+                    eprintln!("dear-imgui-glow: error rendering viewport: {:?}", err);
+                }
             }
-        }
-    }));
+        }));
 
-    if res.is_err() {
-        eprintln!("dear-imgui-glow: panic in Renderer_RenderWindow callback");
-        std::process::abort();
-    }
+        if res.is_err() {
+            eprintln!("dear-imgui-glow: panic in Renderer_RenderWindow callback");
+            std::process::abort();
+        }
+    });
 }
