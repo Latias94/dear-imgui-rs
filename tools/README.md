@@ -178,6 +178,11 @@ python3 tools/update_submodule_and_bindings.py \
 Repository-maintained CI helpers are Python entry points and run on Windows,
 macOS, and Linux without Bash.
 
+`tools/ci/run_contract.py` centralizes expected-failure diagnostics, feature
+conflict checks, Clippy allowance expansion, default dependency audits, and
+release-note preparation. Workflow files contain no repository-owned Bash
+control flow; platform package installation remains a runner command.
+
 Initialize the exact nested submodules needed by CI:
 
 ```bash
