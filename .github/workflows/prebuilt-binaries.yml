@@ -5,27 +5,22 @@ on:
     tags:
       - 'dear-imgui-sys-v*'
       - 'dear-implot-sys-v*'
+      - 'dear-implot3d-sys-v*'
       - 'dear-imnodes-sys-v*'
       - 'dear-node-editor-sys-v*'
       - 'dear-imguizmo-sys-v*'
       - 'dear-imguizmo-quat-sys-v*'
-      - 'dear-implot3d-sys-v*'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Git tag to build (e.g., v0.1.0)'
+        description: 'Git tag to build (e.g., v0.16.0)'
         required: false
         type: string
       branch:
-        description: 'Branch to build (e.g., main). If provided, will build latest commit from this branch and upload artifacts instead of a release.'
+        description: 'Branch to build when no tag is provided'
         required: false
         type: string
         default: main
-      crates:
-        description: 'Comma-separated sys crates: all, dear-imgui-sys, dear-implot-sys, dear-imnodes-sys, dear-node-editor-sys, dear-imguizmo-sys, dear-imguizmo-quat-sys, dear-implot3d-sys'
-        required: false
-        type: string
-        default: all
   release:
     types: [published]
 
@@ -36,30 +31,25 @@ jobs:
   build-prebuilt:
     name: Build ${{ matrix.target }}${{ matrix.crt && format(' ({0})', matrix.crt) || '' }}
     runs-on: ${{ matrix.os }}
-    # Build on all platforms for both release and manual runs.
     permissions:
       contents: write
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Linux
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-          # macOS (Intel)
           - target: x86_64-apple-darwin
             os: macos-15-intel
-          # macOS (Apple Silicon)
           - target: aarch64-apple-darwin
             os: macos-latest
-          # Windows (MD)
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             crt: md
-          # Windows (MT)
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             crt: mt
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -67,7 +57,7 @@ jobs:
           submodules: true
           ref: ${{ inputs.tag || inputs.branch || github.ref }}
 
-      - name: Init required nested submodules (selective)
+      - name: Initialize required nested submodules
         run: >-
           ${{ runner.os == 'Windows' && 'python' || 'python3' }}
           tools/ci/update_submodules.py
@@ -80,301 +70,50 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          cache-bin: "false"
-          key: ${{ format('{0}-{1}-{2}', matrix.target, matrix.crt || 'none', inputs.crates || 'all') }}
+          cache-bin: 'false'
+          key: ${{ format('{0}-{1}', matrix.target, matrix.crt || 'none') }}
 
-      - name: Check Rust toolchain
-        run: |
-          rustup show
-          rustc --version
-          cargo --version
-
-      - name: Install Linux deps
+      - name: Install native dependencies (Linux)
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libfreetype6-dev
 
-      - name: Install FreeType (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libfreetype6-dev
+      - name: Install native dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install freetype pkg-config
 
-      - name: Setup vcpkg (Windows)
+      - name: Export FreeType pkg-config path (macOS)
+        if: runner.os == 'macOS'
+        run: echo "PKG_CONFIG_PATH=$(brew --prefix)/opt/freetype/lib/pkgconfig" >> "$GITHUB_ENV"
+
+      - name: Set up vcpkg (Windows)
         if: runner.os == 'Windows'
         uses: lukka/run-vcpkg@v11
         with:
-          # Use a fixed commit for reproducibility
           vcpkgGitCommitId: 9a98f93671f984351377044210854900bfd73171
           runVcpkgInstall: false
 
-      - name: Install FreeType via vcpkg (Windows)
+      - name: Configure native dependencies (Windows)
         if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $triplet = if ('${{ matrix.crt }}' -eq 'mt') { 'x64-windows-static' } else { 'x64-windows-static-md' }
-          vcpkg install "freetype:$triplet"
+        run: python tools/ci/configure_prebuilt_windows.py --crt "${{ matrix.crt }}"
 
-          $vcpkgExe = (Get-Command vcpkg -ErrorAction Stop).Source
-          $candidates = @(
-            $env:VCPKG_ROOT,
-            $env:VCPKG_INSTALLATION_ROOT,
-            (Split-Path -Parent $vcpkgExe)
-          ) | Where-Object { $_ } | Select-Object -Unique
-          $root = $candidates | Where-Object { Test-Path (Join-Path $_ '.vcpkg-root') } | Select-Object -First 1
-          if (-not $root) {
-            Write-Host "vcpkg.exe: $vcpkgExe"
-            Write-Host "VCPKG_ROOT: $env:VCPKG_ROOT"
-            Write-Host "VCPKG_INSTALLATION_ROOT: $env:VCPKG_INSTALLATION_ROOT"
-            throw 'VCPKG root not found in environment or next to vcpkg.exe.'
-          }
+      - name: Build complete core and extension profile matrix
+        run: >-
+          ${{ runner.os == 'Windows' && 'python' || 'python3' }}
+          tools/ci/verify_packaged_core.py build-prebuilt
+          "${{ github.workspace }}/packages"
+          "${{ matrix.target }}"
+          HEAD
+          "${{ matrix.crt }}"
+          --target-dir "${{ runner.temp }}/dear-imgui-prebuilt-target"
 
-          # vcpkg-rs 0.2.x still reads installed\vcpkg\updates. Modern vcpkg
-          # installs may create installed\vcpkg\status without creating the
-          # updates directory, which otherwise makes vcpkg-rs fail before it
-          # can inspect the installed packages.
-          $statusDir = Join-Path $root 'installed\vcpkg'
-          $updatesDir = Join-Path $statusDir 'updates'
-          New-Item -ItemType Directory -Force -Path $updatesDir | Out-Null
-          $statusFile = Join-Path $statusDir 'status'
-          $hasUpdates = @(Get-ChildItem -Path $updatesDir -File -ErrorAction SilentlyContinue).Count -gt 0
-          if (-not (Test-Path $statusFile) -and -not $hasUpdates) {
-            throw "vcpkg status data not found under $statusDir"
-          }
-
-          Write-Host "Using VCPKG_ROOT=$root"
-          Write-Host "Using VCPKGRS_TRIPLET=$triplet"
-          echo "VCPKG_ROOT=$root" >> $env:GITHUB_ENV
-          echo "VCPKGRS_TRIPLET=$triplet" >> $env:GITHUB_ENV
-          echo "PKG_CONFIG=$env:RUNNER_TEMP\missing-pkg-config.exe" >> $env:GITHUB_ENV
-          echo "PKG_CONFIG_PATH=" >> $env:GITHUB_ENV
-
-      - name: Install FreeType (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          brew update
-          brew install freetype pkg-config
-          echo "PKG_CONFIG_PATH=$(brew --prefix)/opt/freetype/lib/pkgconfig" >> "$GITHUB_ENV"
-
-
-      - name: Select static CRT (Windows MT)
-        if: ${{ runner.os == 'Windows' && matrix.crt == 'mt' }}
-        shell: pwsh
-        run: echo "RUSTFLAGS=-C target-feature=+crt-static" >> $env:GITHUB_ENV
-
-      - name: Build dear-imgui-sys (Release)
-        if: |
-          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-imgui-sys-v'))) ||
-          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imgui-sys'))) ||
-          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-imgui-sys-v'))
-        run: cargo build -p dear-imgui-sys --release --target ${{ matrix.target }}
-        env:
-          TARGET: ${{ matrix.target }}
-
-      - name: Package dear-imgui-sys static library + headers
-        if: |
-          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-imgui-sys-v'))) ||
-          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imgui-sys'))) ||
-          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-imgui-sys-v'))
-        run: cargo run -p dear-imgui-sys --features package-bin --bin package --release --target ${{ matrix.target }}
-        env:
-          IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
-          IMGUI_SYS_PKG_CRT: ${{ matrix.crt }}
-          TARGET: ${{ matrix.target }}
-
-      - name: Build dear-imgui-sys (Release, freetype)
-        if: |
-          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-imgui-sys-v'))) ||
-          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imgui-sys'))) ||
-          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-imgui-sys-v'))
-        run: cargo build -p dear-imgui-sys --release --no-default-features --features "freetype" --target ${{ matrix.target }}
-        env:
-          TARGET: ${{ matrix.target }}
-
-      - name: Package dear-imgui-sys static library + headers (freetype)
-        if: |
-          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-imgui-sys-v'))) ||
-          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imgui-sys'))) ||
-          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-imgui-sys-v'))
-        run: cargo run -p dear-imgui-sys --features "package-bin,freetype" --bin package --release --target ${{ matrix.target }}
-        env:
-          IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
-          IMGUI_SYS_PKG_CRT: ${{ matrix.crt }}
-          IMGUI_SYS_PKG_FEATURES: freetype
-          TARGET: ${{ matrix.target }}
-
-      - name: Build dear-imgui-sys (Release, stack layout)
-        if: |
-          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-imgui-sys-v'))) ||
-          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imgui-sys'))) ||
-          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-imgui-sys-v'))
-        run: cargo build -p dear-imgui-sys --release --no-default-features --features "stack-layout" --target ${{ matrix.target }}
-        env:
-          TARGET: ${{ matrix.target }}
-
-      - name: Package dear-imgui-sys static library + headers (stack layout)
-        if: |
-          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-imgui-sys-v'))) ||
-          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imgui-sys'))) ||
-          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-imgui-sys-v'))
-        run: cargo run -p dear-imgui-sys --features "package-bin,stack-layout" --bin package --release --target ${{ matrix.target }}
-        env:
-          IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
-          IMGUI_SYS_PKG_CRT: ${{ matrix.crt }}
-          IMGUI_SYS_PKG_FEATURES: stack-layout
-          TARGET: ${{ matrix.target }}
-
-      - name: Build dear-imgui-sys (Release, stack layout + freetype)
-        if: |
-          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-imgui-sys-v'))) ||
-          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imgui-sys'))) ||
-          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-imgui-sys-v'))
-        run: cargo build -p dear-imgui-sys --release --no-default-features --features "stack-layout,freetype" --target ${{ matrix.target }}
-        env:
-          TARGET: ${{ matrix.target }}
-
-      - name: Package dear-imgui-sys static library + headers (stack layout + freetype)
-        if: |
-          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-imgui-sys-v'))) ||
-          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imgui-sys'))) ||
-          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-imgui-sys-v'))
-        run: cargo run -p dear-imgui-sys --features "package-bin,stack-layout,freetype" --bin package --release --target ${{ matrix.target }}
-        env:
-          IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
-          IMGUI_SYS_PKG_CRT: ${{ matrix.crt }}
-          IMGUI_SYS_PKG_FEATURES: stack-layout,freetype
-          TARGET: ${{ matrix.target }}
-
-      - name: Build dear-implot-sys (Release)
-        if: |
-          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-implot-sys-v'))) ||
-          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-implot-sys'))) ||
-          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-implot-sys-v'))
-        run: cargo build -p dear-implot-sys --release --target ${{ matrix.target }}
-        env:
-          TARGET: ${{ matrix.target }}
-
-      - name: Package dear-implot-sys static library + headers
-        if: |
-          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-implot-sys-v'))) ||
-          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-implot-sys'))) ||
-          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-implot-sys-v'))
-        run: cargo run -p dear-implot-sys --features package-bin --bin package --release --target ${{ matrix.target }}
-        env:
-          IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
-          IMPLOT_SYS_PKG_CRT: ${{ matrix.crt }}
-          TARGET: ${{ matrix.target }}
-
-      - name: Build dear-imnodes-sys (Release)
-        if: |
-          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-imnodes-sys-v'))) ||
-          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imnodes-sys'))) ||
-          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-imnodes-sys-v'))
-        run: cargo build -p dear-imnodes-sys --release --target ${{ matrix.target }}
-        env:
-          TARGET: ${{ matrix.target }}
-
-      - name: Package dear-imnodes-sys static library + headers
-        if: |
-          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-imnodes-sys-v'))) ||
-          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imnodes-sys'))) ||
-          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-imnodes-sys-v'))
-        run: cargo run -p dear-imnodes-sys --features package-bin --bin package --release --target ${{ matrix.target }}
-        env:
-          IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
-          IMNODES_SYS_PKG_CRT: ${{ matrix.crt }}
-          TARGET: ${{ matrix.target }}
-
-      - name: Build dear-node-editor-sys (Release)
-        if: |
-          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-node-editor-sys-v'))) ||
-          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-node-editor-sys'))) ||
-          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-node-editor-sys-v'))
-        run: cargo build -p dear-node-editor-sys --release --target ${{ matrix.target }}
-        env:
-          TARGET: ${{ matrix.target }}
-
-      - name: Package dear-node-editor-sys static library + headers
-        if: |
-          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-node-editor-sys-v'))) ||
-          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-node-editor-sys'))) ||
-          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-node-editor-sys-v'))
-        run: cargo run -p dear-node-editor-sys --features package-bin --bin package --release --target ${{ matrix.target }}
-        env:
-          IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
-          NODE_EDITOR_SYS_PKG_CRT: ${{ matrix.crt }}
-          TARGET: ${{ matrix.target }}
-
-      - name: Build dear-imguizmo-sys (Release)
-        if: |
-          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-imguizmo-sys-v'))) ||
-          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imguizmo-sys'))) ||
-          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-imguizmo-sys-v'))
-        run: cargo build -p dear-imguizmo-sys --release --target ${{ matrix.target }}
-        env:
-          TARGET: ${{ matrix.target }}
-
-      - name: Package dear-imguizmo-sys static library + headers
-        if: |
-          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-imguizmo-sys-v'))) ||
-          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imguizmo-sys'))) ||
-          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-imguizmo-sys-v'))
-        run: cargo run -p dear-imguizmo-sys --features package-bin --bin package --release --target ${{ matrix.target }}
-        env:
-          IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
-          IMGUIZMO_SYS_PKG_CRT: ${{ matrix.crt }}
-          TARGET: ${{ matrix.target }}
-
-      - name: Build dear-implot3d-sys (Release)
-        if: |
-          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-implot3d-sys-v'))) ||
-          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-implot3d-sys'))) ||
-          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-implot3d-sys-v'))
-        run: cargo build -p dear-implot3d-sys --release --target ${{ matrix.target }}
-        env:
-          TARGET: ${{ matrix.target }}
-
-      - name: Package dear-implot3d-sys static library + headers
-        if: |
-          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-implot3d-sys-v'))) ||
-          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-implot3d-sys'))) ||
-          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-implot3d-sys-v'))
-        run: cargo run -p dear-implot3d-sys --features package-bin --bin package --release --target ${{ matrix.target }}
-        env:
-          IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
-          IMPLOT3D_SYS_PKG_CRT: ${{ matrix.crt }}
-          TARGET: ${{ matrix.target }}
-
-      - name: Build dear-imguizmo-quat-sys (Release)
-        if: |
-          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-imguizmo-quat-sys-v'))) ||
-          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imguizmo-quat-sys'))) ||
-          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-imguizmo-quat-sys-v'))
-        run: cargo build -p dear-imguizmo-quat-sys --release --target ${{ matrix.target }}
-        env:
-          TARGET: ${{ matrix.target }}
-
-      - name: Package dear-imguizmo-quat-sys static library + headers
-        if: |
-          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-imguizmo-quat-sys-v'))) ||
-          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imguizmo-quat-sys'))) ||
-          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-imguizmo-quat-sys-v'))
-        run: cargo run -p dear-imguizmo-quat-sys --features package-bin --bin package --release --target ${{ matrix.target }}
-        env:
-          IMGUI_SYS_PACKAGE_DIR: ${{ github.workspace }}/packages
-          IMGUIZMO_QUAT_SYS_PKG_CRT: ${{ matrix.crt }}
-          TARGET: ${{ matrix.target }}
-
-      - name: Consume every Dear ImGui artifact profile
-        if: |
-          (github.event_name == 'release' && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'dear-imgui-sys-v'))) ||
-          (github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || contains(inputs.crates, 'all') || contains(inputs.crates, 'dear-imgui-sys'))) ||
-          (github.event_name == 'push' && startsWith(github.ref_name, 'dear-imgui-sys-v'))
+      - name: Consume every safe prebuilt profile
         run: >-
           ${{ runner.os == 'Windows' && 'python' || 'python3' }}
           tools/ci/verify_packaged_core.py prebuilt
-          "${{ github.workspace }}/packages" "${{ matrix.target }}" "${{ matrix.crt }}"
+          "${{ github.workspace }}/packages"
+          "${{ matrix.target }}"
+          HEAD
+          "${{ matrix.crt }}"
 
       - name: Upload to release
         uses: softprops/action-gh-release@v3

@@ -37,7 +37,6 @@ dear-imgui-sys.workspace = true
 #mint.workspace = true
 flate2 = { workspace = true, optional = true }
 tar = { workspace = true, optional = true }
-build-support = { workspace = true, optional = true }
 
 [build-dependencies]
 bindgen = { workspace = true, optional = true }
@@ -53,7 +52,7 @@ path = "bin/package/main.rs"
 required-features = ["package-bin"]
 
 [features]
-package-bin = ["dep:flate2", "dep:tar", "dep:build-support"]
+package-bin = ["dep:flate2", "dep:tar"]
 default = []
 bindgen = ["dep:bindgen", "dear-imgui-sys/bindgen"]
 # Docking is always enabled; feature removed.

@@ -45,6 +45,32 @@ impl BuildConfig {
     }
 }
 
+fn extension_artifact_profile(
+    cfg: &BuildConfig,
+    package_mode: bool,
+) -> build_support::binding::ExtensionArtifactProfile {
+    let mut features = vec!["wchar32"];
+    if cfg!(feature = "freetype") {
+        features.push("freetype");
+    }
+    let target = env::var("TARGET").unwrap_or_default();
+    let crt = if cfg.is_windows() && cfg.is_msvc() {
+        if cfg.use_static_crt() { "mt" } else { "md" }
+    } else {
+        ""
+    };
+    build_support::binding::extension_artifact_profile_from_env(
+        build_support::binding::ExtensionBinding::ImGuizmo,
+        &cfg.manifest_dir,
+        env!("CARGO_PKG_VERSION"),
+        &target,
+        crt,
+        &features,
+        package_mode,
+    )
+    .unwrap_or_else(|error| panic!("dear-imguizmo-sys: {error}"))
+}
+
 fn resolve_imgui_includes(cfg: &BuildConfig) -> (PathBuf, PathBuf) {
     // Prefer paths exported by dear-imgui-sys build script (prefix comes from links = "dear-imgui")
     let imgui_src = env::var_os("DEP_DEAR_IMGUI_IMGUI_INCLUDE_PATH")
@@ -247,7 +273,7 @@ fn resolve_imguizmo_cpp(cimguizmo_root: &Path) -> PathBuf {
 fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
     let target_env = &cfg.target_env;
     if let Ok(dir) = env::var("IMGUIZMO_SYS_LIB_DIR") {
-        if try_link_prebuilt(PathBuf::from(dir.clone()), target_env) {
+        if try_link_prebuilt(PathBuf::from(dir.clone()), cfg) {
             return true;
         }
         println!(
@@ -266,7 +292,7 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
         }
         let cache_root = prebuilt_cache_root(cfg);
         if let Ok(dir) = try_download_prebuilt(&cache_root, &url, target_env)
-            && try_link_prebuilt(dir.clone(), target_env)
+            && try_link_prebuilt(dir.clone(), cfg)
         {
             return true;
         }
@@ -296,7 +322,7 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
                 source, owner, repo
             );
             if let Some(dir) = try_download_prebuilt_from_release(cfg)
-                && try_link_prebuilt(dir.clone(), target_env)
+                && try_link_prebuilt(dir.clone(), cfg)
             {
                 return true;
             }
@@ -362,9 +388,29 @@ fn main() {
     println!("cargo:rerun-if-env-changed=IMGUIZMO_SYS_SKIP_CC");
     println!("cargo:rerun-if-env-changed=IMGUIZMO_SYS_PREBUILT_URL");
     println!("cargo:rerun-if-env-changed=IMGUIZMO_SYS_FORCE_BUILD");
+    println!("cargo:rerun-if-env-changed=IMGUIZMO_SYS_CACHE_DIR");
     println!("cargo:rerun-if-env-changed=IMGUIZMO_SYS_USE_CMAKE");
     println!("cargo:rerun-if-env-changed=DEAR_IMGUI_RS_REGEN_BINDINGS");
+    println!("cargo:rerun-if-env-changed=DEAR_IMGUI_RS_CANDIDATE_SHA");
+    println!("cargo:rerun-if-env-changed=DEAR_IMGUI_CORE_ARTIFACT_IDENTITY_HASH");
+    println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_ARTIFACT_IDENTITY_HASH");
+    println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_CANDIDATE_SHA");
     println!("cargo:rerun-if-env-changed=DOCS_RS");
+
+    if cfg!(feature = "package-bin") {
+        let profile = extension_artifact_profile(&cfg, true);
+        profile
+            .write_package_metadata(&cfg.out_dir)
+            .unwrap_or_else(|error| panic!("dear-imguizmo-sys: {error}"));
+        println!(
+            "cargo:rustc-env=DEAR_IMGUI_EXTENSION_ARTIFACT_TARGET={}",
+            profile.target
+        );
+        println!(
+            "cargo:rustc-env=DEAR_IMGUI_EXTENSION_ARTIFACT_CRT={}",
+            profile.crt
+        );
+    }
 
     let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
     let cimguizmo_root = cfg.manifest_dir.join("third-party/cimguizmo");
@@ -435,8 +481,9 @@ fn main() {
     }
 
     // Link/build native
-    let force_build =
-        cfg!(feature = "build-from-source") || env::var("IMGUIZMO_SYS_FORCE_BUILD").is_ok();
+    let force_build = cfg!(feature = "package-bin")
+        || cfg!(feature = "build-from-source")
+        || env::var("IMGUIZMO_SYS_FORCE_BUILD").is_ok();
     let linked_prebuilt = if force_build {
         false
     } else {
@@ -461,39 +508,17 @@ fn expected_lib_name(target_env: &str) -> &'static str {
     }
 }
 
-fn prebuilt_manifest_has_feature(dir: &Path, feature: &str) -> bool {
-    let mut candidates = Vec::with_capacity(2);
-    candidates.push(dir.join("manifest.txt"));
-    if let Some(parent) = dir.parent() {
-        candidates.push(parent.join("manifest.txt"));
-    }
-    let Some(s) = candidates
-        .into_iter()
-        .find_map(|p| std::fs::read_to_string(&p).ok())
-    else {
-        return false;
-    };
-    let feature = feature.trim().to_ascii_lowercase();
-    for line in s.lines() {
-        if let Some(rest) = line.strip_prefix("features=") {
-            return rest
-                .split(',')
-                .map(|f| f.trim().to_ascii_lowercase())
-                .any(|f| f == feature);
-        }
-    }
-    false
-}
-
-fn try_link_prebuilt(dir: PathBuf, target_env: &str) -> bool {
-    let lib_name = expected_lib_name(target_env);
+fn try_link_prebuilt(dir: PathBuf, cfg: &BuildConfig) -> bool {
+    let lib_name = expected_lib_name(&cfg.target_env);
     let lib_path = dir.join(lib_name);
     if !lib_path.exists() {
         return false;
     }
-    if !prebuilt_manifest_has_feature(&dir, "wchar32") {
-        return false;
-    }
+    extension_artifact_profile(cfg, false)
+        .validate_prebuilt_dir(&dir)
+        .unwrap_or_else(|error| {
+            panic!("dear-imguizmo-sys: incompatible prebuilt artifact: {error}")
+        });
     println!("cargo:rustc-link-search=native={}", dir.display());
     println!("cargo:rustc-link-lib=static=dear_imguizmo");
     true
@@ -517,54 +542,27 @@ fn try_download_prebuilt(
 }
 
 fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
-    if build_support::is_offline() {
-        return None;
-    }
-
-    let version = env::var("CARGO_PKG_VERSION").unwrap_or_default();
-    let link_type = "static";
-    let crt = if cfg.is_windows() && cfg.is_msvc() {
-        if cfg.use_static_crt() { "mt" } else { "md" }
-    } else {
-        ""
-    };
-    let target = env::var("TARGET").unwrap_or_default();
-    let archive_name = build_support::compose_archive_name(
-        "dear-imguizmo",
-        &version,
-        &target,
-        link_type,
-        None,
-        crt,
-    );
-    let archive_name_no_crt = build_support::compose_archive_name(
-        "dear-imguizmo",
-        &version,
-        &target,
-        link_type,
-        None,
-        "",
-    );
-    let tags = build_support::release_tags("dear-imguizmo-sys", &version);
+    let profile = extension_artifact_profile(cfg, false);
+    let tags = build_support::release_tags("dear-imguizmo-sys", &profile.version);
     if let Ok(pkg_dir) = env::var("IMGUIZMO_SYS_PACKAGE_DIR") {
         let pkg_dir = PathBuf::from(pkg_dir);
-        for cand in [archive_name.clone(), archive_name_no_crt.clone()] {
-            let archive_path = pkg_dir.join(&cand);
-            if archive_path.exists() {
-                let cache_root = prebuilt_cache_root(cfg);
-                if let Ok(lib_dir) = build_support::extract_archive_to_cache(
-                    &archive_path,
-                    &cache_root,
-                    expected_lib_name(&cfg.target_env),
-                ) {
-                    return Some(lib_dir);
-                }
+        let archive_path = pkg_dir.join(&profile.archive_name);
+        if archive_path.exists() {
+            let cache_root = prebuilt_cache_root(cfg);
+            if let Ok(lib_dir) = build_support::extract_archive_to_cache(
+                &archive_path,
+                &cache_root,
+                expected_lib_name(&cfg.target_env),
+            ) {
+                return Some(lib_dir);
             }
         }
     }
+    if build_support::is_offline() {
+        return None;
+    }
     let cache_root = prebuilt_cache_root(cfg);
-    let names = vec![archive_name, archive_name_no_crt];
-    let urls = build_support::release_candidate_urls_env(&tags, &names);
+    let urls = build_support::release_candidate_urls_env(&tags, &[profile.archive_name]);
     for url in urls {
         if let Ok(lib_dir) = try_download_prebuilt(&cache_root, &url, &cfg.target_env) {
             return Some(lib_dir);
@@ -579,6 +577,7 @@ fn prebuilt_cache_root(cfg: &BuildConfig) -> PathBuf {
         "IMGUIZMO_SYS_CACHE_DIR",
         "dear-imguizmo-prebuilt",
     )
+    .join(extension_artifact_profile(cfg, false).cache_key())
 }
 
 // (removed duplicate prebuilt_extract_dir_env/extract_archive_to_cache; using build_support equivalents)

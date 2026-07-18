@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use build_support::binding::{
     ArtifactProfile, BindingSpec, BuildRequest, BuildRequestInput, CORE_BUILD_ENV_VARS,
-    NativeAbiProfile, SourceRevisions, TargetFacts, bindgen_rerun_env_vars,
-    is_supported_wasm_target, validate_wasm_feature_contract,
+    CoreArtifactIdentity, NativeAbiProfile, RELEASE_CANDIDATE_SHA_ENV, SourceRevisions,
+    TargetFacts, bindgen_rerun_env_vars, is_supported_wasm_target, validate_wasm_feature_contract,
 };
 
 const CORE_WASM_IMPORT_MODULE: &str = "imgui-sys-v0";
@@ -175,12 +175,17 @@ fn is_archive_urlish(s: &str) -> bool {
 }
 
 fn write_package_metadata(cfg: &BuildConfig, profile: &ArtifactProfile) {
+    let candidate_sha = env::var(RELEASE_CANDIDATE_SHA_ENV).unwrap_or_else(|_| {
+        panic!("dear-imgui-sys: feature `package-bin` requires {RELEASE_CANDIDATE_SHA_ENV}")
+    });
     let archive_name = cfg.archive_name(cfg.crt_profile());
     fs::write(cfg.out_dir.join("prebuilt-archive-name.txt"), archive_name)
         .expect("failed to write package archive name");
     fs::write(
         cfg.out_dir.join("prebuilt-manifest.txt"),
-        profile.manifest_bytes(),
+        profile
+            .release_manifest_bytes(&candidate_sha)
+            .unwrap_or_else(|error| panic!("dear-imgui-sys: {error}")),
     )
     .expect("failed to write package manifest");
 }
@@ -229,6 +234,7 @@ fn main() {
     for name in CORE_BUILD_ENV_VARS {
         println!("cargo:rerun-if-env-changed={name}");
     }
+    println!("cargo:rerun-if-env-changed={RELEASE_CANDIDATE_SHA_ENV}");
     for name in bindgen_rerun_env_vars(&cfg.target_triple) {
         println!("cargo:rerun-if-env-changed={name}");
     }
@@ -1009,9 +1015,22 @@ fn read_prebuilt_manifest(dir: &Path) -> Result<Vec<u8>, String> {
     ))
 }
 
-fn validate_prebuilt_artifact_profile(dir: &Path, cfg: &BuildConfig) -> Result<(), String> {
-    cfg.artifact_profile()
-        .validate_manifest_bytes(&read_prebuilt_manifest(dir)?)
+fn validate_prebuilt_artifact_profile(
+    dir: &Path,
+    cfg: &BuildConfig,
+) -> Result<CoreArtifactIdentity, String> {
+    let profile = cfg.artifact_profile();
+    let identity = profile.validate_release_manifest_bytes(&read_prebuilt_manifest(dir)?)?;
+    if let Ok(expected_candidate) = env::var(RELEASE_CANDIDATE_SHA_ENV) {
+        let expected_identity = CoreArtifactIdentity::new(&profile, &expected_candidate)?;
+        if identity != expected_identity {
+            return Err(format!(
+                "artifact candidate mismatch: expected {}, found {}",
+                expected_identity.candidate_sha, identity.candidate_sha
+            ));
+        }
+    }
+    Ok(identity)
 }
 
 fn assert_explicit_artifact_profile(dir: &Path, cfg: &BuildConfig, source: &str) {
@@ -1031,13 +1050,16 @@ fn try_link_prebuilt(dir: &Path, cfg: &BuildConfig) -> bool {
         return false;
     }
 
-    if let Err(error) = validate_prebuilt_artifact_profile(dir, cfg) {
-        println!(
-            "cargo:warning=Rejecting incompatible dear_imgui prebuilt at {}: {error}",
-            dir.display()
-        );
-        return false;
-    }
+    let identity = match validate_prebuilt_artifact_profile(dir, cfg) {
+        Ok(identity) => identity,
+        Err(error) => {
+            println!(
+                "cargo:warning=Rejecting incompatible dear_imgui prebuilt at {}: {error}",
+                dir.display()
+            );
+            return false;
+        }
+    };
     println!("cargo:rustc-link-search=native={}", dir.display());
     println!("cargo:rustc-link-lib=static=dear_imgui");
     build_support::emit_prebuilt_cpp_runtime_linkage(&cfg.target_os, &cfg.target_env);
@@ -1047,6 +1069,12 @@ fn try_link_prebuilt(dir: &Path, cfg: &BuildConfig) -> bool {
         // FreeType library. Emit the same native link metadata as source builds.
         let _ = find_freetype_dependency(true);
     }
+    println!("cargo:ARTIFACT_PROFILE_HASH={}", identity.profile_hash);
+    println!(
+        "cargo:ARTIFACT_IDENTITY_HASH={}",
+        identity.deterministic_hash()
+    );
+    println!("cargo:CANDIDATE_SHA={}", identity.candidate_sha);
     true
 }
 

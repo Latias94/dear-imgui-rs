@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -16,8 +17,11 @@ for import_path in (CI_DIR, TOOLS_DIR):
     if str(import_path) not in sys.path:
         sys.path.insert(0, str(import_path))
 
-from _prebuilt import verify_core_prebuilt_packages  # noqa: E402
-from _process import CommandError  # noqa: E402
+from _prebuilt import (  # noqa: E402
+    build_release_prebuilt_packages,
+    verify_prebuilt_packages,
+)
+from _process import CommandError, run  # noqa: E402
 from _source_packages import verify_packaged_core  # noqa: E402
 from _verification import VerificationError  # noqa: E402
 from release_metadata import MetadataError  # noqa: E402
@@ -29,8 +33,9 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Validate source packages and native Dear ImGui prebuilt artifacts",
         usage=(
             "%(prog)s [full]\n"
-            "       %(prog)s prebuilt PACKAGE_DIR TARGET [CRT]\n"
-            "       %(prog)s --verify-prebuilt-packages PACKAGE_DIR TARGET [CRT]"
+            "       %(prog)s build-prebuilt PACKAGE_DIR TARGET CANDIDATE_SHA [CRT]\n"
+            "       %(prog)s prebuilt PACKAGE_DIR TARGET CANDIDATE_SHA [CRT]\n"
+            "       %(prog)s --verify-prebuilt-packages PACKAGE_DIR TARGET CANDIDATE_SHA [CRT]"
         ),
     )
     parser.add_argument(
@@ -47,23 +52,50 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     prebuilt.add_argument("package_dir", metavar="PACKAGE_DIR", type=Path)
     prebuilt.add_argument("target", metavar="TARGET")
+    prebuilt.add_argument("candidate_sha", metavar="CANDIDATE_SHA")
     prebuilt.add_argument("crt", metavar="CRT", nargs="?", default="")
+    build_prebuilt = commands.add_parser(
+        "build-prebuilt", help="Build every native core and extension artifact profile"
+    )
+    build_prebuilt.add_argument("package_dir", metavar="PACKAGE_DIR", type=Path)
+    build_prebuilt.add_argument("target", metavar="TARGET")
+    build_prebuilt.add_argument("candidate_sha", metavar="CANDIDATE_SHA")
+    build_prebuilt.add_argument("crt", metavar="CRT", nargs="?", default="")
+    build_prebuilt.add_argument("--target-dir", type=Path)
     return parser
 
 
 def _prebuilt_arguments(
     parser: argparse.ArgumentParser, args: argparse.Namespace
-) -> tuple[Path, str, str] | None:
+) -> tuple[Path, str, str, str] | None:
     if args.legacy_prebuilt is not None:
         if args.command is not None:
             parser.error("--verify-prebuilt-packages cannot be combined with a command")
-        if len(args.legacy_prebuilt) not in (2, 3):
-            parser.error("--verify-prebuilt-packages requires PACKAGE_DIR TARGET [CRT]")
-        package_dir, target, *optional_crt = args.legacy_prebuilt
-        return Path(package_dir), target, optional_crt[0] if optional_crt else ""
+        if len(args.legacy_prebuilt) not in (3, 4):
+            parser.error(
+                "--verify-prebuilt-packages requires "
+                "PACKAGE_DIR TARGET CANDIDATE_SHA [CRT]"
+            )
+        package_dir, target, candidate_sha, *optional_crt = args.legacy_prebuilt
+        return (
+            Path(package_dir),
+            target,
+            candidate_sha,
+            optional_crt[0] if optional_crt else "",
+        )
     if args.command == "prebuilt":
-        return args.package_dir, args.target, args.crt
+        return args.package_dir, args.target, args.candidate_sha, args.crt
     return None
+
+
+def _resolve_candidate_sha(candidate_sha: str) -> str:
+    if candidate_sha != "HEAD":
+        return candidate_sha
+    result = run(
+        ("git", "-C", WORKSPACE_ROOT, "rev-parse", "--verify", "HEAD"),
+        capture_output=True,
+    )
+    return (result.stdout or "").strip()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -71,13 +103,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     prebuilt_arguments = _prebuilt_arguments(parser, args)
     try:
-        if prebuilt_arguments is None:
+        if args.command == "build-prebuilt":
+            target_dir = args.target_dir
+            if target_dir is None:
+                target_dir = Path(
+                    os.environ.get(
+                        "CARGO_TARGET_DIR", WORKSPACE_ROOT / "target/prebuilt-release"
+                    )
+                )
+            build_release_prebuilt_packages(
+                WORKSPACE_ROOT,
+                target_dir,
+                args.package_dir,
+                args.target,
+                _resolve_candidate_sha(args.candidate_sha),
+                crt=args.crt,
+            )
+        elif prebuilt_arguments is None:
             verify_packaged_core()
         else:
-            package_dir, target, crt = prebuilt_arguments
-            verify_core_prebuilt_packages(
+            package_dir, target, candidate_sha, crt = prebuilt_arguments
+            verify_prebuilt_packages(
                 package_dir,
                 target,
+                _resolve_candidate_sha(candidate_sha),
                 crt=crt,
                 source_root=WORKSPACE_ROOT,
                 profile_scope="all",
