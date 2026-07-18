@@ -159,12 +159,27 @@ impl TextureManager {
         id
     }
 
-    fn reserve_superseded_retirement(
+    fn reserve_superseded_retirement(&mut self) -> Option<RetirementReservation> {
+        self.retiring_textures.reserve()
+    }
+
+    fn install_managed_replacement(
         &mut self,
-    ) -> Option<(ManagedTextureRetirementKey, RetirementReservation)> {
-        let reservation = self.retiring_textures.reserve()?;
+        texture: SnapshotTextureId,
+        replacement: ManagedVulkanTexture,
+        reservation: RetirementReservation,
+    ) -> TextureId {
+        let texture_id = replacement.texture_id;
         let key = ManagedTextureRetirementKey::Superseded(reservation.batch());
-        Some((key, reservation))
+        let previous = self
+            .managed_textures
+            .insert(texture, replacement)
+            .expect("managed replacement requires an active texture");
+        debug_assert_eq!(previous.texture_id, texture_id);
+        let _ = self
+            .retiring_textures
+            .commit(reservation, key, previous.retire());
+        texture_id
     }
 
     fn request_managed_retirement(
@@ -189,6 +204,22 @@ impl TextureManager {
             .retiring_textures
             .commit(reservation, key, managed.retire());
         Ok(RetirementRequest::Queued(batch))
+    }
+
+    fn complete_managed_retirements(
+        &mut self,
+        completed: TextureRetirementBatch,
+    ) -> Option<Vec<RetiredManagedVulkanTexture>> {
+        let retired = self.retiring_textures.complete_through(completed)?;
+        let mut resources = Vec::with_capacity(retired.len());
+        for (retirement, managed) in retired {
+            if let ManagedTextureRetirementKey::Destroyed(snapshot_id) = retirement {
+                let removed = self.managed_ids.remove(&managed.texture_id.id());
+                debug_assert_eq!(removed, Some(snapshot_id));
+            }
+            resources.push(managed);
+        }
+        Some(resources)
     }
 }
 
@@ -263,8 +294,7 @@ impl AshRenderer {
         }
         let retired = self
             .textures
-            .retiring_textures
-            .complete_through(completed)
+            .complete_managed_retirements(completed)
             .ok_or_else(|| {
                 RendererError::InvalidRenderState(format!(
                     "texture retirement batch {} was not issued by this renderer",
@@ -272,11 +302,7 @@ impl AshRenderer {
                 ))
             })?;
         let count = retired.len();
-        for (retirement, managed) in retired {
-            if let ManagedTextureRetirementKey::Destroyed(snapshot_id) = retirement {
-                let removed = self.textures.managed_ids.remove(&managed.texture_id.id());
-                debug_assert_eq!(removed, Some(snapshot_id));
-            }
+        for managed in retired {
             managed
                 .texture
                 .destroy(&self.device, &mut self.allocator, self.descriptor_pool);
@@ -1077,7 +1103,7 @@ impl AshRenderer {
                 ))
             })?;
         // Reserve before Vulkan allocation so exhaustion cannot strand a submitted replacement.
-        let (retirement_key, reservation) = self
+        let reservation = self
             .textures
             .reserve_superseded_retirement()
             .ok_or_else(|| {
@@ -1086,16 +1112,9 @@ impl AshRenderer {
                 )
             })?;
         let replacement = self.create_managed_texture_image(texture_id, width, height, rgba)?;
-        let previous = self
+        Ok(self
             .textures
-            .managed_textures
-            .insert(snapshot_id, replacement)
-            .expect("managed replacement requires an active texture");
-        let _ =
-            self.textures
-                .retiring_textures
-                .commit(reservation, retirement_key, previous.retire());
-        Ok(texture_id)
+            .install_managed_replacement(snapshot_id, replacement, reservation))
     }
 
     fn update_managed_texture(
@@ -1322,4 +1341,98 @@ pub(super) fn clamp_rect(
         return (x, y, 0, 0);
     }
     (x, y, w.min(tw - x), h.min(th - y))
+}
+
+#[cfg(all(test, not(any(feature = "gpu-allocator", feature = "vk-mem"))))]
+mod managed_lifecycle_tests {
+    use super::*;
+    use ash::vk::Handle;
+
+    fn managed_texture(
+        texture_id: TextureId,
+        image: u64,
+        descriptor_set: u64,
+        pixel: u8,
+    ) -> ManagedVulkanTexture {
+        ManagedVulkanTexture {
+            texture_id,
+            texture: VulkanTexture {
+                image: vk::Image::from_raw(image),
+                image_mem: vk::DeviceMemory::from_raw(image + 100),
+                image_view: vk::ImageView::from_raw(image + 200),
+                sampler: vk::Sampler::from_raw(image + 300),
+                descriptor_set: vk::DescriptorSet::from_raw(descriptor_set),
+                width: 1,
+                height: 1,
+            },
+            rgba: vec![pixel; 4],
+        }
+    }
+
+    #[test]
+    fn superseded_then_destroyed_texture_preserves_mapping_until_final_completion() {
+        let context = Context::create();
+        let snapshot_id = SnapshotTextureId::FontAtlas {
+            context: context.id(),
+            stamp: 7,
+            generation: 3,
+        };
+        let texture_id = TextureId::from(41_u64);
+        let mut manager = TextureManager::new();
+        manager.managed_ids.insert(texture_id.id(), snapshot_id);
+        manager
+            .managed_textures
+            .insert(snapshot_id, managed_texture(texture_id, 1, 11, 1));
+
+        let reservation = manager.reserve_superseded_retirement().unwrap();
+        let superseded_batch = reservation.batch();
+        assert_eq!(
+            manager.install_managed_replacement(
+                snapshot_id,
+                managed_texture(texture_id, 2, 22, 2),
+                reservation,
+            ),
+            texture_id
+        );
+        assert_eq!(
+            manager.get_descriptor_set(texture_id.id()),
+            Some(vk::DescriptorSet::from_raw(22))
+        );
+
+        let superseded = manager
+            .complete_managed_retirements(superseded_batch)
+            .unwrap();
+        assert_eq!(superseded.len(), 1);
+        assert_eq!(superseded[0].texture.image.as_raw(), 1);
+        assert_eq!(
+            manager.managed_ids.get(&texture_id.id()),
+            Some(&snapshot_id)
+        );
+        assert_eq!(
+            manager.managed_textures[&snapshot_id]
+                .texture
+                .image
+                .as_raw(),
+            2
+        );
+
+        let RetirementRequest::Queued(destroy_batch) = manager
+            .request_managed_retirement(snapshot_id)
+            .expect("active replacement should enter destroy retirement")
+        else {
+            panic!("active replacement was acknowledged before retirement");
+        };
+        assert!(!manager.managed_textures.contains_key(&snapshot_id));
+        assert_eq!(
+            manager.get_descriptor_set(texture_id.id()),
+            Some(vk::DescriptorSet::from_raw(22))
+        );
+
+        let destroyed = manager.complete_managed_retirements(destroy_batch).unwrap();
+        assert_eq!(destroyed.len(), 1);
+        assert_eq!(destroyed[0].texture.image.as_raw(), 2);
+        assert!(!manager.managed_ids.contains_key(&texture_id.id()));
+        assert_eq!(manager.get_descriptor_set(texture_id.id()), None);
+        assert_eq!(manager.retiring_textures.pending_batch(), None);
+    }
 }
