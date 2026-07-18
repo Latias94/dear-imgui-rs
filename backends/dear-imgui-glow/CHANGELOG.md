@@ -17,6 +17,17 @@ The format follows Keep a Changelog and Semantic Versioning.
   texture bindings only after their OpenGL resources have been destroyed.
 - Rendering now rejects frames from another Context, another consumer generation, or a path that
   omitted the managed-texture renderer epoch before making OpenGL calls.
+- The `multi-viewport` feature now exposes owning `GlowViewportRuntime`, replacing free
+  `enable`/`disable`/`shutdown_multi_viewport_support` functions and their caller-address contract.
+  The runtime consumes `GlowRenderer` into stable storage, transactionally claims the renderer
+  callback table, defers callback faults to Rust, and shares one ordered shutdown state machine with
+  its Context attachment.
+- Added `GlowRenderer::with_shared_context` for multi-viewport integrations that share the exact
+  `Rc<glow::Context>` used during renderer creation. Existing `with_external_context` renderers are
+  typed-rejected by `GlowViewportRuntime` and remain supported for single-viewport rendering.
+- The low-level `update_texture` helper now accepts a `GlTextureUpdate` descriptor with a typed
+  `TextureFormat`. Upload length is validated before OpenGL reads the slice, and the previous
+  active texture, binding, and unpack alignment are restored after the update.
 
 ### Fixed
 
@@ -24,8 +35,10 @@ The format follows Keep a Changelog and Semantic Versioning.
   `TextureId` instead of creating or replacing a separate texture mapping.
 - `Alpha8` texture creation and updates now use the same RGBA expansion path, matching the
   renderer's shader expectations.
-- `GlowRenderer::destroy()` now clears renderer-owned multi-viewport state so callbacks become
-  no-op when the renderer is destroyed before full platform shutdown.
+- Renderer initialization now resets stale managed-texture bindings after claiming a new consumer,
+  allowing a Context to recover after best-effort runtime Drop.
+- Explicit multi-viewport shutdown now retains its renderer capability when detached snapshots are
+  still outstanding, allowing shutdown to be retried after those epochs complete.
 
 ## [0.10.4] - 2026-03-17
 

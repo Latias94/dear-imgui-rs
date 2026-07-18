@@ -7,7 +7,7 @@
 //!
 //! - **Basic rendering**: Render Dear ImGui draw data using OpenGL
 //! - **Texture support**: Handle font textures and user textures
-//! - **Multi-viewport support**: Support for multiple windows (feature-gated)
+//! - **Multi-viewport support**: Stable owning renderer runtime (feature-gated)
 //! - **OpenGL compatibility**: Support for OpenGL 2.1+ and OpenGL ES 2.0+
 //!
 //! # Example

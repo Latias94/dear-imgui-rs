@@ -312,7 +312,6 @@ impl GlowRenderer {
                             gl,
                             texture_map,
                             count,
-                            cmd_params.texture_id,
                             &cmd_params,
                             draw_data,
                             sampler_filter,
@@ -402,14 +401,13 @@ impl GlowRenderer {
         gl: &Context,
         texture_map: &dyn TextureMap,
         count: usize,
-        effective_tex_id: dear_imgui_rs::TextureId,
         cmd_params: &DrawCmdParams,
         draw_data: &DrawData,
         sampler_filter: u32,
     ) -> RenderResult<()> {
         // Get texture
-        let texture = texture_map.get(effective_tex_id).ok_or_else(|| {
-            RenderError::InvalidTexture(format!("Texture ID {:?} not found", effective_tex_id))
+        let texture = texture_map.get(cmd_params.texture_id).ok_or_else(|| {
+            RenderError::InvalidTexture(format!("Texture ID {:?} not found", cmd_params.texture_id))
         })?;
 
         unsafe {

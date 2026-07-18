@@ -3,6 +3,7 @@
 use crate::{GlTexture, InitError, InitResult};
 use dear_imgui_rs::{TextureFormat, TextureId};
 use glow::{Context, HasContext};
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 pub(crate) fn gl_texture_size_i32(dimension: &'static str, value: u32) -> InitResult<i32> {
@@ -267,22 +268,57 @@ pub fn create_texture_from_alpha(
     }
 }
 
-/// Update a texture with new data
+/// A validated sub-image upload for an existing OpenGL texture.
+#[derive(Clone, Copy, Debug)]
+pub struct GlTextureUpdate<'a> {
+    /// Pixel offset within the destination texture.
+    pub offset: [u32; 2],
+    /// Width and height of the uploaded region.
+    pub size: [u32; 2],
+    /// Source pixel format.
+    pub format: TextureFormat,
+    /// Tightly packed source pixels.
+    pub data: &'a [u8],
+}
+
+impl<'a> GlTextureUpdate<'a> {
+    /// Describe one tightly packed texture sub-image upload.
+    pub fn new(offset: [u32; 2], size: [u32; 2], format: TextureFormat, data: &'a [u8]) -> Self {
+        Self {
+            offset,
+            size,
+            format,
+            data,
+        }
+    }
+}
+
+/// Update a texture with validated, tightly packed pixel data.
 pub fn update_texture(
     gl: &Context,
     texture: GlTexture,
-    x: u32,
-    y: u32,
-    width: u32,
-    height: u32,
-    data: &[u8],
-    format: u32,
+    update: GlTextureUpdate<'_>,
 ) -> InitResult<()> {
+    let [x, y] = update.offset;
+    let [width, height] = update.size;
     let x = gl_texture_size_i32("x", x)?;
     let y = gl_texture_size_i32("y", y)?;
     let (width, height) = checked_gl_texture_size(width, height)?;
+    let data =
+        validated_rgba_upload_data(update.format, update.size[0], update.size[1], update.data)?;
     unsafe {
+        let last_active = u32::try_from(gl.get_parameter_i32(glow::ACTIVE_TEXTURE))
+            .ok()
+            .unwrap_or(glow::TEXTURE0);
+        let last_texture = u32::try_from(gl.get_parameter_i32(glow::TEXTURE_BINDING_2D))
+            .ok()
+            .and_then(std::num::NonZeroU32::new)
+            .map(glow::NativeTexture);
+        let last_unpack = gl.get_parameter_i32(glow::UNPACK_ALIGNMENT);
+
+        gl.active_texture(glow::TEXTURE0);
         gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+        gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
         gl.tex_sub_image_2d(
             glow::TEXTURE_2D,
             0,
@@ -290,13 +326,43 @@ pub fn update_texture(
             y,
             width,
             height,
-            format,
+            glow::RGBA,
             glow::UNSIGNED_BYTE,
-            glow::PixelUnpackData::Slice(Some(data)),
+            glow::PixelUnpackData::Slice(Some(data.as_ref())),
         );
-        gl.bind_texture(glow::TEXTURE_2D, None);
+
+        gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, last_unpack);
+        gl.bind_texture(glow::TEXTURE_2D, last_texture);
+        gl.active_texture(last_active);
     }
     Ok(())
+}
+
+fn validated_rgba_upload_data<'a>(
+    format: TextureFormat,
+    width: u32,
+    height: u32,
+    data: &'a [u8],
+) -> InitResult<Cow<'a, [u8]>> {
+    match format {
+        TextureFormat::RGBA32 => {
+            let expected_len = (width as usize)
+                .checked_mul(height as usize)
+                .and_then(|len| len.checked_mul(4))
+                .ok_or(InitError::TextureSizeOverflow {
+                    format: TextureFormat::RGBA32,
+                })?;
+            if data.len() != expected_len {
+                return Err(InitError::TextureDataSizeMismatch {
+                    format: TextureFormat::RGBA32,
+                    expected: expected_len,
+                    actual: data.len(),
+                });
+            }
+            Ok(Cow::Borrowed(data))
+        }
+        TextureFormat::Alpha8 => Ok(Cow::Owned(alpha8_to_rgba(data, width, height)?)),
+    }
 }
 
 pub(crate) fn alpha8_to_rgba(data: &[u8], width: u32, height: u32) -> InitResult<Vec<u8>> {
@@ -331,29 +397,7 @@ pub(crate) fn upload_texture_data(
     data: &[u8],
 ) -> InitResult<()> {
     let (width_i32, height_i32) = checked_gl_texture_size(width, height)?;
-    let rgba_data;
-    let data = match format {
-        TextureFormat::RGBA32 => {
-            let expected_len = (width as usize)
-                .checked_mul(height as usize)
-                .and_then(|len| len.checked_mul(4))
-                .ok_or(InitError::TextureSizeOverflow {
-                    format: TextureFormat::RGBA32,
-                })?;
-            if data.len() != expected_len {
-                return Err(InitError::TextureDataSizeMismatch {
-                    format: TextureFormat::RGBA32,
-                    expected: expected_len,
-                    actual: data.len(),
-                });
-            }
-            data
-        }
-        TextureFormat::Alpha8 => {
-            rgba_data = alpha8_to_rgba(data, width, height)?;
-            &rgba_data
-        }
-    };
+    let data = validated_rgba_upload_data(format, width, height, data)?;
 
     unsafe {
         let last_active = u32::try_from(gl.get_parameter_i32(glow::ACTIVE_TEXTURE))
@@ -377,7 +421,7 @@ pub(crate) fn upload_texture_data(
             0,
             glow::RGBA,
             glow::UNSIGNED_BYTE,
-            glow::PixelUnpackData::Slice(Some(data)),
+            glow::PixelUnpackData::Slice(Some(data.as_ref())),
         );
 
         gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, last_unpack);
@@ -409,5 +453,17 @@ mod tests {
     #[test]
     fn alpha8_to_rgba_rejects_size_mismatch() {
         assert!(alpha8_to_rgba(&[0, 1], 3, 1).is_err());
+    }
+
+    #[test]
+    fn rgba_upload_validation_rejects_short_source_data() {
+        assert!(matches!(
+            validated_rgba_upload_data(TextureFormat::RGBA32, 2, 2, &[0; 15]),
+            Err(InitError::TextureDataSizeMismatch {
+                format: TextureFormat::RGBA32,
+                expected: 16,
+                actual: 15,
+            })
+        ));
     }
 }

@@ -8,8 +8,8 @@ use glow::{Context, HasContext};
 
 use super::GlowRenderer;
 use crate::texture::{
-    alpha8_to_rgba, create_texture_from_alpha, create_texture_from_rgba, update_texture,
-    upload_texture_data,
+    GlTextureUpdate, alpha8_to_rgba, create_texture_from_alpha, create_texture_from_rgba,
+    update_texture, upload_texture_data,
 };
 use crate::{
     GlTexture,
@@ -20,6 +20,14 @@ use crate::{
 pub(super) struct ManagedTextureBinding {
     pub(super) texture_id: TextureId,
     pub(super) gl_texture: GlTexture,
+}
+
+struct ManagedTextureCreate<'a> {
+    format: TextureFormat,
+    width: u32,
+    height: u32,
+    row_pitch: usize,
+    pixels: &'a [u8],
 }
 
 impl GlowRenderer {
@@ -50,11 +58,13 @@ impl GlowRenderer {
                 let texture_id = self.create_managed_texture(
                     gl,
                     request.texture(),
-                    *format,
-                    *width,
-                    *height,
-                    *row_pitch,
-                    pixels,
+                    ManagedTextureCreate {
+                        format: *format,
+                        width: *width,
+                        height: *height,
+                        row_pitch: *row_pitch,
+                        pixels,
+                    },
                 )?;
                 Ok(request.uploaded(texture_id)?)
             }
@@ -85,37 +95,52 @@ impl GlowRenderer {
         &mut self,
         gl: &Context,
         key: SnapshotTextureId,
-        format: TextureFormat,
-        width: u32,
-        height: u32,
-        row_pitch: usize,
-        pixels: &[u8],
+        create: ManagedTextureCreate<'_>,
     ) -> RenderResult<TextureId> {
-        let pixels = tightly_pack_rows(format, width, height, row_pitch, pixels)
-            .map_err(RenderError::DeviceObjectInit)?;
+        let pixels = tightly_pack_rows(
+            create.format,
+            create.width,
+            create.height,
+            create.row_pitch,
+            create.pixels,
+        )
+        .map_err(RenderError::DeviceObjectInit)?;
 
         if let Some(binding) = self.managed_textures.get(&key).copied() {
-            upload_texture_data(gl, binding.gl_texture, width, height, format, &pixels)
-                .map_err(RenderError::DeviceObjectInit)?;
+            upload_texture_data(
+                gl,
+                binding.gl_texture,
+                create.width,
+                create.height,
+                create.format,
+                &pixels,
+            )
+            .map_err(RenderError::DeviceObjectInit)?;
             self.texture_map_mut().update_texture(
                 binding.texture_id,
                 binding.gl_texture,
-                width,
-                height,
+                create.width,
+                create.height,
             );
             return Ok(binding.texture_id);
         }
 
-        let gl_texture = match format {
-            TextureFormat::RGBA32 => create_texture_from_rgba(gl, width, height, &pixels),
-            TextureFormat::Alpha8 => create_texture_from_alpha(gl, width, height, &pixels),
+        let gl_texture = match create.format {
+            TextureFormat::RGBA32 => {
+                create_texture_from_rgba(gl, create.width, create.height, &pixels)
+            }
+            TextureFormat::Alpha8 => {
+                create_texture_from_alpha(gl, create.width, create.height, &pixels)
+            }
         }
         .map_err(RenderError::DeviceObjectInit)?;
 
-        let texture_id = match self
-            .texture_map_mut()
-            .register_texture(gl_texture, width, height, format)
-        {
+        let texture_id = match self.texture_map_mut().register_texture(
+            gl_texture,
+            create.width,
+            create.height,
+            create.format,
+        ) {
             Ok(texture_id) => texture_id,
             Err(error) => {
                 unsafe { gl.delete_texture(gl_texture) };
@@ -172,12 +197,12 @@ impl GlowRenderer {
             update_texture(
                 gl,
                 binding.gl_texture,
-                u32::from(upload.rect.x),
-                u32::from(upload.rect.y),
-                rect_width,
-                rect_height,
-                &pixels,
-                glow::RGBA,
+                GlTextureUpdate::new(
+                    [u32::from(upload.rect.x), u32::from(upload.rect.y)],
+                    [rect_width, rect_height],
+                    TextureFormat::RGBA32,
+                    &pixels,
+                ),
             )
             .map_err(RenderError::DeviceObjectInit)?;
         }
@@ -436,10 +461,10 @@ mod tests {
 
     fn make_fake_gl() -> glow::Context {
         unsafe extern "system" fn fake_gl_get_string(_name: u32) -> *const u8 {
-            b"4.6\0".as_ptr()
+            c"4.6".as_ptr().cast()
         }
         unsafe extern "system" fn fake_gl_get_string_i(_name: u32, _index: u32) -> *const u8 {
-            b"\0".as_ptr()
+            c"".as_ptr().cast()
         }
         unsafe extern "system" fn fake_gl_get_integer_v(pname: u32, data: *mut i32) {
             if data.is_null() {

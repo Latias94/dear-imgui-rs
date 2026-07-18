@@ -113,6 +113,41 @@ impl GlowRenderer {
         Self::init_internal(None, gl, imgui_context, texture_map)
     }
 
+    /// Create a renderer that shares ownership of its Glow function table.
+    ///
+    /// Unlike [`Self::with_external_context`], the renderer retains the exact `Rc` used to create
+    /// its GL objects. This is the supported construction path when the renderer will later be
+    /// consumed by `GlowViewportRuntime`.
+    ///
+    /// ```rust,no_run
+    /// use std::rc::Rc;
+    /// use dear_imgui_glow::{GlowRenderer, SimpleTextureMap, glow};
+    /// use dear_imgui_rs::Context as ImGuiContext;
+    ///
+    /// let gl = Rc::new(unsafe {
+    ///     glow::Context::from_loader_function(|_| std::ptr::null())
+    /// });
+    /// let mut imgui = ImGuiContext::create();
+    /// let renderer = GlowRenderer::with_shared_context(
+    ///     Rc::clone(&gl),
+    ///     &mut imgui,
+    ///     Box::new(SimpleTextureMap::default()),
+    /// )?;
+    /// # Ok::<(), dear_imgui_glow::InitError>(())
+    /// ```
+    pub fn with_shared_context(
+        gl: std::rc::Rc<Context>,
+        imgui_context: &mut ImGuiContext,
+        texture_map: Box<dyn TextureMap>,
+    ) -> InitResult<Self> {
+        Self::init_internal(
+            Some(std::rc::Rc::clone(&gl)),
+            &gl,
+            imgui_context,
+            texture_map,
+        )
+    }
+
     /// Internal initialization method
     fn init_internal(
         owned_gl: Option<std::rc::Rc<glow::Context>>,
@@ -121,6 +156,7 @@ impl GlowRenderer {
         texture_map: Box<dyn TextureMap>,
     ) -> InitResult<Self> {
         let renderer_consumer = imgui_context.create_renderer_consumer()?;
+        imgui_context.reset_renderer_texture_bindings(&renderer_consumer)?;
         let gl_version = GlVersion::read(gl);
 
         #[cfg(feature = "clip_origin_support")]
@@ -194,11 +230,6 @@ impl GlowRenderer {
         flags.insert(dear_imgui_rs::BackendFlags::RENDERER_HAS_VTX_OFFSET);
         flags.insert(dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES);
 
-        #[cfg(feature = "multi-viewport")]
-        {
-            flags.insert(dear_imgui_rs::BackendFlags::RENDERER_HAS_VIEWPORTS);
-        }
-
         io.set_backend_flags(flags);
 
         let platform_io = imgui_context.platform_io_mut();
@@ -224,8 +255,6 @@ impl GlowRenderer {
         let mut flags = io.backend_flags();
         flags.remove(dear_imgui_rs::BackendFlags::RENDERER_HAS_VTX_OFFSET);
         flags.remove(dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES);
-        #[cfg(feature = "multi-viewport")]
-        flags.remove(dear_imgui_rs::BackendFlags::RENDERER_HAS_VIEWPORTS);
         io.set_backend_flags(flags);
 
         let platform_io = imgui_context.platform_io_mut();
