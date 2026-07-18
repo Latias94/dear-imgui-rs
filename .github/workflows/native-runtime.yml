@@ -1,0 +1,65 @@
+name: Native runtime contract
+
+on:
+  workflow_call:
+    inputs:
+      contract:
+        required: true
+        type: string
+      gate_attempt:
+        required: true
+        type: number
+    outputs:
+      retry_eligible:
+        description: Whether one fresh-runner infrastructure retry is allowed
+        value: ${{ jobs.runtime.outputs.retry_eligible }}
+      gate_success:
+        description: Whether the runtime gate passed
+        value: ${{ jobs.runtime.outputs.gate_success }}
+
+jobs:
+  runtime:
+    name: ${{ inputs.contract }} (attempt ${{ inputs.gate_attempt }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      retry_eligible: ${{ steps.gate.outputs.retry_eligible }}
+      gate_success: ${{ steps.gate.outputs.gate_success }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Init required nested submodules (selective)
+        run: python3 tools/ci/update_submodules.py
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-bin: "false"
+          key: native-runtime-${{ inputs.contract }}
+
+      - name: Refresh native package metadata
+        run: sudo apt-get update
+
+      - name: Install native runtime dependencies
+        run: sudo apt-get install -y build-essential cmake pkg-config libasound2-dev libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev libxkbcommon-dev libwayland-dev libudev-dev xvfb x11-utils openbox mesa-vulkan-drivers vulkan-tools
+
+      - name: Execute native runtime contract
+        id: gate
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+        run: python3 tools/ci/run_contract.py ${{ inputs.contract }} --evidence-dir target/runtime-evidence/${{ inputs.contract }} --attempt ${{ inputs.gate_attempt }} --defer-infrastructure-retry
+
+      - name: Retain native runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-runtime-${{ inputs.contract }}-${{ github.sha }}-run-${{ github.run_attempt }}-gate-${{ inputs.gate_attempt }}
+          path: target/runtime-evidence/${{ inputs.contract }}
+          if-no-files-found: error
+          retention-days: 30

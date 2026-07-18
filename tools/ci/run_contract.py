@@ -20,6 +20,11 @@ if str(CI_DIR) not in sys.path:
     sys.path.insert(0, str(CI_DIR))
 
 from _process import CommandError, environment, github_group, run  # noqa: E402
+from _runtime_gate import (  # noqa: E402
+    GateResult,
+    run_multi_viewport_smoke,
+    run_test_engine_runtime,
+)
 from _verification import VerificationError, temporary_workspace  # noqa: E402
 from _windows_native import (  # noqa: E402
     WindowsNativeError,
@@ -302,6 +307,72 @@ def check_windows_mingw_imports(
     print(inspection.evidence_text, end="")
 
 
+def _positive_float(value: str) -> float:
+    parsed = float(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("value must be greater than zero")
+    return parsed
+
+
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("value must be greater than zero")
+    return parsed
+
+
+def _add_runtime_arguments(
+    parser: argparse.ArgumentParser,
+    *,
+    evidence_dir: Path,
+    child_timeout: float,
+) -> None:
+    parser.add_argument("--evidence-dir", type=Path, default=evidence_dir)
+    parser.add_argument(
+        "--child-timeout",
+        type=_positive_float,
+        default=child_timeout,
+        help="Maximum runtime for each built child, in seconds",
+    )
+    parser.add_argument(
+        "--build-timeout",
+        type=_positive_float,
+        default=900.0,
+        help="Maximum Cargo build time, in seconds",
+    )
+    parser.add_argument(
+        "--attempt",
+        type=_positive_int,
+        default=1,
+        help="Fresh-runner attempt recorded in gate-result.json",
+    )
+    parser.add_argument(
+        "--defer-infrastructure-retry",
+        action="store_true",
+        help=(
+            "Return success for an eligible first infrastructure failure so CI can "
+            "start one fresh runner"
+        ),
+    )
+
+
+def _runtime_exit_code(result: GateResult, *, defer_infrastructure_retry: bool) -> int:
+    github_output = os.environ.get("GITHUB_OUTPUT")
+    if github_output:
+        with Path(github_output).open("a", encoding="utf-8", newline="\n") as output:
+            output.write(f"gate_success={str(result.success).lower()}\n")
+            output.write(f"gate_category={result.category.value}\n")
+            output.write(f"retry_eligible={str(result.retry_eligible).lower()}\n")
+            output.write(f"gate_attempt={result.attempt}\n")
+    if result.success or (defer_infrastructure_retry and result.retry_eligible):
+        return 0
+    print(
+        f"::error::{result.category.value}: {result.summary}",
+        file=sys.stderr,
+    )
+    return 1
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run cross-platform repository CI contracts"
@@ -368,12 +439,33 @@ def _build_parser() -> argparse.ArgumentParser:
     mingw_imports.add_argument("--deps", required=True, type=Path)
     mingw_imports.add_argument("--objdump", required=True, type=Path)
     mingw_imports.add_argument("--evidence", required=True, type=Path)
+
+    test_engine_runtime = commands.add_parser(
+        "test-engine-runtime",
+        help="Execute every stable Test Engine runner outcome",
+    )
+    _add_runtime_arguments(
+        test_engine_runtime,
+        evidence_dir=Path("target/ci-runtime/test-engine-runtime"),
+        child_timeout=120.0,
+    )
+
+    viewport_runtime = commands.add_parser(
+        "multi-viewport-smoke",
+        help="Execute the real Winit/WGPU secondary-window lifecycle",
+    )
+    _add_runtime_arguments(
+        viewport_runtime,
+        evidence_dir=Path("target/ci-runtime/multi-viewport-smoke"),
+        child_timeout=180.0,
+    )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    exit_code = 0
     try:
         if args.contract == "expect-failure":
             expect_failure(
@@ -418,12 +510,36 @@ def main(argv: Sequence[str] | None = None) -> int:
                 objdump=args.objdump,
                 evidence=args.evidence,
             )
+        elif args.contract == "test-engine-runtime":
+            result = run_test_engine_runtime(
+                workspace_root=WORKSPACE_ROOT,
+                evidence_dir=args.evidence_dir,
+                child_timeout=args.child_timeout,
+                build_timeout=args.build_timeout,
+                attempt=args.attempt,
+            )
+            exit_code = _runtime_exit_code(
+                result,
+                defer_infrastructure_retry=args.defer_infrastructure_retry,
+            )
+        elif args.contract == "multi-viewport-smoke":
+            result = run_multi_viewport_smoke(
+                workspace_root=WORKSPACE_ROOT,
+                evidence_dir=args.evidence_dir,
+                child_timeout=args.child_timeout,
+                build_timeout=args.build_timeout,
+                attempt=args.attempt,
+            )
+            exit_code = _runtime_exit_code(
+                result,
+                defer_infrastructure_retry=args.defer_infrastructure_retry,
+            )
         else:  # pragma: no cover - argparse enforces the command set.
             parser.error(f"unknown contract: {args.contract}")
     except (CommandError, OSError, VerificationError, WindowsNativeError) as error:
         print(f"::error::{error}", file=sys.stderr)
         return 1
-    return 0
+    return exit_code
 
 
 if __name__ == "__main__":

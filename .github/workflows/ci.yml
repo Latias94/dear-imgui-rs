@@ -240,6 +240,38 @@ jobs:
           IMGUI_SYS_FORCE_BUILD: "1"
         run: cargo nextest run -p dear-imgui-test-engine-sys --test ffi_boundary
 
+  test-engine-runtime:
+    name: Test Engine native runtime
+    uses: ./.github/workflows/native-runtime.yml
+    with:
+      contract: test-engine-runtime
+      gate_attempt: 1
+
+  test-engine-runtime-retry:
+    name: Test Engine native runtime retry
+    needs: test-engine-runtime
+    if: ${{ always() && needs.test-engine-runtime.outputs.retry_eligible == 'true' }}
+    uses: ./.github/workflows/native-runtime.yml
+    with:
+      contract: test-engine-runtime
+      gate_attempt: 2
+
+  multi-viewport-runtime:
+    name: Winit/WGPU multi-viewport runtime
+    uses: ./.github/workflows/native-runtime.yml
+    with:
+      contract: multi-viewport-smoke
+      gate_attempt: 1
+
+  multi-viewport-runtime-retry:
+    name: Winit/WGPU multi-viewport runtime retry
+    needs: multi-viewport-runtime
+    if: ${{ always() && needs.multi-viewport-runtime.outputs.retry_eligible == 'true' }}
+    uses: ./.github/workflows/native-runtime.yml
+    with:
+      contract: multi-viewport-smoke
+      gate_attempt: 2
+
   binding-contract:
     name: Core and extension binding contract
     runs-on: ubuntu-latest
