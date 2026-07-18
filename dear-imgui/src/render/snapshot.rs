@@ -313,10 +313,16 @@ pub enum TextureRequestKind {
 ///     let TextureUploadIdentity {} = identity;
 /// }
 /// ```
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
 pub struct TextureUploadIdentity {
     revision: u64,
     kind: TextureRequestKind,
+}
+
+impl std::fmt::Debug for TextureUploadIdentity {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("TextureUploadIdentity(..)")
+    }
 }
 
 /// A managed texture operation requested by Dear ImGui.
@@ -1131,6 +1137,15 @@ mod upload_identity_tests {
         let destroy = request(context.id(), 1, 11, TextureOp::Destroy);
 
         assert_eq!(destroy.upload_identity(), None);
+    }
+
+    #[test]
+    fn upload_identity_debug_output_is_opaque() {
+        let context = crate::Context::create();
+        let request = request(context.id(), 1, 11, create_op());
+        let identity = request.upload_identity().unwrap();
+
+        assert_eq!(format!("{identity:?}"), "TextureUploadIdentity(..)");
     }
 }
 
