@@ -70,6 +70,51 @@ class CandidateShaTests(unittest.TestCase):
                     Path("repo"), SHA, runner=runner
                 )
 
+    def test_verify_candidate_cli_accepts_the_checked_out_workflow_revision(self):
+        root = Path("repo")
+        with patch.object(
+            release_evidence, "resolve_candidate_sha", return_value=SHA
+        ) as resolver:
+            result = release_evidence.main(
+                [
+                    "verify-candidate",
+                    "--repo-root",
+                    str(root),
+                    "--candidate-sha",
+                    SHA,
+                ]
+            )
+
+        self.assertEqual(result, 0)
+        resolver.assert_called_once_with(root, SHA)
+
+    def test_verify_candidate_cli_fails_closed_on_identity_mismatch(self):
+        root = Path("repo")
+        diagnostic = io.StringIO()
+        mismatch = release_evidence.EvidenceError(
+            f"candidate HEAD mismatch: expected {SHA}, found {OTHER_SHA}"
+        )
+        with (
+            patch.object(
+                release_evidence, "resolve_candidate_sha", side_effect=mismatch
+            ) as resolver,
+            redirect_stderr(diagnostic),
+            self.assertRaises(SystemExit) as raised,
+        ):
+            release_evidence.main(
+                [
+                    "verify-candidate",
+                    "--repo-root",
+                    str(root),
+                    "--candidate-sha",
+                    SHA,
+                ]
+            )
+
+        self.assertEqual(raised.exception.code, 2)
+        resolver.assert_called_once_with(root, SHA)
+        self.assertIn("candidate HEAD mismatch", diagnostic.getvalue())
+
 
 class CellEvidenceTests(unittest.TestCase):
     def test_writes_stable_lf_json_with_streamed_checksums(self):

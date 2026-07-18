@@ -263,6 +263,7 @@ jobs:
     name: Test Engine native runtime
     uses: ./.github/workflows/native-runtime.yml
     with:
+      candidate_sha: ${{ github.sha }}
       contract: test-engine-runtime
       gate_attempt: 1
 
@@ -272,6 +273,7 @@ jobs:
     if: ${{ always() && needs.test-engine-runtime.outputs.retry_eligible == 'true' }}
     uses: ./.github/workflows/native-runtime.yml
     with:
+      candidate_sha: ${{ github.sha }}
       contract: test-engine-runtime
       gate_attempt: 2
 
@@ -279,6 +281,7 @@ jobs:
     name: Winit/WGPU multi-viewport runtime
     uses: ./.github/workflows/native-runtime.yml
     with:
+      candidate_sha: ${{ github.sha }}
       contract: multi-viewport-smoke
       gate_attempt: 1
 
@@ -288,6 +291,7 @@ jobs:
     if: ${{ always() && needs.multi-viewport-runtime.outputs.retry_eligible == 'true' }}
     uses: ./.github/workflows/native-runtime.yml
     with:
+      candidate_sha: ${{ github.sha }}
       contract: multi-viewport-smoke
       gate_attempt: 2
 

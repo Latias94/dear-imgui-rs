@@ -17,7 +17,24 @@ env:
   RUSTFLAGS: -Cdebuginfo=0
 
 jobs:
+  validate-candidate-identity:
+    name: Validate candidate identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout workflow revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Validate candidate identity
+        run: >-
+          python3 tools/ci/release_evidence.py verify-candidate
+          --repo-root "${{ github.workspace }}"
+          --candidate-sha "${{ inputs.candidate_sha }}"
+
   test-engine-attempt-1:
+    needs: validate-candidate-identity
     uses: ./.github/workflows/native-runtime.yml
     with:
       candidate_sha: ${{ inputs.candidate_sha }}
@@ -25,8 +42,8 @@ jobs:
       gate_attempt: 1
 
   test-engine-attempt-2:
-    needs: test-engine-attempt-1
-    if: always() && needs.test-engine-attempt-1.outputs.retry_eligible == 'true'
+    needs: [validate-candidate-identity, test-engine-attempt-1]
+    if: always() && needs.validate-candidate-identity.result == 'success' && needs.test-engine-attempt-1.outputs.retry_eligible == 'true'
     uses: ./.github/workflows/native-runtime.yml
     with:
       candidate_sha: ${{ inputs.candidate_sha }}
@@ -34,8 +51,8 @@ jobs:
       gate_attempt: 2
 
   test-engine-cell:
-    needs: [test-engine-attempt-1, test-engine-attempt-2]
-    if: always()
+    needs: [validate-candidate-identity, test-engine-attempt-1, test-engine-attempt-2]
+    if: always() && needs.validate-candidate-identity.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -92,6 +109,7 @@ jobs:
           retention-days: 30
 
   viewport-attempt-1:
+    needs: validate-candidate-identity
     uses: ./.github/workflows/native-runtime.yml
     with:
       candidate_sha: ${{ inputs.candidate_sha }}
@@ -99,8 +117,8 @@ jobs:
       gate_attempt: 1
 
   viewport-attempt-2:
-    needs: viewport-attempt-1
-    if: always() && needs.viewport-attempt-1.outputs.retry_eligible == 'true'
+    needs: [validate-candidate-identity, viewport-attempt-1]
+    if: always() && needs.validate-candidate-identity.result == 'success' && needs.viewport-attempt-1.outputs.retry_eligible == 'true'
     uses: ./.github/workflows/native-runtime.yml
     with:
       candidate_sha: ${{ inputs.candidate_sha }}
@@ -108,8 +126,8 @@ jobs:
       gate_attempt: 2
 
   viewport-cell:
-    needs: [viewport-attempt-1, viewport-attempt-2]
-    if: always()
+    needs: [validate-candidate-identity, viewport-attempt-1, viewport-attempt-2]
+    if: always() && needs.validate-candidate-identity.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -166,6 +184,7 @@ jobs:
           retention-days: 30
 
   standard-cells:
+    needs: validate-candidate-identity
     name: ${{ matrix.cell_id }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
@@ -484,13 +503,14 @@ jobs:
           retention-days: 30
 
   prebuilt:
+    needs: validate-candidate-identity
     uses: ./.github/workflows/prebuilt-binaries.yml
     with:
       candidate_sha: ${{ inputs.candidate_sha }}
 
   aggregate:
-    needs: [test-engine-cell, viewport-cell, standard-cells, prebuilt]
-    if: always()
+    needs: [validate-candidate-identity, test-engine-cell, viewport-cell, standard-cells, prebuilt]
+    if: always() && needs.validate-candidate-identity.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

@@ -913,6 +913,13 @@ def verify_gate_result(path: Path, *, expected_candidate_sha: str) -> dict[str, 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
+    verify_candidate = subparsers.add_parser(
+        "verify-candidate",
+        help="require the checked-out workflow revision to match the candidate",
+    )
+    verify_candidate.add_argument("--repo-root", required=True, type=Path)
+    verify_candidate.add_argument("--candidate-sha", required=True)
+
     record = subparsers.add_parser("record", help="write one cell evidence record")
     record.add_argument("--repo-root", required=True, type=Path)
     record.add_argument("--candidate-sha", required=True)
@@ -942,13 +949,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the explicit record or aggregate command."""
+    """Run one explicit release-evidence command."""
     parser = _build_parser()
     arguments = parser.parse_args(argv)
     try:
         candidate_sha = resolve_candidate_sha(
             arguments.repo_root, arguments.candidate_sha
         )
+        if arguments.command == "verify-candidate":
+            return 0
         if arguments.command == "record":
             write_cell_evidence(
                 arguments.output,
