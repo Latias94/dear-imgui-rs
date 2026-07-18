@@ -2,7 +2,7 @@ use std::ffi::{c_char, c_int};
 use std::time::Instant;
 
 use dear_imgui_rs::{Condition, ConfigFlags, Context};
-use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode};
+use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode, Sdl3PlatformBackend};
 use dear_imgui_wgpu::{WgpuInitInfo, WgpuRenderer, wgpu};
 use pollster::block_on;
 use sdl3::event::Event;
@@ -90,8 +90,8 @@ fn run_inner(_argc: c_int, _argv: *mut *mut c_char) -> Result<c_int, Box<dyn std
         style.set_font_scale_dpi(main_scale);
     }
 
-    imgui_sdl3_backend::init_for_other(&mut imgui, &window)?;
-    imgui_sdl3_backend::set_gamepad_mode(GamepadMode::AutoAll);
+    let mut sdl3_backend = Sdl3PlatformBackend::init_for_other(&mut imgui, &window)?;
+    sdl3_backend.set_gamepad_mode(&mut imgui, GamepadMode::AutoAll)?;
 
     let init_info = WgpuInitInfo::new(device.clone(), queue.clone(), surface_config.format);
     let mut renderer = WgpuRenderer::new(init_info, &mut imgui)?;
@@ -109,21 +109,19 @@ fn run_inner(_argc: c_int, _argv: *mut *mut c_char) -> Result<c_int, Box<dyn std
         a: 1.0,
     };
 
-    loop {
+    let exit_result: Result<c_int, Box<dyn std::error::Error>> = 'running: loop {
         while let Some(raw) = imgui_sdl3_backend::sdl3_poll_event_ll() {
-            let _ = imgui_sdl3_backend::process_sys_event(&raw);
+            let _ = sdl3_backend.process_event(&mut imgui, &raw)?;
             let event = Event::from_ll(raw);
             match event {
                 Event::Quit { .. } => {
-                    imgui_sdl3_backend::shutdown(&mut imgui);
-                    return Ok(0);
+                    break 'running Ok(0);
                 }
                 Event::KeyDown {
                     keycode: Some(Keycode::Escape),
                     ..
                 } => {
-                    imgui_sdl3_backend::shutdown(&mut imgui);
-                    return Ok(0);
+                    break 'running Ok(0);
                 }
                 Event::Window {
                     win_event: sdl3::event::WindowEvent::PixelSizeChanged(_, _),
@@ -146,7 +144,7 @@ fn run_inner(_argc: c_int, _argv: *mut *mut c_char) -> Result<c_int, Box<dyn std
         last_frame = now;
         imgui.io_mut().set_delta_time(dt);
 
-        imgui_sdl3_backend::sdl3_new_frame(&mut imgui);
+        sdl3_backend.new_frame(&mut imgui)?;
         let ui = imgui.frame();
 
         ui.window("Dear ImGui iOS SDL3 Smoke")
@@ -203,8 +201,9 @@ fn run_inner(_argc: c_int, _argv: *mut *mut c_char) -> Result<c_int, Box<dyn std
                 continue;
             }
             wgpu::CurrentSurfaceTexture::Validation => {
-                imgui_sdl3_backend::shutdown(&mut imgui);
-                return Err("surface acquisition failed with a WGPU validation error".into());
+                break 'running Err(
+                    "surface acquisition failed with a WGPU validation error".into()
+                );
             }
         };
 
@@ -247,7 +246,11 @@ fn run_inner(_argc: c_int, _argv: *mut *mut c_char) -> Result<c_int, Box<dyn std
         if reconfigure_after_present {
             surface.configure(&device, &surface_config);
         }
-    }
+    };
+
+    renderer.shutdown(&mut imgui)?;
+    sdl3_backend.shutdown(&mut imgui)?;
+    exit_result
 }
 
 #[unsafe(no_mangle)]

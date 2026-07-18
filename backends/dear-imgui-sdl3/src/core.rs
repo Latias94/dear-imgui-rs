@@ -1,35 +1,10 @@
 use super::*;
 
 pub(super) fn with_context<R>(imgui: &Context, caller: &str, f: impl FnOnce() -> R) -> R {
-    with_captured_context(&imgui.binding(), caller, f)
-}
-
-pub(super) fn with_matching_context<R>(
-    context: &ContextBinding,
-    imgui: &Context,
-    caller: &str,
-    f: impl FnOnce() -> R,
-) -> R {
-    assert_eq!(
-        context.id(),
-        imgui.id(),
-        "{caller} received a different Dear ImGui context than the one used during backend initialization"
-    );
-    with_captured_context(context, caller, f)
-}
-
-pub(super) fn with_captured_context<R>(
-    context: &ContextBinding,
-    caller: &str,
-    f: impl FnOnce() -> R,
-) -> R {
-    context
+    imgui
+        .binding()
         .try_with_bound_context(f)
         .unwrap_or_else(|error| panic!("{caller} could not bind its Dear ImGui context: {error}"))
-}
-
-pub(super) fn try_with_context<R>(context: &ContextBinding, f: impl FnOnce() -> R) -> Option<R> {
-    context.try_with_bound_context(f).ok()
 }
 
 #[cfg(any(
@@ -37,9 +12,9 @@ pub(super) fn try_with_context<R>(context: &ContextBinding, f: impl FnOnce() -> 
     feature = "sdlrenderer3-renderer",
     feature = "sdlgpu3-renderer"
 ))]
-pub(super) fn assert_current_draw_data(draw_data: &mut DrawData, caller: &str) {
-    let expected = unsafe { sys::igGetDrawData() as *mut sys::ImDrawData };
-    let actual = draw_data as *mut DrawData as *mut sys::ImDrawData;
+pub(super) fn assert_current_draw_data(draw_data: &DrawData, caller: &str) {
+    let expected = unsafe { sys::igGetDrawData() as *const sys::ImDrawData };
+    let actual = draw_data as *const DrawData as *const sys::ImDrawData;
     assert_eq!(
         expected, actual,
         "{caller} received draw data that does not belong to the captured Dear ImGui context"
@@ -78,6 +53,16 @@ pub(super) mod ffi {
         pub fn ImGui_ImplSDL3_Shutdown_Rust();
         pub fn ImGui_ImplSDL3_NewFrame_Rust();
         pub fn ImGui_ImplSDL3_ProcessEvent_Rust(event: *const SDL_Event) -> bool;
+        #[cfg(any(
+            feature = "opengl3-renderer",
+            feature = "sdlrenderer3-renderer",
+            feature = "sdlgpu3-renderer"
+        ))]
+        pub fn dear_imgui_sdl3_backend_set_texture_updates(
+            texture: *mut sys::ImTextureData,
+            updates: *const sys::ImTextureRect,
+            update_count: i32,
+        );
 
         pub fn ImGui_ImplSDL3_SetGamepadMode_AutoFirst_Rust();
         pub fn ImGui_ImplSDL3_SetGamepadMode_AutoAll_Rust();
@@ -146,6 +131,60 @@ pub enum Sdl3BackendError {
     Renderer3InitFailed,
     #[error("ImGui_ImplSDLGPU3_Init returned false")]
     Gpu3InitFailed,
+    #[error("SDL3 runtime belongs to Context {expected:?}, but received Context {actual:?}")]
+    ContextMismatch {
+        expected: dear_imgui_rs::ContextId,
+        actual: dear_imgui_rs::ContextId,
+    },
+    #[error(transparent)]
+    Attachment(#[from] dear_imgui_rs::ContextAttachmentError),
+    #[error(transparent)]
+    Context(#[from] dear_imgui_rs::ContextBindingError),
+    #[error("another platform backend already owns `{callback}`")]
+    PlatformCallbackOccupied { callback: &'static str },
+    #[error("SDL3 platform callback `{callback}` was replaced while the runtime was attached")]
+    PlatformCallbackReplaced { callback: &'static str },
+    #[error("SDL3-owned platform state `{field}` was replaced while the runtime was attached")]
+    PlatformStateReplaced { field: &'static str },
+    #[error("SDL3 platform callback `{callback}` panicked")]
+    PlatformCallbackPanicked { callback: &'static str },
+    #[error("another platform backend already owns BackendPlatformUserData")]
+    PlatformBackendOccupied,
+    #[error("viewport PlatformUserData was replaced by another platform backend")]
+    ForeignPlatformUserData,
+    #[error("SDL3 failed to create a secondary viewport window")]
+    ViewportCreationFailed,
+    #[error("Dear ImGui platform state is unavailable")]
+    PlatformStateUnavailable,
+    #[error("the SDL3 runtime is no longer attached")]
+    RuntimeDetached,
+    #[error("SDL3 shutdown panicked while releasing {phase}")]
+    ShutdownPanicked { phase: &'static str },
+    #[error("SDL3 shutdown is already releasing {phase}")]
+    ShutdownInProgress { phase: &'static str },
+    #[error(transparent)]
+    RendererConsumer(#[from] dear_imgui_rs::render::RendererConsumerError),
+    #[error(transparent)]
+    TextureFeedback(#[from] dear_imgui_rs::render::TextureFeedbackError),
+    #[error("managed texture {texture:?} received an update before renderer creation")]
+    ManagedTextureNotCreated {
+        texture: dear_imgui_rs::render::SnapshotTextureId,
+    },
+    #[error("managed texture {texture:?} request is invalid: {reason}")]
+    InvalidTextureRequest {
+        texture: dear_imgui_rs::render::SnapshotTextureId,
+        reason: &'static str,
+    },
+    #[error("managed texture {texture:?} uses unsupported format {format:?}")]
+    UnsupportedTextureFormat {
+        texture: dear_imgui_rs::render::SnapshotTextureId,
+        format: dear_imgui_rs::TextureFormat,
+    },
+    #[error("official SDL3 renderer failed to {operation} managed texture {texture:?}")]
+    TextureOperationFailed {
+        texture: dear_imgui_rs::render::SnapshotTextureId,
+        operation: &'static str,
+    },
 }
 
 #[cfg(feature = "opengl3-renderer")]
@@ -188,26 +227,23 @@ pub(super) fn shutdown_platform_impl() {
 }
 
 #[cfg(feature = "opengl3-renderer")]
-pub(super) fn shutdown_opengl3_impl() {
+pub(super) fn shutdown_opengl3_renderer_impl() {
     unsafe {
         opengl3_backend::dear_imgui_backend_opengl3_shutdown();
-        ffi::ImGui_ImplSDL3_Shutdown_Rust();
     }
 }
 
 #[cfg(feature = "sdlgpu3-renderer")]
-pub(super) fn shutdown_sdlgpu3_impl() {
+pub(super) fn shutdown_sdlgpu3_renderer_impl() {
     unsafe {
         ffi::dear_imgui_sdl3_backend_sdlgpu3_shutdown();
-        ffi::ImGui_ImplSDL3_Shutdown_Rust();
     }
 }
 
 #[cfg(feature = "sdlrenderer3-renderer")]
-pub(super) fn shutdown_sdlrenderer3_impl() {
+pub(super) fn shutdown_sdlrenderer3_renderer_impl() {
     unsafe {
         ffi::dear_imgui_sdl3_backend_sdlrenderer3_shutdown();
-        ffi::ImGui_ImplSDL3_Shutdown_Rust();
     }
 }
 

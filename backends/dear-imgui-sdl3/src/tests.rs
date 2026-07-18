@@ -1,29 +1,19 @@
 use super::*;
-use crate::core::try_with_context;
-use std::cell::Cell;
+use std::sync::{Mutex, MutexGuard};
+
+static TEST_MUTEX: Mutex<()> = Mutex::new(());
+
+pub(crate) fn test_guard() -> MutexGuard<'static, ()> {
+    TEST_MUTEX
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 #[test]
 fn backend_error_display_is_stable() {
+    let _guard = test_guard();
     assert_eq!(
         Sdl3BackendError::InvalidGlslVersion.to_string(),
         "Invalid GLSL version string"
     );
-}
-
-#[test]
-fn drop_cleanup_rejects_destroyed_context() {
-    let binding = {
-        let context = Context::create();
-        context.binding()
-    };
-    let called = Cell::new(false);
-
-    assert_eq!(
-        try_with_context(&binding, || {
-            called.set(true);
-            true
-        }),
-        None
-    );
-    assert!(!called.get());
 }

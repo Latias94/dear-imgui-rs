@@ -19,8 +19,8 @@ use std::time::Instant;
 
 use ash::khr::{surface as khr_surface, swapchain as khr_swapchain};
 use ash::{Device, Entry, Instance, vk};
-use dear_imgui_ash::{AshRenderer, Options as AshOptions};
-use dear_imgui_rs::{Condition, ConfigFlags, Context};
+use dear_imgui_ash::{AshRenderer, Options as AshOptions, TextureRetirementBatch};
+use dear_imgui_rs::{Condition, ConfigFlags, Context, render::RenderedFrame};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode, Sdl3PlatformBackend};
 use sdl3::event::Event;
 use sdl3::keyboard::Keycode;
@@ -353,9 +353,7 @@ fn destroy_frame_syncs(
     }
 }
 
-fn record_command_buffer<
-    F: FnOnce(vk::CommandBuffer) -> Result<(), dear_imgui_ash::RendererError>,
->(
+fn record_command_buffer<F>(
     device: &Device,
     command_buffer: vk::CommandBuffer,
     render_pass: vk::RenderPass,
@@ -363,7 +361,11 @@ fn record_command_buffer<
     extent: vk::Extent2D,
     clear_color: [f32; 4],
     record: F,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<Option<TextureRetirementBatch>, Box<dyn Error>>
+where
+    F: FnOnce(vk::CommandBuffer) -> dear_imgui_ash::RendererResult<Option<TextureRetirementBatch>>,
+{
+    let texture_retirement;
     unsafe {
         device.begin_command_buffer(
             command_buffer,
@@ -390,12 +392,12 @@ fn record_command_buffer<
             vk::SubpassContents::INLINE,
         );
 
-        record(command_buffer)?;
+        texture_retirement = record(command_buffer)?;
 
         device.cmd_end_render_pass(command_buffer);
         device.end_command_buffer(command_buffer)?;
     }
-    Ok(())
+    Ok(texture_retirement)
 }
 
 fn create_render_pass(device: &Device, format: vk::Format) -> Result<vk::RenderPass, vk::Result> {
@@ -960,7 +962,8 @@ impl Drop for App {
         }
         let _ = unsafe { self.vk.ctx.device.device_wait_idle() };
         self.destroy_external_texture();
-        self.shutdown_platform_backend();
+        let _ = self.imgui.renderer.shutdown(&mut self.imgui.context);
+        let _ = self.shutdown_platform_backend();
     }
 }
 
@@ -1016,7 +1019,7 @@ impl App {
 
         // SDL3 platform backend for Vulkan (sets Platform_CreateVkSurface for multi-viewport).
         let mut sdl3_backend = Sdl3PlatformBackend::init_for_vulkan(&mut context, &window)?;
-        sdl3_backend.set_gamepad_mode(&mut context, GamepadMode::AutoAll);
+        sdl3_backend.set_gamepad_mode(&mut context, GamepadMode::AutoAll)?;
 
         // Create a managed ImGui texture (CPU-side pixels; backend will create GPU texture).
         let tex_w: u32 = 128;
@@ -1129,10 +1132,11 @@ impl App {
         }
     }
 
-    fn shutdown_platform_backend(&mut self) {
-        if let Some(backend) = self.sdl3_backend.take() {
-            backend.shutdown(&mut self.imgui.context);
+    fn shutdown_platform_backend(&mut self) -> Result<(), imgui_sdl3_backend::Sdl3BackendError> {
+        if let Some(mut backend) = self.sdl3_backend.take() {
+            backend.shutdown(&mut self.imgui.context)?;
         }
+        Ok(())
     }
 
     fn update_texture(&mut self) {
@@ -1152,7 +1156,7 @@ impl App {
         }
         self.imgui
             .context
-            .with_texture_mut(self.imgui.img_tex, |texture| texture.set_data(&pixels))
+            .with_texture_mut(self.imgui.img_tex, |mut texture| texture.set_data(&pixels))
             .expect("animated texture should remain active");
         self.imgui.frame = self.imgui.frame.wrapping_add(1);
     }
@@ -1167,7 +1171,7 @@ impl App {
                     .sdl3_backend
                     .as_mut()
                     .expect("SDL3 backend must be active while the app is running");
-                let _ = backend.process_event(&mut self.imgui.context, &raw);
+                let _ = backend.process_event(&mut self.imgui.context, &raw)?;
 
                 let event = Event::from_ll(raw);
                 match event {
@@ -1206,7 +1210,7 @@ impl App {
             self.sdl3_backend
                 .as_mut()
                 .expect("SDL3 backend must be active while the app is running")
-                .new_frame(&mut self.imgui.context);
+                .new_frame(&mut self.imgui.context)?;
             let ui = self.imgui.context.frame();
 
             ui.dockspace_over_main_viewport();
@@ -1258,23 +1262,34 @@ impl App {
                 unsafe { ui.show_demo_window(&mut self.imgui.show_demo) };
             }
 
-            {
-                let draw_data = self.imgui.context.render();
+            let texture_retirement = {
+                let frame = self.imgui.context.render();
                 let clear_color = self.imgui.clear_color;
                 render_main_window(
                     &mut self.vk,
                     &mut self.imgui.renderer,
                     &self.window,
                     clear_color,
-                    draw_data,
-                )?;
-            }
+                    frame,
+                )?
+            };
 
             if self.enable_viewports {
                 let io_flags = self.imgui.context.io().config_flags();
                 if io_flags.contains(ConfigFlags::VIEWPORTS_ENABLE) {
                     self.imgui.context.update_platform_windows();
                     self.imgui.context.render_platform_windows_default();
+                }
+            }
+
+            if let Some(retirement) = texture_retirement {
+                // SAFETY: device idle covers renderer uploads plus every primary and secondary
+                // viewport submission that can still reference textures in this batch.
+                unsafe {
+                    self.vk.ctx.device.device_wait_idle()?;
+                    self.imgui
+                        .renderer
+                        .notify_texture_retirements_completed(retirement)?;
                 }
             }
         }
@@ -1287,7 +1302,8 @@ impl App {
         }
         unsafe { self.vk.ctx.device.device_wait_idle()? };
         self.destroy_external_texture();
-        self.shutdown_platform_backend();
+        self.imgui.renderer.shutdown(&mut self.imgui.context)?;
+        self.shutdown_platform_backend()?;
         Ok(())
     }
 }
@@ -1297,11 +1313,11 @@ fn render_main_window(
     renderer: &mut AshRenderer,
     window: &sdl3::video::Window,
     clear_color: [f32; 4],
-    draw_data: &mut dear_imgui_rs::render::DrawData,
-) -> Result<(), Box<dyn Error>> {
+    rendered_frame: RenderedFrame<'_>,
+) -> Result<Option<TextureRetirementBatch>, Box<dyn Error>> {
     let (width, height) = window.size_in_pixels();
     if width == 0 || height == 0 {
-        return Ok(());
+        return Ok(renderer.pending_texture_retirement());
     }
     if vk_state.swapchain_dirty {
         vk_state
@@ -1332,7 +1348,7 @@ fn render_main_window(
         Ok(v) => v,
         Err(vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR) => {
             vk_state.swapchain_dirty = true;
-            return Ok(());
+            return Ok(renderer.pending_texture_retirement());
         }
         Err(e) => return Err(Box::new(e)),
     };
@@ -1351,21 +1367,20 @@ fn render_main_window(
     vk_state.images_in_flight[image_index as usize] = frame.fence;
 
     unsafe {
-        vk_state.ctx.device.reset_fences(&[frame.fence])?;
         vk_state
             .ctx
             .device
             .reset_command_buffer(frame.command_buffer, vk::CommandBufferResetFlags::empty())?;
     }
 
-    record_command_buffer(
+    let texture_retirement = record_command_buffer(
         &vk_state.ctx.device,
         frame.command_buffer,
         vk_state.render_pass,
         vk_state.swapchain.framebuffers[image_index as usize],
         vk_state.swapchain.extent,
         clear_color,
-        |cmd| renderer.cmd_draw(cmd, draw_data),
+        |cmd| renderer.cmd_draw(cmd, rendered_frame),
     )?;
 
     let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
@@ -1376,6 +1391,7 @@ fn render_main_window(
         .signal_semaphores(std::slice::from_ref(&present_semaphore));
 
     unsafe {
+        vk_state.ctx.device.reset_fences(&[frame.fence])?;
         vk_state.ctx.device.queue_submit(
             vk_state.ctx.queue,
             std::slice::from_ref(&submit_info),
@@ -1403,7 +1419,7 @@ fn render_main_window(
     }
 
     vk_state.frame_index = (vk_state.frame_index + 1) % vk_state.frames.len();
-    Ok(())
+    Ok(texture_retirement)
 }
 
 fn main() -> Result<(), Box<dyn Error>> {

@@ -71,7 +71,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     'running: loop {
         //input
         while let Some(raw) = imgui_sdl3_backend::sdl3_poll_event_ll() {
-            if sdl3_backend.process_event(&mut imgui, &raw) {
+            if sdl3_backend.process_event(&mut imgui, &raw)? {
                 //event was processed by imgui... we could shortcut the loop here
             }
             let event = Event::from_ll(raw);
@@ -97,7 +97,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
 
-        sdl3_backend.new_frame(&mut imgui);
+        sdl3_backend.new_frame(&mut imgui)?;
         let ui = imgui.frame();
 
         ui.window("SDL3 + IMGUI")
@@ -122,7 +122,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
 
         //update/render
-        let draw_data = imgui.render();
+        let frame = imgui.render();
 
         let mut draw_cmd = gpu.acquire_command_buffer()?;
 
@@ -133,11 +133,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .with_load_op(sdl3::gpu::LoadOp::CLEAR)
                 .with_store_op(sdl3::gpu::StoreOp::STORE);
 
-            sdl3_backend.prepare_render(draw_data, &mut draw_cmd);
+            let prepared = sdl3_backend.prepare_render(frame, &draw_cmd)?;
 
             let mut render_pass = gpu.begin_render_pass(&draw_cmd, &[target_info], None)?;
 
-            sdl3_backend.render(draw_data, &mut draw_cmd, &mut render_pass);
+            prepared.render(&mut render_pass)?;
 
             gpu.end_render_pass(render_pass);
 
@@ -153,5 +153,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
+    sdl3_backend.shutdown(&mut imgui)?;
     Ok(())
 }
