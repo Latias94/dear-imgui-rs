@@ -84,12 +84,27 @@ impl MultiSelectResult {
     /// Apply these requests to index-addressable selection storage.
     pub fn apply_requests_indexed<S: MultiSelectIndexStorage>(&self, storage: &mut S) {
         let items_count = self.items_count.min(storage.len());
+        self.apply_request_indices(items_count, |index, selected| {
+            storage.set_selected(index, selected);
+        });
+    }
 
+    /// Apply these requests to a [`BasicSelection`] using an index-to-ID mapping.
+    pub fn apply_requests_basic<G>(&self, selection: &mut BasicSelection, mut id_at_index: G)
+    where
+        G: FnMut(usize) -> Id,
+    {
+        self.apply_request_indices(self.items_count, |index, selected| {
+            selection.set_selected(id_at_index(index), selected);
+        });
+    }
+
+    fn apply_request_indices(&self, items_count: usize, mut set_selected: impl FnMut(usize, bool)) {
         for request in &self.requests {
             match *request {
                 MultiSelectRequest::SetAll { selected } => {
                     for index in 0..items_count {
-                        storage.set_selected(index, selected);
+                        set_selected(index, selected);
                     }
                 }
                 MultiSelectRequest::SetRange {
@@ -104,50 +119,12 @@ impl MultiSelectResult {
                     match direction {
                         MultiSelectRangeDirection::Forward => {
                             for index in range {
-                                storage.set_selected(index, selected);
+                                set_selected(index, selected);
                             }
                         }
                         MultiSelectRangeDirection::Backward => {
                             for index in range.rev() {
-                                storage.set_selected(index, selected);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// Apply these requests to a [`BasicSelection`] using an index-to-ID mapping.
-    pub fn apply_requests_basic<G>(&self, selection: &mut BasicSelection, mut id_at_index: G)
-    where
-        G: FnMut(usize) -> Id,
-    {
-        for request in &self.requests {
-            match *request {
-                MultiSelectRequest::SetAll { selected } => {
-                    for index in 0..self.items_count {
-                        selection.set_selected(id_at_index(index), selected);
-                    }
-                }
-                MultiSelectRequest::SetRange {
-                    selected,
-                    first,
-                    last,
-                    direction,
-                } => {
-                    let Some(range) = indexed_range(first, last, self.items_count) else {
-                        continue;
-                    };
-                    match direction {
-                        MultiSelectRangeDirection::Forward => {
-                            for index in range {
-                                selection.set_selected(id_at_index(index), selected);
-                            }
-                        }
-                        MultiSelectRangeDirection::Backward => {
-                            for index in range.rev() {
-                                selection.set_selected(id_at_index(index), selected);
+                                set_selected(index, selected);
                             }
                         }
                     }

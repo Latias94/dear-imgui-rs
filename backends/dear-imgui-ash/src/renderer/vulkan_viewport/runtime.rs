@@ -1,5 +1,4 @@
 use std::cell::{Cell, RefCell};
-use std::collections::VecDeque;
 use std::fmt;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -202,6 +201,13 @@ pub(super) enum RuntimeState {
     ResourceDropped,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CallbackState {
+    Unclaimed,
+    Claimed,
+    Released,
+}
+
 enum ShutdownAction<'a> {
     Quiesce,
     Explicit(&'a mut Context),
@@ -240,12 +246,11 @@ pub(super) struct RuntimeControl {
     renderer: RefCell<Option<RendererStorage>>,
     globals: RefCell<Option<GlobalHandles>>,
     attachment: RefCell<Option<ContextAttachmentLease>>,
-    callback_claimed: Cell<bool>,
-    callback_released: Cell<bool>,
+    callback_state: Cell<CallbackState>,
     prior_backend_flags: BackendFlags,
     renderer_flags_added: BackendFlags,
     retained_viewports: RefCell<Vec<Box<super::ViewportAshData>>>,
-    faults: RefCell<VecDeque<AshViewportError>>,
+    faults: RefCell<Option<AshViewportError>>,
     #[cfg(test)]
     panic_next_callback: Cell<bool>,
     #[cfg(test)]
@@ -261,8 +266,7 @@ impl fmt::Debug for RuntimeControl {
             .field("context", &self.binding.id())
             .field("state", &self.state.get())
             .field("has_renderer", &self.renderer.borrow().is_some())
-            .field("callback_claimed", &self.callback_claimed.get())
-            .field("callback_released", &self.callback_released.get())
+            .field("callback_state", &self.callback_state.get())
             .finish_non_exhaustive()
     }
 }
@@ -293,12 +297,11 @@ impl RuntimeControl {
             renderer: RefCell::new(Some(renderer)),
             globals: RefCell::new(globals),
             attachment: RefCell::new(None),
-            callback_claimed: Cell::new(false),
-            callback_released: Cell::new(false),
+            callback_state: Cell::new(CallbackState::Unclaimed),
             prior_backend_flags: context.io().backend_flags(),
             renderer_flags_added,
             retained_viewports: RefCell::new(Vec::new()),
-            faults: RefCell::new(VecDeque::new()),
+            faults: RefCell::new(None),
             #[cfg(test)]
             panic_next_callback: Cell::new(false),
             #[cfg(test)]
@@ -325,26 +328,25 @@ impl RuntimeControl {
     }
 
     pub(super) fn is_callback_accessible(&self) -> bool {
-        self.state.get() == RuntimeState::Attached && !self.callback_released.get()
+        self.state.get() == RuntimeState::Attached
+            && self.callback_state.get() != CallbackState::Released
     }
 
     pub(super) fn should_detect_callback_drift(&self) -> bool {
         self.state.get() == RuntimeState::Attached
-            && self.callback_claimed.get()
-            && !self.callback_released.get()
+            && self.callback_state.get() == CallbackState::Claimed
     }
 
     pub(super) fn callback_released(&self) -> bool {
-        self.callback_released.get()
+        self.callback_state.get() == CallbackState::Released
     }
 
     pub(super) fn mark_callback_claimed(&self) {
-        self.callback_claimed.set(true);
-        self.callback_released.set(false);
+        self.callback_state.set(CallbackState::Claimed);
     }
 
     pub(super) fn mark_callback_released(&self) {
-        self.callback_released.set(true);
+        self.callback_state.set(CallbackState::Released);
         unregister_runtime(self.binding.id());
     }
 
@@ -386,8 +388,9 @@ impl RuntimeControl {
     }
 
     pub(super) fn record_fault(&self, fault: AshViewportError) {
-        if self.faults.borrow().is_empty() {
-            self.faults.borrow_mut().push_back(fault);
+        let mut faults = self.faults.borrow_mut();
+        if faults.is_none() {
+            *faults = Some(fault);
         }
     }
 
@@ -398,7 +401,7 @@ impl RuntimeControl {
 
     fn detect_and_take_fault(&self) -> Option<AshViewportError> {
         detect_callback_drift(self);
-        self.faults.borrow_mut().pop_front()
+        self.faults.borrow_mut().take()
     }
 
     fn ensure_context(&self, context: &Context) -> Result<(), AshViewportError> {

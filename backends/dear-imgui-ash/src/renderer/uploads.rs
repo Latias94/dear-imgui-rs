@@ -7,7 +7,7 @@ pub(super) struct InFlightUpload {
     pub(super) managed_texture: Option<SnapshotTextureId>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub(super) enum UploadSignature {
     Create {
         format: ImGuiTextureFormat,
@@ -24,7 +24,7 @@ pub(super) enum UploadSignature {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub(super) struct UploadRectSignature {
     rect: dear_imgui_rs::texture::TextureRect,
     row_pitch: usize,
@@ -156,6 +156,16 @@ where
         }
     }
 
+    pub(super) fn take_completed(&mut self, texture: K) -> Option<TextureId> {
+        let upload = self.uploads.get(&texture)?;
+        if upload.state != UploadState::Complete {
+            return None;
+        }
+        self.uploads
+            .remove(&texture)
+            .map(|upload| upload.texture_id)
+    }
+
     pub(super) fn cancel(&mut self, texture: K) {
         self.uploads.remove(&texture);
     }
@@ -165,6 +175,18 @@ where
             .get(&texture)
             .is_some_and(|upload| upload.state == UploadState::Pending)
     }
+}
+
+pub(super) fn finish_managed_upload_gate<K, E>(
+    tracker: &mut ManagedUploadTracker<K>,
+    texture: K,
+    wait_result: Result<(), E>,
+) -> Result<Option<TextureId>, E>
+where
+    K: Copy + Eq + std::hash::Hash,
+{
+    wait_result?;
+    Ok(tracker.take_completed(texture))
 }
 
 pub(super) fn finish_destroy_upload_gate<K, E>(
@@ -359,25 +381,25 @@ mod tests {
     fn pending_upload_cannot_produce_feedback_until_completion() {
         let mut tracker = ManagedUploadTracker::<u32>::default();
         let texture = 3;
-        let signature = signature(1);
+        let retry_signature = signature(1);
         let texture_id = TextureId::from(42_u64);
 
         assert_eq!(
-            tracker.decide(texture, &signature),
+            tracker.decide(texture, &retry_signature),
             ManagedUploadDecision::Submit
         );
-        tracker.submitted(texture, signature.clone(), texture_id);
+        tracker.submitted(texture, signature(1), texture_id);
         assert_eq!(
-            tracker.decide(texture, &signature),
+            tracker.decide(texture, &retry_signature),
             ManagedUploadDecision::Wait
         );
         tracker.completed(texture);
         assert_eq!(
-            tracker.decide(texture, &signature),
+            tracker.decide(texture, &retry_signature),
             ManagedUploadDecision::Ready(texture_id)
         );
         assert_eq!(
-            tracker.decide(texture, &signature),
+            tracker.decide(texture, &retry_signature),
             ManagedUploadDecision::Submit
         );
     }
@@ -399,6 +421,43 @@ mod tests {
             tracker.decide(texture, &changed),
             ManagedUploadDecision::Submit
         );
+    }
+
+    #[test]
+    fn completed_upload_can_be_taken_without_rechecking_its_signature() {
+        let mut tracker = ManagedUploadTracker::<u32>::default();
+        let texture = 5;
+        let texture_id = TextureId::from(10_u64);
+        tracker.submitted(texture, signature(1), texture_id);
+
+        assert_eq!(tracker.take_completed(texture), None);
+        assert!(tracker.is_pending(texture));
+
+        tracker.completed(texture);
+        assert_eq!(tracker.take_completed(texture), Some(texture_id));
+        assert_eq!(
+            tracker.decide(texture, &signature(2)),
+            ManagedUploadDecision::Submit
+        );
+    }
+
+    #[test]
+    fn recoverable_wait_failure_keeps_managed_upload_owned() {
+        let mut tracker = ManagedUploadTracker::<u32>::default();
+        let texture = 6;
+        let texture_id = TextureId::from(12_u64);
+        tracker.submitted(texture, signature(2), texture_id);
+
+        let result = finish_managed_upload_gate(&mut tracker, texture, Err("wait failed"));
+
+        assert_eq!(result, Err("wait failed"));
+        assert!(tracker.is_pending(texture));
+        tracker.completed(texture);
+        assert_eq!(
+            finish_managed_upload_gate::<_, &str>(&mut tracker, texture, Ok(())),
+            Ok(Some(texture_id))
+        );
+        assert!(!tracker.is_pending(texture));
     }
 
     #[test]

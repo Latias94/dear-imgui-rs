@@ -8,7 +8,6 @@ import platform
 import re
 import shutil
 import sys
-import tempfile
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field, replace
@@ -22,6 +21,7 @@ from _process import (
     managed_background,
     run_bounded,
 )
+from release_evidence import atomic_write_json
 
 
 class GateCategory(str, Enum):
@@ -125,32 +125,6 @@ _FAILURE_PRIORITY = {
 }
 
 
-def write_json_atomic(path: Path, payload: Mapping[str, object]) -> None:
-    """Write JSON without exposing a partially written release result."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_name: str | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            newline="\n",
-            prefix=f".{path.name}.",
-            suffix=".tmp",
-            dir=path.parent,
-            delete=False,
-        ) as temporary:
-            temporary_name = temporary.name
-            json.dump(payload, temporary, indent=2, sort_keys=True)
-            temporary.write("\n")
-            temporary.flush()
-            os.fsync(temporary.fileno())
-        os.replace(temporary_name, path)
-        temporary_name = None
-    finally:
-        if temporary_name is not None:
-            Path(temporary_name).unlink(missing_ok=True)
-
-
 def _evidence_files(evidence_dir: Path) -> tuple[str, ...]:
     return tuple(
         path.relative_to(evidence_dir).as_posix()
@@ -160,7 +134,7 @@ def _evidence_files(evidence_dir: Path) -> tuple[str, ...]:
 
 
 def _finalize(result: GateResult, evidence_dir: Path) -> GateResult:
-    write_json_atomic(
+    atomic_write_json(
         evidence_dir / "gate-invocation.json",
         {
             "schema_version": 1,
@@ -171,7 +145,7 @@ def _finalize(result: GateResult, evidence_dir: Path) -> GateResult:
         },
     )
     result = replace(result, evidence=_evidence_files(evidence_dir))
-    write_json_atomic(evidence_dir / "gate-result.json", result.to_json())
+    atomic_write_json(evidence_dir / "gate-result.json", result.to_json())
     return result
 
 
@@ -185,7 +159,7 @@ def _prepare_evidence(
     evidence_dir.mkdir(parents=True, exist_ok=True)
     for name in ("gate-result.json", "gate-invocation.json", *owned_files):
         (evidence_dir / name).unlink(missing_ok=True)
-    write_json_atomic(
+    atomic_write_json(
         evidence_dir / "gate-invocation.json",
         {
             "schema_version": 1,
@@ -867,7 +841,7 @@ def run_multi_viewport_smoke(
             "lavapipe_icd": str(lavapipe_icd),
             "tools": {name: str(path) for name, path in sorted(tools.items())},
         }
-        write_json_atomic(evidence_dir / "runtime-environment.json", diagnostics)
+        atomic_write_json(evidence_dir / "runtime-environment.json", diagnostics)
         details["environment"] = diagnostics
 
         package_versions = run_bounded(

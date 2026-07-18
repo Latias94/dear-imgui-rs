@@ -118,9 +118,9 @@ impl crate::ui::Ui {
         &self,
         f: impl for<'storage> FnOnce(StateStorage<'storage>) -> R,
     ) -> R {
-        let binding = self.binding();
-        binding
-            .with_bound_context(|| unsafe { f(StateStorage::from_raw(sys::igGetStateStorage())) })
+        self.run_with_bound_context(|| unsafe {
+            f(StateStorage::from_raw(sys::igGetStateStorage()))
+        })
     }
 
     /// Overrides the current state storage while `f` runs.
@@ -145,8 +145,7 @@ impl crate::ui::Ui {
         storage: &mut OwnedStateStorage,
         f: impl for<'storage> FnOnce(StateStorage<'storage>) -> R,
     ) -> R {
-        let binding = self.binding();
-        binding.with_bound_context(|| {
+        self.run_with_bound_context(|| {
             let replacement = storage.as_raw_mut();
             let scoped_storage = unsafe { StateStorage::from_raw(replacement) };
             let previous = unsafe { sys::igGetStateStorage() };

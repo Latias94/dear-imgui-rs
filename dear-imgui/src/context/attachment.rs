@@ -7,7 +7,7 @@ use std::rc::{Rc, Weak};
 
 use thiserror::Error;
 
-use super::binding::{CTX_MUTEX, ContextId, ContextLifecycle, ContextState, RawBoundContextGuard};
+use super::binding::{self, ContextId, ContextLifecycle, ContextState};
 
 /// Ordered phase of Context teardown exposed to an attachment hook.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -111,9 +111,7 @@ impl ContextTeardown<'_> {
             "ContextTeardown used after native Context destruction"
         );
 
-        let _lock = CTX_MUTEX.lock();
-        let _bound = RawBoundContextGuard::bind(raw);
-        f()
+        binding::with_bound_context(raw, f)
     }
 
     #[cfg(test)]

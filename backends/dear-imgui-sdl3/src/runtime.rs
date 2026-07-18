@@ -64,35 +64,43 @@ struct NativeLifecycle {
     platform_shutdown: Rc<dyn Fn()>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReleaseState {
+    Pending,
+    InProgress,
+    Released,
+}
+
+impl ReleaseState {
+    fn is_released(self) -> bool {
+        self == Self::Released
+    }
+}
+
 struct ReleaseGuard<'a> {
-    in_progress: &'a Cell<bool>,
-    released: &'a Cell<bool>,
-    committed: bool,
+    state: &'a Cell<ReleaseState>,
 }
 
 impl<'a> ReleaseGuard<'a> {
-    fn begin(in_progress: &'a Cell<bool>, released: &'a Cell<bool>) -> Option<Self> {
-        if released.get() || in_progress.replace(true) {
-            return None;
+    fn begin(state: &'a Cell<ReleaseState>) -> Option<Self> {
+        match state.get() {
+            ReleaseState::Pending => {
+                state.set(ReleaseState::InProgress);
+                Some(Self { state })
+            }
+            ReleaseState::InProgress | ReleaseState::Released => None,
         }
-        Some(Self {
-            in_progress,
-            released,
-            committed: false,
-        })
     }
 
-    fn commit(mut self) {
-        self.released.set(true);
-        self.in_progress.set(false);
-        self.committed = true;
+    fn commit(self) {
+        self.state.set(ReleaseState::Released);
     }
 }
 
 impl Drop for ReleaseGuard<'_> {
     fn drop(&mut self) {
-        if !self.committed {
-            self.in_progress.set(false);
+        if self.state.get() == ReleaseState::InProgress {
+            self.state.set(ReleaseState::Pending);
         }
     }
 }
@@ -110,10 +118,8 @@ pub(super) struct RuntimeControl {
     binding: ContextBinding,
     state: Cell<RuntimeState>,
     native_initialized: Cell<bool>,
-    renderer_released: Cell<bool>,
-    renderer_release_in_progress: Cell<bool>,
-    platform_released: Cell<bool>,
-    platform_release_in_progress: Cell<bool>,
+    renderer_release: Cell<ReleaseState>,
+    platform_release: Cell<ReleaseState>,
     callback_teardown_active: Cell<bool>,
     platform_io_key: Cell<usize>,
     lifecycle: NativeLifecycle,
@@ -132,8 +138,8 @@ impl fmt::Debug for RuntimeControl {
             .field("context", &self.binding.id())
             .field("state", &self.state.get())
             .field("native_initialized", &self.native_initialized.get())
-            .field("renderer_released", &self.renderer_released.get())
-            .field("platform_released", &self.platform_released.get())
+            .field("renderer_released", &self.renderer_released())
+            .field("platform_released", &self.platform_released())
             .finish_non_exhaustive()
     }
 }
@@ -148,10 +154,12 @@ impl RuntimeControl {
             binding: context.binding(),
             state: Cell::new(RuntimeState::Attached),
             native_initialized: Cell::new(false),
-            renderer_released: Cell::new(renderer_shutdown.is_none()),
-            renderer_release_in_progress: Cell::new(false),
-            platform_released: Cell::new(false),
-            platform_release_in_progress: Cell::new(false),
+            renderer_release: Cell::new(if renderer_shutdown.is_none() {
+                ReleaseState::Released
+            } else {
+                ReleaseState::Pending
+            }),
+            platform_release: Cell::new(ReleaseState::Pending),
             callback_teardown_active: Cell::new(false),
             platform_io_key: Cell::new(0),
             lifecycle: NativeLifecycle {
@@ -187,13 +195,19 @@ impl RuntimeControl {
         }
     }
 
+    fn renderer_released(&self) -> bool {
+        self.renderer_release.get().is_released()
+    }
+
+    fn platform_released(&self) -> bool {
+        self.platform_release.get().is_released()
+    }
+
     fn release_renderer_bound(&self) -> bool {
-        if self.renderer_released.get() {
+        if self.renderer_released() {
             return true;
         }
-        let Some(release) =
-            ReleaseGuard::begin(&self.renderer_release_in_progress, &self.renderer_released)
-        else {
+        let Some(release) = ReleaseGuard::begin(&self.renderer_release) else {
             return false;
         };
         #[cfg(test)]
@@ -208,13 +222,11 @@ impl RuntimeControl {
     }
 
     fn release_platform_bound(&self) -> Result<(), Sdl3BackendError> {
-        if self.platform_released.get() {
+        if self.platform_released() {
             self.finish_shutdown();
             return Ok(());
         }
-        let Some(release) =
-            ReleaseGuard::begin(&self.platform_release_in_progress, &self.platform_released)
-        else {
+        let Some(release) = ReleaseGuard::begin(&self.platform_release) else {
             return Ok(());
         };
         if !self.release_renderer_bound() {
@@ -270,7 +282,7 @@ impl RuntimeControl {
     }
 
     fn release_renderer_explicit(&self) -> Result<(), Sdl3BackendError> {
-        if self.renderer_released.get() {
+        if self.renderer_released() {
             return Ok(());
         }
         let result = self.binding.try_with_bound_context(|| {
@@ -288,7 +300,7 @@ impl RuntimeControl {
     }
 
     fn release_platform_explicit(&self) -> Result<(), Sdl3BackendError> {
-        if self.platform_released.get() {
+        if self.platform_released() {
             self.finish_shutdown();
             return Ok(());
         }
@@ -446,10 +458,8 @@ impl RuntimeControl {
         self.callbacks.borrow_mut().take();
         self.owned_viewports.borrow_mut().clear();
         self.native_initialized.set(false);
-        self.renderer_released.set(true);
-        self.renderer_release_in_progress.set(false);
-        self.platform_released.set(true);
-        self.platform_release_in_progress.set(false);
+        self.renderer_release.set(ReleaseState::Released);
+        self.platform_release.set(ReleaseState::Released);
         self.state.set(RuntimeState::Detached);
     }
 
@@ -631,10 +641,8 @@ impl RuntimeRegistration {
                 restore_baseline_after_failed_initialization(baseline)
             });
         }
-        self.control.renderer_released.set(true);
-        self.control.renderer_release_in_progress.set(false);
-        self.control.platform_released.set(true);
-        self.control.platform_release_in_progress.set(false);
+        self.control.renderer_release.set(ReleaseState::Released);
+        self.control.platform_release.set(ReleaseState::Released);
         self.control.state.set(RuntimeState::Detached);
         self.detach_attachments();
     }
@@ -685,12 +693,12 @@ impl RuntimeRegistration {
 
         self.control.begin_shutdown();
         let renderer_result = self.control.release_renderer_explicit();
-        let renderer_retry_result = if self.control.renderer_released.get() {
+        let renderer_retry_result = if self.control.renderer_released() {
             Ok(())
         } else {
             self.control.release_renderer_explicit()
         };
-        let (reset_result, platform_result) = if self.control.renderer_released.get() {
+        let (reset_result, platform_result) = if self.control.renderer_released() {
             after_renderer_release();
             let reset_result = consumer
                 .map(|consumer| context.reset_renderer_texture_bindings(consumer))

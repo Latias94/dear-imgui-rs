@@ -1,3 +1,4 @@
+use super::uploads::finish_managed_upload_gate;
 use super::*;
 
 #[derive(Debug)]
@@ -893,8 +894,19 @@ impl AshRenderer {
                     }
                     upload.managed_texture = Some(snapshot_id);
                     self.managed_uploads
-                        .submitted(snapshot_id, signature.clone(), texture_id);
-                    self.wait_for_managed_upload(snapshot_id)?;
+                        .submitted(snapshot_id, signature, texture_id);
+                    let upload_wait = self.wait_for_managed_upload(snapshot_id);
+                    let texture_id = finish_managed_upload_gate(
+                        &mut self.managed_uploads,
+                        snapshot_id,
+                        upload_wait,
+                    )?
+                    .ok_or_else(|| {
+                        RendererError::InvalidRenderState(format!(
+                            "managed texture {snapshot_id:?} completed without tracked feedback"
+                        ))
+                    })?;
+                    return Ok(request.uploaded(texture_id)?);
                 }
             }
         }

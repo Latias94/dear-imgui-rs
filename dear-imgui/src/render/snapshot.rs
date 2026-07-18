@@ -179,18 +179,18 @@ impl Drop for RendererConsumer {
 /// ```
 #[derive(Debug)]
 pub struct FrameSnapshot {
-    draw: DrawDataSnapshot,
+    main_draw: MainDrawSnapshot,
     viewports: Vec<ViewportDrawDataSnapshot>,
     texture_requests: Vec<TextureRequest>,
     epoch: SnapshotEpoch,
-    completion: Option<CompletionTicket>,
+    completion: CompletionTicket,
 }
 
 impl FrameSnapshot {
     /// Main viewport draw data.
     #[must_use]
     pub const fn draw_data(&self) -> &DrawDataSnapshot {
-        &self.draw
+        self.main_draw.draw_data(self.viewports.as_slice())
     }
 
     /// Per-viewport draw data captured for this frame.
@@ -226,14 +226,28 @@ impl FrameSnapshot {
     /// by a later snapshot. Feedback is validated and applied only when this epoch reaches the
     /// Context's contiguous completion watermark.
     pub fn commit(
-        mut self,
+        self,
         feedback: impl IntoIterator<Item = TextureFeedback>,
     ) -> Result<(), SnapshotCommitError> {
-        let ticket = self
-            .completion
-            .take()
-            .expect("FrameSnapshot completion ticket was consumed twice");
-        ticket.commit(feedback.into_iter().collect())
+        self.completion.commit(feedback.into_iter().collect())
+    }
+}
+
+#[derive(Debug)]
+enum MainDrawSnapshot {
+    Standalone(DrawDataSnapshot),
+    Viewport(usize),
+}
+
+impl MainDrawSnapshot {
+    const fn draw_data<'a>(
+        &'a self,
+        viewports: &'a [ViewportDrawDataSnapshot],
+    ) -> &'a DrawDataSnapshot {
+        match self {
+            Self::Standalone(draw) => draw,
+            Self::Viewport(index) => &viewports[*index].draw,
+        }
     }
 }
 
@@ -253,41 +267,12 @@ pub struct DrawDataSnapshot {
     pub draw_lists: Vec<DrawListSnapshot>,
 }
 
-impl DrawDataSnapshot {
-    fn duplicate_for_main_viewport(&self) -> Self {
-        Self {
-            display_pos: self.display_pos,
-            display_size: self.display_size,
-            framebuffer_scale: self.framebuffer_scale,
-            draw_lists: self
-                .draw_lists
-                .iter()
-                .map(DrawListSnapshot::duplicate_for_main_viewport)
-                .collect(),
-        }
-    }
-}
-
 /// Thread-safe draw list snapshot.
 #[derive(Debug)]
 pub struct DrawListSnapshot {
     pub vtx: Vec<DrawVert>,
     pub idx: Vec<DrawIdx>,
     pub commands: Vec<DrawCmdSnapshot>,
-}
-
-impl DrawListSnapshot {
-    fn duplicate_for_main_viewport(&self) -> Self {
-        Self {
-            vtx: self.vtx.clone(),
-            idx: self.idx.clone(),
-            commands: self
-                .commands
-                .iter()
-                .map(DrawCmdSnapshot::duplicate_for_main_viewport)
-                .collect(),
-        }
-    }
 }
 
 /// Thread-safe draw command snapshot.
@@ -303,29 +288,6 @@ pub enum DrawCmdSnapshot {
     ResetRenderState,
     SetSamplerLinear,
     SetSamplerNearest,
-}
-
-impl DrawCmdSnapshot {
-    fn duplicate_for_main_viewport(&self) -> Self {
-        match *self {
-            Self::Elements {
-                count,
-                clip_rect,
-                texture,
-                vtx_offset,
-                idx_offset,
-            } => Self::Elements {
-                count,
-                clip_rect,
-                texture,
-                vtx_offset,
-                idx_offset,
-            },
-            Self::ResetRenderState => Self::ResetRenderState,
-            Self::SetSamplerLinear => Self::SetSamplerLinear,
-            Self::SetSamplerNearest => Self::SetSamplerNearest,
-        }
-    }
 }
 
 /// Operation kind encoded into a texture request and its feedback.
@@ -648,28 +610,23 @@ pub(crate) struct PendingTextureRequest {
 
 #[derive(Debug)]
 pub(crate) struct PendingSnapshot {
-    pub(crate) draw: DrawDataSnapshot,
+    main_draw: MainDrawSnapshot,
     pub(crate) viewports: Vec<ViewportDrawDataSnapshot>,
     pub(crate) texture_requests: Vec<PendingTextureRequest>,
 }
 
 impl PendingSnapshot {
+    fn draw_data(&self) -> &DrawDataSnapshot {
+        self.main_draw.draw_data(&self.viewports)
+    }
+
     pub(crate) fn referenced_user_textures(&self) -> HashSet<ManagedTextureId> {
         let mut referenced = HashSet::new();
-        for draw in
-            std::iter::once(&self.draw).chain(self.viewports.iter().map(|viewport| &viewport.draw))
-        {
-            for list in &draw.draw_lists {
-                for command in &list.commands {
-                    if let DrawCmdSnapshot::Elements {
-                        texture: TextureBinding::Managed(SnapshotTextureId::User(id)),
-                        ..
-                    } = command
-                    {
-                        referenced.insert(*id);
-                    }
-                }
-            }
+        if matches!(&self.main_draw, MainDrawSnapshot::Standalone(_)) {
+            collect_referenced_user_textures(self.draw_data(), &mut referenced);
+        }
+        for viewport in &self.viewports {
+            collect_referenced_user_textures(&viewport.draw, &mut referenced);
         }
         for request in &self.texture_requests {
             if let SnapshotTextureId::User(id) = request.texture {
@@ -687,18 +644,35 @@ impl PendingSnapshot {
         let (texture_requests, expected) = finalize_texture_requests(self.texture_requests, epoch);
         (
             FrameSnapshot {
-                draw: self.draw,
+                main_draw: self.main_draw,
                 viewports: self.viewports,
                 texture_requests,
                 epoch,
-                completion: Some(CompletionTicket {
+                completion: CompletionTicket {
                     epoch,
                     sender,
                     completed: false,
-                }),
+                },
             },
             expected,
         )
+    }
+}
+
+fn collect_referenced_user_textures(
+    draw: &DrawDataSnapshot,
+    referenced: &mut HashSet<ManagedTextureId>,
+) {
+    for list in &draw.draw_lists {
+        for command in &list.commands {
+            if let DrawCmdSnapshot::Elements {
+                texture: TextureBinding::Managed(SnapshotTextureId::User(id)),
+                ..
+            } = command
+            {
+                referenced.insert(*id);
+            }
+        }
     }
 }
 
@@ -743,9 +717,15 @@ pub(crate) fn capture_draw_data(
 ) -> Result<PendingSnapshot, SnapshotError> {
     let draw = snapshot_draw_data(draw_data, resolve)?;
     let texture_requests = snapshot_texture_requests(draw_data, resolve)?;
-    let viewports = viewport_draw_data_snapshots_from_draw_data(draw_data, &draw);
+    let (main_draw, viewports) = match owner_viewport_id(draw_data) {
+        Some(viewport_id) => (
+            MainDrawSnapshot::Viewport(0),
+            vec![ViewportDrawDataSnapshot { viewport_id, draw }],
+        ),
+        None => (MainDrawSnapshot::Standalone(draw), Vec::new()),
+    };
     Ok(PendingSnapshot {
-        draw,
+        main_draw,
         viewports,
         texture_requests,
     })
@@ -781,7 +761,7 @@ pub(crate) fn capture_platform_io(
 
     let Some(main_draw_index) = main_draw_index else {
         return Ok(PendingSnapshot {
-            draw: empty_draw_data_snapshot(),
+            main_draw: MainDrawSnapshot::Standalone(empty_draw_data_snapshot()),
             viewports: Vec::new(),
             texture_requests: Vec::new(),
         });
@@ -791,9 +771,7 @@ pub(crate) fn capture_platform_io(
         resolve,
     )?;
     Ok(PendingSnapshot {
-        draw: viewports[main_draw_index]
-            .draw
-            .duplicate_for_main_viewport(),
+        main_draw: MainDrawSnapshot::Viewport(main_draw_index),
         viewports,
         texture_requests,
     })
@@ -807,19 +785,6 @@ fn empty_draw_data_snapshot() -> DrawDataSnapshot {
         framebuffer_scale: [1.0, 1.0],
         draw_lists: Vec::new(),
     }
-}
-
-fn viewport_draw_data_snapshots_from_draw_data(
-    draw_data: &DrawData,
-    draw: &DrawDataSnapshot,
-) -> Vec<ViewportDrawDataSnapshot> {
-    let Some(viewport_id) = owner_viewport_id(draw_data) else {
-        return Vec::new();
-    };
-    vec![ViewportDrawDataSnapshot {
-        viewport_id,
-        draw: draw.duplicate_for_main_viewport(),
-    }]
 }
 
 fn owner_viewport_id(draw_data: &DrawData) -> Option<Id> {
@@ -1185,8 +1150,12 @@ mod tests {
             Err(SnapshotError::UnknownManagedTexture)
         })
         .expect("empty draw data should capture");
-        assert_eq!(pending.draw.display_size, [640.0, 360.0]);
+        assert_eq!(pending.draw_data().display_size, [640.0, 360.0]);
         assert_eq!(pending.viewports[0].draw.display_size, [320.0, 200.0]);
+        assert!(std::ptr::eq(
+            pending.draw_data(),
+            &pending.viewports[1].draw
+        ));
 
         unsafe {
             sys::ImDrawData_destroy(secondary_draw);

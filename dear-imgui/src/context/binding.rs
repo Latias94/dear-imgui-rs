@@ -271,11 +271,15 @@ impl RawBoundContextGuard {
     pub(crate) fn bind(target: *mut sys::ImGuiContext) -> Self {
         unsafe {
             let previous = sys::igGetCurrentContext();
-            let previous_state = MANAGED_CONTEXTS
-                .try_with(|contexts| contexts.borrow().get(&(previous as usize)).cloned())
-                .ok()
-                .flatten();
             let restore = previous != target;
+            let previous_state = if restore {
+                MANAGED_CONTEXTS
+                    .try_with(|contexts| contexts.borrow().get(&(previous as usize)).cloned())
+                    .ok()
+                    .flatten()
+            } else {
+                None
+            };
             if restore {
                 sys::igSetCurrentContext(target);
             }
