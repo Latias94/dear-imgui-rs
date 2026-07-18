@@ -77,11 +77,17 @@ not move callback-visible renderer storage. Callback replacement, panic, reentry
 terminal surface failures are contained at the C ABI boundary and returned by `poll_fault` or the
 next Rust runtime entry.
 
-From a repository checkout, run the native Winit/WGPU Test Engine smoke to move a window into a real secondary OS viewport, render its surface, merge it back, and verify ordered teardown. `test-engine` is source-only, so this command intentionally builds Dear ImGui from source:
+From a repository checkout, run the same native Winit/WGPU Test Engine contract used by the
+release gate. It moves a window into a real secondary OS viewport, renders its GPU surface, merges
+it back, and verifies ordered teardown. `test-engine` is source-only, so this command intentionally
+builds Dear ImGui from source:
 
 ```bash
-DEAR_IMGUI_VIEWPORT_SMOKE=1 cargo run -p dear-imgui-examples --bin multi_viewport_wgpu --features "multi-viewport test-engine"
+python3 tools/ci/run_contract.py multi-viewport-smoke
 ```
+
+Linux CI supplies Xvfb and Mesa/Lavapipe. Missing display or software-GPU infrastructure is an
+infrastructure failure, not a skipped success.
 
 Shut down renderer ownership before the platform runtime:
 
@@ -100,6 +106,11 @@ The renderer runtime releases `RendererUserData`, surfaces, callbacks, and rende
 it never enters the platform-window phase. The Winit or SDL3 platform owner remains solely
 responsible for destroying native windows. Context-first teardown invokes the same shared state
 machine in ordered renderer-resource and platform-window phases.
+
+Managed texture shutdown follows the same ownership rule. The runtime destroys the actual WGPU
+textures first, calls `Context::reset_renderer_texture_bindings(&consumer)` while its generation is
+idle, and only then releases the consumer. This causes live textures to be requested again after a
+device rebuild without acknowledging a destroy that never happened.
 
 Explicit renderer shutdown is idempotent and retryable. In particular, an outstanding detached
 snapshot leaves the runtime in `Detached` with its renderer retained; finish or abandon the epoch,
@@ -157,7 +168,7 @@ See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob
 
 ## Features
 
-- Default: no extra features required for native builds
+- Default: `wgpu-30`; no extra feature is required for a native WGPU 30 build
 - WGPU version selection (mutually exclusive)
   - `wgpu-30` (default)
   - `wgpu-29`

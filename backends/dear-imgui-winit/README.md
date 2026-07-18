@@ -50,8 +50,8 @@ impl winit::application::ApplicationHandler for App {
                 self.imgui.platform.prepare_render_with_ui(&ui, &window);
 
                 // 5) render via your renderer backend
-                let draw_data = self.imgui.context.render();
-                /* renderer.render(&draw_data) */
+                let frame = self.imgui.context.render();
+                /* renderer.render(frame, ...); */
             }
             _ => {}
         }
@@ -167,7 +167,8 @@ Multi-viewport support is available behind the `multi-viewport` feature and is
 
 The platform side is an owning runtime. It keeps the main `Arc<Window>` and every
 secondary window alive, owns the callback table, and participates in phased Context
-teardown. Winit's `ActiveEventLoop` is available to callbacks only inside a closure:
+teardown. Moving the wrapper does not move callback-visible state. Winit's
+`ActiveEventLoop` is available to native callbacks only inside a non-escaping closure:
 
 ```rust,ignore
 let mut viewport_runtime = WinitPlatformRuntime::new(&mut imgui, Arc::clone(&window))?;
@@ -181,11 +182,19 @@ viewport_runtime.with_event_loop(event_loop, |_| {
 viewport_runtime.shutdown()?;
 ```
 
+Callback panics and window-creation failures are contained before returning
+through C++. `with_event_loop`, `handle_event`, and `poll_fault` report the
+deferred `WinitPlatformError` on the Rust side. Explicit `shutdown` is
+idempotent and reports cleanup failures; dropping either the runtime or the
+Context enters the same attachment state machine on a best-effort basis.
+
 Current support matrix:
 
 - **winit + WGPU**: experimental native multi-viewport, exercised by the
   `multi_viewport_wgpu` example.
-  - Enabled on Windows/macOS/Linux; tested on Windows/macOS, Linux untested.
+  - Enabled on Windows/macOS/Linux. The release gate runs a real Linux secondary-window and GPU-
+    surface lifecycle under Xvfb with Mesa/Lavapipe; missing display or software-GPU
+    infrastructure fails that gate.
   - Example:
     `cargo run -p dear-imgui-examples --bin multi_viewport_wgpu --features multi-viewport`
 - **winit + OpenGL (glow/glutin)**: no official multi-viewport stack yet.

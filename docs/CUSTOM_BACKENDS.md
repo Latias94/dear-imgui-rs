@@ -44,8 +44,9 @@ Examples:
 - a render graph built on `wgpu`, Vulkan, OpenGL, DirectX, or Metal
 - a game framework that exposes raw draw surfaces and input events
 
-Use `dear-imgui-rs` APIs directly. Translate events into `Io`, render
-`DrawData`, and update `TextureData` requests.
+Use `dear-imgui-rs` APIs directly. Translate events into `Io`, consume a
+Context-owned `RenderedFrame`, and return request-bound texture feedback. Use a
+move-only `FrameSnapshot` only when rendering must leave the UI thread.
 
 ### Official Dear ImGui C++ backend
 
@@ -72,10 +73,13 @@ stable enough to document.
 Every integration has this shape:
 
 ```rust,no_run
-use dear_imgui_rs::{Condition, Context};
+use dear_imgui_rs::{
+    Condition, Context,
+    render::{RenderedFrame, RendererConsumer, RendererConsumerError},
+};
 
 # struct MyPlatformBackend;
-# struct MyRendererBackend;
+# struct MyRendererBackend { _consumer: RendererConsumer }
 # struct MyWindow;
 # struct MyEvent;
 # impl MyPlatformBackend {
@@ -85,12 +89,17 @@ use dear_imgui_rs::{Condition, Context};
 #     fn prepare_render(&mut self, _: &mut Context, _: &MyWindow) {}
 # }
 # impl MyRendererBackend {
-#     fn new(_: &mut Context) -> Self { Self }
-#     fn render(&mut self, _: &mut dear_imgui_rs::render::DrawData) {}
+#     fn new(context: &mut Context) -> Result<Self, RendererConsumerError> {
+#         Ok(Self { _consumer: context.create_renderer_consumer()? })
+#     }
+#     fn render(&mut self, _frame: RenderedFrame<'_>) -> Result<(), RendererConsumerError> {
+#         // Implement the request/reconcile/draw sequence in the complete template below.
+#         todo!()
+#     }
 # }
 # let mut imgui = Context::create();
 # let mut platform = MyPlatformBackend::new(&mut imgui);
-# let mut renderer = MyRendererBackend::new(&mut imgui);
+# let mut renderer = MyRendererBackend::new(&mut imgui).unwrap();
 # let window = MyWindow;
 # let event = MyEvent;
 
@@ -111,14 +120,17 @@ ui.window("Tools")
 // 4) Let the platform backend apply post-UI state such as cursor shape or IME.
 platform.prepare_render(&mut imgui, &window);
 
-// 5) Render the draw data. Renderer backends should take mutable draw data so
-// texture status/TexID feedback can be written back.
-let draw_data = imgui.render();
-renderer.render(draw_data);
+// 5) Move the Context-borrowed lease into the renderer. A real backend must
+// reconcile every texture result before reading dependent draw commands.
+let frame = imgui.render();
+renderer.render(frame).unwrap();
 ```
 
-Keep the ImGui context alive longer than every platform and renderer object that
-stores raw Dear ImGui pointers or backend user-data pointers.
+An owning backend should register its callback state as a Context attachment.
+That lets explicit backend shutdown and Context-first teardown enter the same
+idempotent state machine. Keep external prerequisites such as windows, devices,
+queues, and Vulkan instances alive until that teardown has released every
+backend resource.
 
 ## Platform Backend Template
 
@@ -339,6 +351,8 @@ the renderer:
 - Call `Context::poll_snapshot_completions` on the UI thread before creating later frames.
 - Keep GPU resources in a renderer-owned map keyed by `SnapshotTextureId`; never retain a native
   `TextureData` pointer.
+- Keep the non-cloneable `RendererConsumer` on the UI thread. One Context permits one active
+  consumer generation, and its first frame fixes that generation to synchronous or detached mode.
 
 The Bevy backend is the best workspace example of this split.
 
@@ -354,13 +368,15 @@ correct. Multi-viewport requires both platform and renderer support:
 - Backend user-data pointers must be cleared when viewports or renderer state
   are destroyed.
 
-Install the platform backend first and the renderer backend second, before any
-secondary platform window exists. A renderer owns only the five `Renderer_*`
-slots and each viewport's renderer user data; it must not replace `Platform_*`
-slots or foreign `RendererUserData`. Registration should fail atomically when a
-slot is occupied. Shutdown runs in reverse ownership order: destroy secondary
-windows and release renderer callbacks/resources, then release the platform
-callbacks and windows.
+Install the owning platform runtime first and the owning renderer runtime
+second, before any secondary platform window exists. A renderer owns only the
+five `Renderer_*` slots and each viewport's renderer user data; it must not
+replace `Platform_*` slots or foreign `RendererUserData`. Registration should
+fail atomically when a slot is occupied. The runtime, not the caller, keeps
+callback-visible state at a stable address. Explicit shutdown runs in reverse
+ownership order: release renderer callbacks and GPU resources, then release
+platform callbacks and windows. Context-first drop invokes those same ordered
+attachment phases as a best-effort fallback.
 
 For first-party patterns, compare `dear-imgui-winit`,
 `dear-imgui-sdl3`, `dear-imgui-wgpu`, `dear-imgui-glow`, and
@@ -479,6 +495,11 @@ Before publishing a first-party backend crate, document:
   coordinates.
 - Keeping stale `BackendPlatformUserData`, `BackendRendererUserData`, or
   texture backend user-data after a window, renderer, or texture is destroyed.
+- Acknowledging `TextureOp::Destroy` when CPU command recording finishes rather
+  than after the GPU can no longer reference the resource.
+- Dropping a renderer consumer before detached epochs have committed or been
+  abandoned, then trying to attach another consumer while the old generation is
+  still draining.
 - Starting with multi-viewport before single-window lifecycle, resize, and
   texture cleanup are correct.
 - Hiding application-owned lifecycle work inside a backend crate, especially on

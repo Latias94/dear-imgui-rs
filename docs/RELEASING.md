@@ -1,7 +1,8 @@
 # Releasing (sys crates with offline docs.rs)
 
-> **Note**: For a complete publishing guide including automated scripts, see [PUBLISHING.md](./PUBLISHING.md).
-> This document focuses on the technical details of sys crate bindings generation.
+> **Note**: For the current operator commands, see
+> [`tools/README.md`](../tools/README.md). This document covers sys binding
+> generation, provenance, and the release evidence contract.
 
 The `-sys` crates must build docs on docs.rs without network, Git metadata, or submodules. Core Dear ImGui publishes three checked-in artifacts: `bindings_pregenerated_windows.rs`, `bindings_pregenerated.rs` for the supported non-Windows native whitelist, and `wasm_bindings_pregenerated.rs` for the fixed browser import ABI. Extension sys crates keep their native and optional WASM pregenerated files.
 
@@ -17,7 +18,8 @@ Supported crates:
 
 ## Prerequisites
 - `git`, `cargo`, and Python 3.11+ in PATH.
-- Clean working tree (or use a temp branch).
+- A clean, committed release candidate. Local and remote release gates bind to
+  the exact 40-hex `HEAD`; a branch name is not release evidence.
 - If you want to update third-party code, allow the script to update submodules/branches.
 
 ## Binding update workflow
@@ -104,6 +106,46 @@ The exact 40-hex cimgui and nested Dear ImGui revisions are package metadata, no
 
 A `dear-imgui-sys` core native prebuilt is accepted only when its manifest exactly matches crate/version, target triple, static link type, MSVC CRT, normalized features, both source revisions, and binding-spec hash. The normal, freetype, stack-layout, and stack-layout + freetype combinations have different names and manifests. Missing, duplicate, unknown, or mismatched fields reject the core artifact.
 
+The six safe extension crates (`dear-implot`, `dear-implot3d`, `dear-imnodes`,
+`dear-imguizmo`, `dear-imguizmo-quat`, and `dear-node-editor`) forward
+`prebuilt` and `build-from-source` through both core and extension sys crates.
+Source wins when Cargo unifies both routes. Each extension prebuilt manifest
+binds its source and binding identity to the exact core artifact and candidate
+SHA. Test Engine is separate: its crate-local source/shim/generator provenance
+is reproducible, but it is native source-only and never appears in a prebuilt
+artifact profile.
+
+## Release gates and evidence
+
+A release requires both gates for the same commit:
+
+1. `python3 tools/tasks.py release-check` succeeds from a clean, committed
+   working tree.
+2. `.github/workflows/release-gate.yml` returns `Go` for that exact full SHA.
+
+The remote aggregate has a fixed 13-cell inventory: Linux Test Engine runtime,
+Linux real Winit/WGPU viewport smoke, Linux WASM, Windows vcpkg, Windows MSVC
+`/MD` and `/MT`, Windows GNU imports, macOS, and five prebuilt producer/consumer
+targets (Linux x86_64, macOS x86_64/aarch64, and Windows MSVC `/MD`/`/MT`). A
+missing, failed, skipped, cancelled, timed-out, malformed, duplicate, or wrong-
+SHA cell is `No-Go`; the caller cannot narrow the production inventory.
+
+The run retains `gate-result.json`, stdout/stderr, runtime invocation/results,
+Xvfb/Mesa display and adapter data, target/CRT/vcpkg/MinGW metadata, binding
+hashes, manifests, candidate SHA, and SHA256 evidence for approximately 30
+days. Verify a downloaded aggregate locally before publishing:
+
+```bash
+python3 tools/ci/release_evidence.py verify \
+  --repo-root . \
+  --candidate-sha CANDIDATE_SHA \
+  --gate-result artifacts/release-gate/gate-result.json
+```
+
+Headless Test Engine success does not replace the real viewport cell. Missing
+display or software-GPU infrastructure is a failed remote gate, not a skipped
+success.
+
 ## Pre-publish checks
 Verify all `-sys` crates have pregenerated bindings and build in docs mode locally:
 
@@ -141,10 +183,13 @@ These checks generate/use bindings only and won’t build/link native code.
 > git diff
 > git add -A && git commit -m "chore: prepare release v0.16.0"
 > python3 tools/tasks.py release-check
+> git rev-parse HEAD
+> gh workflow run release-gate.yml -f candidate_sha=FULL_40_HEX_SHA
+> gh run download RELEASE_GATE_RUN_ID --name release-gate-FULL_40_HEX_SHA --dir artifacts/release-gate
 > python3 tools/tasks.py publish --dry-run
-> python3 tools/tasks.py publish
+> python3 tools/tasks.py publish --release-gate-result artifacts/release-gate/gate-result.json
 > ```
-> See [PUBLISHING.md](./PUBLISHING.md) for details.
+> See [`tools/README.md`](../tools/README.md) for the corresponding operator commands.
 
 Manual workflow:
 
@@ -156,20 +201,41 @@ git add -A
 git commit -m "chore: prepare release v0.16.0"
 ```
 4) Run `python3 tools/tasks.py release-check` from the clean committed tree.
-5) Publish the complete 27-package train through the shared authoritative order:
+5) Dispatch `.github/workflows/release-gate.yml` with its sole required input,
+the full output of `git rev-parse HEAD`:
+```
+gh workflow run release-gate.yml -f candidate_sha=FULL_40_HEX_SHA
+gh run download RELEASE_GATE_RUN_ID \
+  --name release-gate-FULL_40_HEX_SHA \
+  --dir artifacts/release-gate
+```
+Wait for all 13 cells and require `Go`; the downloaded artifact contains the
+authoritative `gate-result.json`.
+6) Publish the complete 27-package train through the shared authoritative order:
 ```
 python3 tools/publish.py --dry-run
-python3 tools/publish.py
+python3 tools/publish.py \
+  --release-gate-result artifacts/release-gate/gate-result.json
 ```
-The script reruns the strict preflight, targets `crates-io` explicitly, and
-rechecks the clean source fingerprint before every upload. The complete manual
-order is documented in [PUBLISHING.md](./PUBLISHING.md); do not publish only the
-sys crates and leave the release train incomplete.
-6) After every package succeeds, create and push the release tag:
+The script verifies that the aggregate is a complete same-SHA `Go`, reruns the
+strict local preflight, targets `crates-io` explicitly, and rechecks the clean
+source fingerprint before every upload. The complete manual order is
+documented in [PUBLISHING.md](./PUBLISHING.md); do not publish only the sys
+crates and leave the release train incomplete.
+7) After every package succeeds, create and push the release tag:
 ```
 git tag -a v0.16.0 -m "Release v0.16.0"
 git push origin v0.16.0
 ```
+8) Dispatch `.github/workflows/release.yml` with its three required inputs:
+```
+gh workflow run release.yml \
+  -f tag=v0.16.0 \
+  -f candidate_sha=FULL_40_HEX_SHA \
+  -f gate_run_id=RELEASE_GATE_RUN_ID
+```
+It verifies the stored aggregate and recomputes it from the retained cells
+before creating the GitHub Release or uploading its prebuilt archives.
 
 ## Pre-release checklist
 
@@ -184,10 +250,14 @@ Before tagging and publishing, verify the following:
 - All three core binding profiles reproduce exactly with `cargo run -p xtask -- verify-bindings`.
 - The packaged sys crate contains source metadata and all three profiles, and an unpacked offline build succeeds without `.git`.
 - CI green on Linux/Windows/macOS; examples build with extensions enabled.
+- `release-check` passed on the clean committed candidate and the remote fixed
+  13-cell aggregate is `Go` for exactly the same SHA.
 - If external deps changed (e.g., `wgpu`, `winit`, `glow`), backends’ readmes compatibility tables updated.
 - If interfaces changed, examples and crate-level docs updated accordingly.
-- Pushing a `v*` tag creates or updates the GitHub Release from the matching `CHANGELOG.md` section via `.github/workflows/release.yml`.
-- Optional: Run `.github/workflows/prebuilt-binaries.yml` (workflow_dispatch) to produce prebuilt archives for the new tag.
+- The five prebuilt cells were produced and consumed inside the authoritative
+  release gate; prebuilts are not an optional post-release side workflow.
+- `.github/workflows/release.yml` was given the matching tag, candidate SHA,
+  and gate run, and refused to create a release before verifying them.
 - Ensure the publishing environment has access to a valid crates.io token (`cargo login` or `CARGO_REGISTRY_TOKEN`) before running the Python publishing scripts.
 
 ## Notes

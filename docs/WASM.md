@@ -26,6 +26,22 @@ For Bevy, enable `wasm` alongside the features needed by the application:
 dear-imgui-bevy = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", features = ["render", "wasm"] }
 ```
 
+Five safe native extensions expose the same `wasm` feature and forward it to
+both `dear-imgui-rs` and their matching sys crate:
+
+| Safe crate | Sys crate | WASM import bindings |
+| --- | --- | --- |
+| `dear-implot` | `dear-implot-sys` | yes |
+| `dear-implot3d` | `dear-implot3d-sys` | yes |
+| `dear-imnodes` | `dear-imnodes-sys` | yes |
+| `dear-imguizmo` | `dear-imguizmo-sys` | yes |
+| `dear-imguizmo-quat` | `dear-imguizmo-quat-sys` | yes |
+
+Enable the feature on the highest safe crate you depend on; direct sys users
+enable it on the extension sys crate, which forwards the same core dependency
+path. The sixth native safe extension, `dear-node-editor`, intentionally has no
+WASM route. Dear ImGui Test Engine is also native-only and source-only.
+
 A `wasm32-unknown-unknown` build without this feature fails at compile time
 instead of selecting a native binding artifact. Other wasm32 families, including
 `wasm32-wasip1`, `wasm32-wasip2`, and `wasm32-unknown-emscripten`, are rejected
@@ -46,6 +62,23 @@ cargo check -p dear-imgui-bevy --target wasm32-unknown-unknown \
   --no-default-features --features wasm
 cargo check -p dear-imgui-bevy --target wasm32-unknown-unknown \
   --features render,wasm
+cargo check -p dear-implot --target wasm32-unknown-unknown \
+  --no-default-features --features wasm
+cargo check -p dear-implot3d --target wasm32-unknown-unknown \
+  --no-default-features --features wasm
+cargo check -p dear-imnodes --target wasm32-unknown-unknown \
+  --no-default-features --features wasm
+cargo check -p dear-imguizmo --target wasm32-unknown-unknown \
+  --no-default-features --features wasm
+cargo check -p dear-imguizmo-quat --target wasm32-unknown-unknown \
+  --no-default-features --features wasm
+
+# Expected to fail with stable feature-contract diagnostics.
+cargo check -p dear-imgui-sys --target wasm32-unknown-unknown \
+  --features wasm,prebuilt
+cargo check -p dear-imgui-sys --target wasm32-unknown-unknown \
+  --features wasm,test-engine
+cargo check -p dear-imgui-sys --features test-engine,package-bin
 ```
 
 The following paths remain native-only:
@@ -53,15 +86,16 @@ The following paths remain native-only:
 - `stack-layout` and `dear-node-editor/blueprints`
 - `test-engine`, which requires a native source build
 - `prebuilt`, whose archives contain native static libraries
-- `dear-node-editor` in its current integration
+- `dear-node-editor`, which exposes no `wasm` forwarding feature
 - native Winit, SDL3, WGPU, and Ash multi-viewport routes
 
 These features may coexist with the `wasm` feature when Cargo unifies features
 for a native target; the build selects behavior from the actual target, not the
 feature name. On `wasm32-unknown-unknown`, `stack-layout`, `test-engine`, and
-`prebuilt` are rejected. Use `dear-imnodes` for the current WASM-capable node
-editor. Browser integrations render one main canvas and do not install native
-platform-window callbacks.
+`prebuilt` are rejected. `test-engine + package-bin` is rejected on every
+target because Test Engine artifacts are never part of prebuilt packaging. Use
+`dear-imnodes` for the current WASM-capable node editor. Browser integrations
+render one main canvas and do not install native platform-window callbacks.
 
 ## Binding artifacts
 

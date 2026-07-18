@@ -27,6 +27,12 @@ This backend is compatible with both `ash` loader modes:
 `AshRenderer::cmd_draw` consumes a `RenderedFrame`, uploads its owned texture requests, reconciles
 request-bound feedback, and only then reads the frame's immutable draw data.
 
+Each `AshRenderer` owns the sole `RendererConsumer` generation created for the
+Context passed to its constructor. Create one renderer per Context. `cmd_draw`
+rejects a frame from another Context or consumer generation before recording
+GPU work, and the consumed frame lease prevents native `DrawData` from escaping
+its Context borrow.
+
 - Font atlas textures are registered by ImGui itself.
 - Register an `OwnedTextureData` with `Context::register_texture(texture)`. Registration transfers
   ownership to the Context and returns a `ManagedTextureId` for widgets and draw lists.
@@ -64,6 +70,10 @@ Call `AshRenderer::shutdown(&mut imgui)` before dropping a single-viewport Conte
 Shutdown waits for device idle, destroys active and retiring GPU textures, resets Context-owned
 renderer bindings, and then releases the renderer consumer. In multi-viewport mode, call the
 owning renderer runtime's `shutdown(&mut imgui)` before shutting down the platform runtime.
+
+That order is significant: `Context::reset_renderer_texture_bindings` is a
+renderer-reset acknowledgement and may run only after the corresponding Vulkan
+resources are actually gone. Finishing CPU command recording is not enough.
 
 ## External textures & custom sampler
 

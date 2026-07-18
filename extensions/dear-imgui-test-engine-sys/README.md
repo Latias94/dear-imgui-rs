@@ -26,17 +26,39 @@ This crate pairs with `dear-imgui-sys` and is intended for advanced users. Most 
 
 ## Build Modes
 
-- Source build (default)
+- Native source build (the only runtime route)
   - Compiles Dear ImGui Test Engine sources + crate shim using `cc`.
   - Inherits include paths/defines from `dear-imgui-sys`.
 - Docs.rs
   - Uses pregenerated Rust bindings and skips native C/C++ compilation.
 
+There is deliberately no Test Engine prebuilt or WASM feature. The paired
+`dear-imgui-sys/test-engine` feature forces the core native artifact to build
+from source because the hooks change that artifact. WASM targets and
+prebuilt-package generation reject this combination before linking. Workspace
+`--all-features` is therefore not a supported Test Engine build command.
+
+The checked-in bindings are part of the repository-wide canonical binding
+contract. Their crate-local profile records the exact upstream Test Engine
+revision, wrapper/header shim, native target assumptions, generator settings,
+and deterministic specification hash. Reproduce and compare them with:
+
+```bash
+cargo run -p xtask -- verify-bindings
+```
+
+After an intentional source or binding-specification change, maintainers use
+`cargo run -p xtask -- verify-bindings --update --allow-dirty` and review the
+source metadata and generated diff together. Test Engine provenance is kept
+separate from native prebuilt artifact manifests because no Test Engine
+prebuilt is published.
+
 ## Environment Variables
 
 - `IMGUI_TEST_ENGINE_SYS_SKIP_CC`
   - If set, skip native C/C++ compilation and use pregenerated bindings.
-  - Useful for cross-target `cargo check` or constrained CI jobs.
+  - Useful only for docs/binding checks and constrained CI jobs; it does not
+    provide a linkable Test Engine runtime.
 
 The build script also consumes values exported by `dear-imgui-sys`:
 

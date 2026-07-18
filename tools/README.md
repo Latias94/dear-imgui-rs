@@ -21,9 +21,19 @@ git commit -m "chore: prepare release v0.16.0"
 
 # Validate the committed clean release candidate.
 python3 tools/tasks.py release-check
+
+# Record this exact 40-hex commit and dispatch release-gate.yml with it as
+# candidate_sha. Do not substitute a branch or tag that can move.
+git rev-parse HEAD
+gh workflow run release-gate.yml -f candidate_sha=FULL_40_HEX_SHA
 ```
 
 `release-prepare` intentionally leaves changes in the working tree. `release-check` runs the strict clean-tree, changelog, locked dependency graph, reproducible binding, package/offline, documentation, and test gates. Keeping these phases separate prevents release preparation from failing its own clean-tree check.
+
+Local success is necessary but not sufficient for release. The remote release
+gate must return `Go` for the same candidate SHA across all 13 required cells.
+Download that run's authoritative `gate-result.json`; crates.io upload and the
+GitHub Release both verify its exact SHA and complete inventory.
 
 ### Publish to crates.io
 
@@ -31,8 +41,9 @@ python3 tools/tasks.py release-check
 # Dry run first (recommended)
 python3 tools/tasks.py publish --dry-run
 
-# Actual publish
-python3 tools/tasks.py publish
+# Actual upload requires the same-SHA remote aggregate.
+python3 tools/tasks.py publish \
+  --release-gate-result artifacts/release-gate/gate-result.json
 ```
 
 ## Available Scripts
@@ -48,8 +59,8 @@ python3 tools/tasks.py check
 # Update pregenerated bindings
 python3 tools/tasks.py bindings
 
-# Publish crates
-python3 tools/tasks.py publish
+# Preview publishing; actual upload also needs --release-gate-result as shown above
+python3 tools/tasks.py publish --dry-run
 
 # Run tests
 python3 tools/tasks.py test
@@ -83,23 +94,32 @@ Publishes all crates in the correct dependency order.
 # Dry run (show what would be published)
 python3 tools/publish.py --dry-run
 
-# Publish all crates
-python3 tools/publish.py
+# Publish all crates after authoritative evidence verification
+python3 tools/publish.py \
+  --release-gate-result artifacts/release-gate/gate-result.json
 
 # Publish specific crates
-python3 tools/publish.py --crates dear-imgui-sys,dear-imgui-rs
+python3 tools/publish.py \
+  --release-gate-result artifacts/release-gate/gate-result.json \
+  --crates dear-imgui-sys,dear-imgui-rs
 
 # Resume from a specific crate
-python3 tools/publish.py --start-from dear-implot-sys
+python3 tools/publish.py \
+  --release-gate-result artifacts/release-gate/gate-result.json \
+  --start-from dear-implot-sys
 
 # Adjust wait time between publishes
-python3 tools/publish.py --wait 60
+python3 tools/publish.py \
+  --release-gate-result artifacts/release-gate/gate-result.json \
+  --wait 60
 ```
 
 Print-only `--dry-run` validates metadata and shows commands without running the
-expensive release gate. `--cargo-dry-run` and real uploads rerun the strict
-clean-tree preflight, explicitly target the `crates-io` registry, and verify the
-validated Git `HEAD` again before every Cargo publish command.
+expensive release gate. `--cargo-dry-run` reruns the local clean-tree preflight.
+Real uploads additionally require `--release-gate-result`, verify its exact
+`HEAD` and 13-cell `Go` decision before any network command, explicitly target
+the `crates-io` registry, and verify the validated Git fingerprint again before
+every Cargo publish command.
 
 **Publishing Order:**
 1. Build tooling: `dear-imgui-build-support`
@@ -132,7 +152,9 @@ python3 tools/pre_publish_check.py \
 - Packaged core crates build from a clean clone and offline consumer
 - Packaged sys crates contain required artifacts and build offline without `.git`
 - Documentation builds in offline mode
-- Tests pass
+- Python workflow/release contracts and the public API policy pass
+- Native source and explicit WASM-safe feature routes pass without using workspace `--all-features`
+- Targeted Rust tests pass
 
 ### 5. `update_submodule_and_bindings.py` - Bindings Generation
 
@@ -200,15 +222,52 @@ gate:
 python3 tools/ci/verify_packaged_core.py full
 ```
 
-Consume all prebuilt profiles for one target and optional CRT:
+Consume all prebuilt profiles for one target, exact candidate SHA, and optional CRT:
 
 ```bash
-python3 tools/ci/verify_packaged_core.py prebuilt PACKAGE_DIR TARGET [CRT]
+python3 tools/ci/verify_packaged_core.py prebuilt PACKAGE_DIR TARGET CANDIDATE_SHA [CRT]
 ```
 
+`CANDIDATE_SHA` is required because both core and extension manifests bind to
+the exact release commit. The literal `HEAD` is accepted for a local checkout
+and is resolved before validation; release workflows pass the full lowercase
+40-hex SHA explicitly.
+
 The no-argument form remains equivalent to `full`. The legacy
-`--verify-prebuilt-packages PACKAGE_DIR TARGET [CRT]` spelling is accepted for
-existing automation, but new callers should use the `prebuilt` command.
+`--verify-prebuilt-packages PACKAGE_DIR TARGET CANDIDATE_SHA [CRT]` spelling is
+accepted for existing automation, but new callers should use the `prebuilt`
+command.
+
+### 7. Release Evidence
+
+`.github/workflows/release-gate.yml` is the authoritative cross-platform gate.
+It checks out one explicit 40-hex candidate SHA and requires exactly these 13
+cells:
+
+- Linux Test Engine runtime and real Winit/WGPU multi-viewport smoke
+- Linux `wasm32-unknown-unknown` feature and binding routes
+- Windows vcpkg, MSVC `/MD`, MSVC `/MT`, and MinGW import checks
+- macOS native build
+- five prebuilt producer/consumer cells: Linux x86_64, macOS x86_64/aarch64,
+  and Windows MSVC `/MD`/`/MT`
+
+A failed, skipped, cancelled, timed-out, missing, duplicate, malformed, or
+wrong-SHA cell makes the aggregate `No-Go`. The workflow retains the aggregate,
+stdout/stderr, runtime/display/adapter data, target/CRT/vcpkg/MinGW metadata,
+binding hashes, manifests, candidate SHA, and SHA256 evidence for approximately
+30 days.
+
+Verify a downloaded aggregate against the local committed `HEAD` with:
+
+```bash
+python3 tools/ci/release_evidence.py verify \
+  --repo-root . \
+  --candidate-sha CANDIDATE_SHA \
+  --gate-result artifacts/release-gate/gate-result.json
+```
+
+The production verifier owns the required cell inventory; callers cannot pass
+a smaller list.
 
 ## Typical Release Workflow
 
@@ -232,17 +291,29 @@ git commit -m "chore: prepare release v0.16.0"
 # 4. Run strict checks against the clean committed tree.
 python3 tools/tasks.py release-check
 
-# 5. Publish (dry run first).
-python3 tools/tasks.py publish --dry-run
-python3 tools/tasks.py publish
+# 5. Dispatch .github/workflows/release-gate.yml for the exact SHA printed here.
+git rev-parse HEAD
+gh workflow run release-gate.yml -f candidate_sha=FULL_40_HEX_SHA
+# Wait for its complete 13-cell Go result, then download the aggregate.
+gh run download RELEASE_GATE_RUN_ID \
+  --name release-gate-FULL_40_HEX_SHA \
+  --dir artifacts/release-gate
 
-# 6. Tag and push.
+# 6. Publish (dry run first).
+python3 tools/tasks.py publish --dry-run
+python3 tools/tasks.py publish \
+  --release-gate-result artifacts/release-gate/gate-result.json
+
+# 7. Tag and push the already-verified commit.
 git tag -a v0.16.0 -m "Release v0.16.0"
 git push origin main
 git push origin v0.16.0
 
-# 7. GitHub release.
-# Pushing the v* tag triggers .github/workflows/release.yml, which uses the matching CHANGELOG.md section as the release body.
+# 8. Create the GitHub Release only through the verified workflow.
+gh workflow run release.yml \
+  -f tag=v0.16.0 \
+  -f candidate_sha=FULL_40_HEX_SHA \
+  -f gate_run_id=RELEASE_GATE_RUN_ID
 ```
 
 ### Option 2: Step-by-Step
@@ -276,16 +347,29 @@ git commit -m "chore: prepare release v0.16.0"
 # 8. Run the strict clean-tree release gate
 python3 tools/tasks.py release-check
 
-# 9. Publish
-python3 tools/publish.py --dry-run  # Dry run first
-python3 tools/publish.py            # Actual publish
+# 9. Run the remote release gate for this exact committed HEAD and download its
+# complete Go gate-result.json.
+git rev-parse HEAD
+gh workflow run release-gate.yml -f candidate_sha=FULL_40_HEX_SHA
+gh run download RELEASE_GATE_RUN_ID \
+  --name release-gate-FULL_40_HEX_SHA \
+  --dir artifacts/release-gate
 
-# 10. Tag and push
+# 10. Publish
+python3 tools/publish.py --dry-run  # Dry run first
+python3 tools/publish.py \
+  --release-gate-result artifacts/release-gate/gate-result.json
+
+# 11. Tag and push
 git tag -a v0.16.0 -m "Release v0.16.0"
 git push origin main
 git push origin v0.16.0
 
-# 11. GitHub release is created/updated automatically from CHANGELOG.md by .github/workflows/release.yml
+# 12. Dispatch release.yml with all three required inputs.
+gh workflow run release.yml \
+  -f tag=v0.16.0 \
+  -f candidate_sha=FULL_40_HEX_SHA \
+  -f gate_run_id=RELEASE_GATE_RUN_ID
 ```
 
 ## Common Tasks
@@ -337,14 +421,18 @@ If publishing fails partway through:
 
 ```bash
 # Resume from the failed crate
-python3 tools/publish.py --start-from dear-implot-sys
+python3 tools/publish.py \
+  --release-gate-result artifacts/release-gate/gate-result.json \
+  --start-from dear-implot-sys
 ```
 
 ### Publish Only Specific Crates
 
 ```bash
 # Publish only backend crates
-python3 tools/publish.py --crates dear-imgui-winit,dear-imgui-wgpu,dear-imgui-glow,dear-imgui-ash,dear-imgui-sdl3,dear-imgui-bevy
+python3 tools/publish.py \
+  --release-gate-result artifacts/release-gate/gate-result.json \
+  --crates dear-imgui-winit,dear-imgui-wgpu,dear-imgui-glow,dear-imgui-ash,dear-imgui-sdl3,dear-imgui-bevy
 ```
 
 ## Requirements
@@ -380,7 +468,9 @@ cargo yank --registry crates-io --vers 0.16.0 dear-imgui-sys
 python3 tools/tasks.py release-prepare 0.16.1
 # Review and commit, then run the strict gate from the clean tree.
 python3 tools/tasks.py release-check
-python3 tools/publish.py
+# Run the new patch candidate through release-gate.yml, download its Go result, then:
+python3 tools/publish.py \
+  --release-gate-result artifacts/release-gate/gate-result.json
 ```
 
 ### docs.rs Build Failures
