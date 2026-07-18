@@ -809,10 +809,12 @@ mod tests {
         );
         let _ = context.font_atlas().build();
 
-        let result = build_and_render_frame(&mut context, |_ui| {
-            Err(RunError::application("frame", "injected frame failure"))
-        });
-        assert!(result.is_err());
+        {
+            let result = build_and_render_frame(&mut context, |_ui| {
+                Err(RunError::application("frame", "injected frame failure"))
+            });
+            assert!(result.is_err());
+        }
         assert_eq!(context.frame_lifecycle_state(), FrameLifecycleState::Idle);
     }
 
