@@ -39,7 +39,6 @@ tar = { workspace = true, optional = true }
 [build-dependencies]
 bindgen = { workspace = true, optional = true }
 cc.workspace = true
-pkg-config.workspace = true
 build-support = { workspace = true, features = ["binding-spec"] }
 
 [[bin]]

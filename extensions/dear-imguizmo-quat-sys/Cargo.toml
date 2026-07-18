@@ -48,8 +48,6 @@ tar = { version = "0.4", optional = true }
 [build-dependencies]
 bindgen = { workspace = true, optional = true }
 cc.workspace = true
-xshell = { workspace = true }
-pkg-config = { workspace = true }
 build-support = { workspace = true, features = ["binding-spec"] }
 
 [[bin]]

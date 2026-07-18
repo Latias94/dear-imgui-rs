@@ -7,7 +7,6 @@ publish = false
 [dependencies]
 anyhow = "1.0"
 bindgen = "=0.72.1"
-xshell = "0.2"
 which = "8"
 build-support = { workspace = true, features = ["binding-spec"] }
 semver.workspace = true

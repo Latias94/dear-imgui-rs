@@ -41,8 +41,6 @@ tar = { workspace = true, optional = true }
 [build-dependencies]
 bindgen = { workspace = true, optional = true }
 cc.workspace = true
-xshell = "0.2"
-pkg-config = "0.3"
 cmake = "0.1"
 build-support = { workspace = true, features = ["binding-spec"] }
 

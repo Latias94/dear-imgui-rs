@@ -109,7 +109,6 @@ bindgen = "0.72"
 cc = "1.2"
 pkg-config = "0.3"
 vcpkg = "0.2.15"
-xshell = "0.2"
 
 # Error handling
 thiserror = "2.0"
@@ -128,11 +127,9 @@ web-time = "1.1"
 # WASM dependencies
 console_error_panic_hook = "0.1"
 console_log = "1"
-fern = "0.7"
 wasm-bindgen = "0.2.121"
 wasm-bindgen-futures = "0.4"
 web-sys = "0.3"
-js-sys = "0.3"
 
 flate2 = "1"
 tar = "0.4"
