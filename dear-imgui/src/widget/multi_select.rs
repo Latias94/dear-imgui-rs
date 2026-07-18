@@ -9,6 +9,20 @@
 //! - wraps `BeginMultiSelect()` / `EndMultiSelect()`
 //! - wires `SetNextItemSelectionUserData()` for each item (index-based)
 //! - applies selection requests to your storage using a simple trait.
+//!
+//! Native begin/end IO is deliberately not exposed by the safe API:
+//!
+//! ```compile_fail
+//! use dear_imgui_rs::MultiSelectEnd;
+//! ```
+//!
+//! ```compile_fail
+//! use dear_imgui_rs::MultiSelectScope;
+//!
+//! fn mutate_native_io(scope: &mut MultiSelectScope<'_>) {
+//!     scope.begin_io_mut().RangeSrcReset = true;
+//! }
+//! ```
 
 #![allow(
     clippy::cast_possible_truncation,
@@ -30,5 +44,8 @@ pub use options::{
     MultiSelectBoxSelect, MultiSelectClickPolicy, MultiSelectFlags, MultiSelectOptions,
     MultiSelectScopeKind,
 };
-pub use scope::{MultiSelectEnd, MultiSelectScope};
+pub use requests::{
+    MultiSelectRangeDirection, MultiSelectRequest, MultiSelectResult, MultiSelectUserData,
+};
+pub use scope::MultiSelectScope;
 pub use storage::{KeySetSelection, MultiSelectIndexStorage};

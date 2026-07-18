@@ -32,6 +32,8 @@ fn thread_safety_context_and_render_markers() {
     assert_impl_all!(dear_imgui_rs::render::snapshot::TextureFeedback: Send, Sync);
     assert_impl_all!(dear_imgui_rs::render::snapshot::TextureOp: Send, Sync);
     assert_impl_all!(dear_imgui_rs::render::snapshot::TextureUploadRect: Send, Sync);
+    assert_impl_all!(dear_imgui_rs::MultiSelectRequest: Send, Sync, Clone);
+    assert_impl_all!(dear_imgui_rs::MultiSelectResult: Send, Sync, Clone);
 
     // DrawData/DrawList views (render module) are frame-bound, not thread-safe
     assert_not_impl_any!(dear_imgui_rs::render::draw_data::DrawData: Send, Sync);
@@ -40,8 +42,8 @@ fn thread_safety_context_and_render_markers() {
     // Immediate draw list handle is UI-thread bound
     assert_not_impl_any!(dear_imgui_rs::DrawListMut<'static>: Send, Sync);
 
-    // State storage tokens restore ImGui current-window state on drop.
-    assert_not_impl_any!(dear_imgui_rs::StateStorageToken<'static, 'static>: Send, Sync);
+    // Scoped state storage views remain UI-thread bound.
+    assert_not_impl_any!(dear_imgui_rs::StateStorage<'static>: Send, Sync);
 }
 
 #[test]

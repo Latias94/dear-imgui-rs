@@ -32,6 +32,10 @@ fn multi_select_indexed_ends_scope_after_render_panic() {
     }));
 
     assert!(result.is_err());
+    let _ = ui.window("multi_select_after_panic").build(|| {
+        let result = ui.with_multi_select(MultiSelectOptions::new(), None, 0, |_| {});
+        assert!(result.requests().is_empty());
+    });
     unsafe {
         let imgui_ctx = raw_ctx as *const sys::ImGuiContext;
         assert!((*imgui_ctx).CurrentMultiSelect.is_null());
@@ -40,14 +44,14 @@ fn multi_select_indexed_ends_scope_after_render_panic() {
 }
 
 #[test]
-fn begin_multi_select_raw_end_is_not_called_twice_on_drop() {
+fn with_multi_select_ends_scope_exactly_once() {
     let mut ctx = setup_context();
     let raw_ctx = ctx.as_raw();
 
     let ui = ctx.frame();
     let _ = ui.window("multi_select_explicit_end").build(|| {
-        let scope = ui.begin_multi_select_raw(MultiSelectOptions::new(), None, 0);
-        let _end = scope.end();
+        let result = ui.with_multi_select(MultiSelectOptions::new(), None, 0, |_| {});
+        assert!(result.requests().is_empty());
     });
 
     unsafe {
@@ -58,13 +62,53 @@ fn begin_multi_select_raw_end_is_not_called_twice_on_drop() {
 }
 
 #[test]
-fn begin_multi_select_raw_rejects_items_count_over_i32() {
+fn with_multi_select_rejects_items_count_over_i32() {
     let mut ctx = setup_context();
 
     let ui = ctx.frame();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = ui.begin_multi_select_raw(MultiSelectOptions::new(), None, (i32::MAX as usize) + 1);
+        let _ = ui.with_multi_select(
+            MultiSelectOptions::new(),
+            None,
+            (i32::MAX as usize) + 1,
+            |_| {},
+        );
     }));
 
     assert!(result.is_err());
+}
+
+#[test]
+fn result_remains_owned_after_a_later_scope_reuses_native_io() {
+    let mut ctx = setup_context();
+
+    let ui = ctx.frame();
+    let _ = ui.window("multi_select_owned_result").build(|| {
+        let first = ui.with_multi_select(MultiSelectOptions::new(), None, 0, |_| {});
+        let first_copy = first.clone();
+
+        let second = ui.with_multi_select(MultiSelectOptions::new(), None, 0, |scope| {
+            scope.set_range_source_reset(true);
+        });
+
+        assert_eq!(first, first_copy);
+        assert!(!first.range_source_reset());
+        assert!(second.range_source_reset());
+    });
+}
+
+#[test]
+fn outer_scope_does_not_retain_io_pointer_across_nested_scope() {
+    let mut ctx = setup_context();
+
+    let ui = ctx.frame();
+    let _ = ui.window("nested_multi_select").build(|| {
+        let outer = ui.with_multi_select(MultiSelectOptions::new(), None, 0, |outer| {
+            let inner = ui.with_multi_select(MultiSelectOptions::new(), None, 0, |_| {});
+            assert!(inner.requests().is_empty());
+            outer.set_range_source_reset(true);
+        });
+
+        assert!(outer.range_source_reset());
+    });
 }

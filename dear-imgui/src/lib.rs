@@ -173,8 +173,10 @@
 //!   loading and atlas mutation.
 //! - RAII tokens for windows, stacks, popups, tables, draw-list texture stacks, and extension scopes
 //!   are UI/current-context scoped and `!Send + !Sync`. Drop them on the creating UI thread.
-//! - `Ui::push_state_storage` returns `StateStorageToken<'ui, 'storage>`, so the storage must outlive
-//!   the token that restores the previous storage.
+//! - Use `Ui::with_state_storage` for a panic-safe, nested state-storage override. Both the
+//!   replacement and its `StateStorage` view are confined to the closure.
+//! - Use `Ui::with_multi_select` for advanced multi-select flows. It returns an owned
+//!   `MultiSelectResult`; no view into Dear ImGui's temporary begin/end IO escapes the closure.
 //!
 //! ## Colors (ImU32 ABGR)
 //!

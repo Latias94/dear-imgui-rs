@@ -2,25 +2,27 @@ use crate::{Ui, sys};
 
 use super::MultiSelectOptions;
 use super::basic_selection::BasicSelection;
-use super::requests::apply_multi_select_requests_basic;
+use super::requests::MultiSelectResult;
 use super::scope::MultiSelectScope;
 use super::storage::MultiSelectIndexStorage;
 
 impl Ui {
-    /// Low-level entry point: begin a multi-select scope and return a RAII wrapper.
+    /// Run an advanced multi-select block and return an owned copy of its final requests.
     ///
-    /// This is the closest safe wrapper to the raw `BeginMultiSelect()` /
-    /// `EndMultiSelect()` pair. It does not drive any selection storage by
-    /// itself; use `begin_io()` / `end().io()` and the helper methods to
-    /// implement custom patterns.
+    /// The scope exposes only operations that are valid between `BeginMultiSelect()` and
+    /// `EndMultiSelect()`. `EndMultiSelect()` runs exactly once even if `render` panics, and the
+    /// returned [`MultiSelectResult`] contains no native pointers.
     #[doc(alias = "BeginMultiSelect", alias = "EndMultiSelect")]
-    pub fn begin_multi_select_raw(
+    pub fn with_multi_select(
         &self,
         flags: impl Into<MultiSelectOptions>,
         selection_size: Option<i32>,
         items_count: usize,
-    ) -> MultiSelectScope<'_> {
-        MultiSelectScope::new(self, flags, selection_size, items_count)
+        render: impl FnOnce(&mut MultiSelectScope<'_>),
+    ) -> MultiSelectResult {
+        let mut scope = MultiSelectScope::new(self, flags, selection_size, items_count);
+        render(&mut scope);
+        scope.finish()
     }
 
     /// Multi-select helper for index-based storage.
@@ -67,23 +69,17 @@ impl Ui {
             .and_then(|n| i32::try_from(n).ok())
             .unwrap_or(-1);
 
-        let mut scope = MultiSelectScope::new(self, flags, Some(selection_size_i32), items_count);
+        let result =
+            self.with_multi_select(flags, Some(selection_size_i32), items_count, |scope| {
+                scope.apply_begin_requests_indexed(storage);
 
-        // Apply SetAll requests (if any) before submitting items.
-        scope.apply_begin_requests_indexed(storage);
-
-        // Submit items: for each index we set SelectionUserData and let user
-        // draw widgets, passing the current selection state as `is_selected`.
-        for idx in 0..items_count {
-            self.run_with_bound_context(|| unsafe {
-                sys::igSetNextItemSelectionUserData(idx as sys::ImGuiSelectionUserData);
+                for idx in 0..items_count {
+                    scope.set_next_item_selection_user_data(idx as sys::ImGuiSelectionUserData);
+                    let is_selected = storage.is_selected(idx);
+                    render_item(self, idx, is_selected);
+                }
             });
-            let is_selected = storage.is_selected(idx);
-            render_item(self, idx, is_selected);
-        }
-
-        // End scope and apply requests generated during item submission.
-        scope.end().apply_requests_indexed(storage);
+        result.apply_requests_indexed(storage);
     }
 
     /// Multi-select helper for index-based storage inside an active table.
@@ -107,23 +103,19 @@ impl Ui {
             .and_then(|n| i32::try_from(n).ok())
             .unwrap_or(-1);
 
-        let mut scope = MultiSelectScope::new(self, flags, Some(selection_size_i32), row_count);
+        let result = self.with_multi_select(flags, Some(selection_size_i32), row_count, |scope| {
+            scope.apply_begin_requests_indexed(storage);
 
-        scope.apply_begin_requests_indexed(storage);
+            for row in 0..row_count {
+                scope.set_next_item_selection_user_data(row as sys::ImGuiSelectionUserData);
+                self.table_next_row();
+                self.table_next_column();
 
-        for row in 0..row_count {
-            self.run_with_bound_context(|| unsafe {
-                sys::igSetNextItemSelectionUserData(row as sys::ImGuiSelectionUserData);
-            });
-            // Start a new table row and move to first column.
-            self.table_next_row();
-            self.table_next_column();
-
-            let is_selected = storage.is_selected(row);
-            build_row(self, row, is_selected);
-        }
-
-        scope.end().apply_requests_indexed(storage);
+                let is_selected = storage.is_selected(row);
+                build_row(self, row, is_selected);
+            }
+        });
+        result.apply_requests_indexed(storage);
     }
 
     /// Multi-select helper using [`BasicSelection`] as underlying storage.
@@ -147,28 +139,17 @@ impl Ui {
     {
         let selection_size_i32 = i32::try_from(selection.len()).unwrap_or(-1);
 
-        let scope = MultiSelectScope::new(self, flags, Some(selection_size_i32), items_count);
+        let result =
+            self.with_multi_select(flags, Some(selection_size_i32), items_count, |scope| {
+                scope.apply_begin_requests_basic(selection, &mut id_at_index);
 
-        unsafe {
-            apply_multi_select_requests_basic(
-                scope.ms_io_begin,
-                selection,
-                items_count,
-                &mut id_at_index,
-            );
-        }
-
-        for idx in 0..items_count {
-            self.run_with_bound_context(|| unsafe {
-                sys::igSetNextItemSelectionUserData(idx as sys::ImGuiSelectionUserData);
+                for idx in 0..items_count {
+                    scope.set_next_item_selection_user_data(idx as sys::ImGuiSelectionUserData);
+                    let id = id_at_index(idx);
+                    let is_selected = selection.contains(id);
+                    render_item(self, idx, id, is_selected);
+                }
             });
-            let id = id_at_index(idx);
-            let is_selected = selection.contains(id);
-            render_item(self, idx, id, is_selected);
-        }
-
-        scope
-            .end()
-            .apply_requests_basic(selection, &mut id_at_index);
+        result.apply_requests_basic(selection, id_at_index);
     }
 }
