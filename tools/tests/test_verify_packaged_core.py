@@ -25,7 +25,6 @@ PROCESS = importlib.import_module("_process")
 SOURCE_PACKAGES = importlib.import_module("_source_packages")
 VERIFICATION = importlib.import_module("_verification")
 CLI = importlib.import_module("verify_packaged_core")
-WINDOWS_PREBUILT = importlib.import_module("configure_prebuilt_windows")
 
 
 PROFILE_FEATURES = {
@@ -1159,57 +1158,16 @@ class PrebuiltWorkflowTests(unittest.TestCase):
 
         self.assertIn("verify_packaged_core.py build-prebuilt", workflow)
         self.assertIn("verify_packaged_core.py prebuilt", workflow)
+        self.assertIn("timeout-minutes: 90", workflow)
+        self.assertIn("run_contract.py windows-vcpkg", workflow)
+        self.assertIn('--target "${{ matrix.target }}"', workflow)
+        self.assertIn('--crt "${{ matrix.crt }}"', workflow)
+        self.assertIn("--package freetype", workflow)
         self.assertEqual(workflow.count("          HEAD\n          \"${{ matrix.crt }}\""), 2)
         self.assertNotIn("cargo run -p", workflow)
+        self.assertNotIn("configure_prebuilt_windows.py", workflow)
         self.assertNotIn("DEAR_IMGUI_CORE_ARTIFACT_PROFILE_HASH", workflow)
         self.assertNotIn("DEAR_IMGUI_RS_CANDIDATE_SHA:", workflow)
-
-
-class WindowsPrebuiltConfigurationTests(unittest.TestCase):
-    def test_crt_profiles_map_to_reproducible_static_triplets(self):
-        self.assertEqual(
-            WINDOWS_PREBUILT.vcpkg_triplet("md"), "x64-windows-static-md"
-        )
-        self.assertEqual(
-            WINDOWS_PREBUILT.vcpkg_triplet("mt"), "x64-windows-static"
-        )
-
-    def test_configures_vcpkg_status_and_github_environment(self):
-        with TemporaryDirectory() as temporary:
-            root = Path(temporary) / "vcpkg root"
-            root.mkdir()
-            root.joinpath(".vcpkg-root").touch()
-            executable = root / "vcpkg.exe"
-            executable.touch()
-            status_dir = root / "installed/vcpkg"
-            status_dir.mkdir(parents=True)
-            status_dir.joinpath("status").touch()
-            github_env = Path(temporary) / "github-env"
-            environment = {
-                "PATH": "fixture-path",
-                "VCPKG_ROOT": os.fspath(root),
-                "RUNNER_TEMP": os.fspath(Path(temporary) / "runner temp"),
-            }
-            with (
-                patch.object(
-                    WINDOWS_PREBUILT.shutil,
-                    "which",
-                    return_value=os.fspath(executable),
-                ),
-                patch.object(WINDOWS_PREBUILT, "run") as command,
-            ):
-                WINDOWS_PREBUILT.configure_windows_prebuilt(
-                    "mt", environment, github_env
-                )
-
-            output = github_env.read_text(encoding="utf-8")
-            self.assertIn(f"VCPKG_ROOT={root.resolve()}\n", output)
-            self.assertIn("VCPKGRS_TRIPLET=x64-windows-static\n", output)
-            self.assertIn("RUSTFLAGS=-C target-feature=+crt-static\n", output)
-            self.assertTrue((status_dir / "updates").is_dir())
-            command.assert_called_once_with(
-                (executable.resolve(), "install", "freetype:x64-windows-static")
-            )
 
 
 class PackageWorkspaceTests(unittest.TestCase):

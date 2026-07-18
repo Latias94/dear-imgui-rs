@@ -98,6 +98,13 @@ class VcpkgTriplet:
             raise WindowsNativeError(f"invalid vcpkg package name: {name!r}")
         return f"{name}:{self.name}"
 
+    @property
+    def rust_environment(self) -> tuple[tuple[str, str], ...]:
+        """Return Rust environment overrides required by this CRT profile."""
+        if self.crt == "mt":
+            return (("RUSTFLAGS", "-C target-feature=+crt-static"),)
+        return ()
+
 
 @dataclass(frozen=True)
 class VcpkgRootCandidate:
@@ -410,6 +417,7 @@ def vcpkg_github_environment(
         ("VCPKGRS_TRIPLET", triplet.name),
         ("PKG_CONFIG", os.fspath(missing_pkg_config)),
         ("PKG_CONFIG_PATH", ""),
+        *triplet.rust_environment,
     )
 
 

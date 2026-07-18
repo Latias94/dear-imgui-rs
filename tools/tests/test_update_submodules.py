@@ -254,7 +254,7 @@ class RepositoryScriptContractTests(unittest.TestCase):
         prebuilt = (
             REPO_ROOT / ".github" / "workflows" / "prebuilt-binaries.yml"
         ).read_text(encoding="utf-8")
-        self.assertEqual(prebuilt.count(runner_expression), 2)
+        self.assertEqual(prebuilt.count(runner_expression), 3)
 
 
 if __name__ == "__main__":

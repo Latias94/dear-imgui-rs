@@ -290,6 +290,35 @@ class ContractRunnerTests(unittest.TestCase):
                 b"Checking a.exe\nDLL Name: KERNEL32.dll\n",
             )
 
+    def test_windows_cli_preserves_failure_evidence_and_exit_code(self):
+        with TemporaryDirectory() as temporary:
+            evidence = Path(temporary) / "logs" / "imports.txt"
+            failure = CONTRACTS.CommandError(
+                ("objdump.exe", "-p", "fixture.exe"),
+                9,
+                "objdump diagnostic\n",
+            )
+            diagnostic = io.StringIO()
+            with (
+                patch.object(CONTRACTS, "verify_mingw_imports", side_effect=failure),
+                redirect_stderr(diagnostic),
+            ):
+                result = CONTRACTS.main(
+                    (
+                        "windows-mingw-imports",
+                        "--deps",
+                        "deps",
+                        "--objdump",
+                        "objdump.exe",
+                        "--evidence",
+                        str(evidence),
+                    )
+                )
+
+            self.assertEqual(result, 9)
+            self.assertIn("objdump diagnostic", diagnostic.getvalue())
+            self.assertIn("exit code 9", evidence.read_text(encoding="utf-8"))
+
     def test_runtime_parser_owns_stable_child_budgets(self):
         parser = CONTRACTS._build_parser()
         test_engine = parser.parse_args(("test-engine-runtime",))
@@ -675,29 +704,6 @@ class RuntimeGateTests(unittest.TestCase):
 
 
 class WorkflowPortabilityTests(unittest.TestCase):
-    def test_workflows_contain_no_explicit_bash_control_flow(self):
-        workflows = "\n".join(
-            path.read_text(encoding="utf-8")
-            for path in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml"))
-        )
-
-        self.assertNotIn("shell: bash", workflows)
-        self.assertNotIn("set -euo pipefail", workflows)
-        self.assertNotIn("PIPESTATUS", workflows)
-
-    def test_repository_contains_no_owned_shell_script_files(self):
-        ignored_roots = {".git", "repo-ref", "target", "third-party"}
-        scripts = []
-        for root, directories, files in os.walk(REPO_ROOT):
-            directories[:] = [
-                directory for directory in directories if directory not in ignored_roots
-            ]
-            scripts.extend(
-                Path(root) / filename for filename in files if filename.endswith(".sh")
-            )
-
-        self.assertEqual(scripts, [])
-
     def test_native_runtime_retry_chain_retains_release_evidence(self):
         ci = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"

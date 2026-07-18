@@ -46,6 +46,35 @@ class VcpkgTripletTests(unittest.TestCase):
                 "x86_64-pc-windows-msvc", "dynamic"
             )
 
+    def test_github_environment_is_exact_for_md_and_mt(self):
+        root = PureWindowsPath(r"C:\Program Files\vcpkg")
+        runner_temp = PureWindowsPath(r"D:\runner temp")
+        md = WINDOWS_NATIVE.VcpkgTriplet.from_target(
+            "x86_64-pc-windows-msvc", "md"
+        )
+        mt = WINDOWS_NATIVE.VcpkgTriplet.from_target(
+            "x86_64-pc-windows-msvc", "mt"
+        )
+
+        common = (
+            ("VCPKG_ROOT", r"C:\Program Files\vcpkg"),
+            ("PKG_CONFIG", r"D:\runner temp\missing-pkg-config.exe"),
+            ("PKG_CONFIG_PATH", ""),
+        )
+        self.assertEqual(
+            WINDOWS_NATIVE.vcpkg_github_environment(root, md, runner_temp),
+            (common[0], ("VCPKGRS_TRIPLET", "x64-windows-static-md"), *common[1:]),
+        )
+        self.assertEqual(
+            WINDOWS_NATIVE.vcpkg_github_environment(root, mt, runner_temp),
+            (
+                common[0],
+                ("VCPKGRS_TRIPLET", "x64-windows-static"),
+                *common[1:],
+                ("RUSTFLAGS", "-C target-feature=+crt-static"),
+            ),
+        )
+
 
 class VcpkgRootTests(unittest.TestCase):
     def test_candidates_preserve_precedence_and_deduplicate_windows_paths(self):

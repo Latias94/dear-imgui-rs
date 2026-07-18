@@ -31,6 +31,7 @@ jobs:
   build-prebuilt:
     name: Build ${{ matrix.target }}${{ matrix.crt && format(' ({0})', matrix.crt) || '' }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     permissions:
       contents: write
     strategy:
@@ -73,9 +74,13 @@ jobs:
           cache-bin: 'false'
           key: ${{ format('{0}-{1}', matrix.target, matrix.crt || 'none') }}
 
+      - name: Refresh Linux package metadata
+        if: runner.os == 'Linux'
+        run: sudo apt-get update
+
       - name: Install native dependencies (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libfreetype6-dev
+        run: sudo apt-get install -y build-essential pkg-config libfreetype6-dev
 
       - name: Install native dependencies (macOS)
         if: runner.os == 'macOS'
@@ -94,7 +99,13 @@ jobs:
 
       - name: Configure native dependencies (Windows)
         if: runner.os == 'Windows'
-        run: python tools/ci/configure_prebuilt_windows.py --crt "${{ matrix.crt }}"
+        run: >-
+          python tools/ci/run_contract.py windows-vcpkg
+          --target "${{ matrix.target }}"
+          --crt "${{ matrix.crt }}"
+          --package freetype
+          --runner-temp "$env:RUNNER_TEMP"
+          --github-env "$env:GITHUB_ENV"
 
       - name: Build complete core and extension profile matrix
         run: >-

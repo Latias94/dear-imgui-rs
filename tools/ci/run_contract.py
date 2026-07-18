@@ -27,6 +27,7 @@ from _runtime_gate import (  # noqa: E402
 )
 from _verification import VerificationError, temporary_workspace  # noqa: E402
 from _windows_native import (  # noqa: E402
+    ForbiddenImportError,
     WindowsNativeError,
     VcpkgTriplet,
     append_github_assignments,
@@ -300,11 +301,27 @@ def check_windows_mingw_imports(
     evidence: Path,
 ) -> None:
     """Reject dynamic libstdc++ and retain complete objdump evidence."""
-    inspection = verify_mingw_imports(deps_directory, objdump)
-    evidence.parent.mkdir(parents=True, exist_ok=True)
-    normalized = inspection.evidence_text.replace("\r\n", "\n").replace("\r", "\n")
-    evidence.write_bytes(normalized.encode("utf-8"))
-    print(inspection.evidence_text, end="")
+    try:
+        inspection = verify_mingw_imports(deps_directory, objdump)
+        evidence_text = inspection.evidence_text
+    except ForbiddenImportError as error:
+        evidence_text = error.inspection.evidence_text
+        _write_mingw_evidence(evidence, evidence_text)
+        raise
+    except (CommandError, WindowsNativeError) as error:
+        evidence_text = f"{error}\n"
+        _write_mingw_evidence(evidence, evidence_text)
+        raise
+    _write_mingw_evidence(evidence, evidence_text)
+    print(evidence_text, end="")
+
+
+def _write_mingw_evidence(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    normalized = content.replace("\r\n", "\n").replace("\r", "\n")
+    if normalized and not normalized.endswith("\n"):
+        normalized += "\n"
+    path.write_bytes(normalized.encode("utf-8"))
 
 
 def _positive_float(value: str) -> float:
@@ -536,7 +553,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         else:  # pragma: no cover - argparse enforces the command set.
             parser.error(f"unknown contract: {args.contract}")
-    except (CommandError, OSError, VerificationError, WindowsNativeError) as error:
+    except CommandError as error:
+        print(f"::error::{error}", file=sys.stderr)
+        return error.returncode if error.returncode > 0 else 1
+    except (OSError, VerificationError, WindowsNativeError) as error:
         print(f"::error::{error}", file=sys.stderr)
         return 1
     return exit_code
