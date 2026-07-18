@@ -41,12 +41,6 @@ pub enum RendererError {
     #[error("Dear ImGui context is already configured for a renderer backend")]
     ContextAlreadyHasRenderer,
 
-    /// Renderer GPU state cannot change while multi-viewport callbacks are registered.
-    #[error(
-        "WGPU multi-viewport is active; shut it down before reinitializing or shutting down the renderer"
-    )]
-    MultiViewportActive,
-
     /// Draw buffer length exceeds renderer index ranges.
     #[error("{buffer} draw buffer length exceeds renderer limits")]
     DrawBufferTooLarge { buffer: &'static str },

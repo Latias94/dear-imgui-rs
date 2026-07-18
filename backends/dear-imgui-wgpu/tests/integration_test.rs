@@ -343,19 +343,31 @@ fn device_objects_rebind_after_invalidation_and_shutdown() -> RendererResult<()>
         Err(RendererError::ContextMismatch)
     ));
     #[cfg(feature = "multi-viewport-winit")]
-    assert_eq!(
-        // SAFETY: context identity validation rejects this call before callbacks retain renderer.
-        unsafe { dear_imgui_wgpu::multi_viewport::enable(&mut renderer, &mut foreign_context) },
-        Err(dear_imgui_wgpu::multi_viewport::CallbackOwnershipError::RendererContextMismatch)
-    );
+    {
+        let failure = dear_imgui_wgpu::multi_viewport::WinitViewportRuntime::attach(
+            &mut foreign_context,
+            renderer,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            failure.error(),
+            dear_imgui_wgpu::multi_viewport::WgpuViewportError::RendererContextMismatch
+        ));
+        renderer = failure.into_renderer();
+    }
     #[cfg(feature = "multi-viewport-sdl3")]
-    assert_eq!(
-        // SAFETY: context identity validation rejects this call before callbacks retain renderer.
-        unsafe {
-            dear_imgui_wgpu::multi_viewport_sdl3::enable(&mut renderer, &mut foreign_context)
-        },
-        Err(dear_imgui_wgpu::multi_viewport_sdl3::CallbackOwnershipError::RendererContextMismatch)
-    );
+    {
+        let failure = dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRuntime::attach(
+            &mut foreign_context,
+            renderer,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            failure.error(),
+            dear_imgui_wgpu::multi_viewport_sdl3::WgpuViewportError::RendererContextMismatch
+        ));
+        renderer = failure.into_renderer();
+    }
     assert!(renderer.is_initialized());
     assert_eq!(foreign_context.io().backend_flags(), foreign_flags);
 

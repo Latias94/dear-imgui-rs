@@ -2,6 +2,7 @@
 
 use super::platform_adapter;
 use super::registry::GlobalHandles;
+use super::runtime::WgpuViewportError;
 use dear_imgui_rs::ViewportFlags;
 use dear_imgui_rs::platform_io::Viewport;
 
@@ -20,14 +21,12 @@ fn surface_config(
     globals: &GlobalHandles,
     surface: &wgpu::Surface<'static>,
     size: [u32; 2],
-) -> Option<wgpu::SurfaceConfiguration> {
+) -> Result<wgpu::SurfaceConfiguration, WgpuViewportError> {
     let capabilities = surface.get_capabilities(&globals.adapter);
     if !capabilities.formats.contains(&globals.render_target_format) {
-        eprintln!(
-            "[wgpu-mv] surface does not support renderer format {:?}",
-            globals.render_target_format
-        );
-        return None;
+        return Err(WgpuViewportError::SurfaceOperationFailed {
+            operation: "negotiate renderer surface format",
+        });
     }
     let present_mode = if capabilities
         .present_modes
@@ -35,7 +34,11 @@ fn surface_config(
     {
         wgpu::PresentMode::Fifo
     } else {
-        capabilities.present_modes.first().copied()?
+        capabilities.present_modes.first().copied().ok_or(
+            WgpuViewportError::SurfaceOperationFailed {
+                operation: "negotiate surface present mode",
+            },
+        )?
     };
     let alpha_mode = if capabilities
         .alpha_modes
@@ -48,9 +51,13 @@ fn surface_config(
     {
         wgpu::CompositeAlphaMode::Auto
     } else {
-        capabilities.alpha_modes.first().copied()?
+        capabilities.alpha_modes.first().copied().ok_or(
+            WgpuViewportError::SurfaceOperationFailed {
+                operation: "negotiate surface alpha mode",
+            },
+        )?
     };
-    Some(wgpu::SurfaceConfiguration {
+    Ok(wgpu::SurfaceConfiguration {
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
         format: globals.render_target_format,
         #[cfg(feature = "wgpu-30")]
@@ -68,11 +75,11 @@ pub(super) unsafe fn create_viewport_data(
     context: *mut dear_imgui_rs::sys::ImGuiContext,
     viewport: &Viewport,
     globals: &GlobalHandles,
-) -> Option<ViewportWgpuData> {
+) -> Result<ViewportWgpuData, WgpuViewportError> {
     let (surface, size) = unsafe { platform_adapter::create_surface(&globals.instance, viewport) }?;
     let config = surface_config(globals, &surface, size)?;
     surface.configure(&globals.device, &config);
-    Some(ViewportWgpuData {
+    Ok(ViewportWgpuData {
         owner_context: context as usize,
         device: globals.device.clone(),
         #[cfg(feature = "wgpu-30")]
@@ -84,29 +91,24 @@ pub(super) unsafe fn create_viewport_data(
     })
 }
 
-unsafe fn reconfigure_surface(viewport: &Viewport, data: &mut ViewportWgpuData) -> bool {
-    let Some(size) = (unsafe { platform_adapter::framebuffer_size(viewport) }) else {
-        return false;
-    };
+unsafe fn reconfigure_surface(
+    viewport: &Viewport,
+    data: &mut ViewportWgpuData,
+) -> Result<(), WgpuViewportError> {
+    let size = unsafe { platform_adapter::framebuffer_size(viewport) }?;
     data.config.width = size[0].max(1);
     data.config.height = size[1].max(1);
     data.surface.configure(&data.device, &data.config);
-    true
+    Ok(())
 }
 
 unsafe fn recreate_surface(
     viewport: &Viewport,
     data: &mut ViewportWgpuData,
     globals: &GlobalHandles,
-) -> bool {
-    let Some((surface, size)) =
-        (unsafe { platform_adapter::create_surface(&globals.instance, viewport) })
-    else {
-        return false;
-    };
-    let Some(config) = surface_config(globals, &surface, size) else {
-        return false;
-    };
+) -> Result<(), WgpuViewportError> {
+    let (surface, size) = unsafe { platform_adapter::create_surface(&globals.instance, viewport) }?;
+    let config = surface_config(globals, &surface, size)?;
     surface.configure(&globals.device, &config);
     data.pending_frame = None;
     data.pending_reconfigure = false;
@@ -117,7 +119,7 @@ unsafe fn recreate_surface(
     }
     data.surface = surface;
     data.config = config;
-    true
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,25 +165,42 @@ pub(super) const fn surface_action(event: SurfaceEvent) -> SurfaceAction {
     }
 }
 
+impl SurfaceEvent {
+    pub(super) const fn name(self) -> &'static str {
+        match self {
+            Self::Success => "success",
+            Self::Suboptimal => "suboptimal",
+            Self::Outdated => "outdated",
+            Self::Lost => "lost",
+            Self::Timeout => "timeout",
+            #[cfg(any(feature = "wgpu-29", feature = "wgpu-30", test))]
+            Self::Occluded => "occluded",
+            #[cfg(any(feature = "wgpu-29", feature = "wgpu-30", test))]
+            Self::Validation => "validation",
+            #[cfg(any(feature = "wgpu-27", feature = "wgpu-28", test))]
+            Self::OutOfMemory => "out of memory",
+            #[cfg(any(feature = "wgpu-27", feature = "wgpu-28", test))]
+            Self::Other => "other",
+        }
+    }
+}
+
 pub(super) unsafe fn handle_non_renderable_surface_event(
     event: SurfaceEvent,
     viewport: &Viewport,
     data: &mut ViewportWgpuData,
     globals: &GlobalHandles,
-) {
+) -> Result<(), WgpuViewportError> {
     match surface_action(event) {
-        SurfaceAction::Reconfigure => {
-            let _ = unsafe { reconfigure_surface(viewport, data) };
-        }
-        SurfaceAction::Recreate => {
-            let _ = unsafe { recreate_surface(viewport, data, globals) };
-        }
-        SurfaceAction::Skip => {}
-        SurfaceAction::Reject => {
-            eprintln!("[wgpu-mv] surface acquisition rejected: {event:?}");
-        }
+        SurfaceAction::Reconfigure => unsafe { reconfigure_surface(viewport, data) },
+        SurfaceAction::Recreate => unsafe { recreate_surface(viewport, data, globals) },
+        SurfaceAction::Skip => Ok(()),
+        SurfaceAction::Reject => Err(WgpuViewportError::SurfaceRejected {
+            event: event.name(),
+        }),
         SurfaceAction::Render | SurfaceAction::RenderThenReconfigure => {
             debug_assert!(false, "renderable surface event reached recovery path");
+            Ok(())
         }
     }
 }

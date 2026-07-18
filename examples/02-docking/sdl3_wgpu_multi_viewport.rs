@@ -17,6 +17,7 @@ use std::time::Instant;
 
 use dear_imgui_rs::{Condition, ConfigFlags, Context};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode, Sdl3PlatformBackend};
+use dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRuntime;
 use dear_imgui_wgpu::{GammaMode, WgpuInitInfo, WgpuRenderer};
 use sdl3::event::Event;
 use sdl3::keyboard::Keycode;
@@ -126,14 +127,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let init_info = WgpuInitInfo::new(device.clone(), queue.clone(), surface_config.format)
         .with_instance(instance.clone())
         .with_adapter(adapter.clone());
-    let mut renderer = Box::new(WgpuRenderer::new(init_info, &mut imgui)?);
+    let mut renderer = WgpuRenderer::new(init_info, &mut imgui)?;
     renderer.set_gamma_mode(GammaMode::Auto);
-
-    if ENABLE_VIEWPORTS {
-        unsafe {
-            dear_imgui_wgpu::multi_viewport_sdl3::enable(&mut renderer, &mut imgui)?;
-        }
-    }
+    let mut renderer = Sdl3ViewportRuntime::attach(&mut imgui, renderer)?;
 
     let mut last_frame = Instant::now();
     let mut show_demo = true;
@@ -271,10 +267,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    if ENABLE_VIEWPORTS {
-        dear_imgui_wgpu::multi_viewport_sdl3::shutdown_multi_viewport_support(&mut imgui)
-            .expect("WGPU multi-viewport shutdown failed");
-    }
     renderer.shutdown(&mut imgui)?;
     sdl3_backend.shutdown(&mut imgui)?;
     Ok(())

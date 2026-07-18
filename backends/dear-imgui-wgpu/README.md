@@ -24,7 +24,8 @@ Each `WgpuRenderer` is bound to the `Context` passed to `new` or `init_with_cont
 
 ## Native multi-viewport
 
-The Winit and SDL3 routes use one shared renderer runtime. Select exactly one platform adapter:
+The Winit and SDL3 routes use one shared owning renderer core with platform-specific public
+runtime types. Select exactly one platform adapter:
 
 - `multi-viewport-winit`
 - `multi-viewport-sdl3`
@@ -33,46 +34,48 @@ They are mutually exclusive and native-only. The selected feature enables
 `dear-imgui-rs/multi-viewport`; do not enable both routes through `--all-features`.
 
 Secondary windows need the `Instance` and `Adapter` that created the renderer's `Device`. Keep
-them in `WgpuInitInfo`, place the renderer at a stable address, initialize the platform callbacks,
-and then install renderer callbacks before Dear ImGui creates any secondary platform window:
+them in `WgpuInitInfo`, attach the owning platform runtime first, and then move the renderer into
+the matching WGPU runtime before Dear ImGui creates a secondary platform window:
 
 ```rust,no_run
 use dear_imgui_rs::Context;
-use dear_imgui_wgpu::{WgpuInitInfo, WgpuRenderer, multi_viewport as wgpu_mvp, wgpu};
-use dear_imgui_winit::multi_viewport as winit_mvp;
+use std::sync::Arc;
+use dear_imgui_wgpu::{WgpuInitInfo, WgpuRenderer, wgpu};
+use dear_imgui_wgpu::multi_viewport::WinitViewportRuntime;
+use dear_imgui_winit::multi_viewport::WinitPlatformRuntime;
 
 # fn enable_viewports(
 #     imgui: &mut Context,
-#     main_window: &winit::window::Window,
+#     main_window: Arc<winit::window::Window>,
 #     instance: wgpu::Instance,
 #     adapter: wgpu::Adapter,
 #     device: wgpu::Device,
 #     queue: wgpu::Queue,
 #     format: wgpu::TextureFormat,
-# ) -> Result<Box<WgpuRenderer>, Box<dyn std::error::Error>> {
+# ) -> Result<(WinitPlatformRuntime, WinitViewportRuntime), Box<dyn std::error::Error>> {
 imgui.enable_multi_viewport();
-winit_mvp::init_multi_viewport_support(imgui, main_window);
+let platform = WinitPlatformRuntime::new(imgui, main_window)?;
 
 let init = WgpuInitInfo::new(device, queue, format)
     .with_instance(instance)
     .with_adapter(adapter);
-let mut renderer = Box::new(WgpuRenderer::new(init, imgui)?);
-
-// SAFETY: Box keeps the renderer address stable. The context, renderer, Winit
-// windows, and GPU objects remain alive and single-threaded until shutdown.
-unsafe { wgpu_mvp::enable(renderer.as_mut(), imgui)? };
-# Ok(renderer)
+let renderer = WgpuRenderer::new(init, imgui)?;
+let renderer = WinitViewportRuntime::attach(imgui, renderer)?;
+# Ok((platform, renderer))
 # }
 ```
 
-For SDL3, use `dear_imgui_wgpu::multi_viewport_sdl3::enable` after the SDL3 platform backend has
-installed its viewport handlers. The same safety and ordering contract applies.
+For SDL3, initialize `Sdl3PlatformBackend` first and then call
+`dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRuntime::attach`. Both typed constructors
+consume `WgpuRenderer`; no caller-owned stable address or unsafe registration contract remains.
 
 The renderer claims only the five `Renderer_*` slots in `ImGuiPlatformIO`. Registration fails
 instead of replacing foreign renderer callbacks or `RendererUserData`, rejects secondary windows
-that already exist, and prevents one renderer from backing multiple ImGui contexts. While
-registered, do not move, reinitialize, shut down, concurrently access, or drop the renderer, and
-do not replace viewport `RendererUserData`.
+that already exist, and requires an active Context `Platform` attachment. Attach is transactional:
+the error returns the unchanged renderer through `WgpuViewportAttachError`. Moving the runtime does
+not move callback-visible renderer storage. Callback replacement, panic, reentry, rendering, and
+terminal surface failures are contained at the C ABI boundary and returned by `poll_fault` or the
+next Rust runtime entry.
 
 From a repository checkout, run the native Winit/WGPU Test Engine smoke to move a window into a real secondary OS viewport, render its surface, merge it back, and verify ordered teardown. `test-engine` is source-only, so this command intentionally builds Dear ImGui from source:
 
@@ -80,22 +83,30 @@ From a repository checkout, run the native Winit/WGPU Test Engine smoke to move 
 DEAR_IMGUI_VIEWPORT_SMOKE=1 cargo run -p dear-imgui-examples --bin multi_viewport_wgpu --features "multi-viewport test-engine"
 ```
 
-Shut down in ownership order:
+Shut down renderer ownership before the platform runtime:
 
 ```rust,no_run
 # use dear_imgui_rs::Context;
-# use dear_imgui_wgpu::multi_viewport as wgpu_mvp;
-# use dear_imgui_winit::multi_viewport as winit_mvp;
-# use dear_imgui_wgpu::WgpuRenderer;
-# fn shutdown(renderer: &mut WgpuRenderer, imgui: &mut Context) -> Result<(), Box<dyn std::error::Error>> {
-wgpu_mvp::shutdown_multi_viewport_support(imgui)?;
+# use dear_imgui_wgpu::multi_viewport::WinitViewportRuntime;
+# use dear_imgui_winit::multi_viewport::WinitPlatformRuntime;
+# fn shutdown(renderer: &mut WinitViewportRuntime, platform: &mut WinitPlatformRuntime, imgui: &mut Context) -> Result<(), Box<dyn std::error::Error>> {
 renderer.shutdown(imgui)?;
-winit_mvp::shutdown_multi_viewport_support(imgui);
+platform.shutdown()?;
 # Ok(())
 # }
 ```
 
-The renderer helper destroys secondary windows before releasing renderer resources and clears only the callback slots it still owns. Explicit shutdown is required before the renderer, context, platform backend, windows, instance, adapter, device, or queue is dropped. `WgpuRenderer::shutdown` requires the matching context so GPU resources and managed texture IDs are invalidated together; shutdown and renderer reinitialization return an error while the viewport runtime is active. Shut down before dropping the bound context. The renderer retains a context liveness token and remains on the context's UI thread.
+The renderer runtime releases `RendererUserData`, surfaces, callbacks, and renderer GPU resources;
+it never enters the platform-window phase. The Winit or SDL3 platform owner remains solely
+responsible for destroying native windows. Context-first teardown invokes the same shared state
+machine in ordered renderer-resource and platform-window phases.
+
+Explicit renderer shutdown is idempotent and retryable. In particular, an outstanding detached
+snapshot leaves the runtime in `Detached` with its renderer retained; finish or abandon the epoch,
+poll Context completions, and call `shutdown` again. Runtime `Drop` performs terminal best-effort
+cleanup because it cannot report errors or safely wait for detached work. Use explicit shutdown
+when managed texture reset or callback ownership errors matter. Foreign callback and backend-state
+replacements are preserved rather than overwritten during either path.
 
 ## Selecting wgpu version
 

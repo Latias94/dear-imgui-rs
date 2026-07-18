@@ -32,7 +32,7 @@ use dear_imgui_rs::{Condition, Context, TextureId};
 use dear_imgui_test_engine::{
     RunFlags, RunSpeed, ScriptCount, TestEngine, TestGroup, VerboseLevel,
 };
-use dear_imgui_wgpu::{GammaMode, WgpuInitInfo, WgpuRenderer};
+use dear_imgui_wgpu::{GammaMode, WgpuInitInfo, WgpuRenderer, multi_viewport as wgpu_mvp};
 use dear_imgui_winit::{HiDpiMode, WinitPlatform, multi_viewport as winit_mvp};
 use pollster::block_on;
 use std::{sync::Arc, time::Instant};
@@ -44,13 +44,54 @@ use winit::{
     window::{Window, WindowId},
 };
 
+enum AppRenderer {
+    Single(WgpuRenderer),
+    Multi(wgpu_mvp::WinitViewportRuntime),
+}
+
+impl AppRenderer {
+    fn new_frame(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        match self {
+            Self::Single(renderer) => renderer.new_frame()?,
+            Self::Multi(runtime) => runtime.new_frame()?,
+        }
+        Ok(())
+    }
+
+    fn render_context_with_fb_size(
+        &mut self,
+        context: &mut Context,
+        render_pass: &mut wgpu::RenderPass<'_>,
+        width: u32,
+        height: u32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        match self {
+            Self::Single(renderer) => {
+                renderer.render_context_with_fb_size(context, render_pass, width, height)?
+            }
+            Self::Multi(runtime) => {
+                runtime.render_context_with_fb_size(context, render_pass, width, height)?
+            }
+        }
+        Ok(())
+    }
+
+    fn shutdown(&mut self, context: &mut Context) -> Result<(), Box<dyn std::error::Error>> {
+        match self {
+            Self::Single(renderer) => renderer.shutdown(context)?,
+            Self::Multi(runtime) => runtime.shutdown(context)?,
+        }
+        Ok(())
+    }
+}
+
 struct AppWindow {
     window: Arc<Window>,
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
     device: wgpu::Device,
     queue: wgpu::Queue,
-    renderer: Box<WgpuRenderer>,
+    renderer: AppRenderer,
     viewport_runtime: Option<winit_mvp::WinitPlatformRuntime>,
     platform: WinitPlatform,
     imgui: Context,
@@ -72,12 +113,6 @@ impl Drop for AppWindow {
         #[cfg(feature = "test-engine")]
         if let Some(engine) = self.test_engine.as_mut() {
             engine.shutdown();
-        }
-        // Avoid ImGui's shutdown assertion by ensuring platform windows are destroyed before the
-        // context is dropped.
-        if self.enable_viewports {
-            dear_imgui_wgpu::multi_viewport::shutdown_multi_viewport_support(&mut self.imgui)
-                .expect("WGPU multi-viewport shutdown failed");
         }
         self.renderer
             .shutdown(&mut self.imgui)
@@ -195,11 +230,19 @@ impl AppWindow {
         let init_info = WgpuInitInfo::new(device.clone(), queue.clone(), surface_config.format)
             .with_instance(instance.clone())
             .with_adapter(adapter.clone());
-        let mut renderer = Box::new(WgpuRenderer::new(init_info, &mut imgui)?);
+        let mut renderer = WgpuRenderer::new(init_info, &mut imgui)?;
         renderer.set_gamma_mode(GammaMode::Auto);
 
         // Register the offscreen texture as an external ImGui texture.
         let game_tex_id = renderer.register_external_texture(&game_tex, &game_tex_view);
+
+        let renderer = if enable_viewports {
+            AppRenderer::Multi(wgpu_mvp::WinitViewportRuntime::attach(
+                &mut imgui, renderer,
+            )?)
+        } else {
+            AppRenderer::Single(renderer)
+        };
 
         #[cfg(feature = "test-engine")]
         let test_engine = if run_viewport_smoke {
@@ -234,7 +277,7 @@ impl AppWindow {
             None
         };
 
-        let mut app = Self {
+        let app = Self {
             window,
             surface,
             surface_config,
@@ -254,13 +297,6 @@ impl AppWindow {
             #[cfg(feature = "test-engine")]
             viewport_smoke_complete: false,
         };
-
-        if app.enable_viewports {
-            // Renderer viewport callbacks (install AFTER winit so our callbacks take precedence)
-            unsafe {
-                dear_imgui_wgpu::multi_viewport::enable(&mut app.renderer, &mut app.imgui)?;
-            }
-        }
 
         Ok(app)
     }

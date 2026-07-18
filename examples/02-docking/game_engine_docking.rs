@@ -185,7 +185,7 @@ impl Default for GameEngineState {
 
 struct ImguiState {
     platform: WinitPlatform,
-    renderer: Box<WgpuRenderer>,
+    renderer: ImguiRenderer,
     #[cfg(feature = "multi-viewport")]
     viewport_runtime: Option<winit_mvp::WinitPlatformRuntime>,
     #[allow(dead_code)] // Only used when the multi-viewport feature is enabled.
@@ -203,14 +203,58 @@ struct ImguiState {
     context: Context,
 }
 
+enum ImguiRenderer {
+    Single(WgpuRenderer),
+    #[cfg(feature = "multi-viewport")]
+    Multi(wgpu_mvp::WinitViewportRuntime),
+}
+
+impl ImguiRenderer {
+    fn new_frame(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        match self {
+            Self::Single(renderer) => renderer.new_frame()?,
+            #[cfg(feature = "multi-viewport")]
+            Self::Multi(runtime) => runtime.new_frame()?,
+        }
+        Ok(())
+    }
+
+    fn render_with_fb_size(
+        &mut self,
+        frame: dear_imgui_rs::render::RenderedFrame<'_>,
+        render_pass: &mut wgpu::RenderPass<'_>,
+        width: u32,
+        height: u32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        match self {
+            Self::Single(renderer) => {
+                renderer.render_with_fb_size(frame, render_pass, width, height)?
+            }
+            #[cfg(feature = "multi-viewport")]
+            Self::Multi(runtime) => {
+                runtime.render_with_fb_size(frame, render_pass, width, height)?
+            }
+        }
+        Ok(())
+    }
+
+    fn shutdown(&mut self, context: &mut Context) -> Result<(), Box<dyn std::error::Error>> {
+        match self {
+            Self::Single(renderer) => renderer.shutdown(context)?,
+            #[cfg(feature = "multi-viewport")]
+            Self::Multi(runtime) => runtime.shutdown(context)?,
+        }
+        Ok(())
+    }
+}
+
 impl Drop for ImguiState {
     fn drop(&mut self) {
-        // Avoid ImGui's shutdown assertion by ensuring platform windows are destroyed before the
-        // context is dropped.
+        self.renderer
+            .shutdown(&mut self.context)
+            .expect("WGPU renderer shutdown failed");
         #[cfg(feature = "multi-viewport")]
         if self.enable_viewports {
-            wgpu_mvp::shutdown_multi_viewport_support(&mut self.context)
-                .expect("WGPU multi-viewport shutdown failed");
             if let Some(runtime) = self.viewport_runtime.as_mut() {
                 runtime
                     .shutdown()
@@ -1006,9 +1050,21 @@ impl AppWindow {
         #[cfg(feature = "implot")]
         let plot_context = PlotContext::create(&context);
 
+        #[cfg(feature = "multi-viewport")]
+        let renderer = if enable_viewports {
+            ImguiRenderer::Multi(
+                wgpu_mvp::WinitViewportRuntime::attach(&mut context, renderer)
+                    .expect("Failed to initialize WGPU multi-viewport runtime"),
+            )
+        } else {
+            ImguiRenderer::Single(renderer)
+        };
+        #[cfg(not(feature = "multi-viewport"))]
+        let renderer = ImguiRenderer::Single(renderer);
+
         self.imgui = Some(ImguiState {
             platform,
-            renderer: Box::new(renderer),
+            renderer,
             #[cfg(feature = "multi-viewport")]
             viewport_runtime,
             enable_viewports,
@@ -1191,17 +1247,13 @@ impl AppWindow {
                 multiview_mask: None,
             });
 
-            imgui
-                .renderer
-                .render_with_fb_size(
-                    draw_data,
-                    &mut render_pass,
-                    self.surface_desc.width,
-                    self.surface_desc.height,
-                )
-                .unwrap_or_else(|e| {
-                    eprintln!("ImGui render error: {:?}", e);
-                });
+            imgui.renderer.new_frame()?;
+            imgui.renderer.render_with_fb_size(
+                draw_data,
+                &mut render_pass,
+                self.surface_desc.width,
+                self.surface_desc.height,
+            )?;
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -2604,23 +2656,6 @@ impl ApplicationHandler for App {
             window.window.request_redraw();
             self.window = Some(window);
             println!("Window created successfully");
-            #[cfg(feature = "multi-viewport")]
-            {
-                if let Some(app) = self.window.as_mut() {
-                    if let Some(imgui) = app.imgui.as_mut() {
-                        if imgui.enable_viewports {
-                            // Install renderer viewport callbacks after the owning Winit runtime.
-                            if let Err(error) =
-                                unsafe { wgpu_mvp::enable(&mut imgui.renderer, &mut imgui.context) }
-                            {
-                                eprintln!(
-                                    "failed to enable WGPU multi-viewport callbacks: {error}"
-                                );
-                            }
-                        }
-                    }
-                }
-            }
         }
     }
 

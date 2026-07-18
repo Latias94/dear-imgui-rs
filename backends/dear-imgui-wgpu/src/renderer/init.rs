@@ -84,8 +84,6 @@ impl WgpuRenderer {
             gamma_mode: GammaMode::Auto,
             #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
             viewport_clear_color: Color::BLACK,
-            #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
-            multi_viewport_active: std::sync::atomic::AtomicBool::new(false),
             renderer_consumer: None,
         }
     }
@@ -95,9 +93,6 @@ impl WgpuRenderer {
     /// Public initialization always goes through [`Self::init_with_context`] so renderer resources
     /// and Dear ImGui texture bindings cannot be replaced independently.
     fn initialize_device(&mut self, init_info: WgpuInitInfo) -> RendererResult<()> {
-        #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
-        self.ensure_multi_viewport_inactive()?;
-
         self.ensure_uninitialized()?;
 
         // Create backend data
@@ -152,9 +147,6 @@ impl WgpuRenderer {
         imgui_ctx: &mut Context,
         prepare_font_atlas: bool,
     ) -> RendererResult<()> {
-        #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
-        self.ensure_multi_viewport_inactive()?;
-
         self.ensure_uninitialized()?;
         Self::ensure_context_available(imgui_ctx)?;
         self.initialize_device(init_info)?;
