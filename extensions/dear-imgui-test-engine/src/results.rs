@@ -5,6 +5,45 @@ pub struct ResultSummary {
     pub count_in_queue: usize,
 }
 
+/// Terminal outcome of one bounded Test Engine run.
+///
+/// Infrastructure failures are returned as [`crate::RunnerError`] and never represented here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RunOutcome {
+    /// At least one test ran and every test succeeded.
+    Passed,
+    /// At least one test ran and one or more tests failed.
+    Failed,
+    /// The queue reached terminal state without executing a test.
+    NoMatch,
+    /// The primary frame budget expired and the runner subsequently drained the queue.
+    TimedOut,
+    /// The application requested an abort and the runner subsequently drained the queue.
+    Aborted,
+}
+
+impl RunOutcome {
+    /// Returns true only for a non-empty, fully successful run.
+    #[must_use]
+    pub const fn is_passed(self) -> bool {
+        matches!(self, Self::Passed)
+    }
+}
+
+/// Structured terminal report produced by [`crate::TestRunner`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RunReport {
+    /// Terminal product outcome.
+    pub outcome: RunOutcome,
+    /// Native counters captured after the queue reached terminal state.
+    pub summary: ResultSummary,
+    /// Total number of complete frames pumped by the runner.
+    pub frames: u64,
+    /// Number of `frames` used to drain an abort or timeout.
+    pub cleanup_frames: u64,
+}
+
 impl ResultSummary {
     pub(super) fn try_from_raw(
         count_tested: i32,

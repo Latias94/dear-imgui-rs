@@ -9,6 +9,7 @@ mod counts;
 mod engine;
 mod error;
 mod results;
+mod runner;
 mod script;
 mod state;
 
@@ -19,7 +20,8 @@ pub use config::{InputMode, RunFlags, RunSpeed, TestGroup, VerboseLevel};
 pub use counts::{ScriptCount, ScriptLimit};
 pub use engine::TestEngine;
 pub use error::{TestEngineError, TestEngineResult, TestEngineStatus};
-pub use results::ResultSummary;
+pub use results::{ResultSummary, RunOutcome, RunReport};
+pub use runner::{RunnerCallbackStage, RunnerControl, RunnerError, TestRunner};
 pub use script::ScriptTest;
 pub use state::{AttachmentState, RunState};
 

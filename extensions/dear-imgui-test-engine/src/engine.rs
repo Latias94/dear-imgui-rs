@@ -2,8 +2,8 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 
 use dear_imgui_rs::{
-    Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole, ContextBinding, Ui,
-    with_scratch_txt, with_scratch_txt_two,
+    Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole, ContextBinding,
+    ContextId, Ui, with_scratch_txt, with_scratch_txt_two,
 };
 use dear_imgui_test_engine_sys as sys;
 
@@ -55,6 +55,10 @@ impl TestEngine {
     /// Returns the independently tracked test run lifecycle.
     pub fn run_state(&self) -> RunState {
         self.control.run_state()
+    }
+
+    pub(crate) fn attached_context_id(&self) -> Option<ContextId> {
+        self.control.context_id()
     }
 
     /// Transactionally attaches and starts the engine on one Context.
