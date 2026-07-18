@@ -67,5 +67,8 @@ use self::pipeline::{ViewportPipeline, is_srgb_format};
 pub use self::retirement::TextureRetirementBatch;
 use self::retirement::{RetirementQueue, RetirementRequest};
 use self::texture::{PendingTextureUpdate, TextureManager};
-use self::uploads::InFlightUpload;
+use self::uploads::{
+    InFlightUpload, ManagedUploadDecision, ManagedUploadTracker, UploadSignature,
+    finish_destroy_upload_gate,
+};
 use self::vulkan::*;

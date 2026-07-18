@@ -7,7 +7,7 @@ impl AshRenderer {
     /// command buffer is not GPU completion: do not complete the batch until synchronization for
     /// every queue that can still use its textures has signaled. With multi-viewport enabled, that
     /// includes secondary viewport work recorded after this method returns. See
-    /// [`Self::notify_texture_retirements_completed`].
+    /// [`Self::complete_texture_retirements_with_fences`].
     pub fn cmd_draw(
         &mut self,
         command_buffer: vk::CommandBuffer,

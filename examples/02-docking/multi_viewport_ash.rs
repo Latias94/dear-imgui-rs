@@ -291,6 +291,58 @@ struct FrameSync {
     command_buffer: vk::CommandBuffer,
 }
 
+enum RendererRuntime {
+    Single(AshRenderer),
+    Viewports(ash_mvp::WinitViewportRuntime),
+}
+
+impl RendererRuntime {
+    fn set_viewport_clear_color(
+        &mut self,
+        color: [f32; 4],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        match self {
+            Self::Single(renderer) => renderer.set_viewport_clear_color(color),
+            Self::Viewports(runtime) => runtime.set_viewport_clear_color(color)?,
+        }
+        Ok(())
+    }
+
+    fn cmd_draw(
+        &mut self,
+        command_buffer: vk::CommandBuffer,
+        frame: dear_imgui_rs::render::RenderedFrame<'_>,
+    ) -> Result<Option<dear_imgui_ash::TextureRetirementBatch>, Box<dyn std::error::Error>> {
+        Ok(match self {
+            Self::Single(renderer) => renderer.cmd_draw(command_buffer, frame)?,
+            Self::Viewports(runtime) => runtime.cmd_draw(command_buffer, frame)?,
+        })
+    }
+
+    fn wait_for_texture_retirements(
+        &mut self,
+        batch: dear_imgui_ash::TextureRetirementBatch,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        match self {
+            Self::Single(renderer) => {
+                renderer.wait_for_texture_retirements(batch)?;
+            }
+            Self::Viewports(runtime) => {
+                runtime.wait_for_texture_retirements(batch)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn shutdown(&mut self, context: &mut Context) -> Result<(), Box<dyn std::error::Error>> {
+        match self {
+            Self::Single(renderer) => renderer.shutdown(context)?,
+            Self::Viewports(runtime) => runtime.shutdown(context)?,
+        }
+        Ok(())
+    }
+}
+
 struct VulkanState {
     ctx: VulkanContext,
     render_pass: vk::RenderPass,
@@ -313,7 +365,7 @@ impl Drop for VulkanState {
 }
 
 struct ImguiState {
-    renderer: AshRenderer,
+    renderer: RendererRuntime,
     viewport_runtime: Option<winit_mvp::WinitPlatformRuntime>,
     platform: WinitPlatform,
     context: Context,
@@ -332,11 +384,6 @@ struct AppWindow {
 
 impl Drop for AppWindow {
     fn drop(&mut self) {
-        // Avoid shutdown assertions by ensuring platform windows are destroyed before the context
-        // and renderer are dropped.
-        if self.enable_viewports {
-            let _ = ash_mvp::shutdown_multi_viewport_support(&mut self.imgui.context);
-        }
         let _ = self.imgui.renderer.shutdown(&mut self.imgui.context);
         if let Some(runtime) = self.imgui.viewport_runtime.as_mut() {
             let _ = runtime.shutdown();
@@ -408,6 +455,25 @@ impl AppWindow {
             }),
         )?;
         renderer.set_viewport_clear_color([0.1, 0.12, 0.15, 1.0]);
+        let renderer = if enable_viewports {
+            RendererRuntime::Viewports(unsafe {
+                ash_mvp::WinitViewportRuntime::attach(
+                    &mut imgui,
+                    renderer,
+                    ash_mvp::VulkanViewportConfig {
+                        entry: ctx.entry.clone(),
+                        instance: ctx.instance.clone(),
+                        physical_device: ctx.physical_device,
+                        validation_surface: ctx.surface,
+                        present_queue: ctx.queue,
+                        graphics_queue_family_index: ctx.queue_family_index,
+                        present_queue_family_index: ctx.queue_family_index,
+                    },
+                )?
+            })
+        } else {
+            RendererRuntime::Single(renderer)
+        };
 
         let frames = create_frame_syncs(&ctx.device, ctx.command_pool, FRAMES_IN_FLIGHT)?;
         let images_in_flight = vec![vk::Fence::null(); swapchain.images.len()];
@@ -481,9 +547,13 @@ impl AppWindow {
                 ));
 
                 ui.color_edit4("Clear color", &mut self.imgui.clear_color);
-                self.imgui
+                if let Err(error) = self
+                    .imgui
                     .renderer
-                    .set_viewport_clear_color(self.imgui.clear_color);
+                    .set_viewport_clear_color(self.imgui.clear_color)
+                {
+                    error!("failed to update viewport clear color: {error}");
+                }
 
                 if ui.button("Show Demo Window") {
                     self.imgui.demo_open = true;
@@ -601,14 +671,7 @@ impl AppWindow {
         }
 
         if let Some(batch) = texture_retirement {
-            unsafe {
-                // This wait covers the main submission and every secondary viewport queue before
-                // the renderer releases textures referenced by this retirement batch.
-                self.vk.ctx.device.device_wait_idle()?;
-                self.imgui
-                    .renderer
-                    .notify_texture_retirements_completed(batch)?;
-            }
+            self.imgui.renderer.wait_for_texture_retirements(batch)?;
         }
 
         Ok(())
@@ -635,34 +698,8 @@ impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         match AppWindow::new(event_loop) {
             Ok(win) => {
-                // Place the window struct first so its address is stable.
                 win.window.request_redraw();
                 self.window = Some(Box::new(win));
-
-                // Now that AppWindow is in its final place, (re)install renderer callbacks.
-                if let Some(app) = self.window.as_mut() {
-                    if app.enable_viewports {
-                        let result = unsafe {
-                            ash_mvp::enable(
-                                &mut app.imgui.renderer,
-                                &mut app.imgui.context,
-                                ash_mvp::VulkanViewportConfig {
-                                    entry: app.vk.ctx.entry.clone(),
-                                    instance: app.vk.ctx.instance.clone(),
-                                    physical_device: app.vk.ctx.physical_device,
-                                    validation_surface: app.vk.ctx.surface,
-                                    present_queue: app.vk.ctx.queue,
-                                    graphics_queue_family_index: app.vk.ctx.queue_family_index,
-                                    present_queue_family_index: app.vk.ctx.queue_family_index,
-                                },
-                            )
-                        };
-                        if let Err(err) = result {
-                            error!("Failed to enable Ash multi-viewport rendering: {err}");
-                            event_loop.exit();
-                        }
-                    }
-                }
             }
             Err(e) => {
                 error!("Failed to create window: {e}");
@@ -1073,7 +1110,7 @@ fn record_command_buffer<F, T>(
     record_draws: F,
 ) -> Result<T, Box<dyn std::error::Error>>
 where
-    F: FnOnce(vk::CommandBuffer) -> dear_imgui_ash::RendererResult<T>,
+    F: FnOnce(vk::CommandBuffer) -> Result<T, Box<dyn std::error::Error>>,
 {
     let result = unsafe {
         device.begin_command_buffer(

@@ -19,6 +19,7 @@ use std::time::Instant;
 
 use ash::khr::{surface as khr_surface, swapchain as khr_swapchain};
 use ash::{Device, Entry, Instance, vk};
+use dear_imgui_ash::multi_viewport_sdl3::{Sdl3ViewportRuntime, VulkanViewportConfig};
 use dear_imgui_ash::{AshRenderer, Options as AshOptions, TextureRetirementBatch};
 use dear_imgui_rs::{Condition, ConfigFlags, Context, render::RenderedFrame};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode, Sdl3PlatformBackend};
@@ -363,7 +364,7 @@ fn record_command_buffer<F>(
     record: F,
 ) -> Result<Option<TextureRetirementBatch>, Box<dyn Error>>
 where
-    F: FnOnce(vk::CommandBuffer) -> dear_imgui_ash::RendererResult<Option<TextureRetirementBatch>>,
+    F: FnOnce(vk::CommandBuffer) -> Result<Option<TextureRetirementBatch>, Box<dyn Error>>,
 {
     let texture_retirement;
     unsafe {
@@ -638,7 +639,7 @@ fn create_external_rgba_texture(
     device: &Device,
     queue: vk::Queue,
     command_pool: vk::CommandPool,
-    renderer: &mut AshRenderer,
+    renderer: &mut RendererRuntime,
 ) -> Result<ExternalTexture, Box<dyn Error>> {
     fn find_memory_type(
         props: &vk::PhysicalDeviceMemoryProperties,
@@ -898,9 +899,104 @@ fn create_external_rgba_texture(
     })
 }
 
+enum RendererRuntime {
+    Single(AshRenderer),
+    Viewports(Sdl3ViewportRuntime),
+}
+
+impl RendererRuntime {
+    fn cmd_draw(
+        &mut self,
+        command_buffer: vk::CommandBuffer,
+        frame: RenderedFrame<'_>,
+    ) -> Result<Option<TextureRetirementBatch>, Box<dyn Error>> {
+        Ok(match self {
+            Self::Single(renderer) => renderer.cmd_draw(command_buffer, frame)?,
+            Self::Viewports(runtime) => runtime.cmd_draw(command_buffer, frame)?,
+        })
+    }
+
+    fn pending_texture_retirement(&self) -> Result<Option<TextureRetirementBatch>, Box<dyn Error>> {
+        Ok(match self {
+            Self::Single(renderer) => renderer.pending_texture_retirement(),
+            Self::Viewports(runtime) => runtime.pending_texture_retirement()?,
+        })
+    }
+
+    fn wait_for_texture_retirements(
+        &mut self,
+        batch: TextureRetirementBatch,
+    ) -> Result<(), Box<dyn Error>> {
+        match self {
+            Self::Single(renderer) => {
+                renderer.wait_for_texture_retirements(batch)?;
+            }
+            Self::Viewports(runtime) => {
+                runtime.wait_for_texture_retirements(batch)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn set_viewport_clear_color(&mut self, color: [f32; 4]) -> Result<(), Box<dyn Error>> {
+        match self {
+            Self::Single(renderer) => renderer.set_viewport_clear_color(color),
+            Self::Viewports(runtime) => runtime.set_viewport_clear_color(color)?,
+        }
+        Ok(())
+    }
+
+    fn register_external_texture_with_sampler(
+        &mut self,
+        image_view: vk::ImageView,
+        sampler: vk::Sampler,
+    ) -> Result<dear_imgui_rs::TextureId, Box<dyn Error>> {
+        Ok(match self {
+            Self::Single(renderer) => {
+                renderer.register_external_texture_with_sampler(image_view, sampler)?
+            }
+            Self::Viewports(runtime) => {
+                runtime.register_external_texture_with_sampler(image_view, sampler)?
+            }
+        })
+    }
+
+    fn update_external_texture_sampler(
+        &mut self,
+        texture: dear_imgui_rs::TextureId,
+        sampler: vk::Sampler,
+    ) -> Result<bool, Box<dyn Error>> {
+        Ok(match self {
+            Self::Single(renderer) => renderer.update_external_texture_sampler(texture, sampler)?,
+            Self::Viewports(runtime) => {
+                runtime.update_external_texture_sampler(texture, sampler)?
+            }
+        })
+    }
+
+    fn unregister_texture(
+        &mut self,
+        texture: dear_imgui_rs::TextureId,
+    ) -> Result<(), Box<dyn Error>> {
+        match self {
+            Self::Single(renderer) => renderer.unregister_texture(texture)?,
+            Self::Viewports(runtime) => runtime.unregister_texture(texture)?,
+        }
+        Ok(())
+    }
+
+    fn shutdown(&mut self, context: &mut Context) -> Result<(), Box<dyn Error>> {
+        match self {
+            Self::Single(renderer) => renderer.shutdown(context)?,
+            Self::Viewports(runtime) => runtime.shutdown(context)?,
+        }
+        Ok(())
+    }
+}
+
 struct ImguiState {
     context: Context,
-    renderer: AshRenderer,
+    renderer: RendererRuntime,
     last_frame: Instant,
     clear_color: [f32; 4],
     img_tex: dear_imgui_rs::ManagedTextureId,
@@ -953,15 +1049,8 @@ struct App {
 
 impl Drop for App {
     fn drop(&mut self) {
-        if self.enable_viewports {
-            // Avoid shutdown assertions by ensuring platform windows are destroyed before the
-            // ImGui context and renderer are dropped.
-            let _ = dear_imgui_ash::multi_viewport_sdl3::shutdown_multi_viewport_support(
-                &mut self.imgui.context,
-            );
-        }
         let _ = unsafe { self.vk.ctx.device.device_wait_idle() };
-        self.destroy_external_texture();
+        let _ = self.destroy_external_texture();
         let _ = self.imgui.renderer.shutdown(&mut self.imgui.context);
         let _ = self.shutdown_platform_backend();
     }
@@ -1058,6 +1147,25 @@ impl App {
             }),
         )?;
         renderer.set_viewport_clear_color([0.1, 0.12, 0.15, 1.0]);
+        let renderer = if ENABLE_VIEWPORTS {
+            RendererRuntime::Viewports(unsafe {
+                Sdl3ViewportRuntime::attach(
+                    &mut context,
+                    renderer,
+                    VulkanViewportConfig {
+                        entry: ctx.entry.clone(),
+                        instance: ctx.instance.clone(),
+                        physical_device: ctx.physical_device,
+                        validation_surface: ctx.surface,
+                        present_queue: ctx.queue,
+                        graphics_queue_family_index: ctx.queue_family_index,
+                        present_queue_family_index: ctx.queue_family_index,
+                    },
+                )?
+            })
+        } else {
+            RendererRuntime::Single(renderer)
+        };
 
         // Frame sync objects.
         let frames = create_frame_syncs(&ctx.device, ctx.command_pool, FRAMES_IN_FLIGHT)?;
@@ -1107,12 +1215,15 @@ impl App {
         Ok(())
     }
 
-    fn destroy_external_texture(&mut self) {
+    fn destroy_external_texture(&mut self) -> Result<(), Box<dyn Error>> {
         let Some(external) = self.imgui.external.take() else {
-            return;
+            return Ok(());
         };
 
-        self.imgui.renderer.unregister_texture(external.tex_id);
+        if let Err(error) = self.imgui.renderer.unregister_texture(external.tex_id) {
+            self.imgui.external = Some(external);
+            return Err(error);
+        }
 
         unsafe {
             self.vk
@@ -1130,6 +1241,7 @@ impl App {
             self.vk.ctx.device.destroy_image(external.image, None);
             self.vk.ctx.device.free_memory(external.image_mem, None);
         }
+        Ok(())
     }
 
     fn shutdown_platform_backend(&mut self) -> Result<(), imgui_sdl3_backend::Sdl3BackendError> {
@@ -1162,8 +1274,7 @@ impl App {
     }
 
     fn run(&mut self) -> Result<(), Box<dyn Error>> {
-        // Best-effort: create external texture once (will be shown in UI).
-        let _ = self.init_external_texture();
+        self.init_external_texture()?;
 
         'main: loop {
             while let Some(raw) = imgui_sdl3_backend::sdl3_poll_event_ll() {
@@ -1215,6 +1326,7 @@ impl App {
 
             ui.dockspace_over_main_viewport();
 
+            let mut external_sampler_update = None;
             ui.window("SDL3 + Ash (multi-viewport)")
                 .size([460.0, 280.0], Condition::FirstUseEver)
                 .build(|| {
@@ -1239,10 +1351,7 @@ impl App {
                             } else {
                                 external.sampler_nearest
                             };
-                            let _ = self
-                                .imgui
-                                .renderer
-                                .update_external_texture_sampler(external.tex_id, sampler);
+                            external_sampler_update = Some((external.tex_id, sampler));
                         }
 
                         ui.image(external.tex_id, [256.0, 256.0]);
@@ -1261,6 +1370,19 @@ impl App {
                 // SAFETY: This demo assumes the destructive font-atlas controls are not activated.
                 unsafe { ui.show_demo_window(&mut self.imgui.show_demo) };
             }
+
+            if let Some((texture, sampler)) = external_sampler_update {
+                if !self
+                    .imgui
+                    .renderer
+                    .update_external_texture_sampler(texture, sampler)?
+                {
+                    return Err("external texture registration disappeared".into());
+                }
+            }
+            self.imgui
+                .renderer
+                .set_viewport_clear_color(self.imgui.clear_color)?;
 
             let texture_retirement = {
                 let frame = self.imgui.context.render();
@@ -1283,26 +1405,16 @@ impl App {
             }
 
             if let Some(retirement) = texture_retirement {
-                // SAFETY: device idle covers renderer uploads plus every primary and secondary
-                // viewport submission that can still reference textures in this batch.
-                unsafe {
-                    self.vk.ctx.device.device_wait_idle()?;
-                    self.imgui
-                        .renderer
-                        .notify_texture_retirements_completed(retirement)?;
-                }
+                self.imgui
+                    .renderer
+                    .wait_for_texture_retirements(retirement)?;
             }
         }
 
-        if self.enable_viewports {
-            dear_imgui_ash::multi_viewport_sdl3::shutdown_multi_viewport_support(
-                &mut self.imgui.context,
-            )?;
-            self.enable_viewports = false;
-        }
         unsafe { self.vk.ctx.device.device_wait_idle()? };
-        self.destroy_external_texture();
+        self.destroy_external_texture()?;
         self.imgui.renderer.shutdown(&mut self.imgui.context)?;
+        self.enable_viewports = false;
         self.shutdown_platform_backend()?;
         Ok(())
     }
@@ -1310,14 +1422,14 @@ impl App {
 
 fn render_main_window(
     vk_state: &mut VulkanState,
-    renderer: &mut AshRenderer,
+    renderer: &mut RendererRuntime,
     window: &sdl3::video::Window,
     clear_color: [f32; 4],
     rendered_frame: RenderedFrame<'_>,
 ) -> Result<Option<TextureRetirementBatch>, Box<dyn Error>> {
     let (width, height) = window.size_in_pixels();
     if width == 0 || height == 0 {
-        return Ok(renderer.pending_texture_retirement());
+        return renderer.pending_texture_retirement();
     }
     if vk_state.swapchain_dirty {
         vk_state
@@ -1348,7 +1460,7 @@ fn render_main_window(
         Ok(v) => v,
         Err(vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR) => {
             vk_state.swapchain_dirty = true;
-            return Ok(renderer.pending_texture_retirement());
+            return renderer.pending_texture_retirement();
         }
         Err(e) => return Err(Box::new(e)),
     };
@@ -1431,26 +1543,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Optional: ensure SDL loads Vulkan loader early (first Vulkan window would also load it).
     let _ = video.vulkan_load_library_default();
 
-    // Place the app in a Box so the renderer's address stays stable for multi-viewport callbacks.
-    let mut app = Box::new(App::new(&video)?);
-
-    if app.enable_viewports {
-        unsafe {
-            dear_imgui_ash::multi_viewport_sdl3::enable(
-                &mut app.imgui.renderer,
-                &mut app.imgui.context,
-                dear_imgui_ash::multi_viewport_sdl3::VulkanViewportConfig {
-                    entry: app.vk.ctx.entry.clone(),
-                    instance: app.vk.ctx.instance.clone(),
-                    physical_device: app.vk.ctx.physical_device,
-                    validation_surface: app.vk.ctx.surface,
-                    present_queue: app.vk.ctx.queue,
-                    graphics_queue_family_index: app.vk.ctx.queue_family_index,
-                    present_queue_family_index: app.vk.ctx.queue_family_index,
-                },
-            )?;
-        }
-    }
-
+    let mut app = App::new(&video)?;
     app.run()
 }

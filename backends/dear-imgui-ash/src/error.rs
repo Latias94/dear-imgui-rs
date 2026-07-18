@@ -53,9 +53,17 @@ pub enum RendererError {
     #[error("Renderer consumer generation mismatch: expected {expected}, got {actual}")]
     ConsumerGenerationMismatch { expected: u64, actual: u64 },
 
-    /// Multi-viewport callbacks still hold renderer-owned Vulkan resources.
-    #[error("Multi-viewport support is still active; shut it down before the renderer")]
-    MultiViewportActive,
+    /// Fence-proven texture retirement requires at least one completion fence.
+    #[error("Texture retirement completion requires at least one Vulkan fence")]
+    TextureRetirementFencesEmpty,
+
+    /// A completion fence was null.
+    #[error("Texture retirement completion fence {index} is null")]
+    TextureRetirementFenceNull { index: usize },
+
+    /// A completion fence has not signaled yet.
+    #[error("Texture retirement completion fence {index} has not signaled")]
+    TextureRetirementFencePending { index: usize },
 
     /// Bad texture id (no matching descriptor set).
     #[error("Bad texture id: {0}")]

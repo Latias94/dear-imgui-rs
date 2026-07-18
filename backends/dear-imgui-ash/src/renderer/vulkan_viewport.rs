@@ -3,9 +3,12 @@
 mod callbacks;
 mod frame_sync;
 mod registry;
+mod runtime;
 mod surface;
 mod swapchain;
 
+#[cfg(test)]
+mod runtime_contract_tests;
 #[cfg(test)]
 mod tests;
 
@@ -14,36 +17,20 @@ use ash::{
     khr::{surface as khr_surface, swapchain as khr_swapchain},
     vk,
 };
-use dear_imgui_rs::{Context, internal::RawCast, platform_io::Viewport, sys};
-use std::ffi::c_void;
+use dear_imgui_rs::{platform_io::Viewport, sys};
 #[cfg(test)]
 use std::sync::Mutex;
 
-pub(crate) use self::callbacks::{
-    renderer_create_window_sys, renderer_destroy_window_sys, renderer_render_window_sys,
-    renderer_set_window_size_sys, renderer_swap_buffers_sys,
-};
-#[cfg(test)]
-use self::callbacks::{renderer_render_window, request_platform_close_after_create_failure};
 use self::frame_sync::{
     FrameSync, create_command_pool, create_frame_syncs, create_present_semaphores,
     destroy_frame_syncs, destroy_present_semaphores, present_semaphore_for_image,
     replace_frame_sync,
 };
-pub(crate) use self::registry::has_renderer_state_for_renderer;
-pub use self::registry::{
-    CallbackOwnershipError, SurfaceSupportError, shutdown_multi_viewport_support,
-};
-use self::registry::{
-    GlobalHandles, borrow_renderer, global_handles, query_surface_support, register_viewport_data,
-    take_viewport_data, viewport_user_data_mut,
-};
-pub(crate) use self::registry::{clear_for_drop, enable_with_adapter};
-#[cfg(test)]
-use self::registry::{
-    insert_renderer_state, is_ash_viewport_data, remove_renderer_state_for_context,
-    unregister_viewport_data,
-};
+pub use self::registry::SurfaceSupportError;
+use self::registry::{GlobalHandles, query_surface_support};
+pub(crate) use self::runtime::OwningViewportRuntime;
+pub(crate) use self::runtime::attach_with_adapter;
+pub use self::runtime::{AshViewportAttachError, AshViewportError};
 use self::surface::{SwapchainResources, ViewportAshData, ViewportRuntimeState};
 #[cfg(feature = "dynamic-rendering")]
 use self::swapchain::transition_swapchain_image;
@@ -68,7 +55,7 @@ pub(crate) trait SurfaceAdapter: Send + Sync {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum SurfaceCreateError {
+pub enum SurfaceCreateError {
     #[cfg(feature = "multi-viewport-winit")]
     #[error("the viewport has no platform window handle")]
     MissingPlatformHandle,
@@ -92,7 +79,7 @@ pub(crate) enum SurfaceCreateError {
 /// `physical_device` and `validation_surface`; `AshRenderer`'s logical device was created from
 /// that pair with `VK_KHR_swapchain` enabled; `present_queue` belongs to that logical device and
 /// `present_queue_family_index`; and the renderer's graphics queue belongs to
-/// `graphics_queue_family_index`. The platform adapter's unsafe `enable` function cannot validate
+/// `graphics_queue_family_index`. The platform adapter's unsafe `attach` function cannot validate
 /// those raw handle relationships.
 #[derive(Clone)]
 pub struct VulkanViewportConfig {

@@ -499,7 +499,7 @@ impl AppWindow {
             unsafe {
                 self.imgui
                     .renderer
-                    .notify_texture_retirements_completed(retirement)?;
+                    .complete_texture_retirements_with_fences(retirement, &[frame.fence])?;
             }
             frame.texture_retirement = None;
         }

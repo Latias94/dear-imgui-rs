@@ -10,7 +10,7 @@ static NEXT_QUEUE_ID: AtomicU64 = AtomicU64::new(1);
 /// Associate this value with GPU completion that covers every renderer operation which can still
 /// reference a texture in the batch. This includes work recorded after the token is returned, such
 /// as secondary viewport draws from the same Dear ImGui frame. Pass the completed batch to
-/// [`AshRenderer::notify_texture_retirements_completed`](super::AshRenderer::notify_texture_retirements_completed)
+/// [`AshRenderer::wait_for_texture_retirements`](super::AshRenderer::wait_for_texture_retirements)
 /// before expecting Dear ImGui destroy requests to be acknowledged.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[must_use]

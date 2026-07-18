@@ -1,5 +1,21 @@
 use super::*;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum DeviceIdleOutcome {
+    Complete,
+    DeviceLost,
+}
+
+pub(super) fn classify_device_idle(
+    result: Result<(), ash::vk::Result>,
+) -> Result<DeviceIdleOutcome, ash::vk::Result> {
+    match result {
+        Ok(()) => Ok(DeviceIdleOutcome::Complete),
+        Err(ash::vk::Result::ERROR_DEVICE_LOST) => Ok(DeviceIdleOutcome::DeviceLost),
+        Err(error) => Err(error),
+    }
+}
+
 impl AshRenderer {
     fn configure_imgui_context(&mut self, imgui_context: &mut Context) {
         let should_set_name = imgui_context.io().backend_renderer_name().is_none();
@@ -22,7 +38,10 @@ impl AshRenderer {
             .set_draw_callback_reset_render_state_raw(Some(draw_callback_reset_render_state));
     }
 
-    fn unconfigure_imgui_context(imgui_context: &mut Context, renderer_flags_added: BackendFlags) {
+    pub(super) fn unconfigure_imgui_context(
+        imgui_context: &mut Context,
+        renderer_flags_added: BackendFlags,
+    ) {
         let expected_name = format!("dear-imgui-ash {}", env!("CARGO_PKG_VERSION"));
         if imgui_context
             .io()
@@ -41,6 +60,39 @@ impl AshRenderer {
             .map(|callback| callback as usize)
             == Some(draw_callback_reset_render_state as *const () as usize)
         {
+            platform_io.set_draw_callback_reset_render_state_raw(None);
+        }
+    }
+
+    #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+    pub(super) fn renderer_name_is_ours(renderer_name: Option<&std::ffi::CStr>) -> bool {
+        let expected_name = format!("dear-imgui-ash {}", env!("CARGO_PKG_VERSION"));
+        renderer_name.is_some_and(|name| name.to_bytes() == expected_name.as_bytes())
+    }
+
+    #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+    pub(super) fn owned_draw_callbacks_match(
+        platform_io: &dear_imgui_rs::platform_io::PlatformIo,
+    ) -> bool {
+        platform_io
+            .draw_callback_reset_render_state_raw()
+            .is_some_and(|callback| {
+                std::ptr::fn_addr_eq(
+                    callback,
+                    draw_callback_reset_render_state
+                        as unsafe extern "C" fn(
+                            *const dear_imgui_rs::sys::ImDrawList,
+                            *const dear_imgui_rs::sys::ImDrawCmd,
+                        ),
+                )
+            })
+    }
+
+    #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+    pub(super) fn clear_owned_draw_callbacks(
+        platform_io: &mut dear_imgui_rs::platform_io::PlatformIo,
+    ) {
+        if Self::owned_draw_callbacks_match(platform_io) {
             platform_io.set_draw_callback_reset_render_state_raw(None);
         }
     }
@@ -210,6 +262,7 @@ impl AshRenderer {
             frames: Frames::new(options.in_flight_frames),
             destroyed: false,
             in_flight_uploads: VecDeque::new(),
+            managed_uploads: ManagedUploadTracker::default(),
             #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
             viewport_pipelines: HashMap::new(),
             #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
@@ -269,7 +322,7 @@ impl AshRenderer {
         Ok(())
     }
 
-    fn ensure_context_matches(&self, imgui_context: &Context) -> RendererResult<()> {
+    pub(super) fn ensure_context_matches(&self, imgui_context: &Context) -> RendererResult<()> {
         let consumer = self
             .consumer
             .as_ref()
@@ -281,15 +334,6 @@ impl AshRenderer {
             });
         }
         Ok(())
-    }
-
-    #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
-    fn ensure_multi_viewport_inactive(&mut self) -> RendererResult<()> {
-        if vulkan_viewport::has_renderer_state_for_renderer(self as *mut _) {
-            Err(RendererError::MultiViewportActive)
-        } else {
-            Ok(())
-        }
     }
 
     pub fn options(&self) -> Options {
@@ -411,14 +455,13 @@ impl AshRenderer {
 impl AshRenderer {
     /// Wait for the device, release all renderer-owned Vulkan resources, and detach from ImGui.
     ///
-    /// Multi-viewport users must call the matching `shutdown_multi_viewport_support` helper first.
     /// Unlike `Drop`, this method can reset Context-owned texture bindings after GPU destruction.
     pub fn shutdown(&mut self, imgui_context: &mut Context) -> RendererResult<()> {
         self.ensure_context_matches(imgui_context)?;
-        #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
-        self.ensure_multi_viewport_inactive()?;
-
-        self.destroy_internal()?;
+        let destroy_result = self.destroy_internal();
+        if !self.destroyed {
+            return destroy_result;
+        }
         let consumer = self
             .consumer
             .as_ref()
@@ -427,7 +470,16 @@ impl AshRenderer {
         Self::unconfigure_imgui_context(imgui_context, self.renderer_flags_added);
         self.renderer_flags_added = BackendFlags::empty();
         self.consumer.take();
-        Ok(())
+        destroy_result
+    }
+
+    #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+    pub(super) fn shutdown_without_context_reset(&mut self) -> RendererResult<()> {
+        let destroy_result = self.destroy_internal();
+        if self.destroyed {
+            self.consumer.take();
+        }
+        destroy_result
     }
 
     pub(super) fn destroy_internal(&mut self) -> RendererResult<()> {
@@ -435,7 +487,14 @@ impl AshRenderer {
             return Ok(());
         }
 
-        unsafe { self.device.device_wait_idle()? };
+        let completion_result =
+            match classify_device_idle(unsafe { self.device.device_wait_idle() }) {
+                Ok(DeviceIdleOutcome::Complete) => Ok(()),
+                Ok(DeviceIdleOutcome::DeviceLost) => {
+                    Err(RendererError::Vulkan(ash::vk::Result::ERROR_DEVICE_LOST))
+                }
+                Err(error) => return Err(error.into()),
+            };
         let _ = self.reap_all_uploads();
 
         let textures = std::mem::take(&mut self.textures.textures);
@@ -457,14 +516,8 @@ impl AshRenderer {
         self.textures.managed_ids.clear();
 
         unsafe {
-            #[cfg(all(
-                any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"),
-                not(all(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))
-            ))]
+            #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
             {
-                // Ensure callbacks cannot reach this renderer during teardown.
-                vulkan_viewport::clear_for_drop(self as *mut _);
-
                 let viewport_pipelines = std::mem::take(&mut self.viewport_pipelines);
                 for (_, vp) in viewport_pipelines {
                     self.device.destroy_pipeline(vp.pipeline, None);
@@ -489,7 +542,28 @@ impl AshRenderer {
         let frames = std::mem::replace(&mut self.frames, Frames::new(0));
         let _ = frames.destroy(&self.device, &mut self.allocator);
         self.destroyed = true;
-        Ok(())
+        completion_result
+    }
+}
+
+#[cfg(test)]
+mod device_idle_tests {
+    use super::*;
+
+    #[test]
+    fn device_lost_is_terminal_but_other_wait_errors_are_retryable() {
+        assert_eq!(
+            classify_device_idle(Ok(())),
+            Ok(DeviceIdleOutcome::Complete)
+        );
+        assert_eq!(
+            classify_device_idle(Err(ash::vk::Result::ERROR_DEVICE_LOST)),
+            Ok(DeviceIdleOutcome::DeviceLost)
+        );
+        assert_eq!(
+            classify_device_idle(Err(ash::vk::Result::ERROR_OUT_OF_HOST_MEMORY)),
+            Err(ash::vk::Result::ERROR_OUT_OF_HOST_MEMORY)
+        );
     }
 }
 

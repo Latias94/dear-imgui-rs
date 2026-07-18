@@ -166,19 +166,56 @@ impl AshRenderer {
         self.textures.retiring_textures.pending_batch()
     }
 
-    /// Destroy managed textures whose renderer work is known to have completed on the GPU.
+    /// Wait for the whole device and destroy managed textures through `completed`.
     ///
     /// Dear ImGui destroy requests are acknowledged on a later frame, after this method has
-    /// actually released the corresponding Vulkan resources.
+    /// actually released the corresponding Vulkan resources. Device loss is terminal: resources
+    /// are reclaimed, then `ERROR_DEVICE_LOST` is returned.
+    pub fn wait_for_texture_retirements(
+        &mut self,
+        completed: TextureRetirementBatch,
+    ) -> RendererResult<usize> {
+        let completion = match unsafe { self.device.device_wait_idle() } {
+            Ok(()) => Ok(()),
+            Err(vk::Result::ERROR_DEVICE_LOST) => {
+                Err(RendererError::Vulkan(vk::Result::ERROR_DEVICE_LOST))
+            }
+            Err(error) => return Err(error.into()),
+        };
+        let count = self.complete_texture_retirements(completed)?;
+        completion.map(|()| count)
+    }
+
+    /// Verify caller-provided fences and destroy managed textures through `completed`.
+    ///
+    /// Every fence is queried before any texture is destroyed. A pending or null fence leaves the
+    /// retirement queue unchanged.
     ///
     /// # Safety
     ///
-    /// `completed` must be associated with signaled synchronization, or a completed device-idle
-    /// wait, that covers every upload, main-viewport draw, and secondary-viewport draw which can
-    /// reference any texture retired through this batch. This includes work recorded after the
-    /// token was returned, such as secondary viewport draws from the same Dear ImGui frame. When
-    /// renderer work spans multiple queues, all relevant queues must have completed.
-    pub unsafe fn notify_texture_retirements_completed(
+    /// Every fence must belong to this renderer's logical device and, together, cover every queue
+    /// operation that can reference textures through `completed`, including uploads, main viewport
+    /// draws, and secondary viewport draws. Vulkan cannot validate foreign-device handles.
+    pub unsafe fn complete_texture_retirements_with_fences(
+        &mut self,
+        completed: TextureRetirementBatch,
+        fences: &[vk::Fence],
+    ) -> RendererResult<usize> {
+        if fences.is_empty() {
+            return Err(RendererError::TextureRetirementFencesEmpty);
+        }
+        for (index, fence) in fences.iter().copied().enumerate() {
+            if fence == vk::Fence::null() {
+                return Err(RendererError::TextureRetirementFenceNull { index });
+            }
+            if !unsafe { self.device.get_fence_status(fence)? } {
+                return Err(RendererError::TextureRetirementFencePending { index });
+            }
+        }
+        self.complete_texture_retirements(completed)
+    }
+
+    fn complete_texture_retirements(
         &mut self,
         completed: TextureRetirementBatch,
     ) -> RendererResult<usize> {
@@ -211,8 +248,8 @@ impl AshRenderer {
     }
 
     /// Remove a previously registered external texture descriptor set.
-    pub fn remove_texture_descriptor_set(&mut self, id: TextureId) {
-        self.unregister_texture(id);
+    pub fn remove_texture_descriptor_set(&mut self, id: TextureId) -> RendererResult<()> {
+        self.unregister_texture(id)
     }
 
     /// Register an external `vk::ImageView` + `vk::Sampler` as a legacy `TextureId`.
@@ -245,6 +282,21 @@ impl AshRenderer {
     /// Returns false if the texture id is not an external texture registered via
     /// `register_external_texture_with_sampler()`.
     pub fn update_external_texture_view(
+        &mut self,
+        texture_id: TextureId,
+        image_view: vk::ImageView,
+    ) -> RendererResult<bool> {
+        unsafe { self.device.device_wait_idle()? };
+        Ok(unsafe { self.update_external_texture_view_unchecked(texture_id, image_view) })
+    }
+
+    /// Update an external texture view without waiting for earlier descriptor users.
+    ///
+    /// # Safety
+    ///
+    /// The caller must prove that no submitted or recorded command can still access this texture's
+    /// descriptor set. The renderer descriptor layout does not enable update-after-bind.
+    pub unsafe fn update_external_texture_view_unchecked(
         &mut self,
         texture_id: TextureId,
         image_view: vk::ImageView,
@@ -285,6 +337,21 @@ impl AshRenderer {
         &mut self,
         texture_id: TextureId,
         sampler: vk::Sampler,
+    ) -> RendererResult<bool> {
+        unsafe { self.device.device_wait_idle()? };
+        Ok(unsafe { self.update_external_texture_sampler_unchecked(texture_id, sampler) })
+    }
+
+    /// Update an external sampler without waiting for earlier descriptor users.
+    ///
+    /// # Safety
+    ///
+    /// The caller must prove that no submitted or recorded command can still access this texture's
+    /// descriptor set. The renderer descriptor layout does not enable update-after-bind.
+    pub unsafe fn update_external_texture_sampler_unchecked(
+        &mut self,
+        texture_id: TextureId,
+        sampler: vk::Sampler,
     ) -> bool {
         let id = texture_id.id();
         let Some(binding) = self.textures.external_textures.get_mut(&id) else {
@@ -320,7 +387,19 @@ impl AshRenderer {
     /// frees the underlying descriptor set from the pool. For descriptor sets registered via
     /// `register_texture_descriptor_set()`, this simply forgets the id (the descriptor set remains
     /// owned by the caller).
-    pub fn unregister_texture(&mut self, texture_id: TextureId) {
+    pub fn unregister_texture(&mut self, texture_id: TextureId) -> RendererResult<()> {
+        unsafe { self.device.device_wait_idle()? };
+        unsafe { self.unregister_texture_unchecked(texture_id) };
+        Ok(())
+    }
+
+    /// Unregister a texture without waiting for submitted descriptor users.
+    ///
+    /// # Safety
+    ///
+    /// The caller must prove that no submitted or recorded command can still access this texture's
+    /// descriptor set. Owned descriptor sets may be freed immediately.
+    pub unsafe fn unregister_texture_unchecked(&mut self, texture_id: TextureId) {
         let id = texture_id.id();
         if let Some(binding) = self.textures.external_textures.remove(&id) {
             if binding.free_descriptor_set {
@@ -342,6 +421,23 @@ impl AshRenderer {
     /// Call this before rendering if you pass `&mut TextureData` to widgets (e.g. `ui.image()`),
     /// otherwise `ImDrawCmd_GetTexID()` may assert if `TexID` is still invalid.
     pub fn update_texture(
+        &mut self,
+        texture_data: &TextureData,
+    ) -> RendererResult<TextureUpdateResult> {
+        unsafe { self.device.device_wait_idle()? };
+        let result = unsafe { self.update_texture_unchecked(texture_data) }?;
+        self.wait_for_pending_uploads()?;
+        Ok(result)
+    }
+
+    /// Apply a legacy `TextureData` transition without synchronizing earlier or later GPU use.
+    ///
+    /// # Safety
+    ///
+    /// The caller must prove that earlier work no longer reads any texture that can be replaced,
+    /// updated, or destroyed. Before using a created or updated texture, the caller must also prove
+    /// completion or queue ordering for the upload submitted by this method.
+    pub unsafe fn update_texture_unchecked(
         &mut self,
         texture_data: &TextureData,
     ) -> RendererResult<TextureUpdateResult> {
@@ -421,6 +517,7 @@ impl AshRenderer {
                     fence,
                     command_buffer,
                     staging: vec![(staging_buffer, staging_mem)],
+                    managed_texture: None,
                 });
 
                 if let Some(old) = self.textures.textures.remove(&id) {
@@ -498,6 +595,7 @@ impl AshRenderer {
                     fence,
                     command_buffer,
                     staging: vec![(staging_buffer, staging_mem)],
+                    managed_texture: None,
                 });
 
                 Ok(TextureUpdateResult::Updated)
@@ -589,6 +687,7 @@ impl AshRenderer {
             fence,
             command_buffer,
             staging: vec![(staging_buffer, staging_mem)],
+            managed_texture: None,
         });
 
         if let Some(old) = self.textures.textures.remove(&id) {
@@ -687,34 +786,20 @@ impl AshRenderer {
         for request in requests {
             let snapshot_id = request.texture();
             match request.operation() {
-                TextureOp::Create {
-                    format,
-                    width,
-                    height,
-                    row_pitch,
-                    pixels,
-                } => {
-                    let texture_id = self.create_managed_texture(
-                        snapshot_id,
-                        *format,
-                        *width,
-                        *height,
-                        *row_pitch,
-                        pixels,
-                    )?;
-                    feedback.push(request.uploaded(texture_id)?);
-                }
-                TextureOp::Update {
-                    format,
-                    width,
-                    height,
-                    rects,
-                } => {
-                    let texture_id =
-                        self.update_managed_texture(snapshot_id, *format, *width, *height, rects)?;
-                    feedback.push(request.uploaded(texture_id)?);
+                TextureOp::Create { .. } | TextureOp::Update { .. } => {
+                    feedback.push(self.complete_managed_upload_request(request)?)
                 }
                 TextureOp::Destroy => {
+                    let upload_wait = if self.managed_uploads.is_pending(snapshot_id) {
+                        self.wait_for_managed_upload(snapshot_id)
+                    } else {
+                        Ok(())
+                    };
+                    finish_destroy_upload_gate(
+                        &mut self.managed_uploads,
+                        snapshot_id,
+                        upload_wait,
+                    )?;
                     match self
                         .textures
                         .retiring_textures
@@ -733,6 +818,86 @@ impl AshRenderer {
         }
 
         Ok(feedback)
+    }
+
+    fn complete_managed_upload_request(
+        &mut self,
+        request: &TextureRequest,
+    ) -> RendererResult<TextureFeedback> {
+        let snapshot_id = request.texture();
+        let signature = UploadSignature::from_operation(request.operation()).ok_or_else(|| {
+            RendererError::InvalidRenderState(
+                "destroy request entered the managed upload path".to_string(),
+            )
+        })?;
+
+        loop {
+            match self.managed_uploads.decide(snapshot_id, &signature) {
+                ManagedUploadDecision::Ready(texture_id) => {
+                    return Ok(request.uploaded(texture_id)?);
+                }
+                ManagedUploadDecision::Wait => {
+                    self.wait_for_managed_upload(snapshot_id)?;
+                }
+                ManagedUploadDecision::Submit => {
+                    if matches!(request.operation(), TextureOp::Update { .. }) {
+                        // Managed updates currently write the existing image in place. Complete
+                        // every earlier read before recording that write, then wait for the upload
+                        // below before allowing this frame or any secondary viewport to sample it.
+                        unsafe { self.device.device_wait_idle()? };
+                    }
+
+                    let uploads_before = self.in_flight_uploads.len();
+                    let texture_id = match request.operation() {
+                        TextureOp::Create {
+                            format,
+                            width,
+                            height,
+                            row_pitch,
+                            pixels,
+                        } => self.create_managed_texture(
+                            snapshot_id,
+                            *format,
+                            *width,
+                            *height,
+                            *row_pitch,
+                            pixels,
+                        )?,
+                        TextureOp::Update {
+                            format,
+                            width,
+                            height,
+                            rects,
+                        } => self.update_managed_texture(
+                            snapshot_id,
+                            *format,
+                            *width,
+                            *height,
+                            rects,
+                        )?,
+                        TextureOp::Destroy => unreachable!("validated upload operation"),
+                    };
+
+                    if self.in_flight_uploads.len() == uploads_before {
+                        return Ok(request.uploaded(texture_id)?);
+                    }
+                    let upload = self.in_flight_uploads.back_mut().ok_or_else(|| {
+                        RendererError::InvalidRenderState(format!(
+                            "managed texture {snapshot_id:?} submitted no trackable upload"
+                        ))
+                    })?;
+                    if upload.managed_texture.is_some() {
+                        return Err(RendererError::InvalidRenderState(format!(
+                            "managed texture {snapshot_id:?} collided with another upload"
+                        )));
+                    }
+                    upload.managed_texture = Some(snapshot_id);
+                    self.managed_uploads
+                        .submitted(snapshot_id, signature.clone(), texture_id);
+                    self.wait_for_managed_upload(snapshot_id)?;
+                }
+            }
+        }
     }
 
     fn create_managed_texture(
@@ -819,6 +984,7 @@ impl AshRenderer {
             fence,
             command_buffer,
             staging: vec![(staging_buffer, staging_mem)],
+            managed_texture: None,
         });
         let managed = ManagedVulkanTexture {
             texture_id,
@@ -874,6 +1040,7 @@ impl AshRenderer {
             fence,
             command_buffer,
             staging: vec![(staging_buffer, staging_mem)],
+            managed_texture: None,
         });
         Ok(())
     }
@@ -978,6 +1145,7 @@ impl AshRenderer {
             fence,
             command_buffer,
             staging,
+            managed_texture: None,
         });
         Ok(texture_id)
     }
