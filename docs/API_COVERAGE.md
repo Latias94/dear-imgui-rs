@@ -70,6 +70,28 @@ Notes:
 - Namespaced APIs such as `ImFontAtlas`, `ImFontBaked`, `ImDrawList`, and `ImTextureData` are guarded
   against generator drift but still need a manual safe-layer audit during upgrades.
 
+### Removed safe surface and FFI ownership
+
+The same `--check` command discovers maintained Cargo packages from the repository manifest and
+enforces the frozen 0.16 removal inventory. It tokenizes Rust source instead of searching raw text,
+so comments, documentation, and string literals cannot hide or reintroduce an API. The contract
+rejects:
+
+- removed identifiers and call paths, including `Context::frame_with`, `Selectable::new`, the
+  horizontal `Slider::new`, `TextureData::new`, `InputFlags`, `ArrowDirection`, and backend
+  compatibility helpers;
+- public re-exports of the removed `render::renderer` and `fonts::glyph_ranges` modules;
+- a public ImPlot3D export of `validate_nonempty`, `validate_lengths`, or `validate_multiple` while
+  allowing their crate-private implementation use;
+- the removed `sdl3-backends` Cargo feature alias; and
+- a foreign function declaration in a safe crate when that symbol is already supplied by a
+  maintained `*-sys` crate, including the retired extension `compat_ffi` symbols.
+
+Raw sys crates are deliberately outside the removed-safe-surface scan. They remain the documented
+escape hatch for users who accept the native API's unsafe contract. Safe crates may call
+`sys::function(...)` directly and may define C-ABI callbacks or declarations for crate-owned native
+shims; only duplicate ownership of a generated sys declaration is rejected.
+
 ## Completed lifetime-sensitive designs
 
 The safe layer models the previously deferred namespaced capabilities through lifetime- and

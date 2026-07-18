@@ -51,10 +51,43 @@ class CliFixture:
         self.root = root
         self.definitions = root / "definitions.json"
         self.rust_source = root / "rust"
-        self.manifest = root / "Cargo.toml"
+        self.manifest = root / "source-manifest.toml"
         self.policy = root / "policy.json"
         self.snapshot = root / "snapshot.json"
+        self.repository = root / "repository"
+        self.repository_manifest = self.repository / "Cargo.toml"
+        self.safe_source = self.repository / "safe" / "src" / "lib.rs"
+        self.sys_source = self.repository / "raw-sys" / "src" / "lib.rs"
         self.rust_source.mkdir()
+        self.safe_source.parent.mkdir(parents=True)
+        self.sys_source.parent.mkdir(parents=True)
+
+    def write_repository(
+        self,
+        safe_source="",
+        sys_source='unsafe extern "C" { pub fn igRawEscape(); }\n',
+        safe_features="",
+        safe_name="fixture-safe",
+    ):
+        self.repository_manifest.write_text(
+            '[workspace]\nmembers = ["safe", "raw-sys"]\nresolver = "2"\n',
+            encoding="utf-8",
+        )
+        (self.safe_source.parents[1] / "Cargo.toml").write_text(
+            "[package]\n"
+            f'name = "{safe_name}"\n'
+            'version = "0.0.0"\n'
+            f"{safe_features}",
+            encoding="utf-8",
+        )
+        (self.sys_source.parents[1] / "Cargo.toml").write_text(
+            "[package]\n"
+            'name = "fixture-sys"\n'
+            'version = "0.0.0"\n',
+            encoding="utf-8",
+        )
+        self.safe_source.write_text(safe_source, encoding="utf-8")
+        self.sys_source.write_text(sys_source, encoding="utf-8")
 
     def write(
         self,
@@ -78,6 +111,7 @@ class CliFixture:
             f'imgui-revision = "{IMGUI_REVISION}"\n',
             encoding="utf-8",
         )
+        self.write_repository()
         loaded = api_surface_report._load_public_declarations(self.definitions)
         api_surface_report._write_snapshot(
             self.snapshot,
@@ -97,6 +131,8 @@ class CliFixture:
             str(self.policy),
             "--snapshot",
             str(self.snapshot),
+            "--repository-manifest",
+            str(self.repository_manifest),
             "--check",
         ]
 
@@ -132,11 +168,16 @@ class ApiSurfaceReportTests(unittest.TestCase):
             snapshot_values,
             snapshot_revisions,
         )
+        _, packages, source_violations = api_surface_report._audit_source_policy(
+            api_surface_report.REPOSITORY_MANIFEST
+        )
 
         self.assertEqual(len(declarations), 748)
         self.assertEqual(audit.unexpected, frozenset())
         self.assertEqual(audit.stale_policy, frozenset())
         self.assertFalse(drift.has_drift())
+        self.assertGreaterEqual(len(packages), 30)
+        self.assertEqual(source_violations, ())
         self.assertEqual(
             len(audit.aliased) + len(audit.policy_decided),
             len(groups),
@@ -223,6 +264,306 @@ create_token!(
             aliases,
             {"SafeFn", "SafeType", "SafeMethod", "NestedSafe", "MacroToken"},
         )
+
+    def test_removed_source_inventory_rejects_each_structural_rule(self):
+        cases = {
+            "context-frame-with": ("pub fn f() { frame_with(); }\n", "fixture-safe", ""),
+            "renderer-compat-path": (
+                "pub fn f() { render::renderer::legacy(); }\n",
+                "fixture-safe",
+                "",
+            ),
+            "renderer-compat-module": (
+                "pub mod renderer {}\n",
+                "dear-imgui-rs",
+                "",
+            ),
+            "glyph-ranges-builder": (
+                "pub fn f(_: GlyphRangesBuilder) {}\n",
+                "fixture-safe",
+                "",
+            ),
+            "glyph-ranges-type": (
+                "pub fn f(_: GlyphRanges) {}\n",
+                "fixture-safe",
+                "",
+            ),
+            "glyph-ranges-path": (
+                "pub use fonts::glyph_ranges::Legacy;\n",
+                "fixture-safe",
+                "",
+            ),
+            "glyph-ranges-module": (
+                "pub use glyph_ranges::*;\n",
+                "dear-imgui-rs",
+                "",
+            ),
+            "selectable-new": (
+                "pub fn f() { Selectable::new(); }\n",
+                "fixture-safe",
+                "",
+            ),
+            "horizontal-slider-new": (
+                "pub struct Slider; impl Slider {\n"
+                "    pub fn new(ui: &Ui, label: &str, min: f32, max: f32) -> Self { Self }\n"
+                "}\n",
+                "fixture-safe",
+                "",
+            ),
+            "input-flags": ("pub type Alias = InputFlags;\n", "fixture-safe", ""),
+            "arrow-direction": ("pub use x::ArrowDirection;\n", "fixture-safe", ""),
+            "texture-data-new": (
+                "pub fn f() { TextureData::new(); }\n",
+                "fixture-safe",
+                "",
+            ),
+            "create-texture-ref": (
+                "pub fn f() { create_texture_ref(); }\n",
+                "fixture-safe",
+                "",
+            ),
+            "wgpu-texture-manager-mut": (
+                "pub fn f() { renderer.texture_manager_mut(); }\n",
+                "fixture-safe",
+                "",
+            ),
+            "sdl3-update-gp3-texture": (
+                "pub fn f() { update_gp3_texture(); }\n",
+                "fixture-safe",
+                "",
+            ),
+            "sdl3-init-for-platform-sdl-gpu": (
+                "pub fn f() { init_for_platform_sdl_gpu(); }\n",
+                "fixture-safe",
+                "",
+            ),
+            "into-imgui-error": (
+                "pub trait IntoImGuiError {}\n",
+                "fixture-safe",
+                "",
+            ),
+            "into-imgui-error-method": (
+                "pub fn f() { value.into_imgui_error(); }\n",
+                "fixture-safe",
+                "",
+            ),
+            "safe-compat-ffi": ("mod compat_ffi {}\n", "fixture-safe", ""),
+            "implot3d-validation-helpers": (
+                "pub fn validate_nonempty() {}\n",
+                "dear-implot3d",
+                "",
+            ),
+            "examples-sdl3-backends": (
+                "pub fn clean() {}\n",
+                "fixture-safe",
+                '\n[features]\nsdl3-backends = []\n',
+            ),
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fixture = CliFixture(Path(temp_dir))
+            for expected_rule, (source, package, features) in cases.items():
+                with self.subTest(rule=expected_rule):
+                    fixture.write_repository(
+                        safe_source=source,
+                        safe_features=features,
+                        safe_name=package,
+                    )
+                    _, _, violations = api_surface_report._audit_source_policy(
+                        fixture.repository_manifest
+                    )
+                    self.assertEqual(
+                        {violation.rule for violation in violations},
+                        {expected_rule},
+                    )
+
+    def test_removed_source_inventory_normalizes_raw_identifiers(self):
+        cases = {
+            "texture-data-new": (
+                "pub fn f() { TextureData::r#new(); }\n",
+                "fixture-safe",
+            ),
+            "renderer-compat-module": (
+                "pub mod r#renderer {}\n",
+                "dear-imgui-rs",
+            ),
+            "context-frame-with": (
+                "pub fn r#frame_with() {}\n",
+                "fixture-safe",
+            ),
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fixture = CliFixture(Path(temp_dir))
+            for expected_rule, (source, package) in cases.items():
+                with self.subTest(rule=expected_rule):
+                    fixture.write_repository(safe_source=source, safe_name=package)
+                    _, _, violations = api_surface_report._audit_source_policy(
+                        fixture.repository_manifest
+                    )
+                    self.assertEqual(
+                        {violation.rule for violation in violations},
+                        {expected_rule},
+                    )
+
+    def test_rust_string_decoder_handles_cooked_raw_and_continuation_escapes(self):
+        self.assertEqual(
+            api_surface_report._decode_rust_string(r'"\x49\u{6d}\n\t\\\"\0"'),
+            "Im\n\t" + "\\" + '"' + "\0",
+        )
+        continuation = '"left' + "\\" + "\n    right" + '"'
+        self.assertEqual(
+            api_surface_report._decode_rust_string(continuation), "leftright"
+        )
+        self.assertEqual(
+            api_surface_report._decode_rust_string(r'r##"\x49"##'), r"\x49"
+        )
+
+    def test_source_policy_rejects_duplicate_safe_extern_from_generated_sys(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fixture = CliFixture(Path(temp_dir))
+            fixture.write()
+            fixture.write_repository(
+                safe_source='unsafe extern "C" { pub fn igDuplicate(); }\n',
+                sys_source='unsafe extern "C" { pub fn igDuplicate(); }\n',
+            )
+            result, _, stderr = fixture.run()
+
+        self.assertEqual(result, 1)
+        self.assertIn("duplicate-safe-extern", stderr)
+        self.assertIn("igDuplicate", stderr)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fixture = CliFixture(Path(temp_dir))
+            fixture.write_repository(
+                safe_source=(
+                    'mod ffi { unsafe extern "C" { '
+                    "pub fn ImPlot_GetPlotPos(); } }\n"
+                ),
+                sys_source="pub fn unrelated() {}\n",
+            )
+            _, _, violations = api_surface_report._audit_source_policy(
+                fixture.repository_manifest
+            )
+
+        self.assertEqual(
+            {(violation.rule, violation.symbol) for violation in violations},
+            {("duplicate-safe-extern", "ImPlot_GetPlotPos")},
+        )
+
+        for escaped_link_name in (
+            r'"\x49mPlot_GetPlotPos"',
+            r'"\u{49}mPlot_GetPlotPos"',
+            'r#"ImPlot_GetPlotPos"#',
+        ):
+            with self.subTest(link_name=escaped_link_name):
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    fixture = CliFixture(Path(temp_dir))
+                    fixture.write_repository(
+                        safe_source=(
+                            'unsafe extern "C" { #[link_name = '
+                            f"{escaped_link_name}] pub fn renamed_plot_pos(); }}\n"
+                        ),
+                        sys_source="pub fn unrelated() {}\n",
+                    )
+                    _, _, violations = api_surface_report._audit_source_policy(
+                        fixture.repository_manifest
+                    )
+
+                self.assertEqual(
+                    {(violation.rule, violation.symbol) for violation in violations},
+                    {("duplicate-safe-extern", "ImPlot_GetPlotPos")},
+                )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fixture = CliFixture(Path(temp_dir))
+            fixture.write_repository(
+                safe_source=(
+                    'unsafe extern "C" { #[link_name = "ImPlot_GetPlotPos"] '
+                    "pub fn renamed_plot_pos(); }\n"
+                ),
+                sys_source="pub fn unrelated() {}\n",
+            )
+            _, _, violations = api_surface_report._audit_source_policy(
+                fixture.repository_manifest
+            )
+
+        self.assertEqual(
+            {(violation.rule, violation.symbol) for violation in violations},
+            {("duplicate-safe-extern", "ImPlot_GetPlotPos")},
+        )
+
+    def test_source_policy_fails_closed_on_malformed_link_name_escape(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fixture = CliFixture(Path(temp_dir))
+            fixture.write()
+            fixture.write_repository(
+                safe_source=(
+                    r'unsafe extern "C" { #[link_name = "\q"] pub fn renamed(); }'
+                    "\n"
+                )
+            )
+            result, _, stderr = fixture.run()
+
+        self.assertEqual(result, 2)
+        self.assertIn("API surface input error", stderr)
+        self.assertIn("unsupported Rust string escape", stderr)
+
+    def test_source_policy_preserves_raw_sys_and_callback_escape_hatches(self):
+        source = r'''
+// frame_with Selectable::new TextureData::new compat_ffi
+const TEXT: &str = "InputFlags render::renderer sdl3-backends";
+const ESCAPED_TEXT: &str = "\x49nputFlags";
+const RAW_TEXT: &str = r#"TextureData::r#new"#;
+
+pub fn use_raw() {
+    unsafe { fixture_sys::igRawEscape(); }
+    unsafe { fixture_sys::ImPlot_GetPlotPos(); }
+    let _ = raw_font_config.GlyphRanges;
+    VerticalSlider::new();
+    AngleSlider::new();
+    OwnedTextureData::new();
+}
+
+unsafe extern "C" fn callback() {}
+unsafe extern "C" { pub fn local_cpp_shim(); }
+pub(crate) fn validate_nonempty() {}
+'''
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fixture = CliFixture(Path(temp_dir))
+            fixture.write()
+            fixture.write_repository(
+                safe_source=source,
+                safe_name="dear-implot3d",
+                sys_source=(
+                    'unsafe extern "C" { pub fn igRawEscape(); '
+                    "pub fn ImPlot_GetPlotPos(); }\n"
+                ),
+            )
+            result, _, stderr = fixture.run()
+
+        self.assertEqual(result, 0)
+        self.assertEqual(stderr, "")
+
+    def test_source_policy_prunes_unmaintained_trees_before_discovery(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fixture = CliFixture(Path(temp_dir))
+            fixture.write_repository()
+            for excluded in (".git", "repo-ref", "target", "third-party"):
+                excluded_root = fixture.repository / excluded / "nested"
+                excluded_root.mkdir(parents=True)
+                (excluded_root / "Cargo.toml").write_text("not valid TOML {", encoding="utf-8")
+                (excluded_root / "forbidden.rs").write_text(
+                    "pub fn frame_with() {}\n", encoding="utf-8"
+                )
+
+            _, packages, violations = api_surface_report._audit_source_policy(
+                fixture.repository_manifest
+            )
+
+        self.assertEqual(
+            {package.name for package in packages}, {"fixture-safe", "fixture-sys"}
+        )
+        self.assertEqual(violations, ())
 
     def test_policy_schema_is_fail_closed(self):
         valid_group = {
