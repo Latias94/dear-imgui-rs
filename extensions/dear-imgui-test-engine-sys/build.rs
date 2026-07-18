@@ -291,6 +291,7 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=shim/cimgui_test_engine.h");
+    println!("cargo:rerun-if-changed=shim/cimgui_test_engine_internal.h");
     println!("cargo:rerun-if-changed=shim/cimgui_test_engine.cpp");
     println!("cargo:rerun-if-changed=shim/default_tests.cpp");
     println!("cargo:rerun-if-changed=shim/imgui_test_engine_hooks_register.cpp");

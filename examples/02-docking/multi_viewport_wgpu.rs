@@ -112,7 +112,7 @@ impl Drop for AppWindow {
     fn drop(&mut self) {
         #[cfg(feature = "test-engine")]
         if let Some(engine) = self.test_engine.as_mut() {
-            engine.shutdown();
+            let _ = engine.shutdown();
         }
         self.renderer
             .shutdown(&mut self.imgui)
@@ -252,21 +252,20 @@ impl AppWindow {
             let external_pos = [main_pos.x + main_size.width + 100.0, main_pos.y + 100.0];
             let merged_pos = [main_pos.x + 100.0, main_pos.y + 100.0];
 
-            let mut engine = TestEngine::try_create()?;
-            engine.set_capture_enabled(false);
-            engine.set_run_speed(RunSpeed::Fast);
-            engine.set_verbose_level(VerboseLevel::Info);
+            let mut engine = TestEngine::create()?;
+            engine.start(&mut imgui)?;
+            engine.set_capture_enabled(false)?;
+            engine.set_run_speed(RunSpeed::Fast)?;
+            engine.set_verbose_level(VerboseLevel::Info)?;
             engine.add_script_test("wgpu", "multi_viewport_surface_smoke", move |test| {
-                test.wait_for_item("Main/Viewport Count", ScriptCount::new(240))?;
+                test.wait_for_item("Main/Viewport Count", ScriptCount::new(240)?)?;
                 test.window_move("Game View", external_pos[0], external_pos[1])?;
-                test.yield_frames(ScriptCount::new(30));
+                test.yield_frames(ScriptCount::new(30)?)?;
                 test.assert_item_read_int_eq("Main/Viewport Count", 2)?;
                 test.window_move("Game View", merged_pos[0], merged_pos[1])?;
-                test.yield_frames(ScriptCount::new(30));
-                test.assert_item_read_int_eq("Main/Viewport Count", 1)?;
-                Ok(())
+                test.yield_frames(ScriptCount::new(30)?)?;
+                test.assert_item_read_int_eq("Main/Viewport Count", 1)
             })?;
-            engine.try_start(&imgui)?;
             engine.queue_tests(
                 TestGroup::Tests,
                 Some("multi_viewport_surface_smoke"),
@@ -475,13 +474,10 @@ impl AppWindow {
 
         #[cfg(feature = "test-engine")]
         if let Some(engine) = self.test_engine.as_mut() {
-            engine.post_swap();
+            engine.post_swap()?;
             if !self.viewport_smoke_complete
-                && engine.is_test_queue_empty()
-                && !engine.is_running_tests()
+                && let Some(summary) = engine.take_terminal_summary()?
             {
-                engine.stop();
-                let summary = engine.result_summary();
                 if summary.count_tested != 1 || summary.count_success != 1 {
                     return Err(format!(
                         "viewport smoke failed: tested={}, success={}",

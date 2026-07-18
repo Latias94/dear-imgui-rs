@@ -200,6 +200,46 @@ jobs:
           --contains 'feature `test-engine` is source-only and cannot be packaged as a prebuilt core artifact'
           -- cargo check -p dear-imgui-sys --no-default-features --features package-bin,test-engine
 
+  test-engine-sanitizers:
+    name: Test Engine C ABI sanitizers
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Init required nested submodules (selective)
+        run: python3 tools/ci/update_submodules.py
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang build-essential
+
+      - name: Run Test Engine FFI boundary tests with ASan and UBSan
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+          CC: clang
+          CXX: clang++
+          CFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer
+          CXXFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer
+          RUSTFLAGS: >-
+            -Cdebuginfo=1
+            -Cforce-frame-pointers=yes
+            -Clinker=clang++
+            -Clink-arg=-fsanitize=address
+            -Clink-arg=-fsanitize=undefined
+          IMGUI_SYS_FORCE_BUILD: "1"
+        run: cargo nextest run -p dear-imgui-test-engine-sys --test ffi_boundary
+
   binding-contract:
     name: Core and extension binding contract
     runs-on: ubuntu-latest

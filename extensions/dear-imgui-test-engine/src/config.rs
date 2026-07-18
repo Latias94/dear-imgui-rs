@@ -4,34 +4,33 @@ use dear_imgui_test_engine_sys as sys;
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunSpeed {
-    Fast = sys::ImGuiTestEngineRunSpeed_Fast as i32,
-    Normal = sys::ImGuiTestEngineRunSpeed_Normal as i32,
-    Cinematic = sys::ImGuiTestEngineRunSpeed_Cinematic as i32,
+    Fast = sys::ImGuiTestEngineRunSpeed_Fast,
+    Normal = sys::ImGuiTestEngineRunSpeed_Normal,
+    Cinematic = sys::ImGuiTestEngineRunSpeed_Cinematic,
 }
 
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VerboseLevel {
-    Silent = sys::ImGuiTestEngineVerboseLevel_Silent as i32,
-    Error = sys::ImGuiTestEngineVerboseLevel_Error as i32,
-    Warning = sys::ImGuiTestEngineVerboseLevel_Warning as i32,
-    Info = sys::ImGuiTestEngineVerboseLevel_Info as i32,
-    Debug = sys::ImGuiTestEngineVerboseLevel_Debug as i32,
-    Trace = sys::ImGuiTestEngineVerboseLevel_Trace as i32,
+    Silent = sys::ImGuiTestEngineVerboseLevel_Silent,
+    Error = sys::ImGuiTestEngineVerboseLevel_Error,
+    Warning = sys::ImGuiTestEngineVerboseLevel_Warning,
+    Info = sys::ImGuiTestEngineVerboseLevel_Info,
+    Debug = sys::ImGuiTestEngineVerboseLevel_Debug,
+    Trace = sys::ImGuiTestEngineVerboseLevel_Trace,
 }
 
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
-    Mouse = dear_imgui_rs::sys::ImGuiInputSource_Mouse as i32,
-    Keyboard = dear_imgui_rs::sys::ImGuiInputSource_Keyboard as i32,
-    Gamepad = dear_imgui_rs::sys::ImGuiInputSource_Gamepad as i32,
+    Mouse = dear_imgui_rs::sys::ImGuiInputSource_Mouse,
+    Keyboard = dear_imgui_rs::sys::ImGuiInputSource_Keyboard,
+    Gamepad = dear_imgui_rs::sys::ImGuiInputSource_Gamepad,
 }
 
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TestGroup {
-    Unknown = sys::ImGuiTestEngineGroup_Unknown,
     Tests = sys::ImGuiTestEngineGroup_Tests,
     Perfs = sys::ImGuiTestEngineGroup_Perfs,
 }

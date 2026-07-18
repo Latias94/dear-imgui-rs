@@ -7,6 +7,18 @@ This crate pairs with `dear-imgui-sys` and is intended for advanced users. Most 
 - Upstream: https://github.com/ocornut/imgui_test_engine
 - Submodule path: `extensions/dear-imgui-test-engine-sys/third-party/imgui_test_engine`
 
+## ABI Contract
+
+- Every shim operation returns `ImGuiTestEngineStatus`; values are written through validated output
+  pointers only after the operation succeeds.
+- The shim catches C++ exceptions at every exported boundary. No exception is allowed to unwind into
+  Rust. Call `imgui_test_engine_get_last_error()` immediately after a failing operation to copy its
+  thread-local diagnostic.
+- Engine and script handles are non-thread-safe and must follow the documented create, transfer,
+  unbind, and destroy lifecycle. A successfully destroyed raw handle is invalid immediately.
+- Prefer the safe `dear-imgui-test-engine` crate when Context identity, frame scope, or retryable
+  teardown matters.
+
 ## Features
 
 - `freetype`: passthrough to `dear-imgui-sys/freetype`.
