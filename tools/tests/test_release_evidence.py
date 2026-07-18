@@ -1,11 +1,13 @@
 import hashlib
+import io
 import json
 import subprocess
 import sys
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -17,6 +19,10 @@ import release_evidence  # noqa: E402
 
 SHA = "0123456789abcdef0123456789abcdef01234567"
 OTHER_SHA = "89abcdef0123456789abcdef0123456789abcdef"
+FIXTURE_REQUIREMENTS = (
+    release_evidence.EvidenceRequirement("artifacts", "metadata.json"),
+    release_evidence.EvidenceRequirement("logs", "run.log"),
+)
 
 
 class CandidateShaTests(unittest.TestCase):
@@ -170,13 +176,16 @@ class AggregateTests(unittest.TestCase):
         cell_root = self.root / f"{cell_id}{suffix}"
         cell_root.mkdir(parents=True)
         log = cell_root / "run.log"
+        metadata = cell_root / "metadata.json"
         log.write_text(f"{cell_id}\n", encoding="utf-8")
+        metadata.write_text("{}\n", encoding="utf-8")
         evidence = cell_root / "evidence.json"
         release_evidence.write_cell_evidence(
             evidence,
             cell_id=cell_id,
             candidate_sha=candidate_sha,
             conclusion=conclusion,
+            artifacts=[metadata],
             logs=[log],
             target=target,
             crt=crt,
@@ -184,10 +193,23 @@ class AggregateTests(unittest.TestCase):
         )
         return evidence
 
+    @staticmethod
+    def expected(cell_id, target=None, crt=None, requirements=FIXTURE_REQUIREMENTS):
+        return release_evidence.ExpectedCell(
+            cell_id,
+            target,
+            crt,
+            requirements=requirements,
+        )
+
     def aggregate(self, evidence, expected):
+        normalized = [
+            self.expected(value) if isinstance(value, str) else value
+            for value in expected
+        ]
         return release_evidence.aggregate_release_evidence(
             evidence,
-            expected_cells=expected,
+            expected_cells=normalized,
             expected_candidate_sha=SHA,
             evidence_root=self.root,
             output_path=self.output,
@@ -207,7 +229,7 @@ class AggregateTests(unittest.TestCase):
 
         result = self.aggregate(
             [beta, alpha],
-            [release_evidence.ExpectedCell("alpha", "linux", "md"), "beta"],
+            [self.expected("alpha", "linux", "md"), "beta"],
         )
 
         self.assertEqual(result["decision"], "Go")
@@ -251,6 +273,147 @@ class AggregateTests(unittest.TestCase):
         self.assertTrue(any("candidate SHA mismatch" in error for error in errors))
         for conclusion in ("failure", "failed", "skipped", "cancelled", "timed_out"):
             self.assertTrue(any(repr(conclusion) in error for error in errors), errors)
+
+    def test_rejects_empty_payload_lists_for_a_required_cell(self):
+        cell_root = self.root / "empty"
+        cell_root.mkdir()
+        evidence = cell_root / "evidence.json"
+        release_evidence.write_cell_evidence(
+            evidence,
+            cell_id="empty",
+            candidate_sha=SHA,
+            conclusion="success",
+            evidence_root=cell_root,
+        )
+
+        result = self.aggregate([evidence], [self.expected("empty")])
+
+        self.assert_no_go_with(result, "required artifacts evidence is missing")
+        self.assert_no_go_with(result, "required logs evidence is missing")
+
+    def test_rejects_missing_required_evidence_item(self):
+        cell_root = self.root / "partial"
+        cell_root.mkdir()
+        log = cell_root / "run.log"
+        log.write_text("partial\n", encoding="utf-8")
+        evidence = cell_root / "evidence.json"
+        release_evidence.write_cell_evidence(
+            evidence,
+            cell_id="partial",
+            candidate_sha=SHA,
+            conclusion="success",
+            logs=[log],
+            evidence_root=cell_root,
+        )
+
+        result = self.aggregate([evidence], [self.expected("partial")])
+
+        self.assert_no_go_with(result, "pattern 'metadata.json'")
+
+    def test_rejects_required_evidence_in_the_wrong_collection(self):
+        cell_root = self.root / "misclassified"
+        cell_root.mkdir()
+        metadata = cell_root / "metadata.json"
+        log = cell_root / "run.log"
+        metadata.write_text("{}\n", encoding="utf-8")
+        log.write_text("run\n", encoding="utf-8")
+        evidence = cell_root / "evidence.json"
+        release_evidence.write_cell_evidence(
+            evidence,
+            cell_id="misclassified",
+            candidate_sha=SHA,
+            conclusion="success",
+            artifacts=[log],
+            logs=[metadata],
+            evidence_root=cell_root,
+        )
+
+        result = self.aggregate([evidence], [self.expected("misclassified")])
+
+        self.assert_no_go_with(result, "classified as logs")
+        self.assert_no_go_with(result, "classified as artifacts")
+
+    def test_required_patterns_are_anchored_to_the_cell_root(self):
+        cell_root = self.root / "prefixed"
+        artifact = cell_root / "extra" / "metadata" / "result.json"
+        log = cell_root / "run.log"
+        artifact.parent.mkdir(parents=True)
+        artifact.write_text("{}\n", encoding="utf-8")
+        log.write_text("run\n", encoding="utf-8")
+        evidence = cell_root / "evidence.json"
+        release_evidence.write_cell_evidence(
+            evidence,
+            cell_id="prefixed",
+            candidate_sha=SHA,
+            conclusion="success",
+            artifacts=[artifact],
+            logs=[log],
+            evidence_root=cell_root,
+        )
+        expected = self.expected(
+            "prefixed",
+            requirements=(
+                release_evidence.EvidenceRequirement(
+                    "artifacts", "metadata/*.json"
+                ),
+                release_evidence.EvidenceRequirement("logs", "run.log"),
+            ),
+        )
+
+        result = self.aggregate([evidence], [expected])
+
+        self.assert_no_go_with(result, "pattern 'metadata/*.json'")
+
+    def test_custom_inventory_requires_explicit_artifact_and_log_contracts(self):
+        evidence = self.write_cell("alpha")
+
+        result = self.aggregate(
+            [evidence],
+            [release_evidence.ExpectedCell("alpha")],
+        )
+
+        self.assert_no_go_with(result, "non-empty tuple of evidence requirements")
+
+    def test_authoritative_inventory_accepts_complete_required_evidence(self):
+        evidence_paths = []
+        for expected in release_evidence.DEFAULT_EXPECTED_CELL_INVENTORY:
+            cell_root = self.root / expected.cell_id
+            artifacts = []
+            logs = []
+            for requirement in expected.requirements:
+                relative = requirement.pattern.replace("*", "sample")
+                payload = cell_root.joinpath(*relative.split("/"))
+                payload.parent.mkdir(parents=True, exist_ok=True)
+                payload.write_text(f"{expected.cell_id}: {relative}\n", encoding="utf-8")
+                if requirement.collection == "artifacts":
+                    artifacts.append(payload)
+                else:
+                    logs.append(payload)
+            evidence = cell_root / "evidence.json"
+            release_evidence.write_cell_evidence(
+                evidence,
+                cell_id=expected.cell_id,
+                candidate_sha=SHA,
+                conclusion="success",
+                artifacts=artifacts,
+                logs=logs,
+                target=expected.target,
+                crt=expected.crt,
+                evidence_root=cell_root,
+            )
+            evidence_paths.append(evidence)
+
+        result = release_evidence.aggregate_release_evidence(
+            evidence_paths,
+            expected_cells=release_evidence.DEFAULT_EXPECTED_CELL_INVENTORY,
+            expected_candidate_sha=SHA,
+            evidence_root=self.root,
+            output_path=self.output,
+        )
+
+        self.assertEqual(result["decision"], "Go")
+        self.assertEqual(result["summary"]["expected_cells"], 13)
+        self.assertEqual(result["summary"]["failed_checks"], 0)
 
     def test_rejects_checksum_mismatch_after_payload_tampering(self):
         evidence = self.write_cell("alpha")
@@ -344,6 +507,215 @@ class AggregateTests(unittest.TestCase):
             }.issubset(ids)
         )
         self.assertEqual(sum(cell_id.startswith("prebuilt-") for cell_id in ids), 5)
+        for cell in release_evidence.DEFAULT_EXPECTED_CELL_INVENTORY:
+            self.assertEqual(
+                {requirement.collection for requirement in cell.requirements},
+                {"artifacts", "logs"},
+            )
+
+        requirements = {
+            cell.cell_id: {
+                (requirement.collection, requirement.pattern)
+                for requirement in cell.requirements
+            }
+            for cell in release_evidence.DEFAULT_EXPECTED_CELL_INVENTORY
+        }
+        self.assertIn(
+            ("artifacts", "runtime/gate-result.json"),
+            requirements["linux-test-engine-runtime"],
+        )
+        self.assertIn(
+            ("artifacts", "runtime/viewport-result.json"),
+            requirements["linux-multi-viewport-smoke"],
+        )
+        self.assertIn(
+            ("artifacts", "metadata/binding-hashes.json"),
+            requirements["linux-wasm"],
+        )
+        self.assertIn(
+            ("artifacts", "metadata/vcpkg.json"),
+            requirements["windows-vcpkg"],
+        )
+        self.assertIn(
+            ("artifacts", "metadata/mingw-imports.txt"),
+            requirements["windows-gnu"],
+        )
+        for cell_id in ids:
+            if cell_id.startswith("prebuilt-"):
+                self.assertIn(
+                    ("artifacts", "packages/dear-imgui-*.tar.gz"),
+                    requirements[cell_id],
+                )
+                self.assertIn(
+                    ("artifacts", "metadata/prebuilt-manifests.json"),
+                    requirements[cell_id],
+                )
+
+    def test_production_cli_uses_authoritative_inventory_with_zero_evidence(self):
+        with patch.object(
+            release_evidence, "resolve_candidate_sha", return_value=SHA
+        ) as resolve:
+            result = release_evidence.main(
+                [
+                    "aggregate",
+                    "--repo-root",
+                    str(self.root),
+                    "--candidate-sha",
+                    SHA,
+                    "--evidence-root",
+                    str(self.root),
+                    "--output",
+                    str(self.output),
+                ]
+            )
+
+        self.assertEqual(result, 1)
+        resolve.assert_called_once_with(self.root, SHA)
+        gate = json.loads(self.output.read_text(encoding="utf-8"))
+        self.assertEqual(gate["decision"], "No-Go")
+        self.assertEqual(gate["summary"]["expected_cells"], 13)
+        self.assertEqual(gate["summary"]["failed_checks"], 13)
+        self.assertTrue(
+            all(
+                "required cell evidence is missing" in check["errors"]
+                for check in gate["checks"]
+            )
+        )
+
+    def test_production_cli_rejects_callers_that_try_to_override_inventory(self):
+        parser = release_evidence._build_parser()
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
+            parser.parse_args(
+                [
+                    "aggregate",
+                    "--repo-root",
+                    str(self.root),
+                    "--candidate-sha",
+                    SHA,
+                    "--evidence-root",
+                    str(self.root),
+                    "--output",
+                    str(self.output),
+                    "--expected-cell",
+                    "only",
+                ]
+            )
+
+        self.assertEqual(error.exception.code, 2)
+
+
+class GateResultVerificationTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.gate = self.root / release_evidence.GATE_RESULT_NAME
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def complete_gate(self):
+        count = len(release_evidence.DEFAULT_EXPECTED_CELL_INVENTORY)
+        return {
+            "version": release_evidence.SCHEMA_VERSION,
+            "candidate_sha": SHA,
+            "decision": "Go",
+            "checks": [
+                {
+                    "cell_id": cell.cell_id,
+                    "conclusion": "success",
+                    "evidence_paths": [f"{cell.cell_id}/cell.json"],
+                    "errors": [],
+                    "status": "success",
+                }
+                for cell in release_evidence.DEFAULT_EXPECTED_CELL_INVENTORY
+            ],
+            "summary": {
+                "expected_cells": count,
+                "successful_checks": count,
+                "failed_checks": 0,
+            },
+        }
+
+    def write_gate(self, value):
+        self.gate.write_text(
+            json.dumps(value, sort_keys=True) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+
+    def test_accepts_only_complete_same_sha_go(self):
+        value = self.complete_gate()
+        self.write_gate(value)
+
+        self.assertEqual(
+            release_evidence.verify_gate_result(
+                self.gate, expected_candidate_sha=SHA
+            ),
+            value,
+        )
+
+    def test_rejects_wrong_sha_no_go_and_inventory_drift(self):
+        cases = []
+        wrong_sha = self.complete_gate()
+        wrong_sha["candidate_sha"] = OTHER_SHA
+        cases.append(("candidate SHA mismatch", wrong_sha))
+        no_go = self.complete_gate()
+        no_go["decision"] = "No-Go"
+        cases.append(("decision must be 'Go'", no_go))
+        missing = self.complete_gate()
+        missing["checks"].pop()
+        cases.append(("cell inventory mismatch", missing))
+        duplicate = self.complete_gate()
+        duplicate["checks"][-1]["cell_id"] = duplicate["checks"][0]["cell_id"]
+        cases.append(("repeat a cell_id", duplicate))
+
+        for message, value in cases:
+            with self.subTest(message=message):
+                self.write_gate(value)
+                with self.assertRaisesRegex(release_evidence.EvidenceError, message):
+                    release_evidence.verify_gate_result(
+                        self.gate, expected_candidate_sha=SHA
+                    )
+
+    def test_rejects_unsuccessful_or_unretained_cell_and_summary_drift(self):
+        unsuccessful = self.complete_gate()
+        unsuccessful["checks"][0]["status"] = "failure"
+        unretained = self.complete_gate()
+        unretained["checks"][0]["evidence_paths"] = []
+        summary = self.complete_gate()
+        summary["summary"]["successful_checks"] -= 1
+
+        for message, value in (
+            ("not a successful release cell", unsuccessful),
+            ("must name retained evidence", unretained),
+            ("summary does not describe a complete Go", summary),
+        ):
+            with self.subTest(message=message):
+                self.write_gate(value)
+                with self.assertRaisesRegex(release_evidence.EvidenceError, message):
+                    release_evidence.verify_gate_result(
+                        self.gate, expected_candidate_sha=SHA
+                    )
+
+    def test_verify_cli_binds_gate_to_resolved_head(self):
+        self.write_gate(self.complete_gate())
+        with patch.object(
+            release_evidence, "resolve_candidate_sha", return_value=SHA
+        ) as resolve:
+            result = release_evidence.main(
+                [
+                    "verify",
+                    "--repo-root",
+                    str(self.root),
+                    "--candidate-sha",
+                    SHA,
+                    "--gate-result",
+                    str(self.gate),
+                ]
+            )
+
+        self.assertEqual(result, 0)
+        resolve.assert_called_once_with(self.root, SHA)
 
 
 if __name__ == "__main__":

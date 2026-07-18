@@ -1,9 +1,9 @@
 """Create and aggregate deterministic release-gate evidence.
 
-The module deliberately takes every release input as an argument. It does not
-discover workflow jobs, read process environment variables, or access the
-network. This keeps the release decision reproducible from an archived evidence
-directory.
+Candidate identity and evidence paths are explicit inputs, while the production
+cell inventory is code-owned and cannot be narrowed by a workflow caller. The
+module does not discover workflow jobs, read process environment variables, or
+access the network, so an archived evidence directory reproduces the decision.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ import subprocess
 import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
@@ -33,6 +34,16 @@ _REQUIRED_CELL_FIELDS = frozenset(
 )
 _OPTIONAL_CELL_FIELDS = frozenset({"target", "crt"})
 _FILE_FIELDS = frozenset({"path", "sha256"})
+_EVIDENCE_COLLECTIONS = frozenset({"artifacts", "logs"})
+_GATE_RESULT_FIELDS = frozenset(
+    {"version", "candidate_sha", "decision", "checks", "summary"}
+)
+_GATE_CHECK_FIELDS = frozenset(
+    {"cell_id", "conclusion", "evidence_paths", "errors", "status"}
+)
+_GATE_SUMMARY_FIELDS = frozenset(
+    {"expected_cells", "successful_checks", "failed_checks"}
+)
 
 
 class EvidenceError(ValueError):
@@ -40,31 +51,177 @@ class EvidenceError(ValueError):
 
 
 @dataclass(frozen=True)
+class EvidenceRequirement:
+    """One required evidence path pattern in a typed payload collection."""
+
+    collection: str
+    pattern: str
+
+
+@dataclass(frozen=True)
 class ExpectedCell:
-    """One cell required by the release gate."""
+    """One cell and its evidence contract required by the release gate."""
 
     cell_id: str
     target: str | None = None
     crt: str | None = None
+    requirements: tuple[EvidenceRequirement, ...] = ()
+
+
+def _requirements(
+    *, artifacts: Sequence[str] = (), logs: Sequence[str] = ()
+) -> tuple[EvidenceRequirement, ...]:
+    return tuple(
+        [EvidenceRequirement("artifacts", pattern) for pattern in artifacts]
+        + [EvidenceRequirement("logs", pattern) for pattern in logs]
+    )
+
+
+_STANDARD_LOG_REQUIREMENTS = ("logs/stdout.log", "logs/stderr.log")
+_RUNTIME_GATE_REQUIREMENTS = (
+    "runtime/gate-result.json",
+    "runtime/gate-invocation.json",
+)
+_PREBUILT_REQUIREMENTS = _requirements(
+    artifacts=(
+        "packages/dear-imgui-*.tar.gz",
+        "packages/*-prebuilt-*.tar.gz",
+        "metadata/prebuilt-manifests.json",
+        "metadata/binding-hashes.json",
+    ),
+    logs=(
+        "logs/build.stdout.log",
+        "logs/build.stderr.log",
+        "logs/consume.stdout.log",
+        "logs/consume.stderr.log",
+    ),
+)
 
 
 DEFAULT_EXPECTED_CELL_INVENTORY = (
-    ExpectedCell("linux-test-engine-runtime", "x86_64-unknown-linux-gnu"),
-    ExpectedCell("linux-multi-viewport-smoke", "x86_64-unknown-linux-gnu"),
-    ExpectedCell("linux-wasm", "wasm32-unknown-unknown"),
-    ExpectedCell("windows-vcpkg", "x86_64-pc-windows-msvc", "md"),
-    ExpectedCell("windows-platform-md", "x86_64-pc-windows-msvc", "md"),
-    ExpectedCell("windows-platform-mt", "x86_64-pc-windows-msvc", "mt"),
-    ExpectedCell("windows-gnu", "x86_64-pc-windows-gnu"),
-    ExpectedCell("macos-build"),
-    ExpectedCell("prebuilt-x86_64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"),
-    ExpectedCell("prebuilt-x86_64-apple-darwin", "x86_64-apple-darwin"),
-    ExpectedCell("prebuilt-aarch64-apple-darwin", "aarch64-apple-darwin"),
     ExpectedCell(
-        "prebuilt-x86_64-pc-windows-msvc-md", "x86_64-pc-windows-msvc", "md"
+        "linux-test-engine-runtime",
+        "x86_64-unknown-linux-gnu",
+        requirements=_requirements(
+            artifacts=_RUNTIME_GATE_REQUIREMENTS,
+            logs=("runtime/*.stdout.log", "runtime/*.stderr.log"),
+        ),
     ),
     ExpectedCell(
-        "prebuilt-x86_64-pc-windows-msvc-mt", "x86_64-pc-windows-msvc", "mt"
+        "linux-multi-viewport-smoke",
+        "x86_64-unknown-linux-gnu",
+        requirements=_requirements(
+            artifacts=(
+                *_RUNTIME_GATE_REQUIREMENTS,
+                "runtime/runtime-environment.json",
+                "runtime/viewport-result.json",
+            ),
+            logs=(
+                "runtime/display.stdout.log",
+                "runtime/display.stderr.log",
+                "runtime/adapter.stdout.log",
+                "runtime/adapter.stderr.log",
+                "runtime/viewport.stdout.log",
+                "runtime/viewport.stderr.log",
+            ),
+        ),
+    ),
+    ExpectedCell(
+        "linux-wasm",
+        "wasm32-unknown-unknown",
+        requirements=_requirements(
+            artifacts=(
+                "metadata/target.json",
+                "metadata/binding-hashes.json",
+                "metadata/manifests.json",
+            ),
+            logs=_STANDARD_LOG_REQUIREMENTS,
+        ),
+    ),
+    ExpectedCell(
+        "windows-vcpkg",
+        "x86_64-pc-windows-msvc",
+        "md",
+        requirements=_requirements(
+            artifacts=(
+                "metadata/target.json",
+                "metadata/vcpkg.json",
+                "metadata/manifests.json",
+            ),
+            logs=_STANDARD_LOG_REQUIREMENTS,
+        ),
+    ),
+    ExpectedCell(
+        "windows-platform-md",
+        "x86_64-pc-windows-msvc",
+        "md",
+        requirements=_requirements(
+            artifacts=(
+                "metadata/target.json",
+                "metadata/crt.json",
+                "metadata/platform-io-abi.json",
+            ),
+            logs=_STANDARD_LOG_REQUIREMENTS,
+        ),
+    ),
+    ExpectedCell(
+        "windows-platform-mt",
+        "x86_64-pc-windows-msvc",
+        "mt",
+        requirements=_requirements(
+            artifacts=(
+                "metadata/target.json",
+                "metadata/crt.json",
+                "metadata/platform-io-abi.json",
+            ),
+            logs=_STANDARD_LOG_REQUIREMENTS,
+        ),
+    ),
+    ExpectedCell(
+        "windows-gnu",
+        "x86_64-pc-windows-gnu",
+        requirements=_requirements(
+            artifacts=("metadata/target.json", "metadata/mingw-imports.txt"),
+            logs=_STANDARD_LOG_REQUIREMENTS,
+        ),
+    ),
+    ExpectedCell(
+        "macos-build",
+        requirements=_requirements(
+            artifacts=(
+                "metadata/target.json",
+                "metadata/binding-hashes.json",
+                "metadata/manifests.json",
+            ),
+            logs=_STANDARD_LOG_REQUIREMENTS,
+        ),
+    ),
+    ExpectedCell(
+        "prebuilt-x86_64-unknown-linux-gnu",
+        "x86_64-unknown-linux-gnu",
+        requirements=_PREBUILT_REQUIREMENTS,
+    ),
+    ExpectedCell(
+        "prebuilt-x86_64-apple-darwin",
+        "x86_64-apple-darwin",
+        requirements=_PREBUILT_REQUIREMENTS,
+    ),
+    ExpectedCell(
+        "prebuilt-aarch64-apple-darwin",
+        "aarch64-apple-darwin",
+        requirements=_PREBUILT_REQUIREMENTS,
+    ),
+    ExpectedCell(
+        "prebuilt-x86_64-pc-windows-msvc-md",
+        "x86_64-pc-windows-msvc",
+        "md",
+        requirements=_PREBUILT_REQUIREMENTS,
+    ),
+    ExpectedCell(
+        "prebuilt-x86_64-pc-windows-msvc-mt",
+        "x86_64-pc-windows-msvc",
+        "mt",
+        requirements=_PREBUILT_REQUIREMENTS,
     ),
 )
 DEFAULT_EXPECTED_CELL_IDS = tuple(
@@ -180,6 +337,15 @@ def _safe_relative_path(value: Any, field: str) -> PurePosixPath:
     if any(part in ("", ".", "..") for part in raw_parts):
         raise EvidenceError(f"{field} path contains an unsafe component: {value!r}")
     return PurePosixPath(*raw_parts)
+
+
+def _safe_relative_pattern(value: Any, field: str) -> str:
+    pattern = _safe_relative_path(value, field).as_posix()
+    if "**" in pattern or any(character in pattern for character in "?[]"):
+        raise EvidenceError(
+            f"{field} supports only literal path components and '*' wildcards: {value!r}"
+        )
+    return pattern
 
 
 def _path_within_root(path: Path, root: Path, field: str) -> Path:
@@ -395,6 +561,12 @@ def _validate_cell_record(
                 evidence_path=evidence_path,
             )
         )
+    artifact_paths = _recorded_payload_paths(value, "artifacts")
+    log_paths = _recorded_payload_paths(value, "logs")
+    for duplicate in sorted(artifact_paths & log_paths):
+        errors.append(
+            f"payload path {duplicate!r} must not be classified as both artifacts and logs"
+        )
     return cell_id, errors
 
 
@@ -405,22 +577,111 @@ def _display_path(path: Path, root: Path) -> str:
         return path.as_posix()
 
 
-def _normalize_expected_cell(value: str | ExpectedCell) -> ExpectedCell:
-    if isinstance(value, str):
-        value = ExpectedCell(value)
+def _recorded_payload_paths(value: dict[str, Any], field: str) -> set[str]:
+    entries = value.get(field)
+    if not isinstance(entries, list):
+        return set()
+    paths: set[str] = set()
+    for entry in entries:
+        if not isinstance(entry, dict) or set(entry) != _FILE_FIELDS:
+            continue
+        try:
+            paths.add(_safe_relative_path(entry.get("path"), field).as_posix())
+        except EvidenceError:
+            continue
+    return paths
+
+
+def _normalize_requirement(value: EvidenceRequirement) -> EvidenceRequirement:
+    if not isinstance(value, EvidenceRequirement):
+        raise EvidenceError("evidence requirements must be EvidenceRequirement values")
+    collection = _validate_text(value.collection, "requirement collection")
+    if collection not in _EVIDENCE_COLLECTIONS:
+        raise EvidenceError(
+            "requirement collection must be either 'artifacts' or 'logs'"
+        )
+    pattern = _validate_text(value.pattern, "requirement pattern")
+    return EvidenceRequirement(
+        collection=collection,
+        pattern=_safe_relative_pattern(pattern, "requirement pattern"),
+    )
+
+
+def _normalize_expected_cell(value: ExpectedCell) -> ExpectedCell:
     if not isinstance(value, ExpectedCell):
-        raise EvidenceError("expected cell inventory entries must be strings or ExpectedCell")
+        raise EvidenceError("expected cell inventory entries must be ExpectedCell values")
+    if not isinstance(value.requirements, tuple) or not value.requirements:
+        raise EvidenceError(
+            "expected cells must declare a non-empty tuple of evidence requirements"
+        )
+    requirements = tuple(_normalize_requirement(item) for item in value.requirements)
+    if len(set(requirements)) != len(requirements):
+        raise EvidenceError("expected cell evidence requirements must not repeat")
+    required_collections = {requirement.collection for requirement in requirements}
+    missing_collections = sorted(_EVIDENCE_COLLECTIONS - required_collections)
+    if missing_collections:
+        raise EvidenceError(
+            "expected cells must require both artifacts and logs; missing "
+            + ", ".join(missing_collections)
+        )
     return ExpectedCell(
         cell_id=_validate_text(value.cell_id, "expected cell_id"),
         target=_validate_text(value.target, "expected target", optional=True),
         crt=_validate_text(value.crt, "expected crt", optional=True),
+        requirements=requirements,
+    )
+
+
+def _validate_required_evidence(
+    value: dict[str, Any], expected: ExpectedCell
+) -> list[str]:
+    paths_by_collection = {
+        collection: _recorded_payload_paths(value, collection)
+        for collection in _EVIDENCE_COLLECTIONS
+    }
+    errors: list[str] = []
+    for requirement in expected.requirements:
+        matching = {
+            path
+            for path in paths_by_collection[requirement.collection]
+            if _matches_relative_pattern(path, requirement.pattern)
+        }
+        if matching:
+            continue
+        other_collection = (
+            "logs" if requirement.collection == "artifacts" else "artifacts"
+        )
+        misclassified = {
+            path
+            for path in paths_by_collection[other_collection]
+            if _matches_relative_pattern(path, requirement.pattern)
+        }
+        if misclassified:
+            errors.append(
+                f"required {requirement.collection} evidence matching "
+                f"{requirement.pattern!r} is classified as {other_collection}"
+            )
+        else:
+            errors.append(
+                f"required {requirement.collection} evidence is missing for "
+                f"pattern {requirement.pattern!r}"
+            )
+    return errors
+
+
+def _matches_relative_pattern(path: str, pattern: str) -> bool:
+    path_parts = PurePosixPath(path).parts
+    pattern_parts = PurePosixPath(pattern).parts
+    return len(path_parts) == len(pattern_parts) and all(
+        fnmatchcase(path_part, pattern_part)
+        for path_part, pattern_part in zip(path_parts, pattern_parts, strict=True)
     )
 
 
 def aggregate_release_evidence(
     evidence_paths: Sequence[Path],
     *,
-    expected_cells: Sequence[str | ExpectedCell],
+    expected_cells: Sequence[ExpectedCell],
     expected_candidate_sha: str,
     evidence_root: Path,
     output_path: Path,
@@ -501,6 +762,7 @@ def aggregate_release_evidence(
         else:
             _path, value, record_errors = records[0]
             errors.extend(record_errors)
+            errors.extend(_validate_required_evidence(value, expected))
             conclusion_value = value.get("conclusion")
             conclusion = conclusion_value if isinstance(conclusion_value, str) else None
             candidate = value.get("candidate_sha")
@@ -580,15 +842,72 @@ def aggregate_release_evidence(
     return result
 
 
-def _expected_cell_argument(value: str) -> ExpectedCell:
-    parts = value.split(":")
-    if not 1 <= len(parts) <= 3 or any(not part for part in parts):
-        raise argparse.ArgumentTypeError("use CELL_ID[:TARGET[:CRT]]")
-    return ExpectedCell(
-        parts[0],
-        parts[1] if len(parts) >= 2 else None,
-        parts[2] if len(parts) == 3 else None,
-    )
+def verify_gate_result(path: Path, *, expected_candidate_sha: str) -> dict[str, Any]:
+    """Require one complete authoritative Go result for the expected candidate."""
+    expected_sha = parse_candidate_sha(expected_candidate_sha)
+    value = _load_json_object(Path(path))
+    if set(value) != _GATE_RESULT_FIELDS:
+        raise EvidenceError(
+            "release gate result must contain exactly version, candidate_sha, "
+            "decision, checks, and summary"
+        )
+    if isinstance(value["version"], bool) or value["version"] != SCHEMA_VERSION:
+        raise EvidenceError(f"release gate result version must be {SCHEMA_VERSION}")
+    if value["candidate_sha"] != expected_sha:
+        raise EvidenceError(
+            "release gate candidate SHA mismatch: "
+            f"expected {expected_sha}, found {value['candidate_sha']!r}"
+        )
+    if value["decision"] != "Go":
+        raise EvidenceError(
+            f"release gate decision must be 'Go', found {value['decision']!r}"
+        )
+
+    checks = value["checks"]
+    if not isinstance(checks, list):
+        raise EvidenceError("release gate checks must be a JSON array")
+    expected_ids = set(DEFAULT_EXPECTED_CELL_IDS)
+    observed_ids: list[str] = []
+    for index, check in enumerate(checks):
+        label = f"release gate checks[{index}]"
+        if not isinstance(check, dict) or set(check) != _GATE_CHECK_FIELDS:
+            raise EvidenceError(f"{label} has an invalid schema")
+        cell_id = check["cell_id"]
+        if not isinstance(cell_id, str):
+            raise EvidenceError(f"{label} cell_id must be a string")
+        observed_ids.append(cell_id)
+        if check["status"] != "success" or check["conclusion"] != "success":
+            raise EvidenceError(f"{label} is not a successful release cell")
+        if check["errors"] != []:
+            raise EvidenceError(f"{label} must not contain errors")
+        evidence_paths = check["evidence_paths"]
+        if (
+            not isinstance(evidence_paths, list)
+            or not evidence_paths
+            or any(not isinstance(item, str) or not item for item in evidence_paths)
+        ):
+            raise EvidenceError(f"{label} must name retained evidence")
+    if len(observed_ids) != len(set(observed_ids)):
+        raise EvidenceError("release gate checks repeat a cell_id")
+    if set(observed_ids) != expected_ids:
+        missing = sorted(expected_ids - set(observed_ids))
+        unexpected = sorted(set(observed_ids) - expected_ids)
+        raise EvidenceError(
+            "release gate cell inventory mismatch: "
+            f"missing={missing!r}, unexpected={unexpected!r}"
+        )
+
+    summary = value["summary"]
+    if not isinstance(summary, dict) or set(summary) != _GATE_SUMMARY_FIELDS:
+        raise EvidenceError("release gate summary has an invalid schema")
+    expected_count = len(DEFAULT_EXPECTED_CELL_INVENTORY)
+    if summary != {
+        "expected_cells": expected_count,
+        "successful_checks": expected_count,
+        "failed_checks": 0,
+    }:
+        raise EvidenceError("release gate summary does not describe a complete Go")
+    return value
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -611,14 +930,14 @@ def _build_parser() -> argparse.ArgumentParser:
     aggregate.add_argument("--candidate-sha", required=True)
     aggregate.add_argument("--evidence-root", required=True, type=Path)
     aggregate.add_argument("--output", required=True, type=Path)
-    aggregate.add_argument(
-        "--expected-cell",
-        required=True,
-        action="append",
-        type=_expected_cell_argument,
-        help="required CELL_ID[:TARGET[:CRT]]; repeat for every release cell",
+    aggregate.add_argument("evidence", nargs="*", type=Path)
+
+    verify = subparsers.add_parser(
+        "verify", help="verify one authoritative same-SHA Go result"
     )
-    aggregate.add_argument("evidence", nargs="+", type=Path)
+    verify.add_argument("--repo-root", required=True, type=Path)
+    verify.add_argument("--candidate-sha", required=True)
+    verify.add_argument("--gate-result", required=True, type=Path)
     return parser
 
 
@@ -643,14 +962,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                 evidence_root=arguments.evidence_root,
             )
             return 0
-        result = aggregate_release_evidence(
-            arguments.evidence,
-            expected_cells=arguments.expected_cell,
+        if arguments.command == "aggregate":
+            result = aggregate_release_evidence(
+                arguments.evidence,
+                expected_cells=DEFAULT_EXPECTED_CELL_INVENTORY,
+                expected_candidate_sha=candidate_sha,
+                evidence_root=arguments.evidence_root,
+                output_path=arguments.output,
+            )
+            return 0 if result["decision"] == "Go" else 1
+        verify_gate_result(
+            arguments.gate_result,
             expected_candidate_sha=candidate_sha,
-            evidence_root=arguments.evidence_root,
-            output_path=arguments.output,
         )
-        return 0 if result["decision"] == "Go" else 1
+        return 0
     except EvidenceError as error:
         parser.error(str(error))
     return 2
