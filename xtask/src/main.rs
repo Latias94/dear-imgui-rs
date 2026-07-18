@@ -2,8 +2,9 @@ use anyhow::{Context, Result};
 use build_support::binding::{
     BindingFormatter, BindingOwner, BindingRustEdition, BindingSpec, BindingTarget,
     CANONICAL_BINDING_LIBCLANG_VERSION, CANONICAL_BINDING_RUSTC_VERSION,
-    CANONICAL_BINDING_RUSTFMT_VERSION, CrateBindingSpec, CrateBindingTarget, ExtensionBinding,
-    NativeAbiProfile, validate_bindgen_environment,
+    CANONICAL_BINDING_RUSTFMT_VERSION, CrateBindingIncludeRoot, CrateBindingLanguage,
+    CrateBindingSpec, CrateBindingTarget, ExtensionBinding, NativeAbiProfile,
+    validate_bindgen_environment,
 };
 use std::{
     borrow::Cow,
@@ -267,32 +268,66 @@ fn verify_core_bindings(args: &[String]) -> Result<()> {
 
     if !options.check_only {
         validate_canonical_binding_toolchain()?;
-        let verification_dir = root.join("target/binding-verification");
-        std::fs::create_dir_all(&verification_dir)
-            .with_context(|| format!("create {}", verification_dir.display()))?;
-        let generated_wasm = verification_dir.join("bindings_wasm.rs");
+        let target_dir = root.join("target");
+        fs::create_dir_all(&target_dir)
+            .with_context(|| format!("create {}", target_dir.display()))?;
+        let verification_dir = tempfile::Builder::new()
+            .prefix("binding-verification-")
+            .tempdir_in(&target_dir)
+            .context("create independent binding verification directory")?;
+        let first_dir = verification_dir.path().join("first");
+        let second_dir = verification_dir.path().join("second");
+        fs::create_dir_all(&first_dir)
+            .with_context(|| format!("create {}", first_dir.display()))?;
+        fs::create_dir_all(&second_dir)
+            .with_context(|| format!("create {}", second_dir.display()))?;
         let mut generated_native_profiles = Vec::new();
         for profile in native_profiles {
             let spec = BindingSpec::core_native(profile);
-            let generated_native = verification_dir.join(format!("bindings_{}.rs", profile.id()));
-            generate_core_bindings(&root, &spec, &generated_native)?;
-            let canonical = std::fs::read_to_string(&generated_native)
-                .with_context(|| format!("read {}", generated_native.display()))?;
+            let file_name = format!("bindings_{}.rs", profile.id());
+            let first_native = first_dir.join(&file_name);
+            let second_native = second_dir.join(&file_name);
+            generate_core_bindings(&root, &spec, &first_native)?;
+            generate_core_bindings(&root, &spec, &second_native)?;
+            let canonical = fs::read_to_string(&first_native)
+                .with_context(|| format!("read {}", first_native.display()))?;
+            let repeated = fs::read_to_string(&second_native)
+                .with_context(|| format!("read {}", second_native.display()))?;
+            require_byte_identical(
+                &format!("core native profile {}", profile.id()),
+                &canonical,
+                &repeated,
+            )?;
 
             for target in profile.compatibility_targets() {
-                let generated_compat = verification_dir.join(format!(
+                let compat_name = format!(
                     "bindings_{}_{}.rs",
                     profile.id(),
                     target.rust_target.replace('-', "_")
-                ));
+                );
+                let first_compat = first_dir.join(&compat_name);
+                let second_compat = second_dir.join(&compat_name);
                 generate_core_bindings_for_target(
                     &root,
                     &spec,
                     Some(target.clang_target),
-                    &generated_compat,
+                    &first_compat,
                 )?;
-                let compatible = std::fs::read_to_string(&generated_compat)
-                    .with_context(|| format!("read {}", generated_compat.display()))?;
+                generate_core_bindings_for_target(
+                    &root,
+                    &spec,
+                    Some(target.clang_target),
+                    &second_compat,
+                )?;
+                let compatible = fs::read_to_string(&first_compat)
+                    .with_context(|| format!("read {}", first_compat.display()))?;
+                let repeated_compat = fs::read_to_string(&second_compat)
+                    .with_context(|| format!("read {}", second_compat.display()))?;
+                require_byte_identical(
+                    &format!("core compatibility target {}", target.rust_target),
+                    &compatible,
+                    &repeated_compat,
+                )?;
                 if compatible != canonical {
                     anyhow::bail!(
                         "native ABI profile {} drifts for Rust target {} (clang target {})",
@@ -304,10 +339,15 @@ fn verify_core_bindings(args: &[String]) -> Result<()> {
             }
             generated_native_profiles.push((profile, spec, canonical));
         }
-        generate_core_bindings(&root, &wasm_spec, &generated_wasm)?;
-
-        let wasm = std::fs::read_to_string(&generated_wasm)
-            .with_context(|| format!("read {}", generated_wasm.display()))?;
+        let first_wasm = first_dir.join("bindings_wasm.rs");
+        let second_wasm = second_dir.join("bindings_wasm.rs");
+        generate_core_bindings(&root, &wasm_spec, &first_wasm)?;
+        generate_core_bindings(&root, &wasm_spec, &second_wasm)?;
+        let wasm = fs::read_to_string(&first_wasm)
+            .with_context(|| format!("read {}", first_wasm.display()))?;
+        let repeated_wasm = fs::read_to_string(&second_wasm)
+            .with_context(|| format!("read {}", second_wasm.display()))?;
+        require_byte_identical("core WASM profile", &wasm, &repeated_wasm)?;
         if options.update {
             for (profile, _, native) in &generated_native_profiles {
                 let path = sys_root.join(profile.pregenerated_file());
@@ -325,13 +365,23 @@ fn verify_core_bindings(args: &[String]) -> Result<()> {
         }
 
         verify_crate_binding_sources(&root)?;
-        let extension_dir = verification_dir.join("extensions");
-        fs::create_dir_all(&extension_dir)
-            .with_context(|| format!("create {}", extension_dir.display()))?;
+        let first_extension_dir = first_dir.join("extensions");
+        let second_extension_dir = second_dir.join("extensions");
+        fs::create_dir_all(&first_extension_dir)
+            .with_context(|| format!("create {}", first_extension_dir.display()))?;
+        fs::create_dir_all(&second_extension_dir)
+            .with_context(|| format!("create {}", second_extension_dir.display()))?;
         for spec in CrateBindingSpec::maintained() {
-            let generated_path =
-                extension_dir.join(format!("{}_{}.rs", spec.crate_name, spec.target.id()));
-            let generated = generate_extension_bindings(&root, spec, &generated_path)?;
+            let file_name = format!("{}_{}.rs", spec.crate_name, spec.target.id());
+            let first_path = first_extension_dir.join(&file_name);
+            let second_path = second_extension_dir.join(&file_name);
+            let generated = generate_extension_bindings(&root, spec, &first_path)?;
+            let repeated = generate_extension_bindings(&root, spec, &second_path)?;
+            require_byte_identical(
+                &format!("{} {} profile", spec.crate_name, spec.target.id()),
+                &generated,
+                &repeated,
+            )?;
             let checked_in_path = root.join(spec.crate_root).join(spec.checked_in_path);
             if options.update {
                 fs::write(&checked_in_path, generated)
@@ -436,7 +486,7 @@ fn validate_canonical_binding_toolchain() -> Result<()> {
 fn validate_checked_in_extension_bindings(root: &Path) -> Result<()> {
     for spec in CrateBindingSpec::maintained() {
         let crate_root = root.join(spec.crate_root);
-        spec.load_and_validate(&crate_root)
+        spec.load_and_validate_full(&crate_root)
             .map_err(anyhow::Error::msg)
             .with_context(|| {
                 format!(
@@ -550,6 +600,13 @@ fn compare_binding_contents(path: &Path, generated: &str) -> Result<()> {
     Ok(())
 }
 
+fn require_byte_identical(label: &str, first: &str, second: &str) -> Result<()> {
+    if first.as_bytes() != second.as_bytes() {
+        anyhow::bail!("{label} is not deterministic across two independent canonical generations");
+    }
+    Ok(())
+}
+
 fn binding_contents_equal(checked_in: &str, generated: &str) -> bool {
     normalize_line_endings(checked_in) == normalize_line_endings(generated)
 }
@@ -575,14 +632,24 @@ fn extension_bindgen_builder(root: &Path, spec: &CrateBindingSpec) -> Result<bin
         fs::write(shim_root.join(shim.name), shim.contents)
             .with_context(|| format!("write binding header shim {}", shim.name))?;
     }
-    let mut builder = bindgen::Builder::default()
-        .formatter(bindgen::Formatter::Rustfmt)
-        .rust_edition(bindgen::RustEdition::Edition2021)
-        .derive_default(true)
-        .derive_debug(true)
-        .derive_copy(true)
-        .prepend_enum_name(false)
-        .layout_tests(false);
+    let profile = spec.profile;
+    let mut builder = bindgen::Builder::default();
+    builder = match profile.formatter {
+        BindingFormatter::Rustfmt => builder.formatter(bindgen::Formatter::Rustfmt),
+    };
+    builder = match profile.rust_edition {
+        BindingRustEdition::Rust2021 => builder.rust_edition(bindgen::RustEdition::Edition2021),
+    };
+    builder = builder
+        .derive_default(profile.derives.default)
+        .derive_debug(profile.derives.debug)
+        .derive_copy(profile.derives.copy)
+        .derive_eq(profile.derives.eq)
+        .derive_partialeq(profile.derives.partial_eq)
+        .derive_hash(profile.derives.hash)
+        .prepend_enum_name(profile.prepend_enum_name)
+        .layout_tests(profile.layout_tests)
+        .allowlist_recursively(profile.allowlist_recursively);
 
     builder = builder.clang_arg(format!("-I{}", shim_root.display()));
     for arg in spec.clang_args {
@@ -593,194 +660,42 @@ fn extension_bindgen_builder(root: &Path, spec: &CrateBindingSpec) -> Result<bin
         builder = builder.header(crate_root.join(header).to_string_lossy());
     }
 
-    builder = match spec.owner {
-        BindingOwner::TestEngine => builder
-            .allowlist_function("imgui_test_engine_.*")
-            .allowlist_type("ImGuiTestEngine.*")
-            .allowlist_var("ImGuiTestEngine.*")
-            .blocklist_type("ImGuiContext")
-            .derive_eq(true)
-            .derive_partialeq(true)
-            .derive_hash(true),
-        BindingOwner::Extension(ExtensionBinding::ImPlot) => {
-            let source_root = crate_root.join(spec.source_root);
-            builder
-                .allowlist_function("ImPlot.*")
-                .allowlist_type("ImPlot.*")
-                .allowlist_type("ImWchar32")
-                .allowlist_var("ImPlot.*")
-                .allowlist_var("IMPLOT_.*")
-                .blocklist_type("ImVec2")
-                .blocklist_type("ImVec4")
-                .blocklist_type("ImGuiCond")
-                .blocklist_type("ImTextureID")
-                .blocklist_type("ImGuiContext")
-                .blocklist_type("ImDrawList")
-                .blocklist_type("ImGuiMouseButton")
-                .blocklist_type("ImGuiDragDropFlags")
-                .blocklist_type("ImGuiIO")
-                .blocklist_type("ImFontAtlas")
-                .blocklist_type("ImDrawData")
-                .blocklist_type("ImGuiStyle")
-                .blocklist_type("ImGuiKeyModFlags")
-                .clang_arg(format!("-I{}", imgui_src.display()))
-                .clang_arg(format!("-I{}", cimgui_root.display()))
-                .clang_arg(format!("-I{}", source_root.display()))
-                .clang_arg(format!("-I{}", source_root.join("implot").display()))
-                .clang_arg("-DIMGUI_USE_WCHAR32")
-                .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
-                .clang_arg("-DCIMGUI_VARGS0")
-                .derive_eq(true)
-                .derive_partialeq(true)
-                .derive_hash(true)
-                .clang_arg("-x")
-                .clang_arg("c++")
-                .clang_arg("-std=c++17")
-        }
-        BindingOwner::Extension(ExtensionBinding::ImPlot3d) => {
-            let source_root = crate_root.join(spec.source_root);
-            builder
-                .allowlist_function("ImPlot3D_.*")
-                .allowlist_type("ImPlot3D.*")
-                .allowlist_type("ImWchar32")
-                .allowlist_var("ImPlot3D.*")
-                .blocklist_type("ImVec2")
-                .blocklist_type("ImVec4")
-                .blocklist_type("ImGuiContext")
-                .blocklist_type("ImDrawList")
-                .blocklist_type("ImGuiID")
-                .blocklist_type("ImTextureID")
-                .clang_arg(format!("-I{}", cimgui_root.display()))
-                .clang_arg(format!("-I{}", imgui_src.display()))
-                .clang_arg(format!("-I{}", source_root.display()))
-                .clang_arg(format!("-I{}", source_root.join("implot3d").display()))
-                .clang_arg("-DIMGUI_USE_WCHAR32")
-                .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
-                .derive_eq(true)
-                .derive_partialeq(true)
-                .derive_hash(true)
-                .clang_arg("-x")
-                .clang_arg("c++")
-                .clang_arg("-std=c++17")
-        }
-        BindingOwner::Extension(ExtensionBinding::ImNodes) => {
-            let source_root = crate_root.join(spec.source_root);
-            builder
-                .allowlist_function("imnodes_.*")
-                .allowlist_function("EmulateThreeButtonMouse_.*")
-                .allowlist_function("LinkDetachWithModifierClick_.*")
-                .allowlist_function("MultipleSelectModifier_.*")
-                .allowlist_function("getIOKeyCtrlPtr")
-                .allowlist_function("imnodes_getIOKeyShiftPtr")
-                .allowlist_function("imnodes_getIOKeyAltPtr")
-                .allowlist_type("ImNodes.*")
-                .allowlist_type("ImWchar32")
-                .allowlist_var("ImNodes.*")
-                .blocklist_type("ImVec2")
-                .blocklist_type("ImVec4")
-                .blocklist_type("ImGuiContext")
-                .blocklist_type("ImDrawList")
-                .clang_arg(format!("-I{}", cimgui_root.display()))
-                .clang_arg(format!("-I{}", imgui_src.display()))
-                .clang_arg(format!("-I{}", source_root.display()))
-                .clang_arg(format!("-I{}", source_root.join("imnodes").display()))
-                .clang_arg("-DIMGUI_USE_WCHAR32")
-                .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
-                .derive_eq(true)
-                .derive_partialeq(true)
-                .derive_hash(true)
-                .clang_arg("-x")
-                .clang_arg("c++")
-                .clang_arg("-std=c++17")
-        }
-        BindingOwner::Extension(ExtensionBinding::NodeEditor) => {
-            let source_root = crate_root.join(spec.source_root);
-            builder
-                .allowlist_recursively(false)
-                .allowlist_function("dne_.*")
-                .allowlist_type("Dne.*")
-                .allowlist_var("DNE_.*")
-                .blocklist_type("Im.*")
-                .derive_eq(false)
-                .derive_partialeq(false)
-                .derive_hash(false)
-                .clang_arg(format!("-I{}", cimgui_root.display()))
-                .clang_arg(format!("-I{}", imgui_src.display()))
-                .clang_arg(format!("-I{}", source_root.display()))
-                .clang_arg(format!(
-                    "-I{}",
-                    source_root.join("imgui-node-editor").display()
-                ))
-                .clang_arg("-DIMGUI_USE_WCHAR32")
-                .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
-                .clang_arg("-x")
-                .clang_arg("c++")
-                .clang_arg("-std=c++17")
-        }
-        BindingOwner::Extension(ExtensionBinding::ImGuizmo) => {
-            let source_root = crate_root.join(spec.source_root);
-            builder
-                .allowlist_function("ImGuizmo_.*")
-                .allowlist_function("Style_.*")
-                .allowlist_type("(Style|COLOR|MODE|OPERATION)")
-                .allowlist_type("ImWchar32")
-                .allowlist_var(
-                    "(COLOR|MODE|OPERATION|COUNT|TRANSLATE.*|ROTATE.*|SCALE.*|UNIVERSAL)",
-                )
-                .blocklist_type("ImVec2")
-                .blocklist_type("ImVec4")
-                .blocklist_type("ImGuiContext")
-                .blocklist_type("ImDrawList")
-                .blocklist_type("ImGuiID")
-                .clang_arg(format!("-I{}", cimgui_root.display()))
-                .clang_arg(format!("-I{}", imgui_src.display()))
-                .clang_arg(format!("-I{}", source_root.display()))
-                .clang_arg(format!("-I{}", source_root.join("ImGuizmo").display()))
-                .clang_arg(format!("-I{}", source_root.join("ImGuizmo/src").display()))
-                .clang_arg("-DIMGUI_USE_WCHAR32")
-                .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
-                .derive_eq(true)
-                .derive_partialeq(true)
-                .derive_hash(true)
-                .clang_arg("-x")
-                .clang_arg("c++")
-                .clang_arg("-std=c++17")
-        }
-        BindingOwner::Extension(ExtensionBinding::ImGuizmoQuat) => {
-            let source_root = crate_root.join(spec.source_root);
-            builder
-                .allowlist_function("imguiGizmo_.*")
-                .allowlist_function("iggizmo3D_.*")
-                .allowlist_function("(mat4|quat)_.*")
-                .blocklist_type("ImVec2")
-                .blocklist_type("ImDrawList")
-                .blocklist_type("ImGuiContext")
-                .blocklist_type("ImGuiID")
-                .blocklist_type("ImVec4")
-                .clang_arg(format!("-I{}", cimgui_root.display()))
-                .clang_arg(format!("-I{}", imgui_src.display()))
-                .clang_arg(format!("-I{}", source_root.display()))
-                .clang_arg(format!(
-                    "-I{}",
-                    source_root.join("imGuIZMO.quat/imguizmo_quat").display()
-                ))
-                .clang_arg("-DIMGUI_USE_WCHAR32")
-                .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
-                .derive_eq(true)
-                .derive_partialeq(true)
-                .derive_hash(true)
-                .clang_arg("-x")
-                .clang_arg("c++")
-                .clang_arg("-std=c++17")
-        }
-    };
+    let source_root = crate_root.join(spec.source_root);
+    for include in profile.include_paths {
+        let root = match include.root {
+            CrateBindingIncludeRoot::CoreCimgui => &cimgui_root,
+            CrateBindingIncludeRoot::CoreImgui => &imgui_src,
+            CrateBindingIncludeRoot::Source => &source_root,
+        };
+        builder = builder.clang_arg(format!("-I{}", root.join(include.relative_path).display()));
+    }
+    for define in profile.clang_defines {
+        builder = builder.clang_arg(format!("-D{define}"));
+    }
+    for pattern in profile.allowlisted_functions {
+        builder = builder.allowlist_function(pattern);
+    }
+    for pattern in profile.allowlisted_types {
+        builder = builder.allowlist_type(pattern);
+    }
+    for pattern in profile.allowlisted_vars {
+        builder = builder.allowlist_var(pattern);
+    }
+    for pattern in profile.blocklisted_types {
+        builder = builder.blocklist_type(pattern);
+    }
+    if profile.language == CrateBindingLanguage::Cxx17 {
+        builder = builder
+            .clang_arg("-x")
+            .clang_arg("c++")
+            .clang_arg("-std=c++17");
+    }
+    for define in spec.target.clang_defines() {
+        builder = builder.clang_arg(format!("-D{define}"));
+    }
 
     if let CrateBindingTarget::WasmImport { module_name } = spec.target {
-        builder = builder
-            .clang_arg("-DIMGUI_DISABLE_FILE_FUNCTIONS")
-            .clang_arg("-DIMGUI_DISABLE_OSX_FUNCTIONS")
-            .clang_arg("-DIMGUI_DISABLE_WIN32_FUNCTIONS")
-            .wasm_import_module_name(module_name);
+        builder = builder.wasm_import_module_name(module_name);
     }
     Ok(builder)
 }
@@ -1630,7 +1545,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{VerifyBindingOptions, binding_contents_equal};
+    use super::{VerifyBindingOptions, binding_contents_equal, require_byte_identical};
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_owned()).collect()
@@ -1669,5 +1584,12 @@ mod tests {
             "first\r\nsecond\r\n",
             "first\nchanged\n"
         ));
+    }
+
+    #[test]
+    fn independent_generation_requires_exact_bytes() {
+        require_byte_identical("fixture", "first\nsecond\n", "first\nsecond\n").unwrap();
+        assert!(require_byte_identical("fixture", "first\n", "changed\n").is_err());
+        assert!(require_byte_identical("fixture", "first\r\n", "first\n").is_err());
     }
 }

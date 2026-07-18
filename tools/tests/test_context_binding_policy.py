@@ -69,6 +69,30 @@ class ContextBindingPolicyTests(unittest.TestCase):
                 ("crate/src/binding.rs: expected 2, observed 1",),
             )
 
+    def test_ignores_any_nested_cargo_target_directory_component(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "examples-ios"
+            generated = source / "smoke" / "target" / "debug" / "build"
+            maintained = source / "smoke" / "target-output"
+            generated.mkdir(parents=True)
+            maintained.mkdir(parents=True)
+            rust = "fn bypass() { unsafe { sys::igSetCurrentContext(ctx) } }\n"
+            (generated / "bindings.rs").write_text(rust, encoding="utf-8")
+            (maintained / "lib.rs").write_text(rust, encoding="utf-8")
+
+            audit = context_binding_policy.audit_sources(root, (source,), {})
+
+            self.assertEqual(
+                audit.unexpected,
+                (
+                    context_binding_policy.DirectContextSwitch(
+                        path="examples-ios/smoke/target-output/lib.rs",
+                        line=1,
+                    ),
+                ),
+            )
+
     def test_repository_safe_sources_follow_context_binding_policy(self):
         audit = context_binding_policy.audit_sources(
             REPO_ROOT,

@@ -250,7 +250,7 @@ fn use_pregenerated_bindings(manifest_dir: &Path, out_dir: &Path) -> bool {
         "native",
     )
     .expect("missing Test Engine binding spec");
-    spec.copy_checked_in_to_out_dir(manifest_dir, out_dir)
+    spec.copy_embedded_checked_in_to_out_dir(manifest_dir, out_dir)
         .unwrap_or_else(|error| panic!("invalid pregenerated Test Engine bindings: {error}"));
     println!(
         "cargo:warning=Using validated pregenerated bindings: {}",

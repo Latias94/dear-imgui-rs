@@ -126,7 +126,7 @@ def task_bump(args, repo_root: Path) -> int:
 
 
 def task_bindings(args, repo_root: Path) -> int:
-    """Update core ABI profiles through xtask and extensions through their builders."""
+    """Update every maintained binding profile through the canonical xtask."""
     crates = getattr(args, "crates", None) or "all"
     selected = {crate.strip() for crate in crates.split(",") if crate.strip()}
     includes_core = crates.strip().lower() == "all" or "dear-imgui-sys" in selected
@@ -147,37 +147,21 @@ def task_bindings(args, repo_root: Path) -> int:
     if rc != 0 or not includes_core:
         return rc
 
-    core_commands = [
-        [
-            "cargo",
-            "run",
-            "-p",
-            "xtask",
-            "--",
-            "verify-bindings",
-            "--update",
-            "--allow-dirty",
-        ],
-        [
-            "cargo",
-            "run",
-            "-p",
-            "xtask",
-            "--",
-            "verify-bindings",
-            "--allow-dirty",
-        ],
+    core_command = [
+        "cargo",
+        "run",
+        "-p",
+        "xtask",
+        "--",
+        "verify-bindings",
+        "--update",
+        "--allow-dirty",
     ]
     if getattr(args, "dry_run", False):
-        for core_command in core_commands:
-            print(f"$ {' '.join(core_command)}")
+        print(f"$ {' '.join(core_command)}")
         return 0
 
-    for core_command in core_commands:
-        rc = run_command(core_command, cwd=repo_root)
-        if rc != 0:
-            return rc
-    return 0
+    return run_command(core_command, cwd=repo_root)
 
 
 def task_publish(args, repo_root: Path) -> int:

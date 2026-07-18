@@ -64,27 +64,16 @@ def run(cmd, cwd=None, env=None, dry=False):
         return e.returncode
 
 
-def binding_commands():
+def binding_command():
     return [
-        [
-            "cargo",
-            "run",
-            "-p",
-            "xtask",
-            "--",
-            "verify-bindings",
-            "--update",
-            "--allow-dirty",
-        ],
-        [
-            "cargo",
-            "run",
-            "-p",
-            "xtask",
-            "--",
-            "verify-bindings",
-            "--allow-dirty",
-        ],
+        "cargo",
+        "run",
+        "-p",
+        "xtask",
+        "--",
+        "verify-bindings",
+        "--update",
+        "--allow-dirty",
     ]
 
 
@@ -238,10 +227,9 @@ def main() -> int:
 
     if not args.skip_core_bindings:
         print("Generating and validating all maintained binding profiles via xtask...")
-        for command in binding_commands():
-            rc = run(command, cwd=str(repo_root), dry=args.dry_run)
-            if rc != 0:
-                return rc
+        rc = run(binding_command(), cwd=str(repo_root), dry=args.dry_run)
+        if rc != 0:
+            return rc
 
     # Optionally compile-check the explicit core WASM provider contract.
     if args.wasm:

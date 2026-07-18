@@ -339,6 +339,22 @@ class CrateBindingSourceMetadataTests(unittest.TestCase):
                 with self.assertRaises(source_metadata.SourceMetadataError):
                     source_metadata.read_binding_source_metadata(self.manifest_path)
 
+    def test_binding_metadata_rejects_missing_and_duplicate_revisions(self):
+        fixtures = (
+            '[package]\nname = "missing-section"\n',
+            "[package.metadata.dear-imgui-binding]\n",
+            (
+                "[package.metadata.dear-imgui-binding]\n"
+                f'source-revision = "{EXTENSION_REVISION}"\n'
+                'source-revision = "' + "4" * 40 + '"\n'
+            ),
+        )
+        for fixture in fixtures:
+            with self.subTest(fixture=fixture):
+                self.manifest_path.write_text(fixture, encoding="utf-8")
+                with self.assertRaises(source_metadata.SourceMetadataError):
+                    source_metadata.read_binding_source_metadata(self.manifest_path)
+
     def test_verification_rejects_dirty_or_mismatched_owning_source(self):
         def dirty_git_output(path: Path, arguments):
             self.assertEqual(path, self.source_path)

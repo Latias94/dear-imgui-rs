@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import bisect
+import os
 import pathlib
 import sys
 from dataclasses import dataclass
@@ -14,6 +15,7 @@ import api_surface_report
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 FORBIDDEN_IDENT = "igSetCurrentContext"
+IGNORED_DIRECTORY_NAMES = frozenset({".git", "node_modules", "target"})
 
 # Test Engine migrates to ContextBinding in U8, after its attachment state model exists.
 PRODUCTION_ALLOW_COUNTS = {
@@ -62,11 +64,22 @@ def _safe_source_roots(repo_root: pathlib.Path) -> tuple[pathlib.Path, ...]:
 def _iter_rust_sources(roots: Iterable[pathlib.Path]) -> Iterable[pathlib.Path]:
     seen: set[pathlib.Path] = set()
     for root in roots:
-        for path in sorted(root.rglob("*.rs")):
-            resolved = path.resolve()
-            if resolved not in seen:
-                seen.add(resolved)
-                yield path
+        if any(part in IGNORED_DIRECTORY_NAMES for part in root.parts):
+            continue
+        for directory, directory_names, file_names in os.walk(root):
+            directory_names[:] = sorted(
+                name
+                for name in directory_names
+                if name not in IGNORED_DIRECTORY_NAMES
+            )
+            for file_name in sorted(file_names):
+                if not file_name.endswith(".rs"):
+                    continue
+                path = pathlib.Path(directory, file_name)
+                resolved = path.resolve()
+                if resolved not in seen:
+                    seen.add(resolved)
+                    yield path
 
 
 def _is_standalone_test_source(path: pathlib.Path) -> bool:

@@ -24,14 +24,13 @@ UPDATER_SPEC.loader.exec_module(UPDATER)
 
 
 class BindingTaskTests(unittest.TestCase):
-    def test_updater_regenerates_again_to_prove_idempotence(self):
-        commands = UPDATER.binding_commands()
+    def test_updater_uses_the_idempotent_canonical_generation_command(self):
+        command = UPDATER.binding_command()
         self.assertEqual(
-            commands[0][-3:],
+            command[-3:],
             ["verify-bindings", "--update", "--allow-dirty"],
         )
-        self.assertEqual(commands[1][-2:], ["verify-bindings", "--allow-dirty"])
-        self.assertNotIn("--check-only", commands[1])
+        self.assertNotIn("--check-only", command)
 
     def test_core_uses_shared_three_profile_xtask(self):
         args = SimpleNamespace(
@@ -51,13 +50,7 @@ class BindingTaskTests(unittest.TestCase):
                 "--update", "--allow-dirty",
             ],
         )
-        self.assertEqual(
-            commands[2],
-            [
-                "cargo", "run", "-p", "xtask", "--", "verify-bindings",
-                "--allow-dirty",
-            ],
-        )
+        self.assertEqual(len(commands), 2)
 
     def test_extension_only_keeps_the_existing_update_flow(self):
         args = SimpleNamespace(
@@ -84,7 +77,7 @@ class BindingTaskTests(unittest.TestCase):
 
         self.assertEqual(run_command.call_count, 1)
         self.assertIn("--dry-run", run_command.call_args.args[0])
-        self.assertEqual(output.getvalue().count("xtask -- verify-bindings"), 2)
+        self.assertEqual(output.getvalue().count("xtask -- verify-bindings"), 1)
 
 
 class ReleaseTaskTests(unittest.TestCase):
@@ -161,15 +154,6 @@ class ReleaseTaskTests(unittest.TestCase):
                     "--",
                     "verify-bindings",
                     "--update",
-                    "--allow-dirty",
-                ],
-                [
-                    "cargo",
-                    "run",
-                    "-p",
-                    "xtask",
-                    "--",
-                    "verify-bindings",
                     "--allow-dirty",
                 ],
                 [

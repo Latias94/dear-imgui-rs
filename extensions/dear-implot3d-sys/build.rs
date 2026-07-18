@@ -88,7 +88,7 @@ fn use_validated_pregenerated_bindings(out_dir: &Path, target: &str) -> bool {
     if !preg.exists() {
         return false;
     }
-    spec.copy_checked_in_to_out_dir(&crate_root, out_dir)
+    spec.copy_embedded_checked_in_to_out_dir(&crate_root, out_dir)
         .unwrap_or_else(|error| panic!("invalid pregenerated bindings: {error}"));
     println!(
         "cargo:warning=Using validated pregenerated bindings: {}",
