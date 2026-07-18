@@ -17,10 +17,9 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 FORBIDDEN_IDENT = "igSetCurrentContext"
 IGNORED_DIRECTORY_NAMES = frozenset({".git", "node_modules", "target"})
 
-# Test Engine migrates to ContextBinding in U8, after its attachment state model exists.
+# Direct Context switching is confined to the core binding implementation.
 PRODUCTION_ALLOW_COUNTS = {
     "dear-imgui/src/context/binding.rs": 2,
-    "extensions/dear-imgui-test-engine/src/engine.rs": 2,
 }
 
 
