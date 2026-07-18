@@ -21,6 +21,21 @@ if str(CI_DIR) not in sys.path:
 
 from _process import CommandError, environment, github_group, run  # noqa: E402
 from _verification import VerificationError, temporary_workspace  # noqa: E402
+from _windows_native import (  # noqa: E402
+    WindowsNativeError,
+    VcpkgTriplet,
+    append_github_assignments,
+    append_github_paths,
+    calculate_mingw_environment,
+    check_sdl3_vcpkg_consumer,
+    ensure_vcpkg_status_compatibility,
+    install_vcpkg_packages,
+    locate_vcpkg_executable,
+    resolve_vcpkg_root,
+    vcpkg_github_environment,
+    vcpkg_root_candidates,
+    verify_mingw_imports,
+)
 
 
 SYS_CRATES = (
@@ -235,6 +250,58 @@ def prepare_release_notes(tag: str, output: Path, github_output: Path) -> None:
         destination.write(f"tag={tag}\nversion={version}\n")
 
 
+def configure_windows_vcpkg(
+    *,
+    target: str,
+    crt: str,
+    packages: Sequence[str],
+    runner_temp: Path,
+    github_environment: Path,
+) -> None:
+    """Install one explicit vcpkg profile and publish its validated root."""
+    triplet = VcpkgTriplet.from_target(target, crt)
+    executable = locate_vcpkg_executable()
+    root = resolve_vcpkg_root(vcpkg_root_candidates(os.environ, executable)).path
+    install_vcpkg_packages(packages, triplet, executable=executable)
+    status = ensure_vcpkg_status_compatibility(root)
+    append_github_assignments(
+        github_environment,
+        vcpkg_github_environment(root, triplet, runner_temp),
+    )
+    print(
+        f"Validated vcpkg root {root} with {status.status_bytes} status bytes "
+        f"and {status.update_bytes} update bytes for {triplet.name}"
+    )
+
+
+def configure_windows_mingw(
+    *,
+    msys2_root: Path,
+    github_environment: Path,
+    github_path: Path,
+    current_path: str,
+) -> None:
+    """Publish one deterministic MinGW tool directory to later workflow steps."""
+    mingw = calculate_mingw_environment(msys2_root, current_path)
+    append_github_assignments(github_environment, mingw.github_environment)
+    append_github_paths(github_path, mingw.github_path)
+    print(f"Configured MinGW tools from {mingw.bin_directory}")
+
+
+def check_windows_mingw_imports(
+    *,
+    deps_directory: Path,
+    objdump: Path,
+    evidence: Path,
+) -> None:
+    """Reject dynamic libstdc++ and retain complete objdump evidence."""
+    inspection = verify_mingw_imports(deps_directory, objdump)
+    evidence.parent.mkdir(parents=True, exist_ok=True)
+    normalized = inspection.evidence_text.replace("\r\n", "\n").replace("\r", "\n")
+    evidence.write_bytes(normalized.encode("utf-8"))
+    print(inspection.evidence_text, end="")
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run cross-platform repository CI contracts"
@@ -271,6 +338,36 @@ def _build_parser() -> argparse.ArgumentParser:
         "release-notes", help="Extract release notes from RELEASE_TAG"
     )
     release.add_argument("--output", type=Path, default=Path("release-notes.md"))
+
+    vcpkg = commands.add_parser(
+        "windows-vcpkg", help="Install and validate one Windows vcpkg profile"
+    )
+    vcpkg.add_argument("--target", required=True)
+    vcpkg.add_argument("--crt", required=True, choices=("md", "mt"))
+    vcpkg.add_argument("--package", action="append", required=True)
+    vcpkg.add_argument("--runner-temp", required=True, type=Path)
+    vcpkg.add_argument("--github-env", required=True, type=Path)
+
+    sdl3_consumer = commands.add_parser(
+        "windows-sdl3-consumer",
+        help="Run the temporary SDL3 vcpkg discovery consumer",
+    )
+    sdl3_consumer.add_argument("--workspace", required=True, type=Path)
+    sdl3_consumer.add_argument("--repo-root", type=Path, default=WORKSPACE_ROOT)
+
+    mingw_environment = commands.add_parser(
+        "windows-mingw-env", help="Publish the selected MinGW tool directory"
+    )
+    mingw_environment.add_argument("--msys2-root", required=True, type=Path)
+    mingw_environment.add_argument("--github-env", required=True, type=Path)
+    mingw_environment.add_argument("--github-path", required=True, type=Path)
+
+    mingw_imports = commands.add_parser(
+        "windows-mingw-imports", help="Inspect MinGW test executable imports"
+    )
+    mingw_imports.add_argument("--deps", required=True, type=Path)
+    mingw_imports.add_argument("--objdump", required=True, type=Path)
+    mingw_imports.add_argument("--evidence", required=True, type=Path)
     return parser
 
 
@@ -298,9 +395,32 @@ def main(argv: Sequence[str] | None = None) -> int:
             if not github_output:
                 raise VerificationError("GITHUB_OUTPUT is required for release-notes")
             prepare_release_notes(release_tag, args.output, Path(github_output))
+        elif args.contract == "windows-vcpkg":
+            configure_windows_vcpkg(
+                target=args.target,
+                crt=args.crt,
+                packages=args.package,
+                runner_temp=args.runner_temp,
+                github_environment=args.github_env,
+            )
+        elif args.contract == "windows-sdl3-consumer":
+            check_sdl3_vcpkg_consumer(args.workspace, args.repo_root)
+        elif args.contract == "windows-mingw-env":
+            configure_windows_mingw(
+                msys2_root=args.msys2_root,
+                github_environment=args.github_env,
+                github_path=args.github_path,
+                current_path=os.environ.get("PATH", ""),
+            )
+        elif args.contract == "windows-mingw-imports":
+            check_windows_mingw_imports(
+                deps_directory=args.deps,
+                objdump=args.objdump,
+                evidence=args.evidence,
+            )
         else:  # pragma: no cover - argparse enforces the command set.
             parser.error(f"unknown contract: {args.contract}")
-    except (CommandError, OSError, VerificationError) as error:
+    except (CommandError, OSError, VerificationError, WindowsNativeError) as error:
         print(f"::error::{error}", file=sys.stderr)
         return 1
     return 0

@@ -342,12 +342,17 @@ def install_vcpkg_packages(
     packages: Sequence[str],
     triplet: VcpkgTriplet,
     *,
+    executable: PathInput = "vcpkg",
     runner: Runner = run,
 ) -> subprocess.CompletedProcess[str]:
     """Install packages for one explicit triplet without shell interpolation."""
     if not packages:
         raise WindowsNativeError("at least one vcpkg package is required")
-    command = ("vcpkg", "install", *(triplet.package(name) for name in packages))
+    command = (
+        os.fspath(executable),
+        "install",
+        *(triplet.package(name) for name in packages),
+    )
     return runner(command)
 
 

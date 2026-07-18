@@ -147,6 +147,35 @@ class VcpkgStatusTests(unittest.TestCase):
             )
 
 
+class VcpkgInstallTests(unittest.TestCase):
+    def test_uses_resolved_executable_and_explicit_triplet(self):
+        triplet = WINDOWS_NATIVE.VcpkgTriplet.from_target(
+            "x86_64-pc-windows-msvc", "md"
+        )
+        observed = {}
+
+        def runner(command, **_kwargs):
+            observed["command"] = tuple(command)
+            return subprocess.CompletedProcess(command, 0)
+
+        WINDOWS_NATIVE.install_vcpkg_packages(
+            ("freetype", "sdl3"),
+            triplet,
+            executable=PureWindowsPath(r"C:\Program Files\vcpkg\vcpkg.exe"),
+            runner=runner,
+        )
+
+        self.assertEqual(
+            observed["command"],
+            (
+                r"C:\Program Files\vcpkg\vcpkg.exe",
+                "install",
+                "freetype:x64-windows-static-md",
+                "sdl3:x64-windows-static-md",
+            ),
+        )
+
+
 class GithubOutputTests(unittest.TestCase):
     def test_environment_output_is_exact_lf_utf8_without_bom(self):
         with TemporaryDirectory() as temporary:

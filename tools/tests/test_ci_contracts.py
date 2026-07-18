@@ -158,6 +158,72 @@ class ContractRunnerTests(unittest.TestCase):
                     "v0.16.0;echo", Path(temporary) / "notes", Path(temporary) / "out"
                 )
 
+    def test_windows_vcpkg_uses_resolved_executable_and_publishes_environment(self):
+        triplet = CONTRACTS.VcpkgTriplet.from_target(
+            "x86_64-pc-windows-msvc", "md"
+        )
+        status = type("Status", (), {"status_bytes": 12, "update_bytes": 0})()
+        with TemporaryDirectory() as temporary:
+            github_environment = Path(temporary) / "github-env"
+            with (
+                patch.object(
+                    CONTRACTS,
+                    "locate_vcpkg_executable",
+                    return_value=Path("C:/vcpkg/vcpkg.exe"),
+                ),
+                patch.object(
+                    CONTRACTS,
+                    "vcpkg_root_candidates",
+                    return_value=("candidate",),
+                ),
+                patch.object(
+                    CONTRACTS,
+                    "resolve_vcpkg_root",
+                    return_value=type("Root", (), {"path": Path("C:/vcpkg")})(),
+                ),
+                patch.object(CONTRACTS, "install_vcpkg_packages") as installer,
+                patch.object(
+                    CONTRACTS,
+                    "ensure_vcpkg_status_compatibility",
+                    return_value=status,
+                ),
+                patch.object(CONTRACTS, "append_github_assignments") as publisher,
+            ):
+                CONTRACTS.configure_windows_vcpkg(
+                    target=triplet.rust_target,
+                    crt=triplet.crt,
+                    packages=("freetype", "sdl3"),
+                    runner_temp=Path(temporary),
+                    github_environment=github_environment,
+                )
+
+            installer.assert_called_once_with(
+                ("freetype", "sdl3"),
+                triplet,
+                executable=Path("C:/vcpkg/vcpkg.exe"),
+            )
+            self.assertEqual(publisher.call_args.args[0], github_environment)
+
+    def test_windows_mingw_import_check_writes_complete_lf_evidence(self):
+        inspection = type(
+            "Inspection", (), {"evidence_text": "Checking a.exe\r\nDLL Name: KERNEL32.dll\r\n"}
+        )()
+        with TemporaryDirectory() as temporary:
+            evidence = Path(temporary) / "logs" / "imports.txt"
+            with patch.object(
+                CONTRACTS, "verify_mingw_imports", return_value=inspection
+            ):
+                CONTRACTS.check_windows_mingw_imports(
+                    deps_directory=Path("deps"),
+                    objdump=Path("objdump.exe"),
+                    evidence=evidence,
+                )
+
+            self.assertEqual(
+                evidence.read_bytes(),
+                b"Checking a.exe\nDLL Name: KERNEL32.dll\n",
+            )
+
 
 class WorkflowPortabilityTests(unittest.TestCase):
     def test_workflows_contain_no_explicit_bash_control_flow(self):
