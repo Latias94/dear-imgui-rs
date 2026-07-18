@@ -150,6 +150,8 @@ When software cursor is enabled:
 This backend sets (when appropriate):
 - `BackendFlags::HAS_MOUSE_CURSORS`
 - `BackendFlags::HAS_SET_MOUSE_POS`
+- `BackendFlags::PLATFORM_HAS_VIEWPORTS` while `WinitPlatformRuntime` is attached
+- `BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT` while `WinitPlatformRuntime` is attached
 
 For diagnostics, the backend also sets `BackendPlatformName` to `"dear-imgui-winit {version}"`.
 
@@ -162,6 +164,22 @@ Multi-viewport support is available behind the `multi-viewport` feature and is
   routes events for secondary viewports.
 - A renderer backend must also opt into viewports (e.g. `dear-imgui-wgpu/multi-viewport-winit`)
   to create per-viewport render targets and draw them.
+
+The platform side is an owning runtime. It keeps the main `Arc<Window>` and every
+secondary window alive, owns the callback table, and participates in phased Context
+teardown. Winit's `ActiveEventLoop` is available to callbacks only inside a closure:
+
+```rust,ignore
+let mut viewport_runtime = WinitPlatformRuntime::new(&mut imgui, Arc::clone(&window))?;
+
+viewport_runtime.with_event_loop(event_loop, |_| {
+    imgui.update_platform_windows();
+    imgui.render_platform_windows_default();
+})?;
+
+// Optional when shutdown failures must be handled. Drop performs best-effort cleanup.
+viewport_runtime.shutdown()?;
+```
 
 Current support matrix:
 

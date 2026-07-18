@@ -50,9 +50,10 @@ struct AppWindow {
     surface_config: wgpu::SurfaceConfiguration,
     device: wgpu::Device,
     queue: wgpu::Queue,
-    imgui: Context,
-    platform: WinitPlatform,
     renderer: Box<WgpuRenderer>,
+    viewport_runtime: Option<winit_mvp::WinitPlatformRuntime>,
+    platform: WinitPlatform,
+    imgui: Context,
     start_time: Instant,
     enable_viewports: bool,
     // Offscreen "game view" texture and view
@@ -81,8 +82,10 @@ impl Drop for AppWindow {
         self.renderer
             .shutdown(&mut self.imgui)
             .expect("WGPU renderer shutdown failed");
-        if self.enable_viewports {
-            winit_mvp::shutdown_multi_viewport_support(&mut self.imgui);
+        if let Some(runtime) = self.viewport_runtime.as_mut() {
+            runtime
+                .shutdown()
+                .expect("Winit multi-viewport shutdown failed");
         }
     }
 }
@@ -184,6 +187,9 @@ impl AppWindow {
 
         let mut platform = WinitPlatform::new(&mut imgui);
         platform.attach_window(&window, HiDpiMode::Default, &mut imgui);
+        let viewport_runtime = enable_viewports
+            .then(|| winit_mvp::WinitPlatformRuntime::new(&mut imgui, Arc::clone(&window)))
+            .transpose()?;
 
         // WGPU renderer
         let init_info = WgpuInitInfo::new(device.clone(), queue.clone(), surface_config.format)
@@ -234,9 +240,10 @@ impl AppWindow {
             surface_config,
             device,
             queue,
-            imgui,
-            platform,
             renderer,
+            viewport_runtime,
+            platform,
+            imgui,
             start_time: Instant::now(),
             enable_viewports,
             _game_tex: game_tex,
@@ -249,9 +256,6 @@ impl AppWindow {
         };
 
         if app.enable_viewports {
-            // Install platform (winit) viewport handlers (required by Dear ImGui)
-            winit_mvp::init_multi_viewport_support(&mut app.imgui, &app.window);
-
             // Renderer viewport callbacks (install AFTER winit so our callbacks take precedence)
             unsafe {
                 dear_imgui_wgpu::multi_viewport::enable(&mut app.renderer, &mut app.imgui)?;
@@ -259,6 +263,22 @@ impl AppWindow {
         }
 
         Ok(app)
+    }
+
+    fn redraw_with_event_loop(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let viewport_runtime = self.viewport_runtime.take();
+        let result = match viewport_runtime.as_ref() {
+            Some(runtime) => match runtime.with_event_loop(event_loop, |_| self.redraw()) {
+                Ok(result) => result,
+                Err(error) => Err(Box::new(error) as Box<dyn std::error::Error>),
+            },
+            None => self.redraw(),
+        };
+        self.viewport_runtime = viewport_runtime;
+        result
     }
 
     fn redraw(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -492,13 +512,17 @@ impl ApplicationHandler for App {
             window_id,
             event: event.clone(),
         };
-        // Let platform + multi-viewport helper route events to main + secondary windows
-        let _ = winit_mvp::handle_event_with_multi_viewport(
-            &mut app.platform,
-            &mut app.imgui,
-            &app.window,
-            &full,
-        );
+        if let Some(runtime) = app.viewport_runtime.as_ref() {
+            if let Err(error) = runtime.handle_event(&mut app.platform, &mut app.imgui, &full) {
+                self.error = Some(error.to_string());
+                event_loop.exit();
+                return;
+            }
+        } else {
+            let _ = app
+                .platform
+                .handle_event(&mut app.imgui, &app.window, &full);
+        }
 
         match event {
             WindowEvent::CloseRequested => {
@@ -522,14 +546,7 @@ impl ApplicationHandler for App {
                 // We drive rendering from the main window. Secondary viewport windows are
                 // rendered via ImGui's platform callbacks during `app.redraw()`.
                 if is_main_window {
-                    // ImGui may create secondary OS windows during `update_platform_windows()`.
-                    // Provide the current `ActiveEventLoop` for the duration of this callback.
-                    let _el_guard = if app.enable_viewports {
-                        Some(winit_mvp::set_event_loop_for_frame(event_loop))
-                    } else {
-                        None
-                    };
-                    match app.redraw() {
+                    match app.redraw_with_event_loop(event_loop) {
                         Ok(()) => {
                             #[cfg(feature = "test-engine")]
                             if app.viewport_smoke_complete {

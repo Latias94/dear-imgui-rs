@@ -381,6 +381,36 @@ unsafe extern "C" {
         >,
     );
 
+    fn dear_imgui_rs_platform_io_clear_platform_set_window_pos_if_pointer_param(
+        platform_io: *mut ImGuiPlatformIO,
+        user_callback: unsafe extern "C" fn(vp: *mut ImGuiViewport, pos: *const ImVec2),
+    ) -> std::os::raw::c_int;
+
+    fn dear_imgui_rs_platform_io_clear_platform_set_window_size_if_pointer_param(
+        platform_io: *mut ImGuiPlatformIO,
+        user_callback: unsafe extern "C" fn(vp: *mut ImGuiViewport, size: *const ImVec2),
+    ) -> std::os::raw::c_int;
+
+    fn dear_imgui_rs_platform_io_clear_platform_get_window_pos_if_out_param(
+        platform_io: *mut ImGuiPlatformIO,
+        user_callback: unsafe extern "C" fn(vp: *mut ImGuiViewport, out_pos: *mut ImVec2),
+    ) -> std::os::raw::c_int;
+
+    fn dear_imgui_rs_platform_io_clear_platform_get_window_size_if_out_param(
+        platform_io: *mut ImGuiPlatformIO,
+        user_callback: unsafe extern "C" fn(vp: *mut ImGuiViewport, out_size: *mut ImVec2),
+    ) -> std::os::raw::c_int;
+
+    fn dear_imgui_rs_platform_io_clear_platform_get_window_framebuffer_scale_if_out_param(
+        platform_io: *mut ImGuiPlatformIO,
+        user_callback: unsafe extern "C" fn(vp: *mut ImGuiViewport, out_scale: *mut ImVec2),
+    ) -> std::os::raw::c_int;
+
+    fn dear_imgui_rs_platform_io_clear_platform_get_window_work_area_insets_if_out_param(
+        platform_io: *mut ImGuiPlatformIO,
+        user_callback: unsafe extern "C" fn(vp: *mut ImGuiViewport, out_insets: *mut ImVec4),
+    ) -> std::os::raw::c_int;
+
     fn dear_imgui_rs_platform_io_set_renderer_set_window_size(
         platform_io: *mut ImGuiPlatformIO,
         user_callback: Option<unsafe extern "C" fn(vp: *mut ImGuiViewport, size: *const ImVec2)>,
@@ -616,6 +646,144 @@ pub unsafe fn ImGuiPlatformIO_Set_Platform_GetWindowWorkAreaInsets_OutParam(
         } else if let Some(platform_io) = unsafe { platform_io.as_mut() } {
             platform_io.Platform_GetWindowWorkAreaInsets = None;
         }
+    }
+}
+
+/// Clear `Platform_SetWindowPos` only when it is still owned by the given pointer callback.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn ImGuiPlatformIO_ClearPlatformSetWindowPosIfPointerParam(
+    platform_io: *mut ImGuiPlatformIO,
+    user_callback: unsafe extern "C" fn(vp: *mut ImGuiViewport, pos: *const ImVec2),
+) -> bool {
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    unsafe {
+        return dear_imgui_rs_platform_io_clear_platform_set_window_pos_if_pointer_param(
+            platform_io,
+            user_callback,
+        ) != 0;
+    }
+
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    {
+        let _ = platform_io;
+        let _ = user_callback;
+        false
+    }
+}
+
+/// Clear `Platform_SetWindowSize` only when it is still owned by the given pointer callback.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn ImGuiPlatformIO_ClearPlatformSetWindowSizeIfPointerParam(
+    platform_io: *mut ImGuiPlatformIO,
+    user_callback: unsafe extern "C" fn(vp: *mut ImGuiViewport, size: *const ImVec2),
+) -> bool {
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    unsafe {
+        return dear_imgui_rs_platform_io_clear_platform_set_window_size_if_pointer_param(
+            platform_io,
+            user_callback,
+        ) != 0;
+    }
+
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    {
+        let _ = platform_io;
+        let _ = user_callback;
+        false
+    }
+}
+
+/// Clear `Platform_GetWindowPos` only when it is still owned by the given out-parameter callback.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn ImGuiPlatformIO_ClearPlatformGetWindowPosIfOutParam(
+    platform_io: *mut ImGuiPlatformIO,
+    user_callback: unsafe extern "C" fn(vp: *mut ImGuiViewport, out_pos: *mut ImVec2),
+) -> bool {
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    unsafe {
+        return dear_imgui_rs_platform_io_clear_platform_get_window_pos_if_out_param(
+            platform_io,
+            user_callback,
+        ) != 0;
+    }
+
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    {
+        let _ = platform_io;
+        let _ = user_callback;
+        false
+    }
+}
+
+/// Clear `Platform_GetWindowSize` only when it is still owned by the given out-parameter callback.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn ImGuiPlatformIO_ClearPlatformGetWindowSizeIfOutParam(
+    platform_io: *mut ImGuiPlatformIO,
+    user_callback: unsafe extern "C" fn(vp: *mut ImGuiViewport, out_size: *mut ImVec2),
+) -> bool {
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    unsafe {
+        return dear_imgui_rs_platform_io_clear_platform_get_window_size_if_out_param(
+            platform_io,
+            user_callback,
+        ) != 0;
+    }
+
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    {
+        let _ = platform_io;
+        let _ = user_callback;
+        false
+    }
+}
+
+/// Clear `Platform_GetWindowFramebufferScale` only when it is still owned by the given callback.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn ImGuiPlatformIO_ClearPlatformGetWindowFramebufferScaleIfOutParam(
+    platform_io: *mut ImGuiPlatformIO,
+    user_callback: unsafe extern "C" fn(vp: *mut ImGuiViewport, out_scale: *mut ImVec2),
+) -> bool {
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    unsafe {
+        return dear_imgui_rs_platform_io_clear_platform_get_window_framebuffer_scale_if_out_param(
+            platform_io,
+            user_callback,
+        ) != 0;
+    }
+
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    {
+        let _ = platform_io;
+        let _ = user_callback;
+        false
+    }
+}
+
+/// Clear `Platform_GetWindowWorkAreaInsets` only when it is still owned by the given callback.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn ImGuiPlatformIO_ClearPlatformGetWindowWorkAreaInsetsIfOutParam(
+    platform_io: *mut ImGuiPlatformIO,
+    user_callback: unsafe extern "C" fn(vp: *mut ImGuiViewport, out_insets: *mut ImVec4),
+) -> bool {
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    unsafe {
+        return dear_imgui_rs_platform_io_clear_platform_get_window_work_area_insets_if_out_param(
+            platform_io,
+            user_callback,
+        ) != 0;
+    }
+
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    {
+        let _ = platform_io;
+        let _ = user_callback;
+        false
     }
 }
 

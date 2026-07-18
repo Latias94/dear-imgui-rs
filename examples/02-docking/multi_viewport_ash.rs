@@ -313,62 +313,17 @@ impl Drop for VulkanState {
 }
 
 struct ImguiState {
-    context: Context,
-    platform: WinitPlatform,
     renderer: AshRenderer,
+    viewport_runtime: Option<winit_mvp::WinitPlatformRuntime>,
+    platform: WinitPlatform,
+    context: Context,
     clear_color: [f32; 4],
     demo_open: bool,
     last_frame: Instant,
 }
 
-struct WinitViewportBackendGuard {
-    context: Option<Context>,
-    active: bool,
-}
-
-impl WinitViewportBackendGuard {
-    fn new(context: Context) -> Self {
-        Self {
-            context: Some(context),
-            active: false,
-        }
-    }
-
-    fn context_mut(&mut self) -> &mut Context {
-        self.context
-            .as_mut()
-            .expect("viewport backend guard must own its context")
-    }
-
-    fn init(&mut self, window: &Window) {
-        winit_mvp::init_multi_viewport_support(self.context_mut(), window);
-        self.active = true;
-    }
-
-    fn into_parts(mut self) -> (Context, bool) {
-        let active = self.active;
-        self.active = false;
-        let context = self
-            .context
-            .take()
-            .expect("viewport backend guard must own its context");
-        (context, active)
-    }
-}
-
-impl Drop for WinitViewportBackendGuard {
-    fn drop(&mut self) {
-        if self.active {
-            if let Some(context) = self.context.as_mut() {
-                let _ = winit_mvp::shutdown_multi_viewport_support(context);
-            }
-        }
-    }
-}
-
 struct AppWindow {
     enable_viewports: bool,
-    platform_backend_active: bool,
     imgui: ImguiState,
     vk: VulkanState,
     // Keep the platform window alive until renderer, swapchains, and surfaces have been dropped.
@@ -382,9 +337,9 @@ impl Drop for AppWindow {
         if self.enable_viewports {
             let _ = ash_mvp::shutdown_multi_viewport_support(&mut self.imgui.context);
         }
-        if self.platform_backend_active {
-            let _ = winit_mvp::shutdown_multi_viewport_support(&mut self.imgui.context);
-            self.platform_backend_active = false;
+        let _ = self.imgui.renderer.shutdown(&mut self.imgui.context);
+        if let Some(runtime) = self.imgui.viewport_runtime.as_mut() {
+            let _ = runtime.shutdown();
         }
     }
 }
@@ -433,11 +388,9 @@ impl AppWindow {
         let mut platform = WinitPlatform::new(&mut imgui);
         platform.attach_window(&window, HiDpiMode::Default, &mut imgui);
 
-        let mut platform_backend = WinitViewportBackendGuard::new(imgui);
-        if enable_viewports {
-            // Install platform (winit) viewport handlers (required by Dear ImGui).
-            platform_backend.init(&window);
-        }
+        let viewport_runtime = enable_viewports
+            .then(|| winit_mvp::WinitPlatformRuntime::new(&mut imgui, Arc::clone(&window)))
+            .transpose()?;
 
         let framebuffer_srgb = is_srgb_format(swapchain.surface_format.format);
         let mut renderer = AshRenderer::with_default_allocator(
@@ -447,7 +400,7 @@ impl AppWindow {
             ctx.queue,
             ctx.command_pool,
             render_pass,
-            platform_backend.context_mut(),
+            &mut imgui,
             Some(AshOptions {
                 in_flight_frames: FRAMES_IN_FLIGHT,
                 framebuffer_srgb,
@@ -458,16 +411,14 @@ impl AppWindow {
 
         let frames = create_frame_syncs(&ctx.device, ctx.command_pool, FRAMES_IN_FLIGHT)?;
         let images_in_flight = vec![vk::Fence::null(); swapchain.images.len()];
-        let (imgui, platform_backend_active) = platform_backend.into_parts();
-
         Ok(Self {
             window,
             enable_viewports,
-            platform_backend_active,
             imgui: ImguiState {
-                context: imgui,
-                platform,
                 renderer,
+                viewport_runtime,
+                platform,
+                context: imgui,
                 clear_color: [0.1, 0.12, 0.15, 1.0],
                 demo_open: true,
                 last_frame: Instant::now(),
@@ -597,7 +548,7 @@ impl AppWindow {
                 .reset_command_buffer(frame.command_buffer, vk::CommandBufferResetFlags::empty())?;
         }
 
-        record_command_buffer(
+        let texture_retirement = record_command_buffer(
             &self.vk.ctx.device,
             frame.command_buffer,
             self.vk.render_pass,
@@ -649,7 +600,34 @@ impl AppWindow {
             self.imgui.context.render_platform_windows_default();
         }
 
+        if let Some(batch) = texture_retirement {
+            unsafe {
+                // This wait covers the main submission and every secondary viewport queue before
+                // the renderer releases textures referenced by this retirement batch.
+                self.vk.ctx.device.device_wait_idle()?;
+                self.imgui
+                    .renderer
+                    .notify_texture_retirements_completed(batch)?;
+            }
+        }
+
         Ok(())
+    }
+
+    fn render_with_event_loop(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let viewport_runtime = self.imgui.viewport_runtime.take();
+        let result = match viewport_runtime.as_ref() {
+            Some(runtime) => match runtime.with_event_loop(event_loop, |_| self.render()) {
+                Ok(result) => result,
+                Err(error) => Err(Box::new(error) as Box<dyn std::error::Error>),
+            },
+            None => self.render(),
+        };
+        self.imgui.viewport_runtime = viewport_runtime;
+        result
     }
 }
 
@@ -715,13 +693,18 @@ impl ApplicationHandler for App {
             event: event.clone(),
         };
 
-        // Route events to main + secondary windows.
-        let _ = winit_mvp::handle_event_with_multi_viewport(
-            &mut app.imgui.platform,
-            &mut app.imgui.context,
-            &app.window,
-            &full,
-        );
+        if let Some(runtime) = app.imgui.viewport_runtime.as_ref() {
+            if let Err(error) =
+                runtime.handle_event(&mut app.imgui.platform, &mut app.imgui.context, &full)
+            {
+                error!("Winit viewport event error: {error}");
+            }
+        } else {
+            let _ = app
+                .imgui
+                .platform
+                .handle_event(&mut app.imgui.context, &app.window, &full);
+        }
 
         match event {
             WindowEvent::CloseRequested => {
@@ -749,12 +732,7 @@ impl ApplicationHandler for App {
                 // We drive rendering from the main window. Secondary viewport windows are
                 // rendered via ImGui's platform callbacks during `app.render()`.
                 if is_main_window {
-                    let _el_guard = if app.enable_viewports {
-                        Some(winit_mvp::set_event_loop_for_frame(event_loop))
-                    } else {
-                        None
-                    };
-                    if let Err(e) = app.render() {
+                    if let Err(e) = app.render_with_event_loop(event_loop) {
                         error!("Render error: {e}");
                     }
                     app.window.request_redraw();
@@ -1085,19 +1063,19 @@ fn destroy_frame_syncs(
     }
 }
 
-fn record_command_buffer<F>(
+fn record_command_buffer<F, T>(
     device: &Device,
     cmd: vk::CommandBuffer,
     render_pass: vk::RenderPass,
     framebuffer: vk::Framebuffer,
     extent: vk::Extent2D,
     clear_color: [f32; 4],
-    mut record_draws: F,
-) -> Result<(), Box<dyn std::error::Error>>
+    record_draws: F,
+) -> Result<T, Box<dyn std::error::Error>>
 where
-    F: FnMut(vk::CommandBuffer) -> dear_imgui_ash::RendererResult<()>,
+    F: FnOnce(vk::CommandBuffer) -> dear_imgui_ash::RendererResult<T>,
 {
-    unsafe {
+    let result = unsafe {
         device.begin_command_buffer(
             cmd,
             &vk::CommandBufferBeginInfo::default()
@@ -1123,12 +1101,13 @@ where
             vk::SubpassContents::INLINE,
         );
 
-        record_draws(cmd)?;
+        let result = record_draws(cmd)?;
 
         device.cmd_end_render_pass(cmd);
         device.end_command_buffer(cmd)?;
-    }
-    Ok(())
+        result
+    };
+    Ok(result)
 }
 
 fn is_srgb_format(format: vk::Format) -> bool {

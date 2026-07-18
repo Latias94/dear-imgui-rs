@@ -2773,6 +2773,7 @@ name = "dear-imgui-winit"
 version = "0.16.0"
 dependencies = [
  "dear-imgui-rs",
+ "thiserror 2.0.18",
  "web-sys",
  "web-time",
  "winit",

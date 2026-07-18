@@ -119,6 +119,25 @@ impl PlatformIo {
         }
     }
 
+    /// Clear the aggregate position setter only if `callback` still owns it.
+    #[doc(hidden)]
+    #[cfg(feature = "multi-viewport")]
+    pub fn clear_platform_set_window_pos_if_pointer_callback(
+        &mut self,
+        callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, *const sys::ImVec2),
+    ) -> bool {
+        let cleared = unsafe {
+            sys::ImGuiPlatformIO_ClearPlatformSetWindowPosIfPointerParam(
+                self.as_raw_mut(),
+                callback,
+            )
+        };
+        if cleared {
+            self.clear_current_context_cb(&trampolines::PLATFORM_SET_WINDOW_POS_CB);
+        }
+        cleared
+    }
+
     /// Set platform set window position callback (typed Viewport).
     ///
     /// # Safety
@@ -159,6 +178,25 @@ impl PlatformIo {
                 callback,
             );
         }
+    }
+
+    /// Clear the aggregate size setter only if `callback` still owns it.
+    #[doc(hidden)]
+    #[cfg(feature = "multi-viewport")]
+    pub fn clear_platform_set_window_size_if_pointer_callback(
+        &mut self,
+        callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, *const sys::ImVec2),
+    ) -> bool {
+        let cleared = unsafe {
+            sys::ImGuiPlatformIO_ClearPlatformSetWindowSizeIfPointerParam(
+                self.as_raw_mut(),
+                callback,
+            )
+        };
+        if cleared {
+            self.clear_current_context_cb(&trampolines::PLATFORM_SET_WINDOW_SIZE_CB);
+        }
+        cleared
     }
 
     /// Set platform set window size callback (typed Viewport).

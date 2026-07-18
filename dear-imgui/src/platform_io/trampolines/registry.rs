@@ -94,6 +94,27 @@ pub(in crate::platform_io) fn clear_cb_for_platform_io<T: Copy>(
     });
 }
 
+pub(in crate::platform_io) fn load_cb_for_platform_io<T: Copy>(
+    platform_io: *const sys::ImGuiPlatformIO,
+    slot: &CallbackSlot<T>,
+) -> Option<T> {
+    if platform_io.is_null() {
+        return None;
+    }
+
+    CONTEXT_CALLBACKS.with(|contexts| {
+        contexts
+            .borrow()
+            .iter()
+            .find(|entry| unsafe {
+                let entry_platform_io = sys::igGetPlatformIO_ContextPtr(entry.ctx);
+                !entry_platform_io.is_null()
+                    && std::ptr::addr_eq(entry_platform_io.cast_const(), platform_io)
+            })
+            .and_then(|entry| (slot.get)(&entry.callbacks))
+    })
+}
+
 pub(in crate::platform_io) fn clear_platform_callbacks_for_platform_io(
     platform_io: *const sys::ImGuiPlatformIO,
 ) {
