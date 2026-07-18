@@ -267,6 +267,55 @@ class ReleaseTaskTests(unittest.TestCase):
             cwd=REPO_ROOT,
         )
 
+    def test_publish_forwards_authoritative_gate_result(self):
+        args = SimpleNamespace(
+            dry_run=False,
+            no_verify=False,
+            crates="dear-imgui-sys",
+            start_from=None,
+            wait=7,
+            release_gate_result=Path("artifacts/gate-result.json"),
+            dangerously_skip_release_check=False,
+        )
+        with patch.object(TASKS, "run_command", return_value=0) as run_command:
+            self.assertEqual(TASKS.task_publish(args, REPO_ROOT), 0)
+
+        self.assertEqual(
+            run_command.call_args.args[0],
+            [
+                TASKS.sys.executable,
+                "tools/publish.py",
+                "--crates",
+                "dear-imgui-sys",
+                "--wait",
+                "7",
+                "--release-gate-result",
+                str(Path("artifacts/gate-result.json")),
+            ],
+        )
+
+    def test_publish_forwards_explicit_dangerous_bypass(self):
+        args = SimpleNamespace(
+            dry_run=False,
+            no_verify=False,
+            crates=None,
+            start_from=None,
+            wait=None,
+            release_gate_result=None,
+            dangerously_skip_release_check=True,
+        )
+        with patch.object(TASKS, "run_command", return_value=0) as run_command:
+            self.assertEqual(TASKS.task_publish(args, REPO_ROOT), 0)
+
+        self.assertEqual(
+            run_command.call_args.args[0],
+            [
+                TASKS.sys.executable,
+                "tools/publish.py",
+                "--dangerously-skip-release-check",
+            ],
+        )
+
     def test_check_requires_package_skip_when_git_check_is_skipped(self):
         args = SimpleNamespace(
             skip_git=True,
