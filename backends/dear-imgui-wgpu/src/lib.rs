@@ -11,7 +11,7 @@
 //!   - `wgpu-28`
 //!   - `wgpu-27` (for ecosystems pinned to wgpu 27.x, e.g. some Bevy version trains)
 //! - **Diagnostics**: `tracing` emits renderer debug and warning events and is off by default
-//! - **Modern texture management**: Full integration with Dear ImGui's ImTextureData system
+//! - **Managed textures**: pointer-free create/update/destroy requests owned by rendered frames
 //! - **External textures**: Register existing `wgpu::Texture` resources for UI display,
 //!   with optional per-texture custom samplers.
 //! - **Gamma correction**: Automatic sRGB format detection and gamma correction
@@ -38,8 +38,8 @@
 //! // In your render loop:
 //! // imgui.new_frame();
 //! // ... build your UI ...
-//! // let draw_data = imgui.render();
-//! // renderer.render_draw_data(&draw_data, &mut render_pass)?;
+//! // let frame = imgui.render();
+//! // renderer.render(frame, &mut render_pass)?;
 //! # Ok(())
 //! # }
 //! ```

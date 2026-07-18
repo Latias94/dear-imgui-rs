@@ -7,7 +7,7 @@
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use crate::ImguiViewportBridge;
 use crate::{
-    ImguiBackendStatus, ImguiContext, ImguiTextureFeedbackQueue, ImguiViewportWindow,
+    ImguiBackendStatus, ImguiContext, ImguiViewportWindow,
     input::{
         ImguiInputState, map_imgui_mouse_cursor, sanitized_window_display_size,
         sanitized_window_framebuffer_scale,
@@ -23,6 +23,8 @@ use bevy_window::{CursorIcon, CursorOptions, PrimaryWindow, Window, WindowPositi
 use bevy_window::{Monitor, PrimaryMonitor};
 use dear_imgui_rs as imgui;
 use std::ptr::NonNull;
+#[cfg(feature = "render")]
+use std::sync::{Arc, Mutex, MutexGuard};
 
 type PrimaryInputWindowQuery<'w, 's> =
     Query<'w, 's, (Entity, &'static Window), With<PrimaryWindow>>;
@@ -65,7 +67,8 @@ struct BeginFrameParams<'w, 's> {
     viewport_bridge: Option<NonSendMut<'w, ImguiViewportBridge>>,
     frame_state: NonSendMut<'w, ImguiFrameState>,
     output: ResMut<'w, ImguiFrameOutput>,
-    texture_feedback: ResMut<'w, ImguiTextureFeedbackQueue>,
+    #[cfg(feature = "render")]
+    snapshot_mailbox: Res<'w, ImguiFrameMailbox>,
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     backend_status: Res<'w, ImguiBackendStatus>,
     real_time: Option<Res<'w, Time<Real>>>,
@@ -75,7 +78,7 @@ struct BeginFrameParams<'w, 's> {
 #[derive(Resource, Debug, Default)]
 pub struct ImguiFrameOutput {
     frame_index: u64,
-    snapshot: Option<imgui::render::snapshot::FrameSnapshot>,
+    snapshot_epoch: Option<imgui::render::snapshot::SnapshotEpoch>,
     snapshot_error: Option<String>,
 }
 
@@ -86,10 +89,10 @@ impl ImguiFrameOutput {
         self.frame_index
     }
 
-    /// Thread-safe snapshot produced by the latest completed frame.
+    /// Epoch of the latest snapshot handed to the render world.
     #[must_use]
-    pub fn snapshot(&self) -> Option<&imgui::render::snapshot::FrameSnapshot> {
-        self.snapshot.as_ref()
+    pub fn snapshot_epoch(&self) -> Option<imgui::render::snapshot::SnapshotEpoch> {
+        self.snapshot_epoch
     }
 
     /// Snapshot error produced by the latest completed frame, if snapshotting failed.
@@ -98,8 +101,10 @@ impl ImguiFrameOutput {
         self.snapshot_error.as_deref()
     }
 
+    #[cfg(feature = "render")]
     fn set_snapshot(
         &mut self,
+        mailbox: &ImguiFrameMailbox,
         frame_index: u64,
         snapshot: Result<
             imgui::render::snapshot::FrameSnapshot,
@@ -109,11 +114,13 @@ impl ImguiFrameOutput {
         self.frame_index = frame_index;
         match snapshot {
             Ok(snapshot) => {
-                self.snapshot = Some(snapshot);
+                self.snapshot_epoch = Some(snapshot.epoch());
+                mailbox.publish(frame_index, snapshot);
                 self.snapshot_error = None;
             }
             Err(err) => {
-                self.snapshot = None;
+                self.snapshot_epoch = None;
+                mailbox.clear();
                 self.snapshot_error = Some(err.to_string());
             }
         }
@@ -121,8 +128,37 @@ impl ImguiFrameOutput {
 
     fn clear_snapshot(&mut self, frame_index: u64) {
         self.frame_index = frame_index;
-        self.snapshot = None;
+        self.snapshot_epoch = None;
         self.snapshot_error = None;
+    }
+}
+
+#[cfg(feature = "render")]
+#[derive(Resource, Clone, Debug, Default)]
+pub(crate) struct ImguiFrameMailbox {
+    pending: Arc<Mutex<Option<(u64, imgui::render::snapshot::FrameSnapshot)>>>,
+}
+
+#[cfg(feature = "render")]
+impl ImguiFrameMailbox {
+    fn pending(&self) -> MutexGuard<'_, Option<(u64, imgui::render::snapshot::FrameSnapshot)>> {
+        self.pending
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn publish(&self, frame_index: u64, snapshot: imgui::render::snapshot::FrameSnapshot) {
+        let previous = self.pending().replace((frame_index, snapshot));
+        drop(previous);
+    }
+
+    pub(crate) fn take(&self) -> Option<(u64, imgui::render::snapshot::FrameSnapshot)> {
+        self.pending().take()
+    }
+
+    fn clear(&self) {
+        let previous = self.pending().take();
+        drop(previous);
     }
 }
 
@@ -196,9 +232,10 @@ impl<'w> ImguiContexts<'w> {
 pub(crate) fn install_context_lifecycle(app: &mut App) {
     app.init_non_send::<ImguiFrameState>()
         .init_resource::<ImguiFrameOutput>()
-        .init_resource::<ImguiTextureFeedbackQueue>()
         .add_systems(crate::ImguiBeginFrame, begin_primary_frame_system)
         .add_systems(crate::ImguiEndFrame, end_primary_frame_system);
+    #[cfg(feature = "render")]
+    app.init_resource::<ImguiFrameMailbox>();
 }
 
 #[cfg_attr(
@@ -211,13 +248,12 @@ fn begin_primary_frame_system(mut params: BeginFrameParams) {
     }
 
     let Ok((primary_window_entity, window)) = params.primary_window.single() else {
-        let feedback = params.texture_feedback.drain();
-        let applied = params
+        let _ = params
             .imgui_context
             .context_mut()
-            .apply_texture_feedback(&feedback)
-            .unwrap_or_else(|error| panic!("invalid managed texture feedback: {error}"));
-        params.texture_feedback.set_last_applied(applied);
+            .poll_snapshot_completions();
+        #[cfg(feature = "render")]
+        params.snapshot_mailbox.clear();
         params
             .output
             .clear_snapshot(params.frame_state.frame_index());
@@ -225,11 +261,6 @@ fn begin_primary_frame_system(mut params: BeginFrameParams) {
     };
 
     let context = params.imgui_context.context_mut();
-    let feedback = params.texture_feedback.drain();
-    let applied = context
-        .apply_texture_feedback(&feedback)
-        .unwrap_or_else(|error| panic!("invalid managed texture feedback: {error}"));
-    params.texture_feedback.set_last_applied(applied);
 
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     if let Some(viewport_bridge) = params.viewport_bridge.as_deref_mut() {
@@ -289,11 +320,12 @@ pub(crate) fn end_primary_frame_system(
     mut commands: Commands,
     mut imgui_context: NonSendMut<ImguiContext>,
     mut frame_state: NonSendMut<ImguiFrameState>,
-    backend_status: Res<ImguiBackendStatus>,
+    _backend_status: Res<ImguiBackendStatus>,
     input_state: Res<ImguiInputState>,
     mut primary_window: PrimaryFeedbackWindowQuery,
     mut viewport_windows: ViewportFeedbackWindowQuery,
     mut output: ResMut<ImguiFrameOutput>,
+    #[cfg(feature = "render")] snapshot_mailbox: Res<ImguiFrameMailbox>,
 ) {
     if !frame_state.is_frame_open() {
         return;
@@ -311,33 +343,16 @@ pub(crate) fn end_primary_frame_system(
     }
 
     let frame_index = frame_state.end();
-    let snapshot = render_frame_snapshot(
-        imgui_context.context_mut(),
-        backend_status.multi_viewport_supported,
-    );
-    output.set_snapshot(frame_index, snapshot);
-}
-
-fn render_frame_snapshot(
-    context: &mut imgui::Context,
-    _multi_viewport_supported: bool,
-) -> Result<imgui::render::snapshot::FrameSnapshot, imgui::render::snapshot::SnapshotError> {
-    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    #[cfg(feature = "render")]
     {
-        if _multi_viewport_supported {
-            let _ = context.render();
-            context.update_platform_windows();
-            return context
-                .platform_viewport_snapshot(imgui::render::snapshot::SnapshotOptions::default());
-        }
+        let snapshot =
+            imgui_context.render_frame_snapshot(_backend_status.multi_viewport_supported);
+        output.set_snapshot(&snapshot_mailbox, frame_index, snapshot);
     }
-
+    #[cfg(not(feature = "render"))]
     {
-        let draw_data = context.render();
-        imgui::render::snapshot::FrameSnapshot::from_draw_data(
-            draw_data,
-            imgui::render::snapshot::SnapshotOptions::default(),
-        )
+        let _ = imgui_context.context_mut().render();
+        output.clear_snapshot(frame_index);
     }
 }
 
@@ -531,5 +546,172 @@ fn clear_window_cursor_feedback(
     cursor_options.visible = true;
     if cursor_icon.is_some() {
         commands.entity(window_entity).remove::<CursorIcon>();
+    }
+}
+
+#[cfg(all(test, feature = "render"))]
+mod tests {
+    use super::*;
+
+    fn context_and_consumer() -> (imgui::Context, imgui::render::RendererConsumer) {
+        let mut context = imgui::Context::create();
+        context.io_mut().set_config_input_trickle_event_queue(false);
+        context.prepare_frame(
+            imgui::FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
+        );
+        let _ = context.font_atlas().build();
+        let _ = context.set_ini_filename::<std::path::PathBuf>(None);
+        let consumer = context.create_renderer_consumer().unwrap();
+        (context, consumer)
+    }
+
+    fn snapshot(
+        context: &mut imgui::Context,
+        consumer: &imgui::render::RendererConsumer,
+    ) -> imgui::render::FrameSnapshot {
+        context.prepare_frame(
+            imgui::FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
+        );
+        context.begin_frame().render_snapshot(consumer).unwrap()
+    }
+
+    fn texture_snapshot(
+        context: &mut imgui::Context,
+        consumer: &imgui::render::RendererConsumer,
+        texture: imgui::ManagedTextureId,
+    ) -> imgui::render::FrameSnapshot {
+        context.prepare_frame(
+            imgui::FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
+        );
+        let frame = context.begin_frame();
+        frame.ui().image(texture, [16.0, 16.0]);
+        frame.render_snapshot(consumer).unwrap()
+    }
+
+    #[test]
+    fn mailbox_abandon_finishes_draining_before_next_consumer_generation() {
+        let (mut context, consumer) = context_and_consumer();
+        let first_generation = consumer.generation();
+        let mailbox = ImguiFrameMailbox::default();
+        mailbox.publish(1, snapshot(&mut context, &consumer));
+
+        drop(consumer);
+        context.poll_snapshot_completions().unwrap();
+        assert_eq!(
+            context.create_renderer_consumer().unwrap_err(),
+            imgui::render::RendererConsumerError::ConsumerDraining
+        );
+
+        mailbox.clear();
+        let progress = context.poll_snapshot_completions().unwrap();
+        assert_eq!(progress.abandoned(), 1);
+        let replacement = context.create_renderer_consumer().unwrap();
+        assert!(replacement.generation() > first_generation);
+    }
+
+    #[test]
+    fn mailbox_snapshot_can_outlive_its_context_without_panicking() {
+        let (mut context, consumer) = context_and_consumer();
+        let mailbox = ImguiFrameMailbox::default();
+        mailbox.publish(1, snapshot(&mut context, &consumer));
+
+        drop(context);
+        mailbox.clear();
+        drop(consumer);
+    }
+
+    #[test]
+    fn into_inner_rejects_an_outstanding_render_world_snapshot() {
+        let (mut context, consumer) = context_and_consumer();
+        let mailbox = ImguiFrameMailbox::default();
+        mailbox.publish(1, snapshot(&mut context, &consumer));
+        let imgui = ImguiContext {
+            context,
+            renderer_consumer: Some(consumer),
+        };
+
+        let error = match imgui.into_inner() {
+            Ok(_) => panic!("an outstanding render-world epoch must prevent Context extraction"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            error,
+            imgui::render::RendererConsumerError::OutstandingEpochs { count: 1 }
+        );
+
+        mailbox.clear();
+    }
+
+    #[test]
+    fn into_inner_resets_idle_renderer_texture_bindings() {
+        let (mut context, consumer) = context_and_consumer();
+        let mut texture_data = imgui::texture::OwnedTextureData::new();
+        texture_data.create(imgui::TextureFormat::RGBA32, 1, 1);
+        texture_data.set_data(&[255, 0, 255, 255]);
+        let texture = context.register_texture(texture_data);
+        let snapshot = texture_snapshot(&mut context, &consumer, texture);
+        let request = snapshot
+            .texture_requests()
+            .iter()
+            .find(|request| request.texture() == imgui::render::SnapshotTextureId::User(texture))
+            .expect("managed texture should request renderer creation");
+        let feedback = request.uploaded(imgui::TextureId::new(0xBEEF)).unwrap();
+        snapshot.commit([feedback]).unwrap();
+        context.poll_snapshot_completions().unwrap();
+
+        let imgui = ImguiContext {
+            context,
+            renderer_consumer: Some(consumer),
+        };
+        let context = imgui
+            .into_inner()
+            .expect("an idle renderer consumer should reset and detach");
+        context
+            .with_texture(texture, |texture| {
+                assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+                assert!(texture.texture_id().is_null());
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn first_bevy_snapshot_rebinds_textures_from_a_previous_renderer() {
+        let (mut context, consumer) = context_and_consumer();
+        let previous_generation = consumer.generation();
+        let mut texture_data = imgui::texture::OwnedTextureData::new();
+        texture_data.create(imgui::TextureFormat::RGBA32, 1, 1);
+        texture_data.set_data(&[255, 0, 255, 255]);
+        let texture = context.register_texture(texture_data);
+        let snapshot = texture_snapshot(&mut context, &consumer, texture);
+        let request = snapshot
+            .texture_requests()
+            .iter()
+            .find(|request| request.texture() == imgui::render::SnapshotTextureId::User(texture))
+            .expect("previous renderer should receive the original create request");
+        let feedback = request.uploaded(imgui::TextureId::new(0xCAFE)).unwrap();
+        snapshot.commit([feedback]).unwrap();
+        context.poll_snapshot_completions().unwrap();
+        drop(consumer);
+        context.poll_snapshot_completions().unwrap();
+
+        let mut imgui = ImguiContext::new(context);
+        imgui.context_mut().prepare_frame(
+            imgui::FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
+        );
+        imgui.context_mut().frame().image(texture, [16.0, 16.0]);
+        let snapshot = imgui.render_frame_snapshot(false).unwrap();
+        assert!(
+            imgui
+                .renderer_consumer
+                .as_ref()
+                .is_some_and(|consumer| consumer.generation() > previous_generation)
+        );
+        assert!(snapshot.texture_requests().iter().any(|request| {
+            request.texture() == imgui::render::SnapshotTextureId::User(texture)
+                && matches!(request.operation(), imgui::render::TextureOp::Create { .. })
+        }));
+
+        snapshot.commit(std::iter::empty()).unwrap();
+        imgui.context_mut().poll_snapshot_completions().unwrap();
     }
 }

@@ -30,8 +30,8 @@
 //! // In your render loop:
 //! // imgui.new_frame();
 //! // ... build your UI ...
-//! // let draw_data = imgui.render();
-//! // renderer.render(draw_data).unwrap();
+//! // let frame = imgui.render();
+//! // renderer.render(frame).unwrap();
 //! ```
 
 // Re-export glow to make it easier for users to use the correct version.

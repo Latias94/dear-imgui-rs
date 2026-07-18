@@ -301,7 +301,7 @@ pub(super) unsafe fn renderer_render_window(viewport: *mut Viewport) {
     // SAFETY: registry membership proves this is the live data owned by the current viewport.
     let data = unsafe { &mut *data_pointer };
     // SAFETY: Dear ImGui supplies live draw data for the duration of this render callback.
-    let draw_data = unsafe { dear_imgui_rs::render::DrawData::from_raw_mut(&mut *raw_draw_data) };
+    let draw_data = unsafe { dear_imgui_rs::render::DrawData::from_raw(&*raw_draw_data) };
 
     #[cfg(any(feature = "wgpu-29", feature = "wgpu-30"))]
     let (frame, reconfigure_after_present) = match data.surface.get_current_texture() {
@@ -444,7 +444,7 @@ pub(super) unsafe fn renderer_render_window(viewport: *mut Viewport) {
             multiview_mask: None,
             timestamp_writes: None,
         });
-        if let Err(error) = renderer.render_draw_data_with_fb_size_ex(
+        if let Err(error) = renderer.render_read_only_draw_data_with_fb_size(
             draw_data,
             &mut render_pass,
             data.config.width,

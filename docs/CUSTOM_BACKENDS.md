@@ -215,20 +215,28 @@ Platform checklist:
 
 ## Renderer Backend Template
 
-A renderer backend owns GPU resources and draws `DrawData`.
+A renderer backend owns one renderer consumer, all managed GPU resources, and each
+`RenderedFrame` while it is reconciling and drawing that frame.
 
 ```rust,no_run
+use std::collections::HashMap;
+
 use dear_imgui_rs::{
-    BackendFlags, Context, TextureData, TextureId, TextureStatus,
-    render::DrawData,
+    BackendFlags, Context, TextureId,
+    render::{
+        RenderedFrame, RendererConsumer, RendererConsumerError, SnapshotTextureId,
+        TextureOp,
+    },
 };
 
 pub struct MyRendererBackend {
-    next_texture: u64,
+    consumer: RendererConsumer,
+    textures: HashMap<SnapshotTextureId, TextureId>,
+    next_texture: usize,
 }
 
 impl MyRendererBackend {
-    pub fn new(imgui: &mut Context) -> Self {
+    pub fn new(imgui: &mut Context) -> Result<Self, RendererConsumerError> {
         imgui
             .set_renderer_name("my-renderer")
             .expect("renderer name must not contain NUL bytes");
@@ -238,13 +246,57 @@ impl MyRendererBackend {
         flags.insert(BackendFlags::RENDERER_HAS_VTX_OFFSET);
         imgui.io_mut().set_backend_flags(flags);
 
-        Self { next_texture: 1 }
+        let consumer = imgui.create_renderer_consumer()?;
+        imgui.reset_renderer_texture_bindings(&consumer)?;
+        Ok(Self {
+            consumer,
+            textures: HashMap::new(),
+            next_texture: 1,
+        })
     }
 
-    pub fn render(&mut self, draw_data: &mut DrawData) {
-        self.update_textures(draw_data);
+    pub fn render(
+        &mut self,
+        mut frame: RenderedFrame<'_>,
+    ) -> Result<(), RendererConsumerError> {
+        if frame.context_id() != self.consumer.context_id() {
+            return Err(RendererConsumerError::ForeignContext {
+                expected: self.consumer.context_id(),
+                actual: frame.context_id(),
+            });
+        }
+        let mut feedback = Vec::with_capacity(frame.texture_requests().len());
+        for request in frame.texture_requests() {
+            match request.operation() {
+                TextureOp::Create { format, width, height, row_pitch, pixels } => {
+                    // Allocate and upload a GPU texture from the owned request bytes.
+                    let _ = (format, width, height, row_pitch, pixels);
+                    let texture_id = TextureId::new(self.next_texture);
+                    self.next_texture += 1;
+                    self.textures.insert(request.texture(), texture_id);
+                    feedback.push(request.uploaded(texture_id).expect("create is an upload"));
+                }
+                TextureOp::Update { format, width, height, rects } => {
+                    let texture_id = self.textures[&request.texture()];
+                    // Upload the owned update rectangles to this GPU texture.
+                    let _ = (texture_id, format, width, height, rects);
+                    feedback.push(request.uploaded(texture_id).expect("update is an upload"));
+                }
+                TextureOp::Destroy => {
+                    if let Some(texture_id) = self.textures.remove(&request.texture()) {
+                        // Destroy the GPU resource before acknowledging this request.
+                        let _ = texture_id;
+                    }
+                    feedback.push(request.destroyed().expect("destroy is not an upload"));
+                }
+            }
+        }
 
-        for draw_list in draw_data.draw_lists() {
+        // This validates Context, consumer generation, epoch, request kind, and revision.
+        // It also updates draw-command TextureId values before the commands are read below.
+        frame.reconcile_texture_feedback(feedback)?;
+
+        for draw_list in frame.draw_data().draw_lists() {
             // Upload or bind draw_list vertex/index buffers.
             // For each draw command:
             // - bind the texture from the command's TextureId
@@ -252,39 +304,7 @@ impl MyRendererBackend {
             // - draw indexed triangles with the command's element count
             let _ = draw_list;
         }
-    }
-
-    fn update_textures(&mut self, draw_data: &mut DrawData) {
-        let mut textures = draw_data.textures_mut();
-        while let Some(mut texture) = textures.next() {
-            match texture.status() {
-                TextureStatus::WantCreate => self.create_texture(&mut texture),
-                TextureStatus::WantUpdates => self.update_texture(&mut texture),
-                TextureStatus::WantDestroy => self.destroy_texture(&mut texture),
-                TextureStatus::OK | TextureStatus::Destroyed => {}
-            }
-        }
-    }
-
-    fn create_texture(&mut self, texture: &mut TextureData) {
-        let id = TextureId::new(self.next_texture);
-        self.next_texture += 1;
-
-        // Allocate a GPU texture from texture.format(), texture.width(),
-        // texture.height(), and texture pixel data.
-
-        texture.set_tex_id(id);
-        texture.set_status(TextureStatus::OK);
-    }
-
-    fn update_texture(&mut self, texture: &mut TextureData) {
-        // Upload full texture data or update rects to the existing GPU texture.
-        texture.set_status(TextureStatus::OK);
-    }
-
-    fn destroy_texture(&mut self, texture: &mut TextureData) {
-        // Free the GPU resource for texture.tex_id() or texture.backend_user_data().
-        texture.set_status(TextureStatus::Destroyed);
+        Ok(())
     }
 }
 ```
@@ -292,15 +312,16 @@ impl MyRendererBackend {
 Renderer checklist:
 
 - Set `Context::set_renderer_name`.
-- Set `BackendFlags::RENDERER_HAS_TEXTURES` only if `DrawData::textures_mut`
-  requests are actually handled.
+- Create exactly one `RendererConsumer` and retain it for the renderer's lifetime.
+- Set `BackendFlags::RENDERER_HAS_TEXTURES` only if every `TextureRequest` is handled and
+  reconciled with request-bound feedback.
 - Set `BackendFlags::RENDERER_HAS_VTX_OFFSET` if draw commands can use vertex
   offsets.
-- On `WantCreate`, create the GPU texture, set `TextureData::set_tex_id`, then
-  set `TextureStatus::OK`.
-- On `WantUpdates`, upload the requested pixel data or update regions, then set
-  `TextureStatus::OK`.
-- On `WantDestroy`, free the GPU resource and set `TextureStatus::Destroyed`.
+- On `Create` or `Update`, upload the owned bytes and return `request.uploaded(texture_id)`.
+- On `Destroy`, free the GPU resource before returning `request.destroyed()`.
+- Reconcile feedback before reading draw commands that depend on newly assigned texture IDs.
+- During reset or shutdown, actually release renderer resources before calling
+  `Context::reset_renderer_texture_bindings`.
 - Preserve or restore application GPU state unless the backend contract says the
   caller must reset state after rendering.
 - Clip/scissor in framebuffer coordinates, not logical window coordinates.
@@ -313,10 +334,11 @@ the renderer:
 
 - Use `FrameSnapshot` when texture requests and viewport draw data need to cross
   threads.
-- Apply `TextureFeedback` back on the UI thread through `PlatformIo` before the
-  next frame.
-- Keep raw GPU handles in renderer-owned maps; keep Dear ImGui-side texture
-  state in `TextureData`.
+- Keep snapshots move-only and call `FrameSnapshot::commit` exactly once after rendering. Dropping
+  one uncommitted abandons its epoch and deliberately reissues unacknowledged destroys.
+- Call `Context::poll_snapshot_completions` on the UI thread before creating later frames.
+- Keep GPU resources in a renderer-owned map keyed by `SnapshotTextureId`; never retain a native
+  `TextureData` pointer.
 
 The Bevy backend is the best workspace example of this split.
 

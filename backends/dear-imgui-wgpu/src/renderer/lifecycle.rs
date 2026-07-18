@@ -37,10 +37,10 @@ impl WgpuRenderer {
         Ok(())
     }
 
-    /// Invalidate device objects and detach their managed texture bindings.
+    /// Invalidate device objects and reset their managed texture bindings.
     ///
     /// This corresponds to `ImGui_ImplWGPU_InvalidateDeviceObjects`. Passing the context makes
-    /// invalidating GPU textures and requeueing their `ImTextureData` uploads one operation.
+    /// destroying GPU textures and requeueing Context-owned uploads one operation.
     pub fn invalidate_device_objects(&mut self, imgui_context: &mut Context) -> RendererResult<()> {
         self.ensure_context_matches(imgui_context)?;
 
@@ -48,9 +48,7 @@ impl WgpuRenderer {
         self.ensure_multi_viewport_inactive()?;
 
         self.invalidate_device_objects_only();
-        imgui_context
-            .platform_io_mut()
-            .invalidate_renderer_texture_bindings();
+        imgui_context.reset_renderer_texture_bindings(self.renderer_consumer()?)?;
 
         Ok(())
     }
@@ -92,10 +90,9 @@ impl WgpuRenderer {
         #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
         self.clear_multi_viewport_renderer_state();
         self.invalidate_device_objects_only();
-        imgui_context
-            .platform_io_mut()
-            .invalidate_renderer_texture_bindings();
+        imgui_context.reset_renderer_texture_bindings(self.renderer_consumer()?)?;
         self.backend_data = None;
+        self.renderer_consumer = None;
         Self::unconfigure_imgui_context(imgui_context, renderer_flags_added);
         self.clear_context_binding();
         Ok(())
@@ -163,11 +160,9 @@ impl WgpuRenderer {
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::c_void;
-
     use dear_imgui_rs::{
-        BackendFlags, Context, FramePrepareOptions, TextureData, TextureFormat, TextureId,
-        TextureStatus,
+        BackendFlags, Context,
+        texture::{OwnedTextureData, TextureFormat, TextureStatus},
     };
 
     use super::WgpuRenderer;
@@ -176,17 +171,9 @@ mod tests {
     #[test]
     fn unbound_device_invalidation_preserves_managed_texture_bindings() {
         let mut context = Context::create();
-        let mut texture = TextureData::new();
+        let mut texture = OwnedTextureData::new();
         texture.create(TextureFormat::RGBA32, 1, 1);
-        texture.set_tex_id(TextureId::new(77));
-        texture.set_backend_user_data(std::ptr::dangling_mut::<c_void>());
-        texture.set_status(TextureStatus::OK);
         let texture = context.register_texture(texture);
-        context.prepare_frame(
-            FramePrepareOptions::new([640.0, 480.0], 1.0 / 60.0).renderer_has_textures(),
-        );
-        let _ = context.font_atlas().build();
-        let _ = context.begin_frame().render();
 
         let mut renderer = WgpuRenderer::empty();
         let result = renderer.invalidate_device_objects(&mut context);
@@ -194,17 +181,21 @@ mod tests {
         assert!(matches!(result, Err(RendererError::ContextNotBound)));
         context
             .with_texture(texture, |texture| {
-                assert_eq!(texture.status(), TextureStatus::OK);
-                assert_eq!(texture.tex_id(), TextureId::new(77));
-                assert!(!texture.backend_user_data().is_null());
+                assert_eq!(texture.status(), TextureStatus::WantCreate);
+                assert!(texture.texture_id().is_null());
             })
             .expect("registered texture should remain active");
     }
 
     #[test]
     fn foreign_context_lifecycle_calls_are_transactional() {
-        let owner = Context::create();
+        let mut owner = Context::create();
         let mut renderer = WgpuRenderer::empty();
+        renderer.renderer_consumer = Some(
+            owner
+                .create_renderer_consumer()
+                .expect("test context should create a renderer consumer"),
+        );
         renderer
             .bind_context(&owner, BackendFlags::empty())
             .expect("test renderer should bind once");

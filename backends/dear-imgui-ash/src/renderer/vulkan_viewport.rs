@@ -15,7 +15,9 @@ use ash::{
     vk,
 };
 use dear_imgui_rs::{Context, internal::RawCast, platform_io::Viewport, sys};
-use std::{ffi::c_void, sync::Mutex};
+use std::ffi::c_void;
+#[cfg(test)]
+use std::sync::Mutex;
 
 pub(crate) use self::callbacks::{
     renderer_create_window_sys, renderer_destroy_window_sys, renderer_render_window_sys,
@@ -28,6 +30,7 @@ use self::frame_sync::{
     destroy_frame_syncs, destroy_present_semaphores, present_semaphore_for_image,
     replace_frame_sync,
 };
+pub(crate) use self::registry::has_renderer_state_for_renderer;
 pub use self::registry::{
     CallbackOwnershipError, SurfaceSupportError, shutdown_multi_viewport_support,
 };

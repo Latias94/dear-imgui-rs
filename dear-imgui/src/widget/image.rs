@@ -1,8 +1,8 @@
 //! Image widgets
 //!
-//! Draw images from a legacy `TextureId` or from modern `TextureData` handled
-//! via `DrawData::textures_mut()` by renderer backends. See crate-level docs for texture
-//! management.
+//! Draw images from a legacy `TextureId` or a Context-owned `ManagedTextureId`.
+//! Managed pixels reach renderer backends as owned `TextureRequest` values on a
+//! `RenderedFrame` or `FrameSnapshot`; safe renderers never borrow `TextureData`.
 //!
 //! Quick example (image button):
 //! ```no_run

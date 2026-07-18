@@ -11,19 +11,18 @@ use std::ffi::c_void;
 /// Texture data managed by Dear ImGui
 ///
 /// This is a wrapper around ImTextureData that provides safe access to
-/// texture information and pixel data. It's used by renderer backends
-/// to create, update, and destroy textures.
+/// texture information and pixel data. Application code configures an owned value before
+/// registration and mutates registered textures only through their owning Context.
 ///
 /// Lifecycle & Backend Flow (ImGui 1.92+)
 /// - Create an instance (e.g. via `OwnedTextureData::new()` + `create()`)
 /// - Mutate pixels, set flags/rects (e.g. call `set_data()` or directly write `Pixels` then
 ///   set `UpdateRect`), and set status to `WantCreate`/`WantUpdates`.
-/// - Transfer user-created owned textures via `Context::register_texture(tex)`. Dear
-///   ImGui builds `DrawData::textures()` from its internal `PlatformIO.Textures[]` list (font atlas
-///   textures are registered by ImGui itself).
-/// - Your renderer backend iterates `DrawData::textures_mut()` and performs the requested
-///   create/update/destroy operations, then updates status to `OK`/`Destroyed`.
-/// - You can also set/get a `TexID` (e.g., GPU handle) via `set_tex_id()/tex_id()` after creation.
+/// - Transfer user-created owned textures via `Context::register_texture(tex)`.
+/// - A renderer owns one `RendererConsumer` and processes the pointer-free requests exposed by
+///   `RenderedFrame::texture_requests` or `FrameSnapshot::texture_requests`.
+/// - The renderer returns request-bound `TextureFeedback`; the owning Context validates and
+///   reconciles it before mutating native texture status or identifiers.
 ///
 /// Context owns every registered user allocation through retirement. Application mutation uses
 /// `Context::with_texture_mut`, so safe code cannot drop the allocation while native draw data or a

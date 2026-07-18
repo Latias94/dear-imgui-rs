@@ -18,10 +18,10 @@ let gl = unsafe { glow::Context::from_loader_function(|s| loader.get_proc_addres
 let mut imgui = Context::create();
 let mut renderer = GlowRenderer::new(gl, &mut imgui)?;
 
-// per-frame
-let draw_data = imgui.render();
+// Per frame, after building the UI. Rendering consumes the Context-borrowed frame.
 renderer.new_frame()?;
-renderer.render(&draw_data)?;
+let frame = imgui.render();
+renderer.render(frame)?;
 ```
 
 ## What You Get
@@ -29,6 +29,27 @@ renderer.render(&draw_data)?;
 - ImGui v1.92 texture system integration (font atlas upload + dynamic texture updates)
 - OpenGL 2.1+/ES 2.0+ compatible shaders and state setup
 - Full GL state backup/restore around ImGui rendering
+
+## Renderer Lifecycle
+
+`GlowRenderer` owns the Context's sole renderer consumer. `render` and `render_with_context`
+therefore take `RenderedFrame` by value, apply every managed texture request, reconcile the
+result with the owning Context, and only then issue draw commands. A frame from another Context or
+consumer generation is rejected before OpenGL is mutated.
+
+Explicitly destroy the renderer while its OpenGL context is current. This deletes renderer-owned
+GPU textures before their Context bindings are reset and releases the consumer so another renderer
+can attach:
+
+```rust
+let gl = renderer.gl_context().expect("owned GL context").clone();
+renderer.destroy(&gl, &mut imgui)?;
+```
+
+For a renderer created with `with_external_context`, pass the same live GL context to `destroy`.
+`destroy_device_objects` performs the same resource-first reset but keeps the consumer attached for
+later device-object recreation. With `multi-viewport`, destroy platform windows and uninstall their
+callbacks with `multi_viewport::shutdown_multi_viewport_support` before destroying the renderer.
 
 ## sRGB / Gamma
 

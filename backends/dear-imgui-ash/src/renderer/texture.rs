@@ -61,15 +61,28 @@ impl ExternalTextureBinding {
 
 #[derive(Debug)]
 pub(super) struct TextureManager {
+    /// Legacy/default textures addressed directly by `TextureId`.
     pub(super) textures: HashMap<u64, VulkanTexture>,
+    pub(super) managed_textures: HashMap<SnapshotTextureId, ManagedVulkanTexture>,
+    pub(super) managed_ids: HashMap<u64, SnapshotTextureId>,
+    pub(super) retiring_textures: RetirementQueue<SnapshotTextureId, ManagedVulkanTexture>,
     pub(super) external_textures: HashMap<u64, ExternalTextureBinding>,
     pub(super) next_id: u64,
+}
+
+#[derive(Debug)]
+pub(super) struct ManagedVulkanTexture {
+    pub(super) texture_id: TextureId,
+    pub(super) texture: VulkanTexture,
 }
 
 impl TextureManager {
     pub(super) fn new() -> Self {
         Self {
             textures: HashMap::new(),
+            managed_textures: HashMap::new(),
+            managed_ids: HashMap::new(),
+            retiring_textures: RetirementQueue::new(),
             external_textures: HashMap::new(),
             next_id: 1,
         }
@@ -84,6 +97,15 @@ impl TextureManager {
     pub(super) fn get_descriptor_set(&self, texture_id: u64) -> Option<vk::DescriptorSet> {
         if let Some(tex) = self.textures.get(&texture_id) {
             Some(tex.descriptor_set)
+        } else if let Some(snapshot_id) = self.managed_ids.get(&texture_id) {
+            self.managed_textures
+                .get(snapshot_id)
+                .map(|texture| texture.texture.descriptor_set)
+                .or_else(|| {
+                    self.retiring_textures
+                        .get(snapshot_id)
+                        .map(|texture| texture.texture.descriptor_set)
+                })
         } else {
             self.external_textures
                 .get(&texture_id)
@@ -113,70 +135,6 @@ impl TextureManager {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
-pub(super) struct TextureWriteback {
-    pub(super) texture: *mut dear_imgui_rs::sys::ImTextureData,
-    pub(super) tex_id: Option<TextureId>,
-    pub(super) status: TextureStatus,
-}
-
-impl TextureWriteback {
-    pub(super) fn apply(self) {
-        if self.texture.is_null() {
-            return;
-        }
-
-        unsafe {
-            if let Some(tex_id) = self.tex_id {
-                dear_imgui_rs::sys::ImTextureData_SetTexID(self.texture, tex_id.id() as _);
-            }
-            if self.status == TextureStatus::Destroyed {
-                (*self.texture).WantDestroyNextFrame = true;
-            }
-            dear_imgui_rs::sys::ImTextureData_SetStatus(self.texture, self.status.into());
-        }
-    }
-}
-
-pub(super) struct PendingTextureCreate {
-    pub(super) id: u64,
-    pub(super) texture: Texture,
-    pub(super) descriptor_set: vk::DescriptorSet,
-    pub(super) staging_buffer: vk::Buffer,
-    pub(super) staging_mem: Option<Memory>,
-    pub(super) w: u32,
-    pub(super) h: u32,
-}
-
-impl PendingTextureCreate {
-    pub(super) fn into_vulkan_texture(mut self) -> (u64, VulkanTexture, vk::Buffer, Memory) {
-        let staging_mem = self
-            .staging_mem
-            .take()
-            .expect("pending create staging memory must be consumed exactly once");
-        let Texture {
-            image,
-            image_mem,
-            image_view,
-            sampler,
-        } = self.texture;
-        (
-            self.id,
-            VulkanTexture {
-                image,
-                image_mem,
-                image_view,
-                sampler,
-                descriptor_set: self.descriptor_set,
-                width: self.w,
-                height: self.h,
-            },
-            self.staging_buffer,
-            staging_mem,
-        )
-    }
-}
-
 pub(super) struct PendingTextureUpdate {
     pub(super) image: vk::Image,
     pub(super) staging_buffer: vk::Buffer,
@@ -198,6 +156,56 @@ impl PendingTextureUpdate {
 }
 
 impl AshRenderer {
+    /// Highest managed-texture retirement batch still waiting for GPU completion.
+    ///
+    /// Associate the returned token with GPU completion covering all Ash uploads, main-viewport
+    /// draws, and secondary-viewport draws that can still reference a texture in the batch. If
+    /// those operations span multiple queues, every relevant queue must complete before notifying
+    /// this renderer.
+    pub fn pending_texture_retirement(&self) -> Option<TextureRetirementBatch> {
+        self.textures.retiring_textures.pending_batch()
+    }
+
+    /// Destroy managed textures whose renderer work is known to have completed on the GPU.
+    ///
+    /// Dear ImGui destroy requests are acknowledged on a later frame, after this method has
+    /// actually released the corresponding Vulkan resources.
+    ///
+    /// # Safety
+    ///
+    /// `completed` must be associated with signaled synchronization, or a completed device-idle
+    /// wait, that covers every upload, main-viewport draw, and secondary-viewport draw which can
+    /// reference any texture retired through this batch. This includes work recorded after the
+    /// token was returned, such as secondary viewport draws from the same Dear ImGui frame. When
+    /// renderer work spans multiple queues, all relevant queues must have completed.
+    pub unsafe fn notify_texture_retirements_completed(
+        &mut self,
+        completed: TextureRetirementBatch,
+    ) -> RendererResult<usize> {
+        if self.destroyed {
+            return Err(RendererError::RendererDestroyed);
+        }
+        let retired = self
+            .textures
+            .retiring_textures
+            .complete_through(completed)
+            .ok_or_else(|| {
+                RendererError::InvalidRenderState(format!(
+                    "texture retirement batch {} was not issued by this renderer",
+                    completed.sequence()
+                ))
+            })?;
+        let count = retired.len();
+        for (snapshot_id, managed) in retired {
+            let removed = self.textures.managed_ids.remove(&managed.texture_id.id());
+            debug_assert_eq!(removed, Some(snapshot_id));
+            managed
+                .texture
+                .destroy(&self.device, &mut self.allocator, self.descriptor_pool);
+        }
+        Ok(count)
+    }
+
     pub fn register_texture_descriptor_set(&mut self, set: vk::DescriptorSet) -> TextureId {
         TextureId::from(self.textures.register_external_descriptor_set(set))
     }
@@ -672,230 +680,356 @@ impl AshRenderer {
 
     pub(super) fn process_texture_requests(
         &mut self,
-        draw_data: &mut dear_imgui_rs::render::DrawData,
+        requests: &[TextureRequest],
+    ) -> RendererResult<Vec<TextureFeedback>> {
+        let mut feedback = Vec::with_capacity(requests.len());
+
+        for request in requests {
+            let snapshot_id = request.texture();
+            match request.operation() {
+                TextureOp::Create {
+                    format,
+                    width,
+                    height,
+                    row_pitch,
+                    pixels,
+                } => {
+                    let texture_id = self.create_managed_texture(
+                        snapshot_id,
+                        *format,
+                        *width,
+                        *height,
+                        *row_pitch,
+                        pixels,
+                    )?;
+                    feedback.push(request.uploaded(texture_id)?);
+                }
+                TextureOp::Update {
+                    format,
+                    width,
+                    height,
+                    rects,
+                } => {
+                    let texture_id =
+                        self.update_managed_texture(snapshot_id, *format, *width, *height, rects)?;
+                    feedback.push(request.uploaded(texture_id)?);
+                }
+                TextureOp::Destroy => {
+                    match self
+                        .textures
+                        .retiring_textures
+                        .request_retirement(&mut self.textures.managed_textures, snapshot_id)
+                    {
+                        Ok(RetirementRequest::Queued(_)) | Ok(RetirementRequest::Pending) => {}
+                        Ok(RetirementRequest::Retired) => feedback.push(request.destroyed()?),
+                        Err(()) => {
+                            return Err(RendererError::InvalidRenderState(
+                                "managed texture retirement batch space is exhausted".to_string(),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(feedback)
+    }
+
+    fn create_managed_texture(
+        &mut self,
+        snapshot_id: SnapshotTextureId,
+        format: ImGuiTextureFormat,
+        width: u32,
+        height: u32,
+        row_pitch: usize,
+        pixels: &[u8],
+    ) -> RendererResult<TextureId> {
+        if self.textures.retiring_textures.contains_key(&snapshot_id) {
+            return Err(RendererError::InvalidRenderState(format!(
+                "managed texture {snapshot_id:?} was recreated while retirement is pending"
+            )));
+        }
+        if width == 0 || height == 0 {
+            return Err(RendererError::InvalidRenderState(format!(
+                "managed texture {snapshot_id:?} has zero dimensions"
+            )));
+        }
+        let rgba =
+            texture_upload_to_rgba(format, width, height, row_pitch, pixels).ok_or_else(|| {
+                RendererError::InvalidRenderState(format!(
+                    "managed texture {snapshot_id:?} has an invalid create upload layout"
+                ))
+            })?;
+        if let Some(existing) = self.textures.managed_textures.get(&snapshot_id) {
+            // An abandoned epoch replays Create, and CPU pixels may change before that retry.
+            if existing.texture.width != width || existing.texture.height != height {
+                return Err(RendererError::InvalidRenderState(format!(
+                    "managed texture {snapshot_id:?} create dimensions changed during retry"
+                )));
+            }
+            let texture_id = existing.texture_id;
+            let image = existing.texture.image;
+            self.upload_managed_texture_full(image, width, height, &rgba)?;
+            return Ok(texture_id);
+        }
+        let raw_id = self.textures.allocate_id();
+        let texture_id = TextureId::from(raw_id);
+        let (texture, staging_buffer, staging_mem) = Texture::create(
+            &self.device,
+            &mut self.allocator,
+            width,
+            height,
+            self.options.texture_format,
+            &rgba,
+        )?;
+        let descriptor_set = match create_vulkan_descriptor_set(
+            &self.device,
+            self.descriptor_set_layout,
+            self.descriptor_pool,
+            texture.image_view,
+            texture.sampler,
+        ) {
+            Ok(descriptor_set) => descriptor_set,
+            Err(error) => {
+                let _ = self
+                    .allocator
+                    .destroy_buffer(&self.device, staging_buffer, staging_mem);
+                let _ = texture.destroy(&self.device, &mut self.allocator);
+                return Err(error);
+            }
+        };
+        let (command_buffer, fence) = match self.submit_upload_commands(|command_buffer| {
+            texture.upload(&self.device, command_buffer, staging_buffer, width, height);
+        }) {
+            Ok(upload) => upload,
+            Err(error) => {
+                unsafe {
+                    let _ = self
+                        .device
+                        .free_descriptor_sets(self.descriptor_pool, &[descriptor_set]);
+                }
+                let _ = self
+                    .allocator
+                    .destroy_buffer(&self.device, staging_buffer, staging_mem);
+                let _ = texture.destroy(&self.device, &mut self.allocator);
+                return Err(error);
+            }
+        };
+        self.in_flight_uploads.push_back(InFlightUpload {
+            fence,
+            command_buffer,
+            staging: vec![(staging_buffer, staging_mem)],
+        });
+        let managed = ManagedVulkanTexture {
+            texture_id,
+            texture: VulkanTexture {
+                image: texture.image,
+                image_mem: texture.image_mem,
+                image_view: texture.image_view,
+                sampler: texture.sampler,
+                descriptor_set,
+                width,
+                height,
+            },
+        };
+        self.textures.managed_ids.insert(raw_id, snapshot_id);
+        self.textures.managed_textures.insert(snapshot_id, managed);
+        Ok(texture_id)
+    }
+
+    fn upload_managed_texture_full(
+        &mut self,
+        image: vk::Image,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
     ) -> RendererResult<()> {
-        let mut creates: Vec<PendingTextureCreate> = Vec::new();
-        let mut updates: Vec<PendingTextureUpdate> = Vec::new();
-        let mut writebacks: Vec<TextureWriteback> = Vec::new();
-
-        let mut textures = draw_data.textures_mut();
-        while let Some(mut td) = textures.next() {
-            let status = td.status();
-            let internal_id = td.tex_id().id();
-            let needs_create = matches!(status, TextureStatus::WantCreate)
-                || (matches!(status, TextureStatus::WantUpdates)
-                    && (internal_id == 0 || !self.textures.textures.contains_key(&internal_id)));
-
-            if needs_create {
-                let id = if internal_id == 0 || !self.textures.textures.contains_key(&internal_id) {
-                    self.textures.allocate_id()
-                } else {
-                    internal_id
-                };
-                let replacing_existing = self.textures.textures.contains_key(&id);
-                if replacing_existing {
-                    self.wait_for_pending_uploads()?;
-                }
-
-                let (w, h) = (td.width(), td.height());
-                if w == 0 || h == 0 {
-                    continue;
-                }
-                let Some(pixels) = texture_data_to_rgba_full(&td) else {
-                    continue;
-                };
-
-                let (texture, staging_buffer, staging_mem) = match Texture::create(
-                    &self.device,
-                    &mut self.allocator,
-                    w,
-                    h,
-                    self.options.texture_format,
-                    &pixels,
-                ) {
-                    Ok(texture) => texture,
-                    Err(err) => {
-                        self.discard_pending_texture_work(creates, updates);
-                        return Err(err);
-                    }
-                };
-
-                let descriptor_set = match create_vulkan_descriptor_set(
-                    &self.device,
-                    self.descriptor_set_layout,
-                    self.descriptor_pool,
-                    texture.image_view,
-                    texture.sampler,
-                ) {
-                    Ok(descriptor_set) => descriptor_set,
-                    Err(err) => {
-                        let _ = self.allocator.destroy_buffer(
-                            &self.device,
-                            staging_buffer,
-                            staging_mem,
-                        );
-                        let _ = texture.destroy(&self.device, &mut self.allocator);
-                        self.discard_pending_texture_work(creates, updates);
-                        return Err(err);
-                    }
-                };
-
-                creates.push(PendingTextureCreate {
-                    id,
-                    texture,
-                    descriptor_set,
-                    staging_buffer,
-                    staging_mem: Some(staging_mem),
-                    w,
-                    h,
-                });
-
-                writebacks.push(TextureWriteback {
-                    texture: td.as_raw_mut(),
-                    tex_id: Some(TextureId::from(id)),
-                    status: TextureStatus::OK,
-                });
-                continue;
-            }
-
-            match status {
-                TextureStatus::WantCreate => {
-                    // Handled by `needs_create` branch above.
-                }
-                TextureStatus::WantUpdates => {
-                    let id = internal_id;
-                    let Some(existing) = self.textures.textures.get(&id) else {
-                        // If the backend lost its copy but ImGui still asks for updates, fall back
-                        // to a full recreate in the next frame.
-                        td.set_status(TextureStatus::WantCreate);
-                        continue;
-                    };
-
-                    let (tw, th, image) = (existing.width, existing.height, existing.image);
-                    if tw == 0 || th == 0 {
-                        td.set_status(TextureStatus::OK);
-                        continue;
-                    }
-
-                    let rect = td.update_rect();
-                    let (x, y, w, h) = clamp_rect(rect, tw, th);
-                    if w == 0 || h == 0 {
-                        td.set_status(TextureStatus::OK);
-                        continue;
-                    }
-
-                    let Some(pixels) = texture_data_to_rgba_subrect(&td, x, y, w, h) else {
-                        td.set_status(TextureStatus::OK);
-                        continue;
-                    };
-                    let (staging_buffer, staging_mem) = match create_and_fill_buffer(
-                        &self.device,
-                        &mut self.allocator,
-                        &pixels,
-                        vk::BufferUsageFlags::TRANSFER_SRC,
-                    ) {
-                        Ok(staging) => staging,
-                        Err(err) => {
-                            self.discard_pending_texture_work(creates, updates);
-                            return Err(err);
-                        }
-                    };
-
-                    updates.push(PendingTextureUpdate {
-                        image,
-                        staging_buffer,
-                        staging_mem: Some(staging_mem),
-                        x,
-                        y,
-                        w,
-                        h,
-                    });
-
-                    writebacks.push(TextureWriteback {
-                        texture: td.as_raw_mut(),
-                        tex_id: None,
-                        status: TextureStatus::OK,
-                    });
-                }
-                TextureStatus::WantDestroy => {
-                    let id = internal_id;
-                    if self.textures.textures.contains_key(&id) {
-                        if let Err(err) = self.wait_for_pending_uploads() {
-                            self.discard_pending_texture_work(creates, updates);
-                            return Err(err);
-                        }
-                    }
-                    if let Some(tex) = self.textures.textures.remove(&id) {
-                        tex.destroy(&self.device, &mut self.allocator, self.descriptor_pool);
-                    }
-                    unsafe {
-                        (*td.as_raw_mut()).WantDestroyNextFrame = true;
-                    }
-                    td.set_status(TextureStatus::Destroyed);
-                }
-                TextureStatus::OK | TextureStatus::Destroyed => {}
-            }
-        }
-        drop(textures);
-
-        if !creates.is_empty() || !updates.is_empty() {
-            let (command_buffer, fence) = match self.submit_upload_commands(|cmd| {
-                for c in &creates {
-                    c.texture
-                        .upload(&self.device, cmd, c.staging_buffer, c.w, c.h);
-                }
-                for u in &updates {
-                    upload_rgba_subrect_to_image(
-                        &self.device,
-                        cmd,
-                        u.staging_buffer,
-                        u.image,
-                        u.x,
-                        u.y,
-                        u.w,
-                        u.h,
-                    );
-                }
-            }) {
-                Ok(upload) => upload,
-                Err(err) => {
-                    self.discard_pending_texture_work(creates, updates);
-                    return Err(err);
-                }
-            };
-
-            let mut staging: Vec<(vk::Buffer, Memory)> =
-                Vec::with_capacity(creates.len() + updates.len());
-            let mut created_textures: Vec<(u64, VulkanTexture)> = Vec::with_capacity(creates.len());
-            for c in creates {
-                let (id, texture, staging_buffer, staging_mem) = c.into_vulkan_texture();
-                staging.push((staging_buffer, staging_mem));
-                created_textures.push((id, texture));
-            }
-            for u in updates {
-                staging.push(u.into_staging());
-            }
-
-            self.in_flight_uploads.push_back(InFlightUpload {
-                fence,
+        let (staging_buffer, staging_mem) = create_and_fill_buffer(
+            &self.device,
+            &mut self.allocator,
+            rgba,
+            vk::BufferUsageFlags::TRANSFER_SRC,
+        )?;
+        let (command_buffer, fence) = match self.submit_upload_commands(|command_buffer| {
+            upload_rgba_subrect_to_image(
+                &self.device,
                 command_buffer,
-                staging,
-            });
-
-            for (id, texture) in created_textures {
-                if let Some(old) = self.textures.textures.remove(&id) {
-                    old.destroy(&self.device, &mut self.allocator, self.descriptor_pool);
-                }
-                self.textures.textures.insert(id, texture);
+                staging_buffer,
+                image,
+                0,
+                0,
+                width,
+                height,
+            );
+        }) {
+            Ok(upload) => upload,
+            Err(error) => {
+                let _ = self
+                    .allocator
+                    .destroy_buffer(&self.device, staging_buffer, staging_mem);
+                return Err(error);
             }
-        }
-
-        for writeback in writebacks {
-            writeback.apply();
-        }
-
+        };
+        self.in_flight_uploads.push_back(InFlightUpload {
+            fence,
+            command_buffer,
+            staging: vec![(staging_buffer, staging_mem)],
+        });
         Ok(())
     }
+
+    fn update_managed_texture(
+        &mut self,
+        snapshot_id: SnapshotTextureId,
+        format: ImGuiTextureFormat,
+        width: u32,
+        height: u32,
+        rects: &[TextureUploadRect],
+    ) -> RendererResult<TextureId> {
+        let Some(existing) = self.textures.managed_textures.get(&snapshot_id) else {
+            return Err(RendererError::InvalidRenderState(format!(
+                "managed texture {snapshot_id:?} received an update before create"
+            )));
+        };
+        if existing.texture.width != width || existing.texture.height != height {
+            return Err(RendererError::InvalidRenderState(format!(
+                "managed texture {snapshot_id:?} update dimensions changed without create"
+            )));
+        }
+        let texture_id = existing.texture_id;
+        let image = existing.texture.image;
+        let mut updates = Vec::with_capacity(rects.len());
+        for upload in rects {
+            let rect = upload.rect;
+            let (x, y, w, h) = (
+                u32::from(rect.x),
+                u32::from(rect.y),
+                u32::from(rect.w),
+                u32::from(rect.h),
+            );
+            if w == 0 || h == 0 {
+                continue;
+            }
+            let valid_bounds = x.checked_add(w).is_some_and(|right| right <= width)
+                && y.checked_add(h).is_some_and(|bottom| bottom <= height);
+            if !valid_bounds {
+                self.discard_pending_texture_updates(updates);
+                return Err(RendererError::InvalidRenderState(format!(
+                    "managed texture {snapshot_id:?} update rectangle is out of bounds"
+                )));
+            }
+            let Some(rgba) = texture_upload_to_rgba(format, w, h, upload.row_pitch, &upload.data)
+            else {
+                self.discard_pending_texture_updates(updates);
+                return Err(RendererError::InvalidRenderState(format!(
+                    "managed texture {snapshot_id:?} has an invalid update upload layout"
+                )));
+            };
+            let (staging_buffer, staging_mem) = match create_and_fill_buffer(
+                &self.device,
+                &mut self.allocator,
+                &rgba,
+                vk::BufferUsageFlags::TRANSFER_SRC,
+            ) {
+                Ok(staging) => staging,
+                Err(error) => {
+                    self.discard_pending_texture_updates(updates);
+                    return Err(error);
+                }
+            };
+            updates.push(PendingTextureUpdate {
+                image,
+                staging_buffer,
+                staging_mem: Some(staging_mem),
+                x,
+                y,
+                w,
+                h,
+            });
+        }
+        if updates.is_empty() {
+            return Ok(texture_id);
+        }
+        let (command_buffer, fence) = match self.submit_upload_commands(|command_buffer| {
+            for update in &updates {
+                upload_rgba_subrect_to_image(
+                    &self.device,
+                    command_buffer,
+                    update.staging_buffer,
+                    update.image,
+                    update.x,
+                    update.y,
+                    update.w,
+                    update.h,
+                );
+            }
+        }) {
+            Ok(upload) => upload,
+            Err(error) => {
+                self.discard_pending_texture_updates(updates);
+                return Err(error);
+            }
+        };
+        let staging = updates
+            .into_iter()
+            .map(PendingTextureUpdate::into_staging)
+            .collect();
+        self.in_flight_uploads.push_back(InFlightUpload {
+            fence,
+            command_buffer,
+            staging,
+        });
+        Ok(texture_id)
+    }
+
+    fn discard_pending_texture_updates(&mut self, updates: Vec<PendingTextureUpdate>) {
+        for update in updates {
+            self.discard_pending_texture_update(update);
+        }
+    }
+}
+
+pub(super) fn texture_upload_to_rgba(
+    format: ImGuiTextureFormat,
+    width: u32,
+    height: u32,
+    row_pitch: usize,
+    pixels: &[u8],
+) -> Option<Vec<u8>> {
+    let width = usize::try_from(width).ok()?;
+    let height = usize::try_from(height).ok()?;
+    if width == 0 || height == 0 {
+        return None;
+    }
+    let source_bpp = match format {
+        ImGuiTextureFormat::RGBA32 => 4,
+        ImGuiTextureFormat::Alpha8 => 1,
+    };
+    let packed_row = width.checked_mul(source_bpp)?;
+    if row_pitch < packed_row {
+        return None;
+    }
+    let required = (height - 1)
+        .checked_mul(row_pitch)?
+        .checked_add(packed_row)?;
+    if pixels.len() < required {
+        return None;
+    }
+
+    let mut rgba = vec![0_u8; width.checked_mul(height)?.checked_mul(4)?];
+    for row in 0..height {
+        let source = &pixels[row * row_pitch..row * row_pitch + packed_row];
+        let destination = &mut rgba[row * width * 4..(row + 1) * width * 4];
+        match format {
+            ImGuiTextureFormat::RGBA32 => destination.copy_from_slice(source),
+            ImGuiTextureFormat::Alpha8 => {
+                for (pixel, alpha) in destination.chunks_exact_mut(4).zip(source) {
+                    pixel.copy_from_slice(&[255, 255, 255, *alpha]);
+                }
+            }
+        }
+    }
+    Some(rgba)
 }
 
 pub(super) fn texture_data_to_rgba_full(td: &TextureData) -> Option<Vec<u8>> {

@@ -16,10 +16,11 @@ let mut renderer = WgpuRenderer::new(WgpuInitInfo::new(device, queue, surface_fo
 renderer.set_gamma_mode(GammaMode::Auto); // Auto | Linear | Gamma22
 
 // per-frame
-renderer.render_draw_data(imgui.render(), &mut render_pass)?;
+let frame = imgui.render();
+renderer.render(frame, &mut render_pass)?;
 ```
 
-Each `WgpuRenderer` is bound to the `Context` passed to `new` or `init_with_context`. Create one renderer per context in multi-context applications. `render_context()` and `render_context_with_fb_size()` finalize only that bound context and return `RendererError::ContextMismatch` for another context. The draw-data entry points likewise use the bound context's `PlatformIO` and require that context to be current.
+Each `WgpuRenderer` is bound to the `Context` passed to `new` or `init_with_context` and owns its sole renderer consumer generation. Create one renderer per context in multi-context applications. `render()` consumes the Context-borrowed frame, processes pointer-free managed texture requests, reconciles feedback, and only then reads draw commands. `render_context()` and `render_context_with_fb_size()` are convenience methods that finalize only the bound context and return `RendererError::ContextMismatch` for another context.
 
 ## Native multi-viewport
 
@@ -154,10 +155,12 @@ See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob
 - Diagnostics
   - `tracing` enables renderer debug and warning events; it is off by default
 - WASM targets
+  - Every WebGL/WebGPU route automatically enables the matching `dear-imgui-rs/wasm` import path
   - `webgl` / `webgpu` select the WASM route for the default `wgpu-30` build
   - With `wgpu-29`, use `webgl-wgpu29` / `webgpu-wgpu29` instead
   - With `wgpu-28`, use `webgl-wgpu28` / `webgpu-wgpu28` instead
   - With `wgpu-27`, use `webgl-wgpu27` / `webgpu-wgpu27` instead
+  - `wasm-font-atlas-experimental` also enables the required core WASM import provider
 
 Select exactly one WGPU major. `webgl` and `webgpu` may be enabled individually or together for
 the selected major; enabling both lets WGPU choose an available browser backend at runtime. Leave

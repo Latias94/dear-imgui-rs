@@ -120,6 +120,7 @@ impl GlowRenderer {
         imgui_context: &mut ImGuiContext,
         texture_map: Box<dyn TextureMap>,
     ) -> InitResult<Self> {
+        let renderer_consumer = imgui_context.create_renderer_consumer()?;
         let gl_version = GlVersion::read(gl);
 
         #[cfg(feature = "clip_origin_support")]
@@ -146,17 +147,12 @@ impl GlowRenderer {
         let mut state_backup = GlStateBackup::default();
         state_backup.backup(gl, gl_version);
 
-        // The managed texture path builds and uploads the atlas on the first frame.
-        imgui_context
-            .platform_io_mut()
-            .invalidate_renderer_texture_bindings();
-        Self::configure_imgui_context_static(imgui_context);
-
         let shaders = Shaders::new(gl, gl_version)?;
         let vbo_handle = unsafe { gl.create_buffer() }.map_err(InitError::CreateBufferObject)?;
         let ebo_handle = unsafe { gl.create_buffer() }.map_err(InitError::CreateBufferObject)?;
 
         state_backup.restore(gl, gl_version);
+        Self::configure_imgui_context_static(imgui_context);
 
         let renderer = Self {
             shaders,
@@ -171,6 +167,8 @@ impl GlowRenderer {
             is_destroyed: false,
             gl_context: owned_gl,
             texture_map: Some(texture_map),
+            managed_textures: std::collections::HashMap::new(),
+            renderer_consumer: Some(renderer_consumer),
             framebuffer_srgb: false,
             color_gamma_override: None,
             viewport_clear_color: [0.0, 0.0, 0.0, 1.0],
@@ -210,5 +208,59 @@ impl GlowRenderer {
             .set_draw_callback_set_sampler_linear_raw(Some(draw_callback_set_sampler_linear));
         platform_io
             .set_draw_callback_set_sampler_nearest_raw(Some(draw_callback_set_sampler_nearest));
+    }
+
+    pub(super) fn unconfigure_imgui_context_static(imgui_context: &mut ImGuiContext) {
+        let expected_name = format!("dear-imgui-glow {}", env!("CARGO_PKG_VERSION"));
+        if imgui_context
+            .io()
+            .backend_renderer_name()
+            .is_some_and(|name| name.to_bytes() == expected_name.as_bytes())
+        {
+            let _ = imgui_context.set_renderer_name(None::<String>);
+        }
+
+        let io = imgui_context.io_mut();
+        let mut flags = io.backend_flags();
+        flags.remove(dear_imgui_rs::BackendFlags::RENDERER_HAS_VTX_OFFSET);
+        flags.remove(dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES);
+        #[cfg(feature = "multi-viewport")]
+        flags.remove(dear_imgui_rs::BackendFlags::RENDERER_HAS_VIEWPORTS);
+        io.set_backend_flags(flags);
+
+        let platform_io = imgui_context.platform_io_mut();
+        if platform_io
+            .draw_callback_reset_render_state_raw()
+            .is_some_and(|callback| {
+                std::ptr::eq(
+                    callback as *const (),
+                    draw_callback_reset_render_state as *const (),
+                )
+            })
+        {
+            platform_io.set_draw_callback_reset_render_state_raw(None);
+        }
+        if platform_io
+            .draw_callback_set_sampler_linear_raw()
+            .is_some_and(|callback| {
+                std::ptr::eq(
+                    callback as *const (),
+                    draw_callback_set_sampler_linear as *const (),
+                )
+            })
+        {
+            platform_io.set_draw_callback_set_sampler_linear_raw(None);
+        }
+        if platform_io
+            .draw_callback_set_sampler_nearest_raw()
+            .is_some_and(|callback| {
+                std::ptr::eq(
+                    callback as *const (),
+                    draw_callback_set_sampler_nearest as *const (),
+                )
+            })
+        {
+            platform_io.set_draw_callback_set_sampler_nearest_raw(None);
+        }
     }
 }

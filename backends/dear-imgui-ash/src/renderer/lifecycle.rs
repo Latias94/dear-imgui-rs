@@ -1,7 +1,7 @@
 use super::*;
 
 impl AshRenderer {
-    pub fn configure_imgui_context(&self, imgui_context: &mut Context) {
+    fn configure_imgui_context(&mut self, imgui_context: &mut Context) {
         let should_set_name = imgui_context.io().backend_renderer_name().is_none();
         if should_set_name {
             let _ = imgui_context.set_renderer_name(Some(format!(
@@ -10,15 +10,39 @@ impl AshRenderer {
             )));
         }
 
+        let renderer_flags =
+            BackendFlags::RENDERER_HAS_VTX_OFFSET | BackendFlags::RENDERER_HAS_TEXTURES;
         let io = imgui_context.io_mut();
-        let mut flags = io.backend_flags();
-        flags.insert(BackendFlags::RENDERER_HAS_VTX_OFFSET);
-        flags.insert(BackendFlags::RENDERER_HAS_TEXTURES);
-        io.set_backend_flags(flags);
+        let flags = io.backend_flags();
+        self.renderer_flags_added = renderer_flags & !flags;
+        io.set_backend_flags(flags | renderer_flags);
 
         imgui_context
             .platform_io_mut()
             .set_draw_callback_reset_render_state_raw(Some(draw_callback_reset_render_state));
+    }
+
+    fn unconfigure_imgui_context(imgui_context: &mut Context, renderer_flags_added: BackendFlags) {
+        let expected_name = format!("dear-imgui-ash {}", env!("CARGO_PKG_VERSION"));
+        if imgui_context
+            .io()
+            .backend_renderer_name()
+            .is_some_and(|name| name.to_bytes() == expected_name.as_bytes())
+        {
+            let _ = imgui_context.set_renderer_name(None::<String>);
+        }
+
+        let io = imgui_context.io_mut();
+        io.set_backend_flags(io.backend_flags() & !renderer_flags_added);
+
+        let platform_io = imgui_context.platform_io_mut();
+        if platform_io
+            .draw_callback_reset_render_state_raw()
+            .map(|callback| callback as usize)
+            == Some(draw_callback_reset_render_state as *const () as usize)
+        {
+            platform_io.set_draw_callback_reset_render_state_raw(None);
+        }
     }
 
     /// Create a new renderer using the internal default allocator.
@@ -179,6 +203,8 @@ impl AshRenderer {
             descriptor_set_layout,
             descriptor_pool,
             textures: TextureManager::new(),
+            consumer: None,
+            renderer_flags_added: BackendFlags::empty(),
             default_texture_id: 0,
             options,
             frames: Frames::new(options.in_flight_frames),
@@ -191,15 +217,81 @@ impl AshRenderer {
         };
 
         renderer.default_texture_id = renderer.create_default_texture()?;
-        imgui
-            .platform_io_mut()
-            .invalidate_renderer_texture_bindings();
+        let consumer = match imgui.create_renderer_consumer() {
+            Ok(consumer) => consumer,
+            Err(error) => {
+                let _ = renderer.destroy_internal();
+                return Err(error.into());
+            }
+        };
+        renderer.consumer = Some(consumer);
+        if let Err(error) = imgui.reset_renderer_texture_bindings(
+            renderer
+                .consumer
+                .as_ref()
+                .expect("renderer consumer was just attached"),
+        ) {
+            let _ = renderer.destroy_internal();
+            renderer.consumer.take();
+            return Err(error.into());
+        }
         renderer.configure_imgui_context(imgui);
         Ok(renderer)
     }
 }
 
 impl AshRenderer {
+    pub(super) fn ensure_frame_matches(&self, frame: &RenderedFrame<'_>) -> RendererResult<()> {
+        if self.destroyed {
+            return Err(RendererError::RendererDestroyed);
+        }
+        let consumer = self
+            .consumer
+            .as_ref()
+            .ok_or(RendererError::RendererNotAttached)?;
+        if frame.context_id() != consumer.context_id() {
+            return Err(RendererError::ContextMismatch {
+                expected: consumer.context_id(),
+                actual: frame.context_id(),
+            });
+        }
+        let epoch = frame.epoch().ok_or_else(|| {
+            RendererError::InvalidRenderState(
+                "Ash requires a managed-texture renderer epoch".to_string(),
+            )
+        })?;
+        if epoch.consumer_generation() != consumer.generation() {
+            return Err(RendererError::ConsumerGenerationMismatch {
+                expected: consumer.generation(),
+                actual: epoch.consumer_generation(),
+            });
+        }
+        Ok(())
+    }
+
+    fn ensure_context_matches(&self, imgui_context: &Context) -> RendererResult<()> {
+        let consumer = self
+            .consumer
+            .as_ref()
+            .ok_or(RendererError::RendererNotAttached)?;
+        if imgui_context.id() != consumer.context_id() {
+            return Err(RendererError::ContextMismatch {
+                expected: consumer.context_id(),
+                actual: imgui_context.id(),
+            });
+        }
+        Ok(())
+    }
+
+    #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+    fn ensure_multi_viewport_inactive(&mut self) -> RendererResult<()> {
+        if vulkan_viewport::has_renderer_state_for_renderer(self as *mut _) {
+            Err(RendererError::MultiViewportActive)
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn options(&self) -> Options {
         self.options
     }
@@ -317,20 +409,52 @@ impl AshRenderer {
 }
 
 impl AshRenderer {
-    pub(super) fn destroy_internal(&mut self) {
-        if self.destroyed {
-            return;
-        }
-        self.destroyed = true;
+    /// Wait for the device, release all renderer-owned Vulkan resources, and detach from ImGui.
+    ///
+    /// Multi-viewport users must call the matching `shutdown_multi_viewport_support` helper first.
+    /// Unlike `Drop`, this method can reset Context-owned texture bindings after GPU destruction.
+    pub fn shutdown(&mut self, imgui_context: &mut Context) -> RendererResult<()> {
+        self.ensure_context_matches(imgui_context)?;
+        #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+        self.ensure_multi_viewport_inactive()?;
 
-        // Best-effort: ensure in-flight uploads are complete before freeing staging memory.
-        let _ = unsafe { self.device.device_wait_idle() };
+        self.destroy_internal()?;
+        let consumer = self
+            .consumer
+            .as_ref()
+            .ok_or(RendererError::RendererNotAttached)?;
+        imgui_context.reset_renderer_texture_bindings(consumer)?;
+        Self::unconfigure_imgui_context(imgui_context, self.renderer_flags_added);
+        self.renderer_flags_added = BackendFlags::empty();
+        self.consumer.take();
+        Ok(())
+    }
+
+    pub(super) fn destroy_internal(&mut self) -> RendererResult<()> {
+        if self.destroyed {
+            return Ok(());
+        }
+
+        unsafe { self.device.device_wait_idle()? };
         let _ = self.reap_all_uploads();
 
         let textures = std::mem::take(&mut self.textures.textures);
         for (_, tex) in textures {
             tex.destroy(&self.device, &mut self.allocator, self.descriptor_pool);
         }
+        let managed_textures = std::mem::take(&mut self.textures.managed_textures);
+        for (_, managed) in managed_textures {
+            managed
+                .texture
+                .destroy(&self.device, &mut self.allocator, self.descriptor_pool);
+        }
+        let retiring_textures = self.textures.retiring_textures.drain().collect::<Vec<_>>();
+        for (_, managed) in retiring_textures {
+            managed
+                .texture
+                .destroy(&self.device, &mut self.allocator, self.descriptor_pool);
+        }
+        self.textures.managed_ids.clear();
 
         unsafe {
             #[cfg(all(
@@ -364,13 +488,15 @@ impl AshRenderer {
 
         let frames = std::mem::replace(&mut self.frames, Frames::new(0));
         let _ = frames.destroy(&self.device, &mut self.allocator);
+        self.destroyed = true;
+        Ok(())
     }
 }
 
 impl Drop for AshRenderer {
     fn drop(&mut self) {
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            self.destroy_internal();
+            let _ = self.destroy_internal();
         }));
     }
 }

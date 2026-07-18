@@ -9,7 +9,7 @@ use wgpu::*;
 /// Selected render state data shared with callbacks
 ///
 /// This corresponds to ImGui_ImplWGPU_RenderState in the C++ implementation.
-/// This is temporarily stored during the render_draw_data() call to allow
+/// This is temporarily stored during the rendered-frame call to allow
 /// draw callbacks to access the current render state.
 #[derive(Debug)]
 pub struct WgpuRenderState {

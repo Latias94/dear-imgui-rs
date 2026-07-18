@@ -1,10 +1,9 @@
 //! Render-world extraction data for the Bevy backend.
 //!
-//! BEVY-080 clones the thread-safe [`FrameSnapshot`](dear_imgui_rs::render::snapshot::FrameSnapshot)
-//! produced by the main-world lifecycle and associates it with the Bevy cameras that should receive
-//! ImGui overlay rendering. BEVY-090 then prepares renderer-facing CPU batches, shader and pipeline
-//! descriptors, and a camera-driven overlay pass without borrowing raw ImGui draw data across
-//! worlds.
+//! The main world moves one [`FrameSnapshot`](dear_imgui_rs::render::snapshot::FrameSnapshot)
+//! through a bounded mailbox and associates it with the Bevy cameras that should receive ImGui
+//! overlay rendering. The render world owns the snapshot until request-bound texture feedback is
+//! committed, without borrowing raw ImGui draw data across worlds.
 
 use bevy_app::App;
 use bevy_asset::{Assets, Handle, uuid_handle};
@@ -48,7 +47,7 @@ use bevy_shader::Shader;
 use bevy_window::PrimaryWindow;
 use bytemuck::{Pod, Zeroable};
 use dear_imgui_rs as imgui;
-use imgui::render::{DrawCmdSnapshot, DrawIdx, TextureBinding};
+use imgui::render::{DrawCmdSnapshot, DrawIdx, SnapshotTextureId, TextureBinding};
 use std::collections::{HashMap, HashSet};
 use std::mem::size_of;
 
@@ -867,13 +866,20 @@ struct ImguiViewportTarget {
 pub struct ImguiTextureBindGroups {
     textures: HashMap<TextureBinding, ImguiRenderTexture>,
     bevy_image_bindings: HashSet<TextureBinding>,
-    managed_texture_ids: HashMap<imgui::ManagedTextureId, imgui::TextureId>,
+    managed_texture_ids: HashMap<SnapshotTextureId, imgui::TextureId>,
     next_managed_texture_id: u64,
 }
 
 impl ImguiTextureBindGroups {
-    /// Register or replace a texture bind group for an ImGui texture binding.
-    pub fn insert(&mut self, texture: TextureBinding, bind_group: BindGroup) {
+    /// Register or replace a bind group for an external ImGui texture ID.
+    ///
+    /// Context-managed textures are intentionally excluded: their bind groups may only change
+    /// while processing the matching snapshot request and feedback pair.
+    pub fn insert(&mut self, texture: imgui::TextureId, bind_group: BindGroup) {
+        self.insert_binding(TextureBinding::Legacy(texture), bind_group);
+    }
+
+    fn insert_binding(&mut self, texture: TextureBinding, bind_group: BindGroup) {
         self.bevy_image_bindings.remove(&texture);
         self.textures.insert(
             texture,
@@ -887,8 +893,12 @@ impl ImguiTextureBindGroups {
         );
     }
 
-    /// Remove a texture bind group.
-    pub fn remove(&mut self, texture: &TextureBinding) {
+    /// Remove the bind group for an external ImGui texture ID.
+    pub fn remove(&mut self, texture: imgui::TextureId) {
+        self.remove_binding(&TextureBinding::Legacy(texture));
+    }
+
+    fn remove_binding(&mut self, texture: &TextureBinding) {
         self.textures.remove(texture);
         self.bevy_image_bindings.remove(texture);
     }
@@ -921,7 +931,7 @@ impl ImguiTextureBindGroups {
         self.textures.insert(texture, render_texture);
     }
 
-    fn managed_texture_id(&mut self, id: imgui::ManagedTextureId) -> imgui::TextureId {
+    fn managed_texture_id(&mut self, id: SnapshotTextureId) -> imgui::TextureId {
         if let Some(texture_id) = self.managed_texture_ids.get(&id) {
             return *texture_id;
         }
@@ -939,10 +949,10 @@ impl ImguiTextureBindGroups {
         texture_id
     }
 
-    fn remove_managed_texture(&mut self, id: imgui::ManagedTextureId) {
-        self.remove(&TextureBinding::Managed(id));
+    fn remove_managed_texture(&mut self, id: SnapshotTextureId) {
+        self.remove_binding(&TextureBinding::Managed(id));
         if let Some(texture_id) = self.managed_texture_ids.remove(&id) {
-            self.remove(&TextureBinding::Legacy(texture_id));
+            self.remove_binding(&TextureBinding::Legacy(texture_id));
         }
     }
 
@@ -967,7 +977,7 @@ impl ImguiTextureBindGroups {
             .copied()
             .collect::<Vec<_>>();
         for binding in stale_bindings {
-            self.remove(&binding);
+            self.remove_binding(&binding);
         }
     }
 }
@@ -1028,12 +1038,13 @@ impl ImguiQueuedPipelines {
     }
 }
 
-/// Render-side copy of the last completed primary ImGui frame.
-#[derive(Resource, Clone, Debug, Default)]
+/// Render-side owner of the last extracted primary ImGui frame.
+#[derive(Resource, Debug, Default)]
 pub struct ImguiExtractedRenderFrame {
     frame_index: Option<u64>,
     snapshot: Option<imgui::render::snapshot::FrameSnapshot>,
     camera_targets: Vec<ImguiCameraTarget>,
+    texture_feedback: Vec<imgui::render::snapshot::TextureFeedback>,
 }
 
 impl ImguiExtractedRenderFrame {
@@ -1043,7 +1054,7 @@ impl ImguiExtractedRenderFrame {
         self.frame_index
     }
 
-    /// Snapshot copied from the main/UI world.
+    /// Snapshot moved from the main/UI world, if it has not been completed yet.
     #[must_use]
     pub fn snapshot(&self) -> Option<&imgui::render::snapshot::FrameSnapshot> {
         self.snapshot.as_ref()
@@ -1061,15 +1072,41 @@ impl ImguiExtractedRenderFrame {
         snapshot: imgui::render::snapshot::FrameSnapshot,
         camera_targets: Vec<ImguiCameraTarget>,
     ) {
+        self.abandon();
         self.frame_index = Some(frame_index);
         self.snapshot = Some(snapshot);
         self.camera_targets = camera_targets;
     }
 
     fn clear(&mut self, frame_index: u64) {
+        self.abandon();
         self.frame_index = (frame_index > 0).then_some(frame_index);
-        self.snapshot = None;
         self.camera_targets.clear();
+    }
+
+    fn extend_texture_feedback(
+        &mut self,
+        feedback: impl IntoIterator<Item = imgui::render::snapshot::TextureFeedback>,
+    ) {
+        self.texture_feedback.extend(feedback);
+    }
+
+    fn commit(&mut self) {
+        let feedback = std::mem::take(&mut self.texture_feedback);
+        if let Some(snapshot) = self.snapshot.take() {
+            let _ = snapshot.commit(feedback);
+        }
+    }
+
+    fn abandon(&mut self) {
+        self.texture_feedback.clear();
+        drop(self.snapshot.take());
+    }
+}
+
+impl Drop for ImguiExtractedRenderFrame {
+    fn drop(&mut self) {
+        self.abandon();
     }
 }
 
@@ -1078,10 +1115,10 @@ struct ImguiRenderExtractionInstalled;
 
 pub(crate) fn install_render_extraction(app: &mut App) -> bool {
     install_imgui_shader_asset(app);
-    app.init_resource::<crate::ImguiTextureFeedbackQueue>();
-    let texture_feedback = app
+    app.init_resource::<crate::context::ImguiFrameMailbox>();
+    let snapshot_mailbox = app
         .world()
-        .resource::<crate::ImguiTextureFeedbackQueue>()
+        .resource::<crate::context::ImguiFrameMailbox>()
         .clone();
 
     if app.get_sub_app_mut(RenderApp).is_none() {
@@ -1110,7 +1147,7 @@ pub(crate) fn install_render_extraction(app: &mut App) -> bool {
         .init_resource::<ImguiTextureBindGroups>()
         .init_resource::<ImguiQueuedPipelines>()
         .init_gpu_resource::<ImguiPipelineGpuResources>()
-        .insert_resource(texture_feedback)
+        .insert_resource(snapshot_mailbox)
         .insert_resource(ImguiRenderExtractionInstalled)
         .add_systems(
             ExtractSchedule,
@@ -1128,7 +1165,9 @@ pub(crate) fn install_render_extraction(app: &mut App) -> bool {
         )
         .add_systems(
             Render,
-            prepare_imgui_texture_bind_groups.in_set(RenderSystems::PrepareBindGroups),
+            (prepare_imgui_texture_bind_groups, commit_imgui_render_frame)
+                .chain()
+                .in_set(RenderSystems::PrepareBindGroups),
         )
         .add_systems(
             Render,
@@ -1212,12 +1251,13 @@ fn extract_imgui_bevy_textures(
 fn extract_imgui_render_frame(
     mut extracted: ResMut<ImguiExtractedRenderFrame>,
     output: Extract<Res<crate::ImguiFrameOutput>>,
+    snapshot_mailbox: Res<crate::context::ImguiFrameMailbox>,
     backend_status: Extract<Res<ImguiBackendStatus>>,
     primary_window: Extract<Query<Entity, With<PrimaryWindow>>>,
     viewport_windows: Extract<Query<(Entity, &ImguiViewportWindow)>>,
     cameras: Extract<OverlayCameraQuery<'_>>,
 ) {
-    let Some(snapshot) = output.snapshot().cloned() else {
+    let Some((frame_index, snapshot)) = snapshot_mailbox.take() else {
         extracted.clear(output.frame_index());
         return;
     };
@@ -1228,7 +1268,7 @@ fn extract_imgui_render_frame(
         Vec::new()
     };
     let camera_targets = collect_camera_targets(primary_window, &viewport_targets, cameras.iter());
-    extracted.replace(output.frame_index(), snapshot, camera_targets);
+    extracted.replace(frame_index, snapshot, camera_targets);
 }
 
 /// Normalize every active overlay camera target, including secondary windows.
@@ -1331,9 +1371,9 @@ fn prepare_imgui_render_frame(
         return;
     };
 
-    let primary_uniforms = valid_display_rect(&snapshot.draw).map(|_| {
-        ImguiUniforms::from_display_rect(snapshot.draw.display_pos, snapshot.draw.display_size)
-    });
+    let draw_data = snapshot.draw_data();
+    let primary_uniforms = valid_display_rect(draw_data)
+        .map(|_| ImguiUniforms::from_display_rect(draw_data.display_pos, draw_data.display_size));
     let (vertices, indices, draws, uniforms_by_camera) =
         prepare_snapshot_draw_data(snapshot, extracted.camera_targets());
     prepared.replace(PreparedFrameData {
@@ -1343,7 +1383,7 @@ fn prepare_imgui_render_frame(
         vertices,
         indices,
         draws,
-        texture_request_count: snapshot.texture_requests.len(),
+        texture_request_count: snapshot.texture_requests().len(),
     });
 }
 
@@ -1386,18 +1426,17 @@ fn prepare_imgui_uniform_bind_groups(
 
 #[derive(SystemParam)]
 struct ImguiTextureBindGroupParams<'w> {
-    extracted: Res<'w, ImguiExtractedRenderFrame>,
+    extracted: ResMut<'w, ImguiExtractedRenderFrame>,
     extracted_bevy_textures: Res<'w, ImguiExtractedBevyTextures>,
     gpu_images: Option<Res<'w, RenderAssets<GpuImage>>>,
     render_device: Option<Res<'w, RenderDevice>>,
     render_queue: Option<Res<'w, RenderQueue>>,
     pipeline_cache: Option<Res<'w, PipelineCache>>,
     pipeline: Res<'w, ImguiRenderPipeline>,
-    texture_feedback: Res<'w, crate::ImguiTextureFeedbackQueue>,
 }
 
 fn prepare_imgui_texture_bind_groups(
-    params: ImguiTextureBindGroupParams,
+    mut params: ImguiTextureBindGroupParams,
     mut texture_bind_groups: ResMut<ImguiTextureBindGroups>,
 ) {
     let (Some(render_device), Some(render_queue), Some(pipeline_cache)) = (
@@ -1420,8 +1459,10 @@ fn prepare_imgui_texture_bind_groups(
         return;
     };
 
-    for request in &snapshot.texture_requests {
-        match &request.op {
+    let mut texture_feedback = Vec::new();
+    for request in snapshot.texture_requests() {
+        let snapshot_texture = request.texture();
+        match request.operation() {
             imgui::render::TextureOp::Create {
                 format,
                 width,
@@ -1445,20 +1486,18 @@ fn prepare_imgui_texture_bind_groups(
                         pixels,
                     },
                 ) {
-                    let tex_id = texture_bind_groups.managed_texture_id(request.id);
+                    let tex_id = texture_bind_groups.managed_texture_id(snapshot_texture);
                     texture_bind_groups.insert_render_texture(
                         TextureBinding::Legacy(tex_id),
                         render_texture.clone_for_legacy_id(),
                     );
-                    texture_bind_groups
-                        .insert_render_texture(TextureBinding::Managed(request.id), render_texture);
-                    params.texture_feedback.push(
-                        imgui::render::snapshot::TextureFeedback::with_tex_id(
-                            request.id,
-                            imgui::texture::TextureStatus::OK,
-                            tex_id,
-                        ),
+                    texture_bind_groups.insert_render_texture(
+                        TextureBinding::Managed(snapshot_texture),
+                        render_texture,
                     );
+                    if let Ok(feedback) = request.uploaded(tex_id) {
+                        texture_feedback.push(feedback);
+                    }
                 }
             }
             imgui::render::TextureOp::Update {
@@ -1472,7 +1511,7 @@ fn prepare_imgui_texture_bind_groups(
                 }
                 if let Some(render_texture) = texture_bind_groups
                     .textures
-                    .get(&TextureBinding::Managed(request.id))
+                    .get(&TextureBinding::Managed(snapshot_texture))
                 {
                     let Some(texture_extent) = render_texture.extent else {
                         continue;
@@ -1499,22 +1538,21 @@ fn prepare_imgui_texture_bind_groups(
                             &update.pixels,
                         );
                     }
-                    params
-                        .texture_feedback
-                        .push(imgui::render::snapshot::TextureFeedback::status(
-                            request.id,
-                            imgui::texture::TextureStatus::OK,
-                        ));
+                    if let Some(texture_id) = texture_bind_groups
+                        .managed_texture_ids
+                        .get(&snapshot_texture)
+                        .copied()
+                        && let Ok(feedback) = request.uploaded(texture_id)
+                    {
+                        texture_feedback.push(feedback);
+                    }
                 }
             }
             imgui::render::TextureOp::Destroy => {
-                texture_bind_groups.remove_managed_texture(request.id);
-                params
-                    .texture_feedback
-                    .push(imgui::render::snapshot::TextureFeedback::status(
-                        request.id,
-                        imgui::texture::TextureStatus::Destroyed,
-                    ));
+                texture_bind_groups.remove_managed_texture(snapshot_texture);
+                if let Ok(feedback) = request.destroyed() {
+                    texture_feedback.push(feedback);
+                }
             }
         }
     }
@@ -1527,6 +1565,11 @@ fn prepare_imgui_texture_bind_groups(
         &params.pipeline,
         &mut texture_bind_groups,
     );
+    params.extracted.extend_texture_feedback(texture_feedback);
+}
+
+fn commit_imgui_render_frame(mut extracted: ResMut<ImguiExtractedRenderFrame>) {
+    extracted.commit();
 }
 
 fn validate_managed_texture_extent(render_device: &RenderDevice, width: u32, height: u32) -> bool {
@@ -1722,7 +1765,7 @@ fn prepare_bevy_image_texture_bind_groups(
     for (texture_id, asset_id) in extracted_bevy_textures.textures() {
         let binding = TextureBinding::Legacy(*texture_id);
         let Some(gpu_image) = gpu_images.get(*asset_id) else {
-            texture_bind_groups.remove(&binding);
+            texture_bind_groups.remove_binding(&binding);
             continue;
         };
         let Some(bind_group) = create_bevy_image_texture_bind_group(
@@ -1731,7 +1774,7 @@ fn prepare_bevy_image_texture_bind_groups(
             pipeline,
             gpu_image,
         ) else {
-            texture_bind_groups.remove(&binding);
+            texture_bind_groups.remove_binding(&binding);
             continue;
         };
         texture_bind_groups.insert_bevy_image(binding, bind_group);
@@ -2178,7 +2221,20 @@ fn prepare_snapshot_draw_data(
     Vec<ImguiPreparedDraw>,
     HashMap<Entity, ImguiUniforms>,
 ) {
-    let viewport_draws = snapshot_viewport_draws(snapshot);
+    prepare_draw_data(snapshot.draw_data(), snapshot.viewports(), camera_targets)
+}
+
+fn prepare_draw_data(
+    main_draw: &imgui::render::DrawDataSnapshot,
+    viewports: &[imgui::render::ViewportDrawDataSnapshot],
+    camera_targets: &[ImguiCameraTarget],
+) -> (
+    Vec<ImguiGpuVertex>,
+    Vec<DrawIdx>,
+    Vec<ImguiPreparedDraw>,
+    HashMap<Entity, ImguiUniforms>,
+) {
+    let viewport_draws = snapshot_viewport_draws(main_draw, viewports);
     let vertex_count = viewport_draws
         .iter()
         .flat_map(|(_, draw)| &draw.draw_lists)
@@ -2310,20 +2366,20 @@ fn prepare_snapshot_draw_data(
     (vertices, indices, draws, uniforms_by_camera)
 }
 
-fn snapshot_viewport_draws(
-    snapshot: &imgui::render::FrameSnapshot,
-) -> Vec<(Option<imgui::Id>, &imgui::render::DrawDataSnapshot)> {
-    if snapshot.viewports.is_empty() {
-        return vec![(None, &snapshot.draw)];
+fn snapshot_viewport_draws<'draw>(
+    main_draw: &'draw imgui::render::DrawDataSnapshot,
+    viewports: &'draw [imgui::render::ViewportDrawDataSnapshot],
+) -> Vec<(Option<imgui::Id>, &'draw imgui::render::DrawDataSnapshot)> {
+    if viewports.is_empty() {
+        return vec![(None, main_draw)];
     }
 
-    let mut draws = snapshot
-        .viewports
+    let mut draws = viewports
         .iter()
         .map(|viewport| (Some(viewport.viewport_id), &viewport.draw))
         .collect::<Vec<_>>();
     if !draws.iter().any(|(viewport_id, _)| viewport_id.is_none()) {
-        draws.insert(0, (None, &snapshot.draw));
+        draws.insert(0, (None, main_draw));
     }
     draws
 }
@@ -2584,6 +2640,171 @@ mod tests {
         );
     }
 
+    fn managed_context() -> imgui::Context {
+        let mut context = imgui::Context::create();
+        context.io_mut().set_config_input_trickle_event_queue(false);
+        context.prepare_frame(
+            imgui::FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
+        );
+        let _ = context.font_atlas().build();
+        let _ = context.set_ini_filename::<std::path::PathBuf>(None);
+        context
+    }
+
+    fn managed_snapshot(
+        context: &mut imgui::Context,
+        consumer: &imgui::render::RendererConsumer,
+        texture: Option<imgui::ManagedTextureId>,
+    ) -> imgui::render::FrameSnapshot {
+        context.prepare_frame(
+            imgui::FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
+        );
+        let frame = context.begin_frame();
+        if let Some(texture) = texture {
+            frame.ui().image(texture, [16.0, 16.0]);
+        }
+        frame
+            .render_snapshot(consumer)
+            .expect("managed frame should produce a Context-owned snapshot")
+    }
+
+    fn user_texture_request(
+        snapshot: &imgui::render::FrameSnapshot,
+        texture: imgui::ManagedTextureId,
+    ) -> &imgui::render::snapshot::TextureRequest {
+        snapshot
+            .texture_requests()
+            .iter()
+            .find(|request| request.texture() == imgui::render::SnapshotTextureId::User(texture))
+            .expect("snapshot should contain the user texture request")
+    }
+
+    #[test]
+    fn extracted_frame_commits_request_bound_create_update_and_destroy_feedback() {
+        let mut context = managed_context();
+        let consumer = context.create_renderer_consumer().unwrap();
+
+        let mut texture_data = imgui::texture::OwnedTextureData::new();
+        texture_data.create(imgui::TextureFormat::RGBA32, 1, 1);
+        texture_data.set_data(&[255, 0, 255, 255]);
+        let texture = context.register_texture(texture_data);
+        let renderer_texture = imgui::TextureId::new(0xBEEF);
+        let mut extracted = ImguiExtractedRenderFrame::default();
+
+        let create = managed_snapshot(&mut context, &consumer, Some(texture));
+        assert_eq!(
+            user_texture_request(&create, texture).kind(),
+            imgui::render::snapshot::TextureRequestKind::Create
+        );
+        let feedback = user_texture_request(&create, texture)
+            .uploaded(renderer_texture)
+            .unwrap();
+        extracted.replace(1, create, Vec::new());
+        extracted.extend_texture_feedback([feedback]);
+        extracted.commit();
+        let progress = context.poll_snapshot_completions().unwrap();
+        assert_eq!(progress.committed(), 1);
+        assert_eq!(progress.feedback_applied(), 1);
+        context
+            .with_texture(texture, |texture| {
+                assert_eq!(texture.status(), imgui::TextureStatus::OK);
+                assert_eq!(texture.texture_id(), renderer_texture);
+            })
+            .unwrap();
+
+        context
+            .with_texture_mut(texture, |mut texture| {
+                texture.set_data(&[0, 255, 0, 255]);
+            })
+            .unwrap();
+        let update = managed_snapshot(&mut context, &consumer, Some(texture));
+        assert_eq!(
+            user_texture_request(&update, texture).kind(),
+            imgui::render::snapshot::TextureRequestKind::Update
+        );
+        let feedback = user_texture_request(&update, texture)
+            .uploaded(renderer_texture)
+            .unwrap();
+        extracted.replace(2, update, Vec::new());
+        extracted.extend_texture_feedback([feedback]);
+        extracted.commit();
+        let progress = context.poll_snapshot_completions().unwrap();
+        assert_eq!(progress.committed(), 1);
+        assert_eq!(progress.feedback_applied(), 1);
+
+        context.remove_texture(texture).unwrap();
+        let destroy = managed_snapshot(&mut context, &consumer, None);
+        assert_eq!(
+            user_texture_request(&destroy, texture).kind(),
+            imgui::render::snapshot::TextureRequestKind::Destroy
+        );
+        let feedback = user_texture_request(&destroy, texture).destroyed().unwrap();
+        extracted.replace(3, destroy, Vec::new());
+        extracted.extend_texture_feedback([feedback]);
+        extracted.commit();
+        let progress = context.poll_snapshot_completions().unwrap();
+        assert_eq!(progress.committed(), 1);
+        assert_eq!(progress.feedback_applied(), 1);
+        assert!(context.with_texture(texture, |_| ()).is_err());
+    }
+
+    #[test]
+    fn extracted_render_frame_is_move_only() {
+        trait AmbiguousIfClone<Marker> {
+            fn assert_not_clone() {}
+        }
+        impl<T: ?Sized> AmbiguousIfClone<()> for T {}
+        struct Invalid;
+        impl<T: ?Sized + Clone> AmbiguousIfClone<Invalid> for T {}
+
+        let _ = <ImguiExtractedRenderFrame as AmbiguousIfClone<_>>::assert_not_clone;
+    }
+
+    #[test]
+    fn replacing_an_extracted_frame_abandons_only_the_previous_epoch() {
+        let mut context = managed_context();
+        let consumer = context.create_renderer_consumer().unwrap();
+        let first = managed_snapshot(&mut context, &consumer, None);
+        let second = managed_snapshot(&mut context, &consumer, None);
+        let mut extracted = ImguiExtractedRenderFrame::default();
+
+        extracted.replace(1, first, Vec::new());
+        extracted.replace(2, second, Vec::new());
+        extracted.commit();
+
+        let progress = context.poll_snapshot_completions().unwrap();
+        assert_eq!(progress.abandoned(), 1);
+        assert_eq!(progress.committed(), 1);
+        assert_eq!(progress.watermark(), 2);
+        extracted.commit();
+        let progress = context.poll_snapshot_completions().unwrap();
+        assert_eq!(progress.watermark(), 2);
+        assert_eq!(progress.committed(), 0);
+        assert_eq!(progress.abandoned(), 0);
+        assert_eq!(progress.feedback_applied(), 0);
+    }
+
+    #[test]
+    fn dropping_an_extracted_frame_abandons_its_epoch_once() {
+        let mut context = managed_context();
+        let consumer = context.create_renderer_consumer().unwrap();
+        let snapshot = managed_snapshot(&mut context, &consumer, None);
+        let mut extracted = ImguiExtractedRenderFrame::default();
+        extracted.replace(1, snapshot, Vec::new());
+
+        drop(extracted);
+
+        let progress = context.poll_snapshot_completions().unwrap();
+        assert_eq!(progress.abandoned(), 1);
+        assert_eq!(progress.committed(), 0);
+        assert_eq!(progress.watermark(), 1);
+        let progress = context.poll_snapshot_completions().unwrap();
+        assert_eq!(progress.watermark(), 1);
+        assert_eq!(progress.committed(), 0);
+        assert_eq!(progress.abandoned(), 0);
+        assert_eq!(progress.feedback_applied(), 0);
+    }
+
     #[test]
     fn texture_conversion_repackages_padded_rgba_rows() {
         let pixels = [
@@ -2686,12 +2907,66 @@ mod tests {
     #[test]
     fn prepared_draws_preserve_standard_sampler_callback_state() {
         let camera = Entity::from_raw_u32(7).expect("test entity index should be valid");
-        let snapshot = imgui::render::FrameSnapshot {
-            draw: imgui::render::DrawDataSnapshot {
-                display_pos: [0.0, 0.0],
-                display_size: [32.0, 32.0],
-                framebuffer_scale: [1.0, 1.0],
-                draw_lists: vec![imgui::render::DrawListSnapshot {
+        let draw = imgui::render::DrawDataSnapshot {
+            display_pos: [0.0, 0.0],
+            display_size: [32.0, 32.0],
+            framebuffer_scale: [1.0, 1.0],
+            draw_lists: vec![imgui::render::DrawListSnapshot {
+                vtx: vec![
+                    imgui::render::DrawVert::new([0.0, 0.0], [0.0, 0.0], 0xFFFF_FFFF),
+                    imgui::render::DrawVert::new([1.0, 0.0], [1.0, 0.0], 0xFFFF_FFFF),
+                    imgui::render::DrawVert::new([0.0, 1.0], [0.0, 1.0], 0xFFFF_FFFF),
+                ],
+                idx: vec![0, 1, 2],
+                commands: vec![
+                    DrawCmdSnapshot::SetSamplerNearest,
+                    DrawCmdSnapshot::Elements {
+                        count: 3,
+                        clip_rect: [0.0, 0.0, 16.0, 16.0],
+                        texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
+                        vtx_offset: 0,
+                        idx_offset: 0,
+                    },
+                    DrawCmdSnapshot::ResetRenderState,
+                    DrawCmdSnapshot::Elements {
+                        count: 3,
+                        clip_rect: [0.0, 0.0, 16.0, 16.0],
+                        texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
+                        vtx_offset: 0,
+                        idx_offset: 0,
+                    },
+                ],
+            }],
+        };
+        let targets = [ImguiCameraTarget {
+            camera,
+            order: 0,
+            target: NormalizedRenderTarget::Window(
+                bevy_window::WindowRef::Entity(camera)
+                    .normalize(None)
+                    .expect("entity window target should normalize"),
+            ),
+            viewport_id: None,
+            camera_viewport: None,
+            explicit: false,
+        }];
+
+        let (_, _, draws, _) = prepare_draw_data(&draw, &[], &targets);
+
+        assert_eq!(draws.len(), 2);
+        assert_eq!(draws[0].sampler, ImguiSampler::Nearest);
+        assert_eq!(draws[1].sampler, ImguiSampler::Linear);
+    }
+
+    #[test]
+    fn prepared_draws_preserve_sampler_state_across_draw_lists() {
+        let camera = Entity::from_raw_u32(8).expect("test entity index should be valid");
+        let draw = imgui::render::DrawDataSnapshot {
+            display_pos: [0.0, 0.0],
+            display_size: [32.0, 32.0],
+            framebuffer_scale: [1.0, 1.0],
+            draw_lists: vec![
+                imgui::render::DrawListSnapshot {
                     vtx: vec![
                         imgui::render::DrawVert::new([0.0, 0.0], [0.0, 0.0], 0xFFFF_FFFF),
                         imgui::render::DrawVert::new([1.0, 0.0], [1.0, 0.0], 0xFFFF_FFFF),
@@ -2707,19 +2982,24 @@ mod tests {
                             vtx_offset: 0,
                             idx_offset: 0,
                         },
-                        DrawCmdSnapshot::ResetRenderState,
-                        DrawCmdSnapshot::Elements {
-                            count: 3,
-                            clip_rect: [0.0, 0.0, 16.0, 16.0],
-                            texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
-                            vtx_offset: 0,
-                            idx_offset: 0,
-                        },
                     ],
-                }],
-            },
-            viewports: Vec::new(),
-            texture_requests: Vec::new(),
+                },
+                imgui::render::DrawListSnapshot {
+                    vtx: vec![
+                        imgui::render::DrawVert::new([2.0, 0.0], [0.0, 0.0], 0xFFFF_FFFF),
+                        imgui::render::DrawVert::new([3.0, 0.0], [1.0, 0.0], 0xFFFF_FFFF),
+                        imgui::render::DrawVert::new([2.0, 1.0], [0.0, 1.0], 0xFFFF_FFFF),
+                    ],
+                    idx: vec![0, 1, 2],
+                    commands: vec![DrawCmdSnapshot::Elements {
+                        count: 3,
+                        clip_rect: [0.0, 0.0, 16.0, 16.0],
+                        texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
+                        vtx_offset: 0,
+                        idx_offset: 0,
+                    }],
+                },
+            ],
         };
         let targets = [ImguiCameraTarget {
             camera,
@@ -2734,74 +3014,7 @@ mod tests {
             explicit: false,
         }];
 
-        let (_, _, draws, _) = prepare_snapshot_draw_data(&snapshot, &targets);
-
-        assert_eq!(draws.len(), 2);
-        assert_eq!(draws[0].sampler, ImguiSampler::Nearest);
-        assert_eq!(draws[1].sampler, ImguiSampler::Linear);
-    }
-
-    #[test]
-    fn prepared_draws_preserve_sampler_state_across_draw_lists() {
-        let camera = Entity::from_raw_u32(8).expect("test entity index should be valid");
-        let snapshot = imgui::render::FrameSnapshot {
-            draw: imgui::render::DrawDataSnapshot {
-                display_pos: [0.0, 0.0],
-                display_size: [32.0, 32.0],
-                framebuffer_scale: [1.0, 1.0],
-                draw_lists: vec![
-                    imgui::render::DrawListSnapshot {
-                        vtx: vec![
-                            imgui::render::DrawVert::new([0.0, 0.0], [0.0, 0.0], 0xFFFF_FFFF),
-                            imgui::render::DrawVert::new([1.0, 0.0], [1.0, 0.0], 0xFFFF_FFFF),
-                            imgui::render::DrawVert::new([0.0, 1.0], [0.0, 1.0], 0xFFFF_FFFF),
-                        ],
-                        idx: vec![0, 1, 2],
-                        commands: vec![
-                            DrawCmdSnapshot::SetSamplerNearest,
-                            DrawCmdSnapshot::Elements {
-                                count: 3,
-                                clip_rect: [0.0, 0.0, 16.0, 16.0],
-                                texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
-                                vtx_offset: 0,
-                                idx_offset: 0,
-                            },
-                        ],
-                    },
-                    imgui::render::DrawListSnapshot {
-                        vtx: vec![
-                            imgui::render::DrawVert::new([2.0, 0.0], [0.0, 0.0], 0xFFFF_FFFF),
-                            imgui::render::DrawVert::new([3.0, 0.0], [1.0, 0.0], 0xFFFF_FFFF),
-                            imgui::render::DrawVert::new([2.0, 1.0], [0.0, 1.0], 0xFFFF_FFFF),
-                        ],
-                        idx: vec![0, 1, 2],
-                        commands: vec![DrawCmdSnapshot::Elements {
-                            count: 3,
-                            clip_rect: [0.0, 0.0, 16.0, 16.0],
-                            texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
-                            vtx_offset: 0,
-                            idx_offset: 0,
-                        }],
-                    },
-                ],
-            },
-            viewports: Vec::new(),
-            texture_requests: Vec::new(),
-        };
-        let targets = [ImguiCameraTarget {
-            camera,
-            order: 0,
-            target: NormalizedRenderTarget::Window(
-                bevy_window::WindowRef::Entity(camera)
-                    .normalize(None)
-                    .expect("entity window target should normalize"),
-            ),
-            viewport_id: None,
-            camera_viewport: None,
-            explicit: false,
-        }];
-
-        let (_, _, draws, _) = prepare_snapshot_draw_data(&snapshot, &targets);
+        let (_, _, draws, _) = prepare_draw_data(&draw, &[], &targets);
 
         assert_eq!(draws.len(), 2);
         assert_eq!(draws[0].sampler, ImguiSampler::Nearest);
@@ -2811,52 +3024,48 @@ mod tests {
     #[test]
     fn prepared_draws_skip_commands_with_out_of_range_index_or_vertex_offsets() {
         let camera = Entity::from_raw_u32(9).expect("test entity index should be valid");
-        let snapshot = imgui::render::FrameSnapshot {
-            draw: imgui::render::DrawDataSnapshot {
-                display_pos: [0.0, 0.0],
-                display_size: [32.0, 32.0],
-                framebuffer_scale: [1.0, 1.0],
-                draw_lists: vec![imgui::render::DrawListSnapshot {
-                    vtx: vec![
-                        imgui::render::DrawVert::new([0.0, 0.0], [0.0, 0.0], 0xFFFF_FFFF),
-                        imgui::render::DrawVert::new([1.0, 0.0], [1.0, 0.0], 0xFFFF_FFFF),
-                        imgui::render::DrawVert::new([0.0, 1.0], [0.0, 1.0], 0xFFFF_FFFF),
-                    ],
-                    idx: vec![0, 1, 2, 3, 1, 2],
-                    commands: vec![
-                        DrawCmdSnapshot::Elements {
-                            count: 1,
-                            clip_rect: [0.0, 0.0, 16.0, 16.0],
-                            texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
-                            vtx_offset: 0,
-                            idx_offset: 6,
-                        },
-                        DrawCmdSnapshot::Elements {
-                            count: 1,
-                            clip_rect: [0.0, 0.0, 16.0, 16.0],
-                            texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
-                            vtx_offset: 0,
-                            idx_offset: 3,
-                        },
-                        DrawCmdSnapshot::Elements {
-                            count: 3,
-                            clip_rect: [0.0, 0.0, 16.0, 16.0],
-                            texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
-                            vtx_offset: 4,
-                            idx_offset: 3,
-                        },
-                        DrawCmdSnapshot::Elements {
-                            count: 3,
-                            clip_rect: [0.0, 0.0, 16.0, 16.0],
-                            texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
-                            vtx_offset: 0,
-                            idx_offset: 0,
-                        },
-                    ],
-                }],
-            },
-            viewports: Vec::new(),
-            texture_requests: Vec::new(),
+        let draw = imgui::render::DrawDataSnapshot {
+            display_pos: [0.0, 0.0],
+            display_size: [32.0, 32.0],
+            framebuffer_scale: [1.0, 1.0],
+            draw_lists: vec![imgui::render::DrawListSnapshot {
+                vtx: vec![
+                    imgui::render::DrawVert::new([0.0, 0.0], [0.0, 0.0], 0xFFFF_FFFF),
+                    imgui::render::DrawVert::new([1.0, 0.0], [1.0, 0.0], 0xFFFF_FFFF),
+                    imgui::render::DrawVert::new([0.0, 1.0], [0.0, 1.0], 0xFFFF_FFFF),
+                ],
+                idx: vec![0, 1, 2, 3, 1, 2],
+                commands: vec![
+                    DrawCmdSnapshot::Elements {
+                        count: 1,
+                        clip_rect: [0.0, 0.0, 16.0, 16.0],
+                        texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
+                        vtx_offset: 0,
+                        idx_offset: 6,
+                    },
+                    DrawCmdSnapshot::Elements {
+                        count: 1,
+                        clip_rect: [0.0, 0.0, 16.0, 16.0],
+                        texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
+                        vtx_offset: 0,
+                        idx_offset: 3,
+                    },
+                    DrawCmdSnapshot::Elements {
+                        count: 3,
+                        clip_rect: [0.0, 0.0, 16.0, 16.0],
+                        texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
+                        vtx_offset: 4,
+                        idx_offset: 3,
+                    },
+                    DrawCmdSnapshot::Elements {
+                        count: 3,
+                        clip_rect: [0.0, 0.0, 16.0, 16.0],
+                        texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
+                        vtx_offset: 0,
+                        idx_offset: 0,
+                    },
+                ],
+            }],
         };
         let targets = [ImguiCameraTarget {
             camera,
@@ -2871,7 +3080,7 @@ mod tests {
             explicit: false,
         }];
 
-        let (_, _, draws, _) = prepare_snapshot_draw_data(&snapshot, &targets);
+        let (_, _, draws, _) = prepare_draw_data(&draw, &[], &targets);
 
         assert_eq!(draws.len(), 1);
         assert_eq!(draws[0].index_range, 0..3);
@@ -2983,15 +3192,11 @@ mod tests {
     #[test]
     fn camera_viewport_uniforms_use_logical_viewport_rect_without_scaling_imgui_coordinates() {
         let camera = Entity::from_raw_u32(12).expect("test entity index should be valid");
-        let snapshot = imgui::render::FrameSnapshot {
-            draw: imgui::render::DrawDataSnapshot {
-                display_pos: [0.0, 0.0],
-                display_size: [640.0, 360.0],
-                framebuffer_scale: [2.0, 2.0],
-                draw_lists: vec![draw_list_for_test()],
-            },
-            viewports: Vec::new(),
-            texture_requests: Vec::new(),
+        let draw = imgui::render::DrawDataSnapshot {
+            display_pos: [0.0, 0.0],
+            display_size: [640.0, 360.0],
+            framebuffer_scale: [2.0, 2.0],
+            draw_lists: vec![draw_list_for_test()],
         };
         let target = ImguiCameraTarget {
             camera,
@@ -3009,7 +3214,7 @@ mod tests {
             explicit: true,
         };
 
-        let (_, _, draws, uniforms_by_camera) = prepare_snapshot_draw_data(&snapshot, &[target]);
+        let (_, _, draws, uniforms_by_camera) = prepare_draw_data(&draw, &[], &[target]);
 
         assert_eq!(draws.len(), 1);
         assert_eq!(
@@ -3041,30 +3246,27 @@ mod tests {
         let primary_camera = Entity::from_raw_u32(10).expect("test entity index should be valid");
         let secondary_camera = Entity::from_raw_u32(11).expect("test entity index should be valid");
         let secondary_viewport = imgui::Id::from(0xBEEF);
-        let snapshot = imgui::render::FrameSnapshot {
+        let draw = imgui::render::DrawDataSnapshot {
+            display_pos: [0.0, 0.0],
+            display_size: [f32::NAN, 32.0],
+            framebuffer_scale: [1.0, 1.0],
+            draw_lists: vec![draw_list_for_test()],
+        };
+        let viewports = [imgui::render::ViewportDrawDataSnapshot {
+            viewport_id: secondary_viewport,
             draw: imgui::render::DrawDataSnapshot {
                 display_pos: [0.0, 0.0],
-                display_size: [f32::NAN, 32.0],
+                display_size: [32.0, 32.0],
                 framebuffer_scale: [1.0, 1.0],
                 draw_lists: vec![draw_list_for_test()],
             },
-            viewports: vec![imgui::render::ViewportDrawDataSnapshot {
-                viewport_id: secondary_viewport,
-                draw: imgui::render::DrawDataSnapshot {
-                    display_pos: [0.0, 0.0],
-                    display_size: [32.0, 32.0],
-                    framebuffer_scale: [1.0, 1.0],
-                    draw_lists: vec![draw_list_for_test()],
-                },
-            }],
-            texture_requests: Vec::new(),
-        };
+        }];
         let targets = [
             camera_target_for_test(primary_camera, None),
             camera_target_for_test(secondary_camera, Some(secondary_viewport)),
         ];
 
-        let (_, _, draws, uniforms_by_camera) = prepare_snapshot_draw_data(&snapshot, &targets);
+        let (_, _, draws, uniforms_by_camera) = prepare_draw_data(&draw, &viewports, &targets);
 
         assert_eq!(draws.len(), 1);
         assert_eq!(draws[0].camera, secondary_camera);
@@ -3299,7 +3501,19 @@ mod tests {
                 imgui::texture::TextureFormat::RGBA32,
                 4,
                 4,
-                &[valid.clone(), out_of_bounds],
+                &[
+                    imgui::render::snapshot::TextureUploadRect {
+                        rect: imgui::TextureRect {
+                            x: 0,
+                            y: 0,
+                            w: 2,
+                            h: 1,
+                        },
+                        row_pitch: 8,
+                        data: vec![1, 2, 3, 4, 5, 6, 7, 8],
+                    },
+                    out_of_bounds,
+                ],
             )
             .is_none(),
             "one invalid rect should keep the whole texture update pending"

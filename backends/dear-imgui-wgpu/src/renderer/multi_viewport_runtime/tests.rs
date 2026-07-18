@@ -76,6 +76,11 @@ unsafe fn install_test_renderer(
             renderer
                 .bind_context(context, BackendFlags::empty())
                 .expect("test renderer should bind to its registration context");
+            renderer.renderer_consumer = Some(
+                context
+                    .create_renderer_consumer()
+                    .expect("test renderer should own its registration context's consumer"),
+            );
         }
         insert_renderer_state(context, renderer, None);
         renderer

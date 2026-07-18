@@ -1,7 +1,10 @@
 use crate::{
     GammaMode, RendererError, RendererResult, ShaderManager, WgpuBackendData, WgpuTextureManager,
 };
-use dear_imgui_rs::{BackendFlags, Context, ContextBinding};
+use dear_imgui_rs::{
+    BackendFlags, Context, ContextBinding,
+    render::{RenderedFrame, RendererConsumer},
+};
 use wgpu::TextureView;
 
 #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
@@ -76,6 +79,8 @@ pub struct WgpuRenderer {
     /// Prevents safe lifecycle APIs from replacing GPU state behind registered raw callbacks.
     #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
     pub(super) multi_viewport_active: AtomicBool,
+    /// Sole managed-texture consumer generation owned by this renderer.
+    pub(super) renderer_consumer: Option<RendererConsumer>,
 }
 
 impl WgpuRenderer {
@@ -128,6 +133,32 @@ impl WgpuRenderer {
 
     pub(super) fn clear_context_binding(&mut self) {
         self.context_binding = None;
+    }
+
+    pub(super) fn renderer_consumer(&self) -> RendererResult<&RendererConsumer> {
+        self.renderer_consumer
+            .as_ref()
+            .ok_or(RendererError::ContextNotBound)
+    }
+
+    pub(super) fn ensure_frame_matches(&self, frame: &RenderedFrame<'_>) -> RendererResult<()> {
+        let consumer = self.renderer_consumer()?;
+        if frame.context_id() != consumer.context_id() {
+            return Err(RendererError::ContextMismatch);
+        }
+        let epoch = frame.epoch().ok_or_else(|| {
+            RendererError::InvalidRenderState(
+                "WGPU requires a managed-texture renderer epoch".to_owned(),
+            )
+        })?;
+        if epoch.consumer_generation() != consumer.generation() {
+            return Err(RendererError::InvalidRenderState(format!(
+                "rendered frame uses consumer generation {}, WGPU owns generation {}",
+                epoch.consumer_generation(),
+                consumer.generation()
+            )));
+        }
+        Ok(())
     }
 }
 

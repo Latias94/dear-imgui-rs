@@ -156,7 +156,7 @@ impl Application for TexDemoState {
             .expect("configure_imgui should register the animated texture");
         context
             .imgui()
-            .with_texture_mut(img_tex, |texture| texture.set_data(&pixels))
+            .with_texture_mut(img_tex, |mut texture| texture.set_data(&pixels))
             .map_err(|error| RunError::application("prepare_frame", error.to_string()))?;
 
         if self.reload_photo {

@@ -75,38 +75,11 @@ impl AshRenderer {
         Ok((command_buffer, fence))
     }
 
-    pub(super) fn discard_pending_texture_create(&mut self, mut pending: PendingTextureCreate) {
-        unsafe {
-            let _ = self
-                .device
-                .free_descriptor_sets(self.descriptor_pool, &[pending.descriptor_set]);
-        }
-        if let Some(staging_mem) = pending.staging_mem.take() {
-            let _ =
-                self.allocator
-                    .destroy_buffer(&self.device, pending.staging_buffer, staging_mem);
-        }
-        let _ = pending.texture.destroy(&self.device, &mut self.allocator);
-    }
-
     pub(super) fn discard_pending_texture_update(&mut self, mut pending: PendingTextureUpdate) {
         if let Some(staging_mem) = pending.staging_mem.take() {
             let _ =
                 self.allocator
                     .destroy_buffer(&self.device, pending.staging_buffer, staging_mem);
-        }
-    }
-
-    pub(super) fn discard_pending_texture_work(
-        &mut self,
-        creates: Vec<PendingTextureCreate>,
-        updates: Vec<PendingTextureUpdate>,
-    ) {
-        for create in creates {
-            self.discard_pending_texture_create(create);
-        }
-        for update in updates {
-            self.discard_pending_texture_update(update);
         }
     }
 

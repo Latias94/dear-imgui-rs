@@ -236,6 +236,20 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
         }
     }
 
+    /// Render the current frame and build a thread-safe main-viewport snapshot.
+    ///
+    /// This Context-level entry point supports engine schedules that open and close the native
+    /// frame in separate systems and therefore cannot retain a [`FrameToken`]. The snapshot is
+    /// still bound to the supplied renderer consumer, Context, generation, and ordered epoch.
+    pub fn render_snapshot(
+        &mut self,
+        consumer: &crate::render::snapshot::RendererConsumer,
+    ) -> Result<crate::render::snapshot::FrameSnapshot, crate::render::snapshot::SnapshotError>
+    {
+        let draw_data = self.render_raw();
+        self.capture_main_snapshot(consumer, draw_data.as_ptr())
+    }
+
     /// Render the current frame and build a thread-safe snapshot for all platform viewports.
     ///
     /// With the `multi-viewport` feature enabled, Dear ImGui stores draw data on each viewport.

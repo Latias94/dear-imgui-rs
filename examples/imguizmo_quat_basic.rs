@@ -865,9 +865,7 @@ impl AppWindow {
             });
 
             self.imgui.renderer.new_frame()?;
-            self.imgui
-                .renderer
-                .render_draw_data(draw_data, &mut rpass)?;
+            self.imgui.renderer.render(draw_data, &mut rpass)?;
         }
 
         self.queue.submit(Some(encoder.finish()));

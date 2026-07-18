@@ -339,7 +339,7 @@ impl Runtime {
             generation
                 .gpu
                 .renderer
-                .render_draw_data(draw_data, &mut render_pass)
+                .render(draw_data, &mut render_pass)
                 .map_err(RunError::Render)?;
         }
         generation.gpu.queue.submit(Some(encoder.finish()));
@@ -411,10 +411,10 @@ impl Runtime {
     }
 }
 
-fn build_and_render_frame(
-    context: &mut dear_imgui_rs::Context,
+fn build_and_render_frame<'ctx>(
+    context: &'ctx mut dear_imgui_rs::Context,
     build: impl FnOnce(&dear_imgui_rs::Ui) -> Result<(), RunError>,
-) -> Result<&mut dear_imgui_rs::render::DrawData, RunError> {
+) -> Result<dear_imgui_rs::render::RenderedFrame<'ctx>, RunError> {
     let frame = context.begin_frame();
     build(frame.ui())?;
     Ok(frame.render())

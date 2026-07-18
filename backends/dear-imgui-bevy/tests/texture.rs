@@ -10,7 +10,7 @@ use bevy_render::{Render, RenderApp, extract_plugin::ExtractPlugin};
 use bevy_window::{PrimaryWindow, Window, WindowRef, WindowResolution};
 use dear_imgui_bevy::{
     ImguiBevyTextures, ImguiContext, ImguiContexts, ImguiFrameOutput, ImguiPlugin,
-    ImguiPrimaryContextPass, ImguiTextureFeedbackQueue, render::ImguiExtractedBevyTextures,
+    ImguiPrimaryContextPass, render::ImguiExtractedBevyTextures,
 };
 use dear_imgui_rs::{self as imgui, render::TextureBinding};
 use std::sync::{Mutex, OnceLock};
@@ -57,7 +57,7 @@ fn app_with_render_world() -> App {
     app
 }
 
-fn register_managed_texture(app: &mut App) -> imgui::render::snapshot::ManagedTextureId {
+fn register_managed_texture(app: &mut App) -> imgui::ManagedTextureId {
     let mut texture = imgui::texture::OwnedTextureData::new();
     texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
     texture.set_data(&[255, 0, 255, 255]);
@@ -91,7 +91,7 @@ fn draw_bevy_image(mut contexts: ImguiContexts, texture: Res<BevyImageTexture>) 
 }
 
 #[test]
-fn managed_texture_frames_require_context_owned_capture_without_emitting_feedback() {
+fn managed_texture_create_request_repeats_without_gpu_feedback() {
     let _guard = imgui_context_guard();
     let mut app = app_with_render_world();
     let texture_id = register_managed_texture(&mut app);
@@ -101,29 +101,18 @@ fn managed_texture_frames_require_context_owned_capture_without_emitting_feedbac
 
     let output = app.world().resource::<ImguiFrameOutput>();
     assert_eq!(output.frame_index(), 1);
-    assert!(output.snapshot().is_none());
-    assert!(
-        output
-            .snapshot_error()
-            .is_some_and(|error| error.contains("Context-owned snapshot capture")),
-        "managed draws must fail before the detached renderer can observe native pointers"
-    );
+    assert_eq!(output.snapshot_epoch().unwrap().sequence(), 1);
+    assert!(output.snapshot_error().is_none());
 
     let extracted = app
         .sub_app(RenderApp)
         .world()
         .resource::<dear_imgui_bevy::render::ImguiExtractedRenderFrame>();
     assert_eq!(extracted.frame_index(), Some(1));
-    assert!(extracted.snapshot().is_none());
-
-    let main_feedback = app.world().resource::<ImguiTextureFeedbackQueue>();
-    assert_eq!(main_feedback.len(), 0);
-    assert_eq!(main_feedback.last_applied(), 0);
-    let render_feedback = app
-        .sub_app(RenderApp)
-        .world()
-        .resource::<ImguiTextureFeedbackQueue>();
-    assert_eq!(render_feedback.len(), 0);
+    assert!(
+        extracted.snapshot().is_none(),
+        "render preparation should commit the one-shot snapshot with empty feedback"
+    );
 
     let texture = app.world().get_non_send::<ManagedTexture>().unwrap().0;
     let context = app.world().get_non_send::<ImguiContext>().unwrap();
@@ -131,7 +120,7 @@ fn managed_texture_frames_require_context_owned_capture_without_emitting_feedbac
         .context()
         .with_texture(texture, |texture| {
             assert_eq!(texture.status(), imgui::texture::TextureStatus::WantCreate);
-            assert!(texture.tex_id().is_null());
+            assert!(texture.texture_id().is_null());
         })
         .expect("managed texture should remain active");
 
@@ -139,10 +128,22 @@ fn managed_texture_frames_require_context_owned_capture_without_emitting_feedbac
         .sub_app(RenderApp)
         .world()
         .resource::<dear_imgui_bevy::render::ImguiPreparedRenderFrame>();
-    assert!(prepared.draws().is_empty());
-    assert_eq!(prepared.texture_request_count(), 0);
+    assert!(!prepared.draws().is_empty());
+    assert!(prepared.texture_request_count() >= 1);
     let texture = app.world().get_non_send::<ManagedTexture>().unwrap();
     assert_eq!(texture_id, texture.0);
+
+    app.update();
+    let output = app.world().resource::<ImguiFrameOutput>();
+    assert_eq!(output.snapshot_epoch().unwrap().sequence(), 2);
+    let prepared = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<dear_imgui_bevy::render::ImguiPreparedRenderFrame>();
+    assert!(
+        prepared.texture_request_count() >= 1,
+        "unacknowledged creates must repeat in the next snapshot"
+    );
 }
 
 #[test]

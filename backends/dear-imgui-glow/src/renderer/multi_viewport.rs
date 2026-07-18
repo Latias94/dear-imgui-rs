@@ -164,7 +164,10 @@ pub(crate) fn clear_for_drop(renderer: *mut GlowRenderer) {
 /// This function assumes that `renderer` owns a `glow::Context` (the common case);
 /// if `GlowRenderer` was created with an external context (`gl_context()` returns
 /// `None`), the multi-viewport callback will early-return and do nothing.
-pub fn enable(renderer: &mut GlowRenderer, imgui_context: &mut Context) {
+///
+/// Returns an error when the renderer consumer belongs to another Context or was already released.
+pub fn enable(renderer: &mut GlowRenderer, imgui_context: &mut Context) -> crate::RenderResult<()> {
+    renderer.ensure_context_matches(imgui_context)?;
     let binding = imgui_context.binding();
     binding.with_bound_context(|| {
         // Install raw Renderer_RenderWindow callback. We don't need the typed
@@ -173,6 +176,7 @@ pub fn enable(renderer: &mut GlowRenderer, imgui_context: &mut Context) {
         platform_io.set_renderer_render_window_raw(Some(renderer_render_window_sys));
         upsert_renderer_state(imgui_context, renderer as *mut _);
     });
+    Ok(())
 }
 
 /// Disable Glow multi-viewport rendering and clear the renderer callback.
@@ -183,19 +187,6 @@ pub fn disable(imgui_context: &mut Context) {
         platform_io.set_renderer_render_window_raw(None);
         remove_renderer_state_for_context(binding.id());
     });
-}
-
-/// Backwards-compatible helper mirroring older naming.
-///
-/// Prefer using [`enable`] directly so the renderer instance is clearly threaded
-/// through your setup code.
-#[deprecated(
-    since = "0.6.0",
-    note = "use multi_viewport::enable(renderer, imgui_context) instead"
-)]
-pub fn init_multi_viewport_support(_imgui_context: &mut Context) {
-    // Kept only to avoid breaking existing code that might call this.
-    // Without a renderer reference there is nothing useful to do here.
 }
 
 /// Shutdown helper that destroys platform windows and clears callbacks.
@@ -217,7 +208,7 @@ mod tests {
         GUARD.get_or_init(|| TestMutex::new(())).lock().unwrap()
     }
 
-    fn make_test_renderer() -> GlowRenderer {
+    fn make_test_renderer(context: &mut Context) -> GlowRenderer {
         GlowRenderer {
             shaders: Shaders {
                 program: None,
@@ -243,6 +234,8 @@ mod tests {
             is_destroyed: false,
             gl_context: None,
             texture_map: Some(Box::new(SimpleTextureMap::default())),
+            managed_textures: std::collections::HashMap::new(),
+            renderer_consumer: Some(context.create_renderer_consumer().unwrap()),
             framebuffer_srgb: false,
             color_gamma_override: None,
             viewport_clear_color: [0.0, 0.0, 0.0, 1.0],
@@ -255,6 +248,7 @@ mod tests {
         let mut ctx_a = Context::create();
         let raw_a = ctx_a.as_raw();
         let pio_a = unsafe { sys::igGetPlatformIO_ContextPtr(raw_a) };
+        let mut renderer = make_test_renderer(&mut ctx_a);
 
         unsafe {
             sys::igSetCurrentContext(std::ptr::null_mut());
@@ -264,8 +258,7 @@ mod tests {
         let raw_b = ctx_b.as_raw();
         let pio_b = unsafe { sys::igGetPlatformIO_ContextPtr(raw_b) };
 
-        let mut renderer = make_test_renderer();
-        enable(&mut renderer, &mut ctx_a);
+        enable(&mut renderer, &mut ctx_a).unwrap();
 
         unsafe {
             assert_eq!(sys::igGetCurrentContext(), raw_b);
@@ -296,8 +289,8 @@ mod tests {
         let _guard = lock_context();
         let mut ctx_a = Context::create();
         let raw_a = ctx_a.as_raw();
-        let mut renderer_a = make_test_renderer();
-        enable(&mut renderer_a, &mut ctx_a);
+        let mut renderer_a = make_test_renderer(&mut ctx_a);
+        enable(&mut renderer_a, &mut ctx_a).unwrap();
 
         unsafe {
             sys::igSetCurrentContext(std::ptr::null_mut());
@@ -305,8 +298,8 @@ mod tests {
 
         let mut ctx_b = Context::create();
         let raw_b = ctx_b.as_raw();
-        let mut renderer_b = make_test_renderer();
-        enable(&mut renderer_b, &mut ctx_b);
+        let mut renderer_b = make_test_renderer(&mut ctx_b);
+        enable(&mut renderer_b, &mut ctx_b).unwrap();
 
         unsafe {
             sys::igSetCurrentContext(raw_a);
@@ -342,9 +335,9 @@ mod tests {
         let _guard = lock_context();
         let mut ctx = Context::create();
         let raw = ctx.as_raw();
-        let mut renderer = make_test_renderer();
+        let mut renderer = make_test_renderer(&mut ctx);
 
-        enable(&mut renderer, &mut ctx);
+        enable(&mut renderer, &mut ctx).unwrap();
 
         unsafe {
             sys::igSetCurrentContext(raw);
@@ -376,7 +369,7 @@ mod tests {
                 }
             })
         };
-        renderer.destroy(&gl, &mut ctx);
+        renderer.destroy(&gl, &mut ctx).unwrap();
 
         unsafe {
             sys::igSetCurrentContext(raw);
@@ -393,8 +386,10 @@ mod tests {
 ///
 /// This corresponds to `ImGuiPlatformIO::Renderer_RenderWindow`.
 ///
-/// Safety: called from C with a valid `ImGuiViewport*` while the ImGui
-/// context and registered renderer are still alive.
+/// # Safety
+///
+/// `viewport` must point to a live `ImGuiViewport` owned by the currently bound Context, and the
+/// registered renderer must remain alive for the duration of the callback.
 pub unsafe extern "C" fn renderer_render_window_sys(
     viewport: *mut sys::ImGuiViewport,
     _render_arg: *mut c_void,
@@ -440,10 +435,10 @@ pub unsafe extern "C" fn renderer_render_window_sys(
             if !vp_ref.DrawData.is_null() {
                 // Safety: DrawData pointer is owned by Dear ImGui for the duration
                 // of this callback.
-                let raw_dd: &mut sys::ImDrawData = unsafe { &mut *vp_ref.DrawData };
-                let draw_data: &mut DrawData = unsafe { DrawData::from_raw_mut(raw_dd) };
+                let raw_dd: &sys::ImDrawData = unsafe { &*vp_ref.DrawData };
+                let draw_data: &DrawData = unsafe { DrawData::from_raw(raw_dd) };
 
-                if let Err(err) = renderer.render_with_context(gl, draw_data) {
+                if let Err(err) = renderer.render_draw_data(gl, draw_data) {
                     eprintln!("dear-imgui-glow: error rendering viewport: {:?}", err);
                 }
             }

@@ -1,6 +1,6 @@
 use dear_imgui_rs::{
     internal::RawWrapper,
-    render::{DrawCmd, DrawCmdParams, DrawData, DrawVert},
+    render::{DrawCmd, DrawCmdParams, DrawData, DrawVert, RenderedFrame},
 };
 use glow::{Context, HasContext};
 use std::mem::size_of;
@@ -14,45 +14,71 @@ use crate::{
 };
 
 impl GlowRenderer {
-    /// Render Dear ImGui draw data
-    pub fn render(&mut self, draw_data: &mut DrawData) -> RenderResult<()> {
+    /// Consume and render one Context-borrowed Dear ImGui frame.
+    pub fn render(&mut self, mut frame: RenderedFrame<'_>) -> RenderResult<()> {
+        self.validate_rendered_frame(&frame)?;
+        if self.is_destroyed {
+            return Err(RenderError::RendererDestroyed);
+        }
         let gl = self
             .gl_context
             .clone()
             .ok_or(RenderError::MissingGlContext)?;
-
-        // Handle texture updates first, following the original Dear ImGui OpenGL3 implementation
-        let mut textures = draw_data.textures_mut();
-        while let Some(mut texture_data) = textures.next() {
-            if texture_data.status() != dear_imgui_rs::TextureStatus::OK {
-                self.update_texture_from_data(Some(&gl), &mut *texture_data)?;
-            }
-        }
-        drop(textures);
-
-        self.render_internal(&gl, draw_data)
+        self.prepare_rendered_frame(&gl, &mut frame)?;
+        self.render_draw_data(&gl, frame.draw_data())
     }
 
-    /// Advanced render method with external OpenGL context
+    /// Consume and render a frame using an externally managed OpenGL context.
     pub fn render_with_context(
         &mut self,
         gl: &Context,
-        draw_data: &mut DrawData,
+        mut frame: RenderedFrame<'_>,
     ) -> RenderResult<()> {
-        // Handle texture updates first
-        let mut textures = draw_data.textures_mut();
-        while let Some(mut texture_data) = textures.next() {
-            if texture_data.status() != dear_imgui_rs::TextureStatus::OK {
-                self.update_texture_from_data(Some(gl), &mut *texture_data)?;
-            }
+        self.validate_rendered_frame(&frame)?;
+        if self.is_destroyed {
+            return Err(RenderError::RendererDestroyed);
         }
-        drop(textures);
-
-        self.render_internal(gl, draw_data)
+        self.prepare_rendered_frame(gl, &mut frame)?;
+        self.render_draw_data(gl, frame.draw_data())
     }
 
-    /// Internal render implementation
-    fn render_internal(&mut self, gl: &Context, draw_data: &DrawData) -> RenderResult<()> {
+    fn prepare_rendered_frame(
+        &mut self,
+        gl: &Context,
+        frame: &mut RenderedFrame<'_>,
+    ) -> RenderResult<()> {
+        let feedback = self.process_texture_requests(gl, frame.texture_requests())?;
+        frame.reconcile_texture_feedback(feedback)?;
+        Ok(())
+    }
+
+    fn validate_rendered_frame(&self, frame: &RenderedFrame<'_>) -> RenderResult<()> {
+        let consumer = self
+            .renderer_consumer
+            .as_ref()
+            .ok_or(RenderError::RendererNotAttached)?;
+        if frame.context_id() != consumer.context_id() {
+            return Err(RenderError::ContextMismatch {
+                expected: consumer.context_id(),
+                actual: frame.context_id(),
+            });
+        }
+        let epoch = frame.epoch().ok_or(RenderError::MissingRendererEpoch)?;
+        if epoch.consumer_generation() != consumer.generation() {
+            return Err(RenderError::ConsumerGenerationMismatch {
+                expected: consumer.generation(),
+                actual: epoch.consumer_generation(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Draw already-reconciled data. Multi-viewport callbacks use this for secondary viewports.
+    pub(super) fn render_draw_data(
+        &mut self,
+        gl: &Context,
+        draw_data: &DrawData,
+    ) -> RenderResult<()> {
         if self.is_destroyed {
             return Err(RenderError::RendererDestroyed);
         }

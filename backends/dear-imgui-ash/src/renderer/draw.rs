@@ -1,19 +1,29 @@
 use super::*;
 
 impl AshRenderer {
+    /// Reconcile managed textures and record one Context-borrowed frame.
+    ///
+    /// The returned batch represents every pending managed-texture retirement. Recording this
+    /// command buffer is not GPU completion: do not complete the batch until synchronization for
+    /// every queue that can still use its textures has signaled. With multi-viewport enabled, that
+    /// includes secondary viewport work recorded after this method returns. See
+    /// [`Self::notify_texture_retirements_completed`].
     pub fn cmd_draw(
         &mut self,
         command_buffer: vk::CommandBuffer,
-        draw_data: &mut dear_imgui_rs::render::DrawData,
-    ) -> RendererResult<()> {
-        let gamma = self.gamma();
+        mut frame: RenderedFrame<'_>,
+    ) -> RendererResult<Option<TextureRetirementBatch>> {
+        self.ensure_frame_matches(&frame)?;
+        self.reap_completed_uploads()?;
+        let feedback = self.process_texture_requests(frame.texture_requests())?;
+        frame.reconcile_texture_feedback(feedback)?;
+        let pending_retirement = self.pending_texture_retirement();
+        let draw_data = frame.draw_data();
         if !draw_data.valid() || draw_data.total_vtx_count() == 0 {
-            return Ok(());
+            return Ok(pending_retirement);
         }
 
-        self.reap_completed_uploads()?;
-        self.process_texture_requests(draw_data)?;
-
+        let gamma = self.gamma();
         let Some(mesh) = self.frames.next() else {
             return Err(RendererError::FrameResourcesUnavailable);
         };
@@ -28,14 +38,15 @@ impl AshRenderer {
             self.pipeline,
             gamma,
             mesh,
-        )
+        )?;
+        Ok(pending_retirement)
     }
 
     #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
     pub(super) fn cmd_draw_with_mesh(
         &mut self,
         command_buffer: vk::CommandBuffer,
-        draw_data: &mut dear_imgui_rs::render::DrawData,
+        draw_data: &dear_imgui_rs::render::DrawData,
         pipeline: vk::Pipeline,
         gamma: f32,
         mesh: &mut Mesh,
@@ -44,8 +55,6 @@ impl AshRenderer {
             return Ok(());
         }
 
-        self.reap_completed_uploads()?;
-        self.process_texture_requests(draw_data)?;
         record_draw_commands(
             &self.device,
             &mut self.allocator,

@@ -233,7 +233,7 @@ impl AppWindow {
 
         self.imgui
             .context
-            .with_texture_mut(self.img_tex, |texture| texture.set_data(&pixels))
+            .with_texture_mut(self.img_tex, |mut texture| texture.set_data(&pixels))
             .expect("animated texture should remain active");
 
         self.frame = self.frame.wrapping_add(1);
@@ -325,9 +325,7 @@ impl AppWindow {
             });
 
             self.imgui.renderer.new_frame()?;
-            self.imgui
-                .renderer
-                .render_draw_data(draw_data, &mut rpass)?;
+            self.imgui.renderer.render(draw_data, &mut rpass)?;
         }
 
         self.queue.submit(Some(encoder.finish()));

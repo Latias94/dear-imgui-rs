@@ -443,6 +443,16 @@ pub(super) fn has_renderer_state_for_context(ctx: *mut sys::ImGuiContext) -> boo
     })
 }
 
+pub(crate) fn has_renderer_state_for_renderer(renderer: *mut AshRenderer) -> bool {
+    let renderer = renderer as usize;
+    RENDERERS.with(|renderers| {
+        renderers
+            .borrow()
+            .iter()
+            .any(|entry| entry.renderer == renderer && entry.binding.is_alive())
+    })
+}
+
 fn validate_renderer_registration(
     ctx: *mut sys::ImGuiContext,
     renderer: *mut AshRenderer,

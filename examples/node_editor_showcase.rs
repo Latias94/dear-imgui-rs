@@ -530,9 +530,7 @@ impl AppWindow {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            self.imgui
-                .renderer
-                .render_draw_data(draw_data, &mut render_pass)?;
+            self.imgui.renderer.render(draw_data, &mut render_pass)?;
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));

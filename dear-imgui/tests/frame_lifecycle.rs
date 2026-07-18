@@ -70,6 +70,25 @@ fn frame_token_allows_engine_owned_begin_ui_end_flow() {
 }
 
 #[test]
+fn context_can_snapshot_an_engine_owned_main_viewport_frame() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let consumer = ctx.create_renderer_consumer().unwrap();
+
+    let ui = ctx.frame();
+    ui.text("engine-owned frame without a retained FrameToken");
+    let snapshot = ctx.render_snapshot(&consumer).unwrap();
+
+    assert!(!snapshot.draw_data().draw_lists.is_empty());
+    snapshot.commit(std::iter::empty()).unwrap();
+    let progress = ctx.poll_snapshot_completions().unwrap();
+    assert_eq!(progress.committed(), 1);
+    assert_eq!(progress.abandoned(), 0);
+}
+
+#[test]
 fn dropping_frame_token_ends_frame_without_rendering() {
     let _guard = test_guard();
 

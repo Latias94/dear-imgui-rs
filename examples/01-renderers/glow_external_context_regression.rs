@@ -188,7 +188,7 @@ impl AppWindow {
                 let phase = self.imgui.frame_count;
                 self.imgui
                     .context
-                    .with_texture_mut(self.imgui.managed_texture, |texture| {
+                    .with_texture_mut(self.imgui.managed_texture, |mut texture| {
                         fill_texture_pixels(texture, phase)
                     })
                     .expect("managed texture should remain active for update");

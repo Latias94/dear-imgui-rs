@@ -234,7 +234,7 @@ fn run_inner(_argc: c_int, _argv: *mut *mut c_char) -> Result<c_int, Box<dyn std
             });
 
             renderer.new_frame()?;
-            renderer.render_draw_data_with_fb_size(
+            renderer.render_with_fb_size(
                 draw_data,
                 &mut render_pass,
                 surface_config.width,

@@ -260,8 +260,8 @@ pub(super) unsafe fn renderer_render_window(viewport: *mut Viewport, _render_arg
         if draw_data.is_null() {
             return;
         }
-        let draw_data: &mut dear_imgui_rs::render::DrawData =
-            dear_imgui_rs::render::DrawData::from_raw_mut(&mut *draw_data);
+        let draw_data: &dear_imgui_rs::render::DrawData =
+            dear_imgui_rs::render::DrawData::from_raw(&*draw_data);
         if data.pending_present.is_some() || data.frames.is_empty() {
             return;
         }

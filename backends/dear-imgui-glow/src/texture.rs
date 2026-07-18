@@ -1,7 +1,7 @@
 //! Texture management for Dear ImGui
 
 use crate::{GlTexture, InitError, InitResult};
-use dear_imgui_rs::{OwnedTextureData, TextureData, TextureFormat, TextureId, TextureStatus};
+use dear_imgui_rs::{TextureFormat, TextureId};
 use glow::{Context, HasContext};
 use std::collections::HashMap;
 
@@ -16,7 +16,11 @@ pub(crate) fn checked_gl_texture_size(width: u32, height: u32) -> InitResult<(i3
     ))
 }
 
-/// Trait for managing texture mappings with modern Dear ImGui texture system
+/// Rust-owned mapping between opaque Dear ImGui texture IDs and OpenGL resources.
+///
+/// Managed texture request identity is tracked separately by [`crate::GlowRenderer`] using
+/// pointer-free [`dear_imgui_rs::render::SnapshotTextureId`] keys. Implementations of this trait
+/// never receive native `ImTextureData` pointers or renderer feedback state.
 pub trait TextureMap {
     /// Get the OpenGL texture for a Dear ImGui texture ID
     fn get(&self, texture_id: TextureId) -> Option<GlTexture>;
@@ -34,10 +38,10 @@ pub trait TextureMap {
     fn register_texture(
         &mut self,
         gl_texture: GlTexture,
-        width: u32,
-        height: u32,
+        _width: u32,
+        _height: u32,
         format: TextureFormat,
-    ) -> TextureId;
+    ) -> InitResult<TextureId>;
 
     /// Update a texture in Dear ImGui's texture management system
     fn update_texture(
@@ -48,19 +52,16 @@ pub trait TextureMap {
         height: u32,
     );
 
-    /// Get texture data from Dear ImGui's texture management system
-    fn get_texture_data(&self, texture_id: TextureId) -> Option<&TextureData>;
-
-    /// Get mutable texture data from Dear ImGui's texture management system
-    fn get_texture_data_mut(&mut self, texture_id: TextureId) -> Option<&mut TextureData>;
+    /// Pixel format recorded for a renderer-owned texture.
+    fn texture_format(&self, texture_id: TextureId) -> Option<TextureFormat>;
 }
 
 /// Simple texture map implementation using a HashMap with modern texture management
 #[derive(Default)]
 pub struct SimpleTextureMap {
     textures: HashMap<TextureId, GlTexture>,
-    texture_data: HashMap<TextureId, OwnedTextureData>,
-    next_id: usize,
+    formats: HashMap<TextureId, TextureFormat>,
+    next_id: u64,
 }
 
 impl TextureMap for SimpleTextureMap {
@@ -74,34 +75,37 @@ impl TextureMap for SimpleTextureMap {
 
     fn remove(&mut self, texture_id: TextureId) -> Option<GlTexture> {
         let gl_texture = self.textures.remove(&texture_id);
-        self.texture_data.remove(&texture_id);
+        self.formats.remove(&texture_id);
         gl_texture
     }
 
     fn clear(&mut self) {
         self.textures.clear();
-        self.texture_data.clear();
+        self.formats.clear();
     }
 
     fn register_texture(
         &mut self,
         gl_texture: GlTexture,
-        width: u32,
-        height: u32,
+        _width: u32,
+        _height: u32,
         format: TextureFormat,
-    ) -> TextureId {
-        self.next_id += 1;
-        let texture_id = TextureId::new(self.next_id as u64);
-
-        let mut texture_data = TextureData::new();
-        texture_data.create(format, width, height);
-        texture_data.set_tex_id(texture_id);
-        texture_data.set_status(TextureStatus::OK);
+    ) -> InitResult<TextureId> {
+        let texture_id = loop {
+            self.next_id = self
+                .next_id
+                .checked_add(1)
+                .ok_or(InitError::TextureIdExhausted)?;
+            let candidate = TextureId::new(self.next_id);
+            if !candidate.is_null() && !self.textures.contains_key(&candidate) {
+                break candidate;
+            }
+        };
 
         self.textures.insert(texture_id, gl_texture);
-        self.texture_data.insert(texture_id, texture_data);
+        self.formats.insert(texture_id, format);
 
-        texture_id
+        Ok(texture_id)
     }
 
     fn update_texture(
@@ -112,19 +116,10 @@ impl TextureMap for SimpleTextureMap {
         _height: u32,
     ) {
         self.textures.insert(texture_id, gl_texture);
-
-        if let Some(texture_data) = self.texture_data.get_mut(&texture_id) {
-            texture_data.set_tex_id(texture_id);
-            texture_data.set_status(TextureStatus::OK);
-        }
     }
 
-    fn get_texture_data(&self, texture_id: TextureId) -> Option<&TextureData> {
-        self.texture_data.get(&texture_id).map(AsRef::as_ref)
-    }
-
-    fn get_texture_data_mut(&mut self, texture_id: TextureId) -> Option<&mut TextureData> {
-        self.texture_data.get_mut(&texture_id).map(AsMut::as_mut)
+    fn texture_format(&self, texture_id: TextureId) -> Option<TextureFormat> {
+        self.formats.get(&texture_id).copied()
     }
 }
 
@@ -133,7 +128,7 @@ impl SimpleTextureMap {
     pub fn new() -> Self {
         Self {
             textures: HashMap::new(),
-            texture_data: HashMap::new(),
+            formats: HashMap::new(),
             next_id: 0,
         }
     }
@@ -153,11 +148,9 @@ impl SimpleTextureMap {
         self.textures.iter()
     }
 
-    /// Iterate over all texture data
-    pub fn texture_data_iter(&self) -> impl Iterator<Item = (&TextureId, &TextureData)> {
-        self.texture_data
-            .iter()
-            .map(|(id, texture_data)| (id, texture_data.as_ref()))
+    /// Iterate over the formats recorded for renderer-owned textures.
+    pub fn format_iter(&self) -> impl Iterator<Item = (&TextureId, &TextureFormat)> {
+        self.formats.iter()
     }
 }
 
@@ -306,7 +299,7 @@ pub fn update_texture(
     Ok(())
 }
 
-fn alpha8_to_rgba(data: &[u8], width: u32, height: u32) -> InitResult<Vec<u8>> {
+pub(crate) fn alpha8_to_rgba(data: &[u8], width: u32, height: u32) -> InitResult<Vec<u8>> {
     let expected_len =
         (width as usize)
             .checked_mul(height as usize)
@@ -393,93 +386,6 @@ pub(crate) fn upload_texture_data(
     }
 
     Ok(())
-}
-
-/// Update texture from ImGui texture data (similar to ImGui_ImplOpenGL3_UpdateTexture)
-pub fn update_imgui_texture(
-    gl: &Context,
-    texture_id: TextureId,
-    width: u32,
-    height: u32,
-    data: &[u8],
-) -> InitResult<GlTexture> {
-    let (width_i32, height_i32) = checked_gl_texture_size(width, height)?;
-    unsafe {
-        // Backup current texture binding
-        let last_texture = u32::try_from(gl.get_parameter_i32(glow::TEXTURE_BINDING_2D))
-            .ok()
-            .and_then(std::num::NonZeroU32::new)
-            .map(glow::NativeTexture);
-
-        // Set pixel store parameters
-        gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
-
-        let gl_texture = if texture_id.id() == 0 {
-            // Create new texture
-            let texture = gl.create_texture().map_err(InitError::CreateTexture)?;
-
-            gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-            gl.tex_parameter_i32(
-                glow::TEXTURE_2D,
-                glow::TEXTURE_MIN_FILTER,
-                glow::LINEAR as i32,
-            );
-            gl.tex_parameter_i32(
-                glow::TEXTURE_2D,
-                glow::TEXTURE_MAG_FILTER,
-                glow::LINEAR as i32,
-            );
-            gl.tex_parameter_i32(
-                glow::TEXTURE_2D,
-                glow::TEXTURE_WRAP_S,
-                glow::CLAMP_TO_EDGE as i32,
-            );
-            gl.tex_parameter_i32(
-                glow::TEXTURE_2D,
-                glow::TEXTURE_WRAP_T,
-                glow::CLAMP_TO_EDGE as i32,
-            );
-            gl.tex_image_2d(
-                glow::TEXTURE_2D,
-                0,
-                glow::RGBA as i32,
-                width_i32,
-                height_i32,
-                0,
-                glow::RGBA,
-                glow::UNSIGNED_BYTE,
-                glow::PixelUnpackData::Slice(Some(data)),
-            );
-
-            texture
-        } else {
-            // Update existing texture
-            let texture_u32 = u32::try_from(texture_id.id())
-                .map_err(|_| InitError::TextureIdOutOfRange(texture_id.id()))?;
-            let texture_nz =
-                std::num::NonZeroU32::new(texture_u32).ok_or(InitError::NullTextureId)?;
-            let texture = glow::NativeTexture(texture_nz);
-            gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-            gl.tex_image_2d(
-                glow::TEXTURE_2D,
-                0,
-                glow::RGBA as i32,
-                width_i32,
-                height_i32,
-                0,
-                glow::RGBA,
-                glow::UNSIGNED_BYTE,
-                glow::PixelUnpackData::Slice(Some(data)),
-            );
-
-            texture
-        };
-
-        // Restore previous texture binding
-        gl.bind_texture(glow::TEXTURE_2D, last_texture);
-
-        Ok(gl_texture)
-    }
 }
 
 #[cfg(test)]

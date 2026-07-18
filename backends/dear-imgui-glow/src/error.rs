@@ -59,13 +59,42 @@ pub enum InitError {
         actual: usize,
     },
 
-    /// TextureId cannot be represented as an OpenGL texture name.
-    #[error("TextureId is out of range for OpenGL: {0}")]
-    TextureIdOutOfRange(u64),
-
     /// TextureId zero/null is not valid for this operation.
     #[error("TextureId must be non-zero for OpenGL")]
     NullTextureId,
+
+    /// TextureId allocation space was exhausted.
+    #[error("TextureId allocation space is exhausted")]
+    TextureIdExhausted,
+
+    /// The texture map does not contain the requested texture ID.
+    #[error("TextureId is not registered: {0:?}")]
+    UnknownTextureId(dear_imgui_rs::TextureId),
+
+    /// A texture upload row is shorter than the pixels required by its format.
+    #[error("{format:?} texture row pitch is too small: expected at least {minimum}, got {actual}")]
+    TextureRowPitchTooSmall {
+        format: TextureFormat,
+        minimum: usize,
+        actual: usize,
+    },
+
+    /// A managed texture update rectangle lies outside its texture allocation.
+    #[error(
+        "texture update rectangle ({x}, {y}, {width}, {height}) exceeds texture size {texture_width}x{texture_height}"
+    )]
+    TextureUpdateOutOfBounds {
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+        texture_width: u32,
+        texture_height: u32,
+    },
+
+    /// The Context could not register this renderer's sole consumer capability.
+    #[error(transparent)]
+    RendererConsumer(#[from] dear_imgui_rs::render::RendererConsumerError),
 
     /// Generic initialization error
     #[error("Initialization error: {0}")]
@@ -106,6 +135,35 @@ pub enum RenderError {
         resource: &'static str,
         error: String,
     },
+
+    /// This renderer is no longer attached to a Context consumer.
+    #[error("Glow renderer is not attached to a Dear ImGui renderer consumer")]
+    RendererNotAttached,
+
+    /// A rendered frame belongs to a different Context.
+    #[error("rendered frame belongs to Context {actual:?}, not Context {expected:?}")]
+    ContextMismatch {
+        expected: dear_imgui_rs::ContextId,
+        actual: dear_imgui_rs::ContextId,
+    },
+
+    /// A frame was rendered without the managed-texture consumer epoch Glow requires.
+    #[error("rendered frame does not carry a managed-texture renderer epoch")]
+    MissingRendererEpoch,
+
+    /// A rendered frame belongs to an obsolete or foreign consumer generation.
+    #[error(
+        "rendered frame consumer generation {actual} does not match renderer generation {expected}"
+    )]
+    ConsumerGenerationMismatch { expected: u64, actual: u64 },
+
+    /// Context-owned renderer epoch validation failed.
+    #[error(transparent)]
+    RendererConsumer(#[from] dear_imgui_rs::render::RendererConsumerError),
+
+    /// Texture feedback was constructed for the wrong request kind.
+    #[error(transparent)]
+    TextureFeedback(#[from] dear_imgui_rs::render::TextureFeedbackError),
 
     /// Generic rendering error
     #[error("Rendering error: {0}")]

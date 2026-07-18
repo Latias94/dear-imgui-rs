@@ -6,6 +6,18 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- `GlowRenderer` now owns the Context's move-only renderer consumer and consumes
+  `RenderedFrame` by value. Managed texture uploads use pointer-free `SnapshotTextureId` keys and
+  owned request bytes instead of mutating `ImTextureData` through `DrawData`.
+- `TextureMap` now stores only Rust/OpenGL mappings and pixel formats. Its registration method is
+  fallible, and native `TextureData` accessors were removed.
+- `GlowRenderer::destroy` and `destroy_device_objects` now return `RenderResult` and reset Context
+  texture bindings only after their OpenGL resources have been destroyed.
+- Rendering now rejects frames from another Context, another consumer generation, or a path that
+  omitted the managed-texture renderer epoch before making OpenGL calls.
+
 ### Fixed
 
 - `update_texture_with_context` now updates the GL texture already registered for an existing

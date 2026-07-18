@@ -17,14 +17,15 @@ This backend is compatible with both `ash` loader modes:
 
 ## Features
 
-- Supports Dear ImGui 1.92+ texture management (`DrawData::textures()`), including create/update/destroy.
+- Supports Dear ImGui 1.92+ managed texture create/update/destroy requests through `RenderedFrame`.
 - Sets `ImGuiBackendFlags_RendererHasTextures` and `ImGuiBackendFlags_RendererHasVtxOffset`.
 - Upload path uses in-flight fences to avoid `vkQueueWaitIdle` stalls.
 - Sub-rect texture updates (uses `UpdateRect` bounding box).
 
-## User-created textures (ImTextureData)
+## Managed textures
 
-`DrawData::textures()` is derived from ImGui's internal `PlatformIO.Textures[]` list.
+`AshRenderer::cmd_draw` consumes a `RenderedFrame`, uploads its owned texture requests, reconciles
+request-bound feedback, and only then reads the frame's immutable draw data.
 
 - Font atlas textures are registered by ImGui itself.
 - Register an `OwnedTextureData` with `Context::register_texture(texture)`. Registration transfers
@@ -34,6 +35,31 @@ This backend is compatible with both `ash` loader modes:
 
 Safe image APIs do not accept borrowed `TextureData`; this prevents native draw commands from
 retaining a pointer after the Rust borrow ends.
+
+### GPU-safe retirement
+
+Recording a Vulkan command buffer does not mean the GPU has finished using its textures. A destroy
+request therefore moves the managed texture into a retirement queue instead of immediately freeing
+it or acknowledging the request.
+
+`AshRenderer::cmd_draw` returns the highest pending `TextureRetirementBatch`. Associate that token
+with completion submitted after all relevant Ash uploads, main-viewport commands, and secondary-
+viewport commands, including secondary viewport work recorded after `cmd_draw` returns. When that
+work spans multiple queues, wait for every relevant queue; a fence on one queue does not prove work
+on another queue has completed. Once all associated synchronization has signaled, call
+`unsafe AshRenderer::notify_texture_retirements_completed(batch)`. The next frame can then
+acknowledge Dear ImGui's repeated destroy request. `pending_texture_retirement()` recovers the
+current token if command recording returns an error after retirement began.
+
+The retirement protocol is identical for classic render passes and dynamic rendering. In multi-
+viewport mode, render/submit the main viewport, run the secondary viewport renderer callbacks, and
+only then establish the completion point associated with the batch. Merely finishing command
+recording is never sufficient.
+
+Call `AshRenderer::shutdown(&mut imgui)` before dropping the Context or renderer. Shutdown waits for
+device idle, destroys active and retiring GPU textures, resets Context-owned renderer bindings, and
+then releases the renderer consumer. With multi-viewport enabled, call the matching
+`shutdown_multi_viewport_support` helper first.
 
 ## External textures & custom sampler
 
@@ -229,8 +255,17 @@ let mut renderer = AshRenderer::with_default_allocator(
 )?;
 
 // In your render loop (inside a render pass):
-// let draw_data = imgui.render();
-// renderer.cmd_draw(command_buffer, &draw_data)?;
-# let _ = vk::CommandBuffer::null();
+# let command_buffer = vk::CommandBuffer::null();
+let frame = imgui.render();
+let retirement = renderer.cmd_draw(command_buffer, frame)?;
+
+// Submit command_buffer and retain `retirement` with synchronization that covers all Ash renderer
+// work which can still reference the retired textures. After every relevant queue completes:
+if let Some(batch) = retirement {
+    // SAFETY: the associated fence has completed all renderer work through `batch`.
+    unsafe { renderer.notify_texture_retirements_completed(batch)? };
+}
+
+renderer.shutdown(&mut imgui)?;
 # Ok(()) }
 ```

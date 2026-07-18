@@ -7,7 +7,7 @@ use ash::{
     khr::{surface as khr_surface, swapchain as khr_swapchain},
     vk,
 };
-use dear_imgui_ash::{AshRenderer, Options as AshOptions};
+use dear_imgui_ash::{AshRenderer, Options as AshOptions, TextureRetirementBatch};
 use dear_imgui_rs::*;
 use dear_imgui_winit::WinitPlatform;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
@@ -212,6 +212,7 @@ struct FrameSync {
     render_finished: vk::Semaphore,
     fence: vk::Fence,
     command_buffer: vk::CommandBuffer,
+    texture_retirement: Option<TextureRetirementBatch>,
 }
 
 struct VulkanState {
@@ -267,6 +268,13 @@ struct AppWindow {
     window: Arc<Window>,
     imgui: ImguiState,
     vk: VulkanState,
+}
+
+impl Drop for AppWindow {
+    fn drop(&mut self) {
+        let _ = unsafe { self.vk.ctx.device.device_wait_idle() };
+        let _ = self.imgui.renderer.shutdown(&mut self.imgui.context);
+    }
 }
 
 #[derive(Default)]
@@ -416,7 +424,7 @@ impl AppWindow {
         }
         self.imgui
             .context
-            .with_texture_mut(self.imgui.img_tex, |texture| texture.set_data(&pixels))
+            .with_texture_mut(self.imgui.img_tex, |mut texture| texture.set_data(&pixels))
             .expect("animated texture should remain active");
         self.imgui.frame = self.imgui.frame.wrapping_add(1);
     }
@@ -475,14 +483,25 @@ impl AppWindow {
         self.imgui
             .platform
             .prepare_render_with_ui(&ui, &self.window);
-        let draw_data = self.imgui.context.render();
+        let rendered_frame = self.imgui.context.render();
 
-        let frame = &self.vk.frames[self.vk.frame_index % self.vk.frames.len()];
+        let frame_slot = self.vk.frame_index % self.vk.frames.len();
+        let frame = &mut self.vk.frames[frame_slot];
         unsafe {
             self.vk
                 .ctx
                 .device
                 .wait_for_fences(&[frame.fence], true, u64::MAX)?;
+        }
+        if let Some(retirement) = frame.texture_retirement {
+            // SAFETY: this frame fence covers its draw submission and every earlier upload on the
+            // same renderer queue.
+            unsafe {
+                self.imgui
+                    .renderer
+                    .notify_texture_retirements_completed(retirement)?;
+            }
+            frame.texture_retirement = None;
         }
 
         let acquire = unsafe {
@@ -515,21 +534,20 @@ impl AppWindow {
         self.vk.images_in_flight[image_index as usize] = frame.fence;
 
         unsafe {
-            self.vk.ctx.device.reset_fences(&[frame.fence])?;
             self.vk
                 .ctx
                 .device
                 .reset_command_buffer(frame.command_buffer, vk::CommandBufferResetFlags::empty())?;
         }
 
-        record_command_buffer(
+        let texture_retirement = record_command_buffer(
             &self.vk.ctx.device,
             frame.command_buffer,
             self.vk.render_pass,
             self.vk.swapchain.framebuffers[image_index as usize],
             self.vk.swapchain.extent,
             self.imgui.clear_color,
-            |cmd| self.imgui.renderer.cmd_draw(cmd, draw_data),
+            |cmd| self.imgui.renderer.cmd_draw(cmd, rendered_frame),
         )?;
 
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
@@ -540,12 +558,14 @@ impl AppWindow {
             .signal_semaphores(std::slice::from_ref(&frame.render_finished));
 
         unsafe {
+            self.vk.ctx.device.reset_fences(&[frame.fence])?;
             self.vk.ctx.device.queue_submit(
                 self.vk.ctx.queue,
                 std::slice::from_ref(&submit_info),
                 frame.fence,
             )?;
         }
+        frame.texture_retirement = texture_retirement;
 
         let present_info = vk::PresentInfoKHR::default()
             .wait_semaphores(std::slice::from_ref(&frame.render_finished))
@@ -859,6 +879,7 @@ fn create_frame_sync(
         render_finished,
         fence,
         command_buffer,
+        texture_retirement: None,
     })
 }
 
@@ -869,11 +890,12 @@ fn record_command_buffer<F>(
     framebuffer: vk::Framebuffer,
     extent: vk::Extent2D,
     clear_color: [f32; 4],
-    mut record_draws: F,
-) -> Result<(), Box<dyn std::error::Error>>
+    record_draws: F,
+) -> Result<Option<TextureRetirementBatch>, Box<dyn std::error::Error>>
 where
-    F: FnMut(vk::CommandBuffer) -> dear_imgui_ash::RendererResult<()>,
+    F: FnOnce(vk::CommandBuffer) -> dear_imgui_ash::RendererResult<Option<TextureRetirementBatch>>,
 {
+    let texture_retirement;
     unsafe {
         device.begin_command_buffer(
             cmd,
@@ -900,12 +922,12 @@ where
             vk::SubpassContents::INLINE,
         );
 
-        record_draws(cmd)?;
+        texture_retirement = record_draws(cmd)?;
 
         device.cmd_end_render_pass(cmd);
         device.end_command_buffer(cmd)?;
     }
-    Ok(())
+    Ok(texture_retirement)
 }
 
 fn is_srgb_format(format: vk::Format) -> bool {

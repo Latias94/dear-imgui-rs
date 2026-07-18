@@ -48,12 +48,7 @@ struct SecondaryViewportRouteState {
     camera: Option<Entity>,
 }
 
-fn app_with_primary_window() -> (
-    App,
-    Entity,
-    Entity,
-    imgui::render::snapshot::ManagedTextureId,
-) {
+fn app_with_primary_window() -> (App, Entity, Entity, imgui::ManagedTextureId) {
     let mut app = App::new();
     app.add_plugins(ExtractPlugin::default());
     app.add_plugins(ImguiPlugin::default());
@@ -133,7 +128,7 @@ fn draw_legacy_texture(mut contexts: ImguiContexts) {
 }
 
 #[test]
-fn render_extract_rejects_managed_frames_until_context_owned_capture() {
+fn render_extract_moves_context_owned_managed_frame_and_commits_once() {
     let _guard = imgui_context_guard();
     let (mut app, primary_window, camera, texture_id) = app_with_primary_window();
     app.add_systems(ImguiPrimaryContextPass, draw_managed_texture);
@@ -142,31 +137,43 @@ fn render_extract_rejects_managed_frames_until_context_owned_capture() {
 
     let output = app.world().resource::<ImguiFrameOutput>();
     assert_eq!(output.frame_index(), 1);
-    assert!(output.snapshot().is_none());
-    assert!(
-        output
-            .snapshot_error()
-            .is_some_and(|error| error.contains("Context-owned snapshot capture"))
-    );
+    let epoch = output
+        .snapshot_epoch()
+        .expect("main world should publish a Context-owned snapshot epoch");
+    assert_eq!(epoch.sequence(), 1);
+    assert!(output.snapshot_error().is_none());
 
     let extracted = app
         .sub_app(RenderApp)
         .world()
         .resource::<ImguiExtractedRenderFrame>();
     assert_eq!(extracted.frame_index(), Some(1));
-    assert!(extracted.snapshot().is_none());
-    assert!(extracted.camera_targets().is_empty());
+    assert!(
+        extracted.snapshot().is_none(),
+        "the full render schedule must consume the move-only snapshot"
+    );
+    assert_eq!(extracted.camera_targets().len(), 1);
 
     let prepared = app
         .sub_app(RenderApp)
         .world()
         .resource::<ImguiPreparedRenderFrame>();
     assert_eq!(prepared.frame_index(), Some(1));
-    assert!(prepared.draws().is_empty());
-    assert_eq!(prepared.texture_request_count(), 0);
+    assert!(!prepared.draws().is_empty());
+    assert!(prepared.texture_request_count() >= 1);
+    assert!(prepared.draws().iter().any(|draw| {
+        draw.texture == TextureBinding::Managed(imgui::render::SnapshotTextureId::User(texture_id))
+    }));
 
-    let context = app.world().get_non_send::<ImguiContext>().unwrap();
-    assert!(context.context().with_texture(texture_id, |_| ()).is_ok());
+    let progress = app
+        .world_mut()
+        .get_non_send_mut::<ImguiContext>()
+        .unwrap()
+        .context_mut()
+        .poll_snapshot_completions()
+        .expect("request-bound empty feedback should still complete the snapshot epoch");
+    assert_eq!(progress.committed(), 1);
+    assert_eq!(progress.feedback_applied(), 0);
     let _ = (primary_window, camera);
 }
 
@@ -180,10 +187,11 @@ fn render_extract_clears_stale_snapshot_after_primary_window_is_removed() {
     assert!(
         app.sub_app(RenderApp)
             .world()
-            .resource::<ImguiExtractedRenderFrame>()
-            .snapshot()
-            .is_some(),
-        "first update should extract a snapshot"
+            .resource::<ImguiPreparedRenderFrame>()
+            .draws()
+            .iter()
+            .any(|draw| draw.texture == TextureBinding::Legacy(LEGACY_RENDER_TEXTURE_ID)),
+        "first update should prepare the extracted snapshot"
     );
 
     app.world_mut().despawn(primary_window);
@@ -569,10 +577,9 @@ fn renderer_prepare_routes_secondary_viewport_draws_only_to_matching_window() {
         .sub_app(RenderApp)
         .world()
         .resource::<ImguiExtractedRenderFrame>();
-    let snapshot = extracted.snapshot().expect("snapshot should be extracted");
     assert!(
-        snapshot.viewport_draw(secondary_viewport_id).is_some(),
-        "core snapshot should carry secondary Dear ImGui viewport draw data"
+        extracted.snapshot().is_none(),
+        "secondary viewport snapshots must also be committed after preparation"
     );
 
     let prepared = app
@@ -625,7 +632,10 @@ fn renderer_prepare_flattens_extracted_snapshot_for_pipeline_consumption() {
     assert_eq!(prepared.frame_index(), Some(1));
     assert!(!prepared.vertices().is_empty());
     assert!(!prepared.indices().is_empty());
-    assert_eq!(prepared.texture_request_count(), 0);
+    assert!(
+        prepared.texture_request_count() >= 1,
+        "Context-owned capture should carry the font-atlas request alongside legacy draws"
+    );
 
     let draw = prepared
         .draws()

@@ -14,7 +14,9 @@ impl GlowRenderer {
     /// If multi-viewport support was enabled, this also makes renderer callbacks no-op for this
     /// renderer. Call the matching multi-viewport shutdown helper when you also need to uninstall
     /// callbacks from the ImGui context and destroy platform windows.
-    pub fn destroy(&mut self, gl: &Context, imgui_context: &mut ImGuiContext) {
+    pub fn destroy(&mut self, gl: &Context, imgui_context: &mut ImGuiContext) -> RenderResult<()> {
+        self.ensure_context_matches(imgui_context)?;
+
         #[cfg(feature = "multi-viewport")]
         self.clear_multi_viewport_renderer_state();
 
@@ -25,9 +27,14 @@ impl GlowRenderer {
             unsafe { gl.delete_vertex_array(vao) };
         }
 
-        imgui_context
-            .platform_io_mut()
-            .invalidate_renderer_texture_bindings();
+        let consumer = self
+            .renderer_consumer
+            .as_ref()
+            .ok_or(RenderError::RendererNotAttached)?;
+        imgui_context.reset_renderer_texture_bindings(consumer)?;
+        Self::unconfigure_imgui_context_static(imgui_context);
+        self.renderer_consumer.take();
+        Ok(())
     }
 
     #[cfg(feature = "multi-viewport")]
@@ -58,6 +65,10 @@ impl GlowRenderer {
 
     /// Called every frame to prepare for rendering
     pub fn new_frame(&mut self) -> RenderResult<()> {
+        if self.renderer_consumer.is_none() {
+            return Err(RenderError::RendererDestroyed);
+        }
+
         // Check if we need to recreate device objects
         let needs_recreation = self.is_destroyed || self.shaders.program.is_none();
 
@@ -125,11 +136,19 @@ impl GlowRenderer {
     }
 
     /// Destroy OpenGL device objects and detach their managed texture bindings.
-    pub fn destroy_device_objects(&mut self, gl: &Context, imgui_context: &mut ImGuiContext) {
+    pub fn destroy_device_objects(
+        &mut self,
+        gl: &Context,
+        imgui_context: &mut ImGuiContext,
+    ) -> RenderResult<()> {
+        self.ensure_context_matches(imgui_context)?;
         self.destroy_device_objects_only(gl);
-        imgui_context
-            .platform_io_mut()
-            .invalidate_renderer_texture_bindings();
+        let consumer = self
+            .renderer_consumer
+            .as_ref()
+            .ok_or(RenderError::RendererNotAttached)?;
+        imgui_context.reset_renderer_texture_bindings(consumer)?;
+        Ok(())
     }
 
     fn destroy_device_objects_only(&mut self, gl: &Context) {
@@ -145,8 +164,23 @@ impl GlowRenderer {
         for texture in self.owned_textures.drain(..) {
             unsafe { gl.delete_texture(texture) };
         }
+        self.managed_textures.clear();
         self.texture_map_mut().clear();
         self.is_destroyed = true;
+    }
+
+    pub(super) fn ensure_context_matches(&self, imgui_context: &ImGuiContext) -> RenderResult<()> {
+        let consumer = self
+            .renderer_consumer
+            .as_ref()
+            .ok_or(RenderError::RendererNotAttached)?;
+        if consumer.context_id() != imgui_context.id() {
+            return Err(RenderError::ContextMismatch {
+                expected: consumer.context_id(),
+                actual: imgui_context.id(),
+            });
+        }
+        Ok(())
     }
 }
 
