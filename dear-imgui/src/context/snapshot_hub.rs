@@ -308,10 +308,7 @@ impl SnapshotHub {
             ..Default::default()
         };
 
-        loop {
-            let Some((&sequence, outstanding)) = self.outstanding.first_key_value() else {
-                break;
-            };
+        while let Some((&sequence, outstanding)) = self.outstanding.first_key_value() {
             if outstanding.completion.is_none() {
                 break;
             }
