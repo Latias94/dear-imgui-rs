@@ -6,17 +6,14 @@ All notable changes to this crate will be documented in this file.
 
 ### Breaking
 
-- `AshRenderer::cmd_draw` now consumes a Context-borrowed `RenderedFrame` and returns the highest
-  pending `TextureRetirementBatch`; applications must prove GPU completion before notifying the
-  renderer and must call `AshRenderer::shutdown` to reset Context-owned texture bindings.
-- Winit and SDL3 multi-viewport `enable` entry points are now `unsafe`: keep the renderer at a stable address, serialize renderer access on the enabling thread, and preserve the declared Vulkan device lineage until shutdown completes.
-- Applications must call the renderer adapter's `shutdown_multi_viewport_support` before shutting down the platform backend or dropping the renderer, context, windows, validation surface, device, or instance.
-- `shutdown_multi_viewport_support` rejects renderer callback ownership drift before mutating platform windows or runtime state.
+- `AshRenderer::cmd_draw` now consumes a Context-borrowed `RenderedFrame` and returns the highest pending `TextureRetirementBatch`; applications must prove GPU completion before acknowledging the batch and must call `AshRenderer::shutdown` to reset Context-owned texture bindings.
+- Replace the Winit and SDL3 `enable` functions with owning `WinitViewportRuntime::attach` and `Sdl3ViewportRuntime::attach`. Both attach functions remain unsafe only because callers must prove the raw Vulkan device, queue, surface, and synchronization lineage described by `VulkanViewportConfig`; the runtime consumes the renderer into stable internal storage, so callers no longer pin its address.
+- Call the owning renderer runtime's `shutdown` before shutting down the platform runtime or dropping the Context, windows, validation surface, device, or instance. Context attachments preserve the same renderer-resources-before-platform-windows order during best-effort Context teardown.
+- The owning runtime's `shutdown` rejects renderer callback ownership drift before mutating platform windows or runtime state.
 
 ### Changed
 
-- Managed create/update feedback is request-bound, while destroy feedback is delayed until the
-  renderer has actually released the Vulkan texture after fence- or device-idle-backed completion.
+- Managed create/update feedback is request-bound, while destroy feedback is delayed until the renderer has actually released the Vulkan texture after fence- or device-idle-backed completion.
 - Winit and SDL3 surface adapters now share one private Vulkan viewport runtime for callback ownership, surface and swapchain state, per-image synchronization, recovery, and ordered shutdown.
 - Multi-viewport registration now claims only the five `Renderer_*` callback slots and fails instead of replacing foreign callbacks, foreign `RendererUserData`, an active renderer registration, or already-created secondary platform windows.
 - `ViewportFlags::NO_RENDERER_CLEAR` now maps to Vulkan `DONT_CARE` rather than `LOAD`, matching Dear ImGui's discard semantics for a newly acquired swapchain image in both render-pass and dynamic-rendering modes.
