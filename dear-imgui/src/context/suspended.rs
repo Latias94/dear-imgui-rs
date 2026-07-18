@@ -11,6 +11,7 @@ use super::binding::{
     set_current_context,
 };
 use super::frame::FrameLifecycleState;
+use super::snapshot_hub::SnapshotHub;
 use super::texture_registry::ManagedTextureRegistry;
 
 impl Context {
@@ -104,6 +105,7 @@ impl SuspendedContext {
             raw,
             state,
             attachments: AttachmentRegistry::default(),
+            snapshot_hub: SnapshotHub::new(id),
             texture_registry,
             shared_font_atlas,
             ini_filename: None,

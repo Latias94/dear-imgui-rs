@@ -85,58 +85,62 @@
 //!
 //! - Concepts:
 //!   - `TextureId`: legacy plain handle (e.g., GL texture name, Vk descriptor).
-//!   - `TextureData`: managed CPU-side description with status flags and pixel buffer.
+//!   - `OwnedTextureData`: transferable CPU-side texture allocation prepared before registration.
 //!   - `ManagedTextureId`: opaque Context/slot/generation identity used by widgets and draw lists.
+//!   - `ManagedTextureRef` / `ManagedTextureMut`: non-escaping Context-scoped inspection and pixel
+//!     updates which do not expose native pointers or renderer-owned fields.
 //!   - `TextureRef<'tex>`: logical image source constructed from `TextureId`, `ManagedTextureId`,
 //!     or an owner-backed font-atlas texture lease.
 //! - Basic flow:
 //!   1. Create `OwnedTextureData` and call `create(format, w, h)` to allocate pixels.
-//!   2. Fill/modify pixels; call `set_status(WantCreate)` for initial upload, or `WantUpdates` with
-//!      `UpdateRect` for sub-updates. `TextureData::set_data()` is a convenience which copies data and
-//!      marks an update.
+//!   2. Fill pixels with `set_data()`; registration preserves the initial create request.
 //!   3. Transfer ownership with `Context::register_texture(tex)` and retain its handle.
 //!   4. Mutate before a frame with `Context::with_texture_mut(handle, |tex| ...)`.
 //!   5. Use the handle in UI via `ui.image(handle, size)` or draw-list APIs.
 //!   6. Call `Context::remove_texture(handle)` to begin generation-safe retirement.
-//!   7. In a synchronous renderer, iterate `DrawData::textures_mut()` and honor the requests
-//!      (Create/Update/Destroy), then set status back to `OK`/`Destroyed`.
+//!   7. A renderer processes request-owned bytes from `RenderedFrame::texture_requests()` or
+//!      `FrameSnapshot::texture_requests()` and returns feedback created by each request.
 //! - Alternatives: when you already have a GPU handle, pass `TextureId` directly.
 //!
 //! ## Renderer Integration (Modern Textures)
 //!
 //! When integrating a renderer backend (WGPU, OpenGL, etc.) with ImGui 1.92+:
 //! - Set `BackendFlags::RENDERER_HAS_TEXTURES` on the ImGui `Io` before building the font atlas.
-//! - Treat `Context::render()` as producing mutable draw data: renderer APIs should take
-//!   `&mut render::DrawData` so they can write texture feedback.
-//! - Each frame, iterate `DrawData::textures_mut()` and honor all requests:
-//!   - `WantCreate`: create a GPU texture, upload pixels, assign a non-zero TexID back to ImGui, then set status to `OK`.
-//!   - `WantUpdates`: upload pending `UpdateRect`s, then set status to `OK`.
-//!   - `WantDestroy`: delete/free the GPU texture and set status to `Destroyed`.
-//! - Use `DrawData::textures()` only for read-only inspection or snapshots.
+//! - Create one `RendererConsumer` from the Context and keep it alive with the renderer.
+//! - Synchronous renderer APIs consume a Context-borrowed `RenderedFrame`; detached renderers
+//!   consume a move-only `FrameSnapshot`.
+//! - Each frame, handle every `TextureOp::Create`, `Update`, and `Destroy`, then create feedback
+//!   through `TextureRequest::uploaded` or `TextureRequest::destroyed`.
+//! - Reconcile synchronous feedback before rendering draw commands that depend on new IDs;
+//!   detached snapshots commit feedback when their GPU work is complete.
 //! - Bind [`DrawCmdParams::texture_id`](render::DrawCmdParams::texture_id). Command iteration
 //!   resolves the effective ID for both legacy and managed texture references.
-//! - Optional: some backends perform a font-atlas fallback upload on initialization.
-//!   This affects only the font texture for the first frame; user textures go through
-//!   the modern `ImTextureData` path.
+//! - After destroying every renderer-owned GPU texture, call
+//!   `Context::reset_renderer_texture_bindings` before dropping the consumer.
 //!
 //! Pseudocode outline:
 //! ```ignore
 //! // 1) Configure context
 //! io.backend_flags |= BackendFlags::RENDERER_HAS_TEXTURES;
 //!
-//! // 2) Per-frame: handle texture requests
-//! let mut textures = draw_data.textures_mut();
-//! while let Some(mut tex) = textures.next() {
-//!     match tex.status() {
-//!         WantCreate => { create_gpu_tex(tex); tex.set_tex_id(id); tex.set_ok(); }
-//!         WantUpdates => { upload_rects(tex); tex.set_ok(); }
-//!         WantDestroy => { destroy_gpu_tex(tex); tex.set_destroyed(); }
-//!         _ => {}
-//!     }
+//! let consumer = context.create_renderer_consumer()?;
+//! let mut frame = context.render();
+//! let mut feedback = Vec::new();
+//! for request in frame.texture_requests() {
+//!     feedback.push(match request.operation() {
+//!         TextureOp::Create { .. } | TextureOp::Update { .. } =>
+//!             request.uploaded(upload_to_gpu(request))?,
+//!         TextureOp::Destroy => {
+//!             destroy_gpu_texture(request.texture());
+//!             request.destroyed()?
+//!         }
+//!     });
 //! }
+//! frame.reconcile_texture_feedback(feedback)?;
 //!
-//! // 3) Rendering: use the already resolved effective texture ID
-//! for cmd in draw_list.commands() {
+//! // Rendering uses IDs resolved by the owning Context.
+//! for draw_list in frame.draw_data().draw_lists() {
+//!   for cmd in draw_list.commands() {
 //!     match cmd {
 //!         Elements { cmd_params, .. } => {
 //!             bind_texture(cmd_params.texture_id);
@@ -144,12 +148,12 @@
 //!         }
 //!         _ => { /* ... */ }
 //!     }
+//!   }
 //! }
 //! ```
 //!
-//! For thread-safe render work, build `render::snapshot::FrameSnapshot` from read-only draw data.
-//! `OwnedDrawData` is a conservative deep copy for draw lists and intentionally does not carry
-//! live context texture requests as a thread-safe contract.
+//! For thread-safe render work, register one renderer consumer and capture a Context-created,
+//! move-only `render::FrameSnapshot`.
 //!
 //! ## Safe API Migration Notes
 //!
@@ -159,8 +163,8 @@
 //! - Use `TextureId` for legacy handles and `ManagedTextureId` for Context-owned textures.
 //! - Borrowed `&mut TextureData` is intentionally not an image source; transfer ownership with
 //!   `Context::register_texture` and mutate it through a Context-scoped closure.
-//! - Renderer backends should accept `&mut DrawData` and use `textures_mut()` for status/TexID
-//!   feedback. Shared `textures()` iterators are read-only.
+//! - Synchronous renderer backends consume a Context-borrowed `RenderedFrame`; detached renderers
+//!   consume a move-only `FrameSnapshot` and commit request-bound feedback.
 //! - `FontId` is a persistent, atlas-validated handle. It may be stored in style state, but
 //!   `Ui::push_font`, `DrawListMut::add_text_with_font`, and `Ui::push_font_with_size` validate the
 //!   active atlas before entering FFI. `FontAtlas::clear`,

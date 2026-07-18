@@ -13,6 +13,7 @@ mod fonts;
 mod frame;
 mod platform;
 mod settings;
+mod snapshot_hub;
 mod suspended;
 #[cfg(test)]
 mod tests;
@@ -30,6 +31,5 @@ pub use self::frame::{FrameLifecycleState, FramePrepareOptions, FrameResult, Fra
 pub use self::suspended::SuspendedContext;
 pub(crate) use self::texture_registry::SharedTextureRegistry;
 
-// Dear ImGui is not thread-safe. The Context must not be sent or shared across
-// threads. If you need multi-threaded rendering, capture render data via
-// OwnedDrawData and move that to another thread for rendering.
+// Dear ImGui is not thread-safe. Context stays on its owner thread; detached
+// rendering moves only a Context-created FrameSnapshot across threads.

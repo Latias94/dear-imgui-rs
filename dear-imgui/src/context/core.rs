@@ -15,6 +15,7 @@ use super::binding::{
     CTX_MUTEX, ContextAliveToken, ContextBinding, ContextId, ContextState, RawBoundContextGuard,
     no_current_context, set_current_context, with_bound_context,
 };
+use super::snapshot_hub::SnapshotHub;
 use super::texture_registry::{ManagedTextureRegistry, SharedTextureRegistry};
 
 /// An imgui context.
@@ -53,6 +54,7 @@ pub struct Context {
     pub(super) raw: *mut sys::ImGuiContext,
     pub(super) state: Rc<ContextState>,
     pub(super) attachments: AttachmentRegistry,
+    pub(super) snapshot_hub: SnapshotHub,
     pub(crate) texture_registry: SharedTextureRegistry,
     pub(in crate::context) shared_font_atlas: Option<SharedFontAtlas>,
     pub(in crate::context) ini_filename: Option<CString>,
@@ -201,6 +203,7 @@ impl Context {
             raw,
             state,
             attachments: AttachmentRegistry::default(),
+            snapshot_hub: SnapshotHub::new(id),
             texture_registry,
             shared_font_atlas,
             ini_filename: None,
@@ -273,6 +276,7 @@ impl Drop for Context {
         }
 
         self.state.begin_drop();
+        self.snapshot_hub.close();
         let attachment_controls = self.attachments.begin_teardown();
         let context_id = self.state.id();
         let raw = self.raw;

@@ -474,7 +474,7 @@ fn frame_lifecycle_requires_receiver_to_be_current_context() {
     let ctx_b = Context::create();
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = suspended_a.0.draw_data();
+        let _ = suspended_a.0.frame_lifecycle_state();
     }));
 
     assert!(result.is_err());
@@ -620,28 +620,30 @@ fn platform_viewport_snapshot_requires_rendered_frame_and_reuses_current_draw_da
     let mut ctx = Context::create();
     let _ = ctx.font_atlas().build();
     ctx.prepare_frame(super::FramePrepareOptions::new([320.0, 240.0], 1.0 / 60.0));
+    let consumer = ctx.create_renderer_consumer().unwrap();
 
     let before_render = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = ctx.platform_viewport_snapshot(crate::render::snapshot::SnapshotOptions::default());
+        let _ = ctx.platform_viewport_snapshot(&consumer);
     }));
     assert!(before_render.is_err());
 
     let frame = ctx.begin_frame();
     frame.ui().text("snapshot after render");
-    let _ = frame.render();
+    let main_snapshot = frame.render_snapshot(&consumer).unwrap();
 
     let snapshot = ctx
-        .platform_viewport_snapshot(crate::render::snapshot::SnapshotOptions::default())
+        .platform_viewport_snapshot(&consumer)
         .expect("rendered platform viewport draw data should snapshot");
 
-    assert_eq!(snapshot.draw.display_size, [320.0, 240.0]);
+    assert_eq!(snapshot.draw_data().display_size, [320.0, 240.0]);
     assert!(
         snapshot
-            .viewports
+            .viewports()
             .iter()
             .any(|viewport| viewport.draw.display_size == [320.0, 240.0]),
         "platform viewport snapshot should include the rendered main viewport"
     );
+    drop(main_snapshot);
 }
 
 #[cfg(feature = "multi-viewport")]

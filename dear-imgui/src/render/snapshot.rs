@@ -1,99 +1,251 @@
-//! Thread-safe rendering snapshot.
+//! Pointer-free rendering snapshots.
 //!
-//! This module provides `Send + Sync` data structures which capture everything a renderer backend
-//! needs to render a frame, without retaining any pointers into ImGui-owned memory.
+//! A [`FrameSnapshot`] is created by an owning [`crate::Context`] for one registered
+//! [`RendererConsumer`]. It can cross threads, but it cannot be cloned or constructed from
+//! arbitrary native draw data. Dropping it reports an abandoned epoch; [`FrameSnapshot::commit`]
+//! reports renderer feedback for ordered reconciliation by the Context.
+
+use std::collections::HashSet;
+use std::marker::PhantomData;
+use std::num::NonZeroU64;
+use std::rc::Rc;
+use std::sync::mpsc::Sender;
 
 use crate::render::draw_data::{
     DrawData, DrawIdx, DrawList, DrawVert, StandardDrawCallback, classify_standard_draw_callback,
 };
 use crate::sys;
-pub use crate::texture::ManagedTextureId;
-use crate::texture::{TextureFormat, TextureId, TextureRect, TextureStatus};
+use crate::texture::{
+    ManagedTextureError, ManagedTextureId, TextureFormat, TextureId, TextureRect, TextureStatus,
+};
+use crate::{ContextId, Id};
 use thiserror::Error;
 
 #[cfg(feature = "multi-viewport")]
 const IMGUI_VIEWPORT_DEFAULT_ID: u32 = 0x1111_1111;
 
+/// Pointer-free identity used by detached renderers.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub enum SnapshotTextureId {
+    /// A Context-owned user texture.
+    User(ManagedTextureId),
+    /// The current texture allocation of the Context's font atlas.
+    FontAtlas {
+        /// Context that produced this snapshot.
+        context: ContextId,
+        /// Process-unique atlas allocation stamp.
+        stamp: u64,
+        /// Atlas content generation captured by this snapshot.
+        generation: u64,
+    },
+}
+
 /// How a draw command binds its texture.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum TextureBinding {
-    /// Legacy texture binding (plain handle).
+    /// Application-owned texture binding.
     Legacy(TextureId),
-    /// ImGui-managed texture binding, resolved by `ManagedTextureId`.
-    Managed(ManagedTextureId),
+    /// Context-resolved managed texture binding.
+    Managed(SnapshotTextureId),
 }
 
-/// A thread-safe snapshot of everything needed to render a frame.
-#[derive(Clone, Debug)]
-pub struct FrameSnapshot {
-    pub draw: DrawDataSnapshot,
-    pub viewports: Vec<ViewportDrawDataSnapshot>,
-    pub texture_requests: Vec<TextureRequest>,
+/// Context, consumer generation, and ordered sequence for one detached frame.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub struct SnapshotEpoch {
+    context: ContextId,
+    consumer_generation: NonZeroU64,
+    sequence: NonZeroU64,
 }
 
-/// Thread-safe draw data snapshot for one Dear ImGui viewport.
-#[derive(Clone, Debug)]
-pub struct ViewportDrawDataSnapshot {
-    pub viewport_id: crate::Id,
-    pub draw: DrawDataSnapshot,
-}
-
-/// Options controlling snapshot behavior.
-#[derive(Copy, Clone, Debug)]
-pub struct SnapshotOptions {
-    pub user_callback_policy: UserCallbackPolicy,
-    pub capture_texture_requests: bool,
-}
-
-impl Default for SnapshotOptions {
-    fn default() -> Self {
+impl SnapshotEpoch {
+    pub(crate) const fn new(
+        context: ContextId,
+        consumer_generation: NonZeroU64,
+        sequence: NonZeroU64,
+    ) -> Self {
         Self {
-            user_callback_policy: UserCallbackPolicy::Error,
-            capture_texture_requests: true,
+            context,
+            consumer_generation,
+            sequence,
         }
+    }
+
+    /// Context that produced the epoch.
+    #[must_use]
+    pub const fn context_id(self) -> ContextId {
+        self.context
+    }
+
+    /// Generation of the registered renderer consumer.
+    #[must_use]
+    pub const fn consumer_generation(self) -> u64 {
+        self.consumer_generation.get()
+    }
+
+    /// Monotonic Context-local epoch sequence.
+    #[must_use]
+    pub const fn sequence(self) -> u64 {
+        self.sequence.get()
+    }
+
+    pub(crate) const fn consumer_generation_raw(self) -> NonZeroU64 {
+        self.consumer_generation
     }
 }
 
-/// Policy for `ImDrawCmd::UserCallback` commands when snapshotting.
-#[derive(Copy, Clone, Debug, Default)]
-pub enum UserCallbackPolicy {
-    /// Return an error when encountering a user callback (default).
-    #[default]
-    Error,
-    /// Drop callback commands from the snapshot.
-    Drop,
+/// The sole renderer capability for one Context.
+///
+/// The first rendered frame claims either the synchronous or detached mode for this generation.
+/// The capability is deliberately non-cloneable and UI-thread bound. Detached snapshots created
+/// with it are `Send + Sync`; the capability itself is neither.
+#[must_use = "keep the consumer alive while rendering managed texture requests"]
+pub struct RendererConsumer {
+    context: ContextId,
+    generation: NonZeroU64,
+    sender: Sender<SnapshotMessage>,
+    _not_send_or_sync: PhantomData<Rc<()>>,
 }
 
-/// Errors that can occur when building a snapshot.
-#[derive(Error, Debug)]
-pub enum SnapshotError {
-    #[error("user callback commands are not supported in the snapshot path")]
-    UserCallbackUnsupported,
+impl std::fmt::Debug for RendererConsumer {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RendererConsumer")
+            .field("context", &self.context)
+            .field("generation", &self.generation)
+            .finish_non_exhaustive()
+    }
+}
 
-    #[error(
-        "managed textures require Context-owned snapshot capture; arbitrary DrawData capture only supports legacy TextureId values"
-    )]
-    ManagedTextureRequiresContext,
+impl RendererConsumer {
+    pub(crate) fn new(
+        context: ContextId,
+        generation: NonZeroU64,
+        sender: Sender<SnapshotMessage>,
+    ) -> Self {
+        Self {
+            context,
+            generation,
+            sender,
+            _not_send_or_sync: PhantomData,
+        }
+    }
 
-    #[error("managed texture {id:?} has status {status:?} but no pixel buffer is available")]
-    TexturePixelsMissing {
-        id: ManagedTextureId,
-        status: TextureStatus,
-    },
+    /// Context that owns this consumer.
+    #[must_use]
+    pub const fn context_id(&self) -> ContextId {
+        self.context
+    }
 
-    #[error(
-        "managed texture {id:?} has invalid dimensions/format (width={width}, height={height}, bpp={bpp})"
-    )]
-    TextureInvalidLayout {
-        id: ManagedTextureId,
-        width: i32,
-        height: i32,
-        bpp: i32,
-    },
+    /// Current consumer generation.
+    #[must_use]
+    pub const fn generation(&self) -> u64 {
+        self.generation.get()
+    }
+
+    pub(crate) const fn generation_raw(&self) -> NonZeroU64 {
+        self.generation
+    }
+}
+
+impl Drop for RendererConsumer {
+    fn drop(&mut self) {
+        let _ = self.sender.send(SnapshotMessage::Detach {
+            context: self.context,
+            generation: self.generation,
+        });
+    }
+}
+
+/// A thread-safe snapshot of everything needed to render one frame.
+///
+/// This type is intentionally not `Clone`. It owns exactly one completion ticket.
+///
+/// ```compile_fail
+/// use dear_imgui_rs::render::FrameSnapshot;
+///
+/// fn duplicate(snapshot: FrameSnapshot) {
+///     let _copy = snapshot.clone();
+/// }
+/// ```
+///
+/// Snapshot contents are read-only so their completion ticket and request set stay coherent.
+///
+/// ```compile_fail
+/// use dear_imgui_rs::render::FrameSnapshot;
+///
+/// fn discard_requests(snapshot: &mut FrameSnapshot) {
+///     snapshot.texture_requests.clear();
+/// }
+/// ```
+#[derive(Debug)]
+pub struct FrameSnapshot {
+    draw: DrawDataSnapshot,
+    viewports: Vec<ViewportDrawDataSnapshot>,
+    texture_requests: Vec<TextureRequest>,
+    epoch: SnapshotEpoch,
+    completion: Option<CompletionTicket>,
+}
+
+impl FrameSnapshot {
+    /// Main viewport draw data.
+    #[must_use]
+    pub const fn draw_data(&self) -> &DrawDataSnapshot {
+        &self.draw
+    }
+
+    /// Per-viewport draw data captured for this frame.
+    #[must_use]
+    pub fn viewports(&self) -> &[ViewportDrawDataSnapshot] {
+        &self.viewports
+    }
+
+    /// Managed texture work associated with this epoch.
+    #[must_use]
+    pub fn texture_requests(&self) -> &[TextureRequest] {
+        &self.texture_requests
+    }
+
+    /// Ordered identity of this detached frame.
+    #[must_use]
+    pub const fn epoch(&self) -> SnapshotEpoch {
+        self.epoch
+    }
+
+    /// Draw data for a specific viewport, if captured.
+    #[must_use]
+    pub fn viewport_draw(&self, viewport_id: Id) -> Option<&DrawDataSnapshot> {
+        self.viewports
+            .iter()
+            .find(|viewport| viewport.viewport_id == viewport_id)
+            .map(|viewport| &viewport.draw)
+    }
+
+    /// Commit renderer feedback and complete this epoch.
+    ///
+    /// Missing feedback is allowed: unacknowledged requests remain pending and are emitted again
+    /// by a later snapshot. Feedback is validated and applied only when this epoch reaches the
+    /// Context's contiguous completion watermark.
+    pub fn commit(
+        mut self,
+        feedback: impl IntoIterator<Item = TextureFeedback>,
+    ) -> Result<(), SnapshotCommitError> {
+        let ticket = self
+            .completion
+            .take()
+            .expect("FrameSnapshot completion ticket was consumed twice");
+        ticket.commit(feedback.into_iter().collect())
+    }
+}
+
+/// Thread-safe draw data for one Dear ImGui viewport.
+#[derive(Debug)]
+pub struct ViewportDrawDataSnapshot {
+    pub viewport_id: Id,
+    pub draw: DrawDataSnapshot,
 }
 
 /// Thread-safe draw data snapshot.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct DrawDataSnapshot {
     pub display_pos: [f32; 2],
     pub display_size: [f32; 2],
@@ -101,16 +253,45 @@ pub struct DrawDataSnapshot {
     pub draw_lists: Vec<DrawListSnapshot>,
 }
 
+impl DrawDataSnapshot {
+    fn duplicate_for_main_viewport(&self) -> Self {
+        Self {
+            display_pos: self.display_pos,
+            display_size: self.display_size,
+            framebuffer_scale: self.framebuffer_scale,
+            draw_lists: self
+                .draw_lists
+                .iter()
+                .map(DrawListSnapshot::duplicate_for_main_viewport)
+                .collect(),
+        }
+    }
+}
+
 /// Thread-safe draw list snapshot.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct DrawListSnapshot {
     pub vtx: Vec<DrawVert>,
     pub idx: Vec<DrawIdx>,
     pub commands: Vec<DrawCmdSnapshot>,
 }
 
+impl DrawListSnapshot {
+    fn duplicate_for_main_viewport(&self) -> Self {
+        Self {
+            vtx: self.vtx.clone(),
+            idx: self.idx.clone(),
+            commands: self
+                .commands
+                .iter()
+                .map(DrawCmdSnapshot::duplicate_for_main_viewport)
+                .collect(),
+        }
+    }
+}
+
 /// Thread-safe draw command snapshot.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum DrawCmdSnapshot {
     Elements {
         count: usize,
@@ -124,54 +305,39 @@ pub enum DrawCmdSnapshot {
     SetSamplerNearest,
 }
 
-/// A thread-safe managed texture request (ImGui 1.92+).
-#[derive(Clone, Debug)]
-pub struct TextureRequest {
-    pub id: ManagedTextureId,
-    pub op: TextureOp,
-}
-
-/// Feedback produced by the renderer thread, to be applied on the UI thread.
-#[derive(Copy, Clone, Debug)]
-#[non_exhaustive]
-pub struct TextureFeedback {
-    pub id: ManagedTextureId,
-    pub status: TextureStatus,
-    pub tex_id: Option<TextureId>,
-    pub backend_user_data: Option<usize>,
-}
-
-impl TextureFeedback {
-    /// Feedback for a created/updated GPU texture handle.
-    pub fn with_tex_id(id: ManagedTextureId, status: TextureStatus, tex_id: TextureId) -> Self {
-        Self {
-            id,
-            status,
-            tex_id: Some(tex_id),
-            backend_user_data: None,
+impl DrawCmdSnapshot {
+    fn duplicate_for_main_viewport(&self) -> Self {
+        match *self {
+            Self::Elements {
+                count,
+                clip_rect,
+                texture,
+                vtx_offset,
+                idx_offset,
+            } => Self::Elements {
+                count,
+                clip_rect,
+                texture,
+                vtx_offset,
+                idx_offset,
+            },
+            Self::ResetRenderState => Self::ResetRenderState,
+            Self::SetSamplerLinear => Self::SetSamplerLinear,
+            Self::SetSamplerNearest => Self::SetSamplerNearest,
         }
     }
-
-    /// Feedback for status-only transitions such as `Destroyed`.
-    pub fn status(id: ManagedTextureId, status: TextureStatus) -> Self {
-        Self {
-            id,
-            status,
-            tex_id: None,
-            backend_user_data: None,
-        }
-    }
-
-    /// Attach renderer-owned backend user data to apply alongside status/TexID.
-    #[must_use]
-    pub fn backend_user_data(mut self, backend_user_data: usize) -> Self {
-        self.backend_user_data = Some(backend_user_data);
-        self
-    }
 }
 
-/// A managed texture operation requested by ImGui.
-#[derive(Clone, Debug)]
+/// Operation kind encoded into a texture request and its feedback.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub enum TextureRequestKind {
+    Create,
+    Update,
+    Destroy,
+}
+
+/// A managed texture operation requested by Dear ImGui.
+#[derive(Debug)]
 pub enum TextureOp {
     Create {
         format: TextureFormat,
@@ -189,104 +355,457 @@ pub enum TextureOp {
     Destroy,
 }
 
-/// A tightly-packed pixel upload for a sub-rectangle of a managed texture.
-#[derive(Clone, Debug)]
+impl TextureOp {
+    const fn kind(&self) -> TextureRequestKind {
+        match self {
+            Self::Create { .. } => TextureRequestKind::Create,
+            Self::Update { .. } => TextureRequestKind::Update,
+            Self::Destroy => TextureRequestKind::Destroy,
+        }
+    }
+}
+
+/// A tightly-packed pixel upload for a sub-rectangle.
+#[derive(Debug)]
 pub struct TextureUploadRect {
     pub rect: TextureRect,
     pub row_pitch: usize,
     pub data: Vec<u8>,
 }
 
-impl FrameSnapshot {
-    /// Build a `FrameSnapshot` from ImGui draw data.
-    ///
-    /// This must be called on the UI thread while the `Context` is current.
-    pub fn from_draw_data(
-        draw_data: &DrawData,
-        options: SnapshotOptions,
-    ) -> Result<Self, SnapshotError> {
-        let draw = snapshot_draw_data(draw_data, options)?;
-        let texture_requests = if options.capture_texture_requests {
-            snapshot_texture_requests(draw_data)?
-        } else {
-            Vec::new()
-        };
-        let viewports = viewport_draw_data_snapshots_from_draw_data(draw_data, &draw);
-        Ok(Self {
-            draw,
-            viewports,
-            texture_requests,
-        })
-    }
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub(crate) struct TextureRequestKey {
+    pub(crate) epoch: SnapshotEpoch,
+    pub(crate) texture: SnapshotTextureId,
+    pub(crate) revision: u64,
+    pub(crate) kind: TextureRequestKind,
+}
 
-    /// Build a `FrameSnapshot` from all current Dear ImGui platform viewport draw data.
-    ///
-    /// This must be called on the UI thread while the `Context` is current and after
-    /// `Context::render()` has produced valid draw data.
-    #[cfg(feature = "multi-viewport")]
-    pub(crate) fn from_platform_io(
-        platform_io: &crate::platform_io::PlatformIo,
-        options: SnapshotOptions,
-    ) -> Result<Self, SnapshotError> {
-        let mut viewports = Vec::new();
-        let mut main_draw_index = None;
-        for viewport in platform_io.viewports_iter() {
-            let Some(draw_data) = viewport.draw_data_ref() else {
-                continue;
-            };
-            let draw_data = draw_data_from_sys(draw_data);
-            if !draw_data.valid() {
-                continue;
-            }
-            if main_draw_index.is_none() && is_main_platform_viewport(viewport.id(), draw_data) {
-                main_draw_index = Some(viewports.len());
-            }
-            viewports.push(ViewportDrawDataSnapshot {
-                viewport_id: viewport.id(),
-                draw: snapshot_draw_data(draw_data, options)?,
-            });
-        }
+/// One texture request tied to this snapshot's exact epoch and revision.
+#[derive(Debug)]
+pub struct TextureRequest {
+    key: TextureRequestKey,
+    op: TextureOp,
+}
 
-        let Some(main_draw_index) = main_draw_index else {
-            return Ok(Self {
-                draw: DrawDataSnapshot {
-                    display_pos: [0.0, 0.0],
-                    display_size: [0.0, 0.0],
-                    framebuffer_scale: [1.0, 1.0],
-                    draw_lists: Vec::new(),
-                },
-                viewports: Vec::new(),
-                texture_requests: Vec::new(),
-            });
-        };
-
-        let texture_requests = if options.capture_texture_requests {
-            let main_draw_data = platform_io
-                .viewports_iter()
-                .filter_map(|viewport| viewport.draw_data_ref())
-                .map(draw_data_from_sys)
-                .filter(|draw_data| draw_data.valid())
-                .nth(main_draw_index)
-                .expect("main viewport draw data exists");
-            snapshot_texture_requests(main_draw_data)?
-        } else {
-            Vec::new()
-        };
-
-        Ok(Self {
-            draw: viewports[main_draw_index].draw.clone(),
-            viewports,
-            texture_requests,
-        })
-    }
-
-    /// Draw data for a specific viewport, if it was captured in this snapshot.
+impl TextureRequest {
+    /// Texture addressed by this request.
     #[must_use]
-    pub fn viewport_draw(&self, viewport_id: crate::Id) -> Option<&DrawDataSnapshot> {
-        self.viewports
-            .iter()
-            .find(|viewport| viewport.viewport_id == viewport_id)
-            .map(|viewport| &viewport.draw)
+    pub const fn texture(&self) -> SnapshotTextureId {
+        self.key.texture
+    }
+
+    /// Request operation and owned upload bytes.
+    #[must_use]
+    pub const fn operation(&self) -> &TextureOp {
+        &self.op
+    }
+
+    /// Operation kind encoded into feedback validation.
+    #[must_use]
+    pub const fn kind(&self) -> TextureRequestKind {
+        self.key.kind
+    }
+
+    /// Complete a create or update request with its renderer texture identifier.
+    pub fn uploaded(&self, texture_id: TextureId) -> Result<TextureFeedback, TextureFeedbackError> {
+        if self.key.kind == TextureRequestKind::Destroy {
+            return Err(TextureFeedbackError::UploadForDestroy);
+        }
+        Ok(TextureFeedback {
+            key: self.key,
+            result: TextureFeedbackResult::Uploaded { texture_id },
+        })
+    }
+
+    /// Complete a destroy request.
+    pub fn destroyed(&self) -> Result<TextureFeedback, TextureFeedbackError> {
+        if self.key.kind != TextureRequestKind::Destroy {
+            return Err(TextureFeedbackError::DestroyForUpload);
+        }
+        Ok(TextureFeedback {
+            key: self.key,
+            result: TextureFeedbackResult::Destroyed,
+        })
+    }
+}
+
+/// Feedback produced by the detached renderer.
+#[derive(Debug)]
+pub struct TextureFeedback {
+    key: TextureRequestKey,
+    result: TextureFeedbackResult,
+}
+
+impl TextureFeedback {
+    pub(crate) const fn key(&self) -> TextureRequestKey {
+        self.key
+    }
+
+    pub(crate) const fn result(&self) -> TextureFeedbackResult {
+        self.result
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub(crate) enum TextureFeedbackResult {
+    Uploaded { texture_id: TextureId },
+    Destroyed,
+}
+
+/// Error returned when feedback does not match the request operation.
+#[derive(Copy, Clone, Debug, Eq, Error, PartialEq)]
+pub enum TextureFeedbackError {
+    #[error("an upload result cannot complete a destroy request")]
+    UploadForDestroy,
+    #[error("a destroy result cannot complete a create or update request")]
+    DestroyForUpload,
+}
+
+/// Error returned when a snapshot cannot be captured.
+#[derive(Debug, Error)]
+pub enum SnapshotError {
+    #[error("user callback commands are not supported by detached snapshots")]
+    UserCallbackUnsupported,
+    #[error("draw data contains a managed texture not owned by this Context or its font atlas")]
+    UnknownManagedTexture,
+    #[error("managed texture {id:?} has status {status:?} but no pixel buffer is available")]
+    TexturePixelsMissing {
+        id: SnapshotTextureId,
+        status: TextureStatus,
+    },
+    #[error(
+        "managed texture {id:?} has invalid dimensions/format (width={width}, height={height}, bpp={bpp})"
+    )]
+    TextureInvalidLayout {
+        id: SnapshotTextureId,
+        width: i32,
+        height: i32,
+        bpp: i32,
+    },
+    #[error(transparent)]
+    Consumer(#[from] RendererConsumerError),
+    #[error(transparent)]
+    ManagedTexture(#[from] ManagedTextureError),
+}
+
+/// Renderer registration or completion contract violation.
+#[derive(Copy, Clone, Debug, Eq, Error, PartialEq)]
+#[non_exhaustive]
+pub enum RendererConsumerError {
+    #[error("this Context already has an active renderer consumer")]
+    ConsumerAlreadyActive,
+    #[error("the previous renderer consumer is still draining outstanding epochs")]
+    ConsumerDraining,
+    #[error("this Context has no active renderer consumer")]
+    NoActiveConsumer,
+    #[error("the active renderer consumer is already committed to a different render path")]
+    ConsumerModeMismatch,
+    #[error("renderer consumer belongs to Context {actual:?}, not Context {expected:?}")]
+    ForeignContext {
+        expected: ContextId,
+        actual: ContextId,
+    },
+    #[error("renderer consumer generation {actual} is stale; current generation is {expected}")]
+    StaleConsumerGeneration { expected: u64, actual: u64 },
+    #[error("renderer consumer generation space is exhausted")]
+    ConsumerGenerationExhausted,
+    #[error("snapshot epoch space is exhausted")]
+    EpochExhausted,
+    #[error("snapshot completion references unknown epoch {epoch}")]
+    UnknownEpoch { epoch: u64 },
+    #[error("snapshot epoch {epoch} was completed more than once")]
+    EpochAlreadyCompleted { epoch: u64 },
+    #[error("renderer consumer still owns {count} outstanding epoch(s)")]
+    OutstandingEpochs { count: usize },
+    #[error("snapshot epoch {epoch} contains duplicate feedback for {texture:?}")]
+    DuplicateFeedback {
+        epoch: u64,
+        texture: SnapshotTextureId,
+    },
+    #[error("snapshot epoch {epoch} did not request feedback for {texture:?}")]
+    FeedbackNotRequested {
+        epoch: u64,
+        texture: SnapshotTextureId,
+    },
+    #[error("feedback result does not match the request kind for {texture:?}")]
+    InvalidFeedbackTransition { texture: SnapshotTextureId },
+    #[error("font-atlas feedback targets a stale atlas allocation or generation")]
+    StaleFontAtlas,
+    #[error(transparent)]
+    ManagedTexture(#[from] ManagedTextureError),
+}
+
+/// Failure to deliver completion after the owning Context was destroyed.
+#[derive(Copy, Clone, Debug, Eq, Error, PartialEq)]
+pub enum SnapshotCommitError {
+    #[error("the snapshot's owning Context no longer accepts completion")]
+    ContextDropped,
+}
+
+/// Work applied while polling detached completions.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub struct SnapshotCompletionProgress {
+    pub(crate) watermark: u64,
+    pub(crate) committed: usize,
+    pub(crate) abandoned: usize,
+    pub(crate) feedback_applied: usize,
+}
+
+impl SnapshotCompletionProgress {
+    /// Highest contiguous completed epoch sequence.
+    #[must_use]
+    pub const fn watermark(self) -> u64 {
+        self.watermark
+    }
+
+    /// Number of committed epochs consumed by this poll.
+    #[must_use]
+    pub const fn committed(self) -> usize {
+        self.committed
+    }
+
+    /// Number of abandoned epochs consumed by this poll.
+    #[must_use]
+    pub const fn abandoned(self) -> usize {
+        self.abandoned
+    }
+
+    /// Number of feedback items applied by this poll.
+    #[must_use]
+    pub const fn feedback_applied(self) -> usize {
+        self.feedback_applied
+    }
+}
+
+#[derive(Debug)]
+struct CompletionTicket {
+    epoch: SnapshotEpoch,
+    sender: Sender<SnapshotMessage>,
+    completed: bool,
+}
+
+impl CompletionTicket {
+    fn commit(mut self, feedback: Vec<TextureFeedback>) -> Result<(), SnapshotCommitError> {
+        self.completed = true;
+        self.sender
+            .send(SnapshotMessage::Completion(SnapshotCompletion {
+                epoch: self.epoch,
+                outcome: SnapshotCompletionOutcome::Committed(feedback),
+            }))
+            .map_err(|_| SnapshotCommitError::ContextDropped)
+    }
+}
+
+impl Drop for CompletionTicket {
+    fn drop(&mut self) {
+        if self.completed {
+            return;
+        }
+        let _ = self
+            .sender
+            .send(SnapshotMessage::Completion(SnapshotCompletion {
+                epoch: self.epoch,
+                outcome: SnapshotCompletionOutcome::Abandoned,
+            }));
+        self.completed = true;
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum SnapshotMessage {
+    Completion(SnapshotCompletion),
+    Detach {
+        context: ContextId,
+        generation: NonZeroU64,
+    },
+}
+
+#[derive(Debug)]
+pub(crate) struct SnapshotCompletion {
+    pub(crate) epoch: SnapshotEpoch,
+    pub(crate) outcome: SnapshotCompletionOutcome,
+}
+
+#[derive(Debug)]
+pub(crate) enum SnapshotCompletionOutcome {
+    Committed(Vec<TextureFeedback>),
+    Abandoned,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub(crate) struct ResolvedSnapshotTexture {
+    pub(crate) id: SnapshotTextureId,
+    pub(crate) revision: u64,
+}
+
+#[derive(Debug)]
+pub(crate) struct PendingTextureRequest {
+    pub(crate) texture: SnapshotTextureId,
+    pub(crate) revision: u64,
+    pub(crate) op: TextureOp,
+}
+
+#[derive(Debug)]
+pub(crate) struct PendingSnapshot {
+    pub(crate) draw: DrawDataSnapshot,
+    pub(crate) viewports: Vec<ViewportDrawDataSnapshot>,
+    pub(crate) texture_requests: Vec<PendingTextureRequest>,
+}
+
+impl PendingSnapshot {
+    pub(crate) fn referenced_user_textures(&self) -> HashSet<ManagedTextureId> {
+        let mut referenced = HashSet::new();
+        for draw in
+            std::iter::once(&self.draw).chain(self.viewports.iter().map(|viewport| &viewport.draw))
+        {
+            for list in &draw.draw_lists {
+                for command in &list.commands {
+                    if let DrawCmdSnapshot::Elements {
+                        texture: TextureBinding::Managed(SnapshotTextureId::User(id)),
+                        ..
+                    } = command
+                    {
+                        referenced.insert(*id);
+                    }
+                }
+            }
+        }
+        for request in &self.texture_requests {
+            if let SnapshotTextureId::User(id) = request.texture {
+                referenced.insert(id);
+            }
+        }
+        referenced
+    }
+
+    pub(crate) fn into_frame(
+        self,
+        epoch: SnapshotEpoch,
+        sender: Sender<SnapshotMessage>,
+    ) -> (FrameSnapshot, HashSet<TextureRequestKey>) {
+        let (texture_requests, expected) = finalize_texture_requests(self.texture_requests, epoch);
+        (
+            FrameSnapshot {
+                draw: self.draw,
+                viewports: self.viewports,
+                texture_requests,
+                epoch,
+                completion: Some(CompletionTicket {
+                    epoch,
+                    sender,
+                    completed: false,
+                }),
+            },
+            expected,
+        )
+    }
+}
+
+pub(crate) fn finalize_texture_requests(
+    pending: Vec<PendingTextureRequest>,
+    epoch: SnapshotEpoch,
+) -> (Vec<TextureRequest>, HashSet<TextureRequestKey>) {
+    let mut expected = HashSet::with_capacity(pending.len());
+    let texture_requests = pending
+        .into_iter()
+        .map(|request| {
+            let key = TextureRequestKey {
+                epoch,
+                texture: request.texture,
+                revision: request.revision,
+                kind: request.op.kind(),
+            };
+            expected.insert(key);
+            TextureRequest {
+                key,
+                op: request.op,
+            }
+        })
+        .collect();
+    (texture_requests, expected)
+}
+
+pub(crate) fn capture_texture_requests_only(
+    draw_data: &DrawData,
+    resolve: &mut impl FnMut(
+        *const sys::ImTextureData,
+    ) -> Result<ResolvedSnapshotTexture, SnapshotError>,
+) -> Result<Vec<PendingTextureRequest>, SnapshotError> {
+    snapshot_texture_requests(draw_data, resolve)
+}
+
+pub(crate) fn capture_draw_data(
+    draw_data: &DrawData,
+    resolve: &mut impl FnMut(
+        *const sys::ImTextureData,
+    ) -> Result<ResolvedSnapshotTexture, SnapshotError>,
+) -> Result<PendingSnapshot, SnapshotError> {
+    let draw = snapshot_draw_data(draw_data, resolve)?;
+    let texture_requests = snapshot_texture_requests(draw_data, resolve)?;
+    let viewports = viewport_draw_data_snapshots_from_draw_data(draw_data, &draw);
+    Ok(PendingSnapshot {
+        draw,
+        viewports,
+        texture_requests,
+    })
+}
+
+#[cfg(feature = "multi-viewport")]
+pub(crate) fn capture_platform_io(
+    platform_io: &crate::platform_io::PlatformIo,
+    resolve: &mut impl FnMut(
+        *const sys::ImTextureData,
+    ) -> Result<ResolvedSnapshotTexture, SnapshotError>,
+) -> Result<PendingSnapshot, SnapshotError> {
+    let mut viewports = Vec::new();
+    let mut main_draw_index = None;
+    let mut main_draw_data = None;
+    for viewport in platform_io.viewports_iter() {
+        let Some(raw_draw_data) = viewport.draw_data_ref() else {
+            continue;
+        };
+        let draw_data = draw_data_from_sys(raw_draw_data);
+        if !draw_data.valid() {
+            continue;
+        }
+        if main_draw_index.is_none() && is_main_platform_viewport(viewport.id(), draw_data) {
+            main_draw_index = Some(viewports.len());
+            main_draw_data = Some(draw_data);
+        }
+        viewports.push(ViewportDrawDataSnapshot {
+            viewport_id: viewport.id(),
+            draw: snapshot_draw_data(draw_data, resolve)?,
+        });
+    }
+
+    let Some(main_draw_index) = main_draw_index else {
+        return Ok(PendingSnapshot {
+            draw: empty_draw_data_snapshot(),
+            viewports: Vec::new(),
+            texture_requests: Vec::new(),
+        });
+    };
+    let texture_requests = snapshot_texture_requests(
+        main_draw_data.expect("main viewport draw data was recorded"),
+        resolve,
+    )?;
+    Ok(PendingSnapshot {
+        draw: viewports[main_draw_index]
+            .draw
+            .duplicate_for_main_viewport(),
+        viewports,
+        texture_requests,
+    })
+}
+
+#[cfg(feature = "multi-viewport")]
+fn empty_draw_data_snapshot() -> DrawDataSnapshot {
+    DrawDataSnapshot {
+        display_pos: [0.0, 0.0],
+        display_size: [0.0, 0.0],
+        framebuffer_scale: [1.0, 1.0],
+        draw_lists: Vec::new(),
     }
 }
 
@@ -299,17 +818,17 @@ fn viewport_draw_data_snapshots_from_draw_data(
     };
     vec![ViewportDrawDataSnapshot {
         viewport_id,
-        draw: draw.clone(),
+        draw: draw.duplicate_for_main_viewport(),
     }]
 }
 
-fn owner_viewport_id(draw_data: &DrawData) -> Option<crate::Id> {
+fn owner_viewport_id(draw_data: &DrawData) -> Option<Id> {
     let owner_viewport = draw_data.owner_viewport();
     if owner_viewport.is_null() {
         return None;
     }
     let raw = unsafe { (*owner_viewport).ID };
-    (raw != 0).then_some(crate::Id::from(raw))
+    (raw != 0).then_some(Id::from(raw))
 }
 
 #[cfg(feature = "multi-viewport")]
@@ -318,17 +837,299 @@ fn draw_data_from_sys(draw_data: &sys::ImDrawData) -> &DrawData {
 }
 
 #[cfg(feature = "multi-viewport")]
-fn is_main_platform_viewport(viewport_id: crate::Id, draw_data: &DrawData) -> bool {
+fn is_main_platform_viewport(viewport_id: Id, draw_data: &DrawData) -> bool {
     viewport_id.raw() == IMGUI_VIEWPORT_DEFAULT_ID
         || owner_viewport_id(draw_data)
             .is_some_and(|owner_id| owner_id.raw() == IMGUI_VIEWPORT_DEFAULT_ID)
+}
+
+fn snapshot_draw_data(
+    draw_data: &DrawData,
+    resolve: &mut impl FnMut(
+        *const sys::ImTextureData,
+    ) -> Result<ResolvedSnapshotTexture, SnapshotError>,
+) -> Result<DrawDataSnapshot, SnapshotError> {
+    let mut draw_lists = Vec::with_capacity(draw_data.draw_lists_count());
+    for draw_list in draw_data.draw_lists() {
+        draw_lists.push(snapshot_draw_list(draw_list, resolve)?);
+    }
+    Ok(DrawDataSnapshot {
+        display_pos: draw_data.display_pos(),
+        display_size: draw_data.display_size(),
+        framebuffer_scale: draw_data.framebuffer_scale(),
+        draw_lists,
+    })
+}
+
+fn snapshot_draw_list(
+    draw_list: &DrawList,
+    resolve: &mut impl FnMut(
+        *const sys::ImTextureData,
+    ) -> Result<ResolvedSnapshotTexture, SnapshotError>,
+) -> Result<DrawListSnapshot, SnapshotError> {
+    let vtx = draw_list.vtx_buffer().to_vec();
+    let idx = draw_list.idx_buffer().to_vec();
+    let mut commands = Vec::new();
+    for cmd in unsafe { draw_list.cmd_buffer() } {
+        if cmd.UserCallback.is_some() {
+            match classify_standard_draw_callback(cmd.UserCallback) {
+                Some(StandardDrawCallback::ResetRenderState) => {
+                    commands.push(DrawCmdSnapshot::ResetRenderState);
+                    continue;
+                }
+                Some(StandardDrawCallback::SetSamplerLinear) => {
+                    commands.push(DrawCmdSnapshot::SetSamplerLinear);
+                    continue;
+                }
+                Some(StandardDrawCallback::SetSamplerNearest) => {
+                    commands.push(DrawCmdSnapshot::SetSamplerNearest);
+                    continue;
+                }
+                None => return Err(SnapshotError::UserCallbackUnsupported),
+            }
+        }
+
+        commands.push(DrawCmdSnapshot::Elements {
+            count: count_from_u32("DrawCmdSnapshot::Elements::count", cmd.ElemCount),
+            clip_rect: [
+                cmd.ClipRect.x,
+                cmd.ClipRect.y,
+                cmd.ClipRect.z,
+                cmd.ClipRect.w,
+            ],
+            texture: snapshot_texture_binding(cmd.TexRef, resolve)?,
+            vtx_offset: count_from_u32("DrawCmdSnapshot::Elements::vtx_offset", cmd.VtxOffset),
+            idx_offset: count_from_u32("DrawCmdSnapshot::Elements::idx_offset", cmd.IdxOffset),
+        });
+    }
+    Ok(DrawListSnapshot { vtx, idx, commands })
+}
+
+fn count_from_u32(caller: &str, raw: u32) -> usize {
+    usize::try_from(raw).unwrap_or_else(|_| panic!("{caller} exceeded usize range"))
+}
+
+fn snapshot_texture_binding(
+    tex_ref: sys::ImTextureRef,
+    resolve: &mut impl FnMut(
+        *const sys::ImTextureData,
+    ) -> Result<ResolvedSnapshotTexture, SnapshotError>,
+) -> Result<TextureBinding, SnapshotError> {
+    if !tex_ref._TexData.is_null() {
+        return resolve(tex_ref._TexData.cast_const())
+            .map(|resolved| TextureBinding::Managed(resolved.id));
+    }
+    Ok(TextureBinding::Legacy(TextureId::from(
+        tex_ref._TexID as u64,
+    )))
+}
+
+fn snapshot_texture_requests(
+    draw_data: &DrawData,
+    resolve: &mut impl FnMut(
+        *const sys::ImTextureData,
+    ) -> Result<ResolvedSnapshotTexture, SnapshotError>,
+) -> Result<Vec<PendingTextureRequest>, SnapshotError> {
+    let mut out = Vec::new();
+    for texture in draw_data.textures() {
+        let status = texture.status();
+        if matches!(status, TextureStatus::OK | TextureStatus::Destroyed) {
+            continue;
+        }
+        let resolved = resolve(texture.as_raw())?;
+        let id = resolved.id;
+        if status == TextureStatus::WantDestroy {
+            out.push(PendingTextureRequest {
+                texture: id,
+                revision: resolved.revision,
+                op: TextureOp::Destroy,
+            });
+            continue;
+        }
+
+        let raw_width = texture.raw_width_i32();
+        let raw_height = texture.raw_height_i32();
+        let raw_bpp = texture.raw_bytes_per_pixel_i32();
+        let (width, height, bpp) = validated_texture_layout(id, raw_width, raw_height, raw_bpp)?;
+        let format = texture.format();
+        let pixels = texture
+            .pixels()
+            .ok_or(SnapshotError::TexturePixelsMissing { id, status })?;
+        let expected = usize::try_from(width)
+            .ok()
+            .and_then(|w| usize::try_from(height).ok().and_then(|h| w.checked_mul(h)))
+            .and_then(|count| count.checked_mul(bpp))
+            .ok_or(SnapshotError::TextureInvalidLayout {
+                id,
+                width: raw_width,
+                height: raw_height,
+                bpp: raw_bpp,
+            })?;
+        if pixels.len() < expected {
+            return Err(SnapshotError::TextureInvalidLayout {
+                id,
+                width: raw_width,
+                height: raw_height,
+                bpp: raw_bpp,
+            });
+        }
+
+        let op = match status {
+            TextureStatus::WantCreate => TextureOp::Create {
+                format,
+                width,
+                height,
+                row_pitch: usize::try_from(width)
+                    .ok()
+                    .and_then(|width| width.checked_mul(bpp))
+                    .ok_or(SnapshotError::TextureInvalidLayout {
+                        id,
+                        width: raw_width,
+                        height: raw_height,
+                        bpp: raw_bpp,
+                    })?,
+                pixels: pixels[..expected].to_vec(),
+            },
+            TextureStatus::WantUpdates => {
+                let mut rects: Vec<TextureRect> = texture.updates().collect();
+                if rects.is_empty() {
+                    let rect = texture.update_rect();
+                    if rect.w != 0 && rect.h != 0 {
+                        rects.push(rect);
+                    } else {
+                        rects.push(TextureRect {
+                            x: 0,
+                            y: 0,
+                            w: width.min(u16::MAX as u32) as u16,
+                            h: height.min(u16::MAX as u32) as u16,
+                        });
+                    }
+                }
+                TextureOp::Update {
+                    format,
+                    width,
+                    height,
+                    rects: rects
+                        .into_iter()
+                        .filter_map(|rect| copy_upload_rect(pixels, width, height, bpp, rect))
+                        .collect(),
+                }
+            }
+            TextureStatus::OK | TextureStatus::WantDestroy | TextureStatus::Destroyed => {
+                unreachable!("non-upload statuses were handled before layout validation")
+            }
+        };
+        out.push(PendingTextureRequest {
+            texture: id,
+            revision: resolved.revision,
+            op,
+        });
+    }
+    Ok(out)
+}
+
+fn validated_texture_layout(
+    id: SnapshotTextureId,
+    width: i32,
+    height: i32,
+    bpp: i32,
+) -> Result<(u32, u32, usize), SnapshotError> {
+    let invalid = || SnapshotError::TextureInvalidLayout {
+        id,
+        width,
+        height,
+        bpp,
+    };
+    let width = u32::try_from(width)
+        .ok()
+        .filter(|value| *value > 0)
+        .ok_or_else(invalid)?;
+    let height = u32::try_from(height)
+        .ok()
+        .filter(|value| *value > 0)
+        .ok_or_else(invalid)?;
+    let bpp = usize::try_from(bpp)
+        .ok()
+        .filter(|value| *value > 0)
+        .ok_or_else(invalid)?;
+    Ok((width, height, bpp))
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    #[test]
+    fn invalid_texture_layout_preserves_all_raw_dimensions() {
+        let context = crate::Context::create();
+        let id = SnapshotTextureId::FontAtlas {
+            context: context.id(),
+            stamp: 1,
+            generation: 1,
+        };
+        let error = validated_texture_layout(id, 17, -3, 4).unwrap_err();
+        assert!(matches!(
+            error,
+            SnapshotError::TextureInvalidLayout {
+                id: actual,
+                width: 17,
+                height: -3,
+                bpp: 4,
+            } if actual == id
+        ));
+    }
+}
+
+fn copy_upload_rect(
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+    bpp: usize,
+    rect: TextureRect,
+) -> Option<TextureUploadRect> {
+    let width = usize::try_from(width).ok()?;
+    let height = usize::try_from(height).ok()?;
+    if width == 0 || height == 0 || bpp == 0 {
+        return None;
+    }
+    let x = usize::from(rect.x);
+    let y = usize::from(rect.y);
+    let x_end = x.saturating_add(usize::from(rect.w)).min(width);
+    let y_end = y.saturating_add(usize::from(rect.h)).min(height);
+    if x >= x_end || y >= y_end {
+        return None;
+    }
+    let rect_width = x_end - x;
+    let rect_height = y_end - y;
+    let full_row_pitch = width.checked_mul(bpp)?;
+    let row_pitch = rect_width.checked_mul(bpp)?;
+    let mut data = vec![0; row_pitch.checked_mul(rect_height)?];
+    for row in 0..rect_height {
+        let source = y
+            .checked_add(row)?
+            .checked_mul(full_row_pitch)?
+            .checked_add(x.checked_mul(bpp)?)?;
+        let destination = row.checked_mul(row_pitch)?;
+        data.get_mut(destination..destination.checked_add(row_pitch)?)?
+            .copy_from_slice(pixels.get(source..source.checked_add(row_pitch)?)?);
+    }
+    Some(TextureUploadRect {
+        rect: TextureRect {
+            x: rect.x,
+            y: rect.y,
+            w: rect_width.min(u16::MAX as usize) as u16,
+            h: rect_height.min(u16::MAX as usize) as u16,
+        },
+        row_pitch,
+        data,
+    })
 }
 
 #[cfg(all(test, feature = "multi-viewport"))]
 mod tests {
     use super::*;
 
-    fn empty_draw_data(
+    fn empty_native_draw_data(
         viewport: *mut sys::ImGuiViewport,
         display_pos: [f32; 2],
         display_size: [f32; 2],
@@ -337,14 +1138,8 @@ mod tests {
         assert!(!draw_data.is_null());
         unsafe {
             (*draw_data).Valid = true;
-            (*draw_data).DisplayPos = sys::ImVec2 {
-                x: display_pos[0],
-                y: display_pos[1],
-            };
-            (*draw_data).DisplaySize = sys::ImVec2 {
-                x: display_size[0],
-                y: display_size[1],
-            };
+            (*draw_data).DisplayPos = display_pos.into();
+            (*draw_data).DisplaySize = display_size.into();
             (*draw_data).FramebufferScale = sys::ImVec2 { x: 1.0, y: 1.0 };
             (*draw_data).OwnerViewport = viewport;
             (*draw_data).Textures = std::ptr::null_mut();
@@ -363,63 +1158,15 @@ mod tests {
     }
 
     #[test]
-    fn platform_io_snapshot_captures_draw_data_per_viewport() {
-        let main = viewport(IMGUI_VIEWPORT_DEFAULT_ID, std::ptr::null_mut());
-        let secondary = viewport(0x222, std::ptr::null_mut());
-        let main_draw = empty_draw_data(main, [0.0, 0.0], [640.0, 360.0]);
-        let secondary_draw = empty_draw_data(secondary, [100.0, 50.0], [320.0, 200.0]);
-        unsafe {
-            (*main).DrawData = main_draw;
-            (*secondary).DrawData = secondary_draw;
-        }
-
-        let mut viewport_ptrs = [main, secondary];
-        let mut raw = sys::ImGuiPlatformIO {
-            Viewports: sys::ImVector_ImGuiViewportPtr {
-                Size: 2,
-                Capacity: 2,
-                Data: viewport_ptrs.as_mut_ptr(),
-            },
-            ..Default::default()
-        };
-        let platform_io = unsafe {
-            crate::platform_io::PlatformIo::from_raw(
-                (&mut raw as *mut sys::ImGuiPlatformIO).cast_const(),
-            )
-        };
-
-        let snapshot = FrameSnapshot::from_platform_io(&platform_io, SnapshotOptions::default())
-            .expect("valid viewport draw data should snapshot");
-
-        assert_eq!(snapshot.draw.display_size, [640.0, 360.0]);
-        assert_eq!(snapshot.viewports.len(), 2);
-        assert_eq!(
-            snapshot
-                .viewport_draw(crate::Id::from(0x222))
-                .expect("secondary viewport should be captured")
-                .display_pos,
-            [100.0, 50.0]
-        );
-
-        unsafe {
-            sys::ImDrawData_destroy(main_draw);
-            sys::ImDrawData_destroy(secondary_draw);
-            sys::ImGuiViewport_destroy(main);
-            sys::ImGuiViewport_destroy(secondary);
-        }
-    }
-
-    #[test]
-    fn platform_io_snapshot_uses_default_viewport_as_main_even_when_ordered_later() {
+    fn platform_capture_preserves_viewport_order_and_main_identity() {
         let secondary = viewport(0x222, std::ptr::null_mut());
         let main = viewport(IMGUI_VIEWPORT_DEFAULT_ID, std::ptr::null_mut());
-        let secondary_draw = empty_draw_data(secondary, [100.0, 50.0], [320.0, 200.0]);
-        let main_draw = empty_draw_data(main, [0.0, 0.0], [640.0, 360.0]);
+        let secondary_draw = empty_native_draw_data(secondary, [100.0, 50.0], [320.0, 200.0]);
+        let main_draw = empty_native_draw_data(main, [0.0, 0.0], [640.0, 360.0]);
         unsafe {
             (*secondary).DrawData = secondary_draw;
             (*main).DrawData = main_draw;
         }
-
         let mut viewport_ptrs = [secondary, main];
         let mut raw = sys::ImGuiPlatformIO {
             Viewports: sys::ImVector_ImGuiViewportPtr {
@@ -434,16 +1181,12 @@ mod tests {
                 (&mut raw as *mut sys::ImGuiPlatformIO).cast_const(),
             )
         };
-
-        let snapshot = FrameSnapshot::from_platform_io(&platform_io, SnapshotOptions::default())
-            .expect("valid viewport draw data should snapshot");
-
-        assert_eq!(snapshot.draw.display_size, [640.0, 360.0]);
-        assert_eq!(
-            snapshot.viewports[0].draw.display_size,
-            [320.0, 200.0],
-            "captured viewport order should be preserved independently from the compatibility main draw"
-        );
+        let pending = capture_platform_io(&platform_io, &mut |_| {
+            Err(SnapshotError::UnknownManagedTexture)
+        })
+        .expect("empty draw data should capture");
+        assert_eq!(pending.draw.display_size, [640.0, 360.0]);
+        assert_eq!(pending.viewports[0].draw.display_size, [320.0, 200.0]);
 
         unsafe {
             sys::ImDrawData_destroy(secondary_draw);
@@ -452,93 +1195,4 @@ mod tests {
             sys::ImGuiViewport_destroy(main);
         }
     }
-}
-
-fn snapshot_draw_data(
-    draw_data: &DrawData,
-    options: SnapshotOptions,
-) -> Result<DrawDataSnapshot, SnapshotError> {
-    let mut draw_lists = Vec::with_capacity(draw_data.draw_lists_count());
-    for draw_list in draw_data.draw_lists() {
-        draw_lists.push(snapshot_draw_list(draw_list, options)?);
-    }
-
-    Ok(DrawDataSnapshot {
-        display_pos: draw_data.display_pos(),
-        display_size: draw_data.display_size(),
-        framebuffer_scale: draw_data.framebuffer_scale(),
-        draw_lists,
-    })
-}
-
-fn snapshot_draw_list(
-    draw_list: &DrawList,
-    options: SnapshotOptions,
-) -> Result<DrawListSnapshot, SnapshotError> {
-    let vtx = draw_list.vtx_buffer().to_vec();
-    let idx = draw_list.idx_buffer().to_vec();
-
-    let mut commands = Vec::new();
-    for cmd in unsafe { draw_list.cmd_buffer() } {
-        if cmd.UserCallback.is_some() {
-            match classify_standard_draw_callback(cmd.UserCallback) {
-                Some(StandardDrawCallback::ResetRenderState) => {
-                    commands.push(DrawCmdSnapshot::ResetRenderState);
-                    continue;
-                }
-                Some(StandardDrawCallback::SetSamplerLinear) => {
-                    commands.push(DrawCmdSnapshot::SetSamplerLinear);
-                    continue;
-                }
-                Some(StandardDrawCallback::SetSamplerNearest) => {
-                    commands.push(DrawCmdSnapshot::SetSamplerNearest);
-                    continue;
-                }
-                None => match options.user_callback_policy {
-                    UserCallbackPolicy::Error => {
-                        return Err(SnapshotError::UserCallbackUnsupported);
-                    }
-                    UserCallbackPolicy::Drop => continue,
-                },
-            }
-        }
-
-        let texture = snapshot_texture_binding(cmd.TexRef)?;
-        commands.push(DrawCmdSnapshot::Elements {
-            count: count_from_u32("DrawCmdSnapshot::Elements::count", cmd.ElemCount),
-            clip_rect: [
-                cmd.ClipRect.x,
-                cmd.ClipRect.y,
-                cmd.ClipRect.z,
-                cmd.ClipRect.w,
-            ],
-            texture,
-            vtx_offset: count_from_u32("DrawCmdSnapshot::Elements::vtx_offset", cmd.VtxOffset),
-            idx_offset: count_from_u32("DrawCmdSnapshot::Elements::idx_offset", cmd.IdxOffset),
-        });
-    }
-
-    Ok(DrawListSnapshot { vtx, idx, commands })
-}
-
-fn count_from_u32(caller: &str, raw: u32) -> usize {
-    usize::try_from(raw).unwrap_or_else(|_| panic!("{caller} exceeded usize range"))
-}
-
-fn snapshot_texture_binding(tex_ref: sys::ImTextureRef) -> Result<TextureBinding, SnapshotError> {
-    if tex_ref._TexID != 0 {
-        return Ok(TextureBinding::Legacy(TextureId::from(
-            tex_ref._TexID as u64,
-        )));
-    }
-
-    if !tex_ref._TexData.is_null() {
-        return Err(SnapshotError::ManagedTextureRequiresContext);
-    }
-
-    Ok(TextureBinding::Legacy(TextureId::null()))
-}
-
-fn snapshot_texture_requests(_draw_data: &DrawData) -> Result<Vec<TextureRequest>, SnapshotError> {
-    Ok(Vec::new())
 }

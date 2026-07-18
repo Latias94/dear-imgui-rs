@@ -8,7 +8,18 @@ pub(super) struct FontAtlasState {
     pub(super) stamp: u64,
     pub(super) generation: u64,
     pub(super) custom_rect_generation: u64,
+    texture_generation: u64,
+    texture_pointer: usize,
+    snapshot_revision: u64,
     texture_borrows: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct FontAtlasSnapshotIdentity {
+    pub(crate) stamp: u64,
+    pub(crate) texture_generation: u64,
+    pub(crate) revision: u64,
+    pub(crate) texture: *mut sys::ImTextureData,
 }
 
 #[derive(Default)]
@@ -47,6 +58,9 @@ impl FontAtlasStates {
                     stamp,
                     generation: 0,
                     custom_rect_generation: 0,
+                    texture_generation: 0,
+                    texture_pointer: 0,
+                    snapshot_revision: 0,
                     texture_borrows: 0,
                 },
             );
@@ -90,6 +104,62 @@ pub(super) fn bump_custom_rect_generation(raw: *mut sys::ImFontAtlas) -> FontAtl
         let state = *state;
         states.custom_rect_nonces.remove(&(raw as usize));
         state
+    })
+}
+
+pub(super) fn bump_font_atlas_texture_generation(raw: *mut sys::ImFontAtlas) {
+    assert!(!raw.is_null(), "font atlas pointer must not be null");
+    FONT_ATLAS_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        let state = states.get_or_insert(raw);
+        state.texture_generation = state
+            .texture_generation
+            .checked_add(1)
+            .expect("font atlas texture generation counter overflowed");
+        state.texture_pointer = unsafe { (*raw).TexData as usize };
+    });
+}
+
+pub(crate) fn font_atlas_snapshot_identity(
+    raw: *mut sys::ImFontAtlas,
+) -> FontAtlasSnapshotIdentity {
+    font_atlas_texture_identity(raw, true)
+}
+
+pub(crate) fn current_font_atlas_snapshot_identity(
+    raw: *mut sys::ImFontAtlas,
+) -> FontAtlasSnapshotIdentity {
+    font_atlas_texture_identity(raw, false)
+}
+
+fn font_atlas_texture_identity(
+    raw: *mut sys::ImFontAtlas,
+    advance_revision: bool,
+) -> FontAtlasSnapshotIdentity {
+    assert!(!raw.is_null(), "font atlas pointer must not be null");
+    let texture = unsafe { (*raw).TexData };
+    FONT_ATLAS_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        let state = states.get_or_insert(raw);
+        if state.texture_pointer != texture as usize {
+            state.texture_generation = state
+                .texture_generation
+                .checked_add(1)
+                .expect("font atlas texture generation counter overflowed");
+            state.texture_pointer = texture as usize;
+        }
+        if advance_revision {
+            state.snapshot_revision = state
+                .snapshot_revision
+                .checked_add(1)
+                .expect("font atlas snapshot revision counter overflowed");
+        }
+        FontAtlasSnapshotIdentity {
+            stamp: state.stamp,
+            texture_generation: state.texture_generation,
+            revision: state.snapshot_revision,
+            texture,
+        }
     })
 }
 

@@ -31,25 +31,6 @@ impl<'ui> DrawListMut<'ui> {
     pub fn add_draw_cmd(&self) {
         unsafe { sys::ImDrawList_AddDrawCmd(self.draw_list) }
     }
-
-    /// Clone the current draw list output into an owned, independent copy.
-    ///
-    /// The returned draw list is heap-allocated by Dear ImGui and will be destroyed on drop.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the draw list contains user callbacks. Dear ImGui's clone operation copies
-    /// callback userdata as an opaque pointer, which cannot be duplicated safely by this safe API.
-    #[doc(alias = "CloneOutput")]
-    pub fn clone_output(&self) -> crate::render::OwnedDrawList {
-        unsafe {
-            crate::render::draw_data::assert_draw_list_cloneable(
-                self.draw_list.cast_const(),
-                "DrawListMut::clone_output",
-            );
-            crate::render::OwnedDrawList::from_raw(sys::ImDrawList_CloneOutput(self.draw_list))
-        }
-    }
 }
 
 impl<'ui> DrawListMut<'ui> {

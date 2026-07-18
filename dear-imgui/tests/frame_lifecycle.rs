@@ -53,14 +53,16 @@ fn frame_token_allows_engine_owned_begin_ui_end_flow() {
 
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
+    let _consumer = ctx.create_renderer_consumer().unwrap();
 
     let frame = ctx.begin_frame();
     assert_eq!(frame.lifecycle_state(), imgui::FrameLifecycleState::InFrame);
     frame.ui().text("first system");
     frame.ui().text("second system");
 
-    let draw_data = frame.render();
-    assert!(draw_data.valid());
+    let rendered_frame = frame.render();
+    assert!(rendered_frame.valid());
+    drop(rendered_frame);
     assert_eq!(
         ctx.frame_lifecycle_state(),
         imgui::FrameLifecycleState::Rendered
@@ -84,13 +86,12 @@ fn dropping_frame_token_ends_frame_without_rendering() {
         ctx.frame_lifecycle_state(),
         imgui::FrameLifecycleState::Idle
     );
-    assert!(ctx.draw_data().is_none());
-
     prepare_context(&mut ctx);
+    let _consumer = ctx.create_renderer_consumer().unwrap();
     let frame = ctx.begin_frame();
     frame.ui().text("next frame still starts cleanly");
-    let draw_data = frame.render();
-    assert!(draw_data.valid());
+    let rendered_frame = frame.render();
+    assert!(rendered_frame.valid());
 }
 
 #[test]
@@ -134,22 +135,23 @@ fn render_without_beginning_frame_panics_before_entering_ffi() {
 }
 
 #[test]
-fn frame_token_rejects_font_managed_draws_without_a_snapshot_consumer() {
+fn frame_token_captures_font_managed_draws_with_a_context_consumer() {
     let _guard = test_guard();
 
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
+    let consumer = ctx.create_renderer_consumer().unwrap();
 
     let frame = ctx.begin_frame();
     frame.ui().text("snapshot me");
 
-    let error = frame
-        .render_snapshot(imgui::render::snapshot::SnapshotOptions::default())
-        .expect_err("managed font draws require Context-owned snapshot capture");
-    assert!(matches!(
-        error,
-        imgui::render::snapshot::SnapshotError::ManagedTextureRequiresContext
-    ));
+    let snapshot = frame.render_snapshot(&consumer).unwrap();
+    assert!(snapshot.texture_requests().iter().any(|request| {
+        matches!(
+            request.texture(),
+            imgui::render::SnapshotTextureId::FontAtlas { .. }
+        )
+    }));
 }
 
 #[test]
@@ -158,6 +160,7 @@ fn frame_with_result_lets_engines_run_multiple_ui_steps_before_rendering() {
 
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
+    let _consumer = ctx.create_renderer_consumer().unwrap();
 
     let result = ctx.frame_with_result(|ui| {
         ui.text("system A");
@@ -166,7 +169,8 @@ fn frame_with_result_lets_engines_run_multiple_ui_steps_before_rendering() {
     });
 
     assert_eq!(result.value, 42);
-    assert!(result.draw_data.valid());
+    assert!(result.rendered_frame.valid());
+    drop(result);
     assert_eq!(
         ctx.frame_lifecycle_state(),
         imgui::FrameLifecycleState::Rendered
@@ -174,11 +178,12 @@ fn frame_with_result_lets_engines_run_multiple_ui_steps_before_rendering() {
 }
 
 #[test]
-fn frame_token_snapshot_requires_a_managed_texture_consumer() {
+fn synchronous_rendered_frame_reconciles_request_bound_feedback() {
     let _guard = test_guard();
 
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
+    let _consumer = ctx.create_renderer_consumer().unwrap();
     let mut texture = imgui::texture::OwnedTextureData::new();
     texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
     texture.set_data(&[255, 255, 255, 255]);
@@ -186,11 +191,157 @@ fn frame_token_snapshot_requires_a_managed_texture_consumer() {
 
     let frame = ctx.begin_frame();
     frame.ui().image(texture_id, [16.0, 16.0]);
-    let error = frame
-        .render_snapshot(imgui::render::snapshot::SnapshotOptions::default())
-        .expect_err("managed snapshot capture must use the U3 consumer contract");
+    let mut rendered = frame.render();
+    let request = rendered
+        .texture_requests()
+        .iter()
+        .find(|request| request.texture() == imgui::render::SnapshotTextureId::User(texture_id))
+        .expect("synchronous frame should expose the managed create request");
+    let feedback = request.uploaded(imgui::TextureId::new(99)).unwrap();
+    rendered.reconcile_texture_feedback([feedback]).unwrap();
+    assert!(rendered.valid());
+    drop(rendered);
+
+    ctx.with_texture(texture_id, |texture| {
+        assert_eq!(texture.status(), imgui::TextureStatus::OK);
+        assert_eq!(texture.texture_id(), imgui::TextureId::new(99));
+    })
+    .unwrap();
+}
+
+#[test]
+fn synchronous_rendered_frame_abandon_reissues_unacknowledged_requests() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let _consumer = ctx.create_renderer_consumer().unwrap();
+    let mut texture = imgui::texture::OwnedTextureData::new();
+    texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
+    texture.set_data(&[255, 255, 255, 255]);
+    let texture_id = ctx.register_texture(texture);
+
+    let first = ctx.begin_frame();
+    first.ui().image(texture_id, [16.0, 16.0]);
+    let rendered = first.render();
+    assert!(rendered.texture_requests().iter().any(|request| {
+        request.texture() == imgui::render::SnapshotTextureId::User(texture_id)
+            && matches!(request.operation(), imgui::render::TextureOp::Create { .. })
+    }));
+    drop(rendered);
+
+    let second = ctx.begin_frame();
+    second.ui().image(texture_id, [16.0, 16.0]);
+    let mut rendered = second.render();
+    let request = rendered
+        .texture_requests()
+        .iter()
+        .find(|request| request.texture() == imgui::render::SnapshotTextureId::User(texture_id))
+        .expect("the abandoned create request should be emitted again");
+    let feedback = request.uploaded(imgui::TextureId::new(101)).unwrap();
+    rendered.reconcile_texture_feedback([feedback]).unwrap();
+    drop(rendered);
+
+    ctx.with_texture(texture_id, |texture| {
+        assert_eq!(texture.status(), imgui::TextureStatus::OK);
+        assert_eq!(texture.texture_id(), imgui::TextureId::new(101));
+    })
+    .unwrap();
+}
+
+#[test]
+fn renderer_consumer_generation_cannot_switch_render_modes() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let consumer = ctx.create_renderer_consumer().unwrap();
+
+    let mut rendered = ctx.begin_frame().render();
+    rendered
+        .reconcile_texture_feedback(std::iter::empty())
+        .unwrap();
+    drop(rendered);
+
+    let result = ctx.begin_frame().render_snapshot(&consumer);
     assert!(matches!(
-        error,
-        imgui::render::snapshot::SnapshotError::ManagedTextureRequiresContext
+        result,
+        Err(imgui::render::SnapshotError::Consumer(
+            imgui::render::RendererConsumerError::ConsumerModeMismatch
+        ))
     ));
+}
+
+#[test]
+fn renderer_reset_requeues_active_textures_without_native_mutation_access() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let consumer = ctx.create_renderer_consumer().unwrap();
+    let mut texture = imgui::texture::OwnedTextureData::new();
+    texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
+    texture.set_data(&[255, 255, 255, 255]);
+    let texture_id = ctx.register_texture(texture);
+
+    let first = ctx.begin_frame();
+    first.ui().image(texture_id, [16.0, 16.0]);
+    let mut first = first.render();
+    let created = first
+        .texture_requests()
+        .iter()
+        .find(|request| request.texture() == imgui::render::SnapshotTextureId::User(texture_id))
+        .unwrap()
+        .uploaded(imgui::TextureId::new(111))
+        .unwrap();
+    first.reconcile_texture_feedback([created]).unwrap();
+    drop(first);
+
+    assert!(ctx.reset_renderer_texture_bindings(&consumer).unwrap() >= 1);
+    ctx.with_texture(texture_id, |texture| {
+        assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+        assert!(texture.texture_id().is_null());
+    })
+    .unwrap();
+
+    let second = ctx.begin_frame();
+    second.ui().image(texture_id, [16.0, 16.0]);
+    let second = second.render();
+    assert!(second.texture_requests().iter().any(|request| {
+        request.texture() == imgui::render::SnapshotTextureId::User(texture_id)
+            && matches!(request.operation(), imgui::render::TextureOp::Create { .. })
+    }));
+}
+
+#[test]
+fn renderer_reset_acknowledges_retiring_textures_after_the_last_epoch() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let consumer = ctx.create_renderer_consumer().unwrap();
+    let mut texture = imgui::texture::OwnedTextureData::new();
+    texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
+    texture.set_data(&[255, 255, 255, 255]);
+    let texture_id = ctx.register_texture(texture);
+
+    let frame = ctx.begin_frame();
+    frame.ui().image(texture_id, [16.0, 16.0]);
+    let mut frame = frame.render();
+    let created = frame
+        .texture_requests()
+        .iter()
+        .find(|request| request.texture() == imgui::render::SnapshotTextureId::User(texture_id))
+        .unwrap()
+        .uploaded(imgui::TextureId::new(121))
+        .unwrap();
+    frame.reconcile_texture_feedback([created]).unwrap();
+    drop(frame);
+
+    ctx.remove_texture(texture_id).unwrap();
+    ctx.reset_renderer_texture_bindings(&consumer).unwrap();
+    assert_eq!(
+        ctx.with_texture(texture_id, |_| ()),
+        Err(imgui::ManagedTextureError::AlreadyRemoved(texture_id))
+    );
 }

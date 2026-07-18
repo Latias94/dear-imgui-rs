@@ -4,10 +4,10 @@
 //! management and renderer abstractions.
 
 pub mod draw_data;
-pub mod renderer;
+mod frame;
 pub mod snapshot;
 
 // Re-export commonly used types
 pub use draw_data::*;
-pub use renderer::*;
+pub use frame::RenderedFrame;
 pub use snapshot::*;

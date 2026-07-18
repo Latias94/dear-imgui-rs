@@ -19,11 +19,12 @@ fn thread_safety_context_and_render_markers() {
     assert_not_impl_any!(dear_imgui_rs::CustomRectSnapshot<'static>: Send, Sync);
     assert_not_impl_any!(dear_imgui_rs::FontAtlasTexture<'static>: Send, Sync);
 
-    // OwnedDrawData must NOT be Send/Sync (retains shared textures list pointer)
-    assert_not_impl_any!(dear_imgui_rs::render::draw_data::OwnedDrawData: Send, Sync);
+    assert_not_impl_any!(dear_imgui_rs::render::RenderedFrame<'static>: Send, Sync);
+    assert_not_impl_any!(dear_imgui_rs::render::RendererConsumer: Send, Sync, Clone);
 
-    // Threaded snapshot types MUST be Send/Sync
+    // Detached snapshots move across threads but cannot be cloned.
     assert_impl_all!(dear_imgui_rs::render::snapshot::FrameSnapshot: Send, Sync);
+    assert_not_impl_any!(dear_imgui_rs::render::snapshot::FrameSnapshot: Clone);
     assert_impl_all!(dear_imgui_rs::render::snapshot::DrawDataSnapshot: Send, Sync);
     assert_impl_all!(dear_imgui_rs::render::snapshot::DrawListSnapshot: Send, Sync);
     assert_impl_all!(dear_imgui_rs::render::snapshot::DrawCmdSnapshot: Send, Sync);

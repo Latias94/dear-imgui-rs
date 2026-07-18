@@ -1,5 +1,4 @@
 use crate::sys;
-use std::slice;
 
 type RawDrawCallback = unsafe extern "C" fn(*const sys::ImDrawList, *const sys::ImDrawCmd);
 
@@ -51,37 +50,4 @@ pub(crate) fn classify_standard_draw_callback(
     } else {
         None
     }
-}
-
-#[inline]
-fn is_standard_draw_callback(callback: sys::ImDrawCallback) -> bool {
-    classify_standard_draw_callback(callback).is_some()
-}
-
-pub(crate) unsafe fn draw_list_has_uncloneable_callbacks(raw: *const sys::ImDrawList) -> bool {
-    if raw.is_null() {
-        return false;
-    }
-
-    let cmd_buffer = unsafe { &(*raw).CmdBuffer };
-    if cmd_buffer.Size <= 0 || cmd_buffer.Data.is_null() {
-        return false;
-    }
-
-    let len = match usize::try_from(cmd_buffer.Size) {
-        Ok(len) => len,
-        Err(_) => return true,
-    };
-
-    unsafe { slice::from_raw_parts(cmd_buffer.Data, len) }
-        .iter()
-        .any(|cmd| cmd.UserCallback.is_some() && !is_standard_draw_callback(cmd.UserCallback))
-}
-
-pub(crate) unsafe fn assert_draw_list_cloneable(raw: *const sys::ImDrawList, caller: &str) {
-    assert!(
-        !unsafe { draw_list_has_uncloneable_callbacks(raw) },
-        "{caller} cannot clone draw lists containing user callbacks; \
-         callback userdata is opaque and cannot be duplicated safely"
-    );
 }

@@ -71,7 +71,7 @@ fn io_delta_time_must_be_positive_after_first_frame() {
     prepare_context(&mut ctx);
 
     let _ = ctx.frame();
-    ctx.render();
+    let _ = ctx.render();
 
     let io = ctx.io_mut();
     let previous = io.delta_time();

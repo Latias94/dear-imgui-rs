@@ -21,31 +21,6 @@ unsafe extern "C" fn draw_callback_marker(
 }
 
 #[test]
-fn platform_io_textures_empty_is_safe() {
-    let mut raw: sys::ImGuiPlatformIO = new_platform_io();
-
-    raw.Textures.Size = 0;
-    raw.Textures.Data = std::ptr::null_mut();
-    let mut pio = PlatformIo {
-        raw: UnsafeCell::new(raw),
-    };
-    assert_eq!(pio.textures().count(), 0);
-    assert!(pio.textures_mut().next().is_none());
-    assert_eq!(pio.textures_count(), 0);
-
-    let mut raw: sys::ImGuiPlatformIO = new_platform_io();
-    raw.Textures.Size = 1;
-    raw.Textures.Data = std::ptr::null_mut();
-    let mut pio = PlatformIo {
-        raw: UnsafeCell::new(raw),
-    };
-    assert_eq!(pio.textures().count(), 0);
-    assert!(pio.textures_mut().next().is_none());
-    assert_eq!(pio.textures_count(), 0);
-    assert!(pio.texture(0).is_none());
-}
-
-#[test]
 fn invalidating_renderer_bindings_requeues_live_textures() {
     let mut texture = crate::texture::TextureData::new();
     texture.create(crate::texture::TextureFormat::RGBA32, 1, 1);
