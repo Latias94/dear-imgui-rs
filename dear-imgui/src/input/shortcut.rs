@@ -127,9 +127,6 @@ impl From<ShortcutRoute> for ShortcutOptions {
     }
 }
 
-/// Backwards-compatible name for shortcut options.
-pub type InputFlags = ShortcutOptions;
-
 bitflags! {
     /// Flags specific to `SetNextItemShortcut()`.
     #[repr(transparent)]

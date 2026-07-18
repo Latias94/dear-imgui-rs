@@ -324,7 +324,7 @@ impl AppWindow {
         // Create a managed ImGui texture (CPU-side pixels; backend will create GPU texture).
         let tex_w: u32 = 128;
         let tex_h: u32 = 128;
-        let mut img_tex = dear_imgui_rs::texture::TextureData::new();
+        let mut img_tex = dear_imgui_rs::texture::OwnedTextureData::new();
         img_tex.create(dear_imgui_rs::texture::TextureFormat::RGBA32, tex_w, tex_h);
         let mut pixels = vec![0u8; (tex_w * tex_h * 4) as usize];
         for y in 0..tex_h {
@@ -394,7 +394,7 @@ impl AppWindow {
         let rgba = img.to_rgba8();
         let (w, h) = rgba.dimensions();
 
-        let mut tex = dear_imgui_rs::texture::TextureData::new();
+        let mut tex = dear_imgui_rs::texture::OwnedTextureData::new();
         tex.create(dear_imgui_rs::texture::TextureFormat::RGBA32, w, h);
         tex.set_data(&rgba);
         Some(tex)

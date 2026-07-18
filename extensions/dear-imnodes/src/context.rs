@@ -422,12 +422,12 @@ mod tests {
 
         let mut imgui_b = ImGuiContext::create();
         prepare_imgui(&mut imgui_b);
-        let ui = imgui_b.frame();
+        let frame = imgui_b.begin_frame();
         let result = catch_unwind(AssertUnwindSafe(|| {
-            let _ = ui.imnodes(&nodes);
+            let _ = frame.ui().imnodes(&nodes);
         }));
         assert!(result.is_err());
-        let _ = imgui_b.render();
+        drop(frame);
 
         drop(imgui_b);
         let imgui_a = suspended_a.activate().expect("context A should reactivate");
@@ -443,15 +443,15 @@ mod tests {
         let raw_imgui = imgui.as_raw();
         let nodes = ImNodesContext::create(&imgui);
 
-        let ui = imgui.frame();
-        let editor = ui.imnodes(&nodes).editor(None);
+        let frame = imgui.begin_frame();
+        let editor = frame.ui().imnodes(&nodes).editor(None);
 
         unsafe { imgui_sys::igSetCurrentContext(ptr::null_mut()) };
         drop(editor);
         assert_eq!(unsafe { imgui_sys::igGetCurrentContext() }, ptr::null_mut());
 
         unsafe { imgui_sys::igSetCurrentContext(raw_imgui) };
-        let _ = imgui.render();
+        drop(frame);
     }
 
     #[test]
@@ -463,20 +463,18 @@ mod tests {
         let explicit_editor = nodes.create_editor_context();
 
         {
-            let ui = imgui.frame();
-            let editor = ui.imnodes(&nodes).editor(Some(&explicit_editor));
+            let frame = imgui.begin_frame();
+            let editor = frame.ui().imnodes(&nodes).editor(Some(&explicit_editor));
             let _ = editor.end();
         }
-        let _ = imgui.render();
 
         drop(explicit_editor);
 
         {
-            let ui = imgui.frame();
-            let editor = ui.imnodes(&nodes).editor(None);
+            let frame = imgui.begin_frame();
+            let editor = frame.ui().imnodes(&nodes).editor(None);
             let _ = editor.end();
         }
-        let _ = imgui.render();
     }
 
     #[test]
@@ -495,9 +493,8 @@ mod tests {
         drop(explicit_editor);
 
         assert_eq!(unsafe { sys::imnodes_GetCurrentContext() }, raw_nodes);
-        let ui = imgui.frame();
-        let editor = ui.imnodes(&nodes).editor(None);
+        let frame = imgui.begin_frame();
+        let editor = frame.ui().imnodes(&nodes).editor(None);
         let _ = editor.end();
-        let _ = imgui.render();
     }
 }

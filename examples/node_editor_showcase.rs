@@ -609,7 +609,7 @@ fn load_header_background_texture() -> Result<texture::OwnedTextureData, Box<dyn
 
     let image = ::image::ImageReader::open(&path)?.decode()?.to_rgba8();
     let (width, height) = image.dimensions();
-    let mut texture = texture::TextureData::new();
+    let mut texture = texture::OwnedTextureData::new();
     texture.create(
         texture::TextureFormat::RGBA32,
         u32::try_from(width).expect("header texture width fits u32"),

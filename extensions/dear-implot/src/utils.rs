@@ -1,6 +1,6 @@
 // Utility functions for ImPlot
 
-use crate::{Axis, PlotUi, XAxis, YAxis, compat_ffi, sys};
+use crate::{Axis, PlotUi, XAxis, YAxis, sys};
 use dear_imgui_rs::with_scratch_txt;
 use std::fmt;
 
@@ -263,7 +263,7 @@ impl PlotUi<'_> {
         assert!(!text.contains('\0'), "text contained NUL");
         self.with_bound_context(|| {
             with_scratch_txt(text, |ptr| unsafe {
-                compat_ffi::ImPlot_Annotation_Str0(x, y, col, off, clamp, ptr)
+                sys::ImPlot_Annotation_Str0(x, y, col, off, clamp, ptr)
             })
         })
     }
@@ -293,9 +293,7 @@ impl PlotUi<'_> {
         };
         assert!(!text.contains('\0'), "text contained NUL");
         self.with_bound_context(|| {
-            with_scratch_txt(text, |ptr| unsafe {
-                compat_ffi::ImPlot_TagX_Str0(x, col, ptr)
-            })
+            with_scratch_txt(text, |ptr| unsafe { sys::ImPlot_TagX_Str0(x, col, ptr) })
         })
     }
 
@@ -324,9 +322,7 @@ impl PlotUi<'_> {
         };
         assert!(!text.contains('\0'), "text contained NUL");
         self.with_bound_context(|| {
-            with_scratch_txt(text, |ptr| unsafe {
-                compat_ffi::ImPlot_TagY_Str0(y, col, ptr)
-            })
+            with_scratch_txt(text, |ptr| unsafe { sys::ImPlot_TagY_Str0(y, col, ptr) })
         })
     }
 
@@ -400,7 +396,7 @@ impl PlotUi<'_> {
     /// Get current plot position (top-left) in pixels.
     pub fn plot_pos(&self) -> [f32; 2] {
         self.with_bound_context(|| {
-            let out = unsafe { crate::compat_ffi::ImPlot_GetPlotPos() };
+            let out = unsafe { sys::ImPlot_GetPlotPos() };
             [out.x, out.y]
         })
     }
@@ -408,7 +404,7 @@ impl PlotUi<'_> {
     /// Get current plot size in pixels.
     pub fn plot_size(&self) -> [f32; 2] {
         self.with_bound_context(|| {
-            let out = unsafe { crate::compat_ffi::ImPlot_GetPlotSize() };
+            let out = unsafe { sys::ImPlot_GetPlotSize() };
             [out.x, out.y]
         })
     }

@@ -159,10 +159,8 @@ impl Plot3DContext {
         self.with_bound_colormap(
             "dear-implot3d: Plot3DContext::colormap_color()",
             || unsafe {
-                let out = crate::compat_ffi::ImPlot3D_GetColormapColor(
-                    index.raw(),
-                    (-1) as sys::ImPlot3DColormap,
-                );
+                let out =
+                    sys::ImPlot3D_GetColormapColor(index.raw(), (-1) as sys::ImPlot3DColormap);
                 [out.x, out.y, out.z, out.w]
             },
         )
@@ -173,7 +171,7 @@ impl Plot3DContext {
         self.with_bound_colormap(
             "dear-implot3d: Plot3DContext::next_colormap_color()",
             || unsafe {
-                let out = crate::compat_ffi::ImPlot3D_NextColormapColor();
+                let out = sys::ImPlot3D_NextColormapColor();
                 [out.x, out.y, out.z, out.w]
             },
         )
@@ -184,10 +182,7 @@ impl Plot3DUi<'_> {
     /// Return a color from this UI's active ImPlot3D colormap.
     pub fn colormap_color(&self, index: ColormapColorIndex) -> [f32; 4] {
         self.with_bound_context(|| unsafe {
-            let out = crate::compat_ffi::ImPlot3D_GetColormapColor(
-                index.raw(),
-                (-1) as sys::ImPlot3DColormap,
-            );
+            let out = sys::ImPlot3D_GetColormapColor(index.raw(), (-1) as sys::ImPlot3DColormap);
             [out.x, out.y, out.z, out.w]
         })
     }
@@ -195,7 +190,7 @@ impl Plot3DUi<'_> {
     /// Return the next color from this UI's current colormap and advance its color cursor.
     pub fn next_colormap_color(&self) -> [f32; 4] {
         self.with_bound_context(|| unsafe {
-            let out = crate::compat_ffi::ImPlot3D_NextColormapColor();
+            let out = sys::ImPlot3D_NextColormapColor();
             [out.x, out.y, out.z, out.w]
         })
     }

@@ -35,7 +35,7 @@ impl TexDemoState {
         // Animated CPU texture
         let tex_w: u32 = 128;
         let tex_h: u32 = 128;
-        let mut img_tex = dear_imgui_rs::texture::TextureData::new();
+        let mut img_tex = dear_imgui_rs::texture::OwnedTextureData::new();
         img_tex.create(dear_imgui_rs::texture::TextureFormat::RGBA32, tex_w, tex_h);
 
         // Seed with a gradient for first frame
@@ -97,7 +97,7 @@ impl TexDemoState {
                     let rgba = img.to_rgba8();
                     let (w, h) = rgba.dimensions();
                     let data = rgba.into_raw();
-                    let mut t = dear_imgui_rs::texture::TextureData::new();
+                    let mut t = dear_imgui_rs::texture::OwnedTextureData::new();
                     t.create(dear_imgui_rs::texture::TextureFormat::RGBA32, w, h);
                     t.set_data(&data);
                     println!("Loaded demo image from {:?} ({}x{})", path, w, h);

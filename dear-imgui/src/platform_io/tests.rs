@@ -22,7 +22,7 @@ unsafe extern "C" fn draw_callback_marker(
 
 #[test]
 fn invalidating_renderer_bindings_requeues_live_textures() {
-    let mut texture = crate::texture::TextureData::new();
+    let mut texture = crate::texture::OwnedTextureData::new();
     texture.create(crate::texture::TextureFormat::RGBA32, 1, 1);
     texture.set_tex_id(crate::texture::TextureId::new(123));
     texture.set_backend_user_data(std::ptr::dangling_mut());
@@ -48,7 +48,7 @@ fn invalidating_renderer_bindings_requeues_live_textures() {
 
 #[test]
 fn invalidating_renderer_bindings_preserves_queued_destruction() {
-    let mut texture = crate::texture::TextureData::new();
+    let mut texture = crate::texture::OwnedTextureData::new();
     texture.create(crate::texture::TextureFormat::RGBA32, 1, 1);
     texture.set_tex_id(crate::texture::TextureId::new(123));
     texture.set_backend_user_data(std::ptr::dangling_mut());
@@ -75,7 +75,7 @@ fn invalidating_renderer_bindings_preserves_queued_destruction() {
 
 #[test]
 fn invalidating_renderer_bindings_preserves_shared_textures() {
-    let mut texture = crate::texture::TextureData::new();
+    let mut texture = crate::texture::OwnedTextureData::new();
     texture.create(crate::texture::TextureFormat::RGBA32, 1, 1);
     texture.set_tex_id(crate::texture::TextureId::new(123));
     texture.set_backend_user_data(std::ptr::dangling_mut());

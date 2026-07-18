@@ -58,9 +58,6 @@ sdl3-platform = [
     "dep:dear-imgui-sdl3",
 ]
 
-# Legacy alias kept for older commands.
-sdl3-backends = ["sdl3-platform"]
-
 # SDL3 + official OpenGL3 renderer backend.
 sdl3-opengl3 = [
     "sdl3-platform",

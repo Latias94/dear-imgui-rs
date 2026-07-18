@@ -3,6 +3,13 @@
 //! Small convenience widgets that don’t fit elsewhere (e.g. bullets, help
 //! markers). See functions on `Ui` for details.
 //!
+//! Arrow buttons use [`crate::Direction`] directly. The `ArrowDirection` alias is intentionally
+//! unavailable:
+//!
+//! ```compile_fail
+//! use dear_imgui_rs::ArrowDirection;
+//! ```
+//!
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
@@ -21,6 +28,4 @@ mod tests;
 
 pub use button_repeat::ButtonRepeatToken;
 pub use disabled::DisabledToken;
-pub use invisible_button::{
-    ArrowDirection, ButtonFlags, InvisibleButtonMouseButtons, InvisibleButtonOptions,
-};
+pub use invisible_button::{ButtonFlags, InvisibleButtonMouseButtons, InvisibleButtonOptions};

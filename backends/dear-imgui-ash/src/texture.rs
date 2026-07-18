@@ -52,11 +52,11 @@ impl TextureUpdateResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dear_imgui_rs::TextureFormat;
+    use dear_imgui_rs::{OwnedTextureData, TextureFormat};
 
     #[test]
     fn texture_update_result_apply_to_sets_status_and_id() {
-        let mut tex = TextureData::new();
+        let mut tex = OwnedTextureData::new();
 
         TextureUpdateResult::Created {
             texture_id: TextureId::from(42u64),

@@ -22,8 +22,7 @@ impl<'a> BoundEditor<'a> {
     }
 
     pub fn get_panning(&self) -> [f32; 2] {
-        let out = self
-            .with_bound_context(|| unsafe { crate::compat_ffi::imnodes_EditorContextGetPanning() });
+        let out = self.with_bound_context(|| unsafe { sys::imnodes_EditorContextGetPanning() });
         [out.x, out.y]
     }
 

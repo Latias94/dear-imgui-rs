@@ -3,7 +3,7 @@ use super::validation::{
     checked_texture_byte_len, checked_texture_byte_len_if_valid, checked_texture_dimension_to_i32,
     non_negative_texture_count_from_i32,
 };
-use super::{OwnedTextureData, TextureFormat, TextureId, TextureRect, TextureStatus};
+use super::{TextureFormat, TextureId, TextureRect, TextureStatus};
 use crate::sys;
 use std::cell::UnsafeCell;
 use std::ffi::c_void;
@@ -27,6 +27,14 @@ use std::ffi::c_void;
 /// Context owns every registered user allocation through retirement. Application mutation uses
 /// `Context::with_texture_mut`, so safe code cannot drop the allocation while native draw data or a
 /// renderer still refers to it.
+///
+/// Construct owned values explicitly through [`super::OwnedTextureData::new`]. `TextureData` is a
+/// borrowed view and therefore has no constructor:
+///
+/// ```compile_fail
+/// use dear_imgui_rs::texture::TextureData;
+/// let _ = TextureData::new();
+/// ```
 #[repr(transparent)]
 pub struct TextureData {
     raw: UnsafeCell<sys::ImTextureData>,
@@ -63,13 +71,6 @@ impl TextureData {
             raw.Status == sys::ImTextureStatus_Destroyed,
             "{caller} requires Destroyed texture status"
         );
-    }
-
-    /// Create a new owned texture data object.
-    ///
-    /// This is kept for convenience. Prefer [`OwnedTextureData::new()`] for clarity.
-    pub fn new() -> OwnedTextureData {
-        OwnedTextureData::new()
     }
 
     /// Create a new texture data from raw pointer (crate-internal)

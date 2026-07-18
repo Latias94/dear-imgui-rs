@@ -1,3 +1,15 @@
+//! Frame lifecycle APIs.
+//!
+//! Use [`Context::frame_with_result`] when a callback should also close and render the frame.
+//! The callback-only `Context::frame_with` API is intentionally unavailable because it leaves
+//! frame completion implicit:
+//!
+//! ```compile_fail
+//! # use dear_imgui_rs::Context;
+//! # let mut context = Context::create();
+//! let _ = context.frame_with(|ui| ui.text("frame"));
+//! ```
+
 use crate::sys;
 
 use super::Context;
@@ -160,15 +172,6 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
             sys::igNewFrame();
         }
         &mut self.ui
-    }
-
-    /// Create a new frame with a callback
-    pub fn frame_with<F, R>(&mut self, f: F) -> R
-    where
-        F: FnOnce(&crate::ui::Ui) -> R,
-    {
-        let ui = self.frame();
-        f(ui)
     }
 
     /// Begin a frame, run a UI-building closure, render the frame, and return both values.

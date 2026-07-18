@@ -1,6 +1,15 @@
 //! Modular plot types for ImPlot3D
 //!
 //! Builder-oriented API mirroring dear-implot's `plots` module.
+//! Validation helpers are implementation details and are not part of the public API:
+//!
+//! ```compile_fail
+//! use dear_implot3d::plots::{validate_lengths, validate_multiple, validate_nonempty};
+//! ```
+//!
+//! ```compile_fail
+//! use dear_implot3d::{validate_lengths, validate_multiple, validate_nonempty};
+//! ```
 
 pub mod image;
 pub mod line;
@@ -79,7 +88,7 @@ pub trait Plot3D {
 }
 
 #[inline]
-pub fn validate_nonempty<T>(a: &[T]) -> Result<(), Plot3DError> {
+pub(crate) fn validate_nonempty<T>(a: &[T]) -> Result<(), Plot3DError> {
     if a.is_empty() {
         Err(Plot3DError::EmptyData)
     } else {
@@ -88,7 +97,11 @@ pub fn validate_nonempty<T>(a: &[T]) -> Result<(), Plot3DError> {
 }
 
 #[inline]
-pub fn validate_lengths<T, U>(a: &[T], b: &[U], what: &'static str) -> Result<(), Plot3DError> {
+pub(crate) fn validate_lengths<T, U>(
+    a: &[T],
+    b: &[U],
+    what: &'static str,
+) -> Result<(), Plot3DError> {
     if a.len() != b.len() {
         Err(Plot3DError::DataLengthMismatch {
             a: a.len(),
@@ -101,7 +114,11 @@ pub fn validate_lengths<T, U>(a: &[T], b: &[U], what: &'static str) -> Result<()
 }
 
 #[inline]
-pub fn validate_multiple(len: usize, k: usize, what: &'static str) -> Result<(), Plot3DError> {
+pub(crate) fn validate_multiple(
+    len: usize,
+    k: usize,
+    what: &'static str,
+) -> Result<(), Plot3DError> {
     if len % k != 0 {
         Err(Plot3DError::NotMultipleOf { len, k, what })
     } else {

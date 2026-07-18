@@ -11,9 +11,17 @@ use crate::sys;
 /// an owner-backed atlas lease.
 ///
 /// ```compile_fail
-/// # use dear_imgui_rs::{TextureData, texture::TextureRef};
-/// let mut texture = TextureData::new();
+/// # use dear_imgui_rs::texture::{OwnedTextureData, TextureRef};
+/// let mut texture = OwnedTextureData::new();
 /// let _: TextureRef<'_> = (&mut *texture).into();
+/// ```
+///
+/// Raw `ImTextureRef` construction is a sys-layer escape hatch. The former safe helper is
+/// intentionally unavailable:
+///
+/// ```compile_fail
+/// use dear_imgui_rs::texture::{create_texture_ref, TextureId};
+/// let _ = create_texture_ref(TextureId::new(1));
 /// ```
 #[derive(Copy, Clone, Debug)]
 pub struct TextureRef<'texture> {

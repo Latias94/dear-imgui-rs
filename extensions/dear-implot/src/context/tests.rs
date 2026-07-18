@@ -179,8 +179,8 @@ fn plot_ui_binds_own_context_before_calls() {
     let raw_b = unsafe { plot_b.raw() };
 
     {
-        let ui = imgui.frame();
-        let plot_ui = plot_a.get_plot_ui(&ui);
+        let frame = imgui.begin_frame();
+        let plot_ui = plot_a.get_plot_ui(frame.ui());
         unsafe { sys::ImPlot_SetCurrentContext(raw_b) };
 
         {
@@ -194,7 +194,6 @@ fn plot_ui_binds_own_context_before_calls() {
 
         assert_eq!(unsafe { sys::ImPlot_GetCurrentContext() }, raw_b);
     }
-    let _ = imgui.render();
 
     drop(plot_b);
     drop(plot_a);
@@ -210,8 +209,8 @@ fn plot_token_binds_own_context_before_drop() {
     let raw_b = unsafe { plot_b.raw() };
 
     {
-        let ui = imgui.frame();
-        let plot_ui = plot_a.get_plot_ui(&ui);
+        let frame = imgui.begin_frame();
+        let plot_ui = plot_a.get_plot_ui(frame.ui());
         let token = plot_ui.begin_plot("token").expect("failed to begin plot");
 
         unsafe { sys::ImPlot_SetCurrentContext(raw_b) };
@@ -219,7 +218,6 @@ fn plot_token_binds_own_context_before_drop() {
 
         assert_eq!(unsafe { sys::ImPlot_GetCurrentContext() }, raw_b);
     }
-    let _ = imgui.render();
 
     drop(plot_b);
     drop(plot_a);
@@ -235,8 +233,8 @@ fn style_and_plot_clip_tokens_bind_own_context_before_drop() {
     let raw_b = unsafe { plot_b.raw() };
 
     {
-        let ui = imgui.frame();
-        let plot_ui = plot_a.get_plot_ui(&ui);
+        let frame = imgui.begin_frame();
+        let plot_ui = plot_a.get_plot_ui(frame.ui());
         let style = plot_ui.push_style_var_f32(crate::StyleVar::MinorAlpha, 0.5);
         unsafe { sys::ImPlot_SetCurrentContext(raw_b) };
         drop(style);
@@ -249,7 +247,6 @@ fn style_and_plot_clip_tokens_bind_own_context_before_drop() {
         assert_eq!(unsafe { sys::ImPlot_GetCurrentContext() }, raw_b);
         drop(token);
     }
-    let _ = imgui.render();
 
     drop(plot_b);
     drop(plot_a);
@@ -292,8 +289,8 @@ fn set_next_axis_limits_rejects_non_finite_values_before_ffi() {
     let plot = PlotContext::create(&imgui);
 
     {
-        let ui = imgui.frame();
-        let plot_ui = plot.get_plot_ui(&ui);
+        let frame = imgui.begin_frame();
+        let plot_ui = plot.get_plot_ui(frame.ui());
         plot_ui.set_next_x_axis_limits(XAxis::X1, f64::NAN, 1.0, PlotCond::Once);
     }
 }
@@ -307,8 +304,8 @@ fn axis_zoom_constraints_reject_non_positive_min_before_ffi() {
     let plot = PlotContext::create(&imgui);
 
     {
-        let ui = imgui.frame();
-        let plot_ui = plot.get_plot_ui(&ui);
+        let frame = imgui.begin_frame();
+        let plot_ui = plot.get_plot_ui(frame.ui());
         let token = plot_ui
             .begin_plot("constraints")
             .expect("failed to begin plot");
@@ -325,8 +322,8 @@ fn typed_axis_apis_accept_valid_axes() {
     let plot = PlotContext::create(&imgui);
 
     {
-        let ui = imgui.frame();
-        let plot_ui = plot.get_plot_ui(&ui);
+        let frame = imgui.begin_frame();
+        let plot_ui = plot.get_plot_ui(frame.ui());
         plot_ui.set_next_axis_to_fit(Axis::X1);
 
         let token = plot_ui
@@ -341,7 +338,5 @@ fn typed_axis_apis_accept_valid_axes() {
         plot_ui.setup_axis_zoom_constraints(Axis::Y1, 0.1, 20.0);
         token.end();
     }
-
-    let _ = imgui.render();
     drop(plot);
 }

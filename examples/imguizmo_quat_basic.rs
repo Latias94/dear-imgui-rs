@@ -414,13 +414,7 @@ impl OffscreenRtt {
         });
         let depth_view = depth.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let texture_id =
-            renderer
-                .texture_manager_mut()
-                .register_texture(dear_imgui_wgpu::WgpuTexture::new(
-                    texture.clone(),
-                    view.clone(),
-                ));
+        let texture_id = renderer.register_external_texture(&texture, &view);
 
         Self {
             size,
@@ -439,9 +433,7 @@ impl OffscreenRtt {
         size: (u32, u32),
         format: wgpu::TextureFormat,
     ) {
-        renderer
-            .texture_manager_mut()
-            .destroy_texture(self.texture_id);
+        renderer.unregister_texture(self.texture_id);
         *self = Self::create(device, renderer, size, format);
     }
 }

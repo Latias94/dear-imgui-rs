@@ -1,9 +1,9 @@
 use super::texture::{texture_data_to_rgba_subrect, texture_upload_to_rgba};
-use dear_imgui_rs::texture::{TextureData, TextureFormat as ImFormat};
+use dear_imgui_rs::texture::{OwnedTextureData, TextureFormat as ImFormat};
 
 #[test]
 fn texture_subrect_rgba32() {
-    let mut tex = TextureData::new();
+    let mut tex = OwnedTextureData::new();
     tex.create(ImFormat::RGBA32, 2, 2);
     let pixels: [u8; 16] = [
         10, 20, 30, 40, // (0,0)
@@ -19,7 +19,7 @@ fn texture_subrect_rgba32() {
 
 #[test]
 fn texture_subrect_alpha8() {
-    let mut tex = TextureData::new();
+    let mut tex = OwnedTextureData::new();
     tex.create(ImFormat::Alpha8, 2, 2);
     let alphas: [u8; 4] = [0, 64, 128, 255];
     tex.set_data(&alphas);

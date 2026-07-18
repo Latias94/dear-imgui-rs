@@ -2,6 +2,7 @@ use std::any::Any;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Mutex, OnceLock};
 
+use dear_imgui_rs::render::{DrawCmdSnapshot, SnapshotTextureId, TextureBinding, TextureOp};
 use dear_imgui_rs::{BackendFlags, Context, ManagedTextureId, TextureId};
 use dear_implot::{ImPlotPoint, PlotContext};
 
@@ -46,24 +47,111 @@ fn managed_and_legacy_images_resolve_in_the_owner_context() {
     prepare_imgui(&mut imgui);
     let managed = register_texture(&mut imgui);
     let plot = PlotContext::create(&imgui);
+    let consumer = imgui
+        .create_renderer_consumer()
+        .expect("renderer consumer should register");
 
-    {
-        let ui = imgui.frame();
-        let plot_ui = plot.get_plot_ui(ui);
-        let _plot = plot_ui
-            .begin_plot("owner images")
-            .expect("plot should begin");
-        let min = ImPlotPoint { x: 0.0, y: 0.0 };
-        let max = ImPlotPoint { x: 1.0, y: 1.0 };
-        plot_ui
-            .plot_image("managed", managed, min, max)
-            .expect("owner-managed image should plot");
-        plot_ui
-            .plot_image("legacy", TextureId::new(17), min, max)
-            .expect("legacy image should plot without registry lookup");
-    }
+    let snapshot = {
+        let frame = imgui.begin_frame();
+        frame
+            .ui()
+            .window("owner image snapshot")
+            .size([400.0, 300.0], dear_imgui_rs::Condition::Always)
+            .build(|| {
+                let plot_ui = plot.get_plot_ui(frame.ui());
+                let _plot = plot_ui
+                    .begin_plot("owner images")
+                    .expect("plot should begin");
+                let min = ImPlotPoint { x: 0.0, y: 0.0 };
+                let max = ImPlotPoint { x: 1.0, y: 1.0 };
+                plot_ui
+                    .plot_image("managed", managed, min, max)
+                    .expect("owner-managed image should plot");
+                plot_ui
+                    .plot_image("legacy", TextureId::new(17), min, max)
+                    .expect("legacy image should plot without registry lookup");
+            });
+        frame
+            .render_snapshot(&consumer)
+            .expect("owner image frame should snapshot")
+    };
 
-    let _ = imgui.render();
+    let managed_request = snapshot
+        .texture_requests()
+        .iter()
+        .find(|request| request.texture() == SnapshotTextureId::User(managed))
+        .expect("snapshot should request the managed image texture");
+    assert!(matches!(
+        managed_request.operation(),
+        TextureOp::Create {
+            width: 1,
+            height: 1,
+            pixels,
+            ..
+        } if pixels.len() == 4
+    ));
+    assert!(snapshot.draw_data().draw_lists.iter().any(|list| {
+        list.commands.iter().any(|command| {
+            matches!(
+                command,
+                DrawCmdSnapshot::Elements {
+                    count,
+                    texture: TextureBinding::Managed(SnapshotTextureId::User(id)),
+                    ..
+                } if *id == managed && *count > 0
+            )
+        })
+    }));
+    assert!(snapshot.draw_data().draw_lists.iter().any(|list| {
+        list.commands.iter().any(|command| {
+            matches!(
+                command,
+                DrawCmdSnapshot::Elements {
+                    count,
+                    texture: TextureBinding::Legacy(id),
+                    ..
+                } if *id == TextureId::new(17) && *count > 0
+            )
+        })
+    }));
+
+    let managed_renderer_id = TextureId::new(101);
+    let feedback = snapshot
+        .texture_requests()
+        .iter()
+        .enumerate()
+        .map(|(index, request)| match request.operation() {
+            TextureOp::Destroy => request.destroyed(),
+            TextureOp::Create { .. } | TextureOp::Update { .. } => {
+                let texture_id = if request.texture() == SnapshotTextureId::User(managed) {
+                    managed_renderer_id
+                } else {
+                    TextureId::new(
+                        1_000 + u64::try_from(index).expect("request index should fit u64"),
+                    )
+                };
+                request.uploaded(texture_id)
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .expect("renderer feedback should match all snapshot requests");
+    let feedback_count = feedback.len();
+    snapshot
+        .commit(feedback)
+        .expect("snapshot completion should reach the owner context");
+    let progress = imgui
+        .poll_snapshot_completions()
+        .expect("snapshot feedback should reconcile");
+    assert_eq!(progress.committed(), 1);
+    assert_eq!(progress.abandoned(), 0);
+    assert_eq!(progress.feedback_applied(), feedback_count);
+    imgui
+        .with_texture(managed, |texture| {
+            assert_eq!(texture.status(), dear_imgui_rs::TextureStatus::OK);
+            assert_eq!(texture.texture_id(), managed_renderer_id);
+        })
+        .expect("managed texture should remain registered");
+
     drop(plot);
 }
 
@@ -78,8 +166,8 @@ fn managed_image_rejects_a_foreign_context_before_plot_ffi() {
     prepare_imgui(&mut foreign);
     let plot = PlotContext::create(&foreign);
     {
-        let ui = foreign.frame();
-        let plot_ui = plot.get_plot_ui(ui);
+        let frame = foreign.begin_frame();
+        let plot_ui = plot.get_plot_ui(frame.ui());
         let result = catch_unwind(AssertUnwindSafe(|| {
             let _plot = plot_ui
                 .begin_plot("foreign image")
@@ -99,7 +187,6 @@ fn managed_image_rejects_a_foreign_context_before_plot_ffi() {
             "unexpected panic: {message}"
         );
     }
-    let _ = foreign.render();
     drop(plot);
     drop(foreign);
 
@@ -122,8 +209,8 @@ fn managed_image_rejects_a_stale_generation_before_plot_ffi() {
     let plot = PlotContext::create(&imgui);
 
     {
-        let ui = imgui.frame();
-        let plot_ui = plot.get_plot_ui(ui);
+        let frame = imgui.begin_frame();
+        let plot_ui = plot.get_plot_ui(frame.ui());
         let result = catch_unwind(AssertUnwindSafe(|| {
             let _plot = plot_ui
                 .begin_plot("stale image")
@@ -143,6 +230,5 @@ fn managed_image_rejects_a_stale_generation_before_plot_ffi() {
             "unexpected panic: {message}"
         );
     }
-    let _ = imgui.render();
     drop(plot);
 }

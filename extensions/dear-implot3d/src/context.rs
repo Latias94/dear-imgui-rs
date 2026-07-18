@@ -174,8 +174,8 @@ mod tests {
         let raw_b = plot_b.raw;
 
         {
-            let ui = imgui.frame();
-            let plot_ui = plot_a.get_plot_ui(&ui);
+            let frame = imgui.begin_frame();
+            let plot_ui = plot_a.get_plot_ui(frame.ui());
             let style = plot_ui.push_style_var_f32(crate::Plot3DStyleVar::FillAlpha, 0.5);
             unsafe { sys::ImPlot3D_SetCurrentContext(raw_b) };
             drop(style);
@@ -189,7 +189,6 @@ mod tests {
             drop(token);
             assert_eq!(unsafe { sys::ImPlot3D_GetCurrentContext() }, raw_b);
         }
-        let _ = imgui.render();
 
         drop(plot_b);
         drop(plot_a);

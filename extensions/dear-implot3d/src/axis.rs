@@ -1,6 +1,6 @@
 use crate::{
-    Axis3D, Axis3DFlags, Plot3DCond, Plot3DUi, axis_tick_count_to_i32, compat_ffi,
-    debug_before_plot, debug_before_setup, imvec2, len_i32, sys,
+    Axis3D, Axis3DFlags, Plot3DCond, Plot3DUi, axis_tick_count_to_i32, debug_before_plot,
+    debug_before_setup, imvec2, len_i32, sys,
 };
 
 /// Axis helpers
@@ -236,7 +236,7 @@ impl<'ui> Plot3DUi<'ui> {
 
     pub fn plot_to_pixels(&self, point: [f32; 3]) -> [f32; 2] {
         self.with_bound_context(|| unsafe {
-            let out = compat_ffi::ImPlot3D_PlotToPixels_double(
+            let out = sys::ImPlot3D_PlotToPixels_double(
                 point[0] as f64,
                 point[1] as f64,
                 point[2] as f64,
@@ -247,14 +247,14 @@ impl<'ui> Plot3DUi<'ui> {
 
     pub fn get_frame_pos(&self) -> [f32; 2] {
         self.with_bound_context(|| unsafe {
-            let out = compat_ffi::ImPlot3D_GetPlotRectPos();
+            let out = sys::ImPlot3D_GetPlotRectPos();
             [out.x, out.y]
         })
     }
 
     pub fn get_frame_size(&self) -> [f32; 2] {
         self.with_bound_context(|| unsafe {
-            let out = compat_ffi::ImPlot3D_GetPlotRectSize();
+            let out = sys::ImPlot3D_GetPlotRectSize();
             [out.x, out.y]
         })
     }

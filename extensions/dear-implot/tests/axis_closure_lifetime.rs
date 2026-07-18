@@ -24,8 +24,8 @@ fn axis_closure_is_plot_scoped_even_if_token_is_dropped() {
     let plot_ctx = PlotContext::create(&imgui);
 
     {
-        let ui = imgui.frame();
-        let plot_ui = plot_ctx.get_plot_ui(&ui);
+        let frame = imgui.begin_frame();
+        let plot_ui = plot_ctx.get_plot_ui(frame.ui());
         let plot = plot_ui.begin_plot("t").expect("failed to begin plot");
 
         let _ = plot_ui.setup_x_axis_format_closure(XAxis::X1, |_v| "x".to_string());
@@ -34,15 +34,13 @@ fn axis_closure_is_plot_scoped_even_if_token_is_dropped() {
 
         drop(plot);
     }
-    let _ = imgui.render();
 
     // Start a second plot to ensure plot-scoped storage was cleaned up properly.
     {
-        let ui = imgui.frame();
-        let plot_ui = plot_ctx.get_plot_ui(&ui);
+        let frame = imgui.begin_frame();
+        let plot_ui = plot_ctx.get_plot_ui(frame.ui());
         let _plot = plot_ui.begin_plot("t2").expect("failed to begin plot");
     }
-    let _ = imgui.render();
 }
 
 #[test]
@@ -58,8 +56,8 @@ fn multi_axis_plot_rejects_interior_nul_labels() {
     }
     let plot_ctx = PlotContext::create(&imgui);
 
-    let ui = imgui.frame();
-    let plot_ui = plot_ctx.get_plot_ui(&ui);
+    let frame = imgui.begin_frame();
+    let plot_ui = plot_ctx.get_plot_ui(frame.ui());
 
     let plot = dear_implot::MultiAxisPlot::new("t").add_y_axis(YAxisConfig {
         label: Some("a\0b"),
@@ -71,5 +69,4 @@ fn multi_axis_plot_rejects_interior_nul_labels() {
         Ok(_) => panic!("expected interior NUL label to be rejected"),
         Err(err) => assert!(matches!(err, PlotError::StringConversion(_))),
     }
-    let _ = imgui.render();
 }

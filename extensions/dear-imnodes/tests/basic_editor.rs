@@ -21,10 +21,10 @@ fn basic_editor_smoke_test() {
     let _ = imgui.font_atlas().build();
     let _ = imgui.set_ini_filename::<std::path::PathBuf>(None);
 
-    let ui = imgui.frame();
+    let frame = imgui.begin_frame();
 
     // Begin an editor scope and end it explicitly
-    let editor_ui = ui.imnodes(&imnodes_ctx).editor(Some(&editor));
+    let editor_ui = frame.ui().imnodes(&imnodes_ctx).editor(Some(&editor));
 
     // Create a trivial node (no actual widgets, just exercise Begin/End)
     let node_id = imnodes::NodeId::new(1);

@@ -229,15 +229,13 @@ impl<'ui> NodeEditor<'ui> {
         });
     }
     pub fn get_node_pos_screen(&self, node_id: crate::NodeId) -> [f32; 2] {
-        let out = self.with_bound_context(|| unsafe {
-            crate::compat_ffi::imnodes_GetNodeScreenSpacePos(node_id.raw())
-        });
+        let out = self
+            .with_bound_context(|| unsafe { sys::imnodes_GetNodeScreenSpacePos(node_id.raw()) });
         [out.x, out.y]
     }
     pub fn get_node_pos_editor(&self, node_id: crate::NodeId) -> [f32; 2] {
-        let out = self.with_bound_context(|| unsafe {
-            crate::compat_ffi::imnodes_GetNodeEditorSpacePos(node_id.raw())
-        });
+        let out = self
+            .with_bound_context(|| unsafe { sys::imnodes_GetNodeEditorSpacePos(node_id.raw()) });
         [out.x, out.y]
     }
 
@@ -251,9 +249,8 @@ impl<'ui> NodeEditor<'ui> {
         self.with_bound_context(|| unsafe { sys::imnodes_SnapNodeToGrid(node_id.raw()) })
     }
     pub fn get_node_dimensions(&self, node_id: crate::NodeId) -> [f32; 2] {
-        let out = self.with_bound_context(|| unsafe {
-            crate::compat_ffi::imnodes_GetNodeDimensions(node_id.raw())
-        });
+        let out =
+            self.with_bound_context(|| unsafe { sys::imnodes_GetNodeDimensions(node_id.raw()) });
         [out.x, out.y]
     }
 }

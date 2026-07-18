@@ -533,8 +533,8 @@ mod tests {
     fn subplot_grid_rejects_invalid_counts_before_ffi() {
         let _guard = test_guard();
         let (mut imgui, _plot) = setup_context();
-        let ui = imgui.frame();
-        let plot_ui = _plot.get_plot_ui(&ui);
+        let frame = imgui.begin_frame();
+        let plot_ui = _plot.get_plot_ui(frame.ui());
 
         let rows = expect_invalid_data(SubplotGrid::new("bad_rows", 0, 1).begin(&plot_ui));
         assert!(rows.contains("rows must be positive"));
@@ -552,8 +552,8 @@ mod tests {
     fn subplot_grid_ratio_lengths_follow_usize_counts() {
         let _guard = test_guard();
         let (mut imgui, _plot) = setup_context();
-        let ui = imgui.frame();
-        let plot_ui = _plot.get_plot_ui(&ui);
+        let frame = imgui.begin_frame();
+        let plot_ui = _plot.get_plot_ui(frame.ui());
 
         let err = expect_invalid_data(
             SubplotGrid::new("bad_ratios", 2usize, 1usize)

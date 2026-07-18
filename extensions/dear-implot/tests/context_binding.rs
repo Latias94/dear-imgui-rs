@@ -30,11 +30,10 @@ fn plot_ui_rejects_a_ui_from_another_context_by_identity() {
     let mut imgui_b = Context::create();
     prepare_imgui(&mut imgui_b);
     {
-        let ui_b = imgui_b.frame();
-        let result = catch_unwind(AssertUnwindSafe(|| plot_a.get_plot_ui(ui_b)));
+        let frame = imgui_b.begin_frame();
+        let result = catch_unwind(AssertUnwindSafe(|| plot_a.get_plot_ui(frame.ui())));
         assert!(result.is_err());
     }
-    let _ = imgui_b.render();
     drop(imgui_b);
 
     let imgui_a = suspended_a
@@ -54,8 +53,8 @@ fn plot_binding_restores_imgui_and_implot_contexts_after_panic() {
     let previous_plot = unsafe { dear_implot_sys::ImPlot_GetCurrentContext() };
 
     {
-        let ui = imgui.frame();
-        let plot_ui = plot.get_plot_ui(ui);
+        let frame = imgui.begin_frame();
+        let plot_ui = plot.get_plot_ui(frame.ui());
         unsafe {
             dear_imgui_rs::sys::igSetCurrentContext(ptr::null_mut());
             dear_implot_sys::ImPlot_SetCurrentContext(ptr::null_mut());
@@ -75,8 +74,6 @@ fn plot_binding_restores_imgui_and_implot_contexts_after_panic() {
             dear_implot_sys::ImPlot_SetCurrentContext(previous_plot);
         }
     }
-
-    let _ = imgui.render();
     drop(plot);
 }
 

@@ -77,6 +77,16 @@ impl Ui {
 }
 
 /// Builder for a selectable widget.
+///
+/// Create this builder through [`Ui::selectable_config`]. The former direct constructor is
+/// intentionally unavailable so every builder is visibly tied to its owning `Ui`:
+///
+/// ```compile_fail
+/// # use dear_imgui_rs::{Context, Selectable};
+/// # let mut context = Context::create();
+/// # let ui = context.frame();
+/// let _ = Selectable::new("item", ui);
+/// ```
 #[derive(Clone, Debug)]
 #[must_use]
 pub struct Selectable<'ui, T> {
@@ -88,21 +98,6 @@ pub struct Selectable<'ui, T> {
 }
 
 impl<'ui, T: AsRef<str>> Selectable<'ui, T> {
-    /// Constructs a new selectable builder.
-    #[doc(alias = "Selectable")]
-    #[deprecated(
-        since = "0.9.0",
-        note = "use `ui.selectable` or `ui.selectable_config`"
-    )]
-    pub fn new(label: T, ui: &'ui Ui) -> Self {
-        Selectable {
-            label,
-            selected: false,
-            flags: SelectableFlags::empty(),
-            size: [0.0, 0.0],
-            ui,
-        }
-    }
     /// Replaces all current settings with the given flags
     pub fn flags(mut self, flags: SelectableFlags) -> Self {
         self.flags = flags;
