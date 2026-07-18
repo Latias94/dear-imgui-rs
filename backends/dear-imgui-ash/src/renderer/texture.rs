@@ -70,7 +70,6 @@ pub(super) struct TextureManager {
         RetirementQueue<ManagedTextureRetirementKey, RetiredManagedVulkanTexture>,
     pub(super) external_textures: HashMap<u64, ExternalTextureBinding>,
     pub(super) next_id: u64,
-    next_superseded_retirement: Option<std::num::NonZeroU64>,
 }
 
 #[derive(Debug)]
@@ -93,10 +92,7 @@ impl ManagedVulkanTexture {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(super) enum ManagedTextureRetirementKey {
     Destroyed(SnapshotTextureId),
-    Superseded {
-        texture: SnapshotTextureId,
-        serial: std::num::NonZeroU64,
-    },
+    Superseded(TextureRetirementBatch),
 }
 
 #[derive(Debug)]
@@ -114,7 +110,6 @@ impl TextureManager {
             retiring_textures: RetirementQueue::new(),
             external_textures: HashMap::new(),
             next_id: 1,
-            next_superseded_retirement: std::num::NonZeroU64::new(1),
         }
     }
 
@@ -166,18 +161,10 @@ impl TextureManager {
 
     fn reserve_superseded_retirement(
         &mut self,
-        texture: SnapshotTextureId,
     ) -> Option<(ManagedTextureRetirementKey, RetirementReservation)> {
-        let serial = self.next_superseded_retirement?;
         let reservation = self.retiring_textures.reserve()?;
-        self.next_superseded_retirement = serial
-            .get()
-            .checked_add(1)
-            .and_then(std::num::NonZeroU64::new);
-        Some((
-            ManagedTextureRetirementKey::Superseded { texture, serial },
-            reservation,
-        ))
+        let key = ManagedTextureRetirementKey::Superseded(reservation.batch());
+        Some((key, reservation))
     }
 
     fn request_managed_retirement(
@@ -1092,7 +1079,7 @@ impl AshRenderer {
         // Reserve before Vulkan allocation so exhaustion cannot strand a submitted replacement.
         let (retirement_key, reservation) = self
             .textures
-            .reserve_superseded_retirement(snapshot_id)
+            .reserve_superseded_retirement()
             .ok_or_else(|| {
                 RendererError::InvalidRenderState(
                     "managed texture retirement batch space is exhausted".to_string(),
@@ -1131,7 +1118,6 @@ impl AshRenderer {
         }
         let texture_id = existing.texture_id;
         let mut replacement_rgba = existing.rgba.clone();
-        let mut changed = false;
         for upload in rects {
             let rect = upload.rect;
             let (x, y, w, h) = (
@@ -1161,9 +1147,8 @@ impl AshRenderer {
                     "managed texture {snapshot_id:?} has an invalid CPU shadow layout"
                 )));
             }
-            changed = true;
         }
-        if !changed || replacement_rgba == existing.rgba {
+        if replacement_rgba == existing.rgba {
             return Ok(texture_id);
         }
         self.replace_managed_texture_image(snapshot_id, width, height, replacement_rgba)

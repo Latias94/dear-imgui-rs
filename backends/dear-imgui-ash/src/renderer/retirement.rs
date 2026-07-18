@@ -38,6 +38,12 @@ pub(super) struct RetirementReservation {
     batch: TextureRetirementBatch,
 }
 
+impl RetirementReservation {
+    pub(super) const fn batch(&self) -> TextureRetirementBatch {
+        self.batch
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum RetirementRequest {
     Queued(TextureRetirementBatch),
