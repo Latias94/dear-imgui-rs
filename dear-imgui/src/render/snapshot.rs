@@ -298,6 +298,27 @@ pub enum TextureRequestKind {
     Destroy,
 }
 
+/// Opaque identity for one managed texture upload request.
+///
+/// Pair this value with [`TextureRequest::texture`]. It is stable across retries of the same
+/// create or update request. Equality is meaningful only for the same texture; identities from
+/// different textures have no uniqueness or ordering semantics.
+///
+/// The identity intentionally exposes no representation:
+///
+/// ```compile_fail
+/// use dear_imgui_rs::render::TextureUploadIdentity;
+///
+/// fn reveal(identity: TextureUploadIdentity) {
+///     let TextureUploadIdentity {} = identity;
+/// }
+/// ```
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct TextureUploadIdentity {
+    revision: u64,
+    kind: TextureRequestKind,
+}
+
 /// A managed texture operation requested by Dear ImGui.
 #[derive(Debug)]
 pub enum TextureOp {
@@ -367,6 +388,24 @@ impl TextureRequest {
     #[must_use]
     pub const fn kind(&self) -> TextureRequestKind {
         self.key.kind
+    }
+
+    /// Opaque retry identity for a create or update request.
+    ///
+    /// Pair this value with [`Self::texture`]. The identity is stable across retries of the same
+    /// request. Equality is meaningful only for the same texture; identities from different
+    /// textures have no uniqueness or ordering semantics. Destroy requests return `None`.
+    #[must_use]
+    pub const fn upload_identity(&self) -> Option<TextureUploadIdentity> {
+        match self.key.kind {
+            TextureRequestKind::Create | TextureRequestKind::Update => {
+                Some(TextureUploadIdentity {
+                    revision: self.key.revision,
+                    kind: self.key.kind,
+                })
+            }
+            TextureRequestKind::Destroy => None,
+        }
     }
 
     /// Complete a create or update request with its renderer texture identifier.
@@ -1018,6 +1057,81 @@ fn validated_texture_layout(
         .filter(|value| *value > 0)
         .ok_or_else(invalid)?;
     Ok((width, height, bpp))
+}
+
+#[cfg(test)]
+mod upload_identity_tests {
+    use super::*;
+
+    fn request(context: ContextId, sequence: u64, revision: u64, op: TextureOp) -> TextureRequest {
+        let texture = SnapshotTextureId::FontAtlas {
+            context,
+            stamp: 7,
+            generation: 3,
+        };
+        let kind = op.kind();
+        TextureRequest {
+            key: TextureRequestKey {
+                epoch: SnapshotEpoch::new(
+                    context,
+                    NonZeroU64::new(1).unwrap(),
+                    NonZeroU64::new(sequence).unwrap(),
+                ),
+                texture,
+                revision,
+                kind,
+            },
+            op,
+        }
+    }
+
+    fn create_op() -> TextureOp {
+        TextureOp::Create {
+            format: TextureFormat::RGBA32,
+            width: 1,
+            height: 1,
+            row_pitch: 4,
+            pixels: vec![1, 2, 3, 4],
+        }
+    }
+
+    #[test]
+    fn upload_identity_is_stable_across_epoch_retries() {
+        let context = crate::Context::create();
+        let first = request(context.id(), 1, 11, create_op());
+        let retry = request(context.id(), 2, 11, create_op());
+
+        assert_eq!(first.upload_identity(), retry.upload_identity());
+    }
+
+    #[test]
+    fn upload_identity_changes_with_revision_or_operation_kind() {
+        let context = crate::Context::create();
+        let create = request(context.id(), 1, 11, create_op());
+        let revised = request(context.id(), 2, 12, create_op());
+        let update = request(
+            context.id(),
+            3,
+            11,
+            TextureOp::Update {
+                format: TextureFormat::RGBA32,
+                width: 1,
+                height: 1,
+                rects: Vec::new(),
+            },
+        );
+
+        assert_ne!(create.upload_identity(), revised.upload_identity());
+        assert_ne!(create.upload_identity(), update.upload_identity());
+    }
+
+    #[test]
+    fn destroy_request_has_no_upload_identity() {
+        let context = crate::Context::create();
+        let destroy = request(context.id(), 1, 11, TextureOp::Destroy);
+
+        assert_eq!(destroy.upload_identity(), None);
+    }
 }
 
 #[cfg(test)]

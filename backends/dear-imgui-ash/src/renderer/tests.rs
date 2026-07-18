@@ -1,4 +1,4 @@
-use super::texture::{texture_data_to_rgba_subrect, texture_upload_to_rgba};
+use super::texture::{apply_rgba_rect, texture_data_to_rgba_subrect, texture_upload_to_rgba};
 use dear_imgui_rs::texture::{OwnedTextureData, TextureFormat as ImFormat};
 
 #[test]
@@ -61,4 +61,40 @@ fn request_upload_alpha8_honors_row_pitch() {
             255, 255, 255, 10, 255, 255, 255, 20, 255, 255, 255, 30, 255, 255, 255, 40,
         ]
     );
+}
+
+#[test]
+fn managed_update_composes_a_complete_replacement_image() {
+    let mut rgba = vec![
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, // row 0
+        13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, // row 1
+    ];
+    let update = [101, 102, 103, 104, 105, 106, 107, 108];
+
+    assert!(apply_rgba_rect(&mut rgba, 3, 2, 1, 0, 1, 2, &update));
+    assert_eq!(
+        rgba,
+        vec![
+            1, 2, 3, 4, 101, 102, 103, 104, 9, 10, 11, 12, // row 0
+            13, 14, 15, 16, 105, 106, 107, 108, 21, 22, 23, 24, // row 1
+        ]
+    );
+}
+
+#[test]
+fn managed_update_rejects_out_of_bounds_without_mutating_shadow() {
+    let mut rgba = vec![1_u8; 3 * 2 * 4];
+    let original = rgba.clone();
+
+    assert!(!apply_rgba_rect(
+        &mut rgba,
+        3,
+        2,
+        2,
+        1,
+        2,
+        1,
+        &[2_u8; 2 * 4]
+    ));
+    assert_eq!(rgba, original);
 }

@@ -39,7 +39,7 @@ use ash::{Device, vk};
 use dear_imgui_rs::ViewportFlags;
 use dear_imgui_rs::render::{
     RenderedFrame, RendererConsumer, SnapshotTextureId, TextureFeedback, TextureOp, TextureRequest,
-    TextureUploadRect,
+    TextureUploadIdentity, TextureUploadRect,
 };
 use dear_imgui_rs::{BackendFlags, Context};
 use dear_imgui_rs::{TextureData, TextureFormat as ImGuiTextureFormat, TextureId, TextureStatus};
@@ -65,10 +65,9 @@ use self::pipeline::viewport_attachment_load_op;
 #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
 use self::pipeline::{ViewportPipeline, is_srgb_format};
 pub use self::retirement::TextureRetirementBatch;
-use self::retirement::{RetirementQueue, RetirementRequest};
-use self::texture::{PendingTextureUpdate, TextureManager};
+use self::retirement::{RetirementQueue, RetirementRequest, RetirementReservation};
+use self::texture::TextureManager;
 use self::uploads::{
-    InFlightUpload, ManagedUploadDecision, ManagedUploadTracker, UploadSignature,
-    finish_destroy_upload_gate,
+    InFlightUpload, ManagedUploadDecision, ManagedUploadTracker, finish_destroy_upload_gate,
 };
 use self::vulkan::*;

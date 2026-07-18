@@ -5,13 +5,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_QUEUE_ID: AtomicU64 = AtomicU64::new(1);
 
-/// Monotonic batch containing managed textures waiting for GPU-safe destruction.
+/// Monotonic batch containing managed texture resources waiting for GPU-safe destruction.
 ///
 /// Associate this value with GPU completion that covers every renderer operation which can still
 /// reference a texture in the batch. This includes work recorded after the token is returned, such
 /// as secondary viewport draws from the same Dear ImGui frame. Pass the completed batch to
 /// [`AshRenderer::wait_for_texture_retirements`](super::AshRenderer::wait_for_texture_retirements)
-/// before expecting Dear ImGui destroy requests to be acknowledged.
+/// before expecting Dear ImGui destroy requests to be acknowledged. A batch can also contain old
+/// Vulkan images superseded by copy-on-write managed texture updates.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[must_use]
 pub struct TextureRetirementBatch {
@@ -30,6 +31,11 @@ impl TextureRetirementBatch {
 struct Retiring<T> {
     batch: TextureRetirementBatch,
     value: T,
+}
+
+#[derive(Debug)]
+pub(super) struct RetirementReservation {
+    batch: TextureRetirementBatch,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -68,14 +74,42 @@ where
 
     pub(super) fn enqueue(&mut self, key: K, value: T) -> Result<TextureRetirementBatch, T> {
         debug_assert!(!self.entries.contains_key(&key));
-        let (Some(queue), Some(sequence)) = (self.queue_id, self.next_batch.take()) else {
+        if self.entries.contains_key(&key) {
             return Err(value);
+        }
+        let Some(reservation) = self.reserve() else {
+            return Err(value);
+        };
+        Ok(self.commit(reservation, key, value))
+    }
+
+    pub(super) fn reserve(&mut self) -> Option<RetirementReservation> {
+        let (Some(queue), Some(sequence)) = (self.queue_id, self.next_batch.take()) else {
+            return None;
         };
         let batch = TextureRetirementBatch { queue, sequence };
         self.next_batch = sequence.get().checked_add(1).and_then(NonZeroU64::new);
         self.last_issued = sequence.get();
-        self.entries.insert(key, Retiring { batch, value });
-        Ok(batch)
+        Some(RetirementReservation { batch })
+    }
+
+    pub(super) fn commit(
+        &mut self,
+        reservation: RetirementReservation,
+        key: K,
+        value: T,
+    ) -> TextureRetirementBatch {
+        assert_eq!(Some(reservation.batch.queue), self.queue_id);
+        assert!(reservation.batch.sequence() <= self.last_issued);
+        assert!(!self.entries.contains_key(&key));
+        self.entries.insert(
+            key,
+            Retiring {
+                batch: reservation.batch,
+                value,
+            },
+        );
+        reservation.batch
     }
 
     pub(super) fn request_retirement(
@@ -249,6 +283,36 @@ mod tests {
             Ok(RetirementRequest::Retired)
         );
         assert_eq!(active.get(&new_key), Some(&"new"));
+    }
+
+    #[test]
+    fn superseded_texture_retires_before_a_later_active_destroy() {
+        let mut queue = RetirementQueue::new();
+        let replacement = queue.enqueue((7_u32, "replacement"), "old image").unwrap();
+        let destroy = queue.enqueue((7_u32, "destroy"), "active image").unwrap();
+
+        assert_eq!(
+            queue.complete_through(replacement),
+            Some(vec![((7, "replacement"), "old image")])
+        );
+        assert_eq!(queue.get(&(7, "destroy")), Some(&"active image"));
+        assert_eq!(
+            queue.complete_through(destroy),
+            Some(vec![((7, "destroy"), "active image")])
+        );
+    }
+
+    #[test]
+    fn abandoned_reservation_does_not_block_later_retirement() {
+        let mut queue = RetirementQueue::new();
+        let abandoned = queue.reserve().unwrap();
+        let abandoned_sequence = abandoned.batch.sequence();
+        drop(abandoned);
+
+        let batch = queue.enqueue(1_u32, "texture").unwrap();
+        assert_eq!(batch.sequence(), abandoned_sequence + 1);
+        assert_eq!(queue.pending_batch(), Some(batch));
+        assert_eq!(queue.complete_through(batch), Some(vec![(1, "texture")]));
     }
 
     #[test]

@@ -128,12 +128,16 @@ impl Sdl3ViewportRuntime {
         self.inner.cmd_draw(command_buffer, frame)
     }
 
+    /// Return the highest managed-texture resource retirement batch still pending.
     pub fn pending_texture_retirement(
         &self,
     ) -> Result<Option<TextureRetirementBatch>, AshViewportError> {
         self.inner.pending_texture_retirement()
     }
 
+    /// Block for device idle and complete managed-texture resource retirement.
+    ///
+    /// The count includes superseded update images and resources pending a logical destroy.
     pub fn wait_for_texture_retirements(
         &self,
         batch: TextureRetirementBatch,
@@ -141,7 +145,9 @@ impl Sdl3ViewportRuntime {
         self.inner.wait_for_texture_retirements(batch)
     }
 
-    /// Complete managed-texture retirement after validating caller-provided fences are signaled.
+    /// Complete managed-texture resource retirement after validating fences are signaled.
+    ///
+    /// The count includes superseded update images and resources pending a logical destroy.
     ///
     /// # Safety
     ///
