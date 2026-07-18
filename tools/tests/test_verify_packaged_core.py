@@ -1163,7 +1163,13 @@ class PrebuiltWorkflowTests(unittest.TestCase):
         self.assertIn('--target "${{ matrix.target }}"', workflow)
         self.assertIn('--crt "${{ matrix.crt }}"', workflow)
         self.assertIn("--package freetype", workflow)
-        self.assertEqual(workflow.count("          HEAD\n          \"${{ matrix.crt }}\""), 2)
+        self.assertEqual(
+            workflow.count(
+                '          "${{ inputs.candidate_sha }}"\n'
+                '          "${{ matrix.crt }}"'
+            ),
+            2,
+        )
         self.assertNotIn("cargo run -p", workflow)
         self.assertNotIn("configure_prebuilt_windows.py", workflow)
         self.assertNotIn("DEAR_IMGUI_CORE_ARTIFACT_PROFILE_HASH", workflow)

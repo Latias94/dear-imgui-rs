@@ -1,28 +1,21 @@
 name: Build Prebuilt Binaries
 
 on:
-  push:
-    tags:
-      - 'dear-imgui-sys-v*'
-      - 'dear-implot-sys-v*'
-      - 'dear-implot3d-sys-v*'
-      - 'dear-imnodes-sys-v*'
-      - 'dear-node-editor-sys-v*'
-      - 'dear-imguizmo-sys-v*'
-      - 'dear-imguizmo-quat-sys-v*'
+  workflow_call:
+    inputs:
+      candidate_sha:
+        description: Exact release candidate commit
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
-      tag:
-        description: 'Git tag to build (e.g., v0.16.0)'
-        required: false
+      candidate_sha:
+        description: Full 40-character release candidate SHA
+        required: true
         type: string
-      branch:
-        description: 'Branch to build when no tag is provided'
-        required: false
-        type: string
-        default: main
-  release:
-    types: [published]
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -32,36 +25,45 @@ jobs:
     name: Build ${{ matrix.target }}${{ matrix.crt && format(' ({0})', matrix.crt) || '' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
-    permissions:
-      contents: write
     strategy:
       fail-fast: false
       matrix:
         include:
-          - target: x86_64-unknown-linux-gnu
+          - cell_id: prebuilt-x86_64-unknown-linux-gnu
+            target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-          - target: x86_64-apple-darwin
+            python: python3
+            crt: ''
+          - cell_id: prebuilt-x86_64-apple-darwin
+            target: x86_64-apple-darwin
             os: macos-15-intel
-          - target: aarch64-apple-darwin
+            python: python3
+            crt: ''
+          - cell_id: prebuilt-aarch64-apple-darwin
+            target: aarch64-apple-darwin
             os: macos-latest
-          - target: x86_64-pc-windows-msvc
+            python: python3
+            crt: ''
+          - cell_id: prebuilt-x86_64-pc-windows-msvc-md
+            target: x86_64-pc-windows-msvc
             os: windows-latest
+            python: python
             crt: md
-          - target: x86_64-pc-windows-msvc
+          - cell_id: prebuilt-x86_64-pc-windows-msvc-mt
+            target: x86_64-pc-windows-msvc
             os: windows-latest
+            python: python
             crt: mt
 
     steps:
-      - name: Checkout repository
+      - name: Checkout exact candidate
         uses: actions/checkout@v6
         with:
           submodules: true
-          ref: ${{ inputs.tag || inputs.branch || github.ref }}
+          ref: ${{ inputs.candidate_sha }}
 
       - name: Initialize required nested submodules
-        run: >-
-          ${{ runner.os == 'Windows' && 'python' || 'python3' }}
-          tools/ci/update_submodules.py
+        run: ${{ matrix.python }} tools/ci/update_submodules.py
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -108,35 +110,94 @@ jobs:
           --github-env "$env:GITHUB_ENV"
 
       - name: Build complete core and extension profile matrix
+        id: build
+        continue-on-error: true
         run: >-
-          ${{ runner.os == 'Windows' && 'python' || 'python3' }}
-          tools/ci/verify_packaged_core.py build-prebuilt
+          ${{ matrix.python }} tools/ci/release_cell.py capture
+          --cell-root "target/release-evidence/${{ matrix.cell_id }}"
+          --execution executions/build.json
+          --stdout-log logs/build.stdout.log
+          --stderr-log logs/build.stderr.log
+          --timeout 4200
+          --
+          ${{ matrix.python }} tools/ci/verify_packaged_core.py build-prebuilt
           "${{ github.workspace }}/packages"
           "${{ matrix.target }}"
-          HEAD
+          "${{ inputs.candidate_sha }}"
           "${{ matrix.crt }}"
           --target-dir "${{ runner.temp }}/dear-imgui-prebuilt-target"
 
       - name: Consume every safe prebuilt profile
+        id: consume
+        if: always()
+        continue-on-error: true
         run: >-
-          ${{ runner.os == 'Windows' && 'python' || 'python3' }}
-          tools/ci/verify_packaged_core.py prebuilt
+          ${{ matrix.python }} tools/ci/release_cell.py capture
+          --cell-root "target/release-evidence/${{ matrix.cell_id }}"
+          --execution executions/consume.json
+          --stdout-log logs/consume.stdout.log
+          --stderr-log logs/consume.stderr.log
+          --timeout 4200
+          --
+          ${{ matrix.python }} tools/ci/verify_packaged_core.py prebuilt
           "${{ github.workspace }}/packages"
           "${{ matrix.target }}"
-          HEAD
+          "${{ inputs.candidate_sha }}"
           "${{ matrix.crt }}"
 
-      - name: Upload to release
-        uses: softprops/action-gh-release@v3
-        if: inputs.tag || github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
-        with:
-          tag_name: ${{ inputs.tag || github.ref_name }}
-          files: ${{ github.workspace }}/packages/*.tar.gz
+      - name: Materialize prebuilt metadata (non-Windows)
+        if: always() && matrix.crt == ''
+        run: >-
+          ${{ matrix.python }} tools/ci/release_cell.py metadata
+          --repo-root "${{ github.workspace }}"
+          --candidate-sha "${{ inputs.candidate_sha }}"
+          --cell-id "${{ matrix.cell_id }}"
+          --cell-root "target/release-evidence/${{ matrix.cell_id }}"
+          --target "${{ matrix.target }}"
+          --package-dir "${{ github.workspace }}/packages"
 
-      - name: Upload artifact (branch builds)
-        if: inputs.branch && !inputs.tag && github.event_name == 'workflow_dispatch'
+      - name: Materialize prebuilt metadata (Windows)
+        if: always() && matrix.crt != ''
+        run: >-
+          python tools/ci/release_cell.py metadata
+          --repo-root "${{ github.workspace }}"
+          --candidate-sha "${{ inputs.candidate_sha }}"
+          --cell-id "${{ matrix.cell_id }}"
+          --cell-root "target/release-evidence/${{ matrix.cell_id }}"
+          --target "${{ matrix.target }}"
+          --crt "${{ matrix.crt }}"
+          --package-dir "${{ github.workspace }}/packages"
+
+      - name: Finalize prebuilt cell (non-Windows)
+        if: always() && matrix.crt == ''
+        run: >-
+          ${{ matrix.python }} tools/ci/release_cell.py finalize
+          --repo-root "${{ github.workspace }}"
+          --candidate-sha "${{ inputs.candidate_sha }}"
+          --cell-id "${{ matrix.cell_id }}"
+          --cell-root "target/release-evidence/${{ matrix.cell_id }}"
+          --execution executions/build.json
+          --execution executions/consume.json
+          --target "${{ matrix.target }}"
+
+      - name: Finalize prebuilt cell (Windows)
+        if: always() && matrix.crt != ''
+        run: >-
+          python tools/ci/release_cell.py finalize
+          --repo-root "${{ github.workspace }}"
+          --candidate-sha "${{ inputs.candidate_sha }}"
+          --cell-id "${{ matrix.cell_id }}"
+          --cell-root "target/release-evidence/${{ matrix.cell_id }}"
+          --execution executions/build.json
+          --execution executions/consume.json
+          --target "${{ matrix.target }}"
+          --crt "${{ matrix.crt }}"
+
+      - name: Retain prebuilt release cell
+        if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: prebuilt-${{ matrix.target }}${{ matrix.crt && format('-{0}', matrix.crt) || '' }}-${{ inputs.branch }}-${{ github.sha }}
-          path: ${{ github.workspace }}/packages/*.tar.gz
+          name: release-cell-${{ matrix.cell_id }}-${{ inputs.candidate_sha }}
+          path: target/release-evidence
           if-no-files-found: error
+          retention-days: 30

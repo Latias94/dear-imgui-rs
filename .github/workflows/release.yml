@@ -1,33 +1,81 @@
 name: GitHub Release
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag, e.g. v0.15.1'
+        description: Release tag, for example v0.16.0
+        required: true
+        type: string
+      candidate_sha:
+        description: Full 40-character release candidate SHA
+        required: true
+        type: string
+      gate_run_id:
+        description: Successful Release Gate workflow run ID for this candidate
         required: true
         type: string
 
 permissions:
+  actions: read
   contents: write
 
 jobs:
   release:
-    name: Create GitHub release
+    name: Verify candidate and create GitHub release
     runs-on: ubuntu-latest
-    env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+    timeout-minutes: 20
     steps:
-      - name: Checkout repository
+      - name: Checkout release tag
         uses: actions/checkout@v6
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ inputs.tag }}
+
+      - name: Download authoritative gate result
+        uses: actions/download-artifact@v8
+        with:
+          name: release-gate-${{ inputs.candidate_sha }}
+          path: target/release-gate
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.gate_run_id }}
+
+      - name: Download retained release cells
+        uses: actions/download-artifact@v8
+        with:
+          pattern: release-cell-*-${{ inputs.candidate_sha }}
+          path: target/release-cells
+          merge-multiple: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.gate_run_id }}
+
+      - name: Verify authoritative same-SHA Go result
+        run: >-
+          python3 tools/ci/release_evidence.py verify
+          --repo-root "${{ github.workspace }}"
+          --candidate-sha "${{ inputs.candidate_sha }}"
+          --gate-result target/release-gate/gate-result.json
+
+      - name: Recompute decision from retained cell payloads
+        run: >-
+          python3 tools/ci/release_cell.py aggregate
+          --repo-root "${{ github.workspace }}"
+          --candidate-sha "${{ inputs.candidate_sha }}"
+          --evidence-root target/release-cells
+          --output target/release-cells/recomputed-gate-result.json
+
+      - name: Verify recomputed same-SHA Go result
+        run: >-
+          python3 tools/ci/release_evidence.py verify
+          --repo-root "${{ github.workspace }}"
+          --candidate-sha "${{ inputs.candidate_sha }}"
+          --gate-result target/release-cells/recomputed-gate-result.json
 
       - name: Validate tag and extract release notes
         id: tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
         run: python3 tools/ci/run_contract.py release-notes
 
       - name: Create or update release
@@ -36,4 +84,6 @@ jobs:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: ${{ steps.tag.outputs.tag }}
           body_path: release-notes.md
+          files: target/release-cells/prebuilt-*/packages/*.tar.gz
+          fail_on_unmatched_files: true
           make_latest: true

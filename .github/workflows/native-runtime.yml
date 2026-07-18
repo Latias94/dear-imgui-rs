@@ -3,6 +3,10 @@ name: Native runtime contract
 on:
   workflow_call:
     inputs:
+      candidate_sha:
+        description: Exact release candidate commit
+        required: true
+        type: string
       contract:
         required: true
         type: string
@@ -30,6 +34,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           submodules: true
+          ref: ${{ inputs.candidate_sha }}
 
       - name: Init required nested submodules (selective)
         run: python3 tools/ci/update_submodules.py
@@ -59,7 +64,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: native-runtime-${{ inputs.contract }}-${{ github.sha }}-run-${{ github.run_attempt }}-gate-${{ inputs.gate_attempt }}
+          name: native-runtime-${{ inputs.contract }}-${{ inputs.candidate_sha }}-run-${{ github.run_attempt }}-gate-${{ inputs.gate_attempt }}
           path: target/runtime-evidence/${{ inputs.contract }}
           if-no-files-found: error
           retention-days: 30
