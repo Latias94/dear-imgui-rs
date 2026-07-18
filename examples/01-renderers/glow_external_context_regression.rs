@@ -146,7 +146,7 @@ impl AppWindow {
             TEXTURE_WIDTH,
             TEXTURE_HEIGHT,
         );
-        fill_texture_pixels(&mut managed_texture, 0);
+        managed_texture.set_data(&texture_pixels(0));
         managed_texture.set_status(TextureStatus::WantCreate);
 
         let managed_texture = imgui_context.register_texture(managed_texture);
@@ -189,7 +189,7 @@ impl AppWindow {
                 self.imgui
                     .context
                     .with_texture_mut(self.imgui.managed_texture, |mut texture| {
-                        fill_texture_pixels(texture, phase)
+                        texture.set_data(&texture_pixels(phase))
                     })
                     .expect("managed texture should remain active for update");
                 self.imgui.stage = RegressionStage::AwaitUpdate;
@@ -214,7 +214,7 @@ impl AppWindow {
                     .imgui
                     .context
                     .with_texture(self.imgui.managed_texture, |texture| {
-                        (texture.status(), texture.tex_id())
+                        (texture.status(), texture.texture_id())
                     })
                     .map_err(|error| boxed_error(error.to_string()))?;
                 if status == TextureStatus::OK {
@@ -238,7 +238,7 @@ impl AppWindow {
                     .imgui
                     .context
                     .with_texture(self.imgui.managed_texture, |texture| {
-                        (texture.status(), texture.tex_id())
+                        (texture.status(), texture.texture_id())
                     })
                     .map_err(|error| boxed_error(error.to_string()))?;
                 if status == TextureStatus::OK {
@@ -313,7 +313,7 @@ impl AppWindow {
             .imgui
             .context
             .with_texture(self.imgui.managed_texture, |texture| {
-                (texture.status(), texture.tex_id())
+                (texture.status(), texture.texture_id())
             })
             .unwrap_or_else(|error| match error {
                 ManagedTextureError::Retiring(_) => (
@@ -474,7 +474,7 @@ impl ApplicationHandler for App {
     }
 }
 
-fn fill_texture_pixels(texture: &mut dear_imgui_rs::texture::TextureData, phase: u32) {
+fn texture_pixels(phase: u32) -> Vec<u8> {
     let mut pixels = vec![0u8; (TEXTURE_WIDTH * TEXTURE_HEIGHT * 4) as usize];
     let t = phase as f32 * 0.15;
 
@@ -490,7 +490,7 @@ fn fill_texture_pixels(texture: &mut dear_imgui_rs::texture::TextureData, phase:
         }
     }
 
-    texture.set_data(&pixels);
+    pixels
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

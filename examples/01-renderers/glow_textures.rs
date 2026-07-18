@@ -2,7 +2,7 @@
 //!
 //! This example shows how to use the modern ImGui 1.92+ texture management system
 //! with the dear-imgui-glow backend, including texture registration, updates, and
-//! accessing texture data.
+//! application-owned texture metadata.
 
 use ::image::ImageReader;
 use std::{num::NonZeroU32, path::PathBuf, sync::Arc, time::Instant};
@@ -62,12 +62,9 @@ impl TextureDemo {
         self.animated_texture = Some(self.create_animated_texture(renderer)?);
 
         // Try to load a user image from disk (optional)
-        if let Some(tex) = self.try_load_image_texture(renderer) {
+        if let Some((tex, size)) = self.try_load_image_texture(renderer) {
             self.user_image_texture = Some(tex);
-            // We can infer size from the registered texture using the backend's inspection API
-            if let Some(t) = renderer.get_texture_data(tex) {
-                self.user_image_size = Some((t.width(), t.height()));
-            }
+            self.user_image_size = Some(size);
         }
 
         Ok(())
@@ -93,19 +90,16 @@ impl TextureDemo {
         let texture_id = renderer.register_texture(WIDTH, HEIGHT, TextureFormat::RGBA32, &data)?;
 
         println!("Created gradient texture with ID: {:?}", texture_id);
-        if let Some(texture_data) = renderer.get_texture_data(texture_id) {
-            println!("Texture format: {:?}", texture_data.format());
-            println!(
-                "Texture size: {}x{}",
-                texture_data.width(),
-                texture_data.height()
-            );
-        }
+        println!("Texture format: {:?}", TextureFormat::RGBA32);
+        println!("Texture size: {WIDTH}x{HEIGHT}");
 
         Ok(texture_id)
     }
 
-    fn try_load_image_texture(&self, renderer: &mut GlowRenderer) -> Option<TextureId> {
+    fn try_load_image_texture(
+        &self,
+        renderer: &mut GlowRenderer,
+    ) -> Option<(TextureId, (u32, u32))> {
         // Prefer the gradient test image we ship with the examples; fall back
         // to the original JPEG if needed. This keeps behavior consistent with
         // the WGPU texture demos.
@@ -139,9 +133,7 @@ impl TextureDemo {
                     match renderer.register_texture(w, h, TextureFormat::RGBA32, &data) {
                         Ok(id) => {
                             println!("Loaded image texture from {:?} ({}x{})", path, w, h);
-                            // store size via caller
-                            // caller will set user_image_size
-                            Some(id)
+                            Some((id, (w, h)))
                         }
                         Err(e) => {
                             eprintln!("Failed to register image texture: {e}");
@@ -250,7 +242,7 @@ impl TextureDemo {
 
                 ui.text("Features demonstrated:");
                 ui.bullet_text("Texture registration with TextureFormat");
-                ui.bullet_text("Texture data access and inspection");
+                ui.bullet_text("Application-owned texture metadata");
                 ui.bullet_text("Dynamic texture updates");
                 ui.bullet_text("RENDERER_HAS_TEXTURES backend flag");
 
