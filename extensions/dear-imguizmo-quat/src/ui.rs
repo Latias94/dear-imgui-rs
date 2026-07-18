@@ -799,7 +799,7 @@ impl<'ui> GizmoQuatUi<'ui> {
 mod tests {
     use super::{GizmoQuatExt, GizmoQuatSettings, GizmoQuatSettingsToken};
     use dear_imgui_rs::sys as imgui_sys;
-    use dear_imgui_rs::{BackendFlags, Context, ContextLifecycle};
+    use dear_imgui_rs::{Context, ContextLifecycle};
     use std::marker::PhantomData;
     use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::sync::{Mutex, OnceLock};
@@ -813,7 +813,7 @@ mod tests {
         let io = imgui.io_mut();
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
-        io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_TEXTURES);
+        let _ = imgui.font_atlas().build();
     }
 
     #[test]
@@ -843,7 +843,7 @@ mod tests {
             assert_eq!(gizmo.current_settings(), original);
         }
 
-        let _ = imgui.render();
+        drop(imgui.render());
     }
 
     #[test]
@@ -870,7 +870,7 @@ mod tests {
 
         drop(other);
         unsafe { imgui_sys::igSetCurrentContext(raw) };
-        let _ = imgui.render();
+        drop(imgui.render());
     }
 
     #[test]

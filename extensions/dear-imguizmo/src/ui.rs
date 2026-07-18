@@ -545,7 +545,7 @@ impl GuizmoExt for Ui {
 #[cfg(test)]
 mod tests {
     use super::{GuizmoExt, IdToken, sys};
-    use dear_imgui_rs::{BackendFlags, Context, ContextLifecycle};
+    use dear_imgui_rs::{Context, ContextLifecycle};
     use dear_imgui_sys as imgui_sys;
     use std::marker::PhantomData;
     use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -560,7 +560,7 @@ mod tests {
         let io = imgui.io_mut();
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
-        io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_TEXTURES);
+        let _ = imgui.font_atlas().build();
     }
 
     #[test]
@@ -576,7 +576,7 @@ mod tests {
             let id = giz.push_id(7);
             drop(id);
         }
-        let _ = imgui.render();
+        drop(imgui.render());
     }
 
     #[test]
@@ -600,7 +600,7 @@ mod tests {
         unsafe {
             imgui_sys::igSetCurrentContext(raw_a);
         }
-        let _ = imgui_a.render();
+        drop(imgui_a.render());
     }
 
     #[test]
@@ -627,7 +627,7 @@ mod tests {
 
         drop(other);
         unsafe { imgui_sys::igSetCurrentContext(raw) };
-        let _ = imgui.render();
+        drop(imgui.render());
     }
 
     #[test]
@@ -683,6 +683,6 @@ mod tests {
                 unsafe { sys::ImGuizmo_GetID_Ptr((&ptr_value as *const u32).cast()) };
             assert_eq!(ptr_id.raw(), expected_ptr);
         }
-        let _ = imgui.render();
+        drop(imgui.render());
     }
 }
