@@ -90,6 +90,10 @@ name = "hello_world"
 path = "00-quickstart/hello_world.rs"
 
 [[bin]]
+name = "application_lifecycle"
+path = "00-quickstart/application_lifecycle.rs"
+
+[[bin]]
 name = "game_engine_docking"
 path = "02-docking/game_engine_docking.rs"
 
@@ -100,6 +104,18 @@ path = "01-renderers/glow_basic.rs"
 [[bin]]
 name = "input_text_minimal"
 path = "03-features/input_text_minimal.rs"
+
+[[bin]]
+name = "custom_font_minimal"
+path = "03-features/custom_font_minimal.rs"
+
+[[bin]]
+name = "managed_texture_minimal"
+path = "03-features/managed_texture_minimal.rs"
+
+[[bin]]
+name = "task_organizer"
+path = "03-features/task_organizer.rs"
 
 [[bin]]
 name = "tables_minimal"

@@ -76,6 +76,12 @@ fn main() -> Result<(), RunError> {
 - `gpu_recreated` runs after a replacement generation is committed.
 - `shutdown` runs once before add-ons and the Dear ImGui context are destroyed.
 
+The feature-free lifecycle example implements every hook and displays real hook activity, persistent state, and the active GPU generation:
+
+```text
+cargo run -p dear-imgui-examples --bin application_lifecycle
+```
+
 Surface loss and resize do not recreate the application or Dear ImGui context. Only WGPU device loss starts GPU recovery, and that callback communicates with the UI thread through the Winit event loop.
 
 ## Configuration

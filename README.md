@@ -116,11 +116,17 @@ git submodule update --init --recursive
 # Core & docking examples
 cargo run --bin game_engine_docking
 cargo run --bin dockspace_minimal
+cargo run -p dear-imgui-examples --bin dear_app_docking
 
 # Normal application path (UI-only closure, then the full lifecycle API)
 cargo run -p dear-app --example hello
 cargo run -p dear-imgui-examples --bin hello_world
-cargo run -p dear-imgui-examples --bin dear_app_docking
+cargo run -p dear-imgui-examples --bin application_lifecycle
+
+# Focused safe API recipes
+cargo run -p dear-imgui-examples --bin custom_font_minimal
+cargo run -p dear-imgui-examples --bin managed_texture_minimal
+cargo run -p dear-imgui-examples --bin task_organizer
 
 # Extension examples (using wgpu + winit directly)
 cargo run --bin imguizmo_basic --features imguizmo

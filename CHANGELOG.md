@@ -94,6 +94,7 @@ Multi-context use is one major beneficiary rather than the sole motivation: the 
 - Add an opt-in native Winit/WGPU Test Engine smoke that moves a window into a real secondary OS viewport, renders its surface, merges it back into the main viewport, verifies teardown, and exits with a test result.
 - Add `TestRunner::{run_headless,run_with_renderer}` as bounded one-shot Test Engine pumps. `RunReport` distinguishes `Passed`, `Failed`, `NoMatch`, `TimedOut`, and `Aborted` product outcomes, while callback, native-state, cleanup, and renderer failures remain typed `RunnerError` infrastructure errors.
 - Add `dear_app::run_ui` as an infallible UI-closure adapter over the same state-owning runtime and recovery path as `Application`. `dear-app` re-exports its matching core crate as `dear_app::imgui`, so a copyable starter needs only one direct dependency; `DockingConfig::{full_viewport,application_managed}` opt into one explicit dockspace ownership mode.
+- Add focused runnable examples for the complete `dear_app::Application` lifecycle, a compile-time embedded custom font, renderer-agnostic managed texture registration/update/removal/recreation, and a command-driven task organizer combining stable-ID multi-select, typed drag and drop, and routed shortcuts.
 
 ### Changed
 
@@ -107,6 +108,7 @@ Multi-context use is one major beneficiary rather than the sole motivation: the 
 - Forward `build-from-source` and `prebuilt` consistently through the six safe native extension crates (`dear-implot`, `dear-implot3d`, `dear-imnodes`, `dear-imguizmo`, `dear-imguizmo-quat`, and `dear-node-editor`) to both core and sys crates. The first five also forward the browser `wasm` route; node-editor remains native-only, source wins if Cargo unifies both native artifact features, and Test Engine remains native source-only with no prebuilt or WASM route.
 - Gate release candidates through one clean committed local check and a same-SHA remote aggregate with 13 fixed cells covering Linux Test Engine and multi-viewport runtime tests, Linux WASM, Windows vcpkg/MSVC MD/MSVC MT/MinGW, macOS, and five prebuilt targets. Python orchestration records commands, outcomes, target/CRT/toolchain metadata, binding and manifest hashes, runtime diagnostics, candidate SHA, and evidence SHA256 values; missing, skipped, cancelled, timed-out, failed, duplicate, stale, or wrong-SHA evidence is `No-Go`. Native runtime CI passes the trigger commit explicitly, and Release Gate rejects a dispatch whose workflow revision differs from the candidate before any evidence cell runs.
 - Reorganize examples by learning path: the quickstart is a directly runnable `dear-app` program, common widget examples contain UI code instead of duplicated window/renderer loops, raw backend examples live under `01-renderers`, optional UI/extension examples under `03-features`, and lifecycle-heavy examples under `04-integration`. Remove the duplicate `dear_app_quickstart` binary and stale address-pinning guidance.
+- Make the native file-dialog example wake a waiting Winit event loop through an owned user event when its worker completes instead of continuously polling and redrawing.
 
 ### Fixed
 

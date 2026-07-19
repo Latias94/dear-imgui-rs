@@ -18,6 +18,12 @@ The same minimal entry point is also a directly runnable `dear-app` package exam
 cargo run -p dear-app --example hello
 ```
 
+Continue with the complete, feature-free `Application` lifecycle when the program needs initialization, events, Context-owned resources, GPU recovery, or deterministic teardown:
+
+```text
+cargo run -p dear-imgui-examples --bin application_lifecycle
+```
+
 For a new project, add one dependency:
 
 ```toml
@@ -49,7 +55,7 @@ Use `dear_app::Application` when the application needs initialization, events, G
 
 | Directory | Purpose | Expected abstraction level |
 | --- | --- | --- |
-| `00-quickstart` | First working application | `dear_app::run_ui` |
+| `00-quickstart` | First working application and the full lifecycle step-up | `dear_app::run_ui` and `dear_app::Application` |
 | `03-features` | Core widgets, fonts, and optional extensions | UI code first; advanced examples may use `Application` or a raw backend |
 | `01-renderers` | Implementing or embedding a renderer/platform stack | Explicit window, surface, renderer, and GPU lifecycle |
 | `02-docking` | Dock layouts and native multi-viewport | From one dockspace to full backend lifecycle references |
@@ -61,12 +67,17 @@ These examples use the same high-level runtime as `hello_world`, so their source
 
 ```text
 cargo run -p dear-imgui-examples --bin input_text_minimal
+cargo run -p dear-imgui-examples --bin custom_font_minimal
+cargo run -p dear-imgui-examples --bin managed_texture_minimal
+cargo run -p dear-imgui-examples --bin task_organizer
 cargo run -p dear-imgui-examples --bin tables_minimal
 cargo run -p dear-imgui-examples --bin tables_property_grid
 cargo run -p dear-imgui-examples --bin drawlist_minimal
 cargo run -p dear-imgui-examples --bin menus_and_popups
 cargo run -p dear-imgui-examples --bin list_clipper_log
 ```
+
+`custom_font_minimal` embeds a trusted TTF at compile time and demonstrates font registration plus a scoped `push_font`. `managed_texture_minimal` covers renderer-agnostic registration, update, removal, and recreation using CPU-generated pixels. `task_organizer` combines stable-ID multi-select, typed drag and drop, and routed shortcuts in one command-driven workflow.
 
 `style_and_fonts` is the advanced font-lifecycle reference. It includes a bundled Roboto font, runtime atlas updates, baked glyph queries, CJK/Emoji fallback discovery, and managed custom rectangles:
 
@@ -122,7 +133,7 @@ Secondary windows are rendered by the owning platform/renderer runtimes; only th
 - `wgpu_rtt_gameview`: render-to-texture game view.
 - `console_log`: filterable console with history.
 - `asset_browser_grid`: thumbnail grid and filtering.
-- `file_dialog_native` and `file_browser_imgui`: native and pure-ImGui file workflows (`file-browser` feature).
+- `file_dialog_native` and `file_browser_imgui`: native and pure-ImGui file workflows (`file-browser` feature); the native dialog wakes a waiting event loop when its worker finishes.
 - `threaded_snapshot_minimal`: move-only frame snapshot handoff to a renderer thread.
 - `multi_context_switch`: explicit activation and suspension of multiple Contexts.
 - `imgui_test_engine_basic`: interactive or bounded Test Engine runner (`test-engine` feature).
@@ -137,7 +148,7 @@ cargo run -p dear-imgui-examples --bin imgui_test_engine_basic --features test-e
 
 `AppConfig::default()` does not enable docking and does not select an INI file. Set `ini_filename` explicitly when an application should persist window or dock layout state. Declarative dock layouts should normally use `DockLayoutApply::IfMissing`; reserve `Replace` for an explicit reset command.
 
-Texture and font examples resolve assets from `examples/assets` or the workspace manifest path rather than the process working directory. This keeps IDE and terminal launches consistent.
+The minimal custom-font example embeds its vendored TTF at compile time. File-backed texture and advanced font examples resolve assets from `examples/assets` or the workspace manifest path rather than the process working directory. This keeps IDE and terminal launches consistent.
 
 ## Contributing
 
