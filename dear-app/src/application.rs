@@ -1,5 +1,3 @@
-use std::marker::PhantomData;
-
 use dear_imgui_rs as imgui;
 use dear_imgui_rs::{DockFlags, TextureId};
 use thiserror::Error;
@@ -163,7 +161,7 @@ pub trait Application {
     }
 
     /// Builds one Dear ImGui frame.
-    fn frame(&mut self, context: &mut FrameContext<'_, '_>) -> Result<(), RunError>;
+    fn frame(&mut self, context: &mut FrameContext<'_>) -> Result<(), RunError>;
 
     /// Runs exactly once before add-ons and the Dear ImGui context are torn down.
     fn shutdown(&mut self, _context: &mut ShutdownContext<'_>) -> Result<(), RunError> {
@@ -287,7 +285,6 @@ pub struct AddOns<'a> {
     #[cfg(feature = "implot3d")]
     pub(crate) implot3d: Option<&'a implot3d::Plot3DContext>,
     pub(crate) docking: DockingApi<'a>,
-    pub(crate) marker: PhantomData<&'a ()>,
 }
 
 impl<'a> AddOns<'a> {
@@ -405,24 +402,24 @@ impl<'a> GpuContext<'a> {
     }
 }
 
-pub struct FrameContext<'ui, 'runtime> {
-    pub(crate) ui: &'ui imgui::Ui,
-    pub(crate) addons: AddOns<'runtime>,
-    pub(crate) gpu: GpuApi<'runtime>,
-    pub(crate) exit_requested: &'runtime mut bool,
+pub struct FrameContext<'a> {
+    pub(crate) ui: &'a imgui::Ui,
+    pub(crate) addons: AddOns<'a>,
+    pub(crate) gpu: GpuApi<'a>,
+    pub(crate) exit_requested: &'a mut bool,
 }
 
-impl<'ui, 'runtime> FrameContext<'ui, 'runtime> {
+impl<'a> FrameContext<'a> {
     #[must_use]
-    pub fn ui(&self) -> &'ui imgui::Ui {
+    pub fn ui(&self) -> &'a imgui::Ui {
         self.ui
     }
 
-    pub fn addons(&mut self) -> &mut AddOns<'runtime> {
+    pub fn addons(&mut self) -> &mut AddOns<'a> {
         &mut self.addons
     }
 
-    pub fn gpu(&mut self) -> &mut GpuApi<'runtime> {
+    pub fn gpu(&mut self) -> &mut GpuApi<'a> {
         &mut self.gpu
     }
 

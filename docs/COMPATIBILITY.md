@@ -153,15 +153,13 @@ generations as a builder/callback protocol:
 | 0.15 API | 0.16 API |
 | --- | --- |
 | `AppBuilder`, `RunnerConfig`, `RunnerCallbacks` | `AppConfig` plus one state-owning `Application` value |
-| `run_simple`, `run_with_callbacks` | `dear_app::run(config, application)` |
+| `run_simple`, `run_with_callbacks` | `dear_app::run(config, application)` for lifecycle-aware state, or `dear_app::run_ui(config, closure)` for UI-only state |
+| `FrameContext<'ui, 'runtime>` | `FrameContext<'frame>` with one caller-visible frame lifetime |
+| `enable` / `auto_dockspace` boolean combinations and a default full-viewport dockspace | Explicit `DockingConfig::{Disabled,ApplicationManaged,FullViewport}` modes; use `full_viewport()` or `application_managed()` constructors |
 | Application cleanup distributed across callbacks | `Application::shutdown` runs exactly once before add-ons and the stable ImGui context are torn down |
 | GPU rebuild could replace application/context state | The application, main window, and ImGui context survive; only generation-scoped GPU resources are replaced |
 
-Implement `Application::frame` and opt into the lifecycle hooks you need:
-`configure_imgui`, `initialized`, `event`, `gpu_lost`, `gpu_recreated`, and
-`shutdown`. Rebuild application GPU resources from `gpu_recreated`. External
-texture handles carry a `GpuGeneration` and deliberately reject use after their
-generation is replaced.
+Use `run_ui` when a closure-captured state value only needs `&Ui`. Implement `Application::frame` and opt into the lifecycle hooks you need: `configure_imgui`, `initialized`, `event`, `prepare_frame`, `gpu_lost`, `gpu_recreated`, and `shutdown`. Rebuild application GPU resources from `gpu_recreated`. External texture handles carry a `GpuGeneration` and deliberately reject use after their generation is replaced.
 
 ### Binding and prebuilt provenance
 

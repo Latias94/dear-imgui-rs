@@ -117,9 +117,10 @@ git submodule update --init --recursive
 cargo run --bin game_engine_docking
 cargo run --bin dockspace_minimal
 
-# dear-app examples (state-owning application runtime with docking support)
-cargo run --bin dear_app_quickstart
-cargo run --bin dear_app_docking
+# Normal application path (UI-only closure, then the full lifecycle API)
+cargo run -p dear-app --example hello
+cargo run -p dear-imgui-examples --bin hello_world
+cargo run -p dear-imgui-examples --bin dear_app_docking
 
 # Extension examples (using wgpu + winit directly)
 cargo run --bin imguizmo_basic --features imguizmo

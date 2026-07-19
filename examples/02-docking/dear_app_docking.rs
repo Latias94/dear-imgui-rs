@@ -76,7 +76,7 @@ fn alternative_layout() -> DockLayout {
 }
 
 impl Application for DockDemoState {
-    fn frame(&mut self, context: &mut FrameContext<'_, '_>) -> Result<(), RunError> {
+    fn frame(&mut self, context: &mut FrameContext<'_>) -> Result<(), RunError> {
         let ui = context.ui();
         let addons = context.addons();
         let state = self;
@@ -265,11 +265,7 @@ fn main() {
         present_mode: wgpu::PresentMode::Fifo,
         clear_color: [0.1, 0.1, 0.12, 1.0],
         wgpu: WgpuConfig::from_preset(WgpuPreset::HighPerformance),
-        docking: DockingConfig {
-            enable: true,
-            auto_dockspace: false,
-            ..Default::default()
-        },
+        docking: DockingConfig::application_managed(),
         addons: AddOnsConfig::auto(),
         ini_filename: Some(std::path::PathBuf::from("Docking_Demo/docking_demo.ini")),
         restore_previous_geometry: true,

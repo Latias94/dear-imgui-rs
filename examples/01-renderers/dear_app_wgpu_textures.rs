@@ -182,7 +182,7 @@ impl Application for TexDemoState {
         Ok(())
     }
 
-    fn frame(&mut self, context: &mut FrameContext<'_, '_>) -> Result<(), RunError> {
+    fn frame(&mut self, context: &mut FrameContext<'_>) -> Result<(), RunError> {
         let ui = context.ui();
         let gpu = context.gpu();
         let state = self;

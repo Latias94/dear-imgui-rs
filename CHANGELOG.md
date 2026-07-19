@@ -12,6 +12,21 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 This is an intentionally source-breaking architecture release. It replaces shallow safe mirrors of Dear ImGui internals with explicit state owners, makes native callback and renderer lifetime contracts visible, and turns pregenerated bindings and prebuilts into reproducible target-specific artifacts.
 
+Multi-context use is one major beneficiary rather than the sole motivation: the same contracts protect single-context applications from stale frame data, font-atlas repacks, asynchronous GPU completion, and teardown races.
+
+### Architecture Overview
+
+| Area | What changed | Benefit after migration |
+| --- | --- | --- |
+| Context and callbacks | Stable `ContextId`, shared `ContextBinding`, and typed attachments replace implicit current-context access. | Callbacks target the owning Context, panic restoration is contained, and teardown follows one deterministic renderer/platform/extension order. |
+| Rendering and textures | Context-owned managed textures, one-use `RenderedFrame` leases, and move-only `FrameSnapshot` handoffs replace borrowed texture pointers and detachable native draw data. | Cross-Context, stale-generation, duplicate, and out-of-order work is rejected before it can mutate renderer state or reuse GPU resources too early. |
+| Fonts and atlases | Context-borrowed atlases, explicit `SharedFontAtlas` ownership, validated `FontId`/`BakedFont` access, and texture leases replace mixed owning and raw-pointer views. | Dear ImGui 1.92 lazy glyph loading, atlas repacks, shared contexts, and custom rectangles no longer invalidate supposedly safe Rust references silently. |
+| Multi-viewport backends | Winit, SDL3, Glow, WGPU, and Ash use owning platform/renderer runtimes with explicit recovery and ordered shutdown. | Integrations no longer preserve callback state through caller-address stability, and surface, swapchain, device-loss, and teardown failures become reportable. |
+| Scoped and asynchronous state | Closure-scoped state storage and multi-select, session-owned reflection, and filesystem-owning dialogs replace escaping native views, global settings, and frame-borrowed worker capabilities. | Temporary native pointers and background work cannot outlive the Rust owner whose state they access. |
+| Test Engine | Typed attachment/state results, C++ exception barriers, and bounded runners with five terminal outcomes replace assertions, implicit Context state, and compile-only coverage. | Tests distinguish product failures from infrastructure failures and exercise real frame, renderer, timeout, abort, and cleanup behavior. |
+| Bindings and artifact routes | Deterministic native/WASM binding profiles and explicit source, prebuilt, stack-layout, and Test Engine routes replace host-derived or partially forwarded build choices. | Unsupported targets and mismatched source, feature, CRT, or artifact identities fail during the build instead of producing an ABI-surprise later. |
+| Public API and release gates | Declarative Tables and DockLayout APIs, one final replacement for provisional aliases, Python automation, and a fixed same-SHA 13-cell release aggregate replace shallow internal mirrors and platform-specific release scripts. | Applications migrate to one maintained contract, while published crates are checked as real cross-platform consumers rather than only compiling on the maintainer's host. |
+
 ### Breaking Changes
 
 #### Core and FFI
@@ -53,7 +68,7 @@ This is an intentionally source-breaking architecture release. It replaces shall
 - Require explicit ordered multi-viewport shutdown through the owning runtime: renderer runtime first, platform runtime second, then Context, windows, and GPU objects. Attachment roles make Context drop use the same renderer-before-platform phase order as a last-resort best-effort path, while explicit shutdown reports callback ownership drift, deferred callback faults, or incomplete GPU retirement.
 - WGPU secondary surfaces now require the originating `Instance` and `Adapter`, recover lost/outdated/suboptimal surfaces, and treat timeout, occlusion, validation, and out-of-memory outcomes explicitly. `ViewportFlags::NO_RENDERER_CLEAR` loads the existing target instead of clearing it.
 - Ash secondary viewports now share one swapchain runtime for classic render-pass and dynamic-rendering routes, use per-image synchronization, retire old swapchains safely, clamp or pause zero-sized surfaces, and rebuild after out-of-date or suboptimal acquire/present results. `ViewportFlags::NO_RENDERER_CLEAR` uses Vulkan discard semantics rather than issuing a clear.
-- Replace dear-app's `AppBuilder`, `RunnerCallbacks`, `RunnerConfig`, `run_simple`, and `run_with_callbacks` APIs with `AppConfig`, one state-owning `Application`, and `dear_app::run`. The application, main window, add-ons, and Dear ImGui context survive WGPU device loss; only generation-scoped GPU resources are recreated, and stale external texture handles are rejected.
+- Replace dear-app's `AppBuilder`, `RunnerCallbacks`, `RunnerConfig`, `run_simple`, and `run_with_callbacks` APIs with `AppConfig`, one state-owning `Application`, and `dear_app::run`. The application, main window, add-ons, and Dear ImGui context survive WGPU device loss; only generation-scoped GPU resources are recreated, and stale external texture handles are rejected. `FrameContext` now exposes one frame lifetime instead of leaking separate UI/runtime borrow details. Replace the `enable` / `auto_dockspace` boolean combinations with explicit `DockingConfig::{Disabled,ApplicationManaged,FullViewport}` states; docking is opt-in instead of silently creating a full-viewport dockspace in every default application, and full-viewport host names are owned `String` values rather than requiring `'static` text.
 
 #### Extensions
 
@@ -78,6 +93,7 @@ This is an intentionally source-breaking architecture release. It replaces shall
 - Add a bounded native per-runtime scan worker with per-dialog cancellation, latest-request coalescing, bounded UI-thread batch application, owned-worker teardown, and generation filtering for stale results.
 - Add an opt-in native Winit/WGPU Test Engine smoke that moves a window into a real secondary OS viewport, renders its surface, merges it back into the main viewport, verifies teardown, and exits with a test result.
 - Add `TestRunner::{run_headless,run_with_renderer}` as bounded one-shot Test Engine pumps. `RunReport` distinguishes `Passed`, `Failed`, `NoMatch`, `TimedOut`, and `Aborted` product outcomes, while callback, native-state, cleanup, and renderer failures remain typed `RunnerError` infrastructure errors.
+- Add `dear_app::run_ui` as an infallible UI-closure adapter over the same state-owning runtime and recovery path as `Application`. `dear-app` re-exports its matching core crate as `dear_app::imgui`, so a copyable starter needs only one direct dependency; `DockingConfig::{full_viewport,application_managed}` opt into one explicit dockspace ownership mode.
 
 ### Changed
 
@@ -90,6 +106,7 @@ This is an intentionally source-breaking architecture release. It replaces shall
 - Make the `style_and_fonts` example self-contained: vendored Roboto exercises runtime font insertion, scoped `FontId` rendering, baked glyph queries, and text measurement; CJK and Emoji loading falls back to common system fonts and reports the selected source; an interactive checker covers managed custom-rectangle updates.
 - Forward `build-from-source` and `prebuilt` consistently through the six safe native extension crates (`dear-implot`, `dear-implot3d`, `dear-imnodes`, `dear-imguizmo`, `dear-imguizmo-quat`, and `dear-node-editor`) to both core and sys crates. The first five also forward the browser `wasm` route; node-editor remains native-only, source wins if Cargo unifies both native artifact features, and Test Engine remains native source-only with no prebuilt or WASM route.
 - Gate release candidates through one clean committed local check and a same-SHA remote aggregate with 13 fixed cells covering Linux Test Engine and multi-viewport runtime tests, Linux WASM, Windows vcpkg/MSVC MD/MSVC MT/MinGW, macOS, and five prebuilt targets. Python orchestration records commands, outcomes, target/CRT/toolchain metadata, binding and manifest hashes, runtime diagnostics, candidate SHA, and evidence SHA256 values; missing, skipped, cancelled, timed-out, failed, duplicate, stale, or wrong-SHA evidence is `No-Go`. Native runtime CI passes the trigger commit explicitly, and Release Gate rejects a dispatch whose workflow revision differs from the candidate before any evidence cell runs.
+- Reorganize examples by learning path: the quickstart is a directly runnable `dear-app` program, common widget examples contain UI code instead of duplicated window/renderer loops, raw backend examples live under `01-renderers`, optional UI/extension examples under `03-features`, and lifecycle-heavy examples under `04-integration`. Remove the duplicate `dear_app_quickstart` binary and stale address-pinning guidance.
 
 ### Fixed
 
@@ -105,6 +122,47 @@ This is an intentionally source-breaking architecture release. It replaces shall
 - Avoid an out-of-bounds read when measuring text ending in a single `#`, and share the same sentinel-safe measurement path with `push_item_width_text`.
 
 ### Migration Examples
+
+#### dear-app UI-only and lifecycle-aware applications
+
+UI-only applications can capture their persistent state in `run_ui`; the matching core API is available through `dear_app::imgui`, so the starter needs only the `dear-app` dependency:
+
+```rust
+use dear_app::{AppConfig, RunError, run_ui};
+
+fn main() -> Result<(), RunError> {
+    let mut clicks = 0;
+    run_ui(AppConfig::default(), move |ui| {
+        if ui.button("Click me") {
+            clicks += 1;
+        }
+        ui.text(format!("Clicks: {clicks}"));
+    })
+}
+```
+
+Implement `Application` when initialization, events, GPU generations, or teardown are part of the application contract. `FrameContext` has one caller-visible lifetime, and docking is now explicit:
+
+```rust
+use dear_app::{AppConfig, Application, DockingConfig, FrameContext, RunError};
+
+struct Editor;
+
+impl Application for Editor {
+    fn frame(&mut self, frame: &mut FrameContext<'_>) -> Result<(), RunError> {
+        let ui = frame.ui();
+        ui.window("Editor").build(|| ui.text("Ready"));
+        Ok(())
+    }
+}
+
+let config = AppConfig {
+    docking: DockingConfig::full_viewport(),
+    ..Default::default()
+};
+dear_app::run(config, Editor)?;
+# Ok::<(), RunError>(())
+```
 
 #### Font atlas ownership and frame-local runtime data
 

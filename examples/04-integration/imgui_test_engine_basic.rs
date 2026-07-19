@@ -475,7 +475,7 @@ impl Application for TestEngineApp {
         Ok(())
     }
 
-    fn frame(&mut self, context: &mut FrameContext<'_, '_>) -> Result<(), RunError> {
+    fn frame(&mut self, context: &mut FrameContext<'_>) -> Result<(), RunError> {
         let ui = context.ui();
         let Some(engine) = self.engine.as_mut() else {
             return Ok(());

@@ -238,7 +238,7 @@ struct ReflectApp {
 }
 
 impl Application for ReflectApp {
-    fn frame(&mut self, context: &mut FrameContext<'_, '_>) -> Result<(), RunError> {
+    fn frame(&mut self, context: &mut FrameContext<'_>) -> Result<(), RunError> {
         let ui = context.ui();
         let state = &mut self.state;
         let mut inspector = ui.inspector(&self.reflect_session);

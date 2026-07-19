@@ -22,7 +22,7 @@ fn cmap(plot_ui: &Plot3DUi, index: usize) -> [f32; 4] {
 struct ImPlot3dApp;
 
 impl Application for ImPlot3dApp {
-    fn frame(&mut self, context: &mut FrameContext<'_, '_>) -> Result<(), RunError> {
+    fn frame(&mut self, context: &mut FrameContext<'_>) -> Result<(), RunError> {
         let plot_ctx = context.addons().implot3d();
         let ui = context.ui();
         let Some(plot_ctx) = plot_ctx else {
@@ -117,13 +117,7 @@ fn main() {
         window_size: (1600.0, 900.0),
         present_mode: wgpu::PresentMode::Fifo,
         clear_color: [0.06, 0.08, 0.1, 1.0],
-        docking: DockingConfig {
-            enable: true,
-            auto_dockspace: false,
-            dockspace_flags: DockFlags::PASSTHRU_CENTRAL_NODE,
-            host_window_flags: WindowFlags::empty(),
-            host_window_name: "DockSpaceHost",
-        },
+        docking: DockingConfig::application_managed(),
         addons: AddOnsConfig::auto(),
         ini_filename: Some("implot3d_demo.ini".into()),
         ..Default::default()

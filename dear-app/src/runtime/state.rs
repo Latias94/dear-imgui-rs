@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use dear_imgui_rs as imgui;
-use dear_imgui_rs::{ConfigFlags, DockFlags};
+use dear_imgui_rs::ConfigFlags;
 use pollster::block_on;
 use winit::{
     dpi::{LogicalSize, PhysicalSize},
@@ -223,7 +223,7 @@ impl UiState {
             #[cfg(feature = "implot3d")]
             implot3d,
             docking: DockingController {
-                flags: DockFlags::from_bits_retain(config.docking.dockspace_flags.bits()),
+                flags: config.docking.dockspace_flags(),
             },
         })
     }
@@ -381,7 +381,7 @@ fn configure_context(context: &mut imgui::Context, config: &AppConfig) {
 
     let io = context.io_mut();
     let mut flags = io.config_flags();
-    if config.docking.enable {
+    if config.docking.is_enabled() {
         flags.insert(ConfigFlags::DOCKING_ENABLE);
     }
     if let Some(extra) = config.io_config_flags {
