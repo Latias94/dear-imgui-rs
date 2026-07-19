@@ -318,10 +318,9 @@ jobs:
         uses: taiki-e/install-action@nextest
 
       - name: Install fixed LLVM toolchain
-        uses: KyleMayes/install-llvm-action@v2.0.9
-        with:
-          directory: ${{ runner.temp }}/llvm
-          version: '14.0'
+        run: >-
+          python3 tools/ci/install_llvm.py
+          --destination "${{ runner.temp }}/llvm"
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
