@@ -86,7 +86,7 @@ The safe API intentionally encodes Dear ImGui FFI invariants in Rust types. Sour
 accepted when the previous safe wrapper shape could preserve stale handles, unchecked sizes,
 invalid sentinels, wrong-context access, or other states that should remain outside safe Rust.
 
-Version 0.16.0 is the next, intentionally breaking architecture release and has not been published yet. The main migrations are:
+Version 0.16.0 is an intentionally breaking architecture release. The main migrations are:
 
 - legacy Columns to Tables and imperative `DockBuilder` code to declarative `DockLayout`;
 - global reflection helpers to an owned `ReflectSession` and per-frame `Inspector`;
