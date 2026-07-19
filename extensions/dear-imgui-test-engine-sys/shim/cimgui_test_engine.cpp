@@ -465,7 +465,7 @@ ImGuiTestEngineStatus imgui_test_engine_show_windows(ImGuiTestEngine* engine, bo
 
 ImGuiTestEngineStatus imgui_test_engine_queue_tests(
     ImGuiTestEngine* engine,
-    ImGuiTestEngineGroup group,
+    int group,
     const char* filter,
     int run_flags
 ) {
@@ -596,7 +596,7 @@ ImGuiTestEngineStatus imgui_test_engine_get_result_summary(
 
 ImGuiTestEngineStatus imgui_test_engine_set_run_speed(
     ImGuiTestEngine* engine,
-    ImGuiTestEngineRunSpeed speed
+    int speed
 ) {
     return abi::boundary("imgui_test_engine_set_run_speed", [&]() {
         const ImGuiTestEngineStatus status = abi::require_engine(engine);
@@ -613,7 +613,7 @@ ImGuiTestEngineStatus imgui_test_engine_set_run_speed(
 
 ImGuiTestEngineStatus imgui_test_engine_set_verbose_level(
     ImGuiTestEngine* engine,
-    ImGuiTestEngineVerboseLevel level
+    int level
 ) {
     return abi::boundary("imgui_test_engine_set_verbose_level", [&]() {
         const ImGuiTestEngineStatus status = abi::require_engine(engine);
@@ -684,14 +684,14 @@ ImGuiTestEngineStatus imgui_test_engine_install_default_crash_handler(void) {
 }
 
 ImGuiTestEngineStatus imgui_test_engine_test_set_exception_injection(
-    ImGuiTestEngineExceptionPoint point
+    int point
 ) {
     return abi::boundary("imgui_test_engine_test_set_exception_injection", [&]() {
         if (point < ImGuiTestEngineExceptionPoint_None ||
             point > ImGuiTestEngineExceptionPoint_UpstreamCall) {
             return abi::fail(ImGuiTestEngineStatus_OutOfRange, "exception point is out of range");
         }
-        abi::g_exception_point = point;
+        abi::g_exception_point = static_cast<ImGuiTestEngineExceptionPoint>(point);
         return ImGuiTestEngineStatus_Success;
     });
 }

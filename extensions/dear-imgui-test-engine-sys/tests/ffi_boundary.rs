@@ -167,6 +167,10 @@ fn ffi_boundary_is_total_and_preserves_lifecycle_state() {
             sys::imgui_test_engine_set_verbose_level(engine, 99),
             sys::ImGuiTestEngineStatus_OutOfRange
         );
+        assert_eq!(
+            sys::imgui_test_engine_test_set_exception_injection(99),
+            sys::ImGuiTestEngineStatus_OutOfRange
+        );
 
         assert_eq!(
             sys::imgui_test_engine_script_create(ptr::null_mut()),

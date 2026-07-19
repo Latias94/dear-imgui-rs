@@ -87,9 +87,11 @@ ImGuiTestEngineStatus imgui_test_engine_start(ImGuiTestEngine* engine, ImGuiCont
 ImGuiTestEngineStatus imgui_test_engine_stop(ImGuiTestEngine* engine);
 ImGuiTestEngineStatus imgui_test_engine_post_swap(ImGuiTestEngine* engine);
 ImGuiTestEngineStatus imgui_test_engine_show_windows(ImGuiTestEngine* engine, bool* p_open);
+// Enum-domain inputs use int so foreign callers can pass arbitrary values for
+// validation without constructing invalid C++ enum objects.
 ImGuiTestEngineStatus imgui_test_engine_queue_tests(
     ImGuiTestEngine* engine,
-    ImGuiTestEngineGroup group,
+    int group,
     const char* filter,
     int run_flags
 );
@@ -108,11 +110,11 @@ ImGuiTestEngineStatus imgui_test_engine_get_result_summary(
 );
 ImGuiTestEngineStatus imgui_test_engine_set_run_speed(
     ImGuiTestEngine* engine,
-    ImGuiTestEngineRunSpeed speed
+    int speed
 );
 ImGuiTestEngineStatus imgui_test_engine_set_verbose_level(
     ImGuiTestEngine* engine,
-    ImGuiTestEngineVerboseLevel level
+    int level
 );
 ImGuiTestEngineStatus imgui_test_engine_set_capture_enabled(
     ImGuiTestEngine* engine,
@@ -243,7 +245,7 @@ typedef struct ImGuiTestEngineLifecycleCounters_c {
 } ImGuiTestEngineLifecycleCounters_c;
 
 ImGuiTestEngineStatus imgui_test_engine_test_set_exception_injection(
-    ImGuiTestEngineExceptionPoint point
+    int point
 );
 ImGuiTestEngineStatus imgui_test_engine_test_get_lifecycle_counters(
     ImGuiTestEngineLifecycleCounters_c* out_counters
