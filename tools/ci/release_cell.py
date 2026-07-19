@@ -801,8 +801,11 @@ def _validate_execution(path: Path) -> dict[str, Any]:
     if set(value) != _EXECUTION_FIELDS or value.get("schema_version") != SCHEMA_VERSION:
         raise ReleaseCellError(f"capture execution JSON has an invalid schema: {path}")
     command = value["command"]
-    if not isinstance(command, list) or not command or any(
-        not isinstance(item, str) or not item for item in command
+    if (
+        not isinstance(command, list)
+        or not command
+        or any(not isinstance(item, str) for item in command)
+        or not command[0]
     ):
         raise ReleaseCellError(f"capture execution command is invalid: {path}")
     timed_out = value["timed_out"]

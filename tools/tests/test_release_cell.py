@@ -97,6 +97,44 @@ class CaptureTests(unittest.TestCase):
         self.assertTrue((self.root / "logs/stdout.log").is_file())
         self.assertIn(b"could not run", (self.root / "logs/stderr.log").read_bytes())
 
+    def test_execution_validation_allows_empty_command_arguments(self):
+        execution = self.root / "executions/run.json"
+        result = release_cell.capture_command(
+            cell_root=self.root,
+            execution_path=Path("executions/run.json"),
+            stdout_log=Path("logs/stdout.log"),
+            stderr_log=Path("logs/stderr.log"),
+            command=(
+                sys.executable,
+                "-c",
+                "import sys; assert sys.argv[1] == ''",
+                "",
+            ),
+            timeout=5.0,
+        )
+
+        self.assertEqual(result, 0)
+        self.assertEqual(release_cell._validate_execution(execution)["command"][-1], "")
+
+    def test_execution_validation_rejects_an_empty_executable(self):
+        execution = self.root / "executions/run.json"
+        write_json(
+            execution,
+            {
+                "schema_version": 1,
+                "command": ["", "--version"],
+                "returncode": 0,
+                "timed_out": False,
+                "start_failure": False,
+                "evidence_errors": [],
+            },
+        )
+
+        with self.assertRaisesRegex(
+            release_cell.ReleaseCellError, "command is invalid"
+        ):
+            release_cell._validate_execution(execution)
+
 
 class MetadataTests(unittest.TestCase):
     def setUp(self):
