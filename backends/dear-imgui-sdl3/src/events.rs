@@ -14,22 +14,6 @@ pub fn sdl3_poll_event_ll() -> Option<SDL_Event> {
     }
 }
 
-/// Process a single low-level SDL3 event with ImGui's SDL3 backend.
-///
-/// Returns `true` if Dear ImGui consumed the event.
-///
-/// This thin compatibility helper operates on Dear ImGui's current context.
-/// Prefer [`process_sys_event_for_context`] or an RAII backend owner in
-/// multi-context code.
-pub fn process_sys_event(event: &SDL_Event) -> bool {
+pub(crate) fn process_sys_event(event: &SDL_Event) -> bool {
     unsafe { ffi::ImGui_ImplSDL3_ProcessEvent_Rust(event) }
-}
-
-/// Process a single low-level SDL3 event for a specific ImGui context.
-///
-/// Returns `true` if Dear ImGui consumed the event.
-pub fn process_sys_event_for_context(imgui: &mut Context, event: &SDL_Event) -> bool {
-    with_context(imgui, "process_sys_event_for_context()", || {
-        process_sys_event(event)
-    })
 }

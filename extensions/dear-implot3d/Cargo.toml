@@ -24,6 +24,8 @@ mint = { workspace = true, optional = true }
 
 [features]
 default = []
+prebuilt = ["dear-imgui-rs/prebuilt", "dear-implot3d-sys/prebuilt"]
+build-from-source = ["dear-imgui-rs/build-from-source", "dear-implot3d-sys/build-from-source"]
 mint = ["dep:mint"]
 wasm = ["dear-imgui-rs/wasm", "dear-implot3d-sys/wasm"]
 

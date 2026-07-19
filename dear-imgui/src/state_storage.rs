@@ -3,7 +3,7 @@
 //! Dear ImGui provides a per-window key/value storage (`ImGuiStorage`) that is
 //! used by many widgets and can also be used by custom widgets to persist state.
 //!
-use crate::{Id, Ui, sys};
+use crate::{Id, sys};
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 
@@ -64,7 +64,7 @@ impl<'ui> StateStorage<'ui> {
 ///
 /// This is useful when you want to keep widget state outside of the current
 /// window storage (e.g. sharing state across windows or providing custom storage
-/// for a widget subtree via `Ui::push_state_storage`).
+/// for a widget subtree via [`crate::Ui::with_state_storage`]).
 #[derive(Debug, Default)]
 pub struct OwnedStateStorage {
     raw: sys::ImGuiStorage,
@@ -98,42 +98,60 @@ impl Drop for OwnedStateStorage {
     }
 }
 
-/// RAII token that restores the previous state storage on drop.
-#[must_use]
-pub struct StateStorageToken<'ui, 'storage> {
-    ui: &'ui Ui,
-    prev: *mut sys::ImGuiStorage,
-    _marker: PhantomData<&'storage mut sys::ImGuiStorage>,
+struct StateStorageOverride {
+    previous: *mut sys::ImGuiStorage,
 }
 
-impl Drop for StateStorageToken<'_, '_> {
+impl Drop for StateStorageOverride {
     fn drop(&mut self) {
-        self.ui
-            .run_with_bound_context(|| unsafe { sys::igSetStateStorage(self.prev) });
+        unsafe { sys::igSetStateStorage(self.previous) }
     }
 }
 
 impl crate::ui::Ui {
-    /// Returns the current window's state storage.
+    /// Accesses the current window's state storage inside a non-escaping closure.
+    ///
+    /// The storage view cannot outlive this call. The owning context remains current for the
+    /// duration of `f`, including nested calls into other contexts.
     #[doc(alias = "GetStateStorage")]
-    pub fn state_storage(&self) -> StateStorage<'_> {
-        self.run_with_bound_context(|| unsafe { StateStorage::from_raw(sys::igGetStateStorage()) })
+    pub fn with_current_state_storage<R>(
+        &self,
+        f: impl for<'storage> FnOnce(StateStorage<'storage>) -> R,
+    ) -> R {
+        self.run_with_bound_context(|| unsafe {
+            f(StateStorage::from_raw(sys::igGetStateStorage()))
+        })
     }
 
-    /// Overrides the current state storage until the returned token is dropped.
+    /// Overrides the current state storage while `f` runs.
+    ///
+    /// The owning context remains current throughout the call. Nested overrides restore in LIFO
+    /// order, and restoration also runs if `f` panics. The replacement storage and its scoped view
+    /// cannot escape the closure.
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_rs::{Context, OwnedStateStorage, StateStorage};
+    ///
+    /// let mut context = Context::create();
+    /// let ui = context.frame();
+    /// let mut replacement = OwnedStateStorage::new();
+    /// let escaped: StateStorage<'_> =
+    ///     ui.with_state_storage(&mut replacement, |storage| storage);
+    /// # let _ = escaped;
+    /// ```
     #[doc(alias = "SetStateStorage")]
-    pub fn push_state_storage<'storage>(
+    pub fn with_state_storage<R>(
         &self,
-        storage: &'storage mut sys::ImGuiStorage,
-    ) -> StateStorageToken<'_, 'storage> {
-        self.run_with_bound_context(|| unsafe {
-            let prev = sys::igGetStateStorage();
-            sys::igSetStateStorage(storage as *mut sys::ImGuiStorage);
-            StateStorageToken {
-                ui: self,
-                prev,
-                _marker: PhantomData,
-            }
+        storage: &mut OwnedStateStorage,
+        f: impl for<'storage> FnOnce(StateStorage<'storage>) -> R,
+    ) -> R {
+        self.run_with_bound_context(|| {
+            let replacement = storage.as_raw_mut();
+            let scoped_storage = unsafe { StateStorage::from_raw(replacement) };
+            let previous = unsafe { sys::igGetStateStorage() };
+            unsafe { sys::igSetStateStorage(replacement) };
+            let _override = StateStorageOverride { previous };
+            f(scoped_storage)
         })
     }
 

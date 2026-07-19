@@ -3,6 +3,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
+fn is_http_url(value: &str) -> bool {
+    value.starts_with("http://") || value.starts_with("https://")
+}
+
+fn is_archive_urlish(value: &str) -> bool {
+    value.ends_with(".tar.gz") || value.ends_with(".tgz")
+}
+
 #[derive(Clone, Debug)]
 struct BuildConfig {
     manifest_dir: PathBuf,
@@ -41,6 +49,35 @@ impl BuildConfig {
                 .split(',')
                 .any(|f| f == "crt-static")
     }
+}
+
+fn extension_artifact_profile(
+    cfg: &BuildConfig,
+    package_mode: bool,
+) -> build_support::binding::ExtensionArtifactProfile {
+    let mut features = vec!["wchar32"];
+    if cfg!(feature = "freetype") {
+        features.push("freetype");
+    }
+    if cfg!(feature = "stack-layout") {
+        features.push("stack-layout");
+    }
+    let target = env::var("TARGET").unwrap_or_default();
+    let crt = if cfg.is_windows() && cfg.is_msvc() {
+        if cfg.use_static_crt() { "mt" } else { "md" }
+    } else {
+        ""
+    };
+    build_support::binding::extension_artifact_profile_from_env(
+        build_support::binding::ExtensionBinding::NodeEditor,
+        &cfg.manifest_dir,
+        env!("CARGO_PKG_VERSION"),
+        &target,
+        crt,
+        &features,
+        package_mode,
+    )
+    .unwrap_or_else(|error| panic!("dear-node-editor-sys: {error}"))
 }
 
 fn panic_wasm_unsupported() -> ! {
@@ -141,27 +178,23 @@ fn use_pregenerated_bindings(out_dir: &Path) -> bool {
         return false;
     }
 
-    let preg = Path::new("src").join("bindings_pregenerated.rs");
-    if preg.exists() {
-        match std::fs::read_to_string(&preg).and_then(|content| {
-            let sanitized = sanitize_bindings_string(&content);
-            std::fs::write(out_dir.join("bindings.rs"), sanitized)
-        }) {
-            Ok(()) => {
-                println!(
-                    "cargo:warning=Using pregenerated bindings: {}",
-                    preg.display()
-                );
-                true
-            }
-            Err(e) => {
-                println!("cargo:warning=Failed to write pregenerated bindings: {}", e);
-                false
-            }
-        }
-    } else {
-        false
+    let spec = build_support::binding::CrateBindingSpec::for_crate_and_target(
+        env!("CARGO_PKG_NAME"),
+        "native",
+    )
+    .expect("missing node-editor native binding spec");
+    let crate_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let preg = crate_root.join(spec.checked_in_path);
+    if !preg.exists() {
+        return false;
     }
+    spec.copy_embedded_checked_in_to_out_dir(&crate_root, out_dir)
+        .unwrap_or_else(|error| panic!("invalid pregenerated node-editor bindings: {error}"));
+    println!(
+        "cargo:warning=Using validated pregenerated bindings: {}",
+        preg.display()
+    );
+    true
 }
 
 #[cfg(feature = "bindgen")]
@@ -172,6 +205,7 @@ fn sanitize_bindings_file(path: &Path) {
     }
 }
 
+#[cfg(feature = "bindgen")]
 fn sanitize_bindings_string(content: &str) -> String {
     let mut out = String::with_capacity(content.len());
     let mut skip_next_blank = false;
@@ -197,14 +231,16 @@ fn expected_lib_name(target_env: &str) -> String {
     build_support::expected_lib_name(target_env, "dear_node_editor")
 }
 
-fn try_link_prebuilt(dir: PathBuf, target_env: &str) -> bool {
-    let lib_name = expected_lib_name(target_env);
+fn try_link_prebuilt(dir: PathBuf, cfg: &BuildConfig) -> bool {
+    let lib_name = expected_lib_name(&cfg.target_env);
     if !dir.join(&lib_name).exists() {
         return false;
     }
-    if !build_support::prebuilt_manifest_has_feature(&dir, "wchar32") {
-        return false;
-    }
+    extension_artifact_profile(cfg, false)
+        .validate_prebuilt_dir(&dir)
+        .unwrap_or_else(|error| {
+            panic!("dear-node-editor-sys: incompatible prebuilt artifact: {error}")
+        });
     println!("cargo:rustc-link-search=native={}", dir.display());
     println!("cargo:rustc-link-lib=static=dear_node_editor");
     true
@@ -213,7 +249,7 @@ fn try_link_prebuilt(dir: PathBuf, target_env: &str) -> bool {
 fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
     let target_env = &cfg.target_env;
     if let Ok(dir) = env::var("NODE_EDITOR_SYS_LIB_DIR") {
-        if try_link_prebuilt(PathBuf::from(dir.clone()), target_env) {
+        if try_link_prebuilt(PathBuf::from(dir.clone()), cfg) {
             return true;
         }
         println!(
@@ -222,9 +258,9 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
         );
     }
     if let Ok(url) = env::var("NODE_EDITOR_SYS_PREBUILT_URL") {
-        if !cfg!(feature = "prebuilt") && (url.starts_with("http") || url.ends_with(".tar.gz")) {
+        if !cfg!(feature = "prebuilt") && (is_http_url(&url) || is_archive_urlish(&url)) {
             println!(
-                "cargo:warning=NODE_EDITOR_SYS_PREBUILT_URL needs feature `prebuilt` for downloads or archives"
+                "cargo:warning=NODE_EDITOR_SYS_PREBUILT_URL is an HTTP(S) URL or archive, but feature `prebuilt` is disabled; enable it for downloads/extraction or use NODE_EDITOR_SYS_LIB_DIR"
             );
             return false;
         }
@@ -234,20 +270,33 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
             &url,
             &expected_lib_name(target_env),
             target_env,
-        ) && try_link_prebuilt(dir, target_env)
+        ) && try_link_prebuilt(dir, cfg)
         {
             return true;
         }
-    } else if cfg!(feature = "prebuilt")
-        && matches!(
+    } else {
+        let allow_feature = cfg!(feature = "prebuilt");
+        let allow_env = matches!(
             env::var("NODE_EDITOR_SYS_USE_PREBUILT").ok().as_deref(),
             Some("1") | Some("true") | Some("yes")
-        )
-    {
-        if let Some(dir) = try_download_prebuilt_from_release(cfg)
-            && try_link_prebuilt(dir, target_env)
-        {
-            return true;
+        );
+        if allow_env && !allow_feature {
+            println!(
+                "cargo:warning=NODE_EDITOR_SYS_USE_PREBUILT is set, but feature `prebuilt` is disabled"
+            );
+        }
+        if allow_feature {
+            let source = if allow_env { "feature+env" } else { "feature" };
+            let (owner, repo) = build_support::release_owner_repo();
+            println!(
+                "cargo:warning=auto-prebuilt enabled (dear-node-editor-sys): source={}, repo={}/{}",
+                source, owner, repo
+            );
+            if let Some(dir) = try_download_prebuilt_from_release(cfg)
+                && try_link_prebuilt(dir, cfg)
+            {
+                return true;
+            }
         }
     }
     false
@@ -256,28 +305,32 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
 fn prebuilt_cache_root(cfg: &BuildConfig) -> PathBuf {
     build_support::prebuilt_cache_root_from_env_or_target(
         &cfg.manifest_dir,
-        "NODE_EDITOR_SYS_PREBUILT_CACHE",
-        "dear-node-editor-sys-prebuilt",
+        "NODE_EDITOR_SYS_CACHE_DIR",
+        "dear-node-editor-prebuilt",
     )
+    .join(extension_artifact_profile(cfg, false).cache_key())
 }
 
 fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
+    let profile = extension_artifact_profile(cfg, false);
+    let tags = build_support::release_tags("dear-node-editor-sys", &profile.version);
+    if let Ok(package_dir) = env::var("NODE_EDITOR_SYS_PACKAGE_DIR") {
+        let archive_path = PathBuf::from(package_dir).join(&profile.archive_name);
+        if archive_path.exists() {
+            let cache_root = prebuilt_cache_root(cfg);
+            if let Ok(lib_dir) = build_support::extract_archive_to_cache(
+                &archive_path,
+                &cache_root,
+                &expected_lib_name(&cfg.target_env),
+            ) {
+                return Some(lib_dir);
+            }
+        }
+    }
     if build_support::is_offline() {
         return None;
     }
-    let target = env::var("TARGET").ok()?;
-    let version = env::var("CARGO_PKG_VERSION").ok()?;
-    let crt = build_support::msvc_crt_suffix_from_env(Some(&cfg.target_env)).unwrap_or("");
-    let archive = build_support::compose_archive_name(
-        "dear-node-editor",
-        &version,
-        &target,
-        "static",
-        None,
-        crt,
-    );
-    let tags = build_support::release_tags("dear-node-editor-sys", &version);
-    let urls = build_support::release_candidate_urls_env(&tags, &[archive]);
+    let urls = build_support::release_candidate_urls_env(&tags, &[profile.archive_name]);
     let cache_root = prebuilt_cache_root(cfg);
     let lib_name = expected_lib_name(&cfg.target_env);
     for url in urls {
@@ -355,9 +408,30 @@ fn main() {
     println!("cargo:rerun-if-env-changed=NODE_EDITOR_SYS_SKIP_CC");
     println!("cargo:rerun-if-env-changed=NODE_EDITOR_SYS_PREBUILT_URL");
     println!("cargo:rerun-if-env-changed=NODE_EDITOR_SYS_FORCE_BUILD");
+    println!("cargo:rerun-if-env-changed=NODE_EDITOR_SYS_CACHE_DIR");
     println!("cargo:rerun-if-env-changed=NODE_EDITOR_SYS_USE_PREBUILT");
+    println!("cargo:rerun-if-env-changed=NODE_EDITOR_SYS_PACKAGE_DIR");
     println!("cargo:rerun-if-env-changed=DEAR_IMGUI_RS_REGEN_BINDINGS");
+    println!("cargo:rerun-if-env-changed=DEAR_IMGUI_RS_CANDIDATE_SHA");
+    println!("cargo:rerun-if-env-changed=DEAR_IMGUI_CORE_ARTIFACT_IDENTITY_HASH");
+    println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_ARTIFACT_IDENTITY_HASH");
+    println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_CANDIDATE_SHA");
     println!("cargo:rerun-if-env-changed=DOCS_RS");
+
+    if cfg!(feature = "package-bin") {
+        let profile = extension_artifact_profile(&cfg, true);
+        profile
+            .write_package_metadata(&cfg.out_dir)
+            .unwrap_or_else(|error| panic!("dear-node-editor-sys: {error}"));
+        println!(
+            "cargo:rustc-env=DEAR_IMGUI_EXTENSION_ARTIFACT_TARGET={}",
+            profile.target
+        );
+        println!(
+            "cargo:rustc-env=DEAR_IMGUI_EXTENSION_ARTIFACT_CRT={}",
+            profile.crt
+        );
+    }
 
     if cfg.docs_rs {
         println!(
@@ -406,8 +480,9 @@ fn main() {
         generate_bindings(&cfg, &node_editor_root, &imgui_src, &cimgui_root);
     }
 
-    let force_build =
-        cfg!(feature = "build-from-source") || env::var("NODE_EDITOR_SYS_FORCE_BUILD").is_ok();
+    let force_build = cfg!(feature = "package-bin")
+        || cfg!(feature = "build-from-source")
+        || env::var("NODE_EDITOR_SYS_FORCE_BUILD").is_ok();
     let linked = if force_build {
         false
     } else {

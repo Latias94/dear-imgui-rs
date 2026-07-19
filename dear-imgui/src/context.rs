@@ -5,6 +5,7 @@
 //! your chosen backend. See struct-level docs for details and caveats about one
 //! active context at a time.
 
+mod attachment;
 pub(crate) mod binding;
 mod clipboard;
 mod core;
@@ -12,18 +13,23 @@ mod fonts;
 mod frame;
 mod platform;
 mod settings;
+mod snapshot_hub;
 mod suspended;
 #[cfg(test)]
 mod tests;
 mod texture_registry;
 
-pub use self::core::{Context, ContextAliveToken};
+pub use self::attachment::{
+    ContextAttachment, ContextAttachmentError, ContextAttachmentLease, ContextAttachmentPhase,
+    ContextAttachmentRole, ContextDestroyed, ContextTeardown,
+};
+pub use self::binding::{
+    ContextAliveToken, ContextBinding, ContextBindingError, ContextId, ContextLifecycle,
+};
+pub use self::core::Context;
 pub use self::frame::{FrameLifecycleState, FramePrepareOptions, FrameResult, FrameToken};
 pub use self::suspended::SuspendedContext;
-pub use self::texture_registry::RegisteredUserTexture;
+pub(crate) use self::texture_registry::SharedTextureRegistry;
 
-pub(crate) use self::texture_registry::unregister_user_texture_from_all_contexts;
-
-// Dear ImGui is not thread-safe. The Context must not be sent or shared across
-// threads. If you need multi-threaded rendering, capture render data via
-// OwnedDrawData and move that to another thread for rendering.
+// Dear ImGui is not thread-safe. Context stays on its owner thread; detached
+// rendering moves only a Context-created FrameSnapshot across threads.

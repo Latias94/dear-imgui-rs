@@ -7,7 +7,7 @@
 //!
 //! - **Basic rendering**: Render Dear ImGui draw data using OpenGL
 //! - **Texture support**: Handle font textures and user textures
-//! - **Multi-viewport support**: Support for multiple windows (feature-gated)
+//! - **Multi-viewport support**: Stable owning renderer runtime (feature-gated)
 //! - **OpenGL compatibility**: Support for OpenGL 2.1+ and OpenGL ES 2.0+
 //!
 //! # Example
@@ -30,8 +30,8 @@
 //! // In your render loop:
 //! // imgui.new_frame();
 //! // ... build your UI ...
-//! // let draw_data = imgui.render();
-//! // renderer.render(draw_data).unwrap();
+//! // let frame = imgui.render();
+//! // renderer.render(frame).unwrap();
 //! ```
 
 // Re-export glow to make it easier for users to use the correct version.

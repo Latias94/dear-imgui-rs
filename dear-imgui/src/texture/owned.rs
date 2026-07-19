@@ -5,9 +5,9 @@ use std::ptr::NonNull;
 /// Owned texture data managed by Dear ImGui.
 ///
 /// This owns an `ImTextureData` instance allocated by Dear ImGui (C++) and will
-/// destroy it on drop. It dereferences to [`TextureData`] so you can call the
-/// same APIs as on borrowed texture data (e.g. items returned by
-/// `DrawData::textures_mut()`).
+/// destroy it on drop. It dereferences to [`TextureData`] while application code owns it.
+/// Registering it with a Context transfers ownership; later access uses
+/// `Context::with_texture` or `Context::with_texture_mut`.
 pub struct OwnedTextureData {
     raw: NonNull<sys::ImTextureData>,
 }
@@ -40,7 +40,6 @@ impl OwnedTextureData {
 
 impl Drop for OwnedTextureData {
     fn drop(&mut self) {
-        crate::context::unregister_user_texture_from_all_contexts(self.raw.as_ptr());
         unsafe { sys::ImTextureData_destroy(self.raw.as_ptr()) }
     }
 }

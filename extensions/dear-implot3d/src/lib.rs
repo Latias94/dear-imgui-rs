@@ -43,7 +43,6 @@ pub use dear_imgui_rs::{Context, Ui};
 pub(crate) use dear_implot3d_sys as sys;
 
 mod builder;
-mod compat_ffi;
 mod context;
 mod debug_state;
 mod demos;

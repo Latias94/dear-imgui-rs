@@ -82,14 +82,15 @@ impl<'a> Plot for InfLinesPlot<'a> {
         let Ok(count) = i32::try_from(self.positions.len()) else {
             return;
         };
-        let _guard = plot_ui.bind();
-        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_with_style(
-                self.style,
-                self.flags.bits() | self.item_flags.bits(),
-                self.layout,
-            );
-            sys::ImPlot_PlotInfLines_doublePtr(label_ptr, self.positions.as_ptr(), count, spec);
+        plot_ui.with_bound_context(|| {
+            with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+                let spec = plot_spec_with_style(
+                    self.style,
+                    self.flags.bits() | self.item_flags.bits(),
+                    self.layout,
+                );
+                sys::ImPlot_PlotInfLines_doublePtr(label_ptr, self.positions.as_ptr(), count, spec);
+            })
         })
     }
 

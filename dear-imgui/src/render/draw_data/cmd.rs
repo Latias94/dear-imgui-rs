@@ -101,7 +101,7 @@ mod tests {
 
     #[test]
     fn draw_command_params_resolve_managed_texture_ids() {
-        let mut texture = crate::texture::TextureData::new();
+        let mut texture = crate::texture::OwnedTextureData::new();
         let texture_id = TextureId::new(17);
         texture.set_tex_id(texture_id);
 
@@ -122,7 +122,7 @@ mod tests {
 
     #[test]
     fn draw_command_iteration_allows_pending_managed_textures() {
-        let mut texture = crate::texture::TextureData::new();
+        let mut texture = crate::texture::OwnedTextureData::new();
         assert!(texture.tex_id().is_null());
 
         let mut command = sys::ImDrawCmd::default();

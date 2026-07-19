@@ -245,6 +245,102 @@ extern "C" void dear_imgui_rs_platform_io_set_platform_get_window_work_area_inse
     platform_io->Platform_GetWindowWorkAreaInsets = DearImguiRsPlatformGetWindowWorkAreaInsetsHook;
 }
 
+extern "C" int dear_imgui_rs_platform_io_clear_platform_set_window_pos_if_pointer_param(
+    ImGuiPlatformIO* platform_io,
+    void (*user_callback)(ImGuiViewport* vp, const ImVec2* pos))
+{
+    DearImguiRsPlatformIoHookStorage* storage = DearImguiRsFindPlatformIoHookStorage(platform_io);
+    if (platform_io == nullptr || storage == nullptr || storage->Platform_SetWindowPos != user_callback)
+        return 0;
+
+    const bool owned_slot = platform_io->Platform_SetWindowPos == DearImguiRsPlatformSetWindowPosHook;
+    storage->Platform_SetWindowPos = nullptr;
+    if (owned_slot)
+        platform_io->Platform_SetWindowPos = nullptr;
+    DearImguiRsPrunePlatformIoHookStorageIfEmpty(platform_io);
+    return owned_slot ? 1 : 0;
+}
+
+extern "C" int dear_imgui_rs_platform_io_clear_platform_set_window_size_if_pointer_param(
+    ImGuiPlatformIO* platform_io,
+    void (*user_callback)(ImGuiViewport* vp, const ImVec2* size))
+{
+    DearImguiRsPlatformIoHookStorage* storage = DearImguiRsFindPlatformIoHookStorage(platform_io);
+    if (platform_io == nullptr || storage == nullptr || storage->Platform_SetWindowSize != user_callback)
+        return 0;
+
+    const bool owned_slot = platform_io->Platform_SetWindowSize == DearImguiRsPlatformSetWindowSizeHook;
+    storage->Platform_SetWindowSize = nullptr;
+    if (owned_slot)
+        platform_io->Platform_SetWindowSize = nullptr;
+    DearImguiRsPrunePlatformIoHookStorageIfEmpty(platform_io);
+    return owned_slot ? 1 : 0;
+}
+
+extern "C" int dear_imgui_rs_platform_io_clear_platform_get_window_pos_if_out_param(
+    ImGuiPlatformIO* platform_io,
+    void (*user_callback)(ImGuiViewport* vp, ImVec2* out_pos))
+{
+    DearImguiRsPlatformIoHookStorage* storage = DearImguiRsFindPlatformIoHookStorage(platform_io);
+    if (platform_io == nullptr || storage == nullptr || storage->Platform_GetWindowPos != user_callback)
+        return 0;
+
+    const bool owned_slot = platform_io->Platform_GetWindowPos == DearImguiRsPlatformGetWindowPosHook;
+    storage->Platform_GetWindowPos = nullptr;
+    if (owned_slot)
+        platform_io->Platform_GetWindowPos = nullptr;
+    DearImguiRsPrunePlatformIoHookStorageIfEmpty(platform_io);
+    return owned_slot ? 1 : 0;
+}
+
+extern "C" int dear_imgui_rs_platform_io_clear_platform_get_window_size_if_out_param(
+    ImGuiPlatformIO* platform_io,
+    void (*user_callback)(ImGuiViewport* vp, ImVec2* out_size))
+{
+    DearImguiRsPlatformIoHookStorage* storage = DearImguiRsFindPlatformIoHookStorage(platform_io);
+    if (platform_io == nullptr || storage == nullptr || storage->Platform_GetWindowSize != user_callback)
+        return 0;
+
+    const bool owned_slot = platform_io->Platform_GetWindowSize == DearImguiRsPlatformGetWindowSizeHook;
+    storage->Platform_GetWindowSize = nullptr;
+    if (owned_slot)
+        platform_io->Platform_GetWindowSize = nullptr;
+    DearImguiRsPrunePlatformIoHookStorageIfEmpty(platform_io);
+    return owned_slot ? 1 : 0;
+}
+
+extern "C" int dear_imgui_rs_platform_io_clear_platform_get_window_framebuffer_scale_if_out_param(
+    ImGuiPlatformIO* platform_io,
+    void (*user_callback)(ImGuiViewport* vp, ImVec2* out_scale))
+{
+    DearImguiRsPlatformIoHookStorage* storage = DearImguiRsFindPlatformIoHookStorage(platform_io);
+    if (platform_io == nullptr || storage == nullptr || storage->Platform_GetWindowFramebufferScale != user_callback)
+        return 0;
+
+    const bool owned_slot = platform_io->Platform_GetWindowFramebufferScale == DearImguiRsPlatformGetWindowFramebufferScaleHook;
+    storage->Platform_GetWindowFramebufferScale = nullptr;
+    if (owned_slot)
+        platform_io->Platform_GetWindowFramebufferScale = nullptr;
+    DearImguiRsPrunePlatformIoHookStorageIfEmpty(platform_io);
+    return owned_slot ? 1 : 0;
+}
+
+extern "C" int dear_imgui_rs_platform_io_clear_platform_get_window_work_area_insets_if_out_param(
+    ImGuiPlatformIO* platform_io,
+    void (*user_callback)(ImGuiViewport* vp, ImVec4* out_insets))
+{
+    DearImguiRsPlatformIoHookStorage* storage = DearImguiRsFindPlatformIoHookStorage(platform_io);
+    if (platform_io == nullptr || storage == nullptr || storage->Platform_GetWindowWorkAreaInsets != user_callback)
+        return 0;
+
+    const bool owned_slot = platform_io->Platform_GetWindowWorkAreaInsets == DearImguiRsPlatformGetWindowWorkAreaInsetsHook;
+    storage->Platform_GetWindowWorkAreaInsets = nullptr;
+    if (owned_slot)
+        platform_io->Platform_GetWindowWorkAreaInsets = nullptr;
+    DearImguiRsPrunePlatformIoHookStorageIfEmpty(platform_io);
+    return owned_slot ? 1 : 0;
+}
+
 extern "C" void dear_imgui_rs_platform_io_set_renderer_set_window_size(
     ImGuiPlatformIO* platform_io,
     void (*user_callback)(ImGuiViewport* vp, const ImVec2* size))

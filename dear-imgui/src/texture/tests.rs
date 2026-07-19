@@ -11,7 +11,7 @@ fn texture_id_try_as_usize_reports_overflow() {
 
 #[test]
 fn texture_create_rejects_invalid_sizes_and_status_before_ffi() {
-    let mut texture = TextureData::new();
+    let mut texture = OwnedTextureData::new();
 
     assert!(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -44,7 +44,7 @@ fn texture_create_rejects_invalid_sizes_and_status_before_ffi() {
 
 #[test]
 fn texture_metadata_setters_are_destroyed_only_and_keep_bpp_in_sync() {
-    let mut texture = TextureData::new();
+    let mut texture = OwnedTextureData::new();
 
     texture.set_width(4);
     texture.set_height(3);
@@ -86,7 +86,7 @@ fn texture_metadata_setters_are_destroyed_only_and_keep_bpp_in_sync() {
 
 #[test]
 fn unused_frames_is_a_checked_usize_count() {
-    let mut texture = TextureData::new();
+    let mut texture = OwnedTextureData::new();
     unsafe {
         (*texture.as_raw_mut()).UnusedFrames = 7;
     }
@@ -104,23 +104,8 @@ fn unused_frames_is_a_checked_usize_count() {
 }
 
 #[test]
-fn managed_texture_id_is_a_typed_texture_identity() {
-    let mut texture = TextureData::new();
-    unsafe {
-        (*texture.as_raw_mut()).UniqueID = 42;
-    }
-
-    let id: ManagedTextureId = texture.unique_id();
-    let snapshot_id: crate::render::snapshot::ManagedTextureId = id;
-
-    assert_eq!(id, ManagedTextureId::from_raw(42));
-    assert_eq!(id.raw(), 42);
-    assert_eq!(snapshot_id, id);
-}
-
-#[test]
 fn set_data_checks_byte_count_before_allocating_or_copying() {
-    let mut texture = TextureData::new();
+    let mut texture = OwnedTextureData::new();
     unsafe {
         let raw = texture.as_raw_mut();
         (*raw).Format = sys::ImTextureFormat_RGBA32;
@@ -136,7 +121,7 @@ fn set_data_checks_byte_count_before_allocating_or_copying() {
         .is_err()
     );
 
-    let mut texture = TextureData::new();
+    let mut texture = OwnedTextureData::new();
     unsafe {
         let raw = texture.as_raw_mut();
         (*raw).Format = sys::ImTextureFormat_RGBA32;
@@ -153,4 +138,18 @@ fn set_data_checks_byte_count_before_allocating_or_copying() {
         .is_err()
     );
     assert!(unsafe { (*texture.as_raw()).Pixels.is_null() });
+}
+
+#[test]
+fn initial_pixel_upload_preserves_the_create_request() {
+    let mut texture = OwnedTextureData::new();
+    texture.create(TextureFormat::RGBA32, 1, 1);
+    assert_eq!(texture.status(), TextureStatus::WantCreate);
+
+    texture.set_data(&[1, 2, 3, 4]);
+    assert_eq!(texture.status(), TextureStatus::WantCreate);
+
+    texture.set_status(TextureStatus::OK);
+    texture.set_data(&[4, 3, 2, 1]);
+    assert_eq!(texture.status(), TextureStatus::WantUpdates);
 }

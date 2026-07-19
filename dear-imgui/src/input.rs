@@ -6,6 +6,13 @@
 //!
 //! See [`crate::Io`] for the per-frame input state and configuration.
 //!
+//! Shortcut configuration uses [`ShortcutOptions`]. The ambiguous `InputFlags` alias is
+//! intentionally unavailable:
+//!
+//! ```compile_fail
+//! use dear_imgui_rs::InputFlags;
+//! ```
+//!
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
@@ -21,7 +28,7 @@ mod ui;
 pub use keyboard::{Key, KeyChord, KeyMods};
 pub use mouse::{MouseButton, MouseCursor, MouseSource};
 pub use shortcut::{
-    InputFlags, ItemKeyOwnerFlags, NextItemShortcutFlags, NextItemShortcutOptions, ShortcutFlags,
+    ItemKeyOwnerFlags, NextItemShortcutFlags, NextItemShortcutOptions, ShortcutFlags,
     ShortcutGlobalRouteFlags, ShortcutOptions, ShortcutRoute,
 };
 pub use text_flags::{InputScalarFlags, InputTextFlags, InputTextMultilineFlags};

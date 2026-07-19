@@ -111,3 +111,59 @@ fn image_button_rejects_invalid_geometry_and_colors_before_ffi() {
         });
     });
 }
+
+fn managed_texture() -> imgui::texture::OwnedTextureData {
+    let mut texture = imgui::texture::OwnedTextureData::new();
+    texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
+    texture.set_data(&[255, 255, 255, 255]);
+    texture
+}
+
+#[test]
+fn managed_images_resolve_only_in_the_owner_context_and_generation() {
+    let _guard = test_guard();
+
+    let mut owner = imgui::Context::create();
+    prepare_context(&mut owner);
+    let texture = owner.register_texture(managed_texture());
+    {
+        let ui = owner.frame();
+        let _ = ui.window("managed owner").build(|| {
+            ui.image(texture, [8.0, 8.0]);
+            ui.get_window_draw_list().add_image(
+                texture,
+                [0.0, 0.0],
+                [8.0, 8.0],
+                [0.0, 0.0],
+                [1.0, 1.0],
+                [1.0, 1.0, 1.0, 1.0],
+            );
+        });
+    }
+    let _ = owner.render();
+    let suspended_owner = owner.suspend();
+
+    let mut foreign = imgui::Context::create();
+    prepare_context(&mut foreign);
+    let foreign_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let ui = foreign.frame();
+        ui.image(texture, [8.0, 8.0]);
+    }));
+    assert!(foreign_result.is_err());
+    drop(foreign);
+
+    let mut owner = suspended_owner
+        .activate()
+        .unwrap_or_else(|_| panic!("owner Context should reactivate"));
+    owner
+        .remove_texture(texture)
+        .expect("texture without a renderer binding retires immediately");
+    let replacement = owner.register_texture(managed_texture());
+    assert_ne!(texture, replacement);
+
+    let stale_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let ui = owner.frame();
+        ui.image(texture, [8.0, 8.0]);
+    }));
+    assert!(stale_result.is_err());
+}

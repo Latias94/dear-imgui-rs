@@ -7,6 +7,9 @@ This script performs various checks to ensure the workspace is ready for publish
 - Pregenerated bindings exist for -sys crates
 - Git working tree is clean
 - Cargo.lock is up-to-date
+- Python release-tool contracts and release policy are valid
+- The public API surface matches its checked-in policy
+- Core and supported high-level extensions build for wasm32
 - Documentation builds successfully
 - Packaged core crates build from an offline consumer
 
@@ -70,6 +73,14 @@ PRIVATE_RELEASE_TEST_PACKAGES = ("xtask",)
 PACKAGE_TEST_FEATURES = {
     "dear-imgui-build-support": ("binding-spec",),
 }
+WASM_RELEASE_PACKAGES = (
+    "dear-imgui-rs",
+    "dear-implot",
+    "dear-implot3d",
+    "dear-imnodes",
+    "dear-imguizmo",
+    "dear-imguizmo-quat",
+)
 
 
 class Colors:
@@ -146,6 +157,73 @@ def cargo_nextest_available(repo_root: Path) -> bool:
         capture=True,
     )
     return code == 0
+
+
+def release_contract_commands() -> list[tuple[str, list[str]]]:
+    """Build the deterministic local release-contract command sequence."""
+    wasm_features = ",".join(
+        f"{package_name}/wasm" for package_name in WASM_RELEASE_PACKAGES
+    )
+    wasm_command = [
+        "cargo",
+        "check",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--no-default-features",
+    ]
+    for package_name in WASM_RELEASE_PACKAGES:
+        wasm_command.extend(["-p", package_name])
+    wasm_command.extend(["--features", wasm_features])
+
+    return [
+        (
+            "Python contract suite",
+            [
+                sys.executable,
+                "-B",
+                "-m",
+                "unittest",
+                "discover",
+                "-s",
+                "tools/tests",
+                "-p",
+                "test_*.py",
+            ],
+        ),
+        (
+            "API surface policy",
+            [sys.executable, "tools/api_surface_report.py", "--check"],
+        ),
+        (
+            "Workflow policy",
+            [sys.executable, "tools/ci/workflow_policy.py", "--check"],
+        ),
+        (
+            "WASM core and high-level extensions",
+            wasm_command,
+        ),
+    ]
+
+
+def check_release_contracts(repo_root: Path) -> Tuple[bool, List[str]]:
+    """Run local release contracts in order and stop at the first failure."""
+    print_check("Python, API, workflow, and WASM release contracts")
+    for label, command in release_contract_commands():
+        print(f"\n  Checking {label}...")
+        code, stdout, stderr = run_command(
+            command,
+            cwd=repo_root,
+            capture=False,
+        )
+        if code != 0:
+            detail = stderr.strip() or stdout.strip() or f"exit code {code}"
+            error = f"{label} failed: {detail}"
+            print_error(error)
+            return False, [error]
+        print_success(label)
+
+    print_success("All local release contracts passed")
+    return True, []
 
 
 def release_test_commands(use_nextest: bool) -> list[tuple[str, list[str]]]:
@@ -627,6 +705,9 @@ def main() -> int:
             checks.append(("Documentation", check_docs_build(repo_root)))
 
         if not args.skip_test_check:
+            checks.append(
+                ("Release Contracts", check_release_contracts(repo_root))
+            )
             checks.append(("Tests", check_tests(repo_root)))
 
         if not args.skip_package_check:
@@ -662,7 +743,11 @@ def main() -> int:
         print("Next steps:")
         print("  1. Review changes one more time")
         print("  2. Run: python3 tools/publish.py --dry-run")
-        print("  3. Run: python3 tools/publish.py")
+        print("  3. Download the authoritative same-SHA release gate result")
+        print(
+            "  4. Run: python3 tools/publish.py "
+            "--release-gate-result PATH/to/gate-result.json"
+        )
         return 0
     else:
         print()

@@ -90,15 +90,43 @@ target.
 | Ash renderer | Native Vulkan via Ash 0.38. Winit and SDL3 multi-viewport surface adapters are mutually exclusive and share one swapchain runtime. |
 | Browser multi-viewport | Unsupported. Browser integrations render one main canvas. |
 
-WGPU and Ash multi-viewport registration is unsafe because callbacks retain a
-renderer pointer. The renderer or an owner containing it must keep a stable
-address until explicit shutdown. Platform callbacks are installed first;
-renderer callbacks are installed before any secondary window exists. Renderer
-shutdown destroys those windows and clears only the five `Renderer_*` slots it
-owns, then the platform backend is shut down. Registration refuses foreign
-renderer callbacks or `RendererUserData` instead of overwriting them. Platform
-backends use an exclusive whole-`Platform_*`-table model and must not be
-composed with another platform adapter on the same context.
+The six native safe extension crates forward build strategy through both the
+core and their corresponding sys crate. Select the route on the safe crate:
+
+| Safe extension | `prebuilt` | `build-from-source` | `wasm` |
+| --- | --- | --- | --- |
+| `dear-implot` | yes | yes | yes |
+| `dear-implot3d` | yes | yes | yes |
+| `dear-imnodes` | yes | yes | yes |
+| `dear-imguizmo` | yes | yes | yes |
+| `dear-imguizmo-quat` | yes | yes | yes |
+| `dear-node-editor` | yes | yes | no, native-only |
+
+When Cargo unifies `prebuilt` and `build-from-source`, source wins. Test Engine
+is deliberately outside this table: it has no prebuilt or WASM route and always
+enables the source-built core hooks.
+
+Each Context owns its managed texture allocations and permits one non-cloneable
+`RendererConsumer` generation. Synchronous renderers consume a
+`RenderedFrame<'ctx>` by value, reconcile request-bound `TextureFeedback`, and
+read its draw data only while the Context borrow is active. Threaded or render-
+graph integrations move one pointer-free, non-cloneable `FrameSnapshot` across
+the boundary and consume it with `FrameSnapshot::commit`; dropping it records
+an abandoned epoch rather than acknowledging destroy requests. Managed texture
+retirement completes only after matching-generation destroy feedback and the
+ordered completion watermark both permit reclamation.
+
+Winit owns platform windows and the complete `Platform_*` callback table.
+WGPU, Glow, and Ash multi-viewport wrappers own callback-visible renderer state
+in stable internal storage, so callers no longer pin a renderer or uphold an
+unsafe address-stability contract. WGPU and Glow attachment is safe. Ash
+attachment remains unsafe only because Rust cannot prove that the raw Vulkan
+instance, physical device, surface, queues, and queue-family indices share the
+declared device lineage. Platform callbacks are installed first; renderer
+callbacks are installed before any secondary window exists. Registration
+refuses foreign callbacks or user data instead of overwriting them. Explicit
+shutdown releases the renderer runtime before the platform runtime; Context-
+first teardown invokes the same renderer-resource and platform-window phases.
 
 ### PlatformIO callback ABI
 

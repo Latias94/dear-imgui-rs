@@ -7,6 +7,18 @@ This crate pairs with `dear-imgui-sys` and is intended for advanced users. Most 
 - Upstream: https://github.com/ocornut/imgui_test_engine
 - Submodule path: `extensions/dear-imgui-test-engine-sys/third-party/imgui_test_engine`
 
+## ABI Contract
+
+- Every shim operation returns `ImGuiTestEngineStatus`; values are written through validated output
+  pointers only after the operation succeeds.
+- The shim catches C++ exceptions at every exported boundary. No exception is allowed to unwind into
+  Rust. Call `imgui_test_engine_get_last_error()` immediately after a failing operation to copy its
+  thread-local diagnostic.
+- Engine and script handles are non-thread-safe and must follow the documented create, transfer,
+  unbind, and destroy lifecycle. A successfully destroyed raw handle is invalid immediately.
+- Prefer the safe `dear-imgui-test-engine` crate when Context identity, frame scope, or retryable
+  teardown matters.
+
 ## Features
 
 - `freetype`: passthrough to `dear-imgui-sys/freetype`.
@@ -14,17 +26,39 @@ This crate pairs with `dear-imgui-sys` and is intended for advanced users. Most 
 
 ## Build Modes
 
-- Source build (default)
+- Native source build (the only runtime route)
   - Compiles Dear ImGui Test Engine sources + crate shim using `cc`.
   - Inherits include paths/defines from `dear-imgui-sys`.
 - Docs.rs
   - Uses pregenerated Rust bindings and skips native C/C++ compilation.
 
+There is deliberately no Test Engine prebuilt or WASM feature. The paired
+`dear-imgui-sys/test-engine` feature forces the core native artifact to build
+from source because the hooks change that artifact. WASM targets and
+prebuilt-package generation reject this combination before linking. Workspace
+`--all-features` is therefore not a supported Test Engine build command.
+
+The checked-in bindings are part of the repository-wide canonical binding
+contract. Their crate-local profile records the exact upstream Test Engine
+revision, wrapper/header shim, native target assumptions, generator settings,
+and deterministic specification hash. Reproduce and compare them with:
+
+```bash
+cargo run -p xtask -- verify-bindings
+```
+
+After an intentional source or binding-specification change, maintainers use
+`cargo run -p xtask -- verify-bindings --update --allow-dirty` and review the
+source metadata and generated diff together. Test Engine provenance is kept
+separate from native prebuilt artifact manifests because no Test Engine
+prebuilt is published.
+
 ## Environment Variables
 
 - `IMGUI_TEST_ENGINE_SYS_SKIP_CC`
   - If set, skip native C/C++ compilation and use pregenerated bindings.
-  - Useful for cross-target `cargo check` or constrained CI jobs.
+  - Useful only for docs/binding checks and constrained CI jobs; it does not
+    provide a linkable Test Engine runtime.
 
 The build script also consumes values exported by `dear-imgui-sys`:
 

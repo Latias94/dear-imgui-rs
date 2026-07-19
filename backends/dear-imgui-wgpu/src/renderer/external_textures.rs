@@ -68,7 +68,10 @@ impl WgpuRenderer {
             .update_custom_sampler_for_texture(texture_id, sampler.clone())
     }
 
-    /// Unregister (remove) a texture by id. Safe for both external and managed textures.
+    /// Unregister an application-owned texture ID.
+    ///
+    /// Context-owned managed textures are removed through `Context::remove_texture` and cannot be
+    /// bypassed through this legacy texture API.
     pub fn unregister_texture(&mut self, texture_id: TextureId) {
         self.texture_manager.remove_texture(texture_id);
         self.texture_manager

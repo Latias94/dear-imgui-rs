@@ -23,6 +23,8 @@ mint = { workspace = true, optional = true }
 
 [features]
 default = ["glam"]
+prebuilt = ["dear-imgui-rs/prebuilt", "dear-imguizmo-sys/prebuilt"]
+build-from-source = ["dear-imgui-rs/build-from-source", "dear-imguizmo-sys/build-from-source"]
 # Docking is always enabled; remove feature.
 # Enable multi-viewport support (commented out while WIP)
 # multi-viewport = ["dear-imgui-rs/multi-viewport", "dear-imguizmo-sys/multi-viewport"]

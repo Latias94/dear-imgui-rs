@@ -21,105 +21,8 @@ unsafe extern "C" fn draw_callback_marker(
 }
 
 #[test]
-fn platform_io_textures_empty_is_safe() {
-    let mut raw: sys::ImGuiPlatformIO = new_platform_io();
-
-    raw.Textures.Size = 0;
-    raw.Textures.Data = std::ptr::null_mut();
-    let mut pio = PlatformIo {
-        raw: UnsafeCell::new(raw),
-    };
-    assert_eq!(pio.textures().count(), 0);
-    assert!(pio.textures_mut().next().is_none());
-    assert_eq!(pio.textures_count(), 0);
-
-    let mut raw: sys::ImGuiPlatformIO = new_platform_io();
-    raw.Textures.Size = 1;
-    raw.Textures.Data = std::ptr::null_mut();
-    let mut pio = PlatformIo {
-        raw: UnsafeCell::new(raw),
-    };
-    assert_eq!(pio.textures().count(), 0);
-    assert!(pio.textures_mut().next().is_none());
-    assert_eq!(pio.textures_count(), 0);
-    assert!(pio.texture(0).is_none());
-}
-
-#[test]
-fn apply_texture_feedback_matches_typed_managed_texture_ids() {
-    let mut texture = crate::texture::TextureData::new();
-    unsafe {
-        (*texture.as_raw_mut()).UniqueID = 314;
-    }
-    texture.set_status(crate::texture::TextureStatus::WantCreate);
-    let id = texture.unique_id();
-
-    let mut texture_ptr = texture.as_mut().as_raw_mut();
-    let mut raw: sys::ImGuiPlatformIO = new_platform_io();
-    raw.Textures.Size = 1;
-    raw.Textures.Capacity = 1;
-    raw.Textures.Data = &mut texture_ptr;
-
-    let mut pio = PlatformIo {
-        raw: UnsafeCell::new(raw),
-    };
-    let applied =
-        pio.apply_texture_feedback(&[crate::render::snapshot::TextureFeedback::with_tex_id(
-            id,
-            crate::texture::TextureStatus::OK,
-            crate::texture::TextureId::new(99),
-        )]);
-
-    assert_eq!(applied, 1);
-    assert_eq!(texture.status(), crate::texture::TextureStatus::OK);
-    assert_eq!(texture.tex_id(), crate::texture::TextureId::new(99));
-}
-
-#[test]
-fn apply_texture_feedback_can_set_backend_user_data_and_clear_on_destroy() {
-    let mut texture = crate::texture::TextureData::new();
-    unsafe {
-        (*texture.as_raw_mut()).UniqueID = 2718;
-    }
-    texture.set_status(crate::texture::TextureStatus::WantCreate);
-    let id = texture.unique_id();
-
-    let mut texture_ptr = texture.as_mut().as_raw_mut();
-    let mut raw: sys::ImGuiPlatformIO = new_platform_io();
-    raw.Textures.Size = 1;
-    raw.Textures.Capacity = 1;
-    raw.Textures.Data = &mut texture_ptr;
-
-    let mut pio = PlatformIo {
-        raw: UnsafeCell::new(raw),
-    };
-    let applied =
-        pio.apply_texture_feedback(&[crate::render::snapshot::TextureFeedback::with_tex_id(
-            id,
-            crate::texture::TextureStatus::OK,
-            crate::texture::TextureId::new(123),
-        )
-        .backend_user_data(0xCAFE)]);
-
-    assert_eq!(applied, 1);
-    assert_eq!(texture.status(), crate::texture::TextureStatus::OK);
-    assert_eq!(texture.tex_id(), crate::texture::TextureId::new(123));
-    assert_eq!(texture.backend_user_data() as usize, 0xCAFE);
-
-    let applied = pio.apply_texture_feedback(&[crate::render::snapshot::TextureFeedback::status(
-        id,
-        crate::texture::TextureStatus::Destroyed,
-    )]);
-
-    assert_eq!(applied, 1);
-    assert_eq!(texture.status(), crate::texture::TextureStatus::Destroyed);
-    assert!(texture.tex_id().is_null());
-    assert!(texture.backend_user_data().is_null());
-}
-
-#[test]
 fn invalidating_renderer_bindings_requeues_live_textures() {
-    let mut texture = crate::texture::TextureData::new();
+    let mut texture = crate::texture::OwnedTextureData::new();
     texture.create(crate::texture::TextureFormat::RGBA32, 1, 1);
     texture.set_tex_id(crate::texture::TextureId::new(123));
     texture.set_backend_user_data(std::ptr::dangling_mut());
@@ -145,7 +48,7 @@ fn invalidating_renderer_bindings_requeues_live_textures() {
 
 #[test]
 fn invalidating_renderer_bindings_preserves_queued_destruction() {
-    let mut texture = crate::texture::TextureData::new();
+    let mut texture = crate::texture::OwnedTextureData::new();
     texture.create(crate::texture::TextureFormat::RGBA32, 1, 1);
     texture.set_tex_id(crate::texture::TextureId::new(123));
     texture.set_backend_user_data(std::ptr::dangling_mut());
@@ -172,7 +75,7 @@ fn invalidating_renderer_bindings_preserves_queued_destruction() {
 
 #[test]
 fn invalidating_renderer_bindings_preserves_shared_textures() {
-    let mut texture = crate::texture::TextureData::new();
+    let mut texture = crate::texture::OwnedTextureData::new();
     texture.create(crate::texture::TextureFormat::RGBA32, 1, 1);
     texture.set_tex_id(crate::texture::TextureId::new(123));
     texture.set_backend_user_data(std::ptr::dangling_mut());
@@ -412,6 +315,117 @@ fn conditional_renderer_clear_releases_owned_storage_but_preserves_replacement_s
 
     unsafe {
         (*platform_io.as_raw_mut()).Renderer_SetWindowSize = None;
+    }
+}
+
+#[cfg(feature = "multi-viewport")]
+#[test]
+fn conditional_platform_aggregate_clear_preserves_same_thunk_replacements() {
+    let _guard = crate::test_support::imgui_context_guard();
+    unsafe extern "C" fn owned_vec2(_viewport: *mut sys::ImGuiViewport, _out: *mut sys::ImVec2) {}
+    unsafe extern "C" fn replacement_vec2(
+        _viewport: *mut sys::ImGuiViewport,
+        _out: *mut sys::ImVec2,
+    ) {
+    }
+    unsafe extern "C" fn owned_vec4(_viewport: *mut sys::ImGuiViewport, _out: *mut sys::ImVec4) {}
+    unsafe extern "C" fn owned_const_vec2(
+        _viewport: *mut sys::ImGuiViewport,
+        _value: *const sys::ImVec2,
+    ) {
+    }
+    unsafe extern "C" fn replacement_const_vec2(
+        _viewport: *mut sys::ImGuiViewport,
+        _value: *const sys::ImVec2,
+    ) {
+    }
+
+    let storage_count_before = unsafe { sys::ImGuiPlatformIO_AggregateCallbackStorageCount() };
+    let mut ctx = crate::Context::create();
+    let platform_io = ctx.platform_io_mut();
+    platform_io.set_platform_get_window_pos_raw(Some(owned_vec2));
+    platform_io.set_platform_get_window_size_raw(Some(owned_vec2));
+    platform_io.set_platform_get_window_framebuffer_scale_raw(Some(owned_vec2));
+    platform_io.set_platform_get_window_work_area_insets_raw(Some(owned_vec4));
+    platform_io.set_platform_set_window_pos_raw(Some(owned_const_vec2));
+    platform_io.set_platform_set_window_size_raw(Some(owned_const_vec2));
+
+    platform_io.set_platform_get_window_pos_raw(Some(replacement_vec2));
+    platform_io.set_platform_set_window_pos_raw(Some(replacement_const_vec2));
+    assert!(!platform_io.clear_platform_get_window_pos_if_raw_callback(owned_vec2));
+    assert!(!platform_io.clear_platform_set_window_pos_if_pointer_callback(owned_const_vec2));
+    let installed = super::trampolines::load_cb_for_platform_io(
+        platform_io.as_raw(),
+        &super::trampolines::PLATFORM_GET_WINDOW_POS_RAW_CB,
+    )
+    .unwrap();
+    assert!(std::ptr::fn_addr_eq(
+        installed,
+        replacement_vec2 as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2)
+    ));
+
+    assert!(platform_io.clear_platform_get_window_pos_if_raw_callback(replacement_vec2));
+    assert!(platform_io.clear_platform_set_window_pos_if_pointer_callback(replacement_const_vec2));
+    assert!(platform_io.clear_platform_set_window_size_if_pointer_callback(owned_const_vec2));
+    assert!(platform_io.clear_platform_get_window_size_if_raw_callback(owned_vec2));
+    assert!(platform_io.clear_platform_get_window_framebuffer_scale_if_raw_callback(owned_vec2));
+    assert!(platform_io.clear_platform_get_window_work_area_insets_if_raw_callback(owned_vec4));
+    assert!(unsafe { (*platform_io.as_raw()).Platform_GetWindowPos }.is_none());
+    assert!(unsafe { (*platform_io.as_raw()).Platform_GetWindowSize }.is_none());
+    assert!(unsafe { (*platform_io.as_raw()).Platform_GetWindowFramebufferScale }.is_none());
+    assert!(unsafe { (*platform_io.as_raw()).Platform_GetWindowWorkAreaInsets }.is_none());
+    assert!(unsafe { (*platform_io.as_raw()).Platform_SetWindowPos }.is_none());
+    assert!(unsafe { (*platform_io.as_raw()).Platform_SetWindowSize }.is_none());
+    assert_eq!(
+        unsafe { sys::ImGuiPlatformIO_AggregateCallbackStorageCount() },
+        storage_count_before
+    );
+}
+
+#[cfg(feature = "multi-viewport")]
+#[test]
+fn conditional_platform_aggregate_clear_reports_direct_slot_replacements() {
+    let _guard = crate::test_support::imgui_context_guard();
+    unsafe extern "C" fn owned_get(_viewport: *mut sys::ImGuiViewport, _out: *mut sys::ImVec2) {}
+    unsafe extern "C" fn owned_set(_viewport: *mut sys::ImGuiViewport, _value: *const sys::ImVec2) {
+    }
+    unsafe extern "C" fn foreign_get(_viewport: *mut sys::ImGuiViewport) -> sys::ImVec2 {
+        sys::ImVec2::zero()
+    }
+    unsafe extern "C" fn foreign_set(_viewport: *mut sys::ImGuiViewport, _value: sys::ImVec2) {}
+
+    let storage_count_before = unsafe { sys::ImGuiPlatformIO_AggregateCallbackStorageCount() };
+    let mut ctx = crate::Context::create();
+    let platform_io = ctx.platform_io_mut();
+    platform_io.set_platform_get_window_pos_raw(Some(owned_get));
+    platform_io.set_platform_set_window_pos_raw(Some(owned_set));
+
+    unsafe {
+        let raw = platform_io.as_raw_mut();
+        (*raw).Platform_GetWindowPos = Some(foreign_get);
+        (*raw).Platform_SetWindowPos = Some(foreign_set);
+    }
+
+    assert!(!platform_io.clear_platform_get_window_pos_if_raw_callback(owned_get));
+    assert!(!platform_io.clear_platform_set_window_pos_if_pointer_callback(owned_set));
+    let raw = unsafe { &*platform_io.as_raw() };
+    assert!(std::ptr::fn_addr_eq(
+        raw.Platform_GetWindowPos.unwrap(),
+        foreign_get as unsafe extern "C" fn(*mut sys::ImGuiViewport) -> sys::ImVec2
+    ));
+    assert!(std::ptr::fn_addr_eq(
+        raw.Platform_SetWindowPos.unwrap(),
+        foreign_set as unsafe extern "C" fn(*mut sys::ImGuiViewport, sys::ImVec2)
+    ));
+    assert_eq!(
+        unsafe { sys::ImGuiPlatformIO_AggregateCallbackStorageCount() },
+        storage_count_before
+    );
+
+    unsafe {
+        let raw = platform_io.as_raw_mut();
+        (*raw).Platform_GetWindowPos = None;
+        (*raw).Platform_SetWindowPos = None;
     }
 }
 

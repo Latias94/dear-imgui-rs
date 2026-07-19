@@ -383,4 +383,108 @@ impl PlatformIo {
             }
         }
     }
+
+    /// Release `Platform_GetWindowPos` only if `callback` is still the registered raw handler.
+    #[cfg(feature = "multi-viewport")]
+    #[doc(hidden)]
+    pub fn clear_platform_get_window_pos_if_raw_callback(
+        &mut self,
+        callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2),
+    ) -> bool {
+        use trampolines::*;
+        let owned =
+            trampolines::load_cb_for_platform_io(self.as_raw(), &PLATFORM_GET_WINDOW_POS_RAW_CB)
+                .is_some_and(|installed| std::ptr::fn_addr_eq(installed, callback));
+        if !owned {
+            return false;
+        }
+
+        let cleared = unsafe {
+            sys::ImGuiPlatformIO_ClearPlatformGetWindowPosIfOutParam(
+                self.as_raw_mut(),
+                platform_get_window_pos_out,
+            )
+        };
+        self.clear_platform_io_cb(&PLATFORM_GET_WINDOW_POS_RAW_CB);
+        cleared
+    }
+
+    /// Release `Platform_GetWindowSize` only if `callback` is still the registered raw handler.
+    #[cfg(feature = "multi-viewport")]
+    #[doc(hidden)]
+    pub fn clear_platform_get_window_size_if_raw_callback(
+        &mut self,
+        callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2),
+    ) -> bool {
+        use trampolines::*;
+        let owned =
+            trampolines::load_cb_for_platform_io(self.as_raw(), &PLATFORM_GET_WINDOW_SIZE_RAW_CB)
+                .is_some_and(|installed| std::ptr::fn_addr_eq(installed, callback));
+        if !owned {
+            return false;
+        }
+
+        let cleared = unsafe {
+            sys::ImGuiPlatformIO_ClearPlatformGetWindowSizeIfOutParam(
+                self.as_raw_mut(),
+                platform_get_window_size_out,
+            )
+        };
+        self.clear_platform_io_cb(&PLATFORM_GET_WINDOW_SIZE_RAW_CB);
+        cleared
+    }
+
+    /// Release `Platform_GetWindowFramebufferScale` only if `callback` is still registered.
+    #[cfg(feature = "multi-viewport")]
+    #[doc(hidden)]
+    pub fn clear_platform_get_window_framebuffer_scale_if_raw_callback(
+        &mut self,
+        callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2),
+    ) -> bool {
+        use trampolines::*;
+        let owned = trampolines::load_cb_for_platform_io(
+            self.as_raw(),
+            &PLATFORM_GET_WINDOW_FRAMEBUFFER_SCALE_RAW_CB,
+        )
+        .is_some_and(|installed| std::ptr::fn_addr_eq(installed, callback));
+        if !owned {
+            return false;
+        }
+
+        let cleared = unsafe {
+            sys::ImGuiPlatformIO_ClearPlatformGetWindowFramebufferScaleIfOutParam(
+                self.as_raw_mut(),
+                platform_get_window_framebuffer_scale_out,
+            )
+        };
+        self.clear_platform_io_cb(&PLATFORM_GET_WINDOW_FRAMEBUFFER_SCALE_RAW_CB);
+        cleared
+    }
+
+    /// Release `Platform_GetWindowWorkAreaInsets` only if `callback` is still registered.
+    #[cfg(feature = "multi-viewport")]
+    #[doc(hidden)]
+    pub fn clear_platform_get_window_work_area_insets_if_raw_callback(
+        &mut self,
+        callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec4),
+    ) -> bool {
+        use trampolines::*;
+        let owned = trampolines::load_cb_for_platform_io(
+            self.as_raw(),
+            &PLATFORM_GET_WINDOW_WORK_AREA_INSETS_RAW_CB,
+        )
+        .is_some_and(|installed| std::ptr::fn_addr_eq(installed, callback));
+        if !owned {
+            return false;
+        }
+
+        let cleared = unsafe {
+            sys::ImGuiPlatformIO_ClearPlatformGetWindowWorkAreaInsetsIfOutParam(
+                self.as_raw_mut(),
+                platform_get_window_work_area_insets_out,
+            )
+        };
+        self.clear_platform_io_cb(&PLATFORM_GET_WINDOW_WORK_AREA_INSETS_RAW_CB);
+        cleared
+    }
 }

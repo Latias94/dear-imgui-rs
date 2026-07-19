@@ -1,38 +1,177 @@
-//! Winit adapter entry points for WGPU multi-viewport rendering.
+//! Owning Winit/WGPU multi-viewport renderer runtime.
 
-pub use super::multi_viewport_runtime::CallbackOwnershipError;
-use super::{WgpuRenderer, multi_viewport_runtime};
-use dear_imgui_rs::Context;
+#[cfg(doctest)]
+mod removed_free_api_contracts {
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::multi_viewport::enable;
+    /// ```
+    struct Enable;
 
-/// Enables WGPU renderer callbacks for Winit-created platform windows.
-/// Call this after initializing Winit viewport support and before creating secondary platform
-/// windows.
-///
-/// # Safety
-///
-/// `renderer` must remain at the same address until [`shutdown_multi_viewport_support`] returns.
-/// Storing the renderer in a `Box` is the simplest way to uphold this requirement. The
-/// active platform backend must be Winit, and each viewport platform handle must point to its live
-/// `winit::Window` until the renderer destroy callback completes. While enabled, all callbacks and
-/// renderer access must stay on one thread; the renderer must not be concurrently accessed,
-/// reinitialized, shut down, moved, or dropped, and viewport `RendererUserData` must not be
-/// replaced. `imgui_context` must be the context used to initialize `renderer`. Both the context
-/// and renderer must remain alive. Call
-/// [`shutdown_multi_viewport_support`] before either one is dropped.
-pub unsafe fn enable(
-    renderer: &mut WgpuRenderer,
-    imgui_context: &mut Context,
-) -> Result<(), CallbackOwnershipError> {
-    unsafe { multi_viewport_runtime::enable(renderer, imgui_context) }
+    /// ```compile_fail
+    /// use dear_imgui_wgpu::multi_viewport::shutdown_multi_viewport_support;
+    /// ```
+    struct Shutdown;
 }
 
-/// Destroys platform windows before disabling WGPU renderer callbacks.
-pub fn shutdown_multi_viewport_support(
-    imgui_context: &mut Context,
-) -> Result<(), CallbackOwnershipError> {
-    multi_viewport_runtime::shutdown_multi_viewport_support(imgui_context)
+use dear_imgui_rs::render::RenderedFrame;
+use dear_imgui_rs::{Context, TextureId};
+
+use super::WgpuRenderer;
+use super::multi_viewport_runtime::OwningViewportRuntime;
+pub use super::multi_viewport_runtime::{WgpuViewportAttachError, WgpuViewportError};
+use crate::GammaMode;
+
+/// Owning WGPU renderer runtime for the Winit multi-viewport route.
+///
+/// The runtime consumes the renderer into stable boxed storage, owns the Context renderer
+/// attachment and callback claim, and releases all WGPU viewport resources before the Winit
+/// platform attachment enters its platform-window teardown phase.
+#[derive(Debug)]
+pub struct WinitViewportRuntime {
+    inner: OwningViewportRuntime,
 }
 
-pub(crate) fn clear_for_drop(renderer: *mut WgpuRenderer) {
-    multi_viewport_runtime::clear_for_drop(renderer);
+impl WinitViewportRuntime {
+    /// Transactionally attaches an initialized renderer to an active Winit platform runtime.
+    ///
+    /// Failure returns the unchanged renderer through [`WgpuViewportAttachError`]. The renderer
+    /// must have been created for `context` with both `WgpuInitInfo::with_instance` and
+    /// `WgpuInitInfo::with_adapter`.
+    pub fn attach(
+        context: &mut Context,
+        renderer: WgpuRenderer,
+    ) -> Result<Self, WgpuViewportAttachError> {
+        OwningViewportRuntime::attach(context, renderer).map(|inner| Self { inner })
+    }
+
+    /// Returns and clears the oldest deferred callback or ownership fault.
+    pub fn poll_fault(&self) -> Result<(), WgpuViewportError> {
+        self.inner.poll_fault()
+    }
+
+    /// Prepares renderer device objects for a new frame.
+    pub fn new_frame(&self) -> Result<(), WgpuViewportError> {
+        self.inner.new_frame()
+    }
+
+    /// Consumes and renders one Context-owned frame.
+    pub fn render(
+        &self,
+        frame: RenderedFrame<'_>,
+        render_pass: &mut wgpu::RenderPass<'_>,
+    ) -> Result<(), WgpuViewportError> {
+        self.inner.render(frame, render_pass)
+    }
+
+    /// Finalizes and renders the bound Context's current frame.
+    pub fn render_context(
+        &self,
+        context: &mut Context,
+        render_pass: &mut wgpu::RenderPass<'_>,
+    ) -> Result<(), WgpuViewportError> {
+        self.inner.render_context(context, render_pass)
+    }
+
+    /// Consumes and renders one Context-owned frame with explicit framebuffer dimensions.
+    pub fn render_with_fb_size(
+        &self,
+        frame: RenderedFrame<'_>,
+        render_pass: &mut wgpu::RenderPass<'_>,
+        width: u32,
+        height: u32,
+    ) -> Result<(), WgpuViewportError> {
+        self.inner
+            .render_with_fb_size(frame, render_pass, width, height)
+    }
+
+    /// Finalizes and renders the bound Context with explicit framebuffer dimensions.
+    pub fn render_context_with_fb_size(
+        &self,
+        context: &mut Context,
+        render_pass: &mut wgpu::RenderPass<'_>,
+        width: u32,
+        height: u32,
+    ) -> Result<(), WgpuViewportError> {
+        self.inner
+            .render_context_with_fb_size(context, render_pass, width, height)
+    }
+
+    /// Invalidates device objects and resets the bound Context's managed texture bindings.
+    pub fn invalidate_device_objects(
+        &self,
+        context: &mut Context,
+    ) -> Result<(), WgpuViewportError> {
+        self.inner.invalidate_device_objects(context)
+    }
+
+    /// Runs a read-only, non-escaping renderer inspection.
+    pub fn with_renderer<R>(
+        &self,
+        callback: impl FnOnce(&WgpuRenderer) -> R,
+    ) -> Result<R, WgpuViewportError> {
+        self.inner.with_renderer(callback)
+    }
+
+    /// Sets the renderer gamma policy.
+    pub fn set_gamma_mode(&self, mode: GammaMode) -> Result<(), WgpuViewportError> {
+        self.inner.set_gamma_mode(mode)
+    }
+
+    /// Sets the clear color used by secondary viewport surfaces.
+    pub fn set_viewport_clear_color(&self, color: wgpu::Color) -> Result<(), WgpuViewportError> {
+        self.inner.set_viewport_clear_color(color)
+    }
+
+    /// Registers an application-owned external WGPU texture.
+    pub fn register_external_texture(
+        &self,
+        texture: &wgpu::Texture,
+        view: &wgpu::TextureView,
+    ) -> Result<TextureId, WgpuViewportError> {
+        self.inner.register_external_texture(texture, view)
+    }
+
+    /// Registers an application-owned external texture with a custom sampler.
+    pub fn register_external_texture_with_sampler(
+        &self,
+        texture: &wgpu::Texture,
+        view: &wgpu::TextureView,
+        sampler: &wgpu::Sampler,
+    ) -> Result<TextureId, WgpuViewportError> {
+        self.inner
+            .register_external_texture_with_sampler(texture, view, sampler)
+    }
+
+    /// Updates the view of a registered application-owned texture.
+    pub fn update_external_texture_view(
+        &self,
+        texture: TextureId,
+        view: &wgpu::TextureView,
+    ) -> Result<bool, WgpuViewportError> {
+        self.inner.update_external_texture_view(texture, view)
+    }
+
+    /// Updates the sampler of a registered application-owned texture.
+    pub fn update_external_texture_sampler(
+        &self,
+        texture: TextureId,
+        sampler: &wgpu::Sampler,
+    ) -> Result<bool, WgpuViewportError> {
+        self.inner.update_external_texture_sampler(texture, sampler)
+    }
+
+    /// Unregisters an application-owned external texture.
+    pub fn unregister_texture(&self, texture: TextureId) -> Result<(), WgpuViewportError> {
+        self.inner.unregister_texture(texture)
+    }
+
+    /// Explicitly releases renderer callbacks and WGPU resources.
+    ///
+    /// This operation is idempotent. If managed-texture epochs are still outstanding, it retains
+    /// the renderer and attachment so the caller can finish or abandon those epochs and retry.
+    /// Platform windows remain owned by `WinitPlatformRuntime` and are released only in its
+    /// platform-window phase.
+    pub fn shutdown(&mut self, context: &mut Context) -> Result<(), WgpuViewportError> {
+        self.inner.shutdown(context)
+    }
 }

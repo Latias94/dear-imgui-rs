@@ -90,7 +90,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut sdl3_backend =
         Sdl3OpenGl3Backend::init(&mut imgui, &window, &gl_context, "#version 150")?;
     // Let the backend merge all connected gamepads instead of only the first one.
-    sdl3_backend.set_gamepad_mode(&mut imgui, GamepadMode::AutoAll);
+    sdl3_backend.set_gamepad_mode(&mut imgui, GamepadMode::AutoAll)?;
 
     // Basic style scaling using the window's display scale.
     let window_scale = window.display_scale();
@@ -105,7 +105,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         // 1) Pump events: low-level SDL_Event for ImGui backend + high-level Event for us.
         while let Some(raw) = imgui_sdl3_backend::sdl3_poll_event_ll() {
             // Feed the official SDL3 backend.
-            let _ = sdl3_backend.process_event(&mut imgui, &raw);
+            let _ = sdl3_backend.process_event(&mut imgui, &raw)?;
 
             // Convert to high-level Event for our own logic.
             let event = Event::from_ll(raw);
@@ -131,7 +131,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         imgui.io_mut().set_delta_time(dt);
 
         // 3) Start a new ImGui frame.
-        sdl3_backend.new_frame(&mut imgui);
+        sdl3_backend.new_frame(&mut imgui)?;
         let ui = imgui.frame();
 
         // Create a dockspace over the main viewport so there is always content.
@@ -172,7 +172,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             gl.clear(glow::COLOR_BUFFER_BIT);
         }
 
-        sdl3_backend.render(draw_data);
+        sdl3_backend.render(draw_data)?;
 
         // 5) Optionally render additional platform windows when multi-viewport is enabled.
         if ENABLE_VIEWPORTS {
@@ -188,6 +188,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         window.gl_swap_window();
     }
 
+    sdl3_backend.shutdown(&mut imgui)?;
     Ok(())
 }
 

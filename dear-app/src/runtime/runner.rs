@@ -16,7 +16,7 @@ use super::{
 };
 use crate::{
     AddOns, AppConfig, Application, DockingApi, FrameContext, GpuGeneration, InitContext,
-    RedrawMode, RunError, ShutdownContext,
+    PrepareFrameContext, RedrawMode, RunError, ShutdownContext,
 };
 
 pub(crate) fn run<A: Application + 'static>(
@@ -207,6 +207,11 @@ impl Runtime {
             docking,
         } = &mut self.ui;
 
+        let mut prepare_frame = PrepareFrameContext {
+            imgui: context,
+            window: &self.window.window,
+        };
+        application.prepare_frame(&mut prepare_frame)?;
         platform.prepare_frame(&self.window.window, context);
         let mut exit_requested = false;
         let draw_data = build_and_render_frame(context, |ui| {
@@ -334,7 +339,7 @@ impl Runtime {
             generation
                 .gpu
                 .renderer
-                .render_draw_data(draw_data, &mut render_pass)
+                .render(draw_data, &mut render_pass)
                 .map_err(RunError::Render)?;
         }
         generation.gpu.queue.submit(Some(encoder.finish()));
@@ -406,10 +411,10 @@ impl Runtime {
     }
 }
 
-fn build_and_render_frame(
-    context: &mut dear_imgui_rs::Context,
+fn build_and_render_frame<'ctx>(
+    context: &'ctx mut dear_imgui_rs::Context,
     build: impl FnOnce(&dear_imgui_rs::Ui) -> Result<(), RunError>,
-) -> Result<&mut dear_imgui_rs::render::DrawData, RunError> {
+) -> Result<dear_imgui_rs::render::RenderedFrame<'ctx>, RunError> {
     let frame = context.begin_frame();
     build(frame.ui())?;
     Ok(frame.render())
@@ -804,10 +809,12 @@ mod tests {
         );
         let _ = context.font_atlas().build();
 
-        let result = build_and_render_frame(&mut context, |_ui| {
-            Err(RunError::application("frame", "injected frame failure"))
-        });
-        assert!(result.is_err());
+        {
+            let result = build_and_render_frame(&mut context, |_ui| {
+                Err(RunError::application("frame", "injected frame failure"))
+            });
+            assert!(result.is_err());
+        }
         assert_eq!(context.frame_lifecycle_state(), FrameLifecycleState::Idle);
     }
 

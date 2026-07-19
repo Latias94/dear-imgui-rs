@@ -11,8 +11,7 @@ impl<'ui> PlotUi<'ui> {
     where
         F: Fn(f64) -> String + Send + Sync + 'static,
     {
-        let _guard = self.bind();
-        AxisFormatterToken::new(axis as sys::ImAxis, f)
+        self.with_bound_context(|| AxisFormatterToken::new(axis as sys::ImAxis, f))
     }
 
     /// Setup tick label formatter using a Rust closure.
@@ -22,8 +21,7 @@ impl<'ui> PlotUi<'ui> {
     where
         F: Fn(f64) -> String + Send + Sync + 'static,
     {
-        let _guard = self.bind();
-        AxisFormatterToken::new(axis as sys::ImAxis, f)
+        self.with_bound_context(|| AxisFormatterToken::new(axis as sys::ImAxis, f))
     }
 
     // -------- Transform (closure) --------
@@ -40,8 +38,7 @@ impl<'ui> PlotUi<'ui> {
         FW: Fn(f64) -> f64 + Send + Sync + 'static,
         INV: Fn(f64) -> f64 + Send + Sync + 'static,
     {
-        let _guard = self.bind();
-        AxisTransformToken::new(axis as sys::ImAxis, forward, inverse)
+        self.with_bound_context(|| AxisTransformToken::new(axis as sys::ImAxis, forward, inverse))
     }
 
     /// Setup custom axis transform for Y axis using closures
@@ -55,8 +52,7 @@ impl<'ui> PlotUi<'ui> {
         FW: Fn(f64) -> f64 + Send + Sync + 'static,
         INV: Fn(f64) -> f64 + Send + Sync + 'static,
     {
-        let _guard = self.bind();
-        AxisTransformToken::new(axis as sys::ImAxis, forward, inverse)
+        self.with_bound_context(|| AxisTransformToken::new(axis as sys::ImAxis, forward, inverse))
     }
 }
 

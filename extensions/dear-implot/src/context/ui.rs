@@ -17,9 +17,10 @@ pub struct PlotUi<'ui> {
 
 impl<'ui> PlotUi<'ui> {
     #[inline]
-    pub(crate) fn bind(&self) -> super::core::PlotContextBindingGuard {
-        self.context.assert_imgui_alive();
-        self.context.binding().bind("dear-implot: PlotUi")
+    pub(crate) fn with_bound_context<R>(&self, f: impl FnOnce() -> R) -> R {
+        self.context
+            .binding()
+            .with_bound_context("dear-implot: PlotUi", f)
     }
 
     /// Begin a new plot with the given title
@@ -31,18 +32,16 @@ impl<'ui> PlotUi<'ui> {
         if title.contains('\0') {
             return None;
         }
-        let _guard = self.bind();
-        let started = with_scratch_txt(title, |ptr| unsafe { sys::ImPlot_BeginPlot(ptr, size, 0) });
+        self.with_bound_context(|| {
+            let started =
+                with_scratch_txt(title, |ptr| unsafe { sys::ImPlot_BeginPlot(ptr, size, 0) });
 
-        if started {
-            Some(PlotToken::new(
-                self.context.binding(),
-                self.context.imgui_alive_token(),
-                self.ui,
-            ))
-        } else {
-            None
-        }
+            if started {
+                Some(PlotToken::new(self.context.binding(), self.ui))
+            } else {
+                None
+            }
+        })
     }
 
     /// Begin a plot with custom size
@@ -55,20 +54,17 @@ impl<'ui> PlotUi<'ui> {
         if title.contains('\0') {
             return None;
         }
-        let _guard = self.bind();
-        let started = with_scratch_txt(title, |ptr| unsafe {
-            sys::ImPlot_BeginPlot(ptr, plot_size, 0)
-        });
+        self.with_bound_context(|| {
+            let started = with_scratch_txt(title, |ptr| unsafe {
+                sys::ImPlot_BeginPlot(ptr, plot_size, 0)
+            });
 
-        if started {
-            Some(PlotToken::new(
-                self.context.binding(),
-                self.context.imgui_alive_token(),
-                self.ui,
-            ))
-        } else {
-            None
-        }
+            if started {
+                Some(PlotToken::new(self.context.binding(), self.ui))
+            } else {
+                None
+            }
+        })
     }
 
     /// Plot a line with the given label and data
@@ -84,16 +80,17 @@ impl<'ui> PlotUi<'ui> {
         };
 
         let label = if label.contains('\0') { "" } else { label };
-        let _guard = self.bind();
-        with_scratch_txt(label, |ptr| unsafe {
-            let spec = crate::plots::plot_spec_from(0, crate::plots::PlotDataLayout::DEFAULT);
-            sys::ImPlot_PlotLine_doublePtrdoublePtr(
-                ptr,
-                x_data.as_ptr(),
-                y_data.as_ptr(),
-                count,
-                spec,
-            );
+        self.with_bound_context(|| {
+            with_scratch_txt(label, |ptr| unsafe {
+                let spec = crate::plots::plot_spec_from(0, crate::plots::PlotDataLayout::DEFAULT);
+                sys::ImPlot_PlotLine_doublePtrdoublePtr(
+                    ptr,
+                    x_data.as_ptr(),
+                    y_data.as_ptr(),
+                    count,
+                    spec,
+                );
+            })
         })
     }
 
@@ -108,16 +105,17 @@ impl<'ui> PlotUi<'ui> {
         };
 
         let label = if label.contains('\0') { "" } else { label };
-        let _guard = self.bind();
-        with_scratch_txt(label, |ptr| unsafe {
-            let spec = crate::plots::plot_spec_from(0, crate::plots::PlotDataLayout::DEFAULT);
-            sys::ImPlot_PlotScatter_doublePtrdoublePtr(
-                ptr,
-                x_data.as_ptr(),
-                y_data.as_ptr(),
-                count,
-                spec,
-            );
+        self.with_bound_context(|| {
+            with_scratch_txt(label, |ptr| unsafe {
+                let spec = crate::plots::plot_spec_from(0, crate::plots::PlotDataLayout::DEFAULT);
+                sys::ImPlot_PlotScatter_doublePtrdoublePtr(
+                    ptr,
+                    x_data.as_ptr(),
+                    y_data.as_ptr(),
+                    count,
+                    spec,
+                );
+            })
         })
     }
 
@@ -132,17 +130,23 @@ impl<'ui> PlotUi<'ui> {
         };
 
         let label = if label.contains('\0') { "" } else { label };
-        let _guard = self.bind();
-        with_scratch_txt(label, |ptr| unsafe {
-            let spec = crate::plots::plot_spec_from(0, crate::plots::PlotDataLayout::DEFAULT);
-            sys::ImPlot_PlotPolygon_doublePtr(ptr, x_data.as_ptr(), y_data.as_ptr(), count, spec);
+        self.with_bound_context(|| {
+            with_scratch_txt(label, |ptr| unsafe {
+                let spec = crate::plots::plot_spec_from(0, crate::plots::PlotDataLayout::DEFAULT);
+                sys::ImPlot_PlotPolygon_doublePtr(
+                    ptr,
+                    x_data.as_ptr(),
+                    y_data.as_ptr(),
+                    count,
+                    spec,
+                );
+            })
         })
     }
 
     /// Check if the plot area is hovered
     pub fn is_plot_hovered(&self) -> bool {
-        let _guard = self.bind();
-        unsafe { sys::ImPlot_IsPlotHovered() }
+        self.with_bound_context(|| unsafe { sys::ImPlot_IsPlotHovered() })
     }
 
     /// Get the mouse position in plot coordinates
@@ -154,19 +158,18 @@ impl<'ui> PlotUi<'ui> {
             2 => 5,
             _ => 3,
         };
-        let _guard = self.bind();
-        unsafe { sys::ImPlot_GetPlotMousePos(0, y_axis) }
+        self.with_bound_context(|| unsafe { sys::ImPlot_GetPlotMousePos(0, y_axis) })
     }
 
     /// Get the mouse position in plot coordinates for specific axes
     pub fn get_plot_mouse_pos_axes(&self, x_axis: XAxis, y_axis: YAxis) -> sys::ImPlotPoint {
-        let _guard = self.bind();
-        unsafe { sys::ImPlot_GetPlotMousePos(x_axis as i32, y_axis as i32) }
+        self.with_bound_context(|| unsafe {
+            sys::ImPlot_GetPlotMousePos(x_axis as i32, y_axis as i32)
+        })
     }
 
     /// Set current axes for subsequent plot submissions
     pub fn set_axes(&self, x_axis: XAxis, y_axis: YAxis) {
-        let _guard = self.bind();
-        unsafe { sys::ImPlot_SetAxes(x_axis as i32, y_axis as i32) }
+        self.with_bound_context(|| unsafe { sys::ImPlot_SetAxes(x_axis as i32, y_axis as i32) })
     }
 }

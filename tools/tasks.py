@@ -126,7 +126,7 @@ def task_bump(args, repo_root: Path) -> int:
 
 
 def task_bindings(args, repo_root: Path) -> int:
-    """Update core ABI profiles through xtask and extensions through their builders."""
+    """Update every maintained binding profile through the canonical xtask."""
     crates = getattr(args, "crates", None) or "all"
     selected = {crate.strip() for crate in crates.split(",") if crate.strip()}
     includes_core = crates.strip().lower() == "all" or "dear-imgui-sys" in selected
@@ -147,41 +147,25 @@ def task_bindings(args, repo_root: Path) -> int:
     if rc != 0 or not includes_core:
         return rc
 
-    core_commands = [
-        [
-            "cargo",
-            "run",
-            "-p",
-            "xtask",
-            "--",
-            "verify-bindings",
-            "--update",
-            "--allow-dirty",
-        ],
-        [
-            "cargo",
-            "run",
-            "-p",
-            "xtask",
-            "--",
-            "verify-bindings",
-            "--allow-dirty",
-        ],
+    core_command = [
+        "cargo",
+        "run",
+        "-p",
+        "xtask",
+        "--",
+        "verify-bindings",
+        "--update",
+        "--allow-dirty",
     ]
     if getattr(args, "dry_run", False):
-        for core_command in core_commands:
-            print(f"$ {' '.join(core_command)}")
+        print(f"$ {' '.join(core_command)}")
         return 0
 
-    for core_command in core_commands:
-        rc = run_command(core_command, cwd=repo_root)
-        if rc != 0:
-            return rc
-    return 0
+    return run_command(core_command, cwd=repo_root)
 
 
 def task_publish(args, repo_root: Path) -> int:
-    """Publish crates to crates.io."""
+    """Publish crates to crates.io with authoritative release evidence."""
     cmd = [sys.executable, "tools/publish.py"]
     
     if getattr(args, "dry_run", False):
@@ -194,6 +178,10 @@ def task_publish(args, repo_root: Path) -> int:
         cmd.extend(["--start-from", args.start_from])
     if getattr(args, "wait", None):
         cmd.extend(["--wait", str(args.wait)])
+    if getattr(args, "release_gate_result", None):
+        cmd.extend(["--release-gate-result", str(args.release_gate_result)])
+    if getattr(args, "dangerously_skip_release_check", False):
+        cmd.append("--dangerously-skip-release-check")
     
     return run_command(cmd, cwd=repo_root)
 
@@ -458,12 +446,26 @@ def main() -> int:
     bindings_parser.add_argument("--dry-run", action="store_true", help="Dry run")
     
     # publish task
-    publish_parser = subparsers.add_parser("publish", help="Publish crates")
+    publish_parser = subparsers.add_parser(
+        "publish", help="Publish crates with authoritative release evidence"
+    )
     publish_parser.add_argument("--crates", help="Comma-separated list of crates")
     publish_parser.add_argument("--start-from", help="Start from specific crate")
     publish_parser.add_argument("--wait", type=int, help="Wait time between publishes")
     publish_parser.add_argument("--dry-run", action="store_true", help="Dry run")
     publish_parser.add_argument("--no-verify", action="store_true", help="Skip verification")
+    publish_parser.add_argument(
+        "--release-gate-result",
+        type=Path,
+        help="Authoritative same-SHA gate-result.json required for uploads",
+    )
+    publish_parser.add_argument(
+        "--dangerously-skip-release-check",
+        action="store_true",
+        help=(
+            "Emergency-only upload without release evidence or the strict local gate"
+        ),
+    )
     
     # test task
     test_parser = subparsers.add_parser("test", help="Run tests")

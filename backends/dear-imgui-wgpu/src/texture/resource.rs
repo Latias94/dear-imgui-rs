@@ -30,3 +30,11 @@ impl WgpuTexture {
         &self.texture
     }
 }
+
+#[derive(Debug)]
+pub(super) struct ManagedWgpuTexture {
+    pub(super) texture_id: TextureId,
+    pub(super) width: u32,
+    pub(super) height: u32,
+    pub(super) resource: WgpuTexture,
+}

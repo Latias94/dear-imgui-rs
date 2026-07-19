@@ -18,10 +18,10 @@ let gl = unsafe { glow::Context::from_loader_function(|s| loader.get_proc_addres
 let mut imgui = Context::create();
 let mut renderer = GlowRenderer::new(gl, &mut imgui)?;
 
-// per-frame
-let draw_data = imgui.render();
+// Per frame, after building the UI. Rendering consumes the Context-borrowed frame.
 renderer.new_frame()?;
-renderer.render(&draw_data)?;
+let frame = imgui.render();
+renderer.render(frame)?;
 ```
 
 ## What You Get
@@ -29,6 +29,76 @@ renderer.render(&draw_data)?;
 - ImGui v1.92 texture system integration (font atlas upload + dynamic texture updates)
 - OpenGL 2.1+/ES 2.0+ compatible shaders and state setup
 - Full GL state backup/restore around ImGui rendering
+
+## Renderer Lifecycle
+
+`GlowRenderer` owns the Context's sole renderer consumer. `render` and `render_with_context`
+therefore take `RenderedFrame` by value, apply every managed texture request, reconcile the
+result with the owning Context, and only then issue draw commands. A frame from another Context or
+consumer generation is rejected before OpenGL is mutated.
+
+For single-viewport use, explicitly destroy the renderer while its OpenGL context is current. This
+deletes renderer-owned GPU textures before their Context bindings are reset and releases the
+consumer so another renderer can attach:
+
+```rust
+let gl = renderer.gl_context().expect("owned GL context").clone();
+renderer.destroy(&gl, &mut imgui)?;
+```
+
+For a single-viewport renderer created with `with_external_context`, pass the same live GL context
+to `destroy`. `destroy_device_objects` performs the same resource-first reset but keeps the consumer
+attached for later device-object recreation.
+
+## Multi-Viewport Runtime
+
+The `multi-viewport` feature provides an owning `GlowViewportRuntime`. It consumes the renderer
+into stable storage, owns the renderer callback claim, and registers the renderer lifecycle role
+with the Context:
+
+```rust
+use std::rc::Rc;
+use dear_imgui_glow::{GlowRenderer, SimpleTextureMap, multi_viewport::GlowViewportRuntime};
+
+// Attach an OpenGL-aware platform runtime first.
+let gl = Rc::new(unsafe {
+    glow::Context::from_loader_function(|name| loader.get_proc_address(name) as *const _)
+});
+let renderer = GlowRenderer::with_shared_context(
+    Rc::clone(&gl),
+    &mut imgui,
+    Box::new(SimpleTextureMap::default()),
+)?;
+let mut runtime = GlowViewportRuntime::attach(&mut imgui, renderer)
+    .map_err(|failure| failure.into_parts().0)?;
+
+runtime.new_frame()?;
+let frame = imgui.render();
+runtime.render(frame)?;
+
+runtime.shutdown(&mut imgui)?;
+```
+
+Attachment preflights the complete renderer callback table and fails without publishing partial
+state. Callback panic, reentry, renderer failure, and foreign callback replacement are contained
+and returned by the next Rust entry or `poll_fault`. Explicit shutdown and Context-first teardown
+both delete renderer resources before platform windows. Dropping the wrapper performs immediate
+best-effort GPU cleanup and releases its consumer; the next renderer initialization resets managed
+texture bindings before reuse.
+
+The platform contract is stronger than having non-null `Platform_RenderWindow` and
+`Platform_SwapBuffers` callbacks. The platform backend must create GL contexts in the same share
+group and make the correct viewport context current from `Platform_RenderWindow`. The current Winit
+runtime is window-only and is rejected with `PlatformGlContextUnsupported`. Other platform routes
+must document and uphold this external GPU contract; callback preflight alone is not proof of it.
+A compatible share-group context must also be current when `shutdown` runs or the Dear ImGui
+Context is dropped, because renderer resources are deleted before the platform-window phase. Drop
+is a best-effort fallback, not a replacement for an explicitly ordered shutdown at a known-current
+GL boundary.
+
+`GlowRenderer::with_external_context` remains a single-viewport API because an unrelated GL
+capability cannot be paired safely after renderer creation. Use `with_shared_context` so the
+renderer and runtime retain the exact same `Rc<glow::Context>` from initialization onward.
 
 ## sRGB / Gamma
 
@@ -59,7 +129,7 @@ renderer.render(&draw_data)?;
 ## Notes
 
 - Alpha8 textures currently expand to RGBA8 for broad compatibility. On GL 3.3+/GLES 3.0+, RED + texture swizzle can reduce memory (see code comments).
-- Multi-viewport support is feature-gated (off by default).
+- Multi-viewport support is feature-gated and uses `GlowViewportRuntime` (off by default).
 
 ## Compatibility
 
@@ -78,6 +148,6 @@ See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob
   `gl_extensions_support`, `bind_sampler_support`, `clip_origin_support`,
   `polygon_mode_support`, `primitive_restart_support`
 - Debug helper: `debug_message_insert_support` (no-op if disabled)
-- Multi-viewport: `multi-viewport` (declared but currently not fully supported; off by default)
+- Multi-viewport: `multi-viewport` (owning renderer runtime; off by default)
 
 Rule of thumb: use the defaults; turn on `extras` only if you need those GL knobs.

@@ -1,3 +1,15 @@
+//! Frame lifecycle APIs.
+//!
+//! Use [`Context::frame_with_result`] when a callback should also close and render the frame.
+//! The callback-only `Context::frame_with` API is intentionally unavailable because it leaves
+//! frame completion implicit:
+//!
+//! ```compile_fail
+//! # use dear_imgui_rs::Context;
+//! # let mut context = Context::create();
+//! let _ = context.frame_with(|ui| ui.text("frame"));
+//! ```
+
 use crate::sys;
 
 use super::Context;
@@ -76,8 +88,8 @@ pub struct FrameToken<'ctx> {
 pub struct FrameResult<'ctx, T> {
     /// Value returned by the UI-building closure.
     pub value: T,
-    /// Draw data produced by rendering the frame after the closure returned.
-    pub draw_data: &'ctx mut crate::render::DrawData,
+    /// Context-borrowed render lease produced after the closure returned.
+    pub rendered_frame: crate::render::RenderedFrame<'ctx>,
 }
 
 impl Context {
@@ -127,6 +139,8 @@ impl Context {
         let _guard = CTX_MUTEX.lock();
         self.assert_current_context("Context::frame()");
         self.assert_can_begin_frame_unlocked("Context::frame()");
+        self.poll_snapshot_completions_or_panic("Context::frame()");
+        self.collect_retired_textures();
 
         unsafe {
             // Dear ImGui initializes DisplaySize to (-1, -1). Calling NewFrame() without a
@@ -160,15 +174,6 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
         &mut self.ui
     }
 
-    /// Create a new frame with a callback
-    pub fn frame_with<F, R>(&mut self, f: F) -> R
-    where
-        F: FnOnce(&crate::ui::Ui) -> R,
-    {
-        let ui = self.frame();
-        f(ui)
-    }
-
     /// Begin a frame, run a UI-building closure, render the frame, and return both values.
     ///
     /// This is a convenience for callers that want the old callback style but also want the draw
@@ -180,19 +185,39 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     {
         let frame = self.begin_frame();
         let value = f(frame.ui());
-        let draw_data = frame.render();
-        FrameResult { value, draw_data }
+        let rendered_frame = frame.render();
+        FrameResult {
+            value,
+            rendered_frame,
+        }
     }
 
-    /// Renders the frame and returns a mutable reference to the resulting draw data
+    /// Render the frame and return a Context-borrowed synchronous lease.
     ///
     /// This finalizes the Dear ImGui frame and prepares all draw data for rendering.
     /// The returned draw data contains all the information needed to render the frame.
     ///
-    /// Renderer backends receive mutable draw data because ImGui 1.92 texture requests require
-    /// backends to write `TexID`/`Status` feedback into `ImTextureData`.
     #[doc(alias = "Render", alias = "GetDrawData")]
-    pub fn render(&mut self) -> &mut crate::render::DrawData {
+    pub fn render(&mut self) -> crate::render::RenderedFrame<'_> {
+        let draw_data = self.render_raw();
+        let renderer_has_textures = unsafe {
+            let io = self.io_ptr("Context::render()");
+            ((*io).BackendFlags & sys::ImGuiBackendFlags_RendererHasTextures as i32) != 0
+        };
+        let (epoch, requests) = if renderer_has_textures {
+            let (epoch, requests) = self
+                .begin_synchronous_render(draw_data.as_ptr().cast_const())
+                .unwrap_or_else(|error| {
+                    panic!("Context::render() requires an active synchronous renderer consumer: {error}")
+                });
+            (Some(epoch), requests)
+        } else {
+            (None, Vec::new())
+        };
+        crate::render::RenderedFrame::new(self, draw_data, epoch, requests)
+    }
+
+    fn render_raw(&mut self) -> std::ptr::NonNull<crate::render::DrawData> {
         let _guard = CTX_MUTEX.lock();
         self.assert_current_context("Context::render()");
         self.assert_can_render_unlocked("Context::render()");
@@ -210,8 +235,22 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
             if dd.is_null() {
                 panic!("Context::render() returned null draw data");
             }
-            &mut *(dd as *mut crate::render::DrawData)
+            std::ptr::NonNull::new_unchecked(dd as *mut crate::render::DrawData)
         }
+    }
+
+    /// Render the current frame and build a thread-safe main-viewport snapshot.
+    ///
+    /// This Context-level entry point supports engine schedules that open and close the native
+    /// frame in separate systems and therefore cannot retain a [`FrameToken`]. The snapshot is
+    /// still bound to the supplied renderer consumer, Context, generation, and ordered epoch.
+    pub fn render_snapshot(
+        &mut self,
+        consumer: &crate::render::snapshot::RendererConsumer,
+    ) -> Result<crate::render::snapshot::FrameSnapshot, crate::render::snapshot::SnapshotError>
+    {
+        let draw_data = self.render_raw();
+        self.capture_main_snapshot(consumer, draw_data.as_ptr())
     }
 
     /// Render the current frame and build a thread-safe snapshot for all platform viewports.
@@ -225,11 +264,11 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     #[cfg(feature = "multi-viewport")]
     pub fn render_platform_viewport_snapshot(
         &mut self,
-        options: crate::render::snapshot::SnapshotOptions,
+        consumer: &crate::render::snapshot::RendererConsumer,
     ) -> Result<crate::render::snapshot::FrameSnapshot, crate::render::snapshot::SnapshotError>
     {
-        let _ = self.render();
-        self.platform_viewport_snapshot(options)
+        let _ = self.render_raw();
+        self.platform_viewport_snapshot(consumer)
     }
 
     /// Build a thread-safe snapshot from the current platform viewport draw data.
@@ -241,7 +280,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
     #[cfg(feature = "multi-viewport")]
     pub fn platform_viewport_snapshot(
         &mut self,
-        options: crate::render::snapshot::SnapshotOptions,
+        consumer: &crate::render::snapshot::RendererConsumer,
     ) -> Result<crate::render::snapshot::FrameSnapshot, crate::render::snapshot::SnapshotError>
     {
         let _guard = CTX_MUTEX.lock();
@@ -251,46 +290,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
                 "Context::platform_viewport_snapshot() called before rendering the current frame"
             );
         }
-        crate::render::snapshot::FrameSnapshot::from_platform_io(self.platform_io(), options)
-    }
-
-    /// Gets the draw data for the current frame
-    ///
-    /// This returns the draw data without calling render. Only valid after
-    /// `render()` has been called and before the next `new_frame()`.
-    pub fn draw_data(&self) -> Option<&crate::render::DrawData> {
-        let _guard = CTX_MUTEX.lock();
-        self.assert_current_context("Context::draw_data()");
-
-        unsafe {
-            let draw_data = sys::igGetDrawData();
-            if draw_data.is_null() {
-                None
-            } else {
-                let data = &*(draw_data as *const crate::render::DrawData);
-                if data.valid() { Some(data) } else { None }
-            }
-        }
-    }
-
-    /// Gets mutable draw data for the current frame.
-    ///
-    /// This returns the draw data without calling render. Only valid after `render()` has been
-    /// called and before the next `new_frame()`. Use this when a renderer needs to process texture
-    /// updates after draw data has already been produced.
-    pub fn draw_data_mut(&mut self) -> Option<&mut crate::render::DrawData> {
-        let _guard = CTX_MUTEX.lock();
-        self.assert_current_context("Context::draw_data_mut()");
-
-        unsafe {
-            let draw_data = sys::igGetDrawData();
-            if draw_data.is_null() {
-                None
-            } else {
-                let data = &mut *(draw_data as *mut crate::render::DrawData);
-                if data.valid() { Some(data) } else { None }
-            }
-        }
+        self.capture_platform_snapshot(consumer)
     }
 
     pub(super) fn frame_lifecycle_state_unlocked(&self) -> FrameLifecycleState {
@@ -334,7 +334,7 @@ impl<'ctx> FrameToken<'ctx> {
     }
 
     /// Render this frame and return the resulting draw data.
-    pub fn render(mut self) -> &'ctx mut crate::render::DrawData {
+    pub fn render(mut self) -> crate::render::RenderedFrame<'ctx> {
         let ctx = self.ctx as *mut Context;
         let draw_data = unsafe { (&mut *ctx).render() };
         self.closed = true;
@@ -348,25 +348,25 @@ impl<'ctx> FrameToken<'ctx> {
     /// ImGui pointers must not cross the engine extraction boundary.
     pub fn render_snapshot(
         mut self,
-        options: crate::render::snapshot::SnapshotOptions,
+        consumer: &crate::render::snapshot::RendererConsumer,
     ) -> Result<crate::render::snapshot::FrameSnapshot, crate::render::snapshot::SnapshotError>
     {
         let ctx = self.ctx as *mut Context;
-        let draw_data = unsafe { (&mut *ctx).render() };
+        let draw_data = unsafe { (&mut *ctx).render_raw().as_ptr() };
         self.closed = true;
         std::mem::forget(self);
-        crate::render::snapshot::FrameSnapshot::from_draw_data(draw_data, options)
+        unsafe { (&mut *ctx).capture_main_snapshot(consumer, draw_data) }
     }
 
     /// Render this frame and build a thread-safe snapshot for all platform viewports.
     #[cfg(feature = "multi-viewport")]
     pub fn render_platform_viewport_snapshot(
         mut self,
-        options: crate::render::snapshot::SnapshotOptions,
+        consumer: &crate::render::snapshot::RendererConsumer,
     ) -> Result<crate::render::snapshot::FrameSnapshot, crate::render::snapshot::SnapshotError>
     {
         let ctx = self.ctx as *mut Context;
-        let snapshot = unsafe { (&mut *ctx).render_platform_viewport_snapshot(options) };
+        let snapshot = unsafe { (&mut *ctx).render_platform_viewport_snapshot(consumer) };
         self.closed = true;
         std::mem::forget(self);
         snapshot

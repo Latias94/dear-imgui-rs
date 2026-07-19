@@ -357,7 +357,7 @@ impl AppWindow {
 
             self.imgui.renderer.new_frame()?;
             let draw_data = self.imgui.context.render();
-            self.imgui.renderer.render_draw_data_with_fb_size(
+            self.imgui.renderer.render_with_fb_size(
                 draw_data,
                 &mut rpass,
                 self.surface_desc.width,

@@ -10,9 +10,9 @@
 //! cargo run --bin multi_viewport_wgpu --features multi-viewport
 //! ```
 //!
-//! Automated native viewport smoke (builds Dear ImGui from source):
-//! ```bash
-//! DEAR_IMGUI_VIEWPORT_SMOKE=1 cargo run --bin multi_viewport_wgpu --features "multi-viewport test-engine"
+//! Automated Linux viewport smoke with Xvfb and Mesa Lavapipe:
+//! ```text
+//! python3 tools/ci/run_contract.py multi-viewport-smoke
 //! ```
 //!
 //! What this example demonstrates:
@@ -25,16 +25,23 @@
 //! - Multi-viewport functionality may have bugs or incomplete features
 //! - Not recommended for production use
 //! - Secondary OS windows are enabled only on desktop native targets
-//!   (Windows/macOS/Linux); Linux is currently untested.
+//!   (Windows/macOS/Linux); Linux is exercised with Xvfb and Mesa Lavapipe in CI.
 
 use dear_imgui_rs::{Condition, Context, TextureId};
 #[cfg(feature = "test-engine")]
 use dear_imgui_test_engine::{
     RunFlags, RunSpeed, ScriptCount, TestEngine, TestGroup, VerboseLevel,
 };
-use dear_imgui_wgpu::{GammaMode, WgpuInitInfo, WgpuRenderer};
+use dear_imgui_wgpu::{GammaMode, WgpuInitInfo, WgpuRenderer, multi_viewport as wgpu_mvp};
 use dear_imgui_winit::{HiDpiMode, WinitPlatform, multi_viewport as winit_mvp};
 use pollster::block_on;
+#[cfg(feature = "test-engine")]
+use std::{
+    fmt,
+    fs::{self, OpenOptions},
+    io::Write,
+    path::{Path, PathBuf},
+};
 use std::{sync::Arc, time::Instant};
 use winit::{
     application::ApplicationHandler,
@@ -44,15 +51,182 @@ use winit::{
     window::{Window, WindowId},
 };
 
+enum AppRenderer {
+    Single(WgpuRenderer),
+    Multi(wgpu_mvp::WinitViewportRuntime),
+}
+
+#[cfg(feature = "test-engine")]
+struct ViewportSmokeState {
+    result_path: Option<PathBuf>,
+    adapter: wgpu::AdapterInfo,
+    saw_secondary_viewport: bool,
+    saw_merged_viewport: bool,
+    complete: bool,
+}
+
+#[cfg(feature = "test-engine")]
+struct CompletedViewportSmoke {
+    result_path: Option<PathBuf>,
+    adapter: wgpu::AdapterInfo,
+    saw_secondary_viewport: bool,
+    saw_merged_viewport: bool,
+}
+
+#[cfg(feature = "test-engine")]
+impl ViewportSmokeState {
+    fn completed_result(&self) -> Option<CompletedViewportSmoke> {
+        self.complete.then(|| CompletedViewportSmoke {
+            result_path: self.result_path.clone(),
+            adapter: self.adapter.clone(),
+            saw_secondary_viewport: self.saw_secondary_viewport,
+            saw_merged_viewport: self.saw_merged_viewport,
+        })
+    }
+}
+
+#[cfg(feature = "test-engine")]
+impl CompletedViewportSmoke {
+    fn write_after_teardown(self) -> Result<(), Box<dyn std::error::Error>> {
+        let Some(path) = self.result_path else {
+            return Ok(());
+        };
+        let json = format!(
+            "{{\"schema_version\":1,\"outcome\":\"Passed\",\"adapter\":{{\"name\":\"{}\",\"backend\":\"{:?}\",\"device_type\":\"{:?}\",\"driver\":\"{}\",\"driver_info\":\"{}\",\"vendor\":{},\"device\":{}}},\"secondary_viewport_observed\":{},\"merge_observed\":{},\"teardown_complete\":true}}",
+            json_escape(&self.adapter.name),
+            self.adapter.backend,
+            self.adapter.device_type,
+            json_escape(&self.adapter.driver),
+            json_escape(&self.adapter.driver_info),
+            self.adapter.vendor,
+            self.adapter.device,
+            self.saw_secondary_viewport,
+            self.saw_merged_viewport,
+        );
+        write_json_atomic(&path, &json)
+    }
+}
+
+#[cfg(feature = "test-engine")]
+fn validate_software_vulkan_adapter(info: &wgpu::AdapterInfo) -> Result<(), String> {
+    let identity = format!("{} {} {}", info.name, info.driver, info.driver_info).to_lowercase();
+    if info.backend != wgpu::Backend::Vulkan {
+        return Err(format!(
+            "viewport smoke requires Vulkan, selected {:?}",
+            info.backend
+        ));
+    }
+    if info.device_type != wgpu::DeviceType::Cpu {
+        return Err(format!(
+            "viewport smoke requires a CPU software adapter, selected {:?}",
+            info.device_type
+        ));
+    }
+    if !identity.contains("lavapipe") && !identity.contains("llvmpipe") {
+        return Err(format!(
+            "viewport smoke requires Lavapipe/llvmpipe, selected '{}' ({})",
+            info.name, info.driver
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "test-engine")]
+fn json_escape(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '"' => escaped.push_str("\\\""),
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            character if character.is_control() => {
+                use fmt::Write as _;
+                let _ = write!(escaped, "\\u{:04x}", character as u32);
+            }
+            character => escaped.push(character),
+        }
+    }
+    escaped
+}
+
+#[cfg(feature = "test-engine")]
+fn write_json_atomic(path: &Path, contents: &str) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)?;
+    }
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or("DEAR_IMGUI_VIEWPORT_SMOKE_JSON must name a file")?;
+    let temporary = path.with_file_name(format!(".{file_name}.{}.tmp", std::process::id()));
+    let result = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        file.write_all(contents.as_bytes())?;
+        file.write_all(b"\n")?;
+        file.sync_all()?;
+        fs::rename(&temporary, path)?;
+        Ok::<_, Box<dyn std::error::Error>>(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+impl AppRenderer {
+    fn new_frame(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        match self {
+            Self::Single(renderer) => renderer.new_frame()?,
+            Self::Multi(runtime) => runtime.new_frame()?,
+        }
+        Ok(())
+    }
+
+    fn render_context_with_fb_size(
+        &mut self,
+        context: &mut Context,
+        render_pass: &mut wgpu::RenderPass<'_>,
+        width: u32,
+        height: u32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        match self {
+            Self::Single(renderer) => {
+                renderer.render_context_with_fb_size(context, render_pass, width, height)?
+            }
+            Self::Multi(runtime) => {
+                runtime.render_context_with_fb_size(context, render_pass, width, height)?
+            }
+        }
+        Ok(())
+    }
+
+    fn shutdown(&mut self, context: &mut Context) -> Result<(), Box<dyn std::error::Error>> {
+        match self {
+            Self::Single(renderer) => renderer.shutdown(context)?,
+            Self::Multi(runtime) => runtime.shutdown(context)?,
+        }
+        Ok(())
+    }
+}
+
 struct AppWindow {
     window: Arc<Window>,
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
     device: wgpu::Device,
     queue: wgpu::Queue,
-    imgui: Context,
+    renderer: AppRenderer,
+    viewport_runtime: Option<winit_mvp::WinitPlatformRuntime>,
     platform: WinitPlatform,
-    renderer: Box<WgpuRenderer>,
+    imgui: Context,
     start_time: Instant,
     enable_viewports: bool,
     // Offscreen "game view" texture and view
@@ -63,26 +237,22 @@ struct AppWindow {
     #[cfg(feature = "test-engine")]
     test_engine: Option<TestEngine>,
     #[cfg(feature = "test-engine")]
-    viewport_smoke_complete: bool,
+    viewport_smoke: Option<ViewportSmokeState>,
 }
 
 impl Drop for AppWindow {
     fn drop(&mut self) {
         #[cfg(feature = "test-engine")]
         if let Some(engine) = self.test_engine.as_mut() {
-            engine.shutdown();
-        }
-        // Avoid ImGui's shutdown assertion by ensuring platform windows are destroyed before the
-        // context is dropped.
-        if self.enable_viewports {
-            dear_imgui_wgpu::multi_viewport::shutdown_multi_viewport_support(&mut self.imgui)
-                .expect("WGPU multi-viewport shutdown failed");
+            let _ = engine.shutdown();
         }
         self.renderer
             .shutdown(&mut self.imgui)
             .expect("WGPU renderer shutdown failed");
-        if self.enable_viewports {
-            winit_mvp::shutdown_multi_viewport_support(&mut self.imgui);
+        if let Some(runtime) = self.viewport_runtime.as_mut() {
+            runtime
+                .shutdown()
+                .expect("Winit multi-viewport shutdown failed");
         }
     }
 }
@@ -90,8 +260,8 @@ impl Drop for AppWindow {
 impl AppWindow {
     fn new(event_loop: &ActiveEventLoop) -> Result<Self, Box<dyn std::error::Error>> {
         // Winit + WGPU multi-viewport is experimental.
-        // Enabled by default on desktop native targets; tested on Windows/macOS.
-        // Linux is enabled but currently untested.
+        // Enabled by default on desktop native targets. The Linux path is exercised
+        // with Xvfb and Mesa Lavapipe in native runtime CI.
         let enable_viewports = cfg!(any(
             target_os = "windows",
             target_os = "macos",
@@ -102,7 +272,8 @@ impl AppWindow {
             std::env::var("DEAR_IMGUI_VIEWPORT_SMOKE").is_ok_and(|value| value == "1");
 
         // Create WGPU instance first (also used by renderer for per-viewport surfaces)
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
 
         let window: Arc<Window> = Arc::new(
             event_loop
@@ -122,6 +293,23 @@ impl AppWindow {
             apply_limit_buckets: false,
             force_fallback_adapter: false,
         }))?;
+
+        #[cfg(feature = "test-engine")]
+        let adapter_info = adapter.get_info();
+        #[cfg(feature = "test-engine")]
+        if run_viewport_smoke {
+            println!(
+                "WGPU adapter: name='{}', backend={:?}, device_type={:?}, driver='{}', info='{}'",
+                adapter_info.name,
+                adapter_info.backend,
+                adapter_info.device_type,
+                adapter_info.driver,
+                adapter_info.driver_info,
+            );
+            if std::env::var("DEAR_IMGUI_REQUIRE_SOFTWARE_VULKAN").is_ok_and(|value| value == "1") {
+                validate_software_vulkan_adapter(&adapter_info)?;
+            }
+        }
 
         let (device, queue) = block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))?;
 
@@ -184,16 +372,27 @@ impl AppWindow {
 
         let mut platform = WinitPlatform::new(&mut imgui);
         platform.attach_window(&window, HiDpiMode::Default, &mut imgui);
+        let viewport_runtime = enable_viewports
+            .then(|| winit_mvp::WinitPlatformRuntime::new(&mut imgui, Arc::clone(&window)))
+            .transpose()?;
 
         // WGPU renderer
         let init_info = WgpuInitInfo::new(device.clone(), queue.clone(), surface_config.format)
             .with_instance(instance.clone())
             .with_adapter(adapter.clone());
-        let mut renderer = Box::new(WgpuRenderer::new(init_info, &mut imgui)?);
+        let mut renderer = WgpuRenderer::new(init_info, &mut imgui)?;
         renderer.set_gamma_mode(GammaMode::Auto);
 
         // Register the offscreen texture as an external ImGui texture.
         let game_tex_id = renderer.register_external_texture(&game_tex, &game_tex_view);
+
+        let renderer = if enable_viewports {
+            AppRenderer::Multi(wgpu_mvp::WinitViewportRuntime::attach(
+                &mut imgui, renderer,
+            )?)
+        } else {
+            AppRenderer::Single(renderer)
+        };
 
         #[cfg(feature = "test-engine")]
         let test_engine = if run_viewport_smoke {
@@ -203,21 +402,20 @@ impl AppWindow {
             let external_pos = [main_pos.x + main_size.width + 100.0, main_pos.y + 100.0];
             let merged_pos = [main_pos.x + 100.0, main_pos.y + 100.0];
 
-            let mut engine = TestEngine::try_create()?;
-            engine.set_capture_enabled(false);
-            engine.set_run_speed(RunSpeed::Fast);
-            engine.set_verbose_level(VerboseLevel::Info);
+            let mut engine = TestEngine::create()?;
+            engine.start(&mut imgui)?;
+            engine.set_capture_enabled(false)?;
+            engine.set_run_speed(RunSpeed::Fast)?;
+            engine.set_verbose_level(VerboseLevel::Info)?;
             engine.add_script_test("wgpu", "multi_viewport_surface_smoke", move |test| {
-                test.wait_for_item("Main/Viewport Count", ScriptCount::new(240))?;
+                test.wait_for_item("Main/Viewport Count", ScriptCount::new(240)?)?;
                 test.window_move("Game View", external_pos[0], external_pos[1])?;
-                test.yield_frames(ScriptCount::new(30));
+                test.yield_frames(ScriptCount::new(30)?)?;
                 test.assert_item_read_int_eq("Main/Viewport Count", 2)?;
                 test.window_move("Game View", merged_pos[0], merged_pos[1])?;
-                test.yield_frames(ScriptCount::new(30));
-                test.assert_item_read_int_eq("Main/Viewport Count", 1)?;
-                Ok(())
+                test.yield_frames(ScriptCount::new(30)?)?;
+                test.assert_item_read_int_eq("Main/Viewport Count", 1)
             })?;
-            engine.try_start(&imgui)?;
             engine.queue_tests(
                 TestGroup::Tests,
                 Some("multi_viewport_surface_smoke"),
@@ -228,15 +426,25 @@ impl AppWindow {
             None
         };
 
-        let mut app = Self {
+        #[cfg(feature = "test-engine")]
+        let viewport_smoke = run_viewport_smoke.then(|| ViewportSmokeState {
+            result_path: std::env::var_os("DEAR_IMGUI_VIEWPORT_SMOKE_JSON").map(PathBuf::from),
+            adapter: adapter_info,
+            saw_secondary_viewport: false,
+            saw_merged_viewport: false,
+            complete: false,
+        });
+
+        let app = Self {
             window,
             surface,
             surface_config,
             device,
             queue,
-            imgui,
-            platform,
             renderer,
+            viewport_runtime,
+            platform,
+            imgui,
             start_time: Instant::now(),
             enable_viewports,
             _game_tex: game_tex,
@@ -245,20 +453,26 @@ impl AppWindow {
             #[cfg(feature = "test-engine")]
             test_engine,
             #[cfg(feature = "test-engine")]
-            viewport_smoke_complete: false,
+            viewport_smoke,
         };
 
-        if app.enable_viewports {
-            // Install platform (winit) viewport handlers (required by Dear ImGui)
-            winit_mvp::init_multi_viewport_support(&mut app.imgui, &app.window);
-
-            // Renderer viewport callbacks (install AFTER winit so our callbacks take precedence)
-            unsafe {
-                dear_imgui_wgpu::multi_viewport::enable(&mut app.renderer, &mut app.imgui)?;
-            }
-        }
-
         Ok(app)
+    }
+
+    fn redraw_with_event_loop(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let viewport_runtime = self.viewport_runtime.take();
+        let result = match viewport_runtime.as_ref() {
+            Some(runtime) => match runtime.with_event_loop(event_loop, |_| self.redraw()) {
+                Ok(result) => result,
+                Err(error) => Err(Box::new(error) as Box<dyn std::error::Error>),
+            },
+            None => self.redraw(),
+        };
+        self.viewport_runtime = viewport_runtime;
+        result
     }
 
     fn redraw(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -321,6 +535,14 @@ impl AppWindow {
         #[cfg(feature = "test-engine")]
         let mut viewport_count =
             i32::try_from(self.imgui.platform_io().viewports_iter().count()).unwrap_or(i32::MAX);
+        #[cfg(feature = "test-engine")]
+        if let Some(smoke) = self.viewport_smoke.as_mut() {
+            if viewport_count > 1 {
+                smoke.saw_secondary_viewport = true;
+            } else if smoke.saw_secondary_viewport {
+                smoke.saw_merged_viewport = true;
+            }
+        }
         let ui = self.imgui.frame();
 
         // Keep a dockspace in the main viewport so it always has content
@@ -419,13 +641,12 @@ impl AppWindow {
 
         #[cfg(feature = "test-engine")]
         if let Some(engine) = self.test_engine.as_mut() {
-            engine.post_swap();
-            if !self.viewport_smoke_complete
-                && engine.is_test_queue_empty()
-                && !engine.is_running_tests()
-            {
-                engine.stop();
-                let summary = engine.result_summary();
+            engine.post_swap()?;
+            let smoke_pending = self
+                .viewport_smoke
+                .as_ref()
+                .is_some_and(|smoke| !smoke.complete);
+            if smoke_pending && let Some(summary) = engine.take_terminal_summary()? {
                 if summary.count_tested != 1 || summary.count_success != 1 {
                     return Err(format!(
                         "viewport smoke failed: tested={}, success={}",
@@ -433,8 +654,19 @@ impl AppWindow {
                     )
                     .into());
                 }
+                let smoke = self
+                    .viewport_smoke
+                    .as_mut()
+                    .expect("a pending viewport smoke state must exist");
+                if !smoke.saw_secondary_viewport || !smoke.saw_merged_viewport {
+                    return Err(format!(
+                        "viewport smoke did not observe the complete lifecycle: secondary={}, merged={}",
+                        smoke.saw_secondary_viewport, smoke.saw_merged_viewport
+                    )
+                    .into());
+                }
                 println!("WGPU multi-viewport Test Engine smoke passed");
-                self.viewport_smoke_complete = true;
+                smoke.complete = true;
             }
         }
         Ok(())
@@ -492,13 +724,17 @@ impl ApplicationHandler for App {
             window_id,
             event: event.clone(),
         };
-        // Let platform + multi-viewport helper route events to main + secondary windows
-        let _ = winit_mvp::handle_event_with_multi_viewport(
-            &mut app.platform,
-            &mut app.imgui,
-            &app.window,
-            &full,
-        );
+        if let Some(runtime) = app.viewport_runtime.as_ref() {
+            if let Err(error) = runtime.handle_event(&mut app.platform, &mut app.imgui, &full) {
+                self.error = Some(error.to_string());
+                event_loop.exit();
+                return;
+            }
+        } else {
+            let _ = app
+                .platform
+                .handle_event(&mut app.imgui, &app.window, &full);
+        }
 
         match event {
             WindowEvent::CloseRequested => {
@@ -522,17 +758,14 @@ impl ApplicationHandler for App {
                 // We drive rendering from the main window. Secondary viewport windows are
                 // rendered via ImGui's platform callbacks during `app.redraw()`.
                 if is_main_window {
-                    // ImGui may create secondary OS windows during `update_platform_windows()`.
-                    // Provide the current `ActiveEventLoop` for the duration of this callback.
-                    let _el_guard = if app.enable_viewports {
-                        Some(winit_mvp::set_event_loop_for_frame(event_loop))
-                    } else {
-                        None
-                    };
-                    match app.redraw() {
+                    match app.redraw_with_event_loop(event_loop) {
                         Ok(()) => {
                             #[cfg(feature = "test-engine")]
-                            if app.viewport_smoke_complete {
+                            if app
+                                .viewport_smoke
+                                .as_ref()
+                                .is_some_and(|smoke| smoke.complete)
+                            {
                                 event_loop.exit();
                                 return;
                             }
@@ -556,8 +789,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut app = App::default();
     event_loop.run_app(&mut app)?;
-    if let Some(error) = app.error {
+    if let Some(error) = app.error.take() {
         return Err(error.into());
+    }
+    #[cfg(feature = "test-engine")]
+    let smoke_result = app
+        .window
+        .as_ref()
+        .and_then(|window| window.viewport_smoke.as_ref())
+        .and_then(ViewportSmokeState::completed_result);
+    // A success artifact is evidence that renderer, platform, and Context teardown completed.
+    drop(app);
+    #[cfg(feature = "test-engine")]
+    if let Some(result) = smoke_result {
+        result.write_after_teardown()?;
     }
     Ok(())
 }

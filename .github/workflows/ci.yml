@@ -89,26 +89,29 @@ jobs:
         with:
           cache-bin: "false"
 
+      - name: Refresh Linux package metadata
+        if: runner.os == 'Linux'
+        run: sudo apt-get update
+
       - name: Install Linux deps
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential pkg-config \
-            libfreetype6-dev \
-            libasound2-dev \
-            libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev \
-            libxkbcommon-dev libwayland-dev libudev-dev \
-            mesa-common-dev libgl1-mesa-dev cmake
+        run: >-
+          sudo apt-get install -y
+          build-essential pkg-config
+          libfreetype6-dev
+          libasound2-dev
+          libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev
+          libxkbcommon-dev libwayland-dev libudev-dev
+          mesa-common-dev libgl1-mesa-dev cmake
+
+      - name: Refresh Homebrew metadata
+        if: runner.os == 'macOS'
+        run: brew update
 
       - name: Install macOS deps
         if: runner.os == 'macOS'
-        run: |
-          brew update
-          # CMake is needed by various -sys crates; SDL3 is required by the
-          # dear-imgui-sdl3 backend on macOS (we rely on system headers/libs
-          # instead of building SDL3 from source here).
-          brew install cmake freetype pkg-config sdl3
+        # CMake is needed by various -sys crates; SDL3 is provided by the system.
+        run: brew install cmake freetype pkg-config sdl3
 
       - name: Install Windows deps
         if: runner.os == 'Windows'
@@ -157,18 +160,26 @@ jobs:
       - name: Test self-contained font example assets
         run: cargo nextest run -p dear-imgui-examples --bin style_and_fonts
 
-      - name: Check multi-viewport examples
-        run: |
-          cargo check -p dear-imgui-examples --features "multi-viewport" --bin multi_viewport_wgpu --bin multi_viewport_ash
-          cargo check -p dear-imgui-examples --features "multi-viewport sdl3-platform" --bin sdl3_glow_multi_viewport
-          cargo check -p dear-imgui-examples --features "multi-viewport sdl3-opengl3" --bin sdl3_opengl_multi_viewport
-          cargo check -p dear-imgui-examples --features "sdl3-wgpu-multi-viewport" --bin sdl3_wgpu_multi_viewport
-          cargo check -p dear-imgui-examples --features "sdl3-ash-multi-viewport" --bin sdl3_ash_multi_viewport
+      - name: Check Winit multi-viewport examples
+        run: cargo check -p dear-imgui-examples --features "multi-viewport" --bin multi_viewport_wgpu --bin multi_viewport_ash
 
-      - name: Check SDL3 renderer examples
-        run: |
-          cargo check -p dear-imgui-examples --features "sdl3-platform" --bin sdl3_wgpu
-          cargo check -p dear-imgui-examples --features "sdl3-sdlrenderer3" --bin sdl3_sdlrenderer
+      - name: Check SDL3 Glow multi-viewport example
+        run: cargo check -p dear-imgui-examples --features "multi-viewport sdl3-platform" --bin sdl3_glow_multi_viewport
+
+      - name: Check SDL3 OpenGL multi-viewport example
+        run: cargo check -p dear-imgui-examples --features "multi-viewport sdl3-opengl3" --bin sdl3_opengl_multi_viewport
+
+      - name: Check SDL3 WGPU multi-viewport example
+        run: cargo check -p dear-imgui-examples --features "sdl3-wgpu-multi-viewport" --bin sdl3_wgpu_multi_viewport
+
+      - name: Check SDL3 Ash multi-viewport example
+        run: cargo check -p dear-imgui-examples --features "sdl3-ash-multi-viewport" --bin sdl3_ash_multi_viewport
+
+      - name: Check SDL3 WGPU renderer example
+        run: cargo check -p dear-imgui-examples --features "sdl3-platform" --bin sdl3_wgpu
+
+      - name: Check SDLRenderer3 renderer example
+        run: cargo check -p dear-imgui-examples --features "sdl3-sdlrenderer3" --bin sdl3_sdlrenderer
 
       - name: Build examples (test-engine)
         run: cargo build -p dear-imgui-examples --features "test-engine" --bin imgui_test_engine_basic
@@ -179,13 +190,20 @@ jobs:
       - name: Check test-engine (no capture)
         run: cargo check -p dear-imgui-test-engine --no-default-features
 
-      - name: Check native-only features unified with the WASM feature on native targets
+      - name: Check native stack-layout unified with the WASM feature
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
-        run: |
-          cargo check -p dear-imgui-rs --lib --no-default-features --features wasm,stack-layout
-          cargo check -p dear-imgui-rs --lib --no-default-features --features wasm,test-engine
-          cargo check -p dear-imgui-rs --lib --no-default-features --features wasm,prebuilt
+        run: cargo check -p dear-imgui-rs --lib --no-default-features --features wasm,stack-layout
+
+      - name: Check native Test Engine unified with the WASM feature
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+        run: cargo check -p dear-imgui-rs --lib --no-default-features --features wasm,test-engine
+
+      - name: Check native prebuilt unified with the WASM feature
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+        run: cargo check -p dear-imgui-rs --lib --no-default-features --features wasm,prebuilt
 
       - name: Check unified prebuilt and test-engine source profile
         run: >-
@@ -200,8 +218,8 @@ jobs:
           --contains 'feature `test-engine` is source-only and cannot be packaged as a prebuilt core artifact'
           -- cargo check -p dear-imgui-sys --no-default-features --features package-bin,test-engine
 
-  binding-contract:
-    name: Core binding contract
+  test-engine-sanitizers:
+    name: Test Engine C ABI sanitizers
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -218,18 +236,98 @@ jobs:
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
 
+      - name: Refresh native package metadata
+        run: sudo apt-get update
+
+      - name: Install native build dependencies
+        run: sudo apt-get install -y clang build-essential
+
+      - name: Run Test Engine FFI boundary tests with ASan and UBSan
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+          CC: clang
+          CXX: clang++
+          CFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer
+          CXXFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer
+          RUSTFLAGS: >-
+            -Cdebuginfo=1
+            -Cforce-frame-pointers=yes
+            -Clinker=clang++
+            -Clink-arg=-fsanitize=address
+            -Clink-arg=-fsanitize=undefined
+            -Clink-arg=-lstdc++
+          IMGUI_SYS_FORCE_BUILD: "1"
+        run: cargo nextest run -p dear-imgui-test-engine-sys --test ffi_boundary
+
+  test-engine-runtime:
+    name: Test Engine native runtime
+    uses: ./.github/workflows/native-runtime.yml
+    with:
+      candidate_sha: ${{ github.sha }}
+      contract: test-engine-runtime
+      gate_attempt: 1
+
+  test-engine-runtime-retry:
+    name: Test Engine native runtime retry
+    needs: test-engine-runtime
+    if: ${{ always() && needs.test-engine-runtime.outputs.retry_eligible == 'true' }}
+    uses: ./.github/workflows/native-runtime.yml
+    with:
+      candidate_sha: ${{ github.sha }}
+      contract: test-engine-runtime
+      gate_attempt: 2
+
+  multi-viewport-runtime:
+    name: Winit/WGPU multi-viewport runtime
+    uses: ./.github/workflows/native-runtime.yml
+    with:
+      candidate_sha: ${{ github.sha }}
+      contract: multi-viewport-smoke
+      gate_attempt: 1
+
+  multi-viewport-runtime-retry:
+    name: Winit/WGPU multi-viewport runtime retry
+    needs: multi-viewport-runtime
+    if: ${{ always() && needs.multi-viewport-runtime.outputs.retry_eligible == 'true' }}
+    uses: ./.github/workflows/native-runtime.yml
+    with:
+      candidate_sha: ${{ github.sha }}
+      contract: multi-viewport-smoke
+      gate_attempt: 2
+
+  binding-contract:
+    name: Core and extension binding contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: Init required nested submodules (selective)
+        run: python3 tools/ci/update_submodules.py
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.95.0'
+          components: rustfmt
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
       - name: Install fixed LLVM toolchain
-        uses: KyleMayes/install-llvm-action@v1
+        uses: KyleMayes/install-llvm-action@v2.0.9
         with:
           directory: ${{ runner.temp }}/llvm
-          cached: true
           version: '14.0'
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
           cache-bin: "false"
-          key: core-binding-contract
+          key: binding-contract
 
       - name: Test binding specification and provenance models
         run: cargo nextest run -p dear-imgui-build-support --features binding-spec
@@ -237,18 +335,35 @@ jobs:
       - name: Verify exact vendored source provenance
         run: python3 tools/source_metadata.py verify
 
+      - name: Verify exact binding provenance
+        run: python3 tools/source_metadata.py verify-bindings
+
       - name: Verify high-level API coverage policy
         run: python3 tools/api_surface_report.py --check
 
-      - name: Regenerate and verify every core binding profile
+      - name: Regenerate and verify every maintained binding profile
+        env:
+          LIBCLANG_PATH: ${{ runner.temp }}/llvm/lib
         run: cargo run -p xtask -- verify-bindings --allow-dirty
 
-      - name: Assert checked-in core bindings did not drift
-        run: |
-          git diff --exit-code -- \
-            dear-imgui-sys/src/bindings_pregenerated.rs \
-            dear-imgui-sys/src/bindings_pregenerated_windows.rs \
-            dear-imgui-sys/src/wasm_bindings_pregenerated.rs
+      - name: Assert checked-in bindings did not drift
+        run: >-
+          git diff --exit-code --
+          dear-imgui-sys/src/bindings_pregenerated.rs
+          dear-imgui-sys/src/bindings_pregenerated_windows.rs
+          dear-imgui-sys/src/wasm_bindings_pregenerated.rs
+          extensions/dear-imgui-test-engine-sys/src/bindings_pregenerated.rs
+          extensions/dear-implot-sys/src/bindings_pregenerated.rs
+          extensions/dear-implot-sys/src/wasm_bindings_pregenerated.rs
+          extensions/dear-implot3d-sys/src/bindings_pregenerated.rs
+          extensions/dear-implot3d-sys/src/wasm_bindings_pregenerated.rs
+          extensions/dear-imnodes-sys/src/bindings_pregenerated.rs
+          extensions/dear-imnodes-sys/src/wasm_bindings_pregenerated.rs
+          extensions/dear-node-editor-sys/src/bindings_pregenerated.rs
+          extensions/dear-imguizmo-sys/src/bindings_pregenerated.rs
+          extensions/dear-imguizmo-sys/src/wasm_bindings_pregenerated.rs
+          extensions/dear-imguizmo-quat-sys/src/bindings_pregenerated.rs
+          extensions/dear-imguizmo-quat-sys/src/wasm_bindings_pregenerated.rs
 
   wgpu-routes:
     name: WGPU ${{ matrix.wgpu }} + ${{ matrix.platform }}
@@ -300,15 +415,17 @@ jobs:
           cache-bin: "false"
           key: wgpu-${{ matrix.wgpu }}-${{ matrix.platform }}
 
+      - name: Refresh Linux package metadata
+        run: sudo apt-get update
+
       - name: Install Linux deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential cmake ninja-build pkg-config \
-            libasound2-dev \
-            libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev \
-            libxkbcommon-dev libwayland-dev libudev-dev \
-            mesa-common-dev libgl1-mesa-dev
+        run: >-
+          sudo apt-get install -y
+          build-essential cmake ninja-build pkg-config
+          libasound2-dev
+          libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev
+          libxkbcommon-dev libwayland-dev libudev-dev
+          mesa-common-dev libgl1-mesa-dev
 
       - name: Check exact WGPU route
         run: cargo check -p dear-imgui-wgpu --lib --no-default-features --features "${{ matrix.features }}"
@@ -376,13 +493,15 @@ jobs:
           cache-bin: "false"
           key: ash-${{ matrix.platform }}-${{ matrix.rendering }}
 
+      - name: Refresh Linux package metadata
+        run: sudo apt-get update
+
       - name: Install Linux deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential pkg-config \
-            libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev \
-            libxkbcommon-dev libwayland-dev libudev-dev
+        run: >-
+          sudo apt-get install -y
+          build-essential pkg-config
+          libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev
+          libxkbcommon-dev libwayland-dev libudev-dev
 
       - name: Check exact Ash route
         run: cargo check -p dear-imgui-ash --lib --no-default-features --features "${{ matrix.features }}"
@@ -424,15 +543,17 @@ jobs:
           cache-bin: "false"
           key: feature-conflict-contracts
 
+      - name: Refresh Linux package metadata
+        run: sudo apt-get update
+
       - name: Install Linux deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential cmake ninja-build pkg-config \
-            libasound2-dev \
-            libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev \
-            libxkbcommon-dev libwayland-dev libudev-dev \
-            mesa-common-dev libgl1-mesa-dev
+        run: >-
+          sudo apt-get install -y
+          build-essential cmake ninja-build pkg-config
+          libasound2-dev
+          libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev
+          libxkbcommon-dev libwayland-dev libudev-dev
+          mesa-common-dev libgl1-mesa-dev
 
       - name: Reject mutually exclusive renderer features
         run: python3 tools/ci/run_contract.py renderer-feature-conflicts
@@ -460,15 +581,17 @@ jobs:
           cache-bin: "false"
           key: node-editor-normal
 
+      - name: Refresh Linux package metadata
+        run: sudo apt-get update
+
       - name: Install Linux deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential cmake pkg-config \
-            libasound2-dev \
-            libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev \
-            libxkbcommon-dev libwayland-dev libudev-dev \
-            mesa-common-dev libgl1-mesa-dev
+        run: >-
+          sudo apt-get install -y
+          build-essential cmake pkg-config
+          libasound2-dev
+          libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev
+          libxkbcommon-dev libwayland-dev libudev-dev
+          mesa-common-dev libgl1-mesa-dev
 
       - name: Check node editor without stack-layout injection
         run: cargo check -p dear-node-editor --lib --no-default-features
@@ -510,16 +633,19 @@ jobs:
           cache-bin: "false"
           key: stack-layout-${{ matrix.profile }}
 
+      - name: Refresh Linux package metadata
+        if: matrix.profile == 'blueprints'
+        run: sudo apt-get update
+
       - name: Install Linux deps
         if: matrix.profile == 'blueprints'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential cmake pkg-config \
-            libasound2-dev \
-            libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev \
-            libxkbcommon-dev libwayland-dev libudev-dev \
-            mesa-common-dev libgl1-mesa-dev
+        run: >-
+          sudo apt-get install -y
+          build-essential cmake pkg-config
+          libasound2-dev
+          libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev
+          libxkbcommon-dev libwayland-dev libudev-dev
+          mesa-common-dev libgl1-mesa-dev
 
       - name: Check standalone core stack-layout profile
         if: matrix.profile == 'core'
@@ -577,15 +703,17 @@ jobs:
           cache-bin: "false"
           key: clippy-default
 
+      - name: Refresh Linux package metadata
+        run: sudo apt-get update
+
       - name: Install Linux deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential cmake pkg-config \
-            libfreetype6-dev libasound2-dev \
-            libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev \
-            libxkbcommon-dev libwayland-dev libudev-dev \
-            mesa-common-dev libgl1-mesa-dev
+        run: >-
+          sudo apt-get install -y
+          build-essential cmake pkg-config
+          libfreetype6-dev libasound2-dev
+          libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev
+          libxkbcommon-dev libwayland-dev libudev-dev
+          mesa-common-dev libgl1-mesa-dev
 
       - name: Lint default workspace routes
         run: >-
@@ -624,15 +752,17 @@ jobs:
           cache-bin: "false"
           key: clippy-focused
 
+      - name: Refresh Linux package metadata
+        run: sudo apt-get update
+
       - name: Install Linux deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential cmake pkg-config \
-            libasound2-dev \
-            libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev \
-            libxkbcommon-dev libwayland-dev libudev-dev \
-            mesa-common-dev libgl1-mesa-dev
+        run: >-
+          sudo apt-get install -y
+          build-essential cmake pkg-config
+          libasound2-dev
+          libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev
+          libxkbcommon-dev libwayland-dev libudev-dev
+          mesa-common-dev libgl1-mesa-dev
 
       - name: Lint binding contract tooling without warnings
         run: cargo clippy -p dear-imgui-build-support --all-targets --features binding-spec -- -D warnings
@@ -678,15 +808,17 @@ jobs:
         with:
           cache-bin: "false"
 
+      - name: Refresh Linux package metadata
+        run: sudo apt-get update
+
       - name: Install Linux deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential pkg-config \
-            libasound2-dev \
-            libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev \
-            libxkbcommon-dev libwayland-dev libudev-dev \
-            mesa-common-dev libgl1-mesa-dev cmake
+        run: >-
+          sudo apt-get install -y
+          build-essential pkg-config
+          libasound2-dev
+          libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev
+          libxkbcommon-dev libwayland-dev libudev-dev
+          mesa-common-dev libgl1-mesa-dev cmake
 
       - name: Add wasm32 target
         run: rustup target add --toolchain stable wasm32-unknown-unknown
@@ -703,10 +835,11 @@ jobs:
       - name: Check Bevy backend multi-viewport examples
         run: cargo +stable check -p dear-imgui-bevy --examples --features render,multi-viewport
 
-      - name: Check Bevy backend ecosystem examples
-        run: |
-          cargo +stable check -p dear-imgui-bevy --example ecosystem --features render
-          cargo +stable check -p dear-imgui-bevy --example bevy_plot_controls --features render
+      - name: Check Bevy backend ecosystem example
+        run: cargo +stable check -p dear-imgui-bevy --example ecosystem --features render
+
+      - name: Check Bevy backend plot controls example
+        run: cargo +stable check -p dear-imgui-bevy --example bevy_plot_controls --features render
 
       - name: Check Bevy backend docs
         run: cargo +stable doc -p dear-imgui-bevy --no-deps --features render,multi-viewport
@@ -831,6 +964,20 @@ jobs:
           -p dear-imguizmo-quat-sys
           -p dear-imgui-test-engine-sys
 
+      - name: Check generated compatibility symbols on native without vendored sources
+        env:
+          LIBCLANG_PATH: ${{ github.workspace }}/ci-missing-libclang
+          IMGUI_SYS_SKIP_CC: "1"
+          IMPLOT_SYS_SKIP_CC: "1"
+          IMPLOT3D_SYS_SKIP_CC: "1"
+          IMNODES_SYS_SKIP_CC: "1"
+        run: >-
+          cargo check
+          -p dear-implot-sys
+          -p dear-implot3d-sys
+          -p dear-imnodes-sys
+          --test binding_symbols
+
       - name: Assert regeneration requires bindgen feature
         env:
           LIBCLANG_PATH: ${{ github.workspace }}/ci-missing-libclang
@@ -869,43 +1016,14 @@ jobs:
           runVcpkgInstall: false
 
       - name: Install native deps through vcpkg
-        shell: pwsh
-        run: |
-          vcpkg install freetype:x64-windows-static-md sdl3:x64-windows-static-md
-
-          $vcpkgExe = (Get-Command vcpkg -ErrorAction Stop).Source
-          $candidates = @(
-            $env:VCPKG_ROOT,
-            $env:VCPKG_INSTALLATION_ROOT,
-            (Split-Path -Parent $vcpkgExe)
-          ) | Where-Object { $_ } | Select-Object -Unique
-          $root = $candidates | Where-Object { Test-Path (Join-Path $_ '.vcpkg-root') } | Select-Object -First 1
-          if (-not $root) {
-            Write-Host "vcpkg.exe: $vcpkgExe"
-            Write-Host "VCPKG_ROOT: $env:VCPKG_ROOT"
-            Write-Host "VCPKG_INSTALLATION_ROOT: $env:VCPKG_INSTALLATION_ROOT"
-            throw 'VCPKG root not found in environment or next to vcpkg.exe.'
-          }
-
-          # vcpkg-rs 0.2.x still reads installed\vcpkg\updates. Modern vcpkg
-          # installs may create installed\vcpkg\status without creating the
-          # updates directory, which otherwise makes vcpkg-rs fail before it
-          # can inspect the installed packages.
-          $statusDir = Join-Path $root 'installed\vcpkg'
-          $updatesDir = Join-Path $statusDir 'updates'
-          New-Item -ItemType Directory -Force -Path $updatesDir | Out-Null
-          $statusFile = Join-Path $statusDir 'status'
-          $hasUpdates = @(Get-ChildItem -Path $updatesDir -File -ErrorAction SilentlyContinue).Count -gt 0
-          if (-not (Test-Path $statusFile) -and -not $hasUpdates) {
-            throw "vcpkg status data not found under $statusDir"
-          }
-
-          Write-Host "Using VCPKG_ROOT=$root"
-          Write-Host "Using VCPKGRS_TRIPLET=x64-windows-static-md"
-          echo "VCPKG_ROOT=$root" >> $env:GITHUB_ENV
-          echo "VCPKGRS_TRIPLET=x64-windows-static-md" >> $env:GITHUB_ENV
-          echo "PKG_CONFIG=$env:RUNNER_TEMP\missing-pkg-config.exe" >> $env:GITHUB_ENV
-          echo "PKG_CONFIG_PATH=" >> $env:GITHUB_ENV
+        run: >-
+          python tools/ci/run_contract.py windows-vcpkg
+          --target x86_64-pc-windows-msvc
+          --crt md
+          --package freetype
+          --package sdl3
+          --runner-temp "$env:RUNNER_TEMP"
+          --github-env "$env:GITHUB_ENV"
 
       - name: Check dear-imgui-sys FreeType via vcpkg fallback
         run: cargo check -p dear-imgui-sys --no-default-features --features freetype
@@ -916,39 +1034,10 @@ jobs:
         run: cargo test -p dear-imgui-build-support --features pkg-config,vcpkg --lib
 
       - name: Check SDL3 header discovery via vcpkg fallback
-        shell: pwsh
-        run: |
-          $smoke = Join-Path $env:RUNNER_TEMP 'dear-imgui-native-deps-smoke'
-          New-Item -ItemType Directory -Force -Path (Join-Path $smoke 'src') | Out-Null
-          $workspace = '${{ github.workspace }}'.Replace('\', '/')
-          @"
-          [package]
-          name = "dear-imgui-native-deps-smoke"
-          version = "0.0.0"
-          edition = "2024"
-
-          [build-dependencies]
-          build-support = { package = "dear-imgui-build-support", path = "$workspace/tools/build-support", features = ["vcpkg"] }
-          "@ | Set-Content -Path (Join-Path $smoke 'Cargo.toml')
-          @'
-          fn main() {
-              let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
-              let found = build_support::find_sdl3_include_paths(build_support::Sdl3SearchConfig {
-                  out_dir: &out_dir,
-                  target_os: "windows",
-                  use_pkg_config: false,
-                  use_vcpkg: true,
-              })
-              .expect("SDL3 headers should be discoverable through vcpkg");
-              assert!(
-                  !found.include_paths.is_empty(),
-                  "vcpkg SDL3 discovery returned no include paths"
-              );
-          }
-          '@ | Set-Content -Path (Join-Path $smoke 'build.rs')
-          'fn main() {}' | Set-Content -Path (Join-Path $smoke 'src\main.rs')
-          $manifest = Join-Path $smoke 'Cargo.toml'
-          cargo check --manifest-path $manifest
+        run: >-
+          python tools/ci/run_contract.py windows-sdl3-consumer
+          --workspace "$env:RUNNER_TEMP\dear-imgui-native-deps-smoke"
+          --repo-root "$env:GITHUB_WORKSPACE"
 
       - name: Check SDLRenderer3 backend with pkg-config unavailable
         run: cargo check -p dear-imgui-sdl3 --no-default-features --features sdlrenderer3-renderer
@@ -986,12 +1075,11 @@ jobs:
             mingw-w64-x86_64-toolchain
 
       - name: Add MinGW64 to PATH
-        shell: powershell
-        run: |
-          $root = '${{ steps.msys2.outputs.msys2-location }}'
-          $mingw = Join-Path $root 'mingw64\bin'
-          echo $mingw >> $env:GITHUB_PATH
-          echo "MINGW_BIN=$mingw" >> $env:GITHUB_ENV
+        run: >-
+          python tools/ci/run_contract.py windows-mingw-env
+          --msys2-root "${{ steps.msys2.outputs.msys2-location }}"
+          --github-env "$env:GITHUB_ENV"
+          --github-path "$env:GITHUB_PATH"
 
       - name: Add windows-gnu target
         run: rustup target add x86_64-pc-windows-gnu
@@ -1009,25 +1097,11 @@ jobs:
           AR_x86_64_pc_windows_gnu: '${{ env.MINGW_BIN }}\ar.exe'
 
       - name: Verify windows-gnu binary does not import libstdc++
-        shell: powershell
-        run: |
-          $deps = Join-Path (Get-Location) 'target\x86_64-pc-windows-gnu\debug\deps'
-          $binaries = Get-ChildItem $deps -Filter 'dear_imgui_sys-*.exe'
-          if (-not $binaries) {
-            throw "No dear_imgui_sys test binaries found in $deps"
-          }
-
-          foreach ($binary in $binaries) {
-            Write-Host "Checking imports for $($binary.FullName)"
-            $imports = & "$env:MINGW_BIN\objdump.exe" -p $binary.FullName
-            if ($LASTEXITCODE -ne 0) {
-              throw "objdump failed for $($binary.FullName)"
-            }
-            if ($imports | Select-String -Pattern 'DLL Name:\s+libstdc\+\+-6\.dll') {
-              $imports | Select-String -Pattern 'DLL Name:'
-              throw "$($binary.Name) imports libstdc++-6.dll"
-            }
-          }
+        run: >-
+          python tools/ci/run_contract.py windows-mingw-imports
+          --deps "target\x86_64-pc-windows-gnu\debug\deps"
+          --objdump "$env:MINGW_BIN\objdump.exe"
+          --evidence "target\ci-evidence\windows-gnu\mingw-imports.txt"
 
   ffi-cross-check:
     name: FFI signedness check (armv7)
@@ -1085,10 +1159,11 @@ jobs:
       - name: Add iOS targets
         run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim
 
+      - name: Refresh Homebrew package metadata
+        run: brew update
+
       - name: Install macOS deps
-        run: |
-          brew update
-          brew install sdl3
+        run: brew install sdl3
 
       - name: Cargo check (iOS device)
         run: cargo check -p dear-imgui-rs -p dear-imgui-winit -p dear-imgui-wgpu --lib --target aarch64-apple-ios
@@ -1134,15 +1209,20 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Refresh Linux package metadata
+        run: sudo apt-get update
+
       - name: Install Linux deps
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential pkg-config \
-            libasound2-dev \
-            libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev \
-            libxkbcommon-dev libwayland-dev libudev-dev \
-            mesa-common-dev libgl1-mesa-dev cmake
+        run: >-
+          sudo apt-get install -y
+          build-essential pkg-config
+          libasound2-dev
+          libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev
+          libxkbcommon-dev libwayland-dev libudev-dev
+          mesa-common-dev libgl1-mesa-dev cmake
+
+      - name: Enforce workflow portability policy
+        run: python3 -B tools/ci/workflow_policy.py
 
       - name: Test release tooling and source provenance
         run: python3 -B -m unittest discover -s tools/tests -p 'test_*.py' -v
@@ -1188,13 +1268,6 @@ jobs:
         with:
           cache-bin: "false"
 
-      - name: Install LLVM (libclang) for bindgen
-        uses: KyleMayes/install-llvm-action@v1
-        with:
-          directory: ${{ runner.temp }}/llvm
-          cached: true
-          version: '14.0'
-
       - name: Add wasm32 target
         run: rustup target add wasm32-unknown-unknown
 
@@ -1238,13 +1311,19 @@ jobs:
           -- cargo check -p dear-imgui-rs --target wasm32-unknown-unknown
           --no-default-features --features wasm,prebuilt
 
-      - name: Generate WASM bindings for extensions (ImPlot/ImPlot3D/ImNodes/ImGuizmo/ImGuIZMO.quat)
-        run: |
-          cargo run -p xtask -- wasm-bindgen-implot
-          cargo run -p xtask -- wasm-bindgen-implot3d
-          cargo run -p xtask -- wasm-bindgen-imnodes
-          cargo run -p xtask -- wasm-bindgen-imguizmo
-          cargo run -p xtask -- wasm-bindgen-imguizmo-quat
+      - name: Validate checked-in extension WASM binding provenance
+        run: cargo run -p xtask -- verify-bindings --check-only --allow-dirty
+
+      - name: Check generated compatibility symbols on WASM
+        run: >-
+          cargo check
+          -p dear-implot-sys
+          -p dear-implot3d-sys
+          -p dear-imnodes-sys
+          --test binding_symbols
+          --target wasm32-unknown-unknown
+          --no-default-features
+          --features dear-implot-sys/wasm,dear-implot3d-sys/wasm,dear-imnodes-sys/wasm
 
       - name: Build web demo crate for wasm32-unknown-unknown (core + extensions)
         run: cargo build -p dear-imgui-web-demo --target wasm32-unknown-unknown --no-default-features --features "web-backends,implot,implot3d,imnodes,imguizmo,imguizmo-quat"

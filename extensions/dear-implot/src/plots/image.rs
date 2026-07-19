@@ -5,10 +5,10 @@ use super::{
 };
 use crate::{ImageFlags, ItemFlags, sys};
 use dear_imgui_rs::texture::TextureRef;
-use std::marker::PhantomData;
 
-fn to_sys_texture_ref<'tex>(texture: impl Into<TextureRef<'tex>>) -> sys::ImTextureRef_c {
-    let texture = texture.into().raw();
+fn to_sys_texture_ref(ui: &dear_imgui_rs::Ui, texture: TextureRef<'_>) -> sys::ImTextureRef_c {
+    let texture = unsafe { ui.resolve_texture_ref_raw(texture) }
+        .unwrap_or_else(|error| panic!("ImagePlot rejected texture: {error}"));
     sys::ImTextureRef_c {
         _TexData: texture._TexData as *mut sys::ImTextureData,
         _TexID: texture._TexID as sys::ImTextureID,
@@ -18,8 +18,7 @@ fn to_sys_texture_ref<'tex>(texture: impl Into<TextureRef<'tex>>) -> sys::ImText
 /// Plot an image in plot coordinates using an ImGui texture reference.
 pub struct ImagePlot<'a, 'tex> {
     label: &'a str,
-    tex_ref: sys::ImTextureRef_c,
-    _texture: PhantomData<&'tex mut dear_imgui_rs::texture::TextureData>,
+    texture: TextureRef<'tex>,
     bounds_min: sys::ImPlotPoint,
     bounds_max: sys::ImPlotPoint,
     uv0: [f32; 2],
@@ -45,8 +44,7 @@ impl<'a, 'tex> ImagePlot<'a, 'tex> {
     ) -> Self {
         Self {
             label,
-            tex_ref: to_sys_texture_ref(texture),
-            _texture: PhantomData,
+            texture: texture.into(),
             bounds_min,
             bounds_max,
             uv0: [0.0, 0.0],
@@ -102,27 +100,25 @@ impl<'a, 'tex> Plot for ImagePlot<'a, 'tex> {
             z: self.tint[2],
             w: self.tint[3],
         };
-        let tex_ref = sys::ImTextureRef_c {
-            _TexData: self.tex_ref._TexData,
-            _TexID: self.tex_ref._TexID,
-        };
-        let _guard = plot_ui.bind();
-        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_with_style(
-                self.style,
-                self.flags.bits() | self.item_flags.bits(),
-                PlotDataLayout::DEFAULT,
-            );
-            sys::ImPlot_PlotImage(
-                label_ptr,
-                tex_ref,
-                self.bounds_min,
-                self.bounds_max,
-                uv0,
-                uv1,
-                tint,
-                spec,
-            )
+        plot_ui.with_bound_context(|| {
+            let tex_ref = to_sys_texture_ref(plot_ui.ui, self.texture);
+            with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+                let spec = plot_spec_with_style(
+                    self.style,
+                    self.flags.bits() | self.item_flags.bits(),
+                    PlotDataLayout::DEFAULT,
+                );
+                sys::ImPlot_PlotImage(
+                    label_ptr,
+                    tex_ref,
+                    self.bounds_min,
+                    self.bounds_max,
+                    uv0,
+                    uv1,
+                    tint,
+                    spec,
+                )
+            })
         })
     }
 

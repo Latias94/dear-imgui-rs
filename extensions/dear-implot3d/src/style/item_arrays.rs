@@ -123,7 +123,6 @@ impl<'ui> Plot3DUi<'ui> {
         style: Plot3DItemArrayStyle<'a>,
         f: impl FnOnce(&Plot3DUi<'ui>) -> R,
     ) -> R {
-        let _guard = self.bind();
-        with_scoped_next_plot3d_item_array_style(style, || f(self))
+        self.with_bound_context(|| with_scoped_next_plot3d_item_array_style(style, || f(self)))
     }
 }

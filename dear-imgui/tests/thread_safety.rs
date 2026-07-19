@@ -6,6 +6,9 @@ use static_assertions::assert_not_impl_any;
 fn thread_safety_context_and_render_markers() {
     // Context must NOT be Send/Sync
     assert_not_impl_any!(dear_imgui_rs::Context: Send, Sync);
+    assert_not_impl_any!(dear_imgui_rs::ContextBinding: Send, Sync);
+    assert_not_impl_any!(dear_imgui_rs::ContextAttachmentLease: Send, Sync);
+    assert_impl_all!(dear_imgui_rs::ManagedTextureId: Send, Sync);
 
     // Font handles and FontAtlas must NOT be Send/Sync
     assert_not_impl_any!(dear_imgui_rs::FontAtlas: Send, Sync);
@@ -16,11 +19,12 @@ fn thread_safety_context_and_render_markers() {
     assert_not_impl_any!(dear_imgui_rs::CustomRectSnapshot<'static>: Send, Sync);
     assert_not_impl_any!(dear_imgui_rs::FontAtlasTexture<'static>: Send, Sync);
 
-    // OwnedDrawData must NOT be Send/Sync (retains shared textures list pointer)
-    assert_not_impl_any!(dear_imgui_rs::render::draw_data::OwnedDrawData: Send, Sync);
+    assert_not_impl_any!(dear_imgui_rs::render::RenderedFrame<'static>: Send, Sync);
+    assert_not_impl_any!(dear_imgui_rs::render::RendererConsumer: Send, Sync, Clone);
 
-    // Threaded snapshot types MUST be Send/Sync
+    // Detached snapshots move across threads but cannot be cloned.
     assert_impl_all!(dear_imgui_rs::render::snapshot::FrameSnapshot: Send, Sync);
+    assert_not_impl_any!(dear_imgui_rs::render::snapshot::FrameSnapshot: Clone);
     assert_impl_all!(dear_imgui_rs::render::snapshot::DrawDataSnapshot: Send, Sync);
     assert_impl_all!(dear_imgui_rs::render::snapshot::DrawListSnapshot: Send, Sync);
     assert_impl_all!(dear_imgui_rs::render::snapshot::DrawCmdSnapshot: Send, Sync);
@@ -28,6 +32,8 @@ fn thread_safety_context_and_render_markers() {
     assert_impl_all!(dear_imgui_rs::render::snapshot::TextureFeedback: Send, Sync);
     assert_impl_all!(dear_imgui_rs::render::snapshot::TextureOp: Send, Sync);
     assert_impl_all!(dear_imgui_rs::render::snapshot::TextureUploadRect: Send, Sync);
+    assert_impl_all!(dear_imgui_rs::MultiSelectRequest: Send, Sync, Clone);
+    assert_impl_all!(dear_imgui_rs::MultiSelectResult: Send, Sync, Clone);
 
     // DrawData/DrawList views (render module) are frame-bound, not thread-safe
     assert_not_impl_any!(dear_imgui_rs::render::draw_data::DrawData: Send, Sync);
@@ -36,8 +42,8 @@ fn thread_safety_context_and_render_markers() {
     // Immediate draw list handle is UI-thread bound
     assert_not_impl_any!(dear_imgui_rs::DrawListMut<'static>: Send, Sync);
 
-    // State storage tokens restore ImGui current-window state on drop.
-    assert_not_impl_any!(dear_imgui_rs::StateStorageToken<'static, 'static>: Send, Sync);
+    // Scoped state storage views remain UI-thread bound.
+    assert_not_impl_any!(dear_imgui_rs::StateStorage<'static>: Send, Sync);
 }
 
 #[test]

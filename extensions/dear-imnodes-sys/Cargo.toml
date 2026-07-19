@@ -25,6 +25,9 @@ exclude = [
     "third-party/cimnodes/generator/**",
 ]
 
+[package.metadata.dear-imgui-binding]
+source-revision = "8598e740617eefca14948a592e1976ebef5c8362"
+
 # docs.rs configuration for offline builds
 [package.metadata.docs.rs]
 no-default-features = true
@@ -36,14 +39,11 @@ rustdoc-args = ["--cfg", "docsrs"]
 dear-imgui-sys.workspace = true
 flate2 = { workspace = true, optional = true }
 tar = { workspace = true, optional = true }
-build-support = { workspace = true, optional = true }
 
 [build-dependencies]
 bindgen = { workspace = true, optional = true }
 cc.workspace = true
-xshell = "0.2"
-pkg-config = "0.3"
-build-support.workspace = true
+build-support = { workspace = true, features = ["binding-spec"] }
 
 [[bin]]
 name = "package"
@@ -51,7 +51,7 @@ path = "bin/package/main.rs"
 required-features = ["package-bin"]
 
 [features]
-package-bin = ["dep:flate2", "dep:tar", "dep:build-support"]
+package-bin = ["dep:flate2", "dep:tar"]
 default = []
 bindgen = ["dep:bindgen", "dear-imgui-sys/bindgen"]
 # Docking is always enabled; feature removed.

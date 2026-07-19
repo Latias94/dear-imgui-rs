@@ -1,126 +1,198 @@
-use super::result::mark_texture_destroyed;
+use super::cleanup::ManagedRequestOutcome;
 use super::*;
-use dear_imgui_rs::texture::{TextureData, TextureFormat as ImFormat, TextureRect};
+use dear_imgui_rs::{
+    Context,
+    render::SnapshotTextureId,
+    texture::{OwnedTextureData, TextureFormat},
+};
 
-#[test]
-fn texture_update_result_apply_to_sets_status_and_id() {
-    let mut tex = TextureData::new();
-
-    // Created -> sets TexID and OK
-    TextureUpdateResult::Created {
-        texture_id: TextureId::from(42u64),
-    }
-    .apply_to(&mut tex);
-    assert_eq!(tex.status(), TextureStatus::OK);
-    assert_eq!(tex.tex_id().id(), 42);
-
-    // Updated -> only status OK
-    TextureUpdateResult::Updated.apply_to(&mut tex);
-    assert_eq!(tex.status(), TextureStatus::OK);
-    assert_eq!(tex.tex_id().id(), 42);
-
-    // Destroyed -> status Destroyed
-    // `apply_to` owns the ImTextureData status writeback, including Dear ImGui's
-    // WantDestroyNextFrame precondition.
-    TextureUpdateResult::Destroyed.apply_to(&mut tex);
-    assert_eq!(tex.status(), TextureStatus::Destroyed);
-    unsafe {
-        assert!((*tex.as_raw()).WantDestroyNextFrame);
-    }
-
-    // Failed -> also marks Destroyed
-    // In the general case (not a requested destroy), SetStatus(Destroyed) translates to WantCreate.
-    unsafe {
-        (*tex.as_raw_mut()).WantDestroyNextFrame = false;
-    }
-    tex.create(ImFormat::RGBA32, 1, 1);
-    TextureUpdateResult::Failed.apply_to(&mut tex);
-    assert_eq!(tex.status(), TextureStatus::WantCreate);
-
-    // NoAction -> leaves state unchanged
-    TextureUpdateResult::NoAction.apply_to(&mut tex);
-    assert_eq!(tex.status(), TextureStatus::WantCreate);
-}
-
-#[test]
-fn mark_texture_destroyed_sets_destroy_next_frame_and_status() {
-    let mut tex = TextureData::new();
-    tex.create(ImFormat::RGBA32, 1, 1);
-
-    mark_texture_destroyed(&mut tex);
-    assert_eq!(tex.status(), TextureStatus::Destroyed);
-    unsafe {
-        assert!((*tex.as_raw()).WantDestroyNextFrame);
-    }
-}
-
-#[test]
-fn convert_subrect_to_rgba_rgba32_full_rect() {
-    let mut tex = TextureData::new();
-    let width = 2;
-    let height = 2;
-    tex.create(ImFormat::RGBA32, width, height);
-
-    // 2x2 RGBA pixels: row-major
-    let pixels: [u8; 16] = [
-        10, 20, 30, 40, // (0,0)
-        50, 60, 70, 80, // (1,0)
-        90, 100, 110, 120, // (0,1)
-        130, 140, 150, 160, // (1,1)
-    ];
-    tex.set_data(&pixels);
-
-    let rect = TextureRect {
-        x: 0,
-        y: 0,
-        w: width as u16,
-        h: height as u16,
+fn request_test_device() -> Option<(Device, Queue)> {
+    #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
+    let instance = Instance::new(&InstanceDescriptor::default());
+    #[cfg(any(feature = "wgpu-29", feature = "wgpu-30"))]
+    let instance = Instance::new(InstanceDescriptor::new_without_display_handle());
+    let request_adapter = |force_fallback_adapter| {
+        pollster::block_on(instance.request_adapter(&RequestAdapterOptions {
+            power_preference: PowerPreference::LowPower,
+            force_fallback_adapter,
+            ..Default::default()
+        }))
     };
+    let adapter = request_adapter(true)
+        .or_else(|_| request_adapter(false))
+        .ok()?;
+    pollster::block_on(adapter.request_device(&DeviceDescriptor::default())).ok()
+}
 
-    let out = WgpuTextureManager::convert_subrect_to_rgba(&tex, rect).expect("expected data");
-    assert_eq!(out, pixels);
+fn managed_texture_id(context: &mut Context) -> SnapshotTextureId {
+    let mut texture = OwnedTextureData::new();
+    texture.create(TextureFormat::RGBA32, 2, 2);
+    texture.set_data(&[0; 16]);
+    SnapshotTextureId::User(context.register_texture(texture))
+}
+
+fn create_operation() -> TextureOp {
+    TextureOp::Create {
+        format: TextureFormat::RGBA32,
+        width: 2,
+        height: 2,
+        row_pitch: 8,
+        pixels: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+    }
 }
 
 #[test]
-fn convert_subrect_to_rgba_alpha8_full_rect() {
-    let mut tex = TextureData::new();
-    let width = 2;
-    let height = 2;
-    tex.create(ImFormat::Alpha8, width, height);
-
-    // 2x2 alpha-only pixels
-    let alphas: [u8; 4] = [0, 64, 128, 255];
-    tex.set_data(&alphas);
-
-    let rect = TextureRect {
-        x: 0,
-        y: 0,
-        w: width as u16,
-        h: height as u16,
+fn managed_requests_are_idempotent_and_retired_work_cannot_resurrect() -> RendererResult<()> {
+    let Some((device, queue)) = request_test_device() else {
+        eprintln!("skipping WGPU managed texture test because no headless adapter is available");
+        return Ok(());
     };
+    let mut context = Context::create();
+    let id = managed_texture_id(&mut context);
+    let mut manager = WgpuTextureManager::new();
+    let mut render_resources = RenderResources::new();
 
-    let out = WgpuTextureManager::convert_subrect_to_rgba(&tex, rect).expect("expected data");
-    // Each alpha should expand to [255,255,255,a]
-    assert_eq!(
-        out,
-        vec![
-            255, 255, 255, 0, // a=0
-            255, 255, 255, 64, // a=64
-            255, 255, 255, 128, // a=128
-            255, 255, 255, 255, // a=255
-        ]
+    let first = manager.apply_managed_request(
+        id,
+        &create_operation(),
+        &device,
+        &queue,
+        &mut render_resources,
+    )?;
+    let ManagedRequestOutcome::Uploaded(first_texture_id) = first else {
+        panic!("create request must upload");
+    };
+    let duplicate = manager.apply_managed_request(
+        id,
+        &create_operation(),
+        &device,
+        &queue,
+        &mut render_resources,
+    )?;
+    assert_eq!(duplicate, ManagedRequestOutcome::Uploaded(first_texture_id));
+    assert_eq!(manager.managed_texture_count(), 1);
+
+    let malformed_retry = TextureOp::Create {
+        format: TextureFormat::RGBA32,
+        width: 2,
+        height: 2,
+        row_pitch: 8,
+        pixels: vec![0; 15],
+    };
+    assert!(
+        manager
+            .apply_managed_request(id, &malformed_retry, &device, &queue, &mut render_resources,)
+            .is_err(),
+        "a repeated create must validate and upload the request's current pixels"
     );
+    assert_eq!(manager.managed_texture_count(), 1);
+
+    let update = TextureOp::Update {
+        format: TextureFormat::RGBA32,
+        width: 2,
+        height: 2,
+        rects: vec![TextureUploadRect {
+            rect: TextureRect {
+                x: 1,
+                y: 1,
+                w: 1,
+                h: 1,
+            },
+            row_pitch: 4,
+            data: vec![21, 22, 23, 24],
+        }],
+    };
+    assert_eq!(
+        manager.apply_managed_request(id, &update, &device, &queue, &mut render_resources,)?,
+        ManagedRequestOutcome::Uploaded(first_texture_id)
+    );
+    assert_eq!(
+        manager.apply_managed_request(id, &update, &device, &queue, &mut render_resources,)?,
+        ManagedRequestOutcome::Uploaded(first_texture_id)
+    );
+
+    assert_eq!(
+        manager.apply_managed_request(
+            id,
+            &TextureOp::Destroy,
+            &device,
+            &queue,
+            &mut render_resources,
+        )?,
+        ManagedRequestOutcome::Destroyed
+    );
+    assert_eq!(manager.managed_texture_count(), 0);
+    assert_eq!(manager.destroyed_managed_texture_count(), 1);
+    assert_eq!(
+        manager.apply_managed_request(
+            id,
+            &TextureOp::Destroy,
+            &device,
+            &queue,
+            &mut render_resources,
+        )?,
+        ManagedRequestOutcome::Destroyed
+    );
+    assert_eq!(
+        manager.apply_managed_request(
+            id,
+            &create_operation(),
+            &device,
+            &queue,
+            &mut render_resources,
+        )?,
+        ManagedRequestOutcome::IgnoredRetired
+    );
+    assert_eq!(manager.managed_texture_count(), 0);
+    manager.acknowledge_destroyed_textures([id]);
+    assert_eq!(manager.destroyed_managed_texture_count(), 0);
+    Ok(())
 }
 
 #[test]
-fn convert_subrect_to_rgba_out_of_bounds_returns_none() {
-    let mut tex = TextureData::new();
-    tex.create(ImFormat::RGBA32, 2, 2);
-    let rect = TextureRect {
-        x: 10,
-        y: 10,
-        w: 1,
-        h: 1,
+fn managed_destroy_does_not_remove_legacy_texture_ids() -> RendererResult<()> {
+    let Some((device, queue)) = request_test_device() else {
+        eprintln!("skipping WGPU legacy texture test because no headless adapter is available");
+        return Ok(());
     };
-    assert!(WgpuTextureManager::convert_subrect_to_rgba(&tex, rect).is_none());
+    let legacy_texture = device.create_texture(&TextureDescriptor {
+        label: Some("legacy texture test"),
+        size: Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let legacy_view = legacy_texture.create_view(&TextureViewDescriptor::default());
+
+    let mut context = Context::create();
+    let managed = managed_texture_id(&mut context);
+    let mut manager = WgpuTextureManager::new();
+    let legacy = manager.register_texture(WgpuTexture::new(legacy_texture, legacy_view));
+    let mut render_resources = RenderResources::new();
+    manager.apply_managed_request(
+        managed,
+        &create_operation(),
+        &device,
+        &queue,
+        &mut render_resources,
+    )?;
+    manager.apply_managed_request(
+        managed,
+        &TextureOp::Destroy,
+        &device,
+        &queue,
+        &mut render_resources,
+    )?;
+
+    assert!(manager.contains_texture(legacy));
+    assert!(manager.get_texture(legacy).is_some());
+    assert_eq!(manager.texture_count(), 1);
+    Ok(())
 }

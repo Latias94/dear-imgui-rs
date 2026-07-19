@@ -891,28 +891,11 @@ fn demo_axis_constraints(ui: &Ui, plot_ui: &Plot3DUi) {
 }
 
 fn demo_image_plots(ui: &Ui, plot_ui: &Plot3DUi) {
-    use dear_imgui_rs::texture::TextureRef as ImgTextureRef;
-
-    // Use the font atlas texture (always available) like the official demo
-    let tex_ref_opt: Option<ImgTextureRef<'static>> = unsafe {
-        let io = dear_imgui_rs::sys::igGetIO_Nil();
-        if io.is_null() {
-            None
-        } else {
-            let atlas = (*io).Fonts;
-            if atlas.is_null() {
-                None
-            } else {
-                let raw = (*atlas).TexRef; // ImTextureRef from font atlas
-                Some(ImgTextureRef::from_raw(raw))
-            }
-        }
-    };
-    if tex_ref_opt.is_none() {
+    let Some(font_texture) = ui.font_atlas_texture() else {
         ui.text("Font atlas texture not ready yet.");
         return;
-    }
-    let tex = tex_ref_opt.unwrap();
+    };
+    let tex = font_texture.texture_ref();
 
     // Controls/info
     ui.bullet_text("Using font atlas texture for demo");

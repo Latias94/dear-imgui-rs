@@ -457,8 +457,8 @@ impl AppWindow {
                 .map_err(|e| JsValue::from_str(&format!("new_frame: {e}")))?;
             self.imgui
                 .renderer
-                .render_draw_data(draw_data, &mut rpass)
-                .map_err(|e| JsValue::from_str(&format!("render_draw_data: {e}")))?;
+                .render(draw_data, &mut rpass)
+                .map_err(|e| JsValue::from_str(&format!("render: {e}")))?;
         }
 
         self.queue.submit(Some(encoder.finish()));

@@ -2,6 +2,13 @@
 //!
 //! This module provides comprehensive error handling for the Dear ImGui library,
 //! covering context creation, resource allocation, and runtime errors.
+//!
+//! Backend errors are wrapped explicitly in [`ImGuiError::Renderer`]. The blanket
+//! `IntoImGuiError` conversion trait is intentionally unavailable:
+//!
+//! ```compile_fail
+//! use dear_imgui_rs::IntoImGuiError;
+//! ```
 
 use thiserror::Error;
 
@@ -102,20 +109,6 @@ impl ImGuiError {
     }
 }
 
-/// Trait for converting backend errors to ImGuiError
-pub trait IntoImGuiError {
-    fn into_imgui_error(self) -> ImGuiError;
-}
-
-impl<E> IntoImGuiError for E
-where
-    E: std::error::Error + Send + Sync + 'static,
-{
-    fn into_imgui_error(self) -> ImGuiError {
-        ImGuiError::Renderer(Box::new(self))
-    }
-}
-
 /// Helper trait for safe string conversion
 pub trait SafeStringConversion {
     /// Convert to CString safely, returning an error if the string contains null bytes
@@ -150,7 +143,7 @@ mod tests {
     #[test]
     fn test_error_chain() {
         let source_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
-        let imgui_err = source_err.into_imgui_error();
+        let imgui_err = ImGuiError::Renderer(Box::new(source_err));
         assert!(imgui_err.source().is_some());
     }
 }

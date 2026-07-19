@@ -65,7 +65,7 @@ fn imgui_small_button_click_can_be_simulated() {
             });
         rect_center(min, max)
     };
-    ctx.render();
+    drop(ctx.render());
 
     // Warm-up frame: let the window take focus before interacting with items.
     queue_mouse_left(&mut ctx, button_center, false);
@@ -80,7 +80,7 @@ fn imgui_small_button_click_can_be_simulated() {
                 let _ = ui.small_button("Probe");
             });
     }
-    ctx.render();
+    drop(ctx.render());
 
     // Press frame.
     queue_mouse_left(&mut ctx, button_center, true);
@@ -101,7 +101,7 @@ fn imgui_small_button_click_can_be_simulated() {
         assert!(hovered);
         assert!(ui.io().mouse_down(MouseButton::Left));
     }
-    ctx.render();
+    drop(ctx.render());
 
     // Release frame: should click.
     queue_mouse_left(&mut ctx, button_center, false);
@@ -122,7 +122,7 @@ fn imgui_small_button_click_can_be_simulated() {
         assert!(!ui.io().mouse_down(MouseButton::Left));
         assert!(pressed, "expected click on mouse-up frame");
     }
-    ctx.render();
+    drop(ctx.render());
 }
 
 struct VecHarness<T> {
@@ -223,7 +223,7 @@ fn vec_add_button_emits_event_on_click() {
         let _ = harness.draw(&mut inspector);
         rect_center(harness.last_item_min, harness.last_item_max)
     };
-    ctx.render();
+    drop(ctx.render());
 
     // Warm-up frame (see `imgui_small_button_click_can_be_simulated`).
     queue_mouse_left(&mut ctx, add_center, false);
@@ -232,7 +232,7 @@ fn vec_add_button_emits_event_on_click() {
         let mut inspector = session.inspector(ui);
         let _ = harness.draw(&mut inspector);
     }
-    ctx.render();
+    drop(ctx.render());
 
     // Frame 2: press the "+" button (no action yet).
     queue_mouse_left(&mut ctx, add_center, true);
@@ -245,7 +245,7 @@ fn vec_add_button_emits_event_on_click() {
         assert!(resp.is_empty());
         assert!(harness.items.is_empty());
     }
-    ctx.render();
+    drop(ctx.render());
 
     // Frame 3: release the button (triggers insertion and response event).
     queue_mouse_left(&mut ctx, add_center, false);
@@ -276,7 +276,7 @@ fn vec_add_button_emits_event_on_click() {
             other => panic!("unexpected event: {other:?}"),
         }
     }
-    ctx.render();
+    drop(ctx.render());
 }
 
 #[test]
@@ -302,7 +302,7 @@ fn vec_remove_button_emits_event_on_click() {
         let _ = harness.draw(&mut inspector);
         rect_center(harness.last_item_min, harness.last_item_max)
     };
-    ctx.render();
+    drop(ctx.render());
 
     // Warm-up frame (see `imgui_small_button_click_can_be_simulated`).
     queue_mouse_left(&mut ctx, remove_center, false);
@@ -311,7 +311,7 @@ fn vec_remove_button_emits_event_on_click() {
         let mut inspector = session.inspector(ui);
         let _ = harness.draw(&mut inspector);
     }
-    ctx.render();
+    drop(ctx.render());
 
     // Frame 2: press the "-" button (no action yet).
     queue_mouse_left(&mut ctx, remove_center, true);
@@ -324,7 +324,7 @@ fn vec_remove_button_emits_event_on_click() {
         assert!(resp.is_empty());
         assert_eq!(harness.items.len(), 1);
     }
-    ctx.render();
+    drop(ctx.render());
 
     // Frame 3: release the button (triggers removal and response event).
     queue_mouse_left(&mut ctx, remove_center, false);
@@ -355,5 +355,5 @@ fn vec_remove_button_emits_event_on_click() {
             other => panic!("unexpected event: {other:?}"),
         }
     }
-    ctx.render();
+    drop(ctx.render());
 }

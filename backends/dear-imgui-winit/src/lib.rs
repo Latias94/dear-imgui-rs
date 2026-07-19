@@ -29,19 +29,27 @@
 //! ```rust,no_run
 //! # #[cfg(feature = "multi-viewport")]
 //! # {
+//! use std::sync::Arc;
 //! use dear_imgui_rs::Context;
-//! use dear_imgui_winit::{WinitPlatform, multi_viewport};
-//! use winit::event_loop::EventLoop;
+//! use dear_imgui_winit::{WinitPlatform, multi_viewport::WinitPlatformRuntime};
+//! use winit::{event_loop::ActiveEventLoop, window::Window};
 //!
-//! let event_loop = EventLoop::new().unwrap();
-//! let mut imgui_ctx = Context::create();
-//! imgui_ctx.enable_multi_viewport();
+//! fn attach(
+//!     imgui: &mut Context,
+//!     window: Arc<Window>,
+//! ) -> Result<WinitPlatformRuntime, Box<dyn std::error::Error>> {
+//!     imgui.enable_multi_viewport();
+//!     Ok(WinitPlatformRuntime::new(imgui, window)?)
+//! }
 //!
-//! let mut platform = WinitPlatform::new(&mut imgui_ctx);
-//!
-//! // In your event loop callback (before updating platform windows):
-//! // let _guard = multi_viewport::set_event_loop_for_frame(event_loop);
-//! // multi_viewport::init_multi_viewport_support(&mut imgui_ctx, &window);
+//! fn update(
+//!     runtime: &WinitPlatformRuntime,
+//!     imgui: &mut Context,
+//!     event_loop: &ActiveEventLoop,
+//! ) -> Result<(), Box<dyn std::error::Error>> {
+//!     runtime.with_event_loop(event_loop, |_| imgui.update_platform_windows())?;
+//!     Ok(())
+//! }
 //! # }
 //! ```
 

@@ -1853,6 +1853,9 @@ mod tests {
         context
             .io_mut()
             .set_backend_flags(BackendFlags::RENDERER_HAS_TEXTURES);
+        let _consumer = context
+            .create_renderer_consumer()
+            .expect("the headless renderer consumer should attach");
         context
             .font_atlas()
             .add_font(&[FontSource::default_font_with_size(16.0)]);
@@ -1866,7 +1869,19 @@ mod tests {
             let ui = context.frame();
             assert!(ui.image_custom_rect(checker, [32.0, 32.0]));
         }
-        let _ = context.render();
+        let mut rendered = context.render();
+        assert_eq!(rendered.texture_requests().len(), 1);
+        assert_eq!(
+            rendered.texture_requests()[0].kind(),
+            TextureRequestKind::Create
+        );
+        let feedback = rendered.texture_requests()[0]
+            .uploaded(TextureId::new(1))
+            .expect("the atlas create request should accept upload feedback");
+        rendered
+            .reconcile_texture_feedback([feedback])
+            .expect("the atlas create feedback should complete the frame");
+        drop(rendered);
 
         let path = bundled_roboto_path();
         let font_bytes = fs::read(&path).unwrap_or_else(|error| {
@@ -1893,7 +1908,18 @@ mod tests {
             assert!(baked.glyph('R').is_some());
             assert!(ui.image_custom_rect(checker, [32.0, 32.0]));
         }
-        let _ = context.render();
+        let mut rendered = context.render();
+        assert_eq!(rendered.texture_requests().len(), 1);
+        assert_eq!(
+            rendered.texture_requests()[0].kind(),
+            TextureRequestKind::Update
+        );
+        let feedback = rendered.texture_requests()[0]
+            .uploaded(TextureId::new(1))
+            .expect("the atlas update request should accept upload feedback");
+        rendered
+            .reconcile_texture_feedback([feedback])
+            .expect("the atlas update feedback should complete the frame");
     }
 }
 

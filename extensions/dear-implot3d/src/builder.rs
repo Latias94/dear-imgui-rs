@@ -7,7 +7,6 @@ use dear_imgui_rs::Ui;
 /// Plot builder for configuring the 3D plot
 pub struct Plot3DBuilder<'ui> {
     pub(crate) binding: Plot3DContextBinding,
-    pub(crate) imgui_alive: Option<dear_imgui_rs::ContextAliveToken>,
     pub(crate) ui: &'ui Ui,
     pub(crate) title: String,
     pub(crate) size: Option<[f32; 2]>,
@@ -25,43 +24,37 @@ impl<'ui> Plot3DBuilder<'ui> {
         self
     }
     pub fn build(self) -> Option<Plot3DToken<'ui>> {
-        if let Some(alive) = &self.imgui_alive {
-            assert!(
-                alive.is_alive(),
-                "dear-implot3d: ImGui context has been dropped"
-            );
-        }
-        let _guard = self.binding.bind();
-        if self.title.contains('\0') {
-            return None;
-        }
-        let title = self.title;
-        let size = self.size.unwrap_or([0.0, 0.0]);
-        let ok = dear_imgui_rs::with_scratch_txt(&title, |title_ptr| unsafe {
-            // Defensive: ensure style.Colormap is in range before plotting
-            let style = sys::ImPlot3D_GetStyle();
-            if !style.is_null() {
-                let count = sys::ImPlot3D_GetColormapCount();
-                if count > 0 && ((*style).Colormap < 0 || (*style).Colormap >= count) {
-                    (*style).Colormap = 0;
-                }
+        self.binding.with_bound_context(|| {
+            if self.title.contains('\0') {
+                return None;
             }
-            sys::ImPlot3D_BeginPlot(
-                title_ptr,
-                imvec2(size[0], size[1]),
-                self.flags.bits() as i32,
-            )
-        });
-        if ok {
-            debug_begin_plot();
-            Some(Plot3DToken {
-                binding: self.binding,
-                imgui_alive: self.imgui_alive.clone(),
-                ui: self.ui,
-                _lifetime: PhantomData,
-            })
-        } else {
-            None
-        }
+            let title = self.title;
+            let size = self.size.unwrap_or([0.0, 0.0]);
+            let ok = dear_imgui_rs::with_scratch_txt(&title, |title_ptr| unsafe {
+                // Defensive: ensure style.Colormap is in range before plotting
+                let style = sys::ImPlot3D_GetStyle();
+                if !style.is_null() {
+                    let count = sys::ImPlot3D_GetColormapCount();
+                    if count > 0 && ((*style).Colormap < 0 || (*style).Colormap >= count) {
+                        (*style).Colormap = 0;
+                    }
+                }
+                sys::ImPlot3D_BeginPlot(
+                    title_ptr,
+                    imvec2(size[0], size[1]),
+                    self.flags.bits() as i32,
+                )
+            });
+            if ok {
+                debug_begin_plot();
+                Some(Plot3DToken {
+                    binding: self.binding.clone(),
+                    ui: self.ui,
+                    _lifetime: PhantomData,
+                })
+            } else {
+                None
+            }
+        })
     }
 }

@@ -1,106 +1,91 @@
-use super::{TextureData, TextureId};
-use crate::sys;
 use std::marker::PhantomData;
 
-/// A convenient, typed wrapper around ImGui's ImTextureRef (v1.92+)
+use super::{ManagedTextureId, TextureId};
+use crate::sys;
+
+/// A logical image source accepted by safe Dear ImGui drawing APIs.
 ///
-/// Can reference either a plain `TextureId` (legacy path) or a managed `TextureData`.
-/// Managed texture references carry the lifetime of the referenced texture data; legacy
-/// `TextureId` references can be converted into any texture-reference lifetime because they do not
-/// borrow Rust texture data.
-///
-/// Examples
-/// - With a plain GPU handle (legacy path):
-/// ```no_run
-/// # use dear_imgui_rs::{Ui, TextureId};
-/// # fn demo(ui: &Ui) {
-/// let tex_id = TextureId::new(12345);
-/// ui.image(tex_id, [64.0, 64.0]);
-/// # }
-/// ```
-/// - With a managed texture (ImGui 1.92 texture system):
-/// ```no_run
-/// # use dear_imgui_rs::{Ui, texture::{TextureData, TextureFormat}};
-/// # fn demo(ui: &Ui) {
-/// let mut tex = TextureData::new();
-/// tex.create(TextureFormat::RGBA32, 256, 256);
-/// // Fill pixels or schedule updates...
-/// ui.image(&mut *tex, [256.0, 256.0]);
-/// // The renderer backend will honor WantCreate/WantUpdates/WantDestroy
-/// // via DrawData::textures_mut() when rendering this frame.
-/// # }
-/// ```
-///
-/// Managed references cannot be stored beyond the texture data they point at:
+/// A texture reference contains no borrowed user-texture pointer. Legacy [`TextureId`] values are
+/// forwarded directly, while managed handles are resolved through the `Ui`'s owning Context only
+/// for the duration of the native call. Font-atlas references are created internally together with
+/// an owner-backed atlas lease.
 ///
 /// ```compile_fail
-/// # use dear_imgui_rs::texture::{TextureData, TextureRef};
-/// let leaked: TextureRef<'static>;
-/// {
-///     let mut tex = TextureData::new();
-///     leaked = (&mut tex).into();
-/// }
-/// let _ = leaked.raw();
+/// # use dear_imgui_rs::texture::{OwnedTextureData, TextureRef};
+/// let mut texture = OwnedTextureData::new();
+/// let _: TextureRef<'_> = (&mut *texture).into();
 /// ```
 ///
-/// Raw `ImTextureRef` values can contain arbitrary managed texture pointers, so constructing this
-/// wrapper from raw data is unsafe:
+/// Raw `ImTextureRef` construction is a sys-layer escape hatch. The former safe helper is
+/// intentionally unavailable:
 ///
 /// ```compile_fail
-/// # use dear_imgui_rs::{sys, texture::TextureRef};
-/// let raw = sys::ImTextureRef {
-///     _TexData: std::ptr::null_mut(),
-///     _TexID: 0,
-/// };
-/// let _ = TextureRef::from_raw(raw);
+/// use dear_imgui_rs::texture::{create_texture_ref, TextureId};
+/// let _ = create_texture_ref(TextureId::new(1));
 /// ```
 #[derive(Copy, Clone, Debug)]
-#[repr(transparent)]
-pub struct TextureRef<'tex> {
-    raw: sys::ImTextureRef,
-    _marker: PhantomData<&'tex mut TextureData>,
+pub struct TextureRef<'texture> {
+    source: TextureSource,
+    _lease: PhantomData<&'texture ()>,
 }
 
-// Ensure the wrapper stays layout-compatible with the sys bindings.
-const _: [(); std::mem::size_of::<sys::ImTextureRef>()] =
-    [(); std::mem::size_of::<TextureRef<'static>>()];
-const _: [(); std::mem::align_of::<sys::ImTextureRef>()] =
-    [(); std::mem::align_of::<TextureRef<'static>>()];
+#[derive(Copy, Clone, Debug)]
+pub(crate) enum TextureSource {
+    Legacy(TextureId),
+    Managed(ManagedTextureId),
+    FontAtlas {
+        atlas: *mut sys::ImFontAtlas,
+        texture: sys::ImTextureRef,
+    },
+}
 
-impl<'tex> TextureRef<'tex> {
-    /// Create a texture reference from a raw ImGui texture ref.
-    ///
-    /// # Safety
-    ///
-    /// If `raw._TexData` is non-null, the caller must guarantee that it points to a valid
-    /// `ImTextureData` for the entire `'tex` lifetime and that using the resulting reference does
-    /// not violate Rust aliasing rules.
-    #[inline]
-    pub unsafe fn from_raw(raw: sys::ImTextureRef) -> Self {
+impl<'texture> TextureRef<'texture> {
+    pub(crate) fn from_font_atlas_raw(
+        atlas: *mut sys::ImFontAtlas,
+        texture: sys::ImTextureRef,
+    ) -> Self {
+        assert!(!atlas.is_null(), "font atlas texture requires an owner");
         Self {
-            raw,
-            _marker: PhantomData,
+            source: TextureSource::FontAtlas { atlas, texture },
+            _lease: PhantomData,
         }
     }
 
-    /// Get the underlying ImGui texture ref (by value)
-    #[inline]
-    pub fn raw(self) -> sys::ImTextureRef {
-        self.raw
+    pub(crate) const fn source(self) -> TextureSource {
+        self.source
     }
 
-    /// Resolve the effective texture ID.
-    ///
-    /// For managed references this reads the current ID from the borrowed
-    /// [`TextureData`]; legacy references return their embedded ID.
-    #[doc(alias = "GetTexID")]
-    pub fn texture_id(self) -> TextureId {
-        unsafe { effective_texture_id(&self.raw) }
+    /// Returns the embedded legacy texture ID, if this is a legacy reference.
+    pub const fn legacy_id(self) -> Option<TextureId> {
+        match self.source {
+            TextureSource::Legacy(id) => Some(id),
+            TextureSource::Managed(_) | TextureSource::FontAtlas { .. } => None,
+        }
     }
 }
 
-/// Resolve a raw texture reference without asserting that a managed texture
-/// has already been uploaded by a renderer.
+impl<'texture> From<TextureId> for TextureRef<'texture> {
+    #[inline]
+    fn from(id: TextureId) -> Self {
+        Self {
+            source: TextureSource::Legacy(id),
+            _lease: PhantomData,
+        }
+    }
+}
+
+impl<'texture> From<ManagedTextureId> for TextureRef<'texture> {
+    #[inline]
+    fn from(id: ManagedTextureId) -> Self {
+        Self {
+            source: TextureSource::Managed(id),
+            _lease: PhantomData,
+        }
+    }
+}
+
+/// Resolve a raw texture reference without asserting that a managed texture has already been
+/// uploaded by a renderer.
 ///
 /// # Safety
 ///
@@ -113,74 +98,22 @@ pub(crate) unsafe fn effective_texture_id(raw: &sys::ImTextureRef) -> TextureId 
     }
 }
 
-impl<'tex> From<TextureId> for TextureRef<'tex> {
-    #[inline]
-    fn from(id: TextureId) -> Self {
-        TextureRef {
-            raw: sys::ImTextureRef {
-                _TexData: std::ptr::null_mut(),
-                _TexID: id.id() as sys::ImTextureID,
-            },
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<'tex> From<&TextureData> for TextureRef<'tex> {
-    #[inline]
-    fn from(td: &TextureData) -> Self {
-        // Safety: A shared `&TextureData` must not be used to give Dear ImGui a mutable
-        // `ImTextureData*` because ImGui/backends may mutate fields such as `Status`/`TexID`
-        // during the frame, which would violate Rust aliasing rules.
-        //
-        // We therefore treat `&TextureData` as a legacy reference: only forward the current
-        // `TexID` value (if any). For managed textures, pass `&mut TextureData` instead.
-        TextureRef {
-            raw: sys::ImTextureRef {
-                _TexData: std::ptr::null_mut(),
-                _TexID: td.tex_id().id() as sys::ImTextureID,
-            },
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<'tex> From<&'tex mut TextureData> for TextureRef<'tex> {
-    #[inline]
-    fn from(td: &'tex mut TextureData) -> Self {
-        TextureRef {
-            raw: sys::ImTextureRef {
-                _TexData: td.as_raw_mut(),
-                _TexID: 0,
-            },
-            _marker: PhantomData,
-        }
-    }
-}
-
-/// Create an ImTextureRef from a texture ID.
-///
-/// This is the safe way to create an ImTextureRef for use with Dear ImGui.
-/// Use this instead of directly constructing the sys::ImTextureRef structure.
-pub fn create_texture_ref(texture_id: TextureId) -> sys::ImTextureRef {
-    sys::ImTextureRef {
-        _TexData: std::ptr::null_mut(),
-        _TexID: texture_id.id() as sys::ImTextureID,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn texture_ref_resolves_legacy_and_managed_ids() {
-        let legacy_id = TextureId::new(7);
-        assert_eq!(TextureRef::from(legacy_id).texture_id(), legacy_id);
-
-        let mut texture = TextureData::new();
-        let managed_id = TextureId::new(11);
-        texture.set_tex_id(managed_id);
-        assert_eq!(texture.texture_ref().texture_id(), managed_id);
+    fn logical_references_do_not_expose_managed_native_pointers() {
+        let legacy = TextureId::new(7);
+        assert_eq!(TextureRef::from(legacy).legacy_id(), Some(legacy));
+        assert!(
+            TextureRef::from(ManagedTextureId::new(
+                crate::ContextId::allocate().expect("context id"),
+                3,
+                std::num::NonZeroU64::new(2).expect("generation"),
+            ))
+            .legacy_id()
+            .is_none()
+        );
     }
 }

@@ -728,7 +728,9 @@ fn context_into_inner_clears_backend_state() {
         .world_mut()
         .remove_non_send::<ImguiContext>()
         .expect("ImguiContext should be removable for direct shutdown testing");
-    let context = context.into_inner();
+    let context = context
+        .into_inner()
+        .expect("idle renderer state should detach cleanly");
     let io = context.io();
 
     assert!(

@@ -14,7 +14,7 @@ from _archive import (
     verify_core_sys_archive,
     verify_source_archives,
 )
-from _prebuilt import build_host_prebuilt_packages, verify_core_prebuilt_packages
+from _prebuilt import build_host_prebuilt_packages, verify_prebuilt_packages
 from _process import environment, github_group, run
 from _submodules import PACKAGE_NESTED_SUBMODULES
 from _verification import VerificationError, temporary_workspace
@@ -268,6 +268,10 @@ def verify_packaged_core(workspace_root: Path = WORKSPACE_ROOT) -> None:
     """Run the complete source-package and host-prebuilt release gate."""
     workspace_root = workspace_root.resolve()
     _require_clean_source_checkout(workspace_root)
+    candidate_result = run(
+        ("git", "-C", workspace_root, "rev-parse", "HEAD"), capture_output=True
+    )
+    candidate_sha = (candidate_result.stdout or "").strip()
     packages = _validate_release_packages(workspace_root)
     with temporary_workspace("dear-imgui-package.") as work_dir:
         target_dir = work_dir / "target"
@@ -422,10 +426,14 @@ def verify_packaged_core(workspace_root: Path = WORKSPACE_ROOT) -> None:
         )
         native_package_dir = work_dir / "native-packages"
         native_package_dir.mkdir()
-        build_host_prebuilt_packages(package_workspace, target_dir, native_package_dir)
-        verify_core_prebuilt_packages(
+        native_crt = build_host_prebuilt_packages(
+            package_workspace, target_dir, native_package_dir, candidate_sha
+        )
+        verify_prebuilt_packages(
             native_package_dir,
             host_target(),
+            candidate_sha,
+            crt=native_crt,
             source_root=package_workspace,
             profile_scope="base",
         )

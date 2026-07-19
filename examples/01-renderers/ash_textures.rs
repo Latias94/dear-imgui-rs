@@ -7,7 +7,7 @@ use ash::{
     khr::{surface as khr_surface, swapchain as khr_swapchain},
     vk,
 };
-use dear_imgui_ash::{AshRenderer, Options as AshOptions};
+use dear_imgui_ash::{AshRenderer, Options as AshOptions, TextureRetirementBatch};
 use dear_imgui_rs::*;
 use dear_imgui_winit::WinitPlatform;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
@@ -212,6 +212,7 @@ struct FrameSync {
     render_finished: vk::Semaphore,
     fence: vk::Fence,
     command_buffer: vk::CommandBuffer,
+    texture_retirement: Option<TextureRetirementBatch>,
 }
 
 struct VulkanState {
@@ -251,17 +252,14 @@ impl Drop for VulkanState {
 }
 
 struct ImguiState {
-    // Ensure registered textures are unregistered before the ImGui context is destroyed.
-    #[allow(dead_code)]
-    registered_user_textures: Vec<dear_imgui_rs::RegisteredUserTexture>,
     context: Context,
     platform: WinitPlatform,
     renderer: AshRenderer,
     last_frame: Instant,
     clear_color: [f32; 4],
     // Texture demo state (managed by ImGui modern texture system)
-    img_tex: dear_imgui_rs::texture::OwnedTextureData,
-    photo_tex: Option<dear_imgui_rs::texture::OwnedTextureData>,
+    img_tex: dear_imgui_rs::ManagedTextureId,
+    photo_tex: Option<(dear_imgui_rs::ManagedTextureId, (u32, u32))>,
     tex_size: (u32, u32),
     frame: u32,
 }
@@ -270,6 +268,13 @@ struct AppWindow {
     window: Arc<Window>,
     imgui: ImguiState,
     vk: VulkanState,
+}
+
+impl Drop for AppWindow {
+    fn drop(&mut self) {
+        let _ = unsafe { self.vk.ctx.device.device_wait_idle() };
+        let _ = self.imgui.renderer.shutdown(&mut self.imgui.context);
+    }
 }
 
 #[derive(Default)]
@@ -319,7 +324,7 @@ impl AppWindow {
         // Create a managed ImGui texture (CPU-side pixels; backend will create GPU texture).
         let tex_w: u32 = 128;
         let tex_h: u32 = 128;
-        let mut img_tex = dear_imgui_rs::texture::TextureData::new();
+        let mut img_tex = dear_imgui_rs::texture::OwnedTextureData::new();
         img_tex.create(dear_imgui_rs::texture::TextureFormat::RGBA32, tex_w, tex_h);
         let mut pixels = vec![0u8; (tex_w * tex_h * 4) as usize];
         for y in 0..tex_h {
@@ -339,13 +344,11 @@ impl AppWindow {
             photo.set_status(dear_imgui_rs::texture::TextureStatus::WantCreate);
         }
 
-        // Register user-created textures so renderer backends can see them via DrawData::textures().
-        // This avoids TexID==0 assertions and lets the backend handle Create/Update/Destroy.
-        let mut registered_user_textures = Vec::new();
-        registered_user_textures.push(context.register_user_texture_token(&mut img_tex));
-        if let Some(photo) = photo_tex.as_mut() {
-            registered_user_textures.push(context.register_user_texture_token(photo));
-        }
+        let img_tex = context.register_texture(img_tex);
+        let photo_tex = photo_tex.map(|photo| {
+            let size = (photo.width(), photo.height());
+            (context.register_texture(photo), size)
+        });
 
         // Frame sync objects
         let frames = (0..FRAMES_IN_FLIGHT)
@@ -356,7 +359,6 @@ impl AppWindow {
         Ok(Self {
             window,
             imgui: ImguiState {
-                registered_user_textures,
                 context,
                 platform,
                 renderer,
@@ -392,7 +394,7 @@ impl AppWindow {
         let rgba = img.to_rgba8();
         let (w, h) = rgba.dimensions();
 
-        let mut tex = dear_imgui_rs::texture::TextureData::new();
+        let mut tex = dear_imgui_rs::texture::OwnedTextureData::new();
         tex.create(dear_imgui_rs::texture::TextureFormat::RGBA32, w, h);
         tex.set_data(&rgba);
         Some(tex)
@@ -420,7 +422,10 @@ impl AppWindow {
                 pixels[i + 3] = 255;
             }
         }
-        self.imgui.img_tex.set_data(&pixels);
+        self.imgui
+            .context
+            .with_texture_mut(self.imgui.img_tex, |mut texture| texture.set_data(&pixels))
+            .expect("animated texture should remain active");
         self.imgui.frame = self.imgui.frame.wrapping_add(1);
     }
 
@@ -459,13 +464,12 @@ impl AppWindow {
                 ui.separator();
 
                 ui.text("Animated texture:");
-                ui.image(&mut *self.imgui.img_tex, [256.0, 256.0]);
+                ui.image(self.imgui.img_tex, [256.0, 256.0]);
 
-                if let Some(photo) = self.imgui.photo_tex.as_mut() {
+                if let Some((photo, (width, height))) = self.imgui.photo_tex {
                     ui.separator();
                     ui.text("Loaded image (1:1):");
-                    let (w, h) = (photo.width() as f32, photo.height() as f32);
-                    ui.image(&mut **photo, [w, h]);
+                    ui.image(photo, [width as f32, height as f32]);
                 } else {
                     ui.separator();
                     ui.text_wrapped("Place examples/assets/texture_clean.ppm or texture.jpg to show a loaded image.");
@@ -479,14 +483,25 @@ impl AppWindow {
         self.imgui
             .platform
             .prepare_render_with_ui(&ui, &self.window);
-        let draw_data = self.imgui.context.render();
+        let rendered_frame = self.imgui.context.render();
 
-        let frame = &self.vk.frames[self.vk.frame_index % self.vk.frames.len()];
+        let frame_slot = self.vk.frame_index % self.vk.frames.len();
+        let frame = &mut self.vk.frames[frame_slot];
         unsafe {
             self.vk
                 .ctx
                 .device
                 .wait_for_fences(&[frame.fence], true, u64::MAX)?;
+        }
+        if let Some(retirement) = frame.texture_retirement {
+            // SAFETY: this frame fence covers its draw submission and every earlier upload on the
+            // same renderer queue.
+            unsafe {
+                self.imgui
+                    .renderer
+                    .complete_texture_retirements_with_fences(retirement, &[frame.fence])?;
+            }
+            frame.texture_retirement = None;
         }
 
         let acquire = unsafe {
@@ -519,21 +534,20 @@ impl AppWindow {
         self.vk.images_in_flight[image_index as usize] = frame.fence;
 
         unsafe {
-            self.vk.ctx.device.reset_fences(&[frame.fence])?;
             self.vk
                 .ctx
                 .device
                 .reset_command_buffer(frame.command_buffer, vk::CommandBufferResetFlags::empty())?;
         }
 
-        record_command_buffer(
+        let texture_retirement = record_command_buffer(
             &self.vk.ctx.device,
             frame.command_buffer,
             self.vk.render_pass,
             self.vk.swapchain.framebuffers[image_index as usize],
             self.vk.swapchain.extent,
             self.imgui.clear_color,
-            |cmd| self.imgui.renderer.cmd_draw(cmd, draw_data),
+            |cmd| self.imgui.renderer.cmd_draw(cmd, rendered_frame),
         )?;
 
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
@@ -544,12 +558,14 @@ impl AppWindow {
             .signal_semaphores(std::slice::from_ref(&frame.render_finished));
 
         unsafe {
+            self.vk.ctx.device.reset_fences(&[frame.fence])?;
             self.vk.ctx.device.queue_submit(
                 self.vk.ctx.queue,
                 std::slice::from_ref(&submit_info),
                 frame.fence,
             )?;
         }
+        frame.texture_retirement = texture_retirement;
 
         let present_info = vk::PresentInfoKHR::default()
             .wait_semaphores(std::slice::from_ref(&frame.render_finished))
@@ -863,6 +879,7 @@ fn create_frame_sync(
         render_finished,
         fence,
         command_buffer,
+        texture_retirement: None,
     })
 }
 
@@ -873,11 +890,12 @@ fn record_command_buffer<F>(
     framebuffer: vk::Framebuffer,
     extent: vk::Extent2D,
     clear_color: [f32; 4],
-    mut record_draws: F,
-) -> Result<(), Box<dyn std::error::Error>>
+    record_draws: F,
+) -> Result<Option<TextureRetirementBatch>, Box<dyn std::error::Error>>
 where
-    F: FnMut(vk::CommandBuffer) -> dear_imgui_ash::RendererResult<()>,
+    F: FnOnce(vk::CommandBuffer) -> dear_imgui_ash::RendererResult<Option<TextureRetirementBatch>>,
 {
+    let texture_retirement;
     unsafe {
         device.begin_command_buffer(
             cmd,
@@ -904,12 +922,12 @@ where
             vk::SubpassContents::INLINE,
         );
 
-        record_draws(cmd)?;
+        texture_retirement = record_draws(cmd)?;
 
         device.cmd_end_render_pass(cmd);
         device.end_command_buffer(cmd)?;
     }
-    Ok(())
+    Ok(texture_retirement)
 }
 
 fn is_srgb_format(format: vk::Format) -> bool {

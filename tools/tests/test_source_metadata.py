@@ -16,6 +16,7 @@ import source_metadata  # noqa: E402
 
 CIMGUI_REVISION = "1" * 40
 IMGUI_REVISION = "2" * 40
+EXTENSION_REVISION = "3" * 40
 
 
 class SourceMetadataTests(unittest.TestCase):
@@ -285,6 +286,138 @@ class SourceMetadataTests(unittest.TestCase):
         )
 
 
+class CrateBindingSourceMetadataTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary_directory = tempfile.TemporaryDirectory()
+        self.repo_root = Path(self.temporary_directory.name)
+        self.spec = source_metadata.BINDING_SOURCE_SPECS[0]
+        self.manifest_path = self.repo_root / self.spec.manifest_path
+        self.source_path = self.repo_root / self.spec.relative_path
+        self.source_path.mkdir(parents=True)
+        self.manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        self.write_manifest(EXTENSION_REVISION)
+
+    def tearDown(self):
+        self.temporary_directory.cleanup()
+
+    def write_manifest(self, revision: str, *, extra: str = "") -> None:
+        self.manifest_path.write_text(
+            "[package]\n"
+            f'name = "{self.spec.crate_name}"\n\n'
+            "[package.metadata.dear-imgui-binding]\n"
+            f'source-revision = "{revision}"\n'
+            f"{extra}",
+            encoding="utf-8",
+        )
+
+    def test_registry_covers_test_engine_and_six_extension_sys_crates(self):
+        self.assertEqual(len(source_metadata.BINDING_SOURCE_SPECS), 7)
+        self.assertEqual(
+            {spec.crate_name for spec in source_metadata.BINDING_SOURCE_SPECS},
+            {
+                "dear-imgui-test-engine-sys",
+                "dear-implot-sys",
+                "dear-implot3d-sys",
+                "dear-imnodes-sys",
+                "dear-node-editor-sys",
+                "dear-imguizmo-sys",
+                "dear-imguizmo-quat-sys",
+            },
+        )
+
+    def test_binding_metadata_is_exact_and_rejects_unknown_or_malformed_values(self):
+        self.assertEqual(
+            source_metadata.read_binding_source_metadata(self.manifest_path),
+            EXTENSION_REVISION,
+        )
+        for revision, extra in [
+            ("short", ""),
+            (EXTENSION_REVISION, 'unexpected = "4"\n'),
+        ]:
+            with self.subTest(revision=revision, extra=extra):
+                self.write_manifest(revision, extra=extra)
+                with self.assertRaises(source_metadata.SourceMetadataError):
+                    source_metadata.read_binding_source_metadata(self.manifest_path)
+
+    def test_binding_metadata_rejects_missing_and_duplicate_revisions(self):
+        fixtures = (
+            '[package]\nname = "missing-section"\n',
+            "[package.metadata.dear-imgui-binding]\n",
+            (
+                "[package.metadata.dear-imgui-binding]\n"
+                f'source-revision = "{EXTENSION_REVISION}"\n'
+                'source-revision = "' + "4" * 40 + '"\n'
+            ),
+        )
+        for fixture in fixtures:
+            with self.subTest(fixture=fixture):
+                self.manifest_path.write_text(fixture, encoding="utf-8")
+                with self.assertRaises(source_metadata.SourceMetadataError):
+                    source_metadata.read_binding_source_metadata(self.manifest_path)
+
+    def test_verification_rejects_dirty_or_mismatched_owning_source(self):
+        def dirty_git_output(path: Path, arguments):
+            self.assertEqual(path, self.source_path)
+            if tuple(arguments) == ("rev-parse", "--show-toplevel"):
+                return f"{self.source_path.resolve()}\n"
+            if arguments[0] == "status":
+                return " M generated-header.h\n"
+            self.fail(f"unexpected git command: {arguments}")
+
+        with (
+            patch.object(source_metadata, "_git_output", side_effect=dirty_git_output),
+            self.assertRaises(source_metadata.SourceMetadataError) as raised,
+        ):
+            source_metadata.verify_binding_source_metadata(self.repo_root, self.spec)
+        self.assertIn("source tree is dirty", str(raised.exception))
+
+        def mismatched_git_output(path: Path, arguments):
+            self.assertEqual(path, self.source_path)
+            if tuple(arguments) == ("rev-parse", "--show-toplevel"):
+                return f"{self.source_path.resolve()}\n"
+            if arguments[0] == "status":
+                return ""
+            if tuple(arguments) == ("rev-parse", "HEAD"):
+                return f'{"4" * 40}\n'
+            self.fail(f"unexpected git command: {arguments}")
+
+        with (
+            patch.object(
+                source_metadata, "_git_output", side_effect=mismatched_git_output
+            ),
+            self.assertRaises(source_metadata.SourceMetadataError) as raised,
+        ):
+            source_metadata.verify_binding_source_metadata(self.repo_root, self.spec)
+        self.assertIn("revision mismatch", str(raised.exception))
+
+    def test_update_rewrites_only_the_owning_manifest(self):
+        other_manifest = self.repo_root / "other/Cargo.toml"
+        other_manifest.parent.mkdir(parents=True)
+        other_manifest.write_text("untouched\n", encoding="utf-8")
+
+        def git_output(path: Path, arguments):
+            self.assertEqual(path, self.source_path)
+            if tuple(arguments) == ("rev-parse", "--show-toplevel"):
+                return f"{self.source_path.resolve()}\n"
+            if arguments[0] == "status":
+                return ""
+            if tuple(arguments) == ("rev-parse", "HEAD"):
+                return f'{"5" * 40}\n'
+            self.fail(f"unexpected git command: {arguments}")
+
+        with patch.object(source_metadata, "_git_output", side_effect=git_output):
+            result = source_metadata.update_binding_source_metadata(
+                self.repo_root, self.spec
+            )
+
+        self.assertTrue(result.changed)
+        self.assertTrue(result.written)
+        self.assertEqual(
+            source_metadata.read_binding_source_metadata(self.manifest_path), "5" * 40
+        )
+        self.assertEqual(other_manifest.read_text(encoding="utf-8"), "untouched\n")
+
+
 class SourceMetadataIntegrationTests(unittest.TestCase):
     def test_ci_invokes_the_shared_verifier_without_inline_schema(self):
         workflow = (REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
@@ -292,7 +425,8 @@ class SourceMetadataIntegrationTests(unittest.TestCase):
         step_end = workflow.index("- name: Regenerate and verify", step_start)
         step = workflow[step_start:step_end]
 
-        self.assertIn("run: python3 tools/source_metadata.py verify", step)
+        self.assertIn("python3 tools/source_metadata.py verify\n", step)
+        self.assertIn("python3 tools/source_metadata.py verify-bindings", step)
         self.assertNotIn("tomllib", step)
         self.assertNotIn("cimgui-revision", step)
 

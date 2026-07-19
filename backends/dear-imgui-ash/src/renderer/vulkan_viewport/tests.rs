@@ -1,589 +1,194 @@
+use std::cell::Cell;
+use std::ffi::c_void;
+use std::rc::Rc;
+
+use super::callbacks::{
+    publish_registered_box, publish_registered_box_transactionally,
+    request_platform_close_after_create_failure, validate_secondary_viewports,
+};
 use super::registry::{
-    disable, has_renderer_state_for_context, render_callback_matches,
-    try_install_renderer_callbacks, try_install_renderer_callbacks_after_preflight,
-    unary_callback_matches, validate_empty_renderer_user_data,
-    validate_no_created_platform_windows, validate_platform_backend, validate_platform_callbacks,
-    validate_queue_family_selection, validate_vulkan_handles,
+    fail_next_viewport_registration, register_viewport_data, take_viewport_data_from_viewport,
+    validate_queue_family_selection, validate_vulkan_handles, viewport_data_count,
+    viewport_user_data_mut,
 };
 use super::*;
 use ash::vk::Handle;
-use std::ffi::c_void;
-use std::mem::MaybeUninit;
-
-fn lock_context() -> std::sync::MutexGuard<'static, ()> {
-    super::test_context_guard()
-}
-
-unsafe extern "C" fn platform_slot_sentinel(
-    _viewport: *mut sys::ImGuiViewport,
-    _render_arg: *mut c_void,
-) {
-}
-
-unsafe extern "C" fn foreign_renderer_create_window(_viewport: *mut sys::ImGuiViewport) {}
-
-unsafe extern "C" fn foreign_renderer_destroy_window(_viewport: *mut sys::ImGuiViewport) {}
-
-unsafe extern "C" fn foreign_renderer_set_window_size_direct(
-    _viewport: *mut sys::ImGuiViewport,
-    _size: sys::ImVec2,
-) {
-}
-
-unsafe extern "C" fn foreign_renderer_set_window_size_pointer(
-    _viewport: *mut sys::ImGuiViewport,
-    _size: *const sys::ImVec2,
-) {
-}
-
-unsafe extern "C" fn foreign_renderer_render_window(
-    _viewport: *mut sys::ImGuiViewport,
-    _render_arg: *mut c_void,
-) {
-}
-
-unsafe extern "C" fn foreign_renderer_swap_buffers(
-    _viewport: *mut sys::ImGuiViewport,
-    _render_arg: *mut c_void,
-) {
-}
-
-fn set_window_size_callback_matches(
-    actual: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, sys::ImVec2)>,
-    expected: unsafe extern "C" fn(*mut sys::ImGuiViewport, sys::ImVec2),
-) -> bool {
-    actual.is_some_and(|actual| std::ptr::fn_addr_eq(actual, expected))
-}
-
-fn try_install(ctx: &mut Context) -> Result<(), CallbackOwnershipError> {
-    let raw = ctx.as_raw();
-    try_install_renderer_callbacks(raw, ctx.platform_io_mut())
-}
-
-fn assert_ash_renderer_callbacks(ctx: &Context) {
-    let platform_io = ctx.platform_io();
-    assert!(unary_callback_matches(
-        platform_io.renderer_create_window_raw(),
-        renderer_create_window_sys
-    ));
-    assert!(unary_callback_matches(
-        platform_io.renderer_destroy_window_raw(),
-        renderer_destroy_window_sys
-    ));
-    assert!(
-        platform_io.renderer_set_window_size_matches_pointer_callback(renderer_set_window_size_sys)
-    );
-    assert!(render_callback_matches(
-        platform_io.renderer_render_window_raw(),
-        renderer_render_window_sys
-    ));
-    assert!(render_callback_matches(
-        platform_io.renderer_swap_buffers_raw(),
-        renderer_swap_buffers_sys
-    ));
-}
-
-#[test]
-fn renderer_callbacks_preserve_platform_render_slots() {
-    let _guard = lock_context();
-    let mut ctx = Context::create();
-    let raw = ctx.as_raw();
-    let platform_io = unsafe { sys::igGetPlatformIO_ContextPtr(raw) };
-
-    unsafe {
-        (*platform_io).Platform_RenderWindow = Some(platform_slot_sentinel);
-        (*platform_io).Platform_SwapBuffers = Some(platform_slot_sentinel);
-    }
-
-    try_install(&mut ctx).expect("empty renderer callback table");
-
-    {
-        assert_ash_renderer_callbacks(&ctx);
-        unsafe {
-            assert!(render_callback_matches(
-                (*platform_io).Platform_RenderWindow,
-                platform_slot_sentinel
-            ));
-            assert!(render_callback_matches(
-                (*platform_io).Platform_SwapBuffers,
-                platform_slot_sentinel
-            ));
-        }
-    }
-
-    disable(&mut ctx).unwrap();
-
-    unsafe {
-        assert!(ctx.platform_io().renderer_callbacks_are_empty());
-        assert!(render_callback_matches(
-            (*platform_io).Platform_RenderWindow,
-            platform_slot_sentinel
-        ));
-        assert!(render_callback_matches(
-            (*platform_io).Platform_SwapBuffers,
-            platform_slot_sentinel
-        ));
-
-        (*platform_io).Platform_RenderWindow = None;
-        (*platform_io).Platform_SwapBuffers = None;
-    }
-}
-
-#[test]
-fn foreign_renderer_callbacks_reject_install_without_mutation() {
-    let _guard = lock_context();
-    let mut ctx = Context::create();
-    let raw = ctx.as_raw();
-    let platform_io = unsafe { sys::igGetPlatformIO_ContextPtr(raw) };
-
-    macro_rules! assert_conflict {
-        ($field:ident, $callback:ident, $matches:ident) => {{
-            unsafe {
-                (*platform_io).$field = Some($callback);
-            }
-            assert_eq!(
-                try_install(&mut ctx),
-                Err(CallbackOwnershipError::RendererCallbacksOccupied)
-            );
-            assert!(!has_renderer_state_for_context(raw));
-            unsafe {
-                assert!($matches((*platform_io).$field, $callback));
-                (*platform_io).$field = None;
-            }
-            assert!(ctx.platform_io().renderer_callbacks_are_empty());
-        }};
-    }
-
-    assert_conflict!(
-        Renderer_CreateWindow,
-        foreign_renderer_create_window,
-        unary_callback_matches
-    );
-    assert_conflict!(
-        Renderer_DestroyWindow,
-        foreign_renderer_destroy_window,
-        unary_callback_matches
-    );
-    assert_conflict!(
-        Renderer_SetWindowSize,
-        foreign_renderer_set_window_size_direct,
-        set_window_size_callback_matches
-    );
-    assert_conflict!(
-        Renderer_RenderWindow,
-        foreign_renderer_render_window,
-        render_callback_matches
-    );
-    assert_conflict!(
-        Renderer_SwapBuffers,
-        foreign_renderer_swap_buffers,
-        render_callback_matches
-    );
-}
-
-#[test]
-fn failed_preflight_leaves_callback_table_registry_and_backend_flag_clean() {
-    let _guard = lock_context();
-    let mut ctx = Context::create();
-    let raw = ctx.as_raw();
-    let initial_flags = ctx.io().backend_flags();
-
-    let result = try_install_renderer_callbacks_after_preflight(raw, ctx.platform_io_mut(), || {
-        Err(CallbackOwnershipError::SurfaceUnsupported(
-            SurfaceSupportError::NullSurface,
-        ))
-    });
-
-    assert_eq!(
-        result,
-        Err(CallbackOwnershipError::SurfaceUnsupported(
-            SurfaceSupportError::NullSurface,
-        ))
-    );
-    assert!(ctx.platform_io().renderer_callbacks_are_empty());
-    assert!(!has_renderer_state_for_context(raw));
-    assert_eq!(ctx.io().backend_flags(), initial_flags);
-}
-
-#[test]
-fn missing_platform_lifecycle_callbacks_fail_without_claiming_renderer_slots() {
-    let _guard = lock_context();
-    let ctx = Context::create();
-
-    assert_eq!(
-        validate_platform_callbacks(ctx.platform_io()),
-        Err(CallbackOwnershipError::PlatformCallbacksUnavailable)
-    );
-    assert!(ctx.platform_io().renderer_callbacks_are_empty());
-}
-
-#[test]
-fn missing_platform_capability_fails_without_mutating_renderer_state() {
-    let _guard = lock_context();
-    let context = Context::create();
-    let initial_flags = context.io().backend_flags();
-
-    assert_eq!(
-        validate_platform_backend(&context),
-        Err(CallbackOwnershipError::PlatformBackendUnavailable)
-    );
-    assert!(context.platform_io().renderer_callbacks_are_empty());
-    assert!(!has_renderer_state_for_context(context.as_raw()));
-    assert_eq!(context.io().backend_flags(), initial_flags);
-}
 
 #[test]
 fn foreign_renderer_user_data_preflight_is_transactional() {
-    let _guard = lock_context();
-    let context = Context::create();
     let foreign = 0x1234_usize as *mut c_void;
 
-    assert_eq!(
-        validate_empty_renderer_user_data([std::ptr::null_mut(), foreign]),
-        Err(CallbackOwnershipError::RendererUserDataOccupied)
-    );
-    assert!(context.platform_io().renderer_callbacks_are_empty());
-    assert!(!has_renderer_state_for_context(context.as_raw()));
+    assert!(matches!(
+        validate_secondary_viewports(&[(false, std::ptr::null_mut()), (false, foreign)]),
+        Err(AshViewportError::RendererUserDataOccupied)
+    ));
 }
 
 #[test]
 fn existing_platform_windows_preflight_is_transactional() {
-    let _guard = lock_context();
-    let context = Context::create();
-
-    assert_eq!(
-        validate_no_created_platform_windows([false, true]),
-        Err(CallbackOwnershipError::PlatformWindowsAlreadyCreated)
-    );
-    assert!(context.platform_io().renderer_callbacks_are_empty());
-    assert!(!has_renderer_state_for_context(context.as_raw()));
+    assert!(matches!(
+        validate_secondary_viewports(&[
+            (false, std::ptr::null_mut()),
+            (true, std::ptr::null_mut())
+        ]),
+        Err(AshViewportError::PlatformWindowsAlreadyCreated)
+    ));
 }
 
 #[test]
-fn invalid_vulkan_config_is_rejected_without_callback_mutation() {
-    let _guard = lock_context();
-    let context = Context::create();
+fn invalid_vulkan_handles_and_queue_families_are_rejected() {
     let physical_device = vk::PhysicalDevice::from_raw(1);
     let present_queue = vk::Queue::from_raw(2);
 
-    assert_eq!(
+    assert!(matches!(
         validate_vulkan_handles(vk::PhysicalDevice::null(), present_queue),
-        Err(CallbackOwnershipError::NullPhysicalDevice)
-    );
-    assert_eq!(
+        Err(AshViewportError::NullPhysicalDevice)
+    ));
+    assert!(matches!(
         validate_vulkan_handles(physical_device, vk::Queue::null()),
-        Err(CallbackOwnershipError::NullPresentQueue)
-    );
+        Err(AshViewportError::NullPresentQueue)
+    ));
 
     let queue_families = [vk::QueueFamilyProperties {
         queue_flags: vk::QueueFlags::COMPUTE,
         queue_count: 1,
         ..Default::default()
     }];
-    assert_eq!(
+    assert!(matches!(
         validate_queue_family_selection(&queue_families, 0, 0),
-        Err(CallbackOwnershipError::GraphicsQueueFamilyUnsupported {
-            queue_family_index: 0,
+        Err(AshViewportError::GraphicsQueueFamilyUnsupported {
+            queue_family_index: 0
         })
-    );
-    assert_eq!(
-        validate_queue_family_selection(&queue_families, 1, 0),
-        Err(CallbackOwnershipError::GraphicsQueueFamilyOutOfRange {
-            queue_family_index: 1,
-            queue_family_count: 1,
-        })
-    );
-    assert!(context.platform_io().renderer_callbacks_are_empty());
-    assert!(!has_renderer_state_for_context(context.as_raw()));
-}
-
-#[test]
-fn live_viewport_data_blocks_callback_rebind_and_is_context_owned() {
-    let _guard = lock_context();
-    let mut ctx_a = Context::create();
-    let raw_a = ctx_a.as_raw();
-    let data = std::ptr::NonNull::<ViewportAshData>::dangling().as_ptr();
-    register_viewport_data(data);
-    assert!(is_ash_viewport_data(data));
-
-    unsafe { sys::igSetCurrentContext(std::ptr::null_mut()) };
-    let ctx_b = Context::create();
-    let raw_b = ctx_b.as_raw();
-    assert!(!is_ash_viewport_data(data));
-    unsafe { sys::igSetCurrentContext(raw_a) };
-
-    assert_eq!(
-        try_install_renderer_callbacks_after_preflight(raw_a, ctx_a.platform_io_mut(), || Ok(()),),
-        Err(CallbackOwnershipError::LiveViewportResources)
-    );
-    assert!(ctx_a.platform_io().renderer_callbacks_are_empty());
-
-    unregister_viewport_data(data);
-    unsafe { sys::igSetCurrentContext(raw_b) };
-    drop(ctx_b);
-    unsafe { sys::igSetCurrentContext(raw_a) };
-    drop(ctx_a);
-}
-
-#[test]
-fn existing_ash_callback_table_cannot_rebind_renderer_state() {
-    let _guard = lock_context();
-    let mut ctx = Context::create();
-    let raw = ctx.as_raw();
-    let mut renderer = MaybeUninit::<AshRenderer>::uninit();
-
-    try_install(&mut ctx).expect("empty renderer callback table");
-    insert_renderer_state(raw, renderer.as_mut_ptr(), None).unwrap();
-
-    assert_eq!(
-        try_install(&mut ctx),
-        Err(CallbackOwnershipError::RendererCallbacksOccupied)
-    );
-    assert_ash_renderer_callbacks(&ctx);
-
-    disable(&mut ctx).unwrap();
-    assert!(!has_renderer_state_for_context(raw));
-}
-
-#[test]
-fn disable_preserves_renderer_callbacks_replaced_by_another_backend() {
-    let _guard = lock_context();
-    let mut ctx = Context::create();
-    let raw = ctx.as_raw();
-    let mut renderer = MaybeUninit::<AshRenderer>::uninit();
-
-    try_install(&mut ctx).expect("empty renderer callback table");
-    insert_renderer_state(raw, renderer.as_mut_ptr(), None).unwrap();
-    {
-        let platform_io = ctx.platform_io_mut();
-        platform_io.set_renderer_create_window_raw(Some(foreign_renderer_create_window));
-        platform_io.set_renderer_destroy_window_raw(Some(foreign_renderer_destroy_window));
-        platform_io
-            .set_renderer_set_window_size_raw(Some(foreign_renderer_set_window_size_pointer));
-        platform_io.set_renderer_render_window_raw(Some(foreign_renderer_render_window));
-        platform_io.set_renderer_swap_buffers_raw(Some(foreign_renderer_swap_buffers));
-    }
-    let io = ctx.io_mut();
-    io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_VIEWPORTS);
-
-    disable(&mut ctx).unwrap();
-    assert!(!has_renderer_state_for_context(raw));
-    assert!(
-        ctx.io()
-            .backend_flags()
-            .contains(BackendFlags::RENDERER_HAS_VIEWPORTS)
-    );
-
-    {
-        let platform_io = ctx.platform_io();
-        assert!(unary_callback_matches(
-            platform_io.renderer_create_window_raw(),
-            foreign_renderer_create_window
-        ));
-        assert!(unary_callback_matches(
-            platform_io.renderer_destroy_window_raw(),
-            foreign_renderer_destroy_window
-        ));
-        assert!(
-            platform_io.renderer_set_window_size_matches_pointer_callback(
-                foreign_renderer_set_window_size_pointer
-            )
-        );
-        assert!(render_callback_matches(
-            platform_io.renderer_render_window_raw(),
-            foreign_renderer_render_window
-        ));
-        assert!(render_callback_matches(
-            platform_io.renderer_swap_buffers_raw(),
-            foreign_renderer_swap_buffers
-        ));
-    }
-
-    let platform_io = ctx.platform_io_mut();
-    platform_io.set_renderer_create_window_raw(None);
-    platform_io.set_renderer_destroy_window_raw(None);
-    platform_io.set_renderer_set_window_size_raw(None);
-    platform_io.set_renderer_render_window_raw(None);
-    platform_io.set_renderer_swap_buffers_raw(None);
-}
-
-#[test]
-fn shutdown_is_a_noop_for_a_foreign_renderer_context() {
-    let _guard = lock_context();
-    let mut ctx = Context::create();
-    let platform_io = ctx.platform_io_mut();
-    platform_io.set_renderer_create_window_raw(Some(foreign_renderer_create_window));
-    let io = ctx.io_mut();
-    io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_VIEWPORTS);
-
-    shutdown_multi_viewport_support(&mut ctx).unwrap();
-
-    assert!(unary_callback_matches(
-        ctx.platform_io().renderer_create_window_raw(),
-        foreign_renderer_create_window
     ));
-    assert!(
-        ctx.io()
-            .backend_flags()
-            .contains(BackendFlags::RENDERER_HAS_VIEWPORTS)
-    );
-    ctx.platform_io_mut().set_renderer_create_window_raw(None);
+    assert!(matches!(
+        validate_queue_family_selection(&queue_families, 1, 0),
+        Err(AshViewportError::GraphicsQueueFamilyOutOfRange {
+            queue_family_index: 1,
+            queue_family_count: 1
+        })
+    ));
+}
+
+struct DropProbe(Rc<Cell<usize>>);
+
+impl Drop for DropProbe {
+    fn drop(&mut self) {
+        self.0.set(self.0.get() + 1);
+    }
 }
 
 #[test]
-fn shutdown_rejects_missing_callback_before_mutating_live_runtime() {
-    let _guard = lock_context();
-    let mut ctx = Context::create();
-    let raw = ctx.as_raw();
-    let mut renderer = MaybeUninit::<AshRenderer>::uninit();
+fn failed_registered_box_publish_returns_ownership_without_publication() {
+    let drops = Rc::new(Cell::new(0));
+    let published = Cell::new(false);
+    let result = publish_registered_box(
+        Box::new(DropProbe(Rc::clone(&drops))),
+        |_pointer| {
+            Err(AshViewportError::InvalidCallbackArgument {
+                callback: "injected registration failure",
+            })
+        },
+        |_pointer| published.set(true),
+    );
 
-    try_install(&mut ctx).expect("empty renderer callback table");
-    insert_renderer_state(raw, renderer.as_mut_ptr(), None).unwrap();
+    let (error, owner) = result.expect_err("registration must fail");
+    assert!(matches!(
+        error,
+        AshViewportError::InvalidCallbackArgument { .. }
+    ));
+    assert!(!published.get());
+    assert_eq!(drops.get(), 0);
+    drop(owner);
+    assert_eq!(drops.get(), 1);
+}
+
+#[derive(Default)]
+struct ResourceReleaseCounts {
+    surface: Cell<usize>,
+    swapchain: Cell<usize>,
+    command_pool: Cell<usize>,
+    fences: Cell<usize>,
+}
+
+struct ResourceReleaseProbe {
+    counts: Rc<ResourceReleaseCounts>,
+    fence_count: usize,
+}
+
+impl ResourceReleaseProbe {
+    fn destroy_after_device_idle(self) {
+        self.counts.surface.set(self.counts.surface.get() + 1);
+        self.counts.swapchain.set(self.counts.swapchain.get() + 1);
+        self.counts
+            .command_pool
+            .set(self.counts.command_pool.get() + 1);
+        self.counts
+            .fences
+            .set(self.counts.fences.get() + self.fence_count);
+    }
+}
+
+#[test]
+fn registration_failure_cleans_every_viewport_resource_category() {
+    let counts = Rc::new(ResourceReleaseCounts::default());
+    let published = Cell::new(false);
+    let result = publish_registered_box_transactionally(
+        Box::new(ResourceReleaseProbe {
+            counts: Rc::clone(&counts),
+            fence_count: 3,
+        }),
+        |_pointer| {
+            Err(AshViewportError::InvalidCallbackArgument {
+                callback: "injected registration failure",
+            })
+        },
+        |_pointer| published.set(true),
+        |probe| {
+            (*probe).destroy_after_device_idle();
+            Ok(())
+        },
+    );
+
+    assert!(matches!(
+        result,
+        Err(AshViewportError::InvalidCallbackArgument { .. })
+    ));
+    assert!(!published.get());
+    assert_eq!(counts.surface.get(), 1);
+    assert_eq!(counts.swapchain.get(), 1);
+    assert_eq!(counts.command_pool.get(), 1);
+    assert_eq!(counts.fences.get(), 3);
+}
+
+#[test]
+fn injected_viewport_registration_failure_publishes_no_sidecar() {
+    let _guard = super::test_context_guard();
+    let context = Context::create();
     let pointer = std::ptr::NonNull::<ViewportAshData>::dangling().as_ptr();
-    register_viewport_data(pointer);
-    ctx.platform_io_mut().set_renderer_destroy_window_raw(None);
+    fail_next_viewport_registration();
 
-    assert_eq!(
-        shutdown_multi_viewport_support(&mut ctx),
-        Err(CallbackOwnershipError::RendererCallbacksReplaced)
-    );
-
-    assert!(has_renderer_state_for_context(raw));
-    assert!(is_ash_viewport_data(pointer));
-    assert!(ctx.platform_io().renderer_destroy_window_raw().is_none());
-
-    unregister_viewport_data(pointer);
-    ctx.platform_io_mut()
-        .set_renderer_destroy_window_raw(Some(renderer_destroy_window_sys));
-    shutdown_multi_viewport_support(&mut ctx).unwrap();
+    assert!(matches!(
+        register_viewport_data(&context.binding(), pointer),
+        Err(AshViewportError::InvalidCallbackArgument {
+            callback: "injected RendererUserData registration"
+        })
+    ));
+    assert_eq!(viewport_data_count(context.id()), 0);
 }
 
 #[test]
-fn renderer_state_is_context_local() {
-    let _guard = lock_context();
-    let ctx_a = Context::create();
-    let raw_a = ctx_a.as_raw();
-    let mut renderer_a = MaybeUninit::<AshRenderer>::uninit();
-    let renderer_a_ptr = renderer_a.as_mut_ptr();
-    insert_renderer_state(raw_a, renderer_a_ptr, None).unwrap();
+fn foreign_renderer_user_data_is_never_typed_or_taken() {
+    let _guard = super::test_context_guard();
+    let context = Context::create();
+    let foreign = 0x1234_usize as *mut c_void;
+    let mut raw_viewport = sys::ImGuiViewport {
+        RendererUserData: foreign,
+        ..Default::default()
+    };
+    let viewport = unsafe { Viewport::from_raw_mut(&mut raw_viewport) };
 
-    unsafe {
-        sys::igSetCurrentContext(std::ptr::null_mut());
-    }
-
-    let ctx_b = Context::create();
-    let raw_b = ctx_b.as_raw();
-    let mut renderer_b = MaybeUninit::<AshRenderer>::uninit();
-    let renderer_b_ptr = renderer_b.as_mut_ptr();
-    insert_renderer_state(raw_b, renderer_b_ptr, None).unwrap();
-
-    unsafe {
-        sys::igSetCurrentContext(raw_a);
-        {
-            let borrowed = borrow_renderer().expect("renderer for context A");
-            assert_eq!(borrowed.renderer, renderer_a_ptr);
-        }
-
-        sys::igSetCurrentContext(raw_b);
-        {
-            let borrowed = borrow_renderer().expect("renderer for context B");
-            assert_eq!(borrowed.renderer, renderer_b_ptr);
-        }
-    }
-
-    remove_renderer_state_for_context(raw_b);
-    unsafe {
-        sys::igSetCurrentContext(raw_b);
-        assert!(borrow_renderer().is_none());
-
-        sys::igSetCurrentContext(raw_a);
-        assert!(borrow_renderer().is_some());
-    }
-
-    remove_renderer_state_for_context(raw_a);
-    unsafe {
-        sys::igSetCurrentContext(raw_a);
-    }
-    drop(ctx_a);
-    unsafe {
-        sys::igSetCurrentContext(raw_b);
-    }
-    drop(ctx_b);
-}
-
-#[test]
-fn one_renderer_cannot_be_registered_to_two_contexts() {
-    let _guard = lock_context();
-    let ctx_a = Context::create();
-    let raw_a = ctx_a.as_raw();
-    let mut renderer = MaybeUninit::<AshRenderer>::uninit();
-    let renderer = renderer.as_mut_ptr();
-    insert_renderer_state(raw_a, renderer, None).unwrap();
-
-    unsafe { sys::igSetCurrentContext(std::ptr::null_mut()) };
-    let ctx_b = Context::create();
-    let raw_b = ctx_b.as_raw();
-    assert_eq!(
-        insert_renderer_state(raw_b, renderer, None),
-        Err(CallbackOwnershipError::RendererAlreadyRegistered)
-    );
-    assert!(!has_renderer_state_for_context(raw_b));
-
-    remove_renderer_state_for_context(raw_a);
-    unsafe { sys::igSetCurrentContext(raw_b) };
-    drop(ctx_b);
-    unsafe { sys::igSetCurrentContext(raw_a) };
-    drop(ctx_a);
-}
-
-#[test]
-fn clear_for_drop_removes_renderer_state() {
-    let _guard = lock_context();
-    let ctx = Context::create();
-    let raw = ctx.as_raw();
-    let mut renderer = MaybeUninit::<AshRenderer>::uninit();
-    let renderer_ptr = renderer.as_mut_ptr();
-
-    insert_renderer_state(raw, renderer_ptr, None).unwrap();
-    unsafe {
-        sys::igSetCurrentContext(raw);
-        assert!(borrow_renderer().is_some());
-    }
-
-    clear_for_drop(renderer_ptr);
-    unsafe {
-        sys::igSetCurrentContext(raw);
-        assert!(borrow_renderer().is_none());
-    }
-
-    drop(ctx);
-}
-
-#[test]
-fn take_viewport_data_ignores_foreign_renderer_user_data() {
-    let _guard = lock_context();
-    let mut viewport = sys::ImGuiViewport::default();
-    let foreign = 0x1234usize as *mut c_void;
-    viewport.RendererUserData = foreign;
-
-    let viewport = unsafe { Viewport::from_raw_mut(&mut viewport) };
-    let data = unsafe { take_viewport_data(viewport) };
-
-    assert!(data.is_none());
-    assert_eq!(viewport.renderer_user_data(), foreign);
-}
-
-#[test]
-fn viewport_user_data_mut_ignores_unregistered_renderer_user_data() {
-    let _guard = lock_context();
-    let mut viewport = sys::ImGuiViewport::default();
-    let foreign = 0x1234usize as *mut c_void;
-    viewport.RendererUserData = foreign;
-
-    let viewport = unsafe { Viewport::from_raw_mut(&mut viewport) };
-    let data = unsafe { viewport_user_data_mut(viewport) };
-
-    assert!(data.is_none());
+    assert!(unsafe { viewport_user_data_mut(context.as_raw(), viewport) }.is_none());
+    assert!(unsafe { take_viewport_data_from_viewport(context.as_raw(), viewport) }.is_none());
     assert_eq!(viewport.renderer_user_data(), foreign);
 }
 
@@ -595,39 +200,6 @@ fn creation_failure_requests_platform_window_close() {
     request_platform_close_after_create_failure(viewport);
 
     assert!(viewport.platform_request_close());
-}
-
-#[test]
-fn missing_renderer_data_reasserts_close_during_render() {
-    let mut raw_viewport = sys::ImGuiViewport::default();
-
-    unsafe {
-        renderer_render_window(
-            (&mut raw_viewport as *mut sys::ImGuiViewport).cast::<Viewport>(),
-            std::ptr::null_mut(),
-        );
-    }
-
-    assert!(raw_viewport.PlatformRequestClose);
-}
-
-#[test]
-fn foreign_renderer_data_does_not_request_close_during_render() {
-    let foreign = 0x1234usize as *mut c_void;
-    let mut raw_viewport = sys::ImGuiViewport {
-        RendererUserData: foreign,
-        ..Default::default()
-    };
-
-    unsafe {
-        renderer_render_window(
-            (&mut raw_viewport as *mut sys::ImGuiViewport).cast::<Viewport>(),
-            std::ptr::null_mut(),
-        );
-    }
-
-    assert_eq!(raw_viewport.RendererUserData, foreign);
-    assert!(!raw_viewport.PlatformRequestClose);
 }
 
 #[test]

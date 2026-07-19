@@ -19,6 +19,11 @@ This is an intentionally source-breaking architecture release. It replaces shall
 - Remove the legacy safe Columns API, including `Ui::{columns,begin_columns,next_column}`, `ColumnsToken`, and the old column index/flag types. Use the Tables API for safe multi-column layouts; raw cimgui Columns functions remain available through `dear-imgui-sys` for compatibility code.
 - Remove the safe `DockBuilder`, `DockNode`, `NodeRect`, and `SplitDirection` mirror of Dear ImGui internals. Use `DockLayout`, `DockspaceTarget`, and `Ui::{dock_space_with_layout,dockspace_over_main_viewport_with_layout}`. `DockLayoutApply::IfMissing` preserves a restored INI tree, while `Replace` is the explicit destructive reset policy. Raw `dear_imgui_sys::igDockBuilder*` functions remain an unstable unsafe escape hatch.
 - Remove the unused `ImGuiPlatform` and `ImGuiRenderer` traits. Backend crates expose their concrete initialization, frame, recovery, and shutdown APIs directly.
+- Give every `Context` a stable `ContextId` and shared `ContextBinding`, and route safe context-dependent operations through that binding instead of relying on whichever native context happens to be current. Custom integrations can register typed extension `ContextAttachment`s plus at most one renderer and one platform role; context teardown quiesces callbacks, releases renderer resources, destroys platform windows, and tombstones Rust state in that order while containing callback panics.
+- Replace borrowed user-texture registration (`register_user_texture`, raw variants, registration tokens, and explicit unregister) with Context ownership: `Context::register_texture(OwnedTextureData)` transfers the allocation and returns a generational `ManagedTextureId`, `with_texture` and `with_texture_mut` provide non-escaping access, and `remove_texture` begins renderer-coordinated retirement. Managed handles are rejected by the wrong Context or after slot reuse, while external `TextureId` values remain application-owned.
+- Change `Context::render()` and `FrameToken::render()` to return `RenderedFrame<'ctx>`, which exclusively leases that Context's native draw data and managed-texture request batch. Renderer APIs consume the lease by value and reconcile request-bound feedback before drawing; dropping an unreconciled frame abandons its epoch instead of silently accepting work. Remove `Context::{draw_data,draw_data_mut}`, `OwnedDrawData`, `OwnedDrawList`, `DrawListMut::clone_output`, and the old `render::renderer` compatibility module.
+- Replace cloneable or pointer-bearing detached output with one non-cloneable `RendererConsumer` per Context and a move-only, pointer-free `FrameSnapshot`. Create the consumer with `Context::create_renderer_consumer`, detach through `render_snapshot`, commit exactly one matching feedback batch on the render thread, and call `poll_snapshot_completions` on the UI thread; consumer generation, epoch, revision, request identity, abandon, and reset checks reject stale or duplicate completion. Custom renderers can pair `TextureRequest::texture()` with its opaque `upload_identity()` to recognize create/update retries without retaining upload payloads.
+- Replace escaping state-storage views and `StateStorageToken` with `Ui::{with_current_state_storage,with_state_storage}` and `OwnedStateStorage`; the closure cannot outlive the active native storage and nesting or panic restores the previous storage. Replace `begin_multi_select_raw`, transient begin/end IO views, and `MultiSelectEnd` with `Ui::with_multi_select` and an owned pointer-free `MultiSelectResult` that can apply its captured requests after the native scope closes.
 - `Context::enable_multi_viewport()` now enables only `ConfigFlags::VIEWPORTS_ENABLE`; applications that also need docking must enable `ConfigFlags::DOCKING_ENABLE` explicitly.
 - Remove raw safe access to the `PlatformIO.Monitors` vector. Platform backends must replace monitors with `PlatformIo::set_monitors()`, which allocates through Dear ImGui and leaves release ownership with the context.
 - Route all seven aggregate-bearing PlatformIO callbacks through repository-owned C++ ABI shims: `Platform_SetWindowPos`, `Platform_GetWindowPos`, `Platform_SetWindowSize`, `Platform_GetWindowSize`, `Platform_GetWindowFramebufferScale`, `Platform_GetWindowWorkAreaInsets`, and `Renderer_SetWindowSize`. Raw Rust callbacks now receive aggregate inputs by pointer and return aggregates through out-parameters, avoiding compiler-dependent C++ small-aggregate calling conventions on MSVC. Typed callbacks retain their ergonomic value types through Rust trampolines.
@@ -37,20 +42,22 @@ This is an intentionally source-breaking architecture release. It replaces shall
 - Remove the core `tracing` feature, `dear_imgui_rs::logging`, exported `imgui_*` logging macros, process-global subscriber helpers, and logging side effects from error constructors. Applications now own subscriber policy; `dear-imgui-wgpu` emits its existing diagnostics only with its opt-in `tracing` feature. This completes and expands the opt-in tracing direction contributed by [@DBLouis](https://github.com/DBLouis) in [PR #42](https://github.com/Latias94/dear-imgui-rs/pull/42).
 - Make `test-engine` a native source-only feature. It now implies `build-from-source` and is rejected with the WASM import provider instead of compiling without its promised native hooks.
 - Make `prebuilt` native-only and reject it with the WASM import provider. Its download/extraction stack is now confined to the host build graph, while the package helper consumes build-script-generated artifact metadata without adding build-support to the target dependency graph.
+- Remove provisional and deprecated compatibility entry points without aliases: use `Context::frame_with_result` instead of `frame_with`, `Ui::selectable_config` instead of `Selectable::new`, `Ui::slider_config` instead of `Slider::new`, `OwnedTextureData::new` instead of `TextureData::new`, `TextureRef::from` instead of `create_texture_ref`, and `Direction` instead of `ArrowDirection`; replace ambiguous `InputFlags` with the operation-specific shortcut, next-item, and key-owner options. Dear ImGui 1.92 lazy glyph loading replaces `GlyphRanges` and `GlyphRangesBuilder`; structured `(start, end)` pairs remain available where an atlas API explicitly accepts ranges. Also remove WGPU's mutable texture-manager escape hatch, SDL3 typo/compat exports, the examples-only `sdl3-backends` alias, `IntoImGuiError`, and duplicate safe-crate `compat_ffi` declarations.
 
 #### Backends and runtime
 
 - Remove Glow's public cached `font_atlas_texture` field. Font-atlas GPU resources are now renderer-internal and may change when the atlas grows or repacks.
-- Make `GlowRenderer::{destroy,destroy_device_objects}` and `WgpuRenderer::{invalidate_device_objects,shutdown}` take the matching `&mut Context`, so clearing GPU texture maps also invalidates managed `TexID` values and requeues live uploads. Each `WgpuRenderer` now owns exactly one context's renderer state and stays on that context's UI thread; context-taking render and lifecycle methods reject another context before mutation, while contextless draw-data rendering uses the bound context's `PlatformIO`. Create one renderer per context and shut it down before dropping the bound context. Remove contextless `WgpuRenderer::init` and manual `configure_imgui_context`/`prepare_font_atlas`; use `new` or `init_with_context` so GPU state and Dear ImGui renderer state cannot be replaced independently. New Glow, WGPU, and Ash renderers invalidate bindings inherited from an earlier renderer or device; custom backends can use `PlatformIo::invalidate_renderer_texture_bindings()` for the same transition. Textures shared by multiple contexts remain bound until their owners coordinate teardown and only one reference remains.
+- Make Glow, WGPU, Ash, Bevy, and dear-app consume the Context-owned `RenderedFrame` lease instead of accepting detached raw draw data. Every renderer claims the Context's sole `RendererConsumer`, rejects another Context or renderer generation before mutation, processes create/update/destroy requests, and resets managed texture bindings only after its GPU resources and outstanding frames are gone. Custom renderers use `Context::reset_renderer_texture_bindings(&consumer)` for the same proven teardown transition. Ash managed updates replace images copy-on-write and retire superseded Vulkan resources through the existing fence-aware `TextureRetirementBatch` contract instead of idling the whole device.
 - Default `dear-imgui-wgpu` to WGPU 30 and keep WGPU 29, 28, and 27 behind separate mutually exclusive compatibility features.
-- Make WGPU and Ash multi-viewport `enable` entry points `unsafe`. The renderer must have a stable address, remain single-thread serialized with callback execution, and outlive every registered callback and secondary viewport. A pinned owner or `Box` is the normal integration pattern.
-- Require explicit ordered multi-viewport shutdown. Shut down renderer support first, then the platform backend, then drop the renderer, context, secondary/main windows, and GPU or Vulkan objects in their documented ownership order. Renderer reinitialization and explicit renderer shutdown reject an active callback runtime. Rust `Drop` is non-fallible best-effort cleanup and is not a substitute for the required ordered shutdown.
+- Replace address-based multi-viewport `enable` functions with owning runtimes. `WinitPlatformRuntime` owns the main and secondary windows plus its callback table; WGPU's `WinitViewportRuntime` and `Sdl3ViewportRuntime` and Glow's `GlowViewportRuntime` consume their renderer into stable internal storage and attach safely. Ash exposes corresponding unsafe owning attach functions only because Rust cannot prove the lineage of raw Vulkan handles, devices, queues, surfaces, and fences; callers no longer pin renderer storage themselves.
+- Require explicit ordered multi-viewport shutdown through the owning runtime: renderer runtime first, platform runtime second, then Context, windows, and GPU objects. Attachment roles make Context drop use the same renderer-before-platform phase order as a last-resort best-effort path, while explicit shutdown reports callback ownership drift, deferred callback faults, or incomplete GPU retirement.
 - WGPU secondary surfaces now require the originating `Instance` and `Adapter`, recover lost/outdated/suboptimal surfaces, and treat timeout, occlusion, validation, and out-of-memory outcomes explicitly. `ViewportFlags::NO_RENDERER_CLEAR` loads the existing target instead of clearing it.
 - Ash secondary viewports now share one swapchain runtime for classic render-pass and dynamic-rendering routes, use per-image synchronization, retire old swapchains safely, clamp or pause zero-sized surfaces, and rebuild after out-of-date or suboptimal acquire/present results. `ViewportFlags::NO_RENDERER_CLEAR` uses Vulkan discard semantics rather than issuing a clear.
 - Replace dear-app's `AppBuilder`, `RunnerCallbacks`, `RunnerConfig`, `run_simple`, and `run_with_callbacks` APIs with `AppConfig`, one state-owning `Application`, and `dear_app::run`. The application, main window, add-ons, and Dear ImGui context survive WGPU device loss; only generation-scoped GPU resources are recreated, and stale external texture handles are rejected.
 
 #### Extensions
 
+- Make all safe Test Engine operations return typed `TestEngineResult` values and enforce one live Context attachment per engine. `TestEngine::create`, `start`, and `shutdown` now validate native status transitions, contain panics at every C callback boundary, preserve the first callback fault, and reject cross-Context or post-shutdown use instead of relying on assertions or implicit current-context state.
 - Replace `dear-imgui-reflect` global/thread-local settings, free `input`, and no-session `ImGuiReflectExt::input_reflect` with `ReflectSession` and one-frame `Inspector` values. The session-aware `ImGuiReflectExt::inspector` starts a pass through `ui.inspector(&session)`. A session owns settings and persistent map drafts for one UI owner; an inspector owns response and logical path state for one render pass.
 - Make `FileDialogState` own its filesystem capability. Native callers choose `with_background_filesystem(Arc<dyn FileSystem + Send + Sync>)`; caller-thread and browser adapters use `with_blocking_filesystem(Box<dyn FileSystem>)`. Draw methods no longer borrow a filesystem that a worker could outlive.
 - Replace `FileSystem::read_dir` with streaming `FileSystem::visit_dir` and `ScanVisit::{Continue,Stop}`. Replace incremental/synchronous scan presets with explicit `ScanPolicy::Blocking` and native-only `ScanPolicy::Background`. Requesting a background scan without a thread-safe native capability returns an error instead of silently changing execution mode.
@@ -70,6 +77,7 @@ This is an intentionally source-breaking architecture release. It replaces shall
 - Add strict `dear-imgui-sys` core native prebuilt manifests covering crate/version, target, link type, MSVC CRT, normalized artifact features, exact source revisions, and binding-spec hash. Missing, duplicate, unknown, or mismatched fields reject the core artifact. `dear-imgui-rs` now forwards `prebuilt` and `build-from-source`; Cargo may unify both, with source building taking precedence, and packaged consumers exercise the high-level `prebuilt` feature.
 - Add a bounded native per-runtime scan worker with per-dialog cancellation, latest-request coalescing, bounded UI-thread batch application, owned-worker teardown, and generation filtering for stale results.
 - Add an opt-in native Winit/WGPU Test Engine smoke that moves a window into a real secondary OS viewport, renders its surface, merges it back into the main viewport, verifies teardown, and exits with a test result.
+- Add `TestRunner::{run_headless,run_with_renderer}` as bounded one-shot Test Engine pumps. `RunReport` distinguishes `Passed`, `Failed`, `NoMatch`, `TimedOut`, and `Aborted` product outcomes, while callback, native-state, cleanup, and renderer failures remain typed `RunnerError` infrastructure errors.
 
 ### Changed
 
@@ -80,6 +88,8 @@ This is an intentionally source-breaking architecture release. It replaces shall
 - Update `dear-app`, renderer examples, and the browser demo to WGPU 30 surface color-space and queue-present APIs.
 - Regenerate and verify the Windows, non-Windows, and WASM core binding profiles from one canonical command while keeping extension generation on the fixed `imgui-sys-v0` provider contract.
 - Make the `style_and_fonts` example self-contained: vendored Roboto exercises runtime font insertion, scoped `FontId` rendering, baked glyph queries, and text measurement; CJK and Emoji loading falls back to common system fonts and reports the selected source; an interactive checker covers managed custom-rectangle updates.
+- Forward `build-from-source` and `prebuilt` consistently through the six safe native extension crates (`dear-implot`, `dear-implot3d`, `dear-imnodes`, `dear-imguizmo`, `dear-imguizmo-quat`, and `dear-node-editor`) to both core and sys crates. The first five also forward the browser `wasm` route; node-editor remains native-only, source wins if Cargo unifies both native artifact features, and Test Engine remains native source-only with no prebuilt or WASM route.
+- Gate release candidates through one clean committed local check and a same-SHA remote aggregate with 13 fixed cells covering Linux Test Engine and multi-viewport runtime tests, Linux WASM, Windows vcpkg/MSVC MD/MSVC MT/MinGW, macOS, and five prebuilt targets. Python orchestration records commands, outcomes, target/CRT/toolchain metadata, binding and manifest hashes, runtime diagnostics, candidate SHA, and evidence SHA256 values; missing, skipped, cancelled, timed-out, failed, duplicate, stale, or wrong-SHA evidence is `No-Go`. Native runtime CI passes the trigger commit explicitly, and Release Gate rejects a dispatch whose workflow revision differs from the candidate before any evidence cell runs.
 
 ### Fixed
 
@@ -136,21 +146,88 @@ unsafe { ui.show_demo_window(&mut demo_open) };
 
 Do not use these wrappers when arbitrary users can reach those controls; build application-owned diagnostics instead.
 
-#### WGPU context ownership and renderer device invalidation
+#### Context-owned rendering and managed textures
 
-Create one WGPU renderer per context. Pass that same context to explicit render and lifecycle methods so managed textures lose stale backend bindings and are uploaded again:
+Before 0.16, a Context borrowed an application-owned texture and returned raw draw data that could be passed around independently:
 
 ```rust
-let mut wgpu_renderer = WgpuRenderer::new(init_info, &mut ctx)?;
-wgpu_renderer.render_context(&mut ctx, &mut render_pass)?;
-wgpu_renderer.invalidate_device_objects(&mut ctx)?;
-wgpu_renderer.shutdown(&mut ctx)?;
-glow_renderer.destroy_device_objects(&gl, &mut ctx);
+let mut texture = OwnedTextureData::new();
+let _registration = ctx.register_user_texture_token(&mut texture);
+
+let draw_data = ctx.render();
+wgpu_renderer.render_draw_data(draw_data, &mut render_pass)?;
 ```
 
-Passing another context returns `RendererError::ContextMismatch` without changing either context or the renderer. For multiple contexts, construct a separate renderer for each; `render_context` no longer turns one renderer into a shared multi-context backend. Contextless `render_draw_data` variants use the bound context and require it to be current.
+In 0.16, registration transfers ownership to the Context and rendering produces a one-use lease that the matching renderer consumes by value:
 
-Custom managed-texture backends should call `ctx.platform_io_mut().invalidate_renderer_texture_bindings()` whenever they discard every renderer texture resource. The helper follows upstream shutdown semantics and skips textures whose reference count is not exactly one; pause and coordinate every context sharing an atlas before releasing the final renderer resource.
+```rust
+let texture = ctx.register_texture(OwnedTextureData::new());
+
+let ui = ctx.frame();
+ui.image(texture, [64.0, 64.0]);
+let frame = ctx.render();
+wgpu_renderer.render(frame, &mut render_pass)?;
+
+ctx.with_texture_mut(texture, |texture| {
+    texture.set_data(&pixels);
+})?;
+ctx.remove_texture(texture)?;
+```
+
+Create one renderer per Context. Passing a frame from another Context returns a context-mismatch error before mutation. `remove_texture` begins retirement rather than immediately reusing the slot; the renderer's request-bound feedback and completion watermark determine when reuse is safe. A custom renderer that destroys its complete device-side texture map must first finish all outstanding frames and GPU work, then call `ctx.reset_renderer_texture_bindings(&consumer)` with the same non-cloneable `RendererConsumer` it used to process frames.
+
+#### Detached render thread snapshots
+
+Do not clone native draw lists for another thread. Create the Context's sole renderer capability once, detach a pointer-free snapshot, and transfer it by value:
+
+```rust
+let consumer = ctx.create_renderer_consumer()?;
+
+let ui = ctx.frame();
+build_ui(ui);
+let snapshot = ctx.render_snapshot(&consumer)?;
+snapshot_tx.send(snapshot)?;
+
+// Render thread:
+let snapshot = snapshot_rx.recv()?;
+let feedback = process_texture_requests(snapshot.texture_requests())?;
+draw(snapshot.draw_data())?;
+snapshot.commit(feedback)?;
+
+// UI thread, before producing more work as needed:
+ctx.poll_snapshot_completions()?;
+```
+
+`FrameSnapshot` is intentionally neither `Clone` nor a source of native pointers. Dropping it without `commit` abandons that epoch; duplicate, stale-generation, wrong-Context, wrong-revision, and unsolicited feedback are rejected.
+
+#### Scoped state storage and owned multi-select results
+
+Replace `Ui::state_storage()` and `push_state_storage()` views with non-escaping closures around either the current native storage or an owned Rust storage:
+
+```rust
+let mut storage = OwnedStateStorage::new();
+ui.with_state_storage(&mut storage, |storage| {
+    storage.set_bool(ui.get_id("expanded"), true);
+});
+```
+
+The previous storage is restored after normal return or panic. For advanced multi-select, replace `begin_multi_select_raw` and `MultiSelectEnd` with `Ui::with_multi_select`; apply begin requests inside its closure and apply the returned owned `MultiSelectResult` afterward. The result contains copied requests and metadata rather than native IO pointers.
+
+#### Owning multi-viewport runtimes
+
+Before 0.16, renderer callback registration borrowed an address the caller had to keep stable and required matching free shutdown functions. In 0.16, the platform and renderer adapters own those callback states:
+
+```rust
+let mut platform_runtime = WinitPlatformRuntime::new(&mut ctx, Arc::clone(&window))?;
+let mut renderer_runtime = WinitViewportRuntime::attach(&mut ctx, renderer)?;
+
+// Run frames and route events through the runtimes.
+
+renderer_runtime.shutdown(&mut ctx)?;
+platform_runtime.shutdown()?;
+```
+
+WGPU and Glow attach safely because the runtime owns address stability. Ash uses the same owning shape, but `WinitViewportRuntime::attach` and `Sdl3ViewportRuntime::attach` remain unsafe because the caller must prove raw Vulkan device, queue, surface, and synchronization lineage. For Ash, command recording is not GPU completion: acknowledge a `TextureRetirementBatch` only after the covering fences signal or the device is idle.
 
 #### External font data and glyph ranges
 
@@ -204,6 +281,28 @@ tracing_subscriber::fmt()
     .with_env_filter("dear_imgui_wgpu=debug,wgpu=warn")
     .init();
 ```
+
+#### Bounded Test Engine runs
+
+`TestEngine::create`, `start`, and `shutdown` now return typed results, and starting requires mutable access to the one attached Context. Prefer `TestRunner` over manually reproducing the native queue, frame, render, `post_swap`, timeout, abort, and cleanup sequence:
+
+```rust
+let mut engine = TestEngine::create()?;
+engine.start(&mut ctx)?;
+engine.register_default_tests()?;
+
+let report = TestRunner::new(&mut engine).run_headless(&mut ctx, |ui, _frame| {
+    build_application_ui(ui);
+    Ok::<_, Infallible>(RunnerControl::Continue)
+})?;
+
+if report.outcome != RunOutcome::Passed {
+    return Err(format!("test run ended with {:?}", report.outcome).into());
+}
+engine.shutdown()?;
+```
+
+All five terminal product outcomes are successful `RunReport` values, so CI must explicitly require `RunOutcome::Passed`; `RunnerError` is reserved for infrastructure failures. Use `run_with_renderer` when tests issue managed texture requests or require graphical output, because headless mode deliberately rejects texture work it cannot upload.
 
 #### Unknown-count list clipping
 
@@ -311,6 +410,23 @@ cargo run -p dear-imgui-examples --bin node_editor_showcase --features node-edit
 ```
 
 Library users enable `dear-node-editor/blueprints`, which forwards `dear-imgui-rs/stack-layout`. The profile is native-only and cannot be combined with `wasm`.
+
+#### Extension artifact routes
+
+Safe extension crates now select the complete core-plus-extension artifact route with one feature instead of requiring downstream users to coordinate their sys crates:
+
+```toml
+# Native build from the vendored source revisions.
+dear-implot = { version = "0.16.0", features = ["build-from-source"] }
+
+# Native pregenerated bindings plus a matching downloaded binary artifact.
+dear-implot = { version = "0.16.0", features = ["prebuilt"] }
+
+# Browser import bindings; supported by ImPlot, ImPlot3D, ImNodes, ImGuizmo, and ImGuizmo Quat.
+dear-implot = { version = "0.16.0", features = ["wasm"] }
+```
+
+The same native source/prebuilt forwarding applies to `dear-node-editor`, but node-editor and blueprints are not WASM routes. `dear-imgui-test-engine` has neither `prebuilt` nor `wasm`; enable `dear-imgui-rs/test-engine` and compile the Test Engine from source on a supported native target. If Cargo unifies `prebuilt` and `build-from-source`, source compilation wins deterministically.
 
 #### PlatformIO raw aggregate setters
 

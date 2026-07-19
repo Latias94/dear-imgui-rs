@@ -152,9 +152,6 @@ impl From<crate::MouseButton> for InvisibleButtonOptions {
     }
 }
 
-/// Direction for arrow buttons (alias for Direction)
-pub use crate::Direction as ArrowDirection;
-
 impl Ui {
     /// Creates an invisible button
     #[doc(alias = "InvisibleButton")]

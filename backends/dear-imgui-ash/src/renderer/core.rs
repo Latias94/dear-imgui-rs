@@ -13,11 +13,14 @@ pub struct AshRenderer {
     pub(super) descriptor_set_layout: vk::DescriptorSetLayout,
     pub(super) descriptor_pool: vk::DescriptorPool,
     pub(super) textures: TextureManager,
+    pub(super) consumer: Option<RendererConsumer>,
+    pub(super) renderer_flags_added: BackendFlags,
     pub(super) default_texture_id: u64,
     pub(super) options: Options,
     pub(super) frames: Frames,
     pub(super) destroyed: bool,
     pub(super) in_flight_uploads: VecDeque<InFlightUpload>,
+    pub(super) managed_uploads: ManagedUploadTracker,
     #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
     pub(super) viewport_pipelines: HashMap<vk::Format, ViewportPipeline>,
     #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]

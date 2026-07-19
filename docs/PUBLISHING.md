@@ -93,7 +93,8 @@ Before publishing, ensure:
   DOCS_RS=1 cargo check -p dear-imgui-test-engine-sys
   ```
 
-- [ ] CI is green on all platforms
+- [ ] The fixed 13-cell `.github/workflows/release-gate.yml` aggregate is `Go`
+  for the exact release candidate SHA. Generic branch CI is not a substitute.
 
 - [ ] Git working tree is clean (commit all changes)
 
@@ -112,15 +113,30 @@ git commit -m "chore: prepare release v0.16.0"
 
 # Phase 2: validate the committed, clean release candidate.
 python3 tools/tasks.py release-check
+
+# Record this full SHA, dispatch release-gate.yml with candidate_sha, and
+# download the successful run's release-gate-<SHA>/gate-result.json artifact.
+git rev-parse HEAD
+gh workflow run release-gate.yml -f candidate_sha=FULL_40_HEX_SHA
+gh run download RELEASE_GATE_RUN_ID \
+  --name release-gate-FULL_40_HEX_SHA \
+  --dir artifacts/release-gate
 ```
 
 `release-prepare` may leave the working tree dirty by design. `release-check` is the strict gate: it requires a clean tree, one unified publishable version, a matching changelog section, a locked dependency graph, exact binding/source provenance, package/offline checks, documentation, and tests. Do not publish by skipping the second phase.
+
+The remote gate is independently required for the same SHA. Its immutable
+inventory covers Linux Test Engine and real viewport runtimes, Linux WASM,
+Windows vcpkg/MSVC `/MD`/`/MT`/GNU, macOS, and five prebuilt producer/consumer
+targets. Missing, skipped, cancelled, timed-out, failed, malformed, or wrong-
+SHA evidence is `No-Go`.
 
 ## Publishing Process
 
 ### Automated Publishing (Recommended)
 
-After `release-check` succeeds, use `tools/publish.py` to publish all crates in dependency order:
+After the local `release-check` and same-SHA remote aggregate both succeed, use
+`tools/publish.py` to publish all crates in dependency order:
 
 #### 1. Dry Run (Preview)
 
@@ -136,21 +152,23 @@ This will show you:
 - Any potential issues
 
 This print-only preview does not run the expensive release gate. `--cargo-dry-run`
-and every real upload rerun the strict clean-tree preflight and bind the operation
-to the validated Git `HEAD` before invoking Cargo.
+reruns the strict clean-tree preflight. Every real upload additionally requires
+the authoritative remote `gate-result.json`, verifies its fixed inventory and
+exact Git `HEAD`, and only then invokes Cargo.
 
 #### 2. Publish All Crates
 
 Once you've verified the dry run output:
 
 ```bash
-python3 tools/publish.py
+python3 tools/publish.py \
+  --release-gate-result artifacts/release-gate/gate-result.json
 ```
 
 The script will:
-1. Show a summary of what will be published
-2. Ask for confirmation
-3. Rerun the strict `release-check` preflight and verify the clean `HEAD` fingerprint
+1. Verify the downloaded aggregate is a complete 13-cell `Go` for the clean `HEAD`
+2. Rerun the strict local `release-check` preflight
+3. Show a summary and ask for confirmation
 4. Publish each crate explicitly to the `crates-io` registry in dependency order
 5. Recheck the source fingerprint before every Cargo upload
 6. Wait between publishes for crates.io to index
@@ -160,92 +178,38 @@ The script will:
 
 **Publish specific crates:**
 ```bash
-python3 tools/publish.py --crates dear-imgui-sys,dear-imgui-rs
+python3 tools/publish.py \
+  --release-gate-result artifacts/release-gate/gate-result.json \
+  --crates dear-imgui-sys,dear-imgui-rs
 ```
 
 **Skip Cargo's per-crate package verification (the strict release preflight still runs):**
 ```bash
-python3 tools/publish.py --no-verify
+python3 tools/publish.py \
+  --release-gate-result artifacts/release-gate/gate-result.json \
+  --no-verify
 ```
 
 **Adjust wait time between publishes:**
 ```bash
-python3 tools/publish.py --wait 60  # Wait 60 seconds instead of default 30
+python3 tools/publish.py \
+  --release-gate-result artifacts/release-gate/gate-result.json \
+  --wait 60
 ```
 
 **Resume from a specific crate:**
 ```bash
-python3 tools/publish.py --start-from dear-implot-sys
+python3 tools/publish.py \
+  --release-gate-result artifacts/release-gate/gate-result.json \
+  --start-from dear-implot-sys
 ```
 
 This is useful if publishing was interrupted and you want to continue from where it stopped.
 
-### Manual Publishing
-
-If you prefer to publish manually or need to publish individual crates:
-
-#### Publishing Order
-
-**IMPORTANT**: Crates must be published in this exact order to satisfy dependencies:
-
-1. **Tooling**
-   ```bash
-   cargo publish -p dear-imgui-build-support --locked --registry crates-io
-   # Wait for crates.io to index (~30 seconds)
-   ```
-
-2. **Core**
-   ```bash
-   cargo publish -p dear-imgui-sys --locked --registry crates-io
-   # Wait for crates.io to index (~30 seconds)
-   cargo publish -p dear-imgui-rs --locked --registry crates-io
-   ```
-
-3. **Backends**
-   ```bash
-   cargo publish -p dear-imgui-winit --locked --registry crates-io
-   cargo publish -p dear-imgui-wgpu --locked --registry crates-io
-   cargo publish -p dear-imgui-glow --locked --registry crates-io
-   cargo publish -p dear-imgui-ash --locked --registry crates-io
-   cargo publish -p dear-imgui-sdl3 --locked --registry crates-io
-   ```
-
-4. **Extension Sys Crates**
-   ```bash
-   cargo publish -p dear-implot-sys --locked --registry crates-io
-   cargo publish -p dear-imnodes-sys --locked --registry crates-io
-   cargo publish -p dear-node-editor-sys --locked --registry crates-io
-   cargo publish -p dear-imguizmo-sys --locked --registry crates-io
-   cargo publish -p dear-implot3d-sys --locked --registry crates-io
-   cargo publish -p dear-imguizmo-quat-sys --locked --registry crates-io
-   cargo publish -p dear-imgui-test-engine-sys --locked --registry crates-io
-   ```
-
-5. **Extension High-Level Crates**
-   ```bash
-   cargo publish -p dear-implot --locked --registry crates-io
-   cargo publish -p dear-imnodes --locked --registry crates-io
-   cargo publish -p dear-node-editor --locked --registry crates-io
-   cargo publish -p dear-imguizmo --locked --registry crates-io
-   cargo publish -p dear-implot3d --locked --registry crates-io
-   cargo publish -p dear-imguizmo-quat --locked --registry crates-io
-   cargo publish -p dear-imgui-test-engine --locked --registry crates-io
-   cargo publish -p dear-file-browser --locked --registry crates-io
-   cargo publish -p dear-imgui-reflect-derive --locked --registry crates-io
-   cargo publish -p dear-imgui-reflect --locked --registry crates-io
-   ```
-
-6. **Bevy Backend**
-   ```bash
-   cargo publish -p dear-imgui-bevy --locked --registry crates-io
-   ```
-
-7. **Application Runtime**
-   ```bash
-   cargo publish -p dear-app --locked --registry crates-io
-   ```
-
-**Note**: Wait 30-60 seconds between publishes to allow crates.io to index the crates. `dear-imgui-build-support` must be indexed before publishing `dear-imgui-sys` and the other `*-sys` crates.
+Do not replace this command with a hand-written `cargo publish` sequence. That
+would bypass the authoritative remote aggregate, clean-tree preflight, release
+order, and per-upload source fingerprint checks. For interrupted publishing,
+resume with `--start-from` and the same verified gate result.
 
 ## Post-Publishing
 
@@ -262,25 +226,35 @@ git push origin v0.16.0
 
 ### 2. GitHub Release
 
-Pushing a `v*` tag triggers `.github/workflows/release.yml`. The workflow extracts the matching `CHANGELOG.md` section with `tools/changelog.py` and creates or updates the GitHub Release body automatically.
-
-To rerun it manually:
+Pushing a tag does not publish a GitHub Release. Dispatch
+`.github/workflows/release.yml` with all three required inputs:
 
 ```bash
-gh workflow run release.yml -f tag=v0.16.0
+gh workflow run release.yml \
+  -f tag=v0.16.0 \
+  -f candidate_sha=FULL_40_HEX_SHA \
+  -f gate_run_id=RELEASE_GATE_RUN_ID
 ```
 
-### 3. Trigger Prebuilt Binaries Workflow (Optional)
+The workflow checks out the tag, downloads `release-gate-<SHA>` and all retained
+release cells from that exact run, verifies the stored aggregate, recomputes it
+from the 13 cell payloads, and requires both decisions to be same-SHA `Go`. Only
+then does it extract the matching changelog section, create/update the GitHub
+Release, and upload the five cells' prebuilt archives.
 
-If you want to provide prebuilt binaries for the `-sys` crates:
+### 3. Standalone Prebuilt Diagnostic
 
-1. Go to Actions → "Prebuilt Binaries" workflow
-2. Click "Run workflow"
-3. Select the tag (e.g., `v0.16.0`)
-4. Select crates to build (or `all`)
-5. Run the workflow
+The release gate always calls the complete five-target prebuilt matrix; it is
+not optional and there is no selective crate input. Maintainers may run the
+same reusable workflow by itself for diagnosis:
 
-The workflow will build prebuilt binaries for Windows (MD/MT variants) and upload them as release assets.
+```bash
+gh workflow run prebuilt-binaries.yml \
+  -f candidate_sha=FULL_40_HEX_SHA
+```
+
+This standalone run produces retained cell artifacts but is not a release
+aggregate and does not upload GitHub Release assets.
 
 ### 4. Verify Published Crates
 
@@ -315,7 +289,9 @@ cargo yank --registry crates-io --vers 0.16.0 dear-imgui-sys
 python3 tools/tasks.py release-prepare 0.16.1
 # Review and commit the release candidate, then:
 python3 tools/tasks.py release-check
-python3 tools/publish.py
+# Run the new candidate through release-gate.yml, download its Go result, then:
+python3 tools/publish.py \
+  --release-gate-result artifacts/release-gate/gate-result.json
 ```
 
 ### Publishing Failed
@@ -326,7 +302,9 @@ If publishing fails for a crate:
 2. **Fix the issue**: Update Cargo.toml or fix the code
 3. **Resume publishing**: Use `--start-from` to continue from the failed crate
    ```bash
-   python3 tools/publish.py --start-from dear-implot-sys
+   python3 tools/publish.py \
+     --release-gate-result artifacts/release-gate/gate-result.json \
+     --start-from dear-implot-sys
    ```
 
 ### Dependency Version Mismatch
@@ -371,10 +349,12 @@ When preparing a new version:
 - [ ] Generate pregenerated bindings
 - [ ] Verify docs.rs offline builds
 - [ ] Commit the release candidate and run `python3 tools/tasks.py release-check` from a clean tree
-- [ ] Publish using the script
+- [ ] Dispatch `release-gate.yml` with the exact `candidate_sha`; require all 13
+      cells to be same-SHA `Go` and retain the gate run ID/result
+- [ ] Publish using `tools/publish.py --release-gate-result ...`
 - [ ] Create git tag
-- [ ] Create GitHub release
-- [ ] Trigger prebuilt binaries workflow
+- [ ] Dispatch `release.yml` with `tag`, `candidate_sha`, and `gate_run_id`
+- [ ] Verify the GitHub Release contains the five already-gated prebuilt cells
 
 ## Release Cadence
 

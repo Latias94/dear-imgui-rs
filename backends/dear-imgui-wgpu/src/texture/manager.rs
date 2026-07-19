@@ -1,3 +1,4 @@
+use super::resource::ManagedWgpuTexture;
 use super::*;
 
 /// Texture manager for WGPU renderer
@@ -6,8 +7,14 @@ use super::*;
 /// similar to the ImageBindGroups storage in the C++ implementation.
 #[derive(Debug)]
 pub struct WgpuTextureManager {
-    /// Map from texture ID to WGPU texture
+    /// Application-owned textures addressed through the legacy TextureId path.
     pub(super) textures: HashMap<TextureId, WgpuTexture>,
+    /// Context-owned textures addressed by the pointer-free snapshot protocol.
+    pub(super) managed_textures: HashMap<SnapshotTextureId, ManagedWgpuTexture>,
+    /// Renderer IDs written back to draw commands, mapped to their managed owners.
+    pub(super) managed_by_texture_id: HashMap<TextureId, SnapshotTextureId>,
+    /// Managed identities that have already observed a destroy request.
+    pub(super) destroyed_managed_textures: HashSet<SnapshotTextureId>,
     /// Next available texture ID
     pub(super) next_id: u64,
     /// Custom samplers registered for external textures (sampler_id -> sampler)

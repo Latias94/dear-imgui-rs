@@ -68,8 +68,9 @@ ui.window("Hello")
       ui.text("Hello, world!");
       if ui.button("Click me") { println!("clicked"); }
   });
-let _draw_data = ctx.render();
-// Rendering is done by a backend (e.g. dear-imgui-wgpu or dear-imgui-glow)
+let frame = ctx.render();
+// Move `frame` into a backend (e.g. dear-imgui-wgpu or dear-imgui-glow).
+// The backend reconciles managed texture feedback before reading draw commands.
 // Tip: pass `.opened(&mut open)` if you want a title-bar close button (X).
 
 // Tip: For fallible creation, use `Context::try_create()`
@@ -90,7 +91,13 @@ Version 0.16.0 is the next, intentionally breaking architecture release and has 
 - legacy Columns to Tables and imperative `DockBuilder` code to declarative `DockLayout`;
 - global reflection helpers to an owned `ReflectSession` and per-frame `Inspector`;
 - borrowed file-browser filesystems to `FileDialogState`-owned blocking or background capabilities;
-- WGPU/Ash multi-viewport registration to an explicit unsafe stable-address and ordered-shutdown contract;
+- callback access to shared `ContextBinding` and ordered Context attachments;
+- borrowed texture pointers and pseudo-owned draw data to Context-owned `ManagedTextureId`,
+  move-only `RenderedFrame`/`FrameSnapshot`, and request-bound renderer feedback;
+- manual Winit/WGPU/Glow/Ash callback registration to owning runtimes with explicit,
+  idempotent shutdown (Ash remains unsafe only for raw Vulkan handle lineage);
+- ad hoc Test Engine frame pumps to `TestRunner`, whose five product outcomes remain distinct
+  from infrastructure errors;
 - implicit WASM target selection to the explicit `wasm32-unknown-unknown` plus `wasm` feature contract; and
 - `dear_imgui_sys::IMGUI_VERSION` to `BINDING_VERSION`, without a compatibility alias.
 
@@ -152,7 +159,7 @@ cargo run -p dear-imgui-examples --bin sdl3_wgpu --features sdl3-platform
 cargo run -p dear-imgui-examples --bin sdl3_wgpu_multi_viewport --features sdl3-wgpu-multi-viewport
 
 # winit + WGPU (experimental multi-viewport testbed, native only)
-# Enabled on Windows/macOS/Linux; tested on Windows/macOS, Linux untested.
+# Enabled on Windows/macOS/Linux. Release CI exercises the Linux path under Xvfb + Mesa/Lavapipe.
 cargo run -p dear-imgui-examples --bin multi_viewport_wgpu --features multi-viewport
 ```
 
@@ -322,6 +329,11 @@ fn ui_frame(
 - Windows core packages cover both MSVC CRT modes (MD/MT), with optional `freetype` and a distinct `stack-layout` artifact profile. Linux and macOS core archives are also eligible for opt-in release download on their supported targets; source builds remain the default everywhere.
 - Opt-in core prebuilt download from Release: enable `dear-imgui-rs/prebuilt`, or `dear-imgui-sys/prebuilt` when depending on the low-level crate directly (the env toggle `IMGUI_SYS_USE_PREBUILT=1` is still accepted but requires that feature). `IMGUI_SYS_LIB_DIR` points to the static-library directory and requires its matching `manifest.txt` there or in the parent artifact root, while `IMGUI_SYS_PREBUILT_URL` should point to a package-tool-generated archive. Bare core `.a`/`.lib` files without adjacent provenance are rejected.
 - Every accepted core prebuilt manifest records crate/version, target, link type, MSVC CRT, normalized features, cimgui and Dear ImGui revisions, and the binding-spec hash. Missing, unknown, duplicate, or mismatched fields reject the core artifact instead of falling back to an ABI guess. Extension `*-sys` crates retain their crate-specific prebuilt contracts.
+- `dear-implot`, `dear-implot3d`, `dear-imnodes`, `dear-imguizmo`,
+  `dear-imguizmo-quat`, and `dear-node-editor` forward both `prebuilt` and
+  `build-from-source` through the core and their matching sys crate. Source wins
+  if Cargo unifies both features. The first five also forward `wasm`;
+  `dear-node-editor` remains native-only.
 
 Test engine hooks (important):
 
@@ -403,14 +415,23 @@ Maintenance rules
 
 ### CI (Prebuilt Binaries)
 
-- Workflow: `.github/workflows/prebuilt-binaries.yml`
-  - Inputs:
-    - `tag` (release) or `branch` (manual; default `main`)
-    - `crates`: comma-separated list (`all`, `dear-imgui-sys`, `dear-implot-sys`, `dear-implot3d-sys`, `dear-imnodes-sys`, `dear-node-editor-sys`, `dear-imguizmo-sys`, `dear-imguizmo-quat-sys`)
-  - Artifacts (branch builds) or Release assets (tag builds) include `.tar.gz` packages named:
-    `dear-<name>-prebuilt-<version>-<target>-static[-stack-layout][-freetype][-mt|-md].tar.gz`
-  - Release download URLs default to owner/repo configured in `tools/build-support/src/lib.rs`.
-    Override via env: `BUILD_SUPPORT_GH_OWNER`, `BUILD_SUPPORT_GH_REPO`.
+- Dispatch `.github/workflows/release-gate.yml` with the exact full
+  `candidate_sha`; a branch or movable tag is not artifact identity.
+- Its reusable `.github/workflows/prebuilt-binaries.yml` job builds and then
+  consumes the complete core plus six-safe-extension package set for Linux
+  x86_64, macOS x86_64/aarch64, and Windows MSVC `/MD`/`/MT`. There is no
+  selective `crates` input in the release contract.
+- Packages use names such as
+  `dear-<name>-prebuilt-<version>-<target>-static[-stack-layout][-freetype][-mt|-md].tar.gz`
+  and embed the same candidate SHA in their manifests.
+- Prebuilt results are five of the fixed 13 release cells. The aggregate and
+  supporting logs, manifests, binding hashes, candidate SHA, and SHA256
+  evidence are retained for approximately 30 days. A missing or failed
+  producer/consumer cell makes the release `No-Go`; archives are uploaded to a
+  GitHub Release only after the same-SHA aggregate is verified.
+- Release download URLs default to the owner/repository configured in
+  `tools/build-support/src/lib.rs`. Override them with
+  `BUILD_SUPPORT_GH_OWNER` and `BUILD_SUPPORT_GH_REPO`.
 
 ## Version & FFI
 
@@ -459,7 +480,7 @@ The supported Rust target is exactly `wasm32-unknown-unknown`. Every dependency 
 dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", features = ["wasm"] }
 ```
 
-The Rust module imports cimgui from the fixed provider name `imgui-sys-v0`, and both modules share one `WebAssembly.Memory`. The provider name is part of the ABI and is not configurable. Builds for WASI, Rust Emscripten targets, missing `wasm` feature forwarding, or `wasm + stack-layout` fail rather than falling back to another binding profile.
+The Rust module imports cimgui from the fixed provider name `imgui-sys-v0`, and both modules share one `WebAssembly.Memory`. The provider name is part of the ABI and is not configurable. Builds for WASI, Rust Emscripten targets, missing `wasm` feature forwarding, `wasm + stack-layout`, `wasm + prebuilt`, or `wasm + test-engine` fail rather than falling back to another binding profile.
 
 Quick start:
 
@@ -483,10 +504,10 @@ For binding verification, provider construction, feature-forwarding checks, and 
 - **Multi-viewport support**
   - **SDL3 + OpenGL3**: supported via upstream C++ backends (`imgui_impl_sdl3` + `imgui_impl_opengl3`).
     - Example: `cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport,sdl3-opengl3`
-  - **Winit/SDL3 + WGPU**: native-only renderer adapters with WGPU 30 by default. Select exactly one platform route, keep the renderer at a stable address, and call renderer shutdown before platform shutdown and object destruction.
+  - **Winit/SDL3 + WGPU**: native-only owning renderer runtimes with WGPU 30 by default. Select exactly one platform route and call renderer shutdown before platform shutdown and object destruction; the runtime owns callback address stability.
     - Winit example: `cargo run -p dear-imgui-examples --bin multi_viewport_wgpu --features multi-viewport`
     - SDL3 example: `cargo run -p dear-imgui-examples --bin sdl3_wgpu_multi_viewport --features sdl3-wgpu-multi-viewport`
-  - **Winit/SDL3 + Ash**: native-only Vulkan adapters share one callback/swapchain runtime for classic render-pass and dynamic-rendering routes. The same unsafe stable-address and ordered-shutdown contract applies.
+  - **Winit/SDL3 + Ash**: native-only Vulkan adapters share one owning callback/swapchain runtime for classic render-pass and dynamic-rendering routes. Attachment is unsafe only because raw Vulkan handle/device lineage cannot be proven; the runtime owns callback address stability and ordered shutdown.
     - Winit example: `cargo run -p dear-imgui-examples --bin multi_viewport_ash --features multi-viewport`
     - SDL3 example: `cargo run -p dear-imgui-examples --bin sdl3_ash_multi_viewport --features sdl3-ash-multi-viewport`
   - Call `Context::enable_multi_viewport()` for viewports. Enable `ConfigFlags::DOCKING_ENABLE` separately when the application also needs docking.

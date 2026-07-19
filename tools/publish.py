@@ -26,20 +26,20 @@ Usage:
   # Cargo dry run (run cargo publish --dry-run for selected crates)
   python3 tools/publish.py --cargo-dry-run --crates dear-imgui-build-support
 
-  # Publish all crates
-  python3 tools/publish.py
+  # Upload all crates after verifying the authoritative same-SHA release gate
+  python3 tools/publish.py --release-gate-result artifacts/gate-result.json
 
   # Publish specific crates
-  python3 tools/publish.py --crates dear-imgui-sys,dear-imgui-rs
+  python3 tools/publish.py --release-gate-result gate-result.json --crates dear-imgui-sys,dear-imgui-rs
 
   # Skip verification (faster but not recommended)
-  python3 tools/publish.py --no-verify
+  python3 tools/publish.py --release-gate-result gate-result.json --no-verify
 
-  # Emergency-only upload without rerunning the strict release gate
+  # Emergency-only upload without release evidence or the local release gate
   python3 tools/publish.py --dangerously-skip-release-check
 
   # Wait longer between publishes (for crates.io to index)
-  python3 tools/publish.py --wait 60
+  python3 tools/publish.py --release-gate-result gate-result.json --wait 60
 
 Requirements:
   - cargo in PATH
@@ -270,6 +270,38 @@ def run_release_preflight(repo_root: Path) -> int:
     )
 
 
+def release_gate_verification_command(
+    repo_root: Path,
+    candidate_sha: str,
+    gate_result: Path,
+) -> List[str]:
+    """Build the authoritative same-SHA release evidence verification command."""
+    return [
+        sys.executable,
+        "tools/ci/release_evidence.py",
+        "verify",
+        "--repo-root",
+        str(repo_root),
+        "--candidate-sha",
+        candidate_sha,
+        "--gate-result",
+        str(gate_result),
+    ]
+
+
+def verify_release_gate_result(
+    repo_root: Path,
+    candidate_sha: str,
+    gate_result: Path,
+) -> int:
+    """Verify an authoritative remote Go result for the clean release HEAD."""
+    print_header("Authoritative Release Gate Evidence")
+    return run_command(
+        release_gate_verification_command(repo_root, candidate_sha, gate_result),
+        cwd=repo_root,
+    )
+
+
 def capture_release_fingerprint(repo_root: Path) -> Optional[str]:
     """Return the clean HEAD that subsequent publish commands must retain."""
     commands = [
@@ -350,9 +382,19 @@ def main() -> int:
         help="Skip verification (pass --no-verify to cargo publish)"
     )
     parser.add_argument(
+        "--release-gate-result",
+        type=Path,
+        help=(
+            "Authoritative same-SHA gate-result.json; required for crates.io uploads"
+        ),
+    )
+    parser.add_argument(
         "--dangerously-skip-release-check",
         action="store_true",
-        help="Upload without rerunning the strict clean-tree release gate",
+        help=(
+            "Emergency-only upload without authoritative release evidence or the "
+            "strict local release gate"
+        ),
     )
     parser.add_argument(
         "--wait",
@@ -369,6 +411,19 @@ def main() -> int:
 
     if args.dry_run and args.cargo_dry_run:
         print_error("--dry-run and --cargo-dry-run are mutually exclusive")
+        return 1
+
+    actual_upload = not args.dry_run and not args.cargo_dry_run
+    if (
+        actual_upload
+        and not args.dangerously_skip_release_check
+        and args.release_gate_result is None
+    ):
+        print_error(
+            "Actual crates.io uploads require --release-gate-result PATH from the "
+            "authoritative remote release gate. Use "
+            "--dangerously-skip-release-check only for an explicit emergency bypass."
+        )
         return 1
     
     # Get repository root
@@ -411,8 +466,31 @@ def main() -> int:
         if release_head is None:
             return 1
         if args.dangerously_skip_release_check:
-            print_warning("Strict release preflight was explicitly bypassed")
+            print_warning(
+                "Authoritative release evidence and strict local preflight were "
+                "explicitly bypassed"
+            )
         else:
+            if actual_upload:
+                gate_result = args.release_gate_result
+                assert gate_result is not None
+                gate_verification = verify_release_gate_result(
+                    repo_root,
+                    release_head,
+                    gate_result,
+                )
+                if gate_verification != 0:
+                    print_error(
+                        "Authoritative release gate verification failed; no crates "
+                        "were uploaded"
+                    )
+                    return gate_verification
+                if not verify_release_fingerprint(repo_root, release_head):
+                    print_error(
+                        "Release source changed during gate verification; no crates "
+                        "were uploaded"
+                    )
+                    return 1
             preflight = run_release_preflight(repo_root)
             if preflight != 0:
                 print_error("Strict release preflight failed; no crates were uploaded")
@@ -441,6 +519,20 @@ def main() -> int:
     ):
         print_error("Release source changed while loading metadata")
         return 1
+
+    if not actual_upload:
+        gate_status = "not required for preview"
+    elif args.dangerously_skip_release_check:
+        gate_status = "DANGEROUSLY SKIPPED"
+    else:
+        gate_status = f"verified from {args.release_gate_result}"
+
+    if args.dry_run:
+        preflight_status = "not run for print-only dry-run"
+    elif args.dangerously_skip_release_check:
+        preflight_status = "DANGEROUSLY SKIPPED"
+    else:
+        preflight_status = "passed for this clean HEAD"
     
     # Print summary
     print_header("Publishing Summary")
@@ -454,18 +546,8 @@ def main() -> int:
     print_info(f"Dry run: {args.dry_run}")
     print_info(f"Cargo dry run: {args.cargo_dry_run}")
     print_info(f"No verify: {args.no_verify}")
-    print_info(
-        "Strict release preflight: "
-        + (
-            "not run for print-only dry-run"
-            if args.dry_run
-            else (
-                "DANGEROUSLY SKIPPED"
-                if args.dangerously_skip_release_check
-                else "passed for this clean HEAD"
-            )
-        )
-    )
+    print_info(f"Authoritative release gate: {gate_status}")
+    print_info(f"Strict local release preflight: {preflight_status}")
     print_info(f"Wait time: {args.wait}s")
     print()
     print("Publishing order:")

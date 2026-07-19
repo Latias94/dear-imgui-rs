@@ -5,7 +5,6 @@ use super::super::counts::{
 use super::super::util::draw_list_counts;
 use super::DrawListMut;
 use crate::sys;
-use std::marker::PhantomData;
 
 struct TestDrawList {
     shared: *mut sys::ImDrawListSharedData,
@@ -24,7 +23,7 @@ impl TestDrawList {
     fn draw_list(&self) -> DrawListMut<'static> {
         DrawListMut {
             draw_list: self.raw,
-            _phantom: PhantomData,
+            ui: None,
         }
     }
 

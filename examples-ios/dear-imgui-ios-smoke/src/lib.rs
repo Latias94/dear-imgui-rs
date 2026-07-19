@@ -265,7 +265,7 @@ impl AppWindow {
             self.imgui.renderer.new_frame()?;
             self.imgui
                 .renderer
-                .render_draw_data(draw_data, &mut render_pass)?;
+                .render(draw_data, &mut render_pass)?;
         }
 
         self.queue.submit(Some(encoder.finish()));

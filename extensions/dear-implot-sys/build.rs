@@ -48,6 +48,32 @@ impl BuildConfig {
     }
 }
 
+fn extension_artifact_profile(
+    cfg: &BuildConfig,
+    package_mode: bool,
+) -> build_support::binding::ExtensionArtifactProfile {
+    let mut features = vec!["wchar32"];
+    if cfg!(feature = "freetype") {
+        features.push("freetype");
+    }
+    let target = env::var("TARGET").unwrap_or_default();
+    let crt = if cfg.is_windows() && cfg.is_msvc() {
+        if cfg.use_static_crt() { "mt" } else { "md" }
+    } else {
+        ""
+    };
+    build_support::binding::extension_artifact_profile_from_env(
+        build_support::binding::ExtensionBinding::ImPlot,
+        &cfg.manifest_dir,
+        env!("CARGO_PKG_VERSION"),
+        &target,
+        crt,
+        &features,
+        package_mode,
+    )
+    .unwrap_or_else(|error| panic!("dear-implot-sys: {error}"))
+}
+
 fn use_cmake_requested() -> bool {
     matches!(env::var("IMPLOT_SYS_USE_CMAKE"), Ok(v) if !v.is_empty())
 }
@@ -153,7 +179,7 @@ fn generate_bindings(
 fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
     let target_env = &cfg.target_env;
     if let Ok(dir) = env::var("IMPLOT_SYS_LIB_DIR") {
-        if try_link_prebuilt(PathBuf::from(dir), target_env) {
+        if try_link_prebuilt(PathBuf::from(dir), cfg) {
             return true;
         }
         println!(
@@ -171,7 +197,7 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
         }
         let cache_root = prebuilt_cache_root(cfg);
         if let Ok(dir) = try_download_prebuilt(&cache_root, &url, target_env) {
-            if try_link_prebuilt(dir.clone(), target_env) {
+            if try_link_prebuilt(dir.clone(), cfg) {
                 return true;
             }
             println!(
@@ -204,7 +230,7 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
                 source, owner, repo
             );
             if let Some(dir) = try_download_prebuilt_from_release(cfg)
-                && try_link_prebuilt(dir.clone(), target_env)
+                && try_link_prebuilt(dir.clone(), cfg)
             {
                 return true;
             }
@@ -334,9 +360,29 @@ fn main() {
     println!("cargo:rerun-if-env-changed=IMPLOT_SYS_SKIP_CC");
     println!("cargo:rerun-if-env-changed=IMPLOT_SYS_PREBUILT_URL");
     println!("cargo:rerun-if-env-changed=IMPLOT_SYS_FORCE_BUILD");
+    println!("cargo:rerun-if-env-changed=IMPLOT_SYS_CACHE_DIR");
     println!("cargo:rerun-if-env-changed=IMPLOT_SYS_USE_CMAKE");
     println!("cargo:rerun-if-env-changed=DEAR_IMGUI_RS_REGEN_BINDINGS");
+    println!("cargo:rerun-if-env-changed=DEAR_IMGUI_RS_CANDIDATE_SHA");
+    println!("cargo:rerun-if-env-changed=DEAR_IMGUI_CORE_ARTIFACT_IDENTITY_HASH");
+    println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_ARTIFACT_IDENTITY_HASH");
+    println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_CANDIDATE_SHA");
     println!("cargo:rerun-if-env-changed=DOCS_RS");
+
+    if cfg!(feature = "package-bin") {
+        let profile = extension_artifact_profile(&cfg, true);
+        profile
+            .write_package_metadata(&cfg.out_dir)
+            .unwrap_or_else(|error| panic!("dear-implot-sys: {error}"));
+        println!(
+            "cargo:rustc-env=DEAR_IMGUI_EXTENSION_ARTIFACT_TARGET={}",
+            profile.target
+        );
+        println!(
+            "cargo:rustc-env=DEAR_IMGUI_EXTENSION_ARTIFACT_CRT={}",
+            profile.crt
+        );
+    }
 
     let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
     let cimplot_root = cfg.manifest_dir.join("third-party/cimplot");
@@ -415,8 +461,9 @@ fn main() {
     }
 
     // Features: build-from-source forces source build; prebuilt is opt-in
-    let force_build =
-        cfg!(feature = "build-from-source") || env::var("IMPLOT_SYS_FORCE_BUILD").is_ok();
+    let force_build = cfg!(feature = "package-bin")
+        || cfg!(feature = "build-from-source")
+        || env::var("IMPLOT_SYS_FORCE_BUILD").is_ok();
     let linked_prebuilt = if force_build {
         false
     } else {
@@ -462,62 +509,35 @@ fn docsrs_build(cfg: &BuildConfig, cimplot_root: &Path, imgui_src: &Path, cimgui
 }
 
 fn use_pregenerated_bindings(out_dir: &Path) -> bool {
-    if build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS") {
-        return false;
-    }
-
-    let preg = Path::new("src").join("bindings_pregenerated.rs");
-    if preg.exists() {
-        match std::fs::read_to_string(&preg).and_then(|content| {
-            let sanitized = sanitize_bindings_string(&content);
-            std::fs::write(out_dir.join("bindings.rs"), sanitized)
-        }) {
-            Ok(()) => {
-                println!(
-                    "cargo:warning=Using pregenerated bindings: {}",
-                    preg.display()
-                );
-                true
-            }
-            Err(e) => {
-                println!("cargo:warning=Failed to write pregenerated bindings: {}", e);
-                false
-            }
-        }
-    } else {
-        false
-    }
+    use_validated_pregenerated_bindings(out_dir, "native")
 }
 
 fn use_pregenerated_wasm_bindings(out_dir: &Path) -> bool {
+    use_validated_pregenerated_bindings(out_dir, "wasm")
+}
+
+fn use_validated_pregenerated_bindings(out_dir: &Path, target: &str) -> bool {
     if build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS") {
         return false;
     }
 
-    let preg = Path::new("src").join("wasm_bindings_pregenerated.rs");
-    if preg.exists() {
-        match std::fs::read_to_string(&preg).and_then(|content| {
-            let sanitized = sanitize_bindings_string(&content);
-            std::fs::write(out_dir.join("bindings.rs"), sanitized)
-        }) {
-            Ok(()) => {
-                println!(
-                    "cargo:warning=Using pregenerated wasm bindings: {}",
-                    preg.display()
-                );
-                true
-            }
-            Err(e) => {
-                println!(
-                    "cargo:warning=Failed to write pregenerated wasm bindings: {}",
-                    e
-                );
-                false
-            }
-        }
-    } else {
-        false
+    let spec = build_support::binding::CrateBindingSpec::for_crate_and_target(
+        env!("CARGO_PKG_NAME"),
+        target,
+    )
+    .unwrap_or_else(|| panic!("missing {} {target} binding spec", env!("CARGO_PKG_NAME")));
+    let crate_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let preg = crate_root.join(spec.checked_in_path);
+    if !preg.exists() {
+        return false;
     }
+    spec.copy_embedded_checked_in_to_out_dir(&crate_root, out_dir)
+        .unwrap_or_else(|error| panic!("invalid pregenerated bindings: {error}"));
+    println!(
+        "cargo:warning=Using validated pregenerated bindings: {}",
+        preg.display()
+    );
+    true
 }
 
 #[cfg(feature = "bindgen")]
@@ -528,6 +548,7 @@ fn sanitize_bindings_file(path: &Path) {
     }
 }
 
+#[cfg(feature = "bindgen")]
 fn sanitize_bindings_string(content: &str) -> String {
     let mut out = String::with_capacity(content.len());
     let mut skip_next_blank = false;
@@ -628,32 +649,8 @@ fn expected_lib_name(target_env: &str) -> &'static str {
     }
 }
 
-fn prebuilt_manifest_has_feature(dir: &Path, feature: &str) -> bool {
-    let mut candidates = Vec::with_capacity(2);
-    candidates.push(dir.join("manifest.txt"));
-    if let Some(parent) = dir.parent() {
-        candidates.push(parent.join("manifest.txt"));
-    }
-    let Some(s) = candidates
-        .into_iter()
-        .find_map(|p| std::fs::read_to_string(&p).ok())
-    else {
-        return false;
-    };
-    let feature = feature.trim().to_ascii_lowercase();
-    for line in s.lines() {
-        if let Some(rest) = line.strip_prefix("features=") {
-            return rest
-                .split(',')
-                .map(|f| f.trim().to_ascii_lowercase())
-                .any(|f| f == feature);
-        }
-    }
-    false
-}
-
-fn try_link_prebuilt(dir: PathBuf, target_env: &str) -> bool {
-    let lib_name = expected_lib_name(target_env);
+fn try_link_prebuilt(dir: PathBuf, cfg: &BuildConfig) -> bool {
+    let lib_name = expected_lib_name(&cfg.target_env);
     let lib_path = dir.join(lib_name);
     if !lib_path.exists() {
         println!(
@@ -662,9 +659,9 @@ fn try_link_prebuilt(dir: PathBuf, target_env: &str) -> bool {
         );
         return false;
     }
-    if !prebuilt_manifest_has_feature(&dir, "wchar32") {
-        return false;
-    }
+    extension_artifact_profile(cfg, false)
+        .validate_prebuilt_dir(&dir)
+        .unwrap_or_else(|error| panic!("dear-implot-sys: incompatible prebuilt artifact: {error}"));
     println!("cargo:rustc-link-search=native={}", dir.display());
     println!("cargo:rustc-link-lib=static=dear_implot");
     true
@@ -690,42 +687,27 @@ fn try_download_prebuilt(
 }
 
 fn try_download_prebuilt_from_release(cfg: &BuildConfig) -> Option<PathBuf> {
-    if build_support::is_offline() {
-        return None;
-    }
-
-    let version = env::var("CARGO_PKG_VERSION").unwrap_or_default();
-    let link_type = "static";
-    let crt = if cfg.is_windows() && cfg.is_msvc() {
-        if cfg.use_static_crt() { "mt" } else { "md" }
-    } else {
-        ""
-    };
-    let target = env::var("TARGET").unwrap_or_default();
-    let archive_name =
-        build_support::compose_archive_name("dear-implot", &version, &target, link_type, None, crt);
-    let archive_name_no_crt =
-        build_support::compose_archive_name("dear-implot", &version, &target, link_type, None, "");
-    let tags = build_support::release_tags("dear-implot-sys", &version);
+    let profile = extension_artifact_profile(cfg, false);
+    let tags = build_support::release_tags("dear-implot-sys", &profile.version);
     if let Ok(pkg_dir) = env::var("IMPLOT_SYS_PACKAGE_DIR") {
         let pkg_dir = PathBuf::from(pkg_dir);
-        for cand in [archive_name.clone(), archive_name_no_crt.clone()] {
-            let archive_path = pkg_dir.join(&cand);
-            if archive_path.exists() {
-                let cache_root = prebuilt_cache_root(cfg);
-                if let Ok(lib_dir) = build_support::extract_archive_to_cache(
-                    &archive_path,
-                    &cache_root,
-                    expected_lib_name(&cfg.target_env),
-                ) {
-                    return Some(lib_dir);
-                }
+        let archive_path = pkg_dir.join(&profile.archive_name);
+        if archive_path.exists() {
+            let cache_root = prebuilt_cache_root(cfg);
+            if let Ok(lib_dir) = build_support::extract_archive_to_cache(
+                &archive_path,
+                &cache_root,
+                expected_lib_name(&cfg.target_env),
+            ) {
+                return Some(lib_dir);
             }
         }
     }
+    if build_support::is_offline() {
+        return None;
+    }
     let cache_root = prebuilt_cache_root(cfg);
-    let names = vec![archive_name, archive_name_no_crt];
-    let urls = build_support::release_candidate_urls_env(&tags, &names);
+    let urls = build_support::release_candidate_urls_env(&tags, &[profile.archive_name]);
     for url in urls {
         if let Ok(lib_dir) = try_download_prebuilt(&cache_root, &url, &cfg.target_env) {
             return Some(lib_dir);
@@ -740,6 +722,7 @@ fn prebuilt_cache_root(cfg: &BuildConfig) -> PathBuf {
         "IMPLOT_SYS_CACHE_DIR",
         "dear-implot-prebuilt",
     )
+    .join(extension_artifact_profile(cfg, false).cache_key())
 }
 
 // (removed duplicate prebuilt_extract_dir_env/extract_archive_to_cache; using build_support equivalents)

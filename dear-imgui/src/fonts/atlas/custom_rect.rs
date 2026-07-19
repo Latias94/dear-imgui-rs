@@ -96,6 +96,7 @@ impl<'data> CustomRectData<'data> {
 /// immediately, or query the ID again before submitting a later draw command.
 #[derive(Debug)]
 pub struct CustomRectSnapshot<'scope> {
+    atlas: *mut sys::ImFontAtlas,
     texture: sys::ImTextureRef,
     _texture_lease: Option<FontAtlasTexture<'scope>>,
     pixels: TextureRect,
@@ -106,7 +107,7 @@ pub struct CustomRectSnapshot<'scope> {
 impl<'scope> CustomRectSnapshot<'scope> {
     /// Current managed texture reference.
     pub fn texture(&self) -> TextureRef<'_> {
-        unsafe { TextureRef::from_raw(self.texture) }
+        TextureRef::from_font_atlas_raw(self.atlas, self.texture)
     }
 
     /// Current pixel-space rectangle.
@@ -166,6 +167,7 @@ unsafe fn snapshot_from_native<'scope>(
     texture_lease: Option<FontAtlasTexture<'scope>>,
 ) -> CustomRectSnapshot<'scope> {
     CustomRectSnapshot {
+        atlas,
         texture: unsafe { (*atlas).TexRef },
         _texture_lease: texture_lease,
         pixels: TextureRect {

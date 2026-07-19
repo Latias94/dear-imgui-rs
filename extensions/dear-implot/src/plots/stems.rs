@@ -91,21 +91,22 @@ impl<'a> Plot for StemPlot<'a> {
             return;
         };
 
-        let _guard = plot_ui.bind();
-        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_with_style(
-                self.style,
-                self.flags.bits() | self.item_flags.bits(),
-                self.layout,
-            );
-            sys::ImPlot_PlotStems_doublePtrdoublePtr(
-                label_ptr,
-                self.x_data.as_ptr(),
-                self.y_data.as_ptr(),
-                count,
-                self.y_ref,
-                spec,
-            );
+        plot_ui.with_bound_context(|| {
+            with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+                let spec = plot_spec_with_style(
+                    self.style,
+                    self.flags.bits() | self.item_flags.bits(),
+                    self.layout,
+                );
+                sys::ImPlot_PlotStems_doublePtrdoublePtr(
+                    label_ptr,
+                    self.x_data.as_ptr(),
+                    self.y_data.as_ptr(),
+                    count,
+                    self.y_ref,
+                    spec,
+                );
+            })
         })
     }
 
@@ -187,22 +188,23 @@ impl<'a> Plot for SimpleStemPlot<'a> {
             return;
         };
 
-        let _guard = plot_ui.bind();
-        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_with_style(
-                self.style,
-                self.flags.bits() | self.item_flags.bits(),
-                PlotDataLayout::DEFAULT,
-            );
-            sys::ImPlot_PlotStems_doublePtrInt(
-                label_ptr,
-                self.values.as_ptr(),
-                count,
-                self.y_ref,
-                self.x_scale,
-                self.x_start,
-                spec,
-            );
+        plot_ui.with_bound_context(|| {
+            with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+                let spec = plot_spec_with_style(
+                    self.style,
+                    self.flags.bits() | self.item_flags.bits(),
+                    PlotDataLayout::DEFAULT,
+                );
+                sys::ImPlot_PlotStems_doublePtrInt(
+                    label_ptr,
+                    self.values.as_ptr(),
+                    count,
+                    self.y_ref,
+                    self.x_scale,
+                    self.x_start,
+                    spec,
+                );
+            })
         })
     }
 

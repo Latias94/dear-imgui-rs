@@ -23,7 +23,7 @@ pub fn enable_native_ime_ui() {
 ///
 /// Requires the `opengl3-renderer` feature.
 #[cfg(feature = "opengl3-renderer")]
-pub fn init_for_opengl(
+pub(crate) fn init_for_opengl(
     imgui: &mut Context,
     window: &Window,
     gl_context: &GLContext,
@@ -50,7 +50,7 @@ pub fn init_for_opengl(
 ///
 /// Requires the `opengl3-renderer` feature.
 #[cfg(feature = "opengl3-renderer")]
-pub fn init_for_opengl_default(
+pub(crate) fn init_for_opengl_default(
     imgui: &mut Context,
     window: &Window,
     gl_context: &GLContext,
@@ -79,7 +79,7 @@ pub fn init_for_opengl_default(
 /// - a `dear_imgui_rs::Context` already exists;
 /// - `window` has an active OpenGL context (`gl_context`);
 /// - the same context will be current when rendering.
-pub fn init_platform_for_opengl(
+pub(crate) fn init_platform_for_opengl(
     imgui: &mut Context,
     window: &Window,
     gl_context: &GLContext,
@@ -105,7 +105,7 @@ pub fn init_platform_for_opengl(
 /// This assumes that:
 /// - a `dear_imgui_rs::Context` already exists;
 /// - `window` is a valid SDL3 window handle.
-pub fn init_for_other(imgui: &mut Context, window: &Window) -> Result<(), Sdl3BackendError> {
+pub(crate) fn init_for_other(imgui: &mut Context, window: &Window) -> Result<(), Sdl3BackendError> {
     let sdl_window = window.raw();
 
     with_context(imgui, "init_for_other()", || {
@@ -122,7 +122,10 @@ pub fn init_for_other(imgui: &mut Context, window: &Window) -> Result<(), Sdl3Ba
 ///
 /// This is equivalent to `ImGui_ImplSDL3_InitForVulkan` and is required for
 /// Vulkan multi-viewport support (sets Vulkan window flags for secondary viewports).
-pub fn init_for_vulkan(imgui: &mut Context, window: &Window) -> Result<(), Sdl3BackendError> {
+pub(crate) fn init_for_vulkan(
+    imgui: &mut Context,
+    window: &Window,
+) -> Result<(), Sdl3BackendError> {
     let sdl_window = window.raw();
     with_context(imgui, "init_for_vulkan()", || {
         unsafe {
@@ -135,7 +138,7 @@ pub fn init_for_vulkan(imgui: &mut Context, window: &Window) -> Result<(), Sdl3B
 }
 
 /// Initialize the Dear ImGui SDL3 platform backend for Direct3D (Windows only).
-pub fn init_for_d3d(imgui: &mut Context, window: &Window) -> Result<(), Sdl3BackendError> {
+pub(crate) fn init_for_d3d(imgui: &mut Context, window: &Window) -> Result<(), Sdl3BackendError> {
     let sdl_window = window.raw();
     with_context(imgui, "init_for_d3d()", || {
         unsafe {
@@ -148,7 +151,7 @@ pub fn init_for_d3d(imgui: &mut Context, window: &Window) -> Result<(), Sdl3Back
 }
 
 /// Initialize the Dear ImGui SDL3 platform backend for Metal renderers.
-pub fn init_for_metal(imgui: &mut Context, window: &Window) -> Result<(), Sdl3BackendError> {
+pub(crate) fn init_for_metal(imgui: &mut Context, window: &Window) -> Result<(), Sdl3BackendError> {
     let sdl_window = window.raw();
     with_context(imgui, "init_for_metal()", || {
         unsafe {
@@ -165,7 +168,7 @@ pub fn init_for_metal(imgui: &mut Context, window: &Window) -> Result<(), Sdl3Ba
 /// # Safety
 ///
 /// The caller must provide a valid `SDL_Renderer` pointer associated with `window`.
-pub unsafe fn init_for_sdl_renderer(
+pub(crate) unsafe fn init_for_sdl_renderer(
     imgui: &mut Context,
     window: &Window,
     renderer: *mut sdl3_sys::render::SDL_Renderer,
@@ -182,7 +185,10 @@ pub unsafe fn init_for_sdl_renderer(
 }
 
 /// Initialize the Dear ImGui SDL3 platform backend for SDL GPU (SDL_gpu3) renderers.
-pub fn init_for_sdl_gpu(imgui: &mut Context, window: &Window) -> Result<(), Sdl3BackendError> {
+pub(crate) fn init_for_sdl_gpu(
+    imgui: &mut Context,
+    window: &Window,
+) -> Result<(), Sdl3BackendError> {
     with_context(imgui, "init_for_sdl_gpu()", || {
         init_for_sdl_gpu_impl(window.raw())
     })
@@ -226,7 +232,7 @@ impl<'a> SdlGpu3InitInfo<'a> {
 
 /// Initialize the Dear ImGui SDL3 + SDLGPU3 backend with explicit renderer settings.
 #[cfg(feature = "sdlgpu3-renderer")]
-pub fn init_for_sdlgpu3(
+pub(crate) fn init_for_sdlgpu3(
     imgui: &mut Context,
     window: &Window,
     info: SdlGpu3InitInfo<'_>,
@@ -239,7 +245,7 @@ pub fn init_for_sdlgpu3(
 
 /// Initialize the Dear ImGui SDL3 + SDLGPU3 backend using the default renderer settings.
 #[cfg(feature = "sdlgpu3-renderer")]
-pub fn init_for_sdlgpu3_default(
+pub(crate) fn init_for_sdlgpu3_default(
     imgui: &mut Context,
     window: &Window,
     device: &Device,
@@ -251,12 +257,12 @@ pub fn init_for_sdlgpu3_default(
 ///
 /// This assumes that:
 /// - a `dear_imgui_rs::Context` already exists;
-/// - the window related to the renderer/canvas.
-/// - the canvas will exist for at least until `shutdown_for_canvas` is called.
+/// - `window` is the window associated with `canvas`;
+/// - the canvas outlives its owning `Sdl3RendererBackend`.
 ///
 /// Requires the `sdlrenderer3-renderer` feature.
 #[cfg(feature = "sdlrenderer3-renderer")]
-pub fn init_for_canvas(
+pub(crate) fn init_for_canvas(
     imgui: &mut Context,
     window: &Window,
     canvas: &WindowCanvas,
@@ -276,51 +282,4 @@ pub fn init_for_canvas(
         }
         Ok(())
     })
-}
-
-/// Shutdown the SDL3 + OpenGL3 backends.
-///
-/// Call this before destroying the ImGui context or the SDL3 window.
-#[cfg(feature = "opengl3-renderer")]
-pub fn shutdown_for_opengl(imgui: &mut Context) {
-    with_context(imgui, "shutdown_for_opengl()", shutdown_opengl3_impl);
-}
-
-/// Shutdown the SDL3 platform backend only.
-///
-/// This is the counterpart to [`init_for_other`] and should be called before
-/// destroying the ImGui context when using a non-OpenGL renderer (e.g. WGPU).
-pub fn shutdown(imgui: &mut Context) {
-    with_context(imgui, "shutdown()", shutdown_platform_impl);
-}
-
-/// Shutdown the SDL3 + SDLRenderer3 backend.
-///
-/// Call this before destroying the ImGui context or the SDL3 canvas or window.
-#[cfg(feature = "sdlrenderer3-renderer")]
-pub fn shutdown_for_canvas(imgui: &mut Context) {
-    with_context(imgui, "shutdown_for_canvas()", shutdown_sdlrenderer3_impl);
-}
-
-/// Begin a new ImGui frame for SDL3 + OpenGL.
-///
-/// Call this before `imgui.frame()`.
-#[cfg(feature = "opengl3-renderer")]
-pub fn new_frame(imgui: &mut Context) {
-    with_context(imgui, "new_frame()", new_frame_opengl3_impl);
-}
-
-/// Begin a new ImGui frame for SDL3 platform backend only.
-///
-/// This is intended for non-OpenGL renderers such as WGPU.
-pub fn sdl3_new_frame(imgui: &mut Context) {
-    with_context(imgui, "sdl3_new_frame()", sdl3_new_frame_impl);
-}
-
-/// Begin a new ImGui frame for SDL3 + SDLRenderer3.
-///
-/// Call this before `imgui.frame()`.
-#[cfg(feature = "sdlrenderer3-renderer")]
-pub fn canvas_new_frame(imgui: &mut Context) {
-    with_context(imgui, "canvas_new_frame()", new_frame_sdlrenderer3_impl);
 }

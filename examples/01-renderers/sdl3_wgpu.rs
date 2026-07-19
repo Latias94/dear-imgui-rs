@@ -121,7 +121,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Initialize SDL3 platform backend (for "other" renderer).
     let mut sdl3_backend = Sdl3PlatformBackend::init_for_other(&mut imgui, &window)?;
     // Use AutoAll so all connected gamepads are merged into ImGui's gamepad state.
-    sdl3_backend.set_gamepad_mode(&mut imgui, GamepadMode::AutoAll);
+    sdl3_backend.set_gamepad_mode(&mut imgui, GamepadMode::AutoAll)?;
 
     // Initialize WGPU renderer backend.
     let init_info = WgpuInitInfo::new(device.clone(), queue.clone(), surface_config.format);
@@ -130,25 +130,25 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut last_frame = Instant::now();
     let mut show_demo = true;
 
-    loop {
+    'running: loop {
         // Handle events (both for ImGui via SDL3 backend and our own logic).
         while let Some(raw) = imgui_sdl3_backend::sdl3_poll_event_ll() {
             // Feed ImGui SDL3 backend.
-            let _ = sdl3_backend.process_event(&mut imgui, &raw);
+            let _ = sdl3_backend.process_event(&mut imgui, &raw)?;
 
             // Convert to high-level Event for application logic.
             let event = Event::from_ll(raw);
             match event {
-                Event::Quit { .. } => return Ok(()),
+                Event::Quit { .. } => break 'running,
                 Event::KeyDown {
                     keycode: Some(Keycode::Escape),
                     ..
-                } => return Ok(()),
+                } => break 'running,
                 Event::Window {
                     win_event: sdl3::event::WindowEvent::CloseRequested,
                     window_id,
                     ..
-                } if window_id == window.id() => return Ok(()),
+                } if window_id == window.id() => break 'running,
                 Event::Window {
                     win_event: sdl3::event::WindowEvent::PixelSizeChanged(_, _),
                     window_id,
@@ -173,7 +173,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         imgui.io_mut().set_delta_time(dt);
 
         // Start a new ImGui frame.
-        sdl3_backend.new_frame(&mut imgui);
+        sdl3_backend.new_frame(&mut imgui)?;
         let ui = imgui.frame();
 
         // Basic UI: show demo window and a small control window.
@@ -249,7 +249,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             });
 
             renderer.new_frame()?;
-            renderer.render_draw_data_with_fb_size(
+            renderer.render_with_fb_size(
                 draw_data,
                 &mut rpass,
                 surface_config.width,
@@ -263,4 +263,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             surface.configure(&device, &surface_config);
         }
     }
+
+    renderer.shutdown(&mut imgui)?;
+    sdl3_backend.shutdown(&mut imgui)?;
+    Ok(())
 }

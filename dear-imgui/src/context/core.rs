@@ -1,14 +1,22 @@
 use std::ffi::CString;
 use std::ptr;
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 
 use crate::clipboard::ClipboardContext;
 use crate::fonts::SharedFontAtlas;
 use crate::io::Io;
 use crate::sys;
 
-use super::binding::{CTX_MUTEX, clear_current_context, no_current_context, with_bound_context};
-use super::texture_registry::unregister_user_textures_for_context;
+use super::attachment::{
+    AttachmentRegistry, ContextAttachment, ContextAttachmentError, ContextAttachmentLease,
+    ContextAttachmentPhase, ContextAttachmentRole, run_post_destroy, run_pre_destroy_phase,
+};
+use super::binding::{
+    CTX_MUTEX, ContextAliveToken, ContextBinding, ContextId, ContextState, RawBoundContextGuard,
+    no_current_context, set_current_context, with_bound_context,
+};
+use super::snapshot_hub::SnapshotHub;
+use super::texture_registry::{ManagedTextureRegistry, SharedTextureRegistry};
 
 /// An imgui context.
 ///
@@ -44,7 +52,10 @@ use super::texture_registry::unregister_user_textures_for_context;
 #[derive(Debug)]
 pub struct Context {
     pub(super) raw: *mut sys::ImGuiContext,
-    pub(super) alive: Rc<()>,
+    pub(super) state: Rc<ContextState>,
+    pub(super) attachments: AttachmentRegistry,
+    pub(super) snapshot_hub: SnapshotHub,
+    pub(crate) texture_registry: SharedTextureRegistry,
     pub(in crate::context) shared_font_atlas: Option<SharedFontAtlas>,
     pub(in crate::context) ini_filename: Option<CString>,
     pub(in crate::context) log_filename: Option<CString>,
@@ -54,21 +65,6 @@ pub struct Context {
     // Interior mutability and reentrancy guarding live inside ClipboardContext.
     pub(in crate::context) clipboard_ctx: Box<ClipboardContext>,
     pub(in crate::context) ui: crate::ui::Ui,
-}
-
-/// A weak token that indicates whether a `Context` is still alive.
-#[derive(Clone, Debug)]
-pub struct ContextAliveToken(Weak<()>);
-
-impl ContextAliveToken {
-    pub(in crate::context) fn new(alive: &Rc<()>) -> Self {
-        Self(Rc::downgrade(alive))
-    }
-
-    /// Returns true if the originating `Context` has not been dropped.
-    pub fn is_alive(&self) -> bool {
-        self.0.upgrade().is_some()
-    }
 }
 
 impl Context {
@@ -104,12 +100,35 @@ impl Context {
         self.raw
     }
 
+    /// Returns the process-unique identity of this Context.
+    pub fn id(&self) -> ContextId {
+        self.state.id()
+    }
+
+    /// Returns a persistent capability for calling against this Context while it is alive.
+    pub fn binding(&self) -> ContextBinding {
+        ContextBinding::new(&self.state)
+    }
+
     /// Returns a token that can be used to check whether this context is still alive.
     ///
     /// Useful for extension crates that store raw pointers and need to avoid calling into FFI
     /// after the owning `Context` has been dropped.
     pub fn alive_token(&self) -> ContextAliveToken {
-        ContextAliveToken::new(&self.alive)
+        ContextAliveToken::from_binding(self.binding())
+    }
+
+    /// Registers a typed lifecycle attachment owned by this Context.
+    ///
+    /// The marker type identifies the attachment independently of its erased implementation.
+    /// Platform and renderer roles are exclusive, and a renderer requires an active platform.
+    pub fn register_attachment<Marker: 'static>(
+        &mut self,
+        role: ContextAttachmentRole,
+        attachment: Rc<dyn ContextAttachment>,
+    ) -> Result<ContextAttachmentLease, ContextAttachmentError> {
+        self.attachments
+            .register::<Marker>(self.state.lifecycle(), role, attachment)
     }
 
     // removed legacy create_or_panic variants (use create()/try_create())
@@ -151,6 +170,11 @@ impl Context {
             None => ptr::null_mut(),
         };
 
+        let id =
+            ContextId::allocate().ok_or_else(|| crate::error::ImGuiError::ContextCreation {
+                reason: "process Context identity space is exhausted".to_string(),
+            })?;
+
         // Create the actual ImGui context
         let raw = unsafe { sys::igCreateContext(shared_font_atlas_ptr) };
         if raw.is_null() {
@@ -160,9 +184,7 @@ impl Context {
         }
 
         // Set it as the current context
-        unsafe {
-            sys::igSetCurrentContext(raw);
-        }
+        set_current_context(raw);
 
         unsafe {
             let io = sys::igGetIO_ContextPtr(raw);
@@ -173,12 +195,16 @@ impl Context {
             crate::fonts::register_font_atlas_context((*io).Fonts, raw);
         }
 
-        let alive = Rc::new(());
-        let ui = crate::ui::Ui::new(raw, ContextAliveToken::new(&alive));
+        let state = ContextState::new(id, raw);
+        let texture_registry = ManagedTextureRegistry::new(id);
+        let ui = crate::ui::Ui::new(raw, ContextBinding::new(&state), texture_registry.clone());
 
         Ok(Context {
             raw,
-            alive,
+            state,
+            attachments: AttachmentRegistry::default(),
+            snapshot_hub: SnapshotHub::new(id),
+            texture_registry,
             shared_font_atlas,
             ini_filename: None,
             log_filename: None,
@@ -243,45 +269,72 @@ impl Context {
 
 impl Drop for Context {
     fn drop(&mut self) {
-        let _guard = CTX_MUTEX.lock();
-        unsafe {
-            if !self.raw.is_null() {
-                let _ = crate::list_clipper::forget_context_clippers(self.raw);
-                let io = sys::igGetIO_ContextPtr(self.raw);
-                let font_atlas = if io.is_null() {
-                    std::ptr::null_mut()
-                } else {
-                    (*io).Fonts
-                };
-                let owned_font_atlas = if self.shared_font_atlas.is_none() {
-                    font_atlas
-                } else {
-                    std::ptr::null_mut()
-                };
-                with_bound_context(self.raw, || {
-                    if (*self.raw).WithinFrameScope {
-                        sys::igEndFrame();
-                    }
-                });
-                unregister_user_textures_for_context(self.raw);
-                crate::platform_io::clear_typed_callbacks_for_context(self.raw);
-                with_bound_context(self.raw, || {
-                    crate::platform_io::clear_aggregate_callbacks_for_current_context();
-                });
-                #[cfg(feature = "stack-layout")]
-                sys::ImGuiStack_DestroyContextState(self.raw);
-                crate::fonts::unregister_font_atlas_context(font_atlas, self.raw);
-                if let Some(shared_font_atlas) = &self.shared_font_atlas {
-                    with_bound_context(self.raw, || {
-                        shared_font_atlas.unregister_from_current_context();
-                    });
-                }
-                if sys::igGetCurrentContext() == self.raw {
-                    clear_current_context();
-                }
-                sys::igDestroyContext(self.raw);
-                crate::fonts::forget_font_atlas_generation(owned_font_atlas);
-            }
+        let _lock = CTX_MUTEX.lock();
+        if self.raw.is_null() {
+            self.state.mark_native_destroyed();
+            return;
         }
+
+        self.state.begin_drop();
+        self.snapshot_hub.close();
+        let attachment_controls = self.attachments.begin_teardown();
+        let context_id = self.state.id();
+        let raw = self.raw;
+        let _bound = RawBoundContextGuard::bind(raw);
+
+        run_pre_destroy_phase(
+            &attachment_controls,
+            &self.state,
+            ContextAttachmentPhase::Quiesce,
+        );
+        run_pre_destroy_phase(
+            &attachment_controls,
+            &self.state,
+            ContextAttachmentPhase::RendererResources,
+        );
+        run_pre_destroy_phase(
+            &attachment_controls,
+            &self.state,
+            ContextAttachmentPhase::PlatformWindows,
+        );
+
+        unsafe {
+            let _ = crate::list_clipper::forget_context_clippers(raw);
+            let io = sys::igGetIO_ContextPtr(raw);
+            let font_atlas = if io.is_null() {
+                std::ptr::null_mut()
+            } else {
+                (*io).Fonts
+            };
+            let owned_font_atlas = if self.shared_font_atlas.is_none() {
+                font_atlas
+            } else {
+                std::ptr::null_mut()
+            };
+            with_bound_context(raw, || {
+                if (*raw).WithinFrameScope {
+                    sys::igEndFrame();
+                }
+            });
+            self.texture_registry.borrow_mut().teardown();
+            crate::platform_io::clear_typed_callbacks_for_context(raw);
+            with_bound_context(raw, || {
+                crate::platform_io::clear_aggregate_callbacks_for_current_context();
+            });
+            #[cfg(feature = "stack-layout")]
+            sys::ImGuiStack_DestroyContextState(raw);
+            crate::fonts::unregister_font_atlas_context(font_atlas, raw);
+            if let Some(shared_font_atlas) = &self.shared_font_atlas {
+                with_bound_context(raw, || {
+                    shared_font_atlas.unregister_from_current_context();
+                });
+            }
+            sys::igDestroyContext(raw);
+            crate::fonts::forget_font_atlas_generation(owned_font_atlas);
+        }
+
+        self.raw = ptr::null_mut();
+        self.state.mark_native_destroyed();
+        run_post_destroy(attachment_controls, context_id);
     }
 }

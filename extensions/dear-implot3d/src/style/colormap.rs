@@ -8,29 +8,31 @@ use std::marker::PhantomData;
 impl<'ui> Plot3DUi<'ui> {
     #[inline]
     pub fn push_colormap(&self, cmap: impl Into<ColormapIndex>) -> ColormapToken<'_> {
-        let _guard = self.bind();
-        unsafe { sys::ImPlot3D_PushColormap_Plot3DColormap(cmap.into().raw()) }
-        ColormapToken {
-            binding: self.binding,
-            imgui_alive: self.imgui_alive.clone(),
-            was_popped: false,
-            _lifetime: PhantomData,
-            _not_send_or_sync: PhantomData,
-        }
+        self.with_bound_context(|| {
+            unsafe { sys::ImPlot3D_PushColormap_Plot3DColormap(cmap.into().raw()) }
+            ColormapToken {
+                binding: self.binding.clone(),
+                was_popped: false,
+                _lifetime: PhantomData,
+                _not_send_or_sync: PhantomData,
+            }
+        })
     }
 
     #[inline]
     pub fn push_colormap_name(&self, name: &str) -> ColormapToken<'_> {
         assert!(!name.contains('\0'), "colormap name contained NUL");
-        let _guard = self.bind();
-        dear_imgui_rs::with_scratch_txt(name, |ptr| unsafe { sys::ImPlot3D_PushColormap_Str(ptr) });
-        ColormapToken {
-            binding: self.binding,
-            imgui_alive: self.imgui_alive.clone(),
-            was_popped: false,
-            _lifetime: PhantomData,
-            _not_send_or_sync: PhantomData,
-        }
+        self.with_bound_context(|| {
+            dear_imgui_rs::with_scratch_txt(name, |ptr| unsafe {
+                sys::ImPlot3D_PushColormap_Str(ptr)
+            });
+            ColormapToken {
+                binding: self.binding.clone(),
+                was_popped: false,
+                _lifetime: PhantomData,
+                _not_send_or_sync: PhantomData,
+            }
+        })
     }
 }
 
@@ -41,10 +43,8 @@ pub(super) fn colormap_count_from_i32(raw: i32, caller: &str) -> usize {
 
 impl Plot3DContext {
     #[inline]
-    fn with_bound_colormap<R>(&self, caller: &str, f: impl FnOnce() -> R) -> R {
-        self.assert_imgui_alive(caller);
-        let _guard = self.binding().bind();
-        f()
+    fn with_bound_colormap<R>(&self, _caller: &str, f: impl FnOnce() -> R) -> R {
+        self.binding().with_bound_context(|| f())
     }
 
     /// Return the number of available ImPlot3D colormaps.
@@ -159,10 +159,8 @@ impl Plot3DContext {
         self.with_bound_colormap(
             "dear-implot3d: Plot3DContext::colormap_color()",
             || unsafe {
-                let out = crate::compat_ffi::ImPlot3D_GetColormapColor(
-                    index.raw(),
-                    (-1) as sys::ImPlot3DColormap,
-                );
+                let out =
+                    sys::ImPlot3D_GetColormapColor(index.raw(), (-1) as sys::ImPlot3DColormap);
                 [out.x, out.y, out.z, out.w]
             },
         )
@@ -173,7 +171,7 @@ impl Plot3DContext {
         self.with_bound_colormap(
             "dear-implot3d: Plot3DContext::next_colormap_color()",
             || unsafe {
-                let out = crate::compat_ffi::ImPlot3D_NextColormapColor();
+                let out = sys::ImPlot3D_NextColormapColor();
                 [out.x, out.y, out.z, out.w]
             },
         )
@@ -183,22 +181,17 @@ impl Plot3DContext {
 impl Plot3DUi<'_> {
     /// Return a color from this UI's active ImPlot3D colormap.
     pub fn colormap_color(&self, index: ColormapColorIndex) -> [f32; 4] {
-        let _guard = self.bind();
-        unsafe {
-            let out = crate::compat_ffi::ImPlot3D_GetColormapColor(
-                index.raw(),
-                (-1) as sys::ImPlot3DColormap,
-            );
+        self.with_bound_context(|| unsafe {
+            let out = sys::ImPlot3D_GetColormapColor(index.raw(), (-1) as sys::ImPlot3DColormap);
             [out.x, out.y, out.z, out.w]
-        }
+        })
     }
 
     /// Return the next color from this UI's current colormap and advance its color cursor.
     pub fn next_colormap_color(&self) -> [f32; 4] {
-        let _guard = self.bind();
-        unsafe {
-            let out = crate::compat_ffi::ImPlot3D_NextColormapColor();
+        self.with_bound_context(|| unsafe {
+            let out = sys::ImPlot3D_NextColormapColor();
             [out.x, out.y, out.z, out.w]
-        }
+        })
     }
 }

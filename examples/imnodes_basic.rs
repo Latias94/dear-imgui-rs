@@ -1237,9 +1237,7 @@ impl AppWindow {
             });
 
             let draw_data = self.imgui.context.render();
-            self.imgui
-                .renderer
-                .render_draw_data(draw_data, &mut render_pass)?;
+            self.imgui.renderer.render(draw_data, &mut render_pass)?;
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));

@@ -82,8 +82,8 @@ unsafe extern "C" fn imgui_winit_set_ime_data(
         window.set_ime_cursor_area(pos, size);
     }));
     if res.is_err() {
-        eprintln!("dear-imgui-winit: panic in Platform_SetImeDataFn");
-        std::process::abort();
+        #[cfg(feature = "multi-viewport")]
+        crate::multi_viewport::record_callback_panic(ctx, "Platform_SetImeDataFn");
     }
 }
 
@@ -91,6 +91,26 @@ fn is_winit_set_ime_data(callback: Option<SetImeDataCallback>) -> bool {
     callback.is_some_and(|callback| {
         std::ptr::fn_addr_eq(callback, imgui_winit_set_ime_data as SetImeDataCallback)
     })
+}
+
+#[cfg(feature = "multi-viewport")]
+pub(crate) unsafe fn clear_ime_callback_if_owned(
+    platform_io: *mut dear_imgui_rs::sys::ImGuiPlatformIO,
+    window: *const Window,
+) -> bool {
+    if platform_io.is_null()
+        || window.is_null()
+        || !is_winit_set_ime_data(unsafe { (*platform_io).Platform_SetImeDataFn })
+        || unsafe { (*platform_io).Platform_ImeUserData } != window.cast_mut().cast()
+    {
+        return false;
+    }
+
+    unsafe {
+        (*platform_io).Platform_SetImeDataFn = None;
+        (*platform_io).Platform_ImeUserData = std::ptr::null_mut();
+    }
+    true
 }
 
 unsafe fn ime_window_ptr_for_viewport(
@@ -170,23 +190,6 @@ impl WinitPlatform {
         // Set backend flags
         let mut backend_flags = io.backend_flags();
         backend_flags.insert(BackendFlags::HAS_MOUSE_CURSORS | BackendFlags::HAS_SET_MOUSE_POS);
-
-        #[cfg(feature = "multi-viewport")]
-        {
-            // Mark that this platform backend is capable of handling viewports.
-            // Note: we intentionally DO NOT enable `ConfigFlags::VIEWPORTS_ENABLE` here.
-            // Multi-viewport is an opt-in feature and should be enabled explicitly via:
-            //
-            //     imgui_ctx.enable_multi_viewport();
-            //
-            // This matches Dear ImGui's guidance and avoids partially-enabled viewport
-            // behavior when the renderer/platform callbacks are not fully wired.
-            backend_flags.insert(BackendFlags::PLATFORM_HAS_VIEWPORTS);
-            // Backend can also report hovered viewport ids via `Io::add_mouse_viewport_event`.
-            backend_flags.insert(BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT);
-            // We keep `HAS_SET_MOUSE_POS` flag: `prepare_render()` will avoid using it
-            // whenever `ConfigFlags::VIEWPORTS_ENABLE` is actually set.
-        }
 
         io.set_backend_flags(backend_flags);
 
@@ -697,6 +700,39 @@ mod tests {
         assert!(is_winit_set_ime_data(Some(imgui_winit_set_ime_data)));
         assert!(!is_winit_set_ime_data(Some(other_ime_callback)));
         assert!(!is_winit_set_ime_data(None));
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    #[test]
+    fn runtime_ime_cleanup_preserves_foreign_replacements() {
+        let _guard = lock_context();
+        let mut context = Context::create();
+        let platform_io = context.platform_io_mut().as_raw_mut();
+        let window = std::ptr::NonNull::<Window>::dangling().as_ptr();
+        unsafe {
+            (*platform_io).Platform_SetImeDataFn = Some(imgui_winit_set_ime_data);
+            (*platform_io).Platform_ImeUserData = window.cast();
+            assert!(clear_ime_callback_if_owned(platform_io, window));
+            assert!((*platform_io).Platform_SetImeDataFn.is_none());
+
+            (*platform_io).Platform_SetImeDataFn = Some(other_ime_callback_for_test);
+            (*platform_io).Platform_ImeUserData = window.cast();
+            assert!(!clear_ime_callback_if_owned(platform_io, window));
+            assert!(std::ptr::fn_addr_eq(
+                (*platform_io).Platform_SetImeDataFn.unwrap(),
+                other_ime_callback_for_test as SetImeDataCallback
+            ));
+            (*platform_io).Platform_SetImeDataFn = None;
+            (*platform_io).Platform_ImeUserData = std::ptr::null_mut();
+        }
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    unsafe extern "C" fn other_ime_callback_for_test(
+        _context: *mut dear_imgui_rs::sys::ImGuiContext,
+        _viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+        _data: *mut dear_imgui_rs::sys::ImGuiPlatformImeData,
+    ) {
     }
 
     #[test]

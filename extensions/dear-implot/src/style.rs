@@ -2,7 +2,6 @@
 
 use crate::sys;
 use crate::{PlotContext, PlotContextBinding, PlotUi};
-use dear_imgui_rs::ContextAliveToken;
 use dear_imgui_rs::{with_scratch_txt, with_scratch_txt_two};
 use std::borrow::Cow;
 use std::marker::PhantomData;
@@ -40,7 +39,6 @@ pub enum StyleVar {
 /// Token for managing style variable changes
 pub struct StyleVarToken<'ui> {
     binding: PlotContextBinding,
-    imgui_alive: Option<ContextAliveToken>,
     was_popped: bool,
     _lifetime: PhantomData<&'ui PlotUi<'ui>>,
     _not_send_or_sync: PhantomData<Rc<()>>,
@@ -56,9 +54,10 @@ impl StyleVarToken<'_> {
         if self.was_popped {
             panic!("Attempted to pop an ImPlot style var token twice.");
         }
-        assert_imgui_alive(&self.imgui_alive, "dear-implot: StyleVarToken");
-        let _guard = self.binding.bind("dear-implot: StyleVarToken");
-        unsafe { sys::ImPlot_PopStyleVar(1) };
+        self.binding
+            .with_bound_context("dear-implot: StyleVarToken", || {
+                unsafe { sys::ImPlot_PopStyleVar(1) };
+            });
         self.was_popped = true;
     }
 }
@@ -66,7 +65,10 @@ impl StyleVarToken<'_> {
 impl Drop for StyleVarToken<'_> {
     fn drop(&mut self) {
         if !self.was_popped {
-            self.pop_inner();
+            let _ = self
+                .binding
+                .try_with_bound_context(|| unsafe { sys::ImPlot_PopStyleVar(1) });
+            self.was_popped = true;
         }
     }
 }
@@ -74,7 +76,6 @@ impl Drop for StyleVarToken<'_> {
 /// Token for managing style color changes
 pub struct StyleColorToken<'ui> {
     binding: PlotContextBinding,
-    imgui_alive: Option<ContextAliveToken>,
     was_popped: bool,
     _lifetime: PhantomData<&'ui PlotUi<'ui>>,
     _not_send_or_sync: PhantomData<Rc<()>>,
@@ -90,9 +91,10 @@ impl StyleColorToken<'_> {
         if self.was_popped {
             panic!("Attempted to pop an ImPlot style color token twice.");
         }
-        assert_imgui_alive(&self.imgui_alive, "dear-implot: StyleColorToken");
-        let _guard = self.binding.bind("dear-implot: StyleColorToken");
-        unsafe { sys::ImPlot_PopStyleColor(1) };
+        self.binding
+            .with_bound_context("dear-implot: StyleColorToken", || {
+                unsafe { sys::ImPlot_PopStyleColor(1) };
+            });
         self.was_popped = true;
     }
 }
@@ -100,7 +102,10 @@ impl StyleColorToken<'_> {
 impl Drop for StyleColorToken<'_> {
     fn drop(&mut self) {
         if !self.was_popped {
-            self.pop_inner();
+            let _ = self
+                .binding
+                .try_with_bound_context(|| unsafe { sys::ImPlot_PopStyleColor(1) });
+            self.was_popped = true;
         }
     }
 }
@@ -230,7 +235,6 @@ impl From<usize> for ColormapColorIndex {
 #[must_use]
 pub struct ColormapToken<'ui> {
     binding: PlotContextBinding,
-    imgui_alive: Option<ContextAliveToken>,
     was_popped: bool,
     _lifetime: PhantomData<&'ui PlotUi<'ui>>,
     _not_send_or_sync: PhantomData<Rc<()>>,
@@ -246,9 +250,10 @@ impl ColormapToken<'_> {
         if self.was_popped {
             panic!("Attempted to pop an ImPlot colormap token twice.");
         }
-        assert_imgui_alive(&self.imgui_alive, "dear-implot: ColormapToken");
-        let _guard = self.binding.bind("dear-implot: ColormapToken");
-        unsafe { sys::ImPlot_PopColormap(1) };
+        self.binding
+            .with_bound_context("dear-implot: ColormapToken", || {
+                unsafe { sys::ImPlot_PopColormap(1) };
+            });
         self.was_popped = true;
     }
 }
@@ -256,14 +261,11 @@ impl ColormapToken<'_> {
 impl Drop for ColormapToken<'_> {
     fn drop(&mut self) {
         if !self.was_popped {
-            self.pop_inner();
+            let _ = self
+                .binding
+                .try_with_bound_context(|| unsafe { sys::ImPlot_PopColormap(1) });
+            self.was_popped = true;
         }
-    }
-}
-
-fn assert_imgui_alive(alive: &Option<ContextAliveToken>, caller: &str) {
-    if let Some(alive) = alive {
-        assert!(alive.is_alive(), "{caller}: ImGui context has been dropped");
     }
 }
 
@@ -392,44 +394,43 @@ impl<'ui> PlotUi<'ui> {
         style: PlotItemArrayStyle<'a>,
         f: impl FnOnce(&PlotUi<'ui>) -> R,
     ) -> R {
-        let _guard = self.bind();
-        with_scoped_next_plot_item_array_style(style, || f(self))
+        self.with_bound_context(|| with_scoped_next_plot_item_array_style(style, || f(self)))
     }
 
     /// Push a float style variable to this ImPlot context's stack.
     pub fn push_style_var_f32(&self, var: StyleVar, value: f32) -> StyleVarToken<'_> {
-        let _guard = self.bind();
-        unsafe {
-            sys::ImPlot_PushStyleVar_Float(var as sys::ImPlotStyleVar, value);
-        }
-        StyleVarToken {
-            binding: self.context.binding(),
-            imgui_alive: self.context.imgui_alive_token(),
-            was_popped: false,
-            _lifetime: PhantomData,
-            _not_send_or_sync: PhantomData,
-        }
+        self.with_bound_context(|| {
+            unsafe {
+                sys::ImPlot_PushStyleVar_Float(var as sys::ImPlotStyleVar, value);
+            }
+            StyleVarToken {
+                binding: self.context.binding(),
+                was_popped: false,
+                _lifetime: PhantomData,
+                _not_send_or_sync: PhantomData,
+            }
+        })
     }
 
     /// Push a Vec2 style variable to this ImPlot context's stack.
     pub fn push_style_var_vec2(&self, var: StyleVar, value: [f32; 2]) -> StyleVarToken<'_> {
-        let _guard = self.bind();
-        unsafe {
-            sys::ImPlot_PushStyleVar_Vec2(
-                var as sys::ImPlotStyleVar,
-                sys::ImVec2_c {
-                    x: value[0],
-                    y: value[1],
-                },
-            );
-        }
-        StyleVarToken {
-            binding: self.context.binding(),
-            imgui_alive: self.context.imgui_alive_token(),
-            was_popped: false,
-            _lifetime: PhantomData,
-            _not_send_or_sync: PhantomData,
-        }
+        self.with_bound_context(|| {
+            unsafe {
+                sys::ImPlot_PushStyleVar_Vec2(
+                    var as sys::ImPlotStyleVar,
+                    sys::ImVec2_c {
+                        x: value[0],
+                        y: value[1],
+                    },
+                );
+            }
+            StyleVarToken {
+                binding: self.context.binding(),
+                was_popped: false,
+                _lifetime: PhantomData,
+                _not_send_or_sync: PhantomData,
+            }
+        })
     }
 
     /// Push a style color to this ImPlot context's stack.
@@ -438,53 +439,53 @@ impl<'ui> PlotUi<'ui> {
         element: crate::PlotColorElement,
         color: [f32; 4],
     ) -> StyleColorToken<'_> {
-        let _guard = self.bind();
-        unsafe {
-            // Convert color to ImU32 format (RGBA).
-            let r = (color[0] * 255.0) as u32;
-            let g = (color[1] * 255.0) as u32;
-            let b = (color[2] * 255.0) as u32;
-            let a = (color[3] * 255.0) as u32;
-            let color_u32 = (a << 24) | (b << 16) | (g << 8) | r;
+        self.with_bound_context(|| {
+            unsafe {
+                // Convert color to ImU32 format (RGBA).
+                let r = (color[0] * 255.0) as u32;
+                let g = (color[1] * 255.0) as u32;
+                let b = (color[2] * 255.0) as u32;
+                let a = (color[3] * 255.0) as u32;
+                let color_u32 = (a << 24) | (b << 16) | (g << 8) | r;
 
-            sys::ImPlot_PushStyleColor_U32(element as sys::ImPlotCol, color_u32);
-        }
-        StyleColorToken {
-            binding: self.context.binding(),
-            imgui_alive: self.context.imgui_alive_token(),
-            was_popped: false,
-            _lifetime: PhantomData,
-            _not_send_or_sync: PhantomData,
-        }
+                sys::ImPlot_PushStyleColor_U32(element as sys::ImPlotCol, color_u32);
+            }
+            StyleColorToken {
+                binding: self.context.binding(),
+                was_popped: false,
+                _lifetime: PhantomData,
+                _not_send_or_sync: PhantomData,
+            }
+        })
     }
 
     /// Push a colormap to this ImPlot context's stack.
     pub fn push_colormap(&self, cmap: impl Into<ColormapIndex>) -> ColormapToken<'_> {
-        let _guard = self.bind();
-        unsafe {
-            sys::ImPlot_PushColormap_PlotColormap(cmap.into().raw());
-        }
-        ColormapToken {
-            binding: self.context.binding(),
-            imgui_alive: self.context.imgui_alive_token(),
-            was_popped: false,
-            _lifetime: PhantomData,
-            _not_send_or_sync: PhantomData,
-        }
+        self.with_bound_context(|| {
+            unsafe {
+                sys::ImPlot_PushColormap_PlotColormap(cmap.into().raw());
+            }
+            ColormapToken {
+                binding: self.context.binding(),
+                was_popped: false,
+                _lifetime: PhantomData,
+                _not_send_or_sync: PhantomData,
+            }
+        })
     }
 
     /// Push a colormap by name to this ImPlot context's stack.
     pub fn push_colormap_name(&self, name: &str) -> ColormapToken<'_> {
         assert!(!name.contains('\0'), "colormap name contained NUL");
-        let _guard = self.bind();
-        with_scratch_txt(name, |ptr| unsafe { sys::ImPlot_PushColormap_Str(ptr) });
-        ColormapToken {
-            binding: self.context.binding(),
-            imgui_alive: self.context.imgui_alive_token(),
-            was_popped: false,
-            _lifetime: PhantomData,
-            _not_send_or_sync: PhantomData,
-        }
+        self.with_bound_context(|| {
+            with_scratch_txt(name, |ptr| unsafe { sys::ImPlot_PushColormap_Str(ptr) });
+            ColormapToken {
+                binding: self.context.binding(),
+                was_popped: false,
+                _lifetime: PhantomData,
+                _not_send_or_sync: PhantomData,
+            }
+        })
     }
 }
 
@@ -503,9 +504,7 @@ fn assert_colormap_sample_t(t: f32) {
 impl PlotContext {
     #[inline]
     fn with_bound_style<R>(&self, caller: &str, f: impl FnOnce() -> R) -> R {
-        self.assert_imgui_alive();
-        let _guard = self.binding().bind(caller);
-        f()
+        self.binding().with_bound_context(caller, || f())
     }
 
     /// Add a custom colormap from colors. The colors are copied by ImPlot.
@@ -713,32 +712,34 @@ impl PlotContext {
 impl PlotUi<'_> {
     /// Show the ImPlot style editor window for this context.
     pub fn show_style_editor(&self) {
-        let _guard = self.bind();
-        unsafe { sys::ImPlot_ShowStyleEditor(std::ptr::null_mut()) }
+        self.with_bound_context(|| unsafe { sys::ImPlot_ShowStyleEditor(std::ptr::null_mut()) })
     }
 
     /// Show the ImPlot style selector combo; returns true if selection changed.
     pub fn show_style_selector(&self, label: &str) -> bool {
         let label = if label.contains('\0') { "" } else { label };
-        let _guard = self.bind();
-        with_scratch_txt(label, |ptr| unsafe { sys::ImPlot_ShowStyleSelector(ptr) })
+        self.with_bound_context(|| {
+            with_scratch_txt(label, |ptr| unsafe { sys::ImPlot_ShowStyleSelector(ptr) })
+        })
     }
 
     /// Show the ImPlot colormap selector combo; returns true if selection changed.
     pub fn show_colormap_selector(&self, label: &str) -> bool {
         let label = if label.contains('\0') { "" } else { label };
-        let _guard = self.bind();
-        with_scratch_txt(label, |ptr| unsafe {
-            sys::ImPlot_ShowColormapSelector(ptr)
+        self.with_bound_context(|| {
+            with_scratch_txt(label, |ptr| unsafe {
+                sys::ImPlot_ShowColormapSelector(ptr)
+            })
         })
     }
 
     /// Show the ImPlot input-map selector combo; returns true if selection changed.
     pub fn show_input_map_selector(&self, label: &str) -> bool {
         let label = if label.contains('\0') { "" } else { label };
-        let _guard = self.bind();
-        with_scratch_txt(label, |ptr| unsafe {
-            sys::ImPlot_ShowInputMapSelector(ptr)
+        self.with_bound_context(|| {
+            with_scratch_txt(label, |ptr| unsafe {
+                sys::ImPlot_ShowInputMapSelector(ptr)
+            })
         })
     }
 
@@ -765,9 +766,10 @@ impl PlotUi<'_> {
         let fmt_ptr: *const c_char = std::ptr::null();
         let flags = sys::ImPlotColormapScaleFlags_None as sys::ImPlotColormapScaleFlags;
         let cmap = cmap.into().raw();
-        let _guard = self.bind();
-        with_scratch_txt(label, |ptr| unsafe {
-            sys::ImPlot_ColormapScale(ptr, scale_min, scale_max, size, fmt_ptr, flags, cmap)
+        self.with_bound_context(|| {
+            with_scratch_txt(label, |ptr| unsafe {
+                sys::ImPlot_ColormapScale(ptr, scale_min, scale_max, size, fmt_ptr, flags, cmap)
+            })
         })
     }
 
@@ -796,26 +798,27 @@ impl PlotUi<'_> {
             std::ptr::null_mut()
         };
 
-        let _guard = self.bind();
-        let changed = match format {
-            Some(fmt) => with_scratch_txt_two(label, fmt, |label_ptr, fmt_ptr| unsafe {
-                sys::ImPlot_ColormapSlider(label_ptr, t as *mut f32, out_ptr, fmt_ptr, cmap)
-            }),
-            None => with_scratch_txt(label, |label_ptr| unsafe {
-                sys::ImPlot_ColormapSlider(
-                    label_ptr,
-                    t as *mut f32,
-                    out_ptr,
-                    std::ptr::null(),
-                    cmap,
-                )
-            }),
-        };
+        self.with_bound_context(|| {
+            let changed = match format {
+                Some(fmt) => with_scratch_txt_two(label, fmt, |label_ptr, fmt_ptr| unsafe {
+                    sys::ImPlot_ColormapSlider(label_ptr, t as *mut f32, out_ptr, fmt_ptr, cmap)
+                }),
+                None => with_scratch_txt(label, |label_ptr| unsafe {
+                    sys::ImPlot_ColormapSlider(
+                        label_ptr,
+                        t as *mut f32,
+                        out_ptr,
+                        std::ptr::null(),
+                        cmap,
+                    )
+                }),
+            };
 
-        if let Some(out_color) = out_color {
-            *out_color = [out.x, out.y, out.z, out.w];
-        }
-        changed
+            if let Some(out_color) = out_color {
+                *out_color = [out.x, out.y, out.z, out.w];
+            }
+            changed
+        })
     }
 
     /// Draw a colormap picker button; returns true if clicked.
@@ -835,9 +838,10 @@ impl PlotUi<'_> {
             y: size[1],
         };
         let cmap = cmap.into().raw();
-        let _guard = self.bind();
-        with_scratch_txt(label, |ptr| unsafe {
-            sys::ImPlot_ColormapButton(ptr, sz, cmap)
+        self.with_bound_context(|| {
+            with_scratch_txt(label, |ptr| unsafe {
+                sys::ImPlot_ColormapButton(ptr, sz, cmap)
+            })
         })
     }
 }

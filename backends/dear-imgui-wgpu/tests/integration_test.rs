@@ -2,7 +2,10 @@
 //!
 //! This test verifies that our improvements maintain compatibility with the C++ implementation
 
-use dear_imgui_rs::{BackendFlags, Condition, Context, TextureData, TextureId, TextureStatus};
+use dear_imgui_rs::{
+    BackendFlags, Condition, Context, ManagedTextureId, TextureId,
+    texture::{OwnedTextureData, TextureFormat as ImGuiTextureFormat},
+};
 use dear_imgui_wgpu::wgpu::*;
 use dear_imgui_wgpu::{
     RenderResources, RendererError, RendererResult, Uniforms, WgpuInitInfo, WgpuRenderer,
@@ -38,6 +41,8 @@ fn render_test_frame(
     context: &mut Context,
     device: &Device,
     queue: &Queue,
+    managed_texture: Option<ManagedTextureId>,
+    legacy_texture: Option<TextureId>,
 ) -> RendererResult<()> {
     context.io_mut().set_display_size([64.0, 64.0]);
     context.io_mut().set_delta_time(1.0 / 60.0);
@@ -46,6 +51,12 @@ fn render_test_frame(
         .position([0.0, 0.0], Condition::Always)
         .size([64.0, 64.0], Condition::Always)
         .build(|| ui.text("rebuild"));
+    if let Some(texture) = managed_texture {
+        ui.image(texture, [16.0, 16.0]);
+    }
+    if let Some(texture) = legacy_texture {
+        ui.image(texture, [16.0, 16.0]);
+    }
 
     let target = device.create_texture(&TextureDescriptor {
         label: Some("dear-imgui-wgpu lifecycle test target"),
@@ -280,7 +291,7 @@ fn test_renderer_creation() {
 }
 
 #[test]
-fn device_objects_and_managed_textures_survive_invalidate_and_reinitialize() -> RendererResult<()> {
+fn device_objects_rebind_after_invalidation_and_shutdown() -> RendererResult<()> {
     let Some((device, queue)) = request_test_device() else {
         eprintln!("skipping WGPU lifecycle test because no headless adapter is available");
         return Ok(());
@@ -292,12 +303,8 @@ fn device_objects_and_managed_textures_survive_invalidate_and_reinitialize() -> 
         &mut context,
     )?;
 
-    render_test_frame(&mut renderer, &mut context, &device, &queue)?;
-    let first_texture_id = context
-        .platform_io()
-        .texture(0)
-        .expect("the first rendered frame should expose the font texture")
-        .tex_id();
+    render_test_frame(&mut renderer, &mut context, &device, &queue, None, None)?;
+    let first_texture_id = context.font_atlas().texture_id();
     assert!(!first_texture_id.is_null());
     assert!(
         renderer
@@ -307,20 +314,12 @@ fn device_objects_and_managed_textures_survive_invalidate_and_reinitialize() -> 
 
     renderer.invalidate_device_objects(&mut context)?;
     assert!(!renderer.is_initialized());
-    let invalidated = context
-        .platform_io()
-        .texture(0)
-        .expect("the font texture should remain registered after invalidation");
-    assert_eq!(invalidated.status(), TextureStatus::WantCreate);
-    assert!(invalidated.tex_id().is_null());
+    assert!(context.font_atlas().texture_id().is_null());
+    assert_eq!(renderer.texture_manager().texture_count(), 0);
 
-    render_test_frame(&mut renderer, &mut context, &device, &queue)?;
+    render_test_frame(&mut renderer, &mut context, &device, &queue, None, None)?;
     assert!(renderer.is_initialized());
-    let recreated_texture_id = context
-        .platform_io()
-        .texture(0)
-        .expect("the rebuilt renderer should recreate the font texture")
-        .tex_id();
+    let recreated_texture_id = context.font_atlas().texture_id();
     assert!(!recreated_texture_id.is_null());
     assert!(
         renderer
@@ -344,19 +343,31 @@ fn device_objects_and_managed_textures_survive_invalidate_and_reinitialize() -> 
         Err(RendererError::ContextMismatch)
     ));
     #[cfg(feature = "multi-viewport-winit")]
-    assert_eq!(
-        // SAFETY: context identity validation rejects this call before callbacks retain renderer.
-        unsafe { dear_imgui_wgpu::multi_viewport::enable(&mut renderer, &mut foreign_context) },
-        Err(dear_imgui_wgpu::multi_viewport::CallbackOwnershipError::RendererContextMismatch)
-    );
+    {
+        let failure = dear_imgui_wgpu::multi_viewport::WinitViewportRuntime::attach(
+            &mut foreign_context,
+            renderer,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            failure.error(),
+            dear_imgui_wgpu::multi_viewport::WgpuViewportError::RendererContextMismatch
+        ));
+        renderer = failure.into_renderer();
+    }
     #[cfg(feature = "multi-viewport-sdl3")]
-    assert_eq!(
-        // SAFETY: context identity validation rejects this call before callbacks retain renderer.
-        unsafe {
-            dear_imgui_wgpu::multi_viewport_sdl3::enable(&mut renderer, &mut foreign_context)
-        },
-        Err(dear_imgui_wgpu::multi_viewport_sdl3::CallbackOwnershipError::RendererContextMismatch)
-    );
+    {
+        let failure = dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRuntime::attach(
+            &mut foreign_context,
+            renderer,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            failure.error(),
+            dear_imgui_wgpu::multi_viewport_sdl3::WgpuViewportError::RendererContextMismatch
+        ));
+        renderer = failure.into_renderer();
+    }
     assert!(renderer.is_initialized());
     assert_eq!(foreign_context.io().backend_flags(), foreign_flags);
 
@@ -364,7 +375,7 @@ fn device_objects_and_managed_textures_survive_invalidate_and_reinitialize() -> 
     let mut context = suspended_owner
         .activate()
         .expect("renderer owner context should reactivate");
-    render_test_frame(&mut renderer, &mut context, &device, &queue)?;
+    render_test_frame(&mut renderer, &mut context, &device, &queue, None, None)?;
 
     renderer.shutdown(&mut context)?;
     assert!(!renderer.is_initialized());
@@ -373,14 +384,16 @@ fn device_objects_and_managed_textures_survive_invalidate_and_reinitialize() -> 
             BackendFlags::RENDERER_HAS_TEXTURES | BackendFlags::RENDERER_HAS_VTX_OFFSET
         )
     );
-    assert_eq!(
-        context
-            .platform_io()
-            .texture(0)
-            .expect("shutdown should preserve managed font pixels")
-            .status(),
-        TextureStatus::WantCreate
-    );
+    assert!(context.font_atlas().texture_id().is_null());
+    assert_eq!(renderer.texture_manager().texture_count(), 0);
+
+    renderer.init_with_context(
+        WgpuInitInfo::new(device.clone(), queue.clone(), format),
+        &mut context,
+    )?;
+    render_test_frame(&mut renderer, &mut context, &device, &queue, None, None)?;
+    assert!(renderer.is_initialized());
+    renderer.shutdown(&mut context)?;
 
     let suspended_owner = context.suspend();
     let mut context = suspended_foreign
@@ -392,12 +405,8 @@ fn device_objects_and_managed_textures_survive_invalidate_and_reinitialize() -> 
         WgpuInitInfo::new(device.clone(), queue.clone(), format),
         &mut context,
     )?;
-    render_test_frame(&mut renderer, &mut context, &device, &queue)?;
-    let reinitialized_texture_id = context
-        .platform_io()
-        .texture(0)
-        .expect("reinitialization should recreate the font texture")
-        .tex_id();
+    render_test_frame(&mut renderer, &mut context, &device, &queue, None, None)?;
+    let reinitialized_texture_id = context.font_atlas().texture_id();
     assert!(!reinitialized_texture_id.is_null());
     assert!(
         renderer
@@ -406,6 +415,100 @@ fn device_objects_and_managed_textures_survive_invalidate_and_reinitialize() -> 
     );
     renderer.shutdown(&mut context)?;
 
+    Ok(())
+}
+
+#[test]
+fn rendered_frame_reconciles_managed_lifecycle_and_preserves_legacy_ids() -> RendererResult<()> {
+    let Some((device, queue)) = request_test_device() else {
+        eprintln!("skipping WGPU rendered-frame test because no headless adapter is available");
+        return Ok(());
+    };
+    let mut context = Context::create();
+    let mut renderer = WgpuRenderer::new(
+        WgpuInitInfo::new(device.clone(), queue.clone(), TextureFormat::Rgba8Unorm),
+        &mut context,
+    )?;
+
+    let mut managed_data = OwnedTextureData::new();
+    managed_data.create(ImGuiTextureFormat::RGBA32, 2, 2);
+    managed_data.set_data(&[7; 16]);
+    let managed = context.register_texture(managed_data);
+
+    let legacy_texture = device.create_texture(&TextureDescriptor {
+        label: Some("dear-imgui-wgpu legacy render test"),
+        size: Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: TextureDimension::D2,
+        format: TextureFormat::Rgba8Unorm,
+        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let legacy_view = legacy_texture.create_view(&TextureViewDescriptor::default());
+    let legacy = renderer.register_external_texture(&legacy_texture, &legacy_view);
+
+    render_test_frame(
+        &mut renderer,
+        &mut context,
+        &device,
+        &queue,
+        Some(managed),
+        Some(legacy),
+    )?;
+    let first_managed_id = context
+        .with_texture(managed, |texture| texture.texture_id())
+        .expect("managed texture should remain active");
+    assert!(!first_managed_id.is_null());
+    assert!(
+        renderer
+            .texture_manager()
+            .contains_texture(first_managed_id)
+    );
+    assert!(renderer.texture_manager().contains_texture(legacy));
+
+    context
+        .with_texture_mut(managed, |mut texture| texture.set_data(&[11; 16]))
+        .expect("managed texture update should be accepted");
+    render_test_frame(
+        &mut renderer,
+        &mut context,
+        &device,
+        &queue,
+        Some(managed),
+        Some(legacy),
+    )?;
+    assert_eq!(
+        context
+            .with_texture(managed, |texture| texture.texture_id())
+            .expect("updated texture should remain active"),
+        first_managed_id,
+        "updates must keep the renderer-facing texture ID stable"
+    );
+
+    context
+        .remove_texture(managed)
+        .expect("managed texture should begin retirement");
+    render_test_frame(
+        &mut renderer,
+        &mut context,
+        &device,
+        &queue,
+        None,
+        Some(legacy),
+    )?;
+    assert!(
+        !renderer
+            .texture_manager()
+            .contains_texture(first_managed_id)
+    );
+    assert!(renderer.texture_manager().contains_texture(legacy));
+
+    renderer.shutdown(&mut context)?;
     Ok(())
 }
 
@@ -441,20 +544,6 @@ fn texture_id_api_boundaries_are_typed() {
     let _: fn(&mut WgpuTextureManager, TextureId, WgpuTexture) =
         WgpuTextureManager::insert_texture_with_id;
     let _: fn(&mut WgpuTextureManager, TextureId) = WgpuTextureManager::destroy_texture_by_id;
-    let _: for<'a, 'b, 'c> fn(
-        &'a mut WgpuTextureManager,
-        &'b Device,
-        &'c Queue,
-        &TextureData,
-    ) -> RendererResult<TextureId> = WgpuTextureManager::create_texture_from_data;
-    let _: for<'a, 'b, 'c> fn(
-        &'a mut WgpuTextureManager,
-        &'b Device,
-        &'c Queue,
-        &TextureData,
-        TextureId,
-    ) -> RendererResult<()> = WgpuTextureManager::update_texture_from_data_with_id;
-
     let _: for<'a, 'b> fn(
         &'a mut RenderResources,
         &'b Device,

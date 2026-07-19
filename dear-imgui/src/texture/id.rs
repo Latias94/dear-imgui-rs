@@ -1,4 +1,6 @@
-use crate::sys;
+use std::num::NonZeroU64;
+
+use crate::{ContextId, sys};
 
 /// Simple texture ID for backward compatibility
 ///
@@ -104,27 +106,41 @@ impl From<TextureId> for RawTextureId {
     }
 }
 
-/// Stable identifier for an ImGui-managed texture.
+/// Opaque identity for a Context-owned managed texture.
 ///
-/// This wraps Dear ImGui's `ImTextureData::UniqueID`. It is intended for correlating detached
-/// texture requests with renderer feedback, not as a renderer texture handle. Use [`TextureId`] for
-/// backend-owned GPU texture identifiers.
+/// The identity remains stable while the texture is active or retiring. It includes the owning
+/// Context and a private slot generation, so a stale handle can never address a texture registered
+/// later in a reused slot. Use [`TextureId`] for application-owned GPU texture identifiers.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-#[repr(transparent)]
-pub struct ManagedTextureId(i32);
+pub struct ManagedTextureId {
+    context: ContextId,
+    slot: u32,
+    generation: NonZeroU64,
+}
 
 impl ManagedTextureId {
     #[inline]
-    pub(crate) const fn from_raw(raw: i32) -> Self {
-        Self(raw)
+    pub(crate) const fn new(context: ContextId, slot: u32, generation: NonZeroU64) -> Self {
+        Self {
+            context,
+            slot,
+            generation,
+        }
     }
 
-    /// Returns Dear ImGui's raw `ImTextureData::UniqueID` value.
-    ///
-    /// Renderer backends can use this to derive deterministic backend texture handles for managed
-    /// texture requests without relying on probabilistic hashing.
+    /// Returns the Context that owns this managed texture.
     #[inline]
-    pub const fn raw(self) -> i32 {
-        self.0
+    pub const fn context_id(self) -> ContextId {
+        self.context
+    }
+
+    #[inline]
+    pub(crate) const fn slot(self) -> u32 {
+        self.slot
+    }
+
+    #[inline]
+    pub(crate) const fn generation(self) -> NonZeroU64 {
+        self.generation
     }
 }

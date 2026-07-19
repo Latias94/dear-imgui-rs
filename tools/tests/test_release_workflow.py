@@ -435,6 +435,28 @@ class PublishCommandTests(unittest.TestCase):
         self.assertIn("--locked", command)
         self.assertEqual(command[-2:], ["--registry", "crates-io"])
 
+    def test_release_gate_verification_command_is_deterministic(self):
+        gate_result = Path("artifacts/release/gate-result.json")
+
+        self.assertEqual(
+            PUBLISH.release_gate_verification_command(
+                REPO_ROOT,
+                "a" * 40,
+                gate_result,
+            ),
+            [
+                sys.executable,
+                "tools/ci/release_evidence.py",
+                "verify",
+                "--repo-root",
+                str(REPO_ROOT),
+                "--candidate-sha",
+                "a" * 40,
+                "--gate-result",
+                str(gate_result),
+            ],
+        )
+
     def test_publish_guard_runs_after_search_before_cargo_publish(self):
         with (
             patch.object(PUBLISH, "check_crate_published", return_value=False),
@@ -453,11 +475,74 @@ class PublishCommandTests(unittest.TestCase):
             )
         run_command.assert_not_called()
 
-    def test_strict_preflight_failure_runs_no_publish_command(self):
+    def test_missing_release_gate_result_blocks_all_upload_commands(self):
         argv = ["publish.py", "--crates", "dear-imgui-sys", "--wait", "0"]
+        stderr = io.StringIO()
+        with (
+            patch.object(PUBLISH.sys, "argv", argv),
+            patch.object(PUBLISH, "capture_release_fingerprint") as fingerprint,
+            patch.object(PUBLISH, "verify_release_gate_result") as verify_gate,
+            patch.object(PUBLISH, "run_release_preflight") as preflight,
+            patch.object(PUBLISH, "load_workspace_metadata") as load_metadata,
+            patch.object(PUBLISH, "check_crate_published") as search,
+            patch.object(PUBLISH, "run_command") as run_command,
+            redirect_stdout(io.StringIO()),
+            redirect_stderr(stderr),
+        ):
+            self.assertEqual(PUBLISH.main(), 1)
+
+        fingerprint.assert_not_called()
+        verify_gate.assert_not_called()
+        preflight.assert_not_called()
+        load_metadata.assert_not_called()
+        search.assert_not_called()
+        run_command.assert_not_called()
+        self.assertIn("--release-gate-result", stderr.getvalue())
+        self.assertIn("--dangerously-skip-release-check", stderr.getvalue())
+
+    def test_failed_release_gate_verification_blocks_all_network_commands(self):
+        argv = [
+            "publish.py",
+            "--crates",
+            "dear-imgui-sys",
+            "--wait",
+            "0",
+            "--release-gate-result",
+            "wrong-gate-result.json",
+        ]
         with (
             patch.object(PUBLISH.sys, "argv", argv),
             patch.object(PUBLISH, "capture_release_fingerprint", return_value="head"),
+            patch.object(PUBLISH, "verify_release_gate_result", return_value=41),
+            patch.object(PUBLISH, "run_release_preflight") as preflight,
+            patch.object(PUBLISH, "load_workspace_metadata") as load_metadata,
+            patch.object(PUBLISH, "check_crate_published") as search,
+            patch.object(PUBLISH, "publish_crate") as publish_crate,
+            redirect_stdout(io.StringIO()),
+            redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(PUBLISH.main(), 41)
+
+        preflight.assert_not_called()
+        load_metadata.assert_not_called()
+        search.assert_not_called()
+        publish_crate.assert_not_called()
+
+    def test_strict_preflight_failure_runs_no_publish_command(self):
+        argv = [
+            "publish.py",
+            "--crates",
+            "dear-imgui-sys",
+            "--wait",
+            "0",
+            "--release-gate-result",
+            "gate-result.json",
+        ]
+        with (
+            patch.object(PUBLISH.sys, "argv", argv),
+            patch.object(PUBLISH, "capture_release_fingerprint", return_value="head"),
+            patch.object(PUBLISH, "verify_release_fingerprint", return_value=True),
+            patch.object(PUBLISH, "verify_release_gate_result", return_value=0),
             patch.object(PUBLISH, "run_release_preflight", return_value=37),
             patch.object(PUBLISH, "load_workspace_metadata") as load_metadata,
             patch.object(PUBLISH, "publish_crate") as publish_crate,
@@ -469,25 +554,60 @@ class PublishCommandTests(unittest.TestCase):
         load_metadata.assert_not_called()
         publish_crate.assert_not_called()
 
-    def test_actual_upload_uses_preflight_and_authoritative_metadata(self):
-        argv = ["publish.py", "--crates", "dear-imgui-sys", "--wait", "0"]
+    def test_valid_gate_verification_precedes_search_and_publish(self):
+        argv = [
+            "publish.py",
+            "--crates",
+            "dear-imgui-sys",
+            "--wait",
+            "0",
+            "--release-gate-result",
+            "gate-result.json",
+        ]
+        events = []
+
+        def verify_gate(*_args):
+            events.append("verify gate")
+            return 0
+
+        def search(*_args):
+            events.append("crates.io search")
+            return False
+
+        def publish(command, **_kwargs):
+            self.assertEqual(command[:2], ["cargo", "publish"])
+            events.append("cargo publish")
+            return 0
+
         with (
             patch.object(PUBLISH.sys, "argv", argv),
             patch.object(PUBLISH, "capture_release_fingerprint", return_value="head"),
             patch.object(PUBLISH, "verify_release_fingerprint", return_value=True),
+            patch.object(
+                PUBLISH, "verify_release_gate_result", side_effect=verify_gate
+            ) as gate_verification,
             patch.object(PUBLISH, "run_release_preflight", return_value=0) as preflight,
             patch.object(
                 PUBLISH, "load_workspace_metadata", return_value=self.metadata
             ) as load_metadata,
-            patch.object(PUBLISH, "publish_crate", return_value=True) as publish_crate,
+            patch.object(PUBLISH, "check_crate_published", side_effect=search),
+            patch.object(PUBLISH, "run_command", side_effect=publish),
             patch("builtins.input", return_value="y"),
             redirect_stdout(io.StringIO()),
         ):
             self.assertEqual(PUBLISH.main(), 0)
 
+        gate_verification.assert_called_once_with(
+            REPO_ROOT,
+            "head",
+            Path("gate-result.json"),
+        )
         preflight.assert_called_once_with(REPO_ROOT)
         load_metadata.assert_called_once_with(REPO_ROOT)
-        publish_crate.assert_called_once()
+        self.assertEqual(
+            events,
+            ["verify gate", "crates.io search", "cargo publish"],
+        )
 
     def test_cargo_dry_run_is_also_guarded_by_strict_preflight(self):
         argv = [
@@ -502,6 +622,7 @@ class PublishCommandTests(unittest.TestCase):
             patch.object(PUBLISH.sys, "argv", argv),
             patch.object(PUBLISH, "capture_release_fingerprint", return_value="head"),
             patch.object(PUBLISH, "verify_release_fingerprint", return_value=True),
+            patch.object(PUBLISH, "verify_release_gate_result") as verify_gate,
             patch.object(PUBLISH, "run_release_preflight", return_value=0) as preflight,
             patch.object(PUBLISH, "load_workspace_metadata", return_value=self.metadata),
             patch.object(PUBLISH, "publish_crate", return_value=True),
@@ -510,6 +631,7 @@ class PublishCommandTests(unittest.TestCase):
             self.assertEqual(PUBLISH.main(), 0)
 
         preflight.assert_called_once_with(REPO_ROOT)
+        verify_gate.assert_not_called()
 
     def test_dangerous_bypass_is_explicit_and_still_source_guarded(self):
         argv = [
@@ -520,27 +642,47 @@ class PublishCommandTests(unittest.TestCase):
             "0",
             "--dangerously-skip-release-check",
         ]
+        output = io.StringIO()
         with (
             patch.object(PUBLISH.sys, "argv", argv),
             patch.object(PUBLISH, "capture_release_fingerprint", return_value="head"),
             patch.object(PUBLISH, "verify_release_fingerprint", return_value=True),
+            patch.object(PUBLISH, "verify_release_gate_result") as verify_gate,
             patch.object(PUBLISH, "run_release_preflight") as preflight,
             patch.object(PUBLISH, "load_workspace_metadata", return_value=self.metadata),
             patch.object(PUBLISH, "publish_crate", return_value=True),
             patch("builtins.input", return_value="y"),
-            redirect_stdout(io.StringIO()),
+            redirect_stdout(output),
         ):
             self.assertEqual(PUBLISH.main(), 0)
 
         preflight.assert_not_called()
+        verify_gate.assert_not_called()
+        self.assertIn("explicitly bypassed", output.getvalue())
+        self.assertIn("DANGEROUSLY SKIPPED", output.getvalue())
 
     def test_source_change_during_preflight_refuses_to_load_or_publish(self):
-        argv = ["publish.py", "--crates", "dear-imgui-sys", "--wait", "0"]
+        argv = [
+            "publish.py",
+            "--crates",
+            "dear-imgui-sys",
+            "--wait",
+            "0",
+            "--release-gate-result",
+            "gate-result.json",
+        ]
         with (
             patch.object(PUBLISH.sys, "argv", argv),
             patch.object(PUBLISH, "capture_release_fingerprint", return_value="head"),
-            patch.object(PUBLISH, "verify_release_fingerprint", return_value=False),
-            patch.object(PUBLISH, "run_release_preflight", return_value=0),
+            patch.object(
+                PUBLISH,
+                "verify_release_fingerprint",
+                side_effect=[True, False],
+            ) as fingerprint,
+            patch.object(PUBLISH, "verify_release_gate_result", return_value=0),
+            patch.object(
+                PUBLISH, "run_release_preflight", return_value=0
+            ) as preflight,
             patch.object(PUBLISH, "load_workspace_metadata") as load_metadata,
             patch.object(PUBLISH, "publish_crate") as publish_crate,
             redirect_stdout(io.StringIO()),
@@ -548,6 +690,8 @@ class PublishCommandTests(unittest.TestCase):
         ):
             self.assertEqual(PUBLISH.main(), 1)
 
+        preflight.assert_called_once_with(REPO_ROOT)
+        self.assertEqual(fingerprint.call_count, 2)
         load_metadata.assert_not_called()
         publish_crate.assert_not_called()
 
@@ -706,6 +850,132 @@ class PrepublishTests(unittest.TestCase):
 
         self.assertNotIn("--no-verify", script)
         self.assertIn("Create every publishable workspace source archive", script)
+
+    def test_strict_release_contract_commands_are_deterministic(self):
+        self.assertEqual(
+            PREPUBLISH.release_contract_commands(),
+            [
+                (
+                    "Python contract suite",
+                    [
+                        sys.executable,
+                        "-B",
+                        "-m",
+                        "unittest",
+                        "discover",
+                        "-s",
+                        "tools/tests",
+                        "-p",
+                        "test_*.py",
+                    ],
+                ),
+                (
+                    "API surface policy",
+                    [sys.executable, "tools/api_surface_report.py", "--check"],
+                ),
+                (
+                    "Workflow policy",
+                    [sys.executable, "tools/ci/workflow_policy.py", "--check"],
+                ),
+                (
+                    "WASM core and high-level extensions",
+                    [
+                        "cargo",
+                        "check",
+                        "--target",
+                        "wasm32-unknown-unknown",
+                        "--no-default-features",
+                        "-p",
+                        "dear-imgui-rs",
+                        "-p",
+                        "dear-implot",
+                        "-p",
+                        "dear-implot3d",
+                        "-p",
+                        "dear-imnodes",
+                        "-p",
+                        "dear-imguizmo",
+                        "-p",
+                        "dear-imguizmo-quat",
+                        "--features",
+                        "dear-imgui-rs/wasm,dear-implot/wasm,"
+                        "dear-implot3d/wasm,dear-imnodes/wasm,"
+                        "dear-imguizmo/wasm,dear-imguizmo-quat/wasm",
+                    ],
+                ),
+            ],
+        )
+
+    def test_release_contract_gate_stops_on_first_failed_command(self):
+        with (
+            patch.object(
+                PREPUBLISH,
+                "run_command",
+                side_effect=[(0, "", ""), (23, "", "API drift")],
+            ) as run,
+            redirect_stdout(io.StringIO()),
+        ):
+            success, errors = PREPUBLISH.check_release_contracts(Path("/repo"))
+
+        self.assertFalse(success)
+        self.assertEqual(errors, ["API surface policy failed: API drift"])
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(
+            run.call_args_list[-1].args[0],
+            [sys.executable, "tools/api_surface_report.py", "--check"],
+        )
+
+    def test_release_contract_gate_runs_every_owned_command_in_order(self):
+        expected = PREPUBLISH.release_contract_commands()
+        with (
+            patch.object(
+                PREPUBLISH,
+                "run_command",
+                return_value=(0, "", ""),
+            ) as run,
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(
+                PREPUBLISH.check_release_contracts(Path("/repo")),
+                (True, []),
+            )
+
+        self.assertEqual(
+            [call.args[0] for call in run.call_args_list],
+            [command for _label, command in expected],
+        )
+        for call in run.call_args_list:
+            self.assertEqual(
+                call.kwargs,
+                {"cwd": Path("/repo"), "capture": False},
+            )
+
+    def test_default_prepublish_includes_release_contract_gate(self):
+        passing = (True, [])
+        with (
+            patch.object(PREPUBLISH.sys, "argv", ["pre_publish_check.py"]),
+            patch.object(
+                PREPUBLISH,
+                "read_locked_workspace_metadata",
+                return_value=(self.metadata, passing),
+            ),
+            patch.object(PREPUBLISH, "check_core_source_contract", return_value=passing),
+            patch.object(PREPUBLISH, "check_core_binding_contract", return_value=passing),
+            patch.object(PREPUBLISH, "check_version_consistency", return_value=passing),
+            patch.object(PREPUBLISH, "check_pregenerated_bindings", return_value=passing),
+            patch.object(PREPUBLISH, "check_git_status", return_value=passing),
+            patch.object(PREPUBLISH, "check_changelog_release_notes", return_value=passing),
+            patch.object(PREPUBLISH, "check_docs_build", return_value=passing),
+            patch.object(
+                PREPUBLISH, "check_release_contracts", return_value=passing
+            ) as release_contracts,
+            patch.object(PREPUBLISH, "check_tests", return_value=passing),
+            patch.object(PREPUBLISH, "check_packaged_core", return_value=passing),
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(PREPUBLISH.main(), 0)
+
+        release_contracts.assert_called_once_with(REPO_ROOT)
 
     def test_nextest_release_tests_are_per_package_and_cover_integrations(self):
         commands = PREPUBLISH.release_test_commands(use_nextest=True)

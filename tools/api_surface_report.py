@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import re
 import sys
@@ -38,6 +39,7 @@ DEAR_IMGUI_SRC = REPO_ROOT / "dear-imgui" / "src"
 MANIFEST_TOML = REPO_ROOT / "dear-imgui-sys" / "Cargo.toml"
 POLICY_JSON = REPO_ROOT / "tools" / "api_surface_policy.json"
 SNAPSHOT_JSON = REPO_ROOT / "tools" / "api_surface_snapshot.json"
+REPOSITORY_MANIFEST = REPO_ROOT / "Cargo.toml"
 
 POLICY_CLASSIFICATIONS = frozenset(
     {"intentional-sys-only", "unsafe-wrapper", "deferred-design"}
@@ -74,6 +76,100 @@ DECLARATION_TRAITS = (
     "templated",
 )
 REVISION_RE = re.compile(r"[0-9a-f]{40}")
+
+
+@dataclass(frozen=True)
+class RemovedSourceRule:
+    rule: str
+    match: str
+    symbols: tuple[str, ...]
+    package: str | None = None
+
+
+# This is the frozen, unreleased 0.16 removal inventory. Matching is token based:
+# comments, documentation, and string literals cannot satisfy or violate a rule.
+REMOVED_SOURCE_RULES = (
+    RemovedSourceRule("context-frame-with", "identifier", ("frame_with",)),
+    RemovedSourceRule("renderer-compat-path", "path", ("render", "renderer")),
+    RemovedSourceRule(
+        "renderer-compat-module",
+        "public-module",
+        ("renderer",),
+        package="dear-imgui-rs",
+    ),
+    RemovedSourceRule("glyph-ranges-builder", "identifier", ("GlyphRangesBuilder",)),
+    RemovedSourceRule("glyph-ranges-type", "type-identifier", ("GlyphRanges",)),
+    RemovedSourceRule("glyph-ranges-path", "path", ("fonts", "glyph_ranges")),
+    RemovedSourceRule(
+        "glyph-ranges-module",
+        "public-module",
+        ("glyph_ranges",),
+        package="dear-imgui-rs",
+    ),
+    RemovedSourceRule("selectable-new", "associated", ("Selectable", "new")),
+    RemovedSourceRule("horizontal-slider-new", "associated", ("Slider", "new")),
+    RemovedSourceRule("input-flags", "identifier", ("InputFlags",)),
+    RemovedSourceRule("arrow-direction", "identifier", ("ArrowDirection",)),
+    RemovedSourceRule("texture-data-new", "associated", ("TextureData", "new")),
+    RemovedSourceRule("create-texture-ref", "identifier", ("create_texture_ref",)),
+    RemovedSourceRule("wgpu-texture-manager-mut", "identifier", ("texture_manager_mut",)),
+    RemovedSourceRule("sdl3-update-gp3-texture", "identifier", ("update_gp3_texture",)),
+    RemovedSourceRule(
+        "sdl3-init-for-platform-sdl-gpu",
+        "identifier",
+        ("init_for_platform_sdl_gpu",),
+    ),
+    RemovedSourceRule("into-imgui-error", "identifier", ("IntoImGuiError",)),
+    RemovedSourceRule("into-imgui-error-method", "identifier", ("into_imgui_error",)),
+    RemovedSourceRule("safe-compat-ffi", "identifier", ("compat_ffi",)),
+    RemovedSourceRule(
+        "implot3d-validation-helpers",
+        "public-item",
+        ("validate_nonempty", "validate_lengths", "validate_multiple"),
+        package="dear-implot3d",
+    ),
+    RemovedSourceRule("examples-sdl3-backends", "cargo-feature", ("sdl3-backends",)),
+)
+
+REMOVED_SAFE_EXTERN_SYMBOLS = frozenset(
+    {
+        "ImPlot_Annotation_Str0",
+        "ImPlot_GetPlotPos",
+        "ImPlot_GetPlotSize",
+        "ImPlot_TagX_Str0",
+        "ImPlot_TagY_Str0",
+        "ImPlot3D_GetColormapColor",
+        "ImPlot3D_GetPlotRectPos",
+        "ImPlot3D_GetPlotRectSize",
+        "ImPlot3D_NextColormapColor",
+        "ImPlot3D_PlotToPixels_double",
+        "imnodes_EditorContextGetPanning",
+        "imnodes_GetNodeDimensions",
+        "imnodes_GetNodeEditorSpacePos",
+        "imnodes_GetNodeScreenSpacePos",
+    }
+)
+
+
+def _compile_source_policy_candidate_pattern() -> re.Pattern[str]:
+    alternatives = [r"\bextern\b"]
+    for rule in REMOVED_SOURCE_RULES:
+        if rule.match == "cargo-feature":
+            continue
+        if rule.match in {"path", "associated"}:
+            alternatives.append(
+                r"\b"
+                + r"\s*::\s*".join(re.escape(symbol) for symbol in rule.symbols)
+                + r"\b"
+            )
+            if rule.match == "associated":
+                alternatives.append(rf"\b{re.escape(rule.symbols[0])}\b")
+            continue
+        alternatives.extend(rf"\b{re.escape(symbol)}\b" for symbol in rule.symbols)
+    return re.compile("|".join(alternatives))
+
+
+SOURCE_POLICY_CANDIDATE_RE = _compile_source_policy_candidate_pattern()
 
 
 class InputError(ValueError):
@@ -149,6 +245,25 @@ class SnapshotDrift:
 
 
 @dataclass(frozen=True)
+class MaintainedPackage:
+    name: str
+    root: pathlib.Path
+    manifest: pathlib.Path
+    is_sys: bool
+    rust_files: tuple[pathlib.Path, ...]
+
+
+@dataclass(frozen=True)
+class SourcePolicyViolation:
+    rule: str
+    category: str
+    symbol: str
+    package: str
+    path: pathlib.Path
+    line: int
+
+
+@dataclass(frozen=True)
 class _RustToken:
     kind: str
     value: str
@@ -162,6 +277,17 @@ def _read_json(path: pathlib.Path, description: str) -> Any:
         return json.loads(text)
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
         raise InputError(f"failed to read {description} {path}: {error}") from error
+
+
+def _read_toml(path: pathlib.Path, description: str) -> dict[str, Any]:
+    try:
+        with path.open("rb") as toml_file:
+            value = tomllib.load(toml_file)
+    except (OSError, tomllib.TOMLDecodeError) as error:
+        raise InputError(f"failed to read {description} {path}: {error}") from error
+    if not isinstance(value, dict):
+        raise InputError(f"{description} {path} must be a TOML table")
+    return value
 
 
 def _exact_keys(value: dict[str, Any], expected: frozenset[str], context: str) -> None:
@@ -477,24 +603,91 @@ def _raw_string_end(source: str, start: int) -> int | None:
 
 
 def _decode_rust_string(literal: str) -> str:
-    prefix_len = 1 if literal.startswith("b\"") else 0
-    raw_start = prefix_len
+    is_byte = literal.startswith(("b\"", "br", "rb"))
     if literal.startswith(("r", "br", "rb")):
         marker = literal.find('"')
-        hashes = marker - raw_start - 1
-        if literal.startswith(("br", "rb")):
-            hashes -= 1
-        terminator_len = hashes + 1
-        return literal[marker + 1 : -terminator_len]
-    quoted = literal[prefix_len:]
-    quoted = re.sub(r"\\\r?\n[ \t]*", "", quoted)
-    try:
-        return json.loads(quoted)
-    except json.JSONDecodeError:
-        # Token boundaries are what matter for source reachability. Rust has a
-        # few escapes (for example ``\u{...}``) that JSON does not understand;
-        # doc aliases in this crate use ordinary quoted or raw strings.
-        return quoted[1:-1]
+        prefix_length = 2 if literal.startswith(("br", "rb")) else 1
+        if marker < prefix_length:
+            raise InputError("malformed raw Rust string literal")
+        hashes = marker - prefix_length
+        terminator = '"' + ("#" * hashes)
+        if not literal.endswith(terminator):
+            raise InputError("unterminated raw Rust string literal")
+        return literal[marker + 1 : -len(terminator)]
+
+    prefix_length = 1 if is_byte else 0
+    if (
+        len(literal) < prefix_length + 2
+        or literal[prefix_length] != '"'
+        or not literal.endswith('"')
+    ):
+        raise InputError("unterminated cooked Rust string literal")
+    content = literal[prefix_length + 1 : -1]
+    decoded: list[str] = []
+    index = 0
+    common_escapes = {
+        "0": "\0",
+        "t": "\t",
+        "n": "\n",
+        "r": "\r",
+        '"': '"',
+        "'": "'",
+        "\\": "\\",
+    }
+    while index < len(content):
+        if content[index] != "\\":
+            decoded.append(content[index])
+            index += 1
+            continue
+        index += 1
+        if index >= len(content):
+            raise InputError("truncated escape in Rust string literal")
+        escape = content[index]
+        if escape in common_escapes:
+            decoded.append(common_escapes[escape])
+            index += 1
+            continue
+        if escape in {"\n", "\r"}:
+            if escape == "\r":
+                if index + 1 >= len(content) or content[index + 1] != "\n":
+                    raise InputError("bare carriage return in Rust string continuation")
+                index += 1
+            index += 1
+            while index < len(content) and content[index].isspace():
+                index += 1
+            continue
+        if escape == "x":
+            digits = content[index + 1 : index + 3]
+            if len(digits) != 2 or re.fullmatch(r"[0-9A-Fa-f]{2}", digits) is None:
+                raise InputError("malformed \\xNN escape in Rust string literal")
+            value = int(digits, 16)
+            if not is_byte and value > 0x7F:
+                raise InputError("non-ASCII \\xNN escape in Rust string literal")
+            decoded.append(chr(value))
+            index += 3
+            continue
+        if escape == "u":
+            if is_byte:
+                raise InputError("Unicode escape in byte Rust string literal")
+            if index + 1 >= len(content) or content[index + 1] != "{":
+                raise InputError("malformed Unicode escape in Rust string literal")
+            closing = content.find("}", index + 2)
+            if closing < 0:
+                raise InputError("unterminated Unicode escape in Rust string literal")
+            raw_digits = content[index + 2 : closing]
+            if not raw_digits or re.fullmatch(r"[0-9A-Fa-f_]+", raw_digits) is None:
+                raise InputError("malformed Unicode escape in Rust string literal")
+            digits = raw_digits.replace("_", "")
+            if not 1 <= len(digits) <= 6:
+                raise InputError("malformed Unicode escape in Rust string literal")
+            value = int(digits, 16)
+            if value > 0x10FFFF or 0xD800 <= value <= 0xDFFF:
+                raise InputError("invalid Unicode scalar in Rust string literal")
+            decoded.append(chr(value))
+            index = closing + 1
+            continue
+        raise InputError(f"unsupported Rust string escape \\{escape}")
+    return "".join(decoded)
 
 
 def _tokenize_rust(source: str) -> list[_RustToken]:
@@ -545,6 +738,17 @@ def _tokenize_rust(source: str) -> list[_RustToken]:
                 tokens.append(_RustToken("char", "", index, end))
                 index = end
                 continue
+        if (
+            source.startswith("r#", index)
+            and index + 2 < len(source)
+            and (source[index + 2].isalpha() or source[index + 2] == "_")
+        ):
+            end = index + 3
+            while end < len(source) and (source[end].isalnum() or source[end] == "_"):
+                end += 1
+            tokens.append(_RustToken("ident", source[index + 2 : end], index, end))
+            index = end
+            continue
         if char.isalpha() or char == "_":
             end = index + 1
             while end < len(source) and (source[end].isalnum() or source[end] == "_"):
@@ -646,6 +850,498 @@ def _private_module_ranges(tokens: Sequence[_RustToken]) -> list[tuple[int, int]
 
 def _inside_ranges(offset: int, ranges: Sequence[tuple[int, int]]) -> bool:
     return any(start <= offset < end for start, end in ranges)
+
+
+def _is_maintained_repository_path(path: pathlib.Path, root: pathlib.Path) -> bool:
+    try:
+        relative = path.relative_to(root)
+    except ValueError:
+        return False
+    excluded = {".git", "repo-ref", "target", "third-party"}
+    return not any(part in excluded for part in relative.parts)
+
+
+def _walk_repository_files(
+    root: pathlib.Path, *, name: str | None = None, suffix: str | None = None
+) -> Iterable[pathlib.Path]:
+    excluded = {".git", "repo-ref", "target", "third-party"}
+    for current, directories, files in os.walk(root):
+        directories[:] = sorted(
+            directory for directory in directories if directory not in excluded
+        )
+        for filename in sorted(files):
+            if name is not None and filename != name:
+                continue
+            if suffix is not None and not filename.endswith(suffix):
+                continue
+            yield pathlib.Path(current) / filename
+
+
+def _load_maintained_packages(
+    repository_manifest: pathlib.Path,
+) -> tuple[pathlib.Path, tuple[MaintainedPackage, ...]]:
+    repository_manifest = repository_manifest.resolve()
+    repository_root = repository_manifest.parent
+    _read_toml(repository_manifest, "repository manifest")
+
+    packages: list[tuple[str, pathlib.Path, pathlib.Path, bool]] = []
+    for manifest in _walk_repository_files(repository_root, name="Cargo.toml"):
+        document = _read_toml(manifest, "package manifest")
+        package = document.get("package")
+        if package is None:
+            continue
+        if not isinstance(package, dict):
+            raise InputError(f"package table in {manifest} must be a TOML table")
+        name = package.get("name")
+        if not isinstance(name, str) or not name:
+            raise InputError(f"package.name in {manifest} must be a non-empty string")
+        packages.append((name, manifest.parent, manifest, name.endswith("-sys")))
+
+    if not packages:
+        raise InputError(
+            f"repository rooted at {repository_root} contains no maintained packages"
+        )
+
+    package_roots = {root for _, root, _, _ in packages}
+    rust_files_by_root: dict[pathlib.Path, list[pathlib.Path]] = {
+        root: [] for root in package_roots
+    }
+    for path in _walk_repository_files(repository_root, suffix=".rs"):
+        owners = [root for root in package_roots if root in path.parents]
+        if not owners:
+            continue
+        owner = max(owners, key=lambda root: len(root.parts))
+        rust_files_by_root[owner].append(path)
+
+    maintained: list[MaintainedPackage] = []
+    for name, package_root, manifest, is_sys in packages:
+        maintained.append(
+            MaintainedPackage(
+                name=name,
+                root=package_root,
+                manifest=manifest,
+                is_sys=is_sys,
+                rust_files=tuple(sorted(rust_files_by_root[package_root])),
+            )
+        )
+    return repository_root, tuple(
+        sorted(maintained, key=lambda package: (package.name, str(package.root)))
+    )
+
+
+def _foreign_function_declarations(
+    tokens: Sequence[_RustToken],
+) -> list[tuple[str, _RustToken]]:
+    brace_matches = _matching_braces(tokens)
+    declarations: list[tuple[str, _RustToken]] = []
+    for index, token in enumerate(tokens):
+        if token.value != "extern":
+            continue
+        cursor = index + 1
+        if cursor < len(tokens) and tokens[cursor].kind == "string":
+            cursor += 1
+        if (
+            cursor >= len(tokens)
+            or tokens[cursor].value != "{"
+            or cursor not in brace_matches
+        ):
+            continue
+        end = brace_matches[cursor]
+        item = cursor + 1
+        link_name: str | None = None
+        while item < end:
+            attribute_end = _attribute_end(tokens, item)
+            if attribute_end is not None:
+                attribute = tokens[item + 2 : attribute_end - 1]
+                for attribute_index in range(0, len(attribute) - 2):
+                    if (
+                        attribute[attribute_index].value == "link_name"
+                        and attribute[attribute_index + 1].value == "="
+                        and attribute[attribute_index + 2].kind == "string"
+                    ):
+                        link_name = attribute[attribute_index + 2].value
+                item = attribute_end
+                continue
+            if (
+                tokens[item].value == "fn"
+                and item + 1 < end
+                and tokens[item + 1].kind == "ident"
+            ):
+                name_token = tokens[item + 1]
+                declarations.append((name_token.value, name_token))
+                if link_name is not None and link_name != name_token.value:
+                    declarations.append((link_name, name_token))
+                link_name = None
+            item += 1
+    return declarations
+
+
+def _path_token_values(segments: Sequence[str]) -> tuple[str, ...]:
+    values: list[str] = []
+    for segment in segments:
+        if values:
+            values.extend((":", ":"))
+        values.append(segment)
+    return tuple(values)
+
+
+def _find_token_sequence(
+    tokens: Sequence[_RustToken], values: Sequence[str]
+) -> list[_RustToken]:
+    if not values:
+        return []
+    width = len(values)
+    return [
+        tokens[index]
+        for index in range(0, len(tokens) - width + 1)
+        if tuple(token.value for token in tokens[index : index + width])
+        == tuple(values)
+    ]
+
+
+def _public_items(tokens: Sequence[_RustToken]) -> list[tuple[str, str, _RustToken]]:
+    private_ranges = _private_module_ranges(tokens)
+    item_keywords = {
+        "const",
+        "enum",
+        "fn",
+        "macro",
+        "mod",
+        "static",
+        "struct",
+        "trait",
+        "type",
+        "union",
+        "use",
+    }
+    items: list[tuple[str, str, _RustToken]] = []
+    for index, token in enumerate(tokens):
+        if token.value != "pub" or _inside_ranges(token.start, private_ranges):
+            continue
+        cursor = index + 1
+        if cursor < len(tokens) and tokens[cursor].value == "(":
+            continue
+        while cursor < len(tokens) and tokens[cursor].value not in item_keywords:
+            cursor += 1
+        if cursor >= len(tokens):
+            continue
+        kind = tokens[cursor].value
+        if kind == "use":
+            cursor += 1
+            while cursor < len(tokens) and tokens[cursor].value != ";":
+                if tokens[cursor].kind == "ident":
+                    items.append(("use", tokens[cursor].value, tokens[cursor]))
+                cursor += 1
+            continue
+        if cursor + 1 < len(tokens) and tokens[cursor + 1].kind == "ident":
+            name_token = tokens[cursor + 1]
+            items.append((kind, name_token.value, name_token))
+    return items
+
+
+def _associated_item_definitions(
+    tokens: Sequence[_RustToken], owner: str, member: str
+) -> list[_RustToken]:
+    brace_matches = _matching_braces(tokens)
+    definitions: list[_RustToken] = []
+    for index, token in enumerate(tokens):
+        if token.value != "impl":
+            continue
+        cursor = index + 1
+        while cursor < len(tokens) and tokens[cursor].value not in {"{", ";"}:
+            cursor += 1
+        if (
+            cursor >= len(tokens)
+            or tokens[cursor].value != "{"
+            or cursor not in brace_matches
+        ):
+            continue
+        header = tokens[index + 1 : cursor]
+        if not any(part.kind == "ident" and part.value == owner for part in header):
+            continue
+        end = brace_matches[cursor]
+        item = cursor + 1
+        while item < end:
+            if tokens[item].value != "pub":
+                item += 1
+                continue
+            after_pub = item + 1
+            if after_pub < end and tokens[after_pub].value == "(":
+                item += 1
+                continue
+            while after_pub < end and tokens[after_pub].value != "fn":
+                if tokens[after_pub].value in {";", "{", "}"}:
+                    break
+                after_pub += 1
+            if (
+                after_pub + 1 < end
+                and tokens[after_pub].value == "fn"
+                and tokens[after_pub + 1].value == member
+            ):
+                definitions.append(tokens[after_pub + 1])
+            item += 1
+    return definitions
+
+
+def _manifest_defines_or_references_feature(
+    document: dict[str, Any], feature: str
+) -> bool:
+    features = document.get("features")
+    if not isinstance(features, dict):
+        return False
+    if feature in features:
+        return True
+    for values in features.values():
+        if not isinstance(values, list):
+            continue
+        for value in values:
+            if not isinstance(value, str):
+                continue
+            if value == feature or value.rsplit("/", 1)[-1] == feature:
+                return True
+    return False
+
+
+def _line_number(source: str, token: _RustToken) -> int:
+    return source.count("\n", 0, token.start) + 1
+
+
+def _audit_source_policy(
+    repository_manifest: pathlib.Path,
+) -> tuple[pathlib.Path, tuple[MaintainedPackage, ...], tuple[SourcePolicyViolation, ...]]:
+    repository_root, packages = _load_maintained_packages(repository_manifest)
+    source_cache: dict[pathlib.Path, str] = {}
+    token_cache: dict[pathlib.Path, tuple[str, list[_RustToken]]] = {}
+
+    def source_for(path: pathlib.Path) -> str:
+        if path not in source_cache:
+            try:
+                source_cache[path] = path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as error:
+                raise InputError(f"failed to read Rust source {path}: {error}") from error
+        return source_cache[path]
+
+    def tokens_for(path: pathlib.Path) -> tuple[str, list[_RustToken]]:
+        if path not in token_cache:
+            source = source_for(path)
+            token_cache[path] = source, _tokenize_rust(source)
+        return token_cache[path]
+
+    safe_foreign_declarations: dict[
+        tuple[str, pathlib.Path], list[tuple[str, _RustToken]]
+    ] = {}
+    safe_foreign_names: set[str] = set()
+    for package in packages:
+        if package.is_sys:
+            continue
+        for path in package.rust_files:
+            if SOURCE_POLICY_CANDIDATE_RE.search(source_for(path)) is None:
+                continue
+            _, tokens = tokens_for(path)
+            declarations = _foreign_function_declarations(tokens)
+            safe_foreign_declarations[(package.name, path)] = declarations
+            safe_foreign_names.update(name for name, _ in declarations)
+
+    raw_sys_declarations: set[str] = set()
+    if safe_foreign_names:
+        candidate_pattern = re.compile(
+            r"\b(?:"
+            + "|".join(re.escape(name) for name in sorted(safe_foreign_names))
+            + r")\b"
+        )
+        for package in packages:
+            if not package.is_sys:
+                continue
+            for path in package.rust_files:
+                source = source_for(path)
+                if candidate_pattern.search(source) is None:
+                    continue
+                _, tokens = tokens_for(path)
+                raw_sys_declarations.update(
+                    name
+                    for name, _ in _foreign_function_declarations(tokens)
+                    if name in safe_foreign_names
+                )
+
+    violations: list[SourcePolicyViolation] = []
+
+    def add_violation(
+        rule: str,
+        category: str,
+        symbol: str,
+        package: MaintainedPackage,
+        path: pathlib.Path,
+        source: str,
+        token: _RustToken,
+    ) -> None:
+        violations.append(
+            SourcePolicyViolation(
+                rule=rule,
+                category=category,
+                symbol=symbol,
+                package=package.name,
+                path=path,
+                line=_line_number(source, token),
+            )
+        )
+
+    for package in packages:
+        if package.is_sys:
+            continue
+        for path in package.rust_files:
+            if (package.name, path) not in safe_foreign_declarations:
+                continue
+            source, tokens = tokens_for(path)
+            public_items = _public_items(tokens)
+            for rule in REMOVED_SOURCE_RULES:
+                if rule.match == "cargo-feature":
+                    continue
+                if rule.package is not None and rule.package != package.name:
+                    continue
+                if rule.match == "identifier":
+                    for token in tokens:
+                        if token.kind == "ident" and token.value in rule.symbols:
+                            add_violation(
+                                rule.rule,
+                                rule.match,
+                                token.value,
+                                package,
+                                path,
+                                source,
+                                token,
+                            )
+                elif rule.match == "type-identifier":
+                    for index, token in enumerate(tokens):
+                        if token.kind != "ident" or token.value not in rule.symbols:
+                            continue
+                        if index > 0 and tokens[index - 1].value == ".":
+                            continue
+                        add_violation(
+                            rule.rule,
+                            rule.match,
+                            token.value,
+                            package,
+                            path,
+                            source,
+                            token,
+                        )
+                elif rule.match == "path":
+                    values = _path_token_values(rule.symbols)
+                    for token in _find_token_sequence(tokens, values):
+                        add_violation(
+                            rule.rule,
+                            rule.match,
+                            "::".join(rule.symbols),
+                            package,
+                            path,
+                            source,
+                            token,
+                        )
+                elif rule.match == "associated":
+                    owner, member = rule.symbols
+                    values = _path_token_values((owner, member))
+                    for token in _find_token_sequence(tokens, values):
+                        add_violation(
+                            rule.rule,
+                            rule.match,
+                            f"{owner}::{member}",
+                            package,
+                            path,
+                            source,
+                            token,
+                        )
+                    for token in _associated_item_definitions(tokens, owner, member):
+                        add_violation(
+                            rule.rule,
+                            rule.match,
+                            f"{owner}::{member}",
+                            package,
+                            path,
+                            source,
+                            token,
+                        )
+                elif rule.match == "public-module":
+                    for kind, name, token in public_items:
+                        if kind in {"mod", "use"} and name in rule.symbols:
+                            add_violation(
+                                rule.rule,
+                                rule.match,
+                                name,
+                                package,
+                                path,
+                                source,
+                                token,
+                            )
+                elif rule.match == "public-item":
+                    for _, name, token in public_items:
+                        if name in rule.symbols:
+                            add_violation(
+                                rule.rule,
+                                rule.match,
+                                name,
+                                package,
+                                path,
+                                source,
+                                token,
+                            )
+                else:
+                    raise InputError(
+                        f"source policy rule {rule.rule!r} has unknown matcher {rule.match!r}"
+                    )
+
+            for name, token in safe_foreign_declarations[(package.name, path)]:
+                if name in raw_sys_declarations or name in REMOVED_SAFE_EXTERN_SYMBOLS:
+                    add_violation(
+                        "duplicate-safe-extern",
+                        "duplicate-safe-extern",
+                        name,
+                        package,
+                        path,
+                        source,
+                        token,
+                    )
+
+        manifest_document = _read_toml(package.manifest, "package manifest")
+        for rule in REMOVED_SOURCE_RULES:
+            if rule.match != "cargo-feature":
+                continue
+            if rule.package is not None and rule.package != package.name:
+                continue
+            feature = rule.symbols[0]
+            if _manifest_defines_or_references_feature(manifest_document, feature):
+                violations.append(
+                    SourcePolicyViolation(
+                        rule=rule.rule,
+                        category=rule.match,
+                        symbol=feature,
+                        package=package.name,
+                        path=package.manifest,
+                        line=1,
+                    )
+                )
+
+    unique = {
+        (
+            violation.rule,
+            violation.category,
+            violation.symbol,
+            violation.package,
+            violation.path,
+            violation.line,
+        ): violation
+        for violation in violations
+    }
+    return repository_root, packages, tuple(
+        sorted(
+            unique.values(),
+            key=lambda violation: (
+                str(violation.path),
+                violation.line,
+                violation.rule,
+                violation.symbol,
+            ),
+        )
+    )
 
 
 def _collect_doc_aliases(rs_files: Iterable[pathlib.Path]) -> set[str]:
@@ -836,6 +1532,25 @@ def _print_snapshot_drift(drift: SnapshotDrift) -> None:
                 print(f"- {symbol}", file=sys.stderr)
 
 
+def _print_source_policy_violations(
+    repository_root: pathlib.Path,
+    violations: Sequence[SourcePolicyViolation],
+) -> None:
+    if not violations:
+        return
+    print("Removed API/source policy violations:", file=sys.stderr)
+    for violation in violations:
+        try:
+            path = violation.path.relative_to(repository_root).as_posix()
+        except ValueError:
+            path = violation.path.as_posix()
+        print(
+            f"- [{violation.rule}/{violation.category}] {violation.symbol} "
+            f"in {violation.package} at {path}:{violation.line}",
+            file=sys.stderr,
+        )
+
+
 def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--format", choices=["md", "plain"], default="plain")
@@ -846,9 +1561,18 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--policy", type=pathlib.Path, default=POLICY_JSON)
     parser.add_argument("--snapshot", type=pathlib.Path, default=SNAPSHOT_JSON)
     parser.add_argument(
+        "--repository-manifest",
+        type=pathlib.Path,
+        default=REPOSITORY_MANIFEST,
+        help="repository Cargo.toml used to discover maintained safe and sys crates",
+    )
+    parser.add_argument(
         "--check",
         action="store_true",
-        help="fail on generator drift or an unreviewed top-level ImGui function",
+        help=(
+            "fail on generator drift, an unreviewed top-level ImGui function, "
+            "or a removed source contract"
+        ),
     )
     parser.add_argument(
         "--update-snapshot",
@@ -885,6 +1609,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         aliases = _collect_doc_aliases(rs_files)
         policy = _load_policy(args.policy)
         audit = _audit_surface(groups, aliases, policy)
+        repository_root, packages, source_violations = _audit_source_policy(
+            args.repository_manifest
+        )
     except InputError as error:
         print(f"API surface input error: {error}", file=sys.stderr)
         return 2
@@ -897,6 +1624,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Top-level ImGui funcnames: {len(groups)}")
         print(f"Covered via public safe rustdoc aliases: {len(audit.aliased)}")
         print(f"Classified via explicit policy: {len(audit.policy_decided)}")
+        print(f"Maintained Cargo packages checked: {len(packages)}")
+        print(f"Removed source contract violations: {len(source_violations)}")
         if drift.has_drift():
             _print_snapshot_drift(drift)
         if audit.unexpected:
@@ -907,9 +1636,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("Stale API surface policy entries:", file=sys.stderr)
             for name in sorted(audit.stale_policy):
                 print(f"- {name}", file=sys.stderr)
-        if drift.has_drift() or audit.unexpected or audit.stale_policy:
+        _print_source_policy_violations(repository_root, source_violations)
+        if (
+            drift.has_drift()
+            or audit.unexpected
+            or audit.stale_policy
+            or source_violations
+        ):
             return 1
-        print("API surface policy and generator snapshot checks passed.")
+        print("API surface, generator snapshot, and removed source checks passed.")
         return 0
 
     if args.format == "md":
@@ -925,6 +1660,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"Top-level ImGui funcnames: {len(groups)}")
     print(f"Covered via public safe rustdoc aliases: {len(audit.aliased)}")
     print(f"Classified via explicit policy: {len(audit.policy_decided)}")
+    print(f"Maintained Cargo packages checked: {len(packages)}")
+    print(f"Removed source contract violations: {len(source_violations)}")
     print(f"Referenced via sys usage (informational): {covered_by_sys}")
     print(f"Generator snapshot drift: {drift.has_drift()}")
     print(f"Unexpected missing decisions: {len(audit.unexpected)}")

@@ -1,4 +1,73 @@
-use super::{Context, binding::with_bound_context};
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
+
+use super::{
+    Context, ContextAttachment, ContextAttachmentError, ContextAttachmentRole, ContextBindingError,
+    ContextDestroyed, ContextTeardown, binding::with_bound_context,
+};
+
+struct PlatformMarker;
+struct RendererMarker;
+struct ExtensionMarker;
+struct PanickingExtensionMarker;
+
+struct RecordingAttachment {
+    log: Rc<RefCell<Vec<&'static str>>>,
+    binding: Option<super::ContextBinding>,
+    ordinary_rejected: Rc<Cell<bool>>,
+    teardown_bound: Rc<Cell<bool>>,
+    panic_during_quiesce: bool,
+}
+
+impl RecordingAttachment {
+    fn new(log: Rc<RefCell<Vec<&'static str>>>) -> Self {
+        Self {
+            log,
+            binding: None,
+            ordinary_rejected: Rc::new(Cell::new(false)),
+            teardown_bound: Rc::new(Cell::new(false)),
+            panic_during_quiesce: false,
+        }
+    }
+}
+
+impl ContextAttachment for RecordingAttachment {
+    fn quiesce(&self, context: &ContextTeardown<'_>) {
+        assert_eq!(context.phase(), super::ContextAttachmentPhase::Quiesce);
+        if let Some(binding) = &self.binding {
+            self.ordinary_rejected.set(matches!(
+                binding.try_with_bound_context(|| ()),
+                Err(ContextBindingError::Dropping)
+            ));
+            context.with_bound_context(|| {
+                self.teardown_bound
+                    .set(unsafe { crate::sys::igGetCurrentContext() } == context.as_raw_for_test());
+            });
+        }
+        self.log.borrow_mut().push("quiesce");
+        assert!(!self.panic_during_quiesce, "attachment panic");
+    }
+
+    fn release_renderer_resources(&self, context: &ContextTeardown<'_>) {
+        assert_eq!(
+            context.phase(),
+            super::ContextAttachmentPhase::RendererResources
+        );
+        self.log.borrow_mut().push("renderer");
+    }
+
+    fn release_platform_windows(&self, context: &ContextTeardown<'_>) {
+        assert_eq!(
+            context.phase(),
+            super::ContextAttachmentPhase::PlatformWindows
+        );
+        self.log.borrow_mut().push("platform");
+    }
+
+    fn context_destroyed(&self, _context: ContextDestroyed) {
+        self.log.borrow_mut().push("post");
+    }
+}
 
 #[test]
 fn platform_io_shared_and_mut_views_match() {
@@ -98,6 +167,234 @@ fn with_bound_context_restores_previous_context_after_panic() {
 }
 
 #[test]
+fn context_binding_rejects_destroyed_context() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let ctx = Context::create();
+    let binding = ctx.binding();
+    let alive = ctx.alive_token();
+
+    assert!(binding.is_alive());
+    assert!(alive.is_alive());
+    drop(ctx);
+
+    assert!(!binding.is_alive());
+    assert!(!alive.is_alive());
+    assert!(matches!(
+        binding.try_with_bound_context(|| ()),
+        Err(ContextBindingError::NativeDestroyed)
+    ));
+}
+
+#[test]
+fn context_binding_identity_and_nested_restoration_are_stable() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let suspended_a = super::SuspendedContext::create();
+    let suspended_b = super::SuspendedContext::create();
+    let binding_a = suspended_a.0.binding();
+    let binding_b = suspended_b.0.binding();
+    let raw_a = suspended_a.0.as_raw();
+    let raw_b = suspended_b.0.as_raw();
+    let active = Context::create();
+    let active_raw = active.as_raw();
+
+    assert_ne!(binding_a.id(), binding_b.id());
+    assert_ne!(binding_a.id(), active.id());
+    binding_a.with_bound_context(|| {
+        assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw_a);
+        binding_b.with_bound_context(|| {
+            assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw_b);
+        });
+        assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw_a);
+    });
+    assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, active_raw);
+
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        binding_a.with_bound_context(|| {
+            binding_b.with_bound_context(|| panic!("forced nested binding panic"));
+        });
+    }));
+    assert!(panic.is_err());
+    assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, active_raw);
+    assert!(binding_b.try_with_bound_context(|| ()).is_ok());
+
+    drop(active);
+    drop(suspended_b);
+    drop(suspended_a);
+}
+
+#[test]
+fn binding_does_not_restore_a_previous_context_destroyed_inside_the_scope() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let active = Context::create();
+    let suspended = super::SuspendedContext::create();
+    let binding = suspended.0.binding();
+
+    binding.with_bound_context(|| drop(active));
+
+    assert!(unsafe { crate::sys::igGetCurrentContext() }.is_null());
+    let replacement = Context::create();
+    drop(replacement);
+    drop(suspended);
+}
+
+#[test]
+fn attachments_use_phased_teardown_and_reject_ordinary_binding() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut ctx = Context::create();
+    let log = Rc::new(RefCell::new(Vec::new()));
+
+    let platform = Rc::new(RecordingAttachment::new(Rc::clone(&log)));
+    let mut extension = RecordingAttachment::new(Rc::clone(&log));
+    let ordinary_rejected = Rc::clone(&extension.ordinary_rejected);
+    let teardown_bound = Rc::clone(&extension.teardown_bound);
+    extension.binding = Some(ctx.binding());
+    let extension = Rc::new(extension);
+    let renderer = Rc::new(RecordingAttachment::new(Rc::clone(&log)));
+
+    let _platform_lease = ctx
+        .register_attachment::<PlatformMarker>(ContextAttachmentRole::Platform, platform)
+        .unwrap();
+    let _extension_lease = ctx
+        .register_attachment::<ExtensionMarker>(ContextAttachmentRole::Extension, extension)
+        .unwrap();
+    let _renderer_lease = ctx
+        .register_attachment::<RendererMarker>(ContextAttachmentRole::Renderer, renderer)
+        .unwrap();
+
+    drop(ctx);
+
+    assert!(ordinary_rejected.get());
+    assert!(teardown_bound.get());
+    assert_eq!(
+        log.borrow().as_slice(),
+        [
+            "quiesce", "quiesce", "quiesce", "renderer", "renderer", "renderer", "platform",
+            "platform", "platform", "post", "post", "post",
+        ]
+    );
+}
+
+#[test]
+fn attachment_panics_do_not_skip_remaining_teardown() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut ctx = Context::create();
+    let log = Rc::new(RefCell::new(Vec::new()));
+
+    let mut panicking = RecordingAttachment::new(Rc::clone(&log));
+    panicking.panic_during_quiesce = true;
+    let normal = Rc::new(RecordingAttachment::new(Rc::clone(&log)));
+    let binding = ctx.binding();
+
+    let _panicking_lease = ctx
+        .register_attachment::<PanickingExtensionMarker>(
+            ContextAttachmentRole::Extension,
+            Rc::new(panicking),
+        )
+        .unwrap();
+    let _normal_lease = ctx
+        .register_attachment::<ExtensionMarker>(ContextAttachmentRole::Extension, normal)
+        .unwrap();
+
+    drop(ctx);
+
+    let log = log.borrow();
+    assert_eq!(log.iter().filter(|entry| **entry == "quiesce").count(), 2);
+    assert_eq!(log.iter().filter(|entry| **entry == "renderer").count(), 2);
+    assert_eq!(log.iter().filter(|entry| **entry == "platform").count(), 2);
+    assert_eq!(log.iter().filter(|entry| **entry == "post").count(), 2);
+    assert_eq!(
+        binding.lifecycle(),
+        super::ContextLifecycle::NativeDestroyed
+    );
+}
+
+#[test]
+fn attachment_registration_enforces_roles_and_detach_is_idempotent() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut ctx = Context::create();
+    let log = Rc::new(RefCell::new(Vec::new()));
+
+    let missing_platform = ctx.register_attachment::<RendererMarker>(
+        ContextAttachmentRole::Renderer,
+        Rc::new(RecordingAttachment::new(Rc::clone(&log))),
+    );
+    assert!(matches!(
+        missing_platform,
+        Err(ContextAttachmentError::MissingPlatform)
+    ));
+
+    let mut platform_lease = ctx
+        .register_attachment::<PlatformMarker>(
+            ContextAttachmentRole::Platform,
+            Rc::new(RecordingAttachment::new(Rc::clone(&log))),
+        )
+        .unwrap();
+    let duplicate = ctx.register_attachment::<PlatformMarker>(
+        ContextAttachmentRole::Extension,
+        Rc::new(RecordingAttachment::new(Rc::clone(&log))),
+    );
+    assert!(matches!(
+        duplicate,
+        Err(ContextAttachmentError::DuplicateAttachment)
+    ));
+    let occupied = ctx.register_attachment::<ExtensionMarker>(
+        ContextAttachmentRole::Platform,
+        Rc::new(RecordingAttachment::new(Rc::clone(&log))),
+    );
+    assert!(matches!(
+        occupied,
+        Err(ContextAttachmentError::RoleOccupied(
+            ContextAttachmentRole::Platform
+        ))
+    ));
+
+    assert!(platform_lease.detach());
+    assert!(!platform_lease.detach());
+    drop(ctx);
+    assert!(log.borrow().is_empty());
+}
+
+#[test]
+fn detaching_attachment_releases_context_ownership_immediately() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut ctx = Context::create();
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let attachment = Rc::new(RecordingAttachment::new(log));
+    let mut lease = ctx
+        .register_attachment::<ExtensionMarker>(
+            ContextAttachmentRole::Extension,
+            attachment.clone(),
+        )
+        .unwrap();
+
+    assert_eq!(Rc::strong_count(&attachment), 2);
+    assert!(lease.detach());
+    assert_eq!(Rc::strong_count(&attachment), 1);
+    drop(ctx);
+}
+
+#[test]
+fn dropping_suspended_context_restores_previous_current_context() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut suspended = super::SuspendedContext::create();
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let _lease = suspended
+        .0
+        .register_attachment::<ExtensionMarker>(
+            ContextAttachmentRole::Extension,
+            Rc::new(RecordingAttachment::new(log)),
+        )
+        .unwrap();
+    let ctx = Context::create();
+    let raw = ctx.as_raw();
+
+    drop(suspended);
+
+    assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw);
+    drop(ctx);
+}
+
+#[test]
 fn io_and_platform_io_accessors_use_self_context_not_current_context() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx_a = Context::create();
@@ -177,7 +474,7 @@ fn frame_lifecycle_requires_receiver_to_be_current_context() {
     let ctx_b = Context::create();
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = suspended_a.0.draw_data();
+        let _ = suspended_a.0.frame_lifecycle_state();
     }));
 
     assert!(result.is_err());
@@ -323,28 +620,30 @@ fn platform_viewport_snapshot_requires_rendered_frame_and_reuses_current_draw_da
     let mut ctx = Context::create();
     let _ = ctx.font_atlas().build();
     ctx.prepare_frame(super::FramePrepareOptions::new([320.0, 240.0], 1.0 / 60.0));
+    let consumer = ctx.create_renderer_consumer().unwrap();
 
     let before_render = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = ctx.platform_viewport_snapshot(crate::render::snapshot::SnapshotOptions::default());
+        let _ = ctx.platform_viewport_snapshot(&consumer);
     }));
     assert!(before_render.is_err());
 
     let frame = ctx.begin_frame();
     frame.ui().text("snapshot after render");
-    let _ = frame.render();
+    let main_snapshot = frame.render_snapshot(&consumer).unwrap();
 
     let snapshot = ctx
-        .platform_viewport_snapshot(crate::render::snapshot::SnapshotOptions::default())
+        .platform_viewport_snapshot(&consumer)
         .expect("rendered platform viewport draw data should snapshot");
 
-    assert_eq!(snapshot.draw.display_size, [320.0, 240.0]);
+    assert_eq!(snapshot.draw_data().display_size, [320.0, 240.0]);
     assert!(
         snapshot
-            .viewports
+            .viewports()
             .iter()
             .any(|viewport| viewport.draw.display_size == [320.0, 240.0]),
         "platform viewport snapshot should include the rendered main viewport"
     );
+    drop(main_snapshot);
 }
 
 #[cfg(feature = "multi-viewport")]
@@ -415,41 +714,4 @@ fn platform_io_get_window_pos_and_size_setters_install_handlers() {
     assert!(raw.Platform_GetWindowSize.is_none());
     assert!(raw.Platform_GetWindowFramebufferScale.is_none());
     assert!(raw.Platform_GetWindowWorkAreaInsets.is_none());
-}
-
-#[test]
-fn registered_user_texture_token_survives_context_drop() {
-    let _guard = crate::test_support::imgui_context_guard();
-    let mut ctx = Context::create();
-    let mut texture = crate::texture::OwnedTextureData::new();
-
-    let token = ctx.register_user_texture_token(&mut texture);
-    drop(ctx);
-    drop(token);
-    drop(texture);
-}
-
-#[test]
-fn registered_user_texture_token_survives_texture_drop() {
-    let _guard = crate::test_support::imgui_context_guard();
-    let mut ctx = Context::create();
-    let token = {
-        let mut texture = crate::texture::OwnedTextureData::new();
-        ctx.register_user_texture_token(&mut texture)
-    };
-
-    drop(token);
-    drop(ctx);
-}
-
-#[test]
-fn user_texture_registration_is_idempotent_and_unregister_is_noop_when_missing() {
-    let _guard = crate::test_support::imgui_context_guard();
-    let mut ctx = Context::create();
-    let mut texture = crate::texture::OwnedTextureData::new();
-
-    ctx.register_user_texture(&mut texture);
-    ctx.register_user_texture(&mut texture);
-    ctx.unregister_user_texture(&mut texture);
-    ctx.unregister_user_texture(&mut texture);
 }

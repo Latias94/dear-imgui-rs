@@ -56,7 +56,7 @@ fn nested_vec_element_paths_include_index_segments() {
         drop(path);
         inspector.into_response()
     };
-    ctx.render();
+    drop(ctx.render());
 
     let paths: Vec<Option<String>> = resp
         .events()
@@ -91,7 +91,7 @@ fn nested_array_element_paths_include_index_segments() {
         drop(path);
         inspector.into_response()
     };
-    ctx.render();
+    drop(ctx.render());
 
     let paths: Vec<Option<String>> = resp
         .events()
@@ -132,7 +132,7 @@ fn nested_map_value_paths_include_key_segments() {
         drop(path);
         inspector.into_response()
     };
-    ctx.render();
+    drop(ctx.render());
 
     let paths: Vec<Option<String>> = resp
         .events()
@@ -162,7 +162,7 @@ fn nested_tuple_element_paths_include_index_segments() {
         drop(path);
         inspector.into_response()
     };
-    ctx.render();
+    drop(ctx.render());
 
     let paths: Vec<Option<String>> = resp
         .events()
@@ -190,5 +190,5 @@ fn nested_containers_render_without_reentrant_settings_state() {
         let mut inspector = session.inspector(ui);
         let _ = <Vec<Vec<i32>> as ImGuiValue>::imgui_value(&mut inspector, "nested", &mut values);
     }
-    ctx.render();
+    drop(ctx.render());
 }

@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-use std::marker::PhantomData;
 
 use crate::sys;
 
@@ -27,7 +26,7 @@ thread_local! {
 /// The program will panic when attempting to wrap the same draw list twice.
 pub struct DrawListMut<'ui> {
     pub(super) draw_list: *mut sys::ImDrawList,
-    pub(super) _phantom: PhantomData<&'ui crate::Ui>,
+    pub(super) ui: Option<&'ui crate::Ui>,
 }
 
 pub(super) struct ChannelsSplitMergeGuard<'ui> {
@@ -68,11 +67,11 @@ impl<'ui> DrawListMut<'ui> {
         });
     }
 
-    fn from_raw(draw_list: *mut sys::ImDrawList) -> Self {
+    fn from_raw(ui: &'ui crate::Ui, draw_list: *mut sys::ImDrawList) -> Self {
         Self::borrow_draw_list(draw_list);
         Self {
             draw_list,
-            _phantom: PhantomData,
+            ui: Some(ui),
         }
     }
 
@@ -84,25 +83,32 @@ impl<'ui> DrawListMut<'ui> {
     /// Dear ImGui frame and remain valid for `'ui`. The caller must also ensure
     /// the pointer is not independently mutated while the returned wrapper is
     /// alive.
-    pub unsafe fn from_raw_mut(_ui: &'ui crate::Ui, draw_list: *mut sys::ImDrawList) -> Self {
-        Self::from_raw(draw_list)
+    pub unsafe fn from_raw_mut(ui: &'ui crate::Ui, draw_list: *mut sys::ImDrawList) -> Self {
+        Self::from_raw(ui, draw_list)
     }
 
     pub(crate) fn window(ui: &'ui crate::Ui) -> Self {
-        ui.run_with_bound_context(|| Self::from_raw(unsafe { sys::igGetWindowDrawList() }))
+        ui.run_with_bound_context(|| Self::from_raw(ui, unsafe { sys::igGetWindowDrawList() }))
     }
 
     pub(crate) fn background(ui: &'ui crate::Ui) -> Self {
         ui.run_with_bound_context(|| {
             let viewport = unsafe { sys::igGetMainViewport() };
-            Self::from_raw(unsafe { sys::igGetBackgroundDrawList(viewport) })
+            Self::from_raw(ui, unsafe { sys::igGetBackgroundDrawList(viewport) })
         })
     }
 
     pub(crate) fn foreground(ui: &'ui crate::Ui) -> Self {
         ui.run_with_bound_context(|| {
             let viewport = unsafe { sys::igGetMainViewport() };
-            Self::from_raw(unsafe { sys::igGetForegroundDrawList_ViewportPtr(viewport) })
+            Self::from_raw(ui, unsafe {
+                sys::igGetForegroundDrawList_ViewportPtr(viewport)
+            })
         })
+    }
+
+    pub(super) fn ui(&self) -> &crate::Ui {
+        self.ui
+            .expect("texture draw operations require a DrawListMut borrowed from Ui")
     }
 }

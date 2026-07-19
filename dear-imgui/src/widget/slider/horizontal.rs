@@ -7,7 +7,17 @@ use crate::sys;
 use super::SliderFlags;
 use super::validation::validate_slider_preconditions;
 
-/// Builder for slider widgets
+/// Builder for slider widgets.
+///
+/// Create this builder through [`Ui::slider_config`]. The former direct constructor is
+/// intentionally unavailable:
+///
+/// ```compile_fail
+/// # use dear_imgui_rs::{Context, Slider};
+/// # let mut context = Context::create();
+/// # let ui = context.frame();
+/// let _ = Slider::new(ui, "value", 0_i32, 10_i32);
+/// ```
 #[derive(Clone, Debug)]
 #[must_use]
 pub struct Slider<'ui, Label, Data, Format = &'static str> {
@@ -17,26 +27,6 @@ pub struct Slider<'ui, Label, Data, Format = &'static str> {
     pub(super) max: Data,
     pub(super) display_format: Option<Format>,
     pub(super) flags: SliderFlags,
-}
-
-impl<'ui, Label, Data> Slider<'ui, Label, Data>
-where
-    Label: AsRef<str>,
-    Data: DataTypeKind,
-{
-    /// Creates a new slider builder
-    #[doc(alias = "SliderScalar", alias = "SliderScalarN")]
-    #[deprecated(note = "Use `Ui::slider` or `Ui::slider_config`.", since = "0.1.0")]
-    pub fn new(ui: &'ui Ui, label: Label, min: Data, max: Data) -> Self {
-        Self {
-            ui,
-            label,
-            min,
-            max,
-            display_format: None,
-            flags: SliderFlags::NONE,
-        }
-    }
 }
 
 impl<'ui, Label, Data, Format> Slider<'ui, Label, Data, Format>
@@ -99,6 +89,7 @@ where
     /// Builds a slider that is bound to the given value.
     ///
     /// Returns true if the slider value was changed.
+    #[doc(alias = "SliderScalar")]
     pub fn build(self, value: &mut Data) -> bool {
         validate_slider_preconditions("Slider::build()", &self.min, &self.max, self.flags);
         let (label, display_format) = self
@@ -121,6 +112,7 @@ where
     /// Builds a horizontal array of multiple sliders attached to the given slice.
     ///
     /// Returns true if any slider value was changed.
+    #[doc(alias = "SliderScalarN")]
     pub fn build_array(self, values: &mut [Data]) -> bool {
         validate_slider_preconditions("Slider::build_array()", &self.min, &self.max, self.flags);
         let count = component_count_i32("Slider::build_array()", values.len());

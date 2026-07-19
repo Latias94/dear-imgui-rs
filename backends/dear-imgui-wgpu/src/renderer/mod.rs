@@ -3,15 +3,11 @@
 //! This module contains the main WgpuRenderer struct and its implementation,
 //! following the pattern from imgui_impl_wgpu.cpp
 //!
-//! Texture Updates Flow (ImGui 1.92+)
-//! - During `Context::render()`, Dear ImGui emits a list of textures to be processed with
-//!   `DrawData::textures_mut()` (see `dear_imgui_rs::render::DrawData::textures_mut`). Each item is
-//!   an `ImTextureData*` with a `Status` field:
-//!   - `WantCreate`: create a GPU texture, upload all pixels, set `TexID`, then set status `OK`.
-//!   - `WantUpdates`: upload `UpdateRect` (and any queued rects) then set `OK`.
-//!   - `WantDestroy`: schedule/destroy GPU texture; if unused for some frames, set `Destroyed`.
-//! - This backend honors these transitions in its texture module; users can simply pass
-//!   `&mut TextureData` to UI/draw calls and let the backend handle the rest.
+//! Managed texture flow (Dear ImGui 1.92+):
+//! - `Context::render()` returns a Context-borrowed `RenderedFrame` with owned texture requests.
+//! - WGPU stores managed GPU resources by pointer-free `SnapshotTextureId`.
+//! - The renderer reconciles request-bound feedback before reading draw commands.
+//! - Legacy application textures continue to use `TextureId` without entering this protocol.
 
 mod callbacks;
 mod core;

@@ -8,7 +8,8 @@ pub(super) mod renderer;
 pub(super) use platform::*;
 pub(super) use registry::{
     clear_callbacks_for_context, clear_cb_for_current_context, clear_cb_for_platform_io,
-    clear_platform_callbacks_for_platform_io, clear_renderer_callbacks_for_platform_io, store_cb,
+    clear_platform_callbacks_for_platform_io, clear_renderer_callbacks_for_platform_io,
+    load_cb_for_platform_io, store_cb,
 };
 pub(super) use renderer::*;
 pub(super) use set::{

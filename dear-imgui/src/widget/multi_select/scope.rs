@@ -1,23 +1,22 @@
-use crate::sys;
+use crate::{Id, sys};
 
 use super::basic_selection::BasicSelection;
 use super::options::MultiSelectOptions;
-use super::requests::{apply_multi_select_requests_basic, apply_multi_select_requests_indexed};
+use super::requests::{MultiSelectResult, MultiSelectUserData, copy_multi_select_result};
 use super::storage::MultiSelectIndexStorage;
 
 fn usize_to_i32(name: &str, value: usize) -> i32 {
     i32::try_from(value).unwrap_or_else(|_| panic!("{name} exceeded ImGui's i32 range"))
 }
 
-/// RAII wrapper around `BeginMultiSelect()` / `EndMultiSelect()` for advanced users.
+/// Closure-scoped access to an active Dear ImGui multi-select block.
 ///
-/// This gives direct, but scoped, access to the underlying `ImGuiMultiSelectIO`
-/// struct. It does not perform any selection updates by itself; you are expected
-/// to call helper methods or use the raw IO to drive your own storage.
+/// Instances are supplied only to [`crate::Ui::with_multi_select`]. The native IO pointer
+/// remains private and cannot outlive the matching `EndMultiSelect()` call.
 pub struct MultiSelectScope<'ui> {
     ui: &'ui crate::Ui,
-    pub(super) ms_io_begin: *mut sys::ImGuiMultiSelectIO,
-    items_count: i32,
+    begin_result: MultiSelectResult,
+    range_source_reset: bool,
     ended: bool,
 }
 
@@ -29,101 +28,89 @@ impl<'ui> MultiSelectScope<'ui> {
         items_count: usize,
     ) -> Self {
         let options = flags.into();
-        let selection_size_i32 = selection_size.unwrap_or(-1);
-        let items_count_i32 = usize_to_i32("items_count", items_count);
-        let ms_io_begin = ui.run_with_bound_context(|| unsafe {
-            sys::igBeginMultiSelect(options.raw(), selection_size_i32, items_count_i32)
+        let selection_size = selection_size.unwrap_or(-1);
+        let items_count = usize_to_i32("items_count", items_count);
+        let native_io = ui.run_with_bound_context(|| unsafe {
+            sys::igBeginMultiSelect(options.raw(), selection_size, items_count)
         });
+        let begin_result = unsafe { copy_multi_select_result(native_io) };
+
         Self {
             ui,
-            ms_io_begin,
-            items_count: items_count_i32,
+            begin_result,
+            range_source_reset: false,
             ended: false,
         }
     }
 
-    /// Access the IO struct returned by `BeginMultiSelect()`.
-    pub fn begin_io(&self) -> &sys::ImGuiMultiSelectIO {
-        unsafe { &*self.ms_io_begin }
+    /// Owned requests and metadata captured immediately after `BeginMultiSelect()`.
+    #[must_use]
+    pub fn begin_result(&self) -> &MultiSelectResult {
+        &self.begin_result
     }
 
-    /// Mutable access to the IO struct returned by `BeginMultiSelect()`.
-    pub fn begin_io_mut(&mut self) -> &mut sys::ImGuiMultiSelectIO {
-        unsafe { &mut *self.ms_io_begin }
+    /// Apply requests captured at begin time to index-addressable storage.
+    pub fn apply_begin_requests_indexed<S: MultiSelectIndexStorage>(&self, storage: &mut S) {
+        self.begin_result.apply_requests_indexed(storage);
     }
 
-    /// Apply selection requests from `BeginMultiSelect()` to index-based storage.
-    pub fn apply_begin_requests_indexed<S: MultiSelectIndexStorage>(&mut self, storage: &mut S) {
-        unsafe {
-            apply_multi_select_requests_indexed(self.ms_io_begin, storage);
-        }
+    /// Apply requests captured at begin time to a [`BasicSelection`].
+    pub fn apply_begin_requests_basic<G>(&self, selection: &mut BasicSelection, id_at_index: G)
+    where
+        G: FnMut(usize) -> Id,
+    {
+        self.begin_result
+            .apply_requests_basic(selection, id_at_index);
     }
 
-    /// Finalize the multi-select scope and return an IO view for the end state.
+    /// Associate the next submitted item with application-defined selection data.
+    pub fn set_next_item_selection_user_data(&self, item: MultiSelectUserData) {
+        self.ui.run_with_bound_context(|| unsafe {
+            sys::igSetNextItemSelectionUserData(item);
+        });
+    }
+
+    /// Request that Dear ImGui discard its current range-selection source at scope end.
     ///
-    /// This calls `EndMultiSelect()` and returns a `MultiSelectEnd` wrapper
-    /// that can be used to apply the final selection requests.
-    pub fn end(mut self) -> MultiSelectEnd<'ui> {
-        let ms_io_end = self
-            .ui
-            .run_with_bound_context(|| unsafe { sys::igEndMultiSelect() });
+    /// This is useful when the application deletes the range source while the scope is active.
+    pub fn set_range_source_reset(&mut self, reset: bool) {
+        self.range_source_reset = reset;
+    }
+
+    pub(super) fn finish(mut self) -> MultiSelectResult {
+        let native_io = self.end_native();
         self.ended = true;
-        MultiSelectEnd {
-            ms_io_end,
-            items_count: self.items_count,
-            _marker: std::marker::PhantomData,
-        }
+        let mut result = unsafe { copy_multi_select_result(native_io) };
+        result.record_range_source_reset(self.range_source_reset);
+        result
+    }
+
+    fn end_native(&mut self) -> *mut sys::ImGuiMultiSelectIO {
+        self.ui.run_with_bound_context(|| unsafe {
+            if self.range_source_reset {
+                let context = sys::igGetCurrentContext();
+                let active = context.as_ref().and_then(|context| {
+                    context
+                        .CurrentMultiSelect
+                        .cast::<sys::ImGuiMultiSelectTempData>()
+                        .as_mut()
+                });
+                if let Some(active) = active {
+                    active.IO.RangeSrcReset = true;
+                }
+            }
+            sys::igEndMultiSelect()
+        })
     }
 }
 
 impl Drop for MultiSelectScope<'_> {
     fn drop(&mut self) {
-        if !self.ended {
-            self.ui.run_with_bound_context(|| unsafe {
-                sys::igEndMultiSelect();
-            });
-            self.ended = true;
+        if self.ended {
+            return;
         }
-    }
-}
 
-/// IO view returned after calling `EndMultiSelect()` via [`MultiSelectScope::end`].
-pub struct MultiSelectEnd<'ui> {
-    ms_io_end: *mut sys::ImGuiMultiSelectIO,
-    items_count: i32,
-    _marker: std::marker::PhantomData<&'ui crate::Ui>,
-}
-
-impl<'ui> MultiSelectEnd<'ui> {
-    /// Access the IO struct returned by `EndMultiSelect()`.
-    pub fn io(&self) -> &sys::ImGuiMultiSelectIO {
-        unsafe { &*self.ms_io_end }
-    }
-
-    /// Mutable access to the IO struct returned by `EndMultiSelect()`.
-    pub fn io_mut(&mut self) -> &mut sys::ImGuiMultiSelectIO {
-        unsafe { &mut *self.ms_io_end }
-    }
-
-    /// Apply selection requests from `EndMultiSelect()` to index-based storage.
-    pub fn apply_requests_indexed<S: MultiSelectIndexStorage>(&mut self, storage: &mut S) {
-        unsafe {
-            apply_multi_select_requests_indexed(self.ms_io_end, storage);
-        }
-    }
-
-    /// Apply selection requests from `EndMultiSelect()` to a [`BasicSelection`].
-    pub fn apply_requests_basic<G>(&mut self, selection: &mut BasicSelection, mut id_at_index: G)
-    where
-        G: FnMut(usize) -> crate::Id,
-    {
-        unsafe {
-            apply_multi_select_requests_basic(
-                self.ms_io_end,
-                selection,
-                self.items_count as usize,
-                &mut id_at_index,
-            );
-        }
+        self.end_native();
+        self.ended = true;
     }
 }

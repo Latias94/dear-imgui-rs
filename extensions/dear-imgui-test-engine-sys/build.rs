@@ -64,6 +64,7 @@ fn resolve_imgui_includes(cfg: &BuildConfig) -> (PathBuf, PathBuf) {
     (imgui_src, cimgui_root)
 }
 
+#[cfg(feature = "bindgen")]
 fn sanitize_bindings_string(content: &str) -> String {
     let mut out = String::with_capacity(content.len());
     let mut skip_next_blank = false;
@@ -244,23 +245,18 @@ fn use_pregenerated_bindings(manifest_dir: &Path, out_dir: &Path) -> bool {
     if !preg.exists() {
         return false;
     }
-
-    match std::fs::read_to_string(&preg).and_then(|content| {
-        let sanitized = sanitize_bindings_string(&content);
-        std::fs::write(out_dir.join("bindings.rs"), sanitized)
-    }) {
-        Ok(()) => {
-            println!(
-                "cargo:warning=Using pregenerated bindings: {}",
-                preg.display()
-            );
-            true
-        }
-        Err(e) => {
-            println!("cargo:warning=Failed to write pregenerated bindings: {}", e);
-            false
-        }
-    }
+    let spec = build_support::binding::CrateBindingSpec::for_crate_and_target(
+        env!("CARGO_PKG_NAME"),
+        "native",
+    )
+    .expect("missing Test Engine binding spec");
+    spec.copy_embedded_checked_in_to_out_dir(manifest_dir, out_dir)
+        .unwrap_or_else(|error| panic!("invalid pregenerated Test Engine bindings: {error}"));
+    println!(
+        "cargo:warning=Using validated pregenerated bindings: {}",
+        preg.display()
+    );
+    true
 }
 
 fn docsrs_build(cfg: &BuildConfig) {
@@ -295,6 +291,7 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=shim/cimgui_test_engine.h");
+    println!("cargo:rerun-if-changed=shim/cimgui_test_engine_internal.h");
     println!("cargo:rerun-if-changed=shim/cimgui_test_engine.cpp");
     println!("cargo:rerun-if-changed=shim/default_tests.cpp");
     println!("cargo:rerun-if-changed=shim/imgui_test_engine_hooks_register.cpp");

@@ -25,7 +25,8 @@ mod runtime;
 
 pub use application::{
     AddOns, Application, DockingApi, EventContext, ExternalTextureError, ExternalTextureHandle,
-    FrameContext, GpuApi, GpuContext, GpuGeneration, InitContext, RunError, ShutdownContext,
+    FrameContext, GpuApi, GpuContext, GpuGeneration, InitContext, PrepareFrameContext, RunError,
+    ShutdownContext,
 };
 pub use config::{
     AddOnsConfig, AppConfig, DockingConfig, RedrawMode, Theme, WgpuConfig, WgpuPreset,

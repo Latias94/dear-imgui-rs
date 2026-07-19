@@ -5,6 +5,9 @@ impl WgpuTextureManager {
     pub fn new() -> Self {
         Self {
             textures: HashMap::new(),
+            managed_textures: HashMap::new(),
+            managed_by_texture_id: HashMap::new(),
+            destroyed_managed_textures: HashSet::new(),
             next_id: 1, // Start from 1, 0 is reserved for null texture
             custom_samplers: HashMap::new(),
             custom_sampler_by_texture: HashMap::new(),
@@ -15,15 +18,32 @@ impl WgpuTextureManager {
 
     /// Register a new texture and return its ID
     pub fn register_texture(&mut self, texture: WgpuTexture) -> TextureId {
-        let id = TextureId::new(self.next_id);
-        self.next_id += 1;
+        let id = self.allocate_texture_id();
         self.textures.insert(id, texture);
         id
     }
 
+    pub(super) fn allocate_texture_id(&mut self) -> TextureId {
+        loop {
+            let id = TextureId::new(self.next_id);
+            self.next_id = self
+                .next_id
+                .checked_add(1)
+                .expect("WGPU texture identifier space exhausted");
+            if !self.contains_texture(id) {
+                return id;
+            }
+        }
+    }
+
     /// Get a texture by ID
     pub fn get_texture(&self, id: TextureId) -> Option<&WgpuTexture> {
-        self.textures.get(&id)
+        self.textures.get(&id).or_else(|| {
+            let managed = self.managed_by_texture_id.get(&id)?;
+            self.managed_textures
+                .get(managed)
+                .map(|entry| &entry.resource)
+        })
     }
 
     /// Remove a texture by ID
@@ -33,11 +53,14 @@ impl WgpuTextureManager {
 
     /// Check if a texture exists
     pub fn contains_texture(&self, id: TextureId) -> bool {
-        self.textures.contains_key(&id)
+        self.textures.contains_key(&id) || self.managed_by_texture_id.contains_key(&id)
     }
 
     /// Insert a texture with a specific ID
     pub fn insert_texture_with_id(&mut self, id: TextureId, texture: WgpuTexture) {
+        if let Some(managed) = self.managed_by_texture_id.remove(&id) {
+            self.managed_textures.remove(&managed);
+        }
         self.textures.insert(id, texture);
         // Update next_id if necessary
         if id.id() >= self.next_id {
@@ -135,17 +158,47 @@ impl WgpuTextureManager {
 
     /// Get the number of registered textures
     pub fn texture_count(&self) -> usize {
-        self.textures.len()
+        self.textures.len() + self.managed_textures.len()
     }
 
     /// Clear all textures
     pub fn clear(&mut self) {
         self.textures.clear();
+        self.clear_managed_textures();
         self.next_id = 1;
         self.custom_sampler_by_texture.clear();
         self.common_bind_groups.clear();
         // Keep samplers around? Clear to avoid holding stale handles after device loss.
         self.custom_samplers.clear();
         self.next_sampler_id = 1;
+    }
+
+    pub(crate) fn clear_managed_textures(&mut self) {
+        self.managed_textures.clear();
+        self.managed_by_texture_id.clear();
+        self.destroyed_managed_textures.clear();
+    }
+
+    pub(super) fn managed_texture_id(&self, id: SnapshotTextureId) -> Option<TextureId> {
+        self.managed_textures.get(&id).map(|entry| entry.texture_id)
+    }
+
+    pub(crate) fn acknowledge_destroyed_textures(
+        &mut self,
+        destroyed: impl IntoIterator<Item = SnapshotTextureId>,
+    ) {
+        for id in destroyed {
+            self.destroyed_managed_textures.remove(&id);
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn managed_texture_count(&self) -> usize {
+        self.managed_textures.len()
+    }
+
+    #[cfg(test)]
+    pub(super) fn destroyed_managed_texture_count(&self) -> usize {
+        self.destroyed_managed_textures.len()
     }
 }

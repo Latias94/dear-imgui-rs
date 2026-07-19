@@ -2,6 +2,10 @@ use crate::{
     GlBuffer, GlTexture, GlVertexArray, shaders::Shaders, state::GlStateBackup,
     texture::TextureMap, versions::GlVersion,
 };
+use dear_imgui_rs::render::{RendererConsumer, SnapshotTextureId};
+use std::collections::HashMap;
+
+use super::texture::ManagedTextureBinding;
 
 /// Main renderer for Dear ImGui using Glow (OpenGL)
 ///
@@ -24,6 +28,8 @@ pub struct GlowRenderer {
     // Resource management
     pub(super) gl_context: Option<std::rc::Rc<glow::Context>>, // None = externally managed
     pub(super) texture_map: Option<Box<dyn TextureMap>>,
+    pub(super) managed_textures: HashMap<SnapshotTextureId, ManagedTextureBinding>,
+    pub(super) renderer_consumer: Option<RendererConsumer>,
     // Optional: enable GL_FRAMEBUFFER_SRGB during ImGui rendering
     pub(super) framebuffer_srgb: bool,
     // Optional: override color gamma applied to vertex colors (None = auto)

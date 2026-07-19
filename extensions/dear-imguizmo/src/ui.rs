@@ -1,4 +1,4 @@
-use dear_imgui_rs::{Id, Ui};
+use dear_imgui_rs::{ContextBinding, Id, Ui};
 use dear_imgui_sys as imgui_sys;
 use dear_imguizmo_sys as sys;
 
@@ -18,14 +18,8 @@ impl GuizmoContext {
     /// Begin an ImGuizmo frame for the given ImGui `Ui`.
     /// Call exactly once per frame before using GizmoUi functions.
     pub fn begin_frame<'ui>(&self, ui: &'ui Ui) -> GizmoUi<'ui> {
-        let imgui_ctx_raw = ui.with_bound_context(|| {
-            let imgui_ctx_raw = unsafe { imgui_sys::igGetCurrentContext() };
-            assert!(
-                !imgui_ctx_raw.is_null(),
-                "dear-imguizmo: begin_frame requires an active ImGui context"
-            );
+        ui.with_bound_context(|| {
             unsafe {
-                sys::ImGuizmo_SetImGuiContext(imgui_ctx_raw);
                 // ImGuizmo::BeginFrame() creates a helper ImGui window named "gizmo".
                 // When ImGui viewports are enabled, this helper window can accidentally
                 // get its own platform viewport on some backends, resulting in an extra
@@ -39,18 +33,17 @@ impl GuizmoContext {
                 }
                 sys::ImGuizmo_BeginFrame();
             }
-            imgui_ctx_raw
         });
         GizmoUi {
             _ui: ui,
-            imgui_ctx_raw,
+            ctx_binding: ui.binding(),
         }
     }
 }
 
 pub struct GizmoUi<'ui> {
     pub(crate) _ui: &'ui Ui,
-    imgui_ctx_raw: *mut imgui_sys::ImGuiContext,
+    ctx_binding: ContextBinding,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -62,66 +55,44 @@ pub struct GridColors {
 
 impl<'ui> GizmoUi<'ui> {
     #[inline]
-    pub(crate) fn bind(&self) -> BoundGizmoContext {
-        assert!(
-            !self.imgui_ctx_raw.is_null(),
-            "dear-imguizmo: GizmoUi requires an active ImGui context"
-        );
-        let previous = unsafe { imgui_sys::igGetCurrentContext() };
-        unsafe {
-            if previous != self.imgui_ctx_raw {
-                imgui_sys::igSetCurrentContext(self.imgui_ctx_raw);
-            }
-            sys::ImGuizmo_SetImGuiContext(self.imgui_ctx_raw);
-        }
-        BoundGizmoContext {
-            previous,
-            current: self.imgui_ctx_raw,
-        }
+    pub(crate) fn with_bound_context<R>(&self, f: impl FnOnce() -> R) -> R {
+        self._ui.with_bound_context(f)
     }
 
     pub fn set_rect(&self, x: f32, y: f32, width: f32, height: f32) {
-        let _guard = self.bind();
-        unsafe { sys::ImGuizmo_SetRect(x, y, width, height) }
+        self.with_bound_context(|| unsafe { sys::ImGuizmo_SetRect(x, y, width, height) });
     }
     pub fn set_orthographic(&self, is_ortho: bool) {
-        let _guard = self.bind();
-        unsafe { sys::ImGuizmo_SetOrthographic(is_ortho) }
+        self.with_bound_context(|| unsafe { sys::ImGuizmo_SetOrthographic(is_ortho) });
     }
     pub fn allow_axis_flip(&self, enable: bool) {
-        let _guard = self.bind();
-        unsafe { sys::ImGuizmo_AllowAxisFlip(enable) }
+        self.with_bound_context(|| unsafe { sys::ImGuizmo_AllowAxisFlip(enable) });
     }
     pub fn set_gizmo_size_clip_space(&self, value: f32) {
-        let _guard = self.bind();
-        unsafe { sys::ImGuizmo_SetGizmoSizeClipSpace(value) }
+        self.with_bound_context(|| unsafe { sys::ImGuizmo_SetGizmoSizeClipSpace(value) });
     }
     pub fn set_axis_limit(&self, value: f32) {
-        let _guard = self.bind();
-        unsafe { sys::ImGuizmo_SetAxisLimit(value) }
+        self.with_bound_context(|| unsafe { sys::ImGuizmo_SetAxisLimit(value) });
     }
     pub fn set_plane_limit(&self, value: f32) {
-        let _guard = self.bind();
-        unsafe { sys::ImGuizmo_SetPlaneLimit(value) }
+        self.with_bound_context(|| unsafe { sys::ImGuizmo_SetPlaneLimit(value) });
     }
     pub fn set_axis_mask(&self, mask: AxisMask) {
         let x = mask.contains(AxisMask::X);
         let y = mask.contains(AxisMask::Y);
         let z = mask.contains(AxisMask::Z);
-        let _guard = self.bind();
-        unsafe { sys::ImGuizmo_SetAxisMask(x, y, z) }
+        self.with_bound_context(|| unsafe { sys::ImGuizmo_SetAxisMask(x, y, z) });
     }
 
     pub fn draw_grid<T: Mat4Like>(&self, view: &T, projection: &T, model: &T, grid_size: f32) {
-        let _guard = self.bind();
-        unsafe {
+        self.with_bound_context(|| unsafe {
             sys::ImGuizmo_DrawGrid(
                 view.to_cols_array().as_ptr(),
                 projection.to_cols_array().as_ptr(),
                 model.to_cols_array().as_ptr(),
                 grid_size,
             )
-        }
+        });
     }
 
     pub fn draw_grid_custom<T: Mat4Like>(
@@ -133,8 +104,7 @@ impl<'ui> GizmoUi<'ui> {
         major_step: f32,
         subdivision: u32,
     ) {
-        let _guard = self.bind();
-        unsafe {
+        self.with_bound_context(|| unsafe {
             sys::ImGuizmo_DrawGridCustom(
                 view.to_cols_array().as_ptr(),
                 projection.to_cols_array().as_ptr(),
@@ -143,7 +113,7 @@ impl<'ui> GizmoUi<'ui> {
                 major_step,
                 subdivision,
             )
-        }
+        });
     }
 
     pub fn draw_grid_custom_color<T: Mat4Like>(
@@ -156,8 +126,7 @@ impl<'ui> GizmoUi<'ui> {
         subdivision: u32,
         colors: GridColors,
     ) {
-        let _guard = self.bind();
-        unsafe {
+        self.with_bound_context(|| unsafe {
             sys::ImGuizmo_DrawGridCustomColor(
                 view.to_cols_array().as_ptr(),
                 projection.to_cols_array().as_ptr(),
@@ -169,7 +138,7 @@ impl<'ui> GizmoUi<'ui> {
                 colors.minor,
                 colors.center,
             )
-        }
+        });
     }
 
     pub fn draw_axes<T: Mat4Like>(&self, view: &T, projection: &T, matrices: &[T]) {
@@ -188,15 +157,14 @@ impl<'ui> GizmoUi<'ui> {
         for m in matrices {
             flat.extend_from_slice(&m.to_cols_array());
         }
-        let _guard = self.bind();
-        unsafe {
+        self.with_bound_context(|| unsafe {
             sys::ImGuizmo_DrawAxes(
                 view.to_cols_array().as_ptr(),
                 projection.to_cols_array().as_ptr(),
                 flat.as_ptr(),
                 count,
             )
-        }
+        });
     }
 
     pub fn draw_cubes<T: Mat4Like>(&self, view: &T, projection: &T, matrices: &[T]) {
@@ -215,34 +183,32 @@ impl<'ui> GizmoUi<'ui> {
         for m in matrices {
             flat.extend_from_slice(&m.to_cols_array());
         }
-        let _guard = self.bind();
-        unsafe {
+        self.with_bound_context(|| unsafe {
             sys::ImGuizmo_DrawCubes(
                 view.to_cols_array().as_ptr(),
                 projection.to_cols_array().as_ptr(),
                 flat.as_ptr(),
                 count,
             )
-        }
+        });
     }
 
     pub fn set_drawlist_window(&self) {
-        let _guard = self.bind();
-        unsafe { sys::ImGuizmo_SetDrawlist(imgui_sys::igGetWindowDrawList()) }
+        self.with_bound_context(|| unsafe {
+            sys::ImGuizmo_SetDrawlist(imgui_sys::igGetWindowDrawList())
+        });
     }
     pub fn set_drawlist_background(&self) {
-        let _guard = self.bind();
-        unsafe {
+        self.with_bound_context(|| unsafe {
             sys::ImGuizmo_SetDrawlist(imgui_sys::igGetBackgroundDrawList(std::ptr::null_mut()))
-        }
+        });
     }
     pub fn set_drawlist_foreground(&self) {
-        let _guard = self.bind();
-        unsafe {
+        self.with_bound_context(|| unsafe {
             sys::ImGuizmo_SetDrawlist(imgui_sys::igGetForegroundDrawList_ViewportPtr(
                 std::ptr::null_mut(),
             ))
-        }
+        });
     }
     pub fn set_drawlist(&self, target: DrawListTarget) {
         match target {
@@ -261,26 +227,27 @@ impl<'ui> GizmoUi<'ui> {
     /// - Returns `true` if the window was found; otherwise clears the alternative window and returns `false`.
     pub fn set_alternative_window_by_name(&self, window_name: &str) -> bool {
         assert!(!window_name.contains('\0'), "window_name contained NUL");
-        let _guard = self.bind();
-        dear_imgui_rs::with_scratch_txt(window_name, |ptr| {
-            let window = unsafe { imgui_sys::igFindWindowByName(ptr) } as *mut sys::ImGuiWindow;
-            unsafe { sys::ImGuizmo_SetAlternativeWindow(window) };
-            !window.is_null()
+        self.with_bound_context(|| {
+            dear_imgui_rs::with_scratch_txt(window_name, |ptr| {
+                let window = unsafe { imgui_sys::igFindWindowByName(ptr) } as *mut sys::ImGuiWindow;
+                unsafe { sys::ImGuizmo_SetAlternativeWindow(window) };
+                !window.is_null()
+            })
         })
     }
 
     /// Clear the alternative hovered window for ImGuizmo.
     pub fn clear_alternative_window(&self) {
-        let _guard = self.bind();
-        unsafe { sys::ImGuizmo_SetAlternativeWindow(std::ptr::null_mut()) }
+        self.with_bound_context(|| unsafe {
+            sys::ImGuizmo_SetAlternativeWindow(std::ptr::null_mut())
+        });
     }
 
     /// Unsafe: set a raw `ImGuiWindow*` as ImGuizmo's alternative hovered window.
     ///
     /// Prefer `set_alternative_window_by_name` unless you are already working with internal ImGui window pointers.
     pub unsafe fn set_alternative_window_raw(&self, window: *mut sys::ImGuiWindow) {
-        let _guard = self.bind();
-        unsafe { sys::ImGuizmo_SetAlternativeWindow(window) }
+        self.with_bound_context(|| unsafe { sys::ImGuizmo_SetAlternativeWindow(window) });
     }
 
     /// Unsafe: set a raw ImGui drawlist pointer for ImGuizmo to render into.
@@ -289,8 +256,7 @@ impl<'ui> GizmoUi<'ui> {
     /// have a valid `*mut ImDrawList` whose lifetime is at least the duration
     /// of the current frame.
     pub unsafe fn set_drawlist_raw(&self, drawlist: *mut imgui_sys::ImDrawList) {
-        let _guard = self.bind();
-        unsafe { sys::ImGuizmo_SetDrawlist(drawlist) }
+        self.with_bound_context(|| unsafe { sys::ImGuizmo_SetDrawlist(drawlist) });
     }
 
     /// Manipulate using the currently bound draw list.
@@ -307,13 +273,12 @@ impl<'ui> GizmoUi<'ui> {
         local_bounds: Option<&[f32; 6]>,
         bounds_snap: Option<&[f32; 3]>,
     ) -> bool {
-        let _guard = self.bind();
         let mut model_arr = model_matrix.to_cols_array();
         let mut delta_arr = match &delta_matrix {
             Some(dm) => dm.to_cols_array(),
             None => T::identity().to_cols_array(),
         };
-        let used = unsafe {
+        let used = self.with_bound_context(|| unsafe {
             sys::ImGuizmo_Manipulate(
                 view.to_cols_array().as_ptr(),
                 projection.to_cols_array().as_ptr(),
@@ -325,7 +290,7 @@ impl<'ui> GizmoUi<'ui> {
                 local_bounds.map(|b| b.as_ptr()).unwrap_or(std::ptr::null()),
                 bounds_snap.map(|b| b.as_ptr()).unwrap_or(std::ptr::null()),
             )
-        };
+        });
         model_matrix.set_from_cols_array(model_arr);
         if let Some(dm) = &mut delta_matrix {
             dm.set_from_cols_array(delta_arr);
@@ -341,11 +306,10 @@ impl<'ui> GizmoUi<'ui> {
         size: impl Into<[f32; 2]>,
         background_color: u32,
     ) -> bool {
-        let _guard = self.bind();
         let mut arr = view.to_cols_array();
         let position = position.into();
         let size = size.into();
-        unsafe {
+        self.with_bound_context(|| unsafe {
             sys::ImGuizmo_ViewManipulate_Float(
                 arr.as_mut_ptr(),
                 length,
@@ -359,9 +323,9 @@ impl<'ui> GizmoUi<'ui> {
                 },
                 background_color,
             );
-        }
+        });
         view.set_from_cols_array(arr);
-        unsafe { sys::ImGuizmo_IsUsingViewManipulate() }
+        self.with_bound_context(|| unsafe { sys::ImGuizmo_IsUsingViewManipulate() })
     }
 
     /// Extended view manipulator that also takes projection and edits a target matrix.
@@ -377,12 +341,11 @@ impl<'ui> GizmoUi<'ui> {
         size: impl Into<[f32; 2]>,
         background_color: u32,
     ) -> bool {
-        let _guard = self.bind();
         let mut view_arr = view.to_cols_array();
         let mut matrix_arr = matrix.to_cols_array();
         let position = position.into();
         let size = size.into();
-        unsafe {
+        self.with_bound_context(|| unsafe {
             sys::ImGuizmo_ViewManipulate_FloatPtr(
                 view_arr.as_mut_ptr(),
                 projection.to_cols_array().as_ptr(),
@@ -400,10 +363,10 @@ impl<'ui> GizmoUi<'ui> {
                 },
                 background_color,
             );
-        }
+        });
         view.set_from_cols_array(view_arr);
         matrix.set_from_cols_array(matrix_arr);
-        unsafe { sys::ImGuizmo_IsUsingViewManipulate() }
+        self.with_bound_context(|| unsafe { sys::ImGuizmo_IsUsingViewManipulate() })
     }
 
     /// Convenience: set rect from pos/size vectors
@@ -414,52 +377,47 @@ impl<'ui> GizmoUi<'ui> {
     }
 
     pub fn enable(&self, enable: bool) {
-        let _guard = self.bind();
-        unsafe { sys::ImGuizmo_Enable(enable) }
+        self.with_bound_context(|| unsafe { sys::ImGuizmo_Enable(enable) });
     }
     pub fn is_over(&self) -> bool {
-        let _guard = self.bind();
-        unsafe { sys::ImGuizmo_IsOver_Nil() }
+        self.with_bound_context(|| unsafe { sys::ImGuizmo_IsOver_Nil() })
     }
     pub fn is_using(&self) -> bool {
-        let _guard = self.bind();
-        unsafe { sys::ImGuizmo_IsUsing() }
+        self.with_bound_context(|| unsafe { sys::ImGuizmo_IsUsing() })
     }
     pub fn is_using_any(&self) -> bool {
-        let _guard = self.bind();
-        unsafe { sys::ImGuizmo_IsUsingAny() }
+        self.with_bound_context(|| unsafe { sys::ImGuizmo_IsUsingAny() })
     }
     pub fn is_using_view_manipulate(&self) -> bool {
-        let _guard = self.bind();
-        unsafe { sys::ImGuizmo_IsUsingViewManipulate() }
+        self.with_bound_context(|| unsafe { sys::ImGuizmo_IsUsingViewManipulate() })
     }
     pub fn is_view_manipulate_hovered(&self) -> bool {
-        let _guard = self.bind();
-        unsafe { sys::ImGuizmo_IsViewManipulateHovered() }
+        self.with_bound_context(|| unsafe { sys::ImGuizmo_IsViewManipulateHovered() })
     }
     pub fn is_over_operation(&self, operation: Operation) -> bool {
-        let _guard = self.bind();
-        unsafe { sys::ImGuizmo_IsOver_OPERATION(operation.into()) }
+        self.with_bound_context(|| unsafe { sys::ImGuizmo_IsOver_OPERATION(operation.into()) })
     }
 
     pub fn active_handle_type(&self) -> MoveType {
-        let _guard = self.bind();
-        MoveType::from_raw(unsafe { sys::ImGuizmo_GetActiveHandleType() })
+        self.with_bound_context(|| {
+            MoveType::from_raw(unsafe { sys::ImGuizmo_GetActiveHandleType() })
+        })
     }
 
     pub fn hovered_handle_type(&self) -> MoveType {
-        let _guard = self.bind();
-        MoveType::from_raw(unsafe { sys::ImGuizmo_GetHoveredHandleType() })
+        self.with_bound_context(|| {
+            MoveType::from_raw(unsafe { sys::ImGuizmo_GetHoveredHandleType() })
+        })
     }
 
     pub fn active_move_type(&self) -> MoveType {
-        let _guard = self.bind();
-        MoveType::from_raw(unsafe { sys::ImGuizmo_GetActiveMoveType() })
+        self.with_bound_context(|| MoveType::from_raw(unsafe { sys::ImGuizmo_GetActiveMoveType() }))
     }
 
     pub fn hovered_move_type(&self) -> MoveType {
-        let _guard = self.bind();
-        MoveType::from_raw(unsafe { sys::ImGuizmo_GetHoveredMoveType() })
+        self.with_bound_context(|| {
+            MoveType::from_raw(unsafe { sys::ImGuizmo_GetHoveredMoveType() })
+        })
     }
 
     /// Test if the mouse is within `pixel_radius` of a world position once
@@ -470,9 +428,10 @@ impl<'ui> GizmoUi<'ui> {
     ///   (e.g. after calling `manipulate`, `draw_grid`, etc.).
     /// - `position` is a world-space 3D point.
     pub fn is_over_at<V: Vec3Like>(&self, position: V, pixel_radius: f32) -> bool {
-        let _guard = self.bind();
         let mut p = position.to_array();
-        unsafe { sys::ImGuizmo_IsOver_FloatPtr(p.as_mut_ptr(), pixel_radius) }
+        self.with_bound_context(|| unsafe {
+            sys::ImGuizmo_IsOver_FloatPtr(p.as_mut_ptr(), pixel_radius)
+        })
     }
 
     /// Push an ID for ImGuizmo's own ID stack and return a guard that pops on drop.
@@ -480,9 +439,8 @@ impl<'ui> GizmoUi<'ui> {
     where
         I: Into<GuizmoId<'a>>,
     {
-        let _guard = self.bind();
         let id: GuizmoId<'a> = id.into();
-        unsafe {
+        self.with_bound_context(|| unsafe {
             match id {
                 GuizmoId::Int(i) => sys::ImGuizmo_PushID_Int(i),
                 GuizmoId::Str(s) => {
@@ -498,10 +456,10 @@ impl<'ui> GizmoUi<'ui> {
                 }
                 GuizmoId::Ptr(p) => sys::ImGuizmo_PushID_Ptr(p),
             }
-        }
+        });
         IdToken {
-            _ui: self._ui,
-            imgui_ctx_raw: self.imgui_ctx_raw,
+            ctx_binding: self.ctx_binding.clone(),
+            _ui: std::marker::PhantomData,
         }
     }
     /// Convenience for string ID push without needing to keep the guard name verbose.
@@ -514,34 +472,36 @@ impl<'ui> GizmoUi<'ui> {
     }
     /// Obtain a hashed ID value following ImGuizmo's ID scheme.
     pub fn get_id_str(&self, id: &str) -> Id {
-        let _guard = self.bind();
         assert!(!id.contains('\0'), "string contained NUL");
-        Id::from(dear_imgui_rs::with_scratch_txt(id, |ptr| unsafe {
-            sys::ImGuizmo_GetID_Str(ptr)
-        }))
+        self.with_bound_context(|| {
+            Id::from(dear_imgui_rs::with_scratch_txt(id, |ptr| unsafe {
+                sys::ImGuizmo_GetID_Str(ptr)
+            }))
+        })
     }
     /// Obtain a hashed ID value using a non-NUL-terminated byte slice (ImGuizmo `str_begin/str_end` form).
     pub fn get_id_bytes(&self, bytes: &[u8]) -> Id {
-        let _guard = self.bind();
         let range = bytes.as_ptr_range();
-        Id::from(unsafe {
-            sys::ImGuizmo_GetID_StrStr(
-                range.start as *const std::os::raw::c_char,
-                range.end as *const std::os::raw::c_char,
-            )
+        self.with_bound_context(|| {
+            Id::from(unsafe {
+                sys::ImGuizmo_GetID_StrStr(
+                    range.start as *const std::os::raw::c_char,
+                    range.end as *const std::os::raw::c_char,
+                )
+            })
         })
     }
 
     /// Obtain a hashed ID from a pointer following ImGuizmo's ID scheme.
     pub fn get_id_ptr<T>(&self, ptr: *const T) -> Id {
-        let _guard = self.bind();
-        Id::from(unsafe { sys::ImGuizmo_GetID_Ptr(ptr as *const std::ffi::c_void) })
+        self.with_bound_context(|| {
+            Id::from(unsafe { sys::ImGuizmo_GetID_Ptr(ptr as *const std::ffi::c_void) })
+        })
     }
 
     /// Access ImGuizmo global style through a safe wrapper bound to this UI lifetime.
     pub fn style(&self) -> Style<'ui> {
-        let _guard = self.bind();
-        let ptr = unsafe { sys::ImGuizmo_GetStyle() };
+        let ptr = self.with_bound_context(|| unsafe { sys::ImGuizmo_GetStyle() });
         Style {
             ptr,
             _phantom: std::marker::PhantomData,
@@ -559,44 +519,16 @@ impl<'ui> GizmoUi<'ui> {
     }
 }
 
-pub(crate) struct BoundGizmoContext {
-    previous: *mut imgui_sys::ImGuiContext,
-    current: *mut imgui_sys::ImGuiContext,
-}
-
-impl Drop for BoundGizmoContext {
-    fn drop(&mut self) {
-        if self.previous != self.current {
-            unsafe {
-                imgui_sys::igSetCurrentContext(self.previous);
-                sys::ImGuizmo_SetImGuiContext(self.previous);
-            }
-        }
-    }
-}
-
 /// RAII token that pops an ImGuizmo ID when dropped.
 pub struct IdToken<'ui> {
-    pub(crate) _ui: &'ui Ui,
-    imgui_ctx_raw: *mut imgui_sys::ImGuiContext,
+    ctx_binding: ContextBinding,
+    _ui: std::marker::PhantomData<&'ui Ui>,
 }
 impl<'ui> Drop for IdToken<'ui> {
     fn drop(&mut self) {
-        if self.imgui_ctx_raw.is_null() {
-            return;
-        }
-        let previous = unsafe { imgui_sys::igGetCurrentContext() };
-        unsafe {
-            if previous != self.imgui_ctx_raw {
-                imgui_sys::igSetCurrentContext(self.imgui_ctx_raw);
-            }
-            sys::ImGuizmo_SetImGuiContext(self.imgui_ctx_raw);
-            sys::ImGuizmo_PopID();
-            if previous != self.imgui_ctx_raw {
-                imgui_sys::igSetCurrentContext(previous);
-                sys::ImGuizmo_SetImGuiContext(previous);
-            }
-        }
+        let _ = self
+            .ctx_binding
+            .try_with_bound_context(|| unsafe { sys::ImGuizmo_PopID() });
     }
 }
 
@@ -612,9 +544,11 @@ impl GuizmoExt for Ui {
 
 #[cfg(test)]
 mod tests {
-    use super::{GuizmoExt, sys};
-    use dear_imgui_rs::{BackendFlags, Context};
+    use super::{GuizmoExt, IdToken, sys};
+    use dear_imgui_rs::{Context, ContextLifecycle};
     use dear_imgui_sys as imgui_sys;
+    use std::marker::PhantomData;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::sync::{Mutex, OnceLock};
 
     fn test_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -626,7 +560,7 @@ mod tests {
         let io = imgui.io_mut();
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
-        io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_TEXTURES);
+        let _ = imgui.font_atlas().build();
     }
 
     #[test]
@@ -638,10 +572,11 @@ mod tests {
         {
             let ui = imgui.frame();
             let giz = ui.guizmo();
+            assert_eq!(giz.ctx_binding.id(), ui.context_id());
             let id = giz.push_id(7);
             drop(id);
         }
-        let _ = imgui.render();
+        drop(imgui.render());
     }
 
     #[test]
@@ -664,9 +599,55 @@ mod tests {
 
         unsafe {
             imgui_sys::igSetCurrentContext(raw_a);
-            sys::ImGuizmo_SetImGuiContext(raw_a);
         }
-        let _ = imgui_a.render();
+        drop(imgui_a.render());
+    }
+
+    #[test]
+    fn bound_call_restores_previous_context_after_panic() {
+        let _guard = test_guard();
+        let mut imgui = Context::create();
+        prepare_imgui(&mut imgui);
+        let raw = imgui.as_raw();
+
+        let ui = imgui.frame();
+        let giz = ui.guizmo();
+        unsafe { imgui_sys::igSetCurrentContext(std::ptr::null_mut()) };
+        let other = Context::create();
+        let other_raw = other.as_raw();
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            giz.with_bound_context(|| {
+                assert_eq!(unsafe { imgui_sys::igGetCurrentContext() }, raw);
+                panic!("forced panic while ImGuizmo context is bound");
+            });
+        }));
+        assert!(result.is_err());
+        assert_eq!(unsafe { imgui_sys::igGetCurrentContext() }, other_raw);
+
+        drop(other);
+        unsafe { imgui_sys::igSetCurrentContext(raw) };
+        drop(imgui.render());
+    }
+
+    #[test]
+    fn id_token_drop_skips_destroyed_context() {
+        let _guard = test_guard();
+        let imgui = Context::create();
+        let binding = imgui.binding();
+        drop(imgui);
+        assert_eq!(binding.lifecycle(), ContextLifecycle::NativeDestroyed);
+
+        let mut current = Context::create();
+        prepare_imgui(&mut current);
+        let current_raw = current.as_raw();
+        let token: IdToken<'static> = IdToken {
+            ctx_binding: binding,
+            _ui: PhantomData,
+        };
+
+        drop(token);
+        assert_eq!(unsafe { imgui_sys::igGetCurrentContext() }, current_raw);
     }
 
     #[test]
@@ -702,6 +683,6 @@ mod tests {
                 unsafe { sys::ImGuizmo_GetID_Ptr((&ptr_value as *const u32).cast()) };
             assert_eq!(ptr_id.raw(), expected_ptr);
         }
-        let _ = imgui.render();
+        drop(imgui.render());
     }
 }

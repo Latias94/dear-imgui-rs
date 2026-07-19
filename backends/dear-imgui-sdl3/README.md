@@ -112,14 +112,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ImGui context
     let mut imgui = Context::create();
 
-    // Initialize SDL3 + OpenGL3 backends. Dropping this owner shuts both down.
+    // Initialize SDL3 + OpenGL3 backends. The owner and Context share teardown state.
     let mut sdl3_backend =
         Sdl3OpenGl3Backend::init(&mut imgui, &window, &gl_context, "#version 150")?;
 
     'main: loop {
         // 1) Poll SDL3 events and feed ImGui
         while let Some(event) = sdl3_poll_event_ll() {
-            if sdl3_backend.process_event(&mut imgui, &event) {
+            if sdl3_backend.process_event(&mut imgui, &event)? {
                 // ImGui consumed the event; continue if you do not need it.
             }
 
@@ -127,8 +127,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         // 2) Start a new frame for the SDL3 + OpenGL backends
-        sdl3_backend.new_frame(&mut imgui);
-        let ui = imgui.frame();
+        sdl3_backend.new_frame(&mut imgui)?;
+        let frame = imgui.begin_frame();
+        let ui = frame.ui();
 
         // 3) Build UI
         ui.window("Hello")
@@ -138,14 +139,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
 
         // 4) Render via OpenGL backend
-        let draw_data = imgui.render();
+        let rendered = frame.render();
         unsafe {
             use sdl3::video::Window;
             use sdl3::video::GLContext;
             // Make context current if needed, clear framebuffer, etc.
             // window.gl_make_current(&gl_context)?;
         }
-        sdl3_backend.render(draw_data);
+        sdl3_backend.render(rendered)?;
         window.gl_swap_window();
     }
 }
@@ -153,45 +154,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 APIs of interest (see `src/lib.rs` for full docs):
 
-- `Sdl3OpenGl3Backend`, `Sdl3RendererBackend`, and `Sdl3PlatformBackend`:
-  RAII owners that pair initialization, context-bound frame/event helpers, and shutdown.
-- `init_for_opengl(&mut Context, &Window, &GLContext, &str)`:
-  compatibility helper to initialize SDL3 platform + OpenGL3 renderer manually.
-- `init_for_opengl_default(&mut Context, &Window, &GLContext)`:
-  compatibility helper using the upstream default GLSL version.
-- `init_platform_for_opengl(&mut Context, &Window, &GLContext)`:
-  initialize only the platform backend (for use with Rust OpenGL renderers).
-- `init_for_other(&mut Context, &Window)`:
-  initialize only the platform backend (for use with WGPU or other APIs).
-- `init_for_vulkan(&mut Context, &Window)` / `init_for_metal(&mut Context, &Window)` /
-  `init_for_d3d(&mut Context, &Window)` / `init_for_sdl_gpu(&mut Context, &Window)`:
-  initialize the SDL3 platform backend for specific renderer families (use `init_for_vulkan` for Vulkan multi-viewport support).
-- `init_for_sdlgpu3(&mut Context, &Window, SdlGpu3InitInfo)` /
-  `init_for_sdlgpu3_default(&mut Context, &Window, &Device)`:
-  initialize SDL3 platform + official SDLGPU3 renderer with explicit or default renderer settings.
-- `unsafe init_for_sdl_renderer(&mut Context, &Window, *mut SDL_Renderer)`:
-  initialize SDL3 platform backend for SDL_Renderer-based renderers.
-- `shutdown_for_opengl(&mut Context)` / `shutdown(&mut Context)`:
-  compatibility helpers for manual shutdown when you do not use an RAII owner.
-- `new_frame(&mut Context)`:
-  begin a frame for SDL3 + OpenGL3.
-- `sdl3_new_frame(&mut Context)`:
-  begin a frame for SDL3 platform only.
+- `Sdl3OpenGl3Backend` and `Sdl3RendererBackend`:
+  RAII renderer owners that hold the Context's renderer consumer, process request-bound texture
+  feedback, and consume `RenderedFrame` values.
 - `SdlGpu3RendererBackend`:
-  RAII owner for SDL3 platform + official SDLGPU3 renderer.
-- `sdl3_poll_event_ll() -> Option<SDL_Event>` and
-  `process_sys_event(&SDL_Event) -> bool` / `process_sys_event_for_context(&mut Context, &SDL_Event) -> bool`:
-  low-level event polling/processing helpers.
-- `render(&mut DrawData)`:
-  render Dear ImGui draw data via the OpenGL3 backend.
-- `update_texture(&mut TextureData)`:
-  advanced helper that delegates texture updates to `ImGui_ImplOpenGL3_UpdateTexture`.
-- `create_device_objects()` / `destroy_device_objects()`:
-  advanced OpenGL3 helpers mirroring upstream device object management.
+  RAII renderer owner for SDL3 + SDLGPU3. `prepare_render(...)` returns an
+  `SdlGpu3PreparedFrame` that keeps the renderer and Context frame alive until its `render(...)`
+  call inside the SDL GPU render pass.
+- `Sdl3PlatformBackend`:
+  platform-only RAII owner for applications that provide a separate renderer. It intentionally
+  does not claim a renderer consumer. Construct it with `Sdl3PlatformBackend::init_for_other`,
+  `init_platform_for_opengl`, `init_for_vulkan`, `init_for_metal`, `init_for_d3d`,
+  `init_for_sdl_gpu`, or unsafe `init_for_sdl_renderer` as appropriate.
+- `shutdown(&mut self, &mut Context)`:
+  an idempotent owner method that reports actionable teardown and callback-ownership errors.
+  Dropping the owner performs the same teardown on a best-effort basis.
+- `poll_fault()`:
+  returns deferred platform callback failures without unwinding through native code. Ordinary
+  owner methods also surface the oldest pending fault before entering SDL.
+- `sdl3_poll_event_ll() -> Option<SDL_Event>`:
+  low-level SDL event polling. Feed returned events through the owning backend's
+  `process_event(&mut Context, &SDL_Event)` method.
+The free renderer initialization, render, texture-update, and device-object functions were
+removed. They allowed callers to bypass the Context-owned renderer epoch and write directly into
+native texture state. Let an owning backend drop or call its `shutdown(...)` method explicitly when
+shutdown errors need to be reported.
 
-Do not mix an RAII backend owner with the matching manual shutdown function. If you
-use `Sdl3OpenGl3Backend`, `Sdl3RendererBackend`, or `Sdl3PlatformBackend`, let the
-owner drop or call its `shutdown(...)` method.
+Every owning backend registers its platform role with the Context before native initialization.
+Composite owners also register a renderer role, so Context-first teardown always releases renderer
+resources before platform windows. Callback and platform-data claims are transactional: foreign
+replacements are preserved during shutdown and returned as typed faults instead of being silently
+cleared.
 
 ## SDL3 & Build Requirements
 
@@ -467,10 +460,10 @@ state into Dear ImGui (the upstream default behavior).
 You can switch to a mode where **all** detected gamepads are opened and merged:
 
 ```rust
-use dear_imgui_sdl3::{set_gamepad_mode, GamepadMode};
+use dear_imgui_sdl3::GamepadMode;
 
-// After init_for_opengl/init_for_other/init_platform_for_opengl:
-set_gamepad_mode(GamepadMode::AutoAll);
+// After initializing an owning backend:
+sdl3_backend.set_gamepad_mode(&mut imgui, GamepadMode::AutoAll)?;
 ```
 
 This is useful for local multiplayer setups or testing environments.
@@ -481,7 +474,7 @@ providing raw `SDL_Gamepad*` handles opened by your application:
 ```rust
 // Safety: gamepads must be valid, opened SDL_Gamepad pointers.
 unsafe {
-    dear_imgui_sdl3::set_gamepad_mode_manual(&[gamepad1, gamepad2]);
+    sdl3_backend.set_gamepad_mode_manual(&mut imgui, &[gamepad1, gamepad2])?;
 }
 ```
 

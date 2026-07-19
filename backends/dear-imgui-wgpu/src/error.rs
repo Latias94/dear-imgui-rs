@@ -37,19 +37,9 @@ pub enum RendererError {
     #[error("WGPU renderer received a different Dear ImGui context than its bound context")]
     ContextMismatch,
 
-    /// A contextless render operation ran while another context was current.
-    #[error("the Dear ImGui context bound to this WGPU renderer is not current")]
-    ContextNotCurrent,
-
     /// The context already has renderer-owned state that this renderer cannot claim safely.
     #[error("Dear ImGui context is already configured for a renderer backend")]
     ContextAlreadyHasRenderer,
-
-    /// Renderer GPU state cannot change while multi-viewport callbacks are registered.
-    #[error(
-        "WGPU multi-viewport is active; shut it down before reinitializing or shutting down the renderer"
-    )]
-    MultiViewportActive,
 
     /// Draw buffer length exceeds renderer index ranges.
     #[error("{buffer} draw buffer length exceeds renderer limits")]
@@ -82,6 +72,30 @@ pub enum RendererError {
     /// Invalid texture ID
     #[error("Invalid texture ID: {0:?}")]
     InvalidTextureId(dear_imgui_rs::TextureId),
+
+    /// A managed update arrived after the renderer lost its matching GPU resource.
+    #[error(
+        "managed texture {0:?} has no WGPU resource; reset renderer bindings to request a full create"
+    )]
+    ManagedTextureMissing(dear_imgui_rs::render::SnapshotTextureId),
+
+    /// A managed identity was reused with incompatible dimensions.
+    #[error(
+        "managed texture {texture:?} layout changed without a new identity: expected {expected:?}, got {actual:?}"
+    )]
+    ManagedTextureLayoutMismatch {
+        texture: dear_imgui_rs::render::SnapshotTextureId,
+        expected: [u32; 2],
+        actual: [u32; 2],
+    },
+
+    /// Context-owned renderer consumer state rejected the operation.
+    #[error(transparent)]
+    RendererConsumer(#[from] dear_imgui_rs::render::RendererConsumerError),
+
+    /// A request was completed with the wrong feedback kind.
+    #[error(transparent)]
+    TextureFeedback(#[from] dear_imgui_rs::render::TextureFeedbackError),
 }
 
 // Display and Error traits are automatically implemented by thiserror

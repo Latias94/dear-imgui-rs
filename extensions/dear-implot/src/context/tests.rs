@@ -1,7 +1,9 @@
 use super::{PlotContext, validation::axis_tick_count_to_i32};
 use crate::sys;
 use crate::{Axis, PlotCond, XAxis, YAxis};
-use dear_imgui_rs::{BackendFlags, Context};
+use dear_imgui_rs::{BackendFlags, Context, ContextBindingError};
+use std::cell::Cell;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Mutex, OnceLock};
 
 fn test_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -17,6 +19,135 @@ fn prepare_imgui(imgui: &mut Context) {
     io.set_display_size([800.0, 600.0]);
     io.set_delta_time(1.0 / 60.0);
     io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_TEXTURES);
+}
+
+#[test]
+fn nested_plot_bindings_restore_imgui_and_implot_contexts() {
+    let _guard = test_guard();
+    let imgui_a = Context::create();
+    let imgui_a_raw = imgui_a.as_raw();
+    let plot_a = PlotContext::create(&imgui_a);
+    let plot_a_raw = unsafe { plot_a.raw() };
+    let suspended_a = imgui_a.suspend();
+
+    let imgui_b = Context::create();
+    let imgui_b_raw = imgui_b.as_raw();
+    let plot_b = PlotContext::create(&imgui_b);
+    let plot_b_raw = unsafe { plot_b.raw() };
+    unsafe { sys::ImPlot_SetCurrentContext(plot_b_raw) };
+
+    let binding_a = plot_a.binding();
+    let binding_b = plot_b.binding();
+    binding_a.with_bound_context("test outer ImPlot binding", || {
+        assert_eq!(
+            unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
+            imgui_a_raw
+        );
+        assert_eq!(unsafe { sys::ImPlot_GetCurrentContext() }, plot_a_raw);
+
+        binding_b.with_bound_context("test inner ImPlot binding", || {
+            assert_eq!(
+                unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
+                imgui_b_raw
+            );
+            assert_eq!(unsafe { sys::ImPlot_GetCurrentContext() }, plot_b_raw);
+        });
+
+        assert_eq!(
+            unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
+            imgui_a_raw
+        );
+        assert_eq!(unsafe { sys::ImPlot_GetCurrentContext() }, plot_a_raw);
+    });
+
+    assert_eq!(
+        unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
+        imgui_b_raw
+    );
+    assert_eq!(unsafe { sys::ImPlot_GetCurrentContext() }, plot_b_raw);
+
+    let panic_result = catch_unwind(AssertUnwindSafe(|| {
+        binding_a.with_bound_context("test panicking outer ImPlot binding", || {
+            binding_b.with_bound_context("test panicking inner ImPlot binding", || {
+                panic!("nested binding panic probe");
+            });
+        });
+    }));
+    assert!(panic_result.is_err());
+    assert_eq!(
+        unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
+        imgui_b_raw
+    );
+    assert_eq!(unsafe { sys::ImPlot_GetCurrentContext() }, plot_b_raw);
+
+    drop(plot_b);
+    drop(imgui_b);
+    let imgui_a = suspended_a
+        .activate()
+        .unwrap_or_else(|_| panic!("context A should reactivate after context B is dropped"));
+    drop(plot_a);
+    drop(imgui_a);
+}
+
+#[test]
+fn nested_plot_binding_never_restores_a_destroyed_outer_context() {
+    let _guard = test_guard();
+    let imgui_a = Context::create();
+    let plot_a = PlotContext::create(&imgui_a);
+    let binding_a = plot_a.binding();
+    let mut suspended_a = Some(imgui_a.suspend());
+
+    let imgui_b = Context::create();
+    let imgui_b_raw = imgui_b.as_raw();
+    let plot_b = PlotContext::create(&imgui_b);
+    let plot_b_raw = unsafe { plot_b.raw() };
+    let binding_b = plot_b.binding();
+    unsafe { sys::ImPlot_SetCurrentContext(plot_b_raw) };
+
+    binding_a.with_bound_context("test outer ImPlot binding", || {
+        binding_b.with_bound_context("test inner ImPlot binding", || {
+            drop(
+                suspended_a
+                    .take()
+                    .expect("context A must still be owned by the test"),
+            );
+            assert_eq!(
+                unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
+                imgui_b_raw
+            );
+        });
+
+        assert!(unsafe { dear_imgui_rs::sys::igGetCurrentContext() }.is_null());
+    });
+
+    assert_eq!(
+        unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
+        imgui_b_raw
+    );
+    assert_eq!(unsafe { sys::ImPlot_GetCurrentContext() }, plot_b_raw);
+
+    drop(plot_a);
+    assert_eq!(unsafe { sys::ImPlot_GetCurrentContext() }, plot_b_raw);
+    drop(plot_b);
+    drop(imgui_b);
+}
+
+#[test]
+fn dead_plot_binding_never_enters_the_native_scope() {
+    let _guard = test_guard();
+    let imgui = Context::create();
+    let plot = PlotContext::create(&imgui);
+    let binding = plot.binding();
+    drop(imgui);
+
+    let entered = Cell::new(false);
+    let result = binding.try_with_bound_context(|| entered.set(true));
+
+    assert!(matches!(result, Err(ContextBindingError::NativeDestroyed)));
+    assert!(!entered.get());
+
+    drop(plot);
+    assert!(!entered.get());
 }
 
 #[test]
@@ -48,13 +179,14 @@ fn plot_ui_binds_own_context_before_calls() {
     let raw_b = unsafe { plot_b.raw() };
 
     {
-        let ui = imgui.frame();
-        let plot_ui = plot_a.get_plot_ui(&ui);
+        let frame = imgui.begin_frame();
+        let plot_ui = plot_a.get_plot_ui(frame.ui());
         unsafe { sys::ImPlot_SetCurrentContext(raw_b) };
 
         {
-            let _guard = plot_ui.bind();
-            assert_eq!(unsafe { sys::ImPlot_GetCurrentContext() }, raw_a);
+            plot_ui.with_bound_context(|| {
+                assert_eq!(unsafe { sys::ImPlot_GetCurrentContext() }, raw_a);
+            })
         }
         assert_eq!(unsafe { sys::ImPlot_GetCurrentContext() }, raw_b);
 
@@ -62,7 +194,6 @@ fn plot_ui_binds_own_context_before_calls() {
 
         assert_eq!(unsafe { sys::ImPlot_GetCurrentContext() }, raw_b);
     }
-    let _ = imgui.render();
 
     drop(plot_b);
     drop(plot_a);
@@ -78,8 +209,8 @@ fn plot_token_binds_own_context_before_drop() {
     let raw_b = unsafe { plot_b.raw() };
 
     {
-        let ui = imgui.frame();
-        let plot_ui = plot_a.get_plot_ui(&ui);
+        let frame = imgui.begin_frame();
+        let plot_ui = plot_a.get_plot_ui(frame.ui());
         let token = plot_ui.begin_plot("token").expect("failed to begin plot");
 
         unsafe { sys::ImPlot_SetCurrentContext(raw_b) };
@@ -87,7 +218,6 @@ fn plot_token_binds_own_context_before_drop() {
 
         assert_eq!(unsafe { sys::ImPlot_GetCurrentContext() }, raw_b);
     }
-    let _ = imgui.render();
 
     drop(plot_b);
     drop(plot_a);
@@ -103,8 +233,8 @@ fn style_and_plot_clip_tokens_bind_own_context_before_drop() {
     let raw_b = unsafe { plot_b.raw() };
 
     {
-        let ui = imgui.frame();
-        let plot_ui = plot_a.get_plot_ui(&ui);
+        let frame = imgui.begin_frame();
+        let plot_ui = plot_a.get_plot_ui(frame.ui());
         let style = plot_ui.push_style_var_f32(crate::StyleVar::MinorAlpha, 0.5);
         unsafe { sys::ImPlot_SetCurrentContext(raw_b) };
         drop(style);
@@ -117,7 +247,6 @@ fn style_and_plot_clip_tokens_bind_own_context_before_drop() {
         assert_eq!(unsafe { sys::ImPlot_GetCurrentContext() }, raw_b);
         drop(token);
     }
-    let _ = imgui.render();
 
     drop(plot_b);
     drop(plot_a);
@@ -160,8 +289,8 @@ fn set_next_axis_limits_rejects_non_finite_values_before_ffi() {
     let plot = PlotContext::create(&imgui);
 
     {
-        let ui = imgui.frame();
-        let plot_ui = plot.get_plot_ui(&ui);
+        let frame = imgui.begin_frame();
+        let plot_ui = plot.get_plot_ui(frame.ui());
         plot_ui.set_next_x_axis_limits(XAxis::X1, f64::NAN, 1.0, PlotCond::Once);
     }
 }
@@ -175,8 +304,8 @@ fn axis_zoom_constraints_reject_non_positive_min_before_ffi() {
     let plot = PlotContext::create(&imgui);
 
     {
-        let ui = imgui.frame();
-        let plot_ui = plot.get_plot_ui(&ui);
+        let frame = imgui.begin_frame();
+        let plot_ui = plot.get_plot_ui(frame.ui());
         let token = plot_ui
             .begin_plot("constraints")
             .expect("failed to begin plot");
@@ -193,8 +322,8 @@ fn typed_axis_apis_accept_valid_axes() {
     let plot = PlotContext::create(&imgui);
 
     {
-        let ui = imgui.frame();
-        let plot_ui = plot.get_plot_ui(&ui);
+        let frame = imgui.begin_frame();
+        let plot_ui = plot.get_plot_ui(frame.ui());
         plot_ui.set_next_axis_to_fit(Axis::X1);
 
         let token = plot_ui
@@ -209,7 +338,5 @@ fn typed_axis_apis_accept_valid_axes() {
         plot_ui.setup_axis_zoom_constraints(Axis::Y1, 0.1, 20.0);
         token.end();
     }
-
-    let _ = imgui.render();
     drop(plot);
 }

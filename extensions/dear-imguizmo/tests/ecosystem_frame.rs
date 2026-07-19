@@ -22,6 +22,7 @@ fn extensions_compose_inside_one_engine_managed_imgui_frame() {
 
     let mut imgui = Context::create();
     prepare_context(&mut imgui);
+    let consumer = imgui.create_renderer_consumer().unwrap();
 
     let plot_ctx = dear_implot::PlotContext::create(&imgui);
     let imnodes_ctx = dear_imnodes::Context::create(&imgui);
@@ -82,12 +83,12 @@ fn extensions_compose_inside_one_engine_managed_imgui_frame() {
     gizmo.draw_grid(&view, &projection, &model, 10.0);
 
     let snapshot = frame
-        .render_snapshot(dear_imgui_rs::render::snapshot::SnapshotOptions::default())
+        .render_snapshot(&consumer)
         .expect("shared extension frame should snapshot cleanly");
 
     assert!(
         snapshot
-            .draw
+            .draw_data()
             .draw_lists
             .iter()
             .any(|list| !list.vtx.is_empty() && !list.idx.is_empty()),

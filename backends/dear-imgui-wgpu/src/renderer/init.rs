@@ -84,8 +84,7 @@ impl WgpuRenderer {
             gamma_mode: GammaMode::Auto,
             #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
             viewport_clear_color: Color::BLACK,
-            #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
-            multi_viewport_active: std::sync::atomic::AtomicBool::new(false),
+            renderer_consumer: None,
         }
     }
 
@@ -94,9 +93,6 @@ impl WgpuRenderer {
     /// Public initialization always goes through [`Self::init_with_context`] so renderer resources
     /// and Dear ImGui texture bindings cannot be replaced independently.
     fn initialize_device(&mut self, init_info: WgpuInitInfo) -> RendererResult<()> {
-        #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
-        self.ensure_multi_viewport_inactive()?;
-
         self.ensure_uninitialized()?;
 
         // Create backend data
@@ -133,7 +129,10 @@ impl WgpuRenderer {
     }
 
     fn ensure_uninitialized(&self) -> RendererResult<()> {
-        if self.backend_data.is_some() || self.context_binding.is_some() {
+        if self.backend_data.is_some()
+            || self.context_binding.is_some()
+            || self.renderer_consumer.is_some()
+        {
             return Err(RendererError::InvalidRenderState(
                 "renderer is already initialized; call shutdown() with its ImGui context before reinitializing"
                     .to_owned(),
@@ -148,9 +147,6 @@ impl WgpuRenderer {
         imgui_ctx: &mut Context,
         prepare_font_atlas: bool,
     ) -> RendererResult<()> {
-        #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
-        self.ensure_multi_viewport_inactive()?;
-
         self.ensure_uninitialized()?;
         Self::ensure_context_available(imgui_ctx)?;
         self.initialize_device(init_info)?;
@@ -170,22 +166,35 @@ impl WgpuRenderer {
         prepare_font_atlas: bool,
     ) -> RendererResult<()> {
         let renderer_flags_added = Self::configure_imgui_context(imgui_ctx)?;
+        let consumer = match imgui_ctx.create_renderer_consumer() {
+            Ok(consumer) => consumer,
+            Err(error) => {
+                Self::unconfigure_imgui_context(imgui_ctx, renderer_flags_added);
+                return Err(error.into());
+            }
+        };
         if let Err(error) = self.bind_context(imgui_ctx, renderer_flags_added) {
+            drop(consumer);
             Self::unconfigure_imgui_context(imgui_ctx, renderer_flags_added);
             return Err(error);
         }
+        self.renderer_consumer = Some(consumer);
 
         // A newly attached renderer cannot inherit GPU bindings from a previous renderer/device.
-        imgui_ctx
-            .platform_io_mut()
-            .invalidate_renderer_texture_bindings();
-
-        if prepare_font_atlas && let Err(error) = self.prepare_font_atlas(imgui_ctx) {
-            imgui_ctx
-                .platform_io_mut()
-                .invalidate_renderer_texture_bindings();
+        if let Err(error) = imgui_ctx.reset_renderer_texture_bindings(self.renderer_consumer()?) {
+            self.renderer_consumer = None;
             Self::unconfigure_imgui_context(imgui_ctx, renderer_flags_added);
             self.clear_context_binding();
+            return Err(error.into());
+        }
+
+        if prepare_font_atlas && let Err(error) = self.prepare_font_atlas(imgui_ctx) {
+            self.texture_manager.clear_managed_textures();
+            let reset_result = imgui_ctx.reset_renderer_texture_bindings(self.renderer_consumer()?);
+            self.renderer_consumer = None;
+            Self::unconfigure_imgui_context(imgui_ctx, renderer_flags_added);
+            self.clear_context_binding();
+            reset_result?;
             return Err(error);
         }
 
@@ -298,14 +307,14 @@ impl WgpuRenderer {
                 .backend_flags()
                 .contains(BackendFlags::RENDERER_HAS_TEXTURES)
             {
-                // New backend texture system: font textures are produced via DrawData::textures()
-                // requests; do not assign a legacy TexID.
+                // Managed font textures are produced by Context-owned rendered-frame requests;
+                // do not assign a legacy TexID.
                 return Ok(());
             }
 
             // Legacy fallback: only upload when the atlas does not already resolve to a live
             // WGPU texture. This keeps the backend idempotent without carrying a separate
-            // renderer-side font texture cache now that the managed ImTextureData path is the
+            // renderer-side font texture cache now that the managed rendered-frame path is the
             // primary mode.
             let existing_tex_id = imgui_ctx.font_atlas().texture_id();
             let has_live_font_texture = !existing_tex_id.is_null()

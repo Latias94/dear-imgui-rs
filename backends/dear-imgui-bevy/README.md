@@ -118,7 +118,8 @@ extension crates you use to your application dependencies directly.
 
 1. `ImguiBeginFrame` translates Bevy input and opens the Dear ImGui frame.
 2. `ImguiPrimaryContextPass` runs your UI systems against the already-open frame.
-3. `ImguiEndFrame` renders once and stores an owned `FrameSnapshot` for the render world.
+3. `ImguiEndFrame` renders once and moves a one-shot `FrameSnapshot` through a bounded mailbox to
+   the render world. `ImguiFrameOutput` exposes only its epoch and any capture error.
 
 The main user-facing APIs are:
 
@@ -135,9 +136,9 @@ The main user-facing APIs are:
 
 ### Render Targets and Scene Views
 
-With the `render` feature enabled, the backend extracts ImGui frame snapshots into Bevy's render
-world and draws them through Bevy cameras. Add `ImguiOverlayCamera` to the camera that should
-receive the overlay for a render target.
+With the `render` feature enabled, the backend moves ImGui frame snapshots into Bevy's render world,
+commits request-bound texture feedback exactly once, and draws them through Bevy cameras. Add
+`ImguiOverlayCamera` to the camera that should receive the overlay for a render target.
 
 Editor-style scene views usually render Bevy content into an `Image`, register that image through
 `ImguiBevyTextures`, and show it with `ui.image(...)`. Add `ImguiOverlayDisabled` to the offscreen

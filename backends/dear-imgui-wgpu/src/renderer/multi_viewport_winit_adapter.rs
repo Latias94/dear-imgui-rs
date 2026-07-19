@@ -1,5 +1,7 @@
 use dear_imgui_rs::platform_io::Viewport;
 
+use super::multi_viewport_runtime::WgpuViewportError;
+
 /// Creates a surface whose native window lifetime is owned by the Winit platform backend.
 ///
 /// # Safety
@@ -10,10 +12,12 @@ use dear_imgui_rs::platform_io::Viewport;
 pub(super) unsafe fn create_surface(
     instance: &wgpu::Instance,
     viewport: &Viewport,
-) -> Option<(wgpu::Surface<'static>, [u32; 2])> {
+) -> Result<(wgpu::Surface<'static>, [u32; 2]), WgpuViewportError> {
     let window_ptr = viewport.platform_handle();
     if window_ptr.is_null() {
-        return None;
+        return Err(WgpuViewportError::SurfaceOperationFailed {
+            operation: "read Winit viewport window handle",
+        });
     }
 
     let window = unsafe { &*(window_ptr.cast::<winit::window::Window>()) };
@@ -22,46 +26,42 @@ pub(super) unsafe fn create_surface(
         unsafe { wgpu::SurfaceTargetUnsafe::from_display_and_window(window, window) };
     #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
     let target_result = unsafe { wgpu::SurfaceTargetUnsafe::from_window(window) };
-    let target = match target_result {
-        Ok(target) => target,
-        Err(error) => {
-            eprintln!("[wgpu-mv] could not read Winit surface handles: {error:?}");
-            return None;
+    let target = target_result.map_err(|_| WgpuViewportError::SurfaceOperationFailed {
+        operation: "read Winit surface handles",
+    })?;
+    let surface = unsafe { instance.create_surface_unsafe(target) }.map_err(|_| {
+        WgpuViewportError::SurfaceOperationFailed {
+            operation: "create Winit viewport surface",
         }
-    };
-    let surface = match unsafe { instance.create_surface_unsafe(target) } {
-        Ok(surface) => surface,
-        Err(error) => {
-            eprintln!("[wgpu-mv] could not create Winit surface: {error:?}");
-            return None;
-        }
-    };
+    })?;
     let size = window.inner_size();
-    Some((surface, [size.width.max(1), size.height.max(1)]))
+    Ok((surface, [size.width.max(1), size.height.max(1)]))
 }
 
 #[cfg(target_arch = "wasm32")]
 pub(super) unsafe fn create_surface(
     _instance: &wgpu::Instance,
     _viewport: &Viewport,
-) -> Option<(wgpu::Surface<'static>, [u32; 2])> {
-    None
+) -> Result<(wgpu::Surface<'static>, [u32; 2]), WgpuViewportError> {
+    Err(WgpuViewportError::UnsupportedTarget)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(super) unsafe fn framebuffer_size(viewport: &Viewport) -> Option<[u32; 2]> {
+pub(super) unsafe fn framebuffer_size(viewport: &Viewport) -> Result<[u32; 2], WgpuViewportError> {
     let window_ptr = viewport.platform_handle();
     if window_ptr.is_null() {
-        return None;
+        return Err(WgpuViewportError::SurfaceOperationFailed {
+            operation: "read Winit viewport window handle",
+        });
     }
     let window = unsafe { &*(window_ptr.cast::<winit::window::Window>()) };
     let size = window.inner_size();
-    Some([size.width.max(1), size.height.max(1)])
+    Ok([size.width.max(1), size.height.max(1)])
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(super) unsafe fn framebuffer_size(_viewport: &Viewport) -> Option<[u32; 2]> {
-    None
+pub(super) unsafe fn framebuffer_size(_viewport: &Viewport) -> Result<[u32; 2], WgpuViewportError> {
+    Err(WgpuViewportError::UnsupportedTarget)
 }
 
 #[cfg(test)]
@@ -73,6 +73,6 @@ mod tests {
         let mut raw_viewport = dear_imgui_rs::sys::ImGuiViewport::default();
         let viewport =
             unsafe { dear_imgui_rs::platform_io::Viewport::from_raw_mut(&mut raw_viewport) };
-        assert!(unsafe { framebuffer_size(viewport) }.is_none());
+        assert!(unsafe { framebuffer_size(viewport) }.is_err());
     }
 }

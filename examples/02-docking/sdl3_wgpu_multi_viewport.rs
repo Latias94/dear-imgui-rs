@@ -16,7 +16,8 @@ use std::error::Error;
 use std::time::Instant;
 
 use dear_imgui_rs::{Condition, ConfigFlags, Context};
-use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode};
+use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode, Sdl3PlatformBackend};
+use dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRuntime;
 use dear_imgui_wgpu::{GammaMode, WgpuInitInfo, WgpuRenderer};
 use sdl3::event::Event;
 use sdl3::keyboard::Keycode;
@@ -119,28 +120,23 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // SDL3 platform backend only.
-    imgui_sdl3_backend::init_for_other(&mut imgui, &window)?;
-    imgui_sdl3_backend::set_gamepad_mode(GamepadMode::AutoAll);
+    let mut sdl3_backend = Sdl3PlatformBackend::init_for_other(&mut imgui, &window)?;
+    sdl3_backend.set_gamepad_mode(&mut imgui, GamepadMode::AutoAll)?;
 
     // WGPU renderer backend (provide instance/adapter for per-viewport surfaces).
     let init_info = WgpuInitInfo::new(device.clone(), queue.clone(), surface_config.format)
         .with_instance(instance.clone())
         .with_adapter(adapter.clone());
-    let mut renderer = Box::new(WgpuRenderer::new(init_info, &mut imgui)?);
+    let mut renderer = WgpuRenderer::new(init_info, &mut imgui)?;
     renderer.set_gamma_mode(GammaMode::Auto);
-
-    if ENABLE_VIEWPORTS {
-        unsafe {
-            dear_imgui_wgpu::multi_viewport_sdl3::enable(&mut renderer, &mut imgui)?;
-        }
-    }
+    let mut renderer = Sdl3ViewportRuntime::attach(&mut imgui, renderer)?;
 
     let mut last_frame = Instant::now();
     let mut show_demo = true;
 
     'main: loop {
         while let Some(raw) = imgui_sdl3_backend::sdl3_poll_event_ll() {
-            let _ = imgui_sdl3_backend::process_sys_event(&raw);
+            let _ = sdl3_backend.process_event(&mut imgui, &raw)?;
 
             let event = Event::from_ll(raw);
             match event {
@@ -175,7 +171,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         last_frame = now;
         imgui.io_mut().set_delta_time(dt);
 
-        imgui_sdl3_backend::sdl3_new_frame(&mut imgui);
+        sdl3_backend.new_frame(&mut imgui)?;
         let ui = imgui.frame();
 
         ui.dockspace_over_main_viewport();
@@ -248,7 +244,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             });
 
             renderer.new_frame()?;
-            renderer.render_draw_data_with_fb_size(
+            renderer.render_with_fb_size(
                 draw_data,
                 &mut rpass,
                 surface_config.width,
@@ -271,11 +267,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    if ENABLE_VIEWPORTS {
-        dear_imgui_wgpu::multi_viewport_sdl3::shutdown_multi_viewport_support(&mut imgui)
-            .expect("WGPU multi-viewport shutdown failed");
-    }
     renderer.shutdown(&mut imgui)?;
-    imgui_sdl3_backend::shutdown(&mut imgui);
+    sdl3_backend.shutdown(&mut imgui)?;
     Ok(())
 }

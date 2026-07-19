@@ -11,11 +11,12 @@
 //!       --features multi-viewport,sdl3-platform
 
 use std::error::Error;
+use std::rc::Rc;
 use std::time::Instant;
 
-use dear_imgui_glow::{GlowRenderer, multi_viewport as glow_mvp};
+use dear_imgui_glow::{GlowRenderer, SimpleTextureMap, multi_viewport::GlowViewportRuntime};
 use dear_imgui_rs::{Condition, ConfigFlags, Context};
-use dear_imgui_sdl3 as imgui_sdl3_backend;
+use dear_imgui_sdl3::{self as imgui_sdl3_backend, Sdl3PlatformBackend};
 use glow::HasContext;
 use sdl3::event::Event;
 use sdl3::keyboard::Keycode;
@@ -63,7 +64,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     window.show();
 
     // Create a glow context for rendering.
-    let gl = unsafe { create_glow_context(&video) };
+    let gl = Rc::new(unsafe { create_glow_context(&video) });
 
     // Build ImGui context.
     let mut imgui = Context::create();
@@ -78,7 +79,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // Initialize SDL3 platform backend only (no C++ OpenGL3 renderer).
-    imgui_sdl3_backend::init_platform_for_opengl(&mut imgui, &window, &gl_context)?;
+    let mut sdl3_backend =
+        Sdl3PlatformBackend::init_platform_for_opengl(&mut imgui, &window, &gl_context)?;
 
     // Basic style scaling using the window's display scale.
     let window_scale = window.display_scale();
@@ -88,10 +90,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // Initialize Glow renderer and enable multi-viewport callbacks.
-    let mut renderer = GlowRenderer::new(gl, &mut imgui)?;
-    if ENABLE_VIEWPORTS {
-        glow_mvp::enable(&mut renderer, &mut imgui);
-    }
+    let renderer = GlowRenderer::with_shared_context(
+        Rc::clone(&gl),
+        &mut imgui,
+        Box::new(SimpleTextureMap::default()),
+    )?;
+    let mut renderer = GlowViewportRuntime::attach(&mut imgui, renderer)?;
 
     let mut last_frame = Instant::now();
 
@@ -99,7 +103,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         // 1) Pump events: low-level SDL_Event for ImGui backend + high-level Event for us.
         while let Some(raw) = imgui_sdl3_backend::sdl3_poll_event_ll() {
             // Feed the SDL3 backend.
-            let _ = imgui_sdl3_backend::process_sys_event(&raw);
+            let _ = sdl3_backend.process_event(&mut imgui, &raw)?;
 
             // Convert to high-level Event for our own logic.
             let event = Event::from_ll(raw);
@@ -125,7 +129,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         imgui.io_mut().set_delta_time(dt);
 
         // 3) Start a new ImGui frame.
-        imgui_sdl3_backend::sdl3_new_frame(&mut imgui);
+        sdl3_backend.new_frame(&mut imgui)?;
         let ui = imgui.frame();
 
         // Create a dockspace over the main viewport so there is always content.
@@ -140,19 +144,18 @@ fn main() -> Result<(), Box<dyn Error>> {
             });
 
         // 4) Render ImGui main viewport.
-        let draw_data = imgui.render();
+        let frame = imgui.render();
 
         // Clear the main framebuffer with Glow.
         unsafe {
             let (w, h) = window.size_in_pixels();
-            let gl = renderer.gl_context().unwrap().clone();
             gl.viewport(0, 0, w as i32, h as i32);
             gl.clear_color(0.1, 0.12, 0.15, 1.0);
             gl.clear(glow::COLOR_BUFFER_BIT);
         }
 
         renderer.new_frame()?;
-        renderer.render(draw_data)?;
+        renderer.render(frame)?;
 
         // 5) Optionally render additional platform windows when multi-viewport is enabled.
         if ENABLE_VIEWPORTS {
@@ -169,10 +172,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         window.gl_swap_window();
     }
 
-    if ENABLE_VIEWPORTS {
-        glow_mvp::shutdown_multi_viewport_support(&mut imgui);
-    }
-    imgui_sdl3_backend::shutdown(&mut imgui);
+    renderer.shutdown(&mut imgui)?;
+    sdl3_backend.shutdown(&mut imgui)?;
     Ok(())
 }
 

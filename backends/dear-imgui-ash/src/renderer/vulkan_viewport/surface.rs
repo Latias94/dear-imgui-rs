@@ -71,17 +71,11 @@ impl ViewportAshData {
         }
     }
 
-    pub(super) fn destroy(
+    pub(super) fn destroy_after_device_idle(
         mut self,
         renderer: &mut AshRenderer,
         surface_loader: &khr_surface::Instance,
     ) -> RendererResult<()> {
-        if self.swapchain.is_some() {
-            unsafe {
-                let _ = renderer.device.device_wait_idle();
-            }
-        }
-
         self.retire_swapchain_after_device_idle(&renderer.device);
         let _ = self
             .mesh_frames

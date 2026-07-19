@@ -13,6 +13,7 @@ keywords.workspace = true
 
 [dependencies]
 dear-imgui-rs.workspace = true
+thiserror.workspace = true
 winit.workspace = true
 
 # WASM-specific dependencies

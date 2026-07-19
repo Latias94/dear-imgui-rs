@@ -4,7 +4,11 @@ use std::sync::{Mutex, OnceLock};
 use super::{ActiveSampler, RendererRenderStateGuard, WgpuRenderer};
 use crate::wgpu;
 use crate::{GammaMode, RendererError, RendererResult, Uniforms};
-use dear_imgui_rs::{Context, TextureId, render::DrawData, sys};
+use dear_imgui_rs::{
+    Context, ContextBinding, TextureId,
+    render::{DrawData, RenderedFrame, TextureOp},
+    sys,
+};
 use wgpu::RenderPass;
 
 #[allow(unused_macros)]
@@ -14,21 +18,45 @@ macro_rules! mvlog {
     }
 }
 
+fn with_bound_context<R>(
+    binding: &ContextBinding,
+    f: impl FnOnce() -> RendererResult<R>,
+) -> RendererResult<R> {
+    binding
+        .try_with_bound_context(f)
+        .map_err(|_| RendererError::ContextDropped)?
+}
+
+fn platform_io_for_current_context() -> RendererResult<*mut sys::ImGuiPlatformIO> {
+    let context = unsafe { sys::igGetCurrentContext() };
+    let platform_io = unsafe { sys::igGetPlatformIO_ContextPtr(context) };
+    if platform_io.is_null() {
+        Err(RendererError::InvalidRenderState(
+            "bound Dear ImGui context has no PlatformIO".to_owned(),
+        ))
+    } else {
+        Ok(platform_io)
+    }
+}
+
 impl WgpuRenderer {
-    /// Render Dear ImGui draw data
+    /// Render one Context-borrowed Dear ImGui frame.
     ///
-    /// This corresponds to ImGui_ImplWGPU_RenderDrawData in the C++ implementation
-    ///
-    /// `draw_data` must originate from this renderer's bound context, and that context must be
-    /// current for the duration of the call. Use [`Self::render_context`] to finalize and render a
-    /// frame in one operation.
-    pub fn render_draw_data(
+    /// Managed texture requests are applied and reconciled before draw commands resolve their
+    /// renderer texture IDs. Consuming the frame prevents native draw data from escaping its
+    /// owning Context borrow.
+    pub fn render(
         &mut self,
-        draw_data: &mut DrawData,
+        mut frame: RenderedFrame<'_>,
         render_pass: &mut RenderPass,
     ) -> RendererResult<()> {
-        let platform_io = self.render_platform_io()?;
-        self.render_draw_data_ex(draw_data, render_pass, platform_io)
+        self.ensure_frame_matches(&frame)?;
+        let binding = self.bound_context()?;
+        with_bound_context(&binding, || {
+            let platform_io = platform_io_for_current_context()?;
+            self.reconcile_frame_textures(&mut frame)?;
+            self.render_read_only_draw_data(frame.draw_data(), render_pass, platform_io)
+        })
     }
 
     /// Finalize and render the frame for this renderer's bound ImGui context.
@@ -41,14 +69,36 @@ impl WgpuRenderer {
         render_pass: &mut RenderPass,
     ) -> RendererResult<()> {
         self.ensure_context_matches(ctx)?;
-        let platform_io = self.render_platform_io()?;
-        let draw_data = ctx.render();
-        self.render_draw_data_ex(draw_data, render_pass, platform_io)
+        let frame = ctx.render();
+        self.render(frame, render_pass)
     }
 
-    pub(super) fn render_draw_data_ex(
+    fn reconcile_frame_textures(&mut self, frame: &mut RenderedFrame<'_>) -> RendererResult<()> {
+        let destroyed = frame
+            .texture_requests()
+            .iter()
+            .filter_map(|request| {
+                matches!(request.operation(), TextureOp::Destroy).then_some(request.texture())
+            })
+            .collect::<Vec<_>>();
+        let backend_data = self.backend_data.as_mut().ok_or_else(|| {
+            RendererError::InvalidRenderState("Renderer not initialized".to_owned())
+        })?;
+        let feedback = self.texture_manager.handle_texture_requests(
+            frame.texture_requests(),
+            &backend_data.device,
+            &backend_data.queue,
+            &mut backend_data.render_resources,
+        )?;
+        frame.reconcile_texture_feedback(feedback)?;
+        self.texture_manager
+            .acknowledge_destroyed_textures(destroyed);
+        Ok(())
+    }
+
+    pub(super) fn render_read_only_draw_data(
         &mut self,
-        draw_data: &mut DrawData,
+        draw_data: &DrawData,
         render_pass: &mut RenderPass,
         platform_io: *mut sys::ImGuiPlatformIO,
     ) -> RendererResult<()> {
@@ -73,13 +123,6 @@ impl WgpuRenderer {
         if fb_width <= 0 || fb_height <= 0 || !draw_data.valid() {
             return Ok(());
         }
-
-        self.texture_manager.handle_texture_updates(
-            draw_data,
-            &backend_data.device,
-            &backend_data.queue,
-            &mut backend_data.render_resources,
-        );
 
         // Advance to next frame
         backend_data.next_frame();
@@ -124,24 +167,28 @@ impl WgpuRenderer {
         Ok(())
     }
 
-    /// Render draw data from the bound, current context with explicit framebuffer dimensions.
-    pub fn render_draw_data_with_fb_size(
+    /// Render one Context-borrowed frame with explicit framebuffer dimensions.
+    pub fn render_with_fb_size(
         &mut self,
-        draw_data: &mut DrawData,
+        mut frame: RenderedFrame<'_>,
         render_pass: &mut RenderPass,
         fb_width: u32,
         fb_height: u32,
     ) -> RendererResult<()> {
-        let platform_io = self.render_platform_io()?;
-        // Public helper used by the main window: advance frame resources as usual.
-        self.render_draw_data_with_fb_size_ex(
-            draw_data,
-            render_pass,
-            fb_width,
-            fb_height,
-            true,
-            platform_io,
-        )
+        self.ensure_frame_matches(&frame)?;
+        let binding = self.bound_context()?;
+        with_bound_context(&binding, || {
+            let platform_io = platform_io_for_current_context()?;
+            self.reconcile_frame_textures(&mut frame)?;
+            self.render_read_only_draw_data_with_fb_size(
+                frame.draw_data(),
+                render_pass,
+                fb_width,
+                fb_height,
+                true,
+                platform_io,
+            )
+        })
     }
 
     /// Finalize and render the frame for the bound ImGui context and framebuffer size.
@@ -156,24 +203,16 @@ impl WgpuRenderer {
         fb_height: u32,
     ) -> RendererResult<()> {
         self.ensure_context_matches(ctx)?;
-        let platform_io = self.render_platform_io()?;
-        let draw_data = ctx.render();
-        self.render_draw_data_with_fb_size_ex(
-            draw_data,
-            render_pass,
-            fb_width,
-            fb_height,
-            true,
-            platform_io,
-        )
+        let frame = ctx.render();
+        self.render_with_fb_size(frame, render_pass, fb_width, fb_height)
     }
 
     /// Internal variant that optionally skips advancing the frame index.
     ///
     /// When `advance_frame` is `false`, we reuse the current frame resources.
-    pub(super) fn render_draw_data_with_fb_size_ex(
+    pub(super) fn render_read_only_draw_data_with_fb_size(
         &mut self,
-        draw_data: &mut DrawData,
+        draw_data: &DrawData,
         render_pass: &mut RenderPass,
         fb_width: u32,
         fb_height: u32,
@@ -226,13 +265,6 @@ impl WgpuRenderer {
         if fb_width == 0 || fb_height == 0 || !draw_data.valid() {
             return Ok(());
         }
-
-        self.texture_manager.handle_texture_updates(
-            draw_data,
-            &backend_data.device,
-            &backend_data.queue,
-            &mut backend_data.render_resources,
-        );
 
         if advance_frame {
             backend_data.next_frame();

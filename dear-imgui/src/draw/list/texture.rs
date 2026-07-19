@@ -11,7 +11,7 @@ use super::DrawListMut;
 #[must_use]
 pub struct DrawListTextureToken<'draw_list, 'tex> {
     draw_list: *mut sys::ImDrawList,
-    _phantom: PhantomData<(&'draw_list (), &'tex mut crate::texture::TextureData)>,
+    _phantom: PhantomData<(&'draw_list (), &'tex ())>,
 }
 
 impl<'draw_list, 'tex> DrawListTextureToken<'draw_list, 'tex> {
@@ -60,8 +60,16 @@ impl<'ui> DrawListMut<'ui> {
         &self,
         texture: impl Into<crate::texture::TextureRef<'tex>>,
     ) -> DrawListTextureToken<'_, 'tex> {
-        let tex_ref = texture.into().raw();
-        unsafe { sys::ImDrawList_PushTexture(self.draw_list, tex_ref) };
+        let texture = texture.into();
+        self.ui().run_with_bound_context(|| {
+            let tex_ref = self
+                .ui()
+                .resolve_texture_ref(texture)
+                .unwrap_or_else(|error| {
+                    panic!("DrawListMut::push_texture() rejected texture: {error}")
+                });
+            unsafe { sys::ImDrawList_PushTexture(self.draw_list, tex_ref) };
+        });
         DrawListTextureToken::new(self.draw_list)
     }
 

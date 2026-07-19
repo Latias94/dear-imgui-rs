@@ -160,8 +160,7 @@ impl<'a> Plot for HeatmapPlot<'a> {
             return;
         };
         let label_fmt = self.label_fmt.filter(|s| !s.contains('\0'));
-        let _guard = plot_ui.bind();
-        match label_fmt {
+        plot_ui.with_bound_context(|| match label_fmt {
             Some(label_fmt) => {
                 let label = if self.label.contains('\0') {
                     ""
@@ -207,7 +206,7 @@ impl<'a> Plot for HeatmapPlot<'a> {
                     spec,
                 );
             }),
-        }
+        })
     }
 
     fn label(&self) -> &str {
@@ -321,8 +320,7 @@ impl<'a> Plot for HeatmapPlotF32<'a> {
             return;
         };
         let label_fmt = self.label_fmt.filter(|s| !s.contains('\0'));
-        let _guard = plot_ui.bind();
-        match label_fmt {
+        plot_ui.with_bound_context(|| match label_fmt {
             Some(label_fmt) => {
                 let label = if self.label.contains('\0') {
                     ""
@@ -368,7 +366,7 @@ impl<'a> Plot for HeatmapPlotF32<'a> {
                     spec,
                 );
             }),
-        }
+        })
     }
 
     fn label(&self) -> &str {

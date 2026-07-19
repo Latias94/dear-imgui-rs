@@ -251,6 +251,9 @@ mod tests {
     #[test]
     fn managed_atlas_can_create_an_arbitrary_baked_size_in_frame() {
         let mut ctx = crate::Context::create();
+        let _consumer = ctx
+            .create_renderer_consumer()
+            .expect("the managed renderer consumer should attach");
         let font_id = ctx
             .font_atlas()
             .add_font(&[crate::FontSource::default_font()]);

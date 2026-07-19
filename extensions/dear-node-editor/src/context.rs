@@ -1,6 +1,6 @@
 use crate::{EditorConfig, EditorConfigSnapshot, NodeEditorStyle, StyleColor, sys};
-use dear_imgui_rs::{Context as ImGuiContext, ContextAliveToken};
-use std::{ffi::c_void, marker::PhantomData, ptr, rc::Rc};
+use dear_imgui_rs::{Context as ImGuiContext, ContextBinding, ContextId};
+use std::{ffi::c_void, ptr};
 
 /// Errors returned by the node-editor safe layer.
 #[derive(Debug, thiserror::Error)]
@@ -12,12 +12,10 @@ pub enum NodeEditorError {
 /// Owned imgui-node-editor context.
 pub struct EditorContext {
     raw: *mut sys::DneEditorContext,
-    imgui_ctx_raw: *mut dear_imgui_rs::sys::ImGuiContext,
-    imgui_alive: ContextAliveToken,
+    imgui_binding: ContextBinding,
     config: EditorConfigSnapshot,
     _settings_file: Option<std::ffi::CString>,
     _callbacks: Option<Box<crate::config::CallbackState>>,
-    _not_send_sync: PhantomData<Rc<()>>,
 }
 
 impl EditorContext {
@@ -35,23 +33,21 @@ impl EditorContext {
         imgui: &ImGuiContext,
         mut config: EditorConfig,
     ) -> Result<Self, NodeEditorError> {
-        let imgui_ctx_raw = imgui.as_raw();
-        let _imgui_guard = ImGuiContextGuard::bind(imgui_ctx_raw);
+        let imgui_binding = imgui.binding();
         let config_snapshot = config.snapshot();
-        let raw_config = config.to_sys();
-        let raw = unsafe { sys::dne_create_editor(&raw_config) };
+        let raw_config = config.as_sys();
+        let raw =
+            imgui_binding.with_bound_context(|| unsafe { sys::dne_create_editor(&raw_config) });
         if raw.is_null() {
             return Err(NodeEditorError::CreateEditorFailed);
         }
 
         Ok(Self {
             raw,
-            imgui_ctx_raw,
-            imgui_alive: imgui.alive_token(),
+            imgui_binding,
             config: config_snapshot,
             _settings_file: config.settings_file.take(),
             _callbacks: config.callbacks.take(),
-            _not_send_sync: PhantomData,
         })
     }
 
@@ -60,7 +56,14 @@ impl EditorContext {
     }
 
     pub fn as_raw_native(&self) -> *mut c_void {
-        unsafe { sys::dne_editor_context_raw(self.raw) }
+        self.with_current("EditorContext::as_raw_native", || unsafe {
+            sys::dne_editor_context_raw(self.raw)
+        })
+    }
+
+    /// Returns the stable identity of the owning Dear ImGui context.
+    pub fn imgui_context_id(&self) -> ContextId {
+        self.imgui_binding.id()
     }
 
     #[doc(alias = "GetConfig")]
@@ -70,28 +73,28 @@ impl EditorContext {
 
     #[doc(alias = "GetStyle")]
     pub fn style(&self) -> NodeEditorStyle {
-        let _current = self.bind_current("EditorContext::style");
-        NodeEditorStyle::current()
+        self.with_current("EditorContext::style", NodeEditorStyle::current)
     }
 
     pub fn set_style(&self, style: &NodeEditorStyle) {
-        let _current = self.bind_current("EditorContext::set_style");
-        style.apply();
+        self.with_current("EditorContext::set_style", || style.apply());
     }
 
     pub fn style_color(&self, color: StyleColor) -> [f32; 4] {
-        let _current = self.bind_current("EditorContext::style_color");
-        crate::style::current_style_color(color)
+        self.with_current("EditorContext::style_color", || {
+            crate::style::current_style_color(color)
+        })
     }
 
     pub fn set_style_color(&self, color: StyleColor, value: [f32; 4]) {
-        let _current = self.bind_current("EditorContext::set_style_color");
-        crate::style::apply_style_color(color, value);
+        self.with_current("EditorContext::set_style_color", || {
+            crate::style::apply_style_color(color, value)
+        });
     }
 
     pub(crate) fn assert_usable(&self, caller: &str) {
         assert!(
-            self.imgui_alive.is_alive(),
+            self.imgui_binding.is_alive(),
             "{caller} requires the owning Dear ImGui context to be alive"
         );
         assert!(
@@ -100,16 +103,13 @@ impl EditorContext {
         );
     }
 
-    pub(crate) fn bind_current(&self, caller: &str) -> CurrentEditorGuard<'_> {
+    #[inline]
+    pub(crate) fn with_current<R>(&self, caller: &str, f: impl FnOnce() -> R) -> R {
         self.assert_usable(caller);
-        let imgui_guard = ImGuiContextGuard::bind(self.imgui_ctx_raw);
-        let previous = unsafe { sys::dne_get_current_editor_raw() };
-        unsafe { sys::dne_set_current_editor(self.raw) };
-        CurrentEditorGuard {
-            _editor: self,
-            _imgui_guard: imgui_guard,
-            previous,
-        }
+        self.imgui_binding.with_bound_context(|| {
+            let _current = CurrentEditorGuard::bind(self.raw);
+            f()
+        })
     }
 }
 
@@ -119,55 +119,34 @@ impl Drop for EditorContext {
             return;
         }
 
-        if !self.imgui_alive.is_alive() {
-            debug_assert!(
-                false,
-                "EditorContext was dropped after its owning Dear ImGui context; \
-                 declare the editor field before the Context field or drop it explicitly first"
-            );
-            self.raw = ptr::null_mut();
-            return;
+        let raw = std::mem::replace(&mut self.raw, ptr::null_mut());
+        if self
+            .imgui_binding
+            .try_with_bound_context(|| unsafe { sys::dne_destroy_editor(raw) })
+            .is_err()
+        {
+            // The owning ImGui context is no longer enterable. The node-editor shim owns
+            // this handle and can release it without switching the dead ImGui context.
+            unsafe { sys::dne_destroy_editor(raw) };
         }
-
-        let _imgui_guard = ImGuiContextGuard::bind(self.imgui_ctx_raw);
-        unsafe { sys::dne_destroy_editor(self.raw) };
-        self.raw = ptr::null_mut();
     }
 }
 
-pub(crate) struct CurrentEditorGuard<'a> {
-    _editor: &'a EditorContext,
-    _imgui_guard: ImGuiContextGuard,
+struct CurrentEditorGuard {
     previous: *mut c_void,
 }
 
-impl Drop for CurrentEditorGuard<'_> {
+impl CurrentEditorGuard {
+    fn bind(editor: *mut sys::DneEditorContext) -> Self {
+        let previous = unsafe { sys::dne_get_current_editor_raw() };
+        unsafe { sys::dne_set_current_editor(editor) };
+        Self { previous }
+    }
+}
+
+impl Drop for CurrentEditorGuard {
     fn drop(&mut self) {
         unsafe { sys::dne_set_current_editor_raw(self.previous) };
-    }
-}
-
-struct ImGuiContextGuard {
-    prev: *mut dear_imgui_rs::sys::ImGuiContext,
-    restore: bool,
-}
-
-impl ImGuiContextGuard {
-    fn bind(ctx: *mut dear_imgui_rs::sys::ImGuiContext) -> Self {
-        let prev = unsafe { dear_imgui_rs::sys::igGetCurrentContext() };
-        let restore = prev != ctx;
-        if restore {
-            unsafe { dear_imgui_rs::sys::igSetCurrentContext(ctx) };
-        }
-        Self { prev, restore }
-    }
-}
-
-impl Drop for ImGuiContextGuard {
-    fn drop(&mut self) {
-        if self.restore {
-            unsafe { dear_imgui_rs::sys::igSetCurrentContext(self.prev) };
-        }
     }
 }
 
@@ -179,7 +158,10 @@ mod tests {
     };
     use dear_imgui_rs::MouseButton;
     use std::{
+        cell::{Cell, RefCell},
+        panic::{AssertUnwindSafe, catch_unwind},
         ptr,
+        rc::Rc,
         sync::{Mutex, OnceLock},
     };
 
@@ -216,12 +198,162 @@ mod tests {
 
         unsafe { sys::dne_set_current_editor_raw(raw_a) };
         {
-            let _current = editor_b.bind_current("test");
-            assert_eq!(unsafe { sys::dne_get_current_editor_raw() }, raw_b);
+            editor_b.with_current("test", || {
+                assert_eq!(unsafe { sys::dne_get_current_editor_raw() }, raw_b);
+            });
         }
         assert_eq!(unsafe { sys::dne_get_current_editor_raw() }, raw_a);
 
         unsafe { sys::dne_set_current_editor_raw(ptr::null_mut()) };
+    }
+
+    #[test]
+    fn binding_identity_matches_owning_imgui_context() {
+        let _guard = test_guard();
+        let imgui = ImGuiContext::create();
+        let editor = EditorContext::create(&imgui);
+
+        assert_eq!(editor.imgui_context_id(), imgui.id());
+    }
+
+    #[test]
+    fn panic_restores_previous_imgui_and_editor_contexts() {
+        let _guard = test_guard();
+        let imgui_a = ImGuiContext::create();
+        let raw_imgui_a = imgui_a.as_raw();
+        let editor_a = EditorContext::create(&imgui_a);
+        let raw_editor_a = editor_a.as_raw_native();
+        let suspended_a = imgui_a.suspend();
+
+        let imgui_b = ImGuiContext::create();
+        let raw_imgui_b = imgui_b.as_raw();
+        let editor_b = EditorContext::create(&imgui_b);
+        let raw_editor_b = editor_b.as_raw_native();
+        unsafe { sys::dne_set_current_editor_raw(raw_editor_b) };
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            editor_a.with_current("panic restoration test", || {
+                assert_eq!(
+                    unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
+                    raw_imgui_a
+                );
+                assert_eq!(unsafe { sys::dne_get_current_editor_raw() }, raw_editor_a);
+                panic!("intentional binding panic");
+            });
+        }));
+
+        assert!(result.is_err());
+        assert_eq!(
+            unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
+            raw_imgui_b
+        );
+        assert_eq!(unsafe { sys::dne_get_current_editor_raw() }, raw_editor_b);
+
+        unsafe { sys::dne_set_current_editor_raw(ptr::null_mut()) };
+        drop(editor_b);
+        drop(imgui_b);
+        let imgui_a = suspended_a.activate().expect("context A should reactivate");
+        drop(editor_a);
+        drop(imgui_a);
+    }
+
+    #[test]
+    fn dead_imgui_context_rejects_calls_but_editor_still_drops() {
+        let _guard = test_guard();
+        let imgui = ImGuiContext::create();
+        let editor = EditorContext::create(&imgui);
+        drop(imgui);
+
+        let result = catch_unwind(AssertUnwindSafe(|| editor.style()));
+        assert!(result.is_err());
+
+        drop(editor);
+    }
+
+    #[test]
+    fn dead_editor_drop_preserves_another_current_context() {
+        let _guard = test_guard();
+        let imgui_a = ImGuiContext::create();
+        let editor_a = EditorContext::create(&imgui_a);
+        let suspended_a = imgui_a.suspend();
+
+        let imgui_b = ImGuiContext::create();
+        let raw_imgui_b = imgui_b.as_raw();
+        let editor_b = EditorContext::create(&imgui_b);
+        let raw_editor_b = editor_b.as_raw_native();
+        unsafe { sys::dne_set_current_editor_raw(raw_editor_b) };
+
+        drop(suspended_a);
+        drop(editor_a);
+
+        assert_eq!(
+            unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
+            raw_imgui_b
+        );
+        assert_eq!(unsafe { sys::dne_get_current_editor_raw() }, raw_editor_b);
+
+        unsafe { sys::dne_set_current_editor_raw(ptr::null_mut()) };
+        drop(editor_b);
+        drop(imgui_b);
+    }
+
+    #[test]
+    fn editor_drops_during_imgui_teardown_without_rebinding() {
+        struct Marker;
+        struct DropEditorOnQuiesce {
+            editor: RefCell<Option<EditorContext>>,
+            quiesced: Cell<bool>,
+        }
+
+        impl dear_imgui_rs::ContextAttachment for DropEditorOnQuiesce {
+            fn quiesce(&self, _context: &dear_imgui_rs::ContextTeardown<'_>) {
+                drop(self.editor.borrow_mut().take());
+                self.quiesced.set(true);
+            }
+        }
+
+        let _guard = test_guard();
+        let mut imgui = ImGuiContext::create();
+        let attachment = Rc::new(DropEditorOnQuiesce {
+            editor: RefCell::new(Some(EditorContext::create(&imgui))),
+            quiesced: Cell::new(false),
+        });
+        let _lease = imgui
+            .register_attachment::<Marker>(
+                dear_imgui_rs::ContextAttachmentRole::Extension,
+                attachment.clone(),
+            )
+            .expect("attachment should register");
+
+        drop(imgui);
+
+        assert!(attachment.quiesced.get());
+        assert!(attachment.editor.borrow().is_none());
+    }
+
+    #[test]
+    fn ui_from_another_imgui_context_is_rejected_by_identity() {
+        let _guard = test_guard();
+        let imgui_a = ImGuiContext::create();
+        let editor = EditorContext::create(&imgui_a);
+        let suspended_a = imgui_a.suspend();
+
+        let mut imgui_b = ImGuiContext::create();
+        imgui_b.io_mut().set_display_size([640.0, 480.0]);
+        imgui_b.io_mut().set_delta_time(1.0 / 60.0);
+        let _ = imgui_b.font_atlas().build();
+        let ui = imgui_b.frame();
+
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            let _ = ui.node_editor(&editor, "wrong-context", [320.0, 240.0]);
+        }));
+        assert!(result.is_err());
+        drop(imgui_b.render());
+
+        drop(imgui_b);
+        let imgui_a = suspended_a.activate().expect("context A should reactivate");
+        drop(editor);
+        drop(imgui_a);
     }
 
     #[test]
@@ -235,7 +367,7 @@ mod tests {
         let _editor = EditorContext::create(&imgui);
 
         imgui.frame();
-        imgui.render();
+        drop(imgui.render());
     }
 
     #[test]
@@ -328,7 +460,7 @@ mod tests {
 
             editor.end();
         });
-        imgui.render();
+        drop(imgui.render());
     }
 
     #[test]
@@ -362,7 +494,7 @@ mod tests {
             drop(frame);
             assert_eq!(unsafe { sys::dne_get_current_editor_raw() }, raw_b);
         });
-        imgui.render();
+        drop(imgui.render());
 
         unsafe { sys::dne_set_current_editor_raw(ptr::null_mut()) };
 
@@ -388,7 +520,7 @@ mod tests {
         assert!(snapshot.enable_smooth_zoom);
         assert_eq!(snapshot.smooth_zoom_power, 1.25);
 
-        let raw = config.to_sys();
+        let raw = config.as_sys();
         assert_eq!(raw.drag_button_index, MouseButton::Left as i32);
         assert_eq!(raw.select_button_index, MouseButton::Right as i32);
         assert_eq!(raw.navigate_button_index, MouseButton::Middle as i32);

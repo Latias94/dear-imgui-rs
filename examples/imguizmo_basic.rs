@@ -781,9 +781,7 @@ impl AppWindow {
         });
 
         let draw_data = self.imgui.context.render();
-        self.imgui
-            .renderer
-            .render_draw_data(draw_data, &mut rpass)?;
+        self.imgui.renderer.render(draw_data, &mut rpass)?;
         drop(rpass);
         self.queue.submit(Some(encoder.finish()));
         self.queue.present(output);

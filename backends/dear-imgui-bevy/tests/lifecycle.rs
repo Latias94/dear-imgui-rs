@@ -115,12 +115,15 @@ fn lifecycle_primary_context_pass_opens_shared_frame_and_snapshots_once() {
     assert_eq!(trace.frame_indices, [1, 1, 2, 2]);
 
     let output = app.world().resource::<ImguiFrameOutput>();
-    let snapshot = output
-        .snapshot()
-        .expect("end-frame system should store a snapshot");
     assert_eq!(output.frame_index(), 2);
-    assert_eq!(snapshot.draw.display_size, [640.0, 360.0]);
-    assert_eq!(snapshot.draw.framebuffer_scale, [2.0, 2.0]);
+    #[cfg(feature = "render")]
+    assert_eq!(
+        output
+            .snapshot_epoch()
+            .expect("render builds should hand off a detached snapshot")
+            .sequence(),
+        2
+    );
 
     let state = app
         .world()
@@ -144,12 +147,13 @@ fn lifecycle_clears_last_snapshot_when_primary_window_is_missing() {
     let mut app = app_with_primary_window();
 
     app.update();
+    #[cfg(feature = "render")]
     assert!(
         app.world()
             .resource::<ImguiFrameOutput>()
-            .snapshot()
+            .snapshot_epoch()
             .is_some(),
-        "first update should produce a render snapshot"
+        "first update should produce a render snapshot epoch"
     );
 
     let mut primary_query = app
@@ -165,7 +169,7 @@ fn lifecycle_clears_last_snapshot_when_primary_window_is_missing() {
     let output = app.world().resource::<ImguiFrameOutput>();
     assert_eq!(output.frame_index(), 1);
     assert!(
-        output.snapshot().is_none(),
+        output.snapshot_epoch().is_none(),
         "removing the primary window must not leave stale draw data for render extraction"
     );
 }
@@ -293,14 +297,8 @@ fn lifecycle_feature_enabled_without_runtime_viewport_support_uses_primary_snaps
     app.update();
 
     let output = app.world().resource::<ImguiFrameOutput>();
-    let snapshot = output
-        .snapshot()
-        .expect("primary draw data should be snapshotted");
-    assert_eq!(snapshot.draw.display_size, [640.0, 360.0]);
-    assert!(
-        snapshot.draw.display_size != [0.0, 0.0],
-        "runtime-disabled multi-viewport builds must not fall back to an empty platform viewport snapshot"
-    );
+    assert!(output.snapshot_epoch().is_some());
+    assert!(output.snapshot_error().is_none());
 }
 
 #[cfg(all(

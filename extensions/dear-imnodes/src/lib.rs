@@ -6,28 +6,6 @@
 
 use dear_imnodes_sys as sys;
 
-const _: [(); std::mem::size_of::<sys::ImVec2>()] = [(); std::mem::size_of::<sys::ImVec2_c>()];
-const _: [(); std::mem::align_of::<sys::ImVec2>()] = [(); std::mem::align_of::<sys::ImVec2_c>()];
-
-// Similar to ImGui 1.92+ return-by-value changes, generated bindings for
-// `dear-imnodes-sys` may exist in the build directory in both the legacy
-// out-parameter form and the newer return-by-value form. rust-analyzer can end
-// up indexing the wrong `OUT_DIR` and report spurious signature errors.
-//
-// Keep the high-level wrapper stable by calling local extern declarations for
-// the return-by-value APIs we expose.
-#[allow(non_snake_case)]
-pub(crate) mod compat_ffi {
-    use super::sys;
-
-    unsafe extern "C" {
-        pub fn imnodes_EditorContextGetPanning() -> sys::ImVec2;
-        pub fn imnodes_GetNodeScreenSpacePos(node_id: i32) -> sys::ImVec2;
-        pub fn imnodes_GetNodeEditorSpacePos(node_id: i32) -> sys::ImVec2;
-        pub fn imnodes_GetNodeDimensions(node_id: i32) -> sys::ImVec2;
-    }
-}
-
 mod context;
 mod style;
 mod types;

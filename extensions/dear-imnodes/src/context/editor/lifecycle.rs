@@ -5,14 +5,12 @@ use dear_imgui_rs::Ui;
 impl<'ui> NodeEditor<'ui> {
     pub(crate) fn begin(ui: &'ui Ui, ctx: &'ui Context, editor: Option<&EditorContext>) -> Self {
         let scope = ImNodesScope {
-            imgui_ctx_raw: ctx.imgui_ctx_raw,
-            imgui_alive: ctx.imgui_alive.clone(),
+            imgui_binding: ctx.imgui_binding.clone(),
             ctx_raw: ctx.raw,
             ctx_alive: ctx.alive_token(),
             editor_raw: editor.map(|ed| ed.raw),
         };
-        let _guard = scope.bind();
-        unsafe { sys::imnodes_BeginNodeEditor() };
+        scope.with_bound_context(|| unsafe { sys::imnodes_BeginNodeEditor() });
         Self {
             _ui: ui,
             _ctx: ctx,
@@ -23,8 +21,8 @@ impl<'ui> NodeEditor<'ui> {
     }
 
     #[inline]
-    pub(crate) fn bind(&self) -> super::super::ImNodesScopeGuard {
-        self.scope.bind()
+    pub(crate) fn with_bound_context<R>(&self, f: impl FnOnce() -> R) -> R {
+        self.scope.with_bound_context(f)
     }
 
     #[inline]

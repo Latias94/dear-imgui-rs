@@ -1,23 +1,26 @@
 //! Texture management for the WGPU renderer
 //!
-//! This module handles texture creation, updates, and management,
-//! integrating with Dear ImGui's modern texture system.
+//! Application-owned textures retain their legacy [`TextureId`] lookup path. Context-owned
+//! textures are keyed by pointer-free [`SnapshotTextureId`] values and are only changed by owned
+//! renderer requests.
 
 mod cache;
 mod cleanup;
 mod manager;
 mod resource;
-mod result;
 #[cfg(test)]
 mod tests;
 mod upload;
 
 use crate::{RenderResources, RendererError, RendererResult};
-use dear_imgui_rs::{TextureData, TextureFormat as ImGuiTextureFormat, TextureId, TextureStatus};
-use std::collections::HashMap;
+use dear_imgui_rs::{
+    TextureId,
+    render::{SnapshotTextureId, TextureFeedback, TextureOp, TextureRequest, TextureUploadRect},
+    texture::{TextureFormat as ImGuiTextureFormat, TextureRect},
+};
+use std::collections::{HashMap, HashSet};
 use wgpu::*;
 
 pub use resource::WgpuTexture;
-pub use result::TextureUpdateResult;
 
 pub use manager::WgpuTextureManager;

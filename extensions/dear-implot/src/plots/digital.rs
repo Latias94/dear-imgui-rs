@@ -90,20 +90,21 @@ impl<'a> DigitalPlot<'a> {
         let Ok(count) = i32::try_from(self.x_data.len()) else {
             return;
         };
-        let _guard = plot_ui.bind();
-        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_with_style(
-                self.style,
-                self.flags.bits() | self.item_flags.bits(),
-                self.layout,
-            );
-            sys::ImPlot_PlotDigital_doublePtr(
-                label_ptr,
-                self.x_data.as_ptr(),
-                self.y_data.as_ptr(),
-                count,
-                spec,
-            );
+        plot_ui.with_bound_context(|| {
+            with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+                let spec = plot_spec_with_style(
+                    self.style,
+                    self.flags.bits() | self.item_flags.bits(),
+                    self.layout,
+                );
+                sys::ImPlot_PlotDigital_doublePtr(
+                    label_ptr,
+                    self.x_data.as_ptr(),
+                    self.y_data.as_ptr(),
+                    count,
+                    spec,
+                );
+            })
         })
     }
 }
@@ -184,20 +185,21 @@ impl<'a> DigitalPlotF32<'a> {
         let Ok(count) = i32::try_from(self.x_data.len()) else {
             return;
         };
-        let _guard = plot_ui.bind();
-        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_with_style(
-                self.style,
-                self.flags.bits() | self.item_flags.bits(),
-                PlotDataLayout::DEFAULT,
-            );
-            sys::ImPlot_PlotDigital_FloatPtr(
-                label_ptr,
-                self.x_data.as_ptr(),
-                self.y_data.as_ptr(),
-                count,
-                spec,
-            );
+        plot_ui.with_bound_context(|| {
+            with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+                let spec = plot_spec_with_style(
+                    self.style,
+                    self.flags.bits() | self.item_flags.bits(),
+                    PlotDataLayout::DEFAULT,
+                );
+                sys::ImPlot_PlotDigital_FloatPtr(
+                    label_ptr,
+                    self.x_data.as_ptr(),
+                    self.y_data.as_ptr(),
+                    count,
+                    spec,
+                );
+            })
         })
     }
 }
@@ -291,20 +293,21 @@ impl<'a> SimpleDigitalPlot<'a> {
             .map(|i| self.x_start + i as f64 * self.x_scale)
             .collect();
 
-        let _guard = plot_ui.bind();
-        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_with_style(
-                self.style,
-                self.flags.bits() | self.item_flags.bits(),
-                PlotDataLayout::DEFAULT,
-            );
-            sys::ImPlot_PlotDigital_doublePtr(
-                label_ptr,
-                x_data.as_ptr(),
-                self.y_data.as_ptr(),
-                count,
-                spec,
-            );
+        plot_ui.with_bound_context(|| {
+            with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+                let spec = plot_spec_with_style(
+                    self.style,
+                    self.flags.bits() | self.item_flags.bits(),
+                    PlotDataLayout::DEFAULT,
+                );
+                sys::ImPlot_PlotDigital_doublePtr(
+                    label_ptr,
+                    x_data.as_ptr(),
+                    self.y_data.as_ptr(),
+                    count,
+                    spec,
+                );
+            })
         })
     }
 }
@@ -392,20 +395,21 @@ impl<'a> BooleanDigitalPlot<'a> {
             .map(|&b| if b { 1.0 } else { 0.0 })
             .collect();
 
-        let _guard = plot_ui.bind();
-        with_plot_str_or_empty(self.label, |label_ptr| unsafe {
-            let spec = plot_spec_with_style(
-                self.style,
-                self.flags.bits() | self.item_flags.bits(),
-                PlotDataLayout::DEFAULT,
-            );
-            sys::ImPlot_PlotDigital_doublePtr(
-                label_ptr,
-                self.x_data.as_ptr(),
-                y_data_f64.as_ptr(),
-                count,
-                spec,
-            );
+        plot_ui.with_bound_context(|| {
+            with_plot_str_or_empty(self.label, |label_ptr| unsafe {
+                let spec = plot_spec_with_style(
+                    self.style,
+                    self.flags.bits() | self.item_flags.bits(),
+                    PlotDataLayout::DEFAULT,
+                );
+                sys::ImPlot_PlotDigital_doublePtr(
+                    label_ptr,
+                    self.x_data.as_ptr(),
+                    y_data_f64.as_ptr(),
+                    count,
+                    spec,
+                );
+            })
         })
     }
 }

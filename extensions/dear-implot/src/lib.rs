@@ -39,57 +39,6 @@
 
 use dear_implot_sys as sys;
 
-// Bindgen output for `dear-implot-sys` can fluctuate between historical
-// out-parameter signatures and the newer return-by-value signatures depending
-// on which generated `OUT_DIR` file rust-analyzer happens to index.
-//
-// Keep the wrapper crate stable by calling a local extern declaration for the
-// specific APIs we expose.
-#[allow(non_snake_case)]
-pub(crate) mod compat_ffi {
-    use super::sys;
-    use std::os::raw::c_char;
-
-    unsafe extern "C" {
-        pub fn ImPlot_GetPlotPos() -> sys::ImVec2;
-        pub fn ImPlot_GetPlotSize() -> sys::ImVec2;
-    }
-
-    // Some targets (notably import-style wasm) cannot call C variadic (`...`) functions.
-    // Declare the `*_Str0` convenience wrappers here to keep the safe layer independent
-    // of bindgen fluctuations / pregenerated bindings.
-    //
-    // On wasm32, these must be provided by the `imgui-sys-v0` provider module.
-    #[cfg(target_arch = "wasm32")]
-    #[link(wasm_import_module = "imgui-sys-v0")]
-    unsafe extern "C" {
-        pub fn ImPlot_Annotation_Str0(
-            x: f64,
-            y: f64,
-            col: sys::ImVec4_c,
-            pix_offset: sys::ImVec2_c,
-            clamp: bool,
-            fmt: *const c_char,
-        );
-        pub fn ImPlot_TagX_Str0(x: f64, col: sys::ImVec4_c, fmt: *const c_char);
-        pub fn ImPlot_TagY_Str0(y: f64, col: sys::ImVec4_c, fmt: *const c_char);
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    unsafe extern "C" {
-        pub fn ImPlot_Annotation_Str0(
-            x: f64,
-            y: f64,
-            col: sys::ImVec4_c,
-            pix_offset: sys::ImVec2_c,
-            clamp: bool,
-            fmt: *const c_char,
-        );
-        pub fn ImPlot_TagX_Str0(x: f64, col: sys::ImVec4_c, fmt: *const c_char);
-        pub fn ImPlot_TagY_Str0(y: f64, col: sys::ImVec4_c, fmt: *const c_char);
-    }
-}
-
 // Re-export essential types
 pub use dear_imgui_rs::{Context, Ui};
 pub use sys::{ImPlotPoint, ImPlotRange, ImPlotRect};

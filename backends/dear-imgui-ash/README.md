@@ -17,33 +17,77 @@ This backend is compatible with both `ash` loader modes:
 
 ## Features
 
-- Supports Dear ImGui 1.92+ texture management (`DrawData::textures()`), including create/update/destroy.
+- Supports Dear ImGui 1.92+ managed texture create/update/destroy requests through `RenderedFrame`.
 - Sets `ImGuiBackendFlags_RendererHasTextures` and `ImGuiBackendFlags_RendererHasVtxOffset`.
 - Upload path uses in-flight fences to avoid `vkQueueWaitIdle` stalls.
 - Sub-rect texture updates (uses `UpdateRect` bounding box).
 
-## User-created textures (ImTextureData)
+## Managed textures
 
-`DrawData::textures()` is derived from ImGui's internal `PlatformIO.Textures[]` list.
+`AshRenderer::cmd_draw` consumes a `RenderedFrame`, uploads its owned texture requests, reconciles
+request-bound feedback, and only then reads the frame's immutable draw data.
+
+Each `AshRenderer` owns the sole `RendererConsumer` generation created for the
+Context passed to its constructor. Create one renderer per Context. `cmd_draw`
+rejects a frame from another Context or consumer generation before recording
+GPU work, and the consumed frame lease prevents native `DrawData` from escaping
+its Context borrow.
 
 - Font atlas textures are registered by ImGui itself.
-- If you create `TextureData` yourself (e.g. `OwnedTextureData::new()`), register it once via
-  `Context::register_user_texture(&mut tex)` so the renderer can receive Create/Update/Destroy
-  requests.
-  - Prefer `Context::register_user_texture_token(&mut tex)` to automatically unregister on drop.
+- Register an `OwnedTextureData` with `Context::register_texture(texture)`. Registration transfers
+  ownership to the Context and returns a `ManagedTextureId` for widgets and draw lists.
+- Use `Context::with_texture_mut(id, |texture| ...)` for later pixel updates and
+  `Context::remove_texture(id)` to begin renderer-aware retirement.
 
-If you skip registration and still use `&mut TextureData` in widgets, `ImDrawCmd_GetTexID()` may
-assert in debug builds when the draw command refers to a texture that was never uploaded (TexID=0).
+Safe image APIs do not accept borrowed `TextureData`; this prevents native draw commands from
+retaining a pointer after the Rust borrow ends.
+
+### GPU-safe retirement
+
+Recording a Vulkan command buffer does not mean the GPU has finished using its textures. A destroy
+request therefore moves the managed texture into a retirement queue instead of immediately freeing
+it or acknowledging the request.
+
+`AshRenderer::cmd_draw` returns the highest pending `TextureRetirementBatch`. The safe
+`wait_for_texture_retirements(batch)` path waits for device idle and only then releases the Vulkan
+resources. The next frame can then acknowledge Dear ImGui's repeated destroy request.
+`pending_texture_retirement()` recovers the current token if command recording returns an error
+after retirement began.
+
+Advanced render loops may instead associate the batch with synchronization submitted after all
+relevant Ash uploads, main-viewport commands, and secondary-viewport commands. Once every relevant
+queue has completed, `unsafe complete_texture_retirements_with_fences(batch, fences)` validates
+that each supplied fence is signaled before releasing anything. The call remains unsafe because
+Vulkan cannot prove fence device lineage or that the supplied fences cover every queue which could
+still reference the batch.
+
+The retirement protocol is identical for classic render passes and dynamic rendering. In multi-
+viewport mode, render/submit the main viewport, run the secondary viewport renderer callbacks, and
+only then establish the completion point associated with the batch. Merely finishing command
+recording is never sufficient.
+
+Call `AshRenderer::shutdown(&mut imgui)` before dropping a single-viewport Context or renderer.
+Shutdown waits for device idle, destroys active and retiring GPU textures, resets Context-owned
+renderer bindings, and then releases the renderer consumer. In multi-viewport mode, call the
+owning renderer runtime's `shutdown(&mut imgui)` before shutting down the platform runtime.
+
+That order is significant: `Context::reset_renderer_texture_bindings` is a
+renderer-reset acknowledgement and may run only after the corresponding Vulkan
+resources are actually gone. Finishing CPU command recording is not enough.
 
 ## External textures & custom sampler
 
 To display an existing Vulkan image via the legacy `TextureId` path:
 
 - `AshRenderer::register_external_texture_with_sampler(image_view, sampler) -> TextureId`
-- `AshRenderer::update_external_texture_view(texture_id, image_view) -> bool`
-- `AshRenderer::update_external_texture_sampler(texture_id, sampler) -> bool`
-- `AshRenderer::unregister_texture(texture_id)` (frees the descriptor set only for textures
+- `AshRenderer::update_external_texture_view(texture_id, image_view) -> RendererResult<bool>`
+- `AshRenderer::update_external_texture_sampler(texture_id, sampler) -> RendererResult<bool>`
+- `AshRenderer::unregister_texture(texture_id) -> RendererResult<()>` (frees the descriptor set only for textures
   registered via `register_external_texture_with_sampler()`)
+
+These safe mutation and removal methods wait for device idle before changing a descriptor set. The
+matching `unsafe *_unchecked` methods are available when the application can independently prove
+that no submitted or recorded command still accesses that descriptor set.
 
 ## Native multi-viewport
 
@@ -55,8 +99,8 @@ Select exactly one surface adapter:
 
 The features are mutually exclusive, native-only, and each enables
 `dear-imgui-rs/multi-viewport`. Do not use workspace `--all-features` for this crate. The Winit
-route must call `dear_imgui_winit::multi_viewport::init_multi_viewport_support`; the SDL3 route
-must call `dear_imgui_sdl3::init_for_vulkan` before installing the renderer.
+route must create `dear_imgui_winit::multi_viewport::WinitPlatformRuntime`; the SDL3 route must
+initialize `Sdl3PlatformBackend::init_for_vulkan` before attaching the renderer runtime.
 
 ### VulkanViewportConfig and preflight
 
@@ -92,41 +136,48 @@ All handles must have one device lineage: the instance owns the physical device 
 entry point cannot prove those raw-handle relationships.
 
 `validation_surface` is an existing, live application surface, normally the main window surface.
-The runtime never destroys it. Before claiming callback slots, `enable` checks that required
+The runtime never destroys it. Before claiming callback slots, `attach` checks that required
 handles are non-null, queue-family indices are in range and expose queues, the graphics family
 supports graphics, and the present family can present color-attachment swapchains with at least
-one format and present mode on this surface. This makes an invalid configuration fail before any
-secondary window callback can run.
+one format and present mode on this surface. Winit attachment also verifies the active platform
+backend name. SDL3 attachment verifies both the SDL3 backend name and its
+`Platform_CreateVkSurface` capability. An invalid configuration or adapter therefore fails before
+the renderer is consumed or any renderer callback is published; `AshViewportAttachError` returns
+the unchanged renderer to the caller.
 
 ### Winit integration
 
-Place the renderer, or an owner containing it, at a stable address. Initialize the platform first,
-then install the renderer before Dear ImGui creates any secondary platform window:
+Initialize the owning Winit platform runtime first, then consume the renderer into
+`WinitViewportRuntime` before Dear ImGui creates any secondary platform window:
 
 ```rust,no_run
 use dear_imgui_ash::{AshRenderer, multi_viewport as ash_mvp};
 use dear_imgui_rs::Context;
 use dear_imgui_winit::multi_viewport as winit_mvp;
+use std::sync::Arc;
 
-# fn enable_viewports(
-#     renderer: &mut Box<AshRenderer>,
+# fn attach_viewports(
+#     renderer: AshRenderer,
 #     imgui: &mut Context,
-#     main_window: &winit::window::Window,
+#     main_window: Arc<winit::window::Window>,
 #     config: ash_mvp::VulkanViewportConfig,
-# ) -> Result<(), Box<dyn std::error::Error>> {
+# ) -> Result<
+#     (winit_mvp::WinitPlatformRuntime, ash_mvp::WinitViewportRuntime),
+#     Box<dyn std::error::Error>,
+# > {
 imgui.enable_multi_viewport();
-winit_mvp::init_multi_viewport_support(imgui, main_window);
+let platform = winit_mvp::WinitPlatformRuntime::new(imgui, main_window)?;
 
-// SAFETY: Box keeps the renderer address stable. The context, renderer,
-// platform windows, and Vulkan objects remain live and serialized until shutdown.
-unsafe { ash_mvp::enable(renderer.as_mut(), imgui, config)? };
-# Ok(())
+// SAFETY: all raw handles and queue-family indices in config belong to the
+// renderer's logical-device lineage. The wrapper owns renderer address stability.
+let renderer = unsafe { ash_mvp::WinitViewportRuntime::attach(imgui, renderer, config)? };
+# Ok((platform, renderer))
 # }
 ```
 
-For SDL3, replace the two Winit calls with `dear_imgui_sdl3::init_for_vulkan` and
-`dear_imgui_ash::multi_viewport_sdl3::enable`. Both adapters use the same
-`VulkanViewportConfig` and runtime.
+For SDL3, initialize `Sdl3PlatformBackend::init_for_vulkan` first and then call
+`multi_viewport_sdl3::Sdl3ViewportRuntime::attach`. Both adapters use the same
+`VulkanViewportConfig` and backend-local runtime control.
 
 Each frame, render and present the main window first, then render secondary windows:
 
@@ -140,28 +191,35 @@ imgui.render_platform_windows_default();
 
 ### Ownership and shutdown
 
-The Ash runtime claims only the five `Renderer_*` slots. It refuses occupied renderer callbacks,
+The Ash runtime owns the renderer in stable boxed storage and claims only the five `Renderer_*`
+slots. The wrapper itself may be moved safely. Attachment refuses occupied renderer callbacks,
 foreign `RendererUserData`, an already registered renderer, missing platform lifecycle callbacks,
 and secondary platform windows created before renderer registration. It never overwrites platform
-slots. While active, do not move, reinitialize, shut down, concurrently access, or drop the
-renderer, and do not replace viewport `RendererUserData`.
+slots. Callback panics, reentry, Vulkan failures, and ownership drift are contained and reported by
+the next Rust entry point such as `poll_fault` or `cmd_draw`.
 
 Shut down the renderer runtime before the platform backend:
 
 ```rust,no_run
-# use dear_imgui_ash::multi_viewport as ash_mvp;
+# use dear_imgui_ash::multi_viewport::WinitViewportRuntime;
 # use dear_imgui_rs::Context;
-# use dear_imgui_winit::multi_viewport as winit_mvp;
-# fn shutdown(imgui: &mut Context) -> Result<(), ash_mvp::CallbackOwnershipError> {
-ash_mvp::shutdown_multi_viewport_support(imgui)?;
-winit_mvp::shutdown_multi_viewport_support(imgui);
+# use dear_imgui_winit::multi_viewport::WinitPlatformRuntime;
+# fn shutdown(
+#     renderer: &mut WinitViewportRuntime,
+#     platform: &mut WinitPlatformRuntime,
+#     imgui: &mut Context,
+# ) -> Result<(), Box<dyn std::error::Error>> {
+renderer.shutdown(imgui)?;
+platform.shutdown()?;
 # Ok(())
 # }
 ```
 
-The renderer helper destroys secondary windows before releasing surfaces, swapchains, and callback
-state, and clears only slots it still owns. Explicit shutdown must complete before the renderer,
-context, platform backend/windows, Vulkan device, instance, or main validation surface is dropped.
+The renderer runtime destroys secondary renderer resources and clears only callback slots it still
+owns. Context attachments enforce renderer-before-platform teardown even when the Context is
+dropped first. Explicit shutdown remains the preferred path because it reports cleanup errors and
+allows recoverable completion-wait failures to be retried before the Vulkan device, instance, or
+main validation surface is dropped.
 
 Secondary viewports negotiate their own surface format and extent. Pipelines are cached by
 `vk::Format`; resize, minimized extents, out-of-date/suboptimal swapchains, and per-image
@@ -229,8 +287,15 @@ let mut renderer = AshRenderer::with_default_allocator(
 )?;
 
 // In your render loop (inside a render pass):
-// let draw_data = imgui.render();
-// renderer.cmd_draw(command_buffer, &draw_data)?;
-# let _ = vk::CommandBuffer::null();
+# let command_buffer = vk::CommandBuffer::null();
+let frame = imgui.render();
+let retirement = renderer.cmd_draw(command_buffer, frame)?;
+
+// Submit command_buffer. The safe path waits for all device work before releasing retired textures.
+if let Some(batch) = retirement {
+    renderer.wait_for_texture_retirements(batch)?;
+}
+
+renderer.shutdown(&mut imgui)?;
 # Ok(()) }
 ```

@@ -24,14 +24,13 @@ UPDATER_SPEC.loader.exec_module(UPDATER)
 
 
 class BindingTaskTests(unittest.TestCase):
-    def test_updater_regenerates_again_to_prove_idempotence(self):
-        commands = UPDATER.core_binding_commands()
+    def test_updater_uses_the_idempotent_canonical_generation_command(self):
+        command = UPDATER.binding_command()
         self.assertEqual(
-            commands[0][-3:],
+            command[-3:],
             ["verify-bindings", "--update", "--allow-dirty"],
         )
-        self.assertEqual(commands[1][-2:], ["verify-bindings", "--allow-dirty"])
-        self.assertNotIn("--check-only", commands[1])
+        self.assertNotIn("--check-only", command)
 
     def test_core_uses_shared_three_profile_xtask(self):
         args = SimpleNamespace(
@@ -51,13 +50,7 @@ class BindingTaskTests(unittest.TestCase):
                 "--update", "--allow-dirty",
             ],
         )
-        self.assertEqual(
-            commands[2],
-            [
-                "cargo", "run", "-p", "xtask", "--", "verify-bindings",
-                "--allow-dirty",
-            ],
-        )
+        self.assertEqual(len(commands), 2)
 
     def test_extension_only_keeps_the_existing_update_flow(self):
         args = SimpleNamespace(
@@ -84,7 +77,7 @@ class BindingTaskTests(unittest.TestCase):
 
         self.assertEqual(run_command.call_count, 1)
         self.assertIn("--dry-run", run_command.call_args.args[0])
-        self.assertEqual(output.getvalue().count("xtask -- verify-bindings"), 2)
+        self.assertEqual(output.getvalue().count("xtask -- verify-bindings"), 1)
 
 
 class ReleaseTaskTests(unittest.TestCase):
@@ -161,15 +154,6 @@ class ReleaseTaskTests(unittest.TestCase):
                     "--",
                     "verify-bindings",
                     "--update",
-                    "--allow-dirty",
-                ],
-                [
-                    "cargo",
-                    "run",
-                    "-p",
-                    "xtask",
-                    "--",
-                    "verify-bindings",
                     "--allow-dirty",
                 ],
                 [
@@ -283,6 +267,55 @@ class ReleaseTaskTests(unittest.TestCase):
             cwd=REPO_ROOT,
         )
 
+    def test_publish_forwards_authoritative_gate_result(self):
+        args = SimpleNamespace(
+            dry_run=False,
+            no_verify=False,
+            crates="dear-imgui-sys",
+            start_from=None,
+            wait=7,
+            release_gate_result=Path("artifacts/gate-result.json"),
+            dangerously_skip_release_check=False,
+        )
+        with patch.object(TASKS, "run_command", return_value=0) as run_command:
+            self.assertEqual(TASKS.task_publish(args, REPO_ROOT), 0)
+
+        self.assertEqual(
+            run_command.call_args.args[0],
+            [
+                TASKS.sys.executable,
+                "tools/publish.py",
+                "--crates",
+                "dear-imgui-sys",
+                "--wait",
+                "7",
+                "--release-gate-result",
+                str(Path("artifacts/gate-result.json")),
+            ],
+        )
+
+    def test_publish_forwards_explicit_dangerous_bypass(self):
+        args = SimpleNamespace(
+            dry_run=False,
+            no_verify=False,
+            crates=None,
+            start_from=None,
+            wait=None,
+            release_gate_result=None,
+            dangerously_skip_release_check=True,
+        )
+        with patch.object(TASKS, "run_command", return_value=0) as run_command:
+            self.assertEqual(TASKS.task_publish(args, REPO_ROOT), 0)
+
+        self.assertEqual(
+            run_command.call_args.args[0],
+            [
+                TASKS.sys.executable,
+                "tools/publish.py",
+                "--dangerously-skip-release-check",
+            ],
+        )
+
     def test_check_requires_package_skip_when_git_check_is_skipped(self):
         args = SimpleNamespace(
             skip_git=True,
@@ -320,16 +353,12 @@ class ReleaseTaskTests(unittest.TestCase):
                     "--dry-run",
                 ],
             ),
-            patch.object(
-                UPDATER,
-                "find_bindings",
-                side_effect=AssertionError("dry-run must not inspect artifacts"),
-            ),
             redirect_stdout(io.StringIO()) as output,
         ):
             self.assertEqual(UPDATER.main(), 0)
 
-        self.assertIn("Would update pregenerated bindings", output.getvalue())
+        self.assertIn("verify-bindings --update --allow-dirty", output.getvalue())
+        self.assertFalse(hasattr(UPDATER, "find_bindings"))
 
 
 if __name__ == "__main__":

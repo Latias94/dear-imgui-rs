@@ -17,6 +17,7 @@ pub mod multi_viewport_sdl3;
 mod options;
 #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
 mod pipeline;
+mod retirement;
 mod shaders;
 #[cfg(test)]
 mod tests;
@@ -36,6 +37,10 @@ use ash::Instance;
 use ash::{Device, vk};
 #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
 use dear_imgui_rs::ViewportFlags;
+use dear_imgui_rs::render::{
+    RenderedFrame, RendererConsumer, SnapshotTextureId, TextureFeedback, TextureOp, TextureRequest,
+    TextureUploadIdentity, TextureUploadRect,
+};
 use dear_imgui_rs::{BackendFlags, Context};
 use dear_imgui_rs::{TextureData, TextureFormat as ImGuiTextureFormat, TextureId, TextureStatus};
 use std::collections::{HashMap, VecDeque};
@@ -59,6 +64,10 @@ use self::pipeline::create_viewport_render_pass;
 use self::pipeline::viewport_attachment_load_op;
 #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
 use self::pipeline::{ViewportPipeline, is_srgb_format};
-use self::texture::{PendingTextureCreate, PendingTextureUpdate, TextureManager};
-use self::uploads::InFlightUpload;
+pub use self::retirement::TextureRetirementBatch;
+use self::retirement::{RetirementQueue, RetirementRequest, RetirementReservation};
+use self::texture::TextureManager;
+use self::uploads::{
+    InFlightUpload, ManagedUploadDecision, ManagedUploadTracker, finish_destroy_upload_gate,
+};
 use self::vulkan::*;

@@ -8,15 +8,18 @@
 use ::image::ImageReader;
 use dear_app::{
     AddOnsConfig, AppConfig, Application, ExternalTextureHandle, FrameContext, GpuContext,
-    RedrawMode, RunError, Theme, WgpuConfig, WgpuPreset, run,
+    InitContext, PrepareFrameContext, RedrawMode, RunError, Theme, WgpuConfig, WgpuPreset, run,
 };
 use dear_imgui_rs::*;
 use std::{path::PathBuf, time::Instant};
 use wgpu as wgpu_rs;
 
 struct TexDemoState {
-    img_tex: dear_imgui_rs::texture::OwnedTextureData,
-    photo_tex: Option<dear_imgui_rs::texture::OwnedTextureData>,
+    img_tex: Option<dear_imgui_rs::ManagedTextureId>,
+    pending_img_tex: Option<dear_imgui_rs::texture::OwnedTextureData>,
+    photo_tex: Option<(dear_imgui_rs::ManagedTextureId, (u32, u32))>,
+    pending_photo_tex: Option<dear_imgui_rs::texture::OwnedTextureData>,
+    reload_photo: bool,
     tex_size: (u32, u32),
     frame: u32,
     last_ui: Instant,
@@ -32,7 +35,7 @@ impl TexDemoState {
         // Animated CPU texture
         let tex_w: u32 = 128;
         let tex_h: u32 = 128;
-        let mut img_tex = dear_imgui_rs::texture::TextureData::new();
+        let mut img_tex = dear_imgui_rs::texture::OwnedTextureData::new();
         img_tex.create(dear_imgui_rs::texture::TextureFormat::RGBA32, tex_w, tex_h);
 
         // Seed with a gradient for first frame
@@ -49,8 +52,11 @@ impl TexDemoState {
         img_tex.set_data(&pixels);
 
         Self {
-            img_tex,
-            photo_tex: Self::maybe_load_photo_texture(),
+            img_tex: None,
+            pending_img_tex: Some(img_tex),
+            photo_tex: None,
+            pending_photo_tex: Self::maybe_load_photo_texture(),
+            reload_photo: false,
             tex_size: (tex_w, tex_h),
             frame: 0,
             last_ui: Instant::now(),
@@ -91,7 +97,7 @@ impl TexDemoState {
                     let rgba = img.to_rgba8();
                     let (w, h) = rgba.dimensions();
                     let data = rgba.into_raw();
-                    let mut t = dear_imgui_rs::texture::TextureData::new();
+                    let mut t = dear_imgui_rs::texture::OwnedTextureData::new();
                     t.create(dear_imgui_rs::texture::TextureFormat::RGBA32, w, h);
                     t.set_data(&data);
                     println!("Loaded demo image from {:?} ({}x{})", path, w, h);
@@ -109,7 +115,7 @@ impl TexDemoState {
         }
     }
 
-    fn update_anim_tex(&mut self) {
+    fn next_animation_pixels(&mut self) -> Vec<u8> {
         let (w, h) = self.tex_size;
         let mut pixels = vec![0u8; (w * h * 4) as usize];
         let t = self.frame as f32 * 0.08;
@@ -124,12 +130,51 @@ impl TexDemoState {
                 pixels[i + 3] = 255;
             }
         }
-        self.img_tex.set_data(&pixels);
         self.frame = self.frame.wrapping_add(1);
+        pixels
     }
 }
 
 impl Application for TexDemoState {
+    fn configure_imgui(&mut self, context: &mut InitContext<'_>) -> Result<(), RunError> {
+        let img_tex = self
+            .pending_img_tex
+            .take()
+            .expect("initial managed texture source should exist");
+        self.img_tex = Some(context.imgui().register_texture(img_tex));
+        if let Some(photo) = self.pending_photo_tex.take() {
+            let size = (photo.width(), photo.height());
+            self.photo_tex = Some((context.imgui().register_texture(photo), size));
+        }
+        Ok(())
+    }
+
+    fn prepare_frame(&mut self, context: &mut PrepareFrameContext<'_>) -> Result<(), RunError> {
+        let pixels = self.next_animation_pixels();
+        let img_tex = self
+            .img_tex
+            .expect("configure_imgui should register the animated texture");
+        context
+            .imgui()
+            .with_texture_mut(img_tex, |mut texture| texture.set_data(&pixels))
+            .map_err(|error| RunError::application("prepare_frame", error.to_string()))?;
+
+        if self.reload_photo {
+            if let Some((old, _)) = self.photo_tex.take() {
+                context
+                    .imgui()
+                    .remove_texture(old)
+                    .map_err(|error| RunError::application("prepare_frame", error.to_string()))?;
+            }
+            if let Some(photo) = self.pending_photo_tex.take() {
+                let size = (photo.width(), photo.height());
+                self.photo_tex = Some((context.imgui().register_texture(photo), size));
+            }
+            self.reload_photo = false;
+        }
+        Ok(())
+    }
+
     fn gpu_lost(&mut self, _context: &mut GpuContext<'_>) -> Result<(), RunError> {
         self.ext_tex = None;
         self.ext_view = None;
@@ -145,13 +190,6 @@ impl Application for TexDemoState {
         let now = Instant::now();
         let dt = now - state.last_ui;
         state.last_ui = now;
-
-        // Update animated texture; for real-time use we can push updates immediately
-        state.update_anim_tex();
-        let _ = gpu.update_texture_data(&mut state.img_tex);
-        if let Some(photo) = state.photo_tex.as_mut() {
-            let _ = gpu.update_texture_data(&mut **photo);
-        }
 
         // External GPU texture: create once and update per-frame on GPU
         if state.ext_tex_id.is_none() {
@@ -262,16 +300,23 @@ impl Application for TexDemoState {
                 ));
                 ui.separator();
                 ui.text("Animated Texture (CPU -> backend -> GPU):");
-                Image::new(ui, &mut *state.img_tex, [256.0, 256.0]).build();
+                Image::new(
+                    ui,
+                    state
+                        .img_tex
+                        .expect("animated texture should be registered"),
+                    [256.0, 256.0],
+                )
+                .build();
 
-                if let Some(photo) = state.photo_tex.as_mut() {
+                if let Some((photo, (width, height))) = state.photo_tex {
                     ui.separator();
                     ui.text("Loaded Image:");
-                    let w = photo.width() as f32;
-                    let h = photo.height() as f32;
+                    let w = width as f32;
+                    let h = height as f32;
                     let max_dim = 256.0;
                     let scale = if w > h { max_dim / w } else { max_dim / h };
-                    Image::new(ui, &mut **photo, [w * scale, h * scale]).build();
+                    Image::new(ui, photo, [w * scale, h * scale]).build();
                 } else {
                     ui.separator();
                     ui.text_wrapped("Place examples/assets/texture.jpg to preview a real image.");
@@ -286,7 +331,8 @@ impl Application for TexDemoState {
                 }
                 ui.separator();
                 if ui.button("Reload Image") {
-                    state.photo_tex = TexDemoState::maybe_load_photo_texture();
+                    state.pending_photo_tex = TexDemoState::maybe_load_photo_texture();
+                    state.reload_photo = true;
                 }
             });
         Ok(())

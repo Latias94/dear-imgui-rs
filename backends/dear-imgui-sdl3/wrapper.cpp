@@ -57,6 +57,18 @@ bool ImGui_ImplSDL3_ProcessEvent_Rust(const SDL_Event* event) {
     return ImGui_ImplSDL3_ProcessEvent(event);
 }
 
+void dear_imgui_sdl3_backend_set_texture_updates(
+    ImTextureData* texture,
+    const ImTextureRect* updates,
+    int update_count
+) {
+    IM_ASSERT(texture != nullptr);
+    IM_ASSERT(update_count >= 0);
+    texture->Updates.resize(update_count);
+    for (int index = 0; index < update_count; index++)
+        texture->Updates[index] = updates[index];
+}
+
 void ImGui_ImplSDL3_SetGamepadMode_AutoFirst_Rust() {
     ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_AutoFirst, nullptr, 0);
 }

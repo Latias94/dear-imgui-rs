@@ -8,6 +8,20 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Replace the free multi-viewport `enable` and `shutdown_multi_viewport_support` APIs with `WinitPlatformRuntime::new(&mut Context, Arc<Window>)`. The runtime owns the main-window handle, all secondary windows, its callback claim, and a Context platform attachment instead of borrowing caller-managed callback state.
+- Route event-loop-dependent callbacks through the non-escaping `WinitPlatformRuntime::with_event_loop` closure. The active event loop cannot outlive the callback scope, nested scopes restore the outer loop, and callback panics or native faults are reported only after control returns to Rust.
+- Use `WinitPlatformRuntime::shutdown` for reportable ordered teardown. It quiesces callbacks, destroys secondary windows, releases the callback table, and detaches from the Context; `Drop` performs only non-panicking best-effort cleanup.
+
+### Added
+
+- Add `WinitPlatformRuntime::{poll_fault,handle_event,route_secondary_event,main_window}` so applications can inspect deferred callback faults, route main and secondary viewport events, and access the runtime-owned main window without raw callback userdata.
+
+### Changed
+
+- Register the platform runtime as the Context's exclusive platform attachment. Renderer attachments must be created after it, and Context teardown releases renderer resources before Winit destroys platform windows.
+
 ## [0.15.1] - 2026-06-30
 
 ### Breaking Changes

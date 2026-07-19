@@ -1,6 +1,9 @@
 use anyhow::{Context, Result};
 use build_support::binding::{
-    BindingFormatter, BindingRustEdition, BindingSpec, BindingTarget, NativeAbiProfile,
+    BindingFormatter, BindingOwner, BindingRustEdition, BindingSpec, BindingTarget,
+    CANONICAL_BINDING_LIBCLANG_VERSION, CANONICAL_BINDING_RUSTC_VERSION,
+    CANONICAL_BINDING_RUSTFMT_VERSION, CrateBindingIncludeRoot, CrateBindingLanguage,
+    CrateBindingSpec, CrateBindingTarget, ExtensionBinding, NativeAbiProfile,
     validate_bindgen_environment,
 };
 use std::{
@@ -260,35 +263,71 @@ fn verify_core_bindings(args: &[String]) -> Result<()> {
             validate_checked_in_bindings(&path, &BindingSpec::core_native(profile))?;
         }
         validate_checked_in_bindings(&wasm_path, &wasm_spec)?;
+        validate_checked_in_extension_bindings(&root)?;
     }
 
     if !options.check_only {
-        let verification_dir = root.join("target/binding-verification");
-        std::fs::create_dir_all(&verification_dir)
-            .with_context(|| format!("create {}", verification_dir.display()))?;
-        let generated_wasm = verification_dir.join("bindings_wasm.rs");
+        validate_canonical_binding_toolchain()?;
+        let target_dir = root.join("target");
+        fs::create_dir_all(&target_dir)
+            .with_context(|| format!("create {}", target_dir.display()))?;
+        let verification_dir = tempfile::Builder::new()
+            .prefix("binding-verification-")
+            .tempdir_in(&target_dir)
+            .context("create independent binding verification directory")?;
+        let first_dir = verification_dir.path().join("first");
+        let second_dir = verification_dir.path().join("second");
+        fs::create_dir_all(&first_dir)
+            .with_context(|| format!("create {}", first_dir.display()))?;
+        fs::create_dir_all(&second_dir)
+            .with_context(|| format!("create {}", second_dir.display()))?;
         let mut generated_native_profiles = Vec::new();
         for profile in native_profiles {
             let spec = BindingSpec::core_native(profile);
-            let generated_native = verification_dir.join(format!("bindings_{}.rs", profile.id()));
-            generate_core_bindings(&root, &spec, &generated_native)?;
-            let canonical = std::fs::read_to_string(&generated_native)
-                .with_context(|| format!("read {}", generated_native.display()))?;
+            let file_name = format!("bindings_{}.rs", profile.id());
+            let first_native = first_dir.join(&file_name);
+            let second_native = second_dir.join(&file_name);
+            generate_core_bindings(&root, &spec, &first_native)?;
+            generate_core_bindings(&root, &spec, &second_native)?;
+            let canonical = fs::read_to_string(&first_native)
+                .with_context(|| format!("read {}", first_native.display()))?;
+            let repeated = fs::read_to_string(&second_native)
+                .with_context(|| format!("read {}", second_native.display()))?;
+            require_byte_identical(
+                &format!("core native profile {}", profile.id()),
+                &canonical,
+                &repeated,
+            )?;
 
             for target in profile.compatibility_targets() {
-                let generated_compat = verification_dir.join(format!(
+                let compat_name = format!(
                     "bindings_{}_{}.rs",
                     profile.id(),
                     target.rust_target.replace('-', "_")
-                ));
+                );
+                let first_compat = first_dir.join(&compat_name);
+                let second_compat = second_dir.join(&compat_name);
                 generate_core_bindings_for_target(
                     &root,
                     &spec,
                     Some(target.clang_target),
-                    &generated_compat,
+                    &first_compat,
                 )?;
-                let compatible = std::fs::read_to_string(&generated_compat)
-                    .with_context(|| format!("read {}", generated_compat.display()))?;
+                generate_core_bindings_for_target(
+                    &root,
+                    &spec,
+                    Some(target.clang_target),
+                    &second_compat,
+                )?;
+                let compatible = fs::read_to_string(&first_compat)
+                    .with_context(|| format!("read {}", first_compat.display()))?;
+                let repeated_compat = fs::read_to_string(&second_compat)
+                    .with_context(|| format!("read {}", second_compat.display()))?;
+                require_byte_identical(
+                    &format!("core compatibility target {}", target.rust_target),
+                    &compatible,
+                    &repeated_compat,
+                )?;
                 if compatible != canonical {
                     anyhow::bail!(
                         "native ABI profile {} drifts for Rust target {} (clang target {})",
@@ -300,10 +339,15 @@ fn verify_core_bindings(args: &[String]) -> Result<()> {
             }
             generated_native_profiles.push((profile, spec, canonical));
         }
-        generate_core_bindings(&root, &wasm_spec, &generated_wasm)?;
-
-        let wasm = std::fs::read_to_string(&generated_wasm)
-            .with_context(|| format!("read {}", generated_wasm.display()))?;
+        let first_wasm = first_dir.join("bindings_wasm.rs");
+        let second_wasm = second_dir.join("bindings_wasm.rs");
+        generate_core_bindings(&root, &wasm_spec, &first_wasm)?;
+        generate_core_bindings(&root, &wasm_spec, &second_wasm)?;
+        let wasm = fs::read_to_string(&first_wasm)
+            .with_context(|| format!("read {}", first_wasm.display()))?;
+        let repeated_wasm = fs::read_to_string(&second_wasm)
+            .with_context(|| format!("read {}", second_wasm.display()))?;
+        require_byte_identical("core WASM profile", &wasm, &repeated_wasm)?;
         if options.update {
             for (profile, _, native) in &generated_native_profiles {
                 let path = sys_root.join(profile.pregenerated_file());
@@ -319,6 +363,33 @@ fn verify_core_bindings(args: &[String]) -> Result<()> {
             }
             compare_binding_contents(&wasm_path, &wasm)?;
         }
+
+        verify_crate_binding_sources(&root)?;
+        let first_extension_dir = first_dir.join("extensions");
+        let second_extension_dir = second_dir.join("extensions");
+        fs::create_dir_all(&first_extension_dir)
+            .with_context(|| format!("create {}", first_extension_dir.display()))?;
+        fs::create_dir_all(&second_extension_dir)
+            .with_context(|| format!("create {}", second_extension_dir.display()))?;
+        for spec in CrateBindingSpec::maintained() {
+            let file_name = format!("{}_{}.rs", spec.crate_name, spec.target.id());
+            let first_path = first_extension_dir.join(&file_name);
+            let second_path = second_extension_dir.join(&file_name);
+            let generated = generate_extension_bindings(&root, spec, &first_path)?;
+            let repeated = generate_extension_bindings(&root, spec, &second_path)?;
+            require_byte_identical(
+                &format!("{} {} profile", spec.crate_name, spec.target.id()),
+                &generated,
+                &repeated,
+            )?;
+            let checked_in_path = root.join(spec.crate_root).join(spec.checked_in_path);
+            if options.update {
+                fs::write(&checked_in_path, generated)
+                    .with_context(|| format!("write {}", checked_in_path.display()))?;
+            } else {
+                compare_binding_contents(&checked_in_path, &generated)?;
+            }
+        }
     }
 
     for profile in native_profiles {
@@ -326,6 +397,7 @@ fn verify_core_bindings(args: &[String]) -> Result<()> {
         validate_checked_in_bindings(&path, &BindingSpec::core_native(profile))?;
     }
     validate_checked_in_bindings(&wasm_path, &wasm_spec)?;
+    validate_checked_in_extension_bindings(&root)?;
 
     let wasm_content = std::fs::read_to_string(&wasm_path)
         .with_context(|| format!("read {}", wasm_path.display()))?;
@@ -338,36 +410,173 @@ fn verify_core_bindings(args: &[String]) -> Result<()> {
     }
 
     if !options.allow_dirty {
+        let mut binding_paths = vec![
+            "dear-imgui-sys/src/bindings_pregenerated.rs".to_owned(),
+            "dear-imgui-sys/src/bindings_pregenerated_windows.rs".to_owned(),
+            "dear-imgui-sys/src/wasm_bindings_pregenerated.rs".to_owned(),
+        ];
+        binding_paths.extend(
+            CrateBindingSpec::maintained()
+                .iter()
+                .map(|spec| format!("{}/{}", spec.crate_root, spec.checked_in_path)),
+        );
+        binding_paths.sort_unstable();
+        binding_paths.dedup();
         let output = Command::new("git")
             .current_dir(&root)
-            .args([
-                "status",
-                "--porcelain=v1",
-                "--untracked-files=all",
-                "--",
-                "dear-imgui-sys/src/bindings_pregenerated.rs",
-                "dear-imgui-sys/src/bindings_pregenerated_windows.rs",
-                "dear-imgui-sys/src/wasm_bindings_pregenerated.rs",
-            ])
+            .args(["status", "--porcelain=v1", "--untracked-files=all", "--"])
+            .args(&binding_paths)
             .output()
-            .context("run git status for checked-in core bindings")?;
+            .context("run git status for checked-in bindings")?;
         if !output.status.success() {
-            anyhow::bail!("git status failed while checking core binding artifacts");
+            anyhow::bail!("git status failed while checking binding artifacts");
         }
         if !output.stdout.is_empty() {
             anyhow::bail!(
-                "checked-in core binding artifacts are dirty:\n{}",
+                "checked-in binding artifacts are dirty:\n{}",
                 String::from_utf8_lossy(&output.stdout)
             );
         }
     }
 
     eprintln!(
-        "Core bindings verified (windows hash {}, non-windows hash {}, wasm hash {})",
+        "Core and crate-local bindings verified (windows hash {}, non-windows hash {}, wasm hash {}, extension profiles {})",
         BindingSpec::core_native(NativeAbiProfile::Windows64).deterministic_hash(),
         BindingSpec::core_native(NativeAbiProfile::NonWindows).deterministic_hash(),
-        wasm_spec.deterministic_hash()
+        wasm_spec.deterministic_hash(),
+        CrateBindingSpec::maintained().len()
     );
+    Ok(())
+}
+
+fn validate_canonical_binding_toolchain() -> Result<()> {
+    use std::process::Command;
+
+    let clang = bindgen::clang_version();
+    if clang.parsed != Some(CANONICAL_BINDING_LIBCLANG_VERSION) {
+        anyhow::bail!(
+            "canonical binding generation requires libclang {}.{}, found {}",
+            CANONICAL_BINDING_LIBCLANG_VERSION.0,
+            CANONICAL_BINDING_LIBCLANG_VERSION.1,
+            clang.full
+        );
+    }
+    for (program, expected) in [
+        ("rustc", CANONICAL_BINDING_RUSTC_VERSION),
+        ("rustfmt", CANONICAL_BINDING_RUSTFMT_VERSION),
+    ] {
+        let output = Command::new(program)
+            .arg("--version")
+            .output()
+            .with_context(|| format!("run {program} --version"))?;
+        if !output.status.success() {
+            anyhow::bail!("{program} --version failed");
+        }
+        let actual = String::from_utf8_lossy(&output.stdout);
+        if !actual.starts_with(expected) {
+            anyhow::bail!(
+                "canonical binding generation requires {expected}, found {}",
+                actual.trim()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn validate_checked_in_extension_bindings(root: &Path) -> Result<()> {
+    for spec in CrateBindingSpec::maintained() {
+        let crate_root = root.join(spec.crate_root);
+        spec.load_and_validate_full(&crate_root)
+            .map_err(anyhow::Error::msg)
+            .with_context(|| {
+                format!(
+                    "validate {} {} checked-in bindings",
+                    spec.crate_name,
+                    spec.target.id()
+                )
+            })?;
+    }
+    Ok(())
+}
+
+fn verify_crate_binding_sources(root: &Path) -> Result<()> {
+    use build_support::binding::parse_crate_binding_source_revision;
+    use std::collections::BTreeSet;
+    use std::process::Command;
+
+    let mut crates = BTreeSet::new();
+    for spec in CrateBindingSpec::maintained() {
+        if !crates.insert(spec.crate_name) {
+            continue;
+        }
+        let crate_root = root.join(spec.crate_root);
+        let source_root = crate_root.join(spec.source_root);
+        let manifest_path = crate_root.join("Cargo.toml");
+        let manifest = fs::read_to_string(&manifest_path)
+            .with_context(|| format!("read {}", manifest_path.display()))?;
+        let expected =
+            parse_crate_binding_source_revision(&manifest).map_err(anyhow::Error::msg)?;
+
+        let top_level = git_output(&source_root, &["rev-parse", "--show-toplevel"])?;
+        let actual_top_level = fs::canonicalize(top_level.trim())
+            .with_context(|| format!("resolve Git top-level for {}", source_root.display()))?;
+        let expected_top_level = fs::canonicalize(&source_root)
+            .with_context(|| format!("resolve source root {}", source_root.display()))?;
+        if actual_top_level != expected_top_level {
+            anyhow::bail!(
+                "{} source is not the expected Git worktree: expected {}, found {}",
+                spec.crate_name,
+                expected_top_level.display(),
+                actual_top_level.display()
+            );
+        }
+
+        let status = git_output(
+            &source_root,
+            &[
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=all",
+                "--ignore-submodules=none",
+            ],
+        )?;
+        if !status.is_empty() {
+            anyhow::bail!(
+                "{} binding source is dirty at {}:\n{}",
+                spec.crate_name,
+                source_root.display(),
+                status.trim_end()
+            );
+        }
+        let actual = git_output(&source_root, &["rev-parse", "HEAD"])?;
+        if actual.trim() != expected {
+            anyhow::bail!(
+                "{} binding source revision mismatch: metadata {}, HEAD {}",
+                spec.crate_name,
+                expected,
+                actual.trim()
+            );
+        }
+    }
+
+    fn git_output(path: &Path, args: &[&str]) -> Result<String> {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .args(args)
+            .output()
+            .with_context(|| format!("run git for {}", path.display()))?;
+        if !output.status.success() {
+            anyhow::bail!(
+                "git {} failed for {}: {}",
+                args.join(" "),
+                path.display(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    }
+
     Ok(())
 }
 
@@ -384,9 +593,16 @@ fn compare_binding_contents(path: &Path, generated: &str) -> Result<()> {
         .with_context(|| format!("read checked-in bindings from {}", path.display()))?;
     if !binding_contents_equal(&checked_in, generated) {
         anyhow::bail!(
-            "{} differs from the shared BindingSpec output; regenerate core bindings",
+            "{} differs from the canonical BindingSpec output; run `xtask verify-bindings --update`",
             path.display()
         );
+    }
+    Ok(())
+}
+
+fn require_byte_identical(label: &str, first: &str, second: &str) -> Result<()> {
+    if first.as_bytes() != second.as_bytes() {
+        anyhow::bail!("{label} is not deterministic across two independent canonical generations");
     }
     Ok(())
 }
@@ -403,346 +619,172 @@ fn normalize_line_endings(contents: &str) -> Cow<'_, str> {
     }
 }
 
-fn gen_implot_wasm_bindings() -> Result<()> {
-    let root = project_root();
-    let sys_root = root.join("extensions").join("dear-implot-sys");
-    let cimplot_root = sys_root.join("third-party").join("cimplot");
-    let imgui_sys_root = root.join("dear-imgui-sys");
-    let cimgui_root = imgui_sys_root.join("third-party").join("cimgui");
+fn extension_bindgen_builder(root: &Path, spec: &CrateBindingSpec) -> Result<bindgen::Builder> {
+    let crate_root = root.join(spec.crate_root);
+    let cimgui_root = root.join("dear-imgui-sys/third-party/cimgui");
     let imgui_src = cimgui_root.join("imgui");
-    let header = cimplot_root.join("cimplot.h");
-    let out = sys_root.join("src").join("wasm_bindings_pregenerated.rs");
-    let import_name = CORE_WASM_IMPORT_MODULE;
-
-    // Configure bindgen similar to dear-implot-sys build.rs, but generate
-    // wasm import-style bindings that link against the imgui-sys-v0 provider.
-    let mut builder = bindgen::Builder::default()
-        .header(header.to_string_lossy())
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        .clang_arg(format!("-I{}", imgui_src.display()))
-        .clang_arg(format!("-I{}", cimgui_root.display()))
-        .clang_arg(format!("-I{}", cimplot_root.display()))
-        .clang_arg(format!("-I{}", cimplot_root.join("implot").display()))
-        .clang_arg("-DIMGUI_USE_WCHAR32")
-        .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
-        .allowlist_function("ImPlot.*")
-        .allowlist_type("ImPlot.*")
-        .allowlist_type("ImWchar32")
-        .allowlist_var("ImPlot.*")
-        .allowlist_var("IMPLOT_.*")
-        .blocklist_type("ImVec2")
-        .blocklist_type("ImVec4")
-        .blocklist_type("ImGuiCond")
-        .blocklist_type("ImTextureID")
-        .blocklist_type("ImGuiContext")
-        .blocklist_type("ImDrawList")
-        .blocklist_type("ImGuiMouseButton")
-        .blocklist_type("ImGuiDragDropFlags")
-        .blocklist_type("ImGuiIO")
-        .blocklist_type("ImFontAtlas")
-        .blocklist_type("ImDrawData")
-        .blocklist_type("ImGuiStyle")
-        .blocklist_type("ImGuiKeyModFlags")
-        .derive_default(true)
-        .derive_debug(true)
-        .derive_copy(true)
-        .derive_eq(true)
-        .derive_partialeq(true)
-        .derive_hash(true)
-        .prepend_enum_name(false)
-        .layout_tests(false)
-        .clang_arg("-x")
-        .clang_arg("c++")
-        .clang_arg("-std=c++17")
-        .wasm_import_module_name(import_name);
-
-    // Keep ImGui's platform/file functions disabled for WASM bindings to
-    // match the provider configuration.
+    let shim_root = root
+        .join("target/binding-spec-headers/crates")
+        .join(spec.deterministic_hash().replace(':', "-"));
+    fs::create_dir_all(&shim_root)
+        .with_context(|| format!("create binding header shim dir {}", shim_root.display()))?;
+    for shim in spec.header_shims {
+        fs::write(shim_root.join(shim.name), shim.contents)
+            .with_context(|| format!("write binding header shim {}", shim.name))?;
+    }
+    let profile = spec.profile;
+    let mut builder = bindgen::Builder::default();
+    builder = match profile.formatter {
+        BindingFormatter::Rustfmt => builder.formatter(bindgen::Formatter::Rustfmt),
+    };
+    builder = match profile.rust_edition {
+        BindingRustEdition::Rust2021 => builder.rust_edition(bindgen::RustEdition::Edition2021),
+    };
     builder = builder
-        .clang_arg("-DIMGUI_DISABLE_FILE_FUNCTIONS")
-        .clang_arg("-DIMGUI_DISABLE_OSX_FUNCTIONS")
-        .clang_arg("-DIMGUI_DISABLE_WIN32_FUNCTIONS");
+        .derive_default(profile.derives.default)
+        .derive_debug(profile.derives.debug)
+        .derive_copy(profile.derives.copy)
+        .derive_eq(profile.derives.eq)
+        .derive_partialeq(profile.derives.partial_eq)
+        .derive_hash(profile.derives.hash)
+        .prepend_enum_name(profile.prepend_enum_name)
+        .layout_tests(profile.layout_tests)
+        .allowlist_recursively(profile.allowlist_recursively);
 
-    eprintln!(
-        "Generating ImPlot wasm bindings to {} (import module: {})",
-        out.display(),
-        import_name
-    );
-    let bindings = builder
+    builder = builder.clang_arg(format!("-I{}", shim_root.display()));
+    for arg in spec.clang_args {
+        builder = builder.clang_arg(*arg);
+    }
+
+    for header in spec.input_paths {
+        builder = builder.header(crate_root.join(header).to_string_lossy());
+    }
+
+    let source_root = crate_root.join(spec.source_root);
+    for include in profile.include_paths {
+        let root = match include.root {
+            CrateBindingIncludeRoot::CoreCimgui => &cimgui_root,
+            CrateBindingIncludeRoot::CoreImgui => &imgui_src,
+            CrateBindingIncludeRoot::Source => &source_root,
+        };
+        builder = builder.clang_arg(format!("-I{}", root.join(include.relative_path).display()));
+    }
+    for define in profile.clang_defines {
+        builder = builder.clang_arg(format!("-D{define}"));
+    }
+    for pattern in profile.allowlisted_functions {
+        builder = builder.allowlist_function(pattern);
+    }
+    for pattern in profile.allowlisted_types {
+        builder = builder.allowlist_type(pattern);
+    }
+    for pattern in profile.allowlisted_vars {
+        builder = builder.allowlist_var(pattern);
+    }
+    for pattern in profile.blocklisted_types {
+        builder = builder.blocklist_type(pattern);
+    }
+    if profile.language == CrateBindingLanguage::Cxx17 {
+        builder = builder
+            .clang_arg("-x")
+            .clang_arg("c++")
+            .clang_arg("-std=c++17");
+    }
+    for define in spec.target.clang_defines() {
+        builder = builder.clang_arg(format!("-D{define}"));
+    }
+
+    if let CrateBindingTarget::WasmImport { module_name } = spec.target {
+        builder = builder.wasm_import_module_name(module_name);
+    }
+    Ok(builder)
+}
+
+fn generate_extension_bindings(
+    root: &Path,
+    spec: &CrateBindingSpec,
+    output: &Path,
+) -> Result<String> {
+    let environment_names = std::env::vars_os()
+        .map(|(name, _)| name.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    validate_bindgen_environment(&environment_names).map_err(anyhow::Error::msg)?;
+    let bindings = extension_bindgen_builder(root, spec)?
         .generate()
-        .context("bindgen generate() failed for ImPlot")?;
+        .with_context(|| {
+            format!(
+                "bindgen generate() failed for {} {}",
+                spec.crate_name,
+                spec.target.id()
+            )
+        })?;
     bindings
-        .write_to_file(&out)
-        .with_context(|| format!("write bindings to {}", out.display()))?;
-    eprintln!("Done.");
-    Ok(())
+        .write_to_file(output)
+        .with_context(|| format!("write bindings to {}", output.display()))?;
+    let generated = fs::read_to_string(output)
+        .with_context(|| format!("read generated bindings from {}", output.display()))?;
+    let sanitized = sanitize_extension_bindings(&generated);
+    let crate_root = root.join(spec.crate_root);
+    let stamped = spec
+        .stamp(&crate_root, &sanitized)
+        .map_err(anyhow::Error::msg)?;
+    fs::write(output, &stamped)
+        .with_context(|| format!("write stamped bindings to {}", output.display()))?;
+    Ok(stamped)
+}
+
+fn sanitize_extension_bindings(content: &str) -> String {
+    let mut output = String::with_capacity(content.len());
+    let mut skip_next_blank = false;
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("#![") {
+            skip_next_blank = true;
+            continue;
+        }
+        if skip_next_blank && trimmed.is_empty() {
+            continue;
+        }
+        skip_next_blank = false;
+        output.push_str(line);
+        output.push('\n');
+    }
+    output
+}
+
+fn gen_implot_wasm_bindings() -> Result<()> {
+    generate_maintained_wasm_binding(BindingOwner::Extension(ExtensionBinding::ImPlot))
 }
 
 fn gen_implot3d_wasm_bindings() -> Result<()> {
-    let root = project_root();
-    let sys_root = root.join("extensions").join("dear-implot3d-sys");
-    let cimplot3d_root = sys_root.join("third-party").join("cimplot3d");
-    let imgui_sys_root = root.join("dear-imgui-sys");
-    let cimgui_root = imgui_sys_root.join("third-party").join("cimgui");
-    let imgui_src = cimgui_root.join("imgui");
-    let header = cimplot3d_root.join("cimplot3d.h");
-    let out = sys_root.join("src").join("wasm_bindings_pregenerated.rs");
-    let import_name = CORE_WASM_IMPORT_MODULE;
-
-    // Configure bindgen similar to dear-implot3d-sys build.rs, but generate
-    // wasm import-style bindings that link against the imgui-sys-v0 provider.
-    let mut builder = bindgen::Builder::default()
-        .header(header.to_string_lossy())
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        .clang_arg(format!("-I{}", imgui_src.display()))
-        .clang_arg(format!("-I{}", cimgui_root.display()))
-        .clang_arg(format!("-I{}", cimplot3d_root.display()))
-        .clang_arg(format!("-I{}", cimplot3d_root.join("implot3d").display()))
-        .clang_arg("-DIMGUI_USE_WCHAR32")
-        .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
-        .allowlist_function("ImPlot3D_.*")
-        .allowlist_type("ImPlot3D.*")
-        .allowlist_type("ImWchar32")
-        .allowlist_var("ImPlot3D.*")
-        .blocklist_type("ImVec2")
-        .blocklist_type("ImVec4")
-        .blocklist_type("ImGuiContext")
-        .blocklist_type("ImDrawList")
-        .blocklist_type("ImGuiID")
-        .blocklist_type("ImTextureID")
-        .derive_default(true)
-        .derive_debug(true)
-        .derive_copy(true)
-        .derive_eq(true)
-        .derive_partialeq(true)
-        .derive_hash(true)
-        .prepend_enum_name(false)
-        .layout_tests(false)
-        .clang_arg("-x")
-        .clang_arg("c++")
-        .clang_arg("-std=c++17")
-        .wasm_import_module_name(import_name);
-
-    // Match the core ImGui wasm configuration and disable platform/file functions.
-    builder = builder
-        .clang_arg("-DIMGUI_DISABLE_FILE_FUNCTIONS")
-        .clang_arg("-DIMGUI_DISABLE_OSX_FUNCTIONS")
-        .clang_arg("-DIMGUI_DISABLE_WIN32_FUNCTIONS");
-
-    eprintln!(
-        "Generating ImPlot3D wasm bindings to {} (import module: {})",
-        out.display(),
-        import_name
-    );
-    let bindings = builder
-        .generate()
-        .context("bindgen generate() failed for ImPlot3D")?;
-    bindings
-        .write_to_file(&out)
-        .with_context(|| format!("write bindings to {}", out.display()))?;
-    eprintln!("Done.");
-    Ok(())
+    generate_maintained_wasm_binding(BindingOwner::Extension(ExtensionBinding::ImPlot3d))
 }
 
 fn gen_imnodes_wasm_bindings() -> Result<()> {
-    let root = project_root();
-    let sys_root = root.join("extensions").join("dear-imnodes-sys");
-    let cimnodes_root = sys_root.join("third-party").join("cimnodes");
-    let imgui_sys_root = root.join("dear-imgui-sys");
-    let cimgui_root = imgui_sys_root.join("third-party").join("cimgui");
-    let imgui_src = cimgui_root.join("imgui");
-    let header = cimnodes_root.join("cimnodes.h");
-    let shim_header = sys_root.join("shim").join("imnodes_extra.h");
-    let out = sys_root.join("src").join("wasm_bindings_pregenerated.rs");
-    let import_name = CORE_WASM_IMPORT_MODULE;
-
-    // Configure bindgen similar to dear-imnodes-sys build.rs, but generate
-    // wasm import-style bindings that link against the imgui-sys-v0 provider.
-    let mut builder = bindgen::Builder::default()
-        .header(header.to_string_lossy())
-        .header(shim_header.to_string_lossy())
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        .clang_arg(format!("-I{}", cimgui_root.display()))
-        .clang_arg(format!("-I{}", imgui_src.display()))
-        .clang_arg(format!("-I{}", cimnodes_root.display()))
-        .clang_arg(format!("-I{}", cimnodes_root.join("imnodes").display()))
-        .clang_arg("-DIMGUI_USE_WCHAR32")
-        .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
-        .allowlist_function("imnodes_.*")
-        .allowlist_function("EmulateThreeButtonMouse_.*")
-        .allowlist_function("LinkDetachWithModifierClick_.*")
-        .allowlist_function("MultipleSelectModifier_.*")
-        .allowlist_function("getIOKeyCtrlPtr")
-        .allowlist_function("imnodes_getIOKeyShiftPtr")
-        .allowlist_function("imnodes_getIOKeyAltPtr")
-        .allowlist_type("ImNodes.*")
-        .allowlist_type("ImWchar32")
-        .allowlist_var("ImNodes.*")
-        .blocklist_type("ImVec2")
-        .blocklist_type("ImVec4")
-        .blocklist_type("ImGuiContext")
-        .blocklist_type("ImDrawList")
-        .derive_default(true)
-        .derive_debug(true)
-        .derive_copy(true)
-        .derive_eq(true)
-        .derive_partialeq(true)
-        .derive_hash(true)
-        .prepend_enum_name(false)
-        .layout_tests(false)
-        .clang_arg("-x")
-        .clang_arg("c++")
-        .clang_arg("-std=c++17")
-        .wasm_import_module_name(import_name);
-
-    // Match the core ImGui wasm configuration and disable platform/file functions.
-    builder = builder
-        .clang_arg("-DIMGUI_DISABLE_FILE_FUNCTIONS")
-        .clang_arg("-DIMGUI_DISABLE_OSX_FUNCTIONS")
-        .clang_arg("-DIMGUI_DISABLE_WIN32_FUNCTIONS");
-
-    eprintln!(
-        "Generating ImNodes wasm bindings to {} (import module: {})",
-        out.display(),
-        import_name
-    );
-    let bindings = builder
-        .generate()
-        .context("bindgen generate() failed for ImNodes")?;
-    bindings
-        .write_to_file(&out)
-        .with_context(|| format!("write bindings to {}", out.display()))?;
-    eprintln!("Done.");
-    Ok(())
+    generate_maintained_wasm_binding(BindingOwner::Extension(ExtensionBinding::ImNodes))
 }
 
 fn gen_imguizmo_wasm_bindings() -> Result<()> {
-    let root = project_root();
-    let sys_root = root.join("extensions").join("dear-imguizmo-sys");
-    let cimguizmo_root = sys_root.join("third-party").join("cimguizmo");
-    let imgui_sys_root = root.join("dear-imgui-sys");
-    let cimgui_root = imgui_sys_root.join("third-party").join("cimgui");
-    let imgui_src = cimgui_root.join("imgui");
-    let header = cimguizmo_root.join("cimguizmo.h");
-    let out = sys_root.join("src").join("wasm_bindings_pregenerated.rs");
-    let import_name = CORE_WASM_IMPORT_MODULE;
-
-    // Configure bindgen similar to dear-imguizmo-sys build.rs, but generate
-    // wasm import-style bindings that link against the imgui-sys-v0 provider.
-    let mut builder = bindgen::Builder::default()
-        .header(header.to_string_lossy())
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        .clang_arg(format!("-I{}", cimgui_root.display()))
-        .clang_arg(format!("-I{}", imgui_src.display()))
-        .clang_arg(format!("-I{}", cimguizmo_root.display()))
-        .clang_arg(format!("-I{}", cimguizmo_root.join("ImGuizmo").display()))
-        .clang_arg("-DIMGUI_USE_WCHAR32")
-        .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
-        .allowlist_function("ImGuizmo_.*")
-        .allowlist_function("Style_.*")
-        .allowlist_type("(Style|COLOR|MODE|OPERATION)")
-        .allowlist_type("ImWchar32")
-        .allowlist_var("(COLOR|MODE|OPERATION|COUNT|TRANSLATE.*|ROTATE.*|SCALE.*|UNIVERSAL)")
-        .blocklist_type("ImVec2")
-        .blocklist_type("ImVec4")
-        .blocklist_type("ImGuiContext")
-        .blocklist_type("ImDrawList")
-        .blocklist_type("ImGuiID")
-        .derive_default(true)
-        .derive_debug(true)
-        .derive_copy(true)
-        .derive_eq(true)
-        .derive_partialeq(true)
-        .derive_hash(true)
-        .prepend_enum_name(false)
-        .layout_tests(false)
-        .clang_arg("-x")
-        .clang_arg("c++")
-        .clang_arg("-std=c++17")
-        .wasm_import_module_name(import_name);
-
-    // Match the core ImGui wasm configuration and disable platform/file functions.
-    builder = builder
-        .clang_arg("-DIMGUI_DISABLE_FILE_FUNCTIONS")
-        .clang_arg("-DIMGUI_DISABLE_OSX_FUNCTIONS")
-        .clang_arg("-DIMGUI_DISABLE_WIN32_FUNCTIONS");
-
-    eprintln!(
-        "Generating ImGuizmo wasm bindings to {} (import module: {})",
-        out.display(),
-        import_name
-    );
-    let bindings = builder
-        .generate()
-        .context("bindgen generate() failed for ImGuizmo")?;
-    bindings
-        .write_to_file(&out)
-        .with_context(|| format!("write bindings to {}", out.display()))?;
-    eprintln!("Done.");
-    Ok(())
+    generate_maintained_wasm_binding(BindingOwner::Extension(ExtensionBinding::ImGuizmo))
 }
 
 fn gen_imguizmo_quat_wasm_bindings() -> Result<()> {
+    generate_maintained_wasm_binding(BindingOwner::Extension(ExtensionBinding::ImGuizmoQuat))
+}
+
+fn generate_maintained_wasm_binding(owner: BindingOwner) -> Result<()> {
     let root = project_root();
-    let sys_root = root.join("extensions").join("dear-imguizmo-quat-sys");
-    let quat_root = sys_root.join("third-party").join("cimguizmo_quat");
-    let imgui_sys_root = root.join("dear-imgui-sys");
-    let cimgui_root = imgui_sys_root.join("third-party").join("cimgui");
-    let imgui_src = cimgui_root.join("imgui");
-    let header = quat_root.join("cimguizmo_quat.h");
-    let imguizmo_quat_inc = quat_root.join("imGuIZMO.quat").join("imguizmo_quat");
-    let out = sys_root.join("src").join("wasm_bindings_pregenerated.rs");
-    let import_name = CORE_WASM_IMPORT_MODULE;
-
-    // Configure bindgen similar to dear-imguizmo-quat-sys build.rs, but generate
-    // wasm import-style bindings that link against the imgui-sys-v0 provider.
-    let mut builder = bindgen::Builder::default()
-        .header(header.to_string_lossy())
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        .clang_arg(format!("-I{}", cimgui_root.display()))
-        .clang_arg(format!("-I{}", imgui_src.display()))
-        .clang_arg(format!("-I{}", quat_root.display()))
-        .clang_arg(format!("-I{}", imguizmo_quat_inc.display()))
-        .clang_arg("-DIMGUI_USE_WCHAR32")
-        .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
-        .allowlist_function("imguiGizmo_.*")
-        .allowlist_function("iggizmo3D_.*")
-        .allowlist_function("(mat4|quat)_.*")
-        .blocklist_type("ImVec2")
-        .blocklist_type("ImDrawList")
-        .blocklist_type("ImGuiContext")
-        .blocklist_type("ImGuiID")
-        .blocklist_type("ImVec4")
-        .derive_default(true)
-        .derive_debug(true)
-        .derive_copy(true)
-        .derive_eq(true)
-        .derive_partialeq(true)
-        .derive_hash(true)
-        .prepend_enum_name(false)
-        .layout_tests(false)
-        .clang_arg("-x")
-        .clang_arg("c++")
-        .clang_arg("-std=c++17")
-        .wasm_import_module_name(import_name);
-
-    // Match the core ImGui wasm configuration and disable platform/file functions.
-    builder = builder
-        .clang_arg("-DIMGUI_DISABLE_FILE_FUNCTIONS")
-        .clang_arg("-DIMGUI_DISABLE_OSX_FUNCTIONS")
-        .clang_arg("-DIMGUI_DISABLE_WIN32_FUNCTIONS");
-
+    let spec = CrateBindingSpec::for_owner(owner)
+        .find(|spec| spec.target.id() == "wasm")
+        .ok_or_else(|| anyhow::anyhow!("no maintained WASM binding profile for {owner:?}"))?;
+    let output = root.join(spec.crate_root).join(spec.checked_in_path);
     eprintln!(
-        "Generating ImGuIZMO.quat wasm bindings to {} (import module: {})",
-        out.display(),
-        import_name
+        "Generating {} WASM bindings to {} (import module: {})",
+        spec.crate_name,
+        output.display(),
+        spec.target.import_module().unwrap_or_default()
     );
-    let bindings = builder
-        .generate()
-        .context("bindgen generate() failed for ImGuIZMO.quat")?;
-    bindings
-        .write_to_file(&out)
-        .with_context(|| format!("write bindings to {}", out.display()))?;
+    generate_extension_bindings(&root, spec, &output)?;
     eprintln!("Done.");
     Ok(())
 }
@@ -1503,7 +1545,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{VerifyBindingOptions, binding_contents_equal};
+    use super::{VerifyBindingOptions, binding_contents_equal, require_byte_identical};
 
     fn args(values: &[&str]) -> Vec<String> {
         values.iter().map(|value| (*value).to_owned()).collect()
@@ -1542,5 +1584,12 @@ mod tests {
             "first\r\nsecond\r\n",
             "first\nchanged\n"
         ));
+    }
+
+    #[test]
+    fn independent_generation_requires_exact_bytes() {
+        require_byte_identical("fixture", "first\nsecond\n", "first\nsecond\n").unwrap();
+        assert!(require_byte_identical("fixture", "first\n", "changed\n").is_err());
+        assert!(require_byte_identical("fixture", "first\r\n", "first\n").is_err());
     }
 }

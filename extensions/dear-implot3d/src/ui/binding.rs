@@ -1,56 +1,60 @@
-use crate::{imgui_sys, sys};
+use crate::sys;
+use dear_imgui_rs::{ContextBinding, ContextBindingError};
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct Plot3DContextBinding {
     pub(crate) plot_ctx_raw: *mut sys::ImPlot3DContext,
-    pub(crate) imgui_ctx_raw: *mut imgui_sys::ImGuiContext,
+    pub(crate) imgui_binding: ContextBinding,
 }
 
-#[must_use = "dropping the guard restores the previous Dear ImGui/ImPlot3D contexts"]
-pub(crate) struct Plot3DContextBindingGuard {
-    prev_imgui_ctx_raw: *mut imgui_sys::ImGuiContext,
+#[must_use = "dropping the guard restores the previous ImPlot3D context"]
+struct Plot3DContextGuard {
     prev_plot_ctx_raw: *mut sys::ImPlot3DContext,
-    restore_imgui: bool,
     restore_plot: bool,
 }
 
 impl Plot3DContextBinding {
-    pub(crate) fn bind(&self) -> Plot3DContextBindingGuard {
+    pub(crate) fn with_bound_context<R>(&self, f: impl FnOnce() -> R) -> R {
+        self.imgui_binding.with_bound_context(|| {
+            let _guard = Plot3DContextGuard::bind(self.plot_ctx_raw);
+            f()
+        })
+    }
+
+    pub(crate) fn try_with_bound_context<R>(
+        &self,
+        f: impl FnOnce() -> R,
+    ) -> Result<R, ContextBindingError> {
+        self.imgui_binding.try_with_bound_context(|| {
+            let _guard = Plot3DContextGuard::bind(self.plot_ctx_raw);
+            f()
+        })
+    }
+}
+
+impl Plot3DContextGuard {
+    fn bind(plot_ctx_raw: *mut sys::ImPlot3DContext) -> Self {
         assert!(
-            !self.imgui_ctx_raw.is_null(),
-            "dear-implot3d: Plot3DUi requires an active ImGui context"
-        );
-        assert!(
-            !self.plot_ctx_raw.is_null(),
+            !plot_ctx_raw.is_null(),
             "dear-implot3d: Plot3DUi requires an active ImPlot3D context"
         );
-        let prev_imgui_ctx_raw = unsafe { imgui_sys::igGetCurrentContext() };
         let prev_plot_ctx_raw = unsafe { sys::ImPlot3D_GetCurrentContext() };
-        let restore_imgui = prev_imgui_ctx_raw != self.imgui_ctx_raw;
-        let restore_plot = prev_plot_ctx_raw != self.plot_ctx_raw;
+        let restore_plot = prev_plot_ctx_raw != plot_ctx_raw;
         unsafe {
-            if restore_imgui {
-                imgui_sys::igSetCurrentContext(self.imgui_ctx_raw);
-            }
-            sys::ImPlot3D_SetCurrentContext(self.plot_ctx_raw);
+            sys::ImPlot3D_SetCurrentContext(plot_ctx_raw);
         }
-        Plot3DContextBindingGuard {
-            prev_imgui_ctx_raw,
+        Self {
             prev_plot_ctx_raw,
-            restore_imgui,
             restore_plot,
         }
     }
 }
 
-impl Drop for Plot3DContextBindingGuard {
+impl Drop for Plot3DContextGuard {
     fn drop(&mut self) {
-        unsafe {
-            if self.restore_plot {
+        if self.restore_plot {
+            unsafe {
                 sys::ImPlot3D_SetCurrentContext(self.prev_plot_ctx_raw);
-            }
-            if self.restore_imgui {
-                imgui_sys::igSetCurrentContext(self.prev_imgui_ctx_raw);
             }
         }
     }

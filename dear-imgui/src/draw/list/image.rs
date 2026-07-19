@@ -25,10 +25,18 @@ impl<'ui> DrawListMut<'ui> {
         let uv_min = finite_vec2("DrawListMut::add_image()", "uv_min", uv_min);
         let uv_max = finite_vec2("DrawListMut::add_image()", "uv_max", uv_max);
         let col = col.into().to_bits();
-        let tex_ref = texture.into().raw();
-        unsafe {
-            sys::ImDrawList_AddImage(self.draw_list, tex_ref, p_min, p_max, uv_min, uv_max, col)
-        }
+        let texture = texture.into();
+        self.ui().run_with_bound_context(|| {
+            let tex_ref = self
+                .ui()
+                .resolve_texture_ref(texture)
+                .unwrap_or_else(|error| {
+                    panic!("DrawListMut::add_image() rejected texture: {error}")
+                });
+            unsafe {
+                sys::ImDrawList_AddImage(self.draw_list, tex_ref, p_min, p_max, uv_min, uv_max, col)
+            }
+        })
     }
 
     /// Add an image with 4 arbitrary corners.
@@ -63,22 +71,30 @@ impl<'ui> DrawListMut<'ui> {
         let uv3 = finite_vec2("DrawListMut::add_image_quad()", "uv3", uv3);
         let uv4 = finite_vec2("DrawListMut::add_image_quad()", "uv4", uv4);
         let col = col.into().to_bits();
-        let tex_ref = texture.into().raw();
-        unsafe {
-            sys::ImDrawList_AddImageQuad(
-                self.draw_list,
-                tex_ref,
-                p1,
-                p2,
-                p3,
-                p4,
-                uv1,
-                uv2,
-                uv3,
-                uv4,
-                col,
-            )
-        }
+        let texture = texture.into();
+        self.ui().run_with_bound_context(|| {
+            let tex_ref = self
+                .ui()
+                .resolve_texture_ref(texture)
+                .unwrap_or_else(|error| {
+                    panic!("DrawListMut::add_image_quad() rejected texture: {error}")
+                });
+            unsafe {
+                sys::ImDrawList_AddImageQuad(
+                    self.draw_list,
+                    tex_ref,
+                    p1,
+                    p2,
+                    p3,
+                    p4,
+                    uv1,
+                    uv2,
+                    uv3,
+                    uv4,
+                    col,
+                )
+            }
+        })
     }
 
     /// Add an axis-aligned rounded image.
@@ -111,19 +127,27 @@ impl<'ui> DrawListMut<'ui> {
         assert_non_negative_f32("DrawListMut::add_image_rounded()", "rounding", rounding);
         assert_corner_flags("DrawListMut::add_image_rounded()", flags);
         let col = col.into().to_bits();
-        let tex_ref = texture.into().raw();
-        unsafe {
-            sys::ImDrawList_AddImageRounded(
-                self.draw_list,
-                tex_ref,
-                p_min,
-                p_max,
-                uv_min,
-                uv_max,
-                col,
-                rounding,
-                flags.bits() as sys::ImDrawFlags,
-            )
-        }
+        let texture = texture.into();
+        self.ui().run_with_bound_context(|| {
+            let tex_ref = self
+                .ui()
+                .resolve_texture_ref(texture)
+                .unwrap_or_else(|error| {
+                    panic!("DrawListMut::add_image_rounded() rejected texture: {error}")
+                });
+            unsafe {
+                sys::ImDrawList_AddImageRounded(
+                    self.draw_list,
+                    tex_ref,
+                    p_min,
+                    p_max,
+                    uv_min,
+                    uv_max,
+                    col,
+                    rounding,
+                    flags.bits() as sys::ImDrawFlags,
+                )
+            }
+        })
     }
 }

@@ -49,7 +49,6 @@ pub use self::helpers::configure_example_context;
 pub use self::schedule::{ImguiBeginFrame, ImguiEndFrame, ImguiPrimaryContextPass};
 #[cfg(feature = "render")]
 pub use self::texture::ImguiBevyTextures;
-pub use self::texture::ImguiTextureFeedbackQueue;
 pub use self::viewport::{
     ImguiViewportBridge, ImguiViewportCamera, ImguiViewportCommand, ImguiViewportFeedback,
     ImguiViewportId, ImguiViewportSnapshot, ImguiViewportWindow,
@@ -274,13 +273,19 @@ impl Default for ImguiBackendStatus {
 /// thread until later tasks add schedule-specific accessors.
 pub struct ImguiContext {
     context: dear_imgui_rs::Context,
+    #[cfg(feature = "render")]
+    renderer_consumer: Option<dear_imgui_rs::render::RendererConsumer>,
 }
 
 impl ImguiContext {
     /// Wrap an existing Dear ImGui context for insertion into a Bevy world.
     #[must_use]
     pub fn new(context: dear_imgui_rs::Context) -> Self {
-        Self { context }
+        Self {
+            context,
+            #[cfg(feature = "render")]
+            renderer_consumer: None,
+        }
     }
 
     /// Borrow the inner Dear ImGui context.
@@ -296,13 +301,21 @@ impl ImguiContext {
     }
 
     /// Consume the wrapper and return the Dear ImGui context.
-    #[must_use]
-    pub fn into_inner(mut self) -> dear_imgui_rs::Context {
+    ///
+    /// This resets every renderer-owned texture binding before releasing the Bevy renderer
+    /// consumer. The operation fails while the render world still owns a detached frame; in that
+    /// case this wrapper and its Context are dropped because they can no longer be returned with a
+    /// valid renderer contract.
+    pub fn into_inner(
+        mut self,
+    ) -> Result<dear_imgui_rs::Context, dear_imgui_rs::render::RendererConsumerError> {
+        self.reset_renderer_texture_bindings()?;
         self.clear_backend_data();
+        self.detach_renderer_consumer()?;
         let this = std::mem::ManuallyDrop::new(self);
         // SAFETY: `this` will not run `Drop`, and we return ownership of the inner context to the
         // caller exactly once.
-        unsafe { std::ptr::read(&this.context) }
+        Ok(unsafe { std::ptr::read(&this.context) })
     }
 
     fn clear_backend_data(&mut self) {
@@ -336,6 +349,65 @@ impl ImguiContext {
         }
         clear_platform_backend_handlers(&mut self.context);
         self.context.io_mut().set_backend_flags(backend_flags);
+    }
+
+    #[cfg(feature = "render")]
+    fn ensure_renderer_consumer(
+        &mut self,
+    ) -> Result<(), dear_imgui_rs::render::RendererConsumerError> {
+        if self.renderer_consumer.is_none() {
+            let consumer = self.context.create_renderer_consumer()?;
+            if let Err(error) = self.context.reset_renderer_texture_bindings(&consumer) {
+                drop(consumer);
+                let _ = self.context.poll_snapshot_completions();
+                return Err(error);
+            }
+            self.renderer_consumer = Some(consumer);
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "render")]
+    pub(crate) fn render_frame_snapshot(
+        &mut self,
+        multi_viewport_supported: bool,
+    ) -> Result<dear_imgui_rs::render::FrameSnapshot, dear_imgui_rs::render::SnapshotError> {
+        self.ensure_renderer_consumer()?;
+        let consumer = self
+            .renderer_consumer
+            .as_ref()
+            .expect("renderer consumer was initialized");
+        #[cfg(feature = "multi-viewport")]
+        if multi_viewport_supported {
+            let snapshot = self.context.render_platform_viewport_snapshot(consumer)?;
+            #[cfg(not(target_arch = "wasm32"))]
+            self.context.update_platform_windows();
+            return Ok(snapshot);
+        }
+        #[cfg(not(feature = "multi-viewport"))]
+        let _ = multi_viewport_supported;
+        self.context.render_snapshot(consumer)
+    }
+
+    fn reset_renderer_texture_bindings(
+        &mut self,
+    ) -> Result<(), dear_imgui_rs::render::RendererConsumerError> {
+        #[cfg(feature = "render")]
+        if let Some(consumer) = self.renderer_consumer.as_ref() {
+            let _ = self.context.reset_renderer_texture_bindings(consumer)?;
+        }
+        Ok(())
+    }
+
+    fn detach_renderer_consumer(
+        &mut self,
+    ) -> Result<(), dear_imgui_rs::render::RendererConsumerError> {
+        #[cfg(feature = "render")]
+        {
+            drop(self.renderer_consumer.take());
+            let _ = self.context.poll_snapshot_completions()?;
+        }
+        Ok(())
     }
 }
 
@@ -399,6 +471,7 @@ fn clear_renderer_backend_handlers(context: &mut dear_imgui_rs::Context) {
 impl Drop for ImguiContext {
     fn drop(&mut self) {
         self.clear_backend_data();
+        let _ = self.detach_renderer_consumer();
     }
 }
 

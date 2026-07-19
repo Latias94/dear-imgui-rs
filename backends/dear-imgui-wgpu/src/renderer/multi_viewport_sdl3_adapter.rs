@@ -1,3 +1,4 @@
+use super::multi_viewport_runtime::WgpuViewportError;
 use super::sdl3_raw_window_handle::Sdl3SurfaceTarget;
 use dear_imgui_rs::platform_io::Viewport;
 
@@ -13,34 +14,41 @@ compile_error!("`multi-viewport-sdl3` is not supported on wasm32 targets.");
 pub(super) unsafe fn create_surface(
     instance: &wgpu::Instance,
     viewport: &Viewport,
-) -> Option<(wgpu::Surface<'static>, [u32; 2])> {
-    let target = unsafe { target_from_viewport(viewport) }?;
-    let size = window_size(&target)?;
+) -> Result<(wgpu::Surface<'static>, [u32; 2]), WgpuViewportError> {
+    let target = unsafe { target_from_viewport(viewport) }.ok_or(
+        WgpuViewportError::SurfaceOperationFailed {
+            operation: "read SDL3 viewport window handle",
+        },
+    )?;
+    let size = window_size(&target).ok_or(WgpuViewportError::SurfaceOperationFailed {
+        operation: "query SDL3 viewport framebuffer size",
+    })?;
     #[cfg(any(feature = "wgpu-29", feature = "wgpu-30"))]
     let surface_target_result =
         unsafe { wgpu::SurfaceTargetUnsafe::from_display_and_window(&target, &target) };
     #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
     let surface_target_result = unsafe { wgpu::SurfaceTargetUnsafe::from_window(&target) };
-    let surface_target = match surface_target_result {
-        Ok(target) => target,
-        Err(error) => {
-            eprintln!("[wgpu-mv] could not read SDL3 surface handles: {error:?}");
-            return None;
+    let surface_target =
+        surface_target_result.map_err(|_| WgpuViewportError::SurfaceOperationFailed {
+            operation: "read SDL3 surface handles",
+        })?;
+    let surface = unsafe { instance.create_surface_unsafe(surface_target) }.map_err(|_| {
+        WgpuViewportError::SurfaceOperationFailed {
+            operation: "create SDL3 viewport surface",
         }
-    };
-    let surface = match unsafe { instance.create_surface_unsafe(surface_target) } {
-        Ok(surface) => surface,
-        Err(error) => {
-            eprintln!("[wgpu-mv] could not create SDL3 surface: {error:?}");
-            return None;
-        }
-    };
-    Some((surface, size))
+    })?;
+    Ok((surface, size))
 }
 
-pub(super) unsafe fn framebuffer_size(viewport: &Viewport) -> Option<[u32; 2]> {
-    let target = unsafe { target_from_viewport(viewport) }?;
-    window_size(&target)
+pub(super) unsafe fn framebuffer_size(viewport: &Viewport) -> Result<[u32; 2], WgpuViewportError> {
+    let target = unsafe { target_from_viewport(viewport) }.ok_or(
+        WgpuViewportError::SurfaceOperationFailed {
+            operation: "read SDL3 viewport window handle",
+        },
+    )?;
+    window_size(&target).ok_or(WgpuViewportError::SurfaceOperationFailed {
+        operation: "query SDL3 viewport framebuffer size",
+    })
 }
 
 fn window_id_from_platform_handle(
@@ -73,7 +81,8 @@ fn clamp_pixels(pixels: i32) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{clamp_pixels, window_id_from_platform_handle};
+    use super::{clamp_pixels, framebuffer_size, window_id_from_platform_handle};
+    use crate::renderer::multi_viewport_runtime::WgpuViewportError;
 
     #[test]
     fn rejects_null_window_id() {
@@ -83,8 +92,23 @@ mod tests {
     #[test]
     fn preserves_nonzero_window_id() {
         let handle = 42_usize as *mut std::ffi::c_void;
-        let window_id = window_id_from_platform_handle(handle).unwrap();
-        assert!(window_id == sdl3_sys::video::SDL_WindowID(42));
+        assert!(
+            window_id_from_platform_handle(handle)
+                .is_some_and(|window_id| window_id == sdl3_sys::video::SDL_WindowID(42))
+        );
+    }
+
+    #[test]
+    fn invalid_viewport_handle_is_a_typed_error() {
+        let mut raw_viewport = dear_imgui_rs::sys::ImGuiViewport::default();
+        let viewport =
+            unsafe { dear_imgui_rs::platform_io::Viewport::from_raw_mut(&mut raw_viewport) };
+        assert!(matches!(
+            unsafe { framebuffer_size(viewport) },
+            Err(WgpuViewportError::SurfaceOperationFailed {
+                operation: "read SDL3 viewport window handle"
+            })
+        ));
     }
 
     #[test]

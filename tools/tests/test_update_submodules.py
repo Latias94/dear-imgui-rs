@@ -145,6 +145,31 @@ class UpdateSubmodulesTests(unittest.TestCase):
 
 
 class RepositoryScriptContractTests(unittest.TestCase):
+    def test_canonical_bindgen_dependency_matches_provenance_contract(self):
+        xtask_manifest = (REPO_ROOT / "xtask" / "Cargo.toml").read_text(
+            encoding="utf-8"
+        )
+        build_support = (
+            REPO_ROOT / "tools" / "build-support" / "src" / "lib.rs"
+        ).read_text(encoding="utf-8")
+        dependency = re.search(r'^bindgen = "=([0-9.]+)"$', xtask_manifest, re.MULTILINE)
+        contract = re.search(
+            r'CANONICAL_BINDGEN_VERSION: &str = "([0-9.]+)"', build_support
+        )
+
+        self.assertIsNotNone(dependency)
+        self.assertIsNotNone(contract)
+        self.assertEqual(dependency.group(1), contract.group(1))
+
+    def test_binding_updater_uses_canonical_xtask_without_out_dir_guessing(self):
+        content = (
+            REPO_ROOT / "tools" / "update_submodule_and_bindings.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("verify-bindings", content)
+        self.assertNotIn("find_bindings", content)
+        self.assertNotIn("st_mtime", content)
+
     def test_repository_has_no_tracked_non_python_script_entry_points(self):
         result = subprocess.run(
             [
@@ -229,7 +254,9 @@ class RepositoryScriptContractTests(unittest.TestCase):
         prebuilt = (
             REPO_ROOT / ".github" / "workflows" / "prebuilt-binaries.yml"
         ).read_text(encoding="utf-8")
-        self.assertEqual(prebuilt.count(runner_expression), 2)
+        self.assertIn("python: python3", prebuilt)
+        self.assertIn("python: python", prebuilt)
+        self.assertGreaterEqual(prebuilt.count("${{ matrix.python }}"), 5)
 
 
 if __name__ == "__main__":
