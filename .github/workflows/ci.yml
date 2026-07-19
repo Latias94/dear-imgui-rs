@@ -256,6 +256,7 @@ jobs:
             -Clinker=clang++
             -Clink-arg=-fsanitize=address
             -Clink-arg=-fsanitize=undefined
+            -Clink-arg=-lstdc++
           IMGUI_SYS_FORCE_BUILD: "1"
         run: cargo nextest run -p dear-imgui-test-engine-sys --test ffi_boundary
 
@@ -342,6 +343,8 @@ jobs:
         run: python3 tools/api_surface_report.py --check
 
       - name: Regenerate and verify every maintained binding profile
+        env:
+          LIBCLANG_PATH: ${{ runner.temp }}/llvm/lib
         run: cargo run -p xtask -- verify-bindings --allow-dirty
 
       - name: Assert checked-in bindings did not drift

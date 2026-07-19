@@ -411,7 +411,7 @@ def vcpkg_github_environment(
     root: PathInput, triplet: VcpkgTriplet, runner_temp: PathInput
 ) -> tuple[tuple[str, str], ...]:
     """Return the exact environment needed for vcpkg-rs fallback discovery."""
-    missing_pkg_config = Path(runner_temp) / "missing-pkg-config.exe"
+    missing_pkg_config = _pure_path(runner_temp) / "missing-pkg-config.exe"
     return (
         ("VCPKG_ROOT", os.fspath(root)),
         ("VCPKGRS_TRIPLET", triplet.name),

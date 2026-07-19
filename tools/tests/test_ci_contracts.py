@@ -10,6 +10,13 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from tools.tests.workflow_semantics import (
+    load_workflow,
+    named_step,
+    require_mapping,
+    workflow_jobs,
+)
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_DIR = REPO_ROOT / "tools" / "ci"
@@ -704,6 +711,35 @@ class RuntimeGateTests(unittest.TestCase):
 
 
 class WorkflowPortabilityTests(unittest.TestCase):
+    def _ci_jobs(self):
+        workflow = load_workflow(REPO_ROOT / ".github" / "workflows" / "ci.yml")
+        return workflow_jobs(workflow)
+
+    def test_sanitizer_linker_includes_the_cxx_runtime(self):
+        job = self._ci_jobs()["test-engine-sanitizers"]
+        step = named_step(
+            job, "Run Test Engine FFI boundary tests with ASan and UBSan"
+        )
+        environment = require_mapping(
+            step.get("env"), "jobs.test-engine-sanitizers.steps.sanitizer.env"
+        )
+
+        self.assertIn("-Clinker=clang++", environment["RUSTFLAGS"])
+        self.assertIn("-Clink-arg=-lstdc++", environment["RUSTFLAGS"])
+
+    def test_binding_contract_selects_the_installed_libclang(self):
+        job = self._ci_jobs()["binding-contract"]
+        step = named_step(
+            job, "Regenerate and verify every maintained binding profile"
+        )
+        environment = require_mapping(
+            step.get("env"), "jobs.binding-contract.steps.regenerate.env"
+        )
+
+        self.assertEqual(
+            environment.get("LIBCLANG_PATH"), "${{ runner.temp }}/llvm/lib"
+        )
+
     def test_native_runtime_retry_chain_retains_release_evidence(self):
         ci = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"
