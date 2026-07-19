@@ -8,6 +8,7 @@ import platform
 import re
 import shutil
 import sys
+import tempfile
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field, replace
@@ -828,10 +829,18 @@ def run_multi_viewport_smoke(
     details: dict[str, object] = {}
     xvfb = None
     openbox = None
+    xdg_runtime_owner = None
     try:
         tools = _require_linux_runtime_tools()
         lavapipe_icd = _find_lavapipe_icd()
         display = os.environ.get("DEAR_IMGUI_XVFB_DISPLAY", ":99")
+        # Keep Wayland's AF_UNIX socket path below Linux's 108-byte limit.
+        runtime_temp_root = "/tmp" if sys.platform.startswith("linux") else None
+        xdg_runtime_owner = tempfile.TemporaryDirectory(
+            prefix="dear-imgui-xdg-", dir=runtime_temp_root
+        )
+        xdg_runtime = Path(xdg_runtime_owner.name)
+        xdg_runtime.chmod(0o700)
         diagnostics = {
             "display": display,
             "screen": "2560x1440x24",
@@ -839,6 +848,7 @@ def run_multi_viewport_smoke(
             "runner_image": os.environ.get("ImageOS"),
             "runner_image_version": os.environ.get("ImageVersion"),
             "lavapipe_icd": str(lavapipe_icd),
+            "xdg_runtime_dir": str(xdg_runtime),
             "tools": {name: str(path) for name, path in sorted(tools.items())},
         }
         atomic_write_json(evidence_dir / "runtime-environment.json", diagnostics)
@@ -853,6 +863,7 @@ def run_multi_viewport_smoke(
                 "openbox",
                 "mesa-vulkan-drivers",
                 "vulkan-tools",
+                "libxkbcommon-x11-0",
             ),
             cwd=workspace_root,
             timeout=15.0,
@@ -882,9 +893,6 @@ def run_multi_viewport_smoke(
                 "IMGUI_SYS_FORCE_BUILD": "1",
             }
         )
-        xdg_runtime = evidence_dir / "xdg-runtime"
-        xdg_runtime.mkdir(exist_ok=True)
-        xdg_runtime.chmod(0o700)
         child_environment["XDG_RUNTIME_DIR"] = str(xdg_runtime)
 
         build = _run_example_build(
@@ -1060,4 +1068,7 @@ def run_multi_viewport_smoke(
             attempt,
             details,
         )
+    finally:
+        if xdg_runtime_owner is not None:
+            xdg_runtime_owner.cleanup()
     return _finalize(result, evidence_dir)

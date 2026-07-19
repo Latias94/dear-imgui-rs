@@ -318,10 +318,9 @@ jobs:
         uses: taiki-e/install-action@nextest
 
       - name: Install fixed LLVM toolchain
-        uses: KyleMayes/install-llvm-action@v1
+        uses: KyleMayes/install-llvm-action@v2.0.9
         with:
           directory: ${{ runner.temp }}/llvm
-          cached: true
           version: '14.0'
 
       - name: Cache Rust dependencies
@@ -1268,13 +1267,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           cache-bin: "false"
-
-      - name: Install LLVM (libclang) for bindgen
-        uses: KyleMayes/install-llvm-action@v1
-        with:
-          directory: ${{ runner.temp }}/llvm
-          cached: true
-          version: '14.0'
 
       - name: Add wasm32 target
         run: rustup target add wasm32-unknown-unknown

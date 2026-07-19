@@ -666,6 +666,10 @@ class RuntimeGateTests(unittest.TestCase):
             self.assertEqual(result.category, RUNTIME.GateCategory.PASSED)
             self.assertTrue(result.details["xvfb"]["termination"]["attempted"])
             self.assertTrue(result.details["openbox"]["termination"]["attempted"])
+            xdg_runtime = Path(result.details["environment"]["xdg_runtime_dir"])
+            self.assertNotEqual(xdg_runtime.parent, evidence)
+            self.assertTrue(xdg_runtime.name.startswith("dear-imgui-xdg-"))
+            self.assertFalse(xdg_runtime.exists())
             self.assertIn("adapter.stdout.log", result.evidence)
             self.assertIn("viewport-result.json", result.evidence)
 
@@ -727,8 +731,18 @@ class WorkflowPortabilityTests(unittest.TestCase):
         self.assertIn("-Clinker=clang++", environment["RUSTFLAGS"])
         self.assertIn("-Clink-arg=-lstdc++", environment["RUSTFLAGS"])
 
-    def test_binding_contract_selects_the_installed_libclang(self):
-        job = self._ci_jobs()["binding-contract"]
+    def test_binding_contract_installs_and_selects_the_pinned_libclang(self):
+        jobs = self._ci_jobs()
+        job = jobs["binding-contract"]
+        install = named_step(job, "Install fixed LLVM toolchain")
+        install_inputs = require_mapping(
+            install.get("with"), "jobs.binding-contract.steps.install-llvm.with"
+        )
+        self.assertEqual(
+            install.get("uses"), "KyleMayes/install-llvm-action@v2.0.9"
+        )
+        self.assertNotIn("cached", install_inputs)
+
         step = named_step(
             job, "Regenerate and verify every maintained binding profile"
         )
@@ -738,6 +752,13 @@ class WorkflowPortabilityTests(unittest.TestCase):
 
         self.assertEqual(
             environment.get("LIBCLANG_PATH"), "${{ runner.temp }}/llvm/lib"
+        )
+        self.assertFalse(
+            any(
+                "install-llvm-action" in str(step.get("uses", ""))
+                for step in jobs["wasm-check"]["steps"]
+            ),
+            "WASM uses pregenerated bindings and must not install libclang",
         )
 
     def test_native_runtime_retry_chain_retains_release_evidence(self):
@@ -751,6 +772,7 @@ class WorkflowPortabilityTests(unittest.TestCase):
 
         self.assertIn("test-engine-runtime", workflow)
         self.assertIn("multi-viewport-smoke", workflow)
+        self.assertIn("libxkbcommon-x11-dev", runtime)
         self.assertIn("retention-days: 30", workflow)
         self.assertRegex(workflow, r"(?m)^\s+if: always\(\)$")
         self.assertIn("--defer-infrastructure-retry", runtime)
