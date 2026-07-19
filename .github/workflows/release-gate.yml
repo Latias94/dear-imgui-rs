@@ -538,7 +538,7 @@ jobs:
           --repo-root "${{ github.workspace }}"
           --candidate-sha "${{ inputs.candidate_sha }}"
           --evidence-root target/release-evidence/cells
-          --output target/release-evidence/cells/gate-result.json
+          --output gate-result.json
 
       - name: Retain authoritative release decision
         if: always()
