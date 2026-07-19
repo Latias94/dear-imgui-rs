@@ -176,7 +176,7 @@ Common derive attributes include:
 - `multiline`, `lines`, `hint`, `auto_resize`, and `display_only`.
 - `tuple_render`, `tuple_dropdown`, `tuple_columns`, and `tuple_min_width`.
 
-See `examples/reflect_demo.rs` for a complete inspector and
+See `examples/03-features/reflect_demo.rs` for a complete inspector and
 `docs/dear-imgui-reflect-compat.md` for the ImReflect compatibility matrix.
 
 ## Compatibility

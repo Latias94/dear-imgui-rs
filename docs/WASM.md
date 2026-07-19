@@ -16,14 +16,14 @@ enable the `wasm` feature:
 
 ```toml
 [dependencies]
-dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", features = ["wasm"] }
+dear-imgui-rs = { version = "0.16", features = ["wasm"] }
 ```
 
 For Bevy, enable `wasm` alongside the features needed by the application:
 
 ```toml
 [dependencies]
-dear-imgui-bevy = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", features = ["render", "wasm"] }
+dear-imgui-bevy = { version = "0.16", features = ["render", "wasm"] }
 ```
 
 Five safe native extensions expose the same `wasm` feature and forward it to

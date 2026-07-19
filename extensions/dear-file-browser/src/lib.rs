@@ -5,7 +5,7 @@
 //! If you need Chinese/Japanese/Korean or emoji, load a font that contains
 //! those glyphs (e.g., Noto Sans SC) into the font atlas during initialization.
 //! For best quality, enable the `freetype` feature and follow the pattern in
-//! `examples/style_and_fonts.rs` to add fonts and ranges (e.g., Simplified
+//! `examples/03-features/style_and_fonts.rs` to add fonts and ranges (e.g., Simplified
 //! Chinese common glyphs).
 //!
 //! Two backends:

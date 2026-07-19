@@ -83,11 +83,15 @@ sdl3-gpu-multi-viewport = [
 
 [[bin]]
 name = "wgpu_basic"
-path = "00-quickstart/wgpu_basic.rs"
+path = "01-renderers/wgpu_basic.rs"
 
 [[bin]]
 name = "hello_world"
 path = "00-quickstart/hello_world.rs"
+
+[[bin]]
+name = "application_lifecycle"
+path = "00-quickstart/application_lifecycle.rs"
 
 [[bin]]
 name = "game_engine_docking"
@@ -95,35 +99,47 @@ path = "02-docking/game_engine_docking.rs"
 
 [[bin]]
 name = "glow_basic"
-path = "00-quickstart/glow_basic.rs"
+path = "01-renderers/glow_basic.rs"
 
 [[bin]]
 name = "input_text_minimal"
-path = "00-quickstart/input_text_minimal.rs"
+path = "03-features/input_text_minimal.rs"
+
+[[bin]]
+name = "custom_font_minimal"
+path = "03-features/custom_font_minimal.rs"
+
+[[bin]]
+name = "managed_texture_minimal"
+path = "03-features/managed_texture_minimal.rs"
+
+[[bin]]
+name = "task_organizer"
+path = "03-features/task_organizer.rs"
 
 [[bin]]
 name = "tables_minimal"
-path = "00-quickstart/tables_minimal.rs"
+path = "03-features/tables_minimal.rs"
 
 [[bin]]
 name = "drawlist_minimal"
-path = "00-quickstart/drawlist_minimal.rs"
+path = "03-features/drawlist_minimal.rs"
 
 [[bin]]
 name = "menus_and_popups"
-path = "00-quickstart/menus_and_popups.rs"
+path = "03-features/menus_and_popups.rs"
 
 [[bin]]
 name = "tables_property_grid"
-path = "00-quickstart/tables_property_grid.rs"
+path = "03-features/tables_property_grid.rs"
 
 [[bin]]
 name = "list_clipper_log"
-path = "00-quickstart/list_clipper_log.rs"
+path = "03-features/list_clipper_log.rs"
 
 [[bin]]
 name = "style_and_fonts"
-path = "00-quickstart/style_and_fonts.rs"
+path = "03-features/style_and_fonts.rs"
 
 [[bin]]
 name = "glow_textures"
@@ -195,37 +211,37 @@ path = "01-renderers/ash_textures.rs"
 
 [[bin]]
 name = "implot_basic"
-path = "implot_basic.rs"
+path = "03-features/implot_basic.rs"
 required-features = ["implot"]
 
 [[bin]]
 name = "implot3d_basic"
-path = "implot3d_basic.rs"
+path = "03-features/implot3d_basic.rs"
 required-features = ["implot3d"]
 
 [[bin]]
 name = "imguizmo_basic"
-path = "imguizmo_basic.rs"
+path = "03-features/imguizmo_basic.rs"
 required-features = ["imguizmo"]
 
 [[bin]]
 name = "imnodes_basic"
-path = "imnodes_basic.rs"
+path = "03-features/imnodes_basic.rs"
 required-features = ["imnodes"]
 
 [[bin]]
 name = "node_editor_basic"
-path = "node_editor_basic.rs"
+path = "03-features/node_editor_basic.rs"
 required-features = ["node-editor"]
 
 [[bin]]
 name = "node_editor_showcase"
-path = "node_editor_showcase.rs"
+path = "03-features/node_editor_showcase.rs"
 required-features = ["node-editor-blueprints"]
 
 [[bin]]
 name = "imguizmo_quat_basic"
-path = "imguizmo_quat_basic.rs"
+path = "03-features/imguizmo_quat_basic.rs"
 required-features = ["imguizmo-quat"]
 
 
@@ -268,17 +284,13 @@ name = "dear_app_docking"
 path = "02-docking/dear_app_docking.rs"
 
 [[bin]]
-name = "dear_app_quickstart"
-path = "00-quickstart/dear_app_quickstart.rs"
-
-[[bin]]
 name = "reflect_demo"
-path = "reflect_demo.rs"
+path = "03-features/reflect_demo.rs"
 required-features = ["reflect"]
 
 [[bin]]
 name = "imgui_test_engine_basic"
-path = "imgui_test_engine_basic.rs"
+path = "04-integration/imgui_test_engine_basic.rs"
 required-features = ["test-engine"]
 
 [[bin]]

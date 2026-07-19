@@ -1,13 +1,9 @@
 //! Native (rfd) File Dialog example via dear-file-browser
 //! - Demonstrates non-blocking dialogs on a background thread
+//! - Wakes the event loop when a dialog finishes instead of polling
 //! - Buttons for: Open File(s), Pick Folder, Save File
 
-use std::{
-    num::NonZeroU32,
-    sync::{Arc, mpsc},
-    thread,
-    time::Instant,
-};
+use std::{fmt::Write as _, num::NonZeroU32, sync::Arc, thread, time::Instant};
 
 use dear_file_browser::{Backend, DialogMode, FileDialog};
 use dear_imgui_glow::GlowRenderer;
@@ -25,10 +21,13 @@ use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
     event::WindowEvent,
-    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    keyboard::{Key, NamedKey},
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy},
     window::{Window, WindowId},
 };
+
+enum UserEvent {
+    DialogFinished(String),
+}
 
 struct ImguiState {
     context: Context,
@@ -45,12 +44,20 @@ struct AppWindow {
     // demo state
     status: String,
     busy: bool,
-    rx: mpsc::Receiver<String>,
 }
 
-#[derive(Default)]
 struct App {
     window: Option<AppWindow>,
+    event_proxy: EventLoopProxy<UserEvent>,
+}
+
+impl App {
+    fn new(event_proxy: EventLoopProxy<UserEvent>) -> Self {
+        Self {
+            window: None,
+            event_proxy,
+        }
+    }
 }
 
 impl AppWindow {
@@ -99,7 +106,6 @@ impl AppWindow {
         renderer.set_framebuffer_srgb_enabled(false);
         renderer.new_frame()?;
 
-        let (_tx, rx) = mpsc::channel();
         Ok(Self {
             window,
             surface,
@@ -112,7 +118,6 @@ impl AppWindow {
             },
             status: String::new(),
             busy: false,
-            rx,
         })
     }
 
@@ -126,47 +131,40 @@ impl AppWindow {
         }
     }
 
-    fn render(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    fn render(
+        &mut self,
+        event_proxy: &EventLoopProxy<UserEvent>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let now = Instant::now();
         let dt = now - self.imgui.last_frame;
         self.imgui.last_frame = now;
         self.imgui.context.io_mut().set_delta_time(dt.as_secs_f32());
-
-        // Poll results from background threads
-        while let Ok(msg) = self.rx.try_recv() {
-            self.status = msg;
-            self.busy = false;
-        }
 
         self.imgui
             .platform
             .prepare_frame(&self.window, &mut self.imgui.context);
         let ui = self.imgui.context.frame();
 
-        // Defer actions until after UI borrow ends to avoid E0500
-        let mut do_open_file = false;
-        let mut do_open_files = false;
-        let mut do_pick_folder = false;
-        let mut do_save_file = false;
+        let mut requested_dialog = None;
 
         ui.window("File Dialog (Native)")
             .size([700.0, 520.0], Condition::FirstUseEver)
             .build(|| {
                 let can = !self.busy;
                 if can && ui.button("Open File") {
-                    do_open_file = true;
+                    requested_dialog = Some(DialogMode::OpenFile);
                 }
                 ui.same_line();
                 if can && ui.button("Open Files") {
-                    do_open_files = true;
+                    requested_dialog = Some(DialogMode::OpenFiles);
                 }
                 ui.same_line();
                 if can && ui.button("Pick Folder") {
-                    do_pick_folder = true;
+                    requested_dialog = Some(DialogMode::PickFolder);
                 }
                 ui.same_line();
                 if can && ui.button("Save File") {
-                    do_save_file = true;
+                    requested_dialog = Some(DialogMode::SaveFile);
                 }
 
                 ui.separator();
@@ -182,52 +180,44 @@ impl AppWindow {
                 gl.clear(glow::COLOR_BUFFER_BIT);
             }
         }
-        self.imgui
-            .platform
-            .prepare_render_with_ui(&ui, &self.window);
+        self.imgui.platform.prepare_render_with_ui(ui, &self.window);
         let draw_data = self.imgui.context.render();
         self.imgui.renderer.new_frame()?;
         self.imgui.renderer.render(draw_data)?;
         self.surface.swap_buffers(&self.context)?;
 
-        // Trigger actions after UI/render to avoid borrow conflicts
-        if do_open_file {
-            self.spawn(DialogMode::OpenFile);
-        }
-        if do_open_files {
-            self.spawn(DialogMode::OpenFiles);
-        }
-        if do_pick_folder {
-            self.spawn(DialogMode::PickFolder);
-        }
-        if do_save_file {
-            self.spawn(DialogMode::SaveFile);
+        if let Some(mode) = requested_dialog {
+            self.spawn(mode, event_proxy.clone());
+            self.window.request_redraw();
         }
         Ok(())
     }
 
-    fn spawn(&mut self, mode: DialogMode) {
-        let (tx, rx) = mpsc::channel();
-        self.rx = rx;
+    fn spawn(&mut self, mode: DialogMode, event_proxy: EventLoopProxy<UserEvent>) {
         self.busy = true;
         thread::spawn(move || {
-            let res = FileDialog::new(mode).backend(Backend::Auto).open_blocking();
-            let msg = match res {
-                Ok(sel) => {
-                    let mut s = format!("OK ({} path(s))\n", sel.paths.len());
-                    for p in sel.paths {
-                        s.push_str(&format!("  - {}\n", p.display()));
+            let status = match FileDialog::new(mode).backend(Backend::Auto).open_blocking() {
+                Ok(selection) => {
+                    let paths = selection.into_paths();
+                    let mut status = format!("OK ({} path(s))\n", paths.len());
+                    for path in paths {
+                        let _ = writeln!(status, "  - {}", path.display());
                     }
-                    s
+                    status
                 }
-                Err(e) => format!("ERR: {e}"),
+                Err(error) => format!("ERR: {error}"),
             };
-            let _ = tx.send(msg);
+            let _ = event_proxy.send_event(UserEvent::DialogFinished(status));
         });
+    }
+
+    fn finish_dialog(&mut self, status: String) {
+        self.status = status;
+        self.busy = false;
     }
 }
 
-impl ApplicationHandler for App {
+impl ApplicationHandler<UserEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_none() {
             match AppWindow::new(event_loop) {
@@ -261,24 +251,36 @@ impl ApplicationHandler for App {
             .handle_window_event(&mut w.imgui.context, &w.window, &event);
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
-            WindowEvent::Resized(size) => w.resize(size),
-            WindowEvent::RedrawRequested => {
-                if let Err(e) = w.render() {
-                    eprintln!("render error: {e}");
-                    event_loop.exit();
-                    return;
-                }
+            WindowEvent::Resized(size) => {
+                w.resize(size);
                 w.window.request_redraw();
             }
-            _ => {}
+            WindowEvent::RedrawRequested => {
+                if let Err(e) = w.render(&self.event_proxy) {
+                    eprintln!("render error: {e}");
+                    event_loop.exit();
+                }
+            }
+            WindowEvent::Destroyed => {}
+            _ => w.window.request_redraw(),
         }
+    }
+
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
+        let Some(window) = &mut self.window else {
+            return;
+        };
+        match event {
+            UserEvent::DialogFinished(status) => window.finish_dialog(status),
+        }
+        window.window.request_redraw();
     }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut event_loop = EventLoop::new()?;
-    event_loop.set_control_flow(ControlFlow::Poll);
-    let mut app = App::default();
+    let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
+    event_loop.set_control_flow(ControlFlow::Wait);
+    let mut app = App::new(event_loop.create_proxy());
     event_loop.run_app(&mut app)?;
     Ok(())
 }

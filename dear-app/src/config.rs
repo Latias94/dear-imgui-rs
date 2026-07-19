@@ -22,7 +22,7 @@ impl AddOnsConfig {
     }
 }
 
-/// Complete configuration for [`crate::run`].
+/// Complete configuration for [`crate::run`] and [`crate::run_ui`].
 pub struct AppConfig {
     pub window_title: String,
     pub window_size: (f64, f64),
@@ -128,20 +128,38 @@ impl WgpuConfig {
     }
 }
 
-/// Built-in dockspace behavior.
-pub struct DockingConfig {
-    pub enable: bool,
-    pub auto_dockspace: bool,
-    pub dockspace_flags: DockFlags,
-    pub host_window_flags: WindowFlags,
-    pub host_window_name: &'static str,
+/// Optional docking and built-in dockspace behavior.
+///
+/// Docking is disabled by default. Each enabled variant states whether `dear-app` or the
+/// application owns the dockspace host window.
+#[derive(Default)]
+pub enum DockingConfig {
+    /// Do not enable Dear ImGui docking.
+    #[default]
+    Disabled,
+    /// Enable docking without drawing a dockspace host window.
+    ApplicationManaged { dockspace_flags: DockFlags },
+    /// Enable docking and draw a full-viewport dockspace host window every frame.
+    FullViewport {
+        dockspace_flags: DockFlags,
+        host_window_flags: WindowFlags,
+        host_window_name: String,
+    },
 }
 
-impl Default for DockingConfig {
-    fn default() -> Self {
-        Self {
-            enable: true,
-            auto_dockspace: true,
+impl DockingConfig {
+    /// Enables docking while leaving dockspace creation to the application.
+    #[must_use]
+    pub fn application_managed() -> Self {
+        Self::ApplicationManaged {
+            dockspace_flags: DockFlags::PASSTHRU_CENTRAL_NODE,
+        }
+    }
+
+    /// Enables docking with a built-in full-viewport dockspace.
+    #[must_use]
+    pub fn full_viewport() -> Self {
+        Self::FullViewport {
             dockspace_flags: DockFlags::PASSTHRU_CENTRAL_NODE,
             host_window_flags: WindowFlags::NO_TITLE_BAR
                 | WindowFlags::NO_RESIZE
@@ -149,7 +167,36 @@ impl Default for DockingConfig {
                 | WindowFlags::NO_COLLAPSE
                 | WindowFlags::NO_BRING_TO_FRONT_ON_FOCUS
                 | WindowFlags::NO_NAV_FOCUS,
-            host_window_name: "DockSpaceHost",
+            host_window_name: "DockSpaceHost".to_owned(),
+        }
+    }
+
+    #[must_use]
+    pub const fn is_enabled(&self) -> bool {
+        !matches!(self, Self::Disabled)
+    }
+
+    pub(crate) fn dockspace_flags(&self) -> DockFlags {
+        match self {
+            Self::Disabled => DockFlags::empty(),
+            Self::ApplicationManaged { dockspace_flags }
+            | Self::FullViewport {
+                dockspace_flags, ..
+            } => DockFlags::from_bits_retain(dockspace_flags.bits()),
+        }
+    }
+
+    pub(crate) fn full_viewport_host(&self) -> Option<(&str, WindowFlags)> {
+        match self {
+            Self::FullViewport {
+                host_window_flags,
+                host_window_name,
+                ..
+            } => Some((
+                host_window_name,
+                WindowFlags::from_bits_retain(host_window_flags.bits()),
+            )),
+            Self::Disabled | Self::ApplicationManaged { .. } => None,
         }
     }
 }
@@ -166,4 +213,25 @@ pub enum Theme {
     Dark,
     Light,
     Classic,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AppConfig, DockingConfig};
+
+    #[test]
+    fn default_app_does_not_enable_docking() {
+        assert!(!AppConfig::default().docking.is_enabled());
+    }
+
+    #[test]
+    fn docking_modes_assign_dockspace_ownership_explicitly() {
+        let application_managed = DockingConfig::application_managed();
+        let full_viewport = DockingConfig::full_viewport();
+
+        assert!(application_managed.is_enabled());
+        assert!(application_managed.full_viewport_host().is_none());
+        assert!(full_viewport.is_enabled());
+        assert!(full_viewport.full_viewport_host().is_some());
+    }
 }

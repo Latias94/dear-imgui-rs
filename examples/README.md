@@ -1,213 +1,158 @@
-# Examples Overview and Roadmap
+# Examples
 
-This workspace ships a single `dear-imgui-examples` crate with multiple example binaries. The goals:
+The workspace examples are organized by what a user is trying to learn. Normal applications start with `dear-app`; renderer examples intentionally show the lower-level Winit, SDL3, WGPU, Glow, or Ash integration code.
 
-- Start simple: copy/pasteable, single-file examples you can run and adapt quickly.
-- Grow complexity gradually: introduce shared utilities only when needed.
-- Cover common real-world patterns: docking, textures, plotting, nodes, gizmos.
-- Demonstrate multiple backend stacks: `winit` + `wgpu`, and `glow` + `glutin`.
+Mobile host projects live in `examples-ios/` and `examples-android/`. Browser examples live in `examples-wasm/`.
 
-Also see `examples-wasm/` for WebAssembly (WASM) examples.
-Mobile smoke templates intentionally live outside this crate:
+## Start Here
 
-- `examples-ios/` for iOS smoke / Xcode-host integration templates
-- `examples-android/` for Android smoke / packaging templates
+Run the smallest stateful application from the workspace:
 
-They are not regular `cargo run --bin ...` examples, because they need platform
-packaging, host-project glue, or mobile-specific build tooling.
+```text
+cargo run -p dear-imgui-examples --bin hello_world
+```
 
-Run any example with:
+The same minimal entry point is also a directly runnable `dear-app` package example:
 
-- `cargo run --bin <name>`
-- Extensions require features, for example:
-  - `--features implot` for ImPlot
-  - `--features imnodes` for ImNodes
-  - `--features node-editor` for imgui-node-editor / dear-node-editor
-  - `--features node-editor-blueprints` for the patched blueprints stack-layout showcase
-  - `--features imguizmo` for ImGuizmo
-  - `--features imguizmo-quat` for ImGuIZMO.quat
-  - `--features implot3d` for ImPlot3D
-  - `--features file-browser` for File Browser / Dialogs
-  - `--features reflect` for dear-imgui-reflect demo
-  - `--features test-engine` for ImGui Test Engine
+```text
+cargo run -p dear-app --example hello
+```
 
-Quick picks:
+Continue with the complete, feature-free `Application` lifecycle when the program needs initialization, events, Context-owned resources, GPU recovery, or deterministic teardown:
 
-- Hello world: `cargo run --bin hello_world`
-- Core + docking: `cargo run --bin game_engine_docking`
-  - With ImPlot (FPS graph): `cargo run --bin game_engine_docking --features implot`
-  - With ImGuizmo (3D gizmo): `cargo run --bin game_engine_docking --features imguizmo`
-  - With all extensions: `cargo run --bin game_engine_docking --features "implot,imguizmo"`
-  - With experimental multi-viewport (winit + WGPU, native only): `cargo run --bin game_engine_docking --features multi-viewport`
-- Docking minimal: `cargo run --bin dockspace_minimal`
-- WGPU minimal: `cargo run --bin wgpu_basic`
-- Vulkan (Ash) minimal: `cargo run --bin ash_basic`
-- Vulkan (Ash) textures: `cargo run --bin ash_textures`
-- Multi-viewport (winit + Vulkan/Ash, native only): `cargo run --bin multi_viewport_ash --features multi-viewport`
-- SDL3 + Vulkan/Ash multi-viewport (native only): `cargo run -p dear-imgui-examples --bin sdl3_ash_multi_viewport --features sdl3-ash-multi-viewport`
-- OpenGL + textures: `cargo run --bin glow_textures`
-- WGPU + textures: `cargo run --bin wgpu_textures`
-- ImGuIZMO.quat (WGPU): `cargo run --features imguizmo-quat --bin imguizmo_quat_basic`
-- WGPU RTT Game View: `cargo run --bin wgpu_rtt_gameview`
-- Console (log): `cargo run --bin console_log`
-- Asset browser: `cargo run --bin asset_browser_grid`
-- File dialog (native): `cargo run --features file-browser --bin file_dialog_native`
-- File browser (ImGui): `cargo run --features file-browser --bin file_browser_imgui`
-- Style & Fonts (bundled Roboto + runtime atlas/custom-rect checks): `cargo run --bin style_and_fonts`
-  - With FreeType for OTF/CFF and color Emoji: `cargo run --features freetype --bin style_and_fonts`
-- ImPlot3D Demo: `cargo run --bin implot3d_basic --features "implot3d"`
-- Reflect demo: `cargo run --bin reflect_demo --features reflect`
-- ImGui Test Engine: `cargo run --bin imgui_test_engine_basic --features test-engine`
-  - Smoke test (auto-run + exit): `cargo run --bin imgui_test_engine_basic --features test-engine -- --exit-when-done --group tests`
-- dear-node-editor basic: `cargo run -p dear-imgui-examples --bin node_editor_basic --features node-editor`
-- dear-node-editor showcase: `cargo run -p dear-imgui-examples --bin node_editor_showcase --features node-editor-blueprints`
-- Safe multi-context lifecycle pattern: `cargo run -p dear-imgui-examples --bin multi_context_switch`
+```text
+cargo run -p dear-imgui-examples --bin application_lifecycle
+```
 
-Image preview: both `glow_textures` and `wgpu_textures` load `examples/assets/texture.jpg` and show it alongside generated textures.
-- Extensions (e.g., ImPlot): `cargo run --bin implot_basic --features implot`
-  - ImNodes: `cargo run --bin imnodes_basic --features imnodes`
-  - dear-node-editor: `cargo run -p dear-imgui-examples --bin node_editor_showcase --features node-editor-blueprints`
-  - ImGuizmo: `cargo run --bin imguizmo_basic --features imguizmo`
+For a new project, add one dependency:
 
-## Structure (from easy to advanced)
+```toml
+[dependencies]
+dear-app = "0.16"
+```
 
-This is the intended organization.
+```rust
+use dear_app::{AppConfig, RunError, imgui::Condition, run_ui};
 
-- 00-quickstart (single-file, no shared utils)
-  - `hello_world.rs`: context, a window, a button.
-  - `wgpu_basic.rs`: minimal WGPU renderer + platform.
-  - `glow_basic.rs`: minimal OpenGL renderer + platform.
-  - `input_text_minimal.rs`: basic text inputs (String + ImString), multiline.
-  - `tables_minimal.rs`: basic Tables API (sort/resize/reorder).
-  - `drawlist_minimal.rs`: primitives and shapes.
-  - `menus_and_popups.rs`: main/window menu bars, context menu, modal popup.
-  - `tables_property_grid.rs`: 2-column property grid (labels + editors).
-  - `list_clipper_log.rs`: virtualized log with filtering and context actions.
-  - `style_and_fonts.rs`: theme switching, scoped runtime fonts, CJK/Emoji merging, baked glyph diagnostics, and managed atlas custom rectangles.
+fn main() -> Result<(), RunError> {
+    let mut clicks = 0;
+    run_ui(AppConfig::default(), move |ui| {
+        ui.window("Hello")
+            .size([360.0, 160.0], Condition::FirstUseEver)
+            .build(|| {
+                if ui.button("Click me") {
+                    clicks += 1;
+                }
+                ui.text(format!("Clicks: {clicks}"));
+            });
+    })
+}
+```
 
-- 01-renderers (single-file, backend topics)
-  - `glow_textures.rs`: modern texture system (register/update).
-  - `wgpu_textures.rs`: CPU-updated texture registered in WGPU backend.
-  - `ash_basic.rs`: Vulkan (Ash) renderer + winit platform (single window).
-  - `ash_textures.rs`: Vulkan (Ash) renderer + ImGui-managed textures (`TextureData` + `ui.image()`).
-  - `sdl3_wgpu.rs`: SDL3 window + WGPU renderer (single window; uses official SDL3 platform backend).
-    - Run with: `cargo run -p dear-imgui-examples --bin sdl3_wgpu --features sdl3-platform`
-    - For native multi-viewport, see `sdl3_wgpu_multi_viewport.rs` below.
+Use `dear_app::Application` when the application needs initialization, events, GPU resources, device-loss recovery, or teardown hooks. The [`dear-app` README](../dear-app/README.md) shows both paths.
 
-- 02-docking
-  - `dockspace_minimal.rs`: enable docking + a simple dockspace.
-  - `game_engine_docking.rs`: complex Unity-style layout, tabs, panels.
-    - Menu already includes: Reset to Unity Layout, Save INI, Load INI.
-    - Optional extensions: `--features implot` (FPS graph), `--features imguizmo` (3D gizmo manipulation).
-    - Note: INI path is relative to the process CWD; see INI section below.
-  - `multi_viewport_wgpu.rs`: Winit + WGPU native multi-viewport lifecycle reference.
-    - Run with: `cargo run --bin multi_viewport_wgpu --features multi-viewport`
-    - The examples feature `multi-viewport` enables the required backend features:
-      `dear-imgui-winit/multi-viewport` + `dear-imgui-wgpu/multi-viewport-winit`.
-    - Important pattern: only the main window should drive WGPU rendering and surface resize;
-      secondary viewport windows are rendered via ImGui platform/renderer callbacks.
-  - `multi_viewport_ash.rs`: Winit + Vulkan/Ash native multi-viewport lifecycle reference.
-    - Run with: `cargo run --bin multi_viewport_ash --features multi-viewport`
-    - Secondary viewports create their own Vulkan surfaces + swapchains.
-    - The examples feature `multi-viewport` enables: `dear-imgui-ash/multi-viewport-winit`.
-  - `sdl3_opengl_multi_viewport.rs`: SDL3 + OpenGL3 multi-viewport example using official C++ backends.
-    - Run with: `cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport,sdl3-opengl3`
-    - Shows how to combine SDL3 platform backend with OpenGL renderer, including a simple "Game View" texture inside an ImGui window that can be dragged across OS windows.
-    - Relies on the official OpenGL3 renderer in `dear-imgui-sdl3` (feature `opengl3-renderer`).
-  - `sdl3_glow_multi_viewport.rs`: SDL3 + Glow multi-viewport example using Rust Glow renderer backend.
-    - Run with: `cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport --features multi-viewport,sdl3-platform`
-    - Uses SDL3 platform backend for window/GL context management and `dear-imgui-glow` for rendering all viewports.
-  - `sdl3_wgpu_multi_viewport.rs`: SDL3 + WGPU native multi-viewport example using the Rust WGPU renderer backend.
-    - Run with: `cargo run -p dear-imgui-examples --bin sdl3_wgpu_multi_viewport --features sdl3-wgpu-multi-viewport`
-    - Uses SDL3 platform backend for window management and `dear-imgui-wgpu` to render all viewports.
-  - `sdl3_ash_multi_viewport.rs`: SDL3 + Vulkan/Ash native multi-viewport example using the Rust Vulkan renderer backend.
-    - Run with: `cargo run -p dear-imgui-examples --bin sdl3_ash_multi_viewport --features sdl3-ash-multi-viewport`
-    - Uses SDL3 platform backend for window management and `dear-imgui-ash` to render all viewports via `Platform_CreateVkSurface`.
-  - `sdl3_sdlgpu_multi_view.rs`: SDL3 + SDL3 multi-viewport example using official C++ backends. (feature `sdl3-gpu-multi-viewport`)
-    - Run with: `cargo run -p dear-imgui-examples --bin sdl3_sdlgpu_multi_view --features sdl3-gpu-multi-viewport`
-    - Uses SDL3 platform backend for window management and `sdl3::gpu` to render all viewports via `sdl3::gpu::Device`.
+## Learning Paths
 
-The WGPU and Ash renderer examples deliberately keep their renderer in a `Box` before installing callbacks. Their `enable` calls are unsafe because Dear ImGui retains a renderer pointer; moving or dropping that value while callbacks are active is invalid. Shutdown order is equally important: destroy renderer multi-viewport support first, shut down the Winit/SDL3 platform support second, and only then drop the renderer, context, windows, and GPU/Vulkan objects. The adapters claim only their documented `Renderer_*` slots and preserve foreign callback replacements.
+| Directory | Purpose | Expected abstraction level |
+| --- | --- | --- |
+| `00-quickstart` | First working application and the full lifecycle step-up | `dear_app::run_ui` and `dear_app::Application` |
+| `03-features` | Core widgets, fonts, and optional extensions | UI code first; advanced examples may use `Application` or a raw backend |
+| `01-renderers` | Implementing or embedding a renderer/platform stack | Explicit window, surface, renderer, and GPU lifecycle |
+| `02-docking` | Dock layouts and native multi-viewport | From one dockspace to full backend lifecycle references |
+| `04-integration` | Textures, background work, multiple Contexts, Test Engine, and real application patterns | End-to-end integration |
 
+## Common UI Features
 
-- 03-extensions (logical group; these examples still live as top-level bins today)
-  - ImPlot: `implot_basic.rs`.
-  - ImNodes: `imnodes_basic.rs` with multiple tabs.
-  - dear-node-editor: `node_editor_basic.rs` for minimal usage and `node_editor_showcase.rs` for the broader safe API.
-  - ImGuizmo: `imguizmo_basic.rs` + notes on camera math.
-  - Reflect: `reflect_demo.rs` (struct/enum reflection + auto-generated UI).
-  - ImGui Test Engine: `imgui_test_engine_basic.rs`.
+These examples use the same high-level runtime as `hello_world`, so their source focuses on the named UI feature:
 
-- 04-integration patterns (real-world snippets)
-  - `wgpu_rtt_gameview.rs`: Render-to-texture Game View drawn in an ImGui window.
-  - `console_log.rs`: Logging console with filter, autoscroll, and history.
-  - `asset_browser_grid.rs`: Asset browser grid with thumbnails and filter.
-  - `file_dialog_native.rs`: OS-native file dialog using `dear-file-browser` (non-blocking thread).
-  - `file_browser_imgui.rs`: Pure ImGui file browser widget.
-  - `multi_context_switch.rs`: Headless API example for integrations that keep multiple contexts alive and switch between them with `Context::suspend()` / `SuspendedContext::activate()`.
+```text
+cargo run -p dear-imgui-examples --bin input_text_minimal
+cargo run -p dear-imgui-examples --bin custom_font_minimal
+cargo run -p dear-imgui-examples --bin managed_texture_minimal
+cargo run -p dear-imgui-examples --bin task_organizer
+cargo run -p dear-imgui-examples --bin tables_minimal
+cargo run -p dear-imgui-examples --bin tables_property_grid
+cargo run -p dear-imgui-examples --bin drawlist_minimal
+cargo run -p dear-imgui-examples --bin menus_and_popups
+cargo run -p dear-imgui-examples --bin list_clipper_log
+```
 
-- support/
-  - `wgpu_init.rs` (WGPU init + resize helpers)
-  - Additional helpers may be introduced as examples grow.
+`custom_font_minimal` embeds a trusted TTF at compile time and demonstrates font registration plus a scoped `push_font`. `managed_texture_minimal` covers renderer-agnostic registration, update, removal, and recreation using CPU-generated pixels. `task_organizer` combines stable-ID multi-select, typed drag and drop, and routed shortcuts in one command-driven workflow.
 
-## Mapping current examples
+`style_and_fonts` is the advanced font-lifecycle reference. It includes a bundled Roboto font, runtime atlas updates, baked glyph queries, CJK/Emoji fallback discovery, and managed custom rectangles:
 
-- Quickstart/backends: `wgpu_basic.rs`, `glow_basic.rs`, `input_text_minimal.rs`, `tables_minimal.rs`, `drawlist_minimal.rs`, `glow_textures.rs`, `menus_and_popups.rs`, `tables_property_grid.rs`, `list_clipper_log.rs`, `style_and_fonts.rs`
-- Docking: `02-docking/dockspace_minimal.rs`, `02-docking/game_engine_docking.rs` (+ `examples/02-docking/game_engine_docking.ini`)
-- Integration: `04-integration/wgpu_rtt_gameview.rs`, `04-integration/console_log.rs`, `04-integration/asset_browser_grid.rs`
-  and `04-integration/file_dialog_native.rs`, `04-integration/file_browser_imgui.rs`
-- Extensions: `implot_basic.rs`, `imnodes_basic.rs`, `node_editor_basic.rs`, `node_editor_showcase.rs`, `imguizmo_basic.rs`, `reflect_demo.rs`, `imgui_test_engine_basic.rs`
+```text
+cargo run -p dear-imgui-examples --bin style_and_fonts
+cargo run -p dear-imgui-examples --bin style_and_fonts --features freetype
+```
 
-### dear-app applications
+## Optional Extensions
 
-These examples implement the `dear-app::Application` lifecycle on Winit + WGPU:
+Extension binaries require their matching feature:
 
-- Quickstart: `cargo run --bin dear_app_quickstart`
-- Docking template: `cargo run --bin dear_app_docking`
-- Managed and external WGPU textures: `cargo run --bin dear_app_wgpu_textures`
-- ImPlot3D: `cargo run --features implot3d --bin implot3d_basic`
-- Reflection inspector: `cargo run --features reflect --bin reflect_demo`
-- Test Engine: `cargo run --features test-engine --bin imgui_test_engine_basic`
+```text
+cargo run -p dear-imgui-examples --bin implot_basic --features implot
+cargo run -p dear-imgui-examples --bin implot3d_basic --features implot3d
+cargo run -p dear-imgui-examples --bin imnodes_basic --features imnodes
+cargo run -p dear-imgui-examples --bin imguizmo_basic --features imguizmo
+cargo run -p dear-imgui-examples --bin imguizmo_quat_basic --features imguizmo-quat
+cargo run -p dear-imgui-examples --bin node_editor_basic --features node-editor
+cargo run -p dear-imgui-examples --bin node_editor_showcase --features node-editor-blueprints
+cargo run -p dear-imgui-examples --bin reflect_demo --features reflect
+```
 
-Application state and the Dear ImGui context survive device recovery. Rebuild application-owned GPU
-resources from `gpu_recreated`; external texture handles from older generations are intentionally
-rejected.
+## Renderer Integration
 
-## INI handling and paths
+Use these only when integrating Dear ImGui into an existing engine or writing a backend. They deliberately expose infrastructure that `dear-app` owns for normal applications:
 
-Dear ImGui persists window/docking state via an INI file. Useful patterns:
+- `wgpu_basic`, `wgpu_textures`, and `dear_app_wgpu_textures`
+- `glow_basic`, `glow_textures`, and `glow_external_context_regression`
+- `ash_basic` and `ash_textures`
+- `sdl3_wgpu` and `sdl3_sdlrenderer` with their required SDL3 features
 
-- Disable persistence (useful while testing layouts):
-  - `context.set_ini_filename(Option::<std::path::PathBuf>::None)?;`
-  - or `context.set_ini_filename::<std::path::PathBuf>(None)?;`
-- Use a known INI path relative to the repo for reproducible layouts:
-  - `context.set_ini_filename(Some(std::path::PathBuf::from("examples/02-docking/game_engine_docking.ini")))?;`
-- Submit declarative dock layouts every frame with `DockLayoutApply::IfMissing` to preserve restored INI trees. Use `DockLayoutApply::Replace` only for an explicit layout reset.
+The v0.16 multi-viewport adapters own their renderer and callback storage. Call the renderer runtime's shutdown first, then the platform runtime's shutdown, before dropping the Context, windows, and GPU objects. No caller-address pinning or boxed renderer workaround is required.
 
-Tip: On Windows/macOS, CWD may differ when launching from an IDE. Prefer absolute or repo-relative paths when you need deterministic INI behavior.
+## Docking and Multi-viewport
 
-## FreeType (OTF/Color Emoji)
+`dear-app` applications choose ownership explicitly: `DockingConfig::full_viewport()` lets the runtime draw the host, while `DockingConfig::application_managed()` only enables docking for an application-owned layout.
 
-- Enable at build time:
-  - `cargo run --features freetype --bin style_and_fonts`
-- Requires discoverable FreeType development files:
-  - `pkg-config freetype2` is tried first.
-  - vcpkg `freetype` is tried next, which is usually the simplest MSVC route on Windows.
-  - With vcpkg dynamic triplets such as `x64-windows`, set `VCPKGRS_DYNAMIC=1`; otherwise use the vcpkg-rs default/static triplet that matches your Rust target.
-- If `freetype` is enabled and FreeType cannot be found, the build fails fast.
-- `style_and_fonts` ships with a Roboto test font from the vendored Dear ImGui assets and loads it on demand. Optional CJK/Emoji buttons check `examples/assets` first, then common system font locations, and report the selected source.
-- With `freetype` enabled, `style_and_fonts` can additionally load OTF/CFF and color Emoji fonts (e.g. `NotoColorEmoji.ttf`).
+```text
+cargo run -p dear-imgui-examples --bin dear_app_docking
+cargo run -p dear-imgui-examples --bin dockspace_minimal
+cargo run -p dear-imgui-examples --bin game_engine_docking
+cargo run -p dear-imgui-examples --bin multi_viewport_wgpu --features multi-viewport
+cargo run -p dear-imgui-examples --bin multi_viewport_ash --features multi-viewport
+cargo run -p dear-imgui-examples --bin sdl3_wgpu_multi_viewport --features sdl3-wgpu-multi-viewport
+cargo run -p dear-imgui-examples --bin sdl3_ash_multi_viewport --features sdl3-ash-multi-viewport
+```
 
-## Example ideas (next up)
+Secondary windows are rendered by the owning platform/renderer runtimes; only the main window should drive the application's primary surface render loop.
 
-- Declarative Unity-style `DockLayout` variants with proportional splits, tabs, and a one-click `Replace` reset.
-- Texture upload and dynamic updates in WGPU matching `glow_textures.rs` capabilities.
-- InputText best-practice demos: `String` with `capacity_hint`, and zero-copy `ImString` fields.
-- Table angled headers (Ex) demo exercising custom header data.
+## Integration Examples
 
-## How to contribute examples
+- `wgpu_rtt_gameview`: render-to-texture game view.
+- `console_log`: filterable console with history.
+- `asset_browser_grid`: thumbnail grid and filtering.
+- `file_dialog_native` and `file_browser_imgui`: native and pure-ImGui file workflows (`file-browser` feature); the native dialog wakes a waiting event loop when its worker finishes.
+- `threaded_snapshot_minimal`: move-only frame snapshot handoff to a renderer thread.
+- `multi_context_switch`: explicit activation and suspension of multiple Contexts.
+- `imgui_test_engine_basic`: interactive or bounded Test Engine runner (`test-engine` feature).
 
-- Keep small examples single-file and copy/pasteable.
-- Use the high-level safe API; put `unsafe` behind helpers inside `support/` if needed.
-- For FFI interop or raw enums, cast to `dear_imgui_sys` typedefs (avoid raw `as i32/u32`).
-- Prefer assets and INI files under `examples/` and reference them with repo-relative paths.
+Run the Test Engine smoke route with:
+
+```text
+cargo run -p dear-imgui-examples --bin imgui_test_engine_basic --features test-engine -- --exit-when-done --group tests
+```
+
+## Persistence and Assets
+
+`AppConfig::default()` does not enable docking and does not select an INI file. Set `ini_filename` explicitly when an application should persist window or dock layout state. Declarative dock layouts should normally use `DockLayoutApply::IfMissing`; reserve `Replace` for an explicit reset command.
+
+The minimal custom-font example embeds its vendored TTF at compile time. File-backed texture and advanced font examples resolve assets from `examples/assets` or the workspace manifest path rather than the process working directory. This keeps IDE and terminal launches consistent.
+
+## Contributing
+
+- Put normal UI examples on `dear-app` and keep their source focused on the demonstrated feature.
+- Put raw backend lifecycle code in `01-renderers` or `02-docking`.
+- Keep unsafe FFI or native-handle lineage behind the narrowest documented integration boundary.
+- Add a runnable command here for every feature-gated example.

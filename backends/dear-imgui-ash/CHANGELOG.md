@@ -4,6 +4,8 @@ All notable changes to this crate will be documented in this file.
 
 ## Unreleased
 
+## 0.16.0 - 2026-07-19
+
 ### Breaking
 
 - `AshRenderer::cmd_draw` now consumes a Context-borrowed `RenderedFrame` and returns the highest pending `TextureRetirementBatch`; applications must prove GPU completion before acknowledging the batch and must call `AshRenderer::shutdown` to reset Context-owned texture bindings.

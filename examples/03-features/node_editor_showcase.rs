@@ -1,8 +1,8 @@
 //! Blueprints-style imgui-node-editor example for the `dear-node-editor` safe API.
 
-#[path = "support/node_editor_blueprint.rs"]
+#[path = "../support/node_editor_blueprint.rs"]
 mod node_editor_blueprint;
-#[path = "support/wgpu_init.rs"]
+#[path = "../support/wgpu_init.rs"]
 mod wgpu_init;
 
 use dear_imgui_rs::*;

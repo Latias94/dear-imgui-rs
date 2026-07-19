@@ -584,7 +584,7 @@ their normal semantics.
 
 ## Fonts (CJK/Emoji)
 
-Dear ImGui’s default font does not include CJK glyphs or emoji. If your filesystem contains non‑ASCII names (e.g., Chinese), load a font with the required glyphs into the atlas during initialization. See `examples/style_and_fonts.rs` for a complete pattern. Enabling the `freetype` feature in `dear-imgui-rs` also improves text quality.
+Dear ImGui’s default font does not include CJK glyphs or emoji. If your filesystem contains non‑ASCII names (e.g., Chinese), load a font with the required glyphs into the atlas during initialization. See `examples/03-features/style_and_fonts.rs` for a complete pattern. Enabling the `freetype` feature in `dear-imgui-rs` also improves text quality.
 
 ## License
 

@@ -226,7 +226,6 @@ impl Runtime {
                 docking: DockingApi {
                     controller: docking,
                 },
-                marker: std::marker::PhantomData,
             };
             let mut frame = FrameContext {
                 ui,
@@ -467,17 +466,16 @@ impl<A: Application> RuntimeFactory<RuntimeRecovery<'_, A>> for WgpuRuntimeFacto
 }
 
 fn draw_dockspace(ui: &dear_imgui_rs::Ui, flags: DockFlags, config: &AppConfig) {
-    if !config.docking.enable || !config.docking.auto_dockspace {
+    let Some((host_window_name, mut window_flags)) = config.docking.full_viewport_host() else {
         return;
-    }
+    };
 
     let viewport = ui.main_viewport();
     ui.set_next_window_viewport(viewport.id());
-    let mut window_flags = config.docking.host_window_flags;
     if flags.contains(DockFlags::PASSTHRU_CENTRAL_NODE) {
         window_flags |= WindowFlags::NO_BACKGROUND;
     }
-    ui.window(config.docking.host_window_name)
+    ui.window(host_window_name)
         .flags(window_flags)
         .position(viewport.pos(), dear_imgui_rs::Condition::Always)
         .size(viewport.size(), dear_imgui_rs::Condition::Always)

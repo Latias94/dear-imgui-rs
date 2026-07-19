@@ -8,8 +8,8 @@ paths, see `docs/workstreams/apple-platform-support.md`.
 ## Versioning Policy
 
 - Unified release train: all published `dear-*` crates in this workspace are versioned and released together under the same semver, so consumers can depend on a single minor across the board.
-- Next train (unreleased): unified `v0.16.0`; use Git `main` to test it before publication.
-- Current published train: unified `v0.15.1` (use `version = "0.15"`).
+- Current published train: unified `v0.16.0` (use `version = "0.16"`).
+- Previous train: unified `v0.15.1` (use `version = "0.15"`).
 - Previous train: unified `v0.14.1` (use `version = "0.14"`).
 - Previous train: unified `v0.13.0` (use `version = "0.13"`).
 - Previous train: unified `v0.12.0` (use `version = "0.12"`).
@@ -19,7 +19,7 @@ paths, see `docs/workstreams/apple-platform-support.md`.
 - Previous train: unified `v0.8.0` (use `version = "0.8"`).
 - Internal dependency constraints in this repo also pin to the unified minor (for example, `0.16`). Mixing different minors across our crates is unsupported.
 
-## Next Release (0.16.0, Unreleased)
+## Current Release (0.16.0)
 
 Core
 
@@ -67,7 +67,7 @@ Extensions
 
 ## 0.16 Architecture Contracts
 
-The upcoming 0.16.0 release is not source-compatible with 0.15.x. The baseline is Dear ImGui v1.92.8 docking via cimgui, Rust 1.92 for the workspace, Rust 1.95 for the Bevy backend, WGPU 30 by default with explicit 29/28/27 routes, and Bevy 0.19. Migration details and before/after examples live in the `0.16.0` section of `CHANGELOG.md`.
+Release 0.16.0 is not source-compatible with 0.15.x. The baseline is Dear ImGui v1.92.8 docking via cimgui, Rust 1.92 for the workspace, Rust 1.95 for the Bevy backend, WGPU 30 by default with explicit 29/28/27 routes, and Bevy 0.19. Migration details and before/after examples live in the `0.16.0` section of `CHANGELOG.md`.
 
 The safe Rust layer intentionally breaks APIs that expose C++ lifecycle
 protocols, wrong-context state, stale GPU handles, or platform-specific ABI
@@ -153,15 +153,13 @@ generations as a builder/callback protocol:
 | 0.15 API | 0.16 API |
 | --- | --- |
 | `AppBuilder`, `RunnerConfig`, `RunnerCallbacks` | `AppConfig` plus one state-owning `Application` value |
-| `run_simple`, `run_with_callbacks` | `dear_app::run(config, application)` |
+| `run_simple`, `run_with_callbacks` | `dear_app::run(config, application)` for lifecycle-aware state, or `dear_app::run_ui(config, closure)` for UI-only state |
+| `FrameContext<'ui, 'runtime>` | `FrameContext<'frame>` with one caller-visible frame lifetime |
+| `enable` / `auto_dockspace` boolean combinations and a default full-viewport dockspace | Explicit `DockingConfig::{Disabled,ApplicationManaged,FullViewport}` modes; use `full_viewport()` or `application_managed()` constructors |
 | Application cleanup distributed across callbacks | `Application::shutdown` runs exactly once before add-ons and the stable ImGui context are torn down |
 | GPU rebuild could replace application/context state | The application, main window, and ImGui context survive; only generation-scoped GPU resources are replaced |
 
-Implement `Application::frame` and opt into the lifecycle hooks you need:
-`configure_imgui`, `initialized`, `event`, `gpu_lost`, `gpu_recreated`, and
-`shutdown`. Rebuild application GPU resources from `gpu_recreated`. External
-texture handles carry a `GpuGeneration` and deliberately reject use after their
-generation is replaced.
+Use `run_ui` when a closure-captured state value only needs `&Ui`. Implement `Application::frame` and opt into the lifecycle hooks you need: `configure_imgui`, `initialized`, `event`, `prepare_frame`, `gpu_lost`, `gpu_recreated`, and `shutdown`. Rebuild application GPU resources from `gpu_recreated`. External texture handles carry a `GpuGeneration` and deliberately reject use after their generation is replaced.
 
 ### Binding and prebuilt provenance
 

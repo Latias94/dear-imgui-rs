@@ -323,6 +323,12 @@ fn validate_graph(graph: &Graph, root: &DocumentMut) -> Result<Validation> {
             dependency_string(item, "version") == Some(requirement.as_str()),
             "workspace dependency {key} must use version {requirement}"
         );
+        if let Some(default_features) = dependency_bool(item, "default-features") {
+            ensure!(
+                !default_features,
+                "workspace dependency {key} can only disable default features"
+            );
+        }
         if package == "dear-imgui-test-engine-sys" {
             ensure!(
                 dependency_bool(item, "default-features") == Some(false),
@@ -333,9 +339,8 @@ fn validate_graph(graph: &Graph, root: &DocumentMut) -> Result<Validation> {
             .as_table_like()
             .with_context(|| format!("workspace dependency {key} must be a table"))?;
         for (field, _) in fields.iter() {
-            let allowed = matches!(field, "path" | "version")
-                || (key == "build-support" && field == "package")
-                || (package == "dear-imgui-test-engine-sys" && field == "default-features");
+            let allowed = matches!(field, "path" | "version" | "default-features")
+                || (key == "build-support" && field == "package");
             ensure!(
                 allowed,
                 "workspace dependency {key} has forbidden root field {field}; consumer features belong in member manifests"
@@ -1078,6 +1083,36 @@ xtask = {{ path = \"xtask\", version = \"0.1.0\" }}\n\
                 .unwrap_err()
                 .to_string()
                 .contains("forbidden root field")
+        );
+    }
+
+    #[test]
+    fn allows_disabling_default_features_in_root_catalog() {
+        let fixture = Fixture::new();
+        let root = fixture.root_manifest();
+        let source = fs::read_to_string(&root).unwrap().replace(
+            "pkg-01 = { version = \"0.16\", path = \"members/p01\" }",
+            "pkg-01 = { version = \"0.16\", path = \"members/p01\", default-features = false }",
+        );
+        fs::write(root, source).unwrap();
+
+        Plan::build(fixture.root(), Version::parse("0.17.0").unwrap()).unwrap();
+    }
+
+    #[test]
+    fn rejects_enabling_default_features_in_root_catalog() {
+        let fixture = Fixture::new();
+        let root = fixture.root_manifest();
+        let source = fs::read_to_string(&root).unwrap().replace(
+            "pkg-01 = { version = \"0.16\", path = \"members/p01\" }",
+            "pkg-01 = { version = \"0.16\", path = \"members/p01\", default-features = true }",
+        );
+        fs::write(root, source).unwrap();
+        assert!(
+            Plan::build(fixture.root(), Version::parse("0.17.0").unwrap())
+                .unwrap_err()
+                .to_string()
+                .contains("can only disable default features")
         );
     }
 
