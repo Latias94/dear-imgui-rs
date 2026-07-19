@@ -442,7 +442,7 @@ Math Types (glam/mint)
   - Implemented as `ImGuiValue` using `input_float2/3/4` and simple
     to_array/from_array conversions, matching the typical ImGui integration
     pattern for math vector types. These types can be used directly in
-    reflected structs (e.g. `GlamDemo` in `examples/reflect_demo.rs`) and in
+    reflected structs (e.g. `GlamDemo` in `examples/03-features/reflect_demo.rs`) and in
     tests (`glam_support.rs`) under the `glam` feature.
 - [x] `mint::Vector2/3/4<f32>` (feature `mint`)
   - Implemented as `ImGuiValue` using `input_float2/3/4` by reading/writing
@@ -458,7 +458,7 @@ Examples and Tests
 ------------------
  
 - [x] Primitive numeric parity demo
-  - `examples/reflect_demo.rs` demonstrates:
+  - `examples/03-features/reflect_demo.rs` demonstrates:
     - Input vs slider vs drag.
     - Step/step_fast/speed.
     - Log/clamp/wrap_around flags.
@@ -472,7 +472,7 @@ Examples and Tests
     `#[imgui(display_only)]`.
   - `Option<T>`, `Vec<T>`, fixed-size arrays.
 - [x] Maps, tuples, pointers, and type-level defaults
-  - `examples/reflect_demo.rs` "Maps & Tuples" section:
+  - `examples/03-features/reflect_demo.rs` "Maps & Tuples" section:
     - String-keyed `HashMap<String, i32>` / `BTreeMap<String, f32>` with
       inline editing, add-entry popup, and per-row context menu.
     - Small tuples `(i32, f32)`, `(bool, i32, f32)`, `(i32, i32, i32, i32)`

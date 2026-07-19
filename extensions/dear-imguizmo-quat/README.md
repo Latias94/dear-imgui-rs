@@ -140,4 +140,4 @@ ui.gizmo_quat()
 
 - Begin once per frame with `ui.gizmo_quat()` and call into the builder; no extra context is required.
 - RAII and ID usage follow dear-imgui patterns; use unique labels or `##suffix` to avoid ID clashes in loops.
-- See `examples/imguizmo_quat_basic.rs` for a complete WGPU demo (cube + view controls).
+- See `examples/03-features/imguizmo_quat_basic.rs` for a complete WGPU demo (cube + view controls).

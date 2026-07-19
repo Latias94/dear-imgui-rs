@@ -108,7 +108,7 @@ if let Some(_token) = plot_ui.begin_plot("3D Demo")
 
 ## Examples
 
-See `examples/implot3d_basic.rs` for a comprehensive demo that replicates the official ImPlot3D C++ demo.
+See `examples/03-features/implot3d_basic.rs` for a comprehensive demo that replicates the official ImPlot3D C++ demo.
 
 Run with:
 ```bash

@@ -6,6 +6,8 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-07-19
+
 ### Breaking
 
 - Replace the unsafe Winit/SDL3 `enable` and free `shutdown_multi_viewport_support` functions with `WinitViewportRuntime::attach` and `Sdl3ViewportRuntime::attach`. The typed owning runtime consumes `WgpuRenderer`, keeps callback-visible storage stable across moves, participates in ordered Context teardown, and exposes idempotent explicit shutdown.

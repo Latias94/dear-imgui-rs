@@ -8,7 +8,7 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
-## [0.16.0]
+## [0.16.0] - 2026-07-19
 
 This is an intentionally source-breaking architecture release. It replaces shallow safe mirrors of Dear ImGui internals with explicit state owners, makes native callback and renderer lifetime contracts visible, and turns pregenerated bindings and prebuilts into reproducible target-specific artifacts.
 

@@ -18,7 +18,7 @@ For native build/link options, see `extensions/dear-imgui-test-engine-sys/README
 
 - Upstream: https://github.com/ocornut/imgui_test_engine
 - Low-level crate: `dear-imgui-test-engine-sys`
-- Example: `examples/imgui_test_engine_basic.rs`
+- Example: `examples/04-integration/imgui_test_engine_basic.rs`
 
 ## Compatibility
 
@@ -34,12 +34,9 @@ See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob
 
 ```toml
 [dependencies]
-dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
-dear-imgui-test-engine = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
+dear-imgui-rs = "0.16"
+dear-imgui-test-engine = "0.16"
 ```
-
-Version 0.16.0 is not published yet; these Git dependencies select the API
-documented below. Use matching `0.16` crates.io versions after the release.
 
 ```rust
 use std::convert::Infallible;

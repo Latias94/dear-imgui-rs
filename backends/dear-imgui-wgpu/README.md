@@ -121,23 +121,23 @@ replacements are preserved rather than overwritten during either path.
 
 ## Selecting wgpu version
 
-The current `main` branch, which is targeting the unpublished 0.16.0 release, defaults to WGPU 30.
+Release 0.16 defaults to WGPU 30.
 
 If your ecosystem is pinned to `wgpu` v29, v28, or v27, select it explicitly:
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", default-features = false, features = ["wgpu-29"] }
+dear-imgui-wgpu = { version = "0.16", default-features = false, features = ["wgpu-29"] }
 ```
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", default-features = false, features = ["wgpu-28"] }
+dear-imgui-wgpu = { version = "0.16", default-features = false, features = ["wgpu-28"] }
 ```
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", default-features = false, features = ["wgpu-27"] }
+dear-imgui-wgpu = { version = "0.16", default-features = false, features = ["wgpu-27"] }
 ```
 
 ## What You Get

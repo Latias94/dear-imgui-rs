@@ -8,6 +8,8 @@ Changelog prose uses soft wrapping: do not hard-wrap paragraphs or bullet text j
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-07-19
+
 ### Breaking Changes
 
 - Replace the free multi-viewport `enable` and `shutdown_multi_viewport_support` APIs with `WinitPlatformRuntime::new(&mut Context, Arc<Window>)`. The runtime owns the main-window handle, all secondary windows, its callback claim, and a Context platform attachment instead of borrowing caller-managed callback state.

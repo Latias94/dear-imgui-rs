@@ -6,6 +6,8 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-07-19
+
 ### Changed
 
 - `GlowRenderer` now owns the Context's move-only renderer consumer and consumes

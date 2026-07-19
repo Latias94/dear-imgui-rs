@@ -117,7 +117,7 @@ let used: bool = giz
 if used { /* object moved */ }
 ```
 
-See `examples/imguizmo_basic.rs` for a full demo with camera controls, snapping, bounds and helpers.
+See `examples/03-features/imguizmo_basic.rs` for a full demo with camera controls, snapping, bounds and helpers.
 
 ### Per-frame pattern
 
