@@ -735,13 +735,19 @@ class WorkflowPortabilityTests(unittest.TestCase):
         jobs = self._ci_jobs()
         job = jobs["binding-contract"]
         install = named_step(job, "Install fixed LLVM toolchain")
-        install_inputs = require_mapping(
-            install.get("with"), "jobs.binding-contract.steps.install-llvm.with"
+        install_command = str(install.get("run", ""))
+        self.assertNotIn("uses", install)
+        self.assertIn("python3 tools/ci/install_llvm.py", install_command)
+        self.assertIn("${{ runner.temp }}/llvm", install_command)
+        self.assertFalse(
+            any(
+                "install-llvm-action" in str(step.get("uses", ""))
+                for workflow_job in jobs.values()
+                for step in workflow_job.get("steps", ())
+                if isinstance(step, dict)
+            ),
+            "JavaScript LLVM setup actions must not re-enter the workflow",
         )
-        self.assertEqual(
-            install.get("uses"), "KyleMayes/install-llvm-action@v2.0.9"
-        )
-        self.assertNotIn("cached", install_inputs)
 
         step = named_step(
             job, "Regenerate and verify every maintained binding profile"
@@ -755,7 +761,7 @@ class WorkflowPortabilityTests(unittest.TestCase):
         )
         self.assertFalse(
             any(
-                "install-llvm-action" in str(step.get("uses", ""))
+                "install_llvm.py" in str(step.get("run", ""))
                 for step in jobs["wasm-check"]["steps"]
             ),
             "WASM uses pregenerated bindings and must not install libclang",
