@@ -156,6 +156,27 @@ class ReleaseGateWorkflowTests(unittest.TestCase):
         self.assertIn("if: always()", gate)
         self.assertIn("retention-days: 30", gate)
 
+    def test_aggregate_output_is_relative_to_the_evidence_root(self):
+        jobs = workflow_jobs(parsed_workflow("release-gate.yml"))
+        aggregate = jobs["aggregate"]
+        command = shlex.split(
+            named_step(aggregate, "Aggregate exact-SHA release evidence").get(
+                "run", ""
+            )
+        )
+        self.assertEqual(
+            command[command.index("--evidence-root") + 1],
+            "target/release-evidence/cells",
+        )
+        self.assertEqual(command[command.index("--output") + 1], "gate-result.json")
+
+        retain = named_step(aggregate, "Retain authoritative release decision")
+        retain_inputs = require_mapping(retain.get("with"), "aggregate.retain.with")
+        self.assertEqual(
+            retain_inputs.get("path"),
+            "target/release-evidence/cells/gate-result.json",
+        )
+
     def test_candidate_sha_is_required_and_checked_out_exactly(self):
         gate = workflow("release-gate.yml")
         native = workflow("native-runtime.yml")
