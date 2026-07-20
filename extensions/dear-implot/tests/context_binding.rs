@@ -61,9 +61,12 @@ fn plot_binding_restores_imgui_and_implot_contexts_after_panic() {
         }
 
         let result = catch_unwind(AssertUnwindSafe(|| {
-            plot_ui.with_next_plot_item_array_style(PlotItemArrayStyle::new(), |_| {
-                panic!("binding panic probe")
-            });
+            unsafe {
+                // The empty style contains no array pointers to validate.
+                plot_ui.with_next_plot_item_array_style(PlotItemArrayStyle::new(), |_| {
+                    panic!("binding panic probe")
+                });
+            }
         }));
 
         assert!(result.is_err());

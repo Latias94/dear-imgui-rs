@@ -425,15 +425,27 @@ impl ManagedTextureRegistry {
                     };
                     match item.result() {
                         TextureFeedbackResult::Uploaded { texture_id } => {
-                            entry.texture.set_tex_id(texture_id);
+                            unsafe {
+                                // The complete feedback batch was validated against this Context,
+                                // consumer generation, epoch, request, and texture revision above.
+                                entry.texture.set_tex_id(texture_id);
+                            }
                             if retiring {
                                 mark_want_destroy(&mut entry.texture);
                             } else if entry.revision == key.revision {
-                                entry.texture.set_status(TextureStatus::OK);
+                                unsafe {
+                                    // This is the sole validated reconciliation path for managed
+                                    // renderer state.
+                                    entry.texture.set_status(TextureStatus::OK);
+                                }
                             }
                         }
                         TextureFeedbackResult::Destroyed => {
-                            entry.texture.set_status(TextureStatus::Destroyed);
+                            unsafe {
+                                // Request validation proves that the renderer acknowledged this
+                                // texture's matching destroy request for the active generation.
+                                entry.texture.set_status(TextureStatus::Destroyed);
+                            }
                             entry.destroy_ack_epoch = Some(epoch);
                         }
                     }
@@ -445,13 +457,23 @@ impl ManagedTextureRegistry {
                     let texture = unsafe { TextureData::from_raw(target.texture) };
                     match item.result() {
                         TextureFeedbackResult::Uploaded { texture_id } => {
-                            texture.set_tex_id(texture_id);
+                            unsafe {
+                                // The atlas target and request identity were validated above.
+                                texture.set_tex_id(texture_id);
+                            }
                             if target.revision == key.revision {
-                                texture.set_status(TextureStatus::OK);
+                                unsafe {
+                                    // Matching revision proves this upload completes the current
+                                    // atlas contents.
+                                    texture.set_status(TextureStatus::OK);
+                                }
                             }
                         }
                         TextureFeedbackResult::Destroyed => {
-                            texture.set_status(TextureStatus::Destroyed);
+                            unsafe {
+                                // The matching request-bound destroy was validated above.
+                                texture.set_status(TextureStatus::Destroyed);
+                            }
                         }
                     }
                 }
@@ -674,8 +696,11 @@ mod tests {
             let mut registry = context.texture_registry.borrow_mut();
             let entry = registry.active_entry_mut(id).expect("active texture");
             let texture = &mut entry.texture;
-            texture.set_tex_id(TextureId::new(91));
-            texture.set_status(TextureStatus::OK);
+            unsafe {
+                // This test seeds renderer-owned state before exercising retirement validation.
+                texture.set_tex_id(TextureId::new(91));
+                texture.set_status(TextureStatus::OK);
+            }
             texture.as_raw_mut()
         };
         context.remove_texture(id).expect("begin retirement");
@@ -687,7 +712,10 @@ mod tests {
             context.texture_registry.borrow().id_for_native(native),
             Some(id)
         );
-        unsafe { TextureData::from_raw(native).set_status(TextureStatus::Destroyed) };
+        unsafe {
+            // Deliberately bypass feedback to prove that native status alone cannot retire data.
+            TextureData::from_raw(native).set_status(TextureStatus::Destroyed);
+        }
         context.collect_retired_textures();
         assert_eq!(
             context.texture_registry.borrow().id_for_native(native),

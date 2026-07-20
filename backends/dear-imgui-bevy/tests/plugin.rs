@@ -382,14 +382,17 @@ fn plugin_preserves_existing_config_and_context() {
         multi_viewport: true,
     });
     let mut existing_context = ImguiContext::new(dear_imgui_rs::Context::create());
-    existing_context
-        .context_mut()
-        .io_mut()
-        .set_backend_renderer_user_data(std::ptr::dangling_mut::<u8>().cast());
-    existing_context
-        .context_mut()
-        .io_mut()
-        .set_backend_platform_user_data(std::ptr::dangling_mut::<u8>().cast());
+    unsafe {
+        // These dangling values model stale foreign ownership and are never dereferenced.
+        existing_context
+            .context_mut()
+            .io_mut()
+            .set_backend_renderer_user_data(std::ptr::dangling_mut::<u8>().cast());
+        existing_context
+            .context_mut()
+            .io_mut()
+            .set_backend_platform_user_data(std::ptr::dangling_mut::<u8>().cast());
+    }
     install_stale_platform_backend_handlers(existing_context.context_mut());
     install_stale_renderer_backend_handlers(existing_context.context_mut());
     app.insert_non_send(existing_context);
@@ -557,10 +560,13 @@ fn plugin_clears_stale_platform_handlers_when_bridge_is_not_installed() {
         multi_viewport: false,
     });
     let mut existing_context = ImguiContext::new(dear_imgui_rs::Context::create());
-    existing_context
-        .context_mut()
-        .io_mut()
-        .set_backend_platform_user_data(std::ptr::dangling_mut::<u8>().cast());
+    unsafe {
+        // This dangling value models stale foreign ownership and is never dereferenced.
+        existing_context
+            .context_mut()
+            .io_mut()
+            .set_backend_platform_user_data(std::ptr::dangling_mut::<u8>().cast());
+    }
     install_stale_platform_backend_handlers(existing_context.context_mut());
     app.insert_non_send(existing_context);
 

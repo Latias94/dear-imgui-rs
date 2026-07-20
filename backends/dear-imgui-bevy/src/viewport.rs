@@ -368,9 +368,10 @@ fn attach_bridge_to_imgui_context(world: &mut World) {
     };
     imgui_context.viewport_bridge_keepalive = Some(bridge_keepalive);
     let context = imgui_context.context_mut();
-    context.io_mut().set_backend_platform_user_data(bridge_ptr);
     crate::clear_platform_backend_handlers(context);
     unsafe {
+        // The retained Rc keeps the bridge allocation stable until these callbacks are cleared.
+        context.io_mut().set_backend_platform_user_data(bridge_ptr);
         let platform_io = context.platform_io_mut();
         platform_io.set_platform_create_window(Some(platform_create_window));
         platform_io.set_platform_destroy_window(Some(platform_destroy_window));

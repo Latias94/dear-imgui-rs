@@ -99,7 +99,12 @@ impl<'ui> Plot3DUi<'ui> {
     }
 
     /// Raw surface plot (f32) with an explicit data layout.
-    pub fn surface_f32_raw<S: AsRef<str>>(
+    ///
+    /// # Safety
+    ///
+    /// `layout` must use the automatic or contiguous `f32` stride because this method creates its
+    /// own flattened coordinate arrays. The normalized offset may be any sample index.
+    pub unsafe fn surface_f32_raw<S: AsRef<str>>(
         &self,
         label: S,
         xs: &[f32],
@@ -164,7 +169,12 @@ impl<'ui> Plot3DUi<'ui> {
     ///
     /// Use this when you already have per-vertex `xs_flat` and `ys_flat` of length `x_count * y_count`,
     /// matching the layout of `zs`. This avoids per-frame allocations for large dynamic grids.
-    pub fn surface_f32_flat<S: AsRef<str>>(
+    /// # Safety
+    ///
+    /// For every submitted grid index, `layout` must address an initialized, properly aligned
+    /// `f32` within each coordinate allocation. All three allocations must remain alive for this
+    /// call.
+    pub unsafe fn surface_f32_flat<S: AsRef<str>>(
         &self,
         label: S,
         xs_flat: &[f32],

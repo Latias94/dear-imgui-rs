@@ -701,15 +701,9 @@ fn demo_realtime_plots(ui: &Ui, plot_ui: &Plot3DUi) {
                         && xs.data.len() == ys.data.len()
                         && ys.data.len() == zs.data.len()
                     {
-                        plot_ui.plot_line_f32_raw(
-                            "Mouse",
-                            &xs.data,
-                            &ys.data,
-                            &zs.data,
-                            Line3DFlags::NONE,
-                            Plot3DDataLayout::DEFAULT
-                                .with_offset(Plot3DDataOffset::samples(xs.offset as i32)),
-                        );
+                        Line3D::f32("Mouse", &xs.data, &ys.data, &zs.data)
+                            .offset(Plot3DDataOffset::samples(xs.offset as i32))
+                            .plot(plot_ui);
                     }
                 });
             });
@@ -1162,7 +1156,7 @@ fn demo_array_backed_item_styles(ui: &Ui, plot_ui: &Plot3DUi) {
     ui.text("This demo exercises the new closure-scoped spec array helpers.");
     ui.text_wrapped(
         "Line colors, marker sizes, and marker colors are borrowed only for the next plot \
-         submission, which keeps the safe API honest about lifetimes.",
+         submission; each slice must cover every index that plot may read.",
     );
     ui.spacing();
 
@@ -1205,26 +1199,32 @@ fn demo_array_backed_item_styles(ui: &Ui, plot_ui: &Plot3DUi) {
         );
         plot_ui.setup_axes_limits(-0.2, 1.2, -1.2, 1.2, -0.2, 1.2, Plot3DCond::Once);
 
-        plot_ui.with_next_plot3d_item_array_style(
-            Plot3DItemArrayStyle::new().with_line_colors(&line_colors),
-            |plot_ui| {
-                Line3D::f32("Gradient Path", &xs, &ys, &zs)
-                    .with_line_weight(3.0)
-                    .plot(plot_ui);
-            },
-        );
+        unsafe {
+            // One line color is provided for every submitted path sample.
+            plot_ui.with_next_plot3d_item_array_style(
+                Plot3DItemArrayStyle::new().with_line_colors(&line_colors),
+                |plot_ui| {
+                    Line3D::f32("Gradient Path", &xs, &ys, &zs)
+                        .with_line_weight(3.0)
+                        .plot(plot_ui);
+                },
+            );
+        }
 
-        plot_ui.with_next_plot3d_item_array_style(
-            Plot3DItemArrayStyle::new()
-                .with_marker_sizes(&marker_sizes)
-                .with_marker_fill_colors(&marker_colors)
-                .with_marker_line_colors(&marker_colors),
-            |plot_ui| {
-                Scatter3D::f32("Colored Markers", &xs, &ys, &zs)
-                    .with_marker(Marker3D::Circle)
-                    .plot(plot_ui);
-            },
-        );
+        unsafe {
+            // Every marker style array has one entry per submitted scatter sample.
+            plot_ui.with_next_plot3d_item_array_style(
+                Plot3DItemArrayStyle::new()
+                    .with_marker_sizes(&marker_sizes)
+                    .with_marker_fill_colors(&marker_colors)
+                    .with_marker_line_colors(&marker_colors),
+                |plot_ui| {
+                    Scatter3D::f32("Colored Markers", &xs, &ys, &zs)
+                        .with_marker(Marker3D::Circle)
+                        .plot(plot_ui);
+                },
+            );
+        }
     }
 }
 

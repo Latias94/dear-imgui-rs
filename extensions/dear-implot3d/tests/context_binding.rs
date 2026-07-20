@@ -61,9 +61,12 @@ fn plot3d_binding_restores_imgui_and_plot_contexts_after_panic() {
         }
 
         let result = catch_unwind(AssertUnwindSafe(|| {
-            plot_ui.with_next_plot3d_item_array_style(Plot3DItemArrayStyle::new(), |_| {
-                panic!("binding panic probe")
-            });
+            unsafe {
+                // The empty style contains no array pointers to validate.
+                plot_ui.with_next_plot3d_item_array_style(Plot3DItemArrayStyle::new(), |_| {
+                    panic!("binding panic probe")
+                });
+            }
         }));
 
         assert!(result.is_err());

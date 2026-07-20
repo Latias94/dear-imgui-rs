@@ -170,7 +170,11 @@ impl WgpuRenderer {
             // Set atlas texture id + status OK (updates TexRef and TexData)
             {
                 let fonts_mut = imgui_ctx.font_atlas();
-                fonts_mut.set_texture_id(tex_id);
+                unsafe {
+                    // This fallback is active only without managed renderer textures, and the ID
+                    // was allocated by this renderer's texture manager above.
+                    fonts_mut.set_texture_id(tex_id);
+                }
             }
             if cfg!(debug_assertions) {
                 backend_debug!(

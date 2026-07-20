@@ -710,13 +710,19 @@ fn io_and_platform_io_accessors_use_self_context_not_current_context() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx_a = Context::create();
     let marker_a = std::ptr::NonNull::<u8>::dangling().as_ptr().cast();
-    ctx_a.io_mut().set_backend_language_user_data(marker_a);
+    unsafe {
+        // The test only round-trips this opaque marker and never dereferences it.
+        ctx_a.io_mut().set_backend_language_user_data(marker_a);
+    }
     let pio_a = ctx_a.platform_io().as_raw();
     let suspended_a = ctx_a.suspend();
 
     let mut ctx_b = Context::create();
     let marker_b = std::ptr::NonNull::<u16>::dangling().as_ptr().cast();
-    ctx_b.io_mut().set_backend_language_user_data(marker_b);
+    unsafe {
+        // The test only round-trips this opaque marker and never dereferences it.
+        ctx_b.io_mut().set_backend_language_user_data(marker_b);
+    }
     let pio_b = ctx_b.platform_io().as_raw();
 
     assert_ne!(marker_a, marker_b);

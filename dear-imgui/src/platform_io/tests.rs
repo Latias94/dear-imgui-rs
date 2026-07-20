@@ -24,10 +24,12 @@ unsafe extern "C" fn draw_callback_marker(
 fn invalidating_renderer_bindings_requeues_live_textures() {
     let mut texture = crate::texture::OwnedTextureData::new();
     texture.create(crate::texture::TextureFormat::RGBA32, 1, 1);
-    texture.set_tex_id(crate::texture::TextureId::new(123));
-    texture.set_backend_user_data(std::ptr::dangling_mut());
-    texture.set_status(crate::texture::TextureStatus::OK);
     unsafe {
+        // The test owns this unregistered texture; backend data is an opaque marker and is never
+        // dereferenced.
+        texture.set_tex_id(crate::texture::TextureId::new(123));
+        texture.set_backend_user_data(std::ptr::dangling_mut());
+        texture.set_status(crate::texture::TextureStatus::OK);
         (*texture.as_raw_mut()).RefCount = 1;
     }
 
@@ -50,13 +52,15 @@ fn invalidating_renderer_bindings_requeues_live_textures() {
 fn invalidating_renderer_bindings_preserves_queued_destruction() {
     let mut texture = crate::texture::OwnedTextureData::new();
     texture.create(crate::texture::TextureFormat::RGBA32, 1, 1);
-    texture.set_tex_id(crate::texture::TextureId::new(123));
-    texture.set_backend_user_data(std::ptr::dangling_mut());
     unsafe {
+        // The test owns this unregistered texture; backend data is an opaque marker and is never
+        // dereferenced.
+        texture.set_tex_id(crate::texture::TextureId::new(123));
+        texture.set_backend_user_data(std::ptr::dangling_mut());
         (*texture.as_raw_mut()).RefCount = 1;
         (*texture.as_raw_mut()).WantDestroyNextFrame = true;
+        texture.set_status(crate::texture::TextureStatus::WantDestroy);
     }
-    texture.set_status(crate::texture::TextureStatus::WantDestroy);
 
     let mut texture_ptr = texture.as_mut().as_raw_mut();
     let mut raw: sys::ImGuiPlatformIO = new_platform_io();
@@ -77,10 +81,12 @@ fn invalidating_renderer_bindings_preserves_queued_destruction() {
 fn invalidating_renderer_bindings_preserves_shared_textures() {
     let mut texture = crate::texture::OwnedTextureData::new();
     texture.create(crate::texture::TextureFormat::RGBA32, 1, 1);
-    texture.set_tex_id(crate::texture::TextureId::new(123));
-    texture.set_backend_user_data(std::ptr::dangling_mut());
-    texture.set_status(crate::texture::TextureStatus::OK);
     unsafe {
+        // The test owns this unregistered texture; backend data is an opaque marker and is never
+        // dereferenced.
+        texture.set_tex_id(crate::texture::TextureId::new(123));
+        texture.set_backend_user_data(std::ptr::dangling_mut());
+        texture.set_status(crate::texture::TextureStatus::OK);
         (*texture.as_raw_mut()).RefCount = 2;
     }
 
@@ -537,10 +543,11 @@ fn get_window_pos_and_size_callbacks_are_context_local() {
 
     let mut ctx_a = crate::Context::create();
     let language_user_data_a = std::ptr::NonNull::<u8>::dangling().as_ptr().cast();
-    ctx_a
-        .io_mut()
-        .set_backend_language_user_data(language_user_data_a);
     unsafe {
+        // These dangling values are identity markers only; no language backend dereferences them.
+        ctx_a
+            .io_mut()
+            .set_backend_language_user_data(language_user_data_a);
         ctx_a
             .platform_io_mut()
             .set_platform_get_window_pos_raw(Some(get_pos_a));
@@ -563,10 +570,11 @@ fn get_window_pos_and_size_callbacks_are_context_local() {
 
     let mut ctx_b = crate::Context::create();
     let language_user_data_b = std::ptr::NonNull::<u16>::dangling().as_ptr().cast();
-    ctx_b
-        .io_mut()
-        .set_backend_language_user_data(language_user_data_b);
     unsafe {
+        // These dangling values are identity markers only; no language backend dereferences them.
+        ctx_b
+            .io_mut()
+            .set_backend_language_user_data(language_user_data_b);
         ctx_b
             .platform_io_mut()
             .set_platform_get_window_pos_raw(Some(get_pos_b));
@@ -698,9 +706,10 @@ fn typed_platform_callbacks_can_queue_engine_viewport_intent_via_backend_user_da
 
     let mut ctx = crate::Context::create();
     let mut queue = Queue::default();
-    ctx.io_mut()
-        .set_backend_platform_user_data((&mut queue as *mut Queue).cast());
     unsafe {
+        // `queue` outlives every callback invocation below and is cleared before the test returns.
+        ctx.io_mut()
+            .set_backend_platform_user_data((&mut queue as *mut Queue).cast());
         ctx.platform_io_mut()
             .set_platform_create_window(Some(create_window));
         ctx.platform_io_mut()
@@ -740,8 +749,11 @@ fn typed_platform_callbacks_can_queue_engine_viewport_intent_via_backend_user_da
         ]
     );
 
-    ctx.io_mut()
-        .set_backend_platform_user_data(std::ptr::null_mut());
+    unsafe {
+        // No callback is invoked after this point.
+        ctx.io_mut()
+            .set_backend_platform_user_data(std::ptr::null_mut());
+    }
 }
 
 #[cfg(feature = "multi-viewport")]

@@ -70,7 +70,12 @@ impl<'a> BarPlot<'a> {
     }
 
     /// Set the data layout used to read values.
-    pub fn with_data_layout(mut self, layout: PlotDataLayout) -> Self {
+    ///
+    /// # Safety
+    ///
+    /// Every sample address computed from `layout` must refer to an initialized, properly aligned
+    /// `f64` within the allocation backing this builder's values.
+    pub unsafe fn with_data_layout(mut self, layout: PlotDataLayout) -> Self {
         self.layout = layout;
         self
     }
@@ -82,7 +87,12 @@ impl<'a> BarPlot<'a> {
     }
 
     /// Set the byte stride used to read values.
-    pub fn with_stride(mut self, stride: PlotDataStride) -> Self {
+    ///
+    /// # Safety
+    ///
+    /// Every strided sample read must remain initialized, aligned, and within the allocation
+    /// backing this builder's values.
+    pub unsafe fn with_stride(mut self, stride: PlotDataStride) -> Self {
         self.layout = self.layout.with_stride(stride);
         self
     }

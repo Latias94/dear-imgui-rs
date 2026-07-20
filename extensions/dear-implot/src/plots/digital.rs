@@ -59,7 +59,12 @@ impl<'a> DigitalPlot<'a> {
     }
 
     /// Set the data layout used to read X/Y samples.
-    pub fn with_data_layout(mut self, layout: PlotDataLayout) -> Self {
+    ///
+    /// # Safety
+    ///
+    /// Every sample address computed from `layout` must refer to an initialized, properly aligned
+    /// `f64` within both coordinate allocations retained by this builder.
+    pub unsafe fn with_data_layout(mut self, layout: PlotDataLayout) -> Self {
         self.layout = layout;
         self
     }
@@ -71,7 +76,12 @@ impl<'a> DigitalPlot<'a> {
     }
 
     /// Set the byte stride used to read X/Y samples.
-    pub fn with_stride(mut self, stride: PlotDataStride) -> Self {
+    ///
+    /// # Safety
+    ///
+    /// Every strided sample read must remain initialized, aligned, and within both coordinate
+    /// allocations retained by this builder.
+    pub unsafe fn with_stride(mut self, stride: PlotDataStride) -> Self {
         self.layout = self.layout.with_stride(stride);
         self
     }

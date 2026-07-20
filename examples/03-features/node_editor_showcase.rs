@@ -616,7 +616,6 @@ fn load_header_background_texture() -> Result<texture::OwnedTextureData, Box<dyn
         u32::try_from(height).expect("header texture height fits u32"),
     );
     texture.set_data(image.as_raw());
-    texture.set_status(texture::TextureStatus::WantCreate);
     Ok(texture)
 }
 

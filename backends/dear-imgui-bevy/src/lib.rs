@@ -139,15 +139,21 @@ fn sync_backend_context_config(
         .set_platform_name(Some(imgui_name.clone()))
         .expect("sanitized backend names must be valid C strings");
     if !config.multi_viewport || !MULTI_VIEWPORT_FEATURE_ENABLED || !NATIVE_PLATFORM_TARGET {
+        clear_platform_backend_handlers(context);
+        unsafe {
+            // No platform callback can observe the cleared backend pointer after its table is gone.
+            context
+                .io_mut()
+                .set_backend_platform_user_data(std::ptr::null_mut());
+        }
+    }
+    clear_renderer_backend_handlers(context);
+    unsafe {
+        // No renderer callback can observe the cleared backend pointer after its table is gone.
         context
             .io_mut()
-            .set_backend_platform_user_data(std::ptr::null_mut());
-        clear_platform_backend_handlers(context);
+            .set_backend_renderer_user_data(std::ptr::null_mut());
     }
-    context
-        .io_mut()
-        .set_backend_renderer_user_data(std::ptr::null_mut());
-    clear_renderer_backend_handlers(context);
     let mut backend_flags = context.io().backend_flags();
     if render_integration_installed {
         #[cfg(feature = "render")]
@@ -332,9 +338,12 @@ impl ImguiContext {
 
         clear_renderer_backend_handlers(&mut self.context);
         clear_platform_backend_handlers(&mut self.context);
-        self.context
-            .io_mut()
-            .set_backend_platform_user_data(std::ptr::null_mut());
+        unsafe {
+            // Both callback tables are gone, so neither can dereference the cleared pointers.
+            self.context
+                .io_mut()
+                .set_backend_platform_user_data(std::ptr::null_mut());
+        }
         #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
         {
             self.viewport_bridge_keepalive = None;
@@ -342,9 +351,12 @@ impl ImguiContext {
         self.context
             .set_platform_name::<String>(None)
             .expect("clearing BackendPlatformName must not fail");
-        self.context
-            .io_mut()
-            .set_backend_renderer_user_data(std::ptr::null_mut());
+        unsafe {
+            // Renderer callbacks were cleared before this backend pointer.
+            self.context
+                .io_mut()
+                .set_backend_renderer_user_data(std::ptr::null_mut());
+        }
         self.context
             .set_renderer_name::<String>(None)
             .expect("clearing BackendRendererName must not fail");

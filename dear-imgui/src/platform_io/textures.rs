@@ -28,7 +28,11 @@ impl PlatformIo {
             if texture.ref_count() != 1 {
                 continue;
             }
-            texture.set_status(crate::texture::TextureStatus::Destroyed);
+            unsafe {
+                // Renderer teardown owns this unshared binding and has already discarded the GPU
+                // object represented by its texture ID.
+                texture.set_status(crate::texture::TextureStatus::Destroyed);
+            }
             invalidated += 1;
         }
         invalidated

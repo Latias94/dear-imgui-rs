@@ -22,29 +22,39 @@ pub enum TextureUpdateResult {
 }
 
 impl TextureUpdateResult {
-    /// Apply the result to the `TextureData` object.
-    pub fn apply_to(self, texture_data: &mut TextureData) {
-        match self {
-            TextureUpdateResult::Created { texture_id } => {
-                texture_data.set_tex_id(texture_id);
-                texture_data.set_status(TextureStatus::OK);
+    /// Apply a legacy renderer transition directly to a `TextureData` object.
+    ///
+    /// Managed textures must use the request-bound rendering API instead.
+    ///
+    /// # Safety
+    ///
+    /// `self` must be the result produced for this exact texture by the same renderer, all GPU
+    /// synchronization required by the transition must be complete, and `texture_data` must not be
+    /// registered with a `Context`.
+    pub unsafe fn apply_to(self, texture_data: &mut TextureData) {
+        unsafe {
+            match self {
+                TextureUpdateResult::Created { texture_id } => {
+                    texture_data.set_tex_id(texture_id);
+                    texture_data.set_status(TextureStatus::OK);
+                }
+                TextureUpdateResult::Updated => {
+                    texture_data.set_status(TextureStatus::OK);
+                }
+                TextureUpdateResult::Destroyed => {
+                    // ImGui's SetStatus(Destroyed) has special semantics: if
+                    // WantDestroyNextFrame is false, Destroyed may translate back to WantCreate.
+                    // When honoring a requested destroy, set WantDestroyNextFrame first.
+                    (*texture_data.as_raw_mut()).WantDestroyNextFrame = true;
+                    texture_data.set_status(TextureStatus::Destroyed);
+                }
+                TextureUpdateResult::Failed => {
+                    // Best-effort: mark destroyed. If this was not a requested destroy, ImGui may
+                    // translate this back to WantCreate, which is acceptable.
+                    texture_data.set_status(TextureStatus::Destroyed);
+                }
+                TextureUpdateResult::NoAction => {}
             }
-            TextureUpdateResult::Updated => {
-                texture_data.set_status(TextureStatus::OK);
-            }
-            TextureUpdateResult::Destroyed => unsafe {
-                // ImGui's SetStatus(Destroyed) has special semantics: if WantDestroyNextFrame is
-                // false, Destroyed may translate back to WantCreate. When honoring a requested
-                // destroy, we must set WantDestroyNextFrame first.
-                (*texture_data.as_raw_mut()).WantDestroyNextFrame = true;
-                texture_data.set_status(TextureStatus::Destroyed);
-            },
-            TextureUpdateResult::Failed => {
-                // Best-effort: mark destroyed. If this was not a requested destroy, ImGui may
-                // translate this back to WantCreate, which is acceptable.
-                texture_data.set_status(TextureStatus::Destroyed);
-            }
-            TextureUpdateResult::NoAction => {}
         }
     }
 }
@@ -58,18 +68,25 @@ mod tests {
     fn texture_update_result_apply_to_sets_status_and_id() {
         let mut tex = OwnedTextureData::new();
 
-        TextureUpdateResult::Created {
-            texture_id: TextureId::from(42u64),
+        unsafe {
+            // The test applies transitions produced for its sole unregistered texture.
+            TextureUpdateResult::Created {
+                texture_id: TextureId::from(42u64),
+            }
+            .apply_to(&mut tex);
         }
-        .apply_to(&mut tex);
         assert_eq!(tex.status(), TextureStatus::OK);
         assert_eq!(tex.tex_id().id(), 42);
 
-        TextureUpdateResult::Updated.apply_to(&mut tex);
+        unsafe {
+            TextureUpdateResult::Updated.apply_to(&mut tex);
+        }
         assert_eq!(tex.status(), TextureStatus::OK);
         assert_eq!(tex.tex_id().id(), 42);
 
-        TextureUpdateResult::Destroyed.apply_to(&mut tex);
+        unsafe {
+            TextureUpdateResult::Destroyed.apply_to(&mut tex);
+        }
         assert_eq!(tex.status(), TextureStatus::Destroyed);
         unsafe {
             assert!((*tex.as_raw()).WantDestroyNextFrame);
@@ -79,10 +96,14 @@ mod tests {
             (*tex.as_raw_mut()).WantDestroyNextFrame = false;
         }
         tex.create(TextureFormat::RGBA32, 1, 1);
-        TextureUpdateResult::Failed.apply_to(&mut tex);
+        unsafe {
+            TextureUpdateResult::Failed.apply_to(&mut tex);
+        }
         assert_eq!(tex.status(), TextureStatus::WantCreate);
 
-        TextureUpdateResult::NoAction.apply_to(&mut tex);
+        unsafe {
+            TextureUpdateResult::NoAction.apply_to(&mut tex);
+        }
         assert_eq!(tex.status(), TextureStatus::WantCreate);
     }
 }

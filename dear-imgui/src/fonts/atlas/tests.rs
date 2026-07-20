@@ -446,7 +446,10 @@ fn set_texture_id_preserves_managed_tex_data_reference() {
     let raw_tex_data = texture.as_raw();
 
     let texture_id = crate::texture::TextureId::new(0x1234);
-    fonts.set_texture_id(texture_id);
+    unsafe {
+        // The test models the sole legacy renderer owner for this atlas binding.
+        fonts.set_texture_id(texture_id);
+    }
 
     let mut tex_ref = unsafe { (*fonts.raw()).TexRef };
     assert_eq!(tex_ref._TexData.cast_const(), raw_tex_data);

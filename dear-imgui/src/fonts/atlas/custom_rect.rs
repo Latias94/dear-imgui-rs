@@ -458,7 +458,10 @@ mod tests {
             .font_atlas()
             .add_custom_rect(CustomRectData::alpha8([1, 1], &[0x7f]))
             .expect("the custom rectangle should fit");
-        ctx.font_atlas().set_texture_id(crate::TextureId::new(17));
+        unsafe {
+            // The test models a completed legacy upload for this unshared atlas.
+            ctx.font_atlas().set_texture_id(crate::TextureId::new(17));
+        }
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _ = ctx

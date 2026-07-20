@@ -27,8 +27,14 @@ impl Io {
     }
 
     /// Set the backend platform user data pointer.
+    ///
+    /// # Safety
+    ///
+    /// `user_data` must be null or point to the state expected by every installed platform
+    /// callback. That state must remain valid until the callbacks are removed and the pointer is
+    /// cleared.
     #[doc(alias = "BackendPlatformUserData")]
-    pub fn set_backend_platform_user_data(&mut self, user_data: *mut c_void) {
+    pub unsafe fn set_backend_platform_user_data(&mut self, user_data: *mut c_void) {
         self.inner_mut().BackendPlatformUserData = user_data;
     }
 
@@ -39,8 +45,14 @@ impl Io {
     }
 
     /// Set the backend renderer user data pointer.
+    ///
+    /// # Safety
+    ///
+    /// `user_data` must be null or point to the state expected by every installed renderer
+    /// callback. That state must remain valid until the callbacks are removed and the pointer is
+    /// cleared.
     #[doc(alias = "BackendRendererUserData")]
-    pub fn set_backend_renderer_user_data(&mut self, user_data: *mut c_void) {
+    pub unsafe fn set_backend_renderer_user_data(&mut self, user_data: *mut c_void) {
         self.inner_mut().BackendRendererUserData = user_data;
     }
 
@@ -51,8 +63,13 @@ impl Io {
     }
 
     /// Set the backend language user data pointer.
+    ///
+    /// # Safety
+    ///
+    /// `user_data` must be null or point to state whose layout and lifetime match every language
+    /// binding operation that may read it. Clear the pointer before releasing that state.
     #[doc(alias = "BackendLanguageUserData")]
-    pub fn set_backend_language_user_data(&mut self, user_data: *mut c_void) {
+    pub unsafe fn set_backend_language_user_data(&mut self, user_data: *mut c_void) {
         self.inner_mut().BackendLanguageUserData = user_data;
     }
 

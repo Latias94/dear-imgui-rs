@@ -149,8 +149,10 @@ fn destroy_proxy(
     if proxy.data.status() == TextureStatus::Destroyed {
         return Ok(());
     }
-    proxy.data.set_status(TextureStatus::WantDestroy);
     unsafe {
+        // The proxy is owned exclusively by this renderer store and is never registered with a
+        // Context. The request-bound destroy already passed the managed retirement fence.
+        proxy.data.set_status(TextureStatus::WantDestroy);
         // Upstream OpenGL3 and SDLGPU3 intentionally delay destruction until a texture has gone
         // unused. A request-bound destroy is already past that retirement fence.
         (*proxy.data.as_raw_mut()).UnusedFrames = 1;
@@ -353,11 +355,15 @@ mod tests {
 
     fn fake_update(texture: &mut TextureData) {
         match texture.status() {
-            TextureStatus::WantCreate | TextureStatus::WantUpdates => {
+            TextureStatus::WantCreate | TextureStatus::WantUpdates => unsafe {
+                // The test updater exclusively owns the unregistered proxy texture.
                 texture.set_tex_id(TextureId::new(77));
                 texture.set_status(TextureStatus::OK);
-            }
-            TextureStatus::WantDestroy => texture.set_status(TextureStatus::Destroyed),
+            },
+            TextureStatus::WantDestroy => unsafe {
+                // The test updater has completed the proxy's requested destroy transition.
+                texture.set_status(TextureStatus::Destroyed);
+            },
             TextureStatus::OK | TextureStatus::Destroyed => {}
         }
     }

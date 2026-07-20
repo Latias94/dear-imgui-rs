@@ -147,7 +147,6 @@ impl AppWindow {
             TEXTURE_HEIGHT,
         );
         managed_texture.set_data(&texture_pixels(0));
-        managed_texture.set_status(TextureStatus::WantCreate);
 
         let managed_texture = imgui_context.register_texture(managed_texture);
 

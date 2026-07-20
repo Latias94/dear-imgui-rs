@@ -118,7 +118,13 @@ impl<'ui> Plot3DUi<'ui> {
     ///
     /// This is closure-scoped so borrowed slices stay valid for the entire next
     /// plot call and are restored even if `f` panics before submitting an item.
-    pub fn with_next_plot3d_item_array_style<'a, R>(
+    ///
+    /// # Safety
+    ///
+    /// Every non-empty style array must contain enough elements for every index the submitted plot
+    /// may read. Upstream accepts only pointers and carries no array lengths, so this cannot be
+    /// validated by the wrapper.
+    pub unsafe fn with_next_plot3d_item_array_style<'a, R>(
         &self,
         style: Plot3DItemArrayStyle<'a>,
         f: impl FnOnce(&Plot3DUi<'ui>) -> R,

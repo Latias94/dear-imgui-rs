@@ -165,7 +165,10 @@ fn initial_pixel_upload_preserves_the_create_request() {
     texture.set_data(&[1, 2, 3, 4]);
     assert_eq!(texture.status(), TextureStatus::WantCreate);
 
-    texture.set_status(TextureStatus::OK);
+    unsafe {
+        // The test acts as the only renderer owner for this unregistered texture.
+        texture.set_status(TextureStatus::OK);
+    }
     texture.set_data(&[4, 3, 2, 1]);
     assert_eq!(texture.status(), TextureStatus::WantUpdates);
 }

@@ -30,10 +30,19 @@ impl FontAtlas {
         unsafe { crate::texture::effective_texture_id(&(*self.raw()).TexRef) }
     }
 
-    /// Convenience: set atlas texture id and mark status OK
-    /// Also updates TexRef so draw commands continue to follow the managed
-    /// `ImTextureData` when one is available.
-    pub fn set_texture_id(&self, tex_id: crate::texture::TextureId) {
+    /// Set a legacy renderer-owned atlas texture ID and mark its native status as ready.
+    ///
+    /// Managed renderers should process the atlas request from `RenderedFrame` and return
+    /// request-bound `TextureFeedback` instead. This method also updates `TexRef` so legacy draw
+    /// commands continue to follow `ImTextureData` when one is available.
+    ///
+    /// # Safety
+    ///
+    /// `tex_id` must identify a live texture owned by the active renderer for every draw command
+    /// that can observe it. The atlas must be in legacy texture mode and must not be shared with a
+    /// Context using managed renderer textures. The caller must clear or replace the binding only
+    /// after all GPU use has completed.
+    pub unsafe fn set_texture_id(&self, tex_id: crate::texture::TextureId) {
         unsafe {
             let raw = self.raw();
             let texture = (*raw).TexData;

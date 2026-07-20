@@ -1,5 +1,5 @@
 use super::{Plot3D, Plot3DError};
-use crate::{Plot3DDataLayout, Plot3DDataOffset, Plot3DDataStride, Plot3DUi, Surface3DFlags};
+use crate::{Plot3DDataLayout, Plot3DDataOffset, Plot3DUi, Surface3DFlags};
 
 pub struct Surface3D<'a> {
     pub label: &'a str,
@@ -9,7 +9,7 @@ pub struct Surface3D<'a> {
     pub scale_min: f64,
     pub scale_max: f64,
     pub flags: Surface3DFlags,
-    pub layout: Plot3DDataLayout,
+    layout: Plot3DDataLayout,
 }
 
 impl<'a> Surface3D<'a> {
@@ -34,16 +34,8 @@ impl<'a> Surface3D<'a> {
         self.flags = flags;
         self
     }
-    pub fn data_layout(mut self, layout: Plot3DDataLayout) -> Self {
-        self.layout = layout;
-        self
-    }
     pub fn offset(mut self, offset: Plot3DDataOffset) -> Self {
         self.layout = self.layout.with_offset(offset);
-        self
-    }
-    pub fn stride(mut self, stride: Plot3DDataStride) -> Self {
-        self.layout = self.layout.with_stride(stride);
         self
     }
 }
@@ -69,16 +61,20 @@ impl<'a> Plot3D for Surface3D<'a> {
                 z_len: self.zs.len(),
             });
         }
-        ui.surface_f32_raw(
-            self.label,
-            self.xs,
-            self.ys,
-            self.zs,
-            self.scale_min,
-            self.scale_max,
-            self.flags,
-            self.layout,
-        );
+        unsafe {
+            // High-level surfaces keep the automatic contiguous stride; offset is normalized by
+            // ImPlot3D within the validated flattened grid count.
+            ui.surface_f32_raw(
+                self.label,
+                self.xs,
+                self.ys,
+                self.zs,
+                self.scale_min,
+                self.scale_max,
+                self.flags,
+                self.layout,
+            );
+        }
         Ok(())
     }
 }

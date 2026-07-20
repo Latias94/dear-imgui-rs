@@ -389,7 +389,13 @@ impl<'ui> PlotUi<'ui> {
     ///
     /// This is closure-scoped so borrowed slices stay valid for the entire next plot
     /// call and are restored even if `f` panics before submitting an item.
-    pub fn with_next_plot_item_array_style<'a, R>(
+    ///
+    /// # Safety
+    ///
+    /// Every non-empty style array must contain enough elements for every index the submitted plot
+    /// may read. Upstream accepts only pointers and carries no array lengths, so this cannot be
+    /// validated by the wrapper.
+    pub unsafe fn with_next_plot_item_array_style<'a, R>(
         &self,
         style: PlotItemArrayStyle<'a>,
         f: impl FnOnce(&PlotUi<'ui>) -> R,

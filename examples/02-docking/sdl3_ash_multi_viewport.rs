@@ -1126,7 +1126,6 @@ impl App {
             }
         }
         img_tex.set_data(&pixels);
-        img_tex.set_status(dear_imgui_rs::texture::TextureStatus::WantCreate);
 
         let img_tex = context.register_texture(img_tex);
 

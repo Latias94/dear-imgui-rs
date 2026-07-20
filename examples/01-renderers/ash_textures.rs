@@ -337,12 +337,8 @@ impl AppWindow {
             }
         }
         img_tex.set_data(&pixels);
-        img_tex.set_status(dear_imgui_rs::texture::TextureStatus::WantCreate);
 
-        let mut photo_tex = Self::maybe_load_photo_texture();
-        if let Some(photo) = photo_tex.as_mut() {
-            photo.set_status(dear_imgui_rs::texture::TextureStatus::WantCreate);
-        }
+        let photo_tex = Self::maybe_load_photo_texture();
 
         let img_tex = context.register_texture(img_tex);
         let photo_tex = photo_tex.map(|photo| {
