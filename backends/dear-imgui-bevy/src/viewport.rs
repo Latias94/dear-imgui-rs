@@ -1110,6 +1110,7 @@ fn cleanup_orphaned_viewport_cameras(
     let live_cameras = viewport_cameras.collect::<HashSet<_>>();
     let mapped_cameras = bridge
         .inner
+        .borrow()
         .viewport_cameras
         .values()
         .copied()

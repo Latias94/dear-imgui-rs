@@ -625,10 +625,8 @@ mod tests {
         let (mut context, consumer) = context_and_consumer();
         let mailbox = ImguiFrameMailbox::default();
         mailbox.publish(1, snapshot(&mut context, &consumer));
-        let imgui = ImguiContext {
-            context,
-            renderer_consumer: Some(consumer),
-        };
+        let mut imgui = ImguiContext::new(context);
+        imgui.renderer_consumer = Some(consumer);
 
         let error = match imgui.into_inner() {
             Ok(_) => panic!("an outstanding render-world epoch must prevent Context extraction"),
@@ -659,10 +657,8 @@ mod tests {
         snapshot.commit([feedback]).unwrap();
         context.poll_snapshot_completions().unwrap();
 
-        let imgui = ImguiContext {
-            context,
-            renderer_consumer: Some(consumer),
-        };
+        let mut imgui = ImguiContext::new(context);
+        imgui.renderer_consumer = Some(consumer);
         let context = imgui
             .into_inner()
             .expect("an idle renderer consumer should reset and detach");
