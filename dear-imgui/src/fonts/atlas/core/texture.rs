@@ -40,10 +40,10 @@ impl FontAtlas {
             (*raw).TexRef = if texture.is_null() {
                 sys::ImTextureRef {
                     _TexData: std::ptr::null_mut(),
-                    _TexID: tex_id.id() as sys::ImTextureID,
+                    _TexID: sys::ImTextureID::from(tex_id),
                 }
             } else {
-                sys::ImTextureData_SetTexID(texture, tex_id.id() as sys::ImTextureID);
+                sys::ImTextureData_SetTexID(texture, sys::ImTextureID::from(tex_id));
                 sys::ImTextureData_SetStatus(texture, sys::ImTextureStatus_OK);
                 sys::ImTextureData_GetTexRef(texture)
             };

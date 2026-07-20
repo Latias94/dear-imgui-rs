@@ -454,7 +454,7 @@ fn set_texture_id_preserves_managed_tex_data_reference() {
     assert_eq!(texture.tex_id(), texture_id);
 
     let resolved = unsafe { sys::ImTextureRef_GetTexID(&mut tex_ref) };
-    assert_eq!(resolved, texture_id.id() as sys::ImTextureID);
+    assert_eq!(resolved, sys::ImTextureID::from(texture_id));
 }
 
 #[test]

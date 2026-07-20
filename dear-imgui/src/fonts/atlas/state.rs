@@ -8,8 +8,6 @@ pub(super) struct FontAtlasState {
     pub(super) stamp: u64,
     pub(super) generation: u64,
     pub(super) custom_rect_generation: u64,
-    texture_generation: u64,
-    texture_pointer: usize,
     snapshot_revision: u64,
     texture_borrows: usize,
 }
@@ -20,6 +18,68 @@ pub(crate) struct FontAtlasSnapshotIdentity {
     pub(crate) texture_generation: u64,
     pub(crate) revision: u64,
     pub(crate) texture: *mut sys::ImTextureData,
+}
+
+pub(crate) fn font_atlas_snapshot_identities(
+    raw: *mut sys::ImFontAtlas,
+    advance_revision: bool,
+) -> Vec<FontAtlasSnapshotIdentity> {
+    assert!(!raw.is_null(), "font atlas pointer must not be null");
+    let (stamp, revision) = FONT_ATLAS_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        let state = states.get_or_insert(raw);
+        if advance_revision {
+            state.snapshot_revision = state
+                .snapshot_revision
+                .checked_add(1)
+                .expect("font atlas snapshot revision counter overflowed");
+        }
+        (state.stamp, state.snapshot_revision)
+    });
+
+    let mut textures = unsafe {
+        let list = &(*raw).TexList;
+        assert!(
+            list.Size >= 0,
+            "font atlas texture list size must not be negative"
+        );
+        if list.Size == 0 {
+            Vec::new()
+        } else {
+            assert!(
+                !list.Data.is_null(),
+                "non-empty font atlas texture list must have storage"
+            );
+            std::slice::from_raw_parts(list.Data, list.Size as usize).to_vec()
+        }
+    };
+    let current = unsafe { (*raw).TexData };
+    if !current.is_null() && !textures.contains(&current) {
+        textures.push(current);
+    }
+
+    let mut unique_ids = HashSet::with_capacity(textures.len());
+    textures
+        .into_iter()
+        .filter(|texture| !texture.is_null())
+        .map(|texture| {
+            let unique_id = unsafe { (*texture).UniqueID };
+            assert!(
+                unique_id > 0,
+                "font atlas texture allocation must have a positive unique ID"
+            );
+            assert!(
+                unique_ids.insert(unique_id),
+                "font atlas reused a live texture allocation unique ID"
+            );
+            FontAtlasSnapshotIdentity {
+                stamp,
+                texture_generation: unique_id as u64,
+                revision,
+                texture,
+            }
+        })
+        .collect()
 }
 
 #[derive(Default)]
@@ -58,8 +118,6 @@ impl FontAtlasStates {
                     stamp,
                     generation: 0,
                     custom_rect_generation: 0,
-                    texture_generation: 0,
-                    texture_pointer: 0,
                     snapshot_revision: 0,
                     texture_borrows: 0,
                 },
@@ -104,62 +162,6 @@ pub(super) fn bump_custom_rect_generation(raw: *mut sys::ImFontAtlas) -> FontAtl
         let state = *state;
         states.custom_rect_nonces.remove(&(raw as usize));
         state
-    })
-}
-
-pub(super) fn bump_font_atlas_texture_generation(raw: *mut sys::ImFontAtlas) {
-    assert!(!raw.is_null(), "font atlas pointer must not be null");
-    FONT_ATLAS_STATES.with(|states| {
-        let mut states = states.borrow_mut();
-        let state = states.get_or_insert(raw);
-        state.texture_generation = state
-            .texture_generation
-            .checked_add(1)
-            .expect("font atlas texture generation counter overflowed");
-        state.texture_pointer = unsafe { (*raw).TexData as usize };
-    });
-}
-
-pub(crate) fn font_atlas_snapshot_identity(
-    raw: *mut sys::ImFontAtlas,
-) -> FontAtlasSnapshotIdentity {
-    font_atlas_texture_identity(raw, true)
-}
-
-pub(crate) fn current_font_atlas_snapshot_identity(
-    raw: *mut sys::ImFontAtlas,
-) -> FontAtlasSnapshotIdentity {
-    font_atlas_texture_identity(raw, false)
-}
-
-fn font_atlas_texture_identity(
-    raw: *mut sys::ImFontAtlas,
-    advance_revision: bool,
-) -> FontAtlasSnapshotIdentity {
-    assert!(!raw.is_null(), "font atlas pointer must not be null");
-    let texture = unsafe { (*raw).TexData };
-    FONT_ATLAS_STATES.with(|states| {
-        let mut states = states.borrow_mut();
-        let state = states.get_or_insert(raw);
-        if state.texture_pointer != texture as usize {
-            state.texture_generation = state
-                .texture_generation
-                .checked_add(1)
-                .expect("font atlas texture generation counter overflowed");
-            state.texture_pointer = texture as usize;
-        }
-        if advance_revision {
-            state.snapshot_revision = state
-                .snapshot_revision
-                .checked_add(1)
-                .expect("font atlas snapshot revision counter overflowed");
-        }
-        FontAtlasSnapshotIdentity {
-            stamp: state.stamp,
-            texture_generation: state.texture_generation,
-            revision: state.snapshot_revision,
-            texture,
-        }
     })
 }
 

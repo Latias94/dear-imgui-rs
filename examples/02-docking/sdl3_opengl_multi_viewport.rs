@@ -72,7 +72,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // On native GL, `glow::Texture` is a small integer handle wrapper (NativeTexture).
     // We treat the underlying GL name (NonZeroU32) as a legacy ImTextureID.
     let game_tex_name = game_tex.0.get(); // NonZeroU32 -> u32
-    let game_tex_id = TextureId::from(game_tex_name as u64);
+    let game_tex_id = TextureId::from(game_tex_name);
 
     // Build ImGui context.
     let mut imgui = Context::create();

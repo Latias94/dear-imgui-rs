@@ -141,6 +141,22 @@ fn set_data_checks_byte_count_before_allocating_or_copying() {
 }
 
 #[test]
+fn texture_id_supports_lossless_handle_conversions() {
+    let native = std::num::NonZeroU32::new(42).unwrap();
+    let id = TextureId::from(native);
+
+    assert_eq!(id, TextureId::from(42_u32));
+    assert_eq!(id, TextureId::from(42_usize));
+    assert_eq!(id.try_as_u32(), Some(42));
+    assert_eq!(u32::try_from(id), Ok(42));
+    assert_eq!(usize::try_from(id), Ok(42));
+    assert_eq!(u64::from(id), 42);
+
+    assert_eq!(TextureId::new(u64::MAX).try_as_u32(), None);
+    assert!(u32::try_from(TextureId::new(u64::MAX)).is_err());
+}
+
+#[test]
 fn initial_pixel_upload_preserves_the_create_request() {
     let mut texture = OwnedTextureData::new();
     texture.create(TextureFormat::RGBA32, 1, 1);

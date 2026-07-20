@@ -32,6 +32,6 @@ pub use texture::FontAtlasTexture;
 pub(crate) use id::{validate_font_id, validate_font_id_for_current_context};
 pub(crate) use state::{
     assert_font_atlas_renderer_mode, assert_no_font_atlas_texture_borrows,
-    current_font_atlas_snapshot_identity, font_atlas_snapshot_identity,
-    forget_font_atlas_generation, register_font_atlas_context, unregister_font_atlas_context,
+    font_atlas_snapshot_identities, forget_font_atlas_generation, register_font_atlas_context,
+    unregister_font_atlas_context,
 };

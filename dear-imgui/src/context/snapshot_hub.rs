@@ -13,7 +13,9 @@ use crate::render::snapshot::{
 };
 
 use super::binding::CTX_MUTEX;
-use super::texture_registry::{FontAtlasSnapshotTarget, ManagedTextureRegistry};
+use super::texture_registry::{
+    FontAtlasSnapshotTarget, FontAtlasTextureTarget, ManagedTextureRegistry,
+};
 use super::{Context, ContextId};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -151,7 +153,7 @@ impl SnapshotHub {
         atlas: FontAtlasSnapshotTarget,
     ) -> Result<SnapshotCompletionProgress, RendererConsumerError> {
         self.set_direct_completion(epoch, SnapshotCompletionOutcome::Committed(feedback))?;
-        self.advance(registry, atlas)
+        self.advance(registry, &atlas)
     }
 
     pub(super) fn abandon_synchronous(
@@ -164,7 +166,7 @@ impl SnapshotHub {
             .set_direct_completion(epoch, SnapshotCompletionOutcome::Abandoned)
             .is_ok()
         {
-            let _ = self.advance(registry, atlas);
+            let _ = self.advance(registry, &atlas);
         }
     }
 
@@ -295,13 +297,13 @@ impl SnapshotHub {
         atlas: FontAtlasSnapshotTarget,
     ) -> Result<SnapshotCompletionProgress, RendererConsumerError> {
         self.drain_messages();
-        self.advance(registry, atlas)
+        self.advance(registry, &atlas)
     }
 
     fn advance(
         &mut self,
         registry: &mut ManagedTextureRegistry,
-        atlas: FontAtlasSnapshotTarget,
+        atlas: &FontAtlasSnapshotTarget,
     ) -> Result<SnapshotCompletionProgress, RendererConsumerError> {
         let mut progress = SnapshotCompletionProgress {
             watermark: self.completion_watermark,
@@ -548,7 +550,7 @@ impl Context {
         let atlas = self.font_atlas_snapshot_target(true);
         let pending = {
             let registry = self.texture_registry.borrow();
-            let mut resolve = |native| registry.resolve_snapshot_texture(native, atlas);
+            let mut resolve = |native| registry.resolve_snapshot_texture(native, &atlas);
             capture_draw_data(unsafe { &*draw_data }, &mut resolve)?
         };
         self.snapshot_hub
@@ -563,7 +565,7 @@ impl Context {
         let atlas = self.font_atlas_snapshot_target(true);
         let pending = {
             let registry = self.texture_registry.borrow();
-            let mut resolve = |native| registry.resolve_snapshot_texture(native, atlas);
+            let mut resolve = |native| registry.resolve_snapshot_texture(native, &atlas);
             capture_texture_requests_only(unsafe { &*draw_data }, &mut resolve)?
         };
         Ok(self.snapshot_hub.begin_synchronous(pending)?)
@@ -604,7 +606,7 @@ impl Context {
             unsafe { crate::platform_io::PlatformIo::from_raw(platform_io_ptr.cast_const()) };
         let pending = {
             let registry = self.texture_registry.borrow();
-            let mut resolve = |native| registry.resolve_snapshot_texture(native, atlas);
+            let mut resolve = |native| registry.resolve_snapshot_texture(native, &atlas);
             capture_platform_io(platform_io, &mut resolve)?
         };
         self.snapshot_hub
@@ -618,19 +620,20 @@ impl Context {
         let io = self.io_ptr("Context snapshot texture capture");
         let atlas = unsafe { (*io).Fonts };
         assert!(!atlas.is_null(), "Context has no font atlas");
-        let identity = if advance_revision {
-            crate::fonts::font_atlas_snapshot_identity(atlas)
-        } else {
-            crate::fonts::current_font_atlas_snapshot_identity(atlas)
-        };
-        FontAtlasSnapshotTarget {
-            id: SnapshotTextureId::FontAtlas {
-                context: self.id(),
-                stamp: identity.stamp,
-                generation: identity.texture_generation,
-            },
-            revision: identity.revision,
-            texture: identity.texture,
-        }
+        let textures = crate::fonts::font_atlas_snapshot_identities(atlas, advance_revision)
+            .into_iter()
+            .map(|identity| {
+                FontAtlasTextureTarget::new(
+                    SnapshotTextureId::FontAtlas {
+                        context: self.id(),
+                        stamp: identity.stamp,
+                        generation: identity.texture_generation,
+                    },
+                    identity.revision,
+                    identity.texture,
+                )
+            })
+            .collect();
+        FontAtlasSnapshotTarget::new(textures)
     }
 }

@@ -116,10 +116,12 @@ fn snapshot_preserves_standard_sampler_callbacks() {
     let _guard = test_guard();
     let mut ctx = imgui::Context::create();
     prepare_context(&mut ctx);
-    ctx.platform_io_mut()
-        .set_draw_callback_set_sampler_linear_raw(Some(linear));
-    ctx.platform_io_mut()
-        .set_draw_callback_set_sampler_nearest_raw(Some(nearest));
+    unsafe {
+        ctx.platform_io_mut()
+            .set_draw_callback_set_sampler_linear_raw(Some(linear));
+        ctx.platform_io_mut()
+            .set_draw_callback_set_sampler_nearest_raw(Some(nearest));
+    }
     let consumer = ctx.create_renderer_consumer().unwrap();
     let frame = ctx.begin_frame();
     let draw_list = frame.ui().get_foreground_draw_list();
@@ -238,6 +240,99 @@ fn out_of_order_completion_applies_only_after_the_contiguous_gap_closes() {
         assert_eq!(texture.texture_id(), imgui::TextureId::new(42));
     })
     .unwrap();
+}
+
+#[test]
+fn out_of_order_dynamic_font_resize_keeps_every_atlas_allocation_reconcilable() {
+    let _guard = test_guard();
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let consumer = ctx.create_renderer_consumer().unwrap();
+
+    let first = ctx.begin_frame();
+    first
+        .ui()
+        .text("Initial detached atlas allocation: the quick brown fox.");
+    let first = first.render_snapshot(&consumer).unwrap();
+    let first_atlas = first
+        .texture_requests()
+        .iter()
+        .filter_map(|request| match request.texture() {
+            id @ imgui::render::SnapshotTextureId::FontAtlas { .. } => Some(id),
+            imgui::render::SnapshotTextureId::User(_) => None,
+        })
+        .collect::<std::collections::HashSet<_>>();
+    assert!(!first_atlas.is_empty());
+    let first_feedback = first
+        .texture_requests()
+        .iter()
+        .enumerate()
+        .map(|(index, request)| match request.operation() {
+            imgui::render::TextureOp::Create { .. } | imgui::render::TextureOp::Update { .. } => {
+                request
+                    .uploaded(imgui::TextureId::new(3_000 + index as u64))
+                    .unwrap()
+            }
+            imgui::render::TextureOp::Destroy => request.destroyed().unwrap(),
+        })
+        .collect::<Vec<_>>();
+
+    ctx.style_mut().set_font_size_base(96.0);
+    let second = ctx.begin_frame();
+    second
+        .ui()
+        .text("Resized detached atlas allocation: THE QUICK BROWN FOX 0123456789.");
+    let second = second.render_snapshot(&consumer).unwrap();
+    let second_atlas = second
+        .texture_requests()
+        .iter()
+        .filter_map(|request| match request.texture() {
+            id @ imgui::render::SnapshotTextureId::FontAtlas { .. } => Some(id),
+            imgui::render::SnapshotTextureId::User(_) => None,
+        })
+        .collect::<std::collections::HashSet<_>>();
+    assert!(
+        second_atlas.len() >= 2,
+        "font resize should expose both retiring and replacement atlas allocations"
+    );
+    assert!(
+        first_atlas.iter().any(|id| second_atlas.contains(id)),
+        "the retiring allocation must remain addressable until its destroy feedback is applied"
+    );
+    assert!(
+        second_atlas.iter().any(|id| !first_atlas.contains(id)),
+        "font resize must assign a distinct allocation identity to the replacement texture"
+    );
+    let second_feedback = second
+        .texture_requests()
+        .iter()
+        .enumerate()
+        .map(|(index, request)| match request.operation() {
+            imgui::render::TextureOp::Create { .. } | imgui::render::TextureOp::Update { .. } => {
+                request
+                    .uploaded(imgui::TextureId::new(4_000 + index as u64))
+                    .unwrap()
+            }
+            imgui::render::TextureOp::Destroy => request.destroyed().unwrap(),
+        })
+        .collect::<Vec<_>>();
+
+    second.commit(second_feedback).unwrap();
+    assert_eq!(ctx.poll_snapshot_completions().unwrap().watermark(), 0);
+
+    first.commit(first_feedback).unwrap();
+    let progress = ctx.poll_snapshot_completions().unwrap();
+    assert_eq!(progress.watermark(), 2);
+    assert_eq!(progress.committed(), 2);
+
+    let third = ctx.begin_frame();
+    third.ui().text("The replacement atlas remains renderable.");
+    third
+        .render_snapshot(&consumer)
+        .unwrap()
+        .commit(std::iter::empty())
+        .unwrap();
+    assert_eq!(ctx.poll_snapshot_completions().unwrap().watermark(), 3);
 }
 
 #[test]

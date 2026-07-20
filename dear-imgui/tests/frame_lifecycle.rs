@@ -364,3 +364,68 @@ fn renderer_reset_acknowledges_retiring_textures_after_the_last_epoch() {
         Err(imgui::ManagedTextureError::AlreadyRemoved(texture_id))
     );
 }
+
+#[test]
+fn dynamic_font_resize_reconciles_overlapping_atlas_allocations() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let _consumer = ctx.create_renderer_consumer().unwrap();
+
+    let first = ctx.begin_frame();
+    first
+        .ui()
+        .text("Initial atlas allocation: the quick brown fox jumps over the lazy dog.");
+    let mut first = first.render();
+    let first_feedback = first
+        .texture_requests()
+        .iter()
+        .enumerate()
+        .map(|(index, request)| match request.operation() {
+            imgui::render::TextureOp::Create { .. } | imgui::render::TextureOp::Update { .. } => {
+                request
+                    .uploaded(imgui::TextureId::new(1_000 + index as u64))
+                    .unwrap()
+            }
+            imgui::render::TextureOp::Destroy => request.destroyed().unwrap(),
+        })
+        .collect::<Vec<_>>();
+    first.reconcile_texture_feedback(first_feedback).unwrap();
+    drop(first);
+
+    ctx.style_mut().set_font_size_base(96.0);
+    let second = ctx.begin_frame();
+    second
+        .ui()
+        .text("Resized atlas allocation: THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG 0123456789.");
+    let mut second = second.render();
+
+    let atlas_requests = second
+        .texture_requests()
+        .iter()
+        .filter(|request| {
+            matches!(
+                request.texture(),
+                imgui::render::SnapshotTextureId::FontAtlas { .. }
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        atlas_requests.len() >= 2,
+        "resizing should retain the old atlas allocation while creating its replacement"
+    );
+    let feedback = atlas_requests
+        .into_iter()
+        .enumerate()
+        .map(|(index, request)| match request.operation() {
+            imgui::render::TextureOp::Create { .. } | imgui::render::TextureOp::Update { .. } => {
+                request
+                    .uploaded(imgui::TextureId::new(2_000 + index as u64))
+                    .unwrap()
+            }
+            imgui::render::TextureOp::Destroy => request.destroyed().unwrap(),
+        })
+        .collect::<Vec<_>>();
+    second.reconcile_texture_feedback(feedback).unwrap();
+}

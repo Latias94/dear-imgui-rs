@@ -19,11 +19,53 @@ use super::{Context, ContextId};
 
 pub(crate) type SharedTextureRegistry = Rc<RefCell<ManagedTextureRegistry>>;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct FontAtlasSnapshotTarget {
-    pub(crate) id: SnapshotTextureId,
-    pub(crate) revision: u64,
-    pub(crate) texture: *mut sys::ImTextureData,
+    textures: Vec<FontAtlasTextureTarget>,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub(crate) struct FontAtlasTextureTarget {
+    id: SnapshotTextureId,
+    revision: u64,
+    texture: *mut sys::ImTextureData,
+}
+
+impl FontAtlasSnapshotTarget {
+    pub(crate) fn new(textures: Vec<FontAtlasTextureTarget>) -> Self {
+        Self { textures }
+    }
+
+    pub(crate) fn resolve(
+        &self,
+        native: *const sys::ImTextureData,
+    ) -> Option<ResolvedSnapshotTexture> {
+        self.textures
+            .iter()
+            .find(|target| std::ptr::eq(native, target.texture.cast_const()))
+            .map(|target| ResolvedSnapshotTexture {
+                id: target.id,
+                revision: target.revision,
+            })
+    }
+
+    fn find(&self, id: SnapshotTextureId) -> Option<FontAtlasTextureTarget> {
+        self.textures.iter().find(|target| target.id == id).copied()
+    }
+}
+
+impl FontAtlasTextureTarget {
+    pub(crate) fn new(
+        id: SnapshotTextureId,
+        revision: u64,
+        texture: *mut sys::ImTextureData,
+    ) -> Self {
+        Self {
+            id,
+            revision,
+            texture,
+        }
+    }
 }
 
 pub(crate) struct ManagedTextureRegistry {
@@ -217,7 +259,7 @@ impl ManagedTextureRegistry {
     pub(crate) fn resolve_snapshot_texture(
         &self,
         native: *const sys::ImTextureData,
-        atlas: FontAtlasSnapshotTarget,
+        atlas: &FontAtlasSnapshotTarget,
     ) -> Result<ResolvedSnapshotTexture, SnapshotError> {
         if let Some(id) = self.id_for_native(native) {
             let entry = match self.slot(id)? {
@@ -231,11 +273,8 @@ impl ManagedTextureRegistry {
                 revision: entry.revision,
             });
         }
-        if !atlas.texture.is_null() && std::ptr::eq(native, atlas.texture.cast_const()) {
-            return Ok(ResolvedSnapshotTexture {
-                id: atlas.id,
-                revision: atlas.revision,
-            });
+        if let Some(resolved) = atlas.resolve(native) {
+            return Ok(resolved);
         }
         Err(SnapshotError::UnknownManagedTexture)
     }
@@ -335,7 +374,7 @@ impl ManagedTextureRegistry {
     pub(crate) fn apply_snapshot_feedback(
         &mut self,
         feedback: &[TextureFeedback],
-        atlas: FontAtlasSnapshotTarget,
+        atlas: &FontAtlasSnapshotTarget,
         epoch: u64,
     ) -> Result<usize, RendererConsumerError> {
         for item in feedback {
@@ -355,7 +394,7 @@ impl ManagedTextureRegistry {
                     }
                 },
                 SnapshotTextureId::FontAtlas { .. } => {
-                    if key.texture != atlas.id || atlas.texture.is_null() {
+                    if atlas.find(key.texture).is_none() {
                         return Err(RendererConsumerError::StaleFontAtlas);
                     }
                 }
@@ -400,11 +439,14 @@ impl ManagedTextureRegistry {
                     }
                 }
                 SnapshotTextureId::FontAtlas { .. } => {
-                    let texture = unsafe { TextureData::from_raw(atlas.texture) };
+                    let target = atlas
+                        .find(key.texture)
+                        .expect("validated font atlas texture disappeared");
+                    let texture = unsafe { TextureData::from_raw(target.texture) };
                     match item.result() {
                         TextureFeedbackResult::Uploaded { texture_id } => {
                             texture.set_tex_id(texture_id);
-                            if atlas.revision == key.revision {
+                            if target.revision == key.revision {
                                 texture.set_status(TextureStatus::OK);
                             }
                         }

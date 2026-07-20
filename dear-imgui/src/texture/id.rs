@@ -1,14 +1,17 @@
-use std::num::NonZeroU64;
+use std::num::{NonZeroU32, NonZeroU64, NonZeroUsize};
 
 use crate::{ContextId, sys};
 
-/// Simple texture ID for backward compatibility
+/// Opaque renderer handle for an application-owned texture.
 ///
-/// This is a simple wrapper around u64 that can be used to identify textures.
-/// For modern texture management, use TextureData instead.
+/// Dear ImGui stores legacy renderer handles as an unsigned 64-bit value. Integer, non-zero
+/// integer, and raw-pointer handles can be converted into `TextureId` with [`From`]. Conversion
+/// back to `u32` or `usize` uses [`TryFrom`] (or [`Self::try_as_u32`] and
+/// [`Self::try_as_usize`]) so a handle cannot be silently truncated.
 ///
-/// Note: Changed from usize to u64 in Dear ImGui 1.91.4+ to support 64-bit handles
-/// like Vulkan and DX12 on 32-bit targets.
+/// Use [`ManagedTextureId`] instead when the [`crate::Context`] owns the texture's pixels and
+/// renderer lifecycle. Managed IDs intentionally do not convert to primitive handles because
+/// their Context and generation are part of their identity.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[repr(transparent)]
 pub struct TextureId(u64);
@@ -42,7 +45,14 @@ impl TextureId {
     ///
     /// Returns `None` if the id does not fit on this target.
     pub fn try_as_usize(self) -> Option<usize> {
-        usize::try_from(self.0).ok()
+        usize::try_from(self).ok()
+    }
+
+    /// Try to view this texture id as a `u32` handle.
+    ///
+    /// Returns `None` if the id does not fit in 32 bits.
+    pub fn try_as_u32(self) -> Option<u32> {
+        u32::try_from(self).ok()
     }
 
     /// Try to view this texture id as a raw pointer.
@@ -64,6 +74,34 @@ impl From<u64> for TextureId {
     #[inline]
     fn from(id: u64) -> Self {
         TextureId(id)
+    }
+}
+
+impl From<u32> for TextureId {
+    #[inline]
+    fn from(id: u32) -> Self {
+        Self(u64::from(id))
+    }
+}
+
+impl From<NonZeroU32> for TextureId {
+    #[inline]
+    fn from(id: NonZeroU32) -> Self {
+        Self(u64::from(id.get()))
+    }
+}
+
+impl From<NonZeroU64> for TextureId {
+    #[inline]
+    fn from(id: NonZeroU64) -> Self {
+        Self(id.get())
+    }
+}
+
+impl From<NonZeroUsize> for TextureId {
+    #[inline]
+    fn from(id: NonZeroUsize) -> Self {
+        Self(id.get() as u64)
     }
 }
 
@@ -89,6 +127,24 @@ impl From<usize> for TextureId {
     }
 }
 
+impl TryFrom<TextureId> for usize {
+    type Error = std::num::TryFromIntError;
+
+    #[inline]
+    fn try_from(id: TextureId) -> Result<Self, Self::Error> {
+        Self::try_from(id.0)
+    }
+}
+
+impl TryFrom<TextureId> for u32 {
+    type Error = std::num::TryFromIntError;
+
+    #[inline]
+    fn try_from(id: TextureId) -> Result<Self, Self::Error> {
+        Self::try_from(id.0)
+    }
+}
+
 impl Default for TextureId {
     #[inline]
     fn default() -> Self {
@@ -102,7 +158,7 @@ pub type RawTextureId = sys::ImTextureID;
 impl From<TextureId> for RawTextureId {
     #[inline]
     fn from(id: TextureId) -> Self {
-        id.id() as sys::ImTextureID
+        id.id()
     }
 }
 

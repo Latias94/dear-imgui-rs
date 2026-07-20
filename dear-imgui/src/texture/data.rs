@@ -146,7 +146,7 @@ impl TextureData {
     /// This should only be called by renderer backends after creating or destroying the texture.
     pub fn set_tex_id(&mut self, tex_id: TextureId) {
         unsafe {
-            sys::ImTextureData_SetTexID(self.as_raw_mut(), tex_id.id() as sys::ImTextureID);
+            sys::ImTextureData_SetTexID(self.as_raw_mut(), sys::ImTextureID::from(tex_id));
         }
     }
 
