@@ -588,6 +588,22 @@ fn build_with_cmake(cfg: &BuildConfig, cimplot_root: &Path) -> bool {
     let mut c = cmake::Config::new(cimplot_root);
     c.define("IMGUI_STATIC", "ON");
     c.cxxflag("-DCIMGUI_VARGS0");
+    let mut inherited_defines = env::vars()
+        .filter_map(|(key, value)| {
+            key.strip_prefix("DEP_DEAR_IMGUI_SYS_DEFINE_")
+                .or_else(|| key.strip_prefix("DEP_DEAR_IMGUI_DEFINE_"))
+                .map(|suffix| (suffix.to_owned(), value))
+        })
+        .collect::<Vec<_>>();
+    inherited_defines.sort_unstable();
+    inherited_defines.dedup();
+    for (define, value) in inherited_defines {
+        if value.is_empty() {
+            c.cxxflag(format!("-D{define}"));
+        } else {
+            c.cxxflag(format!("-D{define}={value}"));
+        }
+    }
     let profile = env::var("PROFILE").unwrap_or_else(|_| "release".into());
     let cmake_profile = if cfg.is_msvc() && cfg.is_windows() && profile == "debug" {
         "RelWithDebInfo"

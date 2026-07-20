@@ -13,9 +13,14 @@
 #endif
 
 #include <SDL3/SDL.h>
+#include <cstddef>
 #include <vector>
 
 extern "C" {
+
+std::size_t dear_imgui_sdl3_backend_sizeof_imgui_io() {
+    return sizeof(ImGuiIO);
+}
 
 bool ImGui_ImplSDL3_InitForOpenGL_Rust(SDL_Window* window, void* sdl_gl_context) {
     return ImGui_ImplSDL3_InitForOpenGL(window, sdl_gl_context);

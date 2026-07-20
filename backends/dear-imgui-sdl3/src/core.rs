@@ -37,6 +37,8 @@ pub(super) mod ffi {
     }
 
     unsafe extern "C" {
+        #[cfg(test)]
+        pub fn dear_imgui_sdl3_backend_sizeof_imgui_io() -> usize;
         pub fn ImGui_ImplSDL3_InitForOpenGL_Rust(
             window: *mut sdl3_sys::video::SDL_Window,
             sdl_gl_context: *mut c_void,

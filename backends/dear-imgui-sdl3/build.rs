@@ -15,6 +15,10 @@ fn main() {
     println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_IMGUI_BACKENDS_PATH");
     println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_THIRD_PARTY");
     println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_IMGUI_INCLUDE_PATH");
+    println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_DEFINE_IMGUI_DISABLE_OBSOLETE_FUNCTIONS");
+    println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_DEFINE_IMGUI_USE_WCHAR32");
+    println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_DEFINE_IMGUI_ENABLE_TEST_ENGINE");
+    println!("cargo:rerun-if-env-changed=DEP_DEAR_IMGUI_DEFINE_IMGUITEST");
     println!("cargo:rerun-if-env-changed=SDL3_INCLUDE_DIR");
     println!("cargo:rerun-if-env-changed=DEP_SDL3_INCLUDE_PATH");
     println!("cargo:rerun-if-env-changed=DEP_SDL3_INCLUDE_DIR");
@@ -101,13 +105,20 @@ fn main() {
 
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
+    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    build_support::configure_cpp_runtime_linkage(&mut build, &target_os, &target_env);
+    for (key, value) in env::vars() {
+        if let Some(define) = key.strip_prefix("DEP_DEAR_IMGUI_DEFINE_") {
+            build.define(define, value.as_str());
+        }
+    }
 
     // Dear ImGui core includes
     build.include(&imgui_root);
     build.include(backends_parent);
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
-    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let sdl3_headers = build_support::find_sdl3_include_paths(build_support::Sdl3SearchConfig {
         out_dir: &out_dir,
         target_os: &target_os,

@@ -112,7 +112,9 @@ pub use ffi::*;
 /// safe integration for those backends.
 pub mod backend_shim;
 
-// This project always builds Dear ImGui with `IMGUI_USE_WCHAR32`, so `ImWchar` must be 32-bit.
+// This project always builds Dear ImGui with `IMGUI_DISABLE_OBSOLETE_FUNCTIONS` so the native
+// layouts match cimgui's generated struct definitions, and with `IMGUI_USE_WCHAR32` so `ImWchar`
+// must be 32-bit.
 const _: [(); 4] = [(); std::mem::size_of::<ImWchar>()];
 
 // Ensure common ImGui typedefs are available even if bindgen doesn't emit them explicitly

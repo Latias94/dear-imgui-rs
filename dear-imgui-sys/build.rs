@@ -781,6 +781,7 @@ fn new_native_cpp_build(cfg: &BuildConfig) -> cc::Build {
     build.cpp(true).std("c++17");
     build_support::configure_cpp_runtime_linkage(&mut build, &cfg.target_os, &cfg.target_env);
     build.include(cfg.imgui_src());
+    build.define("IMGUI_DISABLE_OBSOLETE_FUNCTIONS", None);
     build.define("IMGUI_USE_WCHAR32", None);
     if cfg.is_msvc() && cfg.is_windows() {
         build.flag("/EHsc");
@@ -988,6 +989,7 @@ fn export_include_paths(cfg: &BuildConfig) {
             "0"
         }
     );
+    println!("cargo:DEFINE_IMGUI_DISABLE_OBSOLETE_FUNCTIONS=1");
     println!("cargo:DEFINE_IMGUI_USE_WCHAR32=1");
 }
 

@@ -152,10 +152,15 @@ typedef __builtin_va_list va_list;
     const CORE_NATIVE_NON_WINDOWS_CLANG_ARGS: &[&str] =
         &["--target=x86_64-unknown-linux-gnu", "-nostdinc"];
     const CORE_WASM_CLANG_ARGS: &[&str] = &["--target=wasm32-unknown-unknown", "-nostdinc"];
-    const CORE_NATIVE_DEFINES: &[&str] = &["CIMGUI_DEFINE_ENUMS_AND_STRUCTS", "IMGUI_USE_WCHAR32"];
+    const CORE_NATIVE_DEFINES: &[&str] = &[
+        "CIMGUI_DEFINE_ENUMS_AND_STRUCTS",
+        "IMGUI_DISABLE_OBSOLETE_FUNCTIONS",
+        "IMGUI_USE_WCHAR32",
+    ];
     const CORE_WASM_DEFINES: &[&str] = &[
         "CIMGUI_DEFINE_ENUMS_AND_STRUCTS",
         "IMGUI_DISABLE_FILE_FUNCTIONS",
+        "IMGUI_DISABLE_OBSOLETE_FUNCTIONS",
         "IMGUI_DISABLE_OSX_FUNCTIONS",
         "IMGUI_DISABLE_WIN32_FUNCTIONS",
         "IMGUI_USE_WCHAR32",
@@ -859,7 +864,7 @@ typedef __builtin_va_list va_list;
 
         pub const fn clang_defines(self) -> &'static [&'static str] {
             match self {
-                Self::Native => &[],
+                Self::Native => CRATE_NATIVE_DEFINES,
                 Self::WasmImport { .. } => CRATE_WASM_DEFINES,
             }
         }
@@ -1600,8 +1605,10 @@ struct tm {
 "#,
         },
     ];
+    const CRATE_NATIVE_DEFINES: &[&str] = &["IMGUI_DISABLE_OBSOLETE_FUNCTIONS"];
     const CRATE_WASM_DEFINES: &[&str] = &[
         "IMGUI_DISABLE_FILE_FUNCTIONS",
+        "IMGUI_DISABLE_OBSOLETE_FUNCTIONS",
         "IMGUI_DISABLE_OSX_FUNCTIONS",
         "IMGUI_DISABLE_WIN32_FUNCTIONS",
     ];

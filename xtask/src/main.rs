@@ -1357,6 +1357,7 @@ fn build_cimgui_provider() -> Result<()> {
         ))
         .arg("-fno-exceptions")
         .arg("-fno-rtti")
+        .arg("-DIMGUI_DISABLE_OBSOLETE_FUNCTIONS")
         .arg("-DIMGUI_DISABLE_OSX_FUNCTIONS")
         .arg("-DIMGUI_DISABLE_WIN32_FUNCTIONS")
         .arg("-DIMNODES_NAMESPACE=imnodes")
