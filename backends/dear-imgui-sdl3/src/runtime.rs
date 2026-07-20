@@ -117,7 +117,8 @@ impl fmt::Debug for NativeLifecycle {
 pub(super) struct RuntimeControl {
     binding: ContextBinding,
     state: Cell<RuntimeState>,
-    native_initialized: Cell<bool>,
+    platform_initialized: Cell<bool>,
+    renderer_initialized: Cell<bool>,
     renderer_release: Cell<ReleaseState>,
     platform_release: Cell<ReleaseState>,
     callback_teardown_active: Cell<bool>,
@@ -137,7 +138,8 @@ impl fmt::Debug for RuntimeControl {
             .debug_struct("RuntimeControl")
             .field("context", &self.binding.id())
             .field("state", &self.state.get())
-            .field("native_initialized", &self.native_initialized.get())
+            .field("platform_initialized", &self.platform_initialized.get())
+            .field("renderer_initialized", &self.renderer_initialized.get())
             .field("renderer_released", &self.renderer_released())
             .field("platform_released", &self.platform_released())
             .finish_non_exhaustive()
@@ -153,7 +155,8 @@ impl RuntimeControl {
         Self {
             binding: context.binding(),
             state: Cell::new(RuntimeState::Attached),
-            native_initialized: Cell::new(false),
+            platform_initialized: Cell::new(false),
+            renderer_initialized: Cell::new(false),
             renderer_release: Cell::new(if renderer_shutdown.is_none() {
                 ReleaseState::Released
             } else {
@@ -190,7 +193,10 @@ impl RuntimeControl {
     }
 
     fn finish_shutdown(&self) {
-        if self.state.get() != RuntimeState::ResourceDropped {
+        if self.renderer_released()
+            && self.platform_released()
+            && self.state.get() != RuntimeState::ResourceDropped
+        {
             self.state.set(RuntimeState::Detached);
         }
     }
@@ -212,12 +218,14 @@ impl RuntimeControl {
         };
         #[cfg(test)]
         self.phase_log.borrow_mut().push("renderer");
-        if self.native_initialized.get()
+        if self.renderer_initialized.get()
             && let Some(shutdown) = &self.lifecycle.renderer_shutdown
         {
             shutdown();
         }
         release.commit();
+        self.renderer_initialized.set(false);
+        self.finish_shutdown();
         true
     }
 
@@ -229,13 +237,10 @@ impl RuntimeControl {
         let Some(release) = ReleaseGuard::begin(&self.platform_release) else {
             return Ok(());
         };
-        if !self.release_renderer_bound() {
-            return Ok(());
-        }
         #[cfg(test)]
         self.phase_log.borrow_mut().push("platform");
 
-        if !self.native_initialized.get() {
+        if !self.platform_initialized.get() {
             release.commit();
             self.finish_shutdown();
             return Ok(());
@@ -262,7 +267,7 @@ impl RuntimeControl {
         // Native shutdown is the irreversible boundary: never call it twice,
         // even if restoring foreign callback state reports an error.
         release.commit();
-        self.native_initialized.set(false);
+        self.platform_initialized.set(false);
         let restore_result = if let Some(restore) = restore {
             let callbacks = self.callbacks.borrow();
             unsafe {
@@ -312,6 +317,32 @@ impl RuntimeControl {
         }))
     }
 
+    fn shutdown_native_explicit(&self) -> Result<(), Sdl3BackendError> {
+        self.begin_shutdown();
+        let platform_result = self.release_platform_explicit();
+        let platform_retry_result = if self.platform_released() {
+            Ok(())
+        } else {
+            self.release_platform_explicit()
+        };
+        let renderer_result = if self.platform_released() {
+            self.release_renderer_explicit()
+        } else {
+            Ok(())
+        };
+        let renderer_retry_result = if self.platform_released() && !self.renderer_released() {
+            self.release_renderer_explicit()
+        } else {
+            Ok(())
+        };
+        first_error([
+            platform_result.err(),
+            platform_retry_result.err(),
+            renderer_result.err(),
+            renderer_retry_result.err(),
+        ])
+    }
+
     fn shutdown_best_effort(&self) {
         if matches!(
             self.state.get(),
@@ -321,17 +352,36 @@ impl RuntimeControl {
         }
         self.begin_shutdown();
         let _ = self.binding.try_with_bound_context(|| {
-            if catch_unwind(AssertUnwindSafe(|| self.release_renderer_bound())).is_err() {
-                self.record_shutdown_panicked("renderer resources");
-            }
-            if catch_unwind(AssertUnwindSafe(|| self.release_platform_bound())).is_err() {
-                self.record_shutdown_panicked("platform windows");
-            }
+            self.shutdown_bound_best_effort();
         });
     }
 
+    fn shutdown_bound_best_effort(&self) {
+        for _ in 0..2 {
+            if self.platform_released() {
+                break;
+            }
+            match catch_unwind(AssertUnwindSafe(|| self.release_platform_bound())) {
+                Ok(Ok(())) => {}
+                Ok(Err(_)) => break,
+                Err(_) => self.record_shutdown_panicked("platform windows"),
+            }
+        }
+        if !self.platform_released() {
+            return;
+        }
+        for _ in 0..2 {
+            if self.renderer_released() {
+                break;
+            }
+            if catch_unwind(AssertUnwindSafe(|| self.release_renderer_bound())).is_err() {
+                self.record_shutdown_panicked("renderer resources");
+            }
+        }
+    }
+
     fn detect_callback_replacements(&self) {
-        if self.state.get() != RuntimeState::Attached || !self.native_initialized.get() {
+        if self.state.get() != RuntimeState::Attached || !self.platform_initialized.get() {
             return;
         }
         let _ = self.binding.try_with_bound_context(|| {
@@ -457,7 +507,8 @@ impl RuntimeControl {
         unregister_runtime(self.platform_io_key.replace(0));
         self.callbacks.borrow_mut().take();
         self.owned_viewports.borrow_mut().clear();
-        self.native_initialized.set(false);
+        self.platform_initialized.set(false);
+        self.renderer_initialized.set(false);
         self.renderer_release.set(ReleaseState::Released);
         self.platform_release.set(ReleaseState::Released);
         self.state.set(RuntimeState::Detached);
@@ -475,7 +526,7 @@ impl RuntimeControl {
     }
 
     fn accepts_current_callback(&self) -> bool {
-        if !self.native_initialized.get() {
+        if !self.platform_initialized.get() {
             return false;
         }
         match (self.state.get(), self.binding.lifecycle()) {
@@ -501,7 +552,7 @@ impl ContextAttachment for PlatformAttachment {
         self.control.begin_shutdown();
         let result = catch_unwind(AssertUnwindSafe(|| {
             context.with_bound_context(|| {
-                let _ = self.control.release_platform_bound();
+                self.control.shutdown_bound_best_effort();
             });
         }));
         if result.is_err() {
@@ -519,14 +570,11 @@ struct RendererAttachment {
 }
 
 impl ContextAttachment for RendererAttachment {
-    fn release_renderer_resources(&self, context: &ContextTeardown<'_>) {
+    fn release_renderer_resources(&self, _context: &ContextTeardown<'_>) {
+        // The official SDL renderer backends call DestroyPlatformWindows() from their own
+        // shutdown paths. Keep renderer callbacks alive through the platform phase, where the
+        // paired platform and renderer backends can be released in their required order.
         self.control.begin_shutdown();
-        let result = catch_unwind(AssertUnwindSafe(|| {
-            context.with_bound_context(|| self.control.release_renderer_bound());
-        }));
-        if result.is_err() {
-            self.control.record_shutdown_panicked("renderer resources");
-        }
     }
 }
 
@@ -602,7 +650,10 @@ impl RuntimeRegistration {
             .as_ref()
             .expect("SDL3 native initialization was already completed")
             .snapshot();
-        self.control.native_initialized.set(true);
+        self.control.platform_initialized.set(true);
+        self.control
+            .renderer_initialized
+            .set(self.control.lifecycle.renderer_shutdown.is_some());
         let claim_result = self.control.binding.try_with_bound_context(|| unsafe {
             PlatformCallbackOwnership::claim(&self.control, baseline)
         });
@@ -628,6 +679,9 @@ impl RuntimeRegistration {
         self.control.begin_shutdown();
         let _ = self.control.binding.try_with_bound_context(|| {
             let _ = self.control.release_platform_bound();
+            if self.control.platform_released() {
+                self.control.release_renderer_bound();
+            }
             if let Some(baseline) = baseline {
                 unsafe { restore_baseline_after_failed_initialization(baseline) };
             }
@@ -641,6 +695,8 @@ impl RuntimeRegistration {
                 restore_baseline_after_failed_initialization(baseline)
             });
         }
+        self.control.platform_initialized.set(false);
+        self.control.renderer_initialized.set(false);
         self.control.renderer_release.set(ReleaseState::Released);
         self.control.platform_release.set(ReleaseState::Released);
         self.control.state.set(RuntimeState::Detached);
@@ -661,13 +717,11 @@ impl RuntimeRegistration {
     ) -> Result<(), Sdl3BackendError> {
         self.control.ensure_context(context)?;
         let pending = self.control.take_pending_fault();
-        self.control.begin_shutdown();
-        let renderer_result = self.control.release_renderer_explicit();
-        let platform_result = self.control.release_platform_explicit();
+        let shutdown_result = self.control.shutdown_native_explicit();
         if matches!(self.control.state(), RuntimeState::Detached) {
             self.detach_attachments();
         }
-        first_error([pending, renderer_result.err(), platform_result.err()])
+        first_error([pending, shutdown_result.err()])
     }
 
     #[cfg(any(
@@ -691,35 +745,21 @@ impl RuntimeRegistration {
             return first_error([pending, None, None, None]);
         }
 
-        self.control.begin_shutdown();
-        let renderer_result = self.control.release_renderer_explicit();
-        let renderer_retry_result = if self.control.renderer_released() {
-            Ok(())
-        } else {
-            self.control.release_renderer_explicit()
-        };
-        let (reset_result, platform_result) = if self.control.renderer_released() {
+        let shutdown_result = self.control.shutdown_native_explicit();
+        let reset_result = if self.control.renderer_released() {
             after_renderer_release();
-            let reset_result = consumer
+            consumer
                 .map(|consumer| context.reset_renderer_texture_bindings(consumer))
                 .transpose()
                 .map(|_| ())
-                .map_err(Into::into);
-            let platform_result = self.control.release_platform_explicit();
-            (reset_result, platform_result)
+                .map_err(Into::into)
         } else {
-            (Ok(()), Ok(()))
+            Ok(())
         };
         if matches!(self.control.state(), RuntimeState::Detached) {
             self.detach_attachments();
         }
-        first_error([
-            pending,
-            renderer_result.err(),
-            renderer_retry_result.err(),
-            reset_result.err(),
-            platform_result.err(),
-        ])
+        first_error([pending, shutdown_result.err(), reset_result.err()])
     }
 
     fn detach_attachments(&mut self) {
@@ -873,7 +913,8 @@ mod tests {
                 Rc::new(move || platform_count.set(platform_count.get() + 1))
             },
         );
-        registration.control.native_initialized.set(true);
+        registration.control.platform_initialized.set(true);
+        registration.control.renderer_initialized.set(true);
         registration
     }
 
@@ -884,15 +925,39 @@ mod tests {
         observed_main_viewport_data: Rc<Cell<usize>>,
         create_window: unsafe extern "C" fn(*mut sys::ImGuiViewport),
     ) -> RuntimeRegistration {
-        let mut registration = registration_with_lifecycle(
+        synthetic_claimed_registration_with_renderer(
             context,
             None,
+            None,
+            platform_count,
+            observed_backend_data,
+            observed_main_viewport_data,
+            create_window,
+        )
+    }
+
+    fn synthetic_claimed_registration_with_renderer(
+        context: &mut Context,
+        renderer_shutdown: Option<Rc<dyn Fn()>>,
+        platform_shutdown_hook: Option<Rc<dyn Fn()>>,
+        platform_count: Rc<Cell<usize>>,
+        observed_backend_data: Rc<Cell<usize>>,
+        observed_main_viewport_data: Rc<Cell<usize>>,
+        create_window: unsafe extern "C" fn(*mut sys::ImGuiViewport),
+    ) -> RuntimeRegistration {
+        let mut registration = registration_with_lifecycle(
+            context,
+            renderer_shutdown,
             Rc::new({
                 let platform_count = Rc::clone(&platform_count);
                 let observed_backend_data = Rc::clone(&observed_backend_data);
                 let observed_main_viewport_data = Rc::clone(&observed_main_viewport_data);
+                let platform_shutdown_hook = platform_shutdown_hook.clone();
                 move || unsafe {
                     platform_count.set(platform_count.get() + 1);
+                    if let Some(hook) = &platform_shutdown_hook {
+                        hook();
+                    }
                     let io = sys::igGetIO_Nil();
                     let platform_io = sys::igGetPlatformIO_Nil();
                     let main_viewport = sys::igGetMainViewport();
@@ -931,13 +996,38 @@ mod tests {
             .callbacks
             .borrow_mut()
             .replace(ownership);
-        registration.control.native_initialized.set(true);
+        registration.control.platform_initialized.set(true);
+        registration
+            .control
+            .renderer_initialized
+            .set(registration.control.lifecycle.renderer_shutdown.is_some());
         registration
     }
 
     fn registry_contains(key: usize) -> bool {
         RUNTIMES.with(|runtimes| runtimes.borrow().contains_key(&key))
     }
+
+    struct TeardownPhaseObserver {
+        renderer_count: Rc<Cell<usize>>,
+        platform_count: Rc<Cell<usize>>,
+        renderer_phase_counts: Rc<Cell<(usize, usize)>>,
+        platform_phase_counts: Rc<Cell<(usize, usize)>>,
+    }
+
+    impl ContextAttachment for TeardownPhaseObserver {
+        fn release_renderer_resources(&self, _context: &ContextTeardown<'_>) {
+            self.renderer_phase_counts
+                .set((self.renderer_count.get(), self.platform_count.get()));
+        }
+
+        fn release_platform_windows(&self, _context: &ContextTeardown<'_>) {
+            self.platform_phase_counts
+                .set((self.renderer_count.get(), self.platform_count.get()));
+        }
+    }
+
+    struct TeardownPhaseObserverMarker;
 
     #[test]
     fn context_first_shutdown_runs_each_phase_once_in_order() {
@@ -950,13 +1040,28 @@ mod tests {
             Rc::clone(&renderer_count),
             Rc::clone(&platform_count),
         );
+        let renderer_phase_counts = Rc::new(Cell::new((usize::MAX, usize::MAX)));
+        let platform_phase_counts = Rc::new(Cell::new((usize::MAX, usize::MAX)));
+        let _observer = context
+            .register_attachment::<TeardownPhaseObserverMarker>(
+                ContextAttachmentRole::Extension,
+                Rc::new(TeardownPhaseObserver {
+                    renderer_count: Rc::clone(&renderer_count),
+                    platform_count: Rc::clone(&platform_count),
+                    renderer_phase_counts: Rc::clone(&renderer_phase_counts),
+                    platform_phase_counts: Rc::clone(&platform_phase_counts),
+                }),
+            )
+            .unwrap();
         let control = Rc::clone(&runtime.control);
 
         drop(context);
 
+        assert_eq!(renderer_phase_counts.get(), (0, 0));
+        assert_eq!(platform_phase_counts.get(), (1, 1));
         assert_eq!(renderer_count.get(), 1);
         assert_eq!(platform_count.get(), 1);
-        assert_eq!(control.phase_log(), ["renderer", "platform"]);
+        assert_eq!(control.phase_log(), ["platform", "renderer"]);
         assert_eq!(control.state(), RuntimeState::Detached);
         drop(runtime);
         assert_eq!(control.state(), RuntimeState::ResourceDropped);
@@ -985,10 +1090,49 @@ mod tests {
 
         assert_eq!(renderer_count.get(), 1);
         assert_eq!(platform_count.get(), 1);
-        assert_eq!(moved.control.phase_log(), ["renderer", "platform"]);
+        assert_eq!(moved.control.phase_log(), ["platform", "renderer"]);
         drop(moved);
         drop(context);
         assert_eq!(renderer_count.get(), 1);
+        assert_eq!(platform_count.get(), 1);
+    }
+
+    #[test]
+    fn platform_shutdown_keeps_platform_destroy_callbacks_live() {
+        let _guard = crate::tests::test_guard();
+        let mut context = Context::create();
+        let viewport = Rc::new(RefCell::new(sys::ImGuiViewport::default()));
+        let platform_shutdown_hook: Rc<dyn Fn()> = {
+            let viewport = Rc::clone(&viewport);
+            Rc::new(move || unsafe {
+                destroy_window_callback_for_test(&mut *viewport.borrow_mut());
+            })
+        };
+        let platform_count = Rc::new(Cell::new(0));
+        let observed_backend_data = Rc::new(Cell::new(0));
+        let observed_main_viewport_data = Rc::new(Cell::new(0));
+        let mut runtime = synthetic_claimed_registration_with_renderer(
+            &mut context,
+            Some(Rc::new(|| {})),
+            Some(platform_shutdown_hook),
+            Rc::clone(&platform_count),
+            observed_backend_data,
+            observed_main_viewport_data,
+            synthetic_create_window,
+        );
+
+        context.binding().with_bound_context(|| unsafe {
+            create_window_callback_for_test(&mut *viewport.borrow_mut());
+        });
+        assert_eq!(
+            viewport.borrow().PlatformUserData as usize,
+            OWNED_VIEWPORT_DATA
+        );
+
+        runtime.shutdown_platform(&mut context).unwrap();
+
+        assert!(viewport.borrow().PlatformUserData.is_null());
+        assert!(viewport.borrow().PlatformHandle.is_null());
         assert_eq!(platform_count.get(), 1);
     }
 
@@ -1009,7 +1153,7 @@ mod tests {
 
         assert_eq!(renderer_count.get(), 1);
         assert_eq!(platform_count.get(), 1);
-        assert_eq!(control.phase_log(), ["renderer", "platform"]);
+        assert_eq!(control.phase_log(), ["platform", "renderer"]);
         assert_eq!(control.state(), RuntimeState::ResourceDropped);
         drop(context);
         assert_eq!(renderer_count.get(), 1);
@@ -1017,7 +1161,7 @@ mod tests {
     }
 
     #[test]
-    fn wrapper_drop_contains_renderer_panic_and_retries_before_platform() {
+    fn wrapper_drop_releases_platform_then_retries_renderer_panic() {
         let _guard = crate::tests::test_guard();
         let renderer_count = Rc::new(Cell::new(0));
         let platform_count = Rc::new(Cell::new(0));
@@ -1039,14 +1183,15 @@ mod tests {
                 Rc::new(move || platform_count.set(platform_count.get() + 1))
             },
         );
-        runtime.control.native_initialized.set(true);
+        runtime.control.platform_initialized.set(true);
+        runtime.control.renderer_initialized.set(true);
         let control = Rc::clone(&runtime.control);
 
         assert!(catch_unwind(AssertUnwindSafe(|| drop(runtime))).is_ok());
 
         assert_eq!(renderer_count.get(), 2);
         assert_eq!(platform_count.get(), 1);
-        assert_eq!(control.phase_log(), ["renderer", "renderer", "platform"]);
+        assert_eq!(control.phase_log(), ["platform", "renderer", "renderer"]);
         assert_eq!(control.state(), RuntimeState::ResourceDropped);
     }
 
@@ -1073,7 +1218,8 @@ mod tests {
                 Rc::new(move || platform_count.set(platform_count.get() + 1))
             },
         );
-        runtime.control.native_initialized.set(true);
+        runtime.control.platform_initialized.set(true);
+        runtime.control.renderer_initialized.set(true);
 
         assert!(matches!(
             runtime.shutdown_platform(&mut context),
@@ -1094,7 +1240,7 @@ mod tests {
         feature = "sdlgpu3-renderer"
     ))]
     #[test]
-    fn renderer_shutdown_retries_before_texture_cleanup_and_platform_release() {
+    fn renderer_shutdown_retries_before_texture_cleanup_after_platform_release() {
         let _guard = crate::tests::test_guard();
         let renderer_count = Rc::new(Cell::new(0));
         let platform_count = Rc::new(Cell::new(0));
@@ -1118,7 +1264,8 @@ mod tests {
                 Rc::new(move || platform_count.set(platform_count.get() + 1))
             },
         );
-        runtime.control.native_initialized.set(true);
+        runtime.control.platform_initialized.set(true);
+        runtime.control.renderer_initialized.set(true);
 
         let result = runtime.shutdown_renderer(&mut context, Some(&consumer), {
             let renderer_count = Rc::clone(&renderer_count);
@@ -1126,7 +1273,7 @@ mod tests {
             let cleanup_count = Rc::clone(&cleanup_count);
             move || {
                 assert_eq!(renderer_count.get(), 2);
-                assert_eq!(platform_count.get(), 0);
+                assert_eq!(platform_count.get(), 1);
                 cleanup_count.set(cleanup_count.get() + 1);
             }
         });
@@ -1143,7 +1290,7 @@ mod tests {
     }
 
     #[test]
-    fn context_teardown_retries_panicked_renderer_before_platform_phase() {
+    fn context_teardown_releases_platform_then_retries_panicked_renderer() {
         let _guard = crate::tests::test_guard();
         let renderer_count = Rc::new(Cell::new(0));
         let platform_count = Rc::new(Cell::new(0));
@@ -1165,14 +1312,15 @@ mod tests {
                 Rc::new(move || platform_count.set(platform_count.get() + 1))
             },
         );
-        runtime.control.native_initialized.set(true);
+        runtime.control.platform_initialized.set(true);
+        runtime.control.renderer_initialized.set(true);
         let control = Rc::clone(&runtime.control);
 
         drop(context);
 
         assert_eq!(renderer_count.get(), 2);
         assert_eq!(platform_count.get(), 1);
-        assert_eq!(control.phase_log(), ["renderer", "renderer", "platform"]);
+        assert_eq!(control.phase_log(), ["platform", "renderer", "renderer"]);
         assert_eq!(control.state(), RuntimeState::Detached);
         assert!(matches!(
             runtime.poll_fault(),
@@ -1185,7 +1333,7 @@ mod tests {
     }
 
     #[test]
-    fn platform_phase_forces_renderer_release_even_when_called_first() {
+    fn platform_phase_does_not_drop_renderer_global_state() {
         let _guard = crate::tests::test_guard();
         let renderer_count = Rc::new(Cell::new(0));
         let platform_count = Rc::new(Cell::new(0));
@@ -1201,9 +1349,15 @@ mod tests {
             .binding()
             .with_bound_context(|| runtime.control.release_platform_bound().unwrap());
 
-        assert_eq!(runtime.control.phase_log(), ["renderer", "platform"]);
-        assert_eq!(renderer_count.get(), 1);
+        assert_eq!(runtime.control.phase_log(), ["platform"]);
+        assert_eq!(renderer_count.get(), 0);
         assert_eq!(platform_count.get(), 1);
+
+        context
+            .binding()
+            .with_bound_context(|| runtime.control.release_renderer_bound());
+        assert_eq!(runtime.control.phase_log(), ["platform", "renderer"]);
+        assert_eq!(renderer_count.get(), 1);
     }
 
     #[test]

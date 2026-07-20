@@ -74,9 +74,11 @@ fn callback_claim_targets_the_passed_context_and_restores_the_previous_one() {
 fn callback_claim_is_transactional_when_a_foreign_slot_is_occupied() {
     let _guard = lock_context();
     let mut context = Context::create();
-    context
-        .platform_io_mut()
-        .set_platform_create_window_raw(Some(foreign_unary));
+    unsafe {
+        context
+            .platform_io_mut()
+            .set_platform_create_window_raw(Some(foreign_unary));
+    }
 
     let error = match WinitPlatformRuntime::new_for_test(&mut context) {
         Ok(_) => panic!("foreign callback ownership must reject runtime attachment"),
@@ -94,9 +96,11 @@ fn callback_claim_is_transactional_when_a_foreign_slot_is_occupied() {
         foreign_unary as unsafe extern "C" fn(*mut dear_imgui_rs::sys::ImGuiViewport)
     ));
 
-    context
-        .platform_io_mut()
-        .set_platform_create_window_raw(None);
+    unsafe {
+        context
+            .platform_io_mut()
+            .set_platform_create_window_raw(None)
+    };
 }
 
 #[test]
@@ -195,9 +199,11 @@ fn shutdown_preserves_a_replaced_direct_callback_and_is_idempotent() {
     let _guard = lock_context();
     let mut context = Context::create();
     let mut runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
-    context
-        .platform_io_mut()
-        .set_platform_show_window_raw(Some(foreign_unary));
+    unsafe {
+        context
+            .platform_io_mut()
+            .set_platform_show_window_raw(Some(foreign_unary));
+    }
 
     assert_eq!(
         runtime.shutdown(),
@@ -215,7 +221,7 @@ fn shutdown_preserves_a_replaced_direct_callback_and_is_idempotent() {
         runtime.route_secondary_event(&mut context, &Event::<()>::AboutToWait),
         Err(WinitPlatformError::RuntimeDetached)
     );
-    context.platform_io_mut().set_platform_show_window_raw(None);
+    unsafe { context.platform_io_mut().set_platform_show_window_raw(None) };
 }
 
 #[test]
@@ -223,9 +229,11 @@ fn shutdown_preserves_a_replaced_aggregate_callback() {
     let _guard = lock_context();
     let mut context = Context::create();
     let mut runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
-    context
-        .platform_io_mut()
-        .set_platform_get_window_pos_raw(Some(foreign_get_vec2));
+    unsafe {
+        context
+            .platform_io_mut()
+            .set_platform_get_window_pos_raw(Some(foreign_get_vec2));
+    }
 
     assert_eq!(
         runtime.shutdown(),
@@ -233,11 +241,12 @@ fn shutdown_preserves_a_replaced_aggregate_callback() {
             callback: "Platform_GetWindowPos"
         })
     );
-    assert!(
+    // The runtime has stopped and this test exclusively owns the replacement callback.
+    assert!(unsafe {
         context
             .platform_io_mut()
             .clear_platform_get_window_pos_if_raw_callback(foreign_get_vec2)
-    );
+    });
 }
 
 #[test]
@@ -273,17 +282,20 @@ fn shutdown_reports_a_direct_aggregate_slot_replacement() {
 fn runtime_does_not_claim_or_clear_an_unimplemented_foreign_callback() {
     let _guard = lock_context();
     let mut context = Context::create();
-    context
-        .platform_io_mut()
-        .set_platform_get_window_work_area_insets_raw(Some(foreign_get_vec4));
+    unsafe {
+        context
+            .platform_io_mut()
+            .set_platform_get_window_work_area_insets_raw(Some(foreign_get_vec4));
+    }
 
     let mut runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
     assert_eq!(runtime.shutdown(), Ok(()));
-    assert!(
+    // The runtime has stopped and this test exclusively owns the replacement callback.
+    assert!(unsafe {
         context
             .platform_io_mut()
             .clear_platform_get_window_work_area_insets_if_raw_callback(foreign_get_vec4)
-    );
+    });
 }
 
 #[test]

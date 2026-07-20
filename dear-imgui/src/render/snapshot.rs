@@ -21,21 +21,18 @@ use crate::texture::{
 use crate::{ContextId, Id};
 use thiserror::Error;
 
-#[cfg(feature = "multi-viewport")]
-const IMGUI_VIEWPORT_DEFAULT_ID: u32 = 0x1111_1111;
-
 /// Pointer-free identity used by detached renderers.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum SnapshotTextureId {
     /// A Context-owned user texture.
     User(ManagedTextureId),
-    /// The current texture allocation of the Context's font atlas.
+    /// One live or retiring texture allocation of the Context's font atlas.
     FontAtlas {
         /// Context that produced this snapshot.
         context: ContextId,
         /// Process-unique atlas allocation stamp.
         stamp: u64,
-        /// Atlas content generation captured by this snapshot.
+        /// Atlas-local allocation generation captured by this snapshot.
         generation: u64,
     },
 }
@@ -848,9 +845,9 @@ fn draw_data_from_sys(draw_data: &sys::ImDrawData) -> &DrawData {
 
 #[cfg(feature = "multi-viewport")]
 fn is_main_platform_viewport(viewport_id: Id, draw_data: &DrawData) -> bool {
-    viewport_id.raw() == IMGUI_VIEWPORT_DEFAULT_ID
+    viewport_id == crate::platform_io::MAIN_VIEWPORT_ID
         || owner_viewport_id(draw_data)
-            .is_some_and(|owner_id| owner_id.raw() == IMGUI_VIEWPORT_DEFAULT_ID)
+            .is_some_and(|owner_id| owner_id == crate::platform_io::MAIN_VIEWPORT_ID)
 }
 
 fn snapshot_draw_data(
@@ -1254,7 +1251,10 @@ mod tests {
     #[test]
     fn platform_capture_preserves_viewport_order_and_main_identity() {
         let secondary = viewport(0x222, std::ptr::null_mut());
-        let main = viewport(IMGUI_VIEWPORT_DEFAULT_ID, std::ptr::null_mut());
+        let main = viewport(
+            crate::platform_io::MAIN_VIEWPORT_ID.raw(),
+            std::ptr::null_mut(),
+        );
         let secondary_draw = empty_native_draw_data(secondary, [100.0, 50.0], [320.0, 200.0]);
         let main_draw = empty_native_draw_data(main, [0.0, 0.0], [640.0, 360.0]);
         unsafe {

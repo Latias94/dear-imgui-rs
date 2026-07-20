@@ -233,12 +233,14 @@ impl GlowRenderer {
         io.set_backend_flags(flags);
 
         let platform_io = imgui_context.platform_io_mut();
-        platform_io
-            .set_draw_callback_reset_render_state_raw(Some(draw_callback_reset_render_state));
-        platform_io
-            .set_draw_callback_set_sampler_linear_raw(Some(draw_callback_set_sampler_linear));
-        platform_io
-            .set_draw_callback_set_sampler_nearest_raw(Some(draw_callback_set_sampler_nearest));
+        unsafe {
+            platform_io
+                .set_draw_callback_reset_render_state_raw(Some(draw_callback_reset_render_state));
+            platform_io
+                .set_draw_callback_set_sampler_linear_raw(Some(draw_callback_set_sampler_linear));
+            platform_io
+                .set_draw_callback_set_sampler_nearest_raw(Some(draw_callback_set_sampler_nearest));
+        }
     }
 
     pub(super) fn unconfigure_imgui_context_static(imgui_context: &mut ImGuiContext) {
@@ -267,7 +269,7 @@ impl GlowRenderer {
                 )
             })
         {
-            platform_io.set_draw_callback_reset_render_state_raw(None);
+            unsafe { platform_io.set_draw_callback_reset_render_state_raw(None) };
         }
         if platform_io
             .draw_callback_set_sampler_linear_raw()
@@ -278,7 +280,7 @@ impl GlowRenderer {
                 )
             })
         {
-            platform_io.set_draw_callback_set_sampler_linear_raw(None);
+            unsafe { platform_io.set_draw_callback_set_sampler_linear_raw(None) };
         }
         if platform_io
             .draw_callback_set_sampler_nearest_raw()
@@ -289,7 +291,7 @@ impl GlowRenderer {
                 )
             })
         {
-            platform_io.set_draw_callback_set_sampler_nearest_raw(None);
+            unsafe { platform_io.set_draw_callback_set_sampler_nearest_raw(None) };
         }
     }
 }

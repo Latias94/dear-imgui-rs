@@ -282,6 +282,16 @@ impl Drop for Context {
         let raw = self.raw;
         let _bound = RawBoundContextGuard::bind(raw);
 
+        // End the native frame while backend callbacks and attachment state are still live.
+        // EndFrame may update viewport bookkeeping, so quiescing backends first would make an
+        // otherwise recoverable dropped FrameToken depend on torn-down callback state.
+        unsafe {
+            let _ = crate::list_clipper::forget_context_clippers(raw);
+            if (*raw).WithinFrameScope {
+                sys::igEndFrame();
+            }
+        }
+
         run_pre_destroy_phase(
             &attachment_controls,
             &self.state,
@@ -299,7 +309,6 @@ impl Drop for Context {
         );
 
         unsafe {
-            let _ = crate::list_clipper::forget_context_clippers(raw);
             let io = sys::igGetIO_ContextPtr(raw);
             let font_atlas = if io.is_null() {
                 std::ptr::null_mut()
@@ -311,13 +320,7 @@ impl Drop for Context {
             } else {
                 std::ptr::null_mut()
             };
-            with_bound_context(raw, || {
-                if (*raw).WithinFrameScope {
-                    sys::igEndFrame();
-                }
-            });
             self.texture_registry.borrow_mut().teardown();
-            crate::platform_io::clear_typed_callbacks_for_context(raw);
             with_bound_context(raw, || {
                 crate::platform_io::clear_aggregate_callbacks_for_current_context();
             });
@@ -330,6 +333,9 @@ impl Drop for Context {
                 });
             }
             sys::igDestroyContext(raw);
+            // Native context destruction may invoke typed destroy callbacks, so their registry
+            // entries must outlive `igDestroyContext` itself.
+            crate::platform_io::clear_typed_callbacks_for_context(raw);
             crate::fonts::forget_font_atlas_generation(owned_font_atlas);
         }
 

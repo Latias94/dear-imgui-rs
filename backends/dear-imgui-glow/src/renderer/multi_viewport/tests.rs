@@ -63,10 +63,12 @@ fn claim_test_platform_callbacks(context: &mut Context) {
     let io = context.io_mut();
     io.set_backend_flags(io.backend_flags() | BackendFlags::PLATFORM_HAS_VIEWPORTS);
     let platform_io = context.platform_io_mut();
-    platform_io.set_platform_create_window_raw(Some(platform_unary));
-    platform_io.set_platform_destroy_window_raw(Some(platform_unary));
-    platform_io.set_platform_render_window_raw(Some(platform_render));
-    platform_io.set_platform_swap_buffers_raw(Some(platform_render));
+    unsafe {
+        platform_io.set_platform_create_window_raw(Some(platform_unary));
+        platform_io.set_platform_destroy_window_raw(Some(platform_unary));
+        platform_io.set_platform_render_window_raw(Some(platform_render));
+        platform_io.set_platform_swap_buffers_raw(Some(platform_render));
+    }
 }
 
 fn attach_test_platform(context: &mut Context) -> ContextAttachmentLease {
@@ -226,12 +228,14 @@ fn missing_platform_gl_callbacks_reject_attach_transactionally() {
         .unwrap();
     let io = context.io_mut();
     io.set_backend_flags(io.backend_flags() | BackendFlags::PLATFORM_HAS_VIEWPORTS);
-    context
-        .platform_io_mut()
-        .set_platform_create_window_raw(Some(platform_unary));
-    context
-        .platform_io_mut()
-        .set_platform_destroy_window_raw(Some(platform_unary));
+    unsafe {
+        context
+            .platform_io_mut()
+            .set_platform_create_window_raw(Some(platform_unary));
+        context
+            .platform_io_mut()
+            .set_platform_destroy_window_raw(Some(platform_unary));
+    }
     let gl = fake_gl();
     let renderer = test_renderer(&mut context, Some(Rc::clone(&gl)), false);
 
@@ -280,21 +284,23 @@ enum OccupiedRendererSlot {
 
 fn occupy_renderer_slot(context: &mut Context, slot: OccupiedRendererSlot) {
     let platform_io = context.platform_io_mut();
-    match slot {
-        OccupiedRendererSlot::Create => {
-            platform_io.set_renderer_create_window_raw(Some(renderer_unary));
-        }
-        OccupiedRendererSlot::Destroy => {
-            platform_io.set_renderer_destroy_window_raw(Some(renderer_unary));
-        }
-        OccupiedRendererSlot::SetSize => {
-            platform_io.set_renderer_set_window_size_raw(Some(renderer_set_size));
-        }
-        OccupiedRendererSlot::Render => {
-            platform_io.set_renderer_render_window_raw(Some(renderer_render));
-        }
-        OccupiedRendererSlot::Swap => {
-            platform_io.set_renderer_swap_buffers_raw(Some(renderer_render));
+    unsafe {
+        match slot {
+            OccupiedRendererSlot::Create => {
+                platform_io.set_renderer_create_window_raw(Some(renderer_unary));
+            }
+            OccupiedRendererSlot::Destroy => {
+                platform_io.set_renderer_destroy_window_raw(Some(renderer_unary));
+            }
+            OccupiedRendererSlot::SetSize => {
+                platform_io.set_renderer_set_window_size_raw(Some(renderer_set_size));
+            }
+            OccupiedRendererSlot::Render => {
+                platform_io.set_renderer_render_window_raw(Some(renderer_render));
+            }
+            OccupiedRendererSlot::Swap => {
+                platform_io.set_renderer_swap_buffers_raw(Some(renderer_render));
+            }
         }
     }
 }
@@ -408,9 +414,11 @@ fn foreign_callback_replacement_is_preserved_and_reported() {
     let renderer = test_renderer(&mut context, Some(Rc::clone(&gl)), false);
     let mut runtime = GlowViewportRuntime::attach(&mut context, renderer).unwrap();
 
-    context
-        .platform_io_mut()
-        .set_renderer_render_window_raw(Some(renderer_render));
+    unsafe {
+        context
+            .platform_io_mut()
+            .set_renderer_render_window_raw(Some(renderer_render));
+    }
     assert!(matches!(
         runtime.poll_fault(),
         Err(GlowViewportError::RendererCallbackReplaced {
@@ -443,9 +451,11 @@ fn foreign_callback_inserted_into_an_unclaimed_slot_is_preserved() {
     let renderer = test_renderer(&mut context, Some(Rc::clone(&gl)), false);
     let mut runtime = GlowViewportRuntime::attach(&mut context, renderer).unwrap();
 
-    context
-        .platform_io_mut()
-        .set_renderer_create_window_raw(Some(renderer_unary));
+    unsafe {
+        context
+            .platform_io_mut()
+            .set_renderer_create_window_raw(Some(renderer_unary));
+    }
     assert!(matches!(
         runtime.poll_fault(),
         Err(GlowViewportError::RendererCallbackReplaced {

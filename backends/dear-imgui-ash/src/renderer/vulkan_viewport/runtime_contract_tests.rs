@@ -78,11 +78,13 @@ fn claim_test_platform_callbacks(context: &mut Context) {
     let io = context.io_mut();
     io.set_backend_flags(io.backend_flags() | BackendFlags::PLATFORM_HAS_VIEWPORTS);
     let platform_io = context.platform_io_mut();
-    platform_io.set_platform_create_window_raw(Some(platform_unary));
-    platform_io.set_platform_destroy_window_raw(Some(platform_unary));
-    context
-        .main_viewport()
-        .set_platform_handle(std::ptr::dangling_mut::<c_void>());
+    unsafe {
+        platform_io.set_platform_create_window_raw(Some(platform_unary));
+        platform_io.set_platform_destroy_window_raw(Some(platform_unary));
+        context
+            .main_viewport()
+            .set_platform_handle(std::ptr::dangling_mut::<c_void>());
+    }
 }
 
 fn clear_test_main_handle_raw() {
@@ -137,9 +139,11 @@ fn renderer_unconfigure_clears_only_its_flags_and_preserves_foreign_metadata() {
     context
         .io_mut()
         .set_backend_flags(prior_flags | added_flags);
-    context
-        .platform_io_mut()
-        .set_draw_callback_reset_render_state_raw(Some(foreign_draw_reset));
+    unsafe {
+        context
+            .platform_io_mut()
+            .set_draw_callback_reset_render_state_raw(Some(foreign_draw_reset));
+    }
 
     AshRenderer::unconfigure_imgui_context(&mut context, added_flags);
 
@@ -169,15 +173,16 @@ fn every_occupied_renderer_slot_rejects_attach_transactionally() {
         let mut context = Context::create();
         let _platform = attach_test_platform(&mut context);
         let platform_io = context.platform_io_mut();
-        match slot {
-            0 => platform_io.set_renderer_create_window_raw(Some(foreign_renderer_unary)),
-            1 => platform_io.set_renderer_destroy_window_raw(Some(foreign_renderer_unary)),
-            2 => {
-                platform_io.set_renderer_set_window_size_raw(Some(foreign_renderer_set_window_size))
+        unsafe {
+            match slot {
+                0 => platform_io.set_renderer_create_window_raw(Some(foreign_renderer_unary)),
+                1 => platform_io.set_renderer_destroy_window_raw(Some(foreign_renderer_unary)),
+                2 => platform_io
+                    .set_renderer_set_window_size_raw(Some(foreign_renderer_set_window_size)),
+                3 => platform_io.set_renderer_render_window_raw(Some(foreign_renderer_render)),
+                4 => platform_io.set_renderer_swap_buffers_raw(Some(foreign_renderer_render)),
+                _ => unreachable!(),
             }
-            3 => platform_io.set_renderer_render_window_raw(Some(foreign_renderer_render)),
-            4 => platform_io.set_renderer_swap_buffers_raw(Some(foreign_renderer_render)),
-            _ => unreachable!(),
         }
 
         let error = OwningViewportRuntime::attach_for_test(&mut context).unwrap_err();
@@ -201,7 +206,7 @@ fn every_occupied_renderer_slot_rejects_attach_transactionally() {
             _ => unreachable!(),
         };
         assert!(occupied);
-        context.platform_io_mut().clear_renderer_handlers();
+        unsafe { context.platform_io_mut().clear_renderer_handlers() };
     }
 }
 
@@ -270,15 +275,16 @@ fn every_foreign_callback_replacement_is_preserved_during_shutdown() {
         let _platform = attach_test_platform(&mut context);
         let mut runtime = OwningViewportRuntime::attach_for_test(&mut context).unwrap();
         let platform_io = context.platform_io_mut();
-        match slot {
-            0 => platform_io.set_renderer_create_window_raw(Some(foreign_renderer_unary)),
-            1 => platform_io.set_renderer_destroy_window_raw(Some(foreign_renderer_unary)),
-            2 => {
-                platform_io.set_renderer_set_window_size_raw(Some(foreign_renderer_set_window_size))
+        unsafe {
+            match slot {
+                0 => platform_io.set_renderer_create_window_raw(Some(foreign_renderer_unary)),
+                1 => platform_io.set_renderer_destroy_window_raw(Some(foreign_renderer_unary)),
+                2 => platform_io
+                    .set_renderer_set_window_size_raw(Some(foreign_renderer_set_window_size)),
+                3 => platform_io.set_renderer_render_window_raw(Some(foreign_renderer_render)),
+                4 => platform_io.set_renderer_swap_buffers_raw(Some(foreign_renderer_render)),
+                _ => unreachable!(),
             }
-            3 => platform_io.set_renderer_render_window_raw(Some(foreign_renderer_render)),
-            4 => platform_io.set_renderer_swap_buffers_raw(Some(foreign_renderer_render)),
-            _ => unreachable!(),
         }
 
         assert!(matches!(
@@ -328,7 +334,7 @@ fn every_foreign_callback_replacement_is_preserved_during_shutdown() {
             _ => unreachable!(),
         };
         assert!(preserved, "foreign callback slot {slot} was overwritten");
-        context.platform_io_mut().clear_renderer_handlers();
+        unsafe { context.platform_io_mut().clear_renderer_handlers() };
     }
 }
 

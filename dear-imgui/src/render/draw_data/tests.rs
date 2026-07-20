@@ -91,9 +91,11 @@ fn platform_io_standard_draw_callbacks_are_classified() {
 
     let mut ctx = crate::Context::create();
     let platform_io = ctx.platform_io_mut();
-    platform_io.set_draw_callback_reset_render_state_raw(Some(reset));
-    platform_io.set_draw_callback_set_sampler_linear_raw(Some(linear));
-    platform_io.set_draw_callback_set_sampler_nearest_raw(Some(nearest));
+    unsafe {
+        platform_io.set_draw_callback_reset_render_state_raw(Some(reset));
+        platform_io.set_draw_callback_set_sampler_linear_raw(Some(linear));
+        platform_io.set_draw_callback_set_sampler_nearest_raw(Some(nearest));
+    }
 
     assert_eq!(
         classify_standard_draw_callback(Some(reset)),

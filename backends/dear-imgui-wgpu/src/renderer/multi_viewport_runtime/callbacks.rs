@@ -162,11 +162,15 @@ pub(super) fn claim_callbacks(control: &RuntimeControl, context: &mut Context) {
     let binding = context.binding();
     binding.with_bound_context(|| {
         let platform_io = context.platform_io_mut();
-        platform_io.set_renderer_create_window_raw(Some(renderer_create_window_sys));
-        platform_io.set_renderer_destroy_window_raw(Some(renderer_destroy_window_sys));
-        platform_io.set_renderer_set_window_size_raw(Some(renderer_set_window_size_sys));
-        platform_io.set_renderer_render_window_raw(Some(renderer_render_window_sys));
-        platform_io.set_renderer_swap_buffers_raw(Some(renderer_swap_buffers_sys));
+        // SAFETY: these callbacks use the exact sys ABI and remain installed until the runtime
+        // quiesces and releases every renderer-owned viewport allocation.
+        unsafe {
+            platform_io.set_renderer_create_window_raw(Some(renderer_create_window_sys));
+            platform_io.set_renderer_destroy_window_raw(Some(renderer_destroy_window_sys));
+            platform_io.set_renderer_set_window_size_raw(Some(renderer_set_window_size_sys));
+            platform_io.set_renderer_render_window_raw(Some(renderer_render_window_sys));
+            platform_io.set_renderer_swap_buffers_raw(Some(renderer_swap_buffers_sys));
+        }
         let io = context.io_mut();
         io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_VIEWPORTS);
     });
@@ -208,30 +212,35 @@ pub(super) fn release_callbacks(control: &RuntimeControl) -> Result<(), WgpuView
     let platform_io = unsafe { PlatformIo::from_raw_mut(platform_io) };
     let drift = first_callback_drift(platform_io);
 
-    if unary_callback_matches(
-        platform_io.renderer_create_window_raw(),
-        renderer_create_window_sys,
-    ) {
-        platform_io.set_renderer_create_window_raw(None);
-    }
-    if unary_callback_matches(
-        platform_io.renderer_destroy_window_raw(),
-        renderer_destroy_window_sys,
-    ) {
-        platform_io.set_renderer_destroy_window_raw(None);
-    }
-    platform_io.clear_renderer_set_window_size_if_pointer_callback(renderer_set_window_size_sys);
-    if render_callback_matches(
-        platform_io.renderer_render_window_raw(),
-        renderer_render_window_sys,
-    ) {
-        platform_io.set_renderer_render_window_raw(None);
-    }
-    if render_callback_matches(
-        platform_io.renderer_swap_buffers_raw(),
-        renderer_swap_buffers_sys,
-    ) {
-        platform_io.set_renderer_swap_buffers_raw(None);
+    // SAFETY: each slot is cleared only when it still contains this runtime's callback, after the
+    // runtime has stopped accepting new callback work.
+    unsafe {
+        if unary_callback_matches(
+            platform_io.renderer_create_window_raw(),
+            renderer_create_window_sys,
+        ) {
+            platform_io.set_renderer_create_window_raw(None);
+        }
+        if unary_callback_matches(
+            platform_io.renderer_destroy_window_raw(),
+            renderer_destroy_window_sys,
+        ) {
+            platform_io.set_renderer_destroy_window_raw(None);
+        }
+        platform_io
+            .clear_renderer_set_window_size_if_pointer_callback(renderer_set_window_size_sys);
+        if render_callback_matches(
+            platform_io.renderer_render_window_raw(),
+            renderer_render_window_sys,
+        ) {
+            platform_io.set_renderer_render_window_raw(None);
+        }
+        if render_callback_matches(
+            platform_io.renderer_swap_buffers_raw(),
+            renderer_swap_buffers_sys,
+        ) {
+            platform_io.set_renderer_swap_buffers_raw(None);
+        }
     }
 
     if platform_io.renderer_callbacks_are_empty() {
@@ -330,7 +339,7 @@ pub(super) unsafe fn renderer_create_window(control: &RuntimeControl, viewport: 
             if let Err(error) = publish_registered_box(
                 Box::new(data),
                 |pointer| register_viewport_data(control.binding(), pointer),
-                |pointer| viewport.set_renderer_user_data(pointer.cast()),
+                |pointer| unsafe { viewport.set_renderer_user_data(pointer.cast()) },
             ) {
                 control.record_fault(error);
                 request_close_after_surface_creation_failure(viewport);

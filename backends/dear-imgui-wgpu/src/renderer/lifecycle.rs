@@ -139,21 +139,21 @@ impl WgpuRenderer {
             .map(|callback| callback as usize)
             == Some(draw_callback_reset_render_state as *const () as usize)
         {
-            platform_io.set_draw_callback_reset_render_state_raw(None);
+            unsafe { platform_io.set_draw_callback_reset_render_state_raw(None) };
         }
         if platform_io
             .draw_callback_set_sampler_linear_raw()
             .map(|callback| callback as usize)
             == Some(draw_callback_set_sampler_linear as *const () as usize)
         {
-            platform_io.set_draw_callback_set_sampler_linear_raw(None);
+            unsafe { platform_io.set_draw_callback_set_sampler_linear_raw(None) };
         }
         if platform_io
             .draw_callback_set_sampler_nearest_raw()
             .map(|callback| callback as usize)
             == Some(draw_callback_set_sampler_nearest as *const () as usize)
         {
-            platform_io.set_draw_callback_set_sampler_nearest_raw(None);
+            unsafe { platform_io.set_draw_callback_set_sampler_nearest_raw(None) };
         }
         unsafe {
             platform_io.set_renderer_render_state(std::ptr::null_mut());

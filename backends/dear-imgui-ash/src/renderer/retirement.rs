@@ -78,7 +78,8 @@ where
         }
     }
 
-    pub(super) fn enqueue(&mut self, key: K, value: T) -> Result<TextureRetirementBatch, T> {
+    #[cfg(test)]
+    fn enqueue(&mut self, key: K, value: T) -> Result<TextureRetirementBatch, T> {
         debug_assert!(!self.entries.contains_key(&key));
         if self.entries.contains_key(&key) {
             return Err(value);
@@ -118,7 +119,8 @@ where
         reservation.batch
     }
 
-    pub(super) fn request_retirement(
+    #[cfg(test)]
+    fn request_retirement(
         &mut self,
         active: &mut HashMap<K, T>,
         key: K,

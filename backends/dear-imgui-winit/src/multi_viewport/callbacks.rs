@@ -88,32 +88,35 @@ pub(super) fn claim_platform_callbacks(ctx: &mut Context) {
     binding.with_bound_context(|| {
         let pio = ctx.platform_io_mut();
 
-        pio.set_platform_create_window_raw(Some(winit_create_window));
-        pio.set_platform_destroy_window_raw(Some(winit_destroy_window));
-        pio.set_platform_show_window_raw(Some(winit_show_window));
-        pio.set_platform_set_window_pos_raw(Some(winit_set_window_pos));
-        // Avoid direct ImVec2 return; use out-parameter shims for all ImVec2 getters.
-        pio.set_platform_get_window_pos_raw(Some(winit_get_window_pos_out));
-        pio.set_platform_set_window_size_raw(Some(winit_set_window_size));
-        pio.set_platform_get_window_size_raw(Some(winit_get_window_size_out));
-        pio.set_platform_set_window_focus_raw(Some(winit_set_window_focus));
-        pio.set_platform_get_window_focus_raw(Some(winit_get_window_focus));
-        pio.set_platform_get_window_minimized_raw(Some(winit_get_window_minimized));
-        pio.set_platform_set_window_title_raw(Some(winit_set_window_title));
-        pio.set_platform_update_window_raw(Some(winit_update_window));
+        // SAFETY: these static callbacks use the exact sys ABI, reject foreign runtime state,
+        // and remain installed until `release_platform_callbacks` quiesces the runtime.
+        unsafe {
+            pio.set_platform_create_window_raw(Some(winit_create_window));
+            pio.set_platform_destroy_window_raw(Some(winit_destroy_window));
+            pio.set_platform_show_window_raw(Some(winit_show_window));
+            pio.set_platform_set_window_pos_raw(Some(winit_set_window_pos));
+            // Avoid direct ImVec2 return; use out-parameter shims for all ImVec2 getters.
+            pio.set_platform_get_window_pos_raw(Some(winit_get_window_pos_out));
+            pio.set_platform_set_window_size_raw(Some(winit_set_window_size));
+            pio.set_platform_get_window_size_raw(Some(winit_get_window_size_out));
+            pio.set_platform_set_window_focus_raw(Some(winit_set_window_focus));
+            pio.set_platform_get_window_focus_raw(Some(winit_get_window_focus));
+            pio.set_platform_get_window_minimized_raw(Some(winit_get_window_minimized));
+            pio.set_platform_set_window_title_raw(Some(winit_set_window_title));
+            pio.set_platform_update_window_raw(Some(winit_update_window));
 
-        // Also register framebuffer/DPI scale callbacks.
-        // ImGui will use FramebufferScale when available, falling back to
-        // DisplayFramebufferScale otherwise. Install through the out-parameter shim to avoid the
-        // struct-return callback ABI.
-        pio.set_platform_get_window_framebuffer_scale_raw(Some(
-            winit_get_window_framebuffer_scale_out,
-        ));
-        pio.set_platform_get_window_dpi_scale_raw(Some(winit_get_window_dpi_scale));
-        pio.set_platform_on_changed_viewport_raw(Some(winit_on_changed_viewport));
-        pio.set_platform_set_window_alpha_raw(Some(winit_set_window_alpha));
-        pio.set_platform_render_window_raw(Some(winit_platform_render_window));
-        pio.set_platform_swap_buffers_raw(Some(winit_platform_swap_buffers));
+            // ImGui will use FramebufferScale when available, falling back to
+            // DisplayFramebufferScale otherwise. Install through the out-parameter shim to avoid
+            // the struct-return callback ABI.
+            pio.set_platform_get_window_framebuffer_scale_raw(Some(
+                winit_get_window_framebuffer_scale_out,
+            ));
+            pio.set_platform_get_window_dpi_scale_raw(Some(winit_get_window_dpi_scale));
+            pio.set_platform_on_changed_viewport_raw(Some(winit_on_changed_viewport));
+            pio.set_platform_set_window_alpha_raw(Some(winit_set_window_alpha));
+            pio.set_platform_render_window_raw(Some(winit_platform_render_window));
+            pio.set_platform_swap_buffers_raw(Some(winit_platform_swap_buffers));
+        }
     });
 }
 
@@ -174,7 +177,7 @@ pub(super) fn setup_monitors(control: &RuntimeControl, ctx: &mut Context) {
 
     control
         .binding()
-        .with_bound_context(|| ctx.platform_io_mut().set_monitors(&monitors));
+        .with_bound_context(|| unsafe { ctx.platform_io_mut().set_monitors(&monitors) });
 }
 
 pub(super) fn release_platform_callbacks(

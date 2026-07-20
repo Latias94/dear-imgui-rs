@@ -115,9 +115,11 @@ fn platform_io_standard_draw_callback_accessors_roundtrip() {
     let mut raw: sys::ImGuiPlatformIO = new_platform_io();
     let pio = unsafe { PlatformIo::from_raw_mut((&mut raw) as *mut sys::ImGuiPlatformIO) };
 
-    pio.set_draw_callback_reset_render_state_raw(Some(draw_callback_marker));
-    pio.set_draw_callback_set_sampler_linear_raw(Some(draw_callback_marker));
-    pio.set_draw_callback_set_sampler_nearest_raw(Some(draw_callback_marker));
+    unsafe {
+        pio.set_draw_callback_reset_render_state_raw(Some(draw_callback_marker));
+        pio.set_draw_callback_set_sampler_linear_raw(Some(draw_callback_marker));
+        pio.set_draw_callback_set_sampler_nearest_raw(Some(draw_callback_marker));
+    }
 
     assert_eq!(
         pio.draw_callback_reset_render_state_raw()
@@ -154,8 +156,10 @@ fn platform_io_clear_handlers_resets_platform_and_renderer_callbacks() {
     raw.Renderer_DestroyWindow = Some(renderer_cb);
 
     let pio = unsafe { PlatformIo::from_raw_mut((&mut raw) as *mut sys::ImGuiPlatformIO) };
-    pio.clear_platform_handlers();
-    pio.clear_renderer_handlers();
+    unsafe {
+        pio.clear_platform_handlers();
+        pio.clear_renderer_handlers();
+    }
 
     assert!(raw.Platform_CreateWindow.is_none());
     assert!(raw.Platform_DestroyWindow.is_none());
@@ -194,13 +198,15 @@ fn clear_platform_handlers_clears_typed_get_window_callbacks() {
 
     let mut ctx = crate::Context::create();
     let pio = ctx.platform_io_mut();
-    pio.set_platform_set_window_pos_raw(Some(set_pos));
-    pio.set_platform_get_window_pos_raw(Some(get_pos));
-    pio.set_platform_set_window_size_raw(Some(set_size));
-    pio.set_platform_get_window_size_raw(Some(get_size));
-    pio.set_platform_get_window_framebuffer_scale_raw(Some(get_scale));
-    pio.set_platform_get_window_work_area_insets_raw(Some(get_insets));
-    pio.clear_platform_handlers();
+    unsafe {
+        pio.set_platform_set_window_pos_raw(Some(set_pos));
+        pio.set_platform_get_window_pos_raw(Some(get_pos));
+        pio.set_platform_set_window_size_raw(Some(set_size));
+        pio.set_platform_get_window_size_raw(Some(get_size));
+        pio.set_platform_get_window_framebuffer_scale_raw(Some(get_scale));
+        pio.set_platform_get_window_work_area_insets_raw(Some(get_insets));
+        pio.clear_platform_handlers();
+    }
 
     let raw = unsafe { &*pio.as_raw() };
     assert!(raw.Platform_GetWindowPos.is_none());
@@ -252,14 +258,16 @@ fn clear_renderer_handlers_clears_renderer_aggregate_callback_storage_only() {
 
     let mut ctx = crate::Context::create();
     let pio = ctx.platform_io_mut();
-    pio.set_platform_set_window_pos_raw(Some(platform_set_pos));
-    pio.set_renderer_set_window_size_raw(Some(renderer_set_size));
+    unsafe {
+        pio.set_platform_set_window_pos_raw(Some(platform_set_pos));
+        pio.set_renderer_set_window_size_raw(Some(renderer_set_size));
+    }
     assert_eq!(
         unsafe { sys::ImGuiPlatformIO_AggregateCallbackStorageCount() },
         1
     );
 
-    pio.clear_renderer_handlers();
+    unsafe { pio.clear_renderer_handlers() };
 
     let raw = unsafe { &*pio.as_raw() };
     assert!(raw.Platform_SetWindowPos.is_some());
@@ -269,7 +277,7 @@ fn clear_renderer_handlers_clears_renderer_aggregate_callback_storage_only() {
         1
     );
 
-    pio.clear_platform_handlers();
+    unsafe { pio.clear_platform_handlers() };
     assert_eq!(
         unsafe { sys::ImGuiPlatformIO_AggregateCallbackStorageCount() },
         0
@@ -294,7 +302,7 @@ fn conditional_renderer_clear_releases_owned_storage_but_preserves_replacement_s
     let storage_count_before = unsafe { sys::ImGuiPlatformIO_AggregateCallbackStorageCount() };
     let mut ctx = crate::Context::create();
     let platform_io = ctx.platform_io_mut();
-    platform_io.set_renderer_set_window_size_raw(Some(owned_pointer_callback));
+    unsafe { platform_io.set_renderer_set_window_size_raw(Some(owned_pointer_callback)) };
     assert_eq!(
         unsafe { sys::ImGuiPlatformIO_AggregateCallbackStorageCount() },
         storage_count_before + 1
@@ -303,7 +311,10 @@ fn conditional_renderer_clear_releases_owned_storage_but_preserves_replacement_s
     unsafe {
         (*platform_io.as_raw_mut()).Renderer_SetWindowSize = Some(foreign_direct_callback);
     }
-    assert!(platform_io.clear_renderer_set_window_size_if_pointer_callback(owned_pointer_callback));
+    // The test owns the callback table and no native call can run while it is mutated here.
+    assert!(unsafe {
+        platform_io.clear_renderer_set_window_size_if_pointer_callback(owned_pointer_callback)
+    });
     assert_eq!(
         unsafe { (*platform_io.as_raw()).Renderer_SetWindowSize }.map(|callback| callback as usize),
         Some(foreign_direct_callback as *const () as usize)
@@ -343,17 +354,22 @@ fn conditional_platform_aggregate_clear_preserves_same_thunk_replacements() {
     let storage_count_before = unsafe { sys::ImGuiPlatformIO_AggregateCallbackStorageCount() };
     let mut ctx = crate::Context::create();
     let platform_io = ctx.platform_io_mut();
-    platform_io.set_platform_get_window_pos_raw(Some(owned_vec2));
-    platform_io.set_platform_get_window_size_raw(Some(owned_vec2));
-    platform_io.set_platform_get_window_framebuffer_scale_raw(Some(owned_vec2));
-    platform_io.set_platform_get_window_work_area_insets_raw(Some(owned_vec4));
-    platform_io.set_platform_set_window_pos_raw(Some(owned_const_vec2));
-    platform_io.set_platform_set_window_size_raw(Some(owned_const_vec2));
+    unsafe {
+        platform_io.set_platform_get_window_pos_raw(Some(owned_vec2));
+        platform_io.set_platform_get_window_size_raw(Some(owned_vec2));
+        platform_io.set_platform_get_window_framebuffer_scale_raw(Some(owned_vec2));
+        platform_io.set_platform_get_window_work_area_insets_raw(Some(owned_vec4));
+        platform_io.set_platform_set_window_pos_raw(Some(owned_const_vec2));
+        platform_io.set_platform_set_window_size_raw(Some(owned_const_vec2));
 
-    platform_io.set_platform_get_window_pos_raw(Some(replacement_vec2));
-    platform_io.set_platform_set_window_pos_raw(Some(replacement_const_vec2));
-    assert!(!platform_io.clear_platform_get_window_pos_if_raw_callback(owned_vec2));
-    assert!(!platform_io.clear_platform_set_window_pos_if_pointer_callback(owned_const_vec2));
+        platform_io.set_platform_get_window_pos_raw(Some(replacement_vec2));
+        platform_io.set_platform_set_window_pos_raw(Some(replacement_const_vec2));
+    }
+    // The test owns the callback table and no native call can run while it is mutated here.
+    assert!(unsafe { !platform_io.clear_platform_get_window_pos_if_raw_callback(owned_vec2) });
+    assert!(unsafe {
+        !platform_io.clear_platform_set_window_pos_if_pointer_callback(owned_const_vec2)
+    });
     let installed = super::trampolines::load_cb_for_platform_io(
         platform_io.as_raw(),
         &super::trampolines::PLATFORM_GET_WINDOW_POS_RAW_CB,
@@ -364,12 +380,18 @@ fn conditional_platform_aggregate_clear_preserves_same_thunk_replacements() {
         replacement_vec2 as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2)
     ));
 
-    assert!(platform_io.clear_platform_get_window_pos_if_raw_callback(replacement_vec2));
-    assert!(platform_io.clear_platform_set_window_pos_if_pointer_callback(replacement_const_vec2));
-    assert!(platform_io.clear_platform_set_window_size_if_pointer_callback(owned_const_vec2));
-    assert!(platform_io.clear_platform_get_window_size_if_raw_callback(owned_vec2));
-    assert!(platform_io.clear_platform_get_window_framebuffer_scale_if_raw_callback(owned_vec2));
-    assert!(platform_io.clear_platform_get_window_work_area_insets_if_raw_callback(owned_vec4));
+    unsafe {
+        assert!(platform_io.clear_platform_get_window_pos_if_raw_callback(replacement_vec2));
+        assert!(
+            platform_io.clear_platform_set_window_pos_if_pointer_callback(replacement_const_vec2)
+        );
+        assert!(platform_io.clear_platform_set_window_size_if_pointer_callback(owned_const_vec2));
+        assert!(platform_io.clear_platform_get_window_size_if_raw_callback(owned_vec2));
+        assert!(
+            platform_io.clear_platform_get_window_framebuffer_scale_if_raw_callback(owned_vec2)
+        );
+        assert!(platform_io.clear_platform_get_window_work_area_insets_if_raw_callback(owned_vec4));
+    }
     assert!(unsafe { (*platform_io.as_raw()).Platform_GetWindowPos }.is_none());
     assert!(unsafe { (*platform_io.as_raw()).Platform_GetWindowSize }.is_none());
     assert!(unsafe { (*platform_io.as_raw()).Platform_GetWindowFramebufferScale }.is_none());
@@ -397,8 +419,10 @@ fn conditional_platform_aggregate_clear_reports_direct_slot_replacements() {
     let storage_count_before = unsafe { sys::ImGuiPlatformIO_AggregateCallbackStorageCount() };
     let mut ctx = crate::Context::create();
     let platform_io = ctx.platform_io_mut();
-    platform_io.set_platform_get_window_pos_raw(Some(owned_get));
-    platform_io.set_platform_set_window_pos_raw(Some(owned_set));
+    unsafe {
+        platform_io.set_platform_get_window_pos_raw(Some(owned_get));
+        platform_io.set_platform_set_window_pos_raw(Some(owned_set));
+    }
 
     unsafe {
         let raw = platform_io.as_raw_mut();
@@ -406,8 +430,9 @@ fn conditional_platform_aggregate_clear_reports_direct_slot_replacements() {
         (*raw).Platform_SetWindowPos = Some(foreign_set);
     }
 
-    assert!(!platform_io.clear_platform_get_window_pos_if_raw_callback(owned_get));
-    assert!(!platform_io.clear_platform_set_window_pos_if_pointer_callback(owned_set));
+    // The test owns the callback table and no native call can run while it is mutated here.
+    assert!(unsafe { !platform_io.clear_platform_get_window_pos_if_raw_callback(owned_get) });
+    assert!(unsafe { !platform_io.clear_platform_set_window_pos_if_pointer_callback(owned_set) });
     let raw = unsafe { &*platform_io.as_raw() };
     assert!(std::ptr::fn_addr_eq(
         raw.Platform_GetWindowPos.unwrap(),
@@ -448,8 +473,10 @@ fn context_drop_clears_aggregate_callback_storage() {
     {
         let mut ctx = crate::Context::create();
         let pio = ctx.platform_io_mut();
-        pio.set_platform_set_window_pos_raw(Some(platform_set_pos));
-        pio.set_renderer_set_window_size_raw(Some(renderer_set_size));
+        unsafe {
+            pio.set_platform_set_window_pos_raw(Some(platform_set_pos));
+            pio.set_renderer_set_window_size_raw(Some(renderer_set_size));
+        }
         assert_eq!(
             unsafe { sys::ImGuiPlatformIO_AggregateCallbackStorageCount() },
             storage_count_before + 1
@@ -513,18 +540,20 @@ fn get_window_pos_and_size_callbacks_are_context_local() {
     ctx_a
         .io_mut()
         .set_backend_language_user_data(language_user_data_a);
-    ctx_a
-        .platform_io_mut()
-        .set_platform_get_window_pos_raw(Some(get_pos_a));
-    ctx_a
-        .platform_io_mut()
-        .set_platform_get_window_size_raw(Some(get_size_a));
-    ctx_a
-        .platform_io_mut()
-        .set_platform_get_window_framebuffer_scale_raw(Some(get_scale_a));
-    ctx_a
-        .platform_io_mut()
-        .set_platform_get_window_work_area_insets_raw(Some(get_insets_a));
+    unsafe {
+        ctx_a
+            .platform_io_mut()
+            .set_platform_get_window_pos_raw(Some(get_pos_a));
+        ctx_a
+            .platform_io_mut()
+            .set_platform_get_window_size_raw(Some(get_size_a));
+        ctx_a
+            .platform_io_mut()
+            .set_platform_get_window_framebuffer_scale_raw(Some(get_scale_a));
+        ctx_a
+            .platform_io_mut()
+            .set_platform_get_window_work_area_insets_raw(Some(get_insets_a));
+    }
     assert_eq!(
         ctx_a.io().backend_language_user_data(),
         language_user_data_a
@@ -537,18 +566,20 @@ fn get_window_pos_and_size_callbacks_are_context_local() {
     ctx_b
         .io_mut()
         .set_backend_language_user_data(language_user_data_b);
-    ctx_b
-        .platform_io_mut()
-        .set_platform_get_window_pos_raw(Some(get_pos_b));
-    ctx_b
-        .platform_io_mut()
-        .set_platform_get_window_size_raw(Some(get_size_b));
-    ctx_b
-        .platform_io_mut()
-        .set_platform_get_window_framebuffer_scale_raw(Some(get_scale_b));
-    ctx_b
-        .platform_io_mut()
-        .set_platform_get_window_work_area_insets_raw(Some(get_insets_b));
+    unsafe {
+        ctx_b
+            .platform_io_mut()
+            .set_platform_get_window_pos_raw(Some(get_pos_b));
+        ctx_b
+            .platform_io_mut()
+            .set_platform_get_window_size_raw(Some(get_size_b));
+        ctx_b
+            .platform_io_mut()
+            .set_platform_get_window_framebuffer_scale_raw(Some(get_scale_b));
+        ctx_b
+            .platform_io_mut()
+            .set_platform_get_window_work_area_insets_raw(Some(get_insets_b));
+    }
     assert_eq!(
         ctx_b.io().backend_language_user_data(),
         language_user_data_b
@@ -774,9 +805,11 @@ fn clear_handlers_target_receiver_platform_io_not_current_context() {
     let mut ctx_a = crate::Context::create();
     let raw_a = ctx_a.as_raw();
     let pio_a = ctx_a.platform_io_mut().as_raw_mut();
-    ctx_a
-        .platform_io_mut()
-        .set_platform_get_window_pos_raw(Some(get_pos));
+    unsafe {
+        ctx_a
+            .platform_io_mut()
+            .set_platform_get_window_pos_raw(Some(get_pos));
+    }
     unsafe {
         ctx_a
             .platform_io_mut()

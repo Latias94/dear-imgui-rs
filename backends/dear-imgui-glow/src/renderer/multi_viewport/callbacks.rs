@@ -55,9 +55,11 @@ pub(super) fn preflight_callbacks(context: &Context) -> Result<(), GlowViewportE
 pub(super) fn claim_callbacks(control: &RuntimeControl, context: &mut Context) {
     let binding = context.binding();
     binding.with_bound_context(|| {
-        context
-            .platform_io_mut()
-            .set_renderer_render_window_raw(Some(renderer_render_window_sys));
+        unsafe {
+            context
+                .platform_io_mut()
+                .set_renderer_render_window_raw(Some(renderer_render_window_sys));
+        }
         let io = context.io_mut();
         io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_VIEWPORTS);
     });
@@ -104,7 +106,7 @@ pub(super) fn release_callbacks(control: &RuntimeControl) -> Result<(), GlowView
     let raw = unsafe { &*platform_io.as_raw() };
     let drift = first_renderer_callback_drift(raw);
     if render_callback_matches(platform_io.renderer_render_window_raw()) {
-        platform_io.set_renderer_render_window_raw(None);
+        unsafe { platform_io.set_renderer_render_window_raw(None) };
     }
 
     if platform_io.renderer_callbacks_are_empty() {

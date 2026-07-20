@@ -41,7 +41,7 @@ use imgui::sys;
 use std::sync::{Mutex, OnceLock};
 
 #[cfg(feature = "multi-viewport")]
-static DESTROY_CALLBACK_SAW_NULL_BACKEND_USER_DATA: std::sync::atomic::AtomicBool =
+static DESTROY_CALLBACK_SAW_LIVE_BACKEND_USER_DATA: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
 #[cfg(feature = "multi-viewport")]
@@ -244,8 +244,10 @@ fn viewport_prepare_refreshes_main_platform_user_data_to_live_handle() {
     {
         let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
         let main_viewport = context.context_mut().main_viewport();
-        main_viewport.set_platform_user_data(stale);
-        main_viewport.set_platform_handle(std::ptr::null_mut());
+        unsafe {
+            main_viewport.set_platform_user_data(stale);
+            main_viewport.set_platform_handle(std::ptr::null_mut());
+        }
     }
 
     app.update();
@@ -472,7 +474,7 @@ fn viewport_platform_io_callbacks_capture_commands_and_bevy_system_applies_them(
             .get_non_send::<ImguiViewportBridge>()
             .expect("bridge should still exist");
         assert_eq!(
-            bridge.commands(),
+            &*bridge.commands(),
             [
                 ImguiViewportCommand::Create(ImguiViewportSnapshot {
                     id,
@@ -553,33 +555,39 @@ fn viewport_destroy_callback_ignores_owned_by_app_main_viewport() {
 
 #[cfg(feature = "multi-viewport")]
 #[test]
-fn context_drop_clears_backend_user_data_before_destroying_platform_windows() {
+fn context_drop_keeps_backend_user_data_live_until_platform_windows_are_destroyed() {
     let _guard = imgui_context_guard();
 
-    unsafe extern "C" fn assert_backend_user_data_is_cleared(viewport: *mut sys::ImGuiViewport) {
+    unsafe extern "C" fn observe_live_backend_user_data(viewport: *mut sys::ImGuiViewport) {
         let io = unsafe { sys::igGetIO_Nil() };
-        let cleared = io.is_null() || unsafe { (*io).BackendPlatformUserData.is_null() };
-        DESTROY_CALLBACK_SAW_NULL_BACKEND_USER_DATA
-            .store(cleared, std::sync::atomic::Ordering::SeqCst);
+        let live = !io.is_null() && unsafe { !(*io).BackendPlatformUserData.is_null() };
+        DESTROY_CALLBACK_SAW_LIVE_BACKEND_USER_DATA
+            .store(live, std::sync::atomic::Ordering::SeqCst);
         if let Some(viewport) = unsafe { viewport.as_mut() } {
             viewport.PlatformUserData = std::ptr::null_mut();
             viewport.PlatformHandle = std::ptr::null_mut();
         }
     }
 
-    DESTROY_CALLBACK_SAW_NULL_BACKEND_USER_DATA.store(false, std::sync::atomic::Ordering::SeqCst);
+    DESTROY_CALLBACK_SAW_LIVE_BACKEND_USER_DATA.store(false, std::sync::atomic::Ordering::SeqCst);
     let mut app = app_with_multi_viewport_bridge("viewport-context-drop");
     {
         let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
         let main_viewport = context.context_mut().main_viewport();
-        main_viewport.set_platform_user_data(std::ptr::dangling_mut::<u8>().cast());
-        main_viewport.set_platform_handle(std::ptr::dangling_mut::<u8>().cast());
-        main_viewport.set_platform_window_created(true);
         unsafe {
+            main_viewport.set_platform_user_data(std::ptr::dangling_mut::<u8>().cast());
+            main_viewport.set_platform_handle(std::ptr::dangling_mut::<u8>().cast());
+            main_viewport.set_platform_window_created(true);
             let platform_io = context.context_mut().platform_io_mut().as_raw_mut();
-            (*platform_io).Platform_DestroyWindow = Some(assert_backend_user_data_is_cleared);
+            (*platform_io).Platform_DestroyWindow = Some(observe_live_backend_user_data);
         }
     }
+
+    drop(
+        app.world_mut()
+            .remove_non_send::<ImguiViewportBridge>()
+            .expect("ImguiViewportBridge should be removable for shutdown-order testing"),
+    );
 
     drop(
         app.world_mut()
@@ -588,8 +596,8 @@ fn context_drop_clears_backend_user_data_before_destroying_platform_windows() {
     );
 
     assert!(
-        DESTROY_CALLBACK_SAW_NULL_BACKEND_USER_DATA.load(std::sync::atomic::Ordering::SeqCst),
-        "ImguiContext shutdown must not leave Platform_DestroyWindow callbacks with a dangling bridge pointer"
+        DESTROY_CALLBACK_SAW_LIVE_BACKEND_USER_DATA.load(std::sync::atomic::Ordering::SeqCst),
+        "ImguiContext must retain the bridge until Platform_DestroyWindow callbacks finish"
     );
 }
 

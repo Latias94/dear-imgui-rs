@@ -261,10 +261,10 @@ fn assert_platform_bridge_replaced_stale_handlers(context: &dear_imgui_rs::Conte
 
 fn install_stale_renderer_backend_handlers(context: &mut dear_imgui_rs::Context) {
     let platform_io = context.platform_io_mut();
-    platform_io.set_draw_callback_reset_render_state_raw(Some(stale_draw_callback));
-    platform_io.set_draw_callback_set_sampler_linear_raw(Some(stale_draw_callback));
-    platform_io.set_draw_callback_set_sampler_nearest_raw(Some(stale_draw_callback));
     unsafe {
+        platform_io.set_draw_callback_reset_render_state_raw(Some(stale_draw_callback));
+        platform_io.set_draw_callback_set_sampler_linear_raw(Some(stale_draw_callback));
+        platform_io.set_draw_callback_set_sampler_nearest_raw(Some(stale_draw_callback));
         platform_io.set_renderer_render_state(std::ptr::dangling_mut::<u8>().cast());
         let raw = platform_io.as_raw_mut();
         (*raw).Renderer_TextureMaxWidth = 1234;

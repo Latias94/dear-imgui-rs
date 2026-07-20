@@ -116,11 +116,13 @@ fn claim_test_platform_callbacks(context: &mut Context) {
     let io = context.io_mut();
     io.set_backend_flags(io.backend_flags() | BackendFlags::PLATFORM_HAS_VIEWPORTS);
     let platform_io = context.platform_io_mut();
-    platform_io.set_platform_create_window_raw(Some(platform_unary));
-    platform_io.set_platform_destroy_window_raw(Some(platform_unary));
-    context
-        .main_viewport()
-        .set_platform_handle(std::ptr::dangling_mut::<c_void>());
+    unsafe {
+        platform_io.set_platform_create_window_raw(Some(platform_unary));
+        platform_io.set_platform_destroy_window_raw(Some(platform_unary));
+        context
+            .main_viewport()
+            .set_platform_handle(std::ptr::dangling_mut::<c_void>());
+    }
 }
 
 fn clear_test_main_handle_raw() {
@@ -178,13 +180,15 @@ fn shutdown_returned_renderer(renderer: &mut WgpuRenderer, context: &mut Context
 
 fn occupy_renderer_slot(context: &mut Context, slot: usize) {
     let platform_io = context.platform_io_mut();
-    match slot {
-        0 => platform_io.set_renderer_create_window_raw(Some(renderer_unary)),
-        1 => platform_io.set_renderer_destroy_window_raw(Some(renderer_unary)),
-        2 => platform_io.set_renderer_set_window_size_raw(Some(renderer_set_size)),
-        3 => platform_io.set_renderer_render_window_raw(Some(renderer_render)),
-        4 => platform_io.set_renderer_swap_buffers_raw(Some(renderer_render)),
-        _ => unreachable!(),
+    unsafe {
+        match slot {
+            0 => platform_io.set_renderer_create_window_raw(Some(renderer_unary)),
+            1 => platform_io.set_renderer_destroy_window_raw(Some(renderer_unary)),
+            2 => platform_io.set_renderer_set_window_size_raw(Some(renderer_set_size)),
+            3 => platform_io.set_renderer_render_window_raw(Some(renderer_render)),
+            4 => platform_io.set_renderer_swap_buffers_raw(Some(renderer_render)),
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -250,12 +254,14 @@ fn missing_platform_callback_rejects_attach_transactionally() {
     };
     let io = context.io_mut();
     io.set_backend_flags(io.backend_flags() | BackendFlags::PLATFORM_HAS_VIEWPORTS);
-    context
-        .platform_io_mut()
-        .set_platform_create_window_raw(Some(platform_unary));
-    context
-        .main_viewport()
-        .set_platform_handle(std::ptr::dangling_mut::<c_void>());
+    unsafe {
+        context
+            .platform_io_mut()
+            .set_platform_create_window_raw(Some(platform_unary));
+        context
+            .main_viewport()
+            .set_platform_handle(std::ptr::dangling_mut::<c_void>());
+    }
 
     let failure =
         OwningViewportRuntime::attach_for_test(&mut context, WgpuRenderer::empty()).unwrap_err();
@@ -283,8 +289,10 @@ fn missing_main_window_handle_rejects_attach_transactionally() {
     let io = context.io_mut();
     io.set_backend_flags(io.backend_flags() | BackendFlags::PLATFORM_HAS_VIEWPORTS);
     let platform_io = context.platform_io_mut();
-    platform_io.set_platform_create_window_raw(Some(platform_unary));
-    platform_io.set_platform_destroy_window_raw(Some(platform_unary));
+    unsafe {
+        platform_io.set_platform_create_window_raw(Some(platform_unary));
+        platform_io.set_platform_destroy_window_raw(Some(platform_unary));
+    }
 
     let failure =
         OwningViewportRuntime::attach_for_test(&mut context, WgpuRenderer::empty()).unwrap_err();
@@ -313,7 +321,7 @@ fn every_occupied_renderer_slot_rejects_attach_without_partial_claim() {
         ));
         let mut renderer = failure.into_renderer();
         shutdown_returned_renderer(&mut renderer, &mut context);
-        context.platform_io_mut().clear_renderer_handlers();
+        unsafe { context.platform_io_mut().clear_renderer_handlers() };
     }
 }
 
@@ -529,9 +537,11 @@ fn foreign_callback_replacement_is_preserved_and_reported() {
     let mut runtime =
         OwningViewportRuntime::attach_for_test(&mut context, WgpuRenderer::empty()).unwrap();
 
-    context
-        .platform_io_mut()
-        .set_renderer_render_window_raw(Some(renderer_render));
+    unsafe {
+        context
+            .platform_io_mut()
+            .set_renderer_render_window_raw(Some(renderer_render));
+    }
     assert!(matches!(
         runtime.poll_fault(),
         Err(WgpuViewportError::RendererCallbackReplaced {
@@ -553,7 +563,7 @@ fn foreign_callback_replacement_is_preserved_and_reported() {
         context.platform_io().renderer_render_window_raw(),
         renderer_render
     ));
-    context.platform_io_mut().clear_renderer_handlers();
+    unsafe { context.platform_io_mut().clear_renderer_handlers() };
 }
 
 #[test]
@@ -679,9 +689,14 @@ fn attach_configured_test_runtime(context: &mut Context) -> (OwningViewportRunti
     let io = context.io_mut();
     io.set_backend_flags(io.backend_flags() | owned_flags);
     let platform_io = context.platform_io_mut();
-    platform_io.set_draw_callback_reset_render_state_raw(Some(draw_callback_reset_render_state));
-    platform_io.set_draw_callback_set_sampler_linear_raw(Some(draw_callback_set_sampler_linear));
-    platform_io.set_draw_callback_set_sampler_nearest_raw(Some(draw_callback_set_sampler_nearest));
+    unsafe {
+        platform_io
+            .set_draw_callback_reset_render_state_raw(Some(draw_callback_reset_render_state));
+        platform_io
+            .set_draw_callback_set_sampler_linear_raw(Some(draw_callback_set_sampler_linear));
+        platform_io
+            .set_draw_callback_set_sampler_nearest_raw(Some(draw_callback_set_sampler_nearest));
+    }
 
     let mut renderer = WgpuRenderer::empty();
     renderer.bind_context(context, owned_flags).unwrap();
@@ -696,9 +711,11 @@ fn replace_backend_state_with_foreign_values(context: &mut Context) {
     context
         .set_renderer_name(Some("foreign-renderer".to_owned()))
         .unwrap();
-    context
-        .platform_io_mut()
-        .set_draw_callback_reset_render_state_raw(Some(foreign_draw_callback));
+    unsafe {
+        context
+            .platform_io_mut()
+            .set_draw_callback_reset_render_state_raw(Some(foreign_draw_callback));
+    }
 }
 
 fn assert_and_clear_foreign_backend_state(context: &mut Context, owned_flags: BackendFlags) {
@@ -729,9 +746,11 @@ fn assert_and_clear_foreign_backend_state(context: &mut Context, owned_flags: Ba
     );
 
     context.set_renderer_name(None::<String>).unwrap();
-    context
-        .platform_io_mut()
-        .set_draw_callback_reset_render_state_raw(None);
+    unsafe {
+        context
+            .platform_io_mut()
+            .set_draw_callback_reset_render_state_raw(None);
+    }
     let io = context.io_mut();
     let mut flags = io.backend_flags();
     flags.remove(owned_flags | BackendFlags::RENDERER_HAS_VIEWPORTS);

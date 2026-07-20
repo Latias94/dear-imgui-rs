@@ -37,11 +37,13 @@ use bevy_winit::WINIT_WINDOWS;
 use dear_imgui_rs as imgui;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use dear_imgui_rs::sys;
+use std::cell::{Ref, RefCell};
 use std::collections::{HashMap, HashSet};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use std::ffi::{CStr, c_void};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use std::ptr::NonNull;
+use std::rc::Rc;
 
 /// Stable Dear ImGui viewport identifier used by the Bevy bridge.
 pub type ImguiViewportId = imgui::Id;
@@ -106,14 +108,16 @@ pub struct ImguiViewportCamera {
     pub viewport_id: ImguiViewportId,
 }
 
+pub(crate) type ImguiViewportBridgeKeepalive = Rc<RefCell<ImguiViewportBridgeState>>;
+
 /// Backend-local queue and viewport-to-window map for Dear ImGui platform windows.
 #[derive(Default)]
 pub struct ImguiViewportBridge {
-    inner: Box<ImguiViewportBridgeState>,
+    inner: ImguiViewportBridgeKeepalive,
 }
 
 #[derive(Default)]
-struct ImguiViewportBridgeState {
+pub(crate) struct ImguiViewportBridgeState {
     commands: Vec<ImguiViewportCommand>,
     viewport_windows: HashMap<ImguiViewportId, Entity>,
     viewport_cameras: HashMap<ImguiViewportId, Entity>,
@@ -155,59 +159,83 @@ impl ImguiViewportBridgeState {
 
 impl ImguiViewportBridge {
     #[must_use]
-    pub fn commands(&self) -> &[ImguiViewportCommand] {
-        &self.inner.commands
+    pub fn commands(&self) -> Ref<'_, [ImguiViewportCommand]> {
+        Ref::map(self.inner.borrow(), |state| state.commands.as_slice())
     }
 
     #[must_use]
     pub fn viewport_window(&self, viewport_id: ImguiViewportId) -> Option<Entity> {
-        self.inner.viewport_windows.get(&viewport_id).copied()
+        self.inner
+            .borrow()
+            .viewport_windows
+            .get(&viewport_id)
+            .copied()
     }
 
     #[must_use]
     pub fn viewport_camera(&self, viewport_id: ImguiViewportId) -> Option<Entity> {
-        self.inner.viewport_cameras.get(&viewport_id).copied()
+        self.inner
+            .borrow()
+            .viewport_cameras
+            .get(&viewport_id)
+            .copied()
     }
 
     #[must_use]
     pub fn viewport_feedback(&self, viewport_id: ImguiViewportId) -> Option<ImguiViewportFeedback> {
-        self.inner.viewport_feedback.get(&viewport_id).copied()
+        self.inner
+            .borrow()
+            .viewport_feedback
+            .get(&viewport_id)
+            .copied()
     }
 
     pub fn queue(&mut self, command: ImguiViewportCommand) {
-        self.inner.commands.push(command);
+        self.inner.borrow_mut().commands.push(command);
     }
 
     #[must_use]
     pub fn drain_commands(&mut self) -> Vec<ImguiViewportCommand> {
-        self.inner.commands.drain(..).collect()
+        self.inner.borrow_mut().commands.drain(..).collect()
     }
 
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     fn clear_viewport_state(&mut self) {
-        self.inner.viewport_windows.clear();
-        self.inner.viewport_cameras.clear();
-        self.inner.viewport_feedback.clear();
-        self.inner.viewport_flags.clear();
-        self.inner.viewport_handles.clear();
-        self.inner.commands.clear();
-        self.inner.focus_next_frame.clear();
-        self.inner.focus_ready.clear();
+        let mut state = self.inner.borrow_mut();
+        state.viewport_windows.clear();
+        state.viewport_cameras.clear();
+        state.viewport_feedback.clear();
+        state.viewport_flags.clear();
+        state.viewport_handles.clear();
+        state.commands.clear();
+        state.focus_next_frame.clear();
+        state.focus_ready.clear();
     }
 
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-    fn stable_ptr(&mut self) -> *mut ImguiViewportBridgeState {
-        (&mut *self.inner) as *mut ImguiViewportBridgeState
+    fn stable_ptr(&self) -> *mut RefCell<ImguiViewportBridgeState> {
+        Rc::as_ptr(&self.inner).cast_mut()
+    }
+
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    fn keepalive(&self) -> ImguiViewportBridgeKeepalive {
+        Rc::clone(&self.inner)
     }
 
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     fn set_viewport_window(&mut self, viewport_id: ImguiViewportId, entity: Entity) {
-        self.inner.viewport_windows.insert(viewport_id, entity);
+        self.inner
+            .borrow_mut()
+            .viewport_windows
+            .insert(viewport_id, entity);
     }
 
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     fn remove_viewport_window(&mut self, viewport_id: ImguiViewportId) -> Option<Entity> {
-        self.inner.viewport_windows.remove(&viewport_id)
+        self.inner
+            .borrow_mut()
+            .viewport_windows
+            .remove(&viewport_id)
     }
 
     #[cfg(all(
@@ -216,7 +244,10 @@ impl ImguiViewportBridge {
         not(target_arch = "wasm32")
     ))]
     fn set_viewport_camera(&mut self, viewport_id: ImguiViewportId, entity: Entity) {
-        self.inner.viewport_cameras.insert(viewport_id, entity);
+        self.inner
+            .borrow_mut()
+            .viewport_cameras
+            .insert(viewport_id, entity);
     }
 
     #[cfg(all(
@@ -225,22 +256,28 @@ impl ImguiViewportBridge {
         not(target_arch = "wasm32")
     ))]
     fn remove_viewport_camera(&mut self, viewport_id: ImguiViewportId) -> Option<Entity> {
-        self.inner.viewport_cameras.remove(&viewport_id)
+        self.inner
+            .borrow_mut()
+            .viewport_cameras
+            .remove(&viewport_id)
     }
 
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     fn remove_viewport_feedback(&mut self, viewport_id: ImguiViewportId) {
-        self.inner.viewport_feedback.remove(&viewport_id);
+        self.inner
+            .borrow_mut()
+            .viewport_feedback
+            .remove(&viewport_id);
     }
 
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     fn remove_viewport_flags(&mut self, viewport_id: ImguiViewportId) {
-        self.inner.viewport_flags.remove(&viewport_id);
+        self.inner.borrow_mut().viewport_flags.remove(&viewport_id);
     }
 
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     fn remove_platform_handle(&mut self, viewport_id: ImguiViewportId) {
-        self.inner.remove_platform_handle(viewport_id);
+        self.inner.borrow_mut().remove_platform_handle(viewport_id);
     }
 
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -249,13 +286,17 @@ impl ImguiViewportBridge {
         viewport_id: ImguiViewportId,
         feedback: ImguiViewportFeedback,
     ) {
-        self.inner.viewport_feedback.insert(viewport_id, feedback);
+        self.inner
+            .borrow_mut()
+            .viewport_feedback
+            .insert(viewport_id, feedback);
     }
 
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     fn show_should_focus(&self, viewport_id: ImguiViewportId) -> bool {
         !self
             .inner
+            .borrow()
             .viewport_flags
             .get(&viewport_id)
             .is_some_and(|flags| flags.contains(imgui::ViewportFlags::NO_FOCUS_ON_APPEARING))
@@ -263,26 +304,14 @@ impl ImguiViewportBridge {
 
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     fn request_focus_next_frame(&mut self, viewport_id: ImguiViewportId) {
-        self.inner.focus_next_frame.insert(viewport_id);
+        self.inner.borrow_mut().focus_next_frame.insert(viewport_id);
     }
 
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     fn clear_focus_request(&mut self, viewport_id: ImguiViewportId) {
-        self.inner.focus_next_frame.remove(&viewport_id);
-        self.inner.focus_ready.remove(&viewport_id);
-    }
-}
-
-impl Drop for ImguiViewportBridge {
-    fn drop(&mut self) {
-        self.inner.commands.clear();
-        self.inner.viewport_windows.clear();
-        self.inner.viewport_cameras.clear();
-        self.inner.viewport_feedback.clear();
-        self.inner.viewport_flags.clear();
-        self.inner.viewport_handles.clear();
-        self.inner.focus_next_frame.clear();
-        self.inner.focus_ready.clear();
+        let mut state = self.inner.borrow_mut();
+        state.focus_next_frame.remove(&viewport_id);
+        state.focus_ready.remove(&viewport_id);
     }
 }
 
@@ -327,16 +356,17 @@ fn attach_bridge_to_imgui_context(world: &mut World) {
         "dear-imgui-bevy multi-viewport requires PlatformIO aggregate ABI hooks"
     );
 
-    let bridge_ptr = {
-        let Some(mut bridge) = world.get_non_send_mut::<ImguiViewportBridge>() else {
+    let (bridge_ptr, bridge_keepalive) = {
+        let Some(bridge) = world.get_non_send::<ImguiViewportBridge>() else {
             return;
         };
-        bridge.stable_ptr().cast()
+        (bridge.stable_ptr().cast(), bridge.keepalive())
     };
 
     let Some(mut imgui_context) = world.get_non_send_mut::<crate::ImguiContext>() else {
         return;
     };
+    imgui_context.viewport_bridge_keepalive = Some(bridge_keepalive);
     let context = imgui_context.context_mut();
     context.io_mut().set_backend_platform_user_data(bridge_ptr);
     crate::clear_platform_backend_handlers(context);
@@ -360,13 +390,21 @@ fn attach_bridge_to_imgui_context(world: &mut World) {
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-unsafe fn current_bridge_mut() -> Option<&'static mut ImguiViewportBridgeState> {
+unsafe fn with_current_bridge_mut<R>(
+    f: impl FnOnce(&mut ImguiViewportBridgeState) -> R,
+) -> Option<R> {
     let io = unsafe { sys::igGetIO_Nil() };
     if io.is_null() {
         return None;
     }
     let ptr = unsafe { (*io).BackendPlatformUserData };
-    NonNull::new(ptr.cast::<ImguiViewportBridgeState>()).map(|mut ptr| unsafe { ptr.as_mut() })
+    let cell = NonNull::new(ptr.cast::<RefCell<ImguiViewportBridgeState>>())?;
+    // SAFETY: `ImguiContext` retains an Rc keepalive for this RefCell while the callback table is
+    // installed. Keeping the borrow inside this closure prevents it from escaping the callback;
+    // `try_borrow_mut` also makes callback reentry fail closed instead of aliasing mutable state.
+    let cell = unsafe { cell.as_ref() };
+    let mut bridge = cell.try_borrow_mut().ok()?;
+    Some(f(&mut bridge))
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -374,16 +412,23 @@ unsafe extern "C" fn platform_create_window(viewport: *mut imgui::Viewport) {
     let Some(viewport) = (unsafe { viewport.as_mut() }) else {
         return;
     };
-    let Some(bridge) = (unsafe { current_bridge_mut() }) else {
+    let Some(handle) = (unsafe {
+        with_current_bridge_mut(|bridge| {
+            let handle = bridge.platform_handle(viewport.id());
+            bridge.set_viewport_flags(viewport.id(), viewport.flags());
+            bridge.queue(ImguiViewportCommand::Create(
+                ImguiViewportSnapshot::from_viewport(viewport),
+            ));
+            handle
+        })
+    }) else {
         return;
     };
-    let handle = bridge.platform_handle(viewport.id());
-    bridge.set_viewport_flags(viewport.id(), viewport.flags());
-    viewport.set_platform_user_data(handle);
-    viewport.set_platform_handle(handle);
-    bridge.queue(ImguiViewportCommand::Create(
-        ImguiViewportSnapshot::from_viewport(viewport),
-    ));
+    // SAFETY: the bridge owns this stable handle until the matching destroy callback clears it.
+    unsafe {
+        viewport.set_platform_user_data(handle);
+        viewport.set_platform_handle(handle);
+    }
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -395,17 +440,22 @@ unsafe extern "C" fn platform_destroy_window(viewport: *mut imgui::Viewport) {
     let owned_by_app = viewport
         .flags()
         .contains(imgui::ViewportFlags::OWNED_BY_APP);
-    if let Some(bridge) = unsafe { current_bridge_mut() } {
-        if !owned_by_app {
-            bridge.queue(ImguiViewportCommand::Destroy { id: viewport_id });
-        }
-        bridge.viewport_flags.remove(&viewport_id);
-        bridge.focus_next_frame.remove(&viewport_id);
-        bridge.focus_ready.remove(&viewport_id);
-        bridge.remove_platform_handle(viewport_id);
+    let _ = unsafe {
+        with_current_bridge_mut(|bridge| {
+            if !owned_by_app {
+                bridge.queue(ImguiViewportCommand::Destroy { id: viewport_id });
+            }
+            bridge.viewport_flags.remove(&viewport_id);
+            bridge.focus_next_frame.remove(&viewport_id);
+            bridge.focus_ready.remove(&viewport_id);
+            bridge.remove_platform_handle(viewport_id);
+        })
+    };
+    // SAFETY: the backend has removed its ownership record before clearing both borrowed handles.
+    unsafe {
+        viewport.set_platform_user_data(std::ptr::null_mut());
+        viewport.set_platform_handle(std::ptr::null_mut());
     }
-    viewport.set_platform_user_data(std::ptr::null_mut());
-    viewport.set_platform_handle(std::ptr::null_mut());
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -413,11 +463,12 @@ unsafe extern "C" fn platform_show_window(viewport: *mut imgui::Viewport) {
     let Some(viewport) = (unsafe { viewport.as_ref() }) else {
         return;
     };
-    let Some(bridge) = (unsafe { current_bridge_mut() }) else {
-        return;
+    let _ = unsafe {
+        with_current_bridge_mut(|bridge| {
+            bridge.set_viewport_flags(viewport.id(), viewport.flags());
+            bridge.queue(ImguiViewportCommand::Show { id: viewport.id() });
+        })
     };
-    bridge.set_viewport_flags(viewport.id(), viewport.flags());
-    bridge.queue(ImguiViewportCommand::Show { id: viewport.id() });
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -425,13 +476,14 @@ unsafe extern "C" fn platform_set_window_pos(viewport: *mut imgui::Viewport, pos
     let Some(viewport) = (unsafe { viewport.as_ref() }) else {
         return;
     };
-    let Some(bridge) = (unsafe { current_bridge_mut() }) else {
-        return;
+    let _ = unsafe {
+        with_current_bridge_mut(|bridge| {
+            bridge.queue(ImguiViewportCommand::SetPos {
+                id: viewport.id(),
+                pos: [pos.x, pos.y],
+            });
+        })
     };
-    bridge.queue(ImguiViewportCommand::SetPos {
-        id: viewport.id(),
-        pos: [pos.x, pos.y],
-    });
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -439,13 +491,14 @@ unsafe extern "C" fn platform_set_window_size(viewport: *mut imgui::Viewport, si
     let Some(viewport) = (unsafe { viewport.as_ref() }) else {
         return;
     };
-    let Some(bridge) = (unsafe { current_bridge_mut() }) else {
-        return;
+    let _ = unsafe {
+        with_current_bridge_mut(|bridge| {
+            bridge.queue(ImguiViewportCommand::SetSize {
+                id: viewport.id(),
+                size: [size.x, size.y],
+            });
+        })
     };
-    bridge.queue(ImguiViewportCommand::SetSize {
-        id: viewport.id(),
-        size: [size.x, size.y],
-    });
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -453,10 +506,11 @@ unsafe extern "C" fn platform_set_window_focus(viewport: *mut imgui::Viewport) {
     let Some(viewport) = (unsafe { viewport.as_ref() }) else {
         return;
     };
-    let Some(bridge) = (unsafe { current_bridge_mut() }) else {
-        return;
+    let _ = unsafe {
+        with_current_bridge_mut(|bridge| {
+            bridge.queue(ImguiViewportCommand::SetFocus { id: viewport.id() });
+        })
     };
-    bridge.queue(ImguiViewportCommand::SetFocus { id: viewport.id() });
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -467,9 +521,6 @@ unsafe extern "C" fn platform_set_window_title(
     let Some(viewport) = (unsafe { viewport.as_ref() }) else {
         return;
     };
-    let Some(bridge) = (unsafe { current_bridge_mut() }) else {
-        return;
-    };
     let title = if title.is_null() {
         String::new()
     } else {
@@ -477,10 +528,14 @@ unsafe extern "C" fn platform_set_window_title(
             .to_string_lossy()
             .into_owned()
     };
-    bridge.queue(ImguiViewportCommand::SetTitle {
-        id: viewport.id(),
-        title,
-    });
+    let _ = unsafe {
+        with_current_bridge_mut(|bridge| {
+            bridge.queue(ImguiViewportCommand::SetTitle {
+                id: viewport.id(),
+                title,
+            });
+        })
+    };
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -551,8 +606,10 @@ unsafe extern "C" fn platform_get_window_minimized(viewport: *mut imgui::Viewpor
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 fn feedback_for_viewport(viewport: *mut imgui::Viewport) -> Option<ImguiViewportFeedback> {
     let viewport = unsafe { viewport.as_ref() }?;
-    let bridge = unsafe { current_bridge_mut() }?;
-    bridge.viewport_feedback.get(&viewport.id()).copied()
+    unsafe {
+        with_current_bridge_mut(|bridge| bridge.viewport_feedback.get(&viewport.id()).copied())
+    }
+    .flatten()
 }
 
 #[derive(SystemParam)]
@@ -681,6 +738,7 @@ fn apply_viewport_commands_system(
             ImguiViewportCommand::Create(snapshot) => {
                 bridge
                     .inner
+                    .borrow_mut()
                     .viewport_flags
                     .insert(snapshot.id, snapshot.flags);
                 let entity = if let Some(entity) = bridge.viewport_window(snapshot.id) {
@@ -843,7 +901,7 @@ fn apply_pending_viewport_focus_requests(
     windows: &mut Query<&mut Window>,
     bridge: &mut ImguiViewportBridge,
 ) {
-    let ready = std::mem::take(&mut bridge.inner.focus_ready);
+    let ready = std::mem::take(&mut bridge.inner.borrow_mut().focus_ready);
     for viewport_id in ready {
         if let Some(entity) = bridge.viewport_window(viewport_id)
             && let Ok(mut window) = windows.get_mut(entity)
@@ -851,10 +909,9 @@ fn apply_pending_viewport_focus_requests(
             window.focused = true;
         }
     }
-    bridge
-        .inner
-        .focus_ready
-        .extend(bridge.inner.focus_next_frame.drain());
+    let mut state = bridge.inner.borrow_mut();
+    let next_frame = std::mem::take(&mut state.focus_next_frame);
+    state.focus_ready.extend(next_frame);
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -892,6 +949,7 @@ fn clear_imgui_viewport_platform_handles(
 ) {
     let owned_handles = bridge
         .inner
+        .borrow()
         .viewport_handles
         .values()
         .map(|handle| (&**handle as *const ImguiViewportPlatformHandle).cast::<c_void>())
@@ -907,6 +965,7 @@ fn clear_stale_imgui_viewport_platform_handles(
 ) {
     let owned_handles = bridge
         .inner
+        .borrow()
         .viewport_handles
         .iter()
         .filter(|(viewport_id, _)| !live_viewports.contains(viewport_id))
@@ -928,8 +987,12 @@ fn clear_imgui_viewport_platform_handles_for_owned_handles(
         if owned_handles.contains(&(viewport.platform_handle() as *const c_void))
             || owned_handles.contains(&(viewport.platform_user_data() as *const c_void))
         {
-            viewport.set_platform_handle(std::ptr::null_mut());
-            viewport.set_platform_user_data(std::ptr::null_mut());
+            // SAFETY: these pointers identify allocations owned by the bridge and are cleared
+            // before the bridge drops those allocations.
+            unsafe {
+                viewport.set_platform_handle(std::ptr::null_mut());
+                viewport.set_platform_user_data(std::ptr::null_mut());
+            }
         }
     }
 }
@@ -969,38 +1032,37 @@ pub(crate) fn prepare_platform_viewports_for_frame(
 
     clear_stale_imgui_viewport_platform_handles(context, bridge, &live_feedback);
 
-    bridge
-        .inner
-        .viewport_feedback
-        .retain(|viewport_id, _| live_feedback.contains(viewport_id));
-    bridge
-        .inner
-        .viewport_windows
-        .retain(|viewport_id, _| live_feedback.contains(viewport_id));
-    bridge
-        .inner
-        .viewport_cameras
-        .retain(|viewport_id, _| live_feedback.contains(viewport_id));
-    bridge
-        .inner
-        .viewport_flags
-        .retain(|viewport_id, _| live_feedback.contains(viewport_id));
-    bridge
-        .inner
-        .focus_next_frame
-        .retain(|viewport_id| live_feedback.contains(viewport_id));
-    bridge
-        .inner
-        .focus_ready
-        .retain(|viewport_id| live_feedback.contains(viewport_id));
-    bridge
-        .inner
-        .viewport_handles
-        .retain(|viewport_id, _| live_feedback.contains(viewport_id));
+    let main_viewport_handle = {
+        let mut state = bridge.inner.borrow_mut();
+        state
+            .viewport_feedback
+            .retain(|viewport_id, _| live_feedback.contains(viewport_id));
+        state
+            .viewport_windows
+            .retain(|viewport_id, _| live_feedback.contains(viewport_id));
+        state
+            .viewport_cameras
+            .retain(|viewport_id, _| live_feedback.contains(viewport_id));
+        state
+            .viewport_flags
+            .retain(|viewport_id, _| live_feedback.contains(viewport_id));
+        state
+            .focus_next_frame
+            .retain(|viewport_id| live_feedback.contains(viewport_id));
+        state
+            .focus_ready
+            .retain(|viewport_id| live_feedback.contains(viewport_id));
+        state
+            .viewport_handles
+            .retain(|viewport_id, _| live_feedback.contains(viewport_id));
+        state.platform_handle(main_viewport_id)
+    };
     let main_viewport = context.main_viewport();
-    let main_viewport_handle = bridge.inner.platform_handle(main_viewport_id);
-    main_viewport.set_platform_handle(main_viewport_handle);
-    main_viewport.set_platform_user_data(main_viewport_handle);
+    // SAFETY: the bridge owns this stable handle and retains it for the complete viewport frame.
+    unsafe {
+        main_viewport.set_platform_handle(main_viewport_handle);
+        main_viewport.set_platform_user_data(main_viewport_handle);
+    }
 
     let fallback_monitor = monitor_from_window(window);
     let monitors = if monitors.is_empty() {
@@ -1008,7 +1070,8 @@ pub(crate) fn prepare_platform_viewports_for_frame(
     } else {
         monitors
     };
-    context.platform_io_mut().set_monitors(monitors);
+    // SAFETY: Bevy owns any monitor handles and keeps them valid until this list is replaced.
+    unsafe { context.platform_io_mut().set_monitors(monitors) };
 
     let io = context.io_mut();
     let mut backend_flags = io.backend_flags();
@@ -1448,8 +1511,8 @@ mod tests {
         let stale_viewport = imgui::Id::from(0x500);
         let live_viewport = imgui::Id::from(0x501);
 
-        bridge.inner.platform_handle(stale_viewport);
-        bridge.inner.platform_handle(live_viewport);
+        bridge.inner.borrow_mut().platform_handle(stale_viewport);
+        bridge.inner.borrow_mut().platform_handle(live_viewport);
 
         prepare_platform_viewports_for_frame(
             &mut context,
@@ -1462,21 +1525,20 @@ mod tests {
         );
 
         let main_viewport_id = context.main_viewport().id();
+        let state = bridge.inner.borrow();
+        assert!(state.viewport_handles.contains_key(&main_viewport_id));
+        assert!(state.viewport_handles.contains_key(&live_viewport));
         assert!(
-            bridge
-                .inner
-                .viewport_handles
-                .contains_key(&main_viewport_id)
-        );
-        assert!(bridge.inner.viewport_handles.contains_key(&live_viewport));
-        assert!(
-            !bridge.inner.viewport_handles.contains_key(&stale_viewport),
+            !state.viewport_handles.contains_key(&stale_viewport),
             "platform handles must not outlive viewports that disappeared from the Bevy mapping"
         );
+        drop(state);
 
         let main_viewport = context.main_viewport();
-        main_viewport.set_platform_handle(std::ptr::null_mut());
-        main_viewport.set_platform_user_data(std::ptr::null_mut());
+        unsafe {
+            main_viewport.set_platform_handle(std::ptr::null_mut());
+            main_viewport.set_platform_user_data(std::ptr::null_mut());
+        }
     }
 
     #[test]
@@ -1485,7 +1547,7 @@ mod tests {
         let mut bridge = ImguiViewportBridge::default();
         let primary_window = Entity::from_raw_u32(1).expect("test entity index should be valid");
         let stale_viewport = imgui::Id::from(0x600);
-        let stale_handle = bridge.inner.platform_handle(stale_viewport);
+        let stale_handle = bridge.inner.borrow_mut().platform_handle(stale_viewport);
         let stale_raw_viewport = unsafe { sys::ImGuiViewport_ImGuiViewport() };
         assert!(
             !stale_raw_viewport.is_null(),
@@ -1525,7 +1587,9 @@ mod tests {
         }
 
         let main_viewport = context.main_viewport();
-        main_viewport.set_platform_handle(std::ptr::null_mut());
-        main_viewport.set_platform_user_data(std::ptr::null_mut());
+        unsafe {
+            main_viewport.set_platform_handle(std::ptr::null_mut());
+            main_viewport.set_platform_user_data(std::ptr::null_mut());
+        }
     }
 }

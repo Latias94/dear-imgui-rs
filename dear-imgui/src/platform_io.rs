@@ -28,6 +28,13 @@ mod textures;
 pub use core::PlatformIo;
 pub use viewport::Viewport;
 
+/// Dear ImGui's stable identifier for the application-owned main viewport.
+///
+/// Unlike viewport flags, this identity does not change when multi-viewport support becomes active.
+pub const MAIN_VIEWPORT_ID: crate::Id = crate::Id(0x1111_1111);
+
+#[cfg(feature = "multi-viewport")]
+pub(crate) use accessors::assert_monitor_contract;
 pub(crate) use core::{
     clear_aggregate_callbacks_for_current_context, clear_typed_callbacks_for_context,
 };

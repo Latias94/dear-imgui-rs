@@ -33,9 +33,11 @@ impl AshRenderer {
         self.renderer_flags_added = renderer_flags & !flags;
         io.set_backend_flags(flags | renderer_flags);
 
-        imgui_context
-            .platform_io_mut()
-            .set_draw_callback_reset_render_state_raw(Some(draw_callback_reset_render_state));
+        unsafe {
+            imgui_context
+                .platform_io_mut()
+                .set_draw_callback_reset_render_state_raw(Some(draw_callback_reset_render_state));
+        }
     }
 
     pub(super) fn unconfigure_imgui_context(
@@ -60,7 +62,7 @@ impl AshRenderer {
             .map(|callback| callback as usize)
             == Some(draw_callback_reset_render_state as *const () as usize)
         {
-            platform_io.set_draw_callback_reset_render_state_raw(None);
+            unsafe { platform_io.set_draw_callback_reset_render_state_raw(None) };
         }
     }
 
@@ -93,7 +95,7 @@ impl AshRenderer {
         platform_io: &mut dear_imgui_rs::platform_io::PlatformIo,
     ) {
         if Self::owned_draw_callbacks_match(platform_io) {
-            platform_io.set_draw_callback_reset_render_state_raw(None);
+            unsafe { platform_io.set_draw_callback_reset_render_state_raw(None) };
         }
     }
 

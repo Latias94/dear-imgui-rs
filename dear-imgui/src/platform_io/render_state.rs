@@ -38,8 +38,18 @@ impl PlatformIo {
     /// Renderer backends may install a backend-specific function pointer here. Higher-level
     /// draw iteration recognizes this callback as [`crate::render::DrawCmd::ResetRenderState`]
     /// instead of treating it as an arbitrary raw callback.
+    ///
+    /// # Safety
+    ///
+    /// When present, the callback must use the exact [`sys::ImDrawCallback`] ABI, remain callable
+    /// while installed, accept the draw-list and draw-command pointers supplied by Dear ImGui,
+    /// and never unwind across the C ABI. Clearing or replacing a live callback is valid only
+    /// after no draw data can reference it.
     #[doc(alias = "DrawCallback_ResetRenderState")]
-    pub fn set_draw_callback_reset_render_state_raw(&mut self, callback: sys::ImDrawCallback) {
+    pub unsafe fn set_draw_callback_reset_render_state_raw(
+        &mut self,
+        callback: sys::ImDrawCallback,
+    ) {
         self.inner_mut().DrawCallback_ResetRenderState = callback;
     }
 
@@ -50,8 +60,15 @@ impl PlatformIo {
     }
 
     /// Set the standard draw callback used to request linear texture sampling.
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_draw_callback_reset_render_state_raw`].
     #[doc(alias = "DrawCallback_SetSamplerLinear")]
-    pub fn set_draw_callback_set_sampler_linear_raw(&mut self, callback: sys::ImDrawCallback) {
+    pub unsafe fn set_draw_callback_set_sampler_linear_raw(
+        &mut self,
+        callback: sys::ImDrawCallback,
+    ) {
         self.inner_mut().DrawCallback_SetSamplerLinear = callback;
     }
 
@@ -62,8 +79,15 @@ impl PlatformIo {
     }
 
     /// Set the standard draw callback used to request nearest/point texture sampling.
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_draw_callback_reset_render_state_raw`].
     #[doc(alias = "DrawCallback_SetSamplerNearest")]
-    pub fn set_draw_callback_set_sampler_nearest_raw(&mut self, callback: sys::ImDrawCallback) {
+    pub unsafe fn set_draw_callback_set_sampler_nearest_raw(
+        &mut self,
+        callback: sys::ImDrawCallback,
+    ) {
         self.inner_mut().DrawCallback_SetSamplerNearest = callback;
     }
 

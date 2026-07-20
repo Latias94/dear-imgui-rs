@@ -275,6 +275,8 @@ pub struct ImguiContext {
     context: dear_imgui_rs::Context,
     #[cfg(feature = "render")]
     renderer_consumer: Option<dear_imgui_rs::render::RendererConsumer>,
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    pub(crate) viewport_bridge_keepalive: Option<viewport::ImguiViewportBridgeKeepalive>,
 }
 
 impl ImguiContext {
@@ -285,6 +287,8 @@ impl ImguiContext {
             context,
             #[cfg(feature = "render")]
             renderer_consumer: None,
+            #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+            viewport_bridge_keepalive: None,
         }
     }
 
@@ -319,9 +323,22 @@ impl ImguiContext {
     }
 
     fn clear_backend_data(&mut self) {
+        #[cfg(feature = "multi-viewport")]
+        {
+            // Destroy secondary viewport state while the renderer/platform callbacks and their
+            // backend user data are still available to Dear ImGui.
+            self.context.destroy_platform_windows();
+        }
+
+        clear_renderer_backend_handlers(&mut self.context);
+        clear_platform_backend_handlers(&mut self.context);
         self.context
             .io_mut()
             .set_backend_platform_user_data(std::ptr::null_mut());
+        #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+        {
+            self.viewport_bridge_keepalive = None;
+        }
         self.context
             .set_platform_name::<String>(None)
             .expect("clearing BackendPlatformName must not fail");
@@ -331,7 +348,6 @@ impl ImguiContext {
         self.context
             .set_renderer_name::<String>(None)
             .expect("clearing BackendRendererName must not fail");
-        clear_renderer_backend_handlers(&mut self.context);
 
         let mut backend_flags = self.context.io().backend_flags();
         backend_flags.remove(
@@ -345,9 +361,7 @@ impl ImguiContext {
                 dear_imgui_rs::BackendFlags::PLATFORM_HAS_VIEWPORTS
                     | dear_imgui_rs::BackendFlags::RENDERER_HAS_VIEWPORTS,
             );
-            self.context.destroy_platform_windows();
         }
-        clear_platform_backend_handlers(&mut self.context);
         self.context.io_mut().set_backend_flags(backend_flags);
     }
 
@@ -415,7 +429,9 @@ pub(crate) fn clear_platform_backend_handlers(context: &mut dear_imgui_rs::Conte
     let platform_io = context.platform_io_mut();
     let clipboard_handlers = ClipboardPlatformHandlers::capture(platform_io.as_raw());
     #[cfg(feature = "multi-viewport")]
-    {
+    unsafe {
+        // Callers only use this during initial configuration or after platform windows have been
+        // destroyed, so Dear ImGui cannot invoke the callback table being cleared.
         platform_io.clear_platform_handlers();
     }
     #[cfg(not(feature = "multi-viewport"))]
@@ -459,7 +475,9 @@ impl ClipboardPlatformHandlers {
 fn clear_renderer_backend_handlers(context: &mut dear_imgui_rs::Context) {
     let platform_io = context.platform_io_mut();
     #[cfg(feature = "multi-viewport")]
-    {
+    unsafe {
+        // Bevy does not expose renderer callbacks after this point, and teardown destroys all
+        // platform windows before reaching this helper.
         platform_io.clear_renderer_handlers();
     }
     #[cfg(not(feature = "multi-viewport"))]

@@ -5,9 +5,11 @@ impl Ui {
     ///
     /// # Safety
     ///
-    /// The upstream Fonts tab exposes controls that can mutate or delete fonts during the frame
-    /// and may continue using invalidated native pointers. The caller must ensure that tab and its
-    /// destructive controls cannot be activated.
+    /// With `BackendFlags::RENDERER_HAS_TEXTURES`, upstream intentionally leaves the font atlas
+    /// unlocked during a frame. The Fonts tab's Remove control deletes an `ImFont` and then the
+    /// same native debug function continues reading that pointer; other destructive controls also
+    /// bypass Rust's atlas-generation tracking. The caller must ensure those controls cannot be
+    /// activated. Changing `FontSizeBase` or the font-scale controls is supported.
     #[doc(alias = "ShowStyleEditor")]
     pub unsafe fn show_style_editor(&self, style: &mut crate::style::Style) {
         self.run_with_bound_context(|| unsafe {
@@ -19,9 +21,11 @@ impl Ui {
     ///
     /// # Safety
     ///
-    /// The upstream Fonts tab exposes controls that can mutate or delete fonts during the frame
-    /// and may continue using invalidated native pointers. The caller must ensure that tab and its
-    /// destructive controls cannot be activated.
+    /// With `BackendFlags::RENDERER_HAS_TEXTURES`, upstream intentionally leaves the font atlas
+    /// unlocked during a frame. The Fonts tab's Remove control deletes an `ImFont` and then the
+    /// same native debug function continues reading that pointer; other destructive controls also
+    /// bypass Rust's atlas-generation tracking. The caller must ensure those controls cannot be
+    /// activated. Changing `FontSizeBase` or the font-scale controls is supported.
     #[doc(alias = "ShowStyleEditor")]
     pub unsafe fn show_default_style_editor(&self) {
         self.run_with_bound_context(|| unsafe {

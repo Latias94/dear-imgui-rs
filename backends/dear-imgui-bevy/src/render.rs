@@ -1203,9 +1203,12 @@ fn install_standard_draw_callbacks(app: &mut App) {
 
 pub(crate) fn install_standard_draw_callbacks_for_context(context: &mut imgui::Context) {
     let platform_io = context.platform_io_mut();
-    platform_io.set_draw_callback_reset_render_state_raw(Some(imgui_bevy_draw_callback_reset));
-    platform_io.set_draw_callback_set_sampler_linear_raw(Some(imgui_bevy_draw_callback_linear));
-    platform_io.set_draw_callback_set_sampler_nearest_raw(Some(imgui_bevy_draw_callback_nearest));
+    unsafe {
+        platform_io.set_draw_callback_reset_render_state_raw(Some(imgui_bevy_draw_callback_reset));
+        platform_io.set_draw_callback_set_sampler_linear_raw(Some(imgui_bevy_draw_callback_linear));
+        platform_io
+            .set_draw_callback_set_sampler_nearest_raw(Some(imgui_bevy_draw_callback_nearest));
+    }
 }
 
 unsafe extern "C" fn imgui_bevy_draw_callback_reset(

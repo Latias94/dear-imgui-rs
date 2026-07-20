@@ -285,12 +285,16 @@ impl WgpuRenderer {
         io.set_backend_flags(previous_flags | renderer_flags);
 
         let platform_io = imgui_context.platform_io_mut();
-        platform_io
-            .set_draw_callback_reset_render_state_raw(Some(draw_callback_reset_render_state));
-        platform_io
-            .set_draw_callback_set_sampler_linear_raw(Some(draw_callback_set_sampler_linear));
-        platform_io
-            .set_draw_callback_set_sampler_nearest_raw(Some(draw_callback_set_sampler_nearest));
+        // SAFETY: these static callbacks use Dear ImGui's exact draw-callback ABI and stay valid
+        // for the renderer lifetime.
+        unsafe {
+            platform_io
+                .set_draw_callback_reset_render_state_raw(Some(draw_callback_reset_render_state));
+            platform_io
+                .set_draw_callback_set_sampler_linear_raw(Some(draw_callback_set_sampler_linear));
+            platform_io
+                .set_draw_callback_set_sampler_nearest_raw(Some(draw_callback_set_sampler_nearest));
+        }
 
         Ok(renderer_flags & !previous_flags)
     }

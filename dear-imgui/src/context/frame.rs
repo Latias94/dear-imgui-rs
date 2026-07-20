@@ -158,6 +158,8 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
                     (*io).DisplaySize.y
                 );
             }
+            #[cfg(feature = "multi-viewport")]
+            self.prepare_multi_viewport_new_frame_contract_unlocked("Context::frame()");
             crate::fonts::assert_no_font_atlas_texture_borrows((*io).Fonts, "Context::frame()");
             let renderer_has_textures =
                 ((*io).BackendFlags & sys::ImGuiBackendFlags_RendererHasTextures as i32) != 0;

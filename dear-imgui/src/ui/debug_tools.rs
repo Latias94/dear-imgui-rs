@@ -6,9 +6,11 @@ impl Ui {
     ///
     /// # Safety
     ///
-    /// The upstream demo can open font-atlas debug panels whose destructive controls mutate or
-    /// delete fonts during the frame and may continue using invalidated native pointers. The
-    /// caller must ensure those panels and controls cannot be activated.
+    /// With `BackendFlags::RENDERER_HAS_TEXTURES`, upstream intentionally leaves the font atlas
+    /// unlocked during a frame. The Fonts panel's Remove control deletes an `ImFont` and then the
+    /// same native debug function continues reading that pointer; other destructive controls also
+    /// bypass Rust's atlas-generation tracking. The caller must ensure those controls cannot be
+    /// activated. Changing `FontSizeBase` or the font-scale controls is supported.
     #[doc(alias = "ShowDemoWindow")]
     pub unsafe fn show_demo_window(&self, opened: &mut bool) {
         self.run_with_bound_context(|| unsafe {
@@ -33,9 +35,11 @@ impl Ui {
     ///
     /// # Safety
     ///
-    /// The upstream metrics window exposes font-atlas controls that can mutate or delete fonts
-    /// during the frame and may continue using invalidated native pointers. The caller must ensure
-    /// the Fonts section and its destructive controls cannot be activated.
+    /// With `BackendFlags::RENDERER_HAS_TEXTURES`, upstream intentionally leaves the font atlas
+    /// unlocked during a frame. The Fonts section's Remove control deletes an `ImFont` and then the
+    /// same native debug function continues reading that pointer; other destructive controls also
+    /// bypass Rust's atlas-generation tracking. The caller must ensure those controls cannot be
+    /// activated. Changing `FontSizeBase` or the font-scale controls is supported.
     #[doc(alias = "ShowMetricsWindow")]
     pub unsafe fn show_metrics_window(&self, opened: &mut bool) {
         self.run_with_bound_context(|| unsafe {

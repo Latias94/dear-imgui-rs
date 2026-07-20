@@ -229,7 +229,9 @@ pub(super) unsafe fn destroy_viewport_data(
         return false;
     }
     unregister_viewport_data(pointer);
-    viewport.set_renderer_user_data(std::ptr::null_mut());
+    // SAFETY: registry ownership proves that the renderer data belongs to this backend and is
+    // cleared before the allocation is reclaimed below.
+    unsafe { viewport.set_renderer_user_data(std::ptr::null_mut()) };
     // SAFETY: registry ownership proves this pointer came from `Box::into_raw` exactly once.
     let data = unsafe { Box::from_raw(pointer) };
     debug_assert_eq!(data.owner_context, context as usize);
