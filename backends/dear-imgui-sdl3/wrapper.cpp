@@ -381,6 +381,49 @@ std::uint64_t dear_imgui_sdl3_native_contract_self_test() {
     fake_native_state = DearImguiSdl3FakeNativeState{};
     previous_window = fake_native_state.current_window;
     previous_context = fake_native_state.current_context;
+    fake_native_state.fail_set_swap_interval = true;
+    dear_imgui_sdl3_native_begin(DEAR_IMGUI_SDL3_PHASE_PLATFORM_CREATE, 1, 0, 0, &viewport);
+    dear_imgui_sdl3_hook_gl_set_attribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1);
+    dear_imgui_sdl3_hook_gl_make_current(main_window, main_context);
+    created = dear_imgui_sdl3_hook_gl_create_context(fake_native_state.viewport_window);
+    bool accepted_interval = dear_imgui_sdl3_hook_gl_set_swap_interval(0);
+    dear_imgui_sdl3_hook_gl_make_current(fake_native_state.viewport_window, previous_context);
+    faults = dear_imgui_sdl3_native_end();
+    if (!accepted_interval
+        || faults != 0
+        || created != fake_native_state.created_context
+        || fake_native_state.set_swap_interval_calls != 1
+        || fake_native_state.set_swap_interval_context != created
+        || fake_native_state.current_window != previous_window
+        || fake_native_state.current_context != previous_context
+        || fake_native_state.share_attribute != 0)
+        failures |= UINT64_C(1) << 8;
+
+    fake_native_state = DearImguiSdl3FakeNativeState{};
+    previous_window = fake_native_state.current_window;
+    previous_context = fake_native_state.current_context;
+    fake_native_state.fail_get_swap_interval = true;
+    dear_imgui_sdl3_native_begin(DEAR_IMGUI_SDL3_PHASE_PLATFORM_CREATE, 1, 1, 0, &viewport);
+    dear_imgui_sdl3_hook_gl_set_attribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1);
+    dear_imgui_sdl3_hook_gl_make_current(main_window, main_context);
+    created = dear_imgui_sdl3_hook_gl_create_context(fake_native_state.viewport_window);
+    accepted_interval = dear_imgui_sdl3_hook_gl_set_swap_interval(0);
+    dear_imgui_sdl3_hook_gl_make_current(fake_native_state.viewport_window, previous_context);
+    faults = dear_imgui_sdl3_native_end();
+    if (!accepted_interval
+        || faults != 0
+        || created != fake_native_state.created_context
+        || fake_native_state.get_swap_interval_index == 0
+        || fake_native_state.set_swap_interval_calls != 1
+        || fake_native_state.swap_interval != 0
+        || fake_native_state.current_window != previous_window
+        || fake_native_state.current_context != previous_context
+        || fake_native_state.share_attribute != 0)
+        failures |= UINT64_C(1) << 9;
+
+    fake_native_state = DearImguiSdl3FakeNativeState{};
+    previous_window = fake_native_state.current_window;
+    previous_context = fake_native_state.current_context;
     fake_native_state.fail_create_context = true;
     dear_imgui_sdl3_native_begin(DEAR_IMGUI_SDL3_PHASE_PLATFORM_CREATE, 1, 0, 0, &viewport);
     dear_imgui_sdl3_hook_gl_set_attribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1);
@@ -533,10 +576,12 @@ bool SDLCALL dear_imgui_sdl3_hook_gl_make_current(SDL_Window* window, SDL_GLCont
                 return false;
             }
             if (state.match_main_swap_interval) {
+                // Present timing is a preference, not a prerequisite for a valid shared GL
+                // context. Drivers such as Xvfb/llvmpipe can reject this query; fall back to
+                // their default timing instead of abandoning a safely-created viewport.
                 if (!native_ops->gl_get_swap_interval(&state.resolved_swap_interval))
-                    state.faults |= DEAR_IMGUI_SDL3_FAULT_GL_MAIN_SWAP_INTERVAL;
-                else
-                    state.swap_interval_resolved = true;
+                    state.resolved_swap_interval = 0;
+                state.swap_interval_resolved = true;
             } else {
                 state.resolved_swap_interval = state.explicit_swap_interval;
                 state.swap_interval_resolved = true;
@@ -571,11 +616,15 @@ bool SDLCALL dear_imgui_sdl3_hook_gl_set_swap_interval(int interval) {
 
     if (state.created_context == nullptr
         || !state.swap_interval_resolved
-        || native_ops->gl_get_current_context() != state.created_context
-        || !native_ops->gl_set_swap_interval(state.resolved_swap_interval)) {
+        || native_ops->gl_get_current_context() != state.created_context) {
         state.faults |= DEAR_IMGUI_SDL3_FAULT_GL_SET_SWAP_INTERVAL;
         return false;
     }
+
+    // SDL documents this as an optional presentation setting. A driver may refuse a valid
+    // interval after the context exists, so retain the usable context and let the driver choose
+    // its default rather than treating an unsupported VSync preference as a creation failure.
+    (void)native_ops->gl_set_swap_interval(state.resolved_swap_interval);
     return true;
 }
 

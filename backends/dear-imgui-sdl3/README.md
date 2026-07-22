@@ -519,8 +519,10 @@ distinct current GL context and restores the previous window, context, and
 VSync waits across several platform windows. Use
 `init_with_viewport_swap_interval(...)` or
 `init_platform_for_opengl_with_viewport_swap_interval(...)` to choose `VSync`, `Adaptive`, or
-`MatchMain`. Native GL and SDL_GPU failures are deferred through `poll_fault()`; a partially
-initialized viewport is closed instead of being published as usable.
+`MatchMain`. Swap-interval selection is best effort: if a driver rejects the requested timing after
+the secondary context is valid, the viewport keeps the driver's default timing. Native GL context,
+state-restoration, and SDL_GPU failures are deferred through `poll_fault()`; a partially initialized
+viewport is closed instead of being published as usable.
 
 - **SDL3 + OpenGL3**: multi-viewport is provided by the upstream C++ backends and
   considered stable for desktop use.

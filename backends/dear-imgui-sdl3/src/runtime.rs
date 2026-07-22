@@ -1180,7 +1180,6 @@ impl RuntimeControl {
         const GL_SHARE_CAPTURE: u64 = 1 << 0;
         const GL_SHARE_SET: u64 = 1 << 1;
         const GL_MAIN_CONTEXT: u64 = 1 << 2;
-        const GL_MAIN_SWAP_INTERVAL: u64 = 1 << 3;
         const GL_CREATE_CONTEXT: u64 = 1 << 4;
         const GL_SET_SWAP_INTERVAL: u64 = 1 << 5;
         const GL_RESTORE_CONTEXT: u64 = 1 << 6;
@@ -1202,7 +1201,7 @@ impl RuntimeControl {
         if faults & (GL_MAIN_CONTEXT | GL_CREATE_CONTEXT) != 0 {
             self.record_fault(RuntimeFault::ViewportOpenGlContextFailed);
         }
-        if faults & (GL_MAIN_SWAP_INTERVAL | GL_SET_SWAP_INTERVAL) != 0 {
+        if faults & GL_SET_SWAP_INTERVAL != 0 {
             self.record_fault(RuntimeFault::ViewportOpenGlSwapIntervalFailed);
         }
         if faults & (GL_SHARE_SET | GL_RESTORE_CONTEXT | GL_RESTORE_SHARE) != 0 {

@@ -124,18 +124,11 @@ fn unsupported_viewport_flag(flag: &'static str, operation: &'static str) -> Win
 
 fn validate_policy_for_creation(
     policy: ViewportWindowPolicy,
-    supports_inactive_creation: bool,
     supports_skip_taskbar: bool,
 ) -> Result<(), WinitPlatformError> {
     if policy.no_focus_on_click {
         return Err(unsupported_viewport_flag(
             "NoFocusOnClick",
-            "window creation",
-        ));
-    }
-    if policy.no_focus_on_appearing && !supports_inactive_creation {
-        return Err(unsupported_viewport_flag(
-            "NoFocusOnAppearing",
             "window creation",
         ));
     }
@@ -151,17 +144,10 @@ fn validate_policy_for_creation(
 fn validate_policy_transition(
     current: ViewportWindowPolicy,
     next: ViewportWindowPolicy,
-    supports_inactive_creation: bool,
     supports_dynamic_taskbar: bool,
 ) -> Result<(), WinitPlatformError> {
     if next.no_focus_on_click {
         return Err(unsupported_viewport_flag("NoFocusOnClick", "window update"));
-    }
-    if next.no_focus_on_appearing && !supports_inactive_creation {
-        return Err(unsupported_viewport_flag(
-            "NoFocusOnAppearing",
-            "window update",
-        ));
     }
     if current.skip_taskbar != next.skip_taskbar && !supports_dynamic_taskbar {
         return Err(unsupported_viewport_flag("NoTaskBarIcon", "window update"));
@@ -186,12 +172,7 @@ fn sync_window_policy(
     next: ViewportWindowPolicy,
 ) -> Result<(), WinitPlatformError> {
     let current = data.window_policy.get();
-    validate_policy_transition(
-        current,
-        next,
-        supports_inactive_window_creation(),
-        supports_dynamic_skip_taskbar(),
-    )?;
+    validate_policy_transition(current, next, supports_dynamic_skip_taskbar())?;
 
     let window = data.window();
     if current.cursor_hittest != next.cursor_hittest {
@@ -1102,11 +1083,9 @@ pub(super) unsafe extern "C" fn winit_create_window(vp: *mut dear_imgui_rs::sys:
             // Handle viewport flags
             let viewport_flags = vp_ref.Flags;
             let window_policy = ViewportWindowPolicy::from_flags(viewport_flags);
-            if let Err(error) = validate_policy_for_creation(
-                window_policy,
-                supports_inactive_window_creation(),
-                supports_skip_taskbar_at_creation(),
-            ) {
+            if let Err(error) =
+                validate_policy_for_creation(window_policy, supports_skip_taskbar_at_creation())
+            {
                 record_viewport_failure(control, vp, error);
                 return;
             }
@@ -1138,9 +1117,10 @@ pub(super) unsafe extern "C" fn winit_create_window(vp: *mut dear_imgui_rs::sys:
                 .with_visible(false)
                 .with_decorations(window_policy.decorations);
 
-            // Supported desktop backends create inactive and make the final focus decision in Show,
-            // after Dear ImGui has finished mutating the viewport flags for this frame.
-            if supports_inactive_window_creation() {
+            // On systems where Winit cannot guarantee inactive creation, still pass the request
+            // through as a best-effort window-manager hint. Focus behavior is presentation policy,
+            // not an ownership invariant that should prevent a valid viewport from being created.
+            if supports_inactive_window_creation() || window_policy.no_focus_on_appearing {
                 window_attrs = window_attrs.with_active(false);
             }
 
@@ -1566,13 +1546,13 @@ mod policy_tests {
     use super::*;
 
     #[test]
-    fn unsupported_focus_flags_are_rejected_before_window_publication() {
+    fn focus_click_and_taskbar_require_capability_but_appearance_is_best_effort() {
         let no_focus_on_click = ViewportWindowPolicy {
             no_focus_on_click: true,
             ..ViewportWindowPolicy::default()
         };
         assert!(matches!(
-            validate_policy_for_creation(no_focus_on_click, true, true),
+            validate_policy_for_creation(no_focus_on_click, true),
             Err(WinitPlatformError::UnsupportedViewportFlag {
                 flag: "NoFocusOnClick",
                 ..
@@ -1583,20 +1563,14 @@ mod policy_tests {
             no_focus_on_appearing: true,
             ..ViewportWindowPolicy::default()
         };
-        assert!(matches!(
-            validate_policy_for_creation(no_focus_on_appearing, false, true),
-            Err(WinitPlatformError::UnsupportedViewportFlag {
-                flag: "NoFocusOnAppearing",
-                ..
-            })
-        ));
+        assert!(validate_policy_for_creation(no_focus_on_appearing, true).is_ok());
 
         let no_taskbar = ViewportWindowPolicy {
             skip_taskbar: true,
             ..ViewportWindowPolicy::default()
         };
         assert!(matches!(
-            validate_policy_for_creation(no_taskbar, true, false),
+            validate_policy_for_creation(no_taskbar, false),
             Err(WinitPlatformError::UnsupportedViewportFlag {
                 flag: "NoTaskBarIcon",
                 ..
@@ -1611,14 +1585,14 @@ mod policy_tests {
             no_focus_on_appearing: true,
             ..current
         };
-        assert!(validate_policy_transition(current, late_no_focus, true, true).is_ok());
+        assert!(validate_policy_transition(current, late_no_focus, true).is_ok());
 
         let taskbar_change = ViewportWindowPolicy {
             skip_taskbar: true,
             ..current
         };
         assert!(matches!(
-            validate_policy_transition(current, taskbar_change, true, false),
+            validate_policy_transition(current, taskbar_change, false),
             Err(WinitPlatformError::UnsupportedViewportFlag {
                 flag: "NoTaskBarIcon",
                 ..

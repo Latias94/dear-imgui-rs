@@ -157,6 +157,9 @@ pub(super) mod ffi {
 ///
 /// [`Immediate`](Self::Immediate) matches the upstream multi-viewport default and avoids serial
 /// VSync waits when several platform windows are presented in one frame.
+///
+/// Drivers may reject a requested interval after creating a secondary context. That is treated as
+/// a presentation fallback to the driver's default rather than a viewport-creation failure.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Sdl3OpenGlViewportSwapInterval {
     /// Disable VSync for secondary viewport contexts.
@@ -235,7 +238,9 @@ pub enum Sdl3BackendError {
     ViewportOpenGlStateCaptureFailed,
     #[error("SDL3 failed to create or activate a distinct OpenGL context for a secondary viewport")]
     ViewportOpenGlContextFailed,
-    #[error("SDL3 failed to resolve or apply the OpenGL swap interval for a secondary viewport")]
+    #[error(
+        "SDL3 failed to maintain the OpenGL swap-interval transaction for a secondary viewport"
+    )]
     ViewportOpenGlSwapIntervalFailed,
     #[error("SDL3 failed to restore the previous OpenGL window, context, or share attribute")]
     ViewportOpenGlStateRestoreFailed,
