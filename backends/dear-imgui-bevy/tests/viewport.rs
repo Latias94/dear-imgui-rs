@@ -39,8 +39,9 @@ use dear_imgui_bevy::ImguiViewportCamera;
 use dear_imgui_bevy::ImguiViewportSnapshot;
 #[cfg(feature = "multi-viewport")]
 use dear_imgui_bevy::{
-    ImguiBackendConfig, ImguiBackendStatus, ImguiContext, ImguiPlugin, ImguiViewportBridge,
-    ImguiViewportCommand, ImguiViewportFeedback, ImguiViewportWindow, ImguiViewportWindowConfig,
+    ImguiBackendConfig, ImguiBackendStatus, ImguiContext, ImguiContexts, ImguiEndFrame,
+    ImguiPlugin, ImguiPrimaryContextPass, ImguiViewportBridge, ImguiViewportCommand,
+    ImguiViewportFeedback, ImguiViewportWindow, ImguiViewportWindowConfig,
 };
 use dear_imgui_rs as imgui;
 #[cfg(feature = "multi-viewport")]
@@ -165,20 +166,152 @@ fn app_with_multi_viewport_window_config(
 }
 
 #[cfg(feature = "multi-viewport")]
-fn live_main_viewport(app: &App) -> (imgui::Id, *mut sys::ImGuiViewport) {
+fn submit_live_secondary_viewport(mut contexts: ImguiContexts) {
+    let ui = contexts
+        .primary_ui_mut()
+        .expect("the primary ImGui frame should be open");
+    ui.window("viewport-event-source")
+        .size([320.0, 240.0], imgui::Condition::Always)
+        .build(|| ui.text("secondary viewport event source"));
+}
+
+#[cfg(feature = "multi-viewport")]
+fn finish_pending_platform_window_update(app: &mut App) {
+    let update_pending = {
+        let context = app
+            .world()
+            .get_non_send::<ImguiContext>()
+            .expect("plugin should install ImGui context");
+        let backend_flags = context.context().io().backend_flags();
+        assert!(
+            backend_flags.contains(
+                imgui::BackendFlags::PLATFORM_HAS_VIEWPORTS
+                    | imgui::BackendFlags::RENDERER_HAS_VIEWPORTS,
+            ),
+            "the fixture must advertise both platform and renderer viewport support"
+        );
+        assert!(
+            context
+                .context()
+                .io()
+                .config_flags()
+                .contains(imgui::ConfigFlags::VIEWPORTS_ENABLE),
+            "the fixture must keep Dear ImGui viewport support enabled"
+        );
+        let raw = context.context().as_raw();
+        assert_eq!(
+            unsafe { (*raw).FrameCountEnded },
+            unsafe { (*raw).FrameCount },
+            "the Bevy end-frame schedule must finish the native frame before platform updates"
+        );
+        unsafe { (*raw).FrameCountPlatformEnded < (*raw).FrameCount }
+    };
+    if update_pending {
+        app.world_mut()
+            .get_non_send_mut::<ImguiContext>()
+            .expect("plugin should install ImGui context")
+            .context_mut()
+            .update_platform_windows();
+    }
+    app.world_mut().run_schedule(ImguiEndFrame);
+}
+
+#[cfg(feature = "multi-viewport")]
+fn resolve_live_viewport(app: &App, viewport_id: imgui::Id) -> *mut sys::ImGuiViewport {
     let context = app
         .world()
         .get_non_send::<ImguiContext>()
         .expect("plugin should install ImGui context");
-    let viewport = context.context().main_viewport();
-    (viewport.id(), viewport.as_raw())
+    let binding = context.context().binding();
+    let viewport =
+        binding.with_bound_context(|| unsafe { sys::igFindViewportByID(viewport_id.raw()) });
+    assert!(
+        !viewport.is_null(),
+        "the secondary viewport must remain in Dear ImGui's internal registry"
+    );
+    viewport
 }
 
 #[cfg(feature = "multi-viewport")]
-fn spawn_platform_event_window(app: &mut App, viewport_id: imgui::Id) -> Entity {
+fn create_live_secondary_viewport(app: &mut App) -> (imgui::Id, Entity) {
+    {
+        let mut status = app.world_mut().resource_mut::<ImguiBackendStatus>();
+        assert!(
+            status.viewport_lifecycle_bridge_enabled && status.viewport_input_feedback_enabled,
+            "the test fixture requires the native platform bridge"
+        );
+        // This test exercises platform lifecycle only. It deliberately bypasses production
+        // renderer capability detection and must not be used to validate secondary rendering.
+        status.multi_viewport_supported = true;
+    }
     app.world_mut()
-        .spawn((Window::default(), ImguiViewportWindow { viewport_id }))
-        .id()
+        .get_non_send_mut::<ImguiContext>()
+        .expect("plugin should install ImGui context")
+        .context_mut()
+        .io_mut()
+        .set_config_viewports_no_auto_merge(true);
+    app.add_systems(ImguiPrimaryContextPass, submit_live_secondary_viewport);
+    // NoAutoMerge makes the UI window deterministically request its own native viewport. The
+    // first frame creates it; the second lets Dear ImGui publish the platform window mapping.
+    app.update();
+    finish_pending_platform_window_update(app);
+    app.update();
+    finish_pending_platform_window_update(app);
+
+    let (viewport_id, published_viewport) = {
+        let context = app
+            .world()
+            .get_non_send::<ImguiContext>()
+            .expect("plugin should install ImGui context");
+        let main_viewport_id = context.context().main_viewport().id();
+        let viewport = context
+            .context()
+            .platform_io()
+            .viewports_iter()
+            .find(|viewport| viewport.id() != main_viewport_id)
+            .expect("NoAutoMerge should create a visible secondary viewport");
+        (viewport.id(), viewport.as_raw().cast_mut())
+    };
+    let resolved_viewport = resolve_live_viewport(app, viewport_id);
+    assert_eq!(
+        resolved_viewport, published_viewport,
+        "the visible secondary viewport must resolve through Dear ImGui's complete registry"
+    );
+    let entity = app
+        .world()
+        .get_non_send::<ImguiViewportBridge>()
+        .expect("bridge should still exist")
+        .viewport_window(viewport_id)
+        .expect("the real secondary viewport should create a matching Bevy window");
+    (viewport_id, entity)
+}
+
+#[cfg(feature = "multi-viewport")]
+fn destroy_live_secondary_viewport(app: &mut App, viewport_id: imgui::Id) {
+    let entity = app
+        .world()
+        .get_non_send::<ImguiViewportBridge>()
+        .expect("bridge should still exist")
+        .viewport_window(viewport_id)
+        .expect("the live viewport should still own a Bevy window");
+    app.world_mut()
+        .get_non_send_mut::<ImguiContext>()
+        .expect("plugin should install ImGui context")
+        .context_mut()
+        .destroy_platform_windows();
+    app.world_mut().run_schedule(ImguiEndFrame);
+    assert!(
+        app.world()
+            .get_non_send::<ImguiViewportBridge>()
+            .expect("bridge should still exist")
+            .viewport_window(viewport_id)
+            .is_none(),
+        "destroying the live platform viewport must remove its Bevy window mapping"
+    );
+    assert!(
+        app.world().get_entity(entity).is_err(),
+        "destroying the live platform viewport must despawn its Bevy window"
+    );
 }
 
 #[cfg(feature = "multi-viewport")]
@@ -1262,10 +1395,7 @@ fn viewport_os_move_and_resize_events_request_imgui_platform_sync() {
     let _guard = imgui_context_guard();
     let mut app = app_with_multi_viewport_bridge("viewport-os-window-events");
     app.world_mut().spawn((Window::default(), PrimaryWindow));
-    app.update();
-
-    let (id, _) = live_main_viewport(&app);
-    let entity = spawn_platform_event_window(&mut app, id);
+    let (id, entity) = create_live_secondary_viewport(&mut app);
     {
         let mut window = app
             .world_mut()
@@ -1301,7 +1431,7 @@ fn viewport_os_move_and_resize_events_request_imgui_platform_sync() {
     assert_eq!(feedback.pos, [280.0, 420.0]);
     assert_eq!(feedback.size, [420.0, 240.0]);
 
-    let (_, raw_viewport) = live_main_viewport(&app);
+    let raw_viewport = resolve_live_viewport(&app, id);
     unsafe {
         assert!(
             (*raw_viewport).PlatformRequestMove,
@@ -1312,6 +1442,7 @@ fn viewport_os_move_and_resize_events_request_imgui_platform_sync() {
             "OS window resizes must tell Dear ImGui to pull the platform size instead of fighting the resize"
         );
     }
+    destroy_live_secondary_viewport(&mut app, id);
 }
 
 #[cfg(feature = "multi-viewport")]
@@ -1320,10 +1451,7 @@ fn viewport_secondary_window_close_requests_imgui_platform_close() {
     let _guard = imgui_context_guard();
     let mut app = app_with_multi_viewport_bridge("viewport-secondary-close-request");
     app.world_mut().spawn((Window::default(), PrimaryWindow));
-    app.update();
-
-    let (id, _) = live_main_viewport(&app);
-    let entity = spawn_platform_event_window(&mut app, id);
+    let (id, entity) = create_live_secondary_viewport(&mut app);
 
     app.world_mut()
         .resource_mut::<Messages<WindowCloseRequested>>()
@@ -1331,13 +1459,14 @@ fn viewport_secondary_window_close_requests_imgui_platform_close() {
 
     app.world_mut().run_schedule(bevy_app::PreUpdate);
 
-    let (_, raw_viewport) = live_main_viewport(&app);
+    let raw_viewport = resolve_live_viewport(&app, id);
     unsafe {
         assert!(
             (*raw_viewport).PlatformRequestClose,
             "closing a detached Bevy window must ask Dear ImGui to close the matching platform viewport"
         );
     }
+    destroy_live_secondary_viewport(&mut app, id);
 }
 
 #[cfg(feature = "multi-viewport")]
@@ -1346,10 +1475,7 @@ fn viewport_occlusion_events_update_imgui_minimized_feedback() {
     let _guard = imgui_context_guard();
     let mut app = app_with_multi_viewport_bridge("viewport-occlusion-feedback");
     app.world_mut().spawn((Window::default(), PrimaryWindow));
-    app.update();
-
-    let (id, _) = live_main_viewport(&app);
-    let entity = spawn_platform_event_window(&mut app, id);
+    let (id, entity) = create_live_secondary_viewport(&mut app);
 
     app.world_mut()
         .resource_mut::<Messages<WindowOccluded>>()
@@ -1372,7 +1498,7 @@ fn viewport_occlusion_events_update_imgui_minimized_feedback() {
                 .expect("bridge should install Platform_GetWindowMinimized")
         }
     };
-    let (_, raw_viewport) = live_main_viewport(&app);
+    let raw_viewport = resolve_live_viewport(&app, id);
     unsafe {
         assert!(
             minimized(raw_viewport),
@@ -1401,13 +1527,14 @@ fn viewport_occlusion_events_update_imgui_minimized_feedback() {
                 .expect("bridge should install Platform_GetWindowMinimized")
         }
     };
-    let (_, raw_viewport) = live_main_viewport(&app);
+    let raw_viewport = resolve_live_viewport(&app, id);
     unsafe {
         assert!(
             !minimized(raw_viewport),
             "unoccluded detached windows should clear minimized feedback"
         );
     }
+    destroy_live_secondary_viewport(&mut app, id);
 }
 
 #[cfg(feature = "multi-viewport")]
