@@ -226,7 +226,6 @@ struct AppWindow {
     renderer: AppRenderer,
     viewport_runtime: Option<winit_mvp::WinitPlatformRuntime>,
     platform: WinitPlatform,
-    imgui: Context,
     start_time: Instant,
     enable_viewports: bool,
     // Offscreen "game view" texture and view
@@ -243,6 +242,8 @@ struct AppWindow {
     renderer_shutdown_complete: bool,
     viewport_runtime_shutdown_complete: bool,
     platform_shutdown_complete: bool,
+    // Every backend and extension that may retain Context-bound state is dropped first.
+    imgui: Context,
 }
 
 impl Drop for AppWindow {
@@ -255,72 +256,54 @@ impl Drop for AppWindow {
 
 impl AppWindow {
     fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        if !self.renderer_shutdown_complete {
-            if let Err(error) = self.renderer.shutdown(&mut self.imgui) {
-                return Err(format!("WGPU renderer shutdown failed: {error}").into());
+        self.imgui.end_frame();
+        let mut errors = Vec::new();
+
+        #[cfg(feature = "test-engine")]
+        if !self.test_engine_shutdown_complete {
+            match self.test_engine.as_mut().map(TestEngine::shutdown) {
+                Some(Err(error)) => errors.push(format!("test engine shutdown failed: {error}")),
+                Some(Ok(())) | None => self.test_engine_shutdown_complete = true,
             }
-            self.renderer_shutdown_complete = true;
         }
 
-        let runtime_error = if !self.viewport_runtime_shutdown_complete {
+        if !self.renderer_shutdown_complete {
+            match self.renderer.shutdown(&mut self.imgui) {
+                Ok(()) => self.renderer_shutdown_complete = true,
+                Err(error) => errors.push(format!("WGPU renderer shutdown failed: {error}")),
+            }
+        }
+
+        if !self.viewport_runtime_shutdown_complete {
             let (viewport_runtime, imgui) = (&mut self.viewport_runtime, &mut self.imgui);
-            viewport_runtime
+            match viewport_runtime
                 .as_mut()
-                .and_then(|runtime| runtime.shutdown(imgui).err())
-        } else {
-            None
-        };
+                .map(|runtime| runtime.shutdown(imgui))
+            {
+                Some(Err(error)) => {
+                    errors.push(format!("Winit multi-viewport shutdown failed: {error}"));
+                }
+                Some(Ok(())) | None => self.viewport_runtime_shutdown_complete = true,
+            }
+        }
 
-        let platform_error = if !self.platform_shutdown_complete {
+        if !self.platform_shutdown_complete {
             let (platform, imgui) = (&mut self.platform, &mut self.imgui);
-            platform.shutdown(imgui).err()
+            match platform.shutdown(imgui) {
+                Ok(()) => {
+                    // `WinitPlatform::shutdown` is the authoritative final release for both its
+                    // base attachment and a runtime that completed native cleanup with a fault.
+                    self.viewport_runtime_shutdown_complete = true;
+                    self.platform_shutdown_complete = true;
+                }
+                Err(error) => errors.push(format!("Winit platform shutdown failed: {error}")),
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
         } else {
-            None
-        };
-        if platform_error.is_none() && !self.platform_shutdown_complete {
-            // `WinitPlatform::shutdown` is the authoritative final release for both its base
-            // attachment and a runtime that has already completed native cleanup with a fault.
-            self.viewport_runtime_shutdown_complete = true;
-            self.platform_shutdown_complete = true;
-        }
-
-        if let Some(platform) = platform_error {
-            return match runtime_error {
-                None => Err(format!("Winit platform shutdown failed: {platform}").into()),
-                Some(runtime) => Err(format!(
-                    "Winit multi-viewport shutdown failed: {runtime}; Winit platform shutdown failed: {platform}"
-                )
-                .into()),
-            };
-        }
-
-        #[cfg(feature = "test-engine")]
-        let test_engine_error = if !self.test_engine_shutdown_complete {
-            self.test_engine
-                .as_mut()
-                .and_then(|engine| engine.shutdown().err())
-        } else {
-            None
-        };
-        #[cfg(feature = "test-engine")]
-        if test_engine_error.is_none() {
-            self.test_engine_shutdown_complete = true;
-        }
-
-        #[cfg(not(feature = "test-engine"))]
-        let test_engine_error: Option<String> = None;
-        #[cfg(feature = "test-engine")]
-        let test_engine_error = test_engine_error.map(|error| error.to_string());
-        let runtime_error = runtime_error.map(|error| error.to_string());
-
-        match (runtime_error, test_engine_error) {
-            (None, None) => Ok(()),
-            (Some(error), None) => Err(format!("Winit multi-viewport shutdown failed: {error}").into()),
-            (None, Some(error)) => Err(format!("test engine shutdown failed: {error}").into()),
-            (Some(runtime), Some(test_engine)) => Err(format!(
-                "Winit multi-viewport shutdown failed: {runtime}; test engine shutdown failed: {test_engine}"
-            )
-            .into()),
+            Err(errors.join("; ").into())
         }
     }
 
@@ -444,38 +427,6 @@ impl AppWindow {
             .then(|| winit_mvp::WinitPlatformRuntime::new(&mut imgui, &platform))
             .transpose()?;
 
-        #[cfg(feature = "test-engine")]
-        let test_engine = if run_viewport_smoke {
-            let scale = window.scale_factor();
-            let main_pos = window.outer_position()?.to_logical::<f32>(scale);
-            let main_size = window.outer_size().to_logical::<f32>(scale);
-            let external_pos = [main_pos.x + main_size.width + 100.0, main_pos.y + 100.0];
-            let merged_pos = [main_pos.x + 100.0, main_pos.y + 100.0];
-
-            let mut engine = TestEngine::create()?;
-            engine.start(&mut imgui)?;
-            engine.set_capture_enabled(false)?;
-            engine.set_run_speed(RunSpeed::Fast)?;
-            engine.set_verbose_level(VerboseLevel::Info)?;
-            engine.add_script_test("wgpu", "multi_viewport_surface_smoke", move |test| {
-                test.wait_for_item("Main/Viewport Count", ScriptCount::new(240)?)?;
-                test.window_move("Game View", external_pos[0], external_pos[1])?;
-                test.yield_frames(ScriptCount::new(30)?)?;
-                test.assert_item_read_int_eq("Main/Viewport Count", 2)?;
-                test.window_move("Game View", merged_pos[0], merged_pos[1])?;
-                test.yield_frames(ScriptCount::new(30)?)?;
-                test.assert_item_read_int_eq("Main/Viewport Count", 1)
-            })?;
-            engine.queue_tests(
-                TestGroup::Tests,
-                Some("multi_viewport_surface_smoke"),
-                RunFlags::RUN_FROM_COMMAND_LINE,
-            )?;
-            Some(engine)
-        } else {
-            None
-        };
-
         // WGPU renderer
         let init_info = WgpuInitInfo::new(device.clone(), queue.clone(), surface_config.format)
             .with_instance(instance.clone())
@@ -488,21 +439,22 @@ impl AppWindow {
         let game_tex_id = renderer.register_external_texture(&game_tex, &game_tex_view);
 
         let renderer = if enable_viewports {
-            AppRenderer::Multi(wgpu_mvp::WinitViewportRuntime::attach(
-                &mut imgui, renderer,
-            )?)
+            match wgpu_mvp::WinitViewportRuntime::attach(&mut imgui, renderer) {
+                Ok(runtime) => AppRenderer::Multi(runtime),
+                Err(failure) => {
+                    let (attach_error, mut renderer) = failure.into_parts();
+                    if let Err(shutdown_error) = renderer.shutdown(&mut imgui) {
+                        return Err(format!(
+                            "WGPU multi-viewport attachment failed: {attach_error}; renderer cleanup failed: {shutdown_error}"
+                        )
+                        .into());
+                    }
+                    return Err(attach_error.into());
+                }
+            }
         } else {
             AppRenderer::Single(renderer)
         };
-
-        #[cfg(feature = "test-engine")]
-        let viewport_smoke = run_viewport_smoke.then(|| ViewportSmokeState {
-            result_path: std::env::var_os("DEAR_IMGUI_VIEWPORT_SMOKE_JSON").map(PathBuf::from),
-            adapter: adapter_info,
-            saw_secondary_viewport: false,
-            saw_merged_viewport: false,
-            complete: false,
-        });
 
         let app = Self {
             window,
@@ -513,24 +465,75 @@ impl AppWindow {
             renderer,
             viewport_runtime,
             platform,
-            imgui,
             start_time: Instant::now(),
             enable_viewports,
             _game_tex: game_tex,
             game_tex_view,
             game_tex_id,
             #[cfg(feature = "test-engine")]
-            test_engine,
+            test_engine: None,
             #[cfg(feature = "test-engine")]
-            viewport_smoke,
+            viewport_smoke: None,
             #[cfg(feature = "test-engine")]
             test_engine_shutdown_complete: false,
             renderer_shutdown_complete: false,
             viewport_runtime_shutdown_complete: false,
             platform_shutdown_complete: false,
+            imgui,
+        };
+
+        #[cfg(feature = "test-engine")]
+        let app = {
+            let mut app = app;
+            if run_viewport_smoke {
+                app.configure_viewport_smoke(adapter_info)?;
+            }
+            app
         };
 
         Ok(app)
+    }
+
+    #[cfg(feature = "test-engine")]
+    fn configure_viewport_smoke(
+        &mut self,
+        adapter: wgpu::AdapterInfo,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let scale = self.window.scale_factor();
+        let main_pos = self.window.outer_position()?.to_logical::<f32>(scale);
+        let main_size = self.window.outer_size().to_logical::<f32>(scale);
+        let external_pos = [main_pos.x + main_size.width + 100.0, main_pos.y + 100.0];
+        let merged_pos = [main_pos.x + 100.0, main_pos.y + 100.0];
+
+        let mut engine = TestEngine::create()?;
+        engine.start(&mut self.imgui)?;
+        engine.set_capture_enabled(false)?;
+        engine.set_run_speed(RunSpeed::Fast)?;
+        engine.set_verbose_level(VerboseLevel::Info)?;
+        engine.add_script_test("wgpu", "multi_viewport_surface_smoke", move |test| {
+            test.wait_for_item("Main/Viewport Count", ScriptCount::new(240)?)?;
+            test.window_move("Game View", external_pos[0], external_pos[1])?;
+            test.yield_frames(ScriptCount::new(30)?)?;
+            test.assert_item_read_int_eq("Main/Viewport Count", 2)?;
+            test.window_move("Game View", merged_pos[0], merged_pos[1])?;
+            test.yield_frames(ScriptCount::new(30)?)?;
+            test.assert_item_read_int_eq("Main/Viewport Count", 1)
+        })?;
+        engine.queue_tests(
+            TestGroup::Tests,
+            Some("multi_viewport_surface_smoke"),
+            RunFlags::RUN_FROM_COMMAND_LINE,
+        )?;
+
+        self.test_engine = Some(engine);
+        self.viewport_smoke = Some(ViewportSmokeState {
+            result_path: std::env::var_os("DEAR_IMGUI_VIEWPORT_SMOKE_JSON").map(PathBuf::from),
+            adapter,
+            saw_secondary_viewport: false,
+            saw_merged_viewport: false,
+            complete: false,
+        });
+        Ok(())
     }
 
     fn redraw_with_event_loop(

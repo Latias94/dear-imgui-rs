@@ -1725,6 +1725,7 @@ mod tests {
     const FOREIGN_VIEWPORT_HANDLE_RAW: usize = 0x403;
     static OWNED_BACKEND_NAME: &[u8] = b"SDL3-test\0";
     static FOREIGN_BACKEND_NAME: &[u8] = b"foreign-test\0";
+    static FOREIGN_CLIPBOARD_TEXT: &[u8] = b"foreign clipboard\0";
 
     thread_local! {
         static DESTROY_OBSERVED_USER_DATA: Cell<usize> = const { Cell::new(0) };
@@ -1757,6 +1758,18 @@ mod tests {
     unsafe extern "C" fn foreign_create_window(_viewport: *mut sys::ImGuiViewport) {}
 
     unsafe extern "C" fn foreign_destroy_window(_viewport: *mut sys::ImGuiViewport) {}
+
+    unsafe extern "C" fn foreign_get_clipboard_text(
+        _context: *mut sys::ImGuiContext,
+    ) -> *const std::ffi::c_char {
+        FOREIGN_CLIPBOARD_TEXT.as_ptr().cast()
+    }
+
+    unsafe extern "C" fn foreign_set_clipboard_text(
+        _context: *mut sys::ImGuiContext,
+        _text: *const std::ffi::c_char,
+    ) {
+    }
 
     unsafe extern "C" fn foreign_platform_render_window(
         _viewport: *mut sys::ImGuiViewport,
@@ -2860,6 +2873,64 @@ mod tests {
             }
             assert!((*main_viewport).PlatformUserData.is_null());
             assert!((*main_viewport).PlatformHandle.is_null());
+        });
+    }
+
+    #[test]
+    fn platform_service_override_does_not_revoke_viewport_ownership() {
+        let _guard = crate::tests::test_guard();
+        let mut context = Context::create();
+        let baseline_clipboard = context.binding().with_bound_context(|| unsafe {
+            let platform_io = sys::igGetPlatformIO_Nil();
+            (
+                (*platform_io).Platform_GetClipboardTextFn,
+                (*platform_io).Platform_SetClipboardTextFn,
+                (*platform_io).Platform_ClipboardUserData,
+            )
+        });
+        let mut runtime = synthetic_claimed_registration(
+            &mut context,
+            Rc::new(Cell::new(0)),
+            Rc::new(Cell::new(0)),
+            Rc::new(Cell::new(0)),
+            synthetic_create_window,
+        );
+
+        context.binding().with_bound_context(|| unsafe {
+            let platform_io = sys::igGetPlatformIO_Nil();
+            (*platform_io).Platform_GetClipboardTextFn = Some(foreign_get_clipboard_text);
+            (*platform_io).Platform_SetClipboardTextFn = Some(foreign_set_clipboard_text);
+            (*platform_io).Platform_ClipboardUserData = FOREIGN_PLATFORM_DATA as *mut _;
+        });
+
+        let mut viewport = sys::ImGuiViewport::default();
+        context.binding().with_bound_context(|| unsafe {
+            create_window_callback_for_test(&mut viewport);
+            destroy_window_callback_for_test(&mut viewport);
+        });
+        runtime.poll_fault().unwrap();
+        runtime.shutdown_platform(&mut context).unwrap();
+
+        context.binding().with_bound_context(|| unsafe {
+            let platform_io = sys::igGetPlatformIO_Nil();
+            assert!(std::ptr::fn_addr_eq(
+                (*platform_io).Platform_GetClipboardTextFn.unwrap(),
+                foreign_get_clipboard_text
+                    as unsafe extern "C" fn(*mut sys::ImGuiContext) -> *const std::ffi::c_char,
+            ));
+            assert!(std::ptr::fn_addr_eq(
+                (*platform_io).Platform_SetClipboardTextFn.unwrap(),
+                foreign_set_clipboard_text
+                    as unsafe extern "C" fn(*mut sys::ImGuiContext, *const std::ffi::c_char),
+            ));
+            assert_eq!(
+                (*platform_io).Platform_ClipboardUserData as usize,
+                FOREIGN_PLATFORM_DATA
+            );
+
+            (*platform_io).Platform_GetClipboardTextFn = baseline_clipboard.0;
+            (*platform_io).Platform_SetClipboardTextFn = baseline_clipboard.1;
+            (*platform_io).Platform_ClipboardUserData = baseline_clipboard.2;
         });
     }
 

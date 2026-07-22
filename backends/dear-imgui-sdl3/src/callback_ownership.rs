@@ -63,6 +63,8 @@ macro_rules! for_each_platform_window_callback {
     };
 }
 
+// Platform services are composable hooks, not part of the viewport window ownership contract.
+// Extensions such as Dear ImGui Test Engine temporarily replace the clipboard family together.
 macro_rules! for_each_platform_service_callback {
     ($macro:ident) => {
         $macro!(Platform_GetClipboardTextFn);
@@ -778,18 +780,6 @@ impl PlatformCallbackOwnership {
         let original = unsafe { PlatformCallbacks::capture(platform_io) };
         register_runtime(control);
         unsafe {
-            if original.raw.Platform_GetClipboardTextFn.is_some() {
-                (*platform_io).Platform_GetClipboardTextFn = Some(sdl3_get_clipboard_text);
-            }
-            if original.raw.Platform_SetClipboardTextFn.is_some() {
-                (*platform_io).Platform_SetClipboardTextFn = Some(sdl3_set_clipboard_text);
-            }
-            if original.raw.Platform_OpenInShellFn.is_some() {
-                (*platform_io).Platform_OpenInShellFn = Some(sdl3_open_in_shell);
-            }
-            if original.raw.Platform_SetImeDataFn.is_some() {
-                (*platform_io).Platform_SetImeDataFn = Some(sdl3_set_ime_data);
-            }
             if original.raw.Platform_CreateWindow.is_some() {
                 (*platform_io).Platform_CreateWindow = Some(sdl3_create_window);
             }
@@ -895,18 +885,6 @@ impl PlatformCallbackOwnership {
             control.capabilities_were_revoked(SDL_PLATFORM_RESERVED_FLAGS);
         let monitors_owned = current_monitors == self.owned_monitors.get();
 
-        macro_rules! detect_replacement {
-            ($field:ident) => {
-                if !callback_eq!(
-                    self.baseline.callbacks.raw.$field,
-                    self.installed.raw.$field
-                ) && !callback_eq!(self.installed.raw.$field, current.raw.$field)
-                {
-                    control.record_callback_replaced(stringify!($field));
-                }
-            };
-        }
-        for_each_platform_service_callback!(detect_replacement);
         macro_rules! detect_window_replacement {
             ($field:ident) => {
                 if !callback_eq!(self.installed.raw.$field, current.raw.$field) {
@@ -916,16 +894,6 @@ impl PlatformCallbackOwnership {
         }
         for_each_platform_window_callback!(detect_window_replacement);
 
-        macro_rules! detect_user_data_replacement {
-            ($field:ident) => {
-                if self.baseline.callbacks.raw.$field != self.installed.raw.$field
-                    && self.installed.raw.$field != current.raw.$field
-                {
-                    control.record_platform_state_replaced(stringify!($field));
-                }
-            };
-        }
-        for_each_user_data!(detect_user_data_replacement);
         if self.baseline.backend.user_data != self.installed_backend.user_data
             && self.installed_backend.user_data != current_backend.user_data
         {
@@ -1166,19 +1134,6 @@ impl PlatformCallbackOwnership {
         let capabilities_were_revoked =
             control.capabilities_were_revoked(SDL_PLATFORM_RESERVED_FLAGS);
         let mut owned = true;
-        macro_rules! detect_replacement {
-            ($field:ident) => {
-                if !callback_eq!(
-                    self.baseline.callbacks.raw.$field,
-                    self.installed.raw.$field
-                ) && !callback_eq!(self.installed.raw.$field, current.$field)
-                {
-                    control.record_callback_replaced(stringify!($field));
-                    owned = false;
-                }
-            };
-        }
-        for_each_platform_service_callback!(detect_replacement);
         macro_rules! detect_window_replacement {
             ($field:ident) => {
                 if !callback_eq!(self.installed.raw.$field, current.$field) {
@@ -1189,17 +1144,6 @@ impl PlatformCallbackOwnership {
         }
         for_each_platform_window_callback!(detect_window_replacement);
 
-        macro_rules! detect_user_data_replacement {
-            ($field:ident) => {
-                if self.baseline.callbacks.raw.$field != self.installed.raw.$field
-                    && self.installed.raw.$field != current.$field
-                {
-                    control.record_platform_state_replaced(stringify!($field));
-                    owned = false;
-                }
-            };
-        }
-        for_each_user_data!(detect_user_data_replacement);
         if self.baseline.backend.user_data != self.installed_backend.user_data
             && self.installed_backend.user_data != current_backend.user_data
         {
@@ -1285,24 +1229,12 @@ impl PlatformCallbackOwnership {
                 }
             };
         }
-        for_each_callback!(require_owned_callback_replacement);
-
-        let mut all_owned_user_data_replaced = true;
-        macro_rules! require_owned_user_data_replacement {
-            ($field:ident) => {
-                if self.baseline.callbacks.raw.$field != self.installed.raw.$field
-                    && (current.$field.is_null() || current.$field == self.installed.raw.$field)
-                {
-                    all_owned_user_data_replaced = false;
-                }
-            };
-        }
-        for_each_user_data!(require_owned_user_data_replacement);
+        for_each_platform_window_callback!(require_owned_callback_replacement);
 
         let owned_monitors = self.owned_monitors.get();
         let monitors_transferred = owned_monitors.is_empty()
             || (!current_monitors.is_empty() && current_monitors != owned_monitors);
-        all_owned_callbacks_replaced && all_owned_user_data_replaced && monitors_transferred
+        all_owned_callbacks_replaced && monitors_transferred
     }
 
     pub(super) unsafe fn refresh_owned_monitors(&self) {
@@ -1359,62 +1291,6 @@ pub(super) unsafe fn restore_baseline_after_failed_initialization(baseline: Plat
 
 fn register_runtime(control: &Rc<RuntimeControl>) {
     crate::runtime::register_runtime(control);
-}
-
-unsafe extern "C" fn sdl3_get_clipboard_text(
-    context: *mut sys::ImGuiContext,
-) -> *const std::ffi::c_char {
-    run_callback(
-        "Platform_GetClipboardTextFn",
-        std::ptr::null(),
-        |control| unsafe {
-            control
-                .original_platform_callback(|raw| raw.Platform_GetClipboardTextFn)
-                .flatten()
-                .map_or(std::ptr::null(), |callback| callback(context))
-        },
-    )
-}
-
-unsafe extern "C" fn sdl3_set_clipboard_text(
-    context: *mut sys::ImGuiContext,
-    text: *const std::ffi::c_char,
-) {
-    run_callback("Platform_SetClipboardTextFn", (), |control| unsafe {
-        if let Some(callback) = control
-            .original_platform_callback(|raw| raw.Platform_SetClipboardTextFn)
-            .flatten()
-        {
-            callback(context, text);
-        }
-    });
-}
-
-unsafe extern "C" fn sdl3_open_in_shell(
-    context: *mut sys::ImGuiContext,
-    path: *const std::ffi::c_char,
-) -> bool {
-    run_callback("Platform_OpenInShellFn", false, |control| unsafe {
-        control
-            .original_platform_callback(|raw| raw.Platform_OpenInShellFn)
-            .flatten()
-            .is_some_and(|callback| callback(context, path))
-    })
-}
-
-unsafe extern "C" fn sdl3_set_ime_data(
-    context: *mut sys::ImGuiContext,
-    viewport: *mut sys::ImGuiViewport,
-    data: *mut sys::ImGuiPlatformImeData,
-) {
-    run_callback("Platform_SetImeDataFn", (), |control| unsafe {
-        if let Some(callback) = control
-            .original_platform_callback(|raw| raw.Platform_SetImeDataFn)
-            .flatten()
-        {
-            callback(context, viewport, data);
-        }
-    });
 }
 
 unsafe extern "C" fn sdl3_show_window(viewport: *mut sys::ImGuiViewport) {
@@ -1642,8 +1518,7 @@ unsafe extern "C" fn sdl3_create_window(viewport: *mut sys::ImGuiViewport) {
         let Some(callback) = control.original_create_window() else {
             return;
         };
-        let Some(transaction) =
-            NativeTransaction::begin(control, NativePhase::Create, viewport)
+        let Some(transaction) = NativeTransaction::begin(control, NativePhase::Create, viewport)
         else {
             control.mark_viewport_failed(viewport);
             return;
@@ -1711,8 +1586,7 @@ unsafe extern "C" fn sdl3_render_window(
         let Some(callback) = control.original_render_window() else {
             return;
         };
-        let Some(transaction) =
-            NativeTransaction::begin(control, NativePhase::Render, viewport)
+        let Some(transaction) = NativeTransaction::begin(control, NativePhase::Render, viewport)
         else {
             control.mark_viewport_failed(viewport);
             return;
@@ -1739,8 +1613,7 @@ unsafe extern "C" fn sdl3_swap_buffers(
         let Some(callback) = control.original_swap_buffers() else {
             return;
         };
-        let Some(transaction) =
-            NativeTransaction::begin(control, NativePhase::Swap, viewport)
+        let Some(transaction) = NativeTransaction::begin(control, NativePhase::Swap, viewport)
         else {
             control.mark_viewport_failed(viewport);
             return;

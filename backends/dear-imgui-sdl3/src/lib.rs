@@ -82,13 +82,6 @@ use dear_imgui_rs::ContextBinding;
     feature = "sdlgpu3-renderer"
 ))]
 use dear_imgui_rs::render::{DrawData, RenderedFrame};
-#[cfg(any(
-    test,
-    feature = "opengl3-renderer",
-    feature = "sdlrenderer3-renderer",
-    feature = "sdlgpu3-renderer"
-))]
-use dear_imgui_sys as sys;
 #[cfg(feature = "opengl3-renderer")]
 use dear_imgui_sys::backend_shim::opengl3 as opengl3_backend;
 #[cfg(feature = "sdlgpu3-renderer")]
