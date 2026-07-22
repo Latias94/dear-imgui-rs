@@ -7,9 +7,7 @@ use bevy_camera::{
 #[cfg(feature = "multi-viewport")]
 use bevy_ecs::message::Messages;
 #[cfg(feature = "multi-viewport")]
-use bevy_ecs::prelude::Entity;
-#[cfg(feature = "multi-viewport")]
-use bevy_ecs::prelude::With;
+use bevy_ecs::prelude::{Entity, Res, Resource, With};
 #[cfg(all(feature = "multi-viewport", feature = "render"))]
 use bevy_ecs::schedule::ScheduleLabel;
 #[cfg(feature = "multi-viewport")]
@@ -166,7 +164,17 @@ fn app_with_multi_viewport_window_config(
 }
 
 #[cfg(feature = "multi-viewport")]
-fn submit_live_secondary_viewport(mut contexts: ImguiContexts) {
+#[derive(Resource)]
+struct SubmitLiveSecondaryViewport(bool);
+
+#[cfg(feature = "multi-viewport")]
+fn submit_live_secondary_viewport(
+    mut contexts: ImguiContexts,
+    submit: Res<SubmitLiveSecondaryViewport>,
+) {
+    if !submit.0 {
+        return;
+    }
     let ui = contexts
         .primary_ui_mut()
         .expect("the primary ImGui frame should be open");
@@ -250,6 +258,7 @@ fn create_live_secondary_viewport(app: &mut App) -> (imgui::Id, Entity) {
         .context_mut()
         .io_mut()
         .set_config_viewports_no_auto_merge(true);
+    app.insert_resource(SubmitLiveSecondaryViewport(true));
     app.add_systems(ImguiPrimaryContextPass, submit_live_secondary_viewport);
     // NoAutoMerge makes the UI window deterministically request its own native viewport. The
     // first frame creates it; the second lets Dear ImGui publish the platform window mapping.
@@ -295,11 +304,13 @@ fn destroy_live_secondary_viewport(app: &mut App, viewport_id: imgui::Id) {
         .viewport_window(viewport_id)
         .expect("the live viewport should still own a Bevy window");
     app.world_mut()
-        .get_non_send_mut::<ImguiContext>()
-        .expect("plugin should install ImGui context")
-        .context_mut()
-        .destroy_platform_windows();
-    app.world_mut().run_schedule(ImguiEndFrame);
+        .resource_mut::<SubmitLiveSecondaryViewport>()
+        .0 = false;
+    // An inactive secondary is destroyed by the normal Dear ImGui platform update. Do not invoke
+    // `DestroyPlatformWindows` here: that is a whole-context shutdown transaction, not a frame
+    // lifecycle transition.
+    app.update();
+    finish_pending_platform_window_update(app);
     assert!(
         app.world()
             .get_non_send::<ImguiViewportBridge>()
@@ -312,6 +323,26 @@ fn destroy_live_secondary_viewport(app: &mut App, viewport_id: imgui::Id) {
         app.world().get_entity(entity).is_err(),
         "destroying the live platform viewport must despawn its Bevy window"
     );
+    let published = app
+        .world()
+        .get_non_send::<ImguiContext>()
+        .expect("plugin should install ImGui context")
+        .context()
+        .platform_io()
+        .viewports_iter()
+        .any(|viewport| viewport.id() == viewport_id);
+    assert!(
+        !published,
+        "an inactive secondary viewport must leave the public PlatformIO snapshot"
+    );
+    let raw_viewport = resolve_live_viewport(app, viewport_id);
+    // Dear ImGui retains the internal viewport for two inactive frames. Its platform fields must
+    // already be cleared before the bridge releases the corresponding Bevy entity.
+    unsafe {
+        assert!((*raw_viewport).PlatformUserData.is_null());
+        assert!((*raw_viewport).PlatformHandle.is_null());
+        assert!((*raw_viewport).PlatformHandleRaw.is_null());
+    }
 }
 
 #[cfg(feature = "multi-viewport")]
