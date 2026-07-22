@@ -8,10 +8,12 @@ use std::ffi::{c_char, c_void};
 use std::rc::Rc;
 use std::sync::Arc;
 
+#[cfg(feature = "multi-viewport")]
+use dear_imgui_rs::ContextPlatformWindowTeardown;
 use dear_imgui_rs::{
     BackendFlags, ConfigFlags, Context, ContextAttachment, ContextAttachmentError,
     ContextAttachmentLease, ContextAttachmentRole, ContextAttachmentTeardownError, ContextBinding,
-    ContextBindingError, ContextDestroyed, ContextTeardown,
+    ContextBindingError, ContextDestroyed, ContextPlatformWindowTeardownError, ContextTeardown,
 };
 use thiserror::Error;
 use winit::dpi::{LogicalPosition, LogicalSize};
@@ -48,6 +50,9 @@ pub enum WinitPlatformError {
     /// The originating Dear ImGui Context can no longer be entered normally.
     #[error(transparent)]
     Context(#[from] ContextBindingError),
+    /// Dear ImGui rejected an explicit platform-window teardown transaction.
+    #[error(transparent)]
+    PlatformWindowTeardown(#[from] ContextPlatformWindowTeardownError),
     /// The supplied Context is not the Context owned by this platform backend.
     #[error("the Winit platform backend belongs to a different Dear ImGui context")]
     ContextMismatch,
@@ -664,10 +669,15 @@ impl WinitPlatformControl {
 
     #[cfg(feature = "multi-viewport")]
     pub(crate) fn clear_runtime(&self, runtime: &Rc<crate::multi_viewport::RuntimeControl>) {
+        self.clear_runtime_by_control(runtime.as_ref());
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    fn clear_runtime_by_control(&self, runtime: &crate::multi_viewport::RuntimeControl) {
         let mut slot = self.runtime.borrow_mut();
         if slot
             .as_ref()
-            .is_some_and(|installed| Rc::ptr_eq(installed, runtime))
+            .is_some_and(|installed| std::ptr::eq(installed.as_ref(), runtime))
         {
             slot.take();
         }
@@ -750,6 +760,53 @@ impl WinitPlatformControl {
 }
 
 impl ContextAttachment for WinitPlatformControl {
+    #[cfg(feature = "multi-viewport")]
+    fn begin_platform_window_teardown(
+        &self,
+        context: &ContextPlatformWindowTeardown<'_>,
+    ) -> Result<(), ContextAttachmentTeardownError> {
+        let runtime = self.runtime.borrow().clone();
+        context
+            .with_bound_context(|| {
+                // `WinitPlatformRuntime::shutdown` already performed its typed preflight and
+                // opened this callback guard before it entered the core transaction. Preserve
+                // that error path instead of wrapping it through the generic attachment error.
+                if runtime
+                    .as_ref()
+                    .is_some_and(|runtime| runtime.teardown_callbacks_active())
+                {
+                    return Ok(());
+                }
+
+                self.validate_base_contract_in_current_context()?;
+                if let Some(runtime) = runtime.as_ref() {
+                    runtime.begin_context_platform_window_teardown()?;
+                }
+                Ok(())
+            })
+            .map_err(|error| ContextAttachmentTeardownError::new(error.to_string()))
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    fn end_platform_window_teardown(
+        &self,
+        context: &ContextPlatformWindowTeardown<'_>,
+    ) -> Result<(), ContextAttachmentTeardownError> {
+        let runtime = self.runtime.borrow().clone();
+        let Some(runtime) = runtime else {
+            return Ok(());
+        };
+
+        let result = context.with_bound_context(|| {
+            runtime.finish_context_platform_window_teardown()?;
+            Ok(())
+        });
+        if runtime.is_released() {
+            self.clear_runtime_by_control(&runtime);
+        }
+        result.map_err(|error| ContextAttachmentTeardownError::new(error.to_string()))
+    }
+
     fn quiesce(
         &self,
         _context: &ContextTeardown<'_>,

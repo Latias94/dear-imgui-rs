@@ -24,6 +24,50 @@ struct TestViewportPlatformMarker;
 struct TestViewportPlatformAttachment;
 
 #[cfg(feature = "multi-viewport")]
+struct ExplicitPlatformWindowTeardownMarker;
+
+#[cfg(feature = "multi-viewport")]
+struct ExplicitPlatformWindowTeardownAttachment {
+    log: Rc<RefCell<Vec<&'static str>>>,
+    reject: Rc<Cell<bool>>,
+    reject_after_native_teardown: Rc<Cell<bool>>,
+    bound: Rc<Cell<bool>>,
+}
+
+#[cfg(feature = "multi-viewport")]
+impl ContextAttachment for ExplicitPlatformWindowTeardownAttachment {
+    fn begin_platform_window_teardown(
+        &self,
+        context: &super::ContextPlatformWindowTeardown<'_>,
+    ) -> Result<(), super::ContextAttachmentTeardownError> {
+        context.with_bound_context(|| {
+            self.bound
+                .set(!unsafe { crate::sys::igGetCurrentContext() }.is_null());
+        });
+        self.log.borrow_mut().push("begin");
+        if self.reject.get() {
+            return Err(super::ContextAttachmentTeardownError::new(
+                "test platform teardown rejection",
+            ));
+        }
+        Ok(())
+    }
+
+    fn end_platform_window_teardown(
+        &self,
+        _context: &super::ContextPlatformWindowTeardown<'_>,
+    ) -> Result<(), super::ContextAttachmentTeardownError> {
+        self.log.borrow_mut().push("end");
+        if self.reject_after_native_teardown.get() {
+            return Err(super::ContextAttachmentTeardownError::new(
+                "test platform teardown postflight rejection",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(feature = "multi-viewport")]
 impl ContextAttachment for TestViewportPlatformAttachment {
     fn release_platform_windows(
         &self,
@@ -569,7 +613,7 @@ fn platform_window_calls_enforce_the_native_frame_order_in_rust() {
     }));
     assert!(update_before_render.is_err());
 
-    ctx.destroy_platform_windows();
+    ctx.destroy_platform_windows().unwrap();
     assert!(!ctx.end_frame());
 
     ctx.frame()
@@ -595,6 +639,100 @@ fn platform_window_calls_enforce_the_native_frame_order_in_rust() {
     }));
     assert!(render_after_end_only.is_err());
     assert_eq!(TEST_RENDER_WINDOW_CALLS.load(Ordering::SeqCst), 0);
+}
+
+#[cfg(feature = "multi-viewport")]
+#[test]
+fn explicit_platform_window_teardown_notifies_the_active_platform_attachment() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut context = Context::create();
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let reject = Rc::new(Cell::new(false));
+    let bound = Rc::new(Cell::new(false));
+    let _lease = context
+        .register_attachment::<ExplicitPlatformWindowTeardownMarker>(
+            ContextAttachmentRole::Platform,
+            Rc::new(ExplicitPlatformWindowTeardownAttachment {
+                log: Rc::clone(&log),
+                reject,
+                reject_after_native_teardown: Rc::new(Cell::new(false)),
+                bound: Rc::clone(&bound),
+            }),
+        )
+        .expect("test platform attachment must register");
+
+    context.destroy_platform_windows().unwrap();
+
+    assert!(bound.get());
+    assert_eq!(*log.borrow(), ["begin", "end"]);
+}
+
+#[cfg(feature = "multi-viewport")]
+#[test]
+fn rejected_platform_window_teardown_does_not_leave_the_scope_active() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut context = Context::create();
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let reject = Rc::new(Cell::new(true));
+    let _lease = context
+        .register_attachment::<ExplicitPlatformWindowTeardownMarker>(
+            ContextAttachmentRole::Platform,
+            Rc::new(ExplicitPlatformWindowTeardownAttachment {
+                log: Rc::clone(&log),
+                reject: Rc::clone(&reject),
+                reject_after_native_teardown: Rc::new(Cell::new(false)),
+                bound: Rc::new(Cell::new(false)),
+            }),
+        )
+        .expect("test platform attachment must register");
+
+    let error = context
+        .destroy_platform_windows()
+        .expect_err("attachment rejection must prevent native teardown");
+    assert!(matches!(
+        error,
+        super::ContextPlatformWindowTeardownError::AttachmentPreflight(_)
+    ));
+    reject.set(false);
+    context
+        .destroy_platform_windows()
+        .expect("the rejected scope must not remain active");
+
+    assert_eq!(*log.borrow(), ["begin", "begin", "end"]);
+}
+
+#[cfg(feature = "multi-viewport")]
+#[test]
+fn postflight_platform_window_teardown_error_does_not_leave_the_scope_active() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut context = Context::create();
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let reject_after_native_teardown = Rc::new(Cell::new(true));
+    let _lease = context
+        .register_attachment::<ExplicitPlatformWindowTeardownMarker>(
+            ContextAttachmentRole::Platform,
+            Rc::new(ExplicitPlatformWindowTeardownAttachment {
+                log: Rc::clone(&log),
+                reject: Rc::new(Cell::new(false)),
+                reject_after_native_teardown: Rc::clone(&reject_after_native_teardown),
+                bound: Rc::new(Cell::new(false)),
+            }),
+        )
+        .expect("test platform attachment must register");
+
+    let error = context
+        .destroy_platform_windows()
+        .expect_err("postflight rejection must reach the caller");
+    assert!(matches!(
+        error,
+        super::ContextPlatformWindowTeardownError::AttachmentPostflight(_)
+    ));
+    reject_after_native_teardown.set(false);
+    context
+        .destroy_platform_windows()
+        .expect("a postflight rejection must not leave the scope active");
+
+    assert_eq!(*log.borrow(), ["begin", "end", "begin", "end"]);
 }
 
 #[cfg(feature = "multi-viewport")]

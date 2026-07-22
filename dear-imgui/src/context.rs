@@ -21,7 +21,8 @@ mod texture_registry;
 
 pub use self::attachment::{
     ContextAttachment, ContextAttachmentError, ContextAttachmentLease, ContextAttachmentPhase,
-    ContextAttachmentRole, ContextAttachmentTeardownError, ContextDestroyed, ContextTeardown,
+    ContextAttachmentRole, ContextAttachmentTeardownError, ContextDestroyed,
+    ContextPlatformWindowTeardown, ContextPlatformWindowTeardownError, ContextTeardown,
 };
 pub use self::binding::{
     ContextAliveToken, ContextBinding, ContextBindingError, ContextId, ContextLifecycle,

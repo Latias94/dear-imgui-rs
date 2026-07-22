@@ -759,6 +759,96 @@ fn shutdown_rejects_foreign_viewport_fields_before_aggregate_destroy() {
 }
 
 #[test]
+fn direct_context_platform_teardown_detaches_the_winit_runtime_and_allows_reopen() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let mut platform = crate::WinitPlatform::new(&mut context).unwrap();
+    let runtime = WinitPlatformRuntime::new_for_test_with_platform(&mut context, &platform)
+        .expect("test runtime should attach to the platform");
+
+    context
+        .destroy_platform_windows()
+        .expect("the core transaction should release the attached Winit runtime");
+
+    assert_eq!(runtime.control().state(), RuntimeState::Detached);
+    assert!(!runtime.control().teardown_callbacks_active());
+    assert!(runtime.control().platform_callback_contract().is_none());
+    assert!(super::registry::runtime_for_context(context.as_raw()).is_none());
+    let platform_io = unsafe { &*context.platform_io().as_raw() };
+    assert!(platform_io.Platform_DestroyWindow.is_none());
+    assert_eq!(
+        runtime.route_secondary_event(&mut context, &Event::<()>::AboutToWait),
+        Err(WinitPlatformError::RuntimeDetached)
+    );
+
+    let mut reopened = WinitPlatformRuntime::new_for_test_with_platform(&mut context, &platform)
+        .expect("a core platform teardown should release the Winit runtime slot");
+    reopened.shutdown(&mut context).unwrap();
+    platform.shutdown(&mut context).unwrap();
+}
+
+#[test]
+fn direct_context_platform_teardown_releases_the_runtime_slot_after_postflight_error() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let mut platform = crate::WinitPlatform::new(&mut context).unwrap();
+    let runtime = WinitPlatformRuntime::new_for_test_with_platform(&mut context, &platform)
+        .expect("test runtime should attach to the platform");
+    unsafe {
+        context
+            .platform_io_mut()
+            .set_platform_show_window_raw(Some(foreign_unary));
+    }
+
+    let error = context
+        .destroy_platform_windows()
+        .expect_err("postflight callback drift should be reported after native teardown");
+    assert!(matches!(
+        error,
+        dear_imgui_rs::ContextPlatformWindowTeardownError::AttachmentPostflight(_)
+    ));
+    assert_eq!(runtime.control().state(), RuntimeState::Detached);
+    assert!(super::registry::runtime_for_context(context.as_raw()).is_none());
+
+    unsafe { context.platform_io_mut().set_platform_show_window_raw(None) };
+    let mut reopened = WinitPlatformRuntime::new_for_test_with_platform(&mut context, &platform)
+        .expect("a postflight failure must not retain the detached runtime slot");
+    reopened.shutdown(&mut context).unwrap();
+    platform.shutdown(&mut context).unwrap();
+}
+
+#[test]
+fn direct_context_platform_teardown_rejects_renderer_state_before_native_destroy() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let mut runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
+    FOREIGN_DESTROY_CALLS.store(0, Ordering::Relaxed);
+    unsafe {
+        context
+            .platform_io_mut()
+            .set_renderer_destroy_window_raw(Some(foreign_destroy));
+    }
+
+    let error = context
+        .destroy_platform_windows()
+        .expect_err("renderer callbacks must reject core platform teardown before native destroy");
+    assert!(matches!(
+        error,
+        dear_imgui_rs::ContextPlatformWindowTeardownError::AttachmentPreflight(_)
+    ));
+    assert_eq!(runtime.control().state(), RuntimeState::Attached);
+    assert!(!runtime.control().teardown_callbacks_active());
+    assert_eq!(FOREIGN_DESTROY_CALLS.load(Ordering::Relaxed), 0);
+
+    unsafe {
+        context
+            .platform_io_mut()
+            .set_renderer_destroy_window_raw(None);
+    }
+    runtime.shutdown(&mut context).unwrap();
+}
+
+#[test]
 fn preflight_keeps_owned_viewports_filtered_from_the_public_snapshot() {
     let _guard = lock_context();
     let mut context = Context::create();

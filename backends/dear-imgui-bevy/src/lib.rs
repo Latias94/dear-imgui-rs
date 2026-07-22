@@ -516,7 +516,10 @@ struct ImguiBackendOwnership {
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 enum ImguiViewportBridgeLifecycle {
     Detached,
-    Attached(viewport::ImguiViewportBridgeKeepalive),
+    Attached {
+        keepalive: viewport::ImguiViewportBridgeKeepalive,
+        attachment: dear_imgui_rs::ContextAttachmentLease,
+    },
     EcsReleasePending(viewport::ImguiViewportBridgeKeepalive),
 }
 
@@ -762,18 +765,22 @@ impl ImguiContext {
     pub(crate) fn attach_viewport_bridge(
         &mut self,
         keepalive: viewport::ImguiViewportBridgeKeepalive,
+        attachment: dear_imgui_rs::ContextAttachmentLease,
     ) {
         assert!(
             matches!(self.viewport_bridge, ImguiViewportBridgeLifecycle::Detached),
             "dear-imgui-bevy viewport bridge was attached more than once"
         );
         self.mark_viewport_backend_owned();
-        self.viewport_bridge = ImguiViewportBridgeLifecycle::Attached(keepalive);
+        self.viewport_bridge = ImguiViewportBridgeLifecycle::Attached {
+            keepalive,
+            attachment,
+        };
     }
 
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     fn assert_attached_viewport_callback_ownership(&mut self) {
-        if let ImguiViewportBridgeLifecycle::Attached(keepalive) = &self.viewport_bridge {
+        if let ImguiViewportBridgeLifecycle::Attached { keepalive, .. } = &self.viewport_bridge {
             viewport::platform_callback_ownership(&mut self.context, keepalive).unwrap_or_else(
                 |error| panic!("dear-imgui-bevy viewport callback ownership changed: {error}"),
             );
@@ -782,7 +789,7 @@ impl ImguiContext {
 
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     fn record_attached_viewport_runtime_contract(&mut self) {
-        if let ImguiViewportBridgeLifecycle::Attached(keepalive) = &self.viewport_bridge {
+        if let ImguiViewportBridgeLifecycle::Attached { keepalive, .. } = &self.viewport_bridge {
             viewport::record_platform_runtime_contract(&mut self.context, keepalive);
         }
     }
@@ -793,7 +800,7 @@ impl ImguiContext {
         not(target_arch = "wasm32")
     ))]
     fn assert_viewport_callback_ownership(&mut self) {
-        let ImguiViewportBridgeLifecycle::Attached(keepalive) = &self.viewport_bridge else {
+        let ImguiViewportBridgeLifecycle::Attached { keepalive, .. } = &self.viewport_bridge else {
             panic!("dear-imgui-bevy viewport bridge is not attached");
         };
         viewport::platform_callback_ownership(&mut self.context, keepalive).unwrap_or_else(
@@ -937,11 +944,15 @@ impl ImguiContext {
         );
         match lifecycle {
             ImguiViewportBridgeLifecycle::Detached => (false, Ok(())),
-            ImguiViewportBridgeLifecycle::Attached(keepalive) => {
+            ImguiViewportBridgeLifecycle::Attached {
+                keepalive,
+                mut attachment,
+            } => {
                 let capabilities_still_owned =
                     viewport::platform_capabilities_still_owned(&mut self.context, &keepalive);
                 let ownership_error =
                     viewport::detach_owned_bridge(&mut self.context, &keepalive).err();
+                let _ = attachment.detach();
                 let ecs_release_pending = viewport::viewport_ecs_release_pending(&keepalive);
                 if ownership_error.is_some() || ecs_release_pending {
                     self.viewport_bridge =

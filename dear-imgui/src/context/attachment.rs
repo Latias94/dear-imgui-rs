@@ -57,6 +57,34 @@ impl ContextAttachmentTeardownError {
     }
 }
 
+/// Failure while entering or leaving an explicit platform-window teardown transaction.
+///
+/// Unlike [`ContextAttachmentTeardownError`], this error is returned to the caller of
+/// [`crate::Context::destroy_platform_windows`] before or after its native operation. It does not
+/// use Context-drop's fail-stop policy because the caller still owns a live Context.
+#[derive(Clone, Debug, Eq, Error, PartialEq)]
+#[non_exhaustive]
+pub enum ContextPlatformWindowTeardownError {
+    /// The Context is already being dropped.
+    #[error("Dear ImGui context teardown is in progress")]
+    ContextDropping,
+    /// A platform-window teardown transaction attempted to re-enter itself.
+    #[error("platform-window teardown cannot be reentered")]
+    Reentrant,
+    /// The active platform attachment rejected the transaction before native teardown began.
+    #[error("platform attachment rejected platform-window teardown: {0}")]
+    AttachmentPreflight(#[source] ContextAttachmentTeardownError),
+    /// The active platform attachment failed after native teardown completed.
+    #[error("platform attachment could not complete platform-window teardown: {0}")]
+    AttachmentPostflight(#[source] ContextAttachmentTeardownError),
+    /// The active platform attachment panicked before native teardown began.
+    #[error("platform attachment panicked before platform-window teardown")]
+    BeginPanicked,
+    /// The active platform attachment panicked after native teardown completed.
+    #[error("platform attachment panicked after platform-window teardown")]
+    EndPanicked,
+}
+
 /// Type-erased lifecycle hooks owned by a Context.
 ///
 /// Hooks must be idempotent. If a hook panics, the remaining attachments in that phase are still
@@ -64,6 +92,30 @@ impl ContextAttachmentTeardownError {
 /// ordering. Explicit backend shutdown APIs remain responsible for reporting retryable errors;
 /// attachment hooks are the fail-stop fallback used by `Context::drop`.
 pub trait ContextAttachment {
+    /// Validates and prepares a normal [`crate::Context::destroy_platform_windows`] call.
+    ///
+    /// Only the active platform attachment receives this hook. The passed capability may bind the
+    /// target Context for immediate native inspection, but intentionally does not expose a mutable
+    /// `Context` reference. Returning an error prevents native teardown from starting.
+    fn begin_platform_window_teardown(
+        &self,
+        _context: &ContextPlatformWindowTeardown<'_>,
+    ) -> Result<(), ContextAttachmentTeardownError> {
+        Ok(())
+    }
+
+    /// Completes a normal [`crate::Context::destroy_platform_windows`] call.
+    ///
+    /// This runs only when [`Self::begin_platform_window_teardown`] succeeded and native teardown
+    /// returned normally. Implementations should restore any temporary callback state and record
+    /// the new native baseline before returning.
+    fn end_platform_window_teardown(
+        &self,
+        _context: &ContextPlatformWindowTeardown<'_>,
+    ) -> Result<(), ContextAttachmentTeardownError> {
+        Ok(())
+    }
+
     /// Stops new work before native teardown begins.
     fn quiesce(
         &self,
@@ -238,6 +290,56 @@ impl ContextTeardown<'_> {
     }
 }
 
+/// Phase-limited capability passed around a normal platform-window teardown transaction.
+///
+/// The Context remains alive throughout this scope. It exists so a platform backend can prepare
+/// callback state for native teardown without receiving unrestricted mutable Context access.
+pub struct ContextPlatformWindowTeardown<'a> {
+    state: &'a ContextState,
+    _exclusive_owner: PhantomData<&'a mut Context>,
+}
+
+impl fmt::Debug for ContextPlatformWindowTeardown<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ContextPlatformWindowTeardown")
+            .field("id", &self.id())
+            .finish_non_exhaustive()
+    }
+}
+
+impl<'a> ContextPlatformWindowTeardown<'a> {
+    pub(super) fn new(state: &'a ContextState) -> Self {
+        Self {
+            state,
+            _exclusive_owner: PhantomData,
+        }
+    }
+
+    /// Returns the Context identity whose platform windows are being torn down.
+    pub fn id(&self) -> ContextId {
+        self.state.id()
+    }
+
+    /// Runs a closure while the target Context is current.
+    ///
+    /// The capability remains valid only for the observer hook currently executing. It does not
+    /// provide a mutable [`Context`] reference, so backend callbacks cannot recursively enter an
+    /// unrelated Context operation while native window teardown is in progress.
+    pub fn with_bound_context<R>(&self, f: impl FnOnce() -> R) -> R {
+        assert_eq!(
+            self.state.lifecycle(),
+            ContextLifecycle::Alive,
+            "ContextPlatformWindowTeardown used outside a live Context"
+        );
+        let raw = self.state.raw_during_teardown();
+        assert!(
+            !raw.is_null(),
+            "ContextPlatformWindowTeardown used after native Context destruction"
+        );
+        binding::with_bound_context(raw, f)
+    }
+}
+
 struct RendererTextureResetInvocation<'a> {
     active: &'a Cell<bool>,
 }
@@ -342,6 +444,7 @@ impl Drop for ContextAttachmentLease {
 pub(super) struct AttachmentRegistry {
     controls: Vec<Rc<AttachmentControl>>,
     tearing_down: bool,
+    platform_window_teardown_active: Cell<bool>,
 }
 
 impl fmt::Debug for AttachmentRegistry {
@@ -349,6 +452,10 @@ impl fmt::Debug for AttachmentRegistry {
         f.debug_struct("AttachmentRegistry")
             .field("controls", &self.controls)
             .field("tearing_down", &self.tearing_down)
+            .field(
+                "platform_window_teardown_active",
+                &self.platform_window_teardown_active.get(),
+            )
             .finish()
     }
 }
@@ -399,6 +506,32 @@ impl AttachmentRegistry {
             .any(|control| control.role == role && control.state.get() == AttachmentState::Active)
     }
 
+    pub(super) fn begin_platform_window_teardown(
+        &self,
+        context: &ContextPlatformWindowTeardown<'_>,
+    ) -> Result<PlatformWindowTeardownInvocation<'_>, ContextPlatformWindowTeardownError> {
+        if self.tearing_down {
+            return Err(ContextPlatformWindowTeardownError::ContextDropping);
+        }
+        if self.platform_window_teardown_active.get() {
+            return Err(ContextPlatformWindowTeardownError::Reentrant);
+        }
+        self.platform_window_teardown_active.set(true);
+        let invocation = PlatformWindowTeardownInvocation {
+            attachment: self
+                .controls
+                .iter()
+                .find(|control| {
+                    control.role == ContextAttachmentRole::Platform
+                        && control.state.get() == AttachmentState::Active
+                })
+                .and_then(|control| control.attachment.borrow().clone()),
+            active: &self.platform_window_teardown_active,
+        };
+        invocation.begin(context)?;
+        Ok(invocation)
+    }
+
     pub(super) fn begin_teardown(&mut self) -> Vec<Rc<AttachmentControl>> {
         self.tearing_down = true;
         let controls = std::mem::take(&mut self.controls);
@@ -412,6 +545,65 @@ impl AttachmentRegistry {
                 true
             })
             .collect()
+    }
+}
+
+pub(super) struct PlatformWindowTeardownInvocation<'a> {
+    attachment: Option<Rc<dyn ContextAttachment>>,
+    active: &'a Cell<bool>,
+}
+
+impl PlatformWindowTeardownInvocation<'_> {
+    fn begin(
+        &self,
+        context: &ContextPlatformWindowTeardown<'_>,
+    ) -> Result<(), ContextPlatformWindowTeardownError> {
+        let Some(attachment) = &self.attachment else {
+            return Ok(());
+        };
+        match catch_unwind(AssertUnwindSafe(|| {
+            attachment.begin_platform_window_teardown(context)
+        })) {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => Err(ContextPlatformWindowTeardownError::AttachmentPreflight(
+                error,
+            )),
+            Err(payload) => {
+                // A panic payload may panic when dropped. The transaction is rejected before any
+                // native teardown begins, so retaining it is preferable to a nested unwind.
+                std::mem::forget(payload);
+                Err(ContextPlatformWindowTeardownError::BeginPanicked)
+            }
+        }
+    }
+
+    pub(super) fn finish(
+        self,
+        context: &ContextPlatformWindowTeardown<'_>,
+    ) -> Result<(), ContextPlatformWindowTeardownError> {
+        let Some(attachment) = &self.attachment else {
+            return Ok(());
+        };
+        match catch_unwind(AssertUnwindSafe(|| {
+            attachment.end_platform_window_teardown(context)
+        })) {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(error)) => Err(ContextPlatformWindowTeardownError::AttachmentPostflight(
+                error,
+            )),
+            Err(payload) => {
+                // Native teardown completed, but the caller still receives a recoverable Rust
+                // error rather than unwinding through an FFI boundary.
+                std::mem::forget(payload);
+                Err(ContextPlatformWindowTeardownError::EndPanicked)
+            }
+        }
+    }
+}
+
+impl Drop for PlatformWindowTeardownInvocation<'_> {
+    fn drop(&mut self) {
+        self.active.set(false);
     }
 }
 

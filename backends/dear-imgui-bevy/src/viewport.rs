@@ -213,6 +213,8 @@ pub(crate) struct ImguiViewportBridgeShared {
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     native_teardown_in_progress: Cell<bool>,
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    core_teardown_owns_native_guard: Cell<bool>,
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     callback_contract: Cell<Option<ImguiViewportCallbackContract>>,
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     runtime_contract: Cell<Option<ImguiViewportRuntimeContract>>,
@@ -276,6 +278,76 @@ impl<'a> NativePlatformTeardownGuard<'a> {
 impl Drop for NativePlatformTeardownGuard<'_> {
     fn drop(&mut self) {
         self.active.set(false);
+    }
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+pub(crate) struct ImguiViewportBridgeAttachmentMarker;
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+pub(crate) struct ImguiViewportBridgeTeardownAttachment {
+    keepalive: ImguiViewportBridgeKeepalive,
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+pub(crate) fn viewport_bridge_teardown_attachment(
+    keepalive: ImguiViewportBridgeKeepalive,
+) -> Rc<dyn imgui::ContextAttachment> {
+    Rc::new(ImguiViewportBridgeTeardownAttachment { keepalive })
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+impl imgui::ContextAttachment for ImguiViewportBridgeTeardownAttachment {
+    fn begin_platform_window_teardown(
+        &self,
+        context: &imgui::ContextPlatformWindowTeardown<'_>,
+    ) -> Result<(), imgui::ContextAttachmentTeardownError> {
+        self.keepalive.core_teardown_owns_native_guard.set(false);
+        context.with_bound_context(|| {
+            let context_raw = unsafe { sys::igGetCurrentContext() };
+            let main_viewport = unsafe { sys::igGetMainViewport() };
+            platform_callback_ownership_raw(context_raw, main_viewport, &self.keepalive)
+                .map_err(|error| imgui::ContextAttachmentTeardownError::new(error.to_string()))?;
+            if !self.keepalive.native_teardown_in_progress.replace(true) {
+                self.keepalive.core_teardown_owns_native_guard.set(true);
+            }
+            Ok(())
+        })
+    }
+
+    fn end_platform_window_teardown(
+        &self,
+        context: &imgui::ContextPlatformWindowTeardown<'_>,
+    ) -> Result<(), imgui::ContextAttachmentTeardownError> {
+        if !self
+            .keepalive
+            .core_teardown_owns_native_guard
+            .replace(false)
+        {
+            return Ok(());
+        }
+        if !self.keepalive.native_teardown_in_progress.get() {
+            return Err(imgui::ContextAttachmentTeardownError::new(
+                "Bevy viewport bridge lost its native teardown guard",
+            ));
+        }
+        struct NativeTeardownReset<'a> {
+            active: &'a Cell<bool>,
+        }
+
+        impl Drop for NativeTeardownReset<'_> {
+            fn drop(&mut self) {
+                self.active.set(false);
+            }
+        }
+
+        let _reset = NativeTeardownReset {
+            active: &self.keepalive.native_teardown_in_progress,
+        };
+        context.with_bound_context(|| {
+            record_platform_runtime_contract_in_current_context(&self.keepalive);
+        });
+        Ok(())
     }
 }
 
@@ -401,16 +473,27 @@ impl ImguiViewportBridgeShared {
     }
 
     fn record_runtime_contract(&self, context: &mut imgui::Context) {
-        let io = unsafe { &*sys::igGetIO_ContextPtr(context.as_raw()) };
-        let main_viewport = context.main_viewport();
+        let binding = context.binding();
+        binding.with_bound_context(|| self.record_runtime_contract_raw(context.as_raw()));
+    }
+
+    fn record_runtime_contract_raw(&self, context_raw: *mut sys::ImGuiContext) {
+        let Some(io) = (unsafe { sys::igGetIO_ContextPtr(context_raw).as_ref() }) else {
+            self.runtime_contract.set(None);
+            return;
+        };
+        let Some(main_viewport) = (unsafe { sys::igGetMainViewport().as_ref() }) else {
+            self.runtime_contract.set(None);
+            return;
+        };
         self.runtime_contract
             .set(Some(ImguiViewportRuntimeContract {
                 backend_platform_user_data: io.BackendPlatformUserData,
                 backend_platform_name: io.BackendPlatformName,
                 owned_flags: io.BackendFlags & viewport_backend_flag_mask(),
-                main_viewport_platform_user_data: main_viewport.platform_user_data(),
-                main_viewport_platform_handle: main_viewport.platform_handle(),
-                main_viewport_platform_handle_raw: main_viewport.platform_handle_raw(),
+                main_viewport_platform_user_data: main_viewport.PlatformUserData,
+                main_viewport_platform_handle: main_viewport.PlatformHandle,
+                main_viewport_platform_handle_raw: main_viewport.PlatformHandleRaw,
             }));
     }
 
@@ -1107,11 +1190,20 @@ fn attach_bridge_to_imgui_context(world: &mut World) {
     let Some(mut imgui_context) = world.get_non_send_mut::<crate::ImguiContext>() else {
         return;
     };
+    let attachment = imgui_context
+        .context_mut()
+        .register_attachment::<ImguiViewportBridgeAttachmentMarker>(
+            imgui::ContextAttachmentRole::Platform,
+            viewport_bridge_teardown_attachment(Rc::clone(&bridge_keepalive)),
+        )
+        .unwrap_or_else(|error| {
+            panic!("cannot register Dear ImGui viewport teardown attachment: {error}")
+        });
     // SAFETY: the bridge resource keeps the allocation stable while installation publishes its
     // pointer, and the context retains the cloned Rc immediately after installation succeeds.
     unsafe { install_owned_platform_callbacks(imgui_context.context_mut(), &bridge_keepalive) }
         .unwrap_or_else(|error| panic!("cannot install Dear ImGui viewport callbacks: {error}"));
-    imgui_context.attach_viewport_bridge(bridge_keepalive);
+    imgui_context.attach_viewport_bridge(bridge_keepalive, attachment);
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -1417,10 +1509,17 @@ unsafe fn validate_aggregate_callback_contract(
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-fn validate_hidden_callback_contract(
-    context: &mut imgui::Context,
+fn validate_hidden_callback_contract_raw(
+    context_raw: *mut sys::ImGuiContext,
 ) -> Result<(), ImguiViewportCallbackOwnershipError> {
-    let platform_io = context.platform_io_mut();
+    let platform_io = unsafe { sys::igGetPlatformIO_ContextPtr(context_raw) };
+    if platform_io.is_null() {
+        return Err(ImguiViewportCallbackOwnershipError::CallbackContractUnavailable);
+    }
+    // SAFETY: the caller enters through ContextPlatformWindowTeardown or ContextBinding, which
+    // keeps this Context current and prevents concurrent PlatformIO access for the callback
+    // contract transaction.
+    let platform_io = unsafe { imgui::PlatformIo::from_raw_mut(platform_io) };
     unsafe {
         if !platform_io
             .clear_platform_set_window_pos_if_pointer_callback(platform_set_window_pos_raw_callback)
@@ -1560,17 +1659,32 @@ pub(crate) fn platform_callback_ownership(
     context: &mut imgui::Context,
     keepalive: &ImguiViewportBridgeKeepalive,
 ) -> Result<(), ImguiViewportCallbackOwnershipError> {
+    let binding = context.binding();
+    binding.with_bound_context(|| {
+        platform_callback_ownership_raw(
+            context.as_raw(),
+            unsafe { sys::igGetMainViewport() },
+            keepalive,
+        )
+    })
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn platform_callback_ownership_raw(
+    context_raw: *mut sys::ImGuiContext,
+    main_viewport: *const sys::ImGuiViewport,
+    keepalive: &ImguiViewportBridgeKeepalive,
+) -> Result<(), ImguiViewportCallbackOwnershipError> {
     if let Some(ImguiViewportBridgeError::CallbackOwnership(error)) = keepalive.callback_fault.get()
     {
         return Err(error);
     }
-    let main_viewport = context.main_viewport().as_raw();
-    let validation = validate_platform_contract_raw(context.as_raw(), main_viewport, keepalive)
-        .and_then(|()| validate_hidden_callback_contract(context));
+    let validation = validate_platform_contract_raw(context_raw, main_viewport, keepalive)
+        .and_then(|()| validate_hidden_callback_contract_raw(context_raw));
     match validation {
         Ok(()) => Ok(()),
         Err(error) => Err(latch_platform_ownership_fault(
-            context.as_raw(),
+            context_raw,
             main_viewport,
             keepalive,
             error,
@@ -1584,6 +1698,11 @@ pub(crate) fn record_platform_runtime_contract(
     keepalive: &ImguiViewportBridgeKeepalive,
 ) {
     keepalive.record_runtime_contract(context);
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn record_platform_runtime_contract_in_current_context(keepalive: &ImguiViewportBridgeKeepalive) {
+    keepalive.record_runtime_contract_raw(unsafe { sys::igGetCurrentContext() });
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -1627,10 +1746,13 @@ pub(crate) fn detach_owned_bridge(
     if ownership.is_ok() {
         // The complete contract was validated immediately above. Dear ImGui invokes the destroy
         // callbacks synchronously, and each successful callback invalidates part of that runtime
-        // contract before the next viewport is visited. Keep registry-based callback access live
-        // for this native teardown transaction without treating those expected changes as drift.
+        // contract before the next viewport is visited. The explicit guard keeps direct unit
+        // fixtures working without a Context attachment; production contexts additionally enter
+        // the same scope through the core platform-window teardown observer.
         let _teardown = NativePlatformTeardownGuard::enter(&keepalive.native_teardown_in_progress);
-        context.destroy_platform_windows();
+        if context.destroy_platform_windows().is_err() {
+            ownership = Err(ImguiViewportCallbackOwnershipError::CallbackContractUnavailable);
+        }
     }
 
     if !keepalive.clear_monitors_if_owned(context) && ownership.is_ok() {
@@ -3968,25 +4090,16 @@ mod tests {
             Ok(())
         );
 
-        let secondary_viewport = unsafe { sys::ImGuiViewport_ImGuiViewport() };
-        assert!(!secondary_viewport.is_null());
         let main_viewport = context.main_viewport().as_raw_mut();
-        let mut viewport_ptrs = [main_viewport, secondary_viewport];
         unsafe {
-            (*secondary_viewport).ID = 0x442;
-            platform_create_window_raw_callback(secondary_viewport);
-            (*secondary_viewport).PlatformHandleRaw = (*secondary_viewport).PlatformHandle;
-            (*secondary_viewport).PlatformWindowCreated = true;
+            platform_create_window_raw_callback(main_viewport);
+            (*main_viewport).PlatformHandleRaw = (*main_viewport).PlatformHandle;
+            (*main_viewport).PlatformWindowCreated = true;
         }
-        let owned_handle = unsafe { (*secondary_viewport).PlatformHandle };
+        keepalive.record_runtime_contract(&mut context);
+        let owned_handle = unsafe { (*main_viewport).PlatformHandle };
         assert!(!owned_handle.is_null());
         let foreign_platform_handle = std::ptr::dangling_mut::<u16>().cast::<c_void>();
-        unsafe {
-            (*secondary_viewport).PlatformHandle = foreign_platform_handle;
-        }
-        let _viewports_guard = unsafe {
-            PlatformViewportsGuard::replace(&mut context, &mut viewport_ptrs, secondary_viewport)
-        };
 
         unsafe {
             let platform_io = context.platform_io_mut();
@@ -4000,6 +4113,9 @@ mod tests {
                 }
             )
         );
+        unsafe {
+            (*main_viewport).PlatformHandle = foreign_platform_handle;
+        }
         unsafe {
             let platform_io = context.platform_io_mut();
             platform_io.set_platform_destroy_window_raw(Some(foreign_platform_destroy_window));
@@ -4025,13 +4141,13 @@ mod tests {
             "a foreign renderer destroy callback must not receive Bevy-owned viewport handles"
         );
         unsafe {
-            assert!((*secondary_viewport).PlatformUserData.is_null());
+            assert!((*main_viewport).PlatformUserData.is_null());
             assert_eq!(
-                (*secondary_viewport).PlatformHandle,
+                (*main_viewport).PlatformHandle,
                 foreign_platform_handle,
                 "direct detach must preserve a foreign viewport-field replacement"
             );
-            assert!((*secondary_viewport).PlatformHandleRaw.is_null());
+            assert!((*main_viewport).PlatformHandleRaw.is_null());
         }
         let state = bridge.inner.state.borrow();
         assert!(state.viewport_handles.is_empty());
@@ -4061,7 +4177,7 @@ mod tests {
         unsafe {
             platform_io.set_platform_destroy_window_raw(None);
             platform_io.set_renderer_destroy_window_raw(None);
-            (*secondary_viewport).PlatformHandle = std::ptr::null_mut();
+            (*main_viewport).PlatformHandle = std::ptr::null_mut();
         }
     }
 
@@ -4340,6 +4456,9 @@ mod tests {
             );
         }
 
+        // The direct cleanup above intentionally changed the main viewport's owned fields. Rebase
+        // the test's runtime contract before exercising the ordinary bridge detach path.
+        keepalive.record_runtime_contract(&mut context);
         detach_owned_bridge(&mut context, &keepalive).unwrap();
     }
 }

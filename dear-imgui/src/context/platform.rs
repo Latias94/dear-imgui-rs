@@ -1,6 +1,8 @@
 use crate::sys;
 
 use super::Context;
+#[cfg(feature = "multi-viewport")]
+use super::attachment::{ContextPlatformWindowTeardown, ContextPlatformWindowTeardownError};
 use super::binding::{CTX_MUTEX, with_bound_context};
 
 impl Context {
@@ -130,17 +132,35 @@ impl Context {
     /// all platform windows and their associated resources.
     ///
     /// Any open frame is ended first through the same idempotent lifecycle path used by Context
-    /// destruction. This lets backends revoke UI access before destroying secondary windows.
+    /// destruction. This lets backends revoke UI access before destroying secondary windows. A
+    /// rejected observer preflight still leaves that frame ended.
+    ///
+    /// Platform backends receive a bounded observer scope around the native call so they can
+    /// validate callback ownership and keep their teardown state coherent. If that preflight
+    /// fails, native teardown does not begin.
+    ///
+    /// This is a platform-backend shutdown primitive. A registered backend may transition its
+    /// own multi-viewport runtime to a released state; prefer its explicit shutdown API when one
+    /// is available.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the active platform attachment rejects the transaction, cannot
+    /// complete post-teardown cleanup, or when the operation is re-entered. Post-teardown errors
+    /// report that native platform windows have already been destroyed.
     #[cfg(feature = "multi-viewport")]
     #[doc(alias = "DestroyPlatformWindows")]
-    pub fn destroy_platform_windows(&mut self) {
+    pub fn destroy_platform_windows(&mut self) -> Result<(), ContextPlatformWindowTeardownError> {
         let _guard = CTX_MUTEX.lock();
         self.end_frame_for_teardown_unlocked();
+        let teardown = ContextPlatformWindowTeardown::new(&self.state);
+        let invocation = self.attachments.begin_platform_window_teardown(&teardown)?;
         unsafe {
             with_bound_context(self.raw, || {
                 sys::igDestroyPlatformWindows();
             });
         }
+        invocation.finish(&teardown)
     }
 
     #[cfg(feature = "multi-viewport")]

@@ -80,6 +80,7 @@ pub(crate) struct RuntimeControl {
     state: Cell<RuntimeState>,
     event_loop: Cell<*const ActiveEventLoop>,
     teardown_callbacks_active: Cell<bool>,
+    core_teardown_owns_callback_guard: Cell<bool>,
     platform_callback_contract: Cell<Option<PlatformCallbackContract>>,
     platform_callback_drift: Cell<Option<&'static str>>,
     fault: RefCell<Option<WinitPlatformError>>,
@@ -101,6 +102,7 @@ impl RuntimeControl {
             state: Cell::new(RuntimeState::Constructing),
             event_loop: Cell::new(std::ptr::null()),
             teardown_callbacks_active: Cell::new(false),
+            core_teardown_owns_callback_guard: Cell::new(false),
             platform_callback_contract: Cell::new(None),
             platform_callback_drift: Cell::new(None),
             fault: RefCell::new(None),
@@ -119,6 +121,7 @@ impl RuntimeControl {
             state: Cell::new(RuntimeState::Constructing),
             event_loop: Cell::new(std::ptr::null()),
             teardown_callbacks_active: Cell::new(false),
+            core_teardown_owns_callback_guard: Cell::new(false),
             platform_callback_contract: Cell::new(None),
             platform_callback_drift: Cell::new(None),
             fault: RefCell::new(None),
@@ -179,7 +182,7 @@ impl RuntimeControl {
         )
     }
 
-    pub(super) fn teardown_callbacks_active(&self) -> bool {
+    pub(crate) fn teardown_callbacks_active(&self) -> bool {
         self.teardown_callbacks_active.get()
     }
 
@@ -308,6 +311,7 @@ impl RuntimeControl {
     fn finish_shutdown(&self) {
         self.event_loop.set(std::ptr::null());
         self.teardown_callbacks_active.set(false);
+        self.core_teardown_owns_callback_guard.set(false);
         self.clear_platform_callback_contract();
         unregister_runtime(self.binding.id());
         self.main_window.borrow_mut().take();
@@ -368,7 +372,7 @@ impl RuntimeControl {
                     }
                     self.teardown_callbacks_active.set(true);
                     let _restore = TeardownCallbackRestore { control: self };
-                    context.destroy_platform_windows();
+                    context.destroy_platform_windows()?;
                     self.shutdown_native()
                 }
                 RuntimeState::ShuttingDown => self.poll_fault(),
@@ -382,6 +386,50 @@ impl RuntimeControl {
             }
             Err(error) => Err(error.into()),
         }
+    }
+
+    pub(crate) fn begin_context_platform_window_teardown(&self) -> Result<(), WinitPlatformError> {
+        if self.teardown_callbacks_active() {
+            return Ok(());
+        }
+
+        match self.state.get() {
+            RuntimeState::Attached => {
+                preflight_platform_window_destruction(self)?;
+                if !self.begin_shutdown() {
+                    return self
+                        .poll_fault()
+                        .and(Err(WinitPlatformError::RuntimeDetached));
+                }
+                self.teardown_callbacks_active.set(true);
+                self.core_teardown_owns_callback_guard.set(true);
+                Ok(())
+            }
+            RuntimeState::Detached | RuntimeState::ContextDestroyed => Ok(()),
+            RuntimeState::Constructing | RuntimeState::ShuttingDown | RuntimeState::Faulted => self
+                .poll_fault()
+                .and(Err(WinitPlatformError::RuntimeDetached)),
+        }
+    }
+
+    pub(crate) fn finish_context_platform_window_teardown(&self) -> Result<(), WinitPlatformError> {
+        if !self.core_teardown_owns_callback_guard.get() {
+            return Ok(());
+        }
+
+        struct CoreTeardownCallbackRestore<'a> {
+            control: &'a RuntimeControl,
+        }
+
+        impl Drop for CoreTeardownCallbackRestore<'_> {
+            fn drop(&mut self) {
+                self.control.teardown_callbacks_active.set(false);
+                self.control.core_teardown_owns_callback_guard.set(false);
+            }
+        }
+
+        let _restore = CoreTeardownCallbackRestore { control: self };
+        self.shutdown_native()
     }
 
     pub(super) fn drop_all_viewports(&self) {
@@ -433,6 +481,7 @@ impl RuntimeControl {
     pub(crate) fn context_destroyed_from_platform(&self, _context: ContextDestroyed) {
         self.event_loop.set(std::ptr::null());
         self.teardown_callbacks_active.set(false);
+        self.core_teardown_owns_callback_guard.set(false);
         self.clear_platform_callback_contract();
         unregister_runtime(self.binding.id());
         self.discard_all_viewports_without_touching_native();
@@ -557,6 +606,9 @@ impl Drop for RuntimeConstruction<'_> {
 /// The runtime shares the `WinitPlatform`'s Context-bound main-window owner, and owns secondary
 /// viewport windows plus the platform callback claim. It does not install a second platform
 /// attachment; Context teardown reaches it through the platform owner's single attachment.
+/// Calling [`Context::destroy_platform_windows`] directly also shuts this runtime down. The base
+/// Winit platform remains attached for single-window use; create a new runtime before resuming
+/// multi-viewport work. Prefer [`Self::shutdown`] when the caller needs backend-specific errors.
 pub struct WinitPlatformRuntime {
     control: Rc<RuntimeControl>,
     platform: Rc<WinitPlatformControl>,

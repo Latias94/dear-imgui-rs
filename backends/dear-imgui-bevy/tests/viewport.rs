@@ -1572,6 +1572,54 @@ fn viewport_occlusion_events_update_imgui_minimized_feedback() {
 
 #[cfg(feature = "multi-viewport")]
 #[test]
+fn direct_context_platform_teardown_preserves_the_bevy_viewport_bridge() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_multi_viewport_bridge("viewport-direct-context-teardown");
+    app.world_mut().spawn((Window::default(), PrimaryWindow));
+    let (id, entity) = create_live_secondary_viewport(&mut app);
+
+    app.world_mut()
+        .get_non_send_mut::<ImguiContext>()
+        .expect("plugin should install ImGui context")
+        .context_mut()
+        .destroy_platform_windows()
+        .expect("the Bevy bridge should authorize explicit Context platform teardown");
+    app.world_mut().run_schedule(ImguiEndFrame);
+
+    let raw_viewport = resolve_live_viewport(&app, id);
+    unsafe {
+        assert!((*raw_viewport).PlatformUserData.is_null());
+        assert!((*raw_viewport).PlatformHandle.is_null());
+        assert!((*raw_viewport).PlatformHandleRaw.is_null());
+    }
+    assert!(
+        app.world()
+            .get_non_send::<ImguiViewportBridge>()
+            .expect("bridge should still exist")
+            .viewport_window(id)
+            .is_none(),
+        "explicit Context teardown must queue the secondary Bevy window for removal"
+    );
+    assert!(
+        app.world().get_entity(entity).is_err(),
+        "explicit Context teardown must despawn the secondary Bevy window"
+    );
+
+    app.update();
+    finish_pending_platform_window_update(&mut app);
+    assert!(
+        app.world()
+            .get_non_send::<ImguiViewportBridge>()
+            .expect("bridge should still exist")
+            .viewport_window(id)
+            .is_some(),
+        "the bridge must rebuild the viewport mapping on the next frame"
+    );
+    destroy_live_secondary_viewport(&mut app, id);
+}
+
+#[cfg(feature = "multi-viewport")]
+#[test]
 fn viewport_commands_spawn_update_show_and_destroy_window_entities() {
     let _guard = imgui_context_guard();
     let mut app = App::new();
