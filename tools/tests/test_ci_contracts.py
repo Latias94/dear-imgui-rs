@@ -812,6 +812,18 @@ class RuntimeGateTests(unittest.TestCase):
             evidence = root / "evidence"
             binary = root / "sdl3_glow_multi_viewport"
             binary.touch()
+            sdl3_library = (
+                root
+                / "target"
+                / "debug"
+                / "build"
+                / "sdl3-sys-test"
+                / "out"
+                / "lib"
+                / "libSDL3.so.0"
+            )
+            sdl3_library.parent.mkdir(parents=True)
+            sdl3_library.touch()
             tools = {
                 name: root / name
                 for name in (
@@ -851,6 +863,10 @@ class RuntimeGateTests(unittest.TestCase):
                         encoding="utf-8",
                     )
                 elif result.stdout_log.name == "viewport.stdout.log":
+                    self.assertEqual(
+                        kwargs["env"]["LD_LIBRARY_PATH"].split(os.pathsep)[0],
+                        str(sdl3_library.parent.resolve()),
+                    )
                     (evidence / "viewport-result.json").write_text(
                         json.dumps(
                             {
@@ -892,6 +908,10 @@ class RuntimeGateTests(unittest.TestCase):
             self.assertEqual(result.category, RUNTIME.GateCategory.PASSED)
             self.assertIn("renderer.stdout.log", result.evidence)
             self.assertIn("viewport-result.json", result.evidence)
+            self.assertEqual(
+                result.details["environment"]["sdl3_library_dirs"],
+                [str(sdl3_library.parent.resolve())],
+            )
 
     def test_new_invocation_invalidates_owned_stale_success_evidence(self):
         with TemporaryDirectory() as temporary:

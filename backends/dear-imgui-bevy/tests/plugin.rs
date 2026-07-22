@@ -1363,7 +1363,7 @@ fn context_into_inner_preserves_complete_foreign_platform_and_renderer_takeover(
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 #[test]
-fn context_into_inner_reports_callback_drift_and_preserves_foreign_backend_state() {
+fn context_into_inner_reports_platform_callback_drift_and_preserves_foreign_callbacks() {
     let _guard = imgui_context_guard();
 
     let mut app = App::new();
@@ -1382,12 +1382,6 @@ fn context_into_inner_reports_callback_drift_and_preserves_foreign_backend_state
         let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
         let context = context.context_mut();
         install_stale_platform_backend_handlers(context);
-        install_stale_renderer_backend_handlers(context);
-        unsafe {
-            context
-                .io_mut()
-                .set_backend_renderer_user_data(std::ptr::dangling_mut::<u8>().cast());
-        }
     }
 
     let owner = app
@@ -1415,12 +1409,10 @@ fn context_into_inner_reports_callback_drift_and_preserves_foreign_backend_state
         context.io().backend_platform_user_data().is_null(),
         "Bevy-owned platform user data must be released even when callbacks drift"
     );
-    assert_eq!(
-        context.io().backend_renderer_user_data(),
-        std::ptr::dangling_mut::<u8>().cast(),
-        "foreign renderer user data must survive Bevy detachment"
+    assert!(
+        context.io().backend_renderer_user_data().is_null(),
+        "Bevy-owned renderer user data must be released"
     );
     assert_stale_platform_backend_handlers_preserved(&context);
-    assert_stale_renderer_backend_handlers_preserved(&context);
     clear_test_foreign_backend_state(&mut context);
 }

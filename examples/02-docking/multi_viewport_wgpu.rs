@@ -443,37 +443,6 @@ impl AppWindow {
         let viewport_runtime = enable_viewports
             .then(|| winit_mvp::WinitPlatformRuntime::new(&mut imgui, &platform))
             .transpose()?;
-        #[cfg(feature = "test-engine")]
-        if run_viewport_smoke {
-            println!("WGPU viewport smoke initialized the Winit platform runtime");
-        }
-
-        // WGPU renderer
-        let init_info = WgpuInitInfo::new(device.clone(), queue.clone(), surface_config.format)
-            .with_instance(instance.clone())
-            .with_adapter(adapter.clone())
-            .with_viewport_surface_config((&surface_config).into());
-        let mut renderer = WgpuRenderer::new(init_info, &mut imgui)?;
-        renderer.set_gamma_mode(GammaMode::Auto);
-        #[cfg(feature = "test-engine")]
-        if run_viewport_smoke {
-            println!("WGPU viewport smoke initialized the core renderer");
-        }
-
-        // Register the offscreen texture as an external ImGui texture.
-        let game_tex_id = renderer.register_external_texture(&game_tex, &game_tex_view);
-
-        let renderer = if enable_viewports {
-            AppRenderer::Multi(wgpu_mvp::WinitViewportRuntime::attach(
-                &mut imgui, renderer,
-            )?)
-        } else {
-            AppRenderer::Single(renderer)
-        };
-        #[cfg(feature = "test-engine")]
-        if run_viewport_smoke {
-            println!("WGPU viewport smoke attached the renderer runtime");
-        }
 
         #[cfg(feature = "test-engine")]
         let test_engine = if run_viewport_smoke {
@@ -485,7 +454,6 @@ impl AppWindow {
 
             let mut engine = TestEngine::create()?;
             engine.start(&mut imgui)?;
-            println!("WGPU viewport smoke started the Test Engine");
             engine.set_capture_enabled(false)?;
             engine.set_run_speed(RunSpeed::Fast)?;
             engine.set_verbose_level(VerboseLevel::Info)?;
@@ -506,6 +474,25 @@ impl AppWindow {
             Some(engine)
         } else {
             None
+        };
+
+        // WGPU renderer
+        let init_info = WgpuInitInfo::new(device.clone(), queue.clone(), surface_config.format)
+            .with_instance(instance.clone())
+            .with_adapter(adapter.clone())
+            .with_viewport_surface_config((&surface_config).into());
+        let mut renderer = WgpuRenderer::new(init_info, &mut imgui)?;
+        renderer.set_gamma_mode(GammaMode::Auto);
+
+        // Register the offscreen texture as an external ImGui texture.
+        let game_tex_id = renderer.register_external_texture(&game_tex, &game_tex_view);
+
+        let renderer = if enable_viewports {
+            AppRenderer::Multi(wgpu_mvp::WinitViewportRuntime::attach(
+                &mut imgui, renderer,
+            )?)
+        } else {
+            AppRenderer::Single(renderer)
         };
 
         #[cfg(feature = "test-engine")]

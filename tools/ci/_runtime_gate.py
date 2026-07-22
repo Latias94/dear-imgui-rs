@@ -264,6 +264,21 @@ def _example_binary(workspace_root: Path, name: str) -> Path:
     return _target_directory(workspace_root) / "debug" / f"{name}{suffix}"
 
 
+def _sdl3_runtime_library_directories(workspace_root: Path) -> tuple[Path, ...]:
+    build_root = _target_directory(workspace_root) / "debug" / "build"
+    directories = {
+        library.parent.resolve()
+        for library in build_root.glob("sdl3-sys-*/out/**/libSDL3.so.0")
+        if library.is_file()
+    }
+    if not directories:
+        raise RuntimeContractError(
+            GateCategory.PRODUCT_FAILURE,
+            "cargo succeeded without producing the bundled SDL3 runtime library",
+        )
+    return tuple(sorted(directories, key=lambda path: str(path)))
+
+
 def _run_example_build(
     *,
     workspace_root: Path,
@@ -1061,6 +1076,19 @@ def _run_viewport_smoke(
                 GateCategory.INFRASTRUCTURE_UNAVAILABLE,
                 f"cargo succeeded without producing {binary}",
             )
+        if spec.gate == _SDL3_GLOW_VIEWPORT_SMOKE.gate:
+            sdl3_library_dirs = _sdl3_runtime_library_directories(workspace_root)
+            inherited_library_path = child_environment.get("LD_LIBRARY_PATH", "")
+            child_environment["LD_LIBRARY_PATH"] = os.pathsep.join(
+                (
+                    *(str(path) for path in sdl3_library_dirs),
+                    *((inherited_library_path,) if inherited_library_path else ()),
+                )
+            )
+            diagnostics["sdl3_library_dirs"] = [
+                str(path) for path in sdl3_library_dirs
+            ]
+            atomic_write_json(evidence_dir / "runtime-environment.json", diagnostics)
 
         xvfb = managed_background(
             (

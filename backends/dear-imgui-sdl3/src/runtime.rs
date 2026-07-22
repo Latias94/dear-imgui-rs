@@ -1601,7 +1601,7 @@ impl RuntimeRegistration {
 
         let consumer_guard =
             (!self.control.renderer_released()).then(|| self.control.renderer_consumer.borrow());
-        let reset = match consumer_guard.as_ref() {
+        let mut reset = match consumer_guard.as_ref() {
             Some(consumer) => {
                 let consumer = consumer
                     .as_ref()
@@ -1615,11 +1615,15 @@ impl RuntimeRegistration {
         };
         let pending = self.control.take_pending_fault();
         let shutdown_result = self.control.shutdown_native_explicit();
-        if self.control.renderer_released() {
-            if let Some(reset) = reset {
+        let renderer_released = self.control.renderer_released();
+        if renderer_released {
+            if let Some(reset) = reset.take() {
                 let _ = reset.commit();
             }
-            drop(consumer_guard);
+        }
+        drop(reset);
+        drop(consumer_guard);
+        if renderer_released {
             self.control.take_renderer_consumer();
             self.control.clear_destroyed_textures();
         }

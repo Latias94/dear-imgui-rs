@@ -1643,7 +1643,7 @@ unsafe extern "C" fn sdl3_create_window(viewport: *mut sys::ImGuiViewport) {
             return;
         };
         let Some(transaction) =
-            NativeTransaction::begin(control, NativePhase::PlatformCreate, viewport)
+            NativeTransaction::begin(control, NativePhase::Create, viewport)
         else {
             control.mark_viewport_failed(viewport);
             return;
@@ -1712,7 +1712,7 @@ unsafe extern "C" fn sdl3_render_window(
             return;
         };
         let Some(transaction) =
-            NativeTransaction::begin(control, NativePhase::PlatformRender, viewport)
+            NativeTransaction::begin(control, NativePhase::Render, viewport)
         else {
             control.mark_viewport_failed(viewport);
             return;
@@ -1740,7 +1740,7 @@ unsafe extern "C" fn sdl3_swap_buffers(
             return;
         };
         let Some(transaction) =
-            NativeTransaction::begin(control, NativePhase::PlatformSwap, viewport)
+            NativeTransaction::begin(control, NativePhase::Swap, viewport)
         else {
             control.mark_viewport_failed(viewport);
             return;
@@ -1775,7 +1775,6 @@ unsafe extern "C" fn sdl3_renderer_create_window(viewport: *mut sys::ImGuiViewpo
         {
             callback(viewport);
             control.remember_owned_renderer_viewport(viewport, (*viewport).RendererUserData);
-            return;
         }
 
         #[cfg(feature = "sdlgpu3-renderer")]
@@ -1951,9 +1950,9 @@ unsafe extern "C" fn sdl3_renderer_swap_buffers(
 #[repr(u32)]
 #[derive(Clone, Copy)]
 enum NativePhase {
-    PlatformCreate = 1,
-    PlatformRender = 2,
-    PlatformSwap = 3,
+    Create = 1,
+    Render = 2,
+    Swap = 3,
     #[cfg(feature = "sdlgpu3-renderer")]
     SdlGpuCreate = 4,
 }

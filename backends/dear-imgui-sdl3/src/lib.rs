@@ -137,11 +137,6 @@ use self::core::{init_sdlgpu3_impl, new_frame_sdlgpu3_impl, shutdown_sdlgpu3_ren
     feature = "sdlrenderer3-renderer",
     feature = "sdlgpu3-renderer"
 ))]
-#[cfg(any(
-    feature = "opengl3-renderer",
-    feature = "sdlrenderer3-renderer",
-    feature = "sdlgpu3-renderer"
-))]
 use self::runtime::RuntimeState;
 use self::runtime::{NativeRendererKind, PlatformGraphicsKind, RuntimeRegistration};
 #[cfg(feature = "sdlrenderer3-renderer")]
