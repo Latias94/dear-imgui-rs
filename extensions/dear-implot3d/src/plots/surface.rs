@@ -318,7 +318,7 @@ mod tests {
     use std::sync::{Mutex, OnceLock};
 
     use super::{Plot3D, Surface3D, SurfaceGrid, SurfaceGridShape, SurfaceLabel};
-    use crate::plots::Plot3DError;
+    use crate::{plots::Plot3DError, sys};
 
     #[test]
     fn axis_grid_flattens_in_row_major_order() {
