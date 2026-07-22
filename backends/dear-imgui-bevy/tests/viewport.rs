@@ -17,9 +17,12 @@ use bevy_math::IVec2;
 #[cfg(all(feature = "multi-viewport", feature = "render"))]
 use bevy_render::{Render, RenderApp, extract_plugin::ExtractPlugin};
 #[cfg(feature = "multi-viewport")]
+use bevy_window::CompositeAlphaMode;
+#[cfg(feature = "multi-viewport")]
 use bevy_window::Monitor;
 #[cfg(feature = "multi-viewport")]
 use bevy_window::WindowCloseRequested;
+use bevy_window::WindowLevel;
 #[cfg(feature = "multi-viewport")]
 use bevy_window::WindowMoved;
 #[cfg(feature = "multi-viewport")]
@@ -29,7 +32,6 @@ use bevy_window::WindowPosition;
 use bevy_window::WindowRef;
 #[cfg(feature = "multi-viewport")]
 use bevy_window::WindowResized;
-use bevy_window::{CompositeAlphaMode, WindowLevel};
 #[cfg(feature = "multi-viewport")]
 use bevy_window::{PrimaryWindow, Window};
 #[cfg(all(feature = "multi-viewport", feature = "render"))]
