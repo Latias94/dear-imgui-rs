@@ -144,7 +144,7 @@ checksum = "460fbee9c2c2f33933d720630a6a0bac33ba7053db5344fac858d4b8952d77d5"
 
 [[package]]
 name = "dear-imgui-build-support"
-version = "0.16.0"
+version = "0.16.0-alpha.1"
 dependencies = [
  "cc",
  "pkg-config",
@@ -164,7 +164,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-rs"
-version = "0.16.0"
+version = "0.16.0-alpha.1"
 dependencies = [
  "bitflags",
  "dear-imgui-sys",
@@ -174,7 +174,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-sdl3"
-version = "0.16.0"
+version = "0.16.0-alpha.1"
 dependencies = [
  "cc",
  "dear-imgui-build-support",
@@ -187,7 +187,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-sys"
-version = "0.16.0"
+version = "0.16.0-alpha.1"
 dependencies = [
  "cc",
  "dear-imgui-build-support",
@@ -196,7 +196,7 @@ dependencies = [
 
 [[package]]
 name = "dear-imgui-wgpu"
-version = "0.16.0"
+version = "0.16.0-alpha.1"
 dependencies = [
  "bytemuck",
  "dear-imgui-rs",

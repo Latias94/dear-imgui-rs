@@ -457,7 +457,7 @@ class AggregateTests(unittest.TestCase):
         )
 
         self.assertEqual(result["decision"], "Go")
-        self.assertEqual(result["summary"]["expected_cells"], 13)
+        self.assertEqual(result["summary"]["expected_cells"], 14)
         self.assertEqual(result["summary"]["failed_checks"], 0)
 
     def test_rejects_checksum_mismatch_after_payload_tampering(self):
@@ -538,11 +538,12 @@ class AggregateTests(unittest.TestCase):
 
     def test_default_inventory_covers_required_release_cells(self):
         ids = set(release_evidence.DEFAULT_EXPECTED_CELL_IDS)
-        self.assertEqual(len(ids), 13)
+        self.assertEqual(len(ids), 14)
         self.assertTrue(
             {
                 "linux-test-engine-runtime",
                 "linux-multi-viewport-smoke",
+                "linux-sdl3-glow-multi-viewport-smoke",
                 "linux-wasm",
                 "windows-vcpkg",
                 "windows-platform-md",
@@ -572,6 +573,10 @@ class AggregateTests(unittest.TestCase):
         self.assertIn(
             ("artifacts", "runtime/viewport-result.json"),
             requirements["linux-multi-viewport-smoke"],
+        )
+        self.assertIn(
+            ("logs", "runtime/renderer.stdout.log"),
+            requirements["linux-sdl3-glow-multi-viewport-smoke"],
         )
         self.assertIn(
             ("artifacts", "metadata/binding-hashes.json"),
@@ -618,8 +623,8 @@ class AggregateTests(unittest.TestCase):
         resolve.assert_called_once_with(self.root, SHA)
         gate = json.loads(self.output.read_text(encoding="utf-8"))
         self.assertEqual(gate["decision"], "No-Go")
-        self.assertEqual(gate["summary"]["expected_cells"], 13)
-        self.assertEqual(gate["summary"]["failed_checks"], 13)
+        self.assertEqual(gate["summary"]["expected_cells"], 14)
+        self.assertEqual(gate["summary"]["failed_checks"], 14)
         self.assertTrue(
             all(
                 "required cell evidence is missing" in check["errors"]

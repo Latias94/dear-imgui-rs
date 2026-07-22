@@ -12,19 +12,26 @@ artifact cannot silently use a different module name.
 
 WASM support is explicit and target-specific. The only supported Rust target is
 `wasm32-unknown-unknown`, and every dependency path to the core crate must
-enable the `wasm` feature:
+enable the `wasm` feature. Until `0.16.0-alpha.1` is published, use the candidate
+from `main`:
 
 ```toml
 [dependencies]
-dear-imgui-rs = { version = "0.16", features = ["wasm"] }
+dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", features = ["wasm"] }
 ```
 
-For Bevy, enable `wasm` alongside the features needed by the application:
+For Bevy, enable `wasm` alongside the features needed by the application and
+take both packages from the same candidate source:
 
 ```toml
 [dependencies]
-dear-imgui-bevy = { version = "0.16", features = ["render", "wasm"] }
+dear-imgui-bevy = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", features = ["render", "wasm"] }
+dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", features = ["wasm"] }
 ```
+
+After publication, replace those Git dependencies with the exact prerelease
+requirements `dear-imgui-rs = { version = "=0.16.0-alpha.1", features = ["wasm"] }`
+and `dear-imgui-bevy = { version = "=0.16.0-alpha.1", features = ["render", "wasm"] }`.
 
 Five safe native extensions expose the same `wasm` feature and forward it to
 both `dear-imgui-rs` and their matching sys crate:

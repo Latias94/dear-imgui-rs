@@ -8,8 +8,8 @@ paths, see `docs/workstreams/apple-platform-support.md`.
 ## Versioning Policy
 
 - Unified release train: all published `dear-*` crates in this workspace are versioned and released together under the same semver, so consumers can depend on a single minor across the board.
-- Current published train: unified `v0.16.0` (use `version = "0.16"`).
-- Previous train: unified `v0.15.1` (use `version = "0.15"`).
+- Upcoming train: unified `v0.16.0-alpha.1`. Until it is published, test the candidate with a Git dependency on `main`; after publication, use an exact `=0.16.0-alpha.1` requirement rather than a broad crates.io `0.16` requirement.
+- Current published train: unified `v0.15.1` (use `version = "0.15"`).
 - Previous train: unified `v0.14.1` (use `version = "0.14"`).
 - Previous train: unified `v0.13.0` (use `version = "0.13"`).
 - Previous train: unified `v0.12.0` (use `version = "0.12"`).
@@ -17,57 +17,57 @@ paths, see `docs/workstreams/apple-platform-support.md`.
 - Previous train: unified `v0.10.4` (use `version = "0.10"`).
 - Previous train: unified `v0.9.0` (use `version = "0.9"`).
 - Previous train: unified `v0.8.0` (use `version = "0.8"`).
-- Internal dependency constraints in this repo also pin to the unified minor (for example, `0.16`). Mixing different minors across our crates is unsupported.
+- Internal dependency constraints in this repo pin to the exact current prerelease (for example, `=0.16.0-alpha.1`). Mixing different release trains across our crates is unsupported.
 
-## Current Release (0.16.0)
+## Release Candidate (0.16.0-alpha.1)
 
 Core
 
 | Crate           | Version | Upstream        | Notes                                     |
 |-----------------|---------|-----------------|-------------------------------------------|
-| dear-imgui-rs   | 0.16.0  | —               | Safe Rust API over dear-imgui-sys         |
-| dear-imgui-sys  | 0.16.0  | ImGui v1.92.8   | Docking branch via cimgui; three binding profiles |
+| dear-imgui-rs   | 0.16.0-alpha.1  | —               | Safe Rust API over dear-imgui-sys         |
+| dear-imgui-sys  | 0.16.0-alpha.1  | ImGui v1.92.8   | Docking branch via cimgui; three binding profiles |
 
 Backends
 
 | Crate             | Version | External deps           | Notes |
 |-------------------|---------|-------------------------|-------|
-| dear-imgui-wgpu   | 0.16.0  | wgpu = 30/29/28/27     | WGPU 30 default; native Winit/SDL3 multi-viewport; browser single-window |
-| dear-imgui-glow   | 0.16.0  | glow = 0.17            | OpenGL renderer (winit/glutin) |
-| dear-imgui-ash    | 0.16.0  | ash = 0.38             | Native Vulkan renderer; shared Winit/SDL3 multi-viewport runtime |
-| dear-imgui-winit  | 0.16.0  | winit = 0.30.13        | Winit platform backend |
-| dear-imgui-sdl3   | 0.16.0  | sdl3 = 0.18.4, sdl3-sys 0.6 | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
-| dear-imgui-bevy   | 0.16.0  | Bevy = 0.19.0          | Experimental Bevy-native backend; Rust 1.95 minimum |
+| dear-imgui-wgpu   | 0.16.0-alpha.1  | wgpu = 30/29/28/27     | WGPU 30 default; native Winit/SDL3 multi-viewport; browser single-window |
+| dear-imgui-glow   | 0.16.0-alpha.1  | glow = 0.17            | OpenGL renderer (winit/glutin) |
+| dear-imgui-ash    | 0.16.0-alpha.1  | ash = 0.38             | Native Vulkan renderer; shared Winit/SDL3 multi-viewport runtime |
+| dear-imgui-winit  | 0.16.0-alpha.1  | winit = 0.30.13        | Winit platform backend |
+| dear-imgui-sdl3   | 0.16.0-alpha.1  | sdl3 = 0.18.4, sdl3-sys 0.6 | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
+| dear-imgui-bevy   | 0.16.0-alpha.1  | Bevy = 0.19.0          | Experimental Bevy-native backend; Rust 1.95 minimum |
 
 Utilities
 
 | Crate     | Version | External deps | Notes |
 |-----------|---------|---------------|-------|
-| dear-app  | 0.16.0  | winit, wgpu 30 | Generation-aware application runtime |
+| dear-app  | 0.16.0-alpha.1  | winit, wgpu 30 | Generation-aware application runtime |
 
 Tooling
 
 | Crate                    | Version | External deps | Notes |
 |--------------------------|---------|---------------|-------|
-| dear-imgui-build-support | 0.16.0  | ureq = 3.3    | Binding specification, build, package, and prebuilt helpers |
+| dear-imgui-build-support | 0.16.0-alpha.1  | ureq = 3.3    | Binding specification, build, package, and prebuilt helpers |
 
 Extensions
 
 | Crate               | Version | Requires dear-imgui-rs | Sys crate                    | Notes                                  |
 |---------------------|---------|------------------------|------------------------------|----------------------------------------|
-| dear-implot         | 0.16.0  | 0.16.0                 | dear-implot-sys 0.16.0       | 2D plotting                            |
-| dear-imnodes        | 0.16.0  | 0.16.0                 | dear-imnodes-sys 0.16.0      | WASM-capable node editor               |
-| dear-node-editor    | 0.16.0  | 0.16.0                 | dear-node-editor-sys 0.16.0  | Native-only; opt-in blueprints profile |
-| dear-imguizmo       | 0.16.0  | 0.16.0                 | dear-imguizmo-sys 0.16.0     | 3D gizmo                               |
-| dear-file-browser   | 0.16.0  | 0.16.0                 | —                            | State-owned ImGui UI + native dialogs  |
-| dear-implot3d       | 0.16.0  | 0.16.0                 | dear-implot3d-sys 0.16.0     | 3D plotting                            |
-| dear-imguizmo-quat  | 0.16.0  | 0.16.0                 | dear-imguizmo-quat-sys 0.16.0 | Quaternion gizmo                     |
-| dear-imgui-test-engine | 0.16.0 | 0.16.0                 | dear-imgui-test-engine-sys 0.16.0 | UI automation and test runner      |
-| dear-imgui-reflect  | 0.16.0  | 0.16.0                 | —                            | Session-owned reflection UI            |
+| dear-implot         | 0.16.0-alpha.1 | 0.16.0-alpha.1 | dear-implot-sys 0.16.0-alpha.1 | 2D plotting |
+| dear-imnodes        | 0.16.0-alpha.1 | 0.16.0-alpha.1 | dear-imnodes-sys 0.16.0-alpha.1 | WASM-capable node editor |
+| dear-node-editor    | 0.16.0-alpha.1 | 0.16.0-alpha.1 | dear-node-editor-sys 0.16.0-alpha.1 | Native-only; opt-in blueprints profile |
+| dear-imguizmo       | 0.16.0-alpha.1 | 0.16.0-alpha.1 | dear-imguizmo-sys 0.16.0-alpha.1 | 3D gizmo |
+| dear-file-browser   | 0.16.0-alpha.1 | 0.16.0-alpha.1 | — | State-owned ImGui UI + native dialogs |
+| dear-implot3d       | 0.16.0-alpha.1 | 0.16.0-alpha.1 | dear-implot3d-sys 0.16.0-alpha.1 | 3D plotting |
+| dear-imguizmo-quat  | 0.16.0-alpha.1 | 0.16.0-alpha.1 | dear-imguizmo-quat-sys 0.16.0-alpha.1 | Quaternion gizmo |
+| dear-imgui-test-engine | 0.16.0-alpha.1 | 0.16.0-alpha.1 | dear-imgui-test-engine-sys 0.16.0-alpha.1 | UI automation and test runner |
+| dear-imgui-reflect  | 0.16.0-alpha.1 | 0.16.0-alpha.1 | — | Session-owned reflection UI |
 
 ## 0.16 Architecture Contracts
 
-Release 0.16.0 is not source-compatible with 0.15.x. The baseline is Dear ImGui v1.92.8 docking via cimgui, Rust 1.92 for the workspace, Rust 1.95 for the Bevy backend, WGPU 30 by default with explicit 29/28/27 routes, and Bevy 0.19. Migration details and before/after examples live in the `0.16.0` section of `CHANGELOG.md`.
+Release 0.16.0-alpha.1 is not source-compatible with 0.15.x. The baseline is Dear ImGui v1.92.8 docking via cimgui, Rust 1.92 for the workspace, Rust 1.95 for the Bevy backend, WGPU 30 by default with explicit 29/28/27 routes, and Bevy 0.19. Migration details and before/after examples live in the `0.16.0-alpha.1` section of `CHANGELOG.md`.
 
 The safe Rust layer intentionally breaks APIs that expose C++ lifecycle
 protocols, wrong-context state, stale GPU handles, or platform-specific ABI
@@ -116,17 +116,34 @@ an abandoned epoch rather than acknowledging destroy requests. Managed texture
 retirement completes only after matching-generation destroy feedback and the
 ordered completion watermark both permit reclamation.
 
+Renderer resource maps keep a tombstone for every accepted Destroy identity
+until a complete idle-consumer reset succeeds. A late Create or Update for a
+tombstoned identity is ignored without GPU work or feedback, so out-of-order
+snapshots cannot revive a released resource. Multi-Context `SharedFontAtlas`
+use is legacy-only; managed atlas rendering requires exactly one registered
+Context and a renderer-local opaque namespace. Use a separate atlas for each
+independent managed renderer. Reusing a managed shared atlas also requires the
+renderer to release its complete GPU texture map and commit the Context reset
+before teardown; otherwise later Context registration fails closed until the
+atlas is dropped and recreated.
+
 Winit owns platform windows and the complete `Platform_*` callback table.
 WGPU, Glow, and Ash multi-viewport wrappers own callback-visible renderer state
 in stable internal storage, so callers no longer pin a renderer or uphold an
-unsafe address-stability contract. WGPU and Glow attachment is safe. Ash
-attachment remains unsafe only because Rust cannot prove that the raw Vulkan
-instance, physical device, surface, queues, and queue-family indices share the
-declared device lineage. Platform callbacks are installed first; renderer
+unsafe address-stability contract. WGPU attachment is safe. Glow attachment
+remains unsafe because Rust cannot prove current-GL-context and share-group
+lineage. Ash attachment remains unsafe because Rust cannot prove that the raw
+Vulkan instance, physical device, surface, queues, and queue-family indices
+share the declared device lineage. Platform callbacks are installed first; renderer
 callbacks are installed before any secondary window exists. Registration
 refuses foreign callbacks or user data instead of overwriting them. Explicit
 shutdown releases the renderer runtime before the platform runtime; Context-
 first teardown invokes the same renderer-resource and platform-window phases.
+Explicit Winit platform shutdown takes `&mut Context`, closes an open frame
+while callbacks are still attached, and only then destroys platform windows.
+Engine integrations can use idempotent `Context::end_frame()` before their own
+detachment sequence. Main viewport checks use `Viewport::is_main()` rather than
+an exported numeric ID.
 
 ### PlatformIO callback ABI
 
@@ -134,7 +151,7 @@ Most cimgui functions are ordinary C ABI calls. Seven `ImGuiPlatformIO` slots ar
 
 Version 0.16 installs repository-owned C++ thunks in those slots and exposes only pointer/out-parameter C callbacks at the Rust boundary. This is required even when a callback appears to work on one compiler: MSVC, MinGW, and Clang may lower small aggregates differently. Windows CI invokes the real C++ slots for both MSVC `/MD` and `/MT`.
 
-WGPU and Ash renderer ownership is per `ImGuiPlatformIO` and per `Renderer_*` slot. They refuse foreign renderer callbacks or `RendererUserData`, record exactly what they install, and clear a slot only if it still contains their thunk. A renderer callback installed by another backend after registration is preserved during renderer shutdown. Winit and SDL3 platform adapters instead own the complete `Platform_*` table and use bulk platform teardown.
+First-party platform and renderer backends now claim an exact Context-bound identity plus their complete callback, capability, main-viewport, monitor, draw-marker, and renderer-metadata contract. Each Rust and direct C entry validates that contract before native or GPU work; the first drift or callback panic is sticky, revokes the advertised capability, and enters terminal teardown even if raw values are later restored. Teardown compares exact data, name-pointer, and function identity so a foreign replacement, including the same name bytes from another allocation, is not cleared. Winit and SDL3 own their complete platform layer, while WGPU, Glow, Ash, SDL3, and Bevy apply the same rule to core and viewport renderer state.
 
 ### State-owner migrations
 
@@ -144,6 +161,8 @@ WGPU and Ash renderer ownership is per `ImGuiPlatformIO` and per `Renderer_*` sl
 | File browser draw methods borrow `&dyn FileSystem` | `FileDialogState` owns a blocking or background filesystem capability | Workers cannot outlive borrowed caller state; `FileSystem::visit_dir` streams entries and cooperates with cancellation through `ScanVisit`. |
 | Incremental/synchronous scan presets | `ScanPolicy::Blocking` or native `ScanPolicy::Background` | Background mode requires `Arc<dyn FileSystem + Send + Sync>` and never silently downgrades; browser/JS adapters stay on the caller thread. |
 | Raw monitor vector access | `PlatformIo::set_monitors` | Dear ImGui's allocator owns the replacement vector storage. |
+| Borrowed Bevy viewport command guards | `ImguiViewportBridge::commands()` returning an owned `Vec` | Native callbacks can enqueue without contending with an application-held observer; `drain_commands()` reports a sticky callback fault instead of consuming partial state. |
+| Best-effort Bevy Context extraction | Retryable `ImguiContext::into_inner()` | The render world destroys managed GPU resources and acknowledges their generation before native bindings reset; failures return the still-owned wrapper. |
 
 ### dear-app migration
 
@@ -176,7 +195,7 @@ import-style binding artifact. `xtask verify-bindings` regenerates and compares
 all supported profiles; arbitrary bindgen clang-argument overrides are rejected
 for canonical artifacts.
 
-The binding generator contract, formatter, allow/block lists, enum normalization, header shims, opaque types, provider name, and exact compatibility target facts all participate in the deterministic binding-spec hash. `dear-imgui-build-support` will ship on the same 0.16.0 train as every other publishable crate.
+The binding generator contract, formatter, allow/block lists, enum normalization, header shims, opaque types, provider name, and exact compatibility target facts all participate in the deterministic binding-spec hash. `dear-imgui-build-support` will ship on the same 0.16.0-alpha.1 train as every other publishable crate.
 
 Source identity is package data rather than repository state. The exact 40-hex
 cimgui and nested Dear ImGui revisions live in

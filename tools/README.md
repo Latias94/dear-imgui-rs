@@ -11,13 +11,13 @@ The workspace uses a **unified release train** model. All 27 publishable package
 ### Prepare a New Release
 
 ```bash
-# Generate the complete 0.16.0 release diff.
-python3 tools/tasks.py release-prepare 0.16.0
+# Generate the complete 0.16.0-alpha.1 release diff.
+python3 tools/tasks.py release-prepare 0.16.0-alpha.1
 
 # Review and commit versions, bindings, lockfile, changelog, and docs.
 git diff
 git add -A
-git commit -m "chore: prepare release v0.16.0"
+git commit -m "chore: prepare release v0.16.0-alpha.1"
 
 # Validate the committed clean release candidate.
 python3 tools/tasks.py release-check
@@ -31,7 +31,7 @@ gh workflow run release-gate.yml -f candidate_sha=FULL_40_HEX_SHA
 `release-prepare` intentionally leaves changes in the working tree. `release-check` runs the strict clean-tree, changelog, locked dependency graph, reproducible binding, package/offline, documentation, and test gates. Keeping these phases separate prevents release preparation from failing its own clean-tree check.
 
 Local success is necessary but not sufficient for release. The remote release
-gate must return `Go` for the same candidate SHA across all 13 required cells.
+gate must return `Go` for the same candidate SHA across all 14 required cells.
 Download that run's authoritative `gate-result.json`; crates.io upload and the
 GitHub Release both verify its exact SHA and complete inventory.
 
@@ -72,7 +72,7 @@ python3 tools/tasks.py doc
 python3 tools/tasks.py clean
 
 # Create a release diff, then validate it after commit
-python3 tools/tasks.py release-prepare 0.16.0
+python3 tools/tasks.py release-prepare 0.16.0-alpha.1
 python3 tools/tasks.py release-check
 ```
 
@@ -81,7 +81,7 @@ python3 tools/tasks.py release-check
 The workspace root is the single version source. Publishable manifests use `version.workspace = true`, and internal dependencies inherit their root workspace declarations. `[workspace.metadata.dear-imgui-release]` is the shared policy for the core package and private package paths/versions; Rust and Python release validators derive package counts from the actual workspace members. Update the release train with:
 
 ```bash
-cargo run -p xtask -- release-version 0.16.0
+cargo run -p xtask -- release-version 0.16.0-alpha.1 --allow-prerelease-relabel
 ```
 
 The command updates the root release version and inherited internal dependency requirements as one validated workspace operation. It never offers partial crate selection. Documentation remains an explicit review step.
@@ -117,7 +117,7 @@ python3 tools/publish.py \
 Print-only `--dry-run` validates metadata and shows commands without running the
 expensive release gate. `--cargo-dry-run` reruns the local clean-tree preflight.
 Real uploads additionally require `--release-gate-result`, verify its exact
-`HEAD` and 13-cell `Go` decision before any network command, explicitly target
+`HEAD` and 14-cell `Go` decision before any network command, explicitly target
 the `crates-io` registry, and verify the validated Git fingerprint again before
 every Cargo publish command.
 
@@ -241,10 +241,11 @@ command.
 ### 7. Release Evidence
 
 `.github/workflows/release-gate.yml` is the authoritative cross-platform gate.
-It checks out one explicit 40-hex candidate SHA and requires exactly these 13
+It checks out one explicit 40-hex candidate SHA and requires exactly these 14
 cells:
 
-- Linux Test Engine runtime and real Winit/WGPU multi-viewport smoke
+- Linux Test Engine runtime plus real Winit/WGPU and SDL3/Glow multi-viewport
+  smokes
 - Linux `wasm32-unknown-unknown` feature and binding routes
 - Windows vcpkg, MSVC `/MD`, MSVC `/MT`, and MinGW import checks
 - macOS native build
@@ -253,7 +254,7 @@ cells:
 
 A failed, skipped, cancelled, timed-out, missing, duplicate, malformed, or
 wrong-SHA cell makes the aggregate `No-Go`. The workflow retains the aggregate,
-stdout/stderr, runtime/display/adapter data, target/CRT/vcpkg/MinGW metadata,
+stdout/stderr, runtime/display/renderer data, target/CRT/vcpkg/MinGW metadata,
 binding hashes, manifests, candidate SHA, and SHA256 evidence for approximately
 30 days.
 
@@ -275,7 +276,7 @@ a smaller list.
 
 ```bash
 # 1. Generate versions, bindings, provenance, and lockfile changes.
-python3 tools/tasks.py release-prepare 0.16.0
+python3 tools/tasks.py release-prepare 0.16.0-alpha.1
 
 # 2. Review generated and hand-written release changes.
 git diff
@@ -286,7 +287,7 @@ git diff
 
 # 3. Commit the release candidate.
 git add -A
-git commit -m "chore: prepare release v0.16.0"
+git commit -m "chore: prepare release v0.16.0-alpha.1"
 
 # 4. Run strict checks against the clean committed tree.
 python3 tools/tasks.py release-check
@@ -294,7 +295,7 @@ python3 tools/tasks.py release-check
 # 5. Dispatch .github/workflows/release-gate.yml for the exact SHA printed here.
 git rev-parse HEAD
 gh workflow run release-gate.yml -f candidate_sha=FULL_40_HEX_SHA
-# Wait for its complete 13-cell Go result, then download the aggregate.
+# Wait for its complete 14-cell Go result, then download the aggregate.
 gh run download RELEASE_GATE_RUN_ID \
   --name release-gate-FULL_40_HEX_SHA \
   --dir artifacts/release-gate
@@ -305,13 +306,13 @@ python3 tools/tasks.py publish \
   --release-gate-result artifacts/release-gate/gate-result.json
 
 # 7. Tag and push the already-verified commit.
-git tag -a v0.16.0 -m "Release v0.16.0"
+git tag -a v0.16.0-alpha.1 -m "Release v0.16.0-alpha.1"
 git push origin main
-git push origin v0.16.0
+git push origin v0.16.0-alpha.1
 
 # 8. Create the GitHub Release only through the verified workflow.
 gh workflow run release.yml \
-  -f tag=v0.16.0 \
+  -f tag=v0.16.0-alpha.1 \
   -f candidate_sha=FULL_40_HEX_SHA \
   -f gate_run_id=RELEASE_GATE_RUN_ID
 ```
@@ -320,7 +321,7 @@ gh workflow run release.yml \
 
 ```bash
 # 1. Update the single workspace release version
-cargo run -p xtask -- release-version 0.16.0
+cargo run -p xtask -- release-version 0.16.0-alpha.1 --allow-prerelease-relabel
 
 # 2. Regenerate bindings without moving third-party submodules
 python3 tools/tasks.py bindings
@@ -342,7 +343,7 @@ cargo run -p xtask -- verify-bindings
 
 # 7. Commit changes
 git add -A
-git commit -m "chore: prepare release v0.16.0"
+git commit -m "chore: prepare release v0.16.0-alpha.1"
 
 # 8. Run the strict clean-tree release gate
 python3 tools/tasks.py release-check
@@ -361,13 +362,13 @@ python3 tools/publish.py \
   --release-gate-result artifacts/release-gate/gate-result.json
 
 # 11. Tag and push
-git tag -a v0.16.0 -m "Release v0.16.0"
+git tag -a v0.16.0-alpha.1 -m "Release v0.16.0-alpha.1"
 git push origin main
-git push origin v0.16.0
+git push origin v0.16.0-alpha.1
 
 # 12. Dispatch release.yml with all three required inputs.
 gh workflow run release.yml \
-  -f tag=v0.16.0 \
+  -f tag=v0.16.0-alpha.1 \
   -f candidate_sha=FULL_40_HEX_SHA \
   -f gate_run_id=RELEASE_GATE_RUN_ID
 ```
@@ -462,10 +463,10 @@ chmod +x tools/*.py
 ### Publishing Fails with "already published"
 
 Published versions cannot be overwritten. The script can skip an already
-published crate; if the release is defective, prepare and publish a new patch:
+published crate; if the release is defective, prepare and publish a new version:
 ```bash
-cargo yank --registry crates-io --vers 0.16.0 dear-imgui-sys
-python3 tools/tasks.py release-prepare 0.16.1
+cargo yank --registry crates-io --vers <published-version> dear-imgui-sys
+python3 tools/tasks.py release-prepare <next-version>
 # Review and commit, then run the strict gate from the clean tree.
 python3 tools/tasks.py release-check
 # Run the new patch candidate through release-gate.yml, download its Go result, then:

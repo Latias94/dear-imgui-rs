@@ -127,6 +127,25 @@ DEFAULT_EXPECTED_CELL_INVENTORY = (
         ),
     ),
     ExpectedCell(
+        "linux-sdl3-glow-multi-viewport-smoke",
+        "x86_64-unknown-linux-gnu",
+        requirements=_requirements(
+            artifacts=(
+                *_RUNTIME_GATE_REQUIREMENTS,
+                "runtime/runtime-environment.json",
+                "runtime/viewport-result.json",
+            ),
+            logs=(
+                "runtime/display.stdout.log",
+                "runtime/display.stderr.log",
+                "runtime/renderer.stdout.log",
+                "runtime/renderer.stderr.log",
+                "runtime/viewport.stdout.log",
+                "runtime/viewport.stderr.log",
+            ),
+        ),
+    ),
+    ExpectedCell(
         "linux-wasm",
         "wasm32-unknown-unknown",
         requirements=_requirements(

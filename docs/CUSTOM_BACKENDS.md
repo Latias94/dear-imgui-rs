@@ -128,9 +128,11 @@ renderer.render(frame).unwrap();
 
 An owning backend should register its callback state as a Context attachment.
 That lets explicit backend shutdown and Context-first teardown enter the same
-idempotent state machine. Keep external prerequisites such as windows, devices,
-queues, and Vulkan instances alive until that teardown has released every
-backend resource.
+idempotent state machine. Attachment hooks return `Result`; during final Context
+drop, every peer in the current phase is notified, but any error or panic aborts
+the process before a later destructive phase can violate resource ordering. Keep
+external prerequisites such as windows, devices, queues, and Vulkan instances
+alive until teardown has released every backend resource.
 
 ## Platform Backend Template
 
@@ -231,19 +233,25 @@ A renderer backend owns one renderer consumer, all managed GPU resources, and ea
 `RenderedFrame` while it is reconciling and drawing that frame.
 
 ```rust,no_run
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use dear_imgui_rs::{
     BackendFlags, Context, TextureId,
     render::{
         RenderedFrame, RendererConsumer, RendererConsumerError, SnapshotTextureId,
-        TextureOp,
+        TextureOp, TextureUploadIdentity,
     },
 };
 
+struct ManagedResource {
+    texture_id: TextureId,
+    upload: TextureUploadIdentity,
+}
+
 pub struct MyRendererBackend {
-    consumer: RendererConsumer,
-    textures: HashMap<SnapshotTextureId, TextureId>,
+    consumer: Option<RendererConsumer>,
+    textures: HashMap<SnapshotTextureId, ManagedResource>,
+    destroyed: HashSet<SnapshotTextureId>,
     next_texture: usize,
 }
 
@@ -258,11 +266,13 @@ impl MyRendererBackend {
         flags.insert(BackendFlags::RENDERER_HAS_VTX_OFFSET);
         imgui.io_mut().set_backend_flags(flags);
 
+        // A previous renderer must have completed its own reset transaction before a new
+        // renderer consumer is attached to this Context.
         let consumer = imgui.create_renderer_consumer()?;
-        imgui.reset_renderer_texture_bindings(&consumer)?;
         Ok(Self {
-            consumer,
+            consumer: Some(consumer),
             textures: HashMap::new(),
+            destroyed: HashSet::new(),
             next_texture: 1,
         })
     }
@@ -271,9 +281,10 @@ impl MyRendererBackend {
         &mut self,
         mut frame: RenderedFrame<'_>,
     ) -> Result<(), RendererConsumerError> {
-        if frame.context_id() != self.consumer.context_id() {
+        let consumer = self.consumer.as_ref().expect("renderer was shut down");
+        if frame.context_id() != consumer.context_id() {
             return Err(RendererConsumerError::ForeignContext {
-                expected: self.consumer.context_id(),
+                expected: consumer.context_id(),
                 actual: frame.context_id(),
             });
         }
@@ -281,23 +292,61 @@ impl MyRendererBackend {
         for request in frame.texture_requests() {
             match request.operation() {
                 TextureOp::Create { format, width, height, row_pitch, pixels } => {
+                    if self.destroyed.contains(&request.texture()) {
+                        // This upload predates an accepted Destroy for the same opaque identity.
+                        continue;
+                    }
+                    let upload = request.upload_identity().expect("create has an upload identity");
+                    if let Some(existing) = self.textures.get(&request.texture())
+                        && existing.upload == upload
+                    {
+                        feedback.push(
+                            request
+                                .uploaded(existing.texture_id)
+                                .expect("create is an upload"),
+                        );
+                        continue;
+                    }
                     // Allocate and upload a GPU texture from the owned request bytes.
                     let _ = (format, width, height, row_pitch, pixels);
                     let texture_id = TextureId::new(self.next_texture);
                     self.next_texture += 1;
-                    self.textures.insert(request.texture(), texture_id);
+                    if let Some(previous) = self.textures.insert(
+                        request.texture(),
+                        ManagedResource { texture_id, upload },
+                    ) {
+                        // Retire the replaced GPU resource before dropping its record.
+                        let _ = previous;
+                    }
                     feedback.push(request.uploaded(texture_id).expect("create is an upload"));
                 }
                 TextureOp::Update { format, width, height, rects } => {
-                    let texture_id = self.textures[&request.texture()];
+                    if self.destroyed.contains(&request.texture()) {
+                        continue;
+                    }
+                    let upload = request.upload_identity().expect("update has an upload identity");
+                    let resource = &mut self.textures[&request.texture()];
+                    if resource.upload == upload {
+                        feedback.push(
+                            request
+                                .uploaded(resource.texture_id)
+                                .expect("update is an upload"),
+                        );
+                        continue;
+                    }
+                    let texture_id = resource.texture_id;
                     // Upload the owned update rectangles to this GPU texture.
                     let _ = (texture_id, format, width, height, rects);
+                    resource.upload = upload;
                     feedback.push(request.uploaded(texture_id).expect("update is an upload"));
                 }
                 TextureOp::Destroy => {
-                    if let Some(texture_id) = self.textures.remove(&request.texture()) {
+                    // Seal the identity before releasing the resource. Repeated Destroy requests
+                    // remain successful, while late Create/Update requests cannot revive it.
+                    self.destroyed.insert(request.texture());
+                    if let Some(resource) = self.textures.remove(&request.texture()) {
                         // Destroy the GPU resource before acknowledging this request.
-                        let _ = texture_id;
+                        let _ = resource;
                     }
                     feedback.push(request.destroyed().expect("destroy is not an upload"));
                 }
@@ -318,6 +367,22 @@ impl MyRendererBackend {
         }
         Ok(())
     }
+
+    pub fn shutdown(&mut self, imgui: &mut Context) -> Result<(), RendererConsumerError> {
+        let Some(consumer) = self.consumer.as_ref() else {
+            return Ok(());
+        };
+        // Wait for backend GPU completion here, then validate the exact idle consumer while the
+        // complete GPU map is still intact. If preparation fails, retain the consumer and retry
+        // after outstanding work has completed; do not render new frames in between.
+        let reset = imgui.prepare_renderer_texture_reset(consumer)?;
+        self.textures.clear();
+        let _invalidated = reset.commit();
+        self.destroyed.clear();
+        drop(self.consumer.take());
+        imgui.poll_snapshot_completions()?;
+        Ok(())
+    }
 }
 ```
 
@@ -330,10 +395,23 @@ Renderer checklist:
 - Set `BackendFlags::RENDERER_HAS_VTX_OFFSET` if draw commands can use vertex
   offsets.
 - On `Create` or `Update`, upload the owned bytes and return `request.uploaded(texture_id)`.
+- Pair each resource with `request.upload_identity()`: return its existing ID for an identical
+  retry, and retire or update the old GPU resource before accepting a changed identity.
 - On `Destroy`, free the GPU resource before returning `request.destroyed()`.
+- Record the destroy epoch before processing `Destroy`; ignore late `Create` or `Update` for that
+  identity without allocating a resource or returning upload feedback.
 - Reconcile feedback before reading draw commands that depend on newly assigned texture IDs.
-- During reset or shutdown, actually release renderer resources before calling
-  `Context::reset_renderer_texture_bindings`.
+- During reset or shutdown, call `Context::prepare_renderer_texture_reset` while the complete GPU
+  map is still intact. Release the map only after preparation succeeds, then commit the permit.
+- A managed `SharedFontAtlas` becomes reusable only after that reset commit. Dropping its Context
+  first preserves the native binding and makes later Context registration return
+  `SharedFontAtlasRendererReleasePending`; after releasing external GPU resources, drop and
+  recreate the atlas rather than transferring the old renderer namespace.
+- Keep explicit shutdown retryable. Failed preparation must retain the same consumer, renderer
+  owner, and GPU map so outstanding epochs can finish before the caller retries.
+- Prune a tombstone only after `SnapshotCompletionProgress::watermark()` reaches its destroy epoch,
+  or after the matching consumer is idle and a complete reset succeeds. One accepted Destroy
+  feedback is not proof that every older request has drained.
 - Preserve or restore application GPU state unless the backend contract says the
   caller must reset state after rendering.
 - Clip/scissor in framebuffer coordinates, not logical window coordinates.
@@ -351,10 +429,17 @@ the renderer:
 - Call `Context::poll_snapshot_completions` on the UI thread before creating later frames.
 - Keep GPU resources in a renderer-owned map keyed by `SnapshotTextureId`; never retain a native
   `TextureData` pointer.
+- Keep destroyed identities in the renderer until a complete idle-consumer reset; out-of-order
+  snapshots may still carry an older upload after a later Destroy was processed.
 - Keep the non-cloneable `RendererConsumer` on the UI thread. One Context permits one active
   consumer generation, and its first frame fixes that generation to synchronous or detached mode.
 
 The Bevy backend is the best workspace example of this split.
+
+One managed renderer must own one Context-local texture namespace. Multiple Contexts may share a
+`SharedFontAtlas` only while they use legacy rendering. Managed atlas rendering requires exactly
+one registered Context and a committed renderer reset before Context teardown; use a separate
+atlas for each independently managed renderer.
 
 ## Multi-viewport Policy
 
@@ -367,20 +452,59 @@ correct. Multi-viewport requires both platform and renderer support:
   surface, framebuffer scale, and swapchain state.
 - Backend user-data pointers must be cleared when viewports or renderer state
   are destroyed.
+- Identify the main viewport through `Viewport::is_main()`. Its numeric ID is an upstream-private
+  implementation detail and is not a cross-Context identity.
 
 Install the owning platform runtime first and the owning renderer runtime
-second, before any secondary platform window exists. A renderer owns only the
-five `Renderer_*` slots and each viewport's renderer user data; it must not
-replace `Platform_*` slots or foreign `RendererUserData`. Registration should
-fail atomically when a slot is occupied. The runtime, not the caller, keeps
-callback-visible state at a stable address. Explicit shutdown runs in reverse
-ownership order: release renderer callbacks and GPU resources, then release
-platform callbacks and windows. Context-first drop invokes those same ordered
-attachment phases as a best-effort fallback.
+second, before any secondary platform window exists. Treat each backend's
+published state as one exclusive lease, not as independent fields that happen
+to have familiar values:
+
+- A platform lease includes an exact non-zero `BackendPlatformUserData`
+  identity, the exact published `BackendPlatformName` pointer, its capability
+  bits, IME state, the complete `Platform_*` callback table, monitor storage,
+  and the main viewport's platform data and handles.
+- A renderer lease includes an exact non-zero `BackendRendererUserData`
+  identity, the exact published `BackendRendererName` pointer, core renderer
+  capability bits, standard draw callbacks, render-state and texture-limit
+  metadata, the five `Renderer_*` slots when viewports are enabled, and every
+  viewport's renderer user data.
+
+Use stable, non-zero-sized Rust allocations for backend identity. Comparing a
+backend name by string contents is not ownership: another backend can publish
+the same bytes from a different allocation. Likewise, marker callbacks used as
+sentinel values must have link-distinct implementations; identical empty
+functions may be folded to one address by LTO or identical-code folding.
+
+Registration must preflight the complete lease and fail atomically when any
+field is occupied. Publish fallible native resources before the lease, or keep
+them in an armed rollback transaction until every field commits. The runtime,
+not the caller, keeps callback-visible state at a stable address.
+
+Every safe Rust entry and every direct C callback must bind the owner Context
+and validate the complete installed lease before dereferencing backend data,
+mutating a viewport, acquiring a surface, recording GPU work, or presenting.
+Contain callback panics at the ABI boundary. The first identity, callback, or
+capability drift is terminal for that attachment: latch one typed fault, revoke
+the advertised capability, enter shutdown, and reject later work even if the
+raw values are written back. Allowing restored values to resume would create an
+ABA ownership hole.
+
+Explicit shutdown runs in reverse ownership order: quiesce renderer callbacks,
+release GPU resources, clear exact renderer-owned fields, then destroy platform
+windows and clear exact platform-owned fields. Compare pointer and function
+identity before clearing fields so foreign replacements survive; never infer
+ownership from equal name bytes. Remove capability bits claimed by a departing
+owner even after drift, because leaving them advertised after its resources are
+gone is itself invalid state. Integrated upstream backends may need to destroy
+per-viewport renderer resources while their platform windows are destroyed, but
+must keep those callbacks alive until the whole native window-destruction phase
+completes and release global renderer state before platform-global state.
+Context-first drop invokes the same phases as a fail-stop fallback.
 
 For first-party patterns, compare `dear-imgui-winit`,
-`dear-imgui-sdl3`, `dear-imgui-wgpu`, `dear-imgui-glow`, and
-`dear-imgui-ash`.
+`dear-imgui-sdl3`, `dear-imgui-wgpu`, `dear-imgui-glow`,
+`dear-imgui-ash`, and `dear-imgui-bevy`.
 
 ### Aggregate callback ABI
 
@@ -437,10 +561,14 @@ registries and the shim's per-`PlatformIo` storage.
 
 The bulk clear methods are appropriate only when the caller owns the complete
 corresponding table. A composable renderer shutdown must compare every
-`Renderer_*` slot with its installed thunk and clear only matches; if another
-backend replaced a slot, preserve it and its capability flag. Apply the same
-ownership check before releasing viewport `RendererUserData`. The WGPU and Ash
-helpers implement this conditional teardown and are the reference behavior.
+`Renderer_*` slot with its installed thunk and clear only matches. If another
+backend replaced a slot, preserve that callback pointer, but revoke the departing
+runtime's `RENDERER_HAS_VIEWPORTS` capability immediately; a replacement backend
+must claim and advertise its own complete contract. Apply the same ownership
+check before releasing viewport `RendererUserData`. Core renderer identity,
+capabilities, draw callbacks, and metadata must pass the same check before any
+viewport callback starts GPU work. WGPU, Glow, Ash, SDL3, and Bevy implement
+this conditional teardown and sticky fail-closed behavior.
 
 The shim must be compiled with the native artifact. Builds that omit native C++
 hooks cannot install these callbacks, and compatible prebuilts declare

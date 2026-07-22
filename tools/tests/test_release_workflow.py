@@ -3,6 +3,7 @@ import io
 import json
 import subprocess
 import sys
+import tomllib
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import replace
@@ -328,6 +329,52 @@ class MetadataTests(unittest.TestCase):
         self.assertEqual(len(metadata.publishable_packages), 27)
         self.assertEqual(len(metadata.private_packages), 3)
         self.assertEqual(release_metadata.validate_release_workspace(metadata), [])
+
+
+class CurrentReleaseTrainTests(unittest.TestCase):
+    def test_alpha_release_train_uses_exact_catalog_requirements(self):
+        workspace = tomllib.loads(
+            REPO_ROOT.joinpath("Cargo.toml").read_text(encoding="utf-8")
+        )
+        version = workspace["workspace"]["package"]["version"]
+        catalog = workspace["workspace"]["dependencies"]
+
+        self.assertEqual(version, "0.16.0-alpha.1")
+        self.assertEqual(
+            {
+                dependency["version"]
+                for dependency in catalog.values()
+                if "path" in dependency
+            },
+            {f"={version}"},
+        )
+
+        metadata = release_metadata.load_workspace_metadata(REPO_ROOT)
+        self.assertEqual(metadata.release_version, version)
+        self.assertEqual(release_metadata.validate_release_workspace(metadata), [])
+
+    def test_standalone_mobile_locks_use_the_alpha_path_packages(self):
+        lockfiles = (
+            "examples-android/dear-imgui-android-smoke/Cargo.lock",
+            "examples-ios/dear-imgui-ios-smoke/Cargo.lock",
+            "examples-ios/dear-imgui-ios-sdl3-smoke/Cargo.lock",
+        )
+        for relative_path in lockfiles:
+            with self.subTest(lockfile=relative_path):
+                lock = tomllib.loads(
+                    REPO_ROOT.joinpath(relative_path).read_text(encoding="utf-8")
+                )
+                path_packages = [
+                    package
+                    for package in lock["package"]
+                    if package["name"].startswith("dear-imgui")
+                    and not package["name"].endswith("-smoke")
+                ]
+                self.assertTrue(path_packages)
+                self.assertEqual(
+                    {package["version"] for package in path_packages},
+                    {"0.16.0-alpha.1"},
+                )
 
 
 class PublishConfigurationTests(unittest.TestCase):

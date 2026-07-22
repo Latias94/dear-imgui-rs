@@ -4,7 +4,7 @@ This guide explains how to publish new versions of the dear-imgui-rs workspace c
 
 ## Overview
 
-The workspace uses a **unified release train** model where all 27 publishable crates share the same version number. Version 0.16.0 includes the build-support crate, core, backends, extension sys/high-level pairs, and `dear-app`; examples and `xtask` are not published.
+The workspace uses a **unified release train** model where all 27 publishable crates share the same version number. The current release candidate is `0.16.0-alpha.1`; it includes the build-support crate, core, backends, extension sys/high-level pairs, and `dear-app`. Examples and `xtask` are not published.
 
 ## Prerequisites
 
@@ -32,7 +32,7 @@ Before publishing, ensure:
 
 - [ ] The unified workspace release version is updated
   ```bash
-  cargo run -p xtask -- release-version 0.16.0
+  cargo run -p xtask -- release-version 0.16.0-alpha.1 --allow-prerelease-relabel
   ```
   - The root `workspace.package.version` is the single source of truth.
   - `[workspace.metadata.dear-imgui-release]` is the single policy for the core package and private package paths/versions; package counts are derived from workspace members.
@@ -45,8 +45,8 @@ Before publishing, ensure:
   - Verify the GitHub Release body that CI will use:
     ```bash
     python3 tools/changelog.py check-unreleased
-    python3 tools/changelog.py extract --version 0.16.0
-    python3 tools/changelog.py check-soft-wrap --version 0.16.0
+    python3 tools/changelog.py extract --version 0.16.0-alpha.1
+    python3 tools/changelog.py check-soft-wrap --version 0.16.0-alpha.1
     ```
 
 - [ ] Documentation is up-to-date
@@ -93,7 +93,7 @@ Before publishing, ensure:
   DOCS_RS=1 cargo check -p dear-imgui-test-engine-sys
   ```
 
-- [ ] The fixed 13-cell `.github/workflows/release-gate.yml` aggregate is `Go`
+- [ ] The fixed 14-cell `.github/workflows/release-gate.yml` aggregate is `Go`
   for the exact release candidate SHA. Generic branch CI is not a substitute.
 
 - [ ] Git working tree is clean (commit all changes)
@@ -103,13 +103,13 @@ Before publishing, ensure:
 Release preparation and release validation are intentionally separate. Preparation invokes `xtask release-version`, refreshes bindings, metadata, and `Cargo.lock`, so it must not run a clean-tree release gate against its own output.
 
 ```bash
-# Phase 1: create the 0.16.0 release diff.
-python3 tools/tasks.py release-prepare 0.16.0
+# Phase 1: create the 0.16.0-alpha.1 release diff.
+python3 tools/tasks.py release-prepare 0.16.0-alpha.1
 
 # Review generated bindings, package metadata, Cargo.lock, CHANGELOG.md, and docs.
 git diff
 git add -A
-git commit -m "chore: prepare release v0.16.0"
+git commit -m "chore: prepare release v0.16.0-alpha.1"
 
 # Phase 2: validate the committed, clean release candidate.
 python3 tools/tasks.py release-check
@@ -166,7 +166,7 @@ python3 tools/publish.py \
 ```
 
 The script will:
-1. Verify the downloaded aggregate is a complete 13-cell `Go` for the clean `HEAD`
+1. Verify the downloaded aggregate is a complete 14-cell `Go` for the clean `HEAD`
 2. Rerun the strict local `release-check` preflight
 3. Show a summary and ask for confirmation
 4. Publish each crate explicitly to the `crates-io` registry in dependency order
@@ -220,8 +220,8 @@ After successful publishing:
 Tag the release in git:
 
 ```bash
-git tag -a v0.16.0 -m "Release v0.16.0"
-git push origin v0.16.0
+git tag -a v0.16.0-alpha.1 -m "Release v0.16.0-alpha.1"
+git push origin v0.16.0-alpha.1
 ```
 
 ### 2. GitHub Release
@@ -231,7 +231,7 @@ Pushing a tag does not publish a GitHub Release. Dispatch
 
 ```bash
 gh workflow run release.yml \
-  -f tag=v0.16.0 \
+  -f tag=v0.16.0-alpha.1 \
   -f candidate_sha=FULL_40_HEX_SHA \
   -f gate_run_id=RELEASE_GATE_RUN_ID
 ```
@@ -281,12 +281,12 @@ Ensure docs.rs has successfully built documentation for all crates:
 
 Published crate versions are immutable. The script can skip a package that is
 already present, but yanking does not make the same version publishable again.
-If 0.16.0 is defective, yank the affected package if necessary, prepare a new
-patch release, and publish the complete release train at that new version:
+If a published release is defective, yank the affected package if necessary,
+prepare a new version, and publish the complete release train at that version:
 
 ```bash
-cargo yank --registry crates-io --vers 0.16.0 dear-imgui-sys
-python3 tools/tasks.py release-prepare 0.16.1
+cargo yank --registry crates-io --vers <published-version> dear-imgui-sys
+python3 tools/tasks.py release-prepare <next-version>
 # Review and commit the release candidate, then:
 python3 tools/tasks.py release-check
 # Run the new candidate through release-gate.yml, download its Go result, then:
@@ -338,7 +338,7 @@ If docs.rs fails to build a `-sys` crate:
 
 When preparing a new version:
 
-- [ ] Run `cargo run -p xtask -- release-version 0.16.0`
+- [ ] Run `cargo run -p xtask -- release-version 0.16.0-alpha.1 --allow-prerelease-relabel`
 - [ ] Verify every publishable manifest inherits `workspace.package.version` and internal dependencies inherit the root workspace declarations
 - [ ] Update `CHANGELOG.md`
 - [ ] Update `README.md` compatibility table
@@ -349,7 +349,7 @@ When preparing a new version:
 - [ ] Generate pregenerated bindings
 - [ ] Verify docs.rs offline builds
 - [ ] Commit the release candidate and run `python3 tools/tasks.py release-check` from a clean tree
-- [ ] Dispatch `release-gate.yml` with the exact `candidate_sha`; require all 13
+- [ ] Dispatch `release-gate.yml` with the exact `candidate_sha`; require all 14
       cells to be same-SHA `Go` and retain the gate run ID/result
 - [ ] Publish using `tools/publish.py --release-gate-result ...`
 - [ ] Create git tag

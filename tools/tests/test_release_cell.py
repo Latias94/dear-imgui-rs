@@ -743,6 +743,45 @@ class RuntimeFinalizeTests(unittest.TestCase):
         self.assertEqual(record["conclusion"], "success")
         self.assertTrue((self.cell / "runtime/viewport-result.json").is_file())
 
+    def test_sdl3_glow_viewport_cell_uses_its_exact_stable_evidence_contract(self):
+        files = (
+            "runtime-environment.json",
+            "viewport-result.json",
+            "display.stdout.log",
+            "display.stderr.log",
+            "renderer.stdout.log",
+            "renderer.stderr.log",
+            "viewport.stdout.log",
+            "viewport.stderr.log",
+        )
+        first = self.write_attempt(
+            "sdl3-glow-viewport-attempt",
+            gate="sdl3-glow-multi-viewport-smoke",
+            attempt=1,
+            success=True,
+            category="Passed",
+            retry=False,
+            extra_files=files,
+        )
+        with patch.object(
+            release_cell.release_evidence,
+            "resolve_candidate_sha",
+            return_value=SHA,
+        ):
+            record = release_cell.finalize_runtime_cell(
+                repo_root=self.repo,
+                candidate_sha=SHA,
+                cell_id="linux-sdl3-glow-multi-viewport-smoke",
+                cell_root=self.cell,
+                attempt1_dir=first,
+            )
+
+        self.assertEqual(
+            record["cell_id"], "linux-sdl3-glow-multi-viewport-smoke"
+        )
+        self.assertEqual(record["conclusion"], "success")
+        self.assertTrue((self.cell / "runtime/viewport-result.json").is_file())
+
 
 class AggregateTests(unittest.TestCase):
     def setUp(self):
@@ -774,7 +813,7 @@ class AggregateTests(unittest.TestCase):
             result["summary"]["expected_cells"],
             len(release_evidence.DEFAULT_EXPECTED_CELL_INVENTORY),
         )
-        self.assertEqual(len(result["checks"]), 13)
+        self.assertEqual(len(result["checks"]), 14)
         self.assertTrue(self.output.is_file())
 
     def test_discovery_is_stable_and_excludes_the_output_itself(self):

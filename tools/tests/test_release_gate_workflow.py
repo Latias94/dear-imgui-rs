@@ -62,7 +62,7 @@ class ReleaseGateWorkflowTests(unittest.TestCase):
             if job.get("uses") == "./.github/workflows/native-runtime.yml"
         }
 
-        self.assertEqual(len(callsites), 4)
+        self.assertEqual(len(callsites), 6)
         for job_id, job in callsites.items():
             inputs = require_mapping(job.get("with"), f"ci.yml:{job_id}.with")
             with self.subTest(job=job_id):
@@ -102,6 +102,9 @@ class ReleaseGateWorkflowTests(unittest.TestCase):
             "viewport-attempt-1",
             "viewport-attempt-2",
             "viewport-cell",
+            "sdl3-glow-viewport-attempt-1",
+            "sdl3-glow-viewport-attempt-2",
+            "sdl3-glow-viewport-cell",
             "standard-cells",
             "prebuilt",
             "aggregate",
@@ -116,6 +119,8 @@ class ReleaseGateWorkflowTests(unittest.TestCase):
             "test-engine-cell",
             "viewport-attempt-2",
             "viewport-cell",
+            "sdl3-glow-viewport-attempt-2",
+            "sdl3-glow-viewport-cell",
             "aggregate",
         )
         for job_id in always_jobs:
@@ -128,13 +133,14 @@ class ReleaseGateWorkflowTests(unittest.TestCase):
                 self.assertIn("always()", terms)
                 self.assertIn(guard_success, terms)
 
-    def test_release_gate_owns_the_authoritative_thirteen_cell_inventory(self):
+    def test_release_gate_owns_the_authoritative_fourteen_cell_inventory(self):
         gate = workflow("release-gate.yml")
         prebuilt = workflow("prebuilt-binaries.yml")
         source = f"{gate}\n{prebuilt}"
         required_cells = (
             "linux-test-engine-runtime",
             "linux-multi-viewport-smoke",
+            "linux-sdl3-glow-multi-viewport-smoke",
             "linux-wasm",
             "windows-vcpkg",
             "windows-platform-md",
@@ -216,6 +222,11 @@ class ReleaseGateWorkflowTests(unittest.TestCase):
         self.assertIn("release_evidence.py verify", release)
         self.assertIn("pattern: release-cell-*-${{ inputs.candidate_sha }}", release)
         self.assertIn("files: target/release-cells/prebuilt-*/packages/*.tar.gz", release)
+        self.assertIn("prerelease: ${{ contains(steps.tag.outputs.version, '-') }}", release)
+        self.assertIn(
+            "make_latest: ${{ contains(steps.tag.outputs.version, '-') && 'false' || 'true' }}",
+            release,
+        )
         self.assertLess(
             release.index("release_evidence.py verify"),
             release.index("softprops/action-gh-release"),

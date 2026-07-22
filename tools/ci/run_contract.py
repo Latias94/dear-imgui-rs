@@ -23,6 +23,7 @@ from _process import CommandError, environment, github_group, run  # noqa: E402
 from _runtime_gate import (  # noqa: E402
     GateResult,
     run_multi_viewport_smoke,
+    run_sdl3_glow_viewport_smoke,
     run_test_engine_runtime,
 )
 from _verification import VerificationError, temporary_workspace  # noqa: E402
@@ -476,6 +477,16 @@ def _build_parser() -> argparse.ArgumentParser:
         evidence_dir=Path("target/ci-runtime/multi-viewport-smoke"),
         child_timeout=180.0,
     )
+
+    sdl3_glow_viewport_runtime = commands.add_parser(
+        "sdl3-glow-multi-viewport-smoke",
+        help="Execute the real SDL3/Glow secondary-window lifecycle",
+    )
+    _add_runtime_arguments(
+        sdl3_glow_viewport_runtime,
+        evidence_dir=Path("target/ci-runtime/sdl3-glow-multi-viewport-smoke"),
+        child_timeout=180.0,
+    )
     return parser
 
 
@@ -541,6 +552,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         elif args.contract == "multi-viewport-smoke":
             result = run_multi_viewport_smoke(
+                workspace_root=WORKSPACE_ROOT,
+                evidence_dir=args.evidence_dir,
+                child_timeout=args.child_timeout,
+                build_timeout=args.build_timeout,
+                attempt=args.attempt,
+            )
+            exit_code = _runtime_exit_code(
+                result,
+                defer_infrastructure_retry=args.defer_infrastructure_retry,
+            )
+        elif args.contract == "sdl3-glow-multi-viewport-smoke":
+            result = run_sdl3_glow_viewport_smoke(
                 workspace_root=WORKSPACE_ROOT,
                 evidence_dir=args.evidence_dir,
                 child_timeout=args.child_timeout,

@@ -141,9 +141,11 @@ def write_extension_prebuilt_archive(
     return path
 
 
-def write_base_extension_matrix(directory: Path) -> dict[str, Path]:
+def write_base_extension_matrix(
+    directory: Path, *, version: str = "0.16.0"
+) -> dict[str, Path]:
     core = {
-        profile: write_prebuilt_archive(directory, profile)
+        profile: write_prebuilt_archive(directory, profile, version=version)
         for profile in ("normal", "stack-layout")
     }
     for spec in PREBUILT.EXTENSION_SPECS:
@@ -307,6 +309,38 @@ class ExtensionArchiveSelectionTests(unittest.TestCase):
         }
         self.assertEqual(set(selected), expected)
         self.assertEqual(len(selected), 7)
+
+    def test_prerelease_version_is_preserved_in_extension_archive_identity(self):
+        version = "0.16.0-alpha.1"
+        with TemporaryDirectory() as temporary:
+            package_dir = Path(temporary)
+            core = write_base_extension_matrix(package_dir, version=version)
+            selected = PREBUILT.select_extension_prebuilt_archives(
+                package_dir,
+                "x86_64-unknown-linux-gnu",
+                "",
+                CANDIDATE_SHA,
+                REPO_ROOT,
+                core,
+                profile_scope="base",
+            )
+
+            for (extension, profile), archive in selected.items():
+                spec = PREBUILT.EXTENSION_BY_ID[extension]
+                features = PREBUILT.extension_artifact_features(spec, profile)
+                self.assertEqual(
+                    archive.name,
+                    PREBUILT._expected_extension_archive_name(
+                        spec,
+                        version,
+                        "x86_64-unknown-linux-gnu",
+                        "",
+                        features,
+                    ),
+                )
+                self.assertEqual(
+                    PREBUILT._read_prebuilt_manifest(archive)["version"], version
+                )
 
     def test_ignores_other_target_profile_and_candidate_routes(self):
         with TemporaryDirectory() as temporary:

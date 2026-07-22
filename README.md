@@ -86,7 +86,7 @@ The safe API intentionally encodes Dear ImGui FFI invariants in Rust types. Sour
 accepted when the previous safe wrapper shape could preserve stale handles, unchecked sizes,
 invalid sentinels, wrong-context access, or other states that should remain outside safe Rust.
 
-Version 0.16.0 is an intentionally breaking architecture release. The main migrations are:
+Version 0.16.0-alpha.1 is an intentionally breaking architecture release candidate. The main migrations are:
 
 - legacy Columns to Tables and imperative `DockBuilder` code to declarative `DockLayout`;
 - global reflection helpers to an owned `ReflectSession` and per-frame `Inspector`;
@@ -95,13 +95,14 @@ Version 0.16.0 is an intentionally breaking architecture release. The main migra
 - borrowed texture pointers and pseudo-owned draw data to Context-owned `ManagedTextureId`,
   move-only `RenderedFrame`/`FrameSnapshot`, and request-bound renderer feedback;
 - manual Winit/WGPU/Glow/Ash callback registration to owning runtimes with explicit,
-  idempotent shutdown (Ash remains unsafe only for raw Vulkan handle lineage);
+  idempotent shutdown (WGPU attach is safe; Glow remains unsafe for current-GL-context and
+  share-group lineage; Ash remains unsafe for raw Vulkan handle lineage);
 - ad hoc Test Engine frame pumps to `TestRunner`, whose five product outcomes remain distinct
   from infrastructure errors;
 - implicit WASM target selection to the explicit `wasm32-unknown-unknown` plus `wasm` feature contract; and
 - `dear_imgui_sys::IMGUI_VERSION` to `BINDING_VERSION`, without a compatibility alias.
 
-The complete before/after examples and callback ABI notes are in the [0.16.0 changelog](CHANGELOG.md#0160).
+The complete before/after examples and callback ABI notes are in the [0.16.0-alpha.1 changelog](CHANGELOG.md#0160-alpha1).
 
 ## Examples
 
@@ -159,7 +160,7 @@ cargo run -p dear-imgui-examples --bin sdl3_ash_multi_viewport --features sdl3-a
 # SDL3 + OpenGL3 with official C++ backends (multi-viewport via imgui_impl_sdl3/imgui_impl_opengl3)
 cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport,sdl3-opengl3
 # SDL3 + Glow (experimental multi-viewport using Rust Glow renderer)
-cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport --features multi-viewport,sdl3-platform
+cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport --features sdl3-glow-multi-viewport
 # SDL3 + WGPU (single-window)
 cargo run -p dear-imgui-examples --bin sdl3_wgpu --features sdl3-platform
 # SDL3 + WGPU (experimental multi-viewport, native only)
@@ -186,25 +187,25 @@ cargo run --bin file_browser_imgui --features file-browser
 
 ## Installation
 
-The current unified crates.io release is `0.16.0`; use matching `0.16` versions across the workspace crates. Applications staying on `0.15.1` can use the [v0.15.1 README](https://github.com/Latias94/dear-imgui-rs/blob/v0.15.1/README.md) for its API and installation snippets.
+The source tree is preparing the unified `0.16.0-alpha.1` release; the current crates.io train remains `0.15.1` until publication completes. Before publication, use Git dependencies on the repository's `main` branch. After publication, pin the exact prerelease `=0.16.0-alpha.1`; a broad `"0.16"` requirement does not select a prerelease. Applications staying on `0.15.1` can use the [v0.15.1 README](https://github.com/Latias94/dear-imgui-rs/blob/v0.15.1/README.md) for its API and installation snippets.
 
 ### Core + Backends
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.16"
+dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
 # Choose a backend + platform integration
-dear-imgui-wgpu = "0.16"  # or dear-imgui-glow / dear-imgui-ash
-dear-imgui-winit = "0.16" # or dear-imgui-sdl3
+dear-imgui-wgpu = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }  # or dear-imgui-glow / dear-imgui-ash
+dear-imgui-winit = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" } # or dear-imgui-sdl3
 ```
 
 `dear-imgui-wgpu` 0.16 defaults to WGPU 30. WGPU 29, 28, and 27 remain available as separate, mutually exclusive compatibility features:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.16"
-dear-imgui-wgpu = { version = "0.16", default-features = false, features = ["wgpu-29"] }
-dear-imgui-winit = "0.16"
+dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
+dear-imgui-wgpu = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", default-features = false, features = ["wgpu-29"] }
+dear-imgui-winit = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
 ```
 
 Replace `wgpu-29` with `wgpu-28` or `wgpu-27` when integrating an older WGPU application.
@@ -213,7 +214,7 @@ Replace `wgpu-29` with `wgpu-28` or `wgpu-27` when integrating an older WGPU app
 
 ```toml
 [dependencies]
-dear-app = "0.16" # State-owning Winit + WGPU runtime with docking support
+dear-app = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" } # State-owning Winit + WGPU runtime with docking support
 ```
 
 ### Apple Platform Examples
@@ -250,8 +251,8 @@ Example: low-level Android route without a dedicated Android convenience crate:
 
 ```toml
 [dependencies]
-dear-imgui-rs = "0.16"
-dear-imgui-sys = { version = "0.16", features = ["backend-shim-android", "backend-shim-opengl3"] }
+dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
+dear-imgui-sys = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", features = ["backend-shim-android", "backend-shim-opengl3"] }
 ```
 
 Recommended ownership split:
@@ -281,25 +282,25 @@ assembly.
 ```toml
 [dependencies]
 # Plotting
-dear-implot = "0.16"   # 2D plotting
-dear-implot3d = "0.16" # 3D plotting
+dear-implot = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }   # 2D plotting
+dear-implot3d = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" } # 3D plotting
 
 # 3D Gizmos
-dear-imguizmo = "0.16"      # Standard 3D gizmo + GraphEditor
-dear-imguizmo-quat = "0.16" # Quaternion-based gizmo
+dear-imguizmo = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }      # Standard 3D gizmo + GraphEditor
+dear-imguizmo-quat = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" } # Quaternion-based gizmo
 
 # Node Editor
-dear-imnodes = "0.16"
-dear-node-editor = "0.16" # native-only; add feature "blueprints" for stack layout
+dear-imnodes = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
+dear-node-editor = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" } # native-only; add feature "blueprints" for stack layout
 
 # Test automation
-dear-imgui-test-engine = "0.16"
+dear-imgui-test-engine = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
 
 # File Browser
-dear-file-browser = "0.16" # Native dialogs + ImGui file browser
+dear-file-browser = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" } # Native dialogs + ImGui file browser
 
 # Reflection-based UI helpers
-dear-imgui-reflect = "0.16"
+dear-imgui-reflect = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
 ```
 
 ### Reflection-based UI (dear-imgui-reflect)
@@ -370,47 +371,47 @@ Quick examples (enable auto prebuilt download):
 - Env (Unix): `IMGUI_SYS_USE_PREBUILT=1 cargo build -p dear-imgui-rs --features prebuilt`
 - Env (Windows PowerShell): `$env:IMGUI_SYS_USE_PREBUILT='1'; cargo build -p dear-imgui-rs --features prebuilt`
 
-## Compatibility (0.16.0)
+## Compatibility Candidate (0.16.0-alpha.1)
 
-The workspace follows a release-train model. The table below lists the combinations supported by the current release. See [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for version history and compatibility policy.
+The workspace follows a release-train model. The table below lists the combinations validated for the 0.16.0-alpha.1 candidate. See [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for version history and compatibility policy.
 
 Core
 
 | Crate           | Version | Notes                                     |
 |-----------------|---------|-------------------------------------------|
-| dear-imgui-rs   | 0.16.0  | Safe Rust API over dear-imgui-sys         |
-| dear-imgui-sys  | 0.16.0  | Dear ImGui v1.92.8 docking via cimgui     |
+| dear-imgui-rs   | 0.16.0-alpha.1 | Safe Rust API over dear-imgui-sys     |
+| dear-imgui-sys  | 0.16.0-alpha.1 | Dear ImGui v1.92.8 docking via cimgui |
 
 Backends
 
 | Crate            | Version | External deps     | Notes                          |
 |------------------|---------|-------------------|--------------------------------|
-| dear-imgui-wgpu  | 0.16.0  | wgpu = 30/29/28/27 | WebGPU renderer; WGPU 30 default, native Winit/SDL3 multi-viewport, browser single-window |
-| dear-imgui-glow  | 0.16.0  | glow = 0.17       | OpenGL renderer (winit/glutin) |
-| dear-imgui-ash   | 0.16.0  | ash = 0.38        | Native Vulkan renderer with Winit/SDL3 multi-viewport adapters |
-| dear-imgui-winit | 0.16.0  | winit = 0.30.13   | Winit platform backend         |
-| dear-imgui-sdl3  | 0.16.0  | sdl3 = 0.18.4     | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
-| dear-imgui-bevy  | 0.16.0  | Bevy = 0.19.0     | Experimental Bevy-native backend with docking, texture interop, and native multi-viewport |
+| dear-imgui-wgpu  | 0.16.0-alpha.1 | wgpu = 30/29/28/27 | WebGPU renderer; WGPU 30 default, native Winit/SDL3 multi-viewport, browser single-window |
+| dear-imgui-glow  | 0.16.0-alpha.1 | glow = 0.17       | OpenGL renderer (winit/glutin) |
+| dear-imgui-ash   | 0.16.0-alpha.1 | ash = 0.38        | Native Vulkan renderer with Winit/SDL3 multi-viewport adapters |
+| dear-imgui-winit | 0.16.0-alpha.1 | winit = 0.30.13   | Winit platform backend         |
+| dear-imgui-sdl3  | 0.16.0-alpha.1 | sdl3 = 0.18.4     | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
+| dear-imgui-bevy  | 0.16.0-alpha.1 | Bevy = 0.19.0     | Experimental Bevy-native backend with docking, texture interop, and native multi-viewport |
 
 Application Runtime
 
 | Crate     | Version | Requires dear-imgui-rs | Notes                                            |
 |-----------|---------|------------------------|--------------------------------------------------|
-| dear-app  | 0.16.0  | 0.16.0                 | Generation-aware Winit + WGPU application runtime |
+| dear-app  | 0.16.0-alpha.1 | 0.16.0-alpha.1       | Generation-aware Winit + WGPU application runtime |
 
 Extensions
 
 | Crate               | Version | Requires dear-imgui-rs | Sys crate                   | Notes                                  |
 |---------------------|---------|------------------------|-----------------------------|----------------------------------------|
-| dear-implot         | 0.16.0  | 0.16.0                 | dear-implot-sys 0.16.0      | 2D plotting                            |
-| dear-imnodes        | 0.16.0  | 0.16.0                 | dear-imnodes-sys 0.16.0     | WASM-capable node editor               |
-| dear-node-editor    | 0.16.0  | 0.16.0                 | dear-node-editor-sys 0.16.0 | Native imgui-node-editor; optional blueprints profile |
-| dear-imguizmo       | 0.16.0  | 0.16.0                 | dear-imguizmo-sys 0.16.0    | 3D gizmo + GraphEditor                 |
-| dear-file-browser   | 0.16.0  | 0.16.0                 | —                           | State-owned ImGui UI + native dialog backends |
-| dear-implot3d       | 0.16.0  | 0.16.0                 | dear-implot3d-sys 0.16.0    | 3D plotting                            |
-| dear-imguizmo-quat  | 0.16.0  | 0.16.0                 | dear-imguizmo-quat-sys 0.16.0 | Quaternion gizmo                     |
-| dear-imgui-test-engine | 0.16.0 | 0.16.0                 | dear-imgui-test-engine-sys 0.16.0 | UI automation and test runner      |
-| dear-imgui-reflect  | 0.16.0  | 0.16.0                 | —                           | Session-owned reflection UI            |
+| dear-implot         | 0.16.0-alpha.1 | 0.16.0-alpha.1 | dear-implot-sys 0.16.0-alpha.1 | 2D plotting                         |
+| dear-imnodes        | 0.16.0-alpha.1 | 0.16.0-alpha.1 | dear-imnodes-sys 0.16.0-alpha.1 | WASM-capable node editor            |
+| dear-node-editor    | 0.16.0-alpha.1 | 0.16.0-alpha.1 | dear-node-editor-sys 0.16.0-alpha.1 | Native imgui-node-editor; optional blueprints profile |
+| dear-imguizmo       | 0.16.0-alpha.1 | 0.16.0-alpha.1 | dear-imguizmo-sys 0.16.0-alpha.1 | 3D gizmo + GraphEditor              |
+| dear-file-browser   | 0.16.0-alpha.1 | 0.16.0-alpha.1 | —                              | State-owned ImGui UI + native dialog backends |
+| dear-implot3d       | 0.16.0-alpha.1 | 0.16.0-alpha.1 | dear-implot3d-sys 0.16.0-alpha.1 | 3D plotting                       |
+| dear-imguizmo-quat  | 0.16.0-alpha.1 | 0.16.0-alpha.1 | dear-imguizmo-quat-sys 0.16.0-alpha.1 | Quaternion gizmo              |
+| dear-imgui-test-engine | 0.16.0-alpha.1 | 0.16.0-alpha.1 | dear-imgui-test-engine-sys 0.16.0-alpha.1 | UI automation and test runner |
+| dear-imgui-reflect  | 0.16.0-alpha.1 | 0.16.0-alpha.1 | —                              | Session-owned reflection UI              |
 
 The workspace MSRV is Rust 1.92. The experimental Bevy backend requires Rust 1.95 because Bevy 0.19 does. Select exactly one WGPU major; `dear-app` follows the WGPU 30 default.
 
@@ -431,7 +432,7 @@ Maintenance rules
 - Packages use names such as
   `dear-<name>-prebuilt-<version>-<target>-static[-stack-layout][-freetype][-mt|-md].tar.gz`
   and embed the same candidate SHA in their manifests.
-- Prebuilt results are five of the fixed 13 release cells. The aggregate and
+- Prebuilt results are five of the fixed 14 release cells. The aggregate and
   supporting logs, manifests, binding hashes, candidate SHA, and SHA256
   evidence are retained for approximately 30 days. A missing or failed
   producer/consumer cell makes the release `No-Go`; archives are uploaded to a
@@ -484,7 +485,7 @@ The supported Rust target is exactly `wasm32-unknown-unknown`. Every dependency 
 
 ```toml
 [dependencies]
-dear-imgui-rs = { version = "0.16", features = ["wasm"] }
+dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", features = ["wasm"] }
 ```
 
 The Rust module imports cimgui from the fixed provider name `imgui-sys-v0`, and both modules share one `WebAssembly.Memory`. The provider name is part of the ABI and is not configurable. Builds for WASI, Rust Emscripten targets, missing `wasm` feature forwarding, `wasm + stack-layout`, `wasm + prebuilt`, or `wasm + test-engine` fail rather than falling back to another binding profile.
