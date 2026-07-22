@@ -195,6 +195,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 fn run() -> Result<RunResult, Box<dyn Error>> {
     let sdl = sdl3::init()?;
     let video = sdl.video()?;
+    #[cfg(feature = "test-engine")]
+    let run_viewport_smoke =
+        std::env::var("DEAR_IMGUI_VIEWPORT_SMOKE").is_ok_and(|value| value == "1");
 
     let gl_attr = video.gl_attr();
     gl_attr.set_context_version(3, 2);
@@ -225,15 +228,20 @@ fn run() -> Result<RunResult, Box<dyn Error>> {
     window
         .gl_make_current(&gl_context)
         .map_err(|error| format!("SDL_GL_MakeCurrent failed: {error}"))?;
-    let _ = video.gl_set_swap_interval(SwapInterval::VSync);
+    #[cfg(feature = "test-engine")]
+    let main_swap_interval = if run_viewport_smoke {
+        SwapInterval::Immediate
+    } else {
+        SwapInterval::VSync
+    };
+    #[cfg(not(feature = "test-engine"))]
+    let main_swap_interval = SwapInterval::VSync;
+    let _ = video.gl_set_swap_interval(main_swap_interval);
     window.set_position(WindowPos::Centered, WindowPos::Centered);
     window.show();
 
     let gl = Rc::new(unsafe { create_glow_context(&video) });
 
-    #[cfg(feature = "test-engine")]
-    let run_viewport_smoke =
-        std::env::var("DEAR_IMGUI_VIEWPORT_SMOKE").is_ok_and(|value| value == "1");
     #[cfg(feature = "test-engine")]
     let renderer_info = query_opengl_renderer(&gl);
     #[cfg(feature = "test-engine")]

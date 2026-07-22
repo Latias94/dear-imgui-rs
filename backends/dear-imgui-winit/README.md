@@ -235,11 +235,11 @@ PlatformIO state is published because Wayland cannot provide the desktop-space w
 required by Dear ImGui. Runtime construction likewise rejects non-desktop targets; the supported
 window systems are Windows, macOS, and Linux/X11. Windows and macOS honor
 `NO_FOCUS_ON_APPEARING` by creating secondary windows inactive and deciding focus from the final
-flags at show time. Linux/X11 forwards the same inactive-creation request as a best-effort
-window-manager hint and never rejects a viewport solely because that focus policy cannot be
-guaranteed. Winit has no API that can guarantee `NO_FOCUS_ON_CLICK`, so that request fails closed
-with `WinitPlatformError::UnsupportedViewportFlag` and closes the affected viewport instead of
-silently changing click-focus behavior. Live decoration and top-most changes are synchronized; Windows also
+flags at show time. Linux/X11 accepts that flag without rejecting the viewport, but its window
+manager controls the final focus behavior. Winit has no API that can guarantee
+`NO_FOCUS_ON_CLICK`, so that request fails closed with
+`WinitPlatformError::UnsupportedViewportFlag` and closes the affected viewport instead of silently
+changing click-focus behavior. Live decoration and top-most changes are synchronized; Windows also
 updates taskbar visibility live, while X11 rejects a live `NO_TASK_BAR_ICON` transition because its
 window type can only be selected at creation. Platforms without a Winit taskbar API reject
 `NO_TASK_BAR_ICON` at creation instead of silently ignoring it.

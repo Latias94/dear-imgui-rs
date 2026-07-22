@@ -1117,10 +1117,10 @@ pub(super) unsafe extern "C" fn winit_create_window(vp: *mut dear_imgui_rs::sys:
                 .with_visible(false)
                 .with_decorations(window_policy.decorations);
 
-            // On systems where Winit cannot guarantee inactive creation, still pass the request
-            // through as a best-effort window-manager hint. Focus behavior is presentation policy,
-            // not an ownership invariant that should prevent a valid viewport from being created.
-            if supports_inactive_window_creation() || window_policy.no_focus_on_appearing {
+            // Inactive creation is guaranteed only on the platforms where Winit exposes that
+            // contract. Other window managers control focus themselves, but the advisory flag
+            // must not block an otherwise valid viewport from being created.
+            if supports_inactive_window_creation() {
                 window_attrs = window_attrs.with_active(false);
             }
 
