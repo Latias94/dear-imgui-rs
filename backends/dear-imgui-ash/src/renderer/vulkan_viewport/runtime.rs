@@ -12,6 +12,7 @@ use dear_imgui_rs::{
     ContextAttachmentRole, ContextAttachmentTeardownError, ContextBinding, ContextBindingError,
     ContextDestroyed, ContextId, ContextLifecycle, ContextTeardown, Id, TextureData, TextureId,
     platform_io::{PlatformIo, Viewport},
+    sys,
 };
 use thiserror::Error;
 
