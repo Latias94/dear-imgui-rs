@@ -781,7 +781,7 @@ fn shared_atlas_assigns_a_fresh_managed_namespace_after_reentry() {
             })
             .expect("managed atlas should emit a texture request");
         drop(rendered);
-        context
+        let _ = context
             .prepare_renderer_texture_reset(consumer)
             .unwrap()
             .commit();
@@ -954,7 +954,7 @@ fn shared_atlas_allows_mode_change_after_a_committed_renderer_reset() {
         managed.frame().text("managed renderer");
         let rendered = managed.render();
         drop(rendered);
-        managed
+        let _ = managed
             .prepare_renderer_texture_reset(&consumer)
             .unwrap()
             .commit();
@@ -1005,7 +1005,7 @@ fn shared_atlas_requires_legacy_preloading_after_managed_use() {
         managed.frame().text("managed atlas");
         let rendered = managed.render();
         drop(rendered);
-        managed
+        let _ = managed
             .prepare_renderer_texture_reset(&consumer)
             .unwrap()
             .commit();
