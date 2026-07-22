@@ -1,3 +1,6 @@
+#include "imgui.h"
+#include "imgui_internal.h"
+#include "implot3d.h"
 #include "cimplot3d.h"
 
 namespace {
