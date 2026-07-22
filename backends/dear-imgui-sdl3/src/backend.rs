@@ -11,6 +11,12 @@ use super::*;
     feature = "sdlgpu3-renderer"
 ))]
 use dear_imgui_rs::render::RendererConsumer;
+#[cfg(any(
+    feature = "opengl3-renderer",
+    feature = "sdlrenderer3-renderer",
+    feature = "sdlgpu3-renderer"
+))]
+use dear_imgui_rs::sys;
 
 #[cfg(any(
     feature = "opengl3-renderer",
