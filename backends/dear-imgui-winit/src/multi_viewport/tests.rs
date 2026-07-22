@@ -724,7 +724,10 @@ fn destroy_preserves_foreign_platform_user_data_and_reports_it() {
     unsafe { (*viewport).PlatformUserData = std::ptr::null_mut() };
     assert_eq!(
         runtime.shutdown(&mut context),
-        Err(WinitPlatformError::ForeignPlatformUserData)
+        Err(WinitPlatformError::ViewportOwnershipLost {
+            viewport_id: unsafe { (*viewport).ID },
+            field: "PlatformUserData",
+        })
     );
     assert_eq!(runtime.control().state(), RuntimeState::Detached);
 }
