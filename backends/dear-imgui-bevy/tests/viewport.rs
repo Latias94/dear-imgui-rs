@@ -259,13 +259,13 @@ fn create_live_secondary_viewport(app: &mut App) -> (imgui::Id, Entity) {
     finish_pending_platform_window_update(app);
 
     let (viewport_id, published_viewport) = {
-        let context = app
-            .world()
-            .get_non_send::<ImguiContext>()
+        let mut context = app
+            .world_mut()
+            .get_non_send_mut::<ImguiContext>()
             .expect("plugin should install ImGui context");
-        let main_viewport_id = context.context().main_viewport().id();
+        let context = context.context_mut();
+        let main_viewport_id = context.main_viewport().id();
         let viewport = context
-            .context()
             .platform_io()
             .viewports_iter()
             .find(|viewport| viewport.id() != main_viewport_id)
