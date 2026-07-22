@@ -110,10 +110,20 @@ impl TextureData {
         TextureStatus::from(self.inner().Status)
     }
 
-    /// Set the status of this texture
+    /// Set the renderer-owned lifecycle status of this texture.
     ///
-    /// This should only be called by renderer backends after handling a request.
-    pub fn set_status(&mut self, status: TextureStatus) {
+    /// Managed renderers should return request-bound `TextureFeedback` instead of calling this
+    /// method. This escape hatch exists for renderer-owned textures passed directly to native
+    /// Dear ImGui backends.
+    ///
+    /// # Safety
+    ///
+    /// The caller must own the renderer transition represented by `status`, uphold Dear ImGui's
+    /// texture state machine, and synchronize every GPU use affected by the transition. A texture
+    /// registered with a `Context` may only be changed by that Context's validated reconciliation
+    /// or renderer-teardown path; external callers must use request-bound `TextureFeedback`
+    /// instead.
+    pub unsafe fn set_status(&mut self, status: TextureStatus) {
         unsafe {
             // When marking a texture as destroyed, Dear ImGui expects the backend to clear any
             // backend bindings (TexID/BackendUserData). Otherwise ImGui will assert when
@@ -126,13 +136,21 @@ impl TextureData {
         }
     }
 
-    /// Get the backend user data
+    /// Get the backend user data pointer without dereferencing it.
     pub fn backend_user_data(&self) -> *mut c_void {
         self.inner().BackendUserData
     }
 
-    /// Set the backend user data
-    pub fn set_backend_user_data(&mut self, data: *mut c_void) {
+    /// Set the renderer-owned backend data pointer.
+    ///
+    /// # Safety
+    ///
+    /// `data` must be null or point to state with the layout expected by the active renderer
+    /// backend. That state must remain valid until the backend has stopped using it and the pointer
+    /// is cleared. A texture registered with a `Context` may only be changed by that Context's
+    /// validated reconciliation path, whose managed protocol does not expose backend-owned
+    /// pointers.
+    pub unsafe fn set_backend_user_data(&mut self, data: *mut c_void) {
         self.inner_mut().BackendUserData = data;
     }
 
@@ -141,12 +159,20 @@ impl TextureData {
         TextureId::from(self.inner().TexID)
     }
 
-    /// Set the texture ID
+    /// Set the renderer-owned texture identifier.
     ///
-    /// This should only be called by renderer backends after creating or destroying the texture.
-    pub fn set_tex_id(&mut self, tex_id: TextureId) {
+    /// Managed renderers should return request-bound `TextureFeedback` instead of calling this
+    /// method.
+    ///
+    /// # Safety
+    ///
+    /// `tex_id` must be valid for the active renderer backend for every draw command that can
+    /// observe it, and changing or clearing it must be synchronized with all GPU use. A texture
+    /// registered with a `Context` may only be changed by that Context's validated reconciliation
+    /// path; external callers must use request-bound `TextureFeedback` instead.
+    pub unsafe fn set_tex_id(&mut self, tex_id: TextureId) {
         unsafe {
-            sys::ImTextureData_SetTexID(self.as_raw_mut(), tex_id.id() as sys::ImTextureID);
+            sys::ImTextureData_SetTexID(self.as_raw_mut(), sys::ImTextureID::from(tex_id));
         }
     }
 
@@ -346,16 +372,34 @@ impl TextureData {
                 return;
             }
 
+            let update_rect = if (*raw).Status == sys::ImTextureStatus_WantCreate {
+                None
+            } else {
+                let width = u16::try_from((*raw).Width).unwrap_or_else(|_| {
+                    panic!(
+                        "TextureData::set_data() cannot represent a full-width update for width {}; use update_subresource() with representable rectangles or recreate the texture",
+                        (*raw).Width
+                    )
+                });
+                let height = u16::try_from((*raw).Height).unwrap_or_else(|_| {
+                    panic!(
+                        "TextureData::set_data() cannot represent a full-height update for height {}; use update_subresource() with representable rectangles or recreate the texture",
+                        (*raw).Height
+                    )
+                });
+                Some(sys::ImTextureRect {
+                    x: 0,
+                    y: 0,
+                    w: width,
+                    h: height,
+                })
+            };
+
             std::ptr::copy_nonoverlapping(data.as_ptr(), (*raw).Pixels as *mut u8, copy_bytes);
 
             // Mark the entire texture as updated without downgrading an initial create request.
-            (*raw).UpdateRect = sys::ImTextureRect {
-                x: 0u16,
-                y: 0u16,
-                w: (*raw).Width.clamp(0, u16::MAX as i32) as u16,
-                h: (*raw).Height.clamp(0, u16::MAX as i32) as u16,
-            };
-            if (*raw).Status != sys::ImTextureStatus_WantCreate {
+            if let Some(update_rect) = update_rect {
+                (*raw).UpdateRect = update_rect;
                 sys::ImTextureData_SetStatus(raw, sys::ImTextureStatus_WantUpdates);
             }
         }

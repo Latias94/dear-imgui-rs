@@ -25,8 +25,16 @@ impl PlatformIo {
     }
 
     /// Set platform create VkSurface callback (raw).
+    ///
+    /// # Safety
+    ///
+    /// When present, the callback must remain callable until it is replaced or cleared, must not
+    /// unwind across the C ABI, and must uphold Dear ImGui's `Platform_CreateVkSurface` contract.
+    /// In particular, it must validate the Vulkan instance and allocator pointers supplied by the
+    /// renderer and initialize `out_vk_surface` according to its return value. Replacing or
+    /// clearing it is valid only after every consumer has stopped invoking it.
     #[cfg(feature = "multi-viewport")]
-    pub fn set_platform_create_vk_surface_raw(
+    pub unsafe fn set_platform_create_vk_surface_raw(
         &mut self,
         callback: Option<
             unsafe extern "C" fn(

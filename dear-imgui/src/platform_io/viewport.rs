@@ -178,51 +178,37 @@ impl Viewport {
         }
     }
 
-    /// Check if this is the main viewport
+    /// Check whether this is the currently bound Context's application-owned main viewport.
     ///
-    /// Note: Main viewport is typically identified by ID == 0 or by checking if it's not a platform window
-    #[cfg(feature = "multi-viewport")]
+    /// Viewport IDs are not used for this decision because the same numeric ID may appear in
+    /// different Contexts. Returns `false` when no Context is current.
     pub fn is_main(&self) -> bool {
-        self.inner().ID == 0
-            || (self.inner().Flags & (crate::ViewportFlags::IS_PLATFORM_WINDOW.bits())) == 0
+        unsafe {
+            if sys::igGetCurrentContext().is_null() {
+                return false;
+            }
+            let main = sys::igGetMainViewport();
+            !main.is_null() && std::ptr::eq(self.as_raw(), main.cast_const())
+        }
     }
 
-    #[cfg(not(feature = "multi-viewport"))]
-    pub fn is_main(&self) -> bool {
-        self.inner().ID == 0
-    }
-
-    /// Check if this is a platform window (not the main viewport)
-    #[cfg(feature = "multi-viewport")]
+    /// Check whether this is a secondary platform window managed for Dear ImGui.
+    ///
+    /// Dear ImGui also sets `ViewportFlags::IS_PLATFORM_WINDOW` on the main viewport after the
+    /// first frame, so this helper additionally excludes [`Viewport::is_main`].
     pub fn is_platform_window(&self) -> bool {
-        (self.inner().Flags & (crate::ViewportFlags::IS_PLATFORM_WINDOW.bits())) != 0
-    }
-
-    #[cfg(not(feature = "multi-viewport"))]
-    pub fn is_platform_window(&self) -> bool {
-        false
+        !self.is_main()
+            && (self.inner().Flags & (crate::ViewportFlags::IS_PLATFORM_WINDOW.bits())) != 0
     }
 
     /// Check if this is a platform monitor
-    #[cfg(feature = "multi-viewport")]
     pub fn is_platform_monitor(&self) -> bool {
         (self.inner().Flags & (crate::ViewportFlags::IS_PLATFORM_MONITOR.bits())) != 0
     }
 
-    #[cfg(not(feature = "multi-viewport"))]
-    pub fn is_platform_monitor(&self) -> bool {
-        false
-    }
-
     /// Check if this viewport is owned by the application
-    #[cfg(feature = "multi-viewport")]
     pub fn is_owned_by_app(&self) -> bool {
         (self.inner().Flags & (crate::ViewportFlags::OWNED_BY_APP.bits())) != 0
-    }
-
-    #[cfg(not(feature = "multi-viewport"))]
-    pub fn is_owned_by_app(&self) -> bool {
-        false
     }
 
     /// Get the platform user data
@@ -230,8 +216,13 @@ impl Viewport {
         self.inner().PlatformUserData
     }
 
-    /// Set the platform user data
-    pub fn set_platform_user_data(&mut self, data: *mut c_void) {
+    /// Set the platform backend's opaque viewport data.
+    ///
+    /// # Safety
+    ///
+    /// `data` must be null or point to the exact allocation expected by the installed platform
+    /// callbacks, and that allocation must remain valid until those callbacks clear or release it.
+    pub unsafe fn set_platform_user_data(&mut self, data: *mut c_void) {
         self.inner_mut().PlatformUserData = data;
     }
 
@@ -240,8 +231,13 @@ impl Viewport {
         self.inner().RendererUserData
     }
 
-    /// Set the renderer user data
-    pub fn set_renderer_user_data(&mut self, data: *mut c_void) {
+    /// Set the renderer backend's opaque viewport data.
+    ///
+    /// # Safety
+    ///
+    /// `data` must be null or point to the exact allocation expected by the installed renderer
+    /// callbacks, and that allocation must remain valid until those callbacks clear or release it.
+    pub unsafe fn set_renderer_user_data(&mut self, data: *mut c_void) {
         self.inner_mut().RendererUserData = data;
     }
 
@@ -250,8 +246,13 @@ impl Viewport {
         self.inner().PlatformHandle
     }
 
-    /// Set the platform handle
-    pub fn set_platform_handle(&mut self, handle: *mut c_void) {
+    /// Set the backend-defined platform handle.
+    ///
+    /// # Safety
+    ///
+    /// `handle` must use the representation and lifetime required by the installed platform and
+    /// renderer callbacks.
+    pub unsafe fn set_platform_handle(&mut self, handle: *mut c_void) {
         self.inner_mut().PlatformHandle = handle;
     }
 
@@ -262,8 +263,13 @@ impl Viewport {
         self.inner().PlatformHandleRaw
     }
 
-    /// Set the raw platform handle.
-    pub fn set_platform_handle_raw(&mut self, handle: *mut c_void) {
+    /// Set the raw native platform handle.
+    ///
+    /// # Safety
+    ///
+    /// `handle` must be null or a live native handle of the kind expected by the installed
+    /// platform callbacks for this viewport.
+    pub unsafe fn set_platform_handle_raw(&mut self, handle: *mut c_void) {
         self.inner_mut().PlatformHandleRaw = handle;
     }
 
@@ -272,8 +278,14 @@ impl Viewport {
         self.inner().PlatformWindowCreated
     }
 
-    /// Set whether the platform window was created
-    pub fn set_platform_window_created(&mut self, created: bool) {
+    /// Set whether the platform window was created.
+    ///
+    /// # Safety
+    ///
+    /// When setting this to `true`, all platform and renderer data required by the corresponding
+    /// destroy callbacks must already be initialized. The caller must keep the flag synchronized
+    /// with the actual native window lifecycle.
+    pub unsafe fn set_platform_window_created(&mut self, created: bool) {
         self.inner_mut().PlatformWindowCreated = created;
     }
 
@@ -435,6 +447,54 @@ mod tests {
     }
 
     #[test]
+    fn main_viewport_identity_does_not_depend_on_platform_window_flags() {
+        let _guard = crate::test_support::imgui_context_guard();
+        let mut context = Context::create();
+        let main = context.main_viewport().as_raw_mut();
+        let secondary = new_viewport();
+        unsafe {
+            (*main).Flags = crate::ViewportFlags::IS_PLATFORM_WINDOW.bits()
+                | crate::ViewportFlags::OWNED_BY_APP.bits();
+            (*secondary).ID = (*main).ID;
+            (*secondary).Flags = crate::ViewportFlags::IS_PLATFORM_WINDOW.bits();
+
+            let main_viewport = Viewport::from_raw_mut(main);
+            assert!(main_viewport.is_main());
+            assert!(!main_viewport.is_platform_window());
+            assert!(main_viewport.is_owned_by_app());
+
+            let secondary_viewport = Viewport::from_raw_mut(secondary);
+            assert_eq!(secondary_viewport.id(), main_viewport.id());
+            assert!(!secondary_viewport.is_main());
+            assert!(secondary_viewport.is_platform_window());
+
+            sys::ImGuiViewport_destroy(secondary);
+        }
+    }
+
+    #[test]
+    fn main_viewport_identity_is_scoped_to_the_current_context() {
+        let _guard = crate::test_support::imgui_context_guard();
+        let context_a = Context::create();
+        let binding_a = context_a.binding();
+        let main_a = unsafe { sys::igGetMainViewport() };
+        unsafe { sys::igSetCurrentContext(std::ptr::null_mut()) };
+        let _context_b = Context::create();
+        let main_b = unsafe { sys::igGetMainViewport() };
+
+        unsafe {
+            assert_eq!((*main_a).ID, (*main_b).ID);
+            assert!(!Viewport::from_raw(main_a).is_main());
+            assert!(Viewport::from_raw(main_b).is_main());
+        }
+
+        binding_a.with_bound_context(|| unsafe {
+            assert!(Viewport::from_raw(main_a).is_main());
+            assert!(!Viewport::from_raw(main_b).is_main());
+        });
+    }
+
+    #[test]
     fn viewport_platform_handle_raw_roundtrips() {
         let raw = new_viewport();
         unsafe {
@@ -445,6 +505,15 @@ mod tests {
 
             sys::ImGuiViewport_destroy(raw);
         }
+    }
+
+    #[test]
+    fn backend_owned_viewport_state_requires_unsafe_callers() {
+        let _: unsafe fn(&mut Viewport, *mut c_void) = Viewport::set_platform_user_data;
+        let _: unsafe fn(&mut Viewport, *mut c_void) = Viewport::set_renderer_user_data;
+        let _: unsafe fn(&mut Viewport, *mut c_void) = Viewport::set_platform_handle;
+        let _: unsafe fn(&mut Viewport, *mut c_void) = Viewport::set_platform_handle_raw;
+        let _: unsafe fn(&mut Viewport, bool) = Viewport::set_platform_window_created;
     }
 
     #[test]

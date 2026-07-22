@@ -53,7 +53,7 @@ impl Ui {
         match texture.source() {
             crate::texture::TextureSource::Legacy(id) => Ok(sys::ImTextureRef {
                 _TexData: std::ptr::null_mut(),
-                _TexID: id.id() as sys::ImTextureID,
+                _TexID: sys::ImTextureID::from(id),
             }),
             crate::texture::TextureSource::Managed(id) => {
                 self.texture_registry.borrow().resolve(id)

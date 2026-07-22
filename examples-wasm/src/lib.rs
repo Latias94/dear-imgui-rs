@@ -14,7 +14,7 @@ use dear_implot::PlotContext;
 #[cfg(feature = "implot3d")]
 use dear_implot3d::{Axis3DFlags, Plot3DContext, Plot3DFlags, Scatter3DFlags};
 use log::info;
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, sync::Arc};
 use wasm_bindgen::prelude::*;
 use web_time::Instant;
 use winit::{
@@ -24,9 +24,6 @@ use winit::{
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     window::{Window, WindowId},
 };
-
-// Use Rc instead of Arc on wasm to avoid cross-thread requirements
-type WindowRc = Rc<Window>;
 
 struct ImguiState {
     platform: WinitPlatform,
@@ -53,7 +50,7 @@ struct ImguiState {
 struct AppWindow {
     device: wgpu::Device,
     queue: wgpu::Queue,
-    window: WindowRc,
+    window: Arc<Window>,
     surface_desc: wgpu::SurfaceConfiguration,
     surface: wgpu::Surface<'static>,
     imgui: ImguiState,
@@ -67,7 +64,7 @@ struct App {
 impl AppWindow {
     // Complete async GPU setup given an already-created window + surface.
     async fn new_with_window(
-        window: WindowRc,
+        window: Arc<Window>,
         surface: wgpu::Surface<'static>,
         size: LogicalSize<f64>,
         instance: wgpu::Instance,
@@ -123,8 +120,15 @@ impl AppWindow {
             io.set_display_framebuffer_scale([1.0, 1.0]);
         }
 
-        let mut platform = WinitPlatform::new(&mut context);
-        platform.attach_window(&window, dear_imgui_winit::HiDpiMode::Default, &mut context);
+        let mut platform = WinitPlatform::new(&mut context)
+            .map_err(|e| JsValue::from_str(&format!("init platform: {e}")))?;
+        platform
+            .attach_window(
+                Arc::clone(&window),
+                dear_imgui_winit::HiDpiMode::Default,
+                &mut context,
+            )
+            .map_err(|e| JsValue::from_str(&format!("attach platform window: {e}")))?;
 
         // Optional: experiment with custom font settings when the experimental
         // feature is enabled. This uses the modern FontAtlas API and verifies
@@ -245,7 +249,8 @@ impl AppWindow {
         // Allow winit platform backend to update IO (mouse/keyboard/text)
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context);
+            .prepare_frame(&self.window, &mut self.imgui.context)
+            .map_err(|e| JsValue::from_str(&format!("prepare platform frame: {e}")))?;
 
         // Skip rendering if surface is zero-sized (e.g., hidden tab)
         if self.surface_desc.width == 0 || self.surface_desc.height == 0 {
@@ -431,6 +436,10 @@ impl AppWindow {
                 label: Some("Render Encoder"),
             });
 
+        self.imgui
+            .platform
+            .prepare_render_with_ui(&ui, &self.window)
+            .map_err(|e| JsValue::from_str(&format!("prepare platform render: {e}")))?;
         let draw_data = self.imgui.context.render();
 
         {
@@ -494,7 +503,7 @@ impl ApplicationHandler for App {
             .expect("element is not canvas");
 
         let size = LogicalSize::new(1280.0, 720.0);
-        let window: WindowRc = Rc::new(
+        let window = Arc::new(
             event_loop
                 .create_window(
                     Window::default_attributes()
@@ -547,10 +556,17 @@ impl ApplicationHandler for App {
             window_id: _window_id,
             event: event.clone(),
         };
-        window
-            .imgui
-            .platform
-            .handle_event(&mut window.imgui.context, &window.window, &full_event);
+        if let Err(error) = window.imgui.platform.handle_event(
+            &mut window.imgui.context,
+            &window.window,
+            &full_event,
+        ) {
+            web_sys::console::error_1(&JsValue::from_str(&format!(
+                "Winit platform event error: {error}"
+            )));
+            event_loop.exit();
+            return;
+        }
 
         match event {
             WindowEvent::Resized(physical_size) => {

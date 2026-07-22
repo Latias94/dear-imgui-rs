@@ -117,8 +117,12 @@ impl AppWindow {
         let mut context = Context::create();
         context.set_ini_filename(None::<String>).unwrap();
 
-        let mut platform = WinitPlatform::new(&mut context);
-        platform.attach_window(&window, dear_imgui_winit::HiDpiMode::Default, &mut context);
+        let mut platform = WinitPlatform::new(&mut context)?;
+        platform.attach_window(
+            Arc::clone(&window),
+            dear_imgui_winit::HiDpiMode::Default,
+            &mut context,
+        )?;
 
         let init_info =
             dear_imgui_wgpu::WgpuInitInfo::new(device.clone(), queue.clone(), surface_desc.format);
@@ -176,7 +180,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context);
+            .prepare_frame(&self.window, &mut self.imgui.context)?;
         let ui = self.imgui.context.frame();
 
         ui.window("Node Editor")
@@ -264,7 +268,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_render_with_ui(&ui, &self.window);
+            .prepare_render_with_ui(&ui, &self.window)?;
         let draw_data = self.imgui.context.render();
 
         let (output, reconfigure_after_present) = match self.surface.get_current_texture() {
@@ -340,11 +344,15 @@ impl ApplicationHandler for App {
         event: WindowEvent,
     ) {
         if let Some(window) = &mut self.window {
-            window.imgui.platform.handle_window_event(
+            if let Err(error) = window.imgui.platform.handle_window_event(
                 &mut window.imgui.context,
                 &window.window,
                 &event,
-            );
+            ) {
+                eprintln!("Winit platform error: {error}");
+                event_loop.exit();
+                return;
+            }
 
             match event {
                 WindowEvent::CloseRequested => event_loop.exit(),

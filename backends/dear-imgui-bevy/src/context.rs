@@ -22,7 +22,9 @@ use bevy_window::{CursorIcon, CursorOptions, PrimaryWindow, Window, WindowPositi
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_window::{Monitor, PrimaryMonitor};
 use dear_imgui_rs as imgui;
+use std::cell::Cell;
 use std::ptr::NonNull;
+use std::rc::Rc;
 #[cfg(feature = "render")]
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -69,6 +71,8 @@ struct BeginFrameParams<'w, 's> {
     output: ResMut<'w, ImguiFrameOutput>,
     #[cfg(feature = "render")]
     snapshot_mailbox: Res<'w, ImguiFrameMailbox>,
+    #[cfg(feature = "render")]
+    renderer_release: Res<'w, crate::render::ImguiRendererRelease>,
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     backend_status: Res<'w, ImguiBackendStatus>,
     real_time: Option<Res<'w, Time<Real>>>,
@@ -105,6 +109,7 @@ impl ImguiFrameOutput {
     fn set_snapshot(
         &mut self,
         mailbox: &ImguiFrameMailbox,
+        renderer_release: &crate::render::ImguiRendererRelease,
         frame_index: u64,
         snapshot: Result<
             imgui::render::snapshot::FrameSnapshot,
@@ -112,6 +117,12 @@ impl ImguiFrameOutput {
         >,
     ) {
         self.frame_index = frame_index;
+        if renderer_release.release_requested() {
+            self.snapshot_epoch = None;
+            mailbox.clear();
+            self.snapshot_error = Some("Bevy renderer shutdown is in progress".to_owned());
+            return;
+        }
         match snapshot {
             Ok(snapshot) => {
                 self.snapshot_epoch = Some(snapshot.epoch());
@@ -147,7 +158,11 @@ impl ImguiFrameMailbox {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    fn publish(&self, frame_index: u64, snapshot: imgui::render::snapshot::FrameSnapshot) {
+    pub(crate) fn publish(
+        &self,
+        frame_index: u64,
+        snapshot: imgui::render::snapshot::FrameSnapshot,
+    ) {
         let previous = self.pending().replace((frame_index, snapshot));
         drop(previous);
     }
@@ -156,7 +171,7 @@ impl ImguiFrameMailbox {
         self.pending().take()
     }
 
-    fn clear(&self) {
+    pub(crate) fn clear(&self) {
         let previous = self.pending().take();
         drop(previous);
     }
@@ -168,41 +183,68 @@ impl ImguiFrameMailbox {
 /// points to the `Ui` owned by the non-send [`ImguiContext`] resource and is never sent to another
 /// thread.
 #[derive(Default)]
+pub(crate) struct ImguiFrameLifecycleControl {
+    frame_index: Cell<u64>,
+    ui: Cell<Option<NonNull<imgui::Ui>>>,
+}
+
+impl ImguiFrameLifecycleControl {
+    pub(crate) fn revoke(&self) {
+        self.ui.set(None);
+    }
+
+    pub(crate) fn is_frame_open(&self) -> bool {
+        self.ui.get().is_some()
+    }
+}
+
 pub struct ImguiFrameState {
-    frame_index: u64,
-    ui: Option<NonNull<imgui::Ui>>,
+    control: Rc<ImguiFrameLifecycleControl>,
 }
 
 impl ImguiFrameState {
+    pub(crate) fn new(control: Rc<ImguiFrameLifecycleControl>) -> Self {
+        Self { control }
+    }
+
+    fn assert_bound_to(&self, control: &Rc<ImguiFrameLifecycleControl>) {
+        assert!(
+            Rc::ptr_eq(&self.control, control),
+            "replacing ImguiContext after ImguiPlugin installation is unsupported; insert a custom ImguiContext before adding ImguiPlugin"
+        );
+    }
+
     /// Current or most recently opened frame index.
     #[must_use]
     pub fn frame_index(&self) -> u64 {
-        self.frame_index
+        self.control.frame_index.get()
     }
 
     /// Whether the Bevy-managed Dear ImGui frame is currently open.
     #[must_use]
     pub fn is_frame_open(&self) -> bool {
-        self.ui.is_some()
+        self.control.is_frame_open()
     }
 
     /// Borrow the currently open `Ui`, if called inside `ImguiPrimaryContextPass`.
     #[must_use]
     pub fn ui(&self) -> Option<&imgui::Ui> {
-        let ui = self.ui?;
+        let ui = self.control.ui.get()?;
         // SAFETY: `ui` is set from the live `ImguiContext` in `begin_primary_frame_system` and
         // cleared by `end_primary_frame_system` before the context renders/closes the frame.
         Some(unsafe { ui.as_ref() })
     }
 
     fn begin(&mut self, ui: &imgui::Ui) {
-        self.frame_index = self.frame_index.saturating_add(1);
-        self.ui = Some(NonNull::from(ui));
+        self.control
+            .frame_index
+            .set(self.control.frame_index.get().saturating_add(1));
+        self.control.ui.set(Some(NonNull::from(ui)));
     }
 
     fn end(&mut self) -> u64 {
-        self.ui = None;
-        self.frame_index
+        self.control.ui.set(None);
+        self.control.frame_index.get()
     }
 }
 
@@ -230,8 +272,13 @@ impl<'w> ImguiContexts<'w> {
 }
 
 pub(crate) fn install_context_lifecycle(app: &mut App) {
-    app.init_non_send::<ImguiFrameState>()
-        .init_resource::<ImguiFrameOutput>()
+    let control = app
+        .world()
+        .get_non_send::<ImguiContext>()
+        .expect("ImguiContext must be installed before its frame lifecycle")
+        .frame_lifecycle_control();
+    app.insert_non_send(ImguiFrameState::new(control));
+    app.init_resource::<ImguiFrameOutput>()
         .add_systems(crate::ImguiBeginFrame, begin_primary_frame_system)
         .add_systems(crate::ImguiEndFrame, end_primary_frame_system);
     #[cfg(feature = "render")]
@@ -243,6 +290,30 @@ pub(crate) fn install_context_lifecycle(app: &mut App) {
     allow(unused_variables)
 )]
 fn begin_primary_frame_system(mut params: BeginFrameParams) {
+    params
+        .frame_state
+        .assert_bound_to(&params.imgui_context.frame_lifecycle_control());
+    #[cfg(feature = "render")]
+    if params.renderer_release.release_requested() {
+        let frame_was_open = params.frame_state.is_frame_open();
+        params.frame_state.end();
+        if frame_was_open {
+            let _ = params.imgui_context.context_mut().end_frame();
+        }
+        params.snapshot_mailbox.clear();
+        let _ = params
+            .imgui_context
+            .context_mut()
+            .poll_snapshot_completions();
+        params
+            .output
+            .clear_snapshot(params.frame_state.frame_index());
+        return;
+    }
+    #[cfg(feature = "render")]
+    params.imgui_context.assert_active_renderer_ownership();
+    #[cfg(feature = "render")]
+    params.snapshot_mailbox.clear();
     if params.frame_state.is_frame_open() {
         return;
     }
@@ -263,7 +334,9 @@ fn begin_primary_frame_system(mut params: BeginFrameParams) {
     let context = params.imgui_context.context_mut();
 
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-    if let Some(viewport_bridge) = params.viewport_bridge.as_deref_mut() {
+    if let Some(viewport_bridge) = params.viewport_bridge.as_deref_mut()
+        && !viewport_bridge.ecs_release_pending()
+    {
         let viewport_feedback = params
             .viewport_windows
             .iter()
@@ -293,7 +366,10 @@ fn begin_primary_frame_system(mut params: BeginFrameParams) {
             &monitors,
             viewport_feedback.into_iter(),
             params.backend_status.multi_viewport_supported,
-        );
+        )
+        .unwrap_or_else(|error| {
+            panic!("dear-imgui-bevy viewport ownership changed before frame preparation: {error}")
+        });
     }
 
     context.prepare_frame(
@@ -326,6 +402,7 @@ pub(crate) fn end_primary_frame_system(
     mut viewport_windows: ViewportFeedbackWindowQuery,
     mut output: ResMut<ImguiFrameOutput>,
     #[cfg(feature = "render")] snapshot_mailbox: Res<ImguiFrameMailbox>,
+    #[cfg(feature = "render")] renderer_release: Res<crate::render::ImguiRendererRelease>,
 ) {
     if !frame_state.is_frame_open() {
         return;
@@ -345,9 +422,18 @@ pub(crate) fn end_primary_frame_system(
     let frame_index = frame_state.end();
     #[cfg(feature = "render")]
     {
-        let snapshot =
-            imgui_context.render_frame_snapshot(_backend_status.multi_viewport_supported);
-        output.set_snapshot(&snapshot_mailbox, frame_index, snapshot);
+        if _backend_status.render_integration_installed {
+            let snapshot =
+                imgui_context.render_frame_snapshot(_backend_status.multi_viewport_supported);
+            if snapshot.is_err() {
+                let _ = imgui_context.context_mut().end_frame();
+            }
+            output.set_snapshot(&snapshot_mailbox, &renderer_release, frame_index, snapshot);
+        } else {
+            snapshot_mailbox.clear();
+            let _ = imgui_context.context_mut().render();
+            output.clear_snapshot(frame_index);
+        }
     }
     #[cfg(not(feature = "render"))]
     {
@@ -588,6 +674,105 @@ mod tests {
         frame.render_snapshot(consumer).unwrap()
     }
 
+    fn suspended_foreign_context() -> (
+        imgui::SuspendedContext,
+        imgui::ContextBinding,
+        *mut imgui::sys::ImGuiContext,
+    ) {
+        let foreign = imgui::Context::create();
+        let foreign_raw = foreign.as_raw();
+        let foreign_binding = foreign.binding();
+        (foreign.suspend(), foreign_binding, foreign_raw)
+    }
+
+    #[test]
+    fn dropping_wrapper_revokes_ui_before_core_closes_an_open_frame() {
+        let (mut context, consumer) = context_and_consumer();
+        drop(consumer);
+        context.poll_snapshot_completions().unwrap();
+        let mut owner = ImguiContext::new(context);
+        let mut frame_state = ImguiFrameState::new(owner.frame_lifecycle_control());
+        let ui = owner.context_mut().frame();
+        frame_state.begin(ui);
+        assert!(frame_state.is_frame_open());
+
+        drop(owner);
+
+        assert!(!frame_state.is_frame_open());
+        assert!(frame_state.ui().is_none());
+    }
+
+    #[test]
+    fn dropping_wrapper_with_foreign_current_closes_open_frame_and_restores_foreign_context() {
+        let (foreign, foreign_binding, foreign_raw) = suspended_foreign_context();
+        let (mut context, consumer) = context_and_consumer();
+        drop(consumer);
+        context.poll_snapshot_completions().unwrap();
+        let mut owner = ImguiContext::new(context);
+        let mut frame_state = ImguiFrameState::new(owner.frame_lifecycle_control());
+        let ui = owner.context_mut().frame();
+        frame_state.begin(ui);
+
+        foreign_binding.with_bound_context(|| {
+            assert_eq!(unsafe { imgui::sys::igGetCurrentContext() }, foreign_raw);
+            drop(owner);
+            assert_eq!(
+                unsafe { imgui::sys::igGetCurrentContext() },
+                foreign_raw,
+                "ImguiContext::drop must restore the host's foreign current Context"
+            );
+        });
+
+        assert!(!frame_state.is_frame_open());
+        assert!(frame_state.ui().is_none());
+        assert!(unsafe { imgui::sys::igGetCurrentContext() }.is_null());
+        drop(foreign);
+    }
+
+    #[test]
+    fn extracting_wrapper_ends_an_open_frame_and_returns_a_reusable_context() {
+        let (mut context, consumer) = context_and_consumer();
+        drop(consumer);
+        context.poll_snapshot_completions().unwrap();
+        let mut owner = ImguiContext::new(context);
+        let mut frame_state = ImguiFrameState::new(owner.frame_lifecycle_control());
+        let ui = owner.context_mut().frame();
+        frame_state.begin(ui);
+
+        let mut context = owner.into_inner().unwrap();
+        assert!(!frame_state.is_frame_open());
+        context.prepare_frame(
+            imgui::FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
+        );
+        context
+            .frame()
+            .text("context reused after explicit Bevy detach");
+        let consumer = context.create_renderer_consumer().unwrap();
+        let snapshot = context.render_snapshot(&consumer).unwrap();
+        drop(snapshot);
+        context.poll_snapshot_completions().unwrap();
+    }
+
+    #[test]
+    fn mutable_context_access_is_rejected_while_ui_is_exposed() {
+        let (mut context, consumer) = context_and_consumer();
+        drop(consumer);
+        context.poll_snapshot_completions().unwrap();
+        let mut owner = ImguiContext::new(context);
+        let mut frame_state = ImguiFrameState::new(owner.frame_lifecycle_control());
+        let ui = owner.context_mut().frame();
+        frame_state.begin(ui);
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = owner.context_mut();
+        }));
+        assert!(result.is_err());
+        assert!(frame_state.is_frame_open());
+
+        frame_state.end();
+        assert!(owner.context_mut().end_frame());
+    }
+
     #[test]
     fn mailbox_abandon_finishes_draining_before_next_consumer_generation() {
         let (mut context, consumer) = context_and_consumer();
@@ -625,21 +810,25 @@ mod tests {
         let (mut context, consumer) = context_and_consumer();
         let mailbox = ImguiFrameMailbox::default();
         mailbox.publish(1, snapshot(&mut context, &consumer));
-        let imgui = ImguiContext {
-            context,
-            renderer_consumer: Some(consumer),
-        };
+        let mut imgui = ImguiContext::new(context);
+        imgui.renderer_consumer = Some(consumer);
 
         let error = match imgui.into_inner() {
             Ok(_) => panic!("an outstanding render-world epoch must prevent Context extraction"),
             Err(error) => error,
         };
         assert_eq!(
-            error,
-            imgui::render::RendererConsumerError::OutstandingEpochs { count: 1 }
+            error.error(),
+            crate::ImguiContextIntoInnerErrorReason::Renderer(
+                imgui::render::RendererConsumerError::OutstandingEpochs { count: 1 }
+            )
         );
 
         mailbox.clear();
+        let imgui = error.into_owner();
+        let _context = imgui
+            .into_inner()
+            .expect("the recovered owner should detach after the snapshot is abandoned");
     }
 
     #[test]
@@ -659,10 +848,8 @@ mod tests {
         snapshot.commit([feedback]).unwrap();
         context.poll_snapshot_completions().unwrap();
 
-        let imgui = ImguiContext {
-            context,
-            renderer_consumer: Some(consumer),
-        };
+        let mut imgui = ImguiContext::new(context);
+        imgui.renderer_consumer = Some(consumer);
         let context = imgui
             .into_inner()
             .expect("an idle renderer consumer should reset and detach");
@@ -672,6 +859,157 @@ mod tests {
                 assert!(texture.texture_id().is_null());
             })
             .unwrap();
+    }
+
+    #[test]
+    fn into_inner_resets_texture_bindings_after_complete_foreign_renderer_takeover() {
+        let (mut context, consumer) = context_and_consumer();
+        let mut texture_data = imgui::texture::OwnedTextureData::new();
+        texture_data.create(imgui::TextureFormat::RGBA32, 1, 1);
+        texture_data.set_data(&[255, 0, 255, 255]);
+        let texture = context.register_texture(texture_data);
+        let snapshot = texture_snapshot(&mut context, &consumer, texture);
+        let request = snapshot
+            .texture_requests()
+            .iter()
+            .find(|request| request.texture() == imgui::render::SnapshotTextureId::User(texture))
+            .expect("managed texture should request renderer creation");
+        let feedback = request.uploaded(imgui::TextureId::new(0xBEEF)).unwrap();
+        snapshot.commit([feedback]).unwrap();
+        context.poll_snapshot_completions().unwrap();
+
+        let mut owner = ImguiContext::new(context);
+        owner.renderer_consumer = Some(consumer);
+        owner
+            .context_mut()
+            .set_renderer_name(Some("bevy-owned-renderer"))
+            .unwrap();
+        unsafe {
+            owner
+                .context_mut()
+                .io_mut()
+                .set_backend_renderer_user_data(std::ptr::dangling_mut::<u8>().cast());
+        }
+        owner.backend_ownership.renderer_contract = Some(
+            crate::ImguiRendererRuntimeContract::capture(owner.context()),
+        );
+
+        let foreign_user_data = std::ptr::dangling_mut::<u16>().cast();
+        owner
+            .context_mut()
+            .set_renderer_name(Some("foreign-renderer"))
+            .unwrap();
+        unsafe {
+            owner
+                .context_mut()
+                .io_mut()
+                .set_backend_renderer_user_data(foreign_user_data);
+        }
+
+        let mut context = owner
+            .into_inner()
+            .expect("a complete foreign renderer takeover should detach after texture reset");
+        context
+            .with_texture(texture, |texture| {
+                assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+                assert!(texture.texture_id().is_null());
+            })
+            .unwrap();
+        assert_eq!(context.io().backend_renderer_user_data(), foreign_user_data);
+        assert_eq!(
+            context.io().backend_renderer_name().unwrap().to_bytes(),
+            b"foreign-renderer"
+        );
+
+        unsafe {
+            context
+                .io_mut()
+                .set_backend_renderer_user_data(std::ptr::null_mut());
+        }
+        context.set_renderer_name::<String>(None).unwrap();
+    }
+
+    #[test]
+    fn into_inner_binds_open_frame_reset_and_completion_poll_to_its_context() {
+        let (foreign, foreign_binding, foreign_raw) = suspended_foreign_context();
+        let (mut context, consumer) = context_and_consumer();
+        let mut texture_data = imgui::texture::OwnedTextureData::new();
+        texture_data.create(imgui::TextureFormat::RGBA32, 1, 1);
+        texture_data.set_data(&[255, 0, 255, 255]);
+        let texture = context.register_texture(texture_data);
+
+        let uploaded_snapshot = texture_snapshot(&mut context, &consumer, texture);
+        let request = uploaded_snapshot
+            .texture_requests()
+            .iter()
+            .find(|request| request.texture() == imgui::render::SnapshotTextureId::User(texture))
+            .expect("managed texture should request renderer creation");
+        let feedback = request.uploaded(imgui::TextureId::new(0xBEEF)).unwrap();
+        uploaded_snapshot.commit([feedback]).unwrap();
+        context.poll_snapshot_completions().unwrap();
+
+        let outstanding_snapshot = texture_snapshot(&mut context, &consumer, texture);
+        context.prepare_frame(
+            imgui::FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
+        );
+        let mut owner = ImguiContext::new(context);
+        owner.renderer_consumer = Some(consumer);
+        let mut frame_state = ImguiFrameState::new(owner.frame_lifecycle_control());
+        let ui = owner.context_mut().frame();
+        frame_state.begin(ui);
+
+        let error = foreign_binding.with_bound_context(|| {
+            assert_eq!(unsafe { imgui::sys::igGetCurrentContext() }, foreign_raw);
+            let error = owner
+                .into_inner()
+                .expect_err("an outstanding epoch must block reset before the consumer detaches");
+            assert_eq!(
+                unsafe { imgui::sys::igGetCurrentContext() },
+                foreign_raw,
+                "a failed teardown must restore the host's foreign current Context"
+            );
+            error
+        });
+        assert_eq!(
+            error.error(),
+            crate::ImguiContextIntoInnerErrorReason::Renderer(
+                imgui::render::RendererConsumerError::OutstandingEpochs { count: 1 }
+            )
+        );
+        assert!(!frame_state.is_frame_open());
+        assert!(frame_state.ui().is_none());
+
+        drop(outstanding_snapshot);
+        let mut context = foreign_binding.with_bound_context(|| {
+            let context = error
+                .into_owner()
+                .into_inner()
+                .expect("abandoning the epoch must allow reset and consumer detachment");
+            assert_eq!(
+                unsafe { imgui::sys::igGetCurrentContext() },
+                foreign_raw,
+                "the successful teardown must restore the host's foreign current Context"
+            );
+            context
+        });
+
+        context
+            .with_texture(texture, |texture| {
+                assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+                assert!(texture.texture_id().is_null());
+            })
+            .unwrap();
+        let replacement = context
+            .create_renderer_consumer()
+            .expect("teardown must poll the detached consumer before extraction returns");
+        let _ = context
+            .prepare_renderer_texture_reset(&replacement)
+            .unwrap()
+            .commit();
+        drop(replacement);
+        context.poll_snapshot_completions().unwrap();
+        drop(context);
+        drop(foreign);
     }
 
     #[test]

@@ -23,7 +23,8 @@ use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::window::Window;
 
 pub use super::vulkan_viewport::{
-    AshViewportAttachError, AshViewportError, SurfaceSupportError, VulkanViewportConfig,
+    AshViewportAttachError, AshViewportError, PresentModePolicy, SurfaceFormatPolicy,
+    SurfaceSupportError, ViewportSwapchainPolicy, VulkanViewportConfig,
 };
 use crate::{Options, TextureRetirementBatch, TextureUpdateResult};
 

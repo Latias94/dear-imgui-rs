@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag, for example v0.16.0
+        description: Release tag, for example v0.16.0-alpha.1
         required: true
         type: string
       candidate_sha:
@@ -86,4 +86,5 @@ jobs:
           body_path: release-notes.md
           files: target/release-cells/prebuilt-*/packages/*.tar.gz
           fail_on_unmatched_files: true
-          make_latest: true
+          prerelease: ${{ contains(steps.tag.outputs.version, '-') }}
+          make_latest: ${{ contains(steps.tag.outputs.version, '-') && 'false' || 'true' }}

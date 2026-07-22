@@ -131,8 +131,12 @@ impl AppWindow {
         let mut context = Context::create();
         context.set_ini_filename(None::<String>).unwrap();
 
-        let mut platform = WinitPlatform::new(&mut context);
-        platform.attach_window(&window, dear_imgui_winit::HiDpiMode::Default, &mut context);
+        let mut platform = WinitPlatform::new(&mut context)?;
+        platform.attach_window(
+            Arc::clone(&window),
+            dear_imgui_winit::HiDpiMode::Default,
+            &mut context,
+        )?;
 
         // Initialize the renderer with one-step initialization
         let init_info =
@@ -188,7 +192,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context);
+            .prepare_frame(&self.window, &mut self.imgui.context)?;
 
         let ui = self.imgui.context.frame();
         let plot_ui = ui.implot(&self.imgui.plot_context);
@@ -403,38 +407,49 @@ impl AppWindow {
 
                     // New in 0.11 Tab
                     if let Some(tab) = ui.tab_item("New in 0.11") {
-                        ui.text("These plots exercise the new safe wrappers added for this release.");
+                        ui.text("These plots exercise the item APIs added for this release.");
                         two_column_plot_table(ui, "new_api_plots", |ui| {
                             ui.table_next_column();
 
                             ui.text("Array-backed item styling:");
                             if let Some(token) = plot_ui.begin_plot("Array-backed Item Style") {
-                                plot_ui.with_next_plot_item_array_style(
-                                    PlotItemArrayStyle::new().with_line_colors(&styled_line_colors),
-                                    |plot_ui| {
-                                        LinePlot::new("Gradient Line", &styled_x, &styled_y)
-                                            .with_line_weight(3.0)
-                                            .plot(plot_ui);
-                                    },
-                                );
+                                unsafe {
+                                    // One line color is provided for every submitted line sample.
+                                    plot_ui.with_next_plot_item_array_style(
+                                        PlotItemArrayStyle::new()
+                                            .with_line_colors(&styled_line_colors),
+                                        |plot_ui| {
+                                            LinePlot::new("Gradient Line", &styled_x, &styled_y)
+                                                .with_line_weight(3.0)
+                                                .plot(plot_ui);
+                                        },
+                                    );
+                                }
 
-                                plot_ui.with_next_plot_item_array_style(
-                                    PlotItemArrayStyle::new()
-                                        .with_marker_sizes(&styled_marker_sizes)
-                                        .with_marker_fill_colors(&styled_marker_colors)
-                                        .with_marker_line_colors(&styled_marker_colors),
-                                    |plot_ui| {
-                                        ScatterPlot::new("Variable Markers", &styled_x, &styled_y)
+                                unsafe {
+                                    // Every marker style array has one entry per scatter sample.
+                                    plot_ui.with_next_plot_item_array_style(
+                                        PlotItemArrayStyle::new()
+                                            .with_marker_sizes(&styled_marker_sizes)
+                                            .with_marker_fill_colors(&styled_marker_colors)
+                                            .with_marker_line_colors(&styled_marker_colors),
+                                        |plot_ui| {
+                                            ScatterPlot::new(
+                                                "Variable Markers",
+                                                &styled_x,
+                                                &styled_y,
+                                            )
                                             .with_marker(Marker::Circle)
                                             .plot(plot_ui);
-                                    },
-                                );
+                                        },
+                                    );
+                                }
 
                                 token.end();
                             }
                             ui.text_wrapped(
-                                "The array-style helper is closure-scoped, so borrowed slices only live \
-                                 for the next plot item submission.",
+                                "Array styles are closure-scoped; each non-empty slice must also cover \
+                                 every index read by the next plot item.",
                             );
 
                             ui.table_next_column();
@@ -693,11 +708,15 @@ impl ApplicationHandler for App {
         event: WindowEvent,
     ) {
         if let Some(window) = &mut self.window {
-            window.imgui.platform.handle_window_event(
+            if let Err(error) = window.imgui.platform.handle_window_event(
                 &mut window.imgui.context,
                 &window.window,
                 &event,
-            );
+            ) {
+                eprintln!("Winit platform error: {error}");
+                event_loop.exit();
+                return;
+            }
 
             match event {
                 WindowEvent::CloseRequested => {

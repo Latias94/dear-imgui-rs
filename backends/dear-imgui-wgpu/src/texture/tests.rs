@@ -112,9 +112,10 @@ fn managed_requests_are_idempotent_and_retired_work_cannot_resurrect() -> Render
     );
 
     assert_eq!(
-        manager.apply_managed_request(
+        manager.apply_managed_request_at_epoch(
             id,
             &TextureOp::Destroy,
+            4,
             &device,
             &queue,
             &mut render_resources,
@@ -124,9 +125,10 @@ fn managed_requests_are_idempotent_and_retired_work_cannot_resurrect() -> Render
     assert_eq!(manager.managed_texture_count(), 0);
     assert_eq!(manager.destroyed_managed_texture_count(), 1);
     assert_eq!(
-        manager.apply_managed_request(
+        manager.apply_managed_request_at_epoch(
             id,
             &TextureOp::Destroy,
+            5,
             &device,
             &queue,
             &mut render_resources,
@@ -134,9 +136,10 @@ fn managed_requests_are_idempotent_and_retired_work_cannot_resurrect() -> Render
         ManagedRequestOutcome::Destroyed
     );
     assert_eq!(
-        manager.apply_managed_request(
+        manager.apply_managed_request_at_epoch(
             id,
             &create_operation(),
+            3,
             &device,
             &queue,
             &mut render_resources,
@@ -144,7 +147,22 @@ fn managed_requests_are_idempotent_and_retired_work_cannot_resurrect() -> Render
         ManagedRequestOutcome::IgnoredRetired
     );
     assert_eq!(manager.managed_texture_count(), 0);
-    manager.acknowledge_destroyed_textures([id]);
+    manager.clear_managed_textures();
+    assert_eq!(manager.destroyed_managed_texture_count(), 1);
+    assert_eq!(
+        manager.apply_managed_request_at_epoch(
+            id,
+            &create_operation(),
+            3,
+            &device,
+            &queue,
+            &mut render_resources,
+        )?,
+        ManagedRequestOutcome::IgnoredRetired
+    );
+    manager.prune_destroyed_managed_textures(4);
+    assert_eq!(manager.destroyed_managed_texture_count(), 1);
+    manager.prune_destroyed_managed_textures(5);
     assert_eq!(manager.destroyed_managed_texture_count(), 0);
     Ok(())
 }

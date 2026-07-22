@@ -90,7 +90,8 @@ fn run_inner(_argc: c_int, _argv: *mut *mut c_char) -> Result<c_int, Box<dyn std
         style.set_font_scale_dpi(main_scale);
     }
 
-    let mut sdl3_backend = Sdl3PlatformBackend::init_for_other(&mut imgui, &window)?;
+    // SAFETY: `window` outlives explicit shutdown and Context teardown on early return.
+    let mut sdl3_backend = unsafe { Sdl3PlatformBackend::init_for_other(&mut imgui, &window)? };
     sdl3_backend.set_gamepad_mode(&mut imgui, GamepadMode::AutoAll)?;
 
     let init_info = WgpuInitInfo::new(device.clone(), queue.clone(), surface_config.format);

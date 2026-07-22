@@ -66,6 +66,8 @@ pub(super) struct TextureManager {
     pub(super) textures: HashMap<u64, VulkanTexture>,
     pub(super) managed_textures: HashMap<SnapshotTextureId, ManagedVulkanTexture>,
     pub(super) managed_ids: HashMap<u64, SnapshotTextureId>,
+    /// Last Destroy epoch for identities that may still appear in older in-flight requests.
+    pub(super) destroyed_managed_textures: HashMap<SnapshotTextureId, u64>,
     pub(super) retiring_textures:
         RetirementQueue<ManagedTextureRetirementKey, RetiredManagedVulkanTexture>,
     pub(super) external_textures: HashMap<u64, ExternalTextureBinding>,
@@ -107,6 +109,7 @@ impl TextureManager {
             textures: HashMap::new(),
             managed_textures: HashMap::new(),
             managed_ids: HashMap::new(),
+            destroyed_managed_textures: HashMap::new(),
             retiring_textures: RetirementQueue::new(),
             external_textures: HashMap::new(),
             next_id: 1,
@@ -206,6 +209,26 @@ impl TextureManager {
         Ok(RetirementRequest::Queued(batch))
     }
 
+    fn seal_managed_texture_destroyed(&mut self, texture: SnapshotTextureId, destroy_epoch: u64) {
+        self.destroyed_managed_textures
+            .entry(texture)
+            .and_modify(|epoch| *epoch = (*epoch).max(destroy_epoch))
+            .or_insert(destroy_epoch);
+    }
+
+    fn managed_texture_is_destroyed(&self, texture: SnapshotTextureId) -> bool {
+        self.destroyed_managed_textures.contains_key(&texture)
+    }
+
+    pub(super) fn clear_destroyed_managed_textures(&mut self) {
+        self.destroyed_managed_textures.clear();
+    }
+
+    pub(super) fn prune_destroyed_managed_textures(&mut self, completion_watermark: u64) {
+        self.destroyed_managed_textures
+            .retain(|_, destroy_epoch| *destroy_epoch > completion_watermark);
+    }
+
     fn complete_managed_retirements(
         &mut self,
         completed: TextureRetirementBatch,
@@ -230,8 +253,9 @@ impl AshRenderer {
     /// draws, and secondary-viewport draws that can still reference a texture in the batch. If
     /// those operations span multiple queues, every relevant queue must complete before notifying
     /// this renderer.
-    pub fn pending_texture_retirement(&self) -> Option<TextureRetirementBatch> {
-        self.textures.retiring_textures.pending_batch()
+    pub fn pending_texture_retirement(&self) -> RendererResult<Option<TextureRetirementBatch>> {
+        self.ensure_operational()?;
+        Ok(self.textures.retiring_textures.pending_batch())
     }
 
     /// Wait for the whole device and destroy managed texture resources through `completed`.
@@ -244,6 +268,7 @@ impl AshRenderer {
         &mut self,
         completed: TextureRetirementBatch,
     ) -> RendererResult<usize> {
+        self.ensure_operational()?;
         let completion = match unsafe { self.device.device_wait_idle() } {
             Ok(()) => Ok(()),
             Err(vk::Result::ERROR_DEVICE_LOST) => {
@@ -271,6 +296,7 @@ impl AshRenderer {
         completed: TextureRetirementBatch,
         fences: &[vk::Fence],
     ) -> RendererResult<usize> {
+        self.ensure_operational()?;
         if fences.is_empty() {
             return Err(RendererError::TextureRetirementFencesEmpty);
         }
@@ -289,9 +315,7 @@ impl AshRenderer {
         &mut self,
         completed: TextureRetirementBatch,
     ) -> RendererResult<usize> {
-        if self.destroyed {
-            return Err(RendererError::RendererDestroyed);
-        }
+        self.ensure_operational()?;
         let retired = self
             .textures
             .complete_managed_retirements(completed)
@@ -310,8 +334,14 @@ impl AshRenderer {
         Ok(count)
     }
 
-    pub fn register_texture_descriptor_set(&mut self, set: vk::DescriptorSet) -> TextureId {
-        TextureId::from(self.textures.register_external_descriptor_set(set))
+    pub fn register_texture_descriptor_set(
+        &mut self,
+        set: vk::DescriptorSet,
+    ) -> RendererResult<TextureId> {
+        self.ensure_operational()?;
+        Ok(TextureId::from(
+            self.textures.register_external_descriptor_set(set),
+        ))
     }
 
     /// Remove a previously registered external texture descriptor set.
@@ -331,6 +361,7 @@ impl AshRenderer {
         image_view: vk::ImageView,
         sampler: vk::Sampler,
     ) -> RendererResult<TextureId> {
+        self.ensure_operational()?;
         let set = create_vulkan_descriptor_set(
             &self.device,
             self.descriptor_set_layout,
@@ -353,8 +384,9 @@ impl AshRenderer {
         texture_id: TextureId,
         image_view: vk::ImageView,
     ) -> RendererResult<bool> {
+        self.ensure_operational()?;
         unsafe { self.device.device_wait_idle()? };
-        Ok(unsafe { self.update_external_texture_view_unchecked(texture_id, image_view) })
+        unsafe { self.update_external_texture_view_unchecked(texture_id, image_view) }
     }
 
     /// Update an external texture view without waiting for earlier descriptor users.
@@ -367,16 +399,17 @@ impl AshRenderer {
         &mut self,
         texture_id: TextureId,
         image_view: vk::ImageView,
-    ) -> bool {
+    ) -> RendererResult<bool> {
+        self.ensure_operational()?;
         let id = texture_id.id();
         let Some(binding) = self.textures.external_textures.get_mut(&id) else {
-            return false;
+            return Ok(false);
         };
         if !binding.free_descriptor_set {
-            return false;
+            return Ok(false);
         }
         let Some(sampler) = binding.sampler else {
-            return false;
+            return Ok(false);
         };
 
         binding.image_view = Some(image_view);
@@ -393,7 +426,7 @@ impl AshRenderer {
                 .image_info(&image_info)];
             self.device.update_descriptor_sets(&write_desc_sets, &[]);
         }
-        true
+        Ok(true)
     }
 
     /// Update (or set) a custom sampler for an already-registered external texture.
@@ -405,8 +438,9 @@ impl AshRenderer {
         texture_id: TextureId,
         sampler: vk::Sampler,
     ) -> RendererResult<bool> {
+        self.ensure_operational()?;
         unsafe { self.device.device_wait_idle()? };
-        Ok(unsafe { self.update_external_texture_sampler_unchecked(texture_id, sampler) })
+        unsafe { self.update_external_texture_sampler_unchecked(texture_id, sampler) }
     }
 
     /// Update an external sampler without waiting for earlier descriptor users.
@@ -419,16 +453,17 @@ impl AshRenderer {
         &mut self,
         texture_id: TextureId,
         sampler: vk::Sampler,
-    ) -> bool {
+    ) -> RendererResult<bool> {
+        self.ensure_operational()?;
         let id = texture_id.id();
         let Some(binding) = self.textures.external_textures.get_mut(&id) else {
-            return false;
+            return Ok(false);
         };
         if !binding.free_descriptor_set {
-            return false;
+            return Ok(false);
         }
         let Some(image_view) = binding.image_view else {
-            return false;
+            return Ok(false);
         };
 
         binding.sampler = Some(sampler);
@@ -445,7 +480,7 @@ impl AshRenderer {
                 .image_info(&image_info)];
             self.device.update_descriptor_sets(&write_desc_sets, &[]);
         }
-        true
+        Ok(true)
     }
 
     /// Unregister a texture id.
@@ -455,9 +490,9 @@ impl AshRenderer {
     /// `register_texture_descriptor_set()`, this simply forgets the id (the descriptor set remains
     /// owned by the caller).
     pub fn unregister_texture(&mut self, texture_id: TextureId) -> RendererResult<()> {
+        self.ensure_operational()?;
         unsafe { self.device.device_wait_idle()? };
-        unsafe { self.unregister_texture_unchecked(texture_id) };
-        Ok(())
+        unsafe { self.unregister_texture_unchecked(texture_id) }
     }
 
     /// Unregister a texture without waiting for submitted descriptor users.
@@ -466,7 +501,11 @@ impl AshRenderer {
     ///
     /// The caller must prove that no submitted or recorded command can still access this texture's
     /// descriptor set. Owned descriptor sets may be freed immediately.
-    pub unsafe fn unregister_texture_unchecked(&mut self, texture_id: TextureId) {
+    pub unsafe fn unregister_texture_unchecked(
+        &mut self,
+        texture_id: TextureId,
+    ) -> RendererResult<()> {
+        self.ensure_operational()?;
         let id = texture_id.id();
         if let Some(binding) = self.textures.external_textures.remove(&id) {
             if binding.free_descriptor_set {
@@ -477,6 +516,7 @@ impl AshRenderer {
                 }
             }
         }
+        Ok(())
     }
 
     /// Update a single texture manually.
@@ -491,6 +531,7 @@ impl AshRenderer {
         &mut self,
         texture_data: &TextureData,
     ) -> RendererResult<TextureUpdateResult> {
+        self.ensure_operational()?;
         unsafe { self.device.device_wait_idle()? };
         let result = unsafe { self.update_texture_unchecked(texture_data) }?;
         self.wait_for_pending_uploads()?;
@@ -508,6 +549,7 @@ impl AshRenderer {
         &mut self,
         texture_data: &TextureData,
     ) -> RendererResult<TextureUpdateResult> {
+        self.ensure_operational()?;
         self.reap_completed_uploads()?;
 
         let status = texture_data.status();
@@ -847,6 +889,7 @@ impl AshRenderer {
     pub(super) fn process_texture_requests(
         &mut self,
         requests: &[TextureRequest],
+        request_epoch: u64,
     ) -> RendererResult<Vec<TextureFeedback>> {
         let mut feedback = Vec::with_capacity(requests.len());
 
@@ -854,9 +897,13 @@ impl AshRenderer {
             let snapshot_id = request.texture();
             match request.operation() {
                 TextureOp::Create { .. } | TextureOp::Update { .. } => {
-                    feedback.push(self.complete_managed_upload_request(request)?)
+                    if !self.textures.managed_texture_is_destroyed(snapshot_id) {
+                        feedback.push(self.complete_managed_upload_request(request)?)
+                    }
                 }
                 TextureOp::Destroy => {
+                    self.textures
+                        .seal_managed_texture_destroyed(snapshot_id, request_epoch);
                     let upload_wait = if self.managed_uploads.is_pending(snapshot_id) {
                         self.wait_for_managed_upload(snapshot_id)
                     } else {
@@ -1344,6 +1391,91 @@ pub(super) fn clamp_rect(
 }
 
 #[cfg(all(test, not(any(feature = "gpu-allocator", feature = "vk-mem"))))]
+mod operational_gate_tests {
+    use super::*;
+    use dear_imgui_rs::texture::OwnedTextureData;
+
+    fn destroyed_renderer(context: &Context) -> AshRenderer {
+        let device = unsafe { Device::load_with(|_| std::ptr::null(), vk::Device::null()) };
+        AshRenderer {
+            device,
+            allocator: Allocator::new(vk::PhysicalDeviceMemoryProperties::default()),
+            queue: vk::Queue::null(),
+            command_pool: vk::CommandPool::null(),
+            pipeline: vk::Pipeline::null(),
+            pipeline_layout: vk::PipelineLayout::null(),
+            descriptor_set_layout: vk::DescriptorSetLayout::null(),
+            descriptor_pool: vk::DescriptorPool::null(),
+            textures: TextureManager::new(),
+            consumer: None,
+            context_state: RendererContextState::prepare(context).unwrap(),
+            default_texture_id: 0,
+            options: Options::default(),
+            frames: Frames::new(0),
+            destroyed: true,
+            in_flight_uploads: VecDeque::new(),
+            managed_uploads: ManagedUploadTracker::default(),
+            #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+            viewport_pipelines: HashMap::new(),
+            #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+            viewport_clear_color: [0.0, 0.0, 0.0, 1.0],
+        }
+    }
+
+    fn assert_destroyed<T>(result: RendererResult<T>) {
+        assert!(matches!(result, Err(RendererError::RendererDestroyed)));
+    }
+
+    #[test]
+    fn every_resource_entry_rejects_destroyed_renderer_before_vulkan() {
+        let mut context = Context::create();
+        let mut renderer = destroyed_renderer(&context);
+        let batch = renderer
+            .textures
+            .retiring_textures
+            .reserve()
+            .unwrap()
+            .batch();
+        let texture = TextureId::from(1_u64);
+        let texture_data = OwnedTextureData::new();
+
+        assert_destroyed(renderer.pending_texture_retirement());
+        assert_destroyed(renderer.wait_for_texture_retirements(batch));
+        assert_destroyed(unsafe {
+            renderer.complete_texture_retirements_with_fences(batch, &[vk::Fence::null()])
+        });
+        assert_destroyed(renderer.register_texture_descriptor_set(vk::DescriptorSet::null()));
+        assert_destroyed(renderer.remove_texture_descriptor_set(texture));
+        assert_destroyed(
+            renderer
+                .register_external_texture_with_sampler(vk::ImageView::null(), vk::Sampler::null()),
+        );
+        assert_destroyed(renderer.update_external_texture_view(texture, vk::ImageView::null()));
+        assert_destroyed(unsafe {
+            renderer.update_external_texture_view_unchecked(texture, vk::ImageView::null())
+        });
+        assert_destroyed(renderer.update_external_texture_sampler(texture, vk::Sampler::null()));
+        assert_destroyed(unsafe {
+            renderer.update_external_texture_sampler_unchecked(texture, vk::Sampler::null())
+        });
+        assert_destroyed(renderer.unregister_texture(texture));
+        assert_destroyed(unsafe { renderer.unregister_texture_unchecked(texture) });
+        assert_destroyed(renderer.update_texture(&texture_data));
+        assert_destroyed(unsafe { renderer.update_texture_unchecked(&texture_data) });
+
+        context.io_mut().set_display_size([128.0, 128.0]);
+        assert!(context.font_atlas().build());
+        context.frame();
+        let frame = context.render();
+        assert_destroyed(renderer.cmd_draw(vk::CommandBuffer::null(), frame));
+        assert_destroyed(renderer.shutdown(&mut context));
+
+        #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+        assert_destroyed(renderer.viewport_pipeline(vk::Format::R8G8B8A8_UNORM));
+    }
+}
+
+#[cfg(all(test, not(any(feature = "gpu-allocator", feature = "vk-mem"))))]
 mod managed_lifecycle_tests {
     use super::*;
     use ash::vk::Handle;
@@ -1416,6 +1548,8 @@ mod managed_lifecycle_tests {
             2
         );
 
+        let destroy_epoch = 9;
+        manager.seal_managed_texture_destroyed(snapshot_id, destroy_epoch);
         let RetirementRequest::Queued(destroy_batch) = manager
             .request_managed_retirement(snapshot_id)
             .expect("active replacement should enter destroy retirement")
@@ -1434,5 +1568,52 @@ mod managed_lifecycle_tests {
         assert!(!manager.managed_ids.contains_key(&texture_id.id()));
         assert_eq!(manager.get_descriptor_set(texture_id.id()), None);
         assert_eq!(manager.retiring_textures.pending_batch(), None);
+        assert!(manager.managed_texture_is_destroyed(snapshot_id));
+
+        manager.prune_destroyed_managed_textures(destroy_epoch - 1);
+        assert!(manager.managed_texture_is_destroyed(snapshot_id));
+        manager.prune_destroyed_managed_textures(destroy_epoch);
+        assert!(!manager.managed_texture_is_destroyed(snapshot_id));
+    }
+
+    #[test]
+    fn destroy_tombstones_use_max_epoch_and_contiguous_watermark() {
+        let context = Context::create();
+        let snapshot_id = SnapshotTextureId::FontAtlas {
+            context: context.id(),
+            stamp: 11,
+            generation: 4,
+        };
+        let mut manager = TextureManager::new();
+
+        manager.seal_managed_texture_destroyed(snapshot_id, 8);
+        manager.seal_managed_texture_destroyed(snapshot_id, 5);
+        manager.prune_destroyed_managed_textures(7);
+        assert!(manager.managed_texture_is_destroyed(snapshot_id));
+
+        manager.seal_managed_texture_destroyed(snapshot_id, 10);
+        manager.prune_destroyed_managed_textures(8);
+        assert!(manager.managed_texture_is_destroyed(snapshot_id));
+        manager.prune_destroyed_managed_textures(10);
+        assert!(!manager.managed_texture_is_destroyed(snapshot_id));
+    }
+
+    #[test]
+    fn advancing_watermark_keeps_destroy_tombstones_bounded() {
+        let context = Context::create();
+        let mut manager = TextureManager::new();
+
+        for epoch in 1..=64 {
+            let snapshot_id = SnapshotTextureId::FontAtlas {
+                context: context.id(),
+                stamp: 13,
+                generation: epoch,
+            };
+            manager.seal_managed_texture_destroyed(snapshot_id, epoch);
+            manager.prune_destroyed_managed_textures(epoch - 1);
+            assert_eq!(manager.destroyed_managed_textures.len(), 1);
+        }
+        manager.prune_destroyed_managed_textures(64);
+        assert!(manager.destroyed_managed_textures.is_empty());
     }
 }

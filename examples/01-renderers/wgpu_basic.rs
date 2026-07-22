@@ -128,8 +128,12 @@ impl AppWindow {
             }
         }
 
-        let mut platform = WinitPlatform::new(&mut context);
-        platform.attach_window(&window, dear_imgui_winit::HiDpiMode::Default, &mut context);
+        let mut platform = WinitPlatform::new(&mut context)?;
+        platform.attach_window(
+            Arc::clone(&window),
+            dear_imgui_winit::HiDpiMode::Default,
+            &mut context,
+        )?;
 
         // Method 1: One-step initialization (recommended)
         let init_info =
@@ -220,7 +224,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context);
+            .prepare_frame(&self.window, &mut self.imgui.context)?;
         let ui = self.imgui.context.frame();
 
         // Main window content
@@ -318,6 +322,10 @@ impl AppWindow {
             unsafe { ui.show_demo_window(&mut self.imgui.demo_open) };
         }
 
+        self.imgui
+            .platform
+            .prepare_render_with_ui(&ui, &self.window)?;
+
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -394,11 +402,15 @@ impl ApplicationHandler for App {
         };
 
         // Handle the event with ImGui first (window-local path)
-        window.imgui.platform.handle_window_event(
+        if let Err(error) = window.imgui.platform.handle_window_event(
             &mut window.imgui.context,
             &window.window,
             &event,
-        );
+        ) {
+            error!("Winit platform event error: {error}");
+            event_loop.exit();
+            return;
+        }
 
         match event {
             WindowEvent::Resized(physical_size) => {

@@ -119,7 +119,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // Initialize SDL3 platform backend (for "other" renderer).
-    let mut sdl3_backend = Sdl3PlatformBackend::init_for_other(&mut imgui, &window)?;
+    // SAFETY: `window` outlives explicit shutdown and Context teardown on early return.
+    let mut sdl3_backend = unsafe { Sdl3PlatformBackend::init_for_other(&mut imgui, &window)? };
     // Use AutoAll so all connected gamepads are merged into ImGui's gamepad state.
     sdl3_backend.set_gamepad_mode(&mut imgui, GamepadMode::AutoAll)?;
 

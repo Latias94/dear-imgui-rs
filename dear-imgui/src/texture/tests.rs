@@ -141,6 +141,22 @@ fn set_data_checks_byte_count_before_allocating_or_copying() {
 }
 
 #[test]
+fn texture_id_supports_lossless_handle_conversions() {
+    let native = std::num::NonZeroU32::new(42).unwrap();
+    let id = TextureId::from(native);
+
+    assert_eq!(id, TextureId::from(42_u32));
+    assert_eq!(id, TextureId::from(42_usize));
+    assert_eq!(id.try_as_u32(), Some(42));
+    assert_eq!(u32::try_from(id), Ok(42));
+    assert_eq!(usize::try_from(id), Ok(42));
+    assert_eq!(u64::from(id), 42);
+
+    assert_eq!(TextureId::new(u64::MAX).try_as_u32(), None);
+    assert!(u32::try_from(TextureId::new(u64::MAX)).is_err());
+}
+
+#[test]
 fn initial_pixel_upload_preserves_the_create_request() {
     let mut texture = OwnedTextureData::new();
     texture.create(TextureFormat::RGBA32, 1, 1);
@@ -149,7 +165,31 @@ fn initial_pixel_upload_preserves_the_create_request() {
     texture.set_data(&[1, 2, 3, 4]);
     assert_eq!(texture.status(), TextureStatus::WantCreate);
 
-    texture.set_status(TextureStatus::OK);
+    unsafe {
+        // The test acts as the only renderer owner for this unregistered texture.
+        texture.set_status(TextureStatus::OK);
+    }
     texture.set_data(&[4, 3, 2, 1]);
     assert_eq!(texture.status(), TextureStatus::WantUpdates);
+}
+
+#[test]
+fn full_updates_reject_unrepresentable_dimensions_before_copying() {
+    let width = u16::MAX as u32 + 1;
+    let mut texture = OwnedTextureData::new();
+    texture.create(TextureFormat::Alpha8, width, 1);
+    texture.set_data(&vec![1; width as usize]);
+    assert_eq!(texture.status(), TextureStatus::WantCreate);
+
+    unsafe {
+        // The test acts as the only renderer owner for this unregistered texture.
+        texture.set_status(TextureStatus::OK);
+    }
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        texture.set_data(&vec![2; width as usize]);
+    }));
+
+    assert!(result.is_err());
+    assert_eq!(texture.status(), TextureStatus::OK);
+    assert!(texture.pixels().unwrap().iter().all(|pixel| *pixel == 1));
 }

@@ -6,8 +6,10 @@ use dear_imgui_rs::platform_io::{PlatformIo, Viewport};
 use dear_imgui_rs::{BackendFlags, Context};
 
 use super::registry::{
-    current_context, register_viewport_data, runtime_for_context, take_viewport_data,
-    take_viewport_data_from_viewport, viewport_user_data_mut, with_current_runtime,
+    ViewportIdentity, current_context, preflight_registered_viewport_data, register_viewport_data,
+    resolve_viewport, restore_registered_viewport_data, runtime_for_context,
+    take_registered_viewport_data, take_viewport_data_from_viewport, viewport_user_data_mut,
+    with_current_runtime,
 };
 use super::runtime::{AshViewportError, RuntimeControl};
 use super::*;
@@ -53,7 +55,7 @@ fn callback_name_for_occupied_slot(platform_io: &PlatformIo) -> Option<&'static 
     .find_map(|(occupied, name)| occupied.then_some(name))
 }
 
-fn first_callback_drift(platform_io: &PlatformIo) -> Option<&'static str> {
+pub(super) fn first_renderer_callback_drift(platform_io: &PlatformIo) -> Option<&'static str> {
     if !unary_callback_matches(
         platform_io.renderer_create_window_raw(),
         renderer_create_window_sys,
@@ -83,6 +85,50 @@ fn first_callback_drift(platform_io: &PlatformIo) -> Option<&'static str> {
     .then_some("Renderer_SwapBuffers")
 }
 
+fn owns_any_renderer_callback(platform_io: &PlatformIo) -> bool {
+    unary_callback_matches(
+        platform_io.renderer_create_window_raw(),
+        renderer_create_window_sys,
+    ) || unary_callback_matches(
+        platform_io.renderer_destroy_window_raw(),
+        renderer_destroy_window_sys,
+    ) || platform_io.renderer_set_window_size_matches_pointer_callback(renderer_set_window_size_sys)
+        || render_callback_matches(
+            platform_io.renderer_render_window_raw(),
+            renderer_render_window_sys,
+        )
+        || render_callback_matches(
+            platform_io.renderer_swap_buffers_raw(),
+            renderer_swap_buffers_sys,
+        )
+}
+
+fn owns_renderer_viewport_publication(control: &RuntimeControl, platform_io: &PlatformIo) -> bool {
+    owns_any_renderer_callback(platform_io) || control.owns_core_renderer_publication(platform_io)
+}
+
+fn validate_platform_dependencies(
+    flags: BackendFlags,
+    platform_io: &PlatformIo,
+) -> Result<(), AshViewportError> {
+    if !flags.contains(BackendFlags::PLATFORM_HAS_VIEWPORTS) {
+        return Err(AshViewportError::PlatformBackendUnavailable);
+    }
+    let raw = unsafe { &*platform_io.as_raw() };
+    for (available, callback) in [
+        (raw.Platform_CreateWindow.is_some(), "Platform_CreateWindow"),
+        (
+            raw.Platform_DestroyWindow.is_some(),
+            "Platform_DestroyWindow",
+        ),
+    ] {
+        if !available {
+            return Err(AshViewportError::PlatformCallbackUnavailable { callback });
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn validate_secondary_viewports(
     states: &[(bool, *mut c_void)],
 ) -> Result<(), AshViewportError> {
@@ -98,30 +144,20 @@ pub(super) fn validate_secondary_viewports(
 pub(super) fn preflight_callbacks(context: &Context) -> Result<(), AshViewportError> {
     let binding = context.binding();
     binding.with_bound_context(|| {
-        if !context
+        let flags = context.io().backend_flags();
+        let platform_io = context.platform_io();
+        validate_platform_dependencies(flags, platform_io)?;
+        if context
             .io()
             .backend_flags()
-            .contains(BackendFlags::PLATFORM_HAS_VIEWPORTS)
+            .contains(BackendFlags::RENDERER_HAS_VIEWPORTS)
         {
-            return Err(AshViewportError::PlatformBackendUnavailable);
+            return Err(AshViewportError::RendererViewportCapabilityOccupied);
         }
         if !sys::HAS_PLATFORM_IO_AGGREGATE_HOOKS {
             return Err(AshViewportError::AggregateCallbackHooksUnavailable);
         }
 
-        let platform_io = context.platform_io();
-        let raw = unsafe { &*platform_io.as_raw() };
-        for (available, callback) in [
-            (raw.Platform_CreateWindow.is_some(), "Platform_CreateWindow"),
-            (
-                raw.Platform_DestroyWindow.is_some(),
-                "Platform_DestroyWindow",
-            ),
-        ] {
-            if !available {
-                return Err(AshViewportError::PlatformCallbackUnavailable { callback });
-            }
-        }
         if let Some(callback) = callback_name_for_occupied_slot(platform_io) {
             return Err(AshViewportError::RendererCallbackOccupied { callback });
         }
@@ -144,31 +180,70 @@ pub(super) fn claim_callbacks(control: &RuntimeControl, context: &mut Context) {
     let binding = context.binding();
     binding.with_bound_context(|| {
         let platform_io = context.platform_io_mut();
-        platform_io.set_renderer_create_window_raw(Some(renderer_create_window_sys));
-        platform_io.set_renderer_destroy_window_raw(Some(renderer_destroy_window_sys));
-        platform_io.set_renderer_set_window_size_raw(Some(renderer_set_window_size_sys));
-        platform_io.set_renderer_render_window_raw(Some(renderer_render_window_sys));
-        platform_io.set_renderer_swap_buffers_raw(Some(renderer_swap_buffers_sys));
+        // SAFETY: these callbacks use the exact sys ABI and remain installed until the runtime
+        // quiesces and destroys all registered Vulkan viewport data.
+        unsafe {
+            platform_io.set_renderer_create_window_raw(Some(renderer_create_window_sys));
+            platform_io.set_renderer_destroy_window_raw(Some(renderer_destroy_window_sys));
+            platform_io.set_renderer_set_window_size_raw(Some(renderer_set_window_size_sys));
+            platform_io.set_renderer_render_window_raw(Some(renderer_render_window_sys));
+            platform_io.set_renderer_swap_buffers_raw(Some(renderer_swap_buffers_sys));
+        }
         let io = context.io_mut();
         io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_VIEWPORTS);
     });
     control.mark_callback_claimed();
 }
 
-pub(super) fn detect_callback_drift(control: &RuntimeControl) {
-    if !control.should_detect_callback_drift() {
+pub(super) fn detect_runtime_contract_drift(control: &RuntimeControl) {
+    if !control.should_validate_runtime_contract() {
         return;
     }
     let result = control.binding().try_with_bound_context(|| {
+        let io = unsafe { sys::igGetIO_Nil() };
         let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
-        if platform_io.is_null() {
-            return Some("Renderer_CreateWindow");
+        if io.is_null() || platform_io.is_null() {
+            return Err(AshViewportError::InvalidCallbackArgument {
+                callback: "validate renderer runtime contract",
+            });
         }
-        let platform_io = unsafe { PlatformIo::from_raw(platform_io) };
-        first_callback_drift(platform_io)
+        let platform_io = unsafe { PlatformIo::from_raw_mut(platform_io) };
+        let validation = (|| {
+            control.reassert_failed_viewport_closures();
+            let flags = BackendFlags::from_bits_retain(unsafe { (*io).BackendFlags });
+            if !flags.contains(BackendFlags::RENDERER_HAS_VIEWPORTS) {
+                return Err(AshViewportError::RendererViewportCapabilityLost);
+            }
+            validate_platform_dependencies(flags, platform_io)?;
+            first_renderer_callback_drift(platform_io).map_or(Ok(()), |callback| {
+                Err(AshViewportError::RendererCallbackReplaced { callback })
+            })?;
+            control.validate_renderer_contract()
+        })();
+        if validation.is_err() {
+            clear_renderer_viewport_capability_if_owned(control, platform_io);
+        }
+        validation
     });
-    if let Ok(Some(callback)) = result {
-        control.record_callback_replaced(callback);
+    let fault = match result {
+        Ok(Ok(())) => return,
+        Ok(Err(fault)) => fault,
+        Err(error) => AshViewportError::Context(error),
+    };
+    control.record_runtime_contract_fault(fault);
+}
+
+fn clear_renderer_viewport_capability_if_owned(control: &RuntimeControl, platform_io: &PlatformIo) {
+    if !owns_renderer_viewport_publication(control, platform_io) {
+        return;
+    }
+    let io = unsafe { sys::igGetIO_Nil() };
+    if io.is_null() {
+        return;
+    }
+    let bit = BackendFlags::RENDERER_HAS_VIEWPORTS.bits();
+    unsafe {
+        (*io).BackendFlags &= !bit;
     }
 }
 
@@ -188,41 +263,46 @@ pub(super) fn release_callbacks(control: &RuntimeControl) -> Result<(), AshViewp
         });
     }
     let platform_io = unsafe { PlatformIo::from_raw_mut(platform_io) };
-    let drift = first_callback_drift(platform_io);
+    let drift = first_renderer_callback_drift(platform_io);
+    let owns_viewport_publication = owns_renderer_viewport_publication(control, platform_io);
 
-    if unary_callback_matches(
-        platform_io.renderer_create_window_raw(),
-        renderer_create_window_sys,
-    ) {
-        platform_io.set_renderer_create_window_raw(None);
-    }
-    if unary_callback_matches(
-        platform_io.renderer_destroy_window_raw(),
-        renderer_destroy_window_sys,
-    ) {
-        platform_io.set_renderer_destroy_window_raw(None);
-    }
-    platform_io.clear_renderer_set_window_size_if_pointer_callback(renderer_set_window_size_sys);
-    if render_callback_matches(
-        platform_io.renderer_render_window_raw(),
-        renderer_render_window_sys,
-    ) {
-        platform_io.set_renderer_render_window_raw(None);
-    }
-    if render_callback_matches(
-        platform_io.renderer_swap_buffers_raw(),
-        renderer_swap_buffers_sys,
-    ) {
-        platform_io.set_renderer_swap_buffers_raw(None);
+    // SAFETY: each slot is cleared only when it still contains this runtime's callback, after the
+    // runtime has stopped accepting new callback work.
+    unsafe {
+        if unary_callback_matches(
+            platform_io.renderer_create_window_raw(),
+            renderer_create_window_sys,
+        ) {
+            platform_io.set_renderer_create_window_raw(None);
+        }
+        if unary_callback_matches(
+            platform_io.renderer_destroy_window_raw(),
+            renderer_destroy_window_sys,
+        ) {
+            platform_io.set_renderer_destroy_window_raw(None);
+        }
+        platform_io
+            .clear_renderer_set_window_size_if_pointer_callback(renderer_set_window_size_sys);
+        if render_callback_matches(
+            platform_io.renderer_render_window_raw(),
+            renderer_render_window_sys,
+        ) {
+            platform_io.set_renderer_render_window_raw(None);
+        }
+        if render_callback_matches(
+            platform_io.renderer_swap_buffers_raw(),
+            renderer_swap_buffers_sys,
+        ) {
+            platform_io.set_renderer_swap_buffers_raw(None);
+        }
     }
 
-    if platform_io.renderer_callbacks_are_empty() {
+    if owns_viewport_publication {
         let io = unsafe { sys::igGetIO_Nil() };
         if !io.is_null() {
             let bit = BackendFlags::RENDERER_HAS_VIEWPORTS.bits();
             unsafe {
-                (*io).BackendFlags =
-                    ((*io).BackendFlags & !bit) | (control.prior_backend_flags().bits() & bit);
+                (*io).BackendFlags &= !bit;
             }
         }
     }
@@ -240,37 +320,40 @@ pub(super) fn destroy_renderer_viewport_resources(
             expected: control.binding().id(),
         });
     }
-    let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
-    if platform_io.is_null() {
-        return Err(AshViewportError::InvalidCallbackArgument {
-            callback: "release viewport resources",
-        });
-    }
-
+    preflight_registered_viewport_data(control.context_raw(), control.binding())?;
     control.with_renderer_teardown(|renderer, globals| {
         control.wait_device_idle(renderer, "viewport runtime shutdown")?;
         let surface_loader = khr_surface::Instance::new(&globals.entry, &globals.instance);
-        let platform_io = unsafe { PlatformIo::from_raw_mut(platform_io) };
         let mut ownership_fault = None;
-        for viewport in platform_io.viewports_iter_mut() {
-            let pointer = viewport.renderer_user_data();
-            let Some(data) =
-                (unsafe { take_viewport_data_from_viewport(control.context_raw(), viewport) })
-            else {
-                if !pointer.is_null() && ownership_fault.is_none() {
+        for entry in take_registered_viewport_data(control.binding().id()) {
+            let identity = entry.identity();
+            let pointer = entry.renderer_data().cast::<c_void>();
+            let Some(viewport) = resolve_viewport(identity) else {
+                entry
+                    .into_box()
+                    .destroy_after_device_idle(renderer, &surface_loader)?;
+                continue;
+            };
+            let viewport = unsafe { Viewport::from_raw_mut(viewport) };
+            if !std::ptr::eq(viewport.renderer_user_data(), pointer) {
+                if ownership_fault.is_none() {
                     ownership_fault = Some(AshViewportError::RendererUserDataOwnershipLost {
                         callback: "viewport runtime shutdown",
                     });
                 }
+                // The viewport is still live but no longer points to this sidecar. Retain the
+                // registration instead of guessing whether another live viewport references it.
+                restore_registered_viewport_data(entry);
                 continue;
-            };
-            data.destroy_after_device_idle(renderer, &surface_loader)?;
-        }
-        for data in take_viewport_data(control.binding().id()) {
-            data.destroy_after_device_idle(renderer, &surface_loader)?;
+            }
+            unsafe { viewport.set_renderer_user_data(std::ptr::null_mut()) };
+            entry
+                .into_box()
+                .destroy_after_device_idle(renderer, &surface_loader)?;
         }
         ownership_fault.map_or(Ok(()), Err)
     })?;
+    control.clear_viewport_create_failures();
     Ok(())
 }
 
@@ -304,10 +387,6 @@ pub(super) fn publish_registered_box_transactionally<T>(
     }
 }
 
-pub(super) fn request_platform_close_after_create_failure(viewport: &mut Viewport) {
-    viewport.set_platform_request_close(true);
-}
-
 fn renderer_data_pointer(
     control: &RuntimeControl,
     viewport: &mut Viewport,
@@ -335,7 +414,7 @@ unsafe fn renderer_create_window(
     }
     let viewport = unsafe { &mut *viewport };
     if !viewport.renderer_user_data().is_null() {
-        request_platform_close_after_create_failure(viewport);
+        control.mark_viewport_create_failed(viewport);
         return Err(AshViewportError::RendererUserDataOwnershipLost {
             callback: "Renderer_CreateWindow",
         });
@@ -388,13 +467,14 @@ unsafe fn renderer_create_window(
             desired_extent_from_viewport(viewport),
         ) {
             data.destroy_after_device_idle(renderer, &surface_loader)?;
-            return Err(error.into());
+            return Err(error);
         }
 
+        let identity = ViewportIdentity::from_viewport(viewport);
         publish_registered_box_transactionally(
             Box::new(data),
-            |pointer| register_viewport_data(control.binding(), pointer),
-            |pointer| viewport.set_renderer_user_data(pointer.cast()),
+            |pointer| register_viewport_data(control.binding(), identity, pointer),
+            |pointer| unsafe { viewport.set_renderer_user_data(pointer.cast()) },
             |data| {
                 data.destroy_after_device_idle(renderer, &surface_loader)?;
                 Ok(())
@@ -402,7 +482,9 @@ unsafe fn renderer_create_window(
         )
     });
     if result.is_err() {
-        request_platform_close_after_create_failure(viewport);
+        control.mark_viewport_create_failed(viewport);
+    } else {
+        control.clear_viewport_create_failure(viewport);
     }
     result
 }
@@ -418,10 +500,11 @@ unsafe fn renderer_destroy_window(
     }
     let viewport = unsafe { &mut *viewport };
     if viewport.renderer_user_data().is_null() {
+        control.clear_viewport_create_failure(viewport);
         return Ok(());
     }
     let pointer = renderer_data_pointer(control, viewport, "Renderer_DestroyWindow")?;
-    control.with_renderer_callback("Renderer_DestroyWindow", |renderer, globals| {
+    let result = control.with_renderer_callback("Renderer_DestroyWindow", |renderer, globals| {
         control.wait_device_idle(renderer, "Renderer_DestroyWindow")?;
         let Some(data) =
             (unsafe { take_viewport_data_from_viewport(control.context_raw(), viewport) })
@@ -434,7 +517,11 @@ unsafe fn renderer_destroy_window(
         let surface_loader = khr_surface::Instance::new(&globals.entry, &globals.instance);
         data.destroy_after_device_idle(renderer, &surface_loader)?;
         Ok(())
-    })
+    });
+    if result.is_ok() {
+        control.clear_viewport_create_failure(viewport);
+    }
+    result
 }
 
 fn rebuild_viewport(
@@ -443,7 +530,7 @@ fn rebuild_viewport(
     data: &mut ViewportAshData,
     desired_extent: Option<vk::Extent2D>,
 ) -> Result<(), AshViewportError> {
-    recreate_swapchain(renderer, globals, data, desired_extent).map_err(Into::into)
+    recreate_swapchain(renderer, globals, data, desired_extent)
 }
 
 unsafe fn renderer_set_window_size(
@@ -494,13 +581,31 @@ fn recover_aborted_acquire(
             }
         }
     }
-    replace_frame_sync(&renderer.device, data.command_pool, frame)?;
+    if let Err(error) = replace_frame_sync(&renderer.device, data.command_pool, frame) {
+        data.mark_failed();
+        return Err(error.into());
+    }
 
     if desired_extent.is_none() {
         data.retire_swapchain_after_device_idle(&renderer.device);
     }
     recreate_swapchain_after_device_idle(renderer, globals, data, desired_extent)?;
     Ok(())
+}
+
+pub(super) fn recover_acquired_step<T>(
+    result: Result<T, RendererError>,
+    recover: impl FnOnce() -> Result<(), AshViewportError>,
+) -> Result<T, AshViewportError> {
+    // Once acquire_next_image succeeds, abandoning its binary semaphore or image would poison the
+    // next frame. Every fallible pre-submit step routes through this recovery boundary.
+    match result {
+        Ok(value) => Ok(value),
+        Err(error) => {
+            recover()?;
+            Err(error.into())
+        }
+    }
 }
 
 unsafe fn renderer_render_window(
@@ -513,6 +618,8 @@ unsafe fn renderer_render_window(
             callback: "Renderer_RenderWindow",
         });
     }
+    #[cfg(test)]
+    control.probe_renderer_storage_for_test()?;
     let viewport = unsafe { &mut *viewport };
     let desired_extent = desired_extent_from_viewport(viewport);
     let attachment_load_op = viewport_attachment_load_op(viewport.flags());
@@ -520,7 +627,7 @@ unsafe fn renderer_render_window(
     let data = match renderer_data_pointer(control, viewport, "Renderer_RenderWindow") {
         Ok(data) => data,
         Err(AshViewportError::InvalidCallbackArgument { .. }) => {
-            request_platform_close_after_create_failure(viewport);
+            control.mark_viewport_create_failed(viewport);
             return Ok(());
         }
         Err(error) => return Err(error),
@@ -672,19 +779,63 @@ unsafe fn renderer_render_window(
             .unwrap_or(vk::ImageLayout::UNDEFINED);
 
         if image_fence != vk::Fence::null() {
+            recover_acquired_step(
+                unsafe {
+                    renderer
+                        .device
+                        .wait_for_fences(&[image_fence], true, u64::MAX)
+                }
+                .map_err(RendererError::from),
+                || {
+                    recover_aborted_acquire(
+                        control,
+                        renderer,
+                        globals,
+                        data,
+                        frame_index,
+                        desired_extent,
+                    )
+                },
+            )?;
+        }
+        recover_acquired_step(
             unsafe {
                 renderer
                     .device
-                    .wait_for_fences(&[image_fence], true, u64::MAX)
+                    .reset_command_buffer(command_buffer, vk::CommandBufferResetFlags::empty())
             }
-            .map_err(RendererError::from)?;
-        }
-        unsafe {
-            renderer
-                .device
-                .reset_command_buffer(command_buffer, vk::CommandBufferResetFlags::empty())
-        }
-        .map_err(RendererError::from)?;
+            .map_err(RendererError::from),
+            || {
+                recover_aborted_acquire(
+                    control,
+                    renderer,
+                    globals,
+                    data,
+                    frame_index,
+                    desired_extent,
+                )
+            },
+        )?;
+        recover_acquired_step(
+            unsafe {
+                renderer.device.begin_command_buffer(
+                    command_buffer,
+                    &vk::CommandBufferBeginInfo::default()
+                        .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
+                )
+            }
+            .map_err(RendererError::from),
+            || {
+                recover_aborted_acquire(
+                    control,
+                    renderer,
+                    globals,
+                    data,
+                    frame_index,
+                    desired_extent,
+                )
+            },
+        )?;
         let Some(mesh) = data.mesh_frames.next() else {
             return recover_aborted_acquire(
                 control,
@@ -695,14 +846,6 @@ unsafe fn renderer_render_window(
                 desired_extent,
             );
         };
-        unsafe {
-            renderer.device.begin_command_buffer(
-                command_buffer,
-                &vk::CommandBufferBeginInfo::default()
-                    .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
-            )
-        }
-        .map_err(RendererError::from)?;
 
         #[cfg(not(feature = "dynamic-rendering"))]
         unsafe {
@@ -800,42 +943,59 @@ unsafe fn renderer_render_window(
             );
         }
 
-        unsafe { renderer.device.end_command_buffer(command_buffer) }
-            .map_err(RendererError::from)?;
+        recover_acquired_step(
+            unsafe { renderer.device.end_command_buffer(command_buffer) }
+                .map_err(RendererError::from),
+            || {
+                recover_aborted_acquire(
+                    control,
+                    renderer,
+                    globals,
+                    data,
+                    frame_index,
+                    desired_extent,
+                )
+            },
+        )?;
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
         let submit_info = vk::SubmitInfo::default()
             .wait_semaphores(std::slice::from_ref(&image_available))
             .wait_dst_stage_mask(&wait_stages)
             .command_buffers(std::slice::from_ref(&command_buffer))
             .signal_semaphores(std::slice::from_ref(&present_semaphore));
-        if let Err(error) = unsafe { renderer.device.reset_fences(&[frame_fence]) } {
-            recover_aborted_acquire(
-                control,
-                renderer,
-                globals,
-                data,
-                frame_index,
-                desired_extent,
-            )?;
-            return Err(RendererError::from(error).into());
-        }
-        if let Err(error) = unsafe {
-            renderer.device.queue_submit(
-                renderer.queue,
-                std::slice::from_ref(&submit_info),
-                frame_fence,
-            )
-        } {
-            recover_aborted_acquire(
-                control,
-                renderer,
-                globals,
-                data,
-                frame_index,
-                desired_extent,
-            )?;
-            return Err(RendererError::from(error).into());
-        }
+        recover_acquired_step(
+            unsafe { renderer.device.reset_fences(&[frame_fence]) }.map_err(RendererError::from),
+            || {
+                recover_aborted_acquire(
+                    control,
+                    renderer,
+                    globals,
+                    data,
+                    frame_index,
+                    desired_extent,
+                )
+            },
+        )?;
+        recover_acquired_step(
+            unsafe {
+                renderer.device.queue_submit(
+                    renderer.queue,
+                    std::slice::from_ref(&submit_info),
+                    frame_fence,
+                )
+            }
+            .map_err(RendererError::from),
+            || {
+                recover_aborted_acquire(
+                    control,
+                    renderer,
+                    globals,
+                    data,
+                    frame_index,
+                    desired_extent,
+                )
+            },
+        )?;
 
         let Some(resources) = data.swapchain.as_mut() else {
             data.mark_failed();
@@ -921,6 +1081,10 @@ fn run_callback(
         return;
     }
     let result = catch_unwind(AssertUnwindSafe(|| {
+        detect_runtime_contract_drift(&control);
+        if !control.can_enter_callback() {
+            return None;
+        }
         with_current_runtime(|active| {
             #[cfg(test)]
             active.maybe_panic_callback_for_test();

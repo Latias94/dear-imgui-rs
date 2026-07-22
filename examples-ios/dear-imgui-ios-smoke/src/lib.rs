@@ -121,8 +121,8 @@ impl AppWindow {
             .set_config_flags(ConfigFlags::DOCKING_ENABLE | ConfigFlags::NAV_ENABLE_KEYBOARD);
         context.set_ini_filename(None::<String>).unwrap();
 
-        let mut platform = WinitPlatform::new(&mut context);
-        platform.attach_window(&window, HiDpiMode::Default, &mut context);
+        let mut platform = WinitPlatform::new(&mut context)?;
+        platform.attach_window(Arc::clone(&window), HiDpiMode::Default, &mut context)?;
 
         let init_info = WgpuInitInfo::new(device.clone(), queue.clone(), surface_desc.format);
         let mut renderer = WgpuRenderer::new(init_info, &mut context)
@@ -170,7 +170,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context);
+            .prepare_frame(&self.window, &mut self.imgui.context)?;
         let ui = self.imgui.context.frame();
 
         ui.window("Dear ImGui iOS Smoke")
@@ -217,7 +217,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_render_with_ui(&ui, &self.window);
+            .prepare_render_with_ui(&ui, &self.window)?;
         let draw_data = self.imgui.context.render();
 
         let (frame, reconfigure_after_present) = match self.surface.get_current_texture() {
@@ -263,9 +263,7 @@ impl AppWindow {
             });
 
             self.imgui.renderer.new_frame()?;
-            self.imgui
-                .renderer
-                .render(draw_data, &mut render_pass)?;
+            self.imgui.renderer.render(draw_data, &mut render_pass)?;
         }
 
         self.queue.submit(Some(encoder.finish()));
@@ -307,11 +305,13 @@ impl ApplicationHandler for App {
             None => return,
         };
 
-        window.imgui.platform.handle_window_event(
+        if let Err(error) = window.imgui.platform.handle_window_event(
             &mut window.imgui.context,
             &window.window,
             &event,
-        );
+        ) {
+            panic!("Dear ImGui iOS smoke platform event failed: {error}");
+        }
 
         match event {
             WindowEvent::Resized(size) => {

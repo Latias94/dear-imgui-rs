@@ -120,13 +120,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // SDL3 platform backend only.
-    let mut sdl3_backend = Sdl3PlatformBackend::init_for_other(&mut imgui, &window)?;
+    // SAFETY: `window` outlives explicit shutdown and Context teardown on early return.
+    let mut sdl3_backend = unsafe { Sdl3PlatformBackend::init_for_other(&mut imgui, &window)? };
     sdl3_backend.set_gamepad_mode(&mut imgui, GamepadMode::AutoAll)?;
 
     // WGPU renderer backend (provide instance/adapter for per-viewport surfaces).
     let init_info = WgpuInitInfo::new(device.clone(), queue.clone(), surface_config.format)
         .with_instance(instance.clone())
-        .with_adapter(adapter.clone());
+        .with_adapter(adapter.clone())
+        .with_viewport_surface_config((&surface_config).into());
     let mut renderer = WgpuRenderer::new(init_info, &mut imgui)?;
     renderer.set_gamma_mode(GammaMode::Auto);
     let mut renderer = Sdl3ViewportRuntime::attach(&mut imgui, renderer)?;

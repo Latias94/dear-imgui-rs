@@ -1,12 +1,96 @@
+use std::panic::{AssertUnwindSafe, catch_unwind};
+
 use dear_imgui_rs::Context as ImGuiContext;
 use glow::{Context, HasContext};
 
 use super::GlowRenderer;
 use crate::{
-    error::{RenderError, RenderResult},
+    GlBuffer,
+    error::{InitError, InitResult, RenderError, RenderResult},
     shaders::Shaders,
     texture::TextureMap,
 };
+
+pub(super) struct PendingDeviceObjects<'a> {
+    gl: &'a Context,
+    shaders: Option<Shaders>,
+    vbo: Option<GlBuffer>,
+    ebo: Option<GlBuffer>,
+}
+
+impl<'a> PendingDeviceObjects<'a> {
+    pub(super) fn create_all(gl: &'a Context, gl_version: crate::GlVersion) -> InitResult<Self> {
+        let mut pending = Self {
+            gl,
+            shaders: None,
+            vbo: None,
+            ebo: None,
+        };
+        pending.shaders = Some(Shaders::new(gl, gl_version)?);
+        pending.vbo = Some(unsafe { gl.create_buffer() }.map_err(InitError::CreateBufferObject)?);
+        pending.ebo = Some(unsafe { gl.create_buffer() }.map_err(InitError::CreateBufferObject)?);
+        Ok(pending)
+    }
+
+    pub(super) fn into_parts(mut self) -> (Shaders, GlBuffer, GlBuffer) {
+        (
+            self.shaders
+                .take()
+                .expect("pending device objects must own shaders"),
+            self.vbo
+                .take()
+                .expect("pending device objects must own a VBO"),
+            self.ebo
+                .take()
+                .expect("pending device objects must own an EBO"),
+        )
+    }
+
+    fn commit(mut self, renderer: &mut GlowRenderer) {
+        let shaders = self
+            .shaders
+            .take()
+            .expect("pending device objects must own shaders");
+        let vbo = self
+            .vbo
+            .take()
+            .expect("pending device objects must own a VBO");
+        let ebo = self
+            .ebo
+            .take()
+            .expect("pending device objects must own an EBO");
+
+        let previous_shaders = std::mem::replace(&mut renderer.shaders, shaders);
+        if let Some(program) = previous_shaders.program {
+            unsafe { self.gl.delete_program(program) };
+        }
+        if let Some(previous) = renderer.vbo_handle.replace(vbo) {
+            unsafe { self.gl.delete_buffer(previous) };
+        }
+        if let Some(previous) = renderer.ebo_handle.replace(ebo) {
+            unsafe { self.gl.delete_buffer(previous) };
+        }
+        renderer.is_destroyed = false;
+    }
+}
+
+impl Drop for PendingDeviceObjects<'_> {
+    fn drop(&mut self) {
+        if let Some(ebo) = self.ebo.take() {
+            unsafe { self.gl.delete_buffer(ebo) };
+        }
+        if let Some(vbo) = self.vbo.take() {
+            unsafe { self.gl.delete_buffer(vbo) };
+        }
+        if let Some(program) = self
+            .shaders
+            .as_mut()
+            .and_then(|shaders| shaders.program.take())
+        {
+            unsafe { self.gl.delete_program(program) };
+        }
+    }
+}
 
 impl GlowRenderer {
     /// Destroy the renderer and free OpenGL resources.
@@ -14,15 +98,72 @@ impl GlowRenderer {
     /// A renderer consumed by `GlowViewportRuntime` must be shut down through that owning runtime.
     pub fn destroy(&mut self, gl: &Context, imgui_context: &mut ImGuiContext) -> RenderResult<()> {
         self.ensure_context_matches(imgui_context)?;
-        self.destroy_gpu_resources_only(gl);
+        self.destroy_resources_and_reset(gl, imgui_context)?;
+        self.unconfigure_imgui_context(imgui_context);
+        Ok(())
+    }
 
+    /// Releases every GPU resource and commits the matching Context texture reset.
+    ///
+    /// This intentionally leaves raw renderer state published so an owning multi-viewport runtime
+    /// can release its callback table before unpublishing the core renderer contract.
+    pub(super) fn destroy_resources_and_reset(
+        &mut self,
+        gl: &Context,
+        imgui_context: &mut ImGuiContext,
+    ) -> RenderResult<()> {
+        self.ensure_context_matches(imgui_context)?;
         let consumer = self
             .renderer_consumer
-            .as_ref()
+            .take()
             .ok_or(RenderError::RendererNotAttached)?;
-        imgui_context.reset_renderer_texture_bindings(consumer)?;
-        Self::unconfigure_imgui_context_static(imgui_context);
+        let reset = match imgui_context.prepare_renderer_texture_reset(&consumer) {
+            Ok(reset) => reset,
+            Err(error) => {
+                self.renderer_consumer = Some(consumer);
+                return Err(error.into());
+            }
+        };
+        if let Err(error) = self.destroy_gpu_resources_only(gl) {
+            // The permit deliberately has not committed yet. Returning the consumer restores the
+            // exact Context/renderer pairing so callers can retry after fixing the failure.
+            drop(reset);
+            self.renderer_consumer = Some(consumer);
+            return Err(error);
+        }
+        let _ = reset.commit();
+        self.destroyed_managed_textures.clear();
+        Ok(())
+    }
+
+    /// Releases GPU resources during a Context-owned renderer-reset transaction.
+    ///
+    /// The attachment retains the renderer consumer while this method runs and commits the native
+    /// reset only after this release succeeds.
+    #[cfg(feature = "multi-viewport")]
+    pub(super) fn destroy_for_context_teardown(&mut self, gl: &Context) -> RenderResult<()> {
+        self.destroy_gpu_resources_only(gl)?;
+        self.destroyed_managed_textures.clear();
+        // The Context is bound for this attachment phase. Clear exact owned raw state before the
+        // attachment commits the matching native texture reset.
+        unsafe { self.clear_owned_renderer_state_bound() };
+        self.context_binding.take();
+        self.gl_context.take();
+        Ok(())
+    }
+
+    /// Best-effort release after the native Dear ImGui Context has already gone away.
+    ///
+    /// This fallback cannot touch native state or commit a texture-reset permit. Normal Context
+    /// teardown must use [`Self::destroy_for_context_teardown`] during the renderer-resource
+    /// phase instead.
+    #[cfg(feature = "multi-viewport")]
+    pub(super) fn destroy_after_context_destroyed(&mut self, gl: &Context) -> RenderResult<()> {
+        self.destroy_gpu_resources_only(gl)?;
+        self.destroyed_managed_textures.clear();
         self.renderer_consumer.take();
+        self.context_binding.take();
+        self.gl_context.take();
         Ok(())
     }
 
@@ -47,9 +188,7 @@ impl GlowRenderer {
 
     /// Called every frame to prepare for rendering
     pub fn new_frame(&mut self) -> RenderResult<()> {
-        if self.renderer_consumer.is_none() {
-            return Err(RenderError::RendererDestroyed);
-        }
+        self.ensure_operational()?;
 
         // Check if we need to recreate device objects
         let needs_recreation = self.is_destroyed || self.shaders.program.is_none();
@@ -87,31 +226,16 @@ impl GlowRenderer {
 
     /// Create OpenGL device objects (buffers, shaders, etc.)
     pub fn create_device_objects(&mut self, gl: &Context) -> RenderResult<()> {
-        if self.shaders.program.is_none() {
-            self.shaders =
-                Shaders::new(gl, self.gl_version).map_err(RenderError::DeviceObjectInit)?;
+        self.ensure_operational()?;
+        if self.shaders.program.is_some() && self.vbo_handle.is_some() && self.ebo_handle.is_some()
+        {
+            self.is_destroyed = false;
+            return Ok(());
         }
 
-        if self.vbo_handle.is_none() {
-            self.vbo_handle =
-                Some(
-                    unsafe { gl.create_buffer() }.map_err(|e| RenderError::CreateResource {
-                        resource: "VBO",
-                        error: e,
-                    })?,
-                );
-        }
-
-        if self.ebo_handle.is_none() {
-            self.ebo_handle =
-                Some(
-                    unsafe { gl.create_buffer() }.map_err(|e| RenderError::CreateResource {
-                        resource: "EBO",
-                        error: e,
-                    })?,
-                );
-        }
-
+        let pending = PendingDeviceObjects::create_all(gl, self.gl_version)
+            .map_err(RenderError::DeviceObjectInit)?;
+        pending.commit(self);
         self.is_destroyed = false;
         Ok(())
     }
@@ -123,16 +247,47 @@ impl GlowRenderer {
         imgui_context: &mut ImGuiContext,
     ) -> RenderResult<()> {
         self.ensure_context_matches(imgui_context)?;
-        self.destroy_device_objects_only(gl);
         let consumer = self
             .renderer_consumer
-            .as_ref()
+            .take()
             .ok_or(RenderError::RendererNotAttached)?;
-        imgui_context.reset_renderer_texture_bindings(consumer)?;
+        let reset = match imgui_context.prepare_renderer_texture_reset(&consumer) {
+            Ok(reset) => reset,
+            Err(error) => {
+                self.renderer_consumer = Some(consumer);
+                return Err(error.into());
+            }
+        };
+        if let Err(error) = self.destroy_device_objects_only(gl) {
+            drop(reset);
+            self.renderer_consumer = Some(consumer);
+            return Err(error);
+        }
+        let _ = reset.commit();
+        self.destroyed_managed_textures.clear();
+        self.renderer_consumer = Some(consumer);
         Ok(())
     }
 
-    fn destroy_device_objects_only(&mut self, gl: &Context) {
+    fn destroy_device_objects_only(&mut self, gl: &Context) -> RenderResult<()> {
+        // A TextureMap is application-provided code. Run it before any irreversible GL deletion
+        // and catch panics so a failed release cannot leave Context texture bindings pointing at
+        // already-deleted GPU resources.
+        self.clear_texture_map_for_release()?;
+        self.destroy_device_objects_after_texture_map_clear(gl);
+        Ok(())
+    }
+
+    fn clear_texture_map_for_release(&mut self) -> RenderResult<()> {
+        let texture_map = self
+            .texture_map
+            .as_deref_mut()
+            .ok_or(RenderError::RendererDestroyed)?;
+        catch_unwind(AssertUnwindSafe(|| texture_map.clear()))
+            .map_err(|_| RenderError::TextureMapCleanupPanicked)
+    }
+
+    fn destroy_device_objects_after_texture_map_clear(&mut self, gl: &Context) {
         if let Some(vbo) = self.vbo_handle.take() {
             unsafe { gl.delete_buffer(vbo) };
         }
@@ -146,16 +301,16 @@ impl GlowRenderer {
             unsafe { gl.delete_texture(texture) };
         }
         self.managed_textures.clear();
-        self.texture_map_mut().clear();
         self.is_destroyed = true;
     }
 
-    pub(super) fn destroy_gpu_resources_only(&mut self, gl: &Context) {
-        self.destroy_device_objects_only(gl);
+    pub(super) fn destroy_gpu_resources_only(&mut self, gl: &Context) -> RenderResult<()> {
+        self.destroy_device_objects_only(gl)?;
         #[cfg(feature = "bind_vertex_array_support")]
         if let Some(vao) = self.vertex_array_object.take() {
             unsafe { gl.delete_vertex_array(vao) };
         }
+        Ok(())
     }
 
     pub(super) fn ensure_context_matches(&self, imgui_context: &ImGuiContext) -> RenderResult<()> {
@@ -175,8 +330,436 @@ impl GlowRenderer {
 
 impl Drop for GlowRenderer {
     fn drop(&mut self) {
-        if let Some(gl) = self.gl_context.take() {
-            self.destroy_gpu_resources_only(&gl);
+        // `Drop` has no mutable Context, so it cannot prove the consumer is idle or commit the
+        // Context texture-reset transaction. Fail closed by withdrawing only our exact raw
+        // publication; explicit `destroy` remains the resource-release path.
+        if let Some(binding) = self.context_binding.clone() {
+            let _ = binding.try_with_bound_context(|| unsafe {
+                self.clear_owned_renderer_state_bound();
+            });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::ffi::c_void;
+    use std::num::NonZeroU32;
+    use std::rc::Rc;
+
+    use dear_imgui_rs::{BackendFlags, Context as ImGuiContext, TextureFormat, TextureId, sys};
+
+    use super::GlowRenderer;
+    use crate::error::InitResult;
+    use crate::shaders::test_support::{
+        FakeFailure, FakeSnapshot, TEST_LOCK, fake_gl, reset, snapshot,
+    };
+    use crate::texture::TextureMap;
+    use crate::{GlTexture, GlVersion, InitError, RenderError, SimpleTextureMap, shaders::Shaders};
+
+    unsafe extern "C" fn foreign_draw_callback(
+        _draw_list: *const sys::ImDrawList,
+        _draw_cmd: *const sys::ImDrawCmd,
+    ) {
+    }
+
+    struct PanicOnceTextureMap {
+        inner: SimpleTextureMap,
+        panic_on_clear: Cell<bool>,
+    }
+
+    impl PanicOnceTextureMap {
+        fn new() -> Self {
+            Self {
+                inner: SimpleTextureMap::default(),
+                panic_on_clear: Cell::new(true),
+            }
+        }
+    }
+
+    impl TextureMap for PanicOnceTextureMap {
+        fn get(&self, texture_id: TextureId) -> Option<GlTexture> {
+            self.inner.get(texture_id)
+        }
+
+        fn set(&mut self, texture_id: TextureId, gl_texture: GlTexture) {
+            self.inner.set(texture_id, gl_texture);
+        }
+
+        fn remove(&mut self, texture_id: TextureId) -> Option<GlTexture> {
+            self.inner.remove(texture_id)
+        }
+
+        fn clear(&mut self) {
+            if self.panic_on_clear.replace(false) {
+                panic!("injected TextureMap::clear panic");
+            }
+            self.inner.clear();
+        }
+
+        fn register_texture(
+            &mut self,
+            gl_texture: GlTexture,
+            width: u32,
+            height: u32,
+            format: TextureFormat,
+        ) -> InitResult<TextureId> {
+            self.inner
+                .register_texture(gl_texture, width, height, format)
+        }
+
+        fn update_texture(
+            &mut self,
+            texture_id: TextureId,
+            gl_texture: GlTexture,
+            width: u32,
+            height: u32,
+        ) {
+            self.inner
+                .update_texture(texture_id, gl_texture, width, height);
+        }
+
+        fn texture_format(&self, texture_id: TextureId) -> Option<TextureFormat> {
+            self.inner.texture_format(texture_id)
+        }
+    }
+
+    fn renderer_with_existing_buffers() -> GlowRenderer {
+        GlowRenderer {
+            shaders: Shaders {
+                program: None,
+                attrib_location_tex: None,
+                attrib_location_proj_mtx: None,
+                attrib_location_color_gamma: None,
+                attrib_location_vtx_pos: 0,
+                attrib_location_vtx_uv: 0,
+                attrib_location_vtx_color: 0,
+            },
+            vbo_handle: Some(glow::NativeBuffer(NonZeroU32::new(71).unwrap())),
+            ebo_handle: Some(glow::NativeBuffer(NonZeroU32::new(72).unwrap())),
+            owned_textures: Vec::new(),
+            #[cfg(feature = "bind_vertex_array_support")]
+            vertex_array_object: None,
+            gl_version: GlVersion {
+                major: 3,
+                minor: 3,
+                is_es: false,
+            },
+            has_clip_origin_support: false,
+            is_destroyed: true,
+            gl_context: None,
+            context_binding: None,
+            backend_user_data: Box::default(),
+            renderer_name_ptr: std::ptr::null(),
+            renderer_texture_max: [0, 0],
+            renderer_state_fault: None,
+            synthetic_test_renderer: true,
+            texture_map: Some(Box::new(SimpleTextureMap::default())),
+            managed_textures: std::collections::HashMap::new(),
+            destroyed_managed_textures: std::collections::HashMap::new(),
+            renderer_consumer: None,
+            framebuffer_srgb: false,
+            color_gamma_override: None,
+            viewport_clear_color: [0.0, 0.0, 0.0, 1.0],
+        }
+    }
+
+    #[test]
+    fn device_object_creation_failure_preserves_renderer_and_cleans_temporaries() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        for (failure, expected) in [
+            (
+                FakeFailure::BufferCreate(1),
+                FakeSnapshot {
+                    deleted_shaders: 2,
+                    deleted_programs: 1,
+                    ..FakeSnapshot::default()
+                },
+            ),
+            (
+                FakeFailure::BufferCreate(2),
+                FakeSnapshot {
+                    deleted_shaders: 2,
+                    deleted_programs: 1,
+                    deleted_buffers: 1,
+                    generated_buffers: 1,
+                },
+            ),
+        ] {
+            reset(failure);
+            let gl = fake_gl();
+            let mut renderer = renderer_with_existing_buffers();
+            let original_vbo = renderer.vbo_handle;
+            let original_ebo = renderer.ebo_handle;
+
+            assert!(matches!(
+                renderer.create_device_objects(&gl),
+                Err(RenderError::DeviceObjectInit(
+                    InitError::CreateBufferObject(_)
+                ))
+            ));
+            assert!(renderer.shaders.program.is_none());
+            assert_eq!(renderer.vbo_handle, original_vbo);
+            assert_eq!(renderer.ebo_handle, original_ebo);
+            assert!(renderer.is_destroyed);
+            assert_eq!(snapshot(), expected);
+        }
+    }
+
+    #[test]
+    fn terminal_destroy_rejects_every_safe_resource_entry_before_gl_work() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset(FakeFailure::None);
+        let gl = fake_gl();
+        let mut context = ImGuiContext::create();
+        let mut renderer = GlowRenderer::with_external_context(
+            &gl,
+            &mut context,
+            Box::new(SimpleTextureMap::default()),
+        )
+        .unwrap();
+
+        renderer.destroy(&gl, &mut context).unwrap();
+        let before = snapshot();
+        assert!(matches!(
+            renderer.create_device_objects(&gl),
+            Err(RenderError::RendererDestroyed)
+        ));
+        assert!(matches!(
+            renderer.register_texture_with_context(
+                &gl,
+                1,
+                1,
+                TextureFormat::RGBA32,
+                &[255, 255, 255, 255],
+            ),
+            Err(RenderError::RendererDestroyed)
+        ));
+        assert!(matches!(
+            renderer.update_texture_with_context(
+                &gl,
+                TextureId::new(1),
+                1,
+                1,
+                &[255, 255, 255, 255],
+            ),
+            Err(RenderError::RendererDestroyed)
+        ));
+        assert!(matches!(
+            renderer.register_texture(1, 1, TextureFormat::RGBA32, &[255, 255, 255, 255],),
+            Err(RenderError::RendererDestroyed)
+        ));
+        assert!(matches!(
+            renderer.update_texture(TextureId::new(1), 1, 1, &[255, 255, 255, 255],),
+            Err(RenderError::RendererDestroyed)
+        ));
+        assert_eq!(snapshot(), before);
+    }
+
+    #[test]
+    fn texture_map_clear_panic_preserves_the_reset_transaction_for_retry() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset(FakeFailure::None);
+        let gl = fake_gl();
+        let mut context = ImGuiContext::create();
+        let mut renderer = GlowRenderer::with_external_context(
+            &gl,
+            &mut context,
+            Box::new(PanicOnceTextureMap::new()),
+        )
+        .unwrap();
+        let user_data = context.io().backend_renderer_user_data();
+        let name = context.io().backend_renderer_name().unwrap().as_ptr();
+        let flags = context.io().backend_flags();
+        let before = snapshot();
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            renderer.destroy(&gl, &mut context)
+        }));
+        assert!(matches!(
+            result,
+            Ok(Err(RenderError::TextureMapCleanupPanicked))
+        ));
+        assert!(renderer.renderer_consumer.is_some());
+        assert!(!renderer.is_destroyed);
+        assert_eq!(context.io().backend_renderer_user_data(), user_data);
+        assert_eq!(context.io().backend_renderer_name().unwrap().as_ptr(), name);
+        assert_eq!(context.io().backend_flags(), flags);
+        assert_eq!(snapshot(), before);
+
+        renderer.destroy(&gl, &mut context).unwrap();
+        assert!(renderer.renderer_consumer.is_none());
+        assert!(context.io().backend_renderer_user_data().is_null());
+        assert!(context.io().backend_renderer_name().is_none());
+    }
+
+    #[test]
+    fn dropping_a_live_renderer_fails_closed_without_destroying_gpu_resources() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset(FakeFailure::None);
+        let gl = Rc::new(fake_gl());
+        let mut context = ImGuiContext::create();
+        let renderer = GlowRenderer::with_shared_context(
+            Rc::clone(&gl),
+            &mut context,
+            Box::new(SimpleTextureMap::default()),
+        )
+        .unwrap();
+        let before = snapshot();
+
+        drop(renderer);
+
+        assert!(context.io().backend_renderer_user_data().is_null());
+        assert!(context.io().backend_renderer_name().is_none());
+        assert!(!context.io().backend_flags().intersects(
+            BackendFlags::RENDERER_HAS_VTX_OFFSET | BackendFlags::RENDERER_HAS_TEXTURES
+        ));
+        assert_eq!(snapshot(), before);
+
+        let mut replacement = GlowRenderer::with_external_context(
+            &gl,
+            &mut context,
+            Box::new(SimpleTextureMap::default()),
+        )
+        .unwrap();
+        replacement.destroy(&gl, &mut context).unwrap();
+    }
+
+    #[test]
+    fn first_core_drift_is_sticky_and_revokes_renderer_capabilities() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset(FakeFailure::None);
+        let gl = fake_gl();
+        let mut context = ImGuiContext::create();
+        let mut renderer = GlowRenderer::with_external_context(
+            &gl,
+            &mut context,
+            Box::new(SimpleTextureMap::default()),
+        )
+        .unwrap();
+        context
+            .set_renderer_name(Some("foreign renderer".to_owned()))
+            .unwrap();
+
+        for _ in 0..2 {
+            assert!(matches!(
+                renderer.register_texture_with_context(
+                    &gl,
+                    1,
+                    1,
+                    TextureFormat::RGBA32,
+                    &[255, 255, 255, 255],
+                ),
+                Err(RenderError::RendererStateDrift {
+                    field: "BackendRendererName"
+                })
+            ));
+        }
+        assert!(!context.io().backend_flags().intersects(
+            BackendFlags::RENDERER_HAS_VTX_OFFSET | BackendFlags::RENDERER_HAS_TEXTURES
+        ));
+        assert_eq!(
+            context
+                .io()
+                .backend_renderer_name()
+                .map(std::ffi::CStr::to_bytes),
+            Some(b"foreign renderer".as_slice())
+        );
+
+        renderer.destroy(&gl, &mut context).unwrap();
+    }
+
+    #[test]
+    fn destroy_preserves_a_complete_foreign_renderer_takeover() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset(FakeFailure::None);
+        let gl = fake_gl();
+        let mut context = ImGuiContext::create();
+        let mut renderer = GlowRenderer::with_external_context(
+            &gl,
+            &mut context,
+            Box::new(SimpleTextureMap::default()),
+        )
+        .unwrap();
+        let mut foreign_user_data = 0_u8;
+        let foreign_user_data_ptr = std::ptr::from_mut(&mut foreign_user_data).cast::<c_void>();
+        context
+            .set_renderer_name(Some("foreign renderer".to_owned()))
+            .unwrap();
+        let foreign_name_ptr = context.io().backend_renderer_name().unwrap().as_ptr();
+        #[cfg(feature = "multi-viewport")]
+        let foreign_flags = BackendFlags::RENDERER_HAS_VTX_OFFSET
+            | BackendFlags::RENDERER_HAS_TEXTURES
+            | BackendFlags::RENDERER_HAS_VIEWPORTS;
+        #[cfg(not(feature = "multi-viewport"))]
+        let foreign_flags =
+            BackendFlags::RENDERER_HAS_VTX_OFFSET | BackendFlags::RENDERER_HAS_TEXTURES;
+        unsafe {
+            context
+                .io_mut()
+                .set_backend_renderer_user_data(foreign_user_data_ptr);
+            context.io_mut().set_backend_flags(foreign_flags);
+            let platform_io = context.platform_io_mut();
+            platform_io.set_draw_callback_reset_render_state_raw(Some(foreign_draw_callback));
+            platform_io.set_draw_callback_set_sampler_linear_raw(Some(foreign_draw_callback));
+            platform_io.set_draw_callback_set_sampler_nearest_raw(Some(foreign_draw_callback));
+            let raw = &mut *platform_io.as_raw_mut();
+            raw.Renderer_TextureMaxWidth = 4096;
+            raw.Renderer_TextureMaxHeight = 2048;
+        }
+
+        renderer.destroy(&gl, &mut context).unwrap();
+
+        assert_eq!(
+            context.io().backend_renderer_user_data(),
+            foreign_user_data_ptr
+        );
+        assert_eq!(
+            context.io().backend_renderer_name().unwrap().as_ptr(),
+            foreign_name_ptr
+        );
+        assert_eq!(context.io().backend_flags() & foreign_flags, foreign_flags);
+        let platform_io = context.platform_io();
+        let raw = unsafe { &*platform_io.as_raw() };
+        assert!(raw.DrawCallback_ResetRenderState.is_some_and(|callback| {
+            std::ptr::fn_addr_eq(
+                callback,
+                foreign_draw_callback
+                    as unsafe extern "C" fn(*const sys::ImDrawList, *const sys::ImDrawCmd),
+            )
+        }));
+        assert!(raw.DrawCallback_SetSamplerLinear.is_some_and(|callback| {
+            std::ptr::fn_addr_eq(
+                callback,
+                foreign_draw_callback
+                    as unsafe extern "C" fn(*const sys::ImDrawList, *const sys::ImDrawCmd),
+            )
+        }));
+        assert!(raw.DrawCallback_SetSamplerNearest.is_some_and(|callback| {
+            std::ptr::fn_addr_eq(
+                callback,
+                foreign_draw_callback
+                    as unsafe extern "C" fn(*const sys::ImDrawList, *const sys::ImDrawCmd),
+            )
+        }));
+        assert_eq!(raw.Renderer_TextureMaxWidth, 4096);
+        assert_eq!(raw.Renderer_TextureMaxHeight, 2048);
+
+        // Model the foreign backend's own shutdown before Dear ImGui destroys the Context.
+        unsafe {
+            context
+                .io_mut()
+                .set_backend_renderer_user_data(std::ptr::null_mut());
+            context.io_mut().set_backend_flags(BackendFlags::empty());
+            let platform_io = context.platform_io_mut();
+            platform_io.set_draw_callback_reset_render_state_raw(None);
+            platform_io.set_draw_callback_set_sampler_linear_raw(None);
+            platform_io.set_draw_callback_set_sampler_nearest_raw(None);
+            let raw = &mut *platform_io.as_raw_mut();
+            raw.Renderer_TextureMaxWidth = 0;
+            raw.Renderer_TextureMaxHeight = 0;
+        }
+        context.set_renderer_name(None::<String>).unwrap();
     }
 }

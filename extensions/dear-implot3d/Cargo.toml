@@ -30,4 +30,5 @@ mint = ["dep:mint"]
 wasm = ["dear-imgui-rs/wasm", "dear-implot3d-sys/wasm"]
 
 [dev-dependencies]
+dear-implot3d-sys = { workspace = true, features = ["surface-test-probe"] }
 static_assertions = "1.1"

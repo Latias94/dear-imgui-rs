@@ -39,36 +39,44 @@ Typical use cases:
 - `sdlgpu3-renderer`: enables this crate's official SDLGPU3 renderer shim.
 - `multi-viewport`: enables multi-viewport helpers (requires `dear-imgui-rs/multi-viewport`).
 
+Until `0.16.0-alpha.1` is published, test any feature combination from `main`:
+
+```toml
+dear-imgui-sdl3 = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", features = ["opengl3-renderer"] }
+```
+
+After publication, use the exact prerelease requirement in the combinations below.
+
 Platform-only usage (SDL3 + WGPU/Glow, no official OpenGL3 renderer):
 
 ```toml
-dear-imgui-sdl3 = { version = "0.16.0", default-features = false }
+dear-imgui-sdl3 = { version = "=0.16.0-alpha.1", default-features = false }
 ```
 
 Enable the official OpenGL3 renderer:
 
 ```toml
-dear-imgui-sdl3 = { version = "0.16.0", features = ["opengl3-renderer"] }
+dear-imgui-sdl3 = { version = "=0.16.0-alpha.1", features = ["opengl3-renderer"] }
 ```
 
 Enable the official SDLRenderer3 renderer:
 
 ```toml
-dear-imgui-sdl3 = { version = "0.16.0", features = ["sdlrenderer3-renderer"] }
+dear-imgui-sdl3 = { version = "=0.16.0-alpha.1", features = ["sdlrenderer3-renderer"] }
 ```
 
 Enable the official SDLGPU3 renderer:
 
 ```toml
-dear-imgui-sdl3 = { version = "0.16.0", features = ["sdlgpu3-renderer"] }
+dear-imgui-sdl3 = { version = "=0.16.0-alpha.1", features = ["sdlgpu3-renderer"] }
 ```
 
 ## Compatibility
 
 | Item          | Version  |
 |---------------|----------|
-| Crate         | 0.16.0  |
-| dear-imgui-rs | 0.16.0  |
+| Crate         | 0.16.0-alpha.1  |
+| dear-imgui-rs | 0.16.0-alpha.1  |
 | SDL3 crate    | 0.18.4   |
 | sdl3-sys      | 0.6      |
 
@@ -113,8 +121,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut imgui = Context::create();
 
     // Initialize SDL3 + OpenGL3 backends. The owner and Context share teardown state.
-    let mut sdl3_backend =
-        Sdl3OpenGl3Backend::init(&mut imgui, &window, &gl_context, "#version 150")?;
+    // SAFETY: Window and GLContext are declared before Context, so they outlive its teardown.
+    let mut sdl3_backend = unsafe {
+        Sdl3OpenGl3Backend::init(&mut imgui, &window, &gl_context, "#version 150")?
+    };
 
     'main: loop {
         // 1) Poll SDL3 events and feed ImGui
@@ -143,8 +153,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         unsafe {
             use sdl3::video::Window;
             use sdl3::video::GLContext;
-            // Make context current if needed, clear framebuffer, etc.
-            // window.gl_make_current(&gl_context)?;
+            // The context passed at initialization must be current for every OpenGL operation.
+            window.gl_make_current(&gl_context)?;
         }
         sdl3_backend.render(rendered)?;
         window.gl_swap_window();
@@ -155,20 +165,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 APIs of interest (see `src/lib.rs` for full docs):
 
 - `Sdl3OpenGl3Backend` and `Sdl3RendererBackend`:
-  RAII renderer owners that hold the Context's renderer consumer, process request-bound texture
-  feedback, and consume `RenderedFrame` values.
+  RAII renderer owners whose shared runtime retains the Context's renderer consumer through
+  explicit or Context-owned teardown, processes request-bound texture feedback, and consumes
+  `RenderedFrame` values. OpenGL users must keep the initialized context current for renderer
+  operations; SDLRenderer rejects a `WindowCanvas` backed by another raw renderer before texture
+  or draw work starts.
 - `SdlGpu3RendererBackend`:
-  RAII renderer owner for SDL3 + SDLGPU3. `prepare_render(...)` returns an
-  `SdlGpu3PreparedFrame` that keeps the renderer and Context frame alive until its `render(...)`
-  call inside the SDL GPU render pass.
+  RAII renderer owner for SDL3 + SDLGPU3. Unsafe `prepare_render(...)` returns an
+  `SdlGpu3PreparedFrame` that keeps the renderer and Context frame alive until its unsafe
+  `render(...)` call inside the SDL GPU render pass. The calls are unsafe because `sdl3` does not
+  expose enough provenance to verify that the command buffer, render pass, and initialized device
+  share one native owner.
 - `Sdl3PlatformBackend`:
   platform-only RAII owner for applications that provide a separate renderer. It intentionally
-  does not claim a renderer consumer. Construct it with `Sdl3PlatformBackend::init_for_other`,
+  does not claim a renderer consumer. Construct it with unsafe `Sdl3PlatformBackend::init_for_other`,
   `init_platform_for_opengl`, `init_for_vulkan`, `init_for_metal`, `init_for_d3d`,
-  `init_for_sdl_gpu`, or unsafe `init_for_sdl_renderer` as appropriate.
+  `init_for_sdl_gpu`, or `init_for_sdl_renderer` as appropriate. Every constructor is unsafe
+  because the upstream backend retains native window and graphics pointers beyond the call; keep
+  those owners alive until explicit shutdown succeeds or the Context finishes attachment teardown.
 - `shutdown(&mut self, &mut Context)`:
-  an idempotent owner method that reports actionable teardown and callback-ownership errors.
-  Dropping the owner performs the same teardown on a best-effort basis.
+  an idempotent owner method that closes any open frame before reporting actionable teardown and
+  callback-ownership errors. Dropping the owner defers native cleanup to the Context attachment,
+  because Drop cannot safely normalize a frame without the mutable Context. Managed texture proxy
+  state is held by that attachment as well, so uninstalled native allocations remain destroyable
+  after the Rust owner is dropped. Official renderer `shutdown(...)` and
+  `destroy_device_objects(...)` first require the Context renderer consumer to be idle: when a
+  detached `FrameSnapshot` is outstanding, they return before changing callbacks or destroying
+  native resources. Commit or drop those snapshots, then retry the operation.
 - `poll_fault()`:
   returns deferred platform callback failures without unwinding through native code. Ordinary
   owner methods also surface the oldest pending fault before entering SDL.
@@ -177,8 +200,13 @@ APIs of interest (see `src/lib.rs` for full docs):
   `process_event(&mut Context, &SDL_Event)` method.
 The free renderer initialization, render, texture-update, and device-object functions were
 removed. They allowed callers to bypass the Context-owned renderer epoch and write directly into
-native texture state. Let an owning backend drop or call its `shutdown(...)` method explicitly when
-shutdown errors need to be reported.
+native texture state. Call the owning backend's `shutdown(...)` method when shutdown errors need to
+be reported; otherwise retain the Context so its attachment can complete deferred cleanup.
+
+Official renderer teardown is transactional: it first obtains
+`Context::prepare_renderer_texture_reset(&consumer)` while its managed texture map is still
+intact, releases the upstream renderer resources, then commits the permit. An outstanding frame or
+detached snapshot rejects preparation before SDL resources or Context bindings change.
 
 Every owning backend registers its platform role with the Context before native initialization.
 Composite owners also register a renderer role, so Context-first teardown always releases renderer
@@ -365,7 +393,7 @@ Example:
 
 ```toml
 [dependencies]
-dear-imgui-sdl3 = { version = "0.16.0", features = ["opengl3-renderer"] }
+dear-imgui-sdl3 = { version = "=0.16.0-alpha.1", features = ["opengl3-renderer"] }
 sdl3 = { version = "0.18", features = ["build-from-source"] }
 ```
 
@@ -484,6 +512,18 @@ The workspace includes several examples that use this backend:
 
 Multi-viewport status on SDL3:
 
+For OpenGL viewports the Rust-owned callback wrapper verifies that each secondary window has a
+distinct current GL context and restores the previous window, context, and
+`SDL_GL_SHARE_WITH_CURRENT_CONTEXT` attribute before returning. Secondary contexts default to
+`Sdl3OpenGlViewportSwapInterval::Immediate`, matching the upstream behavior that avoids serial
+VSync waits across several platform windows. Use
+`init_with_viewport_swap_interval(...)` or
+`init_platform_for_opengl_with_viewport_swap_interval(...)` to choose `VSync`, `Adaptive`, or
+`MatchMain`. Swap-interval selection is best effort: if a driver rejects the requested timing after
+the secondary context is valid, the viewport keeps the driver's default timing. Native GL context,
+state-restoration, and SDL_GPU failures are deferred through `poll_fault()`; a partially initialized
+viewport is closed instead of being published as usable.
+
 - **SDL3 + OpenGL3**: multi-viewport is provided by the upstream C++ backends and
   considered stable for desktop use.
 - **SDL3 + Glow**: multi-viewport is experimental but functional on native targets.
@@ -499,7 +539,7 @@ Multi-viewport status on SDL3:
 - SDL3 + OpenGL3, multi-viewport (Glow renderer wrapper):
 
   ```bash
-  cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport --features "multi-viewport sdl3-platform"
+  cargo run -p dear-imgui-examples --bin sdl3_glow_multi_viewport --features sdl3-glow-multi-viewport
   ```
 
 - SDL3 + WGPU, single-window:

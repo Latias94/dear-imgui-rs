@@ -15,9 +15,12 @@ impl AshRenderer {
     ) -> RendererResult<Option<TextureRetirementBatch>> {
         self.ensure_frame_matches(&frame)?;
         self.reap_completed_uploads()?;
-        let feedback = self.process_texture_requests(frame.texture_requests())?;
-        frame.reconcile_texture_feedback(feedback)?;
-        let pending_retirement = self.pending_texture_retirement();
+        let request_epoch = frame.epoch().map_or(0, |epoch| epoch.sequence());
+        let feedback = self.process_texture_requests(frame.texture_requests(), request_epoch)?;
+        let progress = frame.reconcile_texture_feedback(feedback)?;
+        self.textures
+            .prune_destroyed_managed_textures(progress.watermark());
+        let pending_retirement = self.pending_texture_retirement()?;
         let draw_data = frame.draw_data();
         if !draw_data.valid() || draw_data.total_vtx_count() == 0 {
             return Ok(pending_retirement);
@@ -51,6 +54,7 @@ impl AshRenderer {
         gamma: f32,
         mesh: &mut Mesh,
     ) -> RendererResult<()> {
+        self.ensure_operational()?;
         if !draw_data.valid() || draw_data.total_vtx_count() == 0 {
             return Ok(());
         }

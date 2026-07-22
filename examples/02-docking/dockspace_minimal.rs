@@ -87,12 +87,12 @@ impl AppWindow {
         flags.insert(ConfigFlags::DOCKING_ENABLE);
         io.set_config_flags(flags);
 
-        let mut platform = WinitPlatform::new(&mut imgui_context);
+        let mut platform = WinitPlatform::new(&mut imgui_context)?;
         platform.attach_window(
-            &window,
+            Arc::clone(&window),
             dear_imgui_winit::HiDpiMode::Default,
             &mut imgui_context,
-        );
+        )?;
 
         // OpenGL renderer
         let gl = unsafe {
@@ -140,7 +140,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context);
+            .prepare_frame(&self.window, &mut self.imgui.context)?;
         let ui = self.imgui.context.frame();
 
         // 1) Host a fullscreen window for the DockSpace (mirrors minimal C++ docking example)
@@ -224,7 +224,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_render_with_ui(&ui, &self.window);
+            .prepare_render_with_ui(&ui, &self.window)?;
         let draw_data = self.imgui.context.render();
 
         self.imgui.renderer.new_frame()?;
@@ -263,11 +263,15 @@ impl ApplicationHandler for App {
         };
 
         // Pass to ImGui (window-local path)
-        window.imgui.platform.handle_window_event(
+        if let Err(error) = window.imgui.platform.handle_window_event(
             &mut window.imgui.context,
             &window.window,
             &event,
-        );
+        ) {
+            eprintln!("Winit platform error: {error}");
+            event_loop.exit();
+            return;
+        }
 
         match event {
             WindowEvent::Resized(size) => {

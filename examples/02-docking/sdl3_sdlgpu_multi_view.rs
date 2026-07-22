@@ -62,7 +62,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     gpu.set_swapchain_parameters(&window, PresentMode::Vsync, SwapchainComposition::Sdr)?;
 
-    let mut sdl3_backend = SdlGpu3RendererBackend::init_default(&mut imgui, &window, &gpu)?;
+    // SAFETY: `window` and `gpu` outlive explicit shutdown and Context teardown on early return.
+    let mut sdl3_backend =
+        unsafe { SdlGpu3RendererBackend::init_default(&mut imgui, &window, &gpu)? };
 
     let mut show_demo = false;
     let mut show_debug = false;
@@ -85,10 +87,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
                 Event::Window {
                     timestamp: _,
-                    window_id: _,
+                    window_id,
                     win_event,
                 } => match win_event {
-                    WindowEvent::CloseRequested => {
+                    WindowEvent::CloseRequested if window_id == window.id() => {
                         break 'running;
                     }
                     _ => (),
@@ -103,7 +105,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         ui.window("SDL3 + IMGUI")
             .size([400.0, 200.0], Condition::FirstUseEver)
             .build(|| {
-                ui.text("Dear ImGui running on SDL3 + SDL_Renderer");
+                ui.text("Dear ImGui running on SDL3 + SDL_GPU");
                 ui.separator();
                 ui.checkbox("Show demo window", &mut show_demo);
                 ui.checkbox("Show debug log window", &mut show_debug);
@@ -133,11 +135,13 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .with_load_op(sdl3::gpu::LoadOp::CLEAR)
                 .with_store_op(sdl3::gpu::StoreOp::STORE);
 
-            let prepared = sdl3_backend.prepare_render(frame, &draw_cmd)?;
+            // SAFETY: this command buffer belongs to the device used to initialize the backend.
+            let prepared = unsafe { sdl3_backend.prepare_render(frame, &draw_cmd)? };
 
             let mut render_pass = gpu.begin_render_pass(&draw_cmd, &[target_info], None)?;
 
-            prepared.render(&mut render_pass)?;
+            // SAFETY: this pass belongs to the same device and remains active for this call.
+            unsafe { prepared.render(&mut render_pass)? };
 
             gpu.end_render_pass(render_pass);
 

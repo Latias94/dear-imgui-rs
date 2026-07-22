@@ -19,7 +19,7 @@
 //!
 //! let event_loop = EventLoop::new().unwrap();
 //! let mut imgui_ctx = Context::create();
-//! let mut platform = WinitPlatform::new(&mut imgui_ctx);
+//! let mut platform = WinitPlatform::new(&mut imgui_ctx).expect("create Winit platform");
 //!
 //! // Use in your event loop...
 //! ```
@@ -37,9 +37,11 @@
 //! fn attach(
 //!     imgui: &mut Context,
 //!     window: Arc<Window>,
+//!     platform: &mut WinitPlatform,
 //! ) -> Result<WinitPlatformRuntime, Box<dyn std::error::Error>> {
+//!     platform.attach_window(Arc::clone(&window), dear_imgui_winit::HiDpiMode::Default, imgui)?;
 //!     imgui.enable_multi_viewport();
-//!     Ok(WinitPlatformRuntime::new(imgui, window)?)
+//!     Ok(WinitPlatformRuntime::new(imgui, platform)?)
 //! }
 //!
 //! fn update(
@@ -64,4 +66,4 @@ mod sanitize;
 mod test_util;
 
 // Re-export main types
-pub use platform::{HiDpiMode, WinitPlatform};
+pub use platform::{HiDpiMode, WinitPlatform, WinitPlatformError};

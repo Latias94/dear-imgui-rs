@@ -58,6 +58,7 @@ pub type GlBuffer = <Context as HasContext>::Buffer;
 pub type GlTexture = <Context as HasContext>::Texture;
 pub type GlVertexArray = <Context as HasContext>::VertexArray;
 pub type GlProgram = <Context as HasContext>::Program;
+pub type GlShader = <Context as HasContext>::Shader;
 pub type GlUniformLocation = <Context as HasContext>::UniformLocation;
 
 /// Convert a DrawVert slice to a byte slice

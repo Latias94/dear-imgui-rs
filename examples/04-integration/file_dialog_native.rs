@@ -90,12 +90,12 @@ impl AppWindow {
 
         let mut imgui_context = Context::create();
         imgui_context.set_ini_filename(None::<String>).unwrap();
-        let mut platform = WinitPlatform::new(&mut imgui_context);
+        let mut platform = WinitPlatform::new(&mut imgui_context)?;
         platform.attach_window(
-            &window,
+            Arc::clone(&window),
             dear_imgui_winit::HiDpiMode::Default,
             &mut imgui_context,
-        );
+        )?;
 
         let gl = unsafe {
             glow::Context::from_loader_function_cstr(|s| {
@@ -142,7 +142,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context);
+            .prepare_frame(&self.window, &mut self.imgui.context)?;
         let ui = self.imgui.context.frame();
 
         let mut requested_dialog = None;
@@ -180,7 +180,9 @@ impl AppWindow {
                 gl.clear(glow::COLOR_BUFFER_BIT);
             }
         }
-        self.imgui.platform.prepare_render_with_ui(ui, &self.window);
+        self.imgui
+            .platform
+            .prepare_render_with_ui(ui, &self.window)?;
         let draw_data = self.imgui.context.render();
         self.imgui.renderer.new_frame()?;
         self.imgui.renderer.render(draw_data)?;
@@ -246,9 +248,15 @@ impl ApplicationHandler<UserEvent> for App {
             return;
         }
         // Feed to ImGui platform first (window-local path)
-        w.imgui
-            .platform
-            .handle_window_event(&mut w.imgui.context, &w.window, &event);
+        if let Err(error) =
+            w.imgui
+                .platform
+                .handle_window_event(&mut w.imgui.context, &w.window, &event)
+        {
+            eprintln!("Winit platform error: {error}");
+            event_loop.exit();
+            return;
+        }
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {

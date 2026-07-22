@@ -87,6 +87,19 @@ fn resolve_imgui_includes(cfg: &BuildConfig) -> (PathBuf, PathBuf) {
     (imgui_src, cimgui_root)
 }
 
+fn native_binding_spec() -> &'static build_support::binding::CrateBindingSpec {
+    build_support::binding::CrateBindingSpec::for_crate_and_target(env!("CARGO_PKG_NAME"), "native")
+        .expect("missing dear-implot3d-sys native binding spec")
+}
+
+#[cfg(feature = "bindgen")]
+fn apply_bindgen_defines(mut builder: bindgen::Builder) -> bindgen::Builder {
+    for define in native_binding_spec().binding_defines() {
+        builder = builder.clang_arg(define.clang_arg());
+    }
+    builder
+}
+
 fn use_pregenerated_bindings(out_dir: &Path) -> bool {
     use_validated_pregenerated_bindings(out_dir, "native")
 }
@@ -176,7 +189,7 @@ fn generate_bindings(
         );
     }
 
-    let bindings = bindgen::Builder::default()
+    let builder = bindgen::Builder::default()
         .header(cimplot3d_root.join("cimplot3d.h").to_string_lossy())
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .allowlist_function("ImPlot3D_.*")
@@ -192,9 +205,8 @@ fn generate_bindings(
         .clang_arg(format!("-I{}", cimgui_root.display()))
         .clang_arg(format!("-I{}", imgui_src.display()))
         .clang_arg(format!("-I{}", cimplot3d_root.display()))
-        .clang_arg(format!("-I{}", cimplot3d_root.join("implot3d").display()))
-        .clang_arg("-DIMGUI_USE_WCHAR32")
-        .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
+        .clang_arg(format!("-I{}", cimplot3d_root.join("implot3d").display()));
+    let bindings = apply_bindgen_defines(builder)
         .derive_default(true)
         .derive_debug(true)
         .derive_copy(true)
@@ -397,17 +409,9 @@ fn build_with_cc(cfg: &BuildConfig, cimplot3d_root: &Path, imgui_src: &Path, cim
         build.flag("/D_ITERATOR_DEBUG_LEVEL=0");
     }
 
-    for (k, v) in env::vars() {
-        let suffix = k
-            .strip_prefix("DEP_DEAR_IMGUI_SYS_DEFINE_")
-            .or_else(|| k.strip_prefix("DEP_DEAR_IMGUI_DEFINE_"));
-        if let Some(suffix) = suffix {
-            build.define(suffix, v.as_str());
-        }
-    }
+    native_binding_spec().apply_extension_binding_defines(&mut build, env::vars());
 
     build.define("IMGUI_DEFINE_MATH_OPERATORS", Some("1"));
-    build.define("IMGUI_USE_WCHAR32", None);
     build.include(imgui_src);
     build.include(cimgui_root);
     build.include(cimplot3d_root);
@@ -420,6 +424,29 @@ fn build_with_cc(cfg: &BuildConfig, cimplot3d_root: &Path, imgui_src: &Path, cim
     build.file(cimplot3d_root.join("implot3d/implot3d_demo.cpp"));
 
     build.compile("dear_implot3d");
+}
+
+fn build_surface_test_probe(
+    cfg: &BuildConfig,
+    cimplot3d_root: &Path,
+    imgui_src: &Path,
+    cimgui_root: &Path,
+) {
+    let mut build = cc::Build::new();
+    build.cpp(true).std("c++17");
+    build_support::configure_cpp_runtime_linkage(&mut build, &cfg.target_os, &cfg.target_env);
+    if cfg.is_msvc() && cfg.is_windows() {
+        build.static_crt(cfg.use_static_crt());
+    }
+    native_binding_spec().apply_extension_binding_defines(&mut build, env::vars());
+    build.define("IMGUI_DEFINE_MATH_OPERATORS", Some("1"));
+    build
+        .include(imgui_src)
+        .include(cimgui_root)
+        .include(cimplot3d_root)
+        .include(cimplot3d_root.join("implot3d"))
+        .file(cfg.manifest_dir.join("src/surface_test_probe.cpp"))
+        .compile("dear_implot3d_surface_test_probe");
 }
 
 fn docsrs_build(cfg: &BuildConfig, cimplot3d_root: &Path, imgui_src: &Path, cimgui_root: &Path) {
@@ -446,6 +473,7 @@ fn main() {
     // Pregenerated bindings are copied into OUT_DIR when native toolchains are disabled.
     println!("cargo:rerun-if-changed=src/bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=src/wasm_bindings_pregenerated.rs");
+    println!("cargo:rerun-if-changed=src/surface_test_probe.cpp");
     println!("cargo:rerun-if-changed=third-party/cimplot3d/cimplot3d.h");
     println!("cargo:rerun-if-changed=third-party/cimplot3d/cimplot3d.cpp");
     println!("cargo:rerun-if-changed=third-party/cimplot3d/implot3d/implot3d.h");
@@ -487,6 +515,10 @@ fn main() {
     if cfg.docs_rs {
         docsrs_build(&cfg, &cimplot3d_root, &imgui_src, &cimgui_root);
         return;
+    }
+
+    if cfg!(feature = "surface-test-probe") && cfg.target_arch != "wasm32" {
+        build_surface_test_probe(&cfg, &cimplot3d_root, &imgui_src, &cimgui_root);
     }
 
     if build_support::parse_bool_env("DEAR_IMGUI_RS_REGEN_BINDINGS") {

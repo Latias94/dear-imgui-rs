@@ -10,12 +10,49 @@ use crate::{
     draw_indices_as_bytes, draw_verts_as_bytes,
     error::{RenderError, RenderResult},
     gl_debug_message,
+    state::{FramebufferSrgbScope, GlStateGuard},
     texture::TextureMap,
 };
+
+#[cfg(feature = "bind_vertex_array_support")]
+struct VertexArrayGuard<'a> {
+    gl: &'a Context,
+    vertex_array: crate::GlVertexArray,
+}
+
+#[cfg(feature = "bind_vertex_array_support")]
+impl<'a> VertexArrayGuard<'a> {
+    fn create_and_bind(gl: &'a Context) -> RenderResult<Self> {
+        let vertex_array =
+            unsafe { gl.create_vertex_array() }.map_err(|error| RenderError::CreateResource {
+                resource: "vertex array object",
+                error,
+            })?;
+        unsafe { gl.bind_vertex_array(Some(vertex_array)) };
+        Ok(Self { gl, vertex_array })
+    }
+}
+
+#[cfg(feature = "bind_vertex_array_support")]
+impl Drop for VertexArrayGuard<'_> {
+    fn drop(&mut self) {
+        unsafe { self.gl.delete_vertex_array(self.vertex_array) };
+    }
+}
+
+fn clear_viewport_framebuffer(gl: &Context, color: [f32; 4]) {
+    unsafe {
+        gl.disable(glow::SCISSOR_TEST);
+        gl.color_mask(true, true, true, true);
+        gl.clear_color(color[0], color[1], color[2], color[3]);
+        gl.clear(glow::COLOR_BUFFER_BIT);
+    }
+}
 
 impl GlowRenderer {
     /// Consume and render one Context-borrowed Dear ImGui frame.
     pub fn render(&mut self, mut frame: RenderedFrame<'_>) -> RenderResult<()> {
+        self.ensure_operational()?;
         self.validate_rendered_frame(&frame)?;
         if self.is_destroyed {
             return Err(RenderError::RendererDestroyed);
@@ -34,6 +71,7 @@ impl GlowRenderer {
         gl: &Context,
         mut frame: RenderedFrame<'_>,
     ) -> RenderResult<()> {
+        self.ensure_operational()?;
         self.validate_rendered_frame(&frame)?;
         if self.is_destroyed {
             return Err(RenderError::RendererDestroyed);
@@ -47,8 +85,11 @@ impl GlowRenderer {
         gl: &Context,
         frame: &mut RenderedFrame<'_>,
     ) -> RenderResult<()> {
-        let feedback = self.process_texture_requests(gl, frame.texture_requests())?;
-        frame.reconcile_texture_feedback(feedback)?;
+        let request_epoch = frame.epoch().map_or(0, |epoch| epoch.sequence());
+        let feedback =
+            self.process_texture_requests(gl, frame.texture_requests(), request_epoch)?;
+        let progress = frame.reconcile_texture_feedback(feedback)?;
+        self.prune_destroyed_managed_textures(progress.watermark());
         Ok(())
     }
 
@@ -79,69 +120,79 @@ impl GlowRenderer {
         gl: &Context,
         draw_data: &DrawData,
     ) -> RenderResult<()> {
+        self.render_draw_data_transaction(gl, Some(draw_data), false)
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    pub(super) fn render_viewport_draw_data(
+        &mut self,
+        gl: &Context,
+        draw_data: Option<&DrawData>,
+        clear: bool,
+    ) -> RenderResult<()> {
+        self.ensure_operational()?;
+        self.render_draw_data_transaction(gl, draw_data, clear)
+    }
+
+    fn render_draw_data_transaction(
+        &mut self,
+        gl: &Context,
+        draw_data: Option<&DrawData>,
+        clear: bool,
+    ) -> RenderResult<()> {
         if self.is_destroyed {
             return Err(RenderError::RendererDestroyed);
         }
 
-        let fb_width = draw_data.display_size[0] * draw_data.framebuffer_scale[0];
-        let fb_height = draw_data.display_size[1] * draw_data.framebuffer_scale[1];
-        if !(fb_width > 0.0 && fb_height > 0.0) {
+        let framebuffer_size = draw_data.map(|draw_data| {
+            (
+                draw_data.display_size[0] * draw_data.framebuffer_scale[0],
+                draw_data.display_size[1] * draw_data.framebuffer_scale[1],
+            )
+        });
+        let drawable = framebuffer_size.is_some_and(|(width, height)| width > 0.0 && height > 0.0);
+        if !clear && !drawable {
             return Ok(());
         }
 
         gl_debug_message(gl, "dear-imgui-glow: start render");
 
-        self.state_backup.backup(gl, self.gl_version);
+        let _gl_state = GlStateGuard::capture(gl, self.gl_version);
+        let _framebuffer_srgb = FramebufferSrgbScope::enter(gl, self.framebuffer_srgb);
+
+        if clear {
+            clear_viewport_framebuffer(gl, self.viewport_clear_color);
+        }
+
+        let Some(draw_data) = draw_data.filter(|_| drawable) else {
+            return Ok(());
+        };
+        let (fb_width, fb_height) = framebuffer_size.expect("drawable data has a framebuffer size");
 
         #[cfg(feature = "bind_vertex_array_support")]
-        if self.gl_version.bind_vertex_array_support() {
-            unsafe {
-                self.vertex_array_object =
-                    Some(
-                        gl.create_vertex_array()
-                            .map_err(|err| RenderError::CreateResource {
-                                resource: "vertex array object",
-                                error: err,
-                            })?,
-                    );
-                gl.bind_vertex_array(self.vertex_array_object);
-            }
-        }
+        let _vertex_array = self
+            .gl_version
+            .bind_vertex_array_support()
+            .then(|| VertexArrayGuard::create_and_bind(gl))
+            .transpose()?;
 
         self.set_up_render_state(gl, draw_data, fb_width, fb_height)?;
-
-        // Render draw lists. We temporarily move `texture_map` out to avoid creating
-        // aliasing references (e.g. `&mut self` + `&self.texture_map`) and relying on raw pointers.
-        let texture_map = self
-            .texture_map
-            .take()
-            .expect("GlowRenderer texture_map missing (internal borrow bug)");
-        let render_res = self.render_draw_lists(gl, &*texture_map, draw_data);
-        self.texture_map = Some(texture_map);
-        render_res?;
-
-        // Cleanup
-        #[cfg(feature = "bind_vertex_array_support")]
-        if self.gl_version.bind_vertex_array_support()
-            && let Some(vao) = self.vertex_array_object
-        {
-            unsafe { gl.delete_vertex_array(vao) };
-            self.vertex_array_object = None;
-        }
-
-        // Optionally disable FRAMEBUFFER_SRGB before restoring state (we didn't back it up)
-        if self.framebuffer_srgb {
-            unsafe { gl.disable(glow::FRAMEBUFFER_SRGB) };
-        }
-        self.state_backup.restore(gl, self.gl_version);
+        let texture_map = self.texture_map_for_draw();
+        self.render_draw_lists(gl, texture_map, draw_data)?;
         gl_debug_message(gl, "dear-imgui-glow: end render");
 
         Ok(())
     }
 
+    fn texture_map_for_draw(&self) -> &dyn TextureMap {
+        self.texture_map
+            .as_deref()
+            .expect("GlowRenderer texture_map missing (internal invariant)")
+    }
+
     /// Set up OpenGL render state for ImGui rendering
     fn set_up_render_state(
-        &mut self,
+        &self,
         gl: &Context,
         draw_data: &DrawData,
         fb_width: f32,
@@ -163,19 +214,6 @@ impl GlowRenderer {
             gl.disable(glow::DEPTH_TEST);
             gl.disable(glow::STENCIL_TEST);
             gl.enable(glow::SCISSOR_TEST);
-
-            // Optionally enable sRGB frame-buffer writes for sRGB-capable surfaces.
-            // Note: This is typically controlled by the application. We expose a toggle
-            // for convenience; it will be disabled after rendering to avoid leaking state.
-            if self.framebuffer_srgb {
-                gl.enable(glow::FRAMEBUFFER_SRGB);
-            }
-
-            // Note: We don't enable GL_FRAMEBUFFER_SRGB here because:
-            // 1. Modern applications typically create sRGB surfaces directly (e.g., glutin's .with_srgb(true))
-            // 2. The official OpenGL3 backend also doesn't explicitly enable GL_FRAMEBUFFER_SRGB
-            // 3. Enabling it when the surface is already sRGB would cause incorrect double conversion
-            // The sRGB conversion is handled by the surface/framebuffer configuration
 
             #[cfg(feature = "polygon_mode_support")]
             if self.gl_version.polygon_mode_support() {
@@ -286,7 +324,7 @@ impl GlowRenderer {
 
     /// Render all draw lists
     fn render_draw_lists(
-        &mut self,
+        &self,
         gl: &Context,
         texture_map: &dyn TextureMap,
         draw_data: &DrawData,
@@ -354,7 +392,7 @@ impl GlowRenderer {
     /// Following the original Dear ImGui OpenGL3 implementation, we always use glBufferData()
     /// instead of glBufferSubData() to avoid issues with Intel GPU drivers.
     /// See: https://github.com/ocornut/imgui/issues/4468
-    fn upload_vertex_buffer(&mut self, gl: &Context, vertices: &[DrawVert]) -> RenderResult<()> {
+    fn upload_vertex_buffer(&self, gl: &Context, vertices: &[DrawVert]) -> RenderResult<()> {
         unsafe {
             gl.bind_buffer(glow::ARRAY_BUFFER, self.vbo_handle);
 
@@ -376,7 +414,7 @@ impl GlowRenderer {
     /// instead of glBufferSubData() to avoid issues with Intel GPU drivers.
     /// See: https://github.com/ocornut/imgui/issues/4468
     fn upload_index_buffer(
-        &mut self,
+        &self,
         gl: &Context,
         indices: &[dear_imgui_rs::render::DrawIdx],
     ) -> RenderResult<()> {
@@ -474,5 +512,198 @@ impl GlowRenderer {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    use dear_imgui_rs::{TextureFormat, TextureId};
+
+    #[cfg(feature = "bind_vertex_array_support")]
+    use super::VertexArrayGuard;
+    use super::{GlowRenderer, clear_viewport_framebuffer};
+    use crate::{GlTexture, GlVersion, InitResult, shaders::Shaders, texture::TextureMap};
+
+    static CLEAR_EVENTS: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+    static DELETED_VERTEX_ARRAYS: AtomicU32 = AtomicU32::new(0);
+
+    unsafe extern "system" fn get_string(name: u32) -> *const u8 {
+        if name == glow::VERSION {
+            c"4.6".as_ptr().cast()
+        } else {
+            c"".as_ptr().cast()
+        }
+    }
+
+    unsafe extern "system" fn get_string_i(_name: u32, _index: u32) -> *const u8 {
+        c"".as_ptr().cast()
+    }
+
+    unsafe extern "system" fn get_integer(_name: u32, value: *mut i32) {
+        if !value.is_null() {
+            unsafe { *value = 0 };
+        }
+    }
+
+    unsafe extern "system" fn disable(capability: u32) {
+        assert_eq!(capability, glow::SCISSOR_TEST);
+        CLEAR_EVENTS.lock().unwrap().push("disable-scissor");
+    }
+
+    unsafe extern "system" fn color_mask(r: u8, g: u8, b: u8, a: u8) {
+        assert_eq!([r, g, b, a], [1, 1, 1, 1]);
+        CLEAR_EVENTS.lock().unwrap().push("color-mask");
+    }
+
+    unsafe extern "system" fn clear_color(r: f32, g: f32, b: f32, a: f32) {
+        assert_eq!([r, g, b, a], [0.1, 0.2, 0.3, 0.4]);
+        CLEAR_EVENTS.lock().unwrap().push("clear-color");
+    }
+
+    unsafe extern "system" fn clear(mask: u32) {
+        assert_eq!(mask, glow::COLOR_BUFFER_BIT);
+        CLEAR_EVENTS.lock().unwrap().push("clear");
+    }
+
+    unsafe extern "system" fn gen_vertex_arrays(count: i32, arrays: *mut u32) {
+        assert_eq!(count, 1);
+        unsafe { *arrays = 44 };
+    }
+
+    unsafe extern "system" fn bind_vertex_array(_array: u32) {}
+
+    unsafe extern "system" fn delete_vertex_arrays(count: i32, _arrays: *const u32) {
+        DELETED_VERTEX_ARRAYS.fetch_add(count.max(0) as u32, Ordering::SeqCst);
+    }
+
+    fn fake_gl() -> glow::Context {
+        unsafe {
+            glow::Context::from_loader_function(|name| {
+                match name {
+                    "glGetString" => get_string as *const (),
+                    "glGetStringi" => get_string_i as *const (),
+                    "glGetIntegerv" => get_integer as *const (),
+                    "glDisable" => disable as *const (),
+                    "glColorMask" => color_mask as *const (),
+                    "glClearColor" => clear_color as *const (),
+                    "glClear" => clear as *const (),
+                    "glGenVertexArrays" => gen_vertex_arrays as *const (),
+                    "glBindVertexArray" => bind_vertex_array as *const (),
+                    "glDeleteVertexArrays" => delete_vertex_arrays as *const (),
+                    _ => std::ptr::null(),
+                }
+                .cast()
+            })
+        }
+    }
+
+    struct PanicTextureMap;
+
+    impl TextureMap for PanicTextureMap {
+        fn get(&self, _texture_id: TextureId) -> Option<GlTexture> {
+            panic!("injected texture map panic")
+        }
+
+        fn set(&mut self, _texture_id: TextureId, _gl_texture: GlTexture) {}
+        fn remove(&mut self, _texture_id: TextureId) -> Option<GlTexture> {
+            None
+        }
+        fn clear(&mut self) {}
+        fn register_texture(
+            &mut self,
+            _gl_texture: GlTexture,
+            _width: u32,
+            _height: u32,
+            _format: TextureFormat,
+        ) -> InitResult<TextureId> {
+            unreachable!()
+        }
+        fn update_texture(
+            &mut self,
+            _texture_id: TextureId,
+            _gl_texture: GlTexture,
+            _width: u32,
+            _height: u32,
+        ) {
+        }
+        fn texture_format(&self, _texture_id: TextureId) -> Option<TextureFormat> {
+            None
+        }
+    }
+
+    fn test_renderer(texture_map: Box<dyn TextureMap>) -> GlowRenderer {
+        GlowRenderer {
+            shaders: Shaders {
+                program: None,
+                attrib_location_tex: None,
+                attrib_location_proj_mtx: None,
+                attrib_location_color_gamma: None,
+                attrib_location_vtx_pos: 0,
+                attrib_location_vtx_uv: 0,
+                attrib_location_vtx_color: 0,
+            },
+            vbo_handle: None,
+            ebo_handle: None,
+            owned_textures: Vec::new(),
+            #[cfg(feature = "bind_vertex_array_support")]
+            vertex_array_object: None,
+            gl_version: GlVersion {
+                major: 3,
+                minor: 3,
+                is_es: false,
+            },
+            has_clip_origin_support: false,
+            is_destroyed: false,
+            gl_context: None,
+            context_binding: None,
+            backend_user_data: Box::default(),
+            renderer_name_ptr: std::ptr::null(),
+            renderer_texture_max: [0, 0],
+            renderer_state_fault: None,
+            synthetic_test_renderer: true,
+            texture_map: Some(texture_map),
+            managed_textures: std::collections::HashMap::new(),
+            destroyed_managed_textures: std::collections::HashMap::new(),
+            renderer_consumer: None,
+            framebuffer_srgb: false,
+            color_gamma_override: None,
+            viewport_clear_color: [0.0, 0.0, 0.0, 1.0],
+        }
+    }
+
+    #[test]
+    fn viewport_clear_is_unclipped_and_writes_every_color_channel() {
+        CLEAR_EVENTS.lock().unwrap().clear();
+        clear_viewport_framebuffer(&fake_gl(), [0.1, 0.2, 0.3, 0.4]);
+        assert_eq!(
+            *CLEAR_EVENTS.lock().unwrap(),
+            ["disable-scissor", "color-mask", "clear-color", "clear"]
+        );
+    }
+
+    #[test]
+    fn texture_map_remains_owned_when_lookup_panics() {
+        let renderer = test_renderer(Box::new(PanicTextureMap));
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            renderer.texture_map_for_draw().get(TextureId::new(1));
+        }));
+        assert!(panic.is_err());
+        assert!(renderer.texture_map.is_some());
+    }
+
+    #[cfg(feature = "bind_vertex_array_support")]
+    #[test]
+    fn temporary_vertex_array_is_deleted_when_rendering_panics() {
+        DELETED_VERTEX_ARRAYS.store(0, Ordering::SeqCst);
+        let gl = fake_gl();
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _vertex_array = VertexArrayGuard::create_and_bind(&gl).unwrap();
+            panic!("injected render panic");
+        }));
+        assert!(panic.is_err());
+        assert_eq!(DELETED_VERTEX_ARRAYS.load(Ordering::SeqCst), 1);
     }
 }

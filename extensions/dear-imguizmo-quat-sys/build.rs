@@ -89,6 +89,19 @@ fn resolve_imgui_includes(cfg: &BuildConfig) -> (PathBuf, PathBuf) {
     (imgui_src, cimgui_root)
 }
 
+fn native_binding_spec() -> &'static build_support::binding::CrateBindingSpec {
+    build_support::binding::CrateBindingSpec::for_crate_and_target(env!("CARGO_PKG_NAME"), "native")
+        .expect("missing dear-imguizmo-quat-sys native binding spec")
+}
+
+#[cfg(feature = "bindgen")]
+fn apply_bindgen_defines(mut builder: bindgen::Builder) -> bindgen::Builder {
+    for define in native_binding_spec().binding_defines() {
+        builder = builder.clang_arg(define.clang_arg());
+    }
+    builder
+}
+
 fn use_pregenerated_bindings(out_dir: &Path) -> bool {
     use_validated_pregenerated_bindings(out_dir, "native")
 }
@@ -175,7 +188,7 @@ fn generate_bindings(cfg: &BuildConfig, quat_root: &Path, imgui_src: &Path, cimg
     let header = quat_root.join("cimguizmo_quat.h");
     let imguizmo_quat_inc = quat_root.join("imGuIZMO.quat").join("imguizmo_quat");
 
-    let bindings = bindgen::Builder::default()
+    let builder = bindgen::Builder::default()
         .header(header.to_string_lossy())
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .allowlist_function("imguiGizmo_.*")
@@ -189,9 +202,8 @@ fn generate_bindings(cfg: &BuildConfig, quat_root: &Path, imgui_src: &Path, cimg
         .clang_arg(format!("-I{}", cimgui_root.display()))
         .clang_arg(format!("-I{}", imgui_src.display()))
         .clang_arg(format!("-I{}", quat_root.display()))
-        .clang_arg(format!("-I{}", imguizmo_quat_inc.display()))
-        .clang_arg("-DIMGUI_USE_WCHAR32")
-        .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
+        .clang_arg(format!("-I{}", imguizmo_quat_inc.display()));
+    let bindings = apply_bindgen_defines(builder)
         .derive_default(true)
         .derive_debug(true)
         .derive_copy(true)
@@ -395,15 +407,7 @@ fn build_with_cc(cfg: &BuildConfig, quat_root: &Path, imgui_src: &Path, cimgui_r
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
     build_support::configure_cpp_runtime_linkage(&mut build, &cfg.target_os, &cfg.target_env);
-    for (k, v) in env::vars() {
-        let suffix = k
-            .strip_prefix("DEP_DEAR_IMGUI_SYS_DEFINE_")
-            .or_else(|| k.strip_prefix("DEP_DEAR_IMGUI_DEFINE_"));
-        if let Some(suffix) = suffix {
-            build.define(suffix, v.as_str());
-        }
-    }
-    build.define("IMGUI_USE_WCHAR32", None);
+    native_binding_spec().apply_extension_binding_defines(&mut build, env::vars());
     build.include(imgui_src);
     build.include(cimgui_root);
     build.include(quat_root);

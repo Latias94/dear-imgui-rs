@@ -212,11 +212,13 @@ class ContractRunnerTests(unittest.TestCase):
             output = Path(temporary) / "release-notes.md"
             github_output = Path(temporary) / "github-output.txt"
             with patch.object(CONTRACTS, "run") as runner:
-                CONTRACTS.prepare_release_notes("v0.16.0", output, github_output)
+                CONTRACTS.prepare_release_notes(
+                    "v0.16.0-alpha.1", output, github_output
+                )
 
             self.assertEqual(
                 github_output.read_text(encoding="utf-8"),
-                "tag=v0.16.0\nversion=0.16.0\n",
+                "tag=v0.16.0-alpha.1\nversion=0.16.0-alpha.1\n",
             )
             self.assertEqual(runner.call_count, 2)
             extract_command = tuple(runner.call_args_list[1].args[0])
@@ -228,7 +230,9 @@ class ContractRunnerTests(unittest.TestCase):
                 CONTRACTS.VerificationError, "invalid release tag"
             ):
                 CONTRACTS.prepare_release_notes(
-                    "v0.16.0;echo", Path(temporary) / "notes", Path(temporary) / "out"
+                    "v0.16.0-alpha.1;echo",
+                    Path(temporary) / "notes",
+                    Path(temporary) / "out",
                 )
 
     def test_windows_vcpkg_uses_resolved_executable_and_publishes_environment(self):
@@ -330,11 +334,14 @@ class ContractRunnerTests(unittest.TestCase):
         parser = CONTRACTS._build_parser()
         test_engine = parser.parse_args(("test-engine-runtime",))
         viewport = parser.parse_args(("multi-viewport-smoke",))
+        sdl3_glow = parser.parse_args(("sdl3-glow-multi-viewport-smoke",))
 
         self.assertEqual(test_engine.child_timeout, 120.0)
         self.assertEqual(viewport.child_timeout, 180.0)
+        self.assertEqual(sdl3_glow.child_timeout, 180.0)
         self.assertEqual(test_engine.build_timeout, 900.0)
         self.assertEqual(viewport.build_timeout, 900.0)
+        self.assertEqual(sdl3_glow.build_timeout, 900.0)
 
     def test_runtime_disposition_only_defers_first_infrastructure_failure(self):
         with TemporaryDirectory() as temporary:
@@ -557,6 +564,64 @@ class RuntimeGateTests(unittest.TestCase):
             )
             self.assertEqual(aggregate["category"], "InfrastructureUnavailable")
 
+    def test_viewport_tool_profiles_preserve_platform_and_missing_tool_contract(self):
+        profiles = (
+            (
+                RUNTIME._require_linux_runtime_tools,
+                "multi-viewport-smoke requires Linux, Xvfb, and Mesa Lavapipe",
+                ("Xvfb", "openbox", "xdpyinfo", "xprop", "vulkaninfo", "dpkg-query"),
+            ),
+            (
+                RUNTIME._require_linux_sdl3_glow_tools,
+                "sdl3-glow-multi-viewport-smoke requires Linux, Xvfb, and Mesa llvmpipe",
+                ("Xvfb", "openbox", "xdpyinfo", "xprop", "glxinfo", "dpkg-query"),
+            ),
+        )
+
+        for require_tools, platform_error, tool_names in profiles:
+            with self.subTest(profile=require_tools.__name__):
+                with patch.object(RUNTIME.sys, "platform", "win32"):
+                    with self.assertRaises(RUNTIME.RuntimeContractError) as raised:
+                        require_tools()
+                self.assertEqual(str(raised.exception), platform_error)
+                self.assertEqual(
+                    raised.exception.category,
+                    RUNTIME.GateCategory.INFRASTRUCTURE_UNAVAILABLE,
+                )
+
+                checked: list[str] = []
+
+                def which(name):
+                    checked.append(name)
+                    return None if name == tool_names[4] else f"/usr/bin/{name}"
+
+                with (
+                    patch.object(RUNTIME.sys, "platform", "linux"),
+                    patch.object(RUNTIME.shutil, "which", side_effect=which),
+                ):
+                    with self.assertRaises(RUNTIME.RuntimeContractError) as raised:
+                        require_tools()
+                self.assertEqual(checked, list(tool_names[:5]))
+                self.assertEqual(
+                    str(raised.exception),
+                    f"required runtime program is unavailable: {tool_names[4]}",
+                )
+
+                with (
+                    patch.object(RUNTIME.sys, "platform", "linux"),
+                    patch.object(
+                        RUNTIME.shutil,
+                        "which",
+                        side_effect=lambda name: f"/usr/bin/{name}",
+                    ),
+                ):
+                    tools = require_tools()
+                self.assertEqual(list(tools), list(tool_names))
+                self.assertEqual(
+                    tools,
+                    {name: Path(f"/usr/bin/{name}") for name in tool_names},
+                )
+
     def test_viewport_success_requires_lavapipe_and_full_lifecycle(self):
         valid = {
             "schema_version": 1,
@@ -578,6 +643,74 @@ class RuntimeGateTests(unittest.TestCase):
         self.assertRegex(
             "\n".join(RUNTIME._validate_viewport_payload(valid)),
             "merge_observed",
+        )
+
+    def test_viewport_common_validation_preserves_error_order(self):
+        wgpu_errors = RUNTIME._validate_viewport_payload(
+            {
+                "schema_version": 0,
+                "outcome": "Failed",
+                "secondary_viewport_observed": False,
+                "merge_observed": False,
+                "teardown_complete": False,
+            }
+        )
+        self.assertEqual(
+            wgpu_errors,
+            [
+                "schema_version expected 1, got 0",
+                "outcome expected 'Passed', got 'Failed'",
+                "secondary_viewport_observed expected True, got False",
+                "merge_observed expected True, got False",
+                "teardown_complete expected True, got False",
+                "adapter must be a JSON object",
+            ],
+        )
+
+        sdl3_glow_errors = RUNTIME._validate_sdl3_glow_viewport_payload(
+            {
+                "schema_version": 0,
+                "outcome": "Failed",
+                "secondary_viewport_observed": False,
+                "secondary_viewport_rendered": False,
+                "merge_observed": False,
+                "teardown_complete": False,
+            }
+        )
+        self.assertEqual(
+            sdl3_glow_errors,
+            [
+                "schema_version expected 1, got 0",
+                "outcome expected 'Passed', got 'Failed'",
+                "secondary_viewport_observed expected True, got False",
+                "secondary_viewport_rendered expected True, got False",
+                "merge_observed expected True, got False",
+                "teardown_complete expected True, got False",
+                "renderer must be a JSON object",
+            ],
+        )
+
+    def test_sdl3_glow_success_requires_llvmpipe_rendering_and_full_lifecycle(self):
+        valid = {
+            "schema_version": 1,
+            "outcome": "Passed",
+            "renderer": {
+                "backend": "OpenGL",
+                "vendor": "Mesa",
+                "name": "llvmpipe (LLVM 20)",
+                "version": "4.5 Mesa 25",
+            },
+            "secondary_viewport_observed": True,
+            "secondary_viewport_rendered": True,
+            "merge_observed": True,
+            "teardown_complete": True,
+        }
+
+        self.assertEqual(RUNTIME._validate_sdl3_glow_viewport_payload(valid), [])
+        valid["secondary_viewport_rendered"] = False
+        self.assertRegex(
+            "\n".join(RUNTIME._validate_sdl3_glow_viewport_payload(valid)),
+            "secondary_viewport_rendered",
         )
 
     def test_viewport_gate_retains_display_adapter_and_teardown_evidence(self):
@@ -672,6 +805,113 @@ class RuntimeGateTests(unittest.TestCase):
             self.assertFalse(xdg_runtime.exists())
             self.assertIn("adapter.stdout.log", result.evidence)
             self.assertIn("viewport-result.json", result.evidence)
+
+    def test_sdl3_glow_gate_retains_renderer_and_teardown_evidence(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            evidence = root / "evidence"
+            binary = root / "sdl3_glow_multi_viewport"
+            binary.touch()
+            sdl3_library = (
+                root
+                / "target"
+                / "debug"
+                / "build"
+                / "sdl3-sys-test"
+                / "out"
+                / "lib"
+                / "libSDL3.so.0"
+            )
+            sdl3_library.parent.mkdir(parents=True)
+            sdl3_library.touch()
+            tools = {
+                name: root / name
+                for name in (
+                    "Xvfb",
+                    "openbox",
+                    "xdpyinfo",
+                    "xprop",
+                    "glxinfo",
+                    "dpkg-query",
+                )
+            }
+            build = bounded_result(
+                stdout_log=evidence / "build.stdout.log",
+                stderr_log=evidence / "build.stderr.log",
+            )
+
+            def background(command, **kwargs):
+                return FakeBackground(
+                    command,
+                    stdout_log=kwargs["stdout_log"],
+                    stderr_log=kwargs["stderr_log"],
+                )
+
+            def stage(_command, **kwargs):
+                result = bounded_result(
+                    stdout_log=kwargs["stdout_log"],
+                    stderr_log=kwargs["stderr_log"],
+                )
+                if result.stdout_log.name == "renderer.stdout.log":
+                    result.stdout_log.write_text(
+                        "OpenGL renderer string: llvmpipe (LLVM 20)\n",
+                        encoding="utf-8",
+                    )
+                elif result.stdout_log.name == "window-manager.stdout.log":
+                    result.stdout_log.write_text(
+                        "_NET_SUPPORTING_WM_CHECK(WINDOW): window id # 0x200001\n",
+                        encoding="utf-8",
+                    )
+                elif result.stdout_log.name == "viewport.stdout.log":
+                    self.assertEqual(
+                        kwargs["env"]["LD_LIBRARY_PATH"].split(os.pathsep)[0],
+                        str(sdl3_library.parent.resolve()),
+                    )
+                    (evidence / "viewport-result.json").write_text(
+                        json.dumps(
+                            {
+                                "schema_version": 1,
+                                "outcome": "Passed",
+                                "renderer": {
+                                    "backend": "OpenGL",
+                                    "vendor": "Mesa",
+                                    "name": "llvmpipe (LLVM 20)",
+                                    "version": "4.5 Mesa 25",
+                                },
+                                "secondary_viewport_observed": True,
+                                "secondary_viewport_rendered": True,
+                                "merge_observed": True,
+                                "teardown_complete": True,
+                            }
+                        ),
+                        encoding="utf-8",
+                    )
+                return result
+
+            with (
+                patch.object(
+                    RUNTIME, "_require_linux_sdl3_glow_tools", return_value=tools
+                ),
+                patch.object(RUNTIME, "_run_example_build", return_value=build),
+                patch.object(RUNTIME, "_example_binary", return_value=binary),
+                patch.object(RUNTIME, "managed_background", side_effect=background),
+                patch.object(RUNTIME, "_wait_for_xvfb"),
+                patch.object(RUNTIME, "run_bounded", side_effect=stage),
+                patch.object(RUNTIME.time, "sleep"),
+            ):
+                result = RUNTIME.run_sdl3_glow_viewport_smoke(
+                    workspace_root=root,
+                    evidence_dir=evidence,
+                )
+
+            self.assertTrue(result.success)
+            self.assertEqual(result.category, RUNTIME.GateCategory.PASSED)
+            self.assertIn("renderer.stdout.log", result.evidence)
+            self.assertIn("viewport-result.json", result.evidence)
+            self.assertEqual(
+                result.details["environment"]["sdl3_library_dirs"],
+                [str(sdl3_library.parent.resolve())],
+            )
 
     def test_new_invocation_invalidates_owned_stale_success_evidence(self):
         with TemporaryDirectory() as temporary:
@@ -778,12 +1018,14 @@ class WorkflowPortabilityTests(unittest.TestCase):
 
         self.assertIn("test-engine-runtime", workflow)
         self.assertIn("multi-viewport-smoke", workflow)
+        self.assertIn("sdl3-glow-multi-viewport-smoke", workflow)
         self.assertIn("libxkbcommon-x11-dev", runtime)
+        self.assertIn("mesa-utils", runtime)
         self.assertIn("retention-days: 30", workflow)
         self.assertRegex(workflow, r"(?m)^\s+if: always\(\)$")
         self.assertIn("--defer-infrastructure-retry", runtime)
         self.assertIn("gate_attempt: 2", ci)
-        self.assertEqual(ci.count("outputs.retry_eligible == 'true'"), 2)
+        self.assertEqual(ci.count("outputs.retry_eligible == 'true'"), 3)
 
 
 if __name__ == "__main__":

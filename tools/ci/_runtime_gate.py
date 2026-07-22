@@ -10,7 +10,7 @@ import shutil
 import sys
 import tempfile
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from enum import Enum
 from pathlib import Path
@@ -92,6 +92,26 @@ class ScenarioExpectation:
     outcome: str
     infrastructure: bool
     category: GateCategory
+
+
+@dataclass(frozen=True)
+class ViewportSmokeSpec:
+    """Backend-specific contract layered over the shared real-window harness."""
+
+    gate: str
+    binary: str
+    features: str
+    package_names: tuple[str, ...]
+    probe_tool: str
+    probe_arguments: tuple[str, ...]
+    probe_log_stem: str
+    probe_label: str
+    probe_identities: tuple[str, ...]
+    probe_identity_error: str
+    build_label: str
+    child_label: str
+    success_summary: str
+    payload_validator: Callable[[Mapping[str, object]], list[str]]
 
 
 TEST_ENGINE_SCENARIOS = (
@@ -242,6 +262,21 @@ def _target_directory(workspace_root: Path) -> Path:
 def _example_binary(workspace_root: Path, name: str) -> Path:
     suffix = ".exe" if os.name == "nt" else ""
     return _target_directory(workspace_root) / "debug" / f"{name}{suffix}"
+
+
+def _sdl3_runtime_library_directories(workspace_root: Path) -> tuple[Path, ...]:
+    build_root = _target_directory(workspace_root) / "debug" / "build"
+    directories = {
+        library.parent.resolve()
+        for library in build_root.glob("sdl3-sys-*/out/**/libSDL3.so.0")
+        if library.is_file()
+    }
+    if not directories:
+        raise RuntimeContractError(
+            GateCategory.PRODUCT_FAILURE,
+            "cargo succeeded without producing the bundled SDL3 runtime library",
+        )
+    return tuple(sorted(directories, key=lambda path: str(path)))
 
 
 def _run_example_build(
@@ -636,14 +671,18 @@ def _find_lavapipe_icd() -> Path:
     )
 
 
-def _require_linux_runtime_tools() -> dict[str, Path]:
+def _require_linux_tools(
+    tool_names: Sequence[str],
+    *,
+    platform_error: str,
+) -> dict[str, Path]:
     if not sys.platform.startswith("linux"):
         raise RuntimeContractError(
             GateCategory.INFRASTRUCTURE_UNAVAILABLE,
-            "multi-viewport-smoke requires Linux, Xvfb, and Mesa Lavapipe",
+            platform_error,
         )
     tools: dict[str, Path] = {}
-    for name in ("Xvfb", "openbox", "xdpyinfo", "xprop", "vulkaninfo", "dpkg-query"):
+    for name in tool_names:
         executable = shutil.which(name)
         if executable is None:
             raise RuntimeContractError(
@@ -652,6 +691,22 @@ def _require_linux_runtime_tools() -> dict[str, Path]:
             )
         tools[name] = Path(executable)
     return tools
+
+
+def _require_linux_runtime_tools() -> dict[str, Path]:
+    return _require_linux_tools(
+        ("Xvfb", "openbox", "xdpyinfo", "xprop", "vulkaninfo", "dpkg-query"),
+        platform_error="multi-viewport-smoke requires Linux, Xvfb, and Mesa Lavapipe",
+    )
+
+
+def _require_linux_sdl3_glow_tools() -> dict[str, Path]:
+    return _require_linux_tools(
+        ("Xvfb", "openbox", "xdpyinfo", "xprop", "glxinfo", "dpkg-query"),
+        platform_error=(
+            "sdl3-glow-multi-viewport-smoke requires Linux, Xvfb, and Mesa llvmpipe"
+        ),
+    )
 
 
 def _wait_for_xvfb(process: object, display: str, timeout: float = 10.0) -> None:
@@ -738,20 +793,31 @@ def _wait_for_window_manager(
     )
 
 
-def _validate_viewport_payload(payload: Mapping[str, object]) -> list[str]:
+def _validate_viewport_lifecycle(
+    payload: Mapping[str, object],
+    lifecycle_fields: Sequence[str],
+) -> list[str]:
     errors: list[str] = []
     schema_version = payload.get("schema_version")
     if type(schema_version) is not int or schema_version != 1:
         errors.append(f"schema_version expected 1, got {schema_version!r}")
     if payload.get("outcome") != "Passed":
         errors.append(f"outcome expected 'Passed', got {payload.get('outcome')!r}")
-    for field_name in (
-        "secondary_viewport_observed",
-        "merge_observed",
-        "teardown_complete",
-    ):
+    for field_name in lifecycle_fields:
         if payload.get(field_name) is not True:
             errors.append(f"{field_name} expected True, got {payload.get(field_name)!r}")
+    return errors
+
+
+def _validate_viewport_payload(payload: Mapping[str, object]) -> list[str]:
+    errors = _validate_viewport_lifecycle(
+        payload,
+        (
+            "secondary_viewport_observed",
+            "merge_observed",
+            "teardown_complete",
+        ),
+    )
     adapter = payload.get("adapter")
     if not isinstance(adapter, dict):
         errors.append("adapter must be a JSON object")
@@ -771,6 +837,85 @@ def _validate_viewport_payload(payload: Mapping[str, object]) -> list[str]:
     return errors
 
 
+def _validate_sdl3_glow_viewport_payload(
+    payload: Mapping[str, object],
+) -> list[str]:
+    errors = _validate_viewport_lifecycle(
+        payload,
+        (
+            "secondary_viewport_observed",
+            "secondary_viewport_rendered",
+            "merge_observed",
+            "teardown_complete",
+        ),
+    )
+    renderer = payload.get("renderer")
+    if not isinstance(renderer, dict):
+        errors.append("renderer must be a JSON object")
+        return errors
+    if renderer.get("backend") != "OpenGL":
+        errors.append(
+            f"renderer backend must be OpenGL, got {renderer.get('backend')!r}"
+        )
+    for field_name in ("vendor", "name", "version"):
+        if not isinstance(renderer.get(field_name), str) or not renderer[field_name]:
+            errors.append(f"renderer {field_name} must be a non-empty string")
+    identity = " ".join(
+        str(renderer.get(field_name, "")).lower()
+        for field_name in ("vendor", "name", "version")
+    )
+    if "lavapipe" not in identity and "llvmpipe" not in identity:
+        errors.append("renderer identity does not report Mesa llvmpipe")
+    return errors
+
+
+_WGPU_VIEWPORT_SMOKE = ViewportSmokeSpec(
+    gate="multi-viewport-smoke",
+    binary="multi_viewport_wgpu",
+    features="multi-viewport,test-engine",
+    package_names=(
+        "xvfb",
+        "openbox",
+        "mesa-vulkan-drivers",
+        "vulkan-tools",
+        "libxkbcommon-x11-0",
+    ),
+    probe_tool="vulkaninfo",
+    probe_arguments=("--summary",),
+    probe_log_stem="adapter",
+    probe_label="Lavapipe adapter probe",
+    probe_identities=("lavapipe", "llvmpipe"),
+    probe_identity_error="vulkaninfo did not expose a Lavapipe/llvmpipe adapter",
+    build_label="WGPU multi-viewport example build",
+    child_label="WGPU multi-viewport child",
+    success_summary="secondary Winit/WGPU viewport create, render, merge, and teardown passed",
+    payload_validator=_validate_viewport_payload,
+)
+
+_SDL3_GLOW_VIEWPORT_SMOKE = ViewportSmokeSpec(
+    gate="sdl3-glow-multi-viewport-smoke",
+    binary="sdl3_glow_multi_viewport",
+    features="sdl3-glow-multi-viewport,test-engine",
+    package_names=(
+        "xvfb",
+        "openbox",
+        "mesa-utils",
+        "libgl1-mesa-dri",
+        "libxkbcommon-x11-0",
+    ),
+    probe_tool="glxinfo",
+    probe_arguments=("-B",),
+    probe_log_stem="renderer",
+    probe_label="Mesa llvmpipe OpenGL probe",
+    probe_identities=("llvmpipe", "lavapipe"),
+    probe_identity_error="glxinfo did not expose a Mesa llvmpipe renderer",
+    build_label="SDL3/Glow multi-viewport example build",
+    child_label="SDL3/Glow multi-viewport child",
+    success_summary="secondary SDL3/Glow viewport create, render, merge, and teardown passed",
+    payload_validator=_validate_sdl3_glow_viewport_payload,
+)
+
+
 def _check_background(process: object, label: str) -> None:
     stream_errors = tuple(getattr(process, "stream_errors"))
     termination = getattr(process, "termination")
@@ -783,16 +928,17 @@ def _check_background(process: object, label: str) -> None:
         )
 
 
-def run_multi_viewport_smoke(
+def _run_viewport_smoke(
     *,
+    spec: ViewportSmokeSpec,
     workspace_root: Path,
     evidence_dir: Path,
     child_timeout: float = 180.0,
     build_timeout: float = 900.0,
     attempt: int = 1,
 ) -> GateResult:
-    """Run a real Winit/WGPU secondary-window lifecycle under Lavapipe."""
-    gate = "multi-viewport-smoke"
+    """Run one real secondary-window lifecycle under a software renderer."""
+    gate = spec.gate
     if not evidence_dir.is_absolute():
         evidence_dir = workspace_root / evidence_dir
     _prepare_evidence(
@@ -815,6 +961,8 @@ def run_multi_viewport_smoke(
             "window-manager.stderr.log",
             "adapter.stdout.log",
             "adapter.stderr.log",
+            "renderer.stdout.log",
+            "renderer.stderr.log",
             "viewport.stdout.log",
             "viewport.stderr.log",
             "viewport-result.json",
@@ -831,8 +979,29 @@ def run_multi_viewport_smoke(
     openbox = None
     xdg_runtime_owner = None
     try:
-        tools = _require_linux_runtime_tools()
-        lavapipe_icd = _find_lavapipe_icd()
+        if spec.gate == _WGPU_VIEWPORT_SMOKE.gate:
+            tools = _require_linux_runtime_tools()
+            lavapipe_icd = _find_lavapipe_icd()
+            route_diagnostics = {"lavapipe_icd": str(lavapipe_icd)}
+            route_environment: dict[str, str | Path] = {
+                "WINIT_UNIX_BACKEND": "x11",
+                "WGPU_BACKEND": "vulkan",
+                "VK_DRIVER_FILES": lavapipe_icd,
+                "VK_ICD_FILENAMES": lavapipe_icd,
+                "DEAR_IMGUI_REQUIRE_SOFTWARE_VULKAN": "1",
+            }
+        elif spec.gate == _SDL3_GLOW_VIEWPORT_SMOKE.gate:
+            tools = _require_linux_sdl3_glow_tools()
+            route_diagnostics = {"required_opengl_renderer": "Mesa llvmpipe"}
+            route_environment = {
+                "SDL_VIDEODRIVER": "x11",
+                "DEAR_IMGUI_REQUIRE_SOFTWARE_OPENGL": "1",
+            }
+        else:  # pragma: no cover - specs are module-owned constants.
+            raise RuntimeContractError(
+                GateCategory.PRODUCT_FAILURE,
+                f"unknown viewport smoke profile: {spec.gate}",
+            )
         display = os.environ.get("DEAR_IMGUI_XVFB_DISPLAY", ":99")
         # Keep Wayland's AF_UNIX socket path below Linux's 108-byte limit.
         runtime_temp_root = "/tmp" if sys.platform.startswith("linux") else None
@@ -847,9 +1016,9 @@ def run_multi_viewport_smoke(
             "architecture": platform.machine(),
             "runner_image": os.environ.get("ImageOS"),
             "runner_image_version": os.environ.get("ImageVersion"),
-            "lavapipe_icd": str(lavapipe_icd),
             "xdg_runtime_dir": str(xdg_runtime),
             "tools": {name: str(path) for name, path in sorted(tools.items())},
+            **route_diagnostics,
         }
         atomic_write_json(evidence_dir / "runtime-environment.json", diagnostics)
         details["environment"] = diagnostics
@@ -859,11 +1028,7 @@ def run_multi_viewport_smoke(
                 tools["dpkg-query"],
                 "--show",
                 "--showformat=${Package}=${Version}\\n",
-                "xvfb",
-                "openbox",
-                "mesa-vulkan-drivers",
-                "vulkan-tools",
-                "libxkbcommon-x11-0",
+                *spec.package_names,
             ),
             cwd=workspace_root,
             timeout=15.0,
@@ -880,17 +1045,13 @@ def run_multi_viewport_smoke(
         child_environment = environment(
             {
                 "DISPLAY": display,
-                "WINIT_UNIX_BACKEND": "x11",
-                "WGPU_BACKEND": "vulkan",
-                "VK_DRIVER_FILES": lavapipe_icd,
-                "VK_ICD_FILENAMES": lavapipe_icd,
                 "LIBGL_ALWAYS_SOFTWARE": "1",
                 "GALLIUM_DRIVER": "llvmpipe",
                 "DEAR_IMGUI_VIEWPORT_SMOKE": "1",
-                "DEAR_IMGUI_REQUIRE_SOFTWARE_VULKAN": "1",
                 "DEAR_IMGUI_VIEWPORT_SMOKE_JSON": evidence_dir
                 / "viewport-result.json",
                 "IMGUI_SYS_FORCE_BUILD": "1",
+                **route_environment,
             }
         )
         child_environment["XDG_RUNTIME_DIR"] = str(xdg_runtime)
@@ -898,23 +1059,36 @@ def run_multi_viewport_smoke(
         build = _run_example_build(
             workspace_root=workspace_root,
             evidence_dir=evidence_dir,
-            binary="multi_viewport_wgpu",
-            features="multi-viewport,test-engine",
+            binary=spec.binary,
+            features=spec.features,
             timeout=build_timeout,
             child_environment=child_environment,
         )
         details["build"] = _process_json(build, evidence_dir)
         _check_stage(
             build,
-            label="WGPU multi-viewport example build",
+            label=spec.build_label,
             nonzero_category=GateCategory.PRODUCT_FAILURE,
         )
-        binary = _example_binary(workspace_root, "multi_viewport_wgpu")
+        binary = _example_binary(workspace_root, spec.binary)
         if not binary.is_file():
             raise RuntimeContractError(
                 GateCategory.INFRASTRUCTURE_UNAVAILABLE,
                 f"cargo succeeded without producing {binary}",
             )
+        if spec.gate == _SDL3_GLOW_VIEWPORT_SMOKE.gate:
+            sdl3_library_dirs = _sdl3_runtime_library_directories(workspace_root)
+            inherited_library_path = child_environment.get("LD_LIBRARY_PATH", "")
+            child_environment["LD_LIBRARY_PATH"] = os.pathsep.join(
+                (
+                    *(str(path) for path in sdl3_library_dirs),
+                    *((inherited_library_path,) if inherited_library_path else ()),
+                )
+            )
+            diagnostics["sdl3_library_dirs"] = [
+                str(path) for path in sdl3_library_dirs
+            ]
+            atomic_write_json(evidence_dir / "runtime-environment.json", diagnostics)
 
         xvfb = managed_background(
             (
@@ -969,33 +1143,35 @@ def run_multi_viewport_smoke(
                         details["window_manager_probe"] = _process_json(
                             window_manager_probe, evidence_dir
                         )
-                        adapter_probe = run_bounded(
-                            (tools["vulkaninfo"], "--summary"),
+                        renderer_probe = run_bounded(
+                            (tools[spec.probe_tool], *spec.probe_arguments),
                             cwd=workspace_root,
                             env=child_environment,
                             timeout=30.0,
-                            stdout_log=evidence_dir / "adapter.stdout.log",
-                            stderr_log=evidence_dir / "adapter.stderr.log",
+                            stdout_log=evidence_dir
+                            / f"{spec.probe_log_stem}.stdout.log",
+                            stderr_log=evidence_dir
+                            / f"{spec.probe_log_stem}.stderr.log",
                         )
-                        details["adapter_probe"] = _process_json(
-                            adapter_probe, evidence_dir
+                        details["renderer_probe"] = _process_json(
+                            renderer_probe, evidence_dir
                         )
                         _check_stage(
-                            adapter_probe,
-                            label="Lavapipe adapter probe",
+                            renderer_probe,
+                            label=spec.probe_label,
                             nonzero_category=GateCategory.INFRASTRUCTURE_UNAVAILABLE,
                         )
-                        adapter_output = "\n".join(
+                        renderer_output = "\n".join(
                             path.read_text(encoding="utf-8", errors="replace").lower()
-                            for path in adapter_probe.log_paths
+                            for path in renderer_probe.log_paths
                         )
-                        if (
-                            "lavapipe" not in adapter_output
-                            and "llvmpipe" not in adapter_output
+                        if not any(
+                            identity in renderer_output
+                            for identity in spec.probe_identities
                         ):
                             raise RuntimeContractError(
                                 GateCategory.INFRASTRUCTURE_UNAVAILABLE,
-                                "vulkaninfo did not expose a Lavapipe/llvmpipe adapter",
+                                spec.probe_identity_error,
                             )
 
                         viewport_result = evidence_dir / "viewport-result.json"
@@ -1011,7 +1187,7 @@ def run_multi_viewport_smoke(
                         details["viewport"] = _process_json(child, evidence_dir)
                         _check_stage(
                             child,
-                            label="WGPU multi-viewport child",
+                            label=spec.child_label,
                             nonzero_category=GateCategory.PRODUCT_FAILURE,
                         )
                         if xvfb.poll() is not None:
@@ -1033,7 +1209,7 @@ def run_multi_viewport_smoke(
             _check_background(xvfb, "Xvfb")
 
         payload = _read_object(evidence_dir / "viewport-result.json")
-        errors = _validate_viewport_payload(payload)
+        errors = spec.payload_validator(payload)
         details["result"] = payload
         if errors:
             raise RuntimeContractError(
@@ -1044,7 +1220,7 @@ def run_multi_viewport_smoke(
             gate,
             True,
             GateCategory.PASSED,
-            "secondary Winit/WGPU viewport create, render, merge, and teardown passed",
+            spec.success_summary,
             attempt,
             details,
         )
@@ -1072,3 +1248,41 @@ def run_multi_viewport_smoke(
         if xdg_runtime_owner is not None:
             xdg_runtime_owner.cleanup()
     return _finalize(result, evidence_dir)
+
+
+def run_multi_viewport_smoke(
+    *,
+    workspace_root: Path,
+    evidence_dir: Path,
+    child_timeout: float = 180.0,
+    build_timeout: float = 900.0,
+    attempt: int = 1,
+) -> GateResult:
+    """Run a real Winit/WGPU secondary-window lifecycle under Lavapipe."""
+    return _run_viewport_smoke(
+        spec=_WGPU_VIEWPORT_SMOKE,
+        workspace_root=workspace_root,
+        evidence_dir=evidence_dir,
+        child_timeout=child_timeout,
+        build_timeout=build_timeout,
+        attempt=attempt,
+    )
+
+
+def run_sdl3_glow_viewport_smoke(
+    *,
+    workspace_root: Path,
+    evidence_dir: Path,
+    child_timeout: float = 180.0,
+    build_timeout: float = 900.0,
+    attempt: int = 1,
+) -> GateResult:
+    """Run a real SDL3/Glow secondary-window lifecycle under Mesa llvmpipe."""
+    return _run_viewport_smoke(
+        spec=_SDL3_GLOW_VIEWPORT_SMOKE,
+        workspace_root=workspace_root,
+        evidence_dir=evidence_dir,
+        child_timeout=child_timeout,
+        build_timeout=build_timeout,
+        attempt=attempt,
+    )

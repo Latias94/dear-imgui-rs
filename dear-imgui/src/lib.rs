@@ -115,8 +115,9 @@
 //!   detached snapshots commit feedback when their GPU work is complete.
 //! - Bind [`DrawCmdParams::texture_id`](render::DrawCmdParams::texture_id). Command iteration
 //!   resolves the effective ID for both legacy and managed texture references.
-//! - After destroying every renderer-owned GPU texture, call
-//!   `Context::reset_renderer_texture_bindings` before dropping the consumer.
+//! - Before destroying the renderer's complete GPU texture map, call
+//!   `Context::prepare_renderer_texture_reset`. Destroy the map only after preparation succeeds,
+//!   then commit the permit before dropping the consumer.
 //!
 //! Pseudocode outline:
 //! ```ignore
@@ -150,6 +151,13 @@
 //!     }
 //!   }
 //! }
+//! drop(frame);
+//!
+//! // Shutdown only after every frame and its GPU work has completed.
+//! let reset = context.prepare_renderer_texture_reset(&consumer)?;
+//! destroy_all_gpu_textures();
+//! let _invalidated = reset.commit();
+//! drop(consumer);
 //! ```
 //!
 //! For thread-safe render work, register one renderer consumer and capture a Context-created,

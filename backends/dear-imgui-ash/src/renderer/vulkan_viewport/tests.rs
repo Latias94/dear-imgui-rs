@@ -3,13 +3,14 @@ use std::ffi::c_void;
 use std::rc::Rc;
 
 use super::callbacks::{
-    publish_registered_box, publish_registered_box_transactionally,
-    request_platform_close_after_create_failure, validate_secondary_viewports,
+    publish_registered_box, publish_registered_box_transactionally, recover_acquired_step,
+    validate_secondary_viewports,
 };
 use super::registry::{
-    fail_next_viewport_registration, register_viewport_data, take_viewport_data_from_viewport,
-    validate_queue_family_selection, validate_vulkan_handles, viewport_data_count,
-    viewport_user_data_mut,
+    ViewportIdentity, fail_next_viewport_registration, preflight_registered_viewport_data,
+    register_viewport_data, resolve_viewport, resolve_viewport_by_id,
+    take_viewport_data_from_viewport, unregister_viewport_data, validate_queue_family_selection,
+    validate_vulkan_handles, viewport_data_count, viewport_user_data_mut,
 };
 use super::*;
 use ash::vk::Handle;
@@ -163,17 +164,89 @@ fn registration_failure_cleans_every_viewport_resource_category() {
 #[test]
 fn injected_viewport_registration_failure_publishes_no_sidecar() {
     let _guard = super::test_context_guard();
-    let context = Context::create();
+    let mut context = Context::create();
+    let binding = context.binding();
+    let identity = ViewportIdentity::from_viewport(context.main_viewport());
     let pointer = std::ptr::NonNull::<ViewportAshData>::dangling().as_ptr();
     fail_next_viewport_registration();
 
     assert!(matches!(
-        register_viewport_data(&context.binding(), pointer),
+        register_viewport_data(&binding, identity, pointer),
         Err(AshViewportError::InvalidCallbackArgument {
             callback: "injected RendererUserData registration"
         })
     ));
     assert_eq!(viewport_data_count(context.id()), 0);
+}
+
+#[test]
+fn viewport_identity_resolver_ignores_missing_public_viewport_entry() {
+    let _guard = super::test_context_guard();
+    let mut context = Context::create();
+    let (identity, raw) = {
+        let viewport = context.main_viewport();
+        (
+            ViewportIdentity::from_viewport(viewport),
+            viewport.as_raw_mut(),
+        )
+    };
+
+    // Hidden viewports are absent from the public PlatformIO list. The resolver only requires
+    // Dear ImGui's internal ID lookup, so an omitted public entry cannot prevent cleanup.
+    let public_viewports: [*mut sys::ImGuiViewport; 0] = [];
+    assert!(
+        !public_viewports
+            .iter()
+            .any(|viewport| std::ptr::eq(*viewport, raw))
+    );
+    assert_eq!(resolve_viewport(identity), Some(raw));
+    assert_eq!(
+        resolve_viewport_by_id(identity, |id| {
+            assert_eq!(id, identity.id);
+            raw
+        }),
+        Some(raw)
+    );
+
+    let replaced_address = ViewportIdentity {
+        address: identity
+            .address
+            .wrapping_add(std::mem::align_of::<sys::ImGuiViewport>()),
+        ..identity
+    };
+    assert_eq!(resolve_viewport_by_id(replaced_address, |_| raw), None);
+}
+
+#[test]
+fn preflight_rejects_foreign_sidecar_filtered_from_public_snapshot() {
+    let _guard = super::test_context_guard();
+    let mut context = Context::create();
+    let binding = context.binding();
+    let identity = ViewportIdentity::from_viewport(context.main_viewport());
+    let viewport = context.main_viewport().as_raw_mut();
+    let pointer = std::ptr::NonNull::<ViewportAshData>::dangling().as_ptr();
+    register_viewport_data(&binding, identity, pointer).unwrap();
+    let foreign = std::ptr::dangling_mut::<std::ffi::c_void>();
+    unsafe { (*viewport).RendererUserData = foreign };
+
+    let platform_io = context.platform_io_mut().as_raw_mut();
+    let original_size = unsafe { (*platform_io).Viewports.Size };
+    // The full internal lookup remains live while the public presentation omits this viewport.
+    unsafe { (*platform_io).Viewports.Size = 0 };
+    let result = preflight_registered_viewport_data(context.as_raw(), &binding);
+    unsafe { (*platform_io).Viewports.Size = original_size };
+
+    assert!(matches!(
+        result,
+        Err(AshViewportError::RendererUserDataOwnershipLost {
+            callback: "viewport runtime shutdown"
+        })
+    ));
+    assert_eq!(viewport_data_count(context.id()), 1);
+    assert_eq!(unsafe { (*viewport).RendererUserData }, foreign);
+
+    unsafe { (*viewport).RendererUserData = std::ptr::null_mut() };
+    unregister_viewport_data(pointer);
 }
 
 #[test]
@@ -193,13 +266,41 @@ fn foreign_renderer_user_data_is_never_typed_or_taken() {
 }
 
 #[test]
-fn creation_failure_requests_platform_window_close() {
-    let mut raw_viewport = sys::ImGuiViewport::default();
-    let viewport = unsafe { Viewport::from_raw_mut(&mut raw_viewport) };
+fn every_acquired_frame_error_runs_recovery_before_returning() {
+    let recovery_count = Cell::new(0);
+    let result = recover_acquired_step::<()>(
+        Err(RendererError::Init(
+            "injected acquired-frame failure".into(),
+        )),
+        || {
+            recovery_count.set(recovery_count.get() + 1);
+            Ok(())
+        },
+    );
 
-    request_platform_close_after_create_failure(viewport);
+    assert!(matches!(result, Err(AshViewportError::Renderer(_))));
+    assert_eq!(recovery_count.get(), 1);
+}
 
-    assert!(viewport.platform_request_close());
+#[test]
+fn acquired_frame_error_preserves_recovery_failure() {
+    let result = recover_acquired_step::<()>(
+        Err(RendererError::Init(
+            "injected acquired-frame failure".into(),
+        )),
+        || {
+            Err(AshViewportError::InvalidCallbackArgument {
+                callback: "injected recovery failure",
+            })
+        },
+    );
+
+    assert!(matches!(
+        result,
+        Err(AshViewportError::InvalidCallbackArgument {
+            callback: "injected recovery failure"
+        })
+    ));
 }
 
 #[test]
@@ -269,5 +370,156 @@ fn zero_extent_pauses_and_variable_extent_is_clamped() {
     assert_eq!(
         swapchain::select_swapchain_extent(&capabilities, None),
         None
+    );
+}
+
+#[test]
+fn auto_no_vsync_prefers_immediate_over_fifo() {
+    let modes = [vk::PresentModeKHR::FIFO, vk::PresentModeKHR::IMMEDIATE];
+
+    assert_eq!(
+        swapchain::resolve_present_mode(PresentModePolicy::AutoNoVsync, &modes),
+        Ok(vk::PresentModeKHR::IMMEDIATE)
+    );
+}
+
+#[test]
+fn auto_no_vsync_prefers_mailbox_over_fifo() {
+    let modes = [vk::PresentModeKHR::FIFO, vk::PresentModeKHR::MAILBOX];
+
+    assert_eq!(
+        swapchain::resolve_present_mode(PresentModePolicy::AutoNoVsync, &modes),
+        Ok(vk::PresentModeKHR::MAILBOX)
+    );
+}
+
+#[test]
+fn auto_no_vsync_safely_falls_back_to_fifo() {
+    assert_eq!(
+        swapchain::resolve_present_mode(
+            PresentModePolicy::AutoNoVsync,
+            &[vk::PresentModeKHR::FIFO]
+        ),
+        Ok(vk::PresentModeKHR::FIFO)
+    );
+}
+
+#[test]
+fn auto_vsync_prefers_fifo_relaxed_then_fifo() {
+    assert_eq!(
+        swapchain::resolve_present_mode(
+            PresentModePolicy::AutoVsync,
+            &[vk::PresentModeKHR::FIFO, vk::PresentModeKHR::FIFO_RELAXED]
+        ),
+        Ok(vk::PresentModeKHR::FIFO_RELAXED)
+    );
+    assert_eq!(
+        swapchain::resolve_present_mode(PresentModePolicy::AutoVsync, &[vk::PresentModeKHR::FIFO]),
+        Ok(vk::PresentModeKHR::FIFO)
+    );
+}
+
+#[test]
+fn unsupported_exact_present_mode_is_rejected() {
+    assert_eq!(
+        swapchain::resolve_present_mode(
+            PresentModePolicy::Exact(vk::PresentModeKHR::IMMEDIATE),
+            &[vk::PresentModeKHR::FIFO]
+        ),
+        Err(SurfaceSupportError::PresentModeUnsupported {
+            requested: vk::PresentModeKHR::IMMEDIATE,
+        })
+    );
+}
+
+#[test]
+fn automatic_srgb_selection_matches_the_complete_surface_pair() {
+    let hdr = vk::SurfaceFormatKHR {
+        format: vk::Format::B8G8R8A8_SRGB,
+        color_space: vk::ColorSpaceKHR::HDR10_ST2084_EXT,
+    };
+    let srgb = vk::SurfaceFormatKHR {
+        format: vk::Format::B8G8R8A8_SRGB,
+        color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
+    };
+
+    assert_eq!(
+        swapchain::resolve_surface_format(SurfaceFormatPolicy::AutoSrgb, &[hdr, srgb]),
+        Ok(srgb)
+    );
+}
+
+#[test]
+fn undefined_surface_format_sentinel_resolves_to_an_srgb_pair() {
+    let undefined = vk::SurfaceFormatKHR {
+        format: vk::Format::UNDEFINED,
+        color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
+    };
+
+    assert_eq!(
+        swapchain::resolve_surface_format(SurfaceFormatPolicy::AutoSrgb, &[undefined]),
+        Ok(vk::SurfaceFormatKHR {
+            format: vk::Format::B8G8R8A8_SRGB,
+            color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
+        })
+    );
+}
+
+#[test]
+fn undefined_surface_format_sentinel_preserves_its_color_space() {
+    let undefined_hdr = vk::SurfaceFormatKHR {
+        format: vk::Format::UNDEFINED,
+        color_space: vk::ColorSpaceKHR::HDR10_ST2084_EXT,
+    };
+    let requested = vk::SurfaceFormatKHR {
+        format: vk::Format::A2B10G10R10_UNORM_PACK32,
+        color_space: vk::ColorSpaceKHR::HDR10_ST2084_EXT,
+    };
+
+    assert_eq!(
+        swapchain::resolve_surface_format(SurfaceFormatPolicy::Exact(requested), &[undefined_hdr]),
+        Ok(requested)
+    );
+    assert_eq!(
+        swapchain::resolve_surface_format(SurfaceFormatPolicy::AutoSrgb, &[undefined_hdr]),
+        Err(SurfaceSupportError::SrgbSurfaceFormatUnsupported)
+    );
+}
+
+#[test]
+fn exact_surface_policy_rejects_undefined_as_a_swapchain_format() {
+    let undefined = vk::SurfaceFormatKHR {
+        format: vk::Format::UNDEFINED,
+        color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
+    };
+
+    assert_eq!(
+        swapchain::resolve_surface_format(SurfaceFormatPolicy::Exact(undefined), &[undefined]),
+        Err(SurfaceSupportError::SurfaceFormatUnsupported {
+            requested: undefined,
+        })
+    );
+}
+
+#[test]
+fn main_surface_policy_copies_the_pair_and_vsync_intent() {
+    let pair = vk::SurfaceFormatKHR {
+        format: vk::Format::B8G8R8A8_SRGB,
+        color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
+    };
+
+    assert_eq!(
+        ViewportSwapchainPolicy::from_main_surface(pair, vk::PresentModeKHR::FIFO),
+        ViewportSwapchainPolicy {
+            surface_format: SurfaceFormatPolicy::Exact(pair),
+            present_mode: PresentModePolicy::AutoVsync,
+        }
+    );
+    assert_eq!(
+        ViewportSwapchainPolicy::from_main_surface(pair, vk::PresentModeKHR::IMMEDIATE),
+        ViewportSwapchainPolicy {
+            surface_format: SurfaceFormatPolicy::Exact(pair),
+            present_mode: PresentModePolicy::AutoNoVsync,
+        }
     );
 }

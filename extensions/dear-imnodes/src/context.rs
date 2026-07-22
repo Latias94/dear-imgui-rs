@@ -381,10 +381,14 @@ mod tests {
         }
 
         impl dear_imgui_rs::ContextAttachment for DropImNodesOnQuiesce {
-            fn quiesce(&self, _context: &dear_imgui_rs::ContextTeardown<'_>) {
+            fn quiesce(
+                &self,
+                _context: &dear_imgui_rs::ContextTeardown<'_>,
+            ) -> Result<(), dear_imgui_rs::ContextAttachmentTeardownError> {
                 drop(self.editor.borrow_mut().take());
                 drop(self.context.borrow_mut().take());
                 self.quiesced.set(true);
+                Ok(())
             }
         }
 

@@ -5,18 +5,19 @@ use std::rc::Rc;
 use dear_imgui_rs::render::RenderedFrame;
 use dear_imgui_rs::{
     Context, ContextAttachment, ContextAttachmentError, ContextAttachmentLease,
-    ContextAttachmentRole, ContextBinding, ContextBindingError, ContextDestroyed, ContextId,
-    ContextTeardown, TextureId,
+    ContextAttachmentRole, ContextAttachmentTeardownError, ContextBinding, ContextBindingError,
+    ContextDestroyed, ContextId, ContextLifecycle, ContextTeardown, TextureId,
 };
 use thiserror::Error;
 
 use super::callbacks::{
-    claim_callbacks, destroy_renderer_viewport_resources, detect_callback_drift,
-    preflight_callbacks, release_callbacks,
+    claim_callbacks, destroy_renderer_viewport_resources, detect_runtime_contract_drift,
+    preflight_callbacks, preflight_renderer_viewport_resources, release_callbacks,
+    revoke_renderer_viewport_capability_if_owned,
 };
 use super::registry::{
-    GlobalHandles, preflight_runtime, register_runtime, renderer_globals, take_viewport_data,
-    unregister_runtime,
+    GlobalHandles, drop_orphaned_viewport_data, preflight_runtime, register_runtime,
+    renderer_globals, unregister_runtime,
 };
 use crate::{GammaMode, RendererError, WgpuRenderer};
 
@@ -65,12 +66,21 @@ pub enum WgpuViewportError {
     /// A required platform callback is absent.
     #[error("required ImGuiPlatformIO callback `{callback}` is not installed")]
     PlatformCallbackUnavailable { callback: &'static str },
+    /// PlatformIO itself is unavailable for the currently bound Context.
+    #[error("the bound Dear ImGui Context has no PlatformIO")]
+    PlatformIoUnavailable,
     /// The platform runtime has not published the main native window handle.
     #[error("the attached platform runtime has no main viewport window handle")]
     MainViewportHandleUnavailable,
     /// Another renderer already owns one renderer callback slot.
     #[error("ImGuiPlatformIO callback `{callback}` is already owned by another renderer")]
     RendererCallbackOccupied { callback: &'static str },
+    /// Another renderer already advertises multi-viewport support.
+    #[error("another renderer already advertises RENDERER_HAS_VIEWPORTS")]
+    RendererViewportCapabilityOccupied,
+    /// This runtime's renderer capability bit was cleared while it remained attached.
+    #[error("WGPU renderer backend flag RENDERER_HAS_VIEWPORTS was removed while attached")]
+    RendererViewportCapabilityLost,
     /// A callback claimed by this runtime was replaced while attached.
     #[error("WGPU renderer callback `{callback}` was replaced while the runtime was attached")]
     RendererCallbackReplaced { callback: &'static str },
@@ -104,6 +114,14 @@ pub enum WgpuViewportError {
     /// Creating or configuring a viewport surface failed.
     #[error("WGPU viewport surface operation `{operation}` failed")]
     SurfaceOperationFailed { operation: &'static str },
+    /// The renderer's target format is unavailable with its required secondary-surface encoding.
+    #[error(
+        "WGPU render target format {format:?} is unavailable for secondary viewports in {color_space}"
+    )]
+    UnsupportedSurfaceFormat {
+        format: wgpu::TextureFormat,
+        color_space: &'static str,
+    },
     /// Surface acquisition returned a terminal result.
     #[error("WGPU viewport surface acquisition was rejected: {event}")]
     SurfaceRejected { event: &'static str },
@@ -183,8 +201,6 @@ enum CallbackState {
 enum ShutdownAction<'a> {
     Quiesce,
     Explicit(&'a mut Context),
-    BestEffort,
-    ContextResources,
 }
 
 pub(super) struct RuntimeControl {
@@ -195,8 +211,6 @@ pub(super) struct RuntimeControl {
     globals: RefCell<Option<GlobalHandles>>,
     attachment: RefCell<Option<ContextAttachmentLease>>,
     callback_state: Cell<CallbackState>,
-    prior_backend_flags: dear_imgui_rs::BackendFlags,
-    renderer_flags_added: dear_imgui_rs::BackendFlags,
     faults: RefCell<Option<WgpuViewportError>>,
     #[cfg(test)]
     panic_next_callback: Cell<bool>,
@@ -219,12 +233,7 @@ impl fmt::Debug for RuntimeControl {
 }
 
 impl RuntimeControl {
-    fn new(
-        context: &Context,
-        renderer: WgpuRenderer,
-        globals: Option<GlobalHandles>,
-        renderer_flags_added: dear_imgui_rs::BackendFlags,
-    ) -> Self {
+    fn new(context: &Context, renderer: WgpuRenderer, globals: Option<GlobalHandles>) -> Self {
         Self {
             context_raw: context.as_raw(),
             binding: context.binding(),
@@ -233,8 +242,6 @@ impl RuntimeControl {
             globals: RefCell::new(globals),
             attachment: RefCell::new(None),
             callback_state: Cell::new(CallbackState::Unclaimed),
-            prior_backend_flags: context.io().backend_flags(),
-            renderer_flags_added,
             faults: RefCell::new(None),
             #[cfg(test)]
             panic_next_callback: Cell::new(false),
@@ -253,10 +260,6 @@ impl RuntimeControl {
         &self.binding
     }
 
-    pub(super) fn prior_backend_flags(&self) -> dear_imgui_rs::BackendFlags {
-        self.prior_backend_flags
-    }
-
     pub(super) fn globals(&self) -> Option<GlobalHandles> {
         self.globals.borrow().clone()
     }
@@ -264,6 +267,13 @@ impl RuntimeControl {
     pub(super) fn is_callback_accessible(&self) -> bool {
         self.state.get() == RuntimeState::Attached
             && self.callback_state.get() != CallbackState::Released
+    }
+
+    pub(super) fn is_cleanup_callback_accessible(&self) -> bool {
+        matches!(
+            self.state.get(),
+            RuntimeState::Attached | RuntimeState::ShuttingDown
+        ) && self.callback_state.get() == CallbackState::Claimed
     }
 
     pub(super) fn should_detect_callback_drift(&self) -> bool {
@@ -328,13 +338,60 @@ impl RuntimeControl {
         }
     }
 
-    pub(super) fn record_callback_replaced(&self, callback: &'static str) {
-        self.record_fault(WgpuViewportError::RendererCallbackReplaced { callback });
+    pub(super) fn record_runtime_contract_fault(&self, fault: WgpuViewportError) {
+        let _ = self.binding.try_with_bound_context(|| {
+            revoke_renderer_viewport_capability_if_owned(self);
+        });
+        self.record_fault(fault);
         self.begin_shutdown();
     }
 
+    /// Returns whether this runtime can still prove a WGPU core renderer publication on the
+    /// bound Context. A reentrant mutable borrow is not proof of ownership, so it preserves the
+    /// shared capability bit until a later teardown can inspect the exact publications.
+    pub(super) fn owns_core_renderer_publication_bound(&self) -> bool {
+        let Ok(renderer) = self.renderer.try_borrow() else {
+            return false;
+        };
+        renderer
+            .as_deref()
+            .is_some_and(WgpuRenderer::owns_context_publication_bound)
+    }
+
+    pub(super) fn record_entry_fault(&self, fault: WgpuViewportError) {
+        if matches!(
+            &fault,
+            WgpuViewportError::Renderer(RendererError::RendererStateDrift { .. })
+                | WgpuViewportError::RendererUserDataOwnershipLost { .. }
+                | WgpuViewportError::CallbackPanicked { .. }
+                | WgpuViewportError::SurfaceRejected { .. }
+        ) {
+            self.record_runtime_contract_fault(fault);
+        } else {
+            self.record_fault(fault);
+        }
+    }
+
+    pub(super) fn core_renderer_contract_fault(&self) -> Option<WgpuViewportError> {
+        let renderer = match self.renderer.try_borrow() {
+            Ok(renderer) => renderer,
+            Err(_) => {
+                return Some(WgpuViewportError::CallbackReentered {
+                    callback: "renderer contract validation",
+                });
+            }
+        };
+        let renderer = renderer
+            .as_deref()
+            .ok_or(WgpuViewportError::RuntimeDetached);
+        match renderer {
+            Ok(renderer) => renderer.ensure_renderer_contract().err().map(Into::into),
+            Err(error) => Some(error),
+        }
+    }
+
     fn detect_and_take_fault(&self) -> Option<WgpuViewportError> {
-        detect_callback_drift(self);
+        detect_runtime_contract_drift(self);
         self.faults.borrow_mut().take()
     }
 
@@ -379,7 +436,22 @@ impl RuntimeControl {
                 .as_deref_mut()
                 .ok_or(WgpuViewportError::RuntimeDetached)?;
             callback(renderer)
-        }?;
+        };
+        let result = match result {
+            Ok(result) => result,
+            Err(error) => {
+                if matches!(
+                    &error,
+                    WgpuViewportError::Renderer(RendererError::RendererStateDrift { .. })
+                ) {
+                    self.record_runtime_contract_fault(error);
+                    return Err(self
+                        .detect_and_take_fault()
+                        .unwrap_or(WgpuViewportError::RuntimeDetached));
+                }
+                return Err(error);
+            }
+        };
         self.finish_entry()?;
         Ok(result)
     }
@@ -410,6 +482,10 @@ impl RuntimeControl {
         callback_name: &'static str,
         callback: impl FnOnce(&mut WgpuRenderer, &GlobalHandles) -> Result<(), WgpuViewportError>,
     ) {
+        detect_runtime_contract_drift(self);
+        if self.state.get() != RuntimeState::Attached || self.faults.borrow().is_some() {
+            return;
+        }
         let Ok(mut renderer) = self.renderer.try_borrow_mut() else {
             self.record_fault(WgpuViewportError::CallbackReentered {
                 callback: callback_name,
@@ -425,8 +501,22 @@ impl RuntimeControl {
             return;
         };
         if let Err(error) = callback(renderer, &globals) {
-            self.record_fault(error);
+            self.record_entry_fault(error);
         }
+    }
+
+    fn preflight_renderer_shutdown(&self, context: &mut Context) -> Result<(), WgpuViewportError> {
+        let renderer =
+            self.renderer
+                .try_borrow()
+                .map_err(|_| WgpuViewportError::CallbackReentered {
+                    callback: "WGPU viewport runtime shutdown preflight",
+                })?;
+        renderer
+            .as_deref()
+            .ok_or(WgpuViewportError::RuntimeDetached)?
+            .preflight_shutdown(context)
+            .map_err(Into::into)
     }
 
     fn release_renderer_explicit(&self, context: &mut Context) -> Result<(), WgpuViewportError> {
@@ -452,35 +542,81 @@ impl RuntimeControl {
         Ok(())
     }
 
-    fn release_renderer_without_context_reset(&self) -> Result<(), WgpuViewportError> {
+    fn release_renderer_during_context_teardown(
+        &self,
+        context: &ContextTeardown<'_>,
+    ) -> Result<(), ContextAttachmentTeardownError> {
+        if self.state.get() == RuntimeState::ResourceDropped {
+            return Ok(());
+        }
+
+        // Do not acquire the Context reset transaction until every visible sidecar still proves
+        // exact ownership. This is read-only, so either failure leaves callback publication,
+        // renderer resources, and the consumer intact for Context's fail-stop path.
+        preflight_renderer_viewport_resources(self).map_err(|error| {
+            let message = error.to_string();
+            self.record_fault(error);
+            ContextAttachmentTeardownError::new(message)
+        })?;
+
         if self.renderer.borrow().is_none() {
+            self.mark_detached();
             self.globals.borrow_mut().take();
             self.set_state(RuntimeState::ResourceDropped);
             return Ok(());
         }
-        let mut renderer =
-            self.renderer
-                .try_borrow_mut()
-                .map_err(|_| WgpuViewportError::CallbackReentered {
-                    callback: "Context renderer-resource teardown",
-                })?;
-        if let Some(renderer) = renderer.as_deref_mut() {
-            renderer.shutdown_without_context_reset();
-        }
-        let renderer = renderer.take();
+
+        let mut renderer_slot = self.renderer.try_borrow_mut().map_err(|_| {
+            ContextAttachmentTeardownError::new(
+                "WGPU renderer was reentered during Context renderer-resource teardown",
+            )
+        })?;
+        let renderer = renderer_slot.as_deref_mut().ok_or_else(|| {
+            ContextAttachmentTeardownError::new(
+                "WGPU renderer disappeared during Context renderer-resource teardown",
+            )
+        })?;
+
+        renderer.shutdown_during_context_teardown(context, || {
+            self.begin_shutdown();
+            destroy_renderer_viewport_resources(self).map_err(|error| {
+                let message = error.to_string();
+                self.record_fault(error);
+                ContextAttachmentTeardownError::new(message)
+            })?;
+            release_callbacks(self).map_err(|error| {
+                let message = error.to_string();
+                self.record_fault(error);
+                ContextAttachmentTeardownError::new(message)
+            })?;
+            self.mark_detached();
+            Ok(())
+        })?;
+
+        let renderer = renderer_slot.take();
         drop(renderer);
         self.globals.borrow_mut().take();
         self.set_state(RuntimeState::ResourceDropped);
         Ok(())
     }
 
-    fn shutdown_once(&self, action: ShutdownAction<'_>) -> Result<(), WgpuViewportError> {
+    fn shutdown_once(&self, mut action: ShutdownAction<'_>) -> Result<(), WgpuViewportError> {
         if self.state.get() == RuntimeState::ResourceDropped {
-            if !matches!(action, ShutdownAction::ContextResources) {
-                self.detach_attachment();
-            }
+            self.detach_attachment();
             return Ok(());
         }
+
+        // An explicit shutdown is retryable. Validate that no live frame or detached snapshot
+        // prevents the renderer reset before mutating viewport sidecars, surfaces, callbacks, or
+        // runtime state.
+        if let ShutdownAction::Explicit(context) = &mut action {
+            self.preflight_renderer_shutdown(&mut **context)?;
+        }
+
+        // A foreign write to one sidecar makes the active DestroyWindow callback the only safe
+        // reclaim path. Verify every reachable slot before changing the runtime state, dropping
+        // any sidecar, or clearing callback publication.
+        preflight_renderer_viewport_resources(self)?;
 
         self.begin_shutdown();
         let viewport_result = if matches!(action, ShutdownAction::Quiesce) {
@@ -506,57 +642,27 @@ impl RuntimeControl {
                 }
                 first_error([viewport_error, callback_result.err(), renderer_result.err()])
             }
-            ShutdownAction::BestEffort => {
-                self.mark_detached();
-                let renderer_result = self.release_renderer_without_context_reset();
-                if self.state.get() == RuntimeState::ResourceDropped {
-                    self.clear_bound_renderer_configuration();
-                    self.detach_attachment();
-                }
-                first_error([viewport_error, callback_result.err(), renderer_result.err()])
-            }
-            ShutdownAction::ContextResources => {
-                self.mark_detached();
-                let renderer_result = self.release_renderer_without_context_reset();
-                first_error([viewport_error, callback_result.err(), renderer_result.err()])
-            }
         }
-    }
-
-    fn clear_bound_renderer_configuration(&self) {
-        let io = unsafe { dear_imgui_rs::sys::igGetIO_Nil() };
-        let platform_io = unsafe { dear_imgui_rs::sys::igGetPlatformIO_Nil() };
-        if io.is_null() || platform_io.is_null() {
-            return;
-        }
-        let platform_io =
-            unsafe { dear_imgui_rs::platform_io::PlatformIo::from_raw_mut(platform_io) };
-        let renderer_name = unsafe {
-            (!(*io).BackendRendererName.is_null())
-                .then(|| std::ffi::CStr::from_ptr((*io).BackendRendererName))
-        };
-        let renderer_name_is_ours = WgpuRenderer::renderer_name_is_ours(renderer_name);
-        let draw_callbacks_are_ours = WgpuRenderer::owned_draw_callbacks_match(platform_io);
-        unsafe {
-            if renderer_name_is_ours {
-                (*io).BackendRendererName = std::ptr::null();
-            }
-            if renderer_name_is_ours && draw_callbacks_are_ours {
-                (*io).BackendFlags &= !self.renderer_flags_added.bits();
-            }
-        }
-        WgpuRenderer::clear_owned_draw_callbacks(platform_io);
     }
 
     fn owner_dropped(&self) {
         if self.state.get() == RuntimeState::ResourceDropped {
             return;
         }
-        let _ = self.binding.try_with_bound_context(|| {
-            if let Err(error) = self.shutdown_once(ShutdownAction::BestEffort) {
-                self.record_fault(error);
-            }
-        });
+        match self.binding.lifecycle() {
+            // Drop lacks an exclusive `&mut Context`, so it cannot prepare and commit the
+            // renderer-texture reset transaction. Keep the renderer, sidecars, callback table,
+            // and attachment alive for Context's ordered terminal teardown.
+            ContextLifecycle::Alive => self.defer_attachment_to_context(),
+            // Context already owns this attachment and is currently executing its teardown
+            // phases. Entering native code here would violate that ordering.
+            ContextLifecycle::Dropping => {}
+            // Context teardown normally calls `context_destroyed` before the wrapper can be
+            // released. This idempotent fallback touches only Rust-owned allocations and never
+            // tries to make a destroyed native Context current.
+            ContextLifecycle::NativeDestroyed => self.mark_context_destroyed(),
+            _ => {}
+        }
     }
 
     fn store_attachment(&self, attachment: ContextAttachmentLease) {
@@ -566,6 +672,12 @@ impl RuntimeControl {
     fn detach_attachment(&self) {
         if let Some(mut attachment) = self.attachment.borrow_mut().take() {
             attachment.detach();
+        }
+    }
+
+    fn defer_attachment_to_context(&self) {
+        if let Some(attachment) = self.attachment.borrow_mut().take() {
+            attachment.defer_to_context();
         }
     }
 
@@ -580,13 +692,16 @@ impl RuntimeControl {
 
     fn mark_context_destroyed(&self) {
         unregister_runtime(self.binding.id());
-        for pointer in take_viewport_data(self.binding.id()) {
-            // The registry is the allocation ownership sidecar; native viewport pointers are no
-            // longer touched after Context destruction.
-            drop(unsafe { Box::from_raw(pointer) });
-        }
+        // Native viewport slots are no longer touched after Context destruction, but the sidecar
+        // still owns every remaining renderer allocation.
+        drop_orphaned_viewport_data(self.binding.id());
         if self.renderer.borrow().is_some() {
-            let _ = self.release_renderer_without_context_reset();
+            let mut renderer = self.renderer.borrow_mut();
+            if let Some(renderer) = renderer.as_deref_mut() {
+                renderer.shutdown_after_context_destroyed();
+            }
+            renderer.take();
+            self.globals.borrow_mut().take();
         }
         self.attachment.borrow_mut().take();
         self.set_state(RuntimeState::ResourceDropped);
@@ -647,20 +762,22 @@ impl RuntimeControl {
 }
 
 impl ContextAttachment for RuntimeControl {
-    fn quiesce(&self, context: &ContextTeardown<'_>) {
+    fn quiesce(&self, context: &ContextTeardown<'_>) -> Result<(), ContextAttachmentTeardownError> {
         context.with_bound_context(|| {
-            if let Err(error) = self.shutdown_once(ShutdownAction::Quiesce) {
-                self.record_fault(error);
-            }
-        });
+            self.shutdown_once(ShutdownAction::Quiesce)
+                .map_err(|error| {
+                    let message = error.to_string();
+                    self.record_fault(error);
+                    ContextAttachmentTeardownError::new(message)
+                })
+        })
     }
 
-    fn release_renderer_resources(&self, context: &ContextTeardown<'_>) {
-        context.with_bound_context(|| {
-            if let Err(error) = self.shutdown_once(ShutdownAction::ContextResources) {
-                self.record_fault(error);
-            }
-        });
+    fn release_renderer_resources(
+        &self,
+        context: &ContextTeardown<'_>,
+    ) -> Result<(), ContextAttachmentTeardownError> {
+        context.with_bound_context(|| self.release_renderer_during_context_teardown(context))
     }
 
     fn context_destroyed(&self, _context: ContextDestroyed) {
@@ -687,6 +804,13 @@ impl OwningViewportRuntime {
         context: &mut Context,
         renderer: WgpuRenderer,
     ) -> Result<Self, WgpuViewportAttachError> {
+        // The Context-owned attachment is the first ownership gate. In particular, a wrapper
+        // that was dropped without explicit shutdown leaves this runtime alive for Context
+        // teardown, so a replacement must be rejected without inspecting or mutating its
+        // renderer argument.
+        if let Err(error) = preflight_runtime(context.id()) {
+            return Err(WgpuViewportAttachError::new(error, renderer));
+        }
         if let Err(error) = renderer.ensure_context_matches(context) {
             let error = match error {
                 RendererError::ContextDropped => WgpuViewportError::RendererContextDropped,
@@ -694,6 +818,9 @@ impl OwningViewportRuntime {
                 other => WgpuViewportError::Renderer(other),
             };
             return Err(WgpuViewportAttachError::new(error, renderer));
+        }
+        if let Err(error) = renderer.ensure_renderer_contract() {
+            return Err(WgpuViewportAttachError::new(error.into(), renderer));
         }
         let globals = match renderer_globals(&renderer) {
             Ok(globals) => globals,
@@ -714,18 +841,10 @@ impl OwningViewportRuntime {
             return Err(WgpuViewportAttachError::new(error, renderer));
         }
 
-        let renderer_flags_added = match renderer.renderer_flags_added() {
-            Ok(flags) => flags,
-            Err(error) => {
-                return Err(WgpuViewportAttachError::new(error.into(), renderer));
-            }
-        };
-        let control = Rc::new(RuntimeControl::new(
-            context,
-            renderer,
-            globals,
-            renderer_flags_added,
-        ));
+        if let Err(error) = renderer.ensure_renderer_contract() {
+            return Err(WgpuViewportAttachError::new(error.into(), renderer));
+        }
+        let control = Rc::new(RuntimeControl::new(context, renderer, globals));
         let attachment = match context.register_attachment::<WgpuRendererAttachmentMarker>(
             ContextAttachmentRole::Renderer,
             Rc::clone(&control) as Rc<dyn ContextAttachment>,
@@ -748,9 +867,17 @@ impl OwningViewportRuntime {
         context: &mut Context,
         mut renderer: WgpuRenderer,
     ) -> Result<Self, WgpuViewportAttachError> {
-        if renderer.context_binding.is_none() {
-            if let Err(error) = renderer.bind_context(context, dear_imgui_rs::BackendFlags::empty())
-            {
+        if let Err(error) = preflight_runtime(context.id()) {
+            return Err(WgpuViewportAttachError::new(error, renderer));
+        }
+        if renderer.context_state.is_none() {
+            let (flags, _) = match WgpuRenderer::configure_imgui_context(context) {
+                Ok(configured) => configured,
+                Err(error) => {
+                    return Err(WgpuViewportAttachError::new(error.into(), renderer));
+                }
+            };
+            if let Err(error) = renderer.bind_context(context, flags) {
                 return Err(WgpuViewportAttachError::new(error.into(), renderer));
             }
             renderer.renderer_consumer = match context.create_renderer_consumer() {

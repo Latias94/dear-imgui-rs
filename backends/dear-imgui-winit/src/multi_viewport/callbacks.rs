@@ -1,8 +1,11 @@
 use super::registry::{
-    insert_viewport_data, remove_viewport_data, with_current_runtime, with_viewport_data,
+    insert_viewport_data, preflight_viewport_ownership, remove_viewport_data, with_current_runtime,
+    with_viewport_data,
 };
 use super::runtime::RuntimeControl;
-use super::viewport_data::{ViewportData, decoration_offset_logical};
+use super::viewport_data::{
+    ViewportData, ViewportWindowPolicy, WindowEventEcho, decoration_offset_logical,
+};
 use super::*;
 use crate::sanitize;
 use dear_imgui_rs::Context;
@@ -10,7 +13,194 @@ use std::ffi::{CStr, c_char, c_void};
 use std::rc::Rc;
 use std::sync::Arc;
 use winit::dpi::{LogicalPosition, LogicalSize};
+#[cfg(target_os = "windows")]
+use winit::platform::windows::{WindowAttributesExtWindows, WindowExtWindows};
+#[cfg(target_os = "linux")]
+use winit::platform::x11::{WindowAttributesExtX11, WindowType};
 use winit::window::{WindowAttributes, WindowLevel};
+
+// This is the callback lease owned by Winit. Do not include callbacks merely because they are
+// present in ImGuiPlatformIO: unsupported callbacks remain available to another backend and are
+// intentionally outside Winit's drift contract.
+const PLATFORM_CALLBACK_SLOTS: [&str; 17] = [
+    "Platform_CreateWindow",
+    "Platform_DestroyWindow",
+    "Platform_ShowWindow",
+    "Platform_SetWindowPos",
+    "Platform_GetWindowPos",
+    "Platform_SetWindowSize",
+    "Platform_GetWindowSize",
+    "Platform_GetWindowFramebufferScale",
+    "Platform_SetWindowFocus",
+    "Platform_GetWindowFocus",
+    "Platform_GetWindowMinimized",
+    "Platform_SetWindowTitle",
+    "Platform_UpdateWindow",
+    "Platform_RenderWindow",
+    "Platform_SwapBuffers",
+    "Platform_GetWindowDpiScale",
+    "Platform_OnChangedViewport",
+];
+
+#[derive(Clone, Copy)]
+pub(super) struct PlatformCallbackContract {
+    slots: [usize; PLATFORM_CALLBACK_SLOTS.len()],
+}
+
+impl PlatformCallbackContract {
+    unsafe fn capture(raw: *const dear_imgui_rs::sys::ImGuiPlatformIO) -> Option<Self> {
+        let raw = unsafe { raw.as_ref() }?;
+        Some(Self {
+            slots: [
+                raw.Platform_CreateWindow
+                    .map_or(0, |callback| callback as usize),
+                raw.Platform_DestroyWindow
+                    .map_or(0, |callback| callback as usize),
+                raw.Platform_ShowWindow
+                    .map_or(0, |callback| callback as usize),
+                raw.Platform_SetWindowPos
+                    .map_or(0, |callback| callback as usize),
+                raw.Platform_GetWindowPos
+                    .map_or(0, |callback| callback as usize),
+                raw.Platform_SetWindowSize
+                    .map_or(0, |callback| callback as usize),
+                raw.Platform_GetWindowSize
+                    .map_or(0, |callback| callback as usize),
+                raw.Platform_GetWindowFramebufferScale
+                    .map_or(0, |callback| callback as usize),
+                raw.Platform_SetWindowFocus
+                    .map_or(0, |callback| callback as usize),
+                raw.Platform_GetWindowFocus
+                    .map_or(0, |callback| callback as usize),
+                raw.Platform_GetWindowMinimized
+                    .map_or(0, |callback| callback as usize),
+                raw.Platform_SetWindowTitle
+                    .map_or(0, |callback| callback as usize),
+                raw.Platform_UpdateWindow
+                    .map_or(0, |callback| callback as usize),
+                raw.Platform_RenderWindow
+                    .map_or(0, |callback| callback as usize),
+                raw.Platform_SwapBuffers
+                    .map_or(0, |callback| callback as usize),
+                raw.Platform_GetWindowDpiScale
+                    .map_or(0, |callback| callback as usize),
+                raw.Platform_OnChangedViewport
+                    .map_or(0, |callback| callback as usize),
+            ],
+        })
+    }
+
+    fn first_drift(self, actual: Self) -> Option<&'static str> {
+        self.slots
+            .into_iter()
+            .zip(actual.slots)
+            .zip(PLATFORM_CALLBACK_SLOTS)
+            .find_map(|((expected, actual), slot)| (expected != actual).then_some(slot))
+    }
+
+    fn has_matching_installed_slot(self, actual: Self) -> bool {
+        self.slots
+            .into_iter()
+            .zip(actual.slots)
+            .any(|(expected, actual)| expected != 0 && expected == actual)
+    }
+}
+
+fn supports_inactive_window_creation() -> bool {
+    cfg!(any(target_os = "windows", target_os = "macos"))
+}
+
+fn supports_skip_taskbar_at_creation() -> bool {
+    cfg!(any(target_os = "windows", target_os = "linux"))
+}
+
+fn supports_dynamic_skip_taskbar() -> bool {
+    cfg!(target_os = "windows")
+}
+
+fn unsupported_viewport_flag(flag: &'static str, operation: &'static str) -> WinitPlatformError {
+    WinitPlatformError::UnsupportedViewportFlag { flag, operation }
+}
+
+fn validate_policy_for_creation(
+    policy: ViewportWindowPolicy,
+    supports_skip_taskbar: bool,
+) -> Result<(), WinitPlatformError> {
+    if policy.no_focus_on_click {
+        return Err(unsupported_viewport_flag(
+            "NoFocusOnClick",
+            "window creation",
+        ));
+    }
+    if policy.skip_taskbar && !supports_skip_taskbar {
+        return Err(unsupported_viewport_flag(
+            "NoTaskBarIcon",
+            "window creation",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_policy_transition(
+    current: ViewportWindowPolicy,
+    next: ViewportWindowPolicy,
+    supports_dynamic_taskbar: bool,
+) -> Result<(), WinitPlatformError> {
+    if next.no_focus_on_click {
+        return Err(unsupported_viewport_flag("NoFocusOnClick", "window update"));
+    }
+    if current.skip_taskbar != next.skip_taskbar && !supports_dynamic_taskbar {
+        return Err(unsupported_viewport_flag("NoTaskBarIcon", "window update"));
+    }
+    Ok(())
+}
+
+pub(super) fn record_viewport_failure(
+    control: &RuntimeControl,
+    viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+    error: WinitPlatformError,
+) {
+    control.record_fault(error);
+    if !viewport.is_null() {
+        // SAFETY: callback callers pass a live viewport from the currently bound Context.
+        unsafe { (*viewport).PlatformRequestClose = true };
+    }
+}
+
+fn sync_window_policy(
+    data: &ViewportData,
+    next: ViewportWindowPolicy,
+) -> Result<(), WinitPlatformError> {
+    let current = data.window_policy.get();
+    validate_policy_transition(current, next, supports_dynamic_skip_taskbar())?;
+
+    let window = data.window();
+    if current.cursor_hittest != next.cursor_hittest {
+        window
+            .set_cursor_hittest(next.cursor_hittest)
+            .map_err(|error| WinitPlatformError::WindowOperation {
+                operation: "set_cursor_hittest",
+                message: error.to_string(),
+            })?;
+    }
+    if current.decorations != next.decorations {
+        window.set_decorations(next.decorations);
+    }
+    if current.top_most != next.top_most {
+        window.set_window_level(if next.top_most {
+            WindowLevel::AlwaysOnTop
+        } else {
+            WindowLevel::Normal
+        });
+    }
+    #[cfg(target_os = "windows")]
+    if current.skip_taskbar != next.skip_taskbar {
+        window.set_skip_taskbar(next.skip_taskbar);
+    }
+
+    data.window_policy.set(next);
+    Ok(())
+}
 
 pub(super) fn preflight_platform_callbacks(ctx: &Context) -> Result<(), WinitPlatformError> {
     if !dear_imgui_rs::sys::HAS_PLATFORM_IO_AGGREGATE_HOOKS {
@@ -19,6 +209,22 @@ pub(super) fn preflight_platform_callbacks(ctx: &Context) -> Result<(), WinitPla
 
     let binding = ctx.binding();
     binding.with_bound_context(|| {
+        let flags = ctx.io().backend_flags();
+        for (occupied, flag) in [
+            (
+                flags.contains(dear_imgui_rs::BackendFlags::PLATFORM_HAS_VIEWPORTS),
+                "PLATFORM_HAS_VIEWPORTS",
+            ),
+            (
+                flags.contains(dear_imgui_rs::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT),
+                "HAS_MOUSE_HOVERED_VIEWPORT",
+            ),
+        ] {
+            if occupied {
+                return Err(WinitPlatformError::PlatformCapabilityOccupied { flag });
+            }
+        }
+
         let pio = ctx.platform_io();
         let pio = unsafe { &*pio.as_raw() };
         let occupied = [
@@ -58,10 +264,6 @@ pub(super) fn preflight_platform_callbacks(ctx: &Context) -> Result<(), WinitPla
                 pio.Platform_SetWindowTitle.is_some(),
                 "Platform_SetWindowTitle",
             ),
-            (
-                pio.Platform_SetWindowAlpha.is_some(),
-                "Platform_SetWindowAlpha",
-            ),
             (pio.Platform_UpdateWindow.is_some(), "Platform_UpdateWindow"),
             (pio.Platform_RenderWindow.is_some(), "Platform_RenderWindow"),
             (pio.Platform_SwapBuffers.is_some(), "Platform_SwapBuffers"),
@@ -83,104 +285,429 @@ pub(super) fn preflight_platform_callbacks(ctx: &Context) -> Result<(), WinitPla
     })
 }
 
-pub(super) fn claim_platform_callbacks(ctx: &mut Context) {
+pub(super) fn claim_platform_callbacks(ctx: &mut Context) -> PlatformCallbackContract {
     let binding = ctx.binding();
     binding.with_bound_context(|| {
         let pio = ctx.platform_io_mut();
 
-        pio.set_platform_create_window_raw(Some(winit_create_window));
-        pio.set_platform_destroy_window_raw(Some(winit_destroy_window));
-        pio.set_platform_show_window_raw(Some(winit_show_window));
-        pio.set_platform_set_window_pos_raw(Some(winit_set_window_pos));
-        // Avoid direct ImVec2 return; use out-parameter shims for all ImVec2 getters.
-        pio.set_platform_get_window_pos_raw(Some(winit_get_window_pos_out));
-        pio.set_platform_set_window_size_raw(Some(winit_set_window_size));
-        pio.set_platform_get_window_size_raw(Some(winit_get_window_size_out));
-        pio.set_platform_set_window_focus_raw(Some(winit_set_window_focus));
-        pio.set_platform_get_window_focus_raw(Some(winit_get_window_focus));
-        pio.set_platform_get_window_minimized_raw(Some(winit_get_window_minimized));
-        pio.set_platform_set_window_title_raw(Some(winit_set_window_title));
-        pio.set_platform_update_window_raw(Some(winit_update_window));
+        // SAFETY: these static callbacks use the exact sys ABI, reject foreign runtime state,
+        // and remain installed until `release_platform_callbacks` quiesces the runtime.
+        unsafe {
+            pio.set_platform_create_window_raw(Some(winit_create_window));
+            pio.set_platform_destroy_window_raw(Some(winit_destroy_window));
+            pio.set_platform_show_window_raw(Some(winit_show_window));
+            pio.set_platform_set_window_pos_raw(Some(winit_set_window_pos));
+            // Avoid direct ImVec2 return; use out-parameter shims for all ImVec2 getters.
+            pio.set_platform_get_window_pos_raw(Some(winit_get_window_pos_out));
+            pio.set_platform_set_window_size_raw(Some(winit_set_window_size));
+            pio.set_platform_get_window_size_raw(Some(winit_get_window_size_out));
+            pio.set_platform_set_window_focus_raw(Some(winit_set_window_focus));
+            pio.set_platform_get_window_focus_raw(Some(winit_get_window_focus));
+            pio.set_platform_get_window_minimized_raw(Some(winit_get_window_minimized));
+            pio.set_platform_set_window_title_raw(Some(winit_set_window_title));
+            pio.set_platform_update_window_raw(Some(winit_update_window));
 
-        // Also register framebuffer/DPI scale callbacks.
-        // ImGui will use FramebufferScale when available, falling back to
-        // DisplayFramebufferScale otherwise. Install through the out-parameter shim to avoid the
-        // struct-return callback ABI.
-        pio.set_platform_get_window_framebuffer_scale_raw(Some(
-            winit_get_window_framebuffer_scale_out,
-        ));
-        pio.set_platform_get_window_dpi_scale_raw(Some(winit_get_window_dpi_scale));
-        pio.set_platform_on_changed_viewport_raw(Some(winit_on_changed_viewport));
-        pio.set_platform_set_window_alpha_raw(Some(winit_set_window_alpha));
-        pio.set_platform_render_window_raw(Some(winit_platform_render_window));
-        pio.set_platform_swap_buffers_raw(Some(winit_platform_swap_buffers));
-    });
+            // ImGui will use FramebufferScale when available, falling back to
+            // DisplayFramebufferScale otherwise. Install through the out-parameter shim to avoid
+            // the struct-return callback ABI.
+            pio.set_platform_get_window_framebuffer_scale_raw(Some(
+                winit_get_window_framebuffer_scale_out,
+            ));
+            pio.set_platform_get_window_dpi_scale_raw(Some(winit_get_window_dpi_scale));
+            pio.set_platform_on_changed_viewport_raw(Some(winit_on_changed_viewport));
+            pio.set_platform_render_window_raw(Some(winit_platform_render_window));
+            pio.set_platform_swap_buffers_raw(Some(winit_platform_swap_buffers));
+        }
+
+        // SAFETY: `pio` belongs to the currently bound live Context and remains valid here.
+        unsafe { PlatformCallbackContract::capture(pio.as_raw()) }
+            .expect("a live Context always exposes ImGuiPlatformIO")
+    })
 }
 
-pub(super) fn setup_monitors(control: &RuntimeControl, ctx: &mut Context) {
-    let Some(window) = control.main_window() else {
-        return;
-    };
-    // Build monitor list from winit and let PlatformIo own its allocator contract.
-    let monitors: Vec<dear_imgui_rs::sys::ImGuiPlatformMonitor> = {
-        let mut out = Vec::new();
-        for m in window.available_monitors() {
-            // Winit reports monitor geometry in physical pixels. Dear ImGui expects
-            // monitor rectangles in the same coordinate space as viewport Pos/Size.
-            // Our multi-viewport backend uses logical screen coordinates, so convert.
-            let scale_f64 = sanitize::positive_finite_or(m.scale_factor(), 1.0);
-            let scale = sanitize::positive_finite_f32_or(scale_f64 as f32, 1.0);
-            let pos_logical = m.position().to_logical::<f64>(scale_f64);
-            let size_logical = m.size().to_logical::<f64>(scale_f64);
-            let pos = sanitize::finite_vec2_f64_to_f32([pos_logical.x, pos_logical.y])
-                .unwrap_or([0.0, 0.0]);
-            let size = sanitize::finite_non_negative_size(size_logical);
+pub(super) fn preflight_platform_window_destruction(
+    control: &RuntimeControl,
+) -> Result<(), WinitPlatformError> {
+    unsafe {
+        if dear_imgui_rs::sys::igGetCurrentContext() != control.context_raw() {
+            return Err(WinitPlatformError::ContextMismatch);
+        }
+        let platform_io = dear_imgui_rs::sys::igGetPlatformIO_Nil();
+        if platform_io.is_null() {
+            return Err(WinitPlatformError::ContextMismatch);
+        }
 
-            let mut monitor = dear_imgui_rs::sys::ImGuiPlatformMonitor::default();
-            monitor.MainPos = dear_imgui_rs::sys::ImVec2 {
+        let destroy_is_owned = (*platform_io)
+            .Platform_DestroyWindow
+            .is_some_and(|callback| {
+                std::ptr::fn_addr_eq(
+                    callback,
+                    winit_destroy_window
+                        as unsafe extern "C" fn(*mut dear_imgui_rs::sys::ImGuiViewport),
+                )
+            });
+        if !destroy_is_owned {
+            return Err(WinitPlatformError::PlatformCallbackReplaced {
+                callback: "Platform_DestroyWindow",
+            });
+        }
+        let renderer_callback = [
+            (
+                (*platform_io).Renderer_CreateWindow.is_some(),
+                "Renderer_CreateWindow",
+            ),
+            (
+                (*platform_io).Renderer_DestroyWindow.is_some(),
+                "Renderer_DestroyWindow",
+            ),
+            (
+                (*platform_io).Renderer_SetWindowSize.is_some(),
+                "Renderer_SetWindowSize",
+            ),
+            (
+                (*platform_io).Renderer_RenderWindow.is_some(),
+                "Renderer_RenderWindow",
+            ),
+            (
+                (*platform_io).Renderer_SwapBuffers.is_some(),
+                "Renderer_SwapBuffers",
+            ),
+        ]
+        .into_iter()
+        .find_map(|(installed, field)| installed.then_some(field));
+        if let Some(field) = renderer_callback {
+            return Err(WinitPlatformError::RendererShutdownRequired { field });
+        }
+        let viewports = &(*platform_io).Viewports;
+        if viewports.Size < 0
+            || viewports.Capacity < viewports.Size
+            || (viewports.Size > 0 && viewports.Data.is_null())
+        {
+            return Err(WinitPlatformError::ForeignPlatformUserData);
+        }
+        for index in 0..viewports.Size {
+            let viewport = *viewports.Data.add(index as usize);
+            if viewport.is_null() {
+                return Err(WinitPlatformError::ForeignPlatformUserData);
+            }
+            if !(*viewport).RendererUserData.is_null() {
+                return Err(WinitPlatformError::RendererShutdownRequired {
+                    field: "RendererUserData",
+                });
+            }
+        }
+        preflight_viewport_ownership(control, platform_io)?;
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+struct MonitorVectorState {
+    data: *mut dear_imgui_rs::sys::ImGuiPlatformMonitor,
+    size: i32,
+    capacity: i32,
+}
+
+impl MonitorVectorState {
+    unsafe fn from_platform_io(raw: *mut dear_imgui_rs::sys::ImGuiPlatformIO) -> Self {
+        let monitors = unsafe { &(*raw).Monitors };
+        Self {
+            data: monitors.Data,
+            size: monitors.Size,
+            capacity: monitors.Capacity,
+        }
+    }
+
+    unsafe fn install_into(self, raw: *mut dear_imgui_rs::sys::ImGuiPlatformIO) {
+        let monitors = unsafe { &mut (*raw).Monitors };
+        monitors.Data = self.data;
+        monitors.Size = self.size;
+        monitors.Capacity = self.capacity;
+    }
+
+    unsafe fn matches(self, raw: *mut dear_imgui_rs::sys::ImGuiPlatformIO) -> bool {
+        let monitors = unsafe { &(*raw).Monitors };
+        monitors.Data == self.data
+            && monitors.Size == self.size
+            && monitors.Capacity == self.capacity
+    }
+
+    unsafe fn free(self) {
+        if !self.data.is_null() {
+            unsafe { dear_imgui_rs::sys::igMemFree(self.data.cast()) };
+        }
+    }
+}
+
+pub(super) struct PreparedMonitors {
+    storage: Option<MonitorVectorState>,
+}
+
+impl PreparedMonitors {
+    fn allocate(
+        context: &Context,
+        monitors: &[dear_imgui_rs::sys::ImGuiPlatformMonitor],
+    ) -> Result<Self, WinitPlatformError> {
+        validate_monitors(monitors)?;
+        let count =
+            i32::try_from(monitors.len()).map_err(|_| WinitPlatformError::MonitorCountOverflow)?;
+        let byte_len = std::mem::size_of_val(monitors);
+        let data = context.binding().with_bound_context(|| unsafe {
+            dear_imgui_rs::sys::igMemAlloc(byte_len)
+                .cast::<dear_imgui_rs::sys::ImGuiPlatformMonitor>()
+        });
+        if data.is_null() {
+            return Err(WinitPlatformError::MonitorStorageAllocationFailed);
+        }
+        unsafe { data.copy_from_nonoverlapping(monitors.as_ptr(), monitors.len()) };
+        Ok(Self {
+            storage: Some(MonitorVectorState {
+                data,
+                size: count,
+                capacity: count,
+            }),
+        })
+    }
+
+    fn take_storage(&mut self) -> MonitorVectorState {
+        self.storage
+            .take()
+            .expect("prepared monitor storage can only be published once")
+    }
+}
+
+impl Drop for PreparedMonitors {
+    fn drop(&mut self) {
+        if let Some(storage) = self.storage.take() {
+            unsafe { storage.free() };
+        }
+    }
+}
+
+pub(super) struct MonitorOwnership {
+    prior: MonitorVectorState,
+    installed: MonitorVectorState,
+}
+
+impl MonitorOwnership {
+    pub(super) unsafe fn installed_matches(
+        &self,
+        raw: *mut dear_imgui_rs::sys::ImGuiPlatformIO,
+    ) -> bool {
+        unsafe { self.installed.matches(raw) }
+    }
+
+    pub(super) unsafe fn restore_if_owned(self, raw: *mut dear_imgui_rs::sys::ImGuiPlatformIO) {
+        if unsafe { self.installed.matches(raw) } {
+            unsafe { self.prior.install_into(raw) };
+            unsafe { self.installed.free() };
+        } else if unsafe { self.prior.matches(raw) } {
+            // An allocator-aware foreign replacement may have freed Winit's allocation before
+            // reproducing the prior state (most commonly the empty vector). It is therefore not
+            // safe to free the detached pointer again. A direct raw replacement can leak Winit's
+            // allocation, but never turns uncertain ownership into a double free.
+        } else {
+            // A foreign owner replaced the vector through the allocator-aware API. That operation
+            // released our installed allocation, so only the detached prior allocation remains.
+            unsafe { self.prior.free() };
+        }
+    }
+
+    pub(super) unsafe fn context_destroyed(self) {
+        // Dear ImGui released whichever vector remained installed. The prior allocation was
+        // detached from native ownership when Winit published its monitor list.
+        unsafe { self.prior.free() };
+    }
+}
+
+pub(super) fn prepare_monitors(
+    context: &Context,
+    window: &winit::window::Window,
+) -> Result<PreparedMonitors, WinitPlatformError> {
+    let monitor_handles = window.available_monitors().collect::<Vec<_>>();
+    validate_uniform_monitor_scale_factors(
+        monitor_handles.iter().map(|monitor| monitor.scale_factor()),
+    )?;
+    let mut monitors = Vec::new();
+    for monitor_handle in monitor_handles {
+        // Winit reports physical pixels while this backend uses logical screen coordinates.
+        let scale_f64 = sanitize::positive_finite_or(monitor_handle.scale_factor(), 1.0);
+        let scale = sanitize::positive_finite_f32_or(scale_f64 as f32, 1.0);
+        let pos_logical = monitor_handle.position().to_logical::<f64>(scale_f64);
+        let size_logical = monitor_handle.size().to_logical::<f64>(scale_f64);
+        let pos =
+            sanitize::finite_vec2_f64_to_f32([pos_logical.x, pos_logical.y]).unwrap_or([0.0, 0.0]);
+        let size = sanitize::finite_non_negative_size(size_logical);
+
+        monitors.push(dear_imgui_rs::sys::ImGuiPlatformMonitor {
+            MainPos: dear_imgui_rs::sys::ImVec2 {
                 x: pos[0],
                 y: pos[1],
-            };
-            monitor.MainSize = dear_imgui_rs::sys::ImVec2 {
+            },
+            MainSize: dear_imgui_rs::sys::ImVec2 {
                 x: size[0],
                 y: size[1],
-            };
-            monitor.WorkPos = monitor.MainPos;
-            monitor.WorkSize = monitor.MainSize;
-            monitor.DpiScale = scale;
-            monitor.PlatformHandle = std::ptr::null_mut();
-            out.push(monitor);
-        }
+            },
+            WorkPos: dear_imgui_rs::sys::ImVec2 {
+                x: pos[0],
+                y: pos[1],
+            },
+            WorkSize: dear_imgui_rs::sys::ImVec2 {
+                x: size[0],
+                y: size[1],
+            },
+            DpiScale: scale,
+            PlatformHandle: std::ptr::null_mut(),
+        });
+    }
 
-        if out.is_empty() {
-            // Fallback using window bounds
-            let scale_f64 = sanitize::positive_finite_or(window.scale_factor(), 1.0);
-            let scale = sanitize::positive_finite_f32_or(scale_f64 as f32, 1.0);
-            let size_logical = window.inner_size().to_logical::<f64>(scale_f64);
-            let size = sanitize::finite_non_negative_size(size_logical);
-            let mut monitor = dear_imgui_rs::sys::ImGuiPlatformMonitor::default();
-            monitor.MainPos = dear_imgui_rs::sys::ImVec2 { x: 0.0, y: 0.0 };
-            monitor.MainSize = dear_imgui_rs::sys::ImVec2 {
+    if monitors.is_empty() {
+        let scale_f64 = sanitize::positive_finite_or(window.scale_factor(), 1.0);
+        let scale = sanitize::positive_finite_f32_or(scale_f64 as f32, 1.0);
+        let size_logical = window.inner_size().to_logical::<f64>(scale_f64);
+        let size = sanitize::finite_non_negative_size(size_logical);
+        monitors.push(dear_imgui_rs::sys::ImGuiPlatformMonitor {
+            MainPos: dear_imgui_rs::sys::ImVec2 { x: 0.0, y: 0.0 },
+            MainSize: dear_imgui_rs::sys::ImVec2 {
                 x: size[0],
                 y: size[1],
-            };
-            monitor.WorkPos = monitor.MainPos;
-            monitor.WorkSize = monitor.MainSize;
-            monitor.DpiScale = scale;
-            out.push(monitor);
-        }
-        out
+            },
+            WorkPos: dear_imgui_rs::sys::ImVec2 { x: 0.0, y: 0.0 },
+            WorkSize: dear_imgui_rs::sys::ImVec2 {
+                x: size[0],
+                y: size[1],
+            },
+            DpiScale: scale,
+            PlatformHandle: std::ptr::null_mut(),
+        });
+    }
+
+    PreparedMonitors::allocate(context, &monitors)
+}
+
+fn validate_uniform_monitor_scale_factors(
+    scale_factors: impl IntoIterator<Item = f64>,
+) -> Result<(), WinitPlatformError> {
+    let mut scales = scale_factors
+        .into_iter()
+        .map(|scale| sanitize::positive_finite_or(scale, 1.0));
+    let Some(reference) = scales.next() else {
+        return Ok(());
     };
+    if scales.any(|scale| (scale - reference).abs() > 0.001) {
+        return Err(WinitPlatformError::MixedMonitorScaleFactorsUnsupported);
+    }
+    Ok(())
+}
 
-    control
-        .binding()
-        .with_bound_context(|| ctx.platform_io_mut().set_monitors(&monitors));
+#[cfg(test)]
+pub(super) fn validate_monitor_scale_factors_for_test(
+    scale_factors: &[f64],
+) -> Result<(), WinitPlatformError> {
+    validate_uniform_monitor_scale_factors(scale_factors.iter().copied())
+}
+
+#[cfg(test)]
+pub(super) fn prepare_monitors_for_test(
+    context: &Context,
+    monitors: Vec<dear_imgui_rs::sys::ImGuiPlatformMonitor>,
+) -> Result<PreparedMonitors, WinitPlatformError> {
+    PreparedMonitors::allocate(context, &monitors)
+}
+
+pub(super) fn publish_monitors(
+    context: &mut Context,
+    mut prepared: PreparedMonitors,
+) -> MonitorOwnership {
+    context.binding().with_bound_context(|| unsafe {
+        let raw = context.platform_io_mut().as_raw_mut();
+        let prior = MonitorVectorState::from_platform_io(raw);
+        let installed = prepared.take_storage();
+        installed.install_into(raw);
+        MonitorOwnership { prior, installed }
+    })
+}
+
+fn validate_monitors(
+    monitors: &[dear_imgui_rs::sys::ImGuiPlatformMonitor],
+) -> Result<(), WinitPlatformError> {
+    if monitors.is_empty() {
+        return Err(WinitPlatformError::NoMonitors);
+    }
+    for (monitor, value) in monitors.iter().enumerate() {
+        let values = [
+            value.MainPos.x,
+            value.MainPos.y,
+            value.MainSize.x,
+            value.MainSize.y,
+            value.WorkPos.x,
+            value.WorkPos.y,
+            value.WorkSize.x,
+            value.WorkSize.y,
+            value.DpiScale,
+        ];
+        if !values.iter().all(|value| value.is_finite()) {
+            return Err(WinitPlatformError::InvalidMonitorGeometry {
+                monitor,
+                reason: "geometry and DPI values must be finite",
+            });
+        }
+        if value.MainSize.x <= 0.0 || value.MainSize.y <= 0.0 {
+            return Err(WinitPlatformError::InvalidMonitorGeometry {
+                monitor,
+                reason: "MainSize must be positive",
+            });
+        }
+        if value.WorkSize.x < 0.0 || value.WorkSize.y < 0.0 {
+            return Err(WinitPlatformError::InvalidMonitorGeometry {
+                monitor,
+                reason: "WorkSize must not be negative",
+            });
+        }
+
+        let main_max = [
+            value.MainPos.x + value.MainSize.x,
+            value.MainPos.y + value.MainSize.y,
+        ];
+        let work_max = [
+            value.WorkPos.x + value.WorkSize.x,
+            value.WorkPos.y + value.WorkSize.y,
+        ];
+        if !main_max
+            .iter()
+            .chain(work_max.iter())
+            .all(|value| value.is_finite())
+        {
+            return Err(WinitPlatformError::InvalidMonitorGeometry {
+                monitor,
+                reason: "geometry bounds must not overflow",
+            });
+        }
+        if value.WorkPos.x < value.MainPos.x
+            || value.WorkPos.y < value.MainPos.y
+            || work_max[0] > main_max[0]
+            || work_max[1] > main_max[1]
+        {
+            return Err(WinitPlatformError::InvalidMonitorGeometry {
+                monitor,
+                reason: "work area must be contained within the main area",
+            });
+        }
+        if value.DpiScale <= 0.0 || value.DpiScale >= 99.0 {
+            return Err(WinitPlatformError::InvalidMonitorGeometry {
+                monitor,
+                reason: "DpiScale must be greater than 0 and less than 99",
+            });
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn release_platform_callbacks(
     control: &RuntimeControl,
 ) -> Result<(), WinitPlatformError> {
     let mut replaced = None;
+    let mut owned_callback = false;
     unsafe {
         if dear_imgui_rs::sys::igGetCurrentContext() != control.context_raw() {
             return Err(WinitPlatformError::ContextMismatch);
@@ -192,11 +719,6 @@ pub(super) fn release_platform_callbacks(
         let pio = dear_imgui_rs::platform_io::PlatformIo::from_raw_mut(pio);
         let raw = pio.as_raw_mut();
 
-        if let Some(main_window) = control.main_window() {
-            main_window.set_ime_allowed(false);
-            crate::platform::clear_ime_callback_if_owned(raw, Arc::as_ptr(&main_window));
-        }
-
         macro_rules! clear_unary {
             ($field:ident, $expected:path, $setter:ident, $name:literal) => {
                 match (*raw).$field {
@@ -207,6 +729,7 @@ pub(super) fn release_platform_callbacks(
                                 as unsafe extern "C" fn(*mut dear_imgui_rs::sys::ImGuiViewport),
                         ) =>
                     {
+                        owned_callback = true;
                         pio.$setter(None);
                     }
                     None => {
@@ -231,6 +754,7 @@ pub(super) fn release_platform_callbacks(
                                 ),
                         ) =>
                     {
+                        owned_callback = true;
                         pio.$setter(None);
                     }
                     None => {
@@ -262,21 +786,31 @@ pub(super) fn release_platform_callbacks(
             "Platform_ShowWindow"
         );
         // Aggregate callback slots are conditionally cleared through core owner helpers below.
-        if !pio.clear_platform_set_window_pos_if_pointer_callback(winit_set_window_pos) {
+        if pio.clear_platform_set_window_pos_if_pointer_callback(winit_set_window_pos) {
+            owned_callback = true;
+        } else {
             replaced.get_or_insert("Platform_SetWindowPos");
         }
-        if !pio.clear_platform_get_window_pos_if_raw_callback(winit_get_window_pos_out) {
+        if pio.clear_platform_get_window_pos_if_raw_callback(winit_get_window_pos_out) {
+            owned_callback = true;
+        } else {
             replaced.get_or_insert("Platform_GetWindowPos");
         }
-        if !pio.clear_platform_set_window_size_if_pointer_callback(winit_set_window_size) {
+        if pio.clear_platform_set_window_size_if_pointer_callback(winit_set_window_size) {
+            owned_callback = true;
+        } else {
             replaced.get_or_insert("Platform_SetWindowSize");
         }
-        if !pio.clear_platform_get_window_size_if_raw_callback(winit_get_window_size_out) {
+        if pio.clear_platform_get_window_size_if_raw_callback(winit_get_window_size_out) {
+            owned_callback = true;
+        } else {
             replaced.get_or_insert("Platform_GetWindowSize");
         }
-        if !pio.clear_platform_get_window_framebuffer_scale_if_raw_callback(
+        if pio.clear_platform_get_window_framebuffer_scale_if_raw_callback(
             winit_get_window_framebuffer_scale_out,
         ) {
+            owned_callback = true;
+        } else {
             replaced.get_or_insert("Platform_GetWindowFramebufferScale");
         }
         clear_unary!(
@@ -293,6 +827,7 @@ pub(super) fn release_platform_callbacks(
                         as unsafe extern "C" fn(*mut dear_imgui_rs::sys::ImGuiViewport) -> bool,
                 ) =>
             {
+                owned_callback = true;
                 pio.set_platform_get_window_focus_raw(None)
             }
             None => {
@@ -310,6 +845,7 @@ pub(super) fn release_platform_callbacks(
                         as unsafe extern "C" fn(*mut dear_imgui_rs::sys::ImGuiViewport) -> bool,
                 ) =>
             {
+                owned_callback = true;
                 pio.set_platform_get_window_minimized_raw(None)
             }
             None => {
@@ -330,6 +866,7 @@ pub(super) fn release_platform_callbacks(
                         ),
                 ) =>
             {
+                owned_callback = true;
                 pio.set_platform_set_window_title_raw(None)
             }
             None => {
@@ -337,23 +874,6 @@ pub(super) fn release_platform_callbacks(
             }
             Some(_) => {
                 replaced.get_or_insert("Platform_SetWindowTitle");
-            }
-        }
-        match (*raw).Platform_SetWindowAlpha {
-            Some(actual)
-                if std::ptr::fn_addr_eq(
-                    actual,
-                    winit_set_window_alpha
-                        as unsafe extern "C" fn(*mut dear_imgui_rs::sys::ImGuiViewport, f32),
-                ) =>
-            {
-                pio.set_platform_set_window_alpha_raw(None)
-            }
-            None => {
-                replaced.get_or_insert("Platform_SetWindowAlpha");
-            }
-            Some(_) => {
-                replaced.get_or_insert("Platform_SetWindowAlpha");
             }
         }
         clear_unary!(
@@ -382,6 +902,7 @@ pub(super) fn release_platform_callbacks(
                         as unsafe extern "C" fn(*mut dear_imgui_rs::sys::ImGuiViewport) -> f32,
                 ) =>
             {
+                owned_callback = true;
                 pio.set_platform_get_window_dpi_scale_raw(None)
             }
             None => {
@@ -398,39 +919,79 @@ pub(super) fn release_platform_callbacks(
             "Platform_OnChangedViewport"
         );
 
-        let owned_table_is_empty = (*raw).Platform_CreateWindow.is_none()
-            && (*raw).Platform_DestroyWindow.is_none()
-            && (*raw).Platform_ShowWindow.is_none()
-            && (*raw).Platform_SetWindowPos.is_none()
-            && (*raw).Platform_GetWindowPos.is_none()
-            && (*raw).Platform_SetWindowSize.is_none()
-            && (*raw).Platform_GetWindowSize.is_none()
-            && (*raw).Platform_GetWindowFramebufferScale.is_none()
-            && (*raw).Platform_SetWindowFocus.is_none()
-            && (*raw).Platform_GetWindowFocus.is_none()
-            && (*raw).Platform_GetWindowMinimized.is_none()
-            && (*raw).Platform_SetWindowTitle.is_none()
-            && (*raw).Platform_SetWindowAlpha.is_none()
-            && (*raw).Platform_UpdateWindow.is_none()
-            && (*raw).Platform_RenderWindow.is_none()
-            && (*raw).Platform_SwapBuffers.is_none()
-            && (*raw).Platform_GetWindowDpiScale.is_none()
-            && (*raw).Platform_OnChangedViewport.is_none();
-        if owned_table_is_empty {
-            let io = dear_imgui_rs::sys::igGetIO_Nil();
-            if !io.is_null() {
-                let owned_flags = (dear_imgui_rs::BackendFlags::PLATFORM_HAS_VIEWPORTS
-                    | dear_imgui_rs::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT)
-                    .bits();
-                (*io).BackendFlags = ((*io).BackendFlags & !owned_flags)
-                    | (control.prior_backend_flags().bits() & owned_flags);
-            }
+        let base_publication_owned = control
+            .platform_control()
+            .is_ok_and(|platform| platform.owns_base_publication_in_current_context());
+        if owned_callback || base_publication_owned {
+            clear_platform_capability_flags_in_current_context(
+                owned_callback && !base_publication_owned,
+            );
         }
     }
+    control.clear_platform_callback_contract();
     match replaced {
         Some(callback) => Err(WinitPlatformError::PlatformCallbackReplaced { callback }),
         None => Ok(()),
     }
+}
+
+fn clear_platform_capability_flags_in_current_context(clear_base: bool) {
+    let io = unsafe { dear_imgui_rs::sys::igGetIO_Nil() };
+    if !io.is_null() {
+        let mut owned_flags = (dear_imgui_rs::BackendFlags::PLATFORM_HAS_VIEWPORTS
+            | dear_imgui_rs::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT)
+            .bits();
+        if clear_base {
+            owned_flags |= dear_imgui_rs::BackendFlags::HAS_MOUSE_CURSORS.bits();
+        }
+        unsafe { (*io).BackendFlags &= !owned_flags };
+    }
+}
+
+pub(super) fn has_owned_platform_callback_in_current_context(control: &RuntimeControl) -> bool {
+    if unsafe { dear_imgui_rs::sys::igGetCurrentContext() } != control.context_raw() {
+        return false;
+    }
+    let Some(expected) = control.platform_callback_contract() else {
+        return false;
+    };
+    let Some(actual) =
+        (unsafe { PlatformCallbackContract::capture(dear_imgui_rs::sys::igGetPlatformIO_Nil()) })
+    else {
+        return false;
+    };
+    expected.has_matching_installed_slot(actual)
+}
+
+pub(super) fn validate_platform_callback_contract(
+    control: &RuntimeControl,
+) -> Result<(), WinitPlatformError> {
+    if unsafe { dear_imgui_rs::sys::igGetCurrentContext() } != control.context_raw() {
+        return Err(WinitPlatformError::ContextMismatch);
+    }
+    if let Some(callback) = control.platform_callback_drift() {
+        return Err(WinitPlatformError::PlatformCallbackReplaced { callback });
+    }
+    let expected = control
+        .platform_callback_contract()
+        .ok_or(WinitPlatformError::RuntimeDetached)?;
+    // SAFETY: the runtime registry and current-context check prove this is the live PlatformIO
+    // whose callback contract was captured during attachment.
+    let actual =
+        unsafe { PlatformCallbackContract::capture(dear_imgui_rs::sys::igGetPlatformIO_Nil()) }
+            .ok_or(WinitPlatformError::ContextMismatch)?;
+    match expected.first_drift(actual) {
+        Some(callback) => {
+            control.record_platform_callback_drift(callback);
+            Err(WinitPlatformError::PlatformCallbackReplaced { callback })
+        }
+        None => Ok(()),
+    }
+}
+
+enum CallbackDispatch<R> {
+    Completed(R),
+    Rejected,
 }
 
 pub(super) fn run_callback<R>(
@@ -438,16 +999,43 @@ pub(super) fn run_callback<R>(
     fallback: R,
     callback: impl FnOnce(&Rc<RuntimeControl>) -> R,
 ) -> R {
+    run_callback_with_failure(name, fallback, || {}, callback)
+}
+
+fn run_callback_with_failure<R>(
+    name: &'static str,
+    fallback: R,
+    failure: impl FnOnce(),
+    callback: impl FnOnce(&Rc<RuntimeControl>) -> R,
+) -> R {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        with_current_runtime(callback)
+        with_current_runtime(|control| {
+            let authorized_destroy =
+                name == "Platform_DestroyWindow" && control.teardown_callbacks_active();
+            if !authorized_destroy {
+                let contract = control
+                    .platform_control()
+                    .and_then(|platform| platform.validate_complete_contract_in_current_context());
+                if let Err(error) = contract {
+                    control.record_terminal_fault(error);
+                    return CallbackDispatch::Rejected;
+                }
+            }
+            CallbackDispatch::Completed(callback(control))
+        })
     }));
     match result {
-        Ok(Some(value)) => value,
-        Ok(None) => fallback,
+        Ok(Some(CallbackDispatch::Completed(value))) => value,
+        Ok(Some(CallbackDispatch::Rejected)) | Ok(None) => {
+            failure();
+            fallback
+        }
         Err(_) => {
             let _ = with_current_runtime(|control| {
-                control.record_fault(WinitPlatformError::CallbackPanicked { callback: name });
+                control
+                    .record_terminal_fault(WinitPlatformError::CallbackPanicked { callback: name });
             });
+            failure();
             fallback
         }
     }
@@ -457,115 +1045,188 @@ pub(super) fn run_callback<R>(
 
 /// Create a new viewport window
 pub(super) unsafe extern "C" fn winit_create_window(vp: *mut dear_imgui_rs::sys::ImGuiViewport) {
-    run_callback("Platform_CreateWindow", (), |control| {
-        if vp.is_null() {
-            return;
-        }
+    run_callback_with_failure(
+        "Platform_CreateWindow",
+        (),
+        || {
+            if !vp.is_null() {
+                // SAFETY: Dear ImGui keeps the callback viewport alive for the call duration.
+                unsafe { (*vp).PlatformRequestClose = true };
+            }
+        },
+        |control| {
+            if vp.is_null() {
+                return;
+            }
 
-        let Some(event_loop) = control.active_event_loop() else {
-            control.record_fault(WinitPlatformError::EventLoopUnavailable);
-            unsafe { (*vp).PlatformRequestClose = true };
-            return;
-        };
+            let Some(event_loop) = control.active_event_loop() else {
+                record_viewport_failure(control, vp, WinitPlatformError::EventLoopUnavailable);
+                return;
+            };
 
-        let vp_ref = unsafe { &mut *vp };
-        if super::viewport_data::viewport_data_is_owned(control, vp) {
-            return;
-        }
-        if !vp_ref.PlatformUserData.is_null() || !vp_ref.PlatformHandle.is_null() {
-            control.record_fault(WinitPlatformError::ForeignPlatformUserData);
-            return;
-        }
+            let vp_ref = unsafe { &mut *vp };
+            if super::viewport_data::viewport_data_is_owned(control, vp) {
+                return;
+            }
+            // Winit's lease covers all three platform fields. It intentionally leaves
+            // PlatformHandleRaw null, but a foreign value there still makes the viewport
+            // unavailable and must be rejected before allocating a native window or publishing
+            // either of the fields Winit does own.
+            if !vp_ref.PlatformUserData.is_null()
+                || !vp_ref.PlatformHandle.is_null()
+                || !vp_ref.PlatformHandleRaw.is_null()
+            {
+                record_viewport_failure(control, vp, WinitPlatformError::ForeignPlatformUserData);
+                return;
+            }
 
-        // Handle viewport flags
-        let viewport_flags = vp_ref.Flags;
-        // ImGui provides screen-space *logical* coordinates for Pos/Size, even with multi-viewport.
-        // Winit expects logical positions/sizes and applies DPI scaling internally.
-        let mut pos_x = vp_ref.Pos.x as f64;
-        let mut pos_y = vp_ref.Pos.y as f64;
-        if !pos_x.is_finite() {
-            pos_x = 0.0;
-        }
-        if !pos_y.is_finite() {
-            pos_y = 0.0;
-        }
-        let mut size_x = vp_ref.Size.x as f64;
-        let mut size_y = vp_ref.Size.y as f64;
-        if !size_x.is_finite() || size_x <= 0.0 {
-            size_x = 128.0;
-        }
-        if !size_y.is_finite() || size_y <= 0.0 {
-            size_y = 128.0;
-        }
+            // Handle viewport flags
+            let viewport_flags = vp_ref.Flags;
+            let window_policy = ViewportWindowPolicy::from_flags(viewport_flags);
+            if let Err(error) =
+                validate_policy_for_creation(window_policy, supports_skip_taskbar_at_creation())
+            {
+                record_viewport_failure(control, vp, error);
+                return;
+            }
+            // ImGui provides screen-space *logical* coordinates for Pos/Size, even with multi-viewport.
+            // Winit expects logical positions/sizes and applies DPI scaling internally.
+            let mut pos_x = vp_ref.Pos.x as f64;
+            let mut pos_y = vp_ref.Pos.y as f64;
+            if !pos_x.is_finite() {
+                pos_x = 0.0;
+            }
+            if !pos_y.is_finite() {
+                pos_y = 0.0;
+            }
+            let mut size_x = vp_ref.Size.x as f64;
+            let mut size_y = vp_ref.Size.y as f64;
+            if !size_x.is_finite() || size_x <= 0.0 {
+                size_x = 128.0;
+            }
+            if !size_y.is_finite() || size_y <= 0.0 {
+                size_y = 128.0;
+            }
 
-        let pos_logical = LogicalPosition::new(pos_x, pos_y);
-        let size_logical = LogicalSize::new(size_x, size_y);
-        let mut window_attrs = WindowAttributes::default()
-            .with_title("ImGui Viewport")
-            .with_inner_size(size_logical)
-            .with_position(pos_logical)
-            .with_visible(false); // Start hidden, will be shown by show_window callback
+            let pos_logical = LogicalPosition::new(pos_x, pos_y);
+            let size_logical = LogicalSize::new(size_x, size_y);
+            let mut window_attrs = WindowAttributes::default()
+                .with_title("ImGui Viewport")
+                .with_inner_size(size_logical)
+                .with_position(pos_logical)
+                .with_visible(false)
+                .with_decorations(window_policy.decorations);
 
-        // Handle decorations
-        if viewport_flags & dear_imgui_rs::sys::ImGuiViewportFlags_NoDecoration != 0 {
-            window_attrs = window_attrs.with_decorations(false);
-        }
+            // Inactive creation is guaranteed only on the platforms where Winit exposes that
+            // contract. Other window managers control focus themselves, but the advisory flag
+            // must not block an otherwise valid viewport from being created.
+            if supports_inactive_window_creation() {
+                window_attrs = window_attrs.with_active(false);
+            }
 
-        // Handle always on top
-        if viewport_flags & dear_imgui_rs::sys::ImGuiViewportFlags_TopMost != 0 {
-            window_attrs = window_attrs.with_window_level(WindowLevel::AlwaysOnTop);
-        }
+            if window_policy.top_most {
+                window_attrs = window_attrs.with_window_level(WindowLevel::AlwaysOnTop);
+            }
 
-        match event_loop.create_window(window_attrs) {
-            Ok(window) => {
-                mvlog(format_args!(
-                    "[winit-mv] Platform_CreateWindow id={} size=({}, {})",
-                    vp_ref.ID, vp_ref.Size.x, vp_ref.Size.y
-                ));
-                // Ensure outer position matches ImGui expectation.
-                //
-                // ImGui platform coordinates are relative to the *client* origin, while winit only lets us
-                // position by outer window coordinates. Adjust by decoration offset when available.
-                let cur_frame = unsafe { dear_imgui_rs::sys::igGetFrameCount() };
-                let outer_target = if let Some((dx, dy)) = decoration_offset_logical(&window) {
-                    LogicalPosition::new(pos_logical.x - dx, pos_logical.y - dy)
-                } else {
-                    pos_logical
-                };
-                window.set_outer_position(winit::dpi::Position::Logical(outer_target));
+            if window_policy.skip_taskbar {
+                #[cfg(target_os = "windows")]
+                {
+                    window_attrs = window_attrs.with_skip_taskbar(true);
+                }
+                #[cfg(target_os = "linux")]
+                {
+                    window_attrs = window_attrs.with_x11_window_type(vec![WindowType::Utility]);
+                }
+            }
 
-                let window = Arc::new(window);
-                let data = ViewportData::new(Arc::clone(&window), false);
-                data.ignore_window_pos_event_frame.set(cur_frame);
-                data.ignore_window_size_event_frame.set(cur_frame);
-                let data = match insert_viewport_data(control, vp, data) {
-                    Ok(data) => data,
-                    Err(error) => {
-                        control.record_fault(error);
-                        vp_ref.PlatformRequestClose = true;
+            match event_loop.create_window(window_attrs) {
+                Ok(window) => {
+                    mvlog(format_args!(
+                        "[winit-mv] Platform_CreateWindow id={} size=({}, {})",
+                        vp_ref.ID, vp_ref.Size.x, vp_ref.Size.y
+                    ));
+                    // Ensure outer position matches ImGui expectation.
+                    //
+                    // ImGui platform coordinates are relative to the *client* origin, while winit only lets us
+                    // position by outer window coordinates. Adjust by decoration offset when available.
+                    let cur_frame = unsafe { dear_imgui_rs::sys::igGetFrameCount() };
+                    let outer_target = if let Some((dx, dy)) = decoration_offset_logical(&window) {
+                        LogicalPosition::new(pos_logical.x - dx, pos_logical.y - dy)
+                    } else {
+                        pos_logical
+                    };
+                    let scale = sanitize::positive_finite_or(window.scale_factor(), 1.0);
+                    let initial_position = pos_logical.to_physical::<i32>(scale);
+                    let expected_position = outer_target.to_physical::<i32>(scale);
+                    window.set_outer_position(winit::dpi::Position::Logical(outer_target));
+
+                    let window = Arc::new(window);
+                    let data = ViewportData::new(Arc::clone(&window), false);
+                    if let Err(error) = window.set_cursor_hittest(window_policy.cursor_hittest) {
+                        record_viewport_failure(
+                            control,
+                            vp,
+                            WinitPlatformError::WindowOperation {
+                                operation: "set_cursor_hittest",
+                                message: error.to_string(),
+                            },
+                        );
                         return;
                     }
-                };
-                vp_ref.PlatformUserData = data.cast::<c_void>();
-                vp_ref.PlatformHandle = Arc::as_ptr(&window).cast_mut().cast();
+                    data.window_policy.set(window_policy);
+                    let ignore_until_frame = cur_frame.saturating_add(1);
+                    data.pending_window_pos_echo.set(Some(
+                        WindowEventEcho::new(
+                            [
+                                i64::from(expected_position.x),
+                                i64::from(expected_position.y),
+                            ],
+                            ignore_until_frame,
+                        )
+                        .with_alternate([
+                            i64::from(initial_position.x),
+                            i64::from(initial_position.y),
+                        ]),
+                    ));
+                    let expected_size = window.inner_size();
+                    data.pending_window_size_echo.set(Some(WindowEventEcho::new(
+                        [
+                            i64::from(expected_size.width),
+                            i64::from(expected_size.height),
+                        ],
+                        ignore_until_frame,
+                    )));
+                    let data = match insert_viewport_data(control, vp, data) {
+                        Ok(data) => data,
+                        Err(error) => {
+                            record_viewport_failure(control, vp, error);
+                            return;
+                        }
+                    };
+                    vp_ref.PlatformUserData = data.cast::<c_void>();
+                    vp_ref.PlatformHandle = Arc::as_ptr(&window).cast_mut().cast();
 
-                // Initialize DPI/framebuffer scale immediately
-                let scale = sanitize::positive_finite_f32_or(window.scale_factor() as f32, 1.0);
-                vp_ref.DpiScale = scale;
-                vp_ref.FramebufferScale.x = scale;
-                vp_ref.FramebufferScale.y = scale;
+                    // Initialize DPI/framebuffer scale immediately
+                    let scale = sanitize::positive_finite_f32_or(window.scale_factor() as f32, 1.0);
+                    vp_ref.DpiScale = scale;
+                    vp_ref.FramebufferScale.x = scale;
+                    vp_ref.FramebufferScale.y = scale;
 
-                // Note: winit does not allow registering per-window event callbacks here.
-                // The application forwards events through `WinitPlatformRuntime::handle_event`.
+                    // Note: winit does not allow registering per-window event callbacks here.
+                    // The application forwards events through `WinitPlatformRuntime::handle_event`.
+                }
+                Err(error) => {
+                    record_viewport_failure(
+                        control,
+                        vp,
+                        WinitPlatformError::WindowCreation {
+                            message: error.to_string(),
+                        },
+                    );
+                }
             }
-            Err(error) => {
-                control.record_fault(WinitPlatformError::WindowCreation {
-                    message: error.to_string(),
-                });
-                vp_ref.PlatformRequestClose = true;
-            }
-        }
-    });
+        },
+    );
 }
 
 /// Destroy a viewport window
@@ -586,7 +1247,17 @@ pub(super) unsafe extern "C" fn winit_show_window(vp: *mut dear_imgui_rs::sys::I
         if vp.is_null() {
             return;
         }
-        with_viewport_data(control, vp, |data| data.window().set_visible(true));
+        let policy = ViewportWindowPolicy::from_flags(unsafe { (*vp).Flags });
+        with_viewport_data(control, vp, |data| {
+            if let Err(error) = sync_window_policy(data, policy) {
+                record_viewport_failure(control, vp, error);
+                return;
+            }
+            data.window().set_visible(true);
+            if supports_inactive_window_creation() && !policy.no_focus_on_appearing {
+                data.window().focus_window();
+            }
+        });
     });
 }
 
@@ -644,9 +1315,16 @@ pub(super) unsafe extern "C" fn winit_set_window_pos(
             } else {
                 desired_client
             };
+            let scale = sanitize::positive_finite_or(window.scale_factor(), 1.0);
+            let expected_position = outer_target.to_physical::<i32>(scale);
             window.set_outer_position(winit::dpi::Position::Logical(outer_target));
-            data.ignore_window_pos_event_frame
-                .set(unsafe { dear_imgui_rs::sys::igGetFrameCount() });
+            data.pending_window_pos_echo.set(Some(WindowEventEcho::new(
+                [
+                    i64::from(expected_position.x),
+                    i64::from(expected_position.y),
+                ],
+                unsafe { dear_imgui_rs::sys::igGetFrameCount().saturating_add(1) },
+            )));
         });
     });
 }
@@ -691,11 +1369,18 @@ pub(super) unsafe extern "C" fn winit_set_window_size(
         with_viewport_data(control, vp, |data| {
             let size = sanitize::finite_vec2_f32([size.x, size.y]).unwrap_or([0.0, 0.0]);
             let logical = LogicalSize::new(size[0].max(0.0) as f64, size[1].max(0.0) as f64);
-            let _ = data
-                .window()
-                .request_inner_size(winit::dpi::Size::Logical(logical));
-            data.ignore_window_size_event_frame
-                .set(unsafe { dear_imgui_rs::sys::igGetFrameCount() });
+            let window = data.window();
+            let scale = sanitize::positive_finite_or(window.scale_factor(), 1.0);
+            let expected_size = window
+                .request_inner_size(winit::dpi::Size::Logical(logical))
+                .unwrap_or_else(|| logical.to_physical::<u32>(scale));
+            data.pending_window_size_echo.set(Some(WindowEventEcho::new(
+                [
+                    i64::from(expected_size.width),
+                    i64::from(expected_size.height),
+                ],
+                unsafe { dear_imgui_rs::sys::igGetFrameCount().saturating_add(1) },
+            )));
         });
     });
 }
@@ -825,14 +1510,6 @@ pub(super) unsafe extern "C" fn winit_on_changed_viewport(
     });
 }
 
-/// Set window alpha (no-op for winit)
-pub(super) unsafe extern "C" fn winit_set_window_alpha(
-    _vp: *mut dear_imgui_rs::sys::ImGuiViewport,
-    _alpha: f32,
-) {
-    run_callback("Platform_SetWindowAlpha", (), |_| {});
-}
-
 /// Platform render window (no-op; renderer handles rendering)
 pub(super) unsafe extern "C" fn winit_platform_render_window(
     _vp: *mut dear_imgui_rs::sys::ImGuiViewport,
@@ -849,7 +1526,77 @@ pub(super) unsafe extern "C" fn winit_platform_swap_buffers(
     run_callback("Platform_SwapBuffers", (), |_| {});
 }
 
-/// Update window - called by ImGui for platform-specific updates
-pub(super) unsafe extern "C" fn winit_update_window(_vp: *mut dear_imgui_rs::sys::ImGuiViewport) {
-    run_callback("Platform_UpdateWindow", (), |_| {});
+/// Apply flags that can change while a viewport is alive.
+pub(super) unsafe extern "C" fn winit_update_window(vp: *mut dear_imgui_rs::sys::ImGuiViewport) {
+    run_callback("Platform_UpdateWindow", (), |control| {
+        if vp.is_null() {
+            return;
+        }
+        let policy = ViewportWindowPolicy::from_flags(unsafe { (*vp).Flags });
+        with_viewport_data(control, vp, |data| {
+            if let Err(error) = sync_window_policy(data, policy) {
+                record_viewport_failure(control, vp, error);
+            }
+        });
+    });
+}
+
+#[cfg(test)]
+mod policy_tests {
+    use super::*;
+
+    #[test]
+    fn focus_click_and_taskbar_require_capability_but_appearance_is_best_effort() {
+        let no_focus_on_click = ViewportWindowPolicy {
+            no_focus_on_click: true,
+            ..ViewportWindowPolicy::default()
+        };
+        assert!(matches!(
+            validate_policy_for_creation(no_focus_on_click, true),
+            Err(WinitPlatformError::UnsupportedViewportFlag {
+                flag: "NoFocusOnClick",
+                ..
+            })
+        ));
+
+        let no_focus_on_appearing = ViewportWindowPolicy {
+            no_focus_on_appearing: true,
+            ..ViewportWindowPolicy::default()
+        };
+        assert!(validate_policy_for_creation(no_focus_on_appearing, true).is_ok());
+
+        let no_taskbar = ViewportWindowPolicy {
+            skip_taskbar: true,
+            ..ViewportWindowPolicy::default()
+        };
+        assert!(matches!(
+            validate_policy_for_creation(no_taskbar, false),
+            Err(WinitPlatformError::UnsupportedViewportFlag {
+                flag: "NoTaskBarIcon",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn late_focus_and_unsupported_taskbar_changes_fail_closed() {
+        let current = ViewportWindowPolicy::default();
+        let late_no_focus = ViewportWindowPolicy {
+            no_focus_on_appearing: true,
+            ..current
+        };
+        assert!(validate_policy_transition(current, late_no_focus, true).is_ok());
+
+        let taskbar_change = ViewportWindowPolicy {
+            skip_taskbar: true,
+            ..current
+        };
+        assert!(matches!(
+            validate_policy_transition(current, taskbar_change, false),
+            Err(WinitPlatformError::UnsupportedViewportFlag {
+                flag: "NoTaskBarIcon",
+                ..
+            })
+        ));
+    }
 }

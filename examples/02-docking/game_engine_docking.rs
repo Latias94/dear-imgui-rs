@@ -201,6 +201,10 @@ struct ImguiState {
     #[cfg(feature = "implot")]
     plot_context: PlotContext,
     context: Context,
+    renderer_shutdown_complete: bool,
+    #[cfg(feature = "multi-viewport")]
+    viewport_runtime_shutdown_complete: bool,
+    platform_shutdown_complete: bool,
 }
 
 enum ImguiRenderer {
@@ -250,16 +254,55 @@ impl ImguiRenderer {
 
 impl Drop for ImguiState {
     fn drop(&mut self) {
-        self.renderer
-            .shutdown(&mut self.context)
-            .expect("WGPU renderer shutdown failed");
-        #[cfg(feature = "multi-viewport")]
-        if self.enable_viewports {
-            if let Some(runtime) = self.viewport_runtime.as_mut() {
-                runtime
-                    .shutdown()
-                    .expect("Winit multi-viewport shutdown failed");
+        if let Err(error) = self.shutdown() {
+            eprintln!("Game engine example fallback shutdown failed: {error}");
+        }
+    }
+}
+
+impl ImguiState {
+    fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if !self.renderer_shutdown_complete {
+            if let Err(error) = self.renderer.shutdown(&mut self.context) {
+                return Err(format!("WGPU renderer shutdown failed: {error}").into());
             }
+            self.renderer_shutdown_complete = true;
+        }
+
+        #[cfg(feature = "multi-viewport")]
+        let runtime_error = if !self.viewport_runtime_shutdown_complete {
+            let (viewport_runtime, context) = (&mut self.viewport_runtime, &mut self.context);
+            viewport_runtime
+                .as_mut()
+                .and_then(|runtime| runtime.shutdown(context).err())
+        } else {
+            None
+        };
+        #[cfg(not(feature = "multi-viewport"))]
+        let runtime_error: Option<dear_imgui_winit::WinitPlatformError> = None;
+
+        let platform_error = if !self.platform_shutdown_complete {
+            let (platform, context) = (&mut self.platform, &mut self.context);
+            platform.shutdown(context).err()
+        } else {
+            None
+        };
+        if platform_error.is_none() && !self.platform_shutdown_complete {
+            #[cfg(feature = "multi-viewport")]
+            {
+                self.viewport_runtime_shutdown_complete = true;
+            }
+            self.platform_shutdown_complete = true;
+        }
+
+        match (runtime_error, platform_error) {
+            (None, None) => Ok(()),
+            (Some(error), None) => Err(format!("Winit multi-viewport shutdown failed: {error}").into()),
+            (None, Some(error)) => Err(format!("Winit platform shutdown failed: {error}").into()),
+            (Some(runtime), Some(platform)) => Err(format!(
+                "Winit multi-viewport shutdown failed: {runtime}; Winit platform shutdown failed: {platform}"
+            )
+            .into()),
         }
     }
 }
@@ -877,6 +920,7 @@ struct AppWindow {
 #[derive(Default)]
 struct App {
     window: Option<AppWindow>,
+    error: Option<String>,
 }
 
 impl AppWindow {
@@ -956,7 +1000,7 @@ impl AppWindow {
         }
     }
 
-    fn setup_imgui(&mut self) {
+    fn setup_imgui(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let mut context = Context::create();
         // Disable INI load/save to test the declarative layout reliably.
         context
@@ -983,17 +1027,16 @@ impl AppWindow {
         // moves when interacting with scene gizmos in multi-viewport mode.
         io.set_config_windows_move_from_title_bar_only(true);
 
-        let mut platform = WinitPlatform::new(&mut context);
+        let mut platform = WinitPlatform::new(&mut context)?;
         platform.attach_window(
-            &self.window,
+            Arc::clone(&self.window),
             dear_imgui_winit::HiDpiMode::Default,
             &mut context,
-        );
+        )?;
         #[cfg(feature = "multi-viewport")]
         let viewport_runtime = enable_viewports
-            .then(|| winit_mvp::WinitPlatformRuntime::new(&mut context, Arc::clone(&self.window)))
-            .transpose()
-            .expect("Failed to initialize Winit multi-viewport runtime");
+            .then(|| winit_mvp::WinitPlatformRuntime::new(&mut context, &platform))
+            .transpose()?;
 
         // Initialize renderer with device and queue using one-step initialization
         let init_info = dear_imgui_wgpu::WgpuInitInfo::new(
@@ -1002,7 +1045,8 @@ impl AppWindow {
             self.surface_desc.format,
         )
         .with_instance(self.instance.clone())
-        .with_adapter(self.adapter.clone());
+        .with_adapter(self.adapter.clone())
+        .with_viewport_surface_config((&self.surface_desc).into());
         let mut renderer =
             WgpuRenderer::new(init_info, &mut context).expect("Failed to initialize WGPU renderer");
         // Unify visuals (sRGB): auto gamma by format
@@ -1079,7 +1123,12 @@ impl AppWindow {
             #[cfg(feature = "implot")]
             plot_context,
             context,
+            renderer_shutdown_complete: false,
+            #[cfg(feature = "multi-viewport")]
+            viewport_runtime_shutdown_complete: false,
+            platform_shutdown_complete: false,
         });
+        Ok(())
     }
 
     #[cfg(feature = "multi-viewport")]
@@ -1135,7 +1184,7 @@ impl AppWindow {
 
         imgui
             .platform
-            .prepare_frame(&self.window, &mut imgui.context);
+            .prepare_frame(&self.window, &mut imgui.context)?;
 
         let ui = imgui.context.frame();
 
@@ -1189,7 +1238,7 @@ impl AppWindow {
         // Let the platform backend finalize per-frame data (required for viewports)
         imgui
             .platform
-            .prepare_render(&mut imgui.context, &self.window);
+            .prepare_render(&mut imgui.context, &self.window)?;
         let draw_data = imgui.context.render();
 
         let mut encoder = self
@@ -1322,10 +1371,14 @@ impl AppWindow {
 
 impl App {
     fn exit(&mut self, event_loop: &ActiveEventLoop) {
-        if let Some(mut window) = self.window.take() {
-            window.imgui = None;
-        }
         event_loop.exit();
+    }
+
+    fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.window
+            .as_mut()
+            .and_then(|window| window.imgui.as_mut())
+            .map_or(Ok(()), ImguiState::shutdown)
     }
 }
 
@@ -2651,7 +2704,12 @@ impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_none() {
             let mut window = AppWindow::setup_gpu(event_loop);
-            window.setup_imgui();
+            if let Err(error) = window.setup_imgui() {
+                eprintln!("Failed to initialize Dear ImGui: {error}");
+                self.error = Some(error.to_string());
+                event_loop.exit();
+                return;
+            }
             // Request initial redraw to start the render loop
             window.window.request_redraw();
             self.window = Some(window);
@@ -2703,21 +2761,36 @@ impl ApplicationHandler for App {
                     runtime.handle_event(&mut imgui.platform, &mut imgui.context, &full)
                 {
                     eprintln!("Winit viewport event error: {error}");
+                    self.error = Some(error.to_string());
                     event_loop.exit();
                     return;
                 }
             } else {
-                let _ = imgui
-                    .platform
-                    .handle_event(&mut imgui.context, &window.window, &full);
+                if let Err(error) =
+                    imgui
+                        .platform
+                        .handle_event(&mut imgui.context, &window.window, &full)
+                {
+                    eprintln!("Winit platform event error: {error}");
+                    self.error = Some(error.to_string());
+                    event_loop.exit();
+                    return;
+                }
             }
         }
         #[cfg(not(feature = "multi-viewport"))]
         {
             let imgui = window.imgui.as_mut().unwrap();
-            let _ = imgui
-                .platform
-                .handle_window_event(&mut imgui.context, &window.window, &event);
+            if let Err(error) =
+                imgui
+                    .platform
+                    .handle_window_event(&mut imgui.context, &window.window, &event)
+            {
+                eprintln!("Winit platform event error: {error}");
+                self.error = Some(error.to_string());
+                event_loop.exit();
+                return;
+            }
         }
 
         match event {
@@ -2754,6 +2827,7 @@ impl ApplicationHandler for App {
                         Ok(_) => {}
                         Err(e) => {
                             eprintln!("Render error: {e}");
+                            self.error = Some(e.to_string());
                             event_loop.exit();
                         }
                     }
@@ -2780,10 +2854,10 @@ impl ApplicationHandler for App {
     }
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
 
-    let event_loop = EventLoop::new().unwrap();
+    let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Poll);
 
     let mut app = App::default();
@@ -2804,5 +2878,24 @@ fn main() {
     println!("  * Press ESC to exit");
     println!();
 
-    event_loop.run_app(&mut app).unwrap();
+    let event_loop_result = event_loop.run_app(&mut app);
+    let app_error = app.error.take();
+    let shutdown_result = app.shutdown();
+    drop(app);
+
+    let mut errors = Vec::new();
+    if let Err(error) = event_loop_result {
+        errors.push(format!("event loop failed: {error}"));
+    }
+    if let Some(error) = app_error {
+        errors.push(error);
+    }
+    if let Err(error) = shutdown_result {
+        errors.push(error.to_string());
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; ").into())
+    }
 }

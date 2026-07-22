@@ -10,6 +10,7 @@ use dear_imgui_rs::{ContextBinding, ContextId, ContextLifecycle};
 
 use super::runtime::{RuntimeControl, WgpuViewportError};
 use super::surface::ViewportWgpuData;
+use crate::WgpuViewportSurfaceConfig;
 use crate::renderer::WgpuRenderer;
 
 struct RegisteredRuntime {
@@ -21,7 +22,73 @@ struct RegisteredRuntime {
 struct ViewportDataState {
     context_raw: usize,
     binding: ContextBinding,
+    viewport: ViewportIdentity,
     pointer: usize,
+    drop_allocation: unsafe fn(usize),
+    is_wgpu_data: bool,
+}
+
+impl ViewportDataState {
+    unsafe fn drop_allocation(self) {
+        unsafe { (self.drop_allocation)(self.pointer) };
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct ViewportIdentity {
+    address: usize,
+    id: u32,
+}
+
+impl ViewportIdentity {
+    pub(super) fn capture(viewport: &Viewport) -> Self {
+        Self {
+            address: viewport.as_raw() as usize,
+            id: viewport.id().raw(),
+        }
+    }
+
+    /// Resolves this identity through Dear ImGui's complete internal viewport list.
+    ///
+    /// `PlatformIO.Viewports` is a presentation-facing list and may omit still-live hidden
+    /// viewports. The address comparison makes an ID reuse or stale registry entry fail closed
+    /// without dereferencing the address retained by this identity.
+    pub(super) fn with_live_viewport<R>(
+        self,
+        expected_context: *mut dear_imgui_rs::sys::ImGuiContext,
+        callback: impl FnOnce(&mut Viewport) -> R,
+    ) -> Option<R> {
+        if expected_context.is_null() || current_context() != expected_context {
+            return None;
+        }
+        // SAFETY: the caller proved that the expected live Context is current. Dear ImGui owns
+        // the returned viewport while it remains in that Context's internal viewport list.
+        let viewport = unsafe { dear_imgui_rs::sys::igFindViewportByID(self.id) };
+        if viewport.is_null() || viewport as usize != self.address {
+            return None;
+        }
+        // SAFETY: `igFindViewportByID` returned this exact live viewport for the current Context.
+        Some(callback(unsafe { Viewport::from_raw_mut(viewport) }))
+    }
+
+    #[cfg(test)]
+    pub(super) const fn for_test(address: usize, id: u32) -> Self {
+        Self { address, id }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ViewportDataLookup {
+    Absent,
+    Owned(*mut ViewportWgpuData),
+    OwnershipLost,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ViewportDataDestroy {
+    Absent,
+    Destroyed,
+    OwnershipLost,
 }
 
 #[derive(Clone)]
@@ -32,6 +99,7 @@ pub(super) struct GlobalHandles {
     #[cfg(feature = "wgpu-30")]
     pub(super) queue: wgpu::Queue,
     pub(super) render_target_format: wgpu::TextureFormat,
+    pub(super) viewport_surface_config: WgpuViewportSurfaceConfig,
 }
 
 thread_local! {
@@ -71,6 +139,7 @@ pub(super) fn renderer_globals(
             #[cfg(feature = "wgpu-30")]
             queue: backend.queue.clone(),
             render_target_format: backend.render_target_format,
+            viewport_surface_config: backend.init_info.viewport_surface_config,
         })
     }
 }
@@ -153,9 +222,15 @@ fn binding_has_native_context(binding: &ContextBinding) -> bool {
     )
 }
 
-pub(super) fn register_viewport_data(
+unsafe fn drop_boxed_allocation<T>(pointer: usize) {
+    drop(unsafe { Box::from_raw(pointer as *mut T) });
+}
+
+fn register_viewport_allocation<T>(
     context: &ContextBinding,
-    pointer: *mut ViewportWgpuData,
+    viewport: ViewportIdentity,
+    pointer: *mut T,
+    is_wgpu_data: bool,
 ) -> Result<(), WgpuViewportError> {
     if pointer.is_null() {
         return Err(WgpuViewportError::SurfaceOperationFailed {
@@ -179,20 +254,42 @@ pub(super) fn register_viewport_data(
     VIEWPORT_DATA.with(|data| {
         let mut data = data.borrow_mut();
         data.retain(|state| binding_has_native_context(&state.binding));
-        if !data
-            .iter()
-            .any(|state| state.binding.id() == context.id() && state.pointer == pointer as usize)
-        {
-            data.push(ViewportDataState {
-                context_raw: context_raw as usize,
-                binding: context.clone(),
-                pointer: pointer as usize,
-            });
+        if data.iter().any(|state| {
+            state.binding.id() == context.id()
+                && (state.viewport == viewport || state.pointer == pointer as usize)
+        }) {
+            return Err(WgpuViewportError::RendererUserDataOccupied);
         }
-    });
-    Ok(())
+        data.push(ViewportDataState {
+            context_raw: context_raw as usize,
+            binding: context.clone(),
+            viewport,
+            pointer: pointer as usize,
+            drop_allocation: drop_boxed_allocation::<T>,
+            is_wgpu_data,
+        });
+        Ok(())
+    })
 }
 
+pub(super) fn register_viewport_data(
+    context: &ContextBinding,
+    viewport: ViewportIdentity,
+    pointer: *mut ViewportWgpuData,
+) -> Result<(), WgpuViewportError> {
+    register_viewport_allocation(context, viewport, pointer, true)
+}
+
+#[cfg(test)]
+pub(super) fn register_test_viewport_data<T>(
+    context: &ContextBinding,
+    viewport: ViewportIdentity,
+    pointer: *mut T,
+) -> Result<(), WgpuViewportError> {
+    register_viewport_allocation(context, viewport, pointer, false)
+}
+
+#[cfg(test)]
 pub(super) fn unregister_viewport_data(pointer: *mut ViewportWgpuData) {
     let pointer = pointer as usize;
     VIEWPORT_DATA.with(|data| {
@@ -200,57 +297,190 @@ pub(super) fn unregister_viewport_data(pointer: *mut ViewportWgpuData) {
     });
 }
 
-fn owns_viewport_data(
-    context: *mut dear_imgui_rs::sys::ImGuiContext,
-    pointer: *mut ViewportWgpuData,
-) -> bool {
-    !pointer.is_null()
-        && VIEWPORT_DATA.with(|data| {
-            data.borrow().iter().any(|state| {
-                state.context_raw == context as usize
-                    && binding_has_native_context(&state.binding)
-                    && state.pointer == pointer as usize
-            })
-        })
+pub(super) fn viewport_data_lookup(viewport: &Viewport) -> ViewportDataLookup {
+    let context = current_context();
+    let identity = ViewportIdentity::capture(viewport);
+    let slot = viewport.renderer_user_data() as usize;
+    VIEWPORT_DATA.with(|data| {
+        let data = data.borrow();
+        let Some(state) = data.iter().find(|state| {
+            state.context_raw == context as usize
+                && binding_has_native_context(&state.binding)
+                && state.viewport == identity
+        }) else {
+            return if slot == 0 {
+                ViewportDataLookup::Absent
+            } else {
+                ViewportDataLookup::OwnershipLost
+            };
+        };
+        if state.pointer == slot && state.is_wgpu_data {
+            ViewportDataLookup::Owned(state.pointer as *mut ViewportWgpuData)
+        } else {
+            ViewportDataLookup::OwnershipLost
+        }
+    })
 }
 
-pub(super) unsafe fn viewport_data_pointer(viewport: &Viewport) -> Option<*mut ViewportWgpuData> {
-    let context = current_context();
-    let pointer = viewport.renderer_user_data().cast::<ViewportWgpuData>();
-    owns_viewport_data(context, pointer).then_some(pointer)
+fn registered_viewport_data(
+    context: *mut dear_imgui_rs::sys::ImGuiContext,
+    binding: &ContextBinding,
+) -> Vec<(ViewportIdentity, usize)> {
+    VIEWPORT_DATA.with(|data| {
+        data.borrow()
+            .iter()
+            .filter(|state| {
+                state.context_raw == context as usize
+                    && state.binding.id() == binding.id()
+                    && binding_has_native_context(&state.binding)
+            })
+            .map(|state| (state.viewport, state.pointer))
+            .collect()
+    })
+}
+
+fn take_registered_viewport_data(
+    context: *mut dear_imgui_rs::sys::ImGuiContext,
+    binding: &ContextBinding,
+    viewport: ViewportIdentity,
+    pointer: usize,
+) -> Option<ViewportDataState> {
+    VIEWPORT_DATA.with(|data| {
+        let mut data = data.borrow_mut();
+        data.iter()
+            .position(|state| {
+                state.context_raw == context as usize
+                    && state.binding.id() == binding.id()
+                    && state.viewport == viewport
+                    && state.pointer == pointer
+            })
+            .map(|position| data.remove(position))
+    })
+}
+
+fn renderer_user_data_ownership_error() -> WgpuViewportError {
+    WgpuViewportError::RendererUserDataOwnershipLost {
+        callback: "Renderer_DestroyWindow",
+    }
+}
+
+fn ensure_current_context(
+    context: *mut dear_imgui_rs::sys::ImGuiContext,
+    binding: &ContextBinding,
+) -> Result<(), WgpuViewportError> {
+    if context.is_null() || current_context() != context {
+        return Err(WgpuViewportError::BoundContextMismatch {
+            expected: binding.id(),
+        });
+    }
+    Ok(())
+}
+
+/// Verifies that every renderer-owned sidecar still points at its exact allocation in Dear
+/// ImGui's complete internal viewport list.
+///
+/// This is intentionally read-only. Teardown must reject a partial foreign takeover before it
+/// drops any sidecar or releases `Renderer_DestroyWindow`; otherwise Dear ImGui can later reach a
+/// foreign `RendererUserData` value through an empty destroy callback slot.
+pub(super) fn preflight_viewport_data_ownership(
+    context: *mut dear_imgui_rs::sys::ImGuiContext,
+    binding: &ContextBinding,
+) -> Result<(), WgpuViewportError> {
+    ensure_current_context(context, binding)?;
+    for (viewport, pointer) in registered_viewport_data(context, binding) {
+        let owns_slot = viewport.with_live_viewport(context, |viewport| {
+            viewport.renderer_user_data() as usize == pointer
+        });
+        if owns_slot == Some(false) {
+            return Err(renderer_user_data_ownership_error());
+        }
+    }
+    Ok(())
+}
+
+/// Clears and drops every renderer sidecar registered for the bound Context.
+///
+/// The caller must preflight first. Each identity is resolved immediately before native state is
+/// touched; an absent or address-mismatched viewport is already gone or has been replaced, so its
+/// Rust allocation is released without dereferencing or writing the retained address.
+pub(super) fn destroy_registered_viewport_data(
+    context: *mut dear_imgui_rs::sys::ImGuiContext,
+    binding: &ContextBinding,
+) -> Result<(), WgpuViewportError> {
+    ensure_current_context(context, binding)?;
+    for (viewport, pointer) in registered_viewport_data(context, binding) {
+        let slot_cleared = viewport.with_live_viewport(context, |viewport| {
+            if viewport.renderer_user_data() as usize != pointer {
+                return false;
+            }
+            // SAFETY: the registry and immediately-resolved native slot both prove ownership.
+            unsafe { viewport.set_renderer_user_data(std::ptr::null_mut()) };
+            true
+        });
+        if slot_cleared == Some(false) {
+            return Err(renderer_user_data_ownership_error());
+        }
+
+        let state = take_registered_viewport_data(context, binding, viewport, pointer);
+        if let Some(state) = state {
+            // SAFETY: registry removal transfers the sole allocation ownership into this function.
+            unsafe { state.drop_allocation() };
+        }
+    }
+    Ok(())
 }
 
 pub(super) unsafe fn destroy_viewport_data(
     context: *mut dear_imgui_rs::sys::ImGuiContext,
     viewport: &mut Viewport,
-) -> bool {
-    let pointer = viewport.renderer_user_data().cast::<ViewportWgpuData>();
-    if !owns_viewport_data(context, pointer) {
-        return false;
+) -> ViewportDataDestroy {
+    let identity = ViewportIdentity::capture(viewport);
+    let state = VIEWPORT_DATA.with(|data| {
+        let mut data = data.borrow_mut();
+        data.iter()
+            .position(|state| state.context_raw == context as usize && state.viewport == identity)
+            .map(|position| data.remove(position))
+    });
+    let Some(state) = state else {
+        return if viewport.renderer_user_data().is_null() {
+            ViewportDataDestroy::Absent
+        } else {
+            ViewportDataDestroy::OwnershipLost
+        };
+    };
+
+    let slot_is_owned = viewport.renderer_user_data() as usize == state.pointer;
+    if slot_is_owned {
+        // SAFETY: the registry proves that this exact slot is ours; clear it before drop.
+        unsafe { viewport.set_renderer_user_data(std::ptr::null_mut()) };
     }
-    unregister_viewport_data(pointer);
-    viewport.set_renderer_user_data(std::ptr::null_mut());
-    // SAFETY: registry ownership proves this pointer came from `Box::into_raw` exactly once.
-    let data = unsafe { Box::from_raw(pointer) };
-    debug_assert_eq!(data.owner_context, context as usize);
-    drop(data);
-    true
+    // SAFETY: registry removal transfers the sole allocation ownership into this function.
+    unsafe { state.drop_allocation() };
+    if slot_is_owned {
+        ViewportDataDestroy::Destroyed
+    } else {
+        ViewportDataDestroy::OwnershipLost
+    }
 }
 
-pub(super) fn take_viewport_data(context: ContextId) -> Vec<*mut ViewportWgpuData> {
+pub(super) fn drop_orphaned_viewport_data(context: ContextId) {
     VIEWPORT_DATA.with(|data| {
         let mut data = data.borrow_mut();
         let mut owned = Vec::new();
-        data.retain(|state| {
-            if state.binding.id() == context {
-                owned.push(state.pointer as *mut ViewportWgpuData);
-                false
+        let mut index = 0;
+        while index < data.len() {
+            if data[index].binding.id() == context {
+                owned.push(data.remove(index));
             } else {
-                true
+                index += 1;
             }
-        });
-        owned
-    })
+        }
+        drop(data);
+        for state in owned {
+            // SAFETY: removing each registry entry transfers its sole allocation ownership.
+            unsafe { state.drop_allocation() };
+        }
+    });
 }
 
 #[cfg(test)]

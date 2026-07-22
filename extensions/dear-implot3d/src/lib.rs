@@ -76,5 +76,5 @@ pub(crate) use debug_state::{
 };
 pub(crate) use layout::{
     axis_tick_count_to_i32, default_plot3d_spec, imvec2, imvec4, len_i32, plot3d_spec_from,
-    set_next_plot3d_spec, surface_count_to_i32, take_next_plot3d_spec, update_next_plot3d_spec,
+    set_next_plot3d_spec, take_next_plot3d_spec, update_next_plot3d_spec,
 };

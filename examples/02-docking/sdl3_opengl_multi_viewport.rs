@@ -72,7 +72,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // On native GL, `glow::Texture` is a small integer handle wrapper (NativeTexture).
     // We treat the underlying GL name (NonZeroU32) as a legacy ImTextureID.
     let game_tex_name = game_tex.0.get(); // NonZeroU32 -> u32
-    let game_tex_id = TextureId::from(game_tex_name as u64);
+    let game_tex_id = TextureId::from(game_tex_name);
 
     // Build ImGui context.
     let mut imgui = Context::create();
@@ -87,8 +87,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // Initialize SDL3 + OpenGL3 backends (C++ side).
+    // SAFETY: `window` and `gl_context` outlive shutdown and Context teardown on early return.
     let mut sdl3_backend =
-        Sdl3OpenGl3Backend::init(&mut imgui, &window, &gl_context, "#version 150")?;
+        unsafe { Sdl3OpenGl3Backend::init(&mut imgui, &window, &gl_context, "#version 150")? };
     // Let the backend merge all connected gamepads instead of only the first one.
     sdl3_backend.set_gamepad_mode(&mut imgui, GamepadMode::AutoAll)?;
 

@@ -92,6 +92,19 @@ fn resolve_imgui_includes(cfg: &BuildConfig) -> (PathBuf, PathBuf) {
     (imgui_src, cimgui_root)
 }
 
+fn native_binding_spec() -> &'static build_support::binding::CrateBindingSpec {
+    build_support::binding::CrateBindingSpec::for_crate_and_target(env!("CARGO_PKG_NAME"), "native")
+        .expect("missing dear-imnodes-sys native binding spec")
+}
+
+#[cfg(feature = "bindgen")]
+fn apply_bindgen_defines(mut builder: bindgen::Builder) -> bindgen::Builder {
+    for define in native_binding_spec().binding_defines() {
+        builder = builder.clang_arg(define.clang_arg());
+    }
+    builder
+}
+
 #[cfg(feature = "bindgen")]
 fn generate_bindings(
     cfg: &BuildConfig,
@@ -118,7 +131,7 @@ fn generate_bindings(
         );
     }
 
-    let bindings = bindgen::Builder::default()
+    let builder = bindgen::Builder::default()
         .header(cimnodes_root.join("cimnodes.h").to_string_lossy())
         .header(
             cfg.manifest_dir
@@ -146,9 +159,8 @@ fn generate_bindings(
         .clang_arg(format!("-I{}", cimgui_root.display()))
         .clang_arg(format!("-I{}", imgui_src.display()))
         .clang_arg(format!("-I{}", cimnodes_root.display()))
-        .clang_arg(format!("-I{}", cimnodes_root.join("imnodes").display()))
-        .clang_arg("-DIMGUI_USE_WCHAR32")
-        .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
+        .clang_arg(format!("-I{}", cimnodes_root.join("imnodes").display()));
+    let bindings = apply_bindgen_defines(builder)
         .derive_default(true)
         .derive_debug(true)
         .derive_copy(true)
@@ -247,17 +259,12 @@ fn build_with_cc(cfg: &BuildConfig, cimnodes_root: &Path, imgui_src: &Path, cimg
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
     build_support::configure_cpp_runtime_linkage(&mut build, &cfg.target_os, &cfg.target_env);
-    for (k, v) in env::vars() {
-        if let Some(suffix) = k.strip_prefix("DEP_DEAR_IMGUI_DEFINE_") {
-            build.define(suffix, v.as_str());
-        }
-    }
+    native_binding_spec().apply_extension_binding_defines(&mut build, env::vars());
     build.include(imgui_src);
     build.include(cimgui_root);
     build.include(cimnodes_root);
     build.include(cfg.manifest_dir.join("shim"));
     build.include(cimnodes_root.join("imnodes"));
-    build.define("IMGUI_USE_WCHAR32", None);
     build.define("IMNODES_NAMESPACE", Some("imnodes"));
     build.file(cimnodes_root.join("cimnodes.cpp"));
     build.file(cimnodes_root.join("imnodes/imnodes.cpp"));

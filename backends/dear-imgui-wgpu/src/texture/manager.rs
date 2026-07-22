@@ -13,8 +13,8 @@ pub struct WgpuTextureManager {
     pub(super) managed_textures: HashMap<SnapshotTextureId, ManagedWgpuTexture>,
     /// Renderer IDs written back to draw commands, mapped to their managed owners.
     pub(super) managed_by_texture_id: HashMap<TextureId, SnapshotTextureId>,
-    /// Managed identities that have already observed a destroy request.
-    pub(super) destroyed_managed_textures: HashSet<SnapshotTextureId>,
+    /// Managed identities sealed by Destroy, paired with their latest request epoch.
+    pub(super) destroyed_managed_textures: HashMap<SnapshotTextureId, u64>,
     /// Next available texture ID
     pub(super) next_id: u64,
     /// Custom samplers registered for external textures (sampler_id -> sampler)

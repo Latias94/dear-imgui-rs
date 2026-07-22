@@ -1,39 +1,99 @@
 use super::*;
 
-pub(super) fn pick_surface_format(formats: &[vk::SurfaceFormatKHR]) -> vk::SurfaceFormatKHR {
-    if formats.len() == 1 && formats[0].format == vk::Format::UNDEFINED {
-        return vk::SurfaceFormatKHR {
-            format: vk::Format::B8G8R8A8_SRGB,
-            color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
+const DEFAULT_SRGB_SURFACE_FORMAT: vk::SurfaceFormatKHR = vk::SurfaceFormatKHR {
+    format: vk::Format::B8G8R8A8_SRGB,
+    color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
+};
+
+pub(super) fn resolve_surface_format(
+    policy: SurfaceFormatPolicy,
+    formats: &[vk::SurfaceFormatKHR],
+) -> Result<vk::SurfaceFormatKHR, SurfaceSupportError> {
+    if let SurfaceFormatPolicy::Exact(requested) = policy
+        && requested.format == vk::Format::UNDEFINED
+    {
+        return Err(SurfaceSupportError::SurfaceFormatUnsupported { requested });
+    }
+
+    let unrestricted_color_space = formats
+        .first()
+        .filter(|_| formats.len() == 1)
+        .filter(|format| format.format == vk::Format::UNDEFINED)
+        .map(|format| format.color_space);
+    if let Some(color_space) = unrestricted_color_space {
+        return match policy {
+            SurfaceFormatPolicy::AutoSrgb if color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR => {
+                Ok(DEFAULT_SRGB_SURFACE_FORMAT)
+            }
+            SurfaceFormatPolicy::AutoSrgb => Err(SurfaceSupportError::SrgbSurfaceFormatUnsupported),
+            SurfaceFormatPolicy::Exact(requested) if requested.color_space == color_space => {
+                Ok(requested)
+            }
+            SurfaceFormatPolicy::Exact(requested) => {
+                Err(SurfaceSupportError::SurfaceFormatUnsupported { requested })
+            }
         };
     }
 
-    let preferred = [
-        vk::Format::B8G8R8A8_SRGB,
-        vk::Format::R8G8B8A8_SRGB,
-        vk::Format::B8G8R8A8_UNORM,
-        vk::Format::R8G8B8A8_UNORM,
-    ];
-    for preferred_format in preferred {
-        if let Some(format) = formats
-            .iter()
-            .find(|format| format.format == preferred_format)
-        {
-            return *format;
-        }
+    match policy {
+        SurfaceFormatPolicy::Exact(requested) => formats
+            .contains(&requested)
+            .then_some(requested)
+            .ok_or(SurfaceSupportError::SurfaceFormatUnsupported { requested }),
+        SurfaceFormatPolicy::AutoSrgb => [
+            vk::Format::B8G8R8A8_SRGB,
+            vk::Format::R8G8B8A8_SRGB,
+            vk::Format::B8G8R8A8_UNORM,
+            vk::Format::R8G8B8A8_UNORM,
+        ]
+        .into_iter()
+        .find_map(|preferred| {
+            formats.iter().copied().find(|candidate| {
+                candidate.format == preferred
+                    && candidate.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
+            })
+        })
+        .ok_or(SurfaceSupportError::SrgbSurfaceFormatUnsupported),
     }
-    *formats.first().unwrap_or(&vk::SurfaceFormatKHR {
-        format: vk::Format::B8G8R8A8_UNORM,
-        color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
-    })
 }
 
-pub(super) fn pick_present_mode(modes: &[vk::PresentModeKHR]) -> vk::PresentModeKHR {
-    if modes.contains(&vk::PresentModeKHR::MAILBOX) {
-        vk::PresentModeKHR::MAILBOX
-    } else {
-        vk::PresentModeKHR::FIFO
-    }
+pub(super) fn resolve_present_mode(
+    policy: PresentModePolicy,
+    modes: &[vk::PresentModeKHR],
+) -> Result<vk::PresentModeKHR, SurfaceSupportError> {
+    let candidates: &[vk::PresentModeKHR] = match policy {
+        PresentModePolicy::AutoVsync => {
+            &[vk::PresentModeKHR::FIFO_RELAXED, vk::PresentModeKHR::FIFO]
+        }
+        PresentModePolicy::AutoNoVsync => &[
+            vk::PresentModeKHR::IMMEDIATE,
+            vk::PresentModeKHR::MAILBOX,
+            vk::PresentModeKHR::FIFO,
+        ],
+        PresentModePolicy::Exact(requested) => {
+            return modes
+                .contains(&requested)
+                .then_some(requested)
+                .ok_or(SurfaceSupportError::PresentModeUnsupported { requested });
+        }
+    };
+
+    candidates
+        .iter()
+        .copied()
+        .find(|candidate| modes.contains(candidate))
+        .ok_or(SurfaceSupportError::AutomaticPresentModeUnsupported)
+}
+
+pub(super) fn resolve_swapchain_policy(
+    policy: ViewportSwapchainPolicy,
+    formats: &[vk::SurfaceFormatKHR],
+    modes: &[vk::PresentModeKHR],
+) -> Result<(vk::SurfaceFormatKHR, vk::PresentModeKHR), SurfaceSupportError> {
+    Ok((
+        resolve_surface_format(policy.surface_format, formats)?,
+        resolve_present_mode(policy.present_mode, modes)?,
+    ))
 }
 
 pub(super) fn desired_extent_from_size_and_scale(
@@ -179,17 +239,18 @@ pub(super) fn recreate_swapchain(
     global: &GlobalHandles,
     data: &mut ViewportAshData,
     desired_extent: Option<vk::Extent2D>,
-) -> RendererResult<()> {
+) -> Result<(), AshViewportError> {
     if data.state == ViewportRuntimeState::Failed {
         return Err(RendererError::InvalidRenderState(
             "cannot rebuild a failed viewport runtime".into(),
-        ));
+        )
+        .into());
     }
 
     if data.swapchain.is_some() {
         if let Err(error) = unsafe { renderer.device.device_wait_idle() } {
             data.mark_failed();
-            return Err(error.into());
+            return Err(RendererError::from(error).into());
         }
     }
     recreate_swapchain_after_device_idle(renderer, global, data, desired_extent)
@@ -200,25 +261,28 @@ pub(super) fn recreate_swapchain_after_device_idle(
     global: &GlobalHandles,
     data: &mut ViewportAshData,
     desired_extent: Option<vk::Extent2D>,
-) -> RendererResult<()> {
+) -> Result<(), AshViewportError> {
     if data.state == ViewportRuntimeState::Failed {
         return Err(RendererError::InvalidRenderState(
             "cannot rebuild a failed viewport runtime".into(),
-        ));
+        )
+        .into());
     }
 
     data.pending_present = None;
     data.rebuild_after_present = false;
     data.state = ViewportRuntimeState::RebuildRequired;
 
-    let support = query_surface_support(global, data.surface)
-        .map_err(|error| RendererError::InvalidRenderState(error.to_string()))?;
+    let support = query_surface_support(global, data.surface)?;
     let Some(extent) = select_swapchain_extent(&support.capabilities, desired_extent) else {
         data.state = ViewportRuntimeState::Paused;
         return Ok(());
     };
-    let surface_format = pick_surface_format(&support.formats);
-    let present_mode = pick_present_mode(&support.present_modes);
+    let (surface_format, present_mode) = resolve_swapchain_policy(
+        global.swapchain_policy,
+        &support.formats,
+        &support.present_modes,
+    )?;
 
     #[cfg(not(feature = "dynamic-rendering"))]
     let clear_render_pass = renderer
@@ -279,7 +343,7 @@ pub(super) fn recreate_swapchain_after_device_idle(
     // call fails. Stop exposing the old resources as active immediately after the call.
     let created_swapchain = unsafe { data.swapchain_loader.create_swapchain(&create_info, None) };
     data.retire_swapchain_after_device_idle(&renderer.device);
-    let swapchain = created_swapchain?;
+    let swapchain = created_swapchain.map_err(RendererError::from)?;
 
     let images = match unsafe { data.swapchain_loader.get_swapchain_images(swapchain) } {
         Ok(images) if !images.is_empty() => images,
@@ -287,18 +351,19 @@ pub(super) fn recreate_swapchain_after_device_idle(
             unsafe { data.swapchain_loader.destroy_swapchain(swapchain, None) };
             return Err(RendererError::InvalidRenderState(
                 "Vulkan swapchain returned no images".into(),
-            ));
+            )
+            .into());
         }
         Err(error) => {
             unsafe { data.swapchain_loader.destroy_swapchain(swapchain, None) };
-            return Err(error.into());
+            return Err(RendererError::from(error).into());
         }
     };
     let image_views = match create_image_views(&renderer.device, &images, surface_format.format) {
         Ok(image_views) => image_views,
         Err(error) => {
             unsafe { data.swapchain_loader.destroy_swapchain(swapchain, None) };
-            return Err(error);
+            return Err(error.into());
         }
     };
     let present_semaphores = match create_present_semaphores(&renderer.device, images.len()) {
@@ -306,7 +371,7 @@ pub(super) fn recreate_swapchain_after_device_idle(
         Err(error) => {
             destroy_image_views(&renderer.device, image_views);
             unsafe { data.swapchain_loader.destroy_swapchain(swapchain, None) };
-            return Err(error);
+            return Err(error.into());
         }
     };
     #[cfg(not(feature = "dynamic-rendering"))]
@@ -317,7 +382,7 @@ pub(super) fn recreate_swapchain_after_device_idle(
                 destroy_present_semaphores(&renderer.device, present_semaphores);
                 destroy_image_views(&renderer.device, image_views);
                 unsafe { data.swapchain_loader.destroy_swapchain(swapchain, None) };
-                return Err(error);
+                return Err(error.into());
             }
         };
 

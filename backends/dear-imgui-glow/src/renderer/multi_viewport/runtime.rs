@@ -5,8 +5,8 @@ use std::rc::Rc;
 use dear_imgui_rs::render::RenderedFrame;
 use dear_imgui_rs::{
     Context, ContextAttachment, ContextAttachmentError, ContextAttachmentLease,
-    ContextAttachmentRole, ContextBinding, ContextBindingError, ContextDestroyed, ContextId,
-    ContextTeardown, TextureFormat, TextureId,
+    ContextAttachmentRole, ContextAttachmentTeardownError, ContextBinding, ContextBindingError,
+    ContextDestroyed, ContextId, ContextTeardown, TextureFormat, TextureId,
 };
 use thiserror::Error;
 
@@ -51,11 +51,6 @@ pub enum GlowViewportError {
     /// The platform attachment has not advertised multi-viewport support.
     #[error("Glow multi-viewport requires an attached multi-viewport platform runtime")]
     PlatformBackendUnavailable,
-    /// A known platform runtime cannot establish the required per-window GL context contract.
-    #[error(
-        "platform backend `{backend}` does not provide Glow-compatible per-window GL context switching"
-    )]
-    PlatformGlContextUnsupported { backend: String },
     /// A platform callback required to make and present GL viewport contexts is absent.
     #[error("required ImGuiPlatformIO callback `{callback}` is not installed")]
     PlatformCallbackUnavailable { callback: &'static str },
@@ -65,6 +60,12 @@ pub enum GlowViewportError {
     /// Another renderer already owns part of the renderer callback table.
     #[error("ImGuiPlatformIO callback `{callback}` is already owned by another renderer")]
     RendererCallbackOccupied { callback: &'static str },
+    /// Another renderer already advertises renderer-owned multi-viewport support.
+    #[error("ImGui backend flag `RENDERER_HAS_VIEWPORTS` is already owned by another renderer")]
+    RendererViewportCapabilityOccupied,
+    /// The renderer-owned multi-viewport capability disappeared while attached.
+    #[error("Glow renderer backend flag `RENDERER_HAS_VIEWPORTS` was removed while attached")]
+    RendererViewportCapabilityLost,
     /// A callback claimed by this runtime was replaced while attached.
     #[error("Glow renderer callback `{callback}` was replaced while the runtime was attached")]
     RendererCallbackReplaced { callback: &'static str },
@@ -156,8 +157,6 @@ enum CallbackState {
 enum ShutdownAction<'a> {
     Quiesce,
     Explicit(&'a mut Context),
-    BestEffort,
-    ContextResources,
 }
 
 pub(super) struct RuntimeControl {
@@ -168,7 +167,6 @@ pub(super) struct RuntimeControl {
     gl: RefCell<Option<Rc<glow::Context>>>,
     attachment: RefCell<Option<ContextAttachmentLease>>,
     callback_state: Cell<CallbackState>,
-    prior_backend_flags: dear_imgui_rs::BackendFlags,
     faults: RefCell<Option<GlowViewportError>>,
     #[cfg(test)]
     panic_next_callback: Cell<bool>,
@@ -198,7 +196,6 @@ impl RuntimeControl {
             gl: RefCell::new(Some(gl)),
             attachment: RefCell::new(None),
             callback_state: Cell::new(CallbackState::Unclaimed),
-            prior_backend_flags: context.io().backend_flags(),
             faults: RefCell::new(None),
             #[cfg(test)]
             panic_next_callback: Cell::new(false),
@@ -218,10 +215,6 @@ impl RuntimeControl {
     #[cfg(test)]
     pub(super) fn state(&self) -> RuntimeState {
         self.state.get()
-    }
-
-    pub(super) fn prior_backend_flags(&self) -> dear_imgui_rs::BackendFlags {
-        self.prior_backend_flags
     }
 
     pub(super) fn is_callback_accessible(&self) -> bool {
@@ -291,9 +284,24 @@ impl RuntimeControl {
         }
     }
 
-    pub(super) fn record_callback_replaced(&self, callback: &'static str) {
-        self.record_fault(GlowViewportError::RendererCallbackReplaced { callback });
+    pub(super) fn record_dependency_fault(&self, fault: GlowViewportError) {
+        self.record_fault(fault);
         self.begin_shutdown();
+    }
+
+    fn record_renderer_operational_fault(&self, error: RenderError) {
+        let terminal = matches!(
+            &error,
+            RenderError::RendererStateDrift { .. }
+                | RenderError::RendererCallbackReplaced { .. }
+                | RenderError::RendererCapabilityDrift { .. }
+        );
+        let fault = GlowViewportError::Renderer(error);
+        if terminal {
+            self.record_dependency_fault(fault);
+        } else {
+            self.record_fault(fault);
+        }
     }
 
     fn detect_and_take_fault(&self) -> Option<GlowViewportError> {
@@ -341,6 +349,7 @@ impl RuntimeControl {
             let renderer = renderer
                 .as_deref_mut()
                 .ok_or(GlowViewportError::RuntimeDetached)?;
+            renderer.ensure_operational()?;
             callback(renderer)
         }?;
         self.finish_entry()?;
@@ -388,6 +397,10 @@ impl RuntimeControl {
             self.record_fault(GlowViewportError::RuntimeDetached);
             return;
         };
+        if let Err(error) = renderer.ensure_operational() {
+            self.record_renderer_operational_fault(error);
+            return;
+        }
         if let Err(error) = callback(renderer, &gl) {
             self.record_fault(GlowViewportError::Renderer(error));
         }
@@ -395,9 +408,12 @@ impl RuntimeControl {
 
     fn release_renderer_explicit(&self, context: &mut Context) -> Result<(), GlowViewportError> {
         if self.renderer.borrow().is_none() {
+            self.begin_shutdown();
+            let callback_result = release_callbacks(self);
             self.gl.borrow_mut().take();
+            self.mark_detached();
             self.set_state(RuntimeState::ResourceDropped);
-            return Ok(());
+            return callback_result;
         }
         let gl = self
             .gl
@@ -405,45 +421,69 @@ impl RuntimeControl {
             .as_ref()
             .cloned()
             .ok_or(GlowViewportError::RuntimeDetached)?;
-        let mut renderer =
+        let mut renderer_slot =
             self.renderer
                 .try_borrow_mut()
                 .map_err(|_| GlowViewportError::CallbackReentered {
                     callback: "GlowViewportRuntime::shutdown",
                 })?;
-        renderer
+        let renderer = renderer_slot
             .as_deref_mut()
-            .ok_or(GlowViewportError::RuntimeDetached)?
-            .destroy(&gl, context)?;
-        let renderer = renderer.take();
+            .ok_or(GlowViewportError::RuntimeDetached)?;
+
+        // Preparing the reset permit and releasing resources happens before this runtime mutates
+        // its callback table. A retryable failure therefore leaves every Context-visible runtime
+        // publication intact.
+        renderer.destroy_resources_and_reset(&gl, context)?;
+        self.begin_shutdown();
+        let callback_result = release_callbacks(self);
+        renderer.unconfigure_imgui_context(context);
+        let renderer = renderer_slot.take();
         drop(renderer);
         self.gl.borrow_mut().take();
+        self.mark_detached();
         self.set_state(RuntimeState::ResourceDropped);
-        Ok(())
+        callback_result
     }
 
-    fn release_renderer_without_context_reset(&self) -> Result<(), GlowViewportError> {
+    fn release_renderer_during_context_teardown(
+        &self,
+        context: &ContextTeardown<'_>,
+    ) -> Result<(), ContextAttachmentTeardownError> {
         if self.renderer.borrow().is_none() {
             self.gl.borrow_mut().take();
             self.set_state(RuntimeState::ResourceDropped);
             return Ok(());
         }
-        self.mark_detached();
         let gl = self
             .gl
             .borrow()
             .as_ref()
             .cloned()
-            .ok_or(GlowViewportError::RuntimeDetached)?;
-        let mut renderer =
-            self.renderer
-                .try_borrow_mut()
-                .map_err(|_| GlowViewportError::CallbackReentered {
-                    callback: "Context renderer-resource teardown",
-                })?;
-        if let Some(renderer) = renderer.as_deref_mut() {
-            renderer.destroy_gpu_resources_only(&gl);
+            .ok_or_else(|| context_teardown_error(GlowViewportError::RuntimeDetached))?;
+        let mut renderer = self.renderer.try_borrow_mut().map_err(|_| {
+            context_teardown_error(GlowViewportError::CallbackReentered {
+                callback: "Context renderer-resource teardown",
+            })
+        })?;
+        let renderer_ref = renderer
+            .as_deref_mut()
+            .ok_or_else(|| context_teardown_error(GlowViewportError::RuntimeDetached))?;
+        let consumer = renderer_ref.renderer_consumer.take().ok_or_else(|| {
+            ContextAttachmentTeardownError::new(
+                "Glow renderer-resource teardown lost its renderer consumer",
+            )
+        })?;
+        let reset = context.with_renderer_texture_reset(&consumer, || {
+            renderer_ref
+                .destroy_for_context_teardown(&gl)
+                .map_err(|error| context_teardown_error(GlowViewportError::Renderer(error)))
+        });
+        if let Err(error) = reset {
+            renderer_ref.renderer_consumer = Some(consumer);
+            return Err(error);
         }
+        drop(consumer);
         let renderer = renderer.take();
         drop(renderer);
         self.gl.borrow_mut().take();
@@ -453,35 +493,20 @@ impl RuntimeControl {
 
     fn shutdown_once(&self, action: ShutdownAction<'_>) -> Result<(), GlowViewportError> {
         if self.state.get() == RuntimeState::ResourceDropped {
-            if !matches!(action, ShutdownAction::ContextResources) {
-                self.detach_attachment();
-            }
+            self.detach_attachment();
             return Ok(());
         }
-        self.begin_shutdown();
-        let callback_result = release_callbacks(self);
         match action {
-            ShutdownAction::Quiesce => callback_result,
+            ShutdownAction::Quiesce => {
+                self.begin_shutdown();
+                release_callbacks(self)
+            }
             ShutdownAction::Explicit(context) => {
-                self.mark_detached();
                 let renderer_result = self.release_renderer_explicit(context);
                 if self.state.get() == RuntimeState::ResourceDropped {
                     self.detach_attachment();
                 }
-                first_error([callback_result.err(), renderer_result.err()])
-            }
-            ShutdownAction::BestEffort => {
-                self.mark_detached();
-                let renderer_result = self.release_renderer_without_context_reset();
-                if self.state.get() == RuntimeState::ResourceDropped {
-                    self.detach_attachment();
-                }
-                first_error([callback_result.err(), renderer_result.err()])
-            }
-            ShutdownAction::ContextResources => {
-                self.mark_detached();
-                let renderer_result = self.release_renderer_without_context_reset();
-                first_error([callback_result.err(), renderer_result.err()])
+                renderer_result
             }
         }
     }
@@ -490,11 +515,7 @@ impl RuntimeControl {
         if self.state.get() == RuntimeState::ResourceDropped {
             return;
         }
-        let _ = self.binding.try_with_bound_context(|| {
-            if let Err(error) = self.shutdown_once(ShutdownAction::BestEffort) {
-                self.record_fault(error);
-            }
-        });
+        self.defer_attachment_to_context();
     }
 
     fn store_attachment(&self, attachment: ContextAttachmentLease) {
@@ -504,6 +525,12 @@ impl RuntimeControl {
     fn detach_attachment(&self) {
         if let Some(mut attachment) = self.attachment.borrow_mut().take() {
             attachment.detach();
+        }
+    }
+
+    fn defer_attachment_to_context(&self) {
+        if let Some(attachment) = self.attachment.borrow_mut().take() {
+            attachment.defer_to_context();
         }
     }
 
@@ -518,9 +545,14 @@ impl RuntimeControl {
 
     fn mark_context_destroyed(&self) {
         unregister_runtime(self.binding.id());
-        if self.renderer.borrow().is_some() {
-            let _ = self.release_renderer_without_context_reset();
+        let gl = self.gl.borrow().as_ref().cloned();
+        if let (Some(gl), Ok(mut renderer)) = (gl, self.renderer.try_borrow_mut()) {
+            if let Some(renderer) = renderer.as_deref_mut() {
+                let _ = renderer.destroy_after_context_destroyed(&gl);
+            }
+            renderer.take();
         }
+        self.gl.borrow_mut().take();
         self.attachment.borrow_mut().take();
         self.set_state(RuntimeState::ResourceDropped);
     }
@@ -551,6 +583,11 @@ impl RuntimeControl {
     }
 
     #[cfg(test)]
+    pub(super) fn callback_panic_pending_for_test(&self) -> bool {
+        self.panic_next_callback.get()
+    }
+
+    #[cfg(test)]
     pub(super) fn maybe_panic_callback_for_test(&self) {
         assert!(
             !self.panic_next_callback.replace(false),
@@ -565,20 +602,25 @@ impl RuntimeControl {
 }
 
 impl ContextAttachment for RuntimeControl {
-    fn quiesce(&self, context: &ContextTeardown<'_>) {
+    fn quiesce(&self, context: &ContextTeardown<'_>) -> Result<(), ContextAttachmentTeardownError> {
         context.with_bound_context(|| {
-            if let Err(error) = self.shutdown_once(ShutdownAction::Quiesce) {
-                self.record_fault(error);
-            }
-        });
+            let pending = self.detect_and_take_fault();
+            let shutdown = self.shutdown_once(ShutdownAction::Quiesce);
+            first_error([pending, shutdown.err()]).map_err(context_teardown_error)
+        })
     }
 
-    fn release_renderer_resources(&self, context: &ContextTeardown<'_>) {
+    fn release_renderer_resources(
+        &self,
+        context: &ContextTeardown<'_>,
+    ) -> Result<(), ContextAttachmentTeardownError> {
         context.with_bound_context(|| {
-            if let Err(error) = self.shutdown_once(ShutdownAction::ContextResources) {
-                self.record_fault(error);
-            }
-        });
+            self.begin_shutdown();
+            let callback_error = release_callbacks(self).err().map(context_teardown_error);
+            self.mark_detached();
+            let renderer_error = self.release_renderer_during_context_teardown(context).err();
+            callback_error.or(renderer_error).map_or(Ok(()), Err)
+        })
     }
 
     fn context_destroyed(&self, _context: ContextDestroyed) {
@@ -604,7 +646,7 @@ impl fmt::Debug for GlowViewportRuntime {
 }
 
 impl GlowViewportRuntime {
-    /// Transactionally attaches a renderer that already owns a live GL capability.
+    /// Transactionally attaches a renderer under an explicit platform GL-context contract.
     ///
     /// Renderers created by [`GlowRenderer::with_external_context`] are intentionally rejected:
     /// the runtime cannot prove that an independently supplied capability created their objects.
@@ -612,16 +654,25 @@ impl GlowViewportRuntime {
     ///
     /// # Platform GL contract
     ///
-    /// The registered platform runtime must create every viewport GL context in the renderer's
-    /// share group and make that context current from `Platform_RenderWindow`. Callback-table
-    /// preflight proves ownership structure only; it cannot prove an OS-level GL share group. The
-    /// window-only Winit runtime is rejected explicitly. A compatible share-group context must
-    /// also be current during explicit runtime shutdown and Context teardown so renderer resources
-    /// can be deleted in the ordered renderer-resource phase.
-    pub fn attach(
+    /// Callback-table preflight validates lifecycle structure only. It does not establish or prove
+    /// an OS-level OpenGL capability.
+    ///
+    /// # Safety
+    ///
+    /// The platform runtime must create every secondary viewport OpenGL context in the renderer's
+    /// share group and make the corresponding context current before invoking
+    /// `Platform_RenderWindow`. A compatible share-group context must remain current whenever a
+    /// runtime method performs OpenGL work, during explicit shutdown, when this runtime is dropped,
+    /// and during Context teardown. This lets renderer resources be deleted in the ordered
+    /// renderer-resource phase. Violating these requirements may issue OpenGL operations against
+    /// the wrong native context.
+    pub unsafe fn attach(
         context: &mut Context,
-        renderer: GlowRenderer,
+        mut renderer: GlowRenderer,
     ) -> Result<Self, GlowViewportAttachError> {
+        if let Err(error) = renderer.ensure_operational() {
+            return Err(GlowViewportAttachError::new(error.into(), renderer));
+        }
         let gl = match renderer.gl_context().cloned() {
             Some(gl) => gl,
             None => {
@@ -800,4 +851,8 @@ fn first_error<const N: usize>(
     errors: [Option<GlowViewportError>; N],
 ) -> Result<(), GlowViewportError> {
     errors.into_iter().flatten().next().map_or(Ok(()), Err)
+}
+
+fn context_teardown_error(error: GlowViewportError) -> ContextAttachmentTeardownError {
+    ContextAttachmentTeardownError::new(format!("Glow viewport teardown failed: {error}"))
 }

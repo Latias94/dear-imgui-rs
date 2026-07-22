@@ -20,9 +20,9 @@ Available tasks:
 
 Examples:
   python3 tools/tasks.py check
-  python3 tools/tasks.py bump 0.16.0 --dry-run
+  python3 tools/tasks.py bump 0.16.0-alpha.1 --allow-prerelease-relabel --dry-run
   python3 tools/tasks.py bindings
-  python3 tools/tasks.py release-prepare 0.16.0
+  python3 tools/tasks.py release-prepare 0.16.0-alpha.1 --allow-prerelease-relabel
   python3 tools/tasks.py release-check
   python3 tools/tasks.py publish --dry-run
 """
@@ -32,6 +32,13 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Callable, List
+
+
+STANDALONE_LOCKED_MANIFESTS = (
+    Path("examples-android/dear-imgui-android-smoke/Cargo.toml"),
+    Path("examples-ios/dear-imgui-ios-smoke/Cargo.toml"),
+    Path("examples-ios/dear-imgui-ios-sdl3-smoke/Cargo.toml"),
+)
 
 
 def run_command(
@@ -122,6 +129,8 @@ def task_bump(args, repo_root: Path) -> int:
 
     if getattr(args, "dry_run", False):
         cmd.append("--dry-run")
+    if getattr(args, "allow_prerelease_relabel", False):
+        cmd.append("--allow-prerelease-relabel")
     return run_command(cmd, cwd=repo_root)
 
 
@@ -299,24 +308,43 @@ def require_clean_worktree(repo_root: Path) -> int:
 
 
 def refresh_cargo_lock(repo_root: Path, dry_run: bool) -> int:
-    """Refresh Cargo.lock, then prove that locked metadata resolves."""
-    refresh = ["cargo", "metadata", "--no-deps", "--format-version", "1"]
-    verify = [
-        "cargo",
-        "metadata",
-        "--locked",
-        "--no-deps",
-        "--format-version",
-        "1",
-    ]
+    """Refresh every maintained lockfile, then prove each graph resolves locked."""
+    routes = ((None, True),) + tuple(
+        (manifest, False) for manifest in STANDALONE_LOCKED_MANIFESTS
+    )
+    for manifest, no_deps in routes:
+        manifest_args = (
+            [] if manifest is None else ["--manifest-path", manifest.as_posix()]
+        )
+        dependency_args = ["--no-deps"] if no_deps else []
+        refresh = [
+            "cargo",
+            "metadata",
+            *manifest_args,
+            *dependency_args,
+            "--format-version",
+            "1",
+        ]
+        verify = [
+            "cargo",
+            "metadata",
+            *manifest_args,
+            "--locked",
+            *dependency_args,
+            "--format-version",
+            "1",
+        ]
 
-    if dry_run:
-        print(f"$ {' '.join(refresh)}  # skipped by --dry-run")
-    else:
-        result = run_command(refresh, cwd=repo_root, capture=True)
+        if dry_run:
+            print(f"$ {' '.join(refresh)}  # skipped by --dry-run")
+        else:
+            result = run_command(refresh, cwd=repo_root, capture=True)
+            if result != 0:
+                return result
+        result = run_command(verify, cwd=repo_root, capture=True)
         if result != 0:
             return result
-    return run_command(verify, cwd=repo_root, capture=True)
+    return 0
 
 
 def run_release_step(label: str, operation: Callable[[], int]) -> int:
@@ -431,9 +459,16 @@ def main() -> int:
     bump_parser = subparsers.add_parser(
         "bump", help="Update the unified workspace release version"
     )
-    bump_parser.add_argument("version", help="New complete version (e.g., 0.16.0)")
+    bump_parser.add_argument(
+        "version", help="New complete version (e.g., 0.16.0-alpha.1)"
+    )
     bump_parser.add_argument(
         "--dry-run", action="store_true", help="Validate and preview without writing"
+    )
+    bump_parser.add_argument(
+        "--allow-prerelease-relabel",
+        action="store_true",
+        help="Allow only a stable version to be relabeled as a same-version prerelease",
     )
     
     # bindings task
@@ -487,12 +522,17 @@ def main() -> int:
         help="Generate a release diff from a completely clean worktree",
     )
     release_prepare_parser.add_argument(
-        "version", help="New complete release version (e.g., 0.16.0)"
+        "version", help="New complete release version (e.g., 0.16.0-alpha.1)"
     )
     release_prepare_parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Validate and display mutating steps without writing release files",
+    )
+    release_prepare_parser.add_argument(
+        "--allow-prerelease-relabel",
+        action="store_true",
+        help="Allow only a stable version to be relabeled as a same-version prerelease",
     )
     release_prepare_parser.add_argument(
         "--skip-tool-tests",

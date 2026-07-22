@@ -1,7 +1,8 @@
 use std::cell::{Cell, RefCell};
 
 use dear_imgui_rs::{
-    ContextAttachment, ContextBinding, ContextDestroyed, ContextId, ContextTeardown,
+    ContextAttachment, ContextAttachmentTeardownError, ContextBinding, ContextDestroyed, ContextId,
+    ContextTeardown,
 };
 use dear_imgui_test_engine_sys as sys;
 
@@ -97,41 +98,44 @@ impl AttachmentControl {
         &self,
         operation: &'static str,
         status: sys::ImGuiTestEngineStatus,
-    ) {
+    ) -> Result<(), ContextAttachmentTeardownError> {
         if let Err(error) = ffi_status(operation, status) {
+            let message = error.to_string();
             let mut teardown_error = self.teardown_error.borrow_mut();
             if teardown_error.is_none() {
                 *teardown_error = Some(error);
             }
+            return Err(ContextAttachmentTeardownError::new(message));
         }
+        Ok(())
     }
 }
 
 impl ContextAttachment for AttachmentControl {
-    fn quiesce(&self, context: &ContextTeardown<'_>) {
+    fn quiesce(&self, context: &ContextTeardown<'_>) -> Result<(), ContextAttachmentTeardownError> {
         if self.attachment.get() != AttachmentState::Attached {
-            return;
+            return Ok(());
         }
 
         self.attachment.set(AttachmentState::ContextDropping);
         self.run.set(RunState::Inactive);
         let raw = self.raw.get();
         if raw.is_null() {
-            return;
+            return Ok(());
         }
 
         context.with_bound_context(|| {
             let mut started = false;
             let query_status = unsafe { sys::imgui_test_engine_is_started(raw, &mut started) };
             if query_status != sys::ImGuiTestEngineStatus_Success {
-                self.remember_teardown_status("imgui_test_engine_is_started", query_status);
-                return;
+                return self.remember_teardown_status("imgui_test_engine_is_started", query_status);
             }
             if started {
                 let stop_status = unsafe { sys::imgui_test_engine_stop(raw) };
-                self.remember_teardown_status("imgui_test_engine_stop", stop_status);
+                self.remember_teardown_status("imgui_test_engine_stop", stop_status)?;
             }
-        });
+            Ok(())
+        })
     }
 
     fn context_destroyed(&self, context: ContextDestroyed) {

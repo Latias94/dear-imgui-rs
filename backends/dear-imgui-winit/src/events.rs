@@ -3,11 +3,12 @@
 //! This module contains event processing logic for various winit events
 //! including keyboard, mouse, touch, and IME events.
 
-use dear_imgui_rs::Context;
 use dear_imgui_rs::input::MouseSource;
+use dear_imgui_rs::{Context, ContextId};
 use winit::event::{DeviceEvent, ElementState, Ime, KeyEvent, MouseScrollDelta, TouchPhase};
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use winit::window::Window;
 
 use crate::input::{to_imgui_mouse_button, winit_key_to_imgui_key};
@@ -151,73 +152,126 @@ pub fn handle_ime_event(ime: &Ime, imgui_ctx: &mut Context) {
     }
 }
 
-/// Handle touch events by converting them to mouse events
-pub fn handle_touch_event(touch: &winit::event::Touch, _window: &Window, _imgui_ctx: &mut Context) {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TouchAction {
+    Press,
+    Move,
+    Release,
+}
+
+fn touch_transition(
+    active_id: Option<u64>,
+    event_id: u64,
+    phase: TouchPhase,
+) -> (Option<u64>, Option<TouchAction>) {
+    match phase {
+        TouchPhase::Started if active_id.is_none() => (Some(event_id), Some(TouchAction::Press)),
+        TouchPhase::Moved if active_id == Some(event_id) => (active_id, Some(TouchAction::Move)),
+        TouchPhase::Ended | TouchPhase::Cancelled if active_id == Some(event_id) => {
+            (None, Some(TouchAction::Release))
+        }
+        _ => (active_id, None),
+    }
+}
+
+fn context_touch_transition(
+    active_touches: &mut HashMap<ContextId, u64>,
+    context: ContextId,
+    event_id: u64,
+    phase: TouchPhase,
+) -> Option<TouchAction> {
+    let (next_active, action) =
+        touch_transition(active_touches.get(&context).copied(), event_id, phase);
+    match next_active {
+        Some(active_id) => {
+            active_touches.insert(context, active_id);
+        }
+        None => {
+            active_touches.remove(&context);
+        }
+    }
+    action
+}
+
+pub(crate) fn touch_logical_position(
+    touch: &winit::event::Touch,
+    window: &Window,
+) -> Option<[f32; 2]> {
+    let position = touch
+        .location
+        .to_logical::<f64>(sanitize::positive_finite_or(window.scale_factor(), 1.0));
+    sanitize::finite_position(position)
+}
+
+pub(crate) fn handle_touch_event_at(
+    touch: &winit::event::Touch,
+    position: Option<[f32; 2]>,
+    viewport: Option<dear_imgui_rs::Id>,
+    imgui_ctx: &mut Context,
+) -> bool {
     thread_local! {
-        static ACTIVE_TOUCH: RefCell<Option<u64>> = const { RefCell::new(None) };
+        static ACTIVE_TOUCHES: RefCell<HashMap<ContextId, u64>> = RefCell::new(HashMap::new());
     }
 
-    // Convert touch events to mouse events for basic touch support
-    ACTIVE_TOUCH.with(|active| {
-        let active_id = *active.borrow();
-        let id = touch.id;
-        match touch.phase {
-            TouchPhase::Started => {
-                if active_id.is_none() {
-                    let pos = touch
-                        .location
-                        .to_logical::<f64>(sanitize::positive_finite_or(
-                            _window.scale_factor(),
-                            1.0,
-                        ));
-                    let Some(pos) = sanitize::finite_position(pos) else {
-                        return;
-                    };
+    let context = imgui_ctx.id();
+    ACTIVE_TOUCHES.with(|active_touches| {
+        if position.is_none() && matches!(touch.phase, TouchPhase::Started | TouchPhase::Moved) {
+            return false;
+        }
 
-                    // Capture this touch as the active pointer
-                    *active.borrow_mut() = Some(id);
-                    let io = _imgui_ctx.io_mut();
-                    // Map touch to a touchscreen mouse source.
-                    io.add_mouse_source_event(MouseSource::TouchScreen);
-                    io.add_mouse_pos_event(pos);
-                    io.add_mouse_button_event(dear_imgui_rs::input::MouseButton::Left, true);
-                }
+        let Some(action) = context_touch_transition(
+            &mut active_touches.borrow_mut(),
+            context,
+            touch.id,
+            touch.phase,
+        ) else {
+            return false;
+        };
+
+        let io = imgui_ctx.io_mut();
+        io.add_mouse_source_event(MouseSource::TouchScreen);
+        if let Some(viewport) = viewport {
+            io.add_mouse_viewport_event(viewport);
+        }
+        if let Some(position) = position {
+            io.add_mouse_pos_event(position);
+        }
+        match action {
+            TouchAction::Press => {
+                io.add_mouse_button_event(dear_imgui_rs::input::MouseButton::Left, true);
             }
-            TouchPhase::Moved => {
-                if active_id == Some(id) {
-                    let pos = touch
-                        .location
-                        .to_logical::<f64>(sanitize::positive_finite_or(
-                            _window.scale_factor(),
-                            1.0,
-                        ));
-                    let Some(pos) = sanitize::finite_position(pos) else {
-                        return;
-                    };
-                    let io = _imgui_ctx.io_mut();
-                    io.add_mouse_source_event(MouseSource::TouchScreen);
-                    io.add_mouse_pos_event(pos);
-                }
-            }
-            TouchPhase::Ended | TouchPhase::Cancelled => {
-                if active_id == Some(id) {
-                    let pos = touch
-                        .location
-                        .to_logical::<f64>(sanitize::positive_finite_or(
-                            _window.scale_factor(),
-                            1.0,
-                        ));
-                    let io = _imgui_ctx.io_mut();
-                    io.add_mouse_source_event(MouseSource::TouchScreen);
-                    if let Some(pos) = sanitize::finite_position(pos) {
-                        io.add_mouse_pos_event(pos);
-                    }
-                    io.add_mouse_button_event(dear_imgui_rs::input::MouseButton::Left, false);
-                    *active.borrow_mut() = None;
-                }
+            TouchAction::Move => {}
+            TouchAction::Release => {
+                io.add_mouse_button_event(dear_imgui_rs::input::MouseButton::Left, false);
             }
         }
-    });
+        true
+    })
+}
+
+/// Handle touch events by converting them to mouse events.
+pub fn handle_touch_event(touch: &winit::event::Touch, window: &Window, imgui_ctx: &mut Context) {
+    let position = touch_logical_position(touch, window);
+    #[cfg(feature = "multi-viewport")]
+    let (position, viewport) = if imgui_ctx
+        .io()
+        .config_flags()
+        .contains(dear_imgui_rs::ConfigFlags::VIEWPORTS_ENABLE)
+    {
+        let viewport = Some(imgui_ctx.main_viewport().id());
+        let position = position.and_then(|position| {
+            crate::multi_viewport::client_to_screen_pos(
+                window,
+                [f64::from(position[0]), f64::from(position[1])],
+            )
+        });
+        (position, viewport)
+    } else {
+        (position, None)
+    };
+    #[cfg(not(feature = "multi-viewport"))]
+    let viewport = None;
+    let _ = handle_touch_event_at(touch, position, viewport, imgui_ctx);
 }
 
 /// Handle device events (raw input events)
@@ -238,7 +292,7 @@ mod tests {
     use super::*;
     use crate::test_util::test_sync::lock_context;
     use dear_imgui_rs::Context;
-    use winit::event::{ElementState, MouseButton};
+    use winit::event::{ElementState, MouseButton, TouchPhase};
     use winit::keyboard::ModifiersState;
 
     #[test]
@@ -328,5 +382,50 @@ mod tests {
         }
         assert!(!ui.io().key_shift());
         assert!(!ui.io().key_alt());
+    }
+
+    #[test]
+    fn touch_transition_keeps_the_first_finger_until_release() {
+        assert_eq!(
+            touch_transition(None, 7, TouchPhase::Started),
+            (Some(7), Some(TouchAction::Press))
+        );
+        assert_eq!(
+            touch_transition(Some(7), 8, TouchPhase::Started),
+            (Some(7), None)
+        );
+        assert_eq!(
+            touch_transition(Some(7), 7, TouchPhase::Moved),
+            (Some(7), Some(TouchAction::Move))
+        );
+        assert_eq!(
+            touch_transition(Some(7), 7, TouchPhase::Ended),
+            (None, Some(TouchAction::Release))
+        );
+    }
+
+    #[test]
+    fn active_touch_is_isolated_per_context() {
+        let _guard = lock_context();
+        let context_a = Context::create();
+        let context_a_id = context_a.id();
+        let context_a = context_a.suspend();
+        let context_b = Context::create();
+        let context_b_id = context_b.id();
+        let mut active_touches = HashMap::new();
+
+        assert_eq!(
+            context_touch_transition(&mut active_touches, context_a_id, 7, TouchPhase::Started,),
+            Some(TouchAction::Press)
+        );
+        assert_eq!(
+            context_touch_transition(&mut active_touches, context_b_id, 9, TouchPhase::Started,),
+            Some(TouchAction::Press)
+        );
+        assert_eq!(active_touches.get(&context_a_id), Some(&7));
+        assert_eq!(active_touches.get(&context_b_id), Some(&9));
+
+        drop(context_b);
+        drop(context_a.activate().unwrap());
     }
 }

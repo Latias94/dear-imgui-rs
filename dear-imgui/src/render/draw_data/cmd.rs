@@ -103,7 +103,10 @@ mod tests {
     fn draw_command_params_resolve_managed_texture_ids() {
         let mut texture = crate::texture::OwnedTextureData::new();
         let texture_id = TextureId::new(17);
-        texture.set_tex_id(texture_id);
+        unsafe {
+            // The test-owned texture and synthetic command remain alive for the assertion below.
+            texture.set_tex_id(texture_id);
+        }
 
         let mut command = sys::ImDrawCmd::default();
         command.TexRef = sys::ImTextureRef {

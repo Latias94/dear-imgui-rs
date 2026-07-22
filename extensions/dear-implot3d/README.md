@@ -22,9 +22,9 @@ the ergonomics of `dear-implot`.
 
 | Item               | Version |
 |--------------------|---------|
-| Crate              | 0.16.0  |
-| dear-imgui-rs      | 0.16.0  |
-| dear-implot3d-sys  | 0.16.0  |
+| Crate              | 0.16.0-alpha.1  |
+| dear-imgui-rs      | 0.16.0-alpha.1  |
+| dear-implot3d-sys  | 0.16.0-alpha.1  |
 
 See also: docs/COMPATIBILITY.md in the workspace for the full matrix.
 
@@ -166,8 +166,14 @@ plot_ui
     .surface_f32("Surface", &grid_x, &grid_y, &grid_z)
     .with_fill_alpha(0.35)
     .with_line_color([0.95, 0.95, 0.95, 1.0])
-    .plot();
+    .plot()
+    .expect("valid surface grid");
 ```
+
+Surface axis inputs are validated and expanded to one X/Y value per Z sample in row-major
+order. For callers that already own contiguous per-vertex arrays, use the allocation-free safe
+`surface_f32_flat` path. Custom offsets and strides are available only through the explicitly
+`unsafe` `surface_f32_raw` escape hatch.
 
 The legacy `set_next_*_style()` helpers remain available for immediate-mode
 paths that still plot directly without a builder value.

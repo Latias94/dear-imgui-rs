@@ -123,15 +123,16 @@ A release requires both gates for the same commit:
    working tree.
 2. `.github/workflows/release-gate.yml` returns `Go` for that exact full SHA.
 
-The remote aggregate has a fixed 13-cell inventory: Linux Test Engine runtime,
-Linux real Winit/WGPU viewport smoke, Linux WASM, Windows vcpkg, Windows MSVC
-`/MD` and `/MT`, Windows GNU imports, macOS, and five prebuilt producer/consumer
-targets (Linux x86_64, macOS x86_64/aarch64, and Windows MSVC `/MD`/`/MT`). A
-missing, failed, skipped, cancelled, timed-out, malformed, duplicate, or wrong-
-SHA cell is `No-Go`; the caller cannot narrow the production inventory.
+The remote aggregate has a fixed 14-cell inventory: Linux Test Engine runtime,
+real Winit/WGPU and SDL3/Glow viewport smokes, Linux WASM, Windows vcpkg,
+Windows MSVC `/MD` and `/MT`, Windows GNU imports, macOS, and five prebuilt
+producer/consumer targets (Linux x86_64, macOS x86_64/aarch64, and Windows MSVC
+`/MD`/`/MT`). A missing, failed, skipped, cancelled, timed-out, malformed,
+duplicate, or wrong-SHA cell is `No-Go`; the caller cannot narrow the production
+inventory.
 
 The run retains `gate-result.json`, stdout/stderr, runtime invocation/results,
-Xvfb/Mesa display and adapter data, target/CRT/vcpkg/MinGW metadata, binding
+Xvfb/Mesa display and renderer data, target/CRT/vcpkg/MinGW metadata, binding
 hashes, manifests, candidate SHA, and SHA256 evidence for approximately 30
 days. Verify a downloaded aggregate locally before publishing:
 
@@ -179,9 +180,9 @@ These checks generate/use bindings only and won’t build/link native code.
 
 > **Tip**: Preparation and validation are separate because preparation intentionally changes the tree:
 > ```bash
-> python3 tools/tasks.py release-prepare 0.16.0
+> python3 tools/tasks.py release-prepare 0.16.0-alpha.1
 > git diff
-> git add -A && git commit -m "chore: prepare release v0.16.0"
+> git add -A && git commit -m "chore: prepare release v0.16.0-alpha.1"
 > python3 tools/tasks.py release-check
 > git rev-parse HEAD
 > gh workflow run release-gate.yml -f candidate_sha=FULL_40_HEX_SHA
@@ -193,12 +194,12 @@ These checks generate/use bindings only and won’t build/link native code.
 
 Manual workflow:
 
-1) Update the single workspace release version with `cargo run -p xtask -- release-version 0.16.0`.
+1) Update the single workspace release version with `cargo run -p xtask -- release-version 0.16.0-alpha.1 --allow-prerelease-relabel`.
 2) Run the update script to pregenerate bindings and synchronize source metadata.
 3) Review and commit the source pointers, metadata, pregenerated files, versions, lockfile, changelog, and docs:
 ```
 git add -A
-git commit -m "chore: prepare release v0.16.0"
+git commit -m "chore: prepare release v0.16.0-alpha.1"
 ```
 4) Run `python3 tools/tasks.py release-check` from the clean committed tree.
 5) Dispatch `.github/workflows/release-gate.yml` with its sole required input,
@@ -209,7 +210,7 @@ gh run download RELEASE_GATE_RUN_ID \
   --name release-gate-FULL_40_HEX_SHA \
   --dir artifacts/release-gate
 ```
-Wait for all 13 cells and require `Go`; the downloaded artifact contains the
+Wait for all 14 cells and require `Go`; the downloaded artifact contains the
 authoritative `gate-result.json`.
 6) Publish the complete 27-package train through the shared authoritative order:
 ```
@@ -224,13 +225,13 @@ documented in [PUBLISHING.md](./PUBLISHING.md); do not publish only the sys
 crates and leave the release train incomplete.
 7) After every package succeeds, create and push the release tag:
 ```
-git tag -a v0.16.0 -m "Release v0.16.0"
-git push origin v0.16.0
+git tag -a v0.16.0-alpha.1 -m "Release v0.16.0-alpha.1"
+git push origin v0.16.0-alpha.1
 ```
 8) Dispatch `.github/workflows/release.yml` with its three required inputs:
 ```
 gh workflow run release.yml \
-  -f tag=v0.16.0 \
+  -f tag=v0.16.0-alpha.1 \
   -f candidate_sha=FULL_40_HEX_SHA \
   -f gate_run_id=RELEASE_GATE_RUN_ID
 ```
@@ -244,14 +245,14 @@ Before tagging and publishing, verify the following:
 - Root `workspace.package.version` is correct, all 27 publishable manifests inherit it, internal dependencies inherit root workspace declarations, and `CHANGELOG.md` is updated.
 - The changelog keeps `## [Unreleased]` as its first release section, its prose is soft-wrapped, and the current release notes can be extracted with `python3 tools/changelog.py extract --version <version>`.
 - Compatibility docs are in sync:
-  - Root `README.md` “Compatibility (0.16.0)” table updated.
+  - Root `README.md` “Compatibility Candidate (0.16.0-alpha.1)” table updated.
   - `docs/COMPATIBILITY.md` updated with the new release train and notes.
 - `docs.rs` offline builds validated locally for all `-sys` crates (see Pre-publish checks above).
 - All three core binding profiles reproduce exactly with `cargo run -p xtask -- verify-bindings`.
 - The packaged sys crate contains source metadata and all three profiles, and an unpacked offline build succeeds without `.git`.
 - CI green on Linux/Windows/macOS; examples build with extensions enabled.
 - `release-check` passed on the clean committed candidate and the remote fixed
-  13-cell aggregate is `Go` for exactly the same SHA.
+  14-cell aggregate is `Go` for exactly the same SHA.
 - If external deps changed (e.g., `wgpu`, `winit`, `glow`), backends’ readmes compatibility tables updated.
 - If interfaces changed, examples and crate-level docs updated accordingly.
 - The five prebuilt cells were produced and consumed inside the authoritative

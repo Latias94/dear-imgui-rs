@@ -566,9 +566,9 @@ is rejected with the WASM provider.
    metrics copy, and the safe API exposes no UVs that same-frame repacking could invalidate.
 3. Safe borrowed atlas texture escape hatches are removed. Renderers inspect `TextureData` through
    the `FontAtlasTexture<'_>` returned by `tex_data()` and use the narrow
-   `texture_id`/`set_texture_id` legacy feedback path. Raw pointers remain explicit FFI values and
-   do not bypass the lease through a safe Rust reference. The lease blocks invalidating operations
-   and frame advancement.
+   `texture_id`/unsafe `set_texture_id` legacy feedback path. Raw pointers remain explicit FFI
+   values and do not bypass the lease through a safe Rust reference. The lease blocks invalidating
+   operations and frame advancement.
 4. External font bytes and files are an unsafe native-parser boundary. `FontSource` is opaque,
    memory-font bytes are copied, file batches are preloaded, and direct glyph ranges are structured
    pairs retained by atlas identity.

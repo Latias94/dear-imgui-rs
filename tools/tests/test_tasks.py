@@ -85,6 +85,7 @@ class ReleaseTaskTests(unittest.TestCase):
         values = {
             "version": "0.17.0",
             "dry_run": False,
+            "allow_prerelease_relabel": False,
             "skip_tool_tests": False,
         }
         values.update(overrides)
@@ -102,6 +103,28 @@ class ReleaseTaskTests(unittest.TestCase):
             self.assertEqual(TASKS.require_clean_worktree(REPO_ROOT), 1)
 
         self.assertIn("completely clean worktree", stderr.getvalue())
+
+    def test_bump_forwards_explicit_prerelease_relabel_opt_in(self):
+        args = self.release_args(
+            version="0.16.0-alpha.1", allow_prerelease_relabel=True
+        )
+        with patch.object(TASKS, "run_command", return_value=0) as run_command:
+            self.assertEqual(TASKS.task_bump(args, REPO_ROOT), 0)
+
+        self.assertEqual(
+            run_command.call_args.args[0],
+            [
+                "cargo",
+                "run",
+                "--locked",
+                "-p",
+                "xtask",
+                "--",
+                "release-version",
+                "0.16.0-alpha.1",
+                "--allow-prerelease-relabel",
+            ],
+        )
 
     def test_release_prepare_runs_mutating_steps_in_order(self):
         args = self.release_args()
@@ -134,6 +157,29 @@ class ReleaseTaskTests(unittest.TestCase):
                     "--no-deps",
                     "--format-version",
                     "1",
+                ],
+                *[
+                    command
+                    for manifest in TASKS.STANDALONE_LOCKED_MANIFESTS
+                    for command in (
+                        [
+                            "cargo",
+                            "metadata",
+                            "--manifest-path",
+                            manifest.as_posix(),
+                            "--format-version",
+                            "1",
+                        ],
+                        [
+                            "cargo",
+                            "metadata",
+                            "--manifest-path",
+                            manifest.as_posix(),
+                            "--locked",
+                            "--format-version",
+                            "1",
+                        ],
+                    )
                 ],
                 [
                     TASKS.sys.executable,
@@ -173,6 +219,24 @@ class ReleaseTaskTests(unittest.TestCase):
             any("pre_publish_check.py" in command for command in commands)
         )
 
+    def test_release_prepare_forwards_prerelease_relabel_opt_in(self):
+        args = self.release_args(
+            version="0.16.0-alpha.1",
+            allow_prerelease_relabel=True,
+            skip_tool_tests=True,
+        )
+        with (
+            patch.object(TASKS, "require_clean_worktree", return_value=0),
+            patch.object(TASKS, "run_command", return_value=0) as run_command,
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(TASKS.task_release_prepare(args, REPO_ROOT), 0)
+
+        self.assertEqual(
+            run_command.call_args_list[0].args[0][-2:],
+            ["0.16.0-alpha.1", "--allow-prerelease-relabel"],
+        )
+
     def test_release_prepare_dry_run_does_not_run_mutating_commands(self):
         args = self.release_args(dry_run=True)
         output = io.StringIO()
@@ -196,13 +260,18 @@ class ReleaseTaskTests(unittest.TestCase):
                 "1",
             ],
         )
-        self.assertIn("--dry-run", commands[2])
         self.assertEqual(
-            commands[3][1:5], ["-B", "-m", "unittest", "discover"]
+            [command[3] for command in commands[2:5]],
+            [manifest.as_posix() for manifest in TASKS.STANDALONE_LOCKED_MANIFESTS],
         )
-        self.assertEqual(len(commands), 4)
+        self.assertTrue(all("--locked" in command for command in commands[2:5]))
+        self.assertIn("--dry-run", commands[5])
+        self.assertEqual(
+            commands[6][1:5], ["-B", "-m", "unittest", "discover"]
+        )
+        self.assertEqual(len(commands), 7)
         self.assertIn("cargo metadata --no-deps --format-version 1", output.getvalue())
-        self.assertIn("skipped by --dry-run", output.getvalue())
+        self.assertEqual(output.getvalue().count("skipped by --dry-run"), 4)
 
     def test_release_prepare_stops_on_first_failed_step(self):
         args = self.release_args()

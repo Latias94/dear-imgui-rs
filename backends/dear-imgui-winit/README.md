@@ -8,8 +8,8 @@ cursor handling and DPI awareness into Dear ImGui. Inspired by
 
 | Item          | Version |
 |---------------|---------|
-| Crate         | 0.16.0  |
-| dear-imgui-rs | 0.16.0  |
+| Crate         | 0.16.0-alpha.1  |
+| dear-imgui-rs | 0.16.0-alpha.1  |
 | winit         | 0.30.13 |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
@@ -33,12 +33,16 @@ impl winit::application::ApplicationHandler for App {
         // 1) forward the window-local event to ImGui
         self.imgui
             .platform
-            .handle_window_event(&mut self.imgui.context, &window, &event);
+            .handle_window_event(&mut self.imgui.context, &window, &event)
+            .expect("Winit platform contract changed");
 
         match event {
             WindowEvent::RedrawRequested => {
                 // 2) per-frame prep
-                self.imgui.platform.prepare_frame(&window, &mut self.imgui.context);
+                self.imgui
+                    .platform
+                    .prepare_frame(&window, &mut self.imgui.context)
+                    .expect("Winit platform contract changed");
                 let ui = self.imgui.context.frame();
 
                 // 3) build UI
@@ -47,7 +51,10 @@ impl winit::application::ApplicationHandler for App {
                 });
 
                 // 4) update OS cursor from UI
-                self.imgui.platform.prepare_render_with_ui(&ui, &window);
+                self.imgui
+                    .platform
+                    .prepare_render_with_ui(&ui, &window)
+                    .expect("Winit platform contract changed");
 
                 // 5) render via your renderer backend
                 let frame = self.imgui.context.render();
@@ -60,13 +67,14 @@ impl winit::application::ApplicationHandler for App {
 ```
 
 APIs of interest:
-- `WinitPlatform::new(&mut Context)`
-- `WinitPlatform::attach_window(&Window, HiDpiMode, &mut Context)`
-- `WinitPlatform::handle_window_event(&mut Context, &Window, &WindowEvent)` — for `ApplicationHandler::window_event`
-- `WinitPlatform::handle_event(&mut Context, &Window, &Event<T>)` — for closure-style `EventLoop::run`
-- `WinitPlatform::prepare_frame(&Window, &mut Context)`
-- `WinitPlatform::prepare_render_with_ui(&Ui, &Window)` — updates OS cursor from ImGui
-- `WinitPlatform::detach_window(&Window, &mut Context)` — clears winit-owned IME hooks before a window is destroyed while the context remains alive
+- `WinitPlatform::new(&mut Context) -> Result<WinitPlatform, WinitPlatformError>`
+- `WinitPlatform::attach_window(Arc<Window>, HiDpiMode, &mut Context) -> Result<(), WinitPlatformError>` — the platform retains the exact shared window allocation until detach or Context teardown, so IME callbacks cannot outlive it
+- `WinitPlatform::set_hidpi_mode(HiDpiMode) -> Result<(), WinitPlatformError>` — configure primary-window scaling before attaching multi-viewport support
+- `WinitPlatform::handle_window_event(&mut Context, &Window, &WindowEvent) -> Result<bool, WinitPlatformError>` — for `ApplicationHandler::window_event`
+- `WinitPlatform::handle_event(&mut Context, &Window, &Event<T>) -> Result<bool, WinitPlatformError>` — for closure-style `EventLoop::run`; events for another `WindowId` return `Ok(false)` without being dispatched
+- `WinitPlatform::prepare_frame(&Window, &mut Context) -> Result<(), WinitPlatformError>`
+- `WinitPlatform::prepare_render_with_ui(&Ui, &Window) -> Result<(), WinitPlatformError>` — updates OS cursor from ImGui
+- `WinitPlatform::detach_window(&mut Context) -> Result<Arc<Window>, WinitPlatformError>` — clears winit-owned IME hooks before a window is destroyed while the context remains alive
 
 ## DPI / HiDPI
 
@@ -74,6 +82,12 @@ APIs of interest:
 - `Default`: use winit’s `window.scale_factor()` directly.
 - `Rounded`: round the winit factor to the nearest integer to avoid blurry scaling.
 - `Locked(f64)`: force a custom factor (e.g. 1.0).
+
+Choose the mode before creating `WinitPlatformRuntime`. While that runtime is attached,
+`set_hidpi_mode` and `attach_window` return
+`WinitPlatformError::RuntimeConfigurationLocked` without modifying the main-window or coordinate
+state. This preserves the single desktop-logical coordinate model shared by primary and secondary
+viewports.
 
 When DPI changes (`ScaleFactorChanged`), the backend adjusts:
 - `io.display_size`, `io.display_framebuffer_scale`
@@ -109,15 +123,15 @@ Basic touch-to-mouse translation is provided:
   accordingly. This means IME (and soft keyboards on mobile) are only enabled
   while text widgets are active.
 - You can temporarily override the state with
-  `WinitPlatform::set_ime_allowed(&window, bool)`. Auto-management may adjust
+  `WinitPlatform::set_ime_allowed(bool)`. Auto-management may adjust
   it again on subsequent frames unless you disable it.
 - To fully opt out and manage IME yourself, call
   `WinitPlatform::set_ime_auto_management(false)`.
 - The backend tracks IME enabled/disabled state internally and exposes it
   through `WinitPlatform::ime_enabled()`.
 - If the window is destroyed before the ImGui context, call
-  `WinitPlatform::detach_window(&window, &mut context)` first so Dear ImGui no
-  longer holds a raw pointer to that window for IME cursor placement.
+  `WinitPlatform::detach_window(&mut context)` first. The returned `Arc<Window>` is the
+  platform-owned main window and proves that native IME state has been detached.
 
 ## Cursor Handling
 
@@ -138,7 +152,9 @@ You can force Dear ImGui to draw the cursor by enabling the software cursor:
 imgui_ctx.io_mut().set_mouse_draw_cursor(true);
 
 // Option 2: helper on the platform
-platform.set_software_cursor_enabled(&mut imgui_ctx, true);
+platform
+    .set_software_cursor_enabled(&mut imgui_ctx, true)
+    .expect("Winit platform contract changed");
 ```
 
 When software cursor is enabled:
@@ -149,7 +165,6 @@ When software cursor is enabled:
 
 This backend sets (when appropriate):
 - `BackendFlags::HAS_MOUSE_CURSORS`
-- `BackendFlags::HAS_SET_MOUSE_POS`
 - `BackendFlags::PLATFORM_HAS_VIEWPORTS` while `WinitPlatformRuntime` is attached
 - `BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT` while `WinitPlatformRuntime` is attached
 
@@ -165,34 +180,75 @@ Multi-viewport support is available behind the `multi-viewport` feature and is
 - A renderer backend must also opt into viewports (e.g. `dear-imgui-wgpu/multi-viewport-winit`)
   to create per-viewport render targets and draw them.
 
-The platform side is an owning runtime. It keeps the main `Arc<Window>` and every
-secondary window alive, owns the callback table, and participates in phased Context
-teardown. Moving the wrapper does not move callback-visible state. Winit's
+The platform side is an owning runtime. `WinitPlatformControl` keeps the main `Arc<Window>` and
+is the Context's sole platform attachment; `WinitPlatformRuntime` shares that owner, keeps every
+secondary window alive, and owns only the callbacks it installs. Moving a wrapper does not move
+callback-visible state. Winit's
 `ActiveEventLoop` is available to native callbacks only inside a non-escaping closure:
 
 ```rust,ignore
-let mut viewport_runtime = WinitPlatformRuntime::new(&mut imgui, Arc::clone(&window))?;
+let mut platform = WinitPlatform::new(&mut imgui)?;
+platform.attach_window(Arc::clone(&window), HiDpiMode::Default, &mut imgui)?;
+let mut viewport_runtime =
+    WinitPlatformRuntime::new(&mut imgui, &platform)?;
 
 viewport_runtime.with_event_loop(event_loop, |_| {
     imgui.update_platform_windows();
     imgui.render_platform_windows_default();
 })?;
 
-// Optional when shutdown failures must be handled. Drop performs best-effort cleanup.
-viewport_runtime.shutdown()?;
+// Optional when shutdown failures must be handled. Shut down the renderer runtime first;
+// the Context closes any open frame before Winit releases platform windows.
+viewport_runtime.shutdown(&mut imgui)?;
+platform.shutdown(&mut imgui)?;
 ```
 
 Callback panics and window-creation failures are contained before returning
 through C++. `with_event_loop`, `handle_event`, and `poll_fault` report the
 deferred `WinitPlatformError` on the Rust side. Explicit `shutdown` is
-idempotent and reports cleanup failures; dropping either the runtime or the
-Context enters the same attachment state machine on a best-effort basis.
+idempotent and reports cleanup failures. Dropping the runtime without the
+mutable Context leaves native cleanup with the Context attachment, so teardown
+still passes through the core open-frame normalization path.
+Explicit shutdown returns `WinitPlatformError::RendererShutdownRequired` while a renderer callback
+or viewport renderer state is still installed, preventing Winit-owned viewport data from being
+passed to an unknown renderer callback. Context-owned teardown enforces this renderer-before-platform
+order automatically.
+
+The runtime only advertises callbacks it can implement. In particular, winit has no portable
+per-window opacity API, so it does not install `Platform_SetWindowAlpha`; enabling transparent
+docking payloads therefore fails core capability validation instead of silently accepting a no-op.
+Unimplemented foreign callbacks, including alpha, work-area-inset, and Vulkan-surface hooks, stay
+outside Winit's callback lease and may change without faulting the runtime.
+Programmatic move and resize notifications are suppressed through the following Dear ImGui frame,
+touch events from secondary windows use the same touch-to-mouse path as the primary window, and
+`NO_INPUTS` viewports use Winit cursor hit testing so drag targets behind them remain reachable.
+Windows and X11 also honor `NO_TASK_BAR_ICON` at creation. Because this integration currently uses
+Winit logical coordinates, construction rejects mixed-DPI monitor layouts instead of publishing an
+overlapping or discontinuous monitor map.
+
+Multi-viewport requires `HiDpiMode::Default`. `Rounded` and `Locked` remap the primary-window
+coordinate space, while secondary windows use Winit's desktop logical coordinates; mixing those
+models is rejected instead of publishing inconsistent input and window geometry.
+
+Native Linux multi-viewport support is X11-only. Runtime construction rejects Wayland before any
+PlatformIO state is published because Wayland cannot provide the desktop-space window positioning
+required by Dear ImGui. Runtime construction likewise rejects non-desktop targets; the supported
+window systems are Windows, macOS, and Linux/X11. Windows and macOS honor
+`NO_FOCUS_ON_APPEARING` by creating secondary windows inactive and deciding focus from the final
+flags at show time. Linux/X11 accepts that flag without rejecting the viewport, but its window
+manager controls the final focus behavior. Winit has no API that can guarantee
+`NO_FOCUS_ON_CLICK`, so that request fails closed with
+`WinitPlatformError::UnsupportedViewportFlag` and closes the affected viewport instead of silently
+changing click-focus behavior. Live decoration and top-most changes are synchronized; Windows also
+updates taskbar visibility live, while X11 rejects a live `NO_TASK_BAR_ICON` transition because its
+window type can only be selected at creation. Platforms without a Winit taskbar API reject
+`NO_TASK_BAR_ICON` at creation instead of silently ignoring it.
 
 Current support matrix:
 
 - **winit + WGPU**: experimental native multi-viewport, exercised by the
   `multi_viewport_wgpu` example.
-  - Enabled on Windows/macOS/Linux. The release gate runs a real Linux secondary-window and GPU-
+  - Enabled on Windows, macOS, and Linux/X11. The release gate runs a real Linux secondary-window and GPU-
     surface lifecycle under Xvfb with Mesa/Lavapipe; missing display or software-GPU
     infrastructure fails that gate.
   - Example:

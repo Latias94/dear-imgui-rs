@@ -18,7 +18,7 @@ use dear_imgui_rs::{
     render::{SnapshotTextureId, TextureFeedback, TextureOp, TextureRequest, TextureUploadRect},
     texture::{TextureFormat as ImGuiTextureFormat, TextureRect},
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use wgpu::*;
 
 pub use resource::WgpuTexture;

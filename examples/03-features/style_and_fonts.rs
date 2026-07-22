@@ -294,12 +294,12 @@ impl AppWindow {
         // ImGui
         let mut context_imgui = Context::create();
         context_imgui.set_ini_filename(None::<String>).unwrap();
-        let mut platform = WinitPlatform::new(&mut context_imgui);
+        let mut platform = WinitPlatform::new(&mut context_imgui)?;
         platform.attach_window(
-            &window,
+            Arc::clone(&window),
             dear_imgui_winit::HiDpiMode::Default,
             &mut context_imgui,
-        );
+        )?;
 
         // Fonts: select FreeType loader if available, then add default font
         {
@@ -1462,7 +1462,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context);
+            .prepare_frame(&self.window, &mut self.imgui.context)?;
         // Apply deferred actions from previous frame before building Ui
         if let Some(t) = self.pending_theme.take() {
             self.apply_theme_now(t);
@@ -1684,7 +1684,9 @@ impl AppWindow {
                 unsafe { ui.show_style_editor(&mut style_copy) };
             });
 
-        self.imgui.platform.prepare_render_with_ui(ui, &self.window);
+        self.imgui
+            .platform
+            .prepare_render_with_ui(ui, &self.window)?;
         let draw_data = self.imgui.context.render();
 
         // Clear + render
@@ -1744,11 +1746,15 @@ impl ApplicationHandler for App {
             Some(w) => w,
             None => return,
         };
-        window.imgui.platform.handle_window_event(
+        if let Err(error) = window.imgui.platform.handle_window_event(
             &mut window.imgui.context,
             &window.window,
             &event,
-        );
+        ) {
+            eprintln!("Winit platform error: {error}");
+            event_loop.exit();
+            return;
+        }
         match event {
             WindowEvent::Resized(sz) => {
                 window.resize(sz);

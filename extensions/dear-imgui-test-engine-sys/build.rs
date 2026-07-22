@@ -64,6 +64,19 @@ fn resolve_imgui_includes(cfg: &BuildConfig) -> (PathBuf, PathBuf) {
     (imgui_src, cimgui_root)
 }
 
+fn native_binding_spec() -> &'static build_support::binding::CrateBindingSpec {
+    build_support::binding::CrateBindingSpec::for_crate_and_target(env!("CARGO_PKG_NAME"), "native")
+        .expect("missing Test Engine native binding spec")
+}
+
+#[cfg(feature = "bindgen")]
+fn apply_bindgen_defines(mut builder: bindgen::Builder) -> bindgen::Builder {
+    for define in native_binding_spec().binding_defines() {
+        builder = builder.clang_arg(define.clang_arg());
+    }
+    builder
+}
+
 #[cfg(feature = "bindgen")]
 fn sanitize_bindings_string(content: &str) -> String {
     let mut out = String::with_capacity(content.len());
@@ -105,7 +118,7 @@ fn parse_bool_env(name: &str) -> bool {
 #[cfg(feature = "bindgen")]
 fn generate_bindings(cfg: &BuildConfig) {
     let header = cfg.manifest_dir.join("shim/cimgui_test_engine.h");
-    let bindings = bindgen::Builder::default()
+    let builder = bindgen::Builder::default()
         .header(header.to_string_lossy())
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .allowlist_function("imgui_test_engine_.*")
@@ -119,7 +132,8 @@ fn generate_bindings(cfg: &BuildConfig) {
         .derive_partialeq(true)
         .derive_hash(true)
         .prepend_enum_name(false)
-        .layout_tests(false)
+        .layout_tests(false);
+    let bindings = apply_bindgen_defines(builder)
         .generate()
         .expect("Unable to generate imgui_test_engine bindings");
 
@@ -143,14 +157,7 @@ fn build_with_cc(cfg: &BuildConfig, test_engine_root: &Path, imgui_src: &Path, c
     build.cpp(true).std("c++17");
     build_support::configure_cpp_runtime_linkage(&mut build, &cfg.target_os, &cfg.target_env);
 
-    for (k, v) in env::vars() {
-        if let Some(suffix) = k.strip_prefix("DEP_DEAR_IMGUI_DEFINE_") {
-            build.define(suffix, v.as_str());
-        }
-    }
-
-    build.define("IMGUI_ENABLE_TEST_ENGINE", None);
-    build.define("IMGUI_USE_WCHAR32", None);
+    native_binding_spec().apply_extension_binding_defines(&mut build, env::vars());
     build.define(
         "IMGUI_TEST_ENGINE_ENABLE_CAPTURE",
         Some(if cfg!(feature = "capture") { "1" } else { "0" }),

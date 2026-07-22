@@ -27,12 +27,27 @@ impl Ui {
     /// Passing `None` hides the mouse cursor
     #[doc(alias = "SetMouseCursor")]
     pub fn set_mouse_cursor(&self, cursor_type: Option<MouseCursor>) {
-        unsafe {
+        self.run_with_bound_context(|| unsafe {
             let val: sys::ImGuiMouseCursor = cursor_type
                 .map(|x| x as sys::ImGuiMouseCursor)
                 .unwrap_or(sys::ImGuiMouseCursor_None);
             sys::igSetMouseCursor(val);
-        }
+        });
+    }
+
+    /// Controls whether Dear ImGui renders its own mouse cursor for this Context.
+    ///
+    /// This is the frame-scoped alternative to mutably borrowing [`crate::Io`] while a `Ui` is
+    /// live. Platform backends should hide the OS cursor while this value is enabled.
+    pub fn set_mouse_draw_cursor(&self, draw: bool) {
+        self.run_with_bound_context(|| unsafe {
+            let io = sys::igGetIO_Nil();
+            assert!(
+                !io.is_null(),
+                "Ui::set_mouse_draw_cursor() requires an active ImGui context"
+            );
+            (*io).MouseDrawCursor = draw;
+        });
     }
 
     // ============================================================================

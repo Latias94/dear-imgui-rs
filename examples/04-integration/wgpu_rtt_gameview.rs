@@ -239,8 +239,12 @@ impl AppWindow {
         // ImGui context
         let mut context = Context::create();
         context.set_ini_filename(None::<String>).unwrap();
-        let mut platform = WinitPlatform::new(&mut context);
-        platform.attach_window(&window, dear_imgui_winit::HiDpiMode::Default, &mut context);
+        let mut platform = WinitPlatform::new(&mut context)?;
+        platform.attach_window(
+            Arc::clone(&window),
+            dear_imgui_winit::HiDpiMode::Default,
+            &mut context,
+        )?;
 
         // Renderer
         let init_info =
@@ -381,7 +385,7 @@ impl AppWindow {
             &mut self.imgui.platform,
             &mut self.imgui.renderer,
         );
-        platform.prepare_frame(&self.window, context);
+        platform.prepare_frame(&self.window, context)?;
         let ui = context.frame();
 
         let sampler_label = if self.use_nearest_sampler {
@@ -465,7 +469,7 @@ impl AppWindow {
                 label: Some("Main Encoder"),
             });
 
-        platform.prepare_render_with_ui(&ui, &self.window);
+        platform.prepare_render_with_ui(&ui, &self.window)?;
         let draw_data = context.render();
 
         {
@@ -534,10 +538,15 @@ impl ApplicationHandler for App {
             window_id,
             event: event.clone(),
         };
-        window
-            .imgui
-            .platform
-            .handle_event(&mut window.imgui.context, &window.window, &full_event);
+        if let Err(error) = window.imgui.platform.handle_event(
+            &mut window.imgui.context,
+            &window.window,
+            &full_event,
+        ) {
+            eprintln!("Winit platform error: {error}");
+            event_loop.exit();
+            return;
+        }
 
         match event {
             WindowEvent::Resized(physical_size) => {

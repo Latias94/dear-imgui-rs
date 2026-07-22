@@ -1,6 +1,10 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
+use crate::context::ContextId;
+use crate::error::ImGuiError;
+use crate::render::snapshot::{RendererConsumerError, SnapshotTextureId, TextureOp};
 use crate::sys;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -8,9 +12,6 @@ pub(super) struct FontAtlasState {
     pub(super) stamp: u64,
     pub(super) generation: u64,
     pub(super) custom_rect_generation: u64,
-    texture_generation: u64,
-    texture_pointer: usize,
-    snapshot_revision: u64,
     texture_borrows: usize,
 }
 
@@ -22,11 +23,435 @@ pub(crate) struct FontAtlasSnapshotIdentity {
     pub(crate) texture: *mut sys::ImTextureData,
 }
 
+#[derive(Clone, Debug)]
+struct FontAtlasTextureLedgerEntry {
+    revision: u64,
+    operation: Option<Arc<TextureOp>>,
+    live: bool,
+    last_reference_epoch: HashMap<ContextId, u64>,
+}
+
+#[derive(Default)]
+struct FontAtlasTextureLedger {
+    entries: HashMap<u64, FontAtlasTextureLedgerEntry>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FontAtlasRendererMode {
+    Unclaimed,
+    Legacy,
+    Managed {
+        context: usize,
+        namespace: u64,
+        renderer_reset_committed: bool,
+    },
+    RendererReleasePending {
+        _retired_namespace: u64,
+    },
+}
+
+pub(crate) fn validate_font_atlas_context_registration(
+    raw: *mut sys::ImFontAtlas,
+) -> Result<(), ImGuiError> {
+    if raw.is_null() {
+        return Ok(());
+    }
+    FONT_ATLAS_STATES.with(|states| {
+        let states = states.borrow();
+        match states.renderer_modes.get(&(raw as usize)) {
+            Some(FontAtlasRendererMode::Managed { .. }) => Err(ImGuiError::SharedFontAtlasManaged),
+            Some(FontAtlasRendererMode::RendererReleasePending { .. }) => {
+                Err(ImGuiError::SharedFontAtlasRendererReleasePending)
+            }
+            Some(FontAtlasRendererMode::Unclaimed | FontAtlasRendererMode::Legacy) | None => Ok(()),
+        }
+    })
+}
+
+pub(crate) fn claim_font_atlas_managed_renderer(
+    raw: *mut sys::ImFontAtlas,
+    context: *mut sys::ImGuiContext,
+) -> Result<u64, RendererConsumerError> {
+    assert!(!raw.is_null(), "managed renderer requires a font atlas");
+    assert!(
+        !context.is_null(),
+        "managed renderer requires an ImGui context"
+    );
+    FONT_ATLAS_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        let atlas_key = raw as usize;
+        states.get_or_insert(raw);
+        let registered_contexts = states
+            .contexts_by_atlas
+            .get(&atlas_key)
+            .map_or(0, HashSet::len);
+        if registered_contexts != 1
+            || !states
+                .contexts_by_atlas
+                .get(&atlas_key)
+                .is_some_and(|contexts| contexts.contains(&(context as usize)))
+        {
+            return Err(
+                RendererConsumerError::SharedFontAtlasRequiresExclusiveContext {
+                    registered_contexts,
+                },
+            );
+        }
+
+        match states
+            .renderer_modes
+            .get(&atlas_key)
+            .copied()
+            .unwrap_or(FontAtlasRendererMode::Unclaimed)
+        {
+            FontAtlasRendererMode::Managed {
+                context: owner,
+                namespace,
+                ..
+            } if owner == context as usize => return Ok(namespace),
+            FontAtlasRendererMode::Managed { .. } => {
+                return Err(
+                    RendererConsumerError::SharedFontAtlasRequiresExclusiveContext {
+                        registered_contexts,
+                    },
+                );
+            }
+            FontAtlasRendererMode::RendererReleasePending { .. } => {
+                return Err(RendererConsumerError::SharedFontAtlasRendererReleasePending);
+            }
+            FontAtlasRendererMode::Unclaimed | FontAtlasRendererMode::Legacy => {}
+        }
+
+        if !font_atlas_supports_managed_renderer(raw) {
+            return Err(RendererConsumerError::FontAtlasRequiresManagedRebuild);
+        }
+        Ok(states.enter_managed_renderer(atlas_key, context as usize))
+    })
+}
+
+fn font_atlas_supports_managed_renderer(raw: *mut sys::ImFontAtlas) -> bool {
+    unsafe {
+        let builder = (*raw).Builder;
+        builder.is_null() || !(*builder).PreloadedAllGlyphsRanges
+    }
+}
+
+pub(crate) fn font_atlas_snapshot_identities(
+    raw: *mut sys::ImFontAtlas,
+    context: *mut sys::ImGuiContext,
+) -> Vec<FontAtlasSnapshotIdentity> {
+    assert!(!raw.is_null(), "font atlas pointer must not be null");
+    let observed = unsafe {
+        let list = &(*raw).TexList;
+        assert!(
+            list.Size >= 0,
+            "font atlas texture list size must not be negative"
+        );
+        let mut observed = Vec::with_capacity(list.Size.max(0) as usize + 1);
+        if list.Size > 0 {
+            assert!(
+                !list.Data.is_null(),
+                "non-empty font atlas texture list must have storage"
+            );
+            observed.extend_from_slice(std::slice::from_raw_parts(list.Data, list.Size as usize));
+        }
+        let current = (*raw).TexData;
+        if !current.is_null() && !observed.contains(&current) {
+            observed.push(current);
+        }
+        observed
+    };
+
+    let mut unique_ids = HashSet::with_capacity(observed.len());
+    let observed = observed
+        .into_iter()
+        .filter(|texture| !texture.is_null())
+        .map(|texture| {
+            let unique_id = unsafe { (*texture).UniqueID };
+            assert!(
+                unique_id > 0,
+                "font atlas texture allocation must have a positive unique ID"
+            );
+            assert!(
+                unique_ids.insert(unique_id),
+                "font atlas reused a live texture allocation unique ID"
+            );
+            (unique_id as u64, texture)
+        })
+        .collect::<Vec<_>>();
+
+    FONT_ATLAS_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        states.get_or_insert(raw);
+        let active_mode = states.renderer_modes.get(&(raw as usize)).copied();
+        let ledger = states.texture_ledgers.entry(raw as usize).or_default();
+        let stamp = match active_mode {
+            Some(FontAtlasRendererMode::Managed {
+                context: owner,
+                namespace,
+                ..
+            }) => {
+                debug_assert_eq!(owner, context as usize);
+                namespace
+            }
+            Some(FontAtlasRendererMode::Unclaimed) | Some(FontAtlasRendererMode::Legacy) | None => {
+                0
+            }
+            Some(FontAtlasRendererMode::RendererReleasePending { .. }) => {
+                panic!(
+                    "a font atlas with a pending renderer release cannot be observed by a Context"
+                )
+            }
+        };
+        for entry in ledger.entries.values_mut() {
+            entry.live = false;
+        }
+        observed
+            .into_iter()
+            .map(|(texture_generation, texture)| {
+                let entry = ledger.entries.entry(texture_generation).or_insert_with(|| {
+                    FontAtlasTextureLedgerEntry {
+                        revision: 0,
+                        operation: None,
+                        live: true,
+                        last_reference_epoch: HashMap::new(),
+                    }
+                });
+                entry.live = true;
+                FontAtlasSnapshotIdentity {
+                    stamp,
+                    texture_generation,
+                    revision: entry.revision,
+                    texture,
+                }
+            })
+            .collect()
+    })
+}
+
+pub(crate) fn track_font_atlas_texture_operation(
+    raw: *mut sys::ImFontAtlas,
+    id: SnapshotTextureId,
+    operation: &mut Arc<TextureOp>,
+) -> u64 {
+    let SnapshotTextureId::FontAtlas {
+        stamp, generation, ..
+    } = id
+    else {
+        panic!("font atlas operation received a user texture identity");
+    };
+    FONT_ATLAS_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        states.get_or_insert(raw);
+        let namespace = states
+            .renderer_modes
+            .get_mut(&(raw as usize))
+            .and_then(|mode| match mode {
+                FontAtlasRendererMode::Managed {
+                    namespace,
+                    renderer_reset_committed,
+                    ..
+                } => {
+                    *renderer_reset_committed = false;
+                    Some(*namespace)
+                }
+                FontAtlasRendererMode::Unclaimed
+                | FontAtlasRendererMode::Legacy
+                | FontAtlasRendererMode::RendererReleasePending { .. } => None,
+            })
+            .expect("font atlas managed renderer namespace was not claimed");
+        assert_eq!(
+            stamp, namespace,
+            "font atlas operation belongs to a retired renderer namespace"
+        );
+        let entry = states
+            .texture_ledgers
+            .get_mut(&(raw as usize))
+            .and_then(|ledger| ledger.entries.get_mut(&generation))
+            .expect("font atlas operation must target the current observed texture list");
+        assert!(
+            entry.live,
+            "font atlas operation must target a live texture allocation"
+        );
+        if entry
+            .operation
+            .as_deref()
+            .is_none_or(|current| current != operation.as_ref())
+        {
+            entry.revision = entry
+                .revision
+                .checked_add(1)
+                .expect("font atlas texture revision space exhausted");
+            entry.operation = Some(Arc::clone(operation));
+        } else if let Some(current) = &entry.operation {
+            *operation = Arc::clone(current);
+        }
+        entry.revision
+    })
+}
+
+pub(crate) fn record_font_atlas_texture_reference(
+    raw: *mut sys::ImFontAtlas,
+    id: SnapshotTextureId,
+    epoch: u64,
+) {
+    let SnapshotTextureId::FontAtlas {
+        context,
+        stamp,
+        generation,
+    } = id
+    else {
+        return;
+    };
+    FONT_ATLAS_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        states.get_or_insert(raw);
+        let namespace = states
+            .renderer_modes
+            .get(&(raw as usize))
+            .and_then(|mode| match mode {
+                FontAtlasRendererMode::Managed { namespace, .. } => Some(*namespace),
+                FontAtlasRendererMode::Unclaimed
+                | FontAtlasRendererMode::Legacy
+                | FontAtlasRendererMode::RendererReleasePending { .. } => None,
+            })
+            .expect("font atlas managed renderer namespace was not claimed");
+        assert_eq!(
+            stamp, namespace,
+            "font atlas request belongs to a retired renderer namespace"
+        );
+        let entry = states
+            .texture_ledgers
+            .get_mut(&(raw as usize))
+            .and_then(|ledger| ledger.entries.get_mut(&generation))
+            .expect("font atlas request identity was not observed");
+        entry
+            .last_reference_epoch
+            .entry(context)
+            .and_modify(|last| *last = (*last).max(epoch))
+            .or_insert(epoch);
+    });
+}
+
+pub(crate) fn font_atlas_texture_identity_is_known(
+    raw: *mut sys::ImFontAtlas,
+    id: SnapshotTextureId,
+) -> bool {
+    let SnapshotTextureId::FontAtlas {
+        stamp, generation, ..
+    } = id
+    else {
+        return false;
+    };
+    FONT_ATLAS_STATES.with(|states| {
+        let states = states.borrow();
+        states
+            .texture_ledgers
+            .get(&(raw as usize))
+            .is_some_and(|ledger| {
+                states
+                    .renderer_modes
+                    .get(&(raw as usize))
+                    .is_some_and(|mode| {
+                        matches!(
+                            mode,
+                            FontAtlasRendererMode::Managed { namespace, .. }
+                                if *namespace == stamp
+                        )
+                    })
+                    && ledger.entries.contains_key(&generation)
+            })
+    })
+}
+
+pub(crate) fn font_atlas_texture_revision_is_current(
+    raw: *mut sys::ImFontAtlas,
+    id: SnapshotTextureId,
+    revision: u64,
+) -> bool {
+    let SnapshotTextureId::FontAtlas {
+        stamp, generation, ..
+    } = id
+    else {
+        return false;
+    };
+    FONT_ATLAS_STATES.with(|states| {
+        let states = states.borrow();
+        states
+            .texture_ledgers
+            .get(&(raw as usize))
+            .filter(|_| {
+                states
+                    .renderer_modes
+                    .get(&(raw as usize))
+                    .is_some_and(|mode| {
+                        matches!(
+                            mode,
+                            FontAtlasRendererMode::Managed { namespace, .. }
+                                if *namespace == stamp
+                        )
+                    })
+            })
+            .and_then(|ledger| ledger.entries.get(&generation))
+            .is_some_and(|entry| entry.live && entry.revision == revision)
+    })
+}
+
+pub(crate) fn prune_font_atlas_texture_tombstones(
+    raw: *mut sys::ImFontAtlas,
+    context: ContextId,
+    watermark: u64,
+) {
+    FONT_ATLAS_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        let Some(ledger) = states.texture_ledgers.get_mut(&(raw as usize)) else {
+            return;
+        };
+        for entry in ledger.entries.values_mut() {
+            if entry
+                .last_reference_epoch
+                .get(&context)
+                .is_some_and(|last| *last <= watermark)
+            {
+                entry.last_reference_epoch.remove(&context);
+            }
+        }
+        ledger
+            .entries
+            .retain(|_, entry| entry.live || !entry.last_reference_epoch.is_empty());
+    });
+}
+
+pub(crate) fn mark_font_atlas_renderer_reset(raw: *mut sys::ImFontAtlas) {
+    assert!(!raw.is_null(), "renderer reset requires a font atlas");
+    FONT_ATLAS_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        match states.renderer_modes.get_mut(&(raw as usize)) {
+            Some(FontAtlasRendererMode::Managed {
+                renderer_reset_committed,
+                ..
+            }) => *renderer_reset_committed = true,
+            Some(FontAtlasRendererMode::Unclaimed | FontAtlasRendererMode::Legacy) | None => {
+                debug_assert!(false, "renderer reset requires a managed font atlas");
+            }
+            Some(FontAtlasRendererMode::RendererReleasePending { .. }) => {
+                debug_assert!(
+                    false,
+                    "renderer reset cannot be committed after its Context unregisters"
+                );
+            }
+        }
+    });
+}
+
 #[derive(Default)]
 pub(super) struct FontAtlasStates {
     next_stamp: u64,
+    next_renderer_namespace: u64,
     next_custom_rect_nonce: u64,
     by_atlas: HashMap<usize, FontAtlasState>,
+    texture_ledgers: HashMap<usize, FontAtlasTextureLedger>,
+    renderer_modes: HashMap<usize, FontAtlasRendererMode>,
     contexts_by_atlas: HashMap<usize, HashSet<usize>>,
     custom_rect_nonces: HashMap<usize, HashMap<sys::ImFontAtlasRectId, u64>>,
     owned_glyph_ranges: HashMap<usize, Vec<Box<[sys::ImWchar]>>>,
@@ -35,8 +460,11 @@ pub(super) struct FontAtlasStates {
 thread_local! {
     static FONT_ATLAS_STATES: RefCell<FontAtlasStates> = RefCell::new(FontAtlasStates {
         next_stamp: 1,
+        next_renderer_namespace: 1,
         next_custom_rect_nonce: 1,
         by_atlas: HashMap::new(),
+        texture_ledgers: HashMap::new(),
+        renderer_modes: HashMap::new(),
         contexts_by_atlas: HashMap::new(),
         custom_rect_nonces: HashMap::new(),
         owned_glyph_ranges: HashMap::new(),
@@ -44,6 +472,27 @@ thread_local! {
 }
 
 impl FontAtlasStates {
+    fn enter_managed_renderer(&mut self, atlas_key: usize, context: usize) -> u64 {
+        let namespace = self.next_renderer_namespace;
+        self.next_renderer_namespace = namespace
+            .checked_add(1)
+            .expect("font atlas renderer namespace space exhausted");
+        self.renderer_modes.insert(
+            atlas_key,
+            FontAtlasRendererMode::Managed {
+                context,
+                namespace,
+                renderer_reset_committed: true,
+            },
+        );
+        self.texture_ledgers
+            .entry(atlas_key)
+            .or_default()
+            .entries
+            .clear();
+        namespace
+    }
+
     fn get_or_insert(&mut self, raw: *mut sys::ImFontAtlas) -> &mut FontAtlasState {
         let key = raw as usize;
         if !self.by_atlas.contains_key(&key) {
@@ -58,9 +507,6 @@ impl FontAtlasStates {
                     stamp,
                     generation: 0,
                     custom_rect_generation: 0,
-                    texture_generation: 0,
-                    texture_pointer: 0,
-                    snapshot_revision: 0,
                     texture_borrows: 0,
                 },
             );
@@ -104,62 +550,6 @@ pub(super) fn bump_custom_rect_generation(raw: *mut sys::ImFontAtlas) -> FontAtl
         let state = *state;
         states.custom_rect_nonces.remove(&(raw as usize));
         state
-    })
-}
-
-pub(super) fn bump_font_atlas_texture_generation(raw: *mut sys::ImFontAtlas) {
-    assert!(!raw.is_null(), "font atlas pointer must not be null");
-    FONT_ATLAS_STATES.with(|states| {
-        let mut states = states.borrow_mut();
-        let state = states.get_or_insert(raw);
-        state.texture_generation = state
-            .texture_generation
-            .checked_add(1)
-            .expect("font atlas texture generation counter overflowed");
-        state.texture_pointer = unsafe { (*raw).TexData as usize };
-    });
-}
-
-pub(crate) fn font_atlas_snapshot_identity(
-    raw: *mut sys::ImFontAtlas,
-) -> FontAtlasSnapshotIdentity {
-    font_atlas_texture_identity(raw, true)
-}
-
-pub(crate) fn current_font_atlas_snapshot_identity(
-    raw: *mut sys::ImFontAtlas,
-) -> FontAtlasSnapshotIdentity {
-    font_atlas_texture_identity(raw, false)
-}
-
-fn font_atlas_texture_identity(
-    raw: *mut sys::ImFontAtlas,
-    advance_revision: bool,
-) -> FontAtlasSnapshotIdentity {
-    assert!(!raw.is_null(), "font atlas pointer must not be null");
-    let texture = unsafe { (*raw).TexData };
-    FONT_ATLAS_STATES.with(|states| {
-        let mut states = states.borrow_mut();
-        let state = states.get_or_insert(raw);
-        if state.texture_pointer != texture as usize {
-            state.texture_generation = state
-                .texture_generation
-                .checked_add(1)
-                .expect("font atlas texture generation counter overflowed");
-            state.texture_pointer = texture as usize;
-        }
-        if advance_revision {
-            state.snapshot_revision = state
-                .snapshot_revision
-                .checked_add(1)
-                .expect("font atlas snapshot revision counter overflowed");
-        }
-        FontAtlasSnapshotIdentity {
-            stamp: state.stamp,
-            texture_generation: state.texture_generation,
-            revision: state.snapshot_revision,
-            texture,
-        }
     })
 }
 
@@ -236,6 +626,16 @@ pub(crate) fn register_font_atlas_context(
     FONT_ATLAS_STATES.with(|states| {
         let mut states = states.borrow_mut();
         states.get_or_insert(atlas);
+        assert!(
+            !matches!(
+                states.renderer_modes.get(&(atlas as usize)),
+                Some(
+                    FontAtlasRendererMode::Managed { .. }
+                        | FontAtlasRendererMode::RendererReleasePending { .. }
+                )
+            ),
+            "cannot register another Context while a managed renderer owns the font atlas or its release is pending"
+        );
         let inserted = states
             .contexts_by_atlas
             .entry(atlas as usize)
@@ -251,6 +651,7 @@ pub(crate) fn register_font_atlas_context(
 pub(crate) fn unregister_font_atlas_context(
     atlas: *mut sys::ImFontAtlas,
     context: *mut sys::ImGuiContext,
+    context_id: ContextId,
 ) {
     if atlas.is_null() || context.is_null() {
         return;
@@ -258,6 +659,14 @@ pub(crate) fn unregister_font_atlas_context(
     FONT_ATLAS_STATES.with(|states| {
         let mut states = states.borrow_mut();
         let atlas_key = atlas as usize;
+        if let Some(ledger) = states.texture_ledgers.get_mut(&atlas_key) {
+            for entry in ledger.entries.values_mut() {
+                entry.last_reference_epoch.remove(&context_id);
+            }
+            ledger
+                .entries
+                .retain(|_, entry| entry.live || !entry.last_reference_epoch.is_empty());
+        }
         let remove_atlas_entry =
             if let Some(contexts) = states.contexts_by_atlas.get_mut(&atlas_key) {
                 let removed = contexts.remove(&(context as usize));
@@ -272,6 +681,52 @@ pub(crate) fn unregister_font_atlas_context(
             };
         if remove_atlas_entry {
             states.contexts_by_atlas.remove(&atlas_key);
+            let mode = states
+                .renderer_modes
+                .get(&atlas_key)
+                .copied()
+                .unwrap_or(FontAtlasRendererMode::Unclaimed);
+            match mode {
+                FontAtlasRendererMode::Managed {
+                    context: owner,
+                    namespace,
+                    renderer_reset_committed,
+                } => {
+                    debug_assert_eq!(
+                        owner, context as usize,
+                        "the last Context did not own its font atlas renderer namespace"
+                    );
+                    if renderer_reset_committed {
+                        states
+                            .renderer_modes
+                            .insert(atlas_key, FontAtlasRendererMode::Unclaimed);
+                        if let Some(ledger) = states.texture_ledgers.get_mut(&atlas_key) {
+                            ledger.entries.clear();
+                        }
+                    } else {
+                        states.renderer_modes.insert(
+                            atlas_key,
+                            FontAtlasRendererMode::RendererReleasePending {
+                                _retired_namespace: namespace,
+                            },
+                        );
+                    }
+                }
+                FontAtlasRendererMode::Unclaimed | FontAtlasRendererMode::Legacy => {
+                    states
+                        .renderer_modes
+                        .insert(atlas_key, FontAtlasRendererMode::Unclaimed);
+                    if let Some(ledger) = states.texture_ledgers.get_mut(&atlas_key) {
+                        ledger.entries.clear();
+                    }
+                }
+                FontAtlasRendererMode::RendererReleasePending { .. } => {
+                    debug_assert!(
+                        false,
+                        "a renderer release cannot become pending while a Context remains registered"
+                    );
+                }
+            }
         }
     });
 }
@@ -341,6 +796,68 @@ pub(crate) fn assert_font_atlas_renderer_mode(
     caller: &str,
 ) {
     assert!(!raw.is_null(), "{caller} requires a valid font atlas");
+    let context = unsafe { sys::igGetCurrentContext() };
+    assert!(
+        !context.is_null(),
+        "{caller} requires an active ImGui context"
+    );
+    FONT_ATLAS_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        let mode = states
+            .renderer_modes
+            .get(&(raw as usize))
+            .copied()
+            .unwrap_or(FontAtlasRendererMode::Unclaimed);
+        if renderer_has_textures {
+            match mode {
+                FontAtlasRendererMode::Managed { context: owner, .. } => {
+                    assert_eq!(
+                        owner, context as usize,
+                        "{caller} cannot use another Context's managed font atlas"
+                    );
+                }
+                FontAtlasRendererMode::Unclaimed | FontAtlasRendererMode::Legacy => {
+                    let registered_contexts = states
+                        .contexts_by_atlas
+                        .get(&(raw as usize))
+                        .map_or(0, HashSet::len);
+                    assert_eq!(
+                        registered_contexts, 1,
+                        "{caller} cannot enable RENDERER_HAS_TEXTURES while the font atlas is registered with {registered_contexts} Contexts"
+                    );
+                    assert!(
+                        font_atlas_supports_managed_renderer(raw),
+                        "{caller} cannot switch a legacy-built font atlas to RENDERER_HAS_TEXTURES; clear and repopulate the atlas before changing renderer mode"
+                    );
+                    states.enter_managed_renderer(raw as usize, context as usize);
+                }
+                FontAtlasRendererMode::RendererReleasePending { .. } => {
+                    panic!(
+                        "{caller} cannot use a font atlas whose prior renderer release was not committed"
+                    );
+                }
+            }
+        } else {
+            match mode {
+                FontAtlasRendererMode::Unclaimed => {
+                    states
+                        .renderer_modes
+                        .insert(raw as usize, FontAtlasRendererMode::Legacy);
+                }
+                FontAtlasRendererMode::Legacy => {}
+                FontAtlasRendererMode::Managed { .. } => {
+                    panic!(
+                        "{caller} cannot use a managed font atlas through a legacy renderer"
+                    );
+                }
+                FontAtlasRendererMode::RendererReleasePending { .. } => {
+                    panic!(
+                        "{caller} cannot use a font atlas whose prior renderer release was not committed"
+                    );
+                }
+            }
+        }
+    });
     unsafe {
         let builder = (*raw).Builder;
         if renderer_has_textures {
@@ -364,6 +881,8 @@ pub(crate) fn forget_font_atlas_generation(raw: *mut sys::ImFontAtlas) {
     FONT_ATLAS_STATES.with(|states| {
         let mut states = states.borrow_mut();
         states.by_atlas.remove(&(raw as usize));
+        states.texture_ledgers.remove(&(raw as usize));
+        states.renderer_modes.remove(&(raw as usize));
         states.contexts_by_atlas.remove(&(raw as usize));
         states.custom_rect_nonces.remove(&(raw as usize));
         states.owned_glyph_ranges.remove(&(raw as usize));

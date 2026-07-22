@@ -16,24 +16,37 @@ const DEPENDENCY_SECTIONS: [&str; 3] = ["dependencies", "dev-dependencies", "bui
 struct Options {
     version: Version,
     dry_run: bool,
+    allow_prerelease_relabel: bool,
 }
 
 impl Options {
     fn parse(args: &[String]) -> Result<Self> {
-        let raw = args
-            .first()
-            .context("usage: xtask release-version <semver> [--dry-run]")?;
+        let raw = args.first().context(
+            "usage: xtask release-version <semver> [--dry-run] \
+                 [--allow-prerelease-relabel]",
+        )?;
         let version =
             Version::parse(raw).with_context(|| format!("invalid release version {raw:?}"))?;
         let mut dry_run = false;
+        let mut allow_prerelease_relabel = false;
         for argument in &args[1..] {
             match argument.as_str() {
                 "--dry-run" if !dry_run => dry_run = true,
                 "--dry-run" => bail!("--dry-run may only be specified once"),
+                "--allow-prerelease-relabel" if !allow_prerelease_relabel => {
+                    allow_prerelease_relabel = true;
+                }
+                "--allow-prerelease-relabel" => {
+                    bail!("--allow-prerelease-relabel may only be specified once")
+                }
                 _ => bail!("unknown release-version option: {argument}"),
             }
         }
-        Ok(Self { version, dry_run })
+        Ok(Self {
+            version,
+            dry_run,
+            allow_prerelease_relabel,
+        })
     }
 }
 
@@ -142,12 +155,30 @@ struct Plan {
 
 impl Plan {
     fn build(root: &Path, target: Version) -> Result<Self> {
+        Self::build_with_prerelease_relabel(root, target, false)
+    }
+
+    fn build_with_prerelease_relabel(
+        root: &Path,
+        target: Version,
+        allow_prerelease_relabel: bool,
+    ) -> Result<Self> {
         let graph = Graph::load(root)?;
         let current = validate_graph(&graph, &graph.root_document)?.version;
-        ensure!(
-            target >= current,
-            "release target {target} must not be older than current workspace version {current}"
-        );
+        if target < current {
+            ensure!(
+                allow_prerelease_relabel && is_prerelease_relabel(&current, &target),
+                "release target {target} must not be older than current workspace version \
+                 {current}; an unpublished stable version may only be relabeled to a \
+                 prerelease of the same version with --allow-prerelease-relabel"
+            );
+        } else if allow_prerelease_relabel {
+            ensure!(
+                target == current,
+                "--allow-prerelease-relabel is only valid for an idempotent target or a stable \
+                 version relabeled to a prerelease of the same major, minor, and patch"
+            );
+        }
         let requirement = release_requirement(&target)?;
         let mut updated = parse_document(&graph.root_source, &graph.root_manifest)?;
         update_root(&mut updated, &target.to_string(), &requirement)?;
@@ -178,7 +209,11 @@ impl Plan {
 
 pub(crate) fn run(root: &Path, args: &[String]) -> Result<()> {
     let options = Options::parse(args)?;
-    let plan = Plan::build(root, options.version)?;
+    let plan = if options.allow_prerelease_relabel {
+        Plan::build_with_prerelease_relabel(root, options.version, true)?
+    } else {
+        Plan::build(root, options.version)?
+    };
     if plan.is_idempotent() {
         eprintln!(
             "release graph is already at {} ({} publishable packages, {} internal edges)",
@@ -753,6 +788,14 @@ fn release_requirement(version: &Version) -> Result<String> {
     })
 }
 
+fn is_prerelease_relabel(current: &Version, target: &Version) -> bool {
+    current.pre.is_empty()
+        && !target.pre.is_empty()
+        && current.major == target.major
+        && current.minor == target.minor
+        && current.patch == target.patch
+}
+
 fn package_table<'a>(document: &'a DocumentMut, path: &Path) -> Result<&'a Table> {
     document
         .get("package")
@@ -903,11 +946,25 @@ xtask = {{ path = \"xtask\", version = \"0.1.0\" }}\n\
 
     #[test]
     fn parses_semver_and_options() {
-        let options = Options::parse(&["0.17.0-alpha.1+ci.7".into(), "--dry-run".into()]).unwrap();
+        let options = Options::parse(&[
+            "0.17.0-alpha.1+ci.7".into(),
+            "--dry-run".into(),
+            "--allow-prerelease-relabel".into(),
+        ])
+        .unwrap();
         assert!(options.dry_run);
+        assert!(options.allow_prerelease_relabel);
         assert!(Options::parse(&["0.17".into()]).is_err());
         assert!(Options::parse(&["0.17.0-alpha..1".into()]).is_err());
         assert!(Options::parse(&["0.17.0".into(), "--unknown".into()]).is_err());
+        assert!(
+            Options::parse(&[
+                "0.17.0".into(),
+                "--allow-prerelease-relabel".into(),
+                "--allow-prerelease-relabel".into(),
+            ])
+            .is_err()
+        );
     }
 
     #[test]
@@ -1084,6 +1141,39 @@ xtask = {{ path = \"xtask\", version = \"0.1.0\" }}\n\
                 .to_string()
                 .contains("forbidden root field")
         );
+    }
+
+    #[test]
+    fn prerelease_relabel_requires_an_explicit_same_train_opt_in() {
+        let fixture = Fixture::new();
+        let target = Version::parse("0.16.0-alpha.1").unwrap();
+        let error = Plan::build(fixture.root(), target.clone()).unwrap_err();
+        assert!(error.to_string().contains("--allow-prerelease-relabel"));
+
+        let plan = Plan::build_with_prerelease_relabel(fixture.root(), target, true).unwrap();
+        assert_eq!(plan.requirement, "=0.16.0-alpha.1");
+        assert!(
+            plan.updated_root
+                .contains("version = \"0.16.0-alpha.1\" # release")
+        );
+
+        let fixture = Fixture::new();
+        let error = Plan::build_with_prerelease_relabel(
+            fixture.root(),
+            Version::parse("0.15.0-alpha.1").unwrap(),
+            true,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("must not be older"));
+
+        let fixture = Fixture::new();
+        let error = Plan::build_with_prerelease_relabel(
+            fixture.root(),
+            Version::parse("0.17.0").unwrap(),
+            true,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("only valid"));
     }
 
     #[test]

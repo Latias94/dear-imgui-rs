@@ -301,8 +301,12 @@ impl AppWindow {
         // ImGui context
         let mut context = Context::create();
         context.set_ini_filename(None::<String>).unwrap();
-        let mut platform = WinitPlatform::new(&mut context);
-        platform.attach_window(&window, dear_imgui_winit::HiDpiMode::Default, &mut context);
+        let mut platform = WinitPlatform::new(&mut context)?;
+        platform.attach_window(
+            Arc::clone(&window),
+            dear_imgui_winit::HiDpiMode::Default,
+            &mut context,
+        )?;
 
         // Renderer
         let framebuffer_srgb = is_srgb_format(swapchain.surface_format.format);
@@ -337,12 +341,8 @@ impl AppWindow {
             }
         }
         img_tex.set_data(&pixels);
-        img_tex.set_status(dear_imgui_rs::texture::TextureStatus::WantCreate);
 
-        let mut photo_tex = Self::maybe_load_photo_texture();
-        if let Some(photo) = photo_tex.as_mut() {
-            photo.set_status(dear_imgui_rs::texture::TextureStatus::WantCreate);
-        }
+        let photo_tex = Self::maybe_load_photo_texture();
 
         let img_tex = context.register_texture(img_tex);
         let photo_tex = photo_tex.map(|photo| {
@@ -451,7 +451,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context);
+            .prepare_frame(&self.window, &mut self.imgui.context)?;
         let ui = self.imgui.context.frame();
 
         ui.window("Ash Texture Demo (ImGui-managed)")
@@ -482,7 +482,7 @@ impl AppWindow {
         // Finalize inputs on platform and build draw data.
         self.imgui
             .platform
-            .prepare_render_with_ui(&ui, &self.window);
+            .prepare_render_with_ui(&ui, &self.window)?;
         let rendered_frame = self.imgui.context.render();
 
         let frame_slot = self.vk.frame_index % self.vk.frames.len();
@@ -620,9 +620,15 @@ impl ApplicationHandler for App {
         };
 
         let imgui = &mut window.imgui;
-        imgui
-            .platform
-            .handle_window_event(&mut imgui.context, &window.window, &event);
+        if let Err(error) =
+            imgui
+                .platform
+                .handle_window_event(&mut imgui.context, &window.window, &event)
+        {
+            error!("Winit platform event error: {error}");
+            event_loop.exit();
+            return;
+        }
 
         match event {
             WindowEvent::Resized(physical_size) => {

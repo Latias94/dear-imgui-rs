@@ -89,6 +89,19 @@ fn resolve_imgui_includes(cfg: &BuildConfig) -> (PathBuf, PathBuf) {
     (imgui_src, cimgui_root)
 }
 
+fn native_binding_spec() -> &'static build_support::binding::CrateBindingSpec {
+    build_support::binding::CrateBindingSpec::for_crate_and_target(env!("CARGO_PKG_NAME"), "native")
+        .expect("missing dear-imguizmo-sys native binding spec")
+}
+
+#[cfg(feature = "bindgen")]
+fn apply_bindgen_defines(mut builder: bindgen::Builder) -> bindgen::Builder {
+    for define in native_binding_spec().binding_defines() {
+        builder = builder.clang_arg(define.clang_arg());
+    }
+    builder
+}
+
 fn use_pregenerated_bindings(out_dir: &Path) -> bool {
     use_validated_pregenerated_bindings(out_dir, "native")
 }
@@ -177,7 +190,7 @@ fn generate_bindings(
         );
     }
 
-    let bindings = bindgen::Builder::default()
+    let builder = bindgen::Builder::default()
         .header(cimguizmo_root.join("cimguizmo.h").to_string_lossy())
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .allowlist_function("ImGuizmo_.*")
@@ -197,9 +210,8 @@ fn generate_bindings(
         .clang_arg(format!(
             "-I{}",
             cimguizmo_root.join("ImGuizmo/src").display()
-        ))
-        .clang_arg("-DIMGUI_USE_WCHAR32")
-        .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
+        ));
+    let bindings = apply_bindgen_defines(builder)
         .derive_default(true)
         .derive_debug(true)
         .derive_copy(true)
@@ -335,20 +347,12 @@ fn build_with_cc(cfg: &BuildConfig, cimguizmo_root: &Path, imgui_src: &Path, cim
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
     build_support::configure_cpp_runtime_linkage(&mut build, &cfg.target_os, &cfg.target_env);
-    for (k, v) in env::vars() {
-        let suffix = k
-            .strip_prefix("DEP_DEAR_IMGUI_SYS_DEFINE_")
-            .or_else(|| k.strip_prefix("DEP_DEAR_IMGUI_DEFINE_"));
-        if let Some(suffix) = suffix {
-            build.define(suffix, v.as_str());
-        }
-    }
+    native_binding_spec().apply_extension_binding_defines(&mut build, env::vars());
     build.include(imgui_src);
     build.include(cimgui_root);
     build.include(cimguizmo_root);
     build.include(cimguizmo_root.join("ImGuizmo"));
     build.include(cimguizmo_root.join("ImGuizmo/src"));
-    build.define("IMGUI_USE_WCHAR32", None);
     build.file(cimguizmo_root.join("cimguizmo.cpp"));
     build.file(resolve_imguizmo_cpp(cimguizmo_root));
 

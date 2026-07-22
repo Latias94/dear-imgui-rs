@@ -1,4 +1,10 @@
 use super::*;
+#[cfg(any(
+    feature = "opengl3-renderer",
+    feature = "sdlrenderer3-renderer",
+    feature = "sdlgpu3-renderer"
+))]
+use dear_imgui_rs::sys;
 
 pub(super) fn with_context<R>(imgui: &Context, caller: &str, f: impl FnOnce() -> R) -> R {
     imgui
@@ -37,6 +43,28 @@ pub(super) mod ffi {
     }
 
     unsafe extern "C" {
+        #[cfg(test)]
+        pub fn dear_imgui_sdl3_backend_sizeof_imgui_io() -> usize;
+        #[cfg(all(test, debug_assertions))]
+        pub fn dear_imgui_sdl3_native_contract_self_test() -> u64;
+        #[cfg(all(
+            test,
+            debug_assertions,
+            any(
+                feature = "opengl3-renderer",
+                feature = "sdlrenderer3-renderer",
+                feature = "sdlgpu3-renderer"
+            )
+        ))]
+        pub fn dear_imgui_sdl3_destroy_platform_windows_for_test(
+            viewport: *mut sys::ImGuiViewportP,
+        );
+        #[cfg(test)]
+        pub fn dear_imgui_sdl3_mouse_leave_due_for_test(
+            pending_frame: i32,
+            current_frame: i32,
+            buttons_down: i32,
+        ) -> bool;
         pub fn ImGui_ImplSDL3_InitForOpenGL_Rust(
             window: *mut sdl3_sys::video::SDL_Window,
             sdl_gl_context: *mut c_void,
@@ -53,6 +81,15 @@ pub(super) mod ffi {
         pub fn ImGui_ImplSDL3_Shutdown_Rust();
         pub fn ImGui_ImplSDL3_NewFrame_Rust();
         pub fn ImGui_ImplSDL3_ProcessEvent_Rust(event: *const SDL_Event) -> bool;
+        pub fn dear_imgui_sdl3_native_begin(
+            phase: u32,
+            expects_opengl: u32,
+            swap_interval_policy: u32,
+            explicit_swap_interval: i32,
+            viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+        ) -> u64;
+        pub fn dear_imgui_sdl3_native_end() -> u64;
+        pub fn dear_imgui_sdl3_backend_clear_platform_monitors();
         #[cfg(any(
             feature = "opengl3-renderer",
             feature = "sdlrenderer3-renderer",
@@ -110,11 +147,46 @@ pub(super) mod ffi {
             pipeline: *mut SDL_GPUGraphicsPipeline,
         );
         #[cfg(feature = "sdlgpu3-renderer")]
+        pub fn dear_imgui_sdl3_backend_sdlgpu3_render_viewport(
+            viewport: *mut sys::ImGuiViewport,
+        ) -> u64;
+        #[cfg(feature = "sdlgpu3-renderer")]
         pub fn dear_imgui_sdl3_backend_sdlgpu3_create_device_objects();
         #[cfg(feature = "sdlgpu3-renderer")]
         pub fn dear_imgui_sdl3_backend_sdlgpu3_destroy_device_objects();
         #[cfg(feature = "sdlgpu3-renderer")]
         pub fn dear_imgui_sdl3_backend_sdlgpu3_update_texture(texture: *mut sys::ImTextureData);
+    }
+}
+
+/// Swap-interval policy applied when SDL3 creates a secondary OpenGL context.
+///
+/// [`Immediate`](Self::Immediate) matches the upstream multi-viewport default and avoids serial
+/// VSync waits when several platform windows are presented in one frame.
+///
+/// Drivers may reject a requested interval after creating a secondary context. That is treated as
+/// a presentation fallback to the driver's default rather than a viewport-creation failure.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Sdl3OpenGlViewportSwapInterval {
+    /// Disable VSync for secondary viewport contexts.
+    #[default]
+    Immediate,
+    /// Wait for one vertical refresh when swapping each secondary viewport.
+    VSync,
+    /// Request adaptive VSync (`-1`) where the SDL video driver supports it.
+    Adaptive,
+    /// Read and copy the main OpenGL context's current swap interval at viewport creation.
+    MatchMain,
+}
+
+impl Sdl3OpenGlViewportSwapInterval {
+    pub(crate) fn native_policy(self) -> (u32, i32) {
+        match self {
+            Self::Immediate => (0, 0),
+            Self::VSync => (0, 1),
+            Self::Adaptive => (0, -1),
+            Self::MatchMain => (1, 0),
+        }
     }
 }
 
@@ -142,10 +214,24 @@ pub enum Sdl3BackendError {
     Context(#[from] dear_imgui_rs::ContextBindingError),
     #[error("another platform backend already owns `{callback}`")]
     PlatformCallbackOccupied { callback: &'static str },
+    #[error("another platform backend already owns `{field}`")]
+    PlatformStateOccupied { field: &'static str },
+    #[error("another platform backend already owns SDL3-reserved capability bits {flags:#x}")]
+    PlatformCapabilityOccupied { flags: i32 },
+    #[error("another renderer backend already owns `{callback}`")]
+    RendererCallbackOccupied { callback: &'static str },
+    #[error("another renderer backend already owns `{field}`")]
+    RendererStateOccupied { field: &'static str },
+    #[error("another renderer backend already owns SDL3-reserved capability bits {flags:#x}")]
+    RendererCapabilityOccupied { flags: i32 },
     #[error("SDL3 platform callback `{callback}` was replaced while the runtime was attached")]
     PlatformCallbackReplaced { callback: &'static str },
     #[error("SDL3-owned platform state `{field}` was replaced while the runtime was attached")]
     PlatformStateReplaced { field: &'static str },
+    #[error("SDL3 renderer callback `{callback}` was replaced while the runtime was attached")]
+    RendererCallbackReplaced { callback: &'static str },
+    #[error("SDL3-owned renderer state `{field}` was replaced while the runtime was attached")]
+    RendererStateReplaced { field: &'static str },
     #[error("SDL3 platform callback `{callback}` panicked")]
     PlatformCallbackPanicked { callback: &'static str },
     #[error("another platform backend already owns BackendPlatformUserData")]
@@ -154,6 +240,36 @@ pub enum Sdl3BackendError {
     ForeignPlatformUserData,
     #[error("SDL3 failed to create a secondary viewport window")]
     ViewportCreationFailed,
+    #[error("SDL3 failed to capture the OpenGL state required for viewport creation")]
+    ViewportOpenGlStateCaptureFailed,
+    #[error("SDL3 failed to create or activate a distinct OpenGL context for a secondary viewport")]
+    ViewportOpenGlContextFailed,
+    #[error(
+        "SDL3 failed to maintain the OpenGL swap-interval transaction for a secondary viewport"
+    )]
+    ViewportOpenGlSwapIntervalFailed,
+    #[error("SDL3 failed to restore the previous OpenGL window, context, or share attribute")]
+    ViewportOpenGlStateRestoreFailed,
+    #[error("SDL3 failed to activate the OpenGL context required to render a secondary viewport")]
+    ViewportOpenGlRenderContextFailed,
+    #[error("SDL3 failed to activate or swap a secondary viewport OpenGL window")]
+    ViewportOpenGlSwapFailed,
+    #[error("SDL3 failed to claim a secondary viewport window for the SDL GPU device")]
+    ViewportSdlGpuClaimFailed,
+    #[error("SDL3 failed to configure a secondary viewport SDL GPU swapchain")]
+    ViewportSdlGpuConfigureFailed,
+    #[error("SDL3 failed to acquire a command buffer for a secondary viewport")]
+    ViewportSdlGpuCommandBufferFailed,
+    #[error("SDL3 failed to acquire a swapchain texture for a secondary viewport")]
+    ViewportSdlGpuSwapchainFailed,
+    #[error("SDL3 failed to begin a render pass for a secondary viewport")]
+    ViewportSdlGpuRenderPassFailed,
+    #[error("SDL3 failed to submit a command buffer for a secondary viewport")]
+    ViewportSdlGpuSubmitFailed,
+    #[error("SDLRenderer3 received a WindowCanvas other than the renderer used at initialization")]
+    RendererMismatch,
+    #[error("the SDL3 native callback bridge observed a reentrant or unbalanced transaction")]
+    NativeBridgeProtocolFailed,
     #[error("Dear ImGui platform state is unavailable")]
     PlatformStateUnavailable,
     #[error("the SDL3 runtime is no longer attached")]

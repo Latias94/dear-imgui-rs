@@ -127,7 +127,12 @@ impl<'ui> Plot3DUi<'ui> {
     }
 
     /// Line plot (f32) with an explicit data layout.
-    pub fn plot_line_f32_raw<S: AsRef<str>>(
+    ///
+    /// # Safety
+    ///
+    /// For every submitted index, `layout` must address an initialized, properly aligned `f32`
+    /// within each coordinate allocation. All three allocations must remain alive for this call.
+    pub unsafe fn plot_line_f32_raw<S: AsRef<str>>(
         &self,
         label: S,
         xs: &[f32],
@@ -196,7 +201,12 @@ impl<'ui> Plot3DUi<'ui> {
     }
 
     /// Line plot (f64) with an explicit data layout.
-    pub fn plot_line_f64_raw<S: AsRef<str>>(
+    ///
+    /// # Safety
+    ///
+    /// For every submitted index, `layout` must address an initialized, properly aligned `f64`
+    /// within each coordinate allocation. All three allocations must remain alive for this call.
+    pub unsafe fn plot_line_f64_raw<S: AsRef<str>>(
         &self,
         label: S,
         xs: &[f64],
@@ -265,7 +275,12 @@ impl<'ui> Plot3DUi<'ui> {
     }
 
     /// Scatter plot (f32) with an explicit data layout.
-    pub fn plot_scatter_f32_raw<S: AsRef<str>>(
+    ///
+    /// # Safety
+    ///
+    /// For every submitted index, `layout` must address an initialized, properly aligned `f32`
+    /// within each coordinate allocation. All three allocations must remain alive for this call.
+    pub unsafe fn plot_scatter_f32_raw<S: AsRef<str>>(
         &self,
         label: S,
         xs: &[f32],
@@ -334,7 +349,12 @@ impl<'ui> Plot3DUi<'ui> {
     }
 
     /// Scatter plot (f64) with an explicit data layout.
-    pub fn plot_scatter_f64_raw<S: AsRef<str>>(
+    ///
+    /// # Safety
+    ///
+    /// For every submitted index, `layout` must address an initialized, properly aligned `f64`
+    /// within each coordinate allocation. All three allocations must remain alive for this call.
+    pub unsafe fn plot_scatter_f64_raw<S: AsRef<str>>(
         &self,
         label: S,
         xs: &[f64],
@@ -402,7 +422,13 @@ impl<'ui> Plot3DUi<'ui> {
         })
     }
 
-    pub fn plot_triangles_f32_raw<S: AsRef<str>>(
+    /// Plot f32 triangle coordinates with an explicit data layout.
+    ///
+    /// # Safety
+    ///
+    /// For every submitted index, `layout` must address an initialized, properly aligned `f32`
+    /// within each coordinate allocation. All three allocations must remain alive for this call.
+    pub unsafe fn plot_triangles_f32_raw<S: AsRef<str>>(
         &self,
         label: S,
         xs: &[f32],
@@ -470,7 +496,13 @@ impl<'ui> Plot3DUi<'ui> {
         })
     }
 
-    pub fn plot_quads_f32_raw<S: AsRef<str>>(
+    /// Plot f32 quad coordinates with an explicit data layout.
+    ///
+    /// # Safety
+    ///
+    /// For every submitted index, `layout` must address an initialized, properly aligned `f32`
+    /// within each coordinate allocation. All three allocations must remain alive for this call.
+    pub unsafe fn plot_quads_f32_raw<S: AsRef<str>>(
         &self,
         label: S,
         xs: &[f32],
@@ -538,7 +570,13 @@ impl<'ui> Plot3DUi<'ui> {
         })
     }
 
-    pub fn plot_triangles_f64_raw<S: AsRef<str>>(
+    /// Plot f64 triangle coordinates with an explicit data layout.
+    ///
+    /// # Safety
+    ///
+    /// For every submitted index, `layout` must address an initialized, properly aligned `f64`
+    /// within each coordinate allocation. All three allocations must remain alive for this call.
+    pub unsafe fn plot_triangles_f64_raw<S: AsRef<str>>(
         &self,
         label: S,
         xs: &[f64],
@@ -606,7 +644,13 @@ impl<'ui> Plot3DUi<'ui> {
         })
     }
 
-    pub fn plot_quads_f64_raw<S: AsRef<str>>(
+    /// Plot f64 quad coordinates with an explicit data layout.
+    ///
+    /// # Safety
+    ///
+    /// For every submitted index, `layout` must address an initialized, properly aligned `f64`
+    /// within each coordinate allocation. All three allocations must remain alive for this call.
+    pub unsafe fn plot_quads_f64_raw<S: AsRef<str>>(
         &self,
         label: S,
         xs: &[f64],

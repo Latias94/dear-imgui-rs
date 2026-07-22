@@ -1,8 +1,7 @@
 use crate::fonts::FontId;
 use crate::fonts::atlas::id::validate_font_id_for_atlas;
 use crate::fonts::atlas::state::{
-    bump_custom_rect_generation, bump_font_atlas_generation, bump_font_atlas_texture_generation,
-    clear_font_atlas_glyph_ranges,
+    bump_custom_rect_generation, bump_font_atlas_generation, clear_font_atlas_glyph_ranges,
 };
 use crate::sys;
 
@@ -31,7 +30,6 @@ impl FontAtlas {
         unsafe { sys::ImFontAtlas_Clear(raw) }
         clear_font_atlas_glyph_ranges(raw);
         bump_font_atlas_generation(raw);
-        bump_font_atlas_texture_generation(raw);
         bump_custom_rect_generation(raw);
     }
 
@@ -58,6 +56,5 @@ impl FontAtlas {
             "FontAtlas::clear_tex_data() is only available to legacy renderers without RENDERER_HAS_TEXTURES"
         );
         unsafe { sys::ImFontAtlas_ClearTexData(raw) }
-        bump_font_atlas_texture_generation(raw);
     }
 }

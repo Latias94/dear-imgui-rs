@@ -76,7 +76,7 @@ fn run() -> Result<()> {
 
 fn print_help() {
     eprintln!(
-        "Commands:\n  wasm-bindgen\n  wasm-bindgen-implot\n  wasm-bindgen-implot3d\n  wasm-bindgen-imnodes\n  wasm-bindgen-imguizmo\n  wasm-bindgen-imguizmo-quat\n  verify-bindings [--check-only | --update] [--allow-dirty]\n  release-version <semver> [--dry-run]\n  web-demo [feature_list]\n  build-cimgui-provider\n  help\n\nExamples:\n  # Verify checked-in core bindings and git state\n  xtask verify-bindings\n  # Regenerate all supported core binding profiles\n  xtask verify-bindings --update --allow-dirty\n  # Preview the single-source workspace release update\n  xtask release-version 0.16.0 --dry-run\n  # Core ImGui only\n  xtask web-demo\n  # ImGui + ImPlot\n  xtask web-demo implot\n  # ImGui + ImPlot + ImNodes\n  xtask web-demo implot,imnodes"
+        "Commands:\n  wasm-bindgen\n  wasm-bindgen-implot\n  wasm-bindgen-implot3d\n  wasm-bindgen-imnodes\n  wasm-bindgen-imguizmo\n  wasm-bindgen-imguizmo-quat\n  verify-bindings [--check-only | --update] [--allow-dirty]\n  release-version <semver> [--dry-run] [--allow-prerelease-relabel]\n  web-demo [feature_list]\n  build-cimgui-provider\n  help\n\nExamples:\n  # Verify checked-in core bindings and git state\n  xtask verify-bindings\n  # Regenerate all supported core binding profiles\n  xtask verify-bindings --update --allow-dirty\n  # Preview a stable-to-prerelease release-train relabel\n  xtask release-version 0.16.0-alpha.1 --allow-prerelease-relabel --dry-run\n  # Core ImGui only\n  xtask web-demo\n  # ImGui + ImPlot\n  xtask web-demo implot\n  # ImGui + ImPlot + ImNodes\n  xtask web-demo implot,imnodes"
     );
 }
 
@@ -669,8 +669,8 @@ fn extension_bindgen_builder(root: &Path, spec: &CrateBindingSpec) -> Result<bin
         };
         builder = builder.clang_arg(format!("-I{}", root.join(include.relative_path).display()));
     }
-    for define in profile.clang_defines {
-        builder = builder.clang_arg(format!("-D{define}"));
+    for define in spec.binding_defines() {
+        builder = builder.clang_arg(define.clang_arg());
     }
     for pattern in profile.allowlisted_functions {
         builder = builder.allowlist_function(pattern);
@@ -690,10 +690,6 @@ fn extension_bindgen_builder(root: &Path, spec: &CrateBindingSpec) -> Result<bin
             .clang_arg("c++")
             .clang_arg("-std=c++17");
     }
-    for define in spec.target.clang_defines() {
-        builder = builder.clang_arg(format!("-D{define}"));
-    }
-
     if let CrateBindingTarget::WasmImport { module_name } = spec.target {
         builder = builder.wasm_import_module_name(module_name);
     }
@@ -1357,6 +1353,7 @@ fn build_cimgui_provider() -> Result<()> {
         ))
         .arg("-fno-exceptions")
         .arg("-fno-rtti")
+        .arg("-DIMGUI_DISABLE_OBSOLETE_FUNCTIONS")
         .arg("-DIMGUI_DISABLE_OSX_FUNCTIONS")
         .arg("-DIMGUI_DISABLE_WIN32_FUNCTIONS")
         .arg("-DIMNODES_NAMESPACE=imnodes")

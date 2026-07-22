@@ -92,7 +92,7 @@ Rationale: it prevents undefined behavior from querying ImGui state through a st
 ```
   your-extension/
   your-extension-sys/      # Low-level FFI (C binding + bindgen)
-    build.rs             # cc + bindgen, inherits DEP_DEAR_IMGUI_* paths/defines
+    build.rs             # cc + bindgen, consumes the canonical binding spec
     src/lib.rs           # expose bindings module (prefer committed pregenerated bindings; if using OUT_DIR, keep include! in a dedicated module)
     third-party/           # upstream C API (git submodule)
   your-extension/          # High-level safe API
@@ -107,7 +107,8 @@ Use C bindings (cimgui family) + bindgen when available:
 - Includes: inherit from `dear-imgui-sys` via Cargo env
   - `DEP_DEAR_IMGUI_IMGUI_INCLUDE_PATH`
   - `DEP_DEAR_IMGUI_CIMGUI_INCLUDE_PATH`
-  - `DEP_DEAR_IMGUI_DEFINE_*` (propagate as `build.define(key, val)`)
+  - `DEP_DEAR_IMGUI_DEFINE_*` metadata is consumed only through the canonical binding-spec helper;
+    do not forward environment keys directly to `cc::Build`
 - Sources: compile upstream C/C++ sources with `cc` (e.g., `cimplot.cpp`, `implot/*.cpp`)
 - Base linking: do not duplicate linking of the base ImGui library; rely on `dear-imgui-sys` to emit the correct `cargo:rustc-link-lib` for `dear_imgui`/`cimgui`. Your `-sys` crate should only emit its own static lib.
 - Blocklist ImGui types in bindgen (re-use dear-imgui-sys): ImVec2, ImVec4, ImGuiContext, ImDrawList, etc.
@@ -118,10 +119,17 @@ Use C bindings (cimgui family) + bindgen when available:
 
 Centralize all prebuilt download/extract/naming logic via the shared helper crate:
 
-- Depend on `dear-imgui-build-support` in your `-sys` crate as a build-dependency:
+- Depend on `dear-imgui-build-support` in your `-sys` crate as a build-dependency.
+  Until `0.16.0-alpha.1` is published, use the candidate source:
   ```toml
   [build-dependencies]
-  build-support = { package = "dear-imgui-build-support", version = "0.16" }
+  build-support = { package = "dear-imgui-build-support", git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", features = ["binding-spec"] }
+  ```
+
+  After publication, use the exact prerelease requirement:
+  ```toml
+  [build-dependencies]
+  build-support = { package = "dear-imgui-build-support", version = "=0.16.0-alpha.1", features = ["binding-spec"] }
   ```
 
   Workspace members should inherit the repository catalog instead:
@@ -244,24 +252,32 @@ let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
 // Resolve include paths from dear-imgui-sys
 let imgui_src = PathBuf::from(env::var("DEP_DEAR_IMGUI_IMGUI_INCLUDE_PATH").unwrap());
 let cimgui_root = PathBuf::from(env::var("DEP_DEAR_IMGUI_CIMGUI_INCLUDE_PATH").unwrap());
-let third_party = manifest_dir.join("third-party/           # upstream C API (git submodule)our-upstream");
+let third_party = manifest_dir.join("third-party/your-upstream");
+let binding_spec = build_support::binding::CrateBindingSpec::for_crate_and_target(
+    env!("CARGO_PKG_NAME"),
+    "native",
+)
+.expect("missing canonical native binding spec for this extension");
 
 // Generate bindings
-let bindings = bindgen::Builder::default()
+let mut builder = bindgen::Builder::default()
     .header(third_party.join("your_c_api.h").to_string_lossy())
     .clang_arg(format!("-I{}", imgui_src.display()))
     .clang_arg(format!("-I{}", cimgui_root.display()))
     .clang_arg(format!("-I{}", third_party.display()))
     .blocklist_type("ImVec2").blocklist_type("ImVec4").blocklist_type("ImGuiContext")
     .derive_default(true).derive_debug(true).derive_copy(true)
-    .layout_tests(false)
-    .generate().unwrap();
+    .layout_tests(false);
+for define in binding_spec.binding_defines() {
+    builder = builder.clang_arg(define.clang_arg());
+}
+let bindings = builder.generate().unwrap();
 bindings.write_to_file(out_path.join("bindings.rs")).unwrap();
 
 // Compile sources
 let mut build = cc::Build::new();
 build.cpp(true).std("c++17");
-for (k, v) in env::vars() { if let Some(s) = k.strip_prefix("DEP_DEAR_IMGUI_DEFINE_") { build.define(s, v.as_str()); } }
+binding_spec.apply_extension_binding_defines(&mut build, env::vars());
 build.include(&imgui_src).include(&cimgui_root).include(&third_party);
 build.file(third_party.join("your_c_api.cpp"));
 build.compile("dear_your_ext");
@@ -293,7 +309,7 @@ if target_env == "msvc" && target_os == "windows" {
 ## Checklist
 
 - [ ] `-sys` builds with source, system/prebuilt, and remote prebuilt
-- [ ] Inherit `DEP_DEAR_IMGUI_*` include paths and defines
+- [ ] Inherit `DEP_DEAR_IMGUI_*` include paths and consume defines through `CrateBindingSpec`
 - [ ] Blocklist overlapping ImGui types in bindgen
 - [ ] High-level uses bitflags for masks, enums for discrete choices
 - [ ] Conversions for common math types (mint, optional glam)

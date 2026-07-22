@@ -44,7 +44,17 @@ pub enum Plot3DError {
     GridSizeMismatch {
         x_count: usize,
         y_count: usize,
+        expected: usize,
         z_len: usize,
+    },
+    GridSizeOverflow {
+        x_count: usize,
+        y_count: usize,
+    },
+    GridPointCountOutOfRange {
+        x_count: usize,
+        y_count: usize,
+        point_count: usize,
     },
     StringConversion(&'static str),
 }
@@ -62,14 +72,26 @@ impl std::fmt::Display for Plot3DError {
             Plot3DError::GridSizeMismatch {
                 x_count,
                 y_count,
+                expected,
                 z_len,
             } => write!(
                 f,
                 "grid mismatch: x={} y={} => expected z_len={}, got {}",
+                x_count, y_count, expected, z_len
+            ),
+            Plot3DError::GridSizeOverflow { x_count, y_count } => write!(
+                f,
+                "surface grid size overflow: x_count={} y_count={}",
+                x_count, y_count
+            ),
+            Plot3DError::GridPointCountOutOfRange {
                 x_count,
                 y_count,
-                x_count * y_count,
-                z_len
+                point_count,
+            } => write!(
+                f,
+                "surface grid x_count={} y_count={} has {} points, exceeding ImPlot3D's i32 range",
+                x_count, y_count, point_count
             ),
             Plot3DError::StringConversion(what) => write!(f, "string conversion error: {}", what),
         }

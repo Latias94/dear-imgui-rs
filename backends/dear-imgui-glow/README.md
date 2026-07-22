@@ -37,9 +37,11 @@ therefore take `RenderedFrame` by value, apply every managed texture request, re
 result with the owning Context, and only then issue draw commands. A frame from another Context or
 consumer generation is rejected before OpenGL is mutated.
 
-For single-viewport use, explicitly destroy the renderer while its OpenGL context is current. This
-deletes renderer-owned GPU textures before their Context bindings are reset and releases the
-consumer so another renderer can attach:
+For single-viewport use, explicitly destroy the renderer while its OpenGL context is current.
+Teardown first obtains an idle reset permit from the Context. An outstanding frame or detached
+snapshot therefore returns an error before any GL handle or texture-map entry changes. Once
+validated, teardown deletes renderer-owned GPU textures, commits the Context binding reset, and
+releases the consumer so another renderer can attach:
 
 ```rust
 let gl = renderer.gl_context().expect("owned GL context").clone();
@@ -47,8 +49,9 @@ renderer.destroy(&gl, &mut imgui)?;
 ```
 
 For a single-viewport renderer created with `with_external_context`, pass the same live GL context
-to `destroy`. `destroy_device_objects` performs the same resource-first reset but keeps the consumer
-attached for later device-object recreation.
+to `destroy`. `destroy_device_objects` uses the same prepare-delete-commit transaction but keeps the
+consumer attached for later device-object recreation. After an outstanding-work error, finish or
+drop that work, poll completions, and retry teardown with the renderer still intact.
 
 ## Multi-Viewport Runtime
 
@@ -69,7 +72,10 @@ let renderer = GlowRenderer::with_shared_context(
     &mut imgui,
     Box::new(SimpleTextureMap::default()),
 )?;
-let mut runtime = GlowViewportRuntime::attach(&mut imgui, renderer)
+// SAFETY: the platform creates every secondary GL context in `gl`'s share group, makes the
+// viewport context current before Platform_RenderWindow, and keeps a compatible context current
+// for runtime GL work and teardown.
+let mut runtime = unsafe { GlowViewportRuntime::attach(&mut imgui, renderer) }
     .map_err(|failure| failure.into_parts().0)?;
 
 runtime.new_frame()?;
@@ -79,22 +85,27 @@ runtime.render(frame)?;
 runtime.shutdown(&mut imgui)?;
 ```
 
-Attachment preflights the complete renderer callback table and fails without publishing partial
-state. Callback panic, reentry, renderer failure, and foreign callback replacement are contained
-and returned by the next Rust entry or `poll_fault`. Explicit shutdown and Context-first teardown
-both delete renderer resources before platform windows. Dropping the wrapper performs immediate
-best-effort GPU cleanup and releases its consumer; the next renderer initialization resets managed
-texture bindings before reuse.
+Attachment preflights the complete renderer callback table and renderer capability bit, and fails
+without publishing partial state. Callback panic, reentry, renderer failure, and foreign callback
+replacement are contained and returned by the next Rust entry or `poll_fault`. Explicit shutdown
+preflights renderer epochs before deleting GL resources and leaves the renderer intact for retry if
+work is still outstanding. Explicit shutdown and Context-first teardown both delete renderer
+resources before platform windows. Every Rust and
+direct renderer callback entry revalidates the renderer capability, platform capability, required
+platform callbacks, and complete renderer callback table; dependency drift clears Glow's advertised
+capability and skips GL work. Dropping the wrapper defers the renderer attachment to its Context;
+it does not release GPU resources or the consumer while Context-managed texture bindings remain
+observable. Context-owned teardown performs the ordered renderer release before platform windows.
 
 The platform contract is stronger than having non-null `Platform_RenderWindow` and
 `Platform_SwapBuffers` callbacks. The platform backend must create GL contexts in the same share
-group and make the correct viewport context current from `Platform_RenderWindow`. The current Winit
-runtime is window-only and is rejected with `PlatformGlContextUnsupported`. Other platform routes
-must document and uphold this external GPU contract; callback preflight alone is not proof of it.
-A compatible share-group context must also be current when `shutdown` runs or the Dear ImGui
-Context is dropped, because renderer resources are deleted before the platform-window phase. Drop
-is a best-effort fallback, not a replacement for an explicitly ordered shutdown at a known-current
-GL boundary.
+group and make the correct viewport context current from `Platform_RenderWindow`. Because callback
+preflight cannot prove an OS-level GL share group, `attach` is unsafe and the integration must
+document why it upholds this contract. A compatible share-group context must also be current for
+runtime methods that perform GL work, explicit `shutdown`, and Dear ImGui Context teardown,
+because renderer resources are deleted before the platform-window phase. Dropping the wrapper
+defers that cleanup to the Context attachment; it is not a replacement for explicitly ordered
+shutdown at a known-current GL boundary.
 
 `GlowRenderer::with_external_context` remains a single-viewport API because an unrelated GL
 capability cannot be paired safely after renderer creation. Use `with_shared_context` so the
@@ -135,8 +146,8 @@ renderer and runtime retain the exact same `Rc<glow::Context>` from initializati
 
 | Item          | Version |
 |---------------|---------|
-| Crate         | 0.16.0  |
-| dear-imgui-rs | 0.16.0  |
+| Crate         | 0.16.0-alpha.1  |
+| dear-imgui-rs | 0.16.0-alpha.1  |
 | glow          | 0.17    |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.

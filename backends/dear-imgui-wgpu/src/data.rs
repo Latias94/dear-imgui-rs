@@ -59,9 +59,44 @@ impl WgpuRenderState {
     }
 }
 
-/// Initialization data for ImGui WGPU renderer
+/// Presentation policy for WGPU surfaces created for secondary viewports.
 ///
-/// This corresponds to ImGui_ImplWGPU_InitInfo in the C++ implementation
+/// Surface format and dimensions are renderer- and viewport-owned respectively. Secondary
+/// surfaces use the renderer's sRGB output contract; this value keeps the remaining scheduling
+/// and compositor choices together so creation and surface-loss recovery cannot silently diverge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WgpuViewportSurfaceConfig {
+    /// Requested presentation mode.
+    pub present_mode: PresentMode,
+    /// Requested compositor alpha mode.
+    pub alpha_mode: CompositeAlphaMode,
+    /// Maximum number of monitor refreshes between acquisition and presentation.
+    pub desired_maximum_frame_latency: u32,
+}
+
+impl Default for WgpuViewportSurfaceConfig {
+    fn default() -> Self {
+        Self {
+            present_mode: PresentMode::Fifo,
+            alpha_mode: CompositeAlphaMode::Opaque,
+            desired_maximum_frame_latency: 2,
+        }
+    }
+}
+
+impl From<&SurfaceConfiguration> for WgpuViewportSurfaceConfig {
+    fn from(config: &SurfaceConfiguration) -> Self {
+        Self {
+            present_mode: config.present_mode,
+            alpha_mode: config.alpha_mode,
+            desired_maximum_frame_latency: config.desired_maximum_frame_latency,
+        }
+    }
+}
+
+/// Initialization data for ImGui WGPU renderer.
+///
+/// This corresponds to `ImGui_ImplWGPU_InitInfo` plus Rust-owned multi-viewport policy.
 #[derive(Debug, Clone)]
 pub struct WgpuInitInfo {
     /// WGPU instance (required for multi-viewport to create per-window surfaces)
@@ -76,6 +111,8 @@ pub struct WgpuInitInfo {
     pub num_frames_in_flight: u32,
     /// Render target format
     pub render_target_format: TextureFormat,
+    /// Presentation policy for secondary viewport surfaces.
+    pub viewport_surface_config: WgpuViewportSurfaceConfig,
     /// Depth stencil format (None if no depth buffer)
     pub depth_stencil_format: Option<TextureFormat>,
     /// Pipeline multisample state
@@ -92,6 +129,7 @@ impl WgpuInitInfo {
             queue,
             num_frames_in_flight: 3,
             render_target_format,
+            viewport_surface_config: WgpuViewportSurfaceConfig::default(),
             depth_stencil_format: None,
             pipeline_multisample_state: MultisampleState {
                 count: 1,
@@ -129,6 +167,49 @@ impl WgpuInitInfo {
     pub fn with_adapter(mut self, adapter: Adapter) -> Self {
         self.adapter = Some(adapter);
         self
+    }
+
+    /// Set the complete presentation policy for secondary viewport surfaces.
+    pub fn with_viewport_surface_config(mut self, config: WgpuViewportSurfaceConfig) -> Self {
+        self.viewport_surface_config = config;
+        self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn viewport_surface_defaults_are_explicit_and_throughput_safe() {
+        let config = WgpuViewportSurfaceConfig::default();
+        assert_eq!(config.present_mode, PresentMode::Fifo);
+        assert_eq!(config.alpha_mode, CompositeAlphaMode::Opaque);
+        assert_eq!(config.desired_maximum_frame_latency, 2);
+    }
+
+    #[test]
+    fn viewport_surface_config_copies_supported_main_surface_policy() {
+        let surface = SurfaceConfiguration {
+            usage: TextureUsages::RENDER_ATTACHMENT,
+            format: TextureFormat::Bgra8UnormSrgb,
+            #[cfg(feature = "wgpu-30")]
+            color_space: SurfaceColorSpace::DisplayP3,
+            width: 128,
+            height: 96,
+            present_mode: PresentMode::AutoNoVsync,
+            alpha_mode: CompositeAlphaMode::PreMultiplied,
+            view_formats: vec![],
+            desired_maximum_frame_latency: 3,
+        };
+
+        let viewport = WgpuViewportSurfaceConfig::from(&surface);
+        assert_eq!(viewport.present_mode, surface.present_mode);
+        assert_eq!(viewport.alpha_mode, surface.alpha_mode);
+        assert_eq!(
+            viewport.desired_maximum_frame_latency,
+            surface.desired_maximum_frame_latency
+        );
     }
 }
 

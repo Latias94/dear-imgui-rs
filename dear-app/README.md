@@ -7,12 +7,14 @@
 
 ## Quick Start
 
-Create a binary crate and add one dependency:
+Create a binary crate and add the unreleased `0.16.0-alpha.1` candidate from `main`:
 
 ```toml
 [dependencies]
-dear-app = "0.16"
+dear-app = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", package = "dear-app" }
 ```
+
+After publication, replace that dependency with `dear-app = "=0.16.0-alpha.1"`.
 
 Then use `dear_app::run_ui` for applications that only need persistent UI state:
 
@@ -100,6 +102,8 @@ let config = AppConfig {
     ..Default::default()
 };
 ```
+
+`DockingConfig` configures docking in the main window; it does not enable Dear ImGui platform multi-viewport. `dear-app` rejects `ConfigFlags::VIEWPORTS_ENABLE` in 0.16 because its single-window recovery model does not own secondary platform windows. Use the Winit or SDL3 owning runtime examples when an application needs native secondary windows.
 
 ## GPU Resources
 

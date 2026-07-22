@@ -14,8 +14,13 @@ impl PlatformIo {
     /// This resets the `Renderer_*` callback table stored in `ImGuiPlatformIO`.
     /// This also clears Rust typed renderer callback storage and aggregate ABI shim state for this
     /// `PlatformIo`'s context.
+    ///
+    /// # Safety
+    ///
+    /// Dear ImGui must no longer be able to invoke any renderer callback, and all renderer-owned
+    /// viewport state must already have been released.
     #[cfg(feature = "multi-viewport")]
-    pub fn clear_renderer_handlers(&mut self) {
+    pub unsafe fn clear_renderer_handlers(&mut self) {
         unsafe { sys::ImGuiPlatformIO_ClearRendererHandlers(self.as_raw_mut()) }
 
         trampolines::clear_renderer_callbacks_for_platform_io(self.as_raw());
@@ -24,9 +29,16 @@ impl PlatformIo {
         }
     }
 
-    /// Set renderer create window callback (raw)
+    /// Set renderer create window callback (raw).
+    ///
+    /// # Safety
+    ///
+    /// When present, the callback must remain callable until it is replaced or cleared, must not
+    /// unwind across the C ABI, and must uphold Dear ImGui's renderer callback contract for every
+    /// viewport passed to it. Replacing or clearing a live callback is valid only after all state
+    /// interpreted by that callback has been released.
     #[cfg(feature = "multi-viewport")]
-    pub fn set_renderer_create_window_raw(
+    pub unsafe fn set_renderer_create_window_raw(
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport)>,
     ) {
@@ -56,15 +68,21 @@ impl PlatformIo {
     ) {
         self.assert_current_context_platform_io_for_callbacks();
         use trampolines::*;
-        self.set_renderer_create_window_raw(callback.map(|_| {
-            trampolines::renderer_create_window as unsafe extern "C" fn(*mut sys::ImGuiViewport)
-        }));
+        unsafe {
+            self.set_renderer_create_window_raw(callback.map(|_| {
+                trampolines::renderer_create_window as unsafe extern "C" fn(*mut sys::ImGuiViewport)
+            }));
+        }
         self.store_current_context_cb(&RENDERER_CREATE_WINDOW_CB, callback);
     }
 
-    /// Set renderer destroy window callback (raw)
+    /// Set renderer destroy window callback (raw).
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_renderer_create_window_raw`].
     #[cfg(feature = "multi-viewport")]
-    pub fn set_renderer_destroy_window_raw(
+    pub unsafe fn set_renderer_destroy_window_raw(
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport)>,
     ) {
@@ -93,9 +111,12 @@ impl PlatformIo {
     ) {
         self.assert_current_context_platform_io_for_callbacks();
         use trampolines::*;
-        self.set_renderer_destroy_window_raw(callback.map(|_| {
-            trampolines::renderer_destroy_window as unsafe extern "C" fn(*mut sys::ImGuiViewport)
-        }));
+        unsafe {
+            self.set_renderer_destroy_window_raw(callback.map(|_| {
+                trampolines::renderer_destroy_window
+                    as unsafe extern "C" fn(*mut sys::ImGuiViewport)
+            }));
+        }
         self.store_current_context_cb(&RENDERER_DESTROY_WINDOW_CB, callback);
     }
 
@@ -103,8 +124,13 @@ impl PlatformIo {
     ///
     /// The callback receives a pointer because the C++ slot accepts `ImVec2` by value. The
     /// repository-owned C++ thunk performs that C++ call and forwards a pointer into Rust.
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_renderer_create_window_raw`]. The pointed-to `ImVec2` is valid only for the
+    /// duration of the callback.
     #[cfg(feature = "multi-viewport")]
-    pub fn set_renderer_set_window_size_raw(
+    pub unsafe fn set_renderer_set_window_size_raw(
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *const sys::ImVec2)>,
     ) {
@@ -134,16 +160,23 @@ impl PlatformIo {
     ) {
         self.assert_current_context_platform_io_for_callbacks();
         use trampolines::*;
-        self.set_renderer_set_window_size_raw(callback.map(|_| {
-            trampolines::renderer_set_window_size
-                as unsafe extern "C" fn(*mut sys::ImGuiViewport, *const sys::ImVec2)
-        }));
+        unsafe {
+            self.set_renderer_set_window_size_raw(callback.map(|_| {
+                trampolines::renderer_set_window_size
+                    as unsafe extern "C" fn(*mut sys::ImGuiViewport, *const sys::ImVec2)
+            }));
+        }
         self.store_current_context_cb(&RENDERER_SET_WINDOW_SIZE_CB, callback);
     }
 
-    /// Set renderer render window callback (raw)
+    /// Set renderer render window callback (raw).
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_renderer_create_window_raw`]. `render_arg` must satisfy the backend's
+    /// contract whenever Dear ImGui supplies it.
     #[cfg(feature = "multi-viewport")]
-    pub fn set_renderer_render_window_raw(
+    pub unsafe fn set_renderer_render_window_raw(
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut c_void)>,
     ) {
@@ -172,16 +205,23 @@ impl PlatformIo {
     ) {
         self.assert_current_context_platform_io_for_callbacks();
         use trampolines::*;
-        self.set_renderer_render_window_raw(callback.map(|_| {
-            trampolines::renderer_render_window
-                as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut c_void)
-        }));
+        unsafe {
+            self.set_renderer_render_window_raw(callback.map(|_| {
+                trampolines::renderer_render_window
+                    as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut c_void)
+            }));
+        }
         self.store_current_context_cb(&RENDERER_RENDER_WINDOW_CB, callback);
     }
 
-    /// Set renderer swap buffers callback (raw)
+    /// Set renderer swap buffers callback (raw).
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_renderer_create_window_raw`]. `render_arg` must satisfy the backend's
+    /// contract whenever Dear ImGui supplies it.
     #[cfg(feature = "multi-viewport")]
-    pub fn set_renderer_swap_buffers_raw(
+    pub unsafe fn set_renderer_swap_buffers_raw(
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut c_void)>,
     ) {
@@ -226,9 +266,14 @@ impl PlatformIo {
     }
 
     /// Clear `Renderer_SetWindowSize` only when it is still owned by an aggregate pointer callback.
+    ///
+    /// # Safety
+    ///
+    /// Dear ImGui must no longer be able to invoke this callback, and all backend state it
+    /// interprets must already have been released.
     #[cfg(feature = "multi-viewport")]
     #[doc(hidden)]
-    pub fn clear_renderer_set_window_size_if_pointer_callback(
+    pub unsafe fn clear_renderer_set_window_size_if_pointer_callback(
         &mut self,
         callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, *const sys::ImVec2),
     ) -> bool {
@@ -256,10 +301,12 @@ impl PlatformIo {
     ) {
         self.assert_current_context_platform_io_for_callbacks();
         use trampolines::*;
-        self.set_renderer_swap_buffers_raw(callback.map(|_| {
-            trampolines::renderer_swap_buffers
-                as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut c_void)
-        }));
+        unsafe {
+            self.set_renderer_swap_buffers_raw(callback.map(|_| {
+                trampolines::renderer_swap_buffers
+                    as unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut c_void)
+            }));
+        }
         self.store_current_context_cb(&RENDERER_SWAP_BUFFERS_CB, callback);
     }
 }

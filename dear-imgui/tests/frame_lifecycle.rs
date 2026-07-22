@@ -229,6 +229,73 @@ fn synchronous_rendered_frame_reconciles_request_bound_feedback() {
 }
 
 #[test]
+fn synchronous_rendered_frame_completion_binds_its_owner_context() {
+    let _guard = test_guard();
+
+    let ctx_b = imgui::Context::create();
+    let binding_b = ctx_b.binding();
+    let raw_b = ctx_b.as_raw();
+    let suspended_b = ctx_b.suspend();
+
+    let mut ctx_a = imgui::Context::create();
+    prepare_context(&mut ctx_a);
+    let binding_a = ctx_a.binding();
+    let _consumer_a = ctx_a.create_renderer_consumer().unwrap();
+    let user_textures_before = unsafe { (*ctx_a.as_raw()).UserTextures.Size };
+
+    let mut texture = imgui::texture::OwnedTextureData::new();
+    texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
+    texture.set_data(&[255, 255, 255, 255]);
+    let texture_id = ctx_a.register_texture(texture);
+    assert_eq!(
+        unsafe { (*ctx_a.as_raw()).UserTextures.Size },
+        user_textures_before + 1
+    );
+
+    let mut created = binding_a.with_bound_context(|| {
+        let frame = ctx_a.begin_frame();
+        frame.ui().image(texture_id, [16.0, 16.0]);
+        frame.render()
+    });
+    let uploaded = created
+        .texture_requests()
+        .iter()
+        .find(|request| request.texture() == imgui::render::SnapshotTextureId::User(texture_id))
+        .unwrap()
+        .uploaded(imgui::TextureId::new(141))
+        .unwrap();
+    binding_b.with_bound_context(|| {
+        created.reconcile_texture_feedback([uploaded]).unwrap();
+        drop(created);
+        assert_eq!(unsafe { imgui::sys::igGetCurrentContext() }, raw_b);
+    });
+
+    binding_a.with_bound_context(|| ctx_a.remove_texture(texture_id).unwrap());
+    let mut destroyed = binding_a.with_bound_context(|| ctx_a.begin_frame().render());
+    let feedback = destroyed
+        .texture_requests()
+        .iter()
+        .find(|request| request.texture() == imgui::render::SnapshotTextureId::User(texture_id))
+        .unwrap()
+        .destroyed()
+        .unwrap();
+    binding_b.with_bound_context(|| {
+        destroyed.reconcile_texture_feedback([feedback]).unwrap();
+        drop(destroyed);
+        assert_eq!(unsafe { imgui::sys::igGetCurrentContext() }, raw_b);
+    });
+
+    assert_eq!(
+        binding_a.with_bound_context(|| unsafe { (*ctx_a.as_raw()).UserTextures.Size }),
+        user_textures_before,
+        "owner-bound completion must unregister only from the frame's Context"
+    );
+
+    drop(ctx_a);
+    drop(suspended_b);
+}
+
+#[test]
 fn synchronous_rendered_frame_abandon_reissues_unacknowledged_requests() {
     let _guard = test_guard();
 
@@ -292,7 +359,7 @@ fn renderer_consumer_generation_cannot_switch_render_modes() {
 }
 
 #[test]
-fn renderer_reset_requeues_active_textures_without_native_mutation_access() {
+fn renderer_reset_permit_is_inert_until_committed() {
     let _guard = test_guard();
 
     let mut ctx = imgui::Context::create();
@@ -316,7 +383,16 @@ fn renderer_reset_requeues_active_textures_without_native_mutation_access() {
     first.reconcile_texture_feedback([created]).unwrap();
     drop(first);
 
-    assert!(ctx.reset_renderer_texture_bindings(&consumer).unwrap() >= 1);
+    let reset = ctx.prepare_renderer_texture_reset(&consumer).unwrap();
+    drop(reset);
+    ctx.with_texture(texture_id, |texture| {
+        assert_eq!(texture.status(), imgui::TextureStatus::OK);
+        assert_eq!(texture.texture_id(), imgui::TextureId::new(111));
+    })
+    .unwrap();
+
+    let reset = ctx.prepare_renderer_texture_reset(&consumer).unwrap();
+    assert!(reset.commit() >= 1);
     ctx.with_texture(texture_id, |texture| {
         assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
         assert!(texture.texture_id().is_null());
@@ -330,6 +406,54 @@ fn renderer_reset_requeues_active_textures_without_native_mutation_access() {
         request.texture() == imgui::render::SnapshotTextureId::User(texture_id)
             && matches!(request.operation(), imgui::render::TextureOp::Create { .. })
     }));
+}
+
+#[test]
+fn renderer_reset_commit_binds_its_owner_context() {
+    let _guard = test_guard();
+
+    let foreign = imgui::Context::create();
+    let foreign_binding = foreign.binding();
+    let foreign_raw = foreign.as_raw();
+    let suspended_foreign = foreign.suspend();
+
+    let mut owner = imgui::Context::create();
+    prepare_context(&mut owner);
+    let consumer = owner.create_renderer_consumer().unwrap();
+    let mut texture = imgui::texture::OwnedTextureData::new();
+    texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
+    texture.set_data(&[255, 255, 255, 255]);
+    let texture_id = owner.register_texture(texture);
+
+    let frame = owner.begin_frame();
+    frame.ui().image(texture_id, [16.0, 16.0]);
+    let mut frame = frame.render();
+    let created = frame
+        .texture_requests()
+        .iter()
+        .find(|request| request.texture() == imgui::render::SnapshotTextureId::User(texture_id))
+        .unwrap()
+        .uploaded(imgui::TextureId::new(121))
+        .unwrap();
+    frame.reconcile_texture_feedback([created]).unwrap();
+    drop(frame);
+
+    let reset = owner.prepare_renderer_texture_reset(&consumer).unwrap();
+    foreign_binding.with_bound_context(|| {
+        assert_eq!(unsafe { imgui::sys::igGetCurrentContext() }, foreign_raw);
+        assert!(reset.commit() >= 1);
+        assert_eq!(unsafe { imgui::sys::igGetCurrentContext() }, foreign_raw);
+    });
+
+    owner
+        .with_texture(texture_id, |texture| {
+            assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+            assert!(texture.texture_id().is_null());
+        })
+        .unwrap();
+
+    drop(owner);
+    drop(suspended_foreign);
 }
 
 #[test]
@@ -358,9 +482,75 @@ fn renderer_reset_acknowledges_retiring_textures_after_the_last_epoch() {
     drop(frame);
 
     ctx.remove_texture(texture_id).unwrap();
-    ctx.reset_renderer_texture_bindings(&consumer).unwrap();
+    let reset = ctx.prepare_renderer_texture_reset(&consumer).unwrap();
+    assert!(reset.commit() >= 1);
     assert_eq!(
         ctx.with_texture(texture_id, |_| ()),
         Err(imgui::ManagedTextureError::AlreadyRemoved(texture_id))
     );
+}
+
+#[test]
+fn dynamic_font_resize_reconciles_overlapping_atlas_allocations() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let _consumer = ctx.create_renderer_consumer().unwrap();
+
+    let first = ctx.begin_frame();
+    first
+        .ui()
+        .text("Initial atlas allocation: the quick brown fox jumps over the lazy dog.");
+    let mut first = first.render();
+    let first_feedback = first
+        .texture_requests()
+        .iter()
+        .enumerate()
+        .map(|(index, request)| match request.operation() {
+            imgui::render::TextureOp::Create { .. } | imgui::render::TextureOp::Update { .. } => {
+                request
+                    .uploaded(imgui::TextureId::new(1_000 + index as u64))
+                    .unwrap()
+            }
+            imgui::render::TextureOp::Destroy => request.destroyed().unwrap(),
+        })
+        .collect::<Vec<_>>();
+    first.reconcile_texture_feedback(first_feedback).unwrap();
+    drop(first);
+
+    ctx.style_mut().set_font_size_base(96.0);
+    let second = ctx.begin_frame();
+    second
+        .ui()
+        .text("Resized atlas allocation: THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG 0123456789.");
+    let mut second = second.render();
+
+    let atlas_requests = second
+        .texture_requests()
+        .iter()
+        .filter(|request| {
+            matches!(
+                request.texture(),
+                imgui::render::SnapshotTextureId::FontAtlas { .. }
+            )
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        atlas_requests.len() >= 2,
+        "resizing should retain the old atlas allocation while creating its replacement"
+    );
+    let feedback = atlas_requests
+        .into_iter()
+        .enumerate()
+        .map(|(index, request)| match request.operation() {
+            imgui::render::TextureOp::Create { .. } | imgui::render::TextureOp::Update { .. } => {
+                request
+                    .uploaded(imgui::TextureId::new(2_000 + index as u64))
+                    .unwrap()
+            }
+            imgui::render::TextureOp::Destroy => request.destroyed().unwrap(),
+        })
+        .collect::<Vec<_>>();
+    second.reconcile_texture_feedback(feedback).unwrap();
 }

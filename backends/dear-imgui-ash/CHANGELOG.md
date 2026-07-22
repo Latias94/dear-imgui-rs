@@ -4,11 +4,11 @@ All notable changes to this crate will be documented in this file.
 
 ## Unreleased
 
-## 0.16.0 - 2026-07-19
+## 0.16.0-alpha.1
 
 ### Breaking
 
-- `AshRenderer::cmd_draw` now consumes a Context-borrowed `RenderedFrame` and returns the highest pending `TextureRetirementBatch`; applications must prove GPU completion before acknowledging the batch and must call `AshRenderer::shutdown` to reset Context-owned texture bindings.
+- `AshRenderer::cmd_draw` now consumes a Context-borrowed `RenderedFrame` and returns the highest pending `TextureRetirementBatch`; applications must prove GPU completion before acknowledging the batch and must call `AshRenderer::shutdown`. Shutdown prepares the Context texture-reset permit before releasing Vulkan texture resources, then commits it only after fence-safe destruction.
 - Replace the Winit and SDL3 `enable` functions with owning `WinitViewportRuntime::attach` and `Sdl3ViewportRuntime::attach`. Both attach functions remain unsafe only because callers must prove the raw Vulkan device, queue, surface, and synchronization lineage described by `VulkanViewportConfig`; the runtime consumes the renderer into stable internal storage, so callers no longer pin its address.
 - Call the owning renderer runtime's `shutdown` before shutting down the platform runtime or dropping the Context, windows, validation surface, device, or instance. Context attachments preserve the same renderer-resources-before-platform-windows order during best-effort Context teardown.
 - The owning runtime's `shutdown` rejects renderer callback ownership drift before mutating platform windows or runtime state.

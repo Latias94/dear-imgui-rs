@@ -11,8 +11,13 @@ impl PlatformIo {
     /// out-parameter callback in `dear-imgui-sys` storage and installs a C++ thunk that returns
     /// `ImVec2` by value, which avoids exposing the fragile direct small-aggregate callback ABI
     /// on MSVC.
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_platform_create_window_raw`]. The output pointer is non-null and valid
+    /// only for the duration of the callback; the callback must initialize it.
     #[cfg(feature = "multi-viewport")]
-    pub fn set_platform_get_window_pos_raw(
+    pub unsafe fn set_platform_get_window_pos_raw(
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2)>,
     ) {
@@ -103,8 +108,12 @@ impl PlatformIo {
     /// out-parameter callback in `dear-imgui-sys` storage and installs a C++ thunk that returns
     /// `ImVec2` by value, which avoids exposing the fragile direct small-aggregate callback ABI
     /// on MSVC.
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_platform_get_window_pos_raw`].
     #[cfg(feature = "multi-viewport")]
-    pub fn set_platform_get_window_size_raw(
+    pub unsafe fn set_platform_get_window_size_raw(
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2)>,
     ) {
@@ -197,8 +206,12 @@ impl PlatformIo {
     /// C-compatible out-parameter callback in `dear-imgui-sys` storage and installs a C++ thunk
     /// that returns `ImVec2` by value, which avoids exposing the fragile direct small-aggregate
     /// callback ABI on MSVC.
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_platform_get_window_pos_raw`].
     #[cfg(feature = "multi-viewport")]
-    pub fn set_platform_get_window_framebuffer_scale_raw(
+    pub unsafe fn set_platform_get_window_framebuffer_scale_raw(
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2)>,
     ) {
@@ -294,8 +307,12 @@ impl PlatformIo {
     /// C-compatible out-parameter callback in `dear-imgui-sys` storage and installs a C++ thunk
     /// that returns `ImVec4` by value, which avoids exposing the fragile direct aggregate callback
     /// ABI.
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::set_platform_get_window_pos_raw`].
     #[cfg(feature = "multi-viewport")]
-    pub fn set_platform_get_window_work_area_insets_raw(
+    pub unsafe fn set_platform_get_window_work_area_insets_raw(
         &mut self,
         callback: Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec4)>,
     ) {
@@ -385,9 +402,14 @@ impl PlatformIo {
     }
 
     /// Release `Platform_GetWindowPos` only if `callback` is still the registered raw handler.
+    ///
+    /// # Safety
+    ///
+    /// Dear ImGui must no longer be able to invoke this callback, and all backend state it
+    /// interprets must already have been released.
     #[cfg(feature = "multi-viewport")]
     #[doc(hidden)]
-    pub fn clear_platform_get_window_pos_if_raw_callback(
+    pub unsafe fn clear_platform_get_window_pos_if_raw_callback(
         &mut self,
         callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2),
     ) -> bool {
@@ -410,9 +432,13 @@ impl PlatformIo {
     }
 
     /// Release `Platform_GetWindowSize` only if `callback` is still the registered raw handler.
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::clear_platform_get_window_pos_if_raw_callback`].
     #[cfg(feature = "multi-viewport")]
     #[doc(hidden)]
-    pub fn clear_platform_get_window_size_if_raw_callback(
+    pub unsafe fn clear_platform_get_window_size_if_raw_callback(
         &mut self,
         callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2),
     ) -> bool {
@@ -435,9 +461,13 @@ impl PlatformIo {
     }
 
     /// Release `Platform_GetWindowFramebufferScale` only if `callback` is still registered.
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::clear_platform_get_window_pos_if_raw_callback`].
     #[cfg(feature = "multi-viewport")]
     #[doc(hidden)]
-    pub fn clear_platform_get_window_framebuffer_scale_if_raw_callback(
+    pub unsafe fn clear_platform_get_window_framebuffer_scale_if_raw_callback(
         &mut self,
         callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec2),
     ) -> bool {
@@ -462,9 +492,13 @@ impl PlatformIo {
     }
 
     /// Release `Platform_GetWindowWorkAreaInsets` only if `callback` is still registered.
+    ///
+    /// # Safety
+    ///
+    /// See [`Self::clear_platform_get_window_pos_if_raw_callback`].
     #[cfg(feature = "multi-viewport")]
     #[doc(hidden)]
-    pub fn clear_platform_get_window_work_area_insets_if_raw_callback(
+    pub unsafe fn clear_platform_get_window_work_area_insets_if_raw_callback(
         &mut self,
         callback: unsafe extern "C" fn(*mut sys::ImGuiViewport, *mut sys::ImVec4),
     ) -> bool {

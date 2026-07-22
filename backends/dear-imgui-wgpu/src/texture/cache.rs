@@ -7,7 +7,7 @@ impl WgpuTextureManager {
             textures: HashMap::new(),
             managed_textures: HashMap::new(),
             managed_by_texture_id: HashMap::new(),
-            destroyed_managed_textures: HashSet::new(),
+            destroyed_managed_textures: HashMap::new(),
             next_id: 1, // Start from 1, 0 is reserved for null texture
             custom_samplers: HashMap::new(),
             custom_sampler_by_texture: HashMap::new(),
@@ -176,20 +176,19 @@ impl WgpuTextureManager {
     pub(crate) fn clear_managed_textures(&mut self) {
         self.managed_textures.clear();
         self.managed_by_texture_id.clear();
-        self.destroyed_managed_textures.clear();
     }
 
     pub(super) fn managed_texture_id(&self, id: SnapshotTextureId) -> Option<TextureId> {
         self.managed_textures.get(&id).map(|entry| entry.texture_id)
     }
 
-    pub(crate) fn acknowledge_destroyed_textures(
-        &mut self,
-        destroyed: impl IntoIterator<Item = SnapshotTextureId>,
-    ) {
-        for id in destroyed {
-            self.destroyed_managed_textures.remove(&id);
-        }
+    pub(crate) fn clear_destroyed_managed_textures(&mut self) {
+        self.destroyed_managed_textures.clear();
+    }
+
+    pub(crate) fn prune_destroyed_managed_textures(&mut self, completion_watermark: u64) {
+        self.destroyed_managed_textures
+            .retain(|_, destroy_epoch| *destroy_epoch > completion_watermark);
     }
 
     #[cfg(test)]

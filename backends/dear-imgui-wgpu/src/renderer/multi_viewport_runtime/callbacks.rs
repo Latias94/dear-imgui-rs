@@ -9,13 +9,15 @@ use dear_imgui_rs::{BackendFlags, Context};
 
 use super::platform_adapter;
 use super::registry::{
-    current_context, destroy_viewport_data, register_viewport_data, runtime_for_context,
-    take_viewport_data, viewport_data_pointer, with_current_runtime,
+    ViewportDataDestroy, ViewportDataLookup, ViewportIdentity, current_context,
+    destroy_registered_viewport_data, destroy_viewport_data, preflight_viewport_data_ownership,
+    register_viewport_data, runtime_for_context, viewport_data_lookup, with_current_runtime,
 };
 use super::runtime::{RuntimeControl, WgpuViewportError};
 use super::surface::{
     SurfaceAction, SurfaceEvent, create_viewport_data, handle_non_renderable_surface_event,
-    request_close_after_surface_creation_failure, should_clear_viewport, surface_action,
+    reconfigure_surface, request_close_after_surface_creation_failure, should_clear_viewport,
+    surface_action,
 };
 
 pub(super) fn unary_callback_matches(
@@ -90,6 +92,75 @@ fn first_callback_drift(platform_io: &PlatformIo) -> Option<&'static str> {
     .then_some("Renderer_SwapBuffers")
 }
 
+/// Returns whether any renderer viewport callback slot still contains this runtime's exact
+/// callback. The shared capability bit has no identity of its own, so this is one of the facts
+/// that authorizes this runtime to revoke it during teardown or fail-closed handling.
+pub(super) fn owns_any_renderer_viewport_callback(platform_io: &PlatformIo) -> bool {
+    unary_callback_matches(
+        platform_io.renderer_create_window_raw(),
+        renderer_create_window_sys,
+    ) || unary_callback_matches(
+        platform_io.renderer_destroy_window_raw(),
+        renderer_destroy_window_sys,
+    ) || platform_io.renderer_set_window_size_matches_pointer_callback(renderer_set_window_size_sys)
+        || render_callback_matches(
+            platform_io.renderer_render_window_raw(),
+            renderer_render_window_sys,
+        )
+        || render_callback_matches(
+            platform_io.renderer_swap_buffers_raw(),
+            renderer_swap_buffers_sys,
+        )
+}
+
+fn current_runtime_contract_fault(control: &RuntimeControl) -> Option<WgpuViewportError> {
+    if let Some(fault) = control.core_renderer_contract_fault() {
+        return Some(fault);
+    }
+    let io = unsafe { dear_imgui_rs::sys::igGetIO_Nil() };
+    if io.is_null() {
+        return Some(WgpuViewportError::PlatformIoUnavailable);
+    }
+    // SAFETY: the caller binds the runtime's Context for the whole validation.
+    let flags = BackendFlags::from_bits_retain(unsafe { (*io).BackendFlags });
+    if !flags.contains(BackendFlags::RENDERER_HAS_VIEWPORTS) {
+        return Some(WgpuViewportError::RendererViewportCapabilityLost);
+    }
+    if !flags.contains(BackendFlags::PLATFORM_HAS_VIEWPORTS) {
+        return Some(WgpuViewportError::PlatformBackendUnavailable);
+    }
+
+    let platform_io = unsafe { dear_imgui_rs::sys::igGetPlatformIO_Nil() };
+    if platform_io.is_null() {
+        return Some(WgpuViewportError::PlatformIoUnavailable);
+    }
+    // SAFETY: PlatformIO belongs to the currently bound Context.
+    let platform_io = unsafe { PlatformIo::from_raw(platform_io) };
+    // WGPU creates a surface after the platform creates the native window and leaves native
+    // window destruction to the platform owner.
+    let raw = unsafe { &*platform_io.as_raw() };
+    for (available, callback) in [
+        (raw.Platform_CreateWindow.is_some(), "Platform_CreateWindow"),
+        (
+            raw.Platform_DestroyWindow.is_some(),
+            "Platform_DestroyWindow",
+        ),
+    ] {
+        if !available {
+            return Some(WgpuViewportError::PlatformCallbackUnavailable { callback });
+        }
+    }
+    if platform_io
+        .viewports_iter()
+        .next()
+        .is_none_or(|viewport| viewport.platform_handle().is_null())
+    {
+        return Some(WgpuViewportError::MainViewportHandleUnavailable);
+    }
+    first_callback_drift(platform_io)
+        .map(|callback| WgpuViewportError::RendererCallbackReplaced { callback })
+}
+
 pub(super) fn validate_secondary_viewports(
     states: &[(bool, *mut c_void)],
 ) -> Result<(), WgpuViewportError> {
@@ -114,6 +185,13 @@ pub(super) fn preflight_callbacks(context: &Context) -> Result<(), WgpuViewportE
         }
         if !dear_imgui_rs::sys::HAS_PLATFORM_IO_AGGREGATE_HOOKS {
             return Err(WgpuViewportError::AggregateCallbackHooksUnavailable);
+        }
+        if context
+            .io()
+            .backend_flags()
+            .contains(BackendFlags::RENDERER_HAS_VIEWPORTS)
+        {
+            return Err(WgpuViewportError::RendererViewportCapabilityOccupied);
         }
 
         let platform_io = context.platform_io();
@@ -162,32 +240,69 @@ pub(super) fn claim_callbacks(control: &RuntimeControl, context: &mut Context) {
     let binding = context.binding();
     binding.with_bound_context(|| {
         let platform_io = context.platform_io_mut();
-        platform_io.set_renderer_create_window_raw(Some(renderer_create_window_sys));
-        platform_io.set_renderer_destroy_window_raw(Some(renderer_destroy_window_sys));
-        platform_io.set_renderer_set_window_size_raw(Some(renderer_set_window_size_sys));
-        platform_io.set_renderer_render_window_raw(Some(renderer_render_window_sys));
-        platform_io.set_renderer_swap_buffers_raw(Some(renderer_swap_buffers_sys));
+        // SAFETY: these callbacks use the exact sys ABI and remain installed until the runtime
+        // quiesces and releases every renderer-owned viewport allocation.
+        unsafe {
+            platform_io.set_renderer_create_window_raw(Some(renderer_create_window_sys));
+            platform_io.set_renderer_destroy_window_raw(Some(renderer_destroy_window_sys));
+            platform_io.set_renderer_set_window_size_raw(Some(renderer_set_window_size_sys));
+            platform_io.set_renderer_render_window_raw(Some(renderer_render_window_sys));
+            platform_io.set_renderer_swap_buffers_raw(Some(renderer_swap_buffers_sys));
+        }
         let io = context.io_mut();
         io.set_backend_flags(io.backend_flags() | BackendFlags::RENDERER_HAS_VIEWPORTS);
     });
     control.mark_callback_claimed();
 }
 
-pub(super) fn detect_callback_drift(control: &RuntimeControl) {
+pub(super) fn detect_runtime_contract_drift(control: &RuntimeControl) {
     if !control.should_detect_callback_drift() {
         return;
     }
-    let result = control.binding().try_with_bound_context(|| {
-        let platform_io = unsafe { dear_imgui_rs::sys::igGetPlatformIO_Nil() };
-        if platform_io.is_null() {
-            return Some("Renderer_CreateWindow");
-        }
-        let platform_io = unsafe { PlatformIo::from_raw(platform_io) };
-        first_callback_drift(platform_io)
-    });
-    if let Ok(Some(callback)) = result {
-        control.record_callback_replaced(callback);
+    let result = control
+        .binding()
+        .try_with_bound_context(|| current_runtime_contract_fault(control));
+    if let Ok(Some(fault)) = result {
+        control.record_runtime_contract_fault(fault);
     }
+}
+
+fn revoke_renderer_viewport_capability() {
+    let io = unsafe { dear_imgui_rs::sys::igGetIO_Nil() };
+    if !io.is_null() {
+        unsafe {
+            (*io).BackendFlags &= !BackendFlags::RENDERER_HAS_VIEWPORTS.bits();
+        }
+    }
+}
+
+/// Revokes the shared viewport capability only while a WGPU runtime or core renderer
+/// publication still proves ownership. A complete foreign takeover must retain the foreign
+/// backend's capability bit.
+pub(super) fn revoke_renderer_viewport_capability_if_owned(control: &RuntimeControl) {
+    let platform_io = unsafe { dear_imgui_rs::sys::igGetPlatformIO_Nil() };
+    let owns_runtime_callback = !platform_io.is_null()
+        // SAFETY: callers invoke this while the runtime's Context is bound.
+        && owns_any_renderer_viewport_callback(unsafe { PlatformIo::from_raw(platform_io) });
+    if owns_runtime_callback || control.owns_core_renderer_publication_bound() {
+        revoke_renderer_viewport_capability();
+    }
+}
+
+/// Verifies every live viewport sidecar before a shutdown path changes callback publication.
+///
+/// `Renderer_DestroyWindow` is the only callback capable of releasing a live sidecar after a
+/// runtime fault. It must remain installed if a foreign write displaced even one registered
+/// `RendererUserData` pointer, so this preflight runs before every callback-release path.
+pub(super) fn preflight_renderer_viewport_resources(
+    control: &RuntimeControl,
+) -> Result<(), WgpuViewportError> {
+    if current_context() != control.context_raw() {
+        return Err(WgpuViewportError::BoundContextMismatch {
+            expected: control.binding().id(),
+        });
+    }
+    preflight_viewport_data_ownership(control.context_raw(), control.binding())
 }
 
 pub(super) fn release_callbacks(control: &RuntimeControl) -> Result<(), WgpuViewportError> {
@@ -199,6 +314,7 @@ pub(super) fn release_callbacks(control: &RuntimeControl) -> Result<(), WgpuView
             expected: control.binding().id(),
         });
     }
+    preflight_renderer_viewport_resources(control)?;
     let platform_io = unsafe { dear_imgui_rs::sys::igGetPlatformIO_Nil() };
     if platform_io.is_null() {
         return Err(WgpuViewportError::SurfaceOperationFailed {
@@ -207,42 +323,42 @@ pub(super) fn release_callbacks(control: &RuntimeControl) -> Result<(), WgpuView
     }
     let platform_io = unsafe { PlatformIo::from_raw_mut(platform_io) };
     let drift = first_callback_drift(platform_io);
+    let owns_runtime_callback = owns_any_renderer_viewport_callback(platform_io);
+    let owns_core_publication = control.owns_core_renderer_publication_bound();
 
-    if unary_callback_matches(
-        platform_io.renderer_create_window_raw(),
-        renderer_create_window_sys,
-    ) {
-        platform_io.set_renderer_create_window_raw(None);
-    }
-    if unary_callback_matches(
-        platform_io.renderer_destroy_window_raw(),
-        renderer_destroy_window_sys,
-    ) {
-        platform_io.set_renderer_destroy_window_raw(None);
-    }
-    platform_io.clear_renderer_set_window_size_if_pointer_callback(renderer_set_window_size_sys);
-    if render_callback_matches(
-        platform_io.renderer_render_window_raw(),
-        renderer_render_window_sys,
-    ) {
-        platform_io.set_renderer_render_window_raw(None);
-    }
-    if render_callback_matches(
-        platform_io.renderer_swap_buffers_raw(),
-        renderer_swap_buffers_sys,
-    ) {
-        platform_io.set_renderer_swap_buffers_raw(None);
-    }
-
-    if platform_io.renderer_callbacks_are_empty() {
-        let io = unsafe { dear_imgui_rs::sys::igGetIO_Nil() };
-        if !io.is_null() {
-            let bit = BackendFlags::RENDERER_HAS_VIEWPORTS.bits();
-            unsafe {
-                (*io).BackendFlags =
-                    ((*io).BackendFlags & !bit) | (control.prior_backend_flags().bits() & bit);
-            }
+    // SAFETY: each slot is cleared only when it still contains this runtime's callback, after the
+    // runtime has stopped accepting new callback work.
+    unsafe {
+        if unary_callback_matches(
+            platform_io.renderer_create_window_raw(),
+            renderer_create_window_sys,
+        ) {
+            platform_io.set_renderer_create_window_raw(None);
         }
+        if unary_callback_matches(
+            platform_io.renderer_destroy_window_raw(),
+            renderer_destroy_window_sys,
+        ) {
+            platform_io.set_renderer_destroy_window_raw(None);
+        }
+        platform_io
+            .clear_renderer_set_window_size_if_pointer_callback(renderer_set_window_size_sys);
+        if render_callback_matches(
+            platform_io.renderer_render_window_raw(),
+            renderer_render_window_sys,
+        ) {
+            platform_io.set_renderer_render_window_raw(None);
+        }
+        if render_callback_matches(
+            platform_io.renderer_swap_buffers_raw(),
+            renderer_swap_buffers_sys,
+        ) {
+            platform_io.set_renderer_swap_buffers_raw(None);
+        }
+    }
+
+    if owns_runtime_callback || owns_core_publication {
+        revoke_renderer_viewport_capability();
     }
     control.mark_callback_released();
     drift.map_or(Ok(()), |callback| {
@@ -258,30 +374,14 @@ pub(super) fn destroy_renderer_viewport_resources(
             expected: control.binding().id(),
         });
     }
+    preflight_renderer_viewport_resources(control)?;
     #[cfg(test)]
     if control.take_viewport_cleanup_failure_for_test() {
         return Err(WgpuViewportError::SurfaceOperationFailed {
             operation: "injected viewport cleanup failure",
         });
     }
-    let platform_io = unsafe { dear_imgui_rs::sys::igGetPlatformIO_Nil() };
-    if platform_io.is_null() {
-        return Err(WgpuViewportError::SurfaceOperationFailed {
-            operation: "read PlatformIO during viewport teardown",
-        });
-    }
-    let platform_io = unsafe { PlatformIo::from_raw_mut(platform_io) };
-    for viewport in platform_io.viewports_iter_mut() {
-        unsafe {
-            destroy_viewport_data(control.context_raw(), viewport);
-        }
-    }
-    for pointer in take_viewport_data(control.binding().id()) {
-        // Registry membership is the ownership sidecar for allocations that were detached from
-        // their native viewport slot by a foreign callback.
-        drop(unsafe { Box::from_raw(pointer) });
-    }
-    Ok(())
+    destroy_registered_viewport_data(control.context_raw(), control.binding())
 }
 
 pub(super) fn publish_registered_box<T>(
@@ -297,14 +397,8 @@ pub(super) fn publish_registered_box<T>(
     Ok(())
 }
 
-fn record_renderer_user_data_drift(
-    control: &RuntimeControl,
-    callback: &'static str,
-    viewport: &Viewport,
-) {
-    if !viewport.renderer_user_data().is_null() {
-        control.record_fault(WgpuViewportError::RendererUserDataOwnershipLost { callback });
-    }
+fn record_renderer_user_data_drift(control: &RuntimeControl, callback: &'static str) {
+    control.record_entry_fault(WgpuViewportError::RendererUserDataOwnershipLost { callback });
 }
 
 pub(super) unsafe fn renderer_create_window(control: &RuntimeControl, viewport: *mut Viewport) {
@@ -315,22 +409,26 @@ pub(super) unsafe fn renderer_create_window(control: &RuntimeControl, viewport: 
         return;
     }
     let viewport = unsafe { &mut *viewport };
-    if !viewport.renderer_user_data().is_null() {
-        record_renderer_user_data_drift(control, "Renderer_CreateWindow", viewport);
-        request_close_after_surface_creation_failure(viewport);
-        return;
+    match viewport_data_lookup(viewport) {
+        ViewportDataLookup::Absent => {}
+        ViewportDataLookup::Owned(_) | ViewportDataLookup::OwnershipLost => {
+            record_renderer_user_data_drift(control, "Renderer_CreateWindow");
+            request_close_after_surface_creation_failure(viewport);
+            return;
+        }
     }
     let Some(globals) = control.globals() else {
         control.record_fault(WgpuViewportError::RuntimeDetached);
         request_close_after_surface_creation_failure(viewport);
         return;
     };
-    match unsafe { create_viewport_data(control.context_raw(), viewport, &globals) } {
+    match unsafe { create_viewport_data(viewport, &globals) } {
         Ok(data) => {
+            let identity = ViewportIdentity::capture(viewport);
             if let Err(error) = publish_registered_box(
                 Box::new(data),
-                |pointer| register_viewport_data(control.binding(), pointer),
-                |pointer| viewport.set_renderer_user_data(pointer.cast()),
+                |pointer| register_viewport_data(control.binding(), identity, pointer),
+                |pointer| unsafe { viewport.set_renderer_user_data(pointer.cast()) },
             ) {
                 control.record_fault(error);
                 request_close_after_surface_creation_failure(viewport);
@@ -351,8 +449,11 @@ pub(super) unsafe fn renderer_destroy_window(control: &RuntimeControl, viewport:
         return;
     }
     let viewport = unsafe { &mut *viewport };
-    if !(unsafe { destroy_viewport_data(control.context_raw(), viewport) }) {
-        record_renderer_user_data_drift(control, "Renderer_DestroyWindow", viewport);
+    match unsafe { destroy_viewport_data(control.context_raw(), viewport) } {
+        ViewportDataDestroy::Destroyed | ViewportDataDestroy::Absent => {}
+        ViewportDataDestroy::OwnershipLost => {
+            record_renderer_user_data_drift(control, "Renderer_DestroyWindow");
+        }
     }
 }
 
@@ -368,16 +469,24 @@ pub(super) unsafe fn renderer_set_window_size(
         return;
     }
     let viewport = unsafe { &mut *viewport };
-    let Some(pointer) = (unsafe { viewport_data_pointer(viewport) }) else {
-        record_renderer_user_data_drift(control, "Renderer_SetWindowSize", viewport);
-        return;
+    let pointer = match viewport_data_lookup(viewport) {
+        ViewportDataLookup::Owned(pointer) => pointer,
+        ViewportDataLookup::Absent => return,
+        ViewportDataLookup::OwnershipLost => {
+            record_renderer_user_data_drift(control, "Renderer_SetWindowSize");
+            return;
+        }
     };
     let pixels = super::logical_size_to_framebuffer([size.x, size.y], viewport.framebuffer_scale());
     let data = unsafe { &mut *pointer };
     if data.config.width != pixels[0] || data.config.height != pixels[1] {
-        data.config.width = pixels[0];
-        data.config.height = pixels[1];
-        data.surface.configure(&data.device, &data.config);
+        let Some(globals) = control.globals() else {
+            control.record_fault(WgpuViewportError::RuntimeDetached);
+            return;
+        };
+        if let Err(error) = reconfigure_surface(data, &globals, pixels) {
+            control.record_fault(error);
+        }
     }
 }
 
@@ -389,13 +498,16 @@ pub(super) unsafe fn renderer_render_window(control: &RuntimeControl, viewport: 
         return;
     }
     let viewport = unsafe { &mut *viewport };
-    let Some(data_pointer) = (unsafe { viewport_data_pointer(viewport) }) else {
-        if viewport.renderer_user_data().is_null() {
+    let data_pointer = match viewport_data_lookup(viewport) {
+        ViewportDataLookup::Owned(pointer) => pointer,
+        ViewportDataLookup::Absent => {
             request_close_after_surface_creation_failure(viewport);
-        } else {
-            record_renderer_user_data_drift(control, "Renderer_RenderWindow", viewport);
+            return;
         }
-        return;
+        ViewportDataLookup::OwnershipLost => {
+            record_renderer_user_data_drift(control, "Renderer_RenderWindow");
+            return;
+        }
     };
     control.with_renderer_callback("Renderer_RenderWindow", |renderer, globals| {
         let backend = renderer
@@ -591,9 +703,13 @@ pub(super) unsafe fn renderer_swap_buffers(control: &RuntimeControl, viewport: *
         return;
     }
     let viewport = unsafe { &mut *viewport };
-    let Some(pointer) = (unsafe { viewport_data_pointer(viewport) }) else {
-        record_renderer_user_data_drift(control, "Renderer_SwapBuffers", viewport);
-        return;
+    let pointer = match viewport_data_lookup(viewport) {
+        ViewportDataLookup::Owned(pointer) => pointer,
+        ViewportDataLookup::Absent => return,
+        ViewportDataLookup::OwnershipLost => {
+            record_renderer_user_data_drift(control, "Renderer_SwapBuffers");
+            return;
+        }
     };
     let data = unsafe { &mut *pointer };
     let Some(frame) = data.pending_frame.take() else {
@@ -615,9 +731,14 @@ pub(super) unsafe fn renderer_swap_buffers(control: &RuntimeControl, viewport: *
                 return;
             }
         };
-        data.config.width = size[0].max(1);
-        data.config.height = size[1].max(1);
-        data.surface.configure(&data.device, &data.config);
+        let Some(globals) = control.globals() else {
+            control.record_fault(WgpuViewportError::RuntimeDetached);
+            return;
+        };
+        if let Err(error) = reconfigure_surface(data, &globals, size) {
+            control.record_fault(error);
+            return;
+        }
         data.pending_reconfigure = false;
     }
 }
@@ -633,7 +754,7 @@ pub(super) fn framebuffer_size_for_reconfigure<E>(
     }
 }
 
-fn run_callback(callback_name: &'static str, callback: impl FnOnce(&RuntimeControl)) {
+fn run_work_callback(callback_name: &'static str, callback: impl FnOnce(&RuntimeControl)) {
     let Some(control) = runtime_for_context(current_context()) else {
         return;
     };
@@ -642,13 +763,46 @@ fn run_callback(callback_name: &'static str, callback: impl FnOnce(&RuntimeContr
     }
     let result = catch_unwind(AssertUnwindSafe(|| {
         let _ = with_current_runtime(|active| {
+            // Validate the whole runtime contract before touching a viewport. A foreign caller
+            // can replace a different slot or clear a capability bit without invoking this
+            // callback through Rust first.
+            detect_runtime_contract_drift(active);
+            if !active.is_callback_accessible() {
+                return;
+            }
             #[cfg(test)]
             active.maybe_panic_callback_for_test();
             callback(active);
         });
     }));
     if result.is_err() {
-        control.record_fault(WgpuViewportError::CallbackPanicked {
+        control.record_entry_fault(WgpuViewportError::CallbackPanicked {
+            callback: callback_name,
+        });
+    }
+}
+
+fn run_cleanup_callback(callback_name: &'static str, callback: impl FnOnce(&RuntimeControl)) {
+    let Some(control) = runtime_for_context(current_context()) else {
+        return;
+    };
+    if !control.is_cleanup_callback_accessible() {
+        return;
+    }
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        let _ = control.binding().try_with_bound_context(|| {
+            // While attached, detect drift first but continue into cleanup if validation moves the
+            // runtime to ShuttingDown. Cleanup relies only on sidecar identity, not revoked flags.
+            if control.should_detect_callback_drift() {
+                detect_runtime_contract_drift(&control);
+            }
+            if control.is_cleanup_callback_accessible() {
+                callback(&control);
+            }
+        });
+    }));
+    if result.is_err() {
+        control.record_entry_fault(WgpuViewportError::CallbackPanicked {
             callback: callback_name,
         });
     }
@@ -657,7 +811,7 @@ fn run_callback(callback_name: &'static str, callback: impl FnOnce(&RuntimeContr
 pub(super) unsafe extern "C" fn renderer_create_window_sys(
     viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
 ) {
-    run_callback("Renderer_CreateWindow", |control| unsafe {
+    run_work_callback("Renderer_CreateWindow", |control| unsafe {
         renderer_create_window(control, viewport.cast())
     });
 }
@@ -665,7 +819,7 @@ pub(super) unsafe extern "C" fn renderer_create_window_sys(
 pub(super) unsafe extern "C" fn renderer_destroy_window_sys(
     viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
 ) {
-    run_callback("Renderer_DestroyWindow", |control| unsafe {
+    run_cleanup_callback("Renderer_DestroyWindow", |control| unsafe {
         renderer_destroy_window(control, viewport.cast())
     });
 }
@@ -676,7 +830,7 @@ pub(super) unsafe extern "C" fn renderer_set_window_size_sys(
     viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
     size: *const dear_imgui_rs::sys::ImVec2,
 ) {
-    run_callback("Renderer_SetWindowSize", |control| {
+    run_work_callback("Renderer_SetWindowSize", |control| {
         if size.is_null() {
             control.record_fault(WgpuViewportError::SurfaceOperationFailed {
                 operation: "read Renderer_SetWindowSize argument",
@@ -691,7 +845,7 @@ pub(super) unsafe extern "C" fn renderer_render_window_sys(
     viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
     _render_arg: *mut c_void,
 ) {
-    run_callback("Renderer_RenderWindow", |control| unsafe {
+    run_work_callback("Renderer_RenderWindow", |control| unsafe {
         renderer_render_window(control, viewport.cast())
     });
 }
@@ -700,7 +854,7 @@ pub(super) unsafe extern "C" fn renderer_swap_buffers_sys(
     viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
     _render_arg: *mut c_void,
 ) {
-    run_callback("Renderer_SwapBuffers", |control| unsafe {
+    run_work_callback("Renderer_SwapBuffers", |control| unsafe {
         renderer_swap_buffers(control, viewport.cast())
     });
 }

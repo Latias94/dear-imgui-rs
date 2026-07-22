@@ -14,18 +14,13 @@ mod runtime;
 mod tests;
 mod viewport_data;
 
+use std::sync::Arc;
 use winit::window::Window;
 
-pub use self::runtime::{EventLoopScope, WinitPlatformError, WinitPlatformRuntime};
-
-pub(crate) fn record_callback_panic(
-    context: *mut dear_imgui_rs::sys::ImGuiContext,
-    callback: &'static str,
-) {
-    if let Some(control) = self::registry::runtime_for_context(context) {
-        control.record_fault(WinitPlatformError::CallbackPanicked { callback });
-    }
-}
+pub(crate) use self::runtime::RuntimeControl;
+pub use self::runtime::{EventLoopScope, WinitPlatformRuntime};
+pub(crate) use self::viewport_data::client_to_screen_pos;
+pub use crate::WinitPlatformError;
 
 // Debug logging helper (off by default). Enable by building this crate with
 // `--features mv-log`.
@@ -36,15 +31,13 @@ fn mvlog(message: impl std::fmt::Display) {
     }
 }
 
-pub(crate) unsafe fn window_ptr_for_viewport(
+pub(crate) fn window_for_viewport(
     ctx: *mut dear_imgui_rs::sys::ImGuiContext,
     viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
-) -> *const Window {
+) -> Option<Arc<Window>> {
     if viewport.is_null() {
-        return std::ptr::null();
+        return None;
     }
-
     self::registry::runtime_for_context(ctx)
         .and_then(|control| self::registry::window_for_viewport(&control, viewport))
-        .map_or(std::ptr::null(), |window| std::sync::Arc::as_ptr(&window))
 }
