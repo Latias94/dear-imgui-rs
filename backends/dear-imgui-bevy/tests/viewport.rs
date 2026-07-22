@@ -306,9 +306,11 @@ fn destroy_live_secondary_viewport(app: &mut App, viewport_id: imgui::Id) {
     app.world_mut()
         .resource_mut::<SubmitLiveSecondaryViewport>()
         .0 = false;
-    // An inactive secondary is destroyed by the normal Dear ImGui platform update. Do not invoke
-    // `DestroyPlatformWindows` here: that is a whole-context shutdown transaction, not a frame
-    // lifecycle transition.
+    // An inactive secondary is destroyed by the normal Dear ImGui platform update after two
+    // inactive frames. Do not invoke `DestroyPlatformWindows` here: that is a whole-context
+    // shutdown transaction, not a frame lifecycle transition.
+    app.update();
+    finish_pending_platform_window_update(app);
     app.update();
     finish_pending_platform_window_update(app);
     assert!(
