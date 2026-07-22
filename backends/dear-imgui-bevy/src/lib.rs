@@ -881,7 +881,16 @@ impl ImguiContext {
             &mut self.backend_ownership.flags_added,
             dear_imgui_rs::BackendFlags::empty(),
         );
+        #[cfg(any(
+            feature = "render",
+            all(feature = "multi-viewport", not(target_arch = "wasm32"))
+        ))]
         let mut flags_to_clear = flags_added;
+        #[cfg(not(any(
+            feature = "render",
+            all(feature = "multi-viewport", not(target_arch = "wasm32"))
+        )))]
+        let flags_to_clear = flags_added;
         #[cfg(feature = "render")]
         if !renderer_capabilities_still_owned {
             flags_to_clear.remove(

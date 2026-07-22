@@ -418,10 +418,7 @@ impl WgpuRenderer {
         let resources = DeferredRendererResources {
             context_state,
             backend_data: self.backend_data.take(),
-            shader_manager: Some(std::mem::replace(
-                &mut self.shader_manager,
-                ShaderManager::new(),
-            )),
+            shader_manager: Some(std::mem::take(&mut self.shader_manager)),
             texture_manager: Some(std::mem::take(&mut self.texture_manager)),
             default_texture: self.default_texture.take(),
             renderer_consumer: self.renderer_consumer.take(),

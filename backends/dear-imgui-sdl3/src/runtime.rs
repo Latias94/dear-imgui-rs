@@ -4,11 +4,6 @@ use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::rc::{Rc, Weak};
 
-#[cfg(any(
-    feature = "opengl3-renderer",
-    feature = "sdlrenderer3-renderer",
-    feature = "sdlgpu3-renderer"
-))]
 use dear_imgui_rs::RendererConsumer;
 #[cfg(any(
     feature = "opengl3-renderer",
@@ -1553,13 +1548,11 @@ impl RuntimeRegistration {
         destroy_device_objects: impl FnOnce(),
     ) -> Result<(), Sdl3BackendError> {
         self.control.ensure_entry(context)?;
-        let reset = {
-            let consumer = self.control.renderer_consumer.borrow();
-            let consumer = consumer
-                .as_ref()
-                .expect("initialized SDL3 renderer lost its renderer consumer");
-            context.prepare_renderer_texture_reset(consumer)?
-        };
+        let consumer_guard = self.control.renderer_consumer.borrow();
+        let consumer = consumer_guard
+            .as_ref()
+            .expect("initialized SDL3 renderer lost its renderer consumer");
+        let reset = context.prepare_renderer_texture_reset(consumer)?;
 
         self.control.binding.try_with_bound_context(|| {
             self.control.destroy_uninstalled_renderer_textures_bound()?;
@@ -1569,6 +1562,7 @@ impl RuntimeRegistration {
         })??;
 
         let _ = reset.commit();
+        drop(consumer_guard);
         self.control.clear_destroyed_textures();
         self.control.finish_entry()
     }
@@ -1605,20 +1599,19 @@ impl RuntimeRegistration {
             return first_error([pending, None]);
         }
 
-        let reset = if self.control.renderer_released() {
-            None
-        } else {
-            let reset = {
-                let consumer = self.control.renderer_consumer.borrow();
+        let consumer_guard =
+            (!self.control.renderer_released()).then(|| self.control.renderer_consumer.borrow());
+        let reset = match consumer_guard.as_ref() {
+            Some(consumer) => {
                 let consumer = consumer
                     .as_ref()
                     .expect("initialized SDL3 renderer lost its renderer consumer");
-                context.prepare_renderer_texture_reset(consumer)
-            };
-            match reset {
-                Ok(reset) => Some(reset),
-                Err(error) => return Err(error.into()),
+                match context.prepare_renderer_texture_reset(consumer) {
+                    Ok(reset) => Some(reset),
+                    Err(error) => return Err(error.into()),
+                }
             }
+            None => None,
         };
         let pending = self.control.take_pending_fault();
         let shutdown_result = self.control.shutdown_native_explicit();
@@ -1626,6 +1619,7 @@ impl RuntimeRegistration {
             if let Some(reset) = reset {
                 let _ = reset.commit();
             }
+            drop(consumer_guard);
             self.control.take_renderer_consumer();
             self.control.clear_destroyed_textures();
         }

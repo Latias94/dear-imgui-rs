@@ -839,7 +839,6 @@ impl ImguiViewportBridge {
     ///
     /// A deferred native callback fault returns its precise error without consuming any commands.
     /// That fault remains sticky until the viewport bridge is torn down and rebuilt.
-    #[must_use]
     pub fn drain_commands(
         &mut self,
     ) -> Result<Vec<ImguiViewportCommand>, ImguiViewportBridgeError> {

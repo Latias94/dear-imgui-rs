@@ -619,12 +619,9 @@ fn plugin_preserves_existing_config_and_context() {
         !io.config_flags()
             .contains(dear_imgui_rs::ConfigFlags::DOCKING_ENABLE)
     );
-    assert_eq!(
-        io.backend_platform_name()
-            .expect("plugin should set BackendPlatformName")
-            .to_str()
-            .expect("backend name should be valid UTF-8"),
-        "custom-imgui"
+    assert!(
+        io.backend_platform_name().is_none(),
+        "plugin must not claim BackendPlatformName while foreign platform state is present"
     );
     assert_eq!(
         io.backend_renderer_user_data(),
