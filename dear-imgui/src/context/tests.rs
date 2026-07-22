@@ -3,6 +3,8 @@ use std::rc::Rc;
 
 #[cfg(feature = "multi-viewport")]
 use std::ffi::{c_char, c_void};
+#[cfg(feature = "multi-viewport")]
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::{
     Context, ContextAttachment, ContextAttachmentError, ContextAttachmentRole, ContextBindingError,
@@ -13,6 +15,7 @@ struct PlatformMarker;
 struct RendererMarker;
 struct ExtensionMarker;
 struct PanickingExtensionMarker;
+struct PanickingRendererExtensionMarker;
 
 #[cfg(feature = "multi-viewport")]
 struct TestViewportPlatformMarker;
@@ -22,10 +25,14 @@ struct TestViewportPlatformAttachment;
 
 #[cfg(feature = "multi-viewport")]
 impl ContextAttachment for TestViewportPlatformAttachment {
-    fn release_platform_windows(&self, context: &ContextTeardown<'_>) {
+    fn release_platform_windows(
+        &self,
+        context: &ContextTeardown<'_>,
+    ) -> Result<(), super::ContextAttachmentTeardownError> {
         context.with_bound_context(|| unsafe {
             crate::sys::igDestroyPlatformWindows();
         });
+        Ok(())
     }
 }
 
@@ -54,6 +61,17 @@ unsafe extern "C" fn test_platform_set_title(
     _viewport: *mut crate::sys::ImGuiViewport,
     _title: *const c_char,
 ) {
+}
+
+#[cfg(feature = "multi-viewport")]
+static TEST_RENDER_WINDOW_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(feature = "multi-viewport")]
+unsafe extern "C" fn test_renderer_render_window(
+    _viewport: *mut crate::sys::ImGuiViewport,
+    _render_arg: *mut c_void,
+) {
+    TEST_RENDER_WINDOW_CALLS.fetch_add(1, Ordering::SeqCst);
 }
 
 #[cfg(feature = "multi-viewport")]
@@ -101,7 +119,9 @@ struct RecordingAttachment {
     ordinary_rejected: Rc<Cell<bool>>,
     teardown_bound: Rc<Cell<bool>>,
     frame_closed_before_quiesce: Rc<Cell<bool>>,
+    inspect_native_state_during_quiesce: bool,
     panic_during_quiesce: bool,
+    fail_during_renderer_release: bool,
 }
 
 impl RecordingAttachment {
@@ -112,18 +132,25 @@ impl RecordingAttachment {
             ordinary_rejected: Rc::new(Cell::new(false)),
             teardown_bound: Rc::new(Cell::new(false)),
             frame_closed_before_quiesce: Rc::new(Cell::new(false)),
+            inspect_native_state_during_quiesce: true,
             panic_during_quiesce: false,
+            fail_during_renderer_release: false,
         }
     }
 }
 
 impl ContextAttachment for RecordingAttachment {
-    fn quiesce(&self, context: &ContextTeardown<'_>) {
+    fn quiesce(
+        &self,
+        context: &ContextTeardown<'_>,
+    ) -> Result<(), super::ContextAttachmentTeardownError> {
         assert_eq!(context.phase(), super::ContextAttachmentPhase::Quiesce);
-        context.with_bound_context(|| {
-            self.frame_closed_before_quiesce
-                .set(!unsafe { (*context.as_raw_for_test()).WithinFrameScope });
-        });
+        if self.inspect_native_state_during_quiesce {
+            context.with_bound_context(|| {
+                self.frame_closed_before_quiesce
+                    .set(!unsafe { (*context.as_raw_for_test()).WithinFrameScope });
+            });
+        }
         if let Some(binding) = &self.binding {
             self.ordinary_rejected.set(matches!(
                 binding.try_with_bound_context(|| ()),
@@ -136,27 +163,236 @@ impl ContextAttachment for RecordingAttachment {
         }
         self.log.borrow_mut().push("quiesce");
         assert!(!self.panic_during_quiesce, "attachment panic");
+        Ok(())
     }
 
-    fn release_renderer_resources(&self, context: &ContextTeardown<'_>) {
+    fn release_renderer_resources(
+        &self,
+        context: &ContextTeardown<'_>,
+    ) -> Result<(), super::ContextAttachmentTeardownError> {
         assert_eq!(
             context.phase(),
             super::ContextAttachmentPhase::RendererResources
         );
         self.log.borrow_mut().push("renderer");
+        if self.fail_during_renderer_release {
+            return Err(super::ContextAttachmentTeardownError::new(
+                "renderer attachment failure",
+            ));
+        }
+        Ok(())
     }
 
-    fn release_platform_windows(&self, context: &ContextTeardown<'_>) {
+    fn release_platform_windows(
+        &self,
+        context: &ContextTeardown<'_>,
+    ) -> Result<(), super::ContextAttachmentTeardownError> {
         assert_eq!(
             context.phase(),
             super::ContextAttachmentPhase::PlatformWindows
         );
         self.log.borrow_mut().push("platform");
+        Ok(())
     }
 
     fn context_destroyed(&self, _context: ContextDestroyed) {
         self.log.borrow_mut().push("post");
     }
+}
+
+struct RendererTextureResetMarker;
+struct WrongPhaseRendererTextureResetMarker;
+
+#[derive(Debug)]
+struct RendererTextureResetObservation {
+    release_calls: Cell<usize>,
+    release_saw_expected_binding: Cell<bool>,
+    reset_rejected: Cell<bool>,
+    invalidated: Cell<Option<usize>>,
+    binding_after_call: Cell<crate::TextureId>,
+    nested_reset_rejected: Cell<bool>,
+}
+
+impl RendererTextureResetObservation {
+    fn new() -> Self {
+        Self {
+            release_calls: Cell::new(0),
+            release_saw_expected_binding: Cell::new(false),
+            reset_rejected: Cell::new(false),
+            invalidated: Cell::new(None),
+            binding_after_call: Cell::new(crate::TextureId::null()),
+            nested_reset_rejected: Cell::new(false),
+        }
+    }
+}
+
+struct RendererTextureResetAttachment {
+    consumer: crate::render::RendererConsumer,
+    expected_binding: crate::TextureId,
+    release_fails: bool,
+    attempts_reentry: bool,
+    observation: Rc<RendererTextureResetObservation>,
+}
+
+impl ContextAttachment for RendererTextureResetAttachment {
+    fn release_renderer_resources(
+        &self,
+        context: &ContextTeardown<'_>,
+    ) -> Result<(), super::ContextAttachmentTeardownError> {
+        let consumer = &self.consumer;
+        let expected_binding = self.expected_binding;
+        let observation = Rc::clone(&self.observation);
+        let result = context.with_renderer_texture_reset(consumer, || {
+            observation
+                .release_calls
+                .set(observation.release_calls.get().saturating_add(1));
+            observation
+                .release_saw_expected_binding
+                .set(font_texture_id_during_teardown(context) == expected_binding);
+
+            if self.attempts_reentry {
+                observation.nested_reset_rejected.set(
+                    context
+                        .with_renderer_texture_reset(consumer, || Ok(()))
+                        .is_err(),
+                );
+            }
+            if self.release_fails {
+                return Err(super::ContextAttachmentTeardownError::new(
+                    "test renderer resource release failed",
+                ));
+            }
+            Ok(())
+        });
+
+        match result {
+            Ok(invalidated) => self.observation.invalidated.set(Some(invalidated)),
+            Err(_) => self.observation.reset_rejected.set(true),
+        }
+        self.observation
+            .binding_after_call
+            .set(font_texture_id_during_teardown(context));
+        Ok(())
+    }
+}
+
+struct WrongPhaseRendererTextureResetAttachment {
+    consumer: crate::render::RendererConsumer,
+    expected_binding: crate::TextureId,
+    observation: Rc<RendererTextureResetObservation>,
+}
+
+impl ContextAttachment for WrongPhaseRendererTextureResetAttachment {
+    fn quiesce(
+        &self,
+        context: &ContextTeardown<'_>,
+    ) -> Result<(), super::ContextAttachmentTeardownError> {
+        let result = context.with_renderer_texture_reset(&self.consumer, || {
+            self.observation
+                .release_calls
+                .set(self.observation.release_calls.get().saturating_add(1));
+            Ok(())
+        });
+        self.observation.reset_rejected.set(result.is_err());
+        self.observation
+            .binding_after_call
+            .set(font_texture_id_during_teardown(context));
+        assert_eq!(
+            self.observation.binding_after_call.get(),
+            self.expected_binding,
+            "a wrong-phase reset attempt must not touch native bindings"
+        );
+        Ok(())
+    }
+}
+
+fn font_texture_id_during_teardown(context: &ContextTeardown<'_>) -> crate::TextureId {
+    context.with_bound_context(|| unsafe {
+        let io = crate::sys::igGetIO_Nil();
+        assert!(!io.is_null(), "teardown Context must retain ImGuiIO");
+        let atlas = (*io).Fonts;
+        assert!(
+            !atlas.is_null(),
+            "teardown Context must retain the font atlas"
+        );
+        crate::texture::effective_texture_id(&(*atlas).TexRef)
+    })
+}
+
+fn prepare_managed_font_atlas(
+    context: &mut Context,
+) -> (crate::render::RendererConsumer, crate::TextureId) {
+    context.prepare_frame(
+        super::FramePrepareOptions::new([320.0, 240.0], 1.0 / 60.0).renderer_has_textures(),
+    );
+    assert!(context.font_atlas().build());
+    let consumer = context
+        .create_renderer_consumer()
+        .expect("test Context must create a renderer consumer");
+
+    let frame = context.begin_frame();
+    frame.ui().text("initialize the managed font atlas");
+    let mut rendered = frame.render();
+    let binding = crate::TextureId::new(0xC0FFEE);
+    let feedback = rendered
+        .texture_requests()
+        .iter()
+        .find(|request| {
+            matches!(
+                request.texture(),
+                crate::render::SnapshotTextureId::FontAtlas { .. }
+            )
+        })
+        .expect("first managed frame must request the font atlas")
+        .uploaded(binding)
+        .expect("font atlas upload feedback must match the request");
+    rendered
+        .reconcile_texture_feedback([feedback])
+        .expect("test font atlas feedback must reconcile");
+    drop(rendered);
+
+    assert_eq!(context.font_atlas().texture_id(), binding);
+    (consumer, binding)
+}
+
+fn prepare_managed_font_atlas_for_detached_rendering(
+    context: &mut Context,
+) -> (crate::render::RendererConsumer, crate::TextureId) {
+    context.prepare_frame(
+        super::FramePrepareOptions::new([320.0, 240.0], 1.0 / 60.0).renderer_has_textures(),
+    );
+    assert!(context.font_atlas().build());
+    let consumer = context
+        .create_renderer_consumer()
+        .expect("test Context must create a renderer consumer");
+
+    let frame = context.begin_frame();
+    frame.ui().text("initialize detached managed font atlas");
+    let snapshot = frame
+        .render_snapshot(&consumer)
+        .expect("test frame must create a detached snapshot");
+    let binding = crate::TextureId::new(0xD37AC4ED);
+    let feedback = snapshot
+        .texture_requests()
+        .iter()
+        .find(|request| {
+            matches!(
+                request.texture(),
+                crate::render::SnapshotTextureId::FontAtlas { .. }
+            )
+        })
+        .expect("first managed snapshot must request the font atlas")
+        .uploaded(binding)
+        .expect("font atlas upload feedback must match the request");
+    snapshot
+        .commit([feedback])
+        .expect("test snapshot completion must reach the Context");
+    context
+        .poll_snapshot_completions()
+        .expect("test snapshot completion must reconcile");
+
+    assert_eq!(context.font_atlas().texture_id(), binding);
+    (consumer, binding)
 }
 
 #[test]
@@ -321,6 +557,11 @@ fn platform_window_calls_enforce_the_native_frame_order_in_rust() {
     let mut ctx = Context::create();
     assert!(ctx.font_atlas().build());
     ctx.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
+    TEST_RENDER_WINDOW_CALLS.store(0, Ordering::SeqCst);
+    unsafe {
+        ctx.platform_io_mut()
+            .set_renderer_render_window_raw(Some(test_renderer_render_window));
+    }
 
     ctx.frame().text("platform lifecycle");
     let update_before_render = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -328,11 +569,11 @@ fn platform_window_calls_enforce_the_native_frame_order_in_rust() {
     }));
     assert!(update_before_render.is_err());
 
-    let destroy_during_frame = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        ctx.destroy_platform_windows();
-    }));
-    assert!(destroy_during_frame.is_err());
+    ctx.destroy_platform_windows();
+    assert!(!ctx.end_frame());
 
+    ctx.frame()
+        .text("platform lifecycle after normalized teardown");
     drop(ctx.render());
     let render_before_update = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         ctx.render_platform_windows_default();
@@ -345,6 +586,55 @@ fn platform_window_calls_enforce_the_native_frame_order_in_rust() {
         ctx.update_platform_windows();
     }));
     assert!(duplicate_update.is_err());
+
+    ctx.frame().text("ended without rendering");
+    assert!(ctx.end_frame());
+    ctx.update_platform_windows();
+    let render_after_end_only = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ctx.render_platform_windows_default();
+    }));
+    assert!(render_after_end_only.is_err());
+    assert_eq!(TEST_RENDER_WINDOW_CALLS.load(Ordering::SeqCst), 0);
+}
+
+#[cfg(feature = "multi-viewport")]
+#[test]
+fn default_platform_render_requires_a_callback_render_path() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut ctx = Context::create();
+    assert!(ctx.font_atlas().build());
+    ctx.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
+    ctx.frame().text("no default renderer callback");
+    drop(ctx.render());
+    ctx.update_platform_windows();
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ctx.render_platform_windows_default();
+    }));
+    assert!(result.is_err());
+}
+
+#[test]
+fn end_frame_is_idempotent_and_allows_a_new_frame() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut ctx = Context::create();
+    assert!(ctx.font_atlas().build());
+    ctx.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
+
+    ctx.frame().text("first frame");
+    assert!(ctx.end_frame());
+    assert!(!ctx.end_frame());
+    assert_eq!(
+        ctx.frame_lifecycle_state(),
+        super::FrameLifecycleState::Idle
+    );
+
+    ctx.frame().text("replacement frame");
+    drop(ctx.render());
+    assert_eq!(
+        ctx.frame_lifecycle_state(),
+        super::FrameLifecycleState::Rendered
+    );
 }
 
 #[cfg(feature = "multi-viewport")]
@@ -586,14 +876,17 @@ fn context_drop_ends_an_open_frame_before_attachment_quiesce() {
 }
 
 #[test]
-fn attachment_panics_do_not_skip_remaining_teardown() {
+fn attachment_quiesce_panic_finishes_its_phase_but_blocks_later_phases() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
     let log = Rc::new(RefCell::new(Vec::new()));
 
     let mut panicking = RecordingAttachment::new(Rc::clone(&log));
+    panicking.inspect_native_state_during_quiesce = false;
     panicking.panic_during_quiesce = true;
-    let normal = Rc::new(RecordingAttachment::new(Rc::clone(&log)));
+    let mut normal = RecordingAttachment::new(Rc::clone(&log));
+    normal.inspect_native_state_during_quiesce = false;
+    let normal = Rc::new(normal);
     let binding = ctx.binding();
 
     let _panicking_lease = ctx
@@ -606,17 +899,71 @@ fn attachment_panics_do_not_skip_remaining_teardown() {
         .register_attachment::<ExtensionMarker>(ContextAttachmentRole::Extension, normal)
         .unwrap();
 
-    drop(ctx);
+    let controls = ctx.attachments.begin_teardown();
+    assert!(!super::attachment::run_pre_destroy_phase(
+        &controls,
+        &mut ctx,
+        super::ContextAttachmentPhase::Quiesce,
+    ));
 
     let log = log.borrow();
     assert_eq!(log.iter().filter(|entry| **entry == "quiesce").count(), 2);
-    assert_eq!(log.iter().filter(|entry| **entry == "renderer").count(), 2);
-    assert_eq!(log.iter().filter(|entry| **entry == "platform").count(), 2);
-    assert_eq!(log.iter().filter(|entry| **entry == "post").count(), 2);
+    assert!(
+        !log.iter()
+            .any(|entry| matches!(*entry, "renderer" | "platform" | "post"))
+    );
+    drop(log);
+    drop(controls);
+    drop(ctx);
     assert_eq!(
         binding.lifecycle(),
         super::ContextLifecycle::NativeDestroyed
     );
+}
+
+#[test]
+fn attachment_renderer_error_finishes_its_phase_but_blocks_platform_release() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut ctx = Context::create();
+    let log = Rc::new(RefCell::new(Vec::new()));
+
+    let mut panicking = RecordingAttachment::new(Rc::clone(&log));
+    panicking.inspect_native_state_during_quiesce = false;
+    panicking.fail_during_renderer_release = true;
+    let mut normal = RecordingAttachment::new(Rc::clone(&log));
+    normal.inspect_native_state_during_quiesce = false;
+    let normal = Rc::new(normal);
+    let _panicking_lease = ctx
+        .register_attachment::<PanickingRendererExtensionMarker>(
+            ContextAttachmentRole::Extension,
+            Rc::new(panicking),
+        )
+        .unwrap();
+    let _normal_lease = ctx
+        .register_attachment::<ExtensionMarker>(ContextAttachmentRole::Extension, normal)
+        .unwrap();
+
+    let controls = ctx.attachments.begin_teardown();
+    assert!(super::attachment::run_pre_destroy_phase(
+        &controls,
+        &mut ctx,
+        super::ContextAttachmentPhase::Quiesce,
+    ));
+    assert!(!super::attachment::run_pre_destroy_phase(
+        &controls,
+        &mut ctx,
+        super::ContextAttachmentPhase::RendererResources,
+    ));
+    let log = log.borrow();
+    assert_eq!(log.iter().filter(|entry| **entry == "quiesce").count(), 2);
+    assert_eq!(log.iter().filter(|entry| **entry == "renderer").count(), 2);
+    assert!(
+        !log.iter()
+            .any(|entry| matches!(*entry, "platform" | "post"))
+    );
+    drop(log);
+    drop(controls);
+    drop(ctx);
 }
 
 #[test]
@@ -682,6 +1029,219 @@ fn detaching_attachment_releases_context_ownership_immediately() {
     assert!(lease.detach());
     assert_eq!(Rc::strong_count(&attachment), 1);
     drop(ctx);
+}
+
+#[test]
+fn attachment_lease_can_defer_cleanup_to_context_teardown() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut ctx = Context::create();
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let attachment = Rc::new(RecordingAttachment::new(Rc::clone(&log)));
+    let lease = ctx
+        .register_attachment::<PlatformMarker>(ContextAttachmentRole::Platform, attachment.clone())
+        .unwrap();
+
+    lease.defer_to_context();
+    assert_eq!(Rc::strong_count(&attachment), 2);
+    drop(ctx);
+
+    assert_eq!(Rc::strong_count(&attachment), 1);
+    assert_eq!(
+        log.borrow().as_slice(),
+        ["quiesce", "renderer", "platform", "post"]
+    );
+}
+
+#[test]
+fn renderer_attachment_reset_releases_before_commit_and_rejects_reentry() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut context = Context::create();
+    let (consumer, binding) = prepare_managed_font_atlas(&mut context);
+    let observation = Rc::new(RendererTextureResetObservation::new());
+    let attachment = Rc::new(RendererTextureResetAttachment {
+        consumer,
+        expected_binding: binding,
+        release_fails: false,
+        attempts_reentry: true,
+        observation: Rc::clone(&observation),
+    });
+    let _lease = context
+        .register_attachment::<RendererTextureResetMarker>(
+            ContextAttachmentRole::Extension,
+            attachment,
+        )
+        .unwrap();
+
+    drop(context);
+
+    assert_eq!(observation.release_calls.get(), 1);
+    assert!(observation.release_saw_expected_binding.get());
+    assert!(observation.nested_reset_rejected.get());
+    assert!(observation.invalidated.get().is_some_and(|count| count > 0));
+    assert_eq!(
+        observation.binding_after_call.get(),
+        crate::TextureId::null(),
+        "native binding must reset only after resource release succeeds"
+    );
+}
+
+#[test]
+fn renderer_attachment_reset_preserves_native_bindings_when_release_fails() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut context = Context::create();
+    let (consumer, binding) = prepare_managed_font_atlas(&mut context);
+    let observation = Rc::new(RendererTextureResetObservation::new());
+    let attachment = Rc::new(RendererTextureResetAttachment {
+        consumer,
+        expected_binding: binding,
+        release_fails: true,
+        attempts_reentry: false,
+        observation: Rc::clone(&observation),
+    });
+    let _lease = context
+        .register_attachment::<RendererTextureResetMarker>(
+            ContextAttachmentRole::Extension,
+            attachment,
+        )
+        .unwrap();
+
+    drop(context);
+
+    assert_eq!(observation.release_calls.get(), 1);
+    assert!(observation.release_saw_expected_binding.get());
+    assert!(observation.reset_rejected.get());
+    assert_eq!(observation.invalidated.get(), None);
+    assert_eq!(
+        observation.binding_after_call.get(),
+        binding,
+        "a release error must leave native bindings intact for fail-stop teardown"
+    );
+}
+
+#[test]
+fn renderer_attachment_reset_rejects_wrong_phase_without_calling_release() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut context = Context::create();
+    let (consumer, binding) = prepare_managed_font_atlas(&mut context);
+    let observation = Rc::new(RendererTextureResetObservation::new());
+    let attachment = Rc::new(WrongPhaseRendererTextureResetAttachment {
+        consumer,
+        expected_binding: binding,
+        observation: Rc::clone(&observation),
+    });
+    let _lease = context
+        .register_attachment::<WrongPhaseRendererTextureResetMarker>(
+            ContextAttachmentRole::Extension,
+            attachment,
+        )
+        .unwrap();
+
+    drop(context);
+
+    assert!(observation.reset_rejected.get());
+    assert_eq!(observation.release_calls.get(), 0);
+    assert_eq!(observation.binding_after_call.get(), binding);
+}
+
+#[test]
+fn renderer_attachment_reset_rejects_a_foreign_consumer_without_mutating_bindings() {
+    let _guard = crate::test_support::imgui_context_guard();
+
+    let mut foreign_context = Context::create();
+    let (foreign_consumer, _) = prepare_managed_font_atlas(&mut foreign_context);
+    let foreign_context = foreign_context.suspend();
+
+    let mut context = Context::create();
+    let (local_consumer, binding) = prepare_managed_font_atlas(&mut context);
+    let observation = Rc::new(RendererTextureResetObservation::new());
+    let attachment = Rc::new(RendererTextureResetAttachment {
+        consumer: foreign_consumer,
+        expected_binding: binding,
+        release_fails: false,
+        attempts_reentry: false,
+        observation: Rc::clone(&observation),
+    });
+    let _lease = context
+        .register_attachment::<RendererTextureResetMarker>(
+            ContextAttachmentRole::Extension,
+            attachment,
+        )
+        .unwrap();
+
+    drop(context);
+
+    assert!(observation.reset_rejected.get());
+    assert_eq!(observation.release_calls.get(), 0);
+    assert_eq!(observation.binding_after_call.get(), binding);
+
+    drop(local_consumer);
+    drop(foreign_context);
+}
+
+#[test]
+fn renderer_attachment_reset_rejects_an_active_snapshot_without_mutating_bindings() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut context = Context::create();
+    let (consumer, binding) = prepare_managed_font_atlas_for_detached_rendering(&mut context);
+    let snapshot = context
+        .begin_frame()
+        .render_snapshot(&consumer)
+        .expect("test Context must produce an outstanding detached snapshot");
+    let observation = Rc::new(RendererTextureResetObservation::new());
+    let attachment = Rc::new(RendererTextureResetAttachment {
+        consumer,
+        expected_binding: binding,
+        release_fails: false,
+        attempts_reentry: false,
+        observation: Rc::clone(&observation),
+    });
+    let _lease = context
+        .register_attachment::<RendererTextureResetMarker>(
+            ContextAttachmentRole::Extension,
+            attachment,
+        )
+        .unwrap();
+
+    drop(context);
+
+    assert!(observation.reset_rejected.get());
+    assert_eq!(observation.release_calls.get(), 0);
+    assert_eq!(observation.binding_after_call.get(), binding);
+    drop(snapshot);
+}
+
+#[test]
+fn renderer_attachment_reset_restores_a_foreign_current_context() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut context = Context::create();
+    let (consumer, binding) = prepare_managed_font_atlas(&mut context);
+    let observation = Rc::new(RendererTextureResetObservation::new());
+    let attachment = Rc::new(RendererTextureResetAttachment {
+        consumer,
+        expected_binding: binding,
+        release_fails: false,
+        attempts_reentry: false,
+        observation: Rc::clone(&observation),
+    });
+    let _lease = context
+        .register_attachment::<RendererTextureResetMarker>(
+            ContextAttachmentRole::Extension,
+            attachment,
+        )
+        .unwrap();
+    let context = context.suspend();
+
+    let foreign = Context::create();
+    let foreign_raw = foreign.as_raw();
+    drop(context);
+
+    assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, foreign_raw);
+    assert!(observation.invalidated.get().is_some_and(|count| count > 0));
+    assert_eq!(
+        observation.binding_after_call.get(),
+        crate::TextureId::null()
+    );
+    drop(foreign);
 }
 
 #[test]
@@ -876,6 +1436,8 @@ fn ui_methods_run_on_owner_context_and_restore_previous_current_context() {
         assert_eq!(ui_a.style_color(crate::StyleColor::Text), color_a);
         assert_eq!(ui_a.clone_style().color(crate::StyleColor::Text), color_a);
         ui_a.style_colors_dark();
+        ui_a.set_mouse_draw_cursor(true);
+        ui_a.set_mouse_cursor(Some(crate::MouseCursor::Hand));
 
         let owner_color = unsafe {
             with_bound_context(raw_a, || {
@@ -887,9 +1449,23 @@ fn ui_methods_run_on_owner_context_and_restore_previous_current_context() {
                 (&*(crate::sys::igGetStyle() as *const crate::Style)).color(crate::StyleColor::Text)
             })
         };
+        let owner_mouse = with_bound_context(raw_a, || unsafe {
+            (
+                (*crate::sys::igGetIO_Nil()).MouseDrawCursor,
+                crate::sys::igGetMouseCursor(),
+            )
+        });
+        let current_mouse = with_bound_context(raw_b, || unsafe {
+            (
+                (*crate::sys::igGetIO_Nil()).MouseDrawCursor,
+                crate::sys::igGetMouseCursor(),
+            )
+        });
 
         assert_ne!(owner_color, color_a);
         assert_eq!(current_color, color_b);
+        assert_eq!(owner_mouse, (true, crate::MouseCursor::Hand as i32));
+        assert_ne!(current_mouse, owner_mouse);
         assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw_b);
     }
 
@@ -935,8 +1511,9 @@ fn font_stack_token_drops_on_owner_context_and_restores_previous_current_context
 fn platform_viewport_snapshot_requires_rendered_frame_and_reuses_current_draw_data() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();
-    let _ = ctx.font_atlas().build();
-    ctx.prepare_frame(super::FramePrepareOptions::new([320.0, 240.0], 1.0 / 60.0));
+    ctx.prepare_frame(
+        super::FramePrepareOptions::new([320.0, 240.0], 1.0 / 60.0).renderer_has_textures(),
+    );
     let consumer = ctx.create_renderer_consumer().unwrap();
 
     let before_render = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

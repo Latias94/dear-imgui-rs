@@ -482,6 +482,7 @@ fn renderer_prepare_routes_secondary_viewport_draws_only_to_matching_window() {
         name: "render-routing".to_owned(),
         docking: true,
         multi_viewport: true,
+        viewport_window: Default::default(),
     }));
     app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
 

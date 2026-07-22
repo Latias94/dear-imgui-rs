@@ -50,7 +50,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     imgui.set_ini_filename(None::<String>)?;
     imgui.set_log_filename(None::<String>)?;
 
-    let mut sdl3_backend = Sdl3RendererBackend::init(&mut imgui, canvas.window(), &canvas)?;
+    // SAFETY: `canvas` owns the Window and SDL_Renderer through shutdown or Context teardown.
+    let mut sdl3_backend =
+        unsafe { Sdl3RendererBackend::init(&mut imgui, canvas.window(), &canvas)? };
 
     let mut show_demo = false;
     let mut show_debug = false;

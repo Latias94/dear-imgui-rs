@@ -23,12 +23,24 @@ file-browser = ["dep:dear-file-browser", "dear-file-browser/thumbnails-image"]
 reflect = ["dep:dear-imgui-reflect", "dear-imgui-reflect/glam"]
 test-engine = ["dep:dear-imgui-test-engine"]
 multi-viewport = [
-    "dear-imgui-rs/multi-viewport",
+    "glow-multi-viewport",
     "dear-imgui-winit/multi-viewport",
     "dear-imgui-wgpu/multi-viewport-winit",
     "dear-imgui-ash/multi-viewport-winit",
     "dear-imgui-sdl3?/multi-viewport",
+]
+
+glow-multi-viewport = [
+    "dear-imgui-rs/multi-viewport",
     "dear-imgui-glow/multi-viewport",
+]
+
+# Enable the SDL3 platform and Glow renderer multi-viewport route without
+# activating the unrelated Winit/WGPU/Ash multi-viewport routes.
+sdl3-glow-multi-viewport = [
+    "sdl3-platform",
+    "glow-multi-viewport",
+    "dear-imgui-sdl3/multi-viewport",
 ]
 
 # Enable WGPU multi-viewport when using the SDL3 platform backend (native only).
@@ -171,7 +183,7 @@ required-features = ["multi-viewport", "sdl3-opengl3"]
 [[bin]]
 name = "sdl3_glow_multi_viewport"
 path = "02-docking/sdl3_glow_multi_viewport.rs"
-required-features = ["multi-viewport", "sdl3-platform"]
+required-features = ["sdl3-platform", "glow-multi-viewport"]
 
 [[bin]]
 name = "sdl3_wgpu"

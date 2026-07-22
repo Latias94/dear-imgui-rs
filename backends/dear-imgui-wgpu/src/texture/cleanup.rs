@@ -22,15 +22,17 @@ impl WgpuTextureManager {
     pub(crate) fn handle_texture_requests(
         &mut self,
         requests: &[TextureRequest],
+        request_epoch: u64,
         device: &Device,
         queue: &Queue,
         render_resources: &mut RenderResources,
     ) -> RendererResult<Vec<TextureFeedback>> {
         let mut feedback = Vec::with_capacity(requests.len());
         for request in requests {
-            match self.apply_managed_request(
+            match self.apply_managed_request_at_epoch(
                 request.texture(),
                 request.operation(),
+                request_epoch,
                 device,
                 queue,
                 render_resources,
@@ -45,10 +47,11 @@ impl WgpuTextureManager {
         Ok(feedback)
     }
 
-    pub(super) fn apply_managed_request(
+    pub(super) fn apply_managed_request_at_epoch(
         &mut self,
         id: SnapshotTextureId,
         operation: &TextureOp,
+        request_epoch: u64,
         device: &Device,
         queue: &Queue,
         render_resources: &mut RenderResources,
@@ -61,7 +64,7 @@ impl WgpuTextureManager {
                 row_pitch,
                 pixels,
             } => {
-                if self.destroyed_managed_textures.contains(&id) {
+                if self.destroyed_managed_textures.contains_key(&id) {
                     // A delayed create must not resurrect a resource after its destroy request.
                     return Ok(ManagedRequestOutcome::IgnoredRetired);
                 }
@@ -101,7 +104,7 @@ impl WgpuTextureManager {
                 height,
                 rects,
             } => {
-                if self.destroyed_managed_textures.contains(&id) {
+                if self.destroyed_managed_textures.contains_key(&id) {
                     return Ok(ManagedRequestOutcome::IgnoredRetired);
                 }
                 self.update_managed_texture(queue, id, *format, *width, *height, rects)?;
@@ -111,7 +114,12 @@ impl WgpuTextureManager {
                 Ok(ManagedRequestOutcome::Uploaded(texture_id))
             }
             TextureOp::Destroy => {
-                self.destroyed_managed_textures.insert(id);
+                self.destroyed_managed_textures
+                    .entry(id)
+                    .and_modify(|destroy_epoch| {
+                        *destroy_epoch = (*destroy_epoch).max(request_epoch);
+                    })
+                    .or_insert(request_epoch);
                 if let Some(entry) = self.managed_textures.remove(&id) {
                     self.managed_by_texture_id.remove(&entry.texture_id);
                     self.clear_custom_sampler_for_texture(entry.texture_id);
@@ -122,5 +130,17 @@ impl WgpuTextureManager {
                 Ok(ManagedRequestOutcome::Destroyed)
             }
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn apply_managed_request(
+        &mut self,
+        id: SnapshotTextureId,
+        operation: &TextureOp,
+        device: &Device,
+        queue: &Queue,
+        render_resources: &mut RenderResources,
+    ) -> RendererResult<ManagedRequestOutcome> {
+        self.apply_managed_request_at_epoch(id, operation, 0, device, queue, render_resources)
     }
 }

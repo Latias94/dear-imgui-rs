@@ -21,7 +21,8 @@ use dear_imgui_rs::{Context, TextureData, TextureId, platform_io::Viewport, sys}
 use std::{ffi::c_void, sync::Arc};
 
 pub use super::vulkan_viewport::{
-    AshViewportAttachError, AshViewportError, SurfaceSupportError, VulkanViewportConfig,
+    AshViewportAttachError, AshViewportError, PresentModePolicy, SurfaceFormatPolicy,
+    SurfaceSupportError, ViewportSwapchainPolicy, VulkanViewportConfig,
 };
 use crate::{Options, TextureRetirementBatch, TextureUpdateResult};
 

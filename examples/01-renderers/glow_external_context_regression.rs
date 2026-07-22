@@ -119,12 +119,12 @@ impl AppWindow {
         let mut imgui_context = ImguiContext::create();
         imgui_context.set_ini_filename(None::<String>).unwrap();
 
-        let mut platform = WinitPlatform::new(&mut imgui_context);
+        let mut platform = WinitPlatform::new(&mut imgui_context)?;
         platform.attach_window(
-            &window,
+            Arc::clone(&window),
             dear_imgui_winit::HiDpiMode::Default,
             &mut imgui_context,
-        );
+        )?;
 
         let gl = unsafe {
             glow::Context::from_loader_function_cstr(|s| {
@@ -327,7 +327,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context);
+            .prepare_frame(&self.window, &mut self.imgui.context)?;
         let ui = self.imgui.context.frame();
 
         let stage = self.imgui.stage;
@@ -378,7 +378,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_render_with_ui(&ui, &self.window);
+            .prepare_render_with_ui(&ui, &self.window)?;
         let draw_data = self.imgui.context.render();
 
         // Mirror the original issue reproduction, where the application keeps the GL
@@ -428,11 +428,15 @@ impl ApplicationHandler for App {
             None => return,
         };
 
-        window.imgui.platform.handle_window_event(
+        if let Err(error) = window.imgui.platform.handle_window_event(
             &mut window.imgui.context,
             &window.window,
             &event,
-        );
+        ) {
+            self.failure_message = Some(format!("Winit platform event error: {error}"));
+            event_loop.exit();
+            return;
+        }
 
         match event {
             WindowEvent::Resized(physical_size) => {

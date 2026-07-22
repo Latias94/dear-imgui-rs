@@ -1,5 +1,4 @@
 use super::*;
-use std::cell::UnsafeCell;
 
 fn new_platform_io() -> sys::ImGuiPlatformIO {
     unsafe {
@@ -18,91 +17,6 @@ unsafe extern "C" fn draw_callback_marker(
     _parent_list: *const sys::ImDrawList,
     _cmd: *const sys::ImDrawCmd,
 ) {
-}
-
-#[test]
-fn invalidating_renderer_bindings_requeues_live_textures() {
-    let mut texture = crate::texture::OwnedTextureData::new();
-    texture.create(crate::texture::TextureFormat::RGBA32, 1, 1);
-    unsafe {
-        // The test owns this unregistered texture; backend data is an opaque marker and is never
-        // dereferenced.
-        texture.set_tex_id(crate::texture::TextureId::new(123));
-        texture.set_backend_user_data(std::ptr::dangling_mut());
-        texture.set_status(crate::texture::TextureStatus::OK);
-        (*texture.as_raw_mut()).RefCount = 1;
-    }
-
-    let mut texture_ptr = texture.as_mut().as_raw_mut();
-    let mut raw: sys::ImGuiPlatformIO = new_platform_io();
-    raw.Textures.Size = 1;
-    raw.Textures.Capacity = 1;
-    raw.Textures.Data = &mut texture_ptr;
-    let mut platform_io = PlatformIo {
-        raw: UnsafeCell::new(raw),
-    };
-
-    assert_eq!(platform_io.invalidate_renderer_texture_bindings(), 1);
-    assert_eq!(texture.status(), crate::texture::TextureStatus::WantCreate);
-    assert!(texture.tex_id().is_null());
-    assert!(texture.backend_user_data().is_null());
-}
-
-#[test]
-fn invalidating_renderer_bindings_preserves_queued_destruction() {
-    let mut texture = crate::texture::OwnedTextureData::new();
-    texture.create(crate::texture::TextureFormat::RGBA32, 1, 1);
-    unsafe {
-        // The test owns this unregistered texture; backend data is an opaque marker and is never
-        // dereferenced.
-        texture.set_tex_id(crate::texture::TextureId::new(123));
-        texture.set_backend_user_data(std::ptr::dangling_mut());
-        (*texture.as_raw_mut()).RefCount = 1;
-        (*texture.as_raw_mut()).WantDestroyNextFrame = true;
-        texture.set_status(crate::texture::TextureStatus::WantDestroy);
-    }
-
-    let mut texture_ptr = texture.as_mut().as_raw_mut();
-    let mut raw: sys::ImGuiPlatformIO = new_platform_io();
-    raw.Textures.Size = 1;
-    raw.Textures.Capacity = 1;
-    raw.Textures.Data = &mut texture_ptr;
-    let mut platform_io = PlatformIo {
-        raw: UnsafeCell::new(raw),
-    };
-
-    assert_eq!(platform_io.invalidate_renderer_texture_bindings(), 1);
-    assert_eq!(texture.status(), crate::texture::TextureStatus::Destroyed);
-    assert!(texture.tex_id().is_null());
-    assert!(texture.backend_user_data().is_null());
-}
-
-#[test]
-fn invalidating_renderer_bindings_preserves_shared_textures() {
-    let mut texture = crate::texture::OwnedTextureData::new();
-    texture.create(crate::texture::TextureFormat::RGBA32, 1, 1);
-    unsafe {
-        // The test owns this unregistered texture; backend data is an opaque marker and is never
-        // dereferenced.
-        texture.set_tex_id(crate::texture::TextureId::new(123));
-        texture.set_backend_user_data(std::ptr::dangling_mut());
-        texture.set_status(crate::texture::TextureStatus::OK);
-        (*texture.as_raw_mut()).RefCount = 2;
-    }
-
-    let mut texture_ptr = texture.as_mut().as_raw_mut();
-    let mut raw: sys::ImGuiPlatformIO = new_platform_io();
-    raw.Textures.Size = 1;
-    raw.Textures.Capacity = 1;
-    raw.Textures.Data = &mut texture_ptr;
-    let mut platform_io = PlatformIo {
-        raw: UnsafeCell::new(raw),
-    };
-
-    assert_eq!(platform_io.invalidate_renderer_texture_bindings(), 0);
-    assert_eq!(texture.status(), crate::texture::TextureStatus::OK);
-    assert_eq!(texture.tex_id(), crate::texture::TextureId::new(123));
-    assert!(!texture.backend_user_data().is_null());
 }
 
 #[test]

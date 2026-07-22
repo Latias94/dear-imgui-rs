@@ -1,20 +1,25 @@
 #[cfg(feature = "multi-viewport")]
 use bevy_app::App;
 #[cfg(all(feature = "multi-viewport", feature = "render"))]
-use bevy_camera::{Camera, Camera2d, RenderTarget, visibility::RenderLayers};
+use bevy_camera::{
+    Camera, Camera2d, CameraOutputMode, ClearColorConfig, RenderTarget, visibility::RenderLayers,
+};
 #[cfg(feature = "multi-viewport")]
 use bevy_ecs::message::Messages;
 #[cfg(feature = "multi-viewport")]
 use bevy_ecs::prelude::Entity;
 #[cfg(feature = "multi-viewport")]
 use bevy_ecs::prelude::With;
+#[cfg(all(feature = "multi-viewport", feature = "render"))]
+use bevy_ecs::schedule::ScheduleLabel;
 #[cfg(feature = "multi-viewport")]
 use bevy_math::IVec2;
+#[cfg(all(feature = "multi-viewport", feature = "render"))]
+use bevy_render::{Render, RenderApp, extract_plugin::ExtractPlugin};
 #[cfg(feature = "multi-viewport")]
 use bevy_window::Monitor;
 #[cfg(feature = "multi-viewport")]
 use bevy_window::WindowCloseRequested;
-use bevy_window::WindowLevel;
 #[cfg(feature = "multi-viewport")]
 use bevy_window::WindowMoved;
 #[cfg(feature = "multi-viewport")]
@@ -24,6 +29,7 @@ use bevy_window::WindowPosition;
 use bevy_window::WindowRef;
 #[cfg(feature = "multi-viewport")]
 use bevy_window::WindowResized;
+use bevy_window::{CompositeAlphaMode, WindowLevel};
 #[cfg(feature = "multi-viewport")]
 use bevy_window::{PrimaryWindow, Window};
 #[cfg(all(feature = "multi-viewport", feature = "render"))]
@@ -32,17 +38,88 @@ use dear_imgui_bevy::ImguiViewportSnapshot;
 #[cfg(feature = "multi-viewport")]
 use dear_imgui_bevy::{
     ImguiBackendConfig, ImguiBackendStatus, ImguiContext, ImguiPlugin, ImguiViewportBridge,
-    ImguiViewportCommand, ImguiViewportFeedback, ImguiViewportWindow,
+    ImguiViewportCommand, ImguiViewportFeedback, ImguiViewportWindow, ImguiViewportWindowConfig,
 };
 use dear_imgui_rs as imgui;
 #[cfg(feature = "multi-viewport")]
 use imgui::sys;
 #[cfg(feature = "multi-viewport")]
+use std::rc::Rc;
+#[cfg(feature = "multi-viewport")]
 use std::sync::{Mutex, OnceLock};
 
 #[cfg(feature = "multi-viewport")]
-static DESTROY_CALLBACK_SAW_LIVE_BACKEND_USER_DATA: std::sync::atomic::AtomicBool =
+static FOREIGN_DESTROY_SAW_BEVY_BACKEND_USER_DATA: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(feature = "multi-viewport")]
+static FOREIGN_DROP_BACKEND_FLAGS: std::sync::atomic::AtomicI32 =
+    std::sync::atomic::AtomicI32::new(0);
+#[cfg(feature = "multi-viewport")]
+static FOREIGN_DROP_CONFIG_FLAGS: std::sync::atomic::AtomicI32 =
+    std::sync::atomic::AtomicI32::new(0);
+#[cfg(feature = "multi-viewport")]
+static FOREIGN_DROP_EXPECTED_USER_DATA: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+#[cfg(feature = "multi-viewport")]
+static FOREIGN_DROP_EXPECTED_MAIN_USER_DATA: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+#[cfg(feature = "multi-viewport")]
+static FOREIGN_DROP_EXPECTED_MAIN_HANDLE: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+#[cfg(feature = "multi-viewport")]
+static FOREIGN_DROP_EXPECTED_MAIN_HANDLE_RAW: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+#[cfg(feature = "multi-viewport")]
+static FOREIGN_DROP_FIELDS_PRESERVED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(feature = "multi-viewport")]
+struct ForeignDropObserver;
+
+#[cfg(feature = "multi-viewport")]
+struct ForeignDropObserverMarker;
+
+#[cfg(feature = "multi-viewport")]
+impl imgui::ContextAttachment for ForeignDropObserver {
+    fn release_platform_windows(
+        &self,
+        context: &imgui::ContextTeardown<'_>,
+    ) -> Result<(), imgui::ContextAttachmentTeardownError> {
+        context.with_bound_context(|| unsafe {
+            let io = sys::igGetIO_Nil();
+            let main_viewport = sys::igGetMainViewport();
+            if io.is_null() || main_viewport.is_null() {
+                return;
+            }
+            FOREIGN_DROP_BACKEND_FLAGS
+                .store((*io).BackendFlags, std::sync::atomic::Ordering::SeqCst);
+            FOREIGN_DROP_CONFIG_FLAGS.store((*io).ConfigFlags, std::sync::atomic::Ordering::SeqCst);
+            let fields_preserved = (*io).BackendPlatformUserData as usize
+                == FOREIGN_DROP_EXPECTED_USER_DATA.load(std::sync::atomic::Ordering::SeqCst)
+                && (*main_viewport).PlatformUserData as usize
+                    == FOREIGN_DROP_EXPECTED_MAIN_USER_DATA
+                        .load(std::sync::atomic::Ordering::SeqCst)
+                && (*main_viewport).PlatformHandle as usize
+                    == FOREIGN_DROP_EXPECTED_MAIN_HANDLE.load(std::sync::atomic::Ordering::SeqCst)
+                && (*main_viewport).PlatformHandleRaw as usize
+                    == FOREIGN_DROP_EXPECTED_MAIN_HANDLE_RAW
+                        .load(std::sync::atomic::Ordering::SeqCst);
+            FOREIGN_DROP_FIELDS_PRESERVED
+                .store(fields_preserved, std::sync::atomic::Ordering::SeqCst);
+
+            // This simulated foreign backend owns the final native cleanup. The Bevy wrapper has
+            // already detached itself by this phase and must not have modified the observed claim.
+            (*io).BackendPlatformUserData = std::ptr::null_mut();
+            (*main_viewport).PlatformUserData = std::ptr::null_mut();
+            (*main_viewport).PlatformHandle = std::ptr::null_mut();
+            (*main_viewport).PlatformHandleRaw = std::ptr::null_mut();
+            (*main_viewport).PlatformWindowCreated = false;
+            sys::ImGuiPlatformIO_ClearPlatformHandlers(sys::igGetPlatformIO_Nil());
+        });
+        Ok(())
+    }
+}
 
 #[cfg(feature = "multi-viewport")]
 fn imgui_context_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -62,12 +139,21 @@ fn viewport_snapshot(id: u32) -> ImguiViewportSnapshot {
 
 #[cfg(feature = "multi-viewport")]
 fn app_with_multi_viewport_bridge(name: &str) -> App {
+    app_with_multi_viewport_window_config(name, ImguiViewportWindowConfig::default())
+}
+
+#[cfg(feature = "multi-viewport")]
+fn app_with_multi_viewport_window_config(
+    name: &str,
+    viewport_window: ImguiViewportWindowConfig,
+) -> App {
     let mut app = App::new();
     app.add_message::<WindowCloseRequested>();
     app.add_plugins(ImguiPlugin::new(ImguiBackendConfig {
         name: name.to_owned(),
         docking: true,
         multi_viewport: true,
+        viewport_window,
     }));
     {
         let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
@@ -167,6 +253,24 @@ fn ensure_primary_window(app: &mut App) -> Entity {
 }
 
 #[cfg(feature = "multi-viewport")]
+fn foreign_platform_monitor() -> sys::ImGuiPlatformMonitor {
+    let mut monitor = sys::ImGuiPlatformMonitor::default();
+    monitor.MainPos = sys::ImVec2 { x: 80.0, y: 120.0 };
+    monitor.MainSize = sys::ImVec2 {
+        x: 1600.0,
+        y: 900.0,
+    };
+    monitor.WorkPos = sys::ImVec2 { x: 80.0, y: 160.0 };
+    monitor.WorkSize = sys::ImVec2 {
+        x: 1600.0,
+        y: 860.0,
+    };
+    monitor.DpiScale = 1.25;
+    monitor.PlatformHandle = std::ptr::dangling_mut::<u16>().cast();
+    monitor
+}
+
+#[cfg(feature = "multi-viewport")]
 #[test]
 fn multi_viewport_feature_does_not_install_bridge_until_requested() {
     let _guard = imgui_context_guard();
@@ -198,6 +302,7 @@ fn multi_viewport_feature_installs_bridge_but_does_not_advertise_full_support_ye
         name: "viewport-lifecycle".to_owned(),
         docking: true,
         multi_viewport: true,
+        viewport_window: Default::default(),
     }));
 
     assert!(app.world().get_non_send::<ImguiViewportBridge>().is_some());
@@ -234,37 +339,52 @@ fn multi_viewport_feature_installs_bridge_but_does_not_advertise_full_support_ye
 
 #[cfg(feature = "multi-viewport")]
 #[test]
-fn viewport_prepare_refreshes_main_platform_user_data_to_live_handle() {
+fn viewport_prepare_rejects_replaced_main_platform_user_data() {
     let _guard = imgui_context_guard();
-    let mut app = app_with_multi_viewport_bridge("viewport-main-handle-refresh");
+    let mut app = app_with_multi_viewport_bridge("viewport-main-handle-drift");
     app.world_mut().spawn((Window::default(), PrimaryWindow));
+    app.update();
 
-    let mut stale_marker = 0usize;
-    let stale = (&mut stale_marker as *mut usize).cast::<std::ffi::c_void>();
+    let foreign = std::ptr::dangling_mut::<u16>().cast::<std::ffi::c_void>();
     {
         let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
         let main_viewport = context.context_mut().main_viewport();
-        unsafe {
-            main_viewport.set_platform_user_data(stale);
-            main_viewport.set_platform_handle(std::ptr::null_mut());
-        }
+        assert_eq!(
+            main_viewport.platform_user_data(),
+            main_viewport.platform_handle()
+        );
+        unsafe { main_viewport.set_platform_user_data(foreign) };
     }
 
-    app.update();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| app.update()));
+    assert!(
+        result.is_err(),
+        "main viewport ownership drift must stop the frame"
+    );
 
-    let (handle, user_data) = {
+    {
         let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
         let main_viewport = context.context_mut().main_viewport();
-        (
-            main_viewport.platform_handle(),
+        assert_eq!(
             main_viewport.platform_user_data(),
+            foreign,
+            "frame preparation must not overwrite a foreign PlatformUserData claim"
+        );
+        unsafe { main_viewport.set_platform_user_data(std::ptr::null_mut()) };
+    }
+    assert_eq!(
+        app.world()
+            .get_non_send::<ImguiViewportBridge>()
+            .unwrap()
+            .callback_error(),
+        Some(
+            dear_imgui_bevy::viewport::ImguiViewportBridgeError::CallbackOwnership(
+                dear_imgui_bevy::viewport::ImguiViewportCallbackOwnershipError::
+                    ViewportFieldReplaced {
+                        field: "PlatformUserData",
+                    },
+            )
         )
-    };
-    assert!(!handle.is_null());
-    assert_eq!(user_data, handle);
-    assert_ne!(
-        user_data, stale,
-        "main viewport PlatformUserData must not keep a stale backend handle"
     );
 }
 
@@ -410,6 +530,7 @@ fn viewport_platform_io_callbacks_capture_commands_and_bevy_system_applies_them(
         name: "viewport-callbacks".to_owned(),
         docking: true,
         multi_viewport: true,
+        viewport_window: Default::default(),
     }));
     ensure_primary_window(&mut app);
 
@@ -555,29 +676,29 @@ fn viewport_destroy_callback_ignores_owned_by_app_main_viewport() {
 
 #[cfg(feature = "multi-viewport")]
 #[test]
-fn context_drop_keeps_backend_user_data_live_until_platform_windows_are_destroyed() {
+fn context_drop_sanitizes_owned_state_before_foreign_destroy_callbacks_run() {
     let _guard = imgui_context_guard();
 
     unsafe extern "C" fn observe_live_backend_user_data(viewport: *mut sys::ImGuiViewport) {
         let io = unsafe { sys::igGetIO_Nil() };
         let live = !io.is_null() && unsafe { !(*io).BackendPlatformUserData.is_null() };
-        DESTROY_CALLBACK_SAW_LIVE_BACKEND_USER_DATA
-            .store(live, std::sync::atomic::Ordering::SeqCst);
+        FOREIGN_DESTROY_SAW_BEVY_BACKEND_USER_DATA.store(live, std::sync::atomic::Ordering::SeqCst);
         if let Some(viewport) = unsafe { viewport.as_mut() } {
             viewport.PlatformUserData = std::ptr::null_mut();
             viewport.PlatformHandle = std::ptr::null_mut();
         }
     }
 
-    DESTROY_CALLBACK_SAW_LIVE_BACKEND_USER_DATA.store(false, std::sync::atomic::Ordering::SeqCst);
+    FOREIGN_DESTROY_SAW_BEVY_BACKEND_USER_DATA.store(false, std::sync::atomic::Ordering::SeqCst);
     let mut app = app_with_multi_viewport_bridge("viewport-context-drop");
+    app.world_mut().spawn((Window::default(), PrimaryWindow));
+    app.update();
     {
         let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
         let main_viewport = context.context_mut().main_viewport();
         unsafe {
-            main_viewport.set_platform_user_data(std::ptr::dangling_mut::<u8>().cast());
-            main_viewport.set_platform_handle(std::ptr::dangling_mut::<u8>().cast());
-            main_viewport.set_platform_window_created(true);
+            assert!(!main_viewport.platform_user_data().is_null());
+            assert!(!main_viewport.platform_handle().is_null());
             let platform_io = context.context_mut().platform_io_mut().as_raw_mut();
             (*platform_io).Platform_DestroyWindow = Some(observe_live_backend_user_data);
         }
@@ -596,9 +717,451 @@ fn context_drop_keeps_backend_user_data_live_until_platform_windows_are_destroye
     );
 
     assert!(
-        DESTROY_CALLBACK_SAW_LIVE_BACKEND_USER_DATA.load(std::sync::atomic::Ordering::SeqCst),
-        "ImguiContext must retain the bridge until Platform_DestroyWindow callbacks finish"
+        !FOREIGN_DESTROY_SAW_BEVY_BACKEND_USER_DATA.load(std::sync::atomic::Ordering::SeqCst),
+        "foreign destroy callbacks must never observe Bevy-owned BackendPlatformUserData"
     );
+}
+
+#[cfg(feature = "multi-viewport")]
+#[test]
+fn context_drop_preserves_complete_foreign_platform_takeover() {
+    let _guard = imgui_context_guard();
+    FOREIGN_DROP_BACKEND_FLAGS.store(0, std::sync::atomic::Ordering::SeqCst);
+    FOREIGN_DROP_CONFIG_FLAGS.store(0, std::sync::atomic::Ordering::SeqCst);
+    FOREIGN_DROP_FIELDS_PRESERVED.store(false, std::sync::atomic::Ordering::SeqCst);
+
+    let mut app = app_with_multi_viewport_bridge("viewport-complete-foreign-drop");
+    app.world_mut().spawn((Window::default(), PrimaryWindow));
+    app.update();
+
+    let expected_backend_flags;
+    let expected_config_flags;
+    {
+        let mut wrapper = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
+        let context = wrapper.context_mut();
+        let foreign_user_data = std::ptr::dangling_mut::<u16>().cast();
+        let foreign_main_user_data = std::ptr::dangling_mut::<u32>().cast();
+        let foreign_main_handle = std::ptr::dangling_mut::<u64>().cast();
+        let foreign_main_handle_raw = std::ptr::dangling_mut::<u8>().cast();
+        FOREIGN_DROP_EXPECTED_USER_DATA.store(
+            foreign_user_data as usize,
+            std::sync::atomic::Ordering::SeqCst,
+        );
+        FOREIGN_DROP_EXPECTED_MAIN_USER_DATA.store(
+            foreign_main_user_data as usize,
+            std::sync::atomic::Ordering::SeqCst,
+        );
+        FOREIGN_DROP_EXPECTED_MAIN_HANDLE.store(
+            foreign_main_handle as usize,
+            std::sync::atomic::Ordering::SeqCst,
+        );
+        FOREIGN_DROP_EXPECTED_MAIN_HANDLE_RAW.store(
+            foreign_main_handle_raw as usize,
+            std::sync::atomic::Ordering::SeqCst,
+        );
+
+        expected_backend_flags = context.io().backend_flags()
+            | imgui::BackendFlags::PLATFORM_HAS_VIEWPORTS
+            | imgui::BackendFlags::RENDERER_HAS_VIEWPORTS
+            | imgui::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT;
+        expected_config_flags = context.io().config_flags() | imgui::ConfigFlags::VIEWPORTS_ENABLE;
+        unsafe {
+            context
+                .io_mut()
+                .set_backend_platform_user_data(foreign_user_data);
+            context
+                .set_platform_name(Some("foreign-platform-drop"))
+                .unwrap();
+            let platform_io = context.platform_io_mut().as_raw_mut();
+            sys::ImGuiPlatformIO_ClearPlatformHandlers(platform_io);
+            let main_viewport = context.main_viewport().as_raw_mut();
+            (*main_viewport).PlatformUserData = foreign_main_user_data;
+            (*main_viewport).PlatformHandle = foreign_main_handle;
+            (*main_viewport).PlatformHandleRaw = foreign_main_handle_raw;
+            (*main_viewport).PlatformWindowCreated = true;
+        }
+        context.io_mut().set_backend_flags(expected_backend_flags);
+        context.io_mut().set_config_flags(expected_config_flags);
+        context
+            .register_attachment::<ForeignDropObserverMarker>(
+                imgui::ContextAttachmentRole::Extension,
+                Rc::new(ForeignDropObserver),
+            )
+            .expect("the foreign test backend should register its teardown observer")
+            .defer_to_context();
+    }
+
+    drop(
+        app.world_mut()
+            .remove_non_send::<ImguiContext>()
+            .expect("ImguiContext should be removable for direct shutdown testing"),
+    );
+
+    assert_eq!(
+        FOREIGN_DROP_BACKEND_FLAGS.load(std::sync::atomic::Ordering::SeqCst),
+        expected_backend_flags.bits(),
+        "Drop must not clear foreign backend capability flags"
+    );
+    assert_eq!(
+        FOREIGN_DROP_CONFIG_FLAGS.load(std::sync::atomic::Ordering::SeqCst),
+        expected_config_flags.bits(),
+        "Drop must not clear foreign viewport configuration"
+    );
+    assert!(
+        FOREIGN_DROP_FIELDS_PRESERVED.load(std::sync::atomic::Ordering::SeqCst),
+        "Drop must leave the complete foreign platform claim intact until Dear ImGui dispatches it"
+    );
+}
+
+#[cfg(all(feature = "multi-viewport", feature = "render"))]
+#[test]
+fn context_extraction_releases_secondary_entities_before_returning_context() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_multi_viewport_bridge("viewport-explicit-release");
+    let primary = ensure_primary_window(&mut app);
+    let (window, camera) = spawn_secondary_viewport(&mut app, imgui::Id::from(0x710));
+
+    let owner = app
+        .world_mut()
+        .remove_non_send::<ImguiContext>()
+        .expect("ImguiContext should be removable for explicit shutdown");
+    let error = owner
+        .into_inner()
+        .expect_err("live secondary entities must delay Context extraction");
+    assert_eq!(
+        error.error(),
+        dear_imgui_bevy::ImguiContextIntoInnerErrorReason::ViewportWorldReleasePending
+    );
+
+    app.insert_non_send(error.into_owner());
+    app.update();
+    assert!(app.world().get_entity(primary).is_ok());
+    assert!(app.world().get_entity(window).is_err());
+    assert!(app.world().get_entity(camera).is_err());
+
+    let owner = app
+        .world_mut()
+        .remove_non_send::<ImguiContext>()
+        .expect("ImguiContext should remain available after World cleanup");
+    let _context = owner
+        .into_inner()
+        .expect("Context extraction should finish after secondary entity cleanup");
+}
+
+#[cfg(all(feature = "multi-viewport", feature = "render"))]
+#[test]
+fn context_extraction_clears_owned_platform_monitors() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_multi_viewport_bridge("viewport-monitor-release");
+    ensure_primary_window(&mut app);
+    app.update();
+    {
+        let context = app.world().get_non_send::<ImguiContext>().unwrap();
+        let monitors = unsafe { (*context.context().platform_io().as_raw()).Monitors };
+        assert!(monitors.Size > 0);
+        assert!(!monitors.Data.is_null());
+    }
+
+    let owner = app.world_mut().remove_non_send::<ImguiContext>().unwrap();
+    let context = owner
+        .into_inner()
+        .expect("an intact bridge should release its monitor vector");
+    let monitors = unsafe { (*context.platform_io().as_raw()).Monitors };
+    assert_eq!(monitors.Size, 0);
+    assert_eq!(monitors.Capacity, 0);
+    assert!(monitors.Data.is_null());
+}
+
+#[cfg(all(feature = "multi-viewport", feature = "render"))]
+#[test]
+fn context_extraction_preserves_replaced_platform_monitors() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_multi_viewport_bridge("viewport-monitor-drift-release");
+    ensure_primary_window(&mut app);
+    app.update();
+
+    let foreign_monitor = foreign_platform_monitor();
+    let foreign_storage = {
+        let mut owner = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
+        unsafe {
+            owner
+                .context_mut()
+                .platform_io_mut()
+                .set_monitors(&[foreign_monitor]);
+            (*owner.context().platform_io().as_raw()).Monitors
+        }
+    };
+
+    let owner = app.world_mut().remove_non_send::<ImguiContext>().unwrap();
+    let error = owner
+        .into_inner()
+        .expect_err("foreign monitor storage must be reported before shutdown completes");
+    assert_eq!(
+        error.error(),
+        dear_imgui_bevy::ImguiContextIntoInnerErrorReason::ViewportCallbackOwnership(
+            dear_imgui_bevy::viewport::ImguiViewportCallbackOwnershipError::
+                PlatformMonitorsReplaced,
+        )
+    );
+    let owner = error.into_owner();
+    let preserved = unsafe { (*owner.context().platform_io().as_raw()).Monitors };
+    assert_eq!(preserved, foreign_storage);
+    assert_eq!(unsafe { *preserved.Data }, foreign_monitor);
+
+    let mut context = owner
+        .into_inner()
+        .expect("monitor drift without secondary entities should be retryable");
+    let preserved = unsafe { (*context.platform_io().as_raw()).Monitors };
+    assert_eq!(preserved, foreign_storage);
+    assert_eq!(unsafe { *preserved.Data }, foreign_monitor);
+    unsafe { context.platform_io_mut().set_monitors(&[]) };
+}
+
+#[cfg(feature = "multi-viewport")]
+#[test]
+fn frame_preparation_rejects_replaced_platform_monitors_without_overwriting_them() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_multi_viewport_bridge("viewport-monitor-frame-drift");
+    ensure_primary_window(&mut app);
+    app.update();
+
+    let foreign_monitor = foreign_platform_monitor();
+    let expected = {
+        let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
+        unsafe {
+            context
+                .context_mut()
+                .platform_io_mut()
+                .set_monitors(&[foreign_monitor]);
+            (*context.context().platform_io().as_raw()).Monitors
+        }
+    };
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| app.update()));
+    assert!(
+        result.is_err(),
+        "monitor ownership drift must stop the frame"
+    );
+
+    let context = app.world().get_non_send::<ImguiContext>().unwrap();
+    let actual = unsafe { (*context.context().platform_io().as_raw()).Monitors };
+    assert_eq!(actual, expected);
+    assert_eq!(unsafe { *actual.Data }, foreign_monitor);
+    assert_eq!(
+        app.world()
+            .get_non_send::<ImguiViewportBridge>()
+            .unwrap()
+            .callback_error(),
+        Some(
+            dear_imgui_bevy::viewport::ImguiViewportBridgeError::CallbackOwnership(
+                dear_imgui_bevy::viewport::ImguiViewportCallbackOwnershipError::
+                    PlatformMonitorsReplaced,
+            )
+        )
+    );
+}
+
+#[cfg(feature = "multi-viewport")]
+#[test]
+fn frame_preparation_rejects_in_place_platform_monitor_tampering() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_multi_viewport_bridge("viewport-monitor-content-drift");
+    ensure_primary_window(&mut app);
+    app.update();
+
+    let (data, tampered_scale) = {
+        let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
+        let monitors = unsafe { (*context.context_mut().platform_io().as_raw()).Monitors };
+        assert!(monitors.Size > 0);
+        let tampered_scale = unsafe { (*monitors.Data).DpiScale + 0.5 };
+        unsafe { (*monitors.Data).DpiScale = tampered_scale };
+        (monitors.Data, tampered_scale)
+    };
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| app.update()));
+    assert!(
+        result.is_err(),
+        "in-place monitor tampering must stop the frame"
+    );
+
+    let context = app.world().get_non_send::<ImguiContext>().unwrap();
+    let monitors = unsafe { (*context.context().platform_io().as_raw()).Monitors };
+    assert_eq!(monitors.Data, data);
+    assert_eq!(unsafe { (*monitors.Data).DpiScale }, tampered_scale);
+    assert_eq!(
+        app.world()
+            .get_non_send::<ImguiViewportBridge>()
+            .unwrap()
+            .callback_error(),
+        Some(
+            dear_imgui_bevy::viewport::ImguiViewportBridgeError::CallbackOwnership(
+                dear_imgui_bevy::viewport::ImguiViewportCallbackOwnershipError::
+                    PlatformMonitorsReplaced,
+            )
+        )
+    );
+}
+
+#[cfg(all(feature = "multi-viewport", feature = "render"))]
+#[test]
+fn callback_drift_is_reported_before_world_release_pending() {
+    unsafe extern "C" fn foreign_destroy(_viewport: *mut sys::ImGuiViewport) {}
+
+    let _guard = imgui_context_guard();
+    let mut app = app_with_multi_viewport_bridge("viewport-drift-release");
+    let primary = ensure_primary_window(&mut app);
+    let (window, camera) = spawn_secondary_viewport(&mut app, imgui::Id::from(0x711));
+    unsafe {
+        app.world_mut()
+            .get_non_send_mut::<ImguiContext>()
+            .unwrap()
+            .context_mut()
+            .platform_io_mut()
+            .set_platform_destroy_window_raw(Some(foreign_destroy));
+    }
+
+    let owner = app.world_mut().remove_non_send::<ImguiContext>().unwrap();
+    let ownership_error = owner
+        .into_inner()
+        .expect_err("callback drift must be reported first");
+    assert_eq!(
+        ownership_error.error(),
+        dear_imgui_bevy::ImguiContextIntoInnerErrorReason::ViewportCallbackOwnership(
+            dear_imgui_bevy::viewport::ImguiViewportCallbackOwnershipError::
+                PlatformCallbackReplaced {
+                    slot: "Platform_DestroyWindow",
+                },
+        )
+    );
+    let world_error = ownership_error
+        .into_owner()
+        .into_inner()
+        .expect_err("secondary entities must still be released by the World");
+    assert_eq!(
+        world_error.error(),
+        dear_imgui_bevy::ImguiContextIntoInnerErrorReason::ViewportWorldReleasePending
+    );
+
+    app.insert_non_send(world_error.into_owner());
+    app.update();
+    assert!(app.world().get_entity(primary).is_ok());
+    assert!(app.world().get_entity(window).is_err());
+    assert!(app.world().get_entity(camera).is_err());
+
+    let owner = app.world_mut().remove_non_send::<ImguiContext>().unwrap();
+    let mut context = owner
+        .into_inner()
+        .expect("World cleanup should make callback-drift extraction retryable");
+    unsafe {
+        context
+            .platform_io_mut()
+            .set_platform_destroy_window_raw(None);
+    }
+}
+
+#[cfg(all(feature = "multi-viewport", feature = "render"))]
+#[test]
+fn invalid_window_config_does_not_block_viewport_release_cleanup() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_multi_viewport_bridge("viewport-invalid-config-release");
+    let primary = ensure_primary_window(&mut app);
+    let (window, camera) = spawn_secondary_viewport(&mut app, imgui::Id::from(0x712));
+    app.world_mut()
+        .resource_mut::<ImguiBackendConfig>()
+        .viewport_window = ImguiViewportWindowConfig {
+        transparent: true,
+        composite_alpha_mode: CompositeAlphaMode::Opaque,
+        ..Default::default()
+    };
+
+    let owner = app.world_mut().remove_non_send::<ImguiContext>().unwrap();
+    let error = owner
+        .into_inner()
+        .expect_err("live secondary entities must delay Context extraction");
+    assert_eq!(
+        error.error(),
+        dear_imgui_bevy::ImguiContextIntoInnerErrorReason::ViewportWorldReleasePending
+    );
+
+    app.insert_non_send(error.into_owner());
+    app.update();
+    assert!(app.world().get_entity(primary).is_ok());
+    assert!(app.world().get_entity(window).is_err());
+    assert!(app.world().get_entity(camera).is_err());
+
+    let owner = app.world_mut().remove_non_send::<ImguiContext>().unwrap();
+    let _context = owner
+        .into_inner()
+        .expect("invalid creation policy must not block release-only cleanup");
+}
+
+#[cfg(all(feature = "multi-viewport", feature = "render"))]
+#[test]
+fn callback_userdata_drift_fails_before_platform_window_update() {
+    let _guard = imgui_context_guard();
+    let mut app = App::new();
+    app.add_plugins(ExtractPlugin::default());
+    app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
+    app.add_plugins(ImguiPlugin::new(ImguiBackendConfig {
+        name: "viewport-update-ownership".to_owned(),
+        docking: true,
+        multi_viewport: true,
+        viewport_window: Default::default(),
+    }));
+    ensure_primary_window(&mut app);
+    unsafe {
+        app.world_mut()
+            .get_non_send_mut::<ImguiContext>()
+            .unwrap()
+            .context_mut()
+            .io_mut()
+            .set_backend_platform_user_data(std::ptr::null_mut());
+    }
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| app.update()));
+    assert!(
+        result.is_err(),
+        "callback ownership drift must stop the frame before UpdatePlatformWindows"
+    );
+}
+
+#[cfg(feature = "multi-viewport")]
+#[test]
+fn transparent_viewport_config_rejects_non_alpha_compositor_modes() {
+    for composite_alpha_mode in [
+        CompositeAlphaMode::Auto,
+        CompositeAlphaMode::Opaque,
+        CompositeAlphaMode::Inherit,
+    ] {
+        let config = ImguiViewportWindowConfig {
+            composite_alpha_mode,
+            transparent: true,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            config.validate(),
+            Err(
+                dear_imgui_bevy::viewport::ImguiViewportWindowConfigError::
+                    TransparentCompositeAlphaModeUnsupported {
+                        composite_alpha_mode,
+                    },
+            )
+        );
+    }
+
+    for composite_alpha_mode in [
+        CompositeAlphaMode::PreMultiplied,
+        CompositeAlphaMode::PostMultiplied,
+    ] {
+        assert!(
+            ImguiViewportWindowConfig {
+                composite_alpha_mode,
+                transparent: true,
+                ..Default::default()
+            }
+            .validate()
+            .is_ok()
+        );
+    }
 }
 
 #[cfg(feature = "multi-viewport")]
@@ -610,6 +1173,7 @@ fn viewport_platform_feedback_queries_return_mapped_bevy_window_state() {
         name: "viewport-feedback".to_owned(),
         docking: true,
         multi_viewport: true,
+        viewport_window: Default::default(),
     }));
     app.world_mut().spawn((Window::default(), PrimaryWindow));
     {
@@ -914,6 +1478,7 @@ fn viewport_commands_spawn_update_show_and_destroy_window_entities() {
         name: "viewport-lifecycle".to_owned(),
         docking: true,
         multi_viewport: true,
+        viewport_window: Default::default(),
     }));
     ensure_primary_window(&mut app);
 
@@ -1070,6 +1635,7 @@ fn viewport_show_respects_no_focus_on_appearing() {
         name: "viewport-no-focus-on-show".to_owned(),
         docking: true,
         multi_viewport: true,
+        viewport_window: Default::default(),
     }));
     ensure_primary_window(&mut app);
 
@@ -1209,6 +1775,63 @@ fn viewport_commands_spawn_and_destroy_secondary_overlay_camera() {
         app.world().get_entity(camera_entity).is_err(),
         "destroy command should despawn the secondary viewport camera entity"
     );
+}
+
+#[cfg(all(feature = "multi-viewport", feature = "render"))]
+#[test]
+fn viewport_no_renderer_clear_preserves_existing_window_target() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_multi_viewport_bridge("viewport-no-renderer-clear");
+    ensure_primary_window(&mut app);
+
+    let id = imgui::Id::from(0x107);
+    app.world_mut()
+        .get_non_send_mut::<ImguiViewportBridge>()
+        .expect("bridge should be installed")
+        .queue(ImguiViewportCommand::Create(ImguiViewportSnapshot {
+            flags: imgui::ViewportFlags::IS_PLATFORM_WINDOW
+                | imgui::ViewportFlags::NO_RENDERER_CLEAR,
+            ..viewport_snapshot(id.raw())
+        }));
+    app.update();
+
+    let camera = app
+        .world()
+        .get_non_send::<ImguiViewportBridge>()
+        .and_then(|bridge| bridge.viewport_camera(id))
+        .expect("create command should spawn a viewport camera");
+    assert!(matches!(
+        app.world().get::<Camera>(camera).unwrap().output_mode,
+        CameraOutputMode::Write {
+            clear_color: ClearColorConfig::None,
+            ..
+        }
+    ));
+}
+
+#[cfg(all(feature = "multi-viewport", feature = "render"))]
+#[test]
+fn viewport_camera_mapping_recovers_after_external_despawn() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_multi_viewport_bridge("viewport-camera-recovery");
+
+    let id = imgui::Id::from(0x108);
+    let (window_entity, original_camera) = spawn_secondary_viewport(&mut app, id);
+    app.world_mut().despawn(original_camera);
+
+    app.update();
+
+    let replacement_camera = app
+        .world()
+        .get_non_send::<ImguiViewportBridge>()
+        .and_then(|bridge| bridge.viewport_camera(id))
+        .expect("a live viewport window should recover its missing overlay camera");
+    assert_ne!(replacement_camera, original_camera);
+    assert!(app.world().get_entity(replacement_camera).is_ok());
+    assert!(matches!(
+        app.world().get::<RenderTarget>(replacement_camera),
+        Some(RenderTarget::Window(WindowRef::Entity(entity))) if *entity == window_entity
+    ));
 }
 
 #[cfg(all(feature = "multi-viewport", feature = "render"))]

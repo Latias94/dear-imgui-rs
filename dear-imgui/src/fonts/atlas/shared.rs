@@ -10,7 +10,6 @@ use super::state::{font_atlas_state, forget_font_atlas_generation};
 struct SharedFontAtlasInner {
     raw: NonNull<sys::ImFontAtlas>,
     next_frame: Cell<i32>,
-    renderer_has_textures: Cell<Option<bool>>,
 }
 
 impl Drop for SharedFontAtlasInner {
@@ -35,6 +34,18 @@ impl Drop for SharedFontAtlasInner {
 ///
 /// The final Rust owner destroys the native atlas. Contexts that use the atlas unregister from it
 /// before native context shutdown, so Dear ImGui never races this owner or destroys it twice.
+///
+/// Multiple contexts may share the atlas only while they use legacy renderer-managed texture
+/// handling. Attaching a managed renderer with
+/// [`Context::create_renderer_consumer`](crate::Context::create_renderer_consumer) requires this
+/// atlas to be registered with exactly one context. After that claim succeeds, attempts to register
+/// another context return [`ImGuiError::SharedFontAtlasManaged`](crate::ImGuiError::SharedFontAtlasManaged).
+/// Before that managed Context is dropped, its renderer must release its complete GPU texture map
+/// and commit [`Context::prepare_renderer_texture_reset`](crate::Context::prepare_renderer_texture_reset).
+/// Otherwise the atlas preserves its old native bindings and rejects later Context registration
+/// with [`ImGuiError::SharedFontAtlasRendererReleasePending`](crate::ImGuiError::SharedFontAtlasRendererReleasePending).
+/// After releasing the external renderer resources, drop and recreate such an atlas rather than
+/// transferring its unproven renderer namespace to another Context.
 #[derive(Debug, Clone)]
 pub struct SharedFontAtlas(Rc<SharedFontAtlasInner>);
 
@@ -50,7 +61,6 @@ impl SharedFontAtlas {
             SharedFontAtlas(Rc::new(SharedFontAtlasInner {
                 raw: NonNull::new_unchecked(raw_atlas),
                 next_frame: Cell::new(0),
-                renderer_has_textures: Cell::new(None),
             }))
         }
     }
@@ -60,21 +70,6 @@ impl SharedFontAtlas {
     }
 
     pub(crate) fn prepare_frame(&self, renderer_has_textures: bool) {
-        let expected_renderer_has_textures = self.0.renderer_has_textures.get();
-        match expected_renderer_has_textures {
-            Some(expected) => assert_eq!(
-                renderer_has_textures, expected,
-                "all contexts sharing a font atlas must agree on BackendFlags::RENDERER_HAS_TEXTURES"
-            ),
-            None => {}
-        }
-
-        if expected_renderer_has_textures.is_none() {
-            self.0
-                .renderer_has_textures
-                .set(Some(renderer_has_textures));
-        }
-
         let frame = self.0.next_frame.get();
         let next_frame = frame
             .checked_add(1)
@@ -91,7 +86,6 @@ impl SharedFontAtlas {
             sys::igUnregisterFontAtlas(raw);
             if (*raw).RefCount == 0 {
                 (*raw).Locked = false;
-                self.0.renderer_has_textures.set(None);
             }
         }
     }

@@ -8,7 +8,11 @@ pub(crate) trait OwnedGpuGeneration {
     fn teardown(self);
 }
 
-pub(crate) trait RecoveryEffects<G> {
+pub(crate) trait GenerationRelease<G> {
+    fn release_generation(&mut self, generation: &mut G) -> Result<(), RunError>;
+}
+
+pub(crate) trait RecoveryEffects<G>: GenerationRelease<G> {
     fn gpu_lost(&mut self, generation: &mut G) -> Result<(), RunError>;
     fn invalidate_resources(&mut self, generation: &mut G) -> Result<(), RunError>;
     fn gpu_recreated(&mut self, generation: &mut G) -> Result<(), RunError>;
@@ -120,6 +124,7 @@ impl<G: OwnedGpuGeneration> RuntimeGenerations<G> {
             }
             environment.gpu_lost(current)?;
             environment.invalidate_resources(current)?;
+            environment.release_generation(current)?;
         }
 
         let old = self.current.take().ok_or_else(|| RunError::Recovery {
@@ -167,9 +172,16 @@ impl<G: OwnedGpuGeneration> RuntimeGenerations<G> {
         self.lifecycle.fail(error);
     }
 
-    pub(crate) fn shutdown(&mut self) {
+    pub(crate) fn shutdown(
+        &mut self,
+        releaser: &mut impl GenerationRelease<G>,
+    ) -> Result<(), RunError> {
+        if let Some(generation) = self.current.as_mut() {
+            releaser.release_generation(generation)?;
+        }
         self.teardown_current();
         self.lifecycle.shutdown();
+        Ok(())
     }
 
     pub(crate) fn take_terminal_error(&mut self) -> Option<RunError> {
@@ -212,7 +224,8 @@ mod tests {
     use std::{cell::RefCell, collections::BTreeSet, rc::Rc};
 
     use super::{
-        OwnedGpuGeneration, RecoveryEffects, RecoveryOutcome, RuntimeFactory, RuntimeGenerations,
+        GenerationRelease, OwnedGpuGeneration, RecoveryEffects, RecoveryOutcome, RuntimeFactory,
+        RuntimeGenerations,
     };
     use crate::runtime::lifecycle::RuntimeState;
     use crate::{GpuGeneration, RunError};
@@ -284,6 +297,22 @@ mod tests {
         GpuLost,
         InvalidateResources,
         GpuRecreated,
+        RendererRelease,
+    }
+
+    impl GenerationRelease<ProbeGeneration> for ProbeEnvironment {
+        fn release_generation(&mut self, generation: &mut ProbeGeneration) -> Result<(), RunError> {
+            self.state
+                .borrow_mut()
+                .events
+                .push(format!("renderer_release:{}", generation.id.get()));
+            if self.fail_on == Some(EffectFailure::RendererRelease) {
+                return Err(RunError::Recovery {
+                    message: "injected renderer release failure".to_owned(),
+                });
+            }
+            Ok(())
+        }
     }
 
     impl RecoveryEffects<ProbeGeneration> for ProbeEnvironment {
@@ -404,6 +433,7 @@ mod tests {
             [
                 "gpu_lost:0",
                 "managed_reset:0",
+                "renderer_release:0",
                 "teardown:0",
                 "candidate_build:1",
                 "gpu_recreated:1",
@@ -418,13 +448,37 @@ mod tests {
             std::ptr::from_ref(environment.stable_ui.as_ref())
         );
 
-        generations.shutdown();
+        generations.shutdown(&mut environment).unwrap();
         assert_eq!(generations.state(), RuntimeState::Shutdown);
         assert!(state.borrow().alive_generations.is_empty());
         assert_eq!(state.borrow().events.last().unwrap(), "teardown:1");
         let event_count = state.borrow().events.len();
         drop(generations);
         assert_eq!(state.borrow().events.len(), event_count);
+    }
+
+    #[test]
+    fn shutdown_release_failure_retains_the_generation_for_retry() {
+        let (state, mut generations, mut environment, _factory) =
+            fixture(None, Some(EffectFailure::RendererRelease));
+
+        let error = generations
+            .shutdown(&mut environment)
+            .expect_err("release failure must keep ownership retryable");
+        assert!(
+            error
+                .to_string()
+                .contains("injected renderer release failure")
+        );
+        assert_eq!(
+            generations.current_generation(),
+            Some(GpuGeneration::INITIAL)
+        );
+        assert_eq!(state.borrow().alive_generations, BTreeSet::from([0]));
+
+        environment.fail_on = None;
+        generations.shutdown(&mut environment).unwrap();
+        assert!(state.borrow().alive_generations.is_empty());
     }
 
     #[test]
@@ -445,6 +499,7 @@ mod tests {
             [
                 "gpu_lost:0",
                 "managed_reset:0",
+                "renderer_release:0",
                 "teardown:0",
                 "candidate_build:1",
                 "candidate_cleanup:1",
@@ -486,11 +541,13 @@ mod tests {
             [
                 "gpu_lost:0",
                 "managed_reset:0",
+                "renderer_release:0",
                 "teardown:0",
                 "candidate_build:1",
                 "gpu_recreated:1",
                 "gpu_lost:1",
                 "managed_reset:1",
+                "renderer_release:1",
                 "teardown:1",
                 "candidate_build:2",
                 "gpu_recreated:2",
@@ -538,7 +595,7 @@ mod tests {
             .expect("the recovery owner must retain the first effect error");
         assert!(error.to_string().contains(expected_error));
 
-        generations.shutdown();
+        generations.shutdown(&mut environment).unwrap();
         assert_eq!(generations.state(), RuntimeState::Shutdown);
         assert_eq!(generations.current_generation(), None);
         assert!(state.borrow().alive_generations.is_empty());
@@ -555,7 +612,7 @@ mod tests {
             EffectFailure::GpuLost,
             GpuGeneration::INITIAL,
             &["gpu_lost:0"],
-            &["gpu_lost:0", "teardown:0"],
+            &["gpu_lost:0", "renderer_release:0", "teardown:0"],
             "injected gpu_lost failure",
         );
     }
@@ -566,7 +623,12 @@ mod tests {
             EffectFailure::InvalidateResources,
             GpuGeneration::INITIAL,
             &["gpu_lost:0", "managed_reset:0"],
-            &["gpu_lost:0", "managed_reset:0", "teardown:0"],
+            &[
+                "gpu_lost:0",
+                "managed_reset:0",
+                "renderer_release:0",
+                "teardown:0",
+            ],
             "injected invalidation failure",
         );
     }
@@ -580,6 +642,7 @@ mod tests {
             &[
                 "gpu_lost:0",
                 "managed_reset:0",
+                "renderer_release:0",
                 "teardown:0",
                 "candidate_build:1",
                 "gpu_recreated:1",
@@ -587,9 +650,11 @@ mod tests {
             &[
                 "gpu_lost:0",
                 "managed_reset:0",
+                "renderer_release:0",
                 "teardown:0",
                 "candidate_build:1",
                 "gpu_recreated:1",
+                "renderer_release:1",
                 "teardown:1",
             ],
             "injected gpu_recreated failure",

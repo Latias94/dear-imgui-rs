@@ -93,6 +93,19 @@ fn resolve_imgui_includes(cfg: &BuildConfig) -> (PathBuf, PathBuf) {
     (imgui_src, cimgui_root)
 }
 
+fn native_binding_spec() -> &'static build_support::binding::CrateBindingSpec {
+    build_support::binding::CrateBindingSpec::for_crate_and_target(env!("CARGO_PKG_NAME"), "native")
+        .expect("missing dear-implot-sys native binding spec")
+}
+
+#[cfg(feature = "bindgen")]
+fn apply_bindgen_defines(mut builder: bindgen::Builder) -> bindgen::Builder {
+    for define in native_binding_spec().binding_defines() {
+        builder = builder.clang_arg(define.clang_arg());
+    }
+    builder
+}
+
 #[cfg(feature = "bindgen")]
 fn generate_bindings(cfg: &BuildConfig, cimplot_root: &Path, imgui_src: &Path, cimgui_root: &Path) {
     // For wasm32 targets, we rely on pregenerated import-style bindings that
@@ -115,7 +128,7 @@ fn generate_bindings(cfg: &BuildConfig, cimplot_root: &Path, imgui_src: &Path, c
         );
     }
 
-    let bindings = bindgen::Builder::default()
+    let builder = bindgen::Builder::default()
         .header(cimplot_root.join("cimplot.h").to_string_lossy())
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .allowlist_function("ImPlot.*")
@@ -147,10 +160,8 @@ fn generate_bindings(cfg: &BuildConfig, cimplot_root: &Path, imgui_src: &Path, c
         .clang_arg(format!("-I{}", imgui_src.display()))
         .clang_arg(format!("-I{}", cimgui_root.display()))
         .clang_arg(format!("-I{}", cimplot_root.display()))
-        .clang_arg(format!("-I{}", cimplot_root.join("implot").display()))
-        .clang_arg("-DIMGUI_USE_WCHAR32")
-        .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
-        .clang_arg("-DCIMGUI_VARGS0")
+        .clang_arg(format!("-I{}", cimplot_root.join("implot").display()));
+    let bindings = apply_bindgen_defines(builder)
         .clang_arg("-x")
         .clang_arg("c++")
         .clang_arg("-std=c++17")
@@ -265,20 +276,10 @@ fn build_with_cc(cfg: &BuildConfig, cimplot_root: &Path, imgui_src: &Path, cimgu
         build.flag("/D_ITERATOR_DEBUG_LEVEL=0");
     }
 
-    // Inherit dear-imgui defines
-    for (k, v) in env::vars() {
-        let suffix = k
-            .strip_prefix("DEP_DEAR_IMGUI_SYS_DEFINE_")
-            .or_else(|| k.strip_prefix("DEP_DEAR_IMGUI_DEFINE_"));
-        if let Some(suffix) = suffix {
-            build.define(suffix, v.as_str());
-        }
-    }
+    native_binding_spec().apply_extension_binding_defines(&mut build, env::vars());
 
     // Includes and defines
     build.define("IMGUI_DEFINE_MATH_OPERATORS", Some("1"));
-    build.define("IMGUI_USE_WCHAR32", None);
-    build.define("CIMGUI_VARGS0", None);
     build.include(imgui_src);
     build.include(cimgui_root);
     build.include(cimplot_root);
@@ -587,22 +588,8 @@ fn build_with_cmake(cfg: &BuildConfig, cimplot_root: &Path) -> bool {
     println!("cargo:warning=Building cimplot with CMake");
     let mut c = cmake::Config::new(cimplot_root);
     c.define("IMGUI_STATIC", "ON");
-    c.cxxflag("-DCIMGUI_VARGS0");
-    let mut inherited_defines = env::vars()
-        .filter_map(|(key, value)| {
-            key.strip_prefix("DEP_DEAR_IMGUI_SYS_DEFINE_")
-                .or_else(|| key.strip_prefix("DEP_DEAR_IMGUI_DEFINE_"))
-                .map(|suffix| (suffix.to_owned(), value))
-        })
-        .collect::<Vec<_>>();
-    inherited_defines.sort_unstable();
-    inherited_defines.dedup();
-    for (define, value) in inherited_defines {
-        if value.is_empty() {
-            c.cxxflag(format!("-D{define}"));
-        } else {
-            c.cxxflag(format!("-D{define}={value}"));
-        }
+    for define in native_binding_spec().resolved_extension_binding_defines(env::vars()) {
+        c.cxxflag(define.clang_arg());
     }
     let profile = env::var("PROFILE").unwrap_or_else(|_| "release".into());
     let cmake_profile = if cfg.is_msvc() && cfg.is_windows() && profile == "debug" {

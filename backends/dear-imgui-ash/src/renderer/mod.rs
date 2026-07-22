@@ -7,6 +7,7 @@ compile_error!(
 
 mod allocator;
 mod callbacks;
+mod context_state;
 mod core;
 mod draw;
 mod lifecycle;
@@ -35,18 +36,19 @@ use crate::{RendererError, RendererResult};
 #[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
 use ash::Instance;
 use ash::{Device, vk};
+use dear_imgui_rs::Context;
 #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
 use dear_imgui_rs::ViewportFlags;
 use dear_imgui_rs::render::{
     RenderedFrame, RendererConsumer, SnapshotTextureId, TextureFeedback, TextureOp, TextureRequest,
     TextureUploadIdentity, TextureUploadRect,
 };
-use dear_imgui_rs::{BackendFlags, Context};
 use dear_imgui_rs::{TextureData, TextureFormat as ImGuiTextureFormat, TextureId, TextureStatus};
 use std::collections::{HashMap, VecDeque};
 
 use self::allocator::{Allocate, Allocator, Memory};
 use self::callbacks::draw_callback_reset_render_state;
+use self::context_state::RendererContextState;
 pub use self::core::AshRenderer;
 use self::draw::Frames;
 #[cfg(feature = "dynamic-rendering")]

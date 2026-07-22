@@ -131,8 +131,12 @@ impl AppWindow {
         let mut context = Context::create();
         context.set_ini_filename(None::<String>).unwrap();
 
-        let mut platform = WinitPlatform::new(&mut context);
-        platform.attach_window(&window, dear_imgui_winit::HiDpiMode::Default, &mut context);
+        let mut platform = WinitPlatform::new(&mut context)?;
+        platform.attach_window(
+            Arc::clone(&window),
+            dear_imgui_winit::HiDpiMode::Default,
+            &mut context,
+        )?;
 
         // Initialize the renderer with one-step initialization
         let init_info =
@@ -188,7 +192,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context);
+            .prepare_frame(&self.window, &mut self.imgui.context)?;
 
         let ui = self.imgui.context.frame();
         let plot_ui = ui.implot(&self.imgui.plot_context);
@@ -704,11 +708,15 @@ impl ApplicationHandler for App {
         event: WindowEvent,
     ) {
         if let Some(window) = &mut self.window {
-            window.imgui.platform.handle_window_event(
+            if let Err(error) = window.imgui.platform.handle_window_event(
                 &mut window.imgui.context,
                 &window.window,
                 &event,
-            );
+            ) {
+                eprintln!("Winit platform error: {error}");
+                event_loop.exit();
+                return;
+            }
 
             match event {
                 WindowEvent::CloseRequested => {

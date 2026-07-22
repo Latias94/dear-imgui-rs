@@ -9,6 +9,7 @@ use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::num::NonZeroU64;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
 use crate::render::draw_data::{
@@ -30,7 +31,7 @@ pub enum SnapshotTextureId {
     FontAtlas {
         /// Context that produced this snapshot.
         context: ContextId,
-        /// Process-unique atlas allocation stamp.
+        /// Opaque namespace for this atlas's current managed-renderer ownership period.
         stamp: u64,
         /// Atlas-local allocation generation captured by this snapshot.
         generation: u64,
@@ -249,10 +250,51 @@ impl MainDrawSnapshot {
 }
 
 /// Thread-safe draw data for one Dear ImGui viewport.
+///
+/// The main-viewport role is captured with the source Context and remains meaningful after the
+/// native viewport and Context are no longer current.
 #[derive(Debug)]
 pub struct ViewportDrawDataSnapshot {
     pub viewport_id: Id,
     pub draw: DrawDataSnapshot,
+    is_main: bool,
+}
+
+impl ViewportDrawDataSnapshot {
+    /// Construct detached draw data with its Context-relative viewport role captured explicitly.
+    ///
+    /// Pass the result of [`crate::platform_io::Viewport::is_main`] from the live source viewport;
+    /// do not infer `is_main` from the numeric viewport ID.
+    ///
+    /// ```
+    /// use dear_imgui_rs::{
+    ///     Id,
+    ///     render::{DrawDataSnapshot, ViewportDrawDataSnapshot},
+    /// };
+    ///
+    /// let draw = DrawDataSnapshot {
+    ///     display_pos: [0.0, 0.0],
+    ///     display_size: [640.0, 480.0],
+    ///     framebuffer_scale: [1.0, 1.0],
+    ///     draw_lists: Vec::new(),
+    /// };
+    /// let viewport = ViewportDrawDataSnapshot::new(Id::from(7_u32), true, draw);
+    /// assert!(viewport.is_main());
+    /// ```
+    #[must_use]
+    pub const fn new(viewport_id: Id, is_main: bool, draw: DrawDataSnapshot) -> Self {
+        Self {
+            viewport_id,
+            draw,
+            is_main,
+        }
+    }
+
+    /// Whether this was the source Context's main viewport when the snapshot was captured.
+    #[must_use]
+    pub const fn is_main(&self) -> bool {
+        self.is_main
+    }
 }
 
 /// Thread-safe draw data snapshot.
@@ -323,7 +365,7 @@ impl std::fmt::Debug for TextureUploadIdentity {
 }
 
 /// A managed texture operation requested by Dear ImGui.
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TextureOp {
     Create {
         format: TextureFormat,
@@ -352,7 +394,7 @@ impl TextureOp {
 }
 
 /// A tightly-packed pixel upload for a sub-rectangle.
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TextureUploadRect {
     pub rect: TextureRect,
     pub row_pitch: usize,
@@ -371,7 +413,7 @@ pub(crate) struct TextureRequestKey {
 #[derive(Debug)]
 pub struct TextureRequest {
     key: TextureRequestKey,
-    op: TextureOp,
+    op: Arc<TextureOp>,
 }
 
 impl TextureRequest {
@@ -383,8 +425,8 @@ impl TextureRequest {
 
     /// Request operation and owned upload bytes.
     #[must_use]
-    pub const fn operation(&self) -> &TextureOp {
-        &self.op
+    pub fn operation(&self) -> &TextureOp {
+        self.op.as_ref()
     }
 
     /// Operation kind encoded into feedback validation.
@@ -487,6 +529,14 @@ pub enum SnapshotError {
         height: i32,
         bpp: i32,
     },
+    #[error(
+        "managed texture {id:?} full update exceeds ImTextureRect limits (width={width}, height={height})"
+    )]
+    TextureFullUpdateOutOfRange {
+        id: SnapshotTextureId,
+        width: u32,
+        height: u32,
+    },
     #[error(transparent)]
     Consumer(#[from] RendererConsumerError),
     #[error(transparent)]
@@ -499,6 +549,18 @@ pub enum SnapshotError {
 pub enum RendererConsumerError {
     #[error("this Context already has an active renderer consumer")]
     ConsumerAlreadyActive,
+    #[error(
+        "managed font-atlas rendering requires exactly one registered Context; found {registered_contexts}"
+    )]
+    SharedFontAtlasRequiresExclusiveContext { registered_contexts: usize },
+    #[error(
+        "the font atlas contains legacy-preloaded data; clear and repopulate it before attaching a managed renderer"
+    )]
+    FontAtlasRequiresManagedRebuild,
+    #[error(
+        "the shared font atlas still belongs to a renderer whose texture release was not committed"
+    )]
+    SharedFontAtlasRendererReleasePending,
     #[error("the previous renderer consumer is still draining outstanding epochs")]
     ConsumerDraining,
     #[error("this Context has no active renderer consumer")]
@@ -647,7 +709,7 @@ pub(crate) struct ResolvedSnapshotTexture {
 pub(crate) struct PendingTextureRequest {
     pub(crate) texture: SnapshotTextureId,
     pub(crate) revision: u64,
-    pub(crate) op: TextureOp,
+    pub(crate) op: Arc<TextureOp>,
 }
 
 #[derive(Debug)]
@@ -759,10 +821,10 @@ pub(crate) fn capture_draw_data(
 ) -> Result<PendingSnapshot, SnapshotError> {
     let draw = snapshot_draw_data(draw_data, resolve)?;
     let texture_requests = snapshot_texture_requests(draw_data, resolve)?;
-    let (main_draw, viewports) = match owner_viewport_id(draw_data) {
-        Some(viewport_id) => (
+    let (main_draw, viewports) = match owner_viewport_identity(draw_data) {
+        Some((viewport_id, is_main)) => (
             MainDrawSnapshot::Viewport(0),
-            vec![ViewportDrawDataSnapshot { viewport_id, draw }],
+            vec![ViewportDrawDataSnapshot::new(viewport_id, is_main, draw)],
         ),
         None => (MainDrawSnapshot::Standalone(draw), Vec::new()),
     };
@@ -791,14 +853,17 @@ pub(crate) fn capture_platform_io(
         if !draw_data.valid() {
             continue;
         }
-        if main_draw_index.is_none() && is_main_platform_viewport(viewport.id(), draw_data) {
+        let is_main = viewport.is_main()
+            || owner_viewport_identity(draw_data).is_some_and(|(_, is_main)| is_main);
+        if main_draw_index.is_none() && is_main {
             main_draw_index = Some(viewports.len());
             main_draw_data = Some(draw_data);
         }
-        viewports.push(ViewportDrawDataSnapshot {
-            viewport_id: viewport.id(),
-            draw: snapshot_draw_data(draw_data, resolve)?,
-        });
+        viewports.push(ViewportDrawDataSnapshot::new(
+            viewport.id(),
+            is_main,
+            snapshot_draw_data(draw_data, resolve)?,
+        ));
     }
 
     let Some(main_draw_index) = main_draw_index else {
@@ -829,25 +894,21 @@ fn empty_draw_data_snapshot() -> DrawDataSnapshot {
     }
 }
 
-fn owner_viewport_id(draw_data: &DrawData) -> Option<Id> {
+fn owner_viewport_identity(draw_data: &DrawData) -> Option<(Id, bool)> {
     let owner_viewport = draw_data.owner_viewport();
     if owner_viewport.is_null() {
         return None;
     }
     let raw = unsafe { (*owner_viewport).ID };
-    (raw != 0).then_some(Id::from(raw))
+    (raw != 0).then(|| {
+        let viewport = unsafe { crate::platform_io::Viewport::from_raw(owner_viewport) };
+        (Id::from(raw), viewport.is_main())
+    })
 }
 
 #[cfg(feature = "multi-viewport")]
 fn draw_data_from_sys(draw_data: &sys::ImDrawData) -> &DrawData {
     unsafe { <DrawData as crate::internal::RawCast<sys::ImDrawData>>::from_raw(draw_data) }
-}
-
-#[cfg(feature = "multi-viewport")]
-fn is_main_platform_viewport(viewport_id: Id, draw_data: &DrawData) -> bool {
-    viewport_id == crate::platform_io::MAIN_VIEWPORT_ID
-        || owner_viewport_id(draw_data)
-            .is_some_and(|owner_id| owner_id == crate::platform_io::MAIN_VIEWPORT_ID)
 }
 
 fn snapshot_draw_data(
@@ -949,7 +1010,7 @@ fn snapshot_texture_requests(
             out.push(PendingTextureRequest {
                 texture: id,
                 revision: resolved.revision,
-                op: TextureOp::Destroy,
+                op: Arc::new(TextureOp::Destroy),
             });
             continue;
         }
@@ -1004,12 +1065,7 @@ fn snapshot_texture_requests(
                     if rect.w != 0 && rect.h != 0 {
                         rects.push(rect);
                     } else {
-                        rects.push(TextureRect {
-                            x: 0,
-                            y: 0,
-                            w: width.min(u16::MAX as u32) as u16,
-                            h: height.min(u16::MAX as u32) as u16,
-                        });
+                        rects.push(full_texture_update_rect(id, width, height)?);
                     }
                 }
                 TextureOp::Update {
@@ -1029,10 +1085,24 @@ fn snapshot_texture_requests(
         out.push(PendingTextureRequest {
             texture: id,
             revision: resolved.revision,
-            op,
+            op: Arc::new(op),
         });
     }
     Ok(out)
+}
+
+fn full_texture_update_rect(
+    id: SnapshotTextureId,
+    width: u32,
+    height: u32,
+) -> Result<TextureRect, SnapshotError> {
+    let out_of_range = || SnapshotError::TextureFullUpdateOutOfRange { id, width, height };
+    Ok(TextureRect {
+        x: 0,
+        y: 0,
+        w: u16::try_from(width).map_err(|_| out_of_range())?,
+        h: u16::try_from(height).map_err(|_| out_of_range())?,
+    })
 }
 
 fn validated_texture_layout(
@@ -1084,7 +1154,7 @@ mod upload_identity_tests {
                 revision,
                 kind,
             },
-            op,
+            op: Arc::new(op),
         }
     }
 
@@ -1169,6 +1239,34 @@ mod layout_tests {
             } if actual == id
         ));
     }
+
+    #[test]
+    fn full_texture_updates_reject_dimensions_the_native_rect_cannot_represent() {
+        let context = crate::Context::create();
+        let id = SnapshotTextureId::FontAtlas {
+            context: context.id(),
+            stamp: 2,
+            generation: 1,
+        };
+
+        assert_eq!(
+            full_texture_update_rect(id, u16::MAX as u32, 1).unwrap(),
+            TextureRect {
+                x: 0,
+                y: 0,
+                w: u16::MAX,
+                h: 1,
+            }
+        );
+        assert!(matches!(
+            full_texture_update_rect(id, u16::MAX as u32 + 1, 1),
+            Err(SnapshotError::TextureFullUpdateOutOfRange {
+                id: actual,
+                width,
+                height: 1,
+            }) if actual == id && width == u16::MAX as u32 + 1
+        ));
+    }
 }
 
 fn copy_upload_rect(
@@ -1250,11 +1348,11 @@ mod tests {
 
     #[test]
     fn platform_capture_preserves_viewport_order_and_main_identity() {
-        let secondary = viewport(0x222, std::ptr::null_mut());
-        let main = viewport(
-            crate::platform_io::MAIN_VIEWPORT_ID.raw(),
-            std::ptr::null_mut(),
-        );
+        let _guard = crate::test_support::imgui_context_guard();
+        let mut context = crate::Context::create();
+        let main = context.main_viewport().as_raw_mut();
+        let previous_main_draw = unsafe { (*main).DrawData };
+        let secondary = viewport(unsafe { (*main).ID }, std::ptr::null_mut());
         let secondary_draw = empty_native_draw_data(secondary, [100.0, 50.0], [320.0, 200.0]);
         let main_draw = empty_native_draw_data(main, [0.0, 0.0], [640.0, 360.0]);
         unsafe {
@@ -1281,16 +1379,27 @@ mod tests {
         .expect("empty draw data should capture");
         assert_eq!(pending.draw_data().display_size, [640.0, 360.0]);
         assert_eq!(pending.viewports[0].draw.display_size, [320.0, 200.0]);
+        assert!(!pending.viewports[0].is_main());
+        assert!(pending.viewports[1].is_main());
         assert!(std::ptr::eq(
             pending.draw_data(),
             &pending.viewports[1].draw
         ));
 
+        let suspended_context = context.suspend();
+        let other_context = crate::Context::create();
+        assert!(!pending.viewports[0].is_main());
+        assert!(pending.viewports[1].is_main());
+        drop(other_context);
+        let _context = suspended_context
+            .activate()
+            .expect("the snapshot owner Context should reactivate");
+
         unsafe {
+            (*main).DrawData = previous_main_draw;
             sys::ImDrawData_destroy(secondary_draw);
             sys::ImDrawData_destroy(main_draw);
             sys::ImGuiViewport_destroy(secondary);
-            sys::ImGuiViewport_destroy(main);
         }
     }
 }

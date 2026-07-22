@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 
 use build_support::binding::{
     ArtifactProfile, BindingSpec, BuildRequest, BuildRequestInput, CORE_BUILD_ENV_VARS,
-    CoreArtifactIdentity, NativeAbiProfile, RELEASE_CANDIDATE_SHA_ENV, SourceRevisions,
-    TargetFacts, bindgen_rerun_env_vars, is_supported_wasm_target, validate_wasm_feature_contract,
+    CoreArtifactIdentity, CrateBindingDefine, NativeAbiProfile, RELEASE_CANDIDATE_SHA_ENV,
+    SourceRevisions, TargetFacts, bindgen_rerun_env_vars, is_supported_wasm_target,
+    validate_wasm_feature_contract,
 };
 
 const CORE_WASM_IMPORT_MODULE: &str = "imgui-sys-v0";
@@ -973,24 +974,23 @@ fn export_include_paths(cfg: &BuildConfig) {
         "cargo:IMGUI_BACKEND_SHIMS_PATH={}",
         cfg.manifest_dir.join("backend-shims").display()
     );
-    println!(
-        "cargo:DEFINE_IMGUI_ENABLE_TEST_ENGINE={}",
-        if cfg!(feature = "test-engine") {
-            "1"
-        } else {
-            "0"
-        }
-    );
-    println!(
-        "cargo:DEFINE_IMGUITEST={}",
-        if cfg!(feature = "test-engine") {
-            "1"
-        } else {
-            "0"
-        }
-    );
-    println!("cargo:DEFINE_IMGUI_DISABLE_OBSOLETE_FUNCTIONS=1");
-    println!("cargo:DEFINE_IMGUI_USE_WCHAR32=1");
+    for define in cfg
+        .binding_spec()
+        .clang_defines
+        .iter()
+        .filter_map(|definition| CrateBindingDefine::from_definition(definition))
+        .filter(|define| define.applies_to_native_compilation())
+    {
+        println!(
+            "cargo:DEFINE_{}={}",
+            define.name,
+            define.value.unwrap_or("1")
+        );
+    }
+    if cfg!(feature = "test-engine") {
+        println!("cargo:DEFINE_IMGUI_ENABLE_TEST_ENGINE=1");
+        println!("cargo:DEFINE_IMGUITEST=1");
+    }
 }
 
 fn expected_lib_name(target_env: &str) -> String {

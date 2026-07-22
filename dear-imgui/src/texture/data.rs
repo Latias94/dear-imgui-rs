@@ -372,16 +372,34 @@ impl TextureData {
                 return;
             }
 
+            let update_rect = if (*raw).Status == sys::ImTextureStatus_WantCreate {
+                None
+            } else {
+                let width = u16::try_from((*raw).Width).unwrap_or_else(|_| {
+                    panic!(
+                        "TextureData::set_data() cannot represent a full-width update for width {}; use update_subresource() with representable rectangles or recreate the texture",
+                        (*raw).Width
+                    )
+                });
+                let height = u16::try_from((*raw).Height).unwrap_or_else(|_| {
+                    panic!(
+                        "TextureData::set_data() cannot represent a full-height update for height {}; use update_subresource() with representable rectangles or recreate the texture",
+                        (*raw).Height
+                    )
+                });
+                Some(sys::ImTextureRect {
+                    x: 0,
+                    y: 0,
+                    w: width,
+                    h: height,
+                })
+            };
+
             std::ptr::copy_nonoverlapping(data.as_ptr(), (*raw).Pixels as *mut u8, copy_bytes);
 
             // Mark the entire texture as updated without downgrading an initial create request.
-            (*raw).UpdateRect = sys::ImTextureRect {
-                x: 0u16,
-                y: 0u16,
-                w: (*raw).Width.clamp(0, u16::MAX as i32) as u16,
-                h: (*raw).Height.clamp(0, u16::MAX as i32) as u16,
-            };
-            if (*raw).Status != sys::ImTextureStatus_WantCreate {
+            if let Some(update_rect) = update_rect {
+                (*raw).UpdateRect = update_rect;
                 sys::ImTextureData_SetStatus(raw, sys::ImTextureStatus_WantUpdates);
             }
         }

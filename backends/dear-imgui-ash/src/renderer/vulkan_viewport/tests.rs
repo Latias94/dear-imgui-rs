@@ -3,8 +3,8 @@ use std::ffi::c_void;
 use std::rc::Rc;
 
 use super::callbacks::{
-    publish_registered_box, publish_registered_box_transactionally,
-    request_platform_close_after_create_failure, validate_secondary_viewports,
+    publish_registered_box, publish_registered_box_transactionally, recover_acquired_step,
+    validate_secondary_viewports,
 };
 use super::registry::{
     fail_next_viewport_registration, register_viewport_data, take_viewport_data_from_viewport,
@@ -193,13 +193,41 @@ fn foreign_renderer_user_data_is_never_typed_or_taken() {
 }
 
 #[test]
-fn creation_failure_requests_platform_window_close() {
-    let mut raw_viewport = sys::ImGuiViewport::default();
-    let viewport = unsafe { Viewport::from_raw_mut(&mut raw_viewport) };
+fn every_acquired_frame_error_runs_recovery_before_returning() {
+    let recovery_count = Cell::new(0);
+    let result = recover_acquired_step::<()>(
+        Err(RendererError::Init(
+            "injected acquired-frame failure".into(),
+        )),
+        || {
+            recovery_count.set(recovery_count.get() + 1);
+            Ok(())
+        },
+    );
 
-    request_platform_close_after_create_failure(viewport);
+    assert!(matches!(result, Err(AshViewportError::Renderer(_))));
+    assert_eq!(recovery_count.get(), 1);
+}
 
-    assert!(viewport.platform_request_close());
+#[test]
+fn acquired_frame_error_preserves_recovery_failure() {
+    let result = recover_acquired_step::<()>(
+        Err(RendererError::Init(
+            "injected acquired-frame failure".into(),
+        )),
+        || {
+            Err(AshViewportError::InvalidCallbackArgument {
+                callback: "injected recovery failure",
+            })
+        },
+    );
+
+    assert!(matches!(
+        result,
+        Err(AshViewportError::InvalidCallbackArgument {
+            callback: "injected recovery failure"
+        })
+    ));
 }
 
 #[test]
@@ -269,5 +297,156 @@ fn zero_extent_pauses_and_variable_extent_is_clamped() {
     assert_eq!(
         swapchain::select_swapchain_extent(&capabilities, None),
         None
+    );
+}
+
+#[test]
+fn auto_no_vsync_prefers_immediate_over_fifo() {
+    let modes = [vk::PresentModeKHR::FIFO, vk::PresentModeKHR::IMMEDIATE];
+
+    assert_eq!(
+        swapchain::resolve_present_mode(PresentModePolicy::AutoNoVsync, &modes),
+        Ok(vk::PresentModeKHR::IMMEDIATE)
+    );
+}
+
+#[test]
+fn auto_no_vsync_prefers_mailbox_over_fifo() {
+    let modes = [vk::PresentModeKHR::FIFO, vk::PresentModeKHR::MAILBOX];
+
+    assert_eq!(
+        swapchain::resolve_present_mode(PresentModePolicy::AutoNoVsync, &modes),
+        Ok(vk::PresentModeKHR::MAILBOX)
+    );
+}
+
+#[test]
+fn auto_no_vsync_safely_falls_back_to_fifo() {
+    assert_eq!(
+        swapchain::resolve_present_mode(
+            PresentModePolicy::AutoNoVsync,
+            &[vk::PresentModeKHR::FIFO]
+        ),
+        Ok(vk::PresentModeKHR::FIFO)
+    );
+}
+
+#[test]
+fn auto_vsync_prefers_fifo_relaxed_then_fifo() {
+    assert_eq!(
+        swapchain::resolve_present_mode(
+            PresentModePolicy::AutoVsync,
+            &[vk::PresentModeKHR::FIFO, vk::PresentModeKHR::FIFO_RELAXED]
+        ),
+        Ok(vk::PresentModeKHR::FIFO_RELAXED)
+    );
+    assert_eq!(
+        swapchain::resolve_present_mode(PresentModePolicy::AutoVsync, &[vk::PresentModeKHR::FIFO]),
+        Ok(vk::PresentModeKHR::FIFO)
+    );
+}
+
+#[test]
+fn unsupported_exact_present_mode_is_rejected() {
+    assert_eq!(
+        swapchain::resolve_present_mode(
+            PresentModePolicy::Exact(vk::PresentModeKHR::IMMEDIATE),
+            &[vk::PresentModeKHR::FIFO]
+        ),
+        Err(SurfaceSupportError::PresentModeUnsupported {
+            requested: vk::PresentModeKHR::IMMEDIATE,
+        })
+    );
+}
+
+#[test]
+fn automatic_srgb_selection_matches_the_complete_surface_pair() {
+    let hdr = vk::SurfaceFormatKHR {
+        format: vk::Format::B8G8R8A8_SRGB,
+        color_space: vk::ColorSpaceKHR::HDR10_ST2084_EXT,
+    };
+    let srgb = vk::SurfaceFormatKHR {
+        format: vk::Format::B8G8R8A8_SRGB,
+        color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
+    };
+
+    assert_eq!(
+        swapchain::resolve_surface_format(SurfaceFormatPolicy::AutoSrgb, &[hdr, srgb]),
+        Ok(srgb)
+    );
+}
+
+#[test]
+fn undefined_surface_format_sentinel_resolves_to_an_srgb_pair() {
+    let undefined = vk::SurfaceFormatKHR {
+        format: vk::Format::UNDEFINED,
+        color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
+    };
+
+    assert_eq!(
+        swapchain::resolve_surface_format(SurfaceFormatPolicy::AutoSrgb, &[undefined]),
+        Ok(vk::SurfaceFormatKHR {
+            format: vk::Format::B8G8R8A8_SRGB,
+            color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
+        })
+    );
+}
+
+#[test]
+fn undefined_surface_format_sentinel_preserves_its_color_space() {
+    let undefined_hdr = vk::SurfaceFormatKHR {
+        format: vk::Format::UNDEFINED,
+        color_space: vk::ColorSpaceKHR::HDR10_ST2084_EXT,
+    };
+    let requested = vk::SurfaceFormatKHR {
+        format: vk::Format::A2B10G10R10_UNORM_PACK32,
+        color_space: vk::ColorSpaceKHR::HDR10_ST2084_EXT,
+    };
+
+    assert_eq!(
+        swapchain::resolve_surface_format(SurfaceFormatPolicy::Exact(requested), &[undefined_hdr]),
+        Ok(requested)
+    );
+    assert_eq!(
+        swapchain::resolve_surface_format(SurfaceFormatPolicy::AutoSrgb, &[undefined_hdr]),
+        Err(SurfaceSupportError::SrgbSurfaceFormatUnsupported)
+    );
+}
+
+#[test]
+fn exact_surface_policy_rejects_undefined_as_a_swapchain_format() {
+    let undefined = vk::SurfaceFormatKHR {
+        format: vk::Format::UNDEFINED,
+        color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
+    };
+
+    assert_eq!(
+        swapchain::resolve_surface_format(SurfaceFormatPolicy::Exact(undefined), &[undefined]),
+        Err(SurfaceSupportError::SurfaceFormatUnsupported {
+            requested: undefined,
+        })
+    );
+}
+
+#[test]
+fn main_surface_policy_copies_the_pair_and_vsync_intent() {
+    let pair = vk::SurfaceFormatKHR {
+        format: vk::Format::B8G8R8A8_SRGB,
+        color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
+    };
+
+    assert_eq!(
+        ViewportSwapchainPolicy::from_main_surface(pair, vk::PresentModeKHR::FIFO),
+        ViewportSwapchainPolicy {
+            surface_format: SurfaceFormatPolicy::Exact(pair),
+            present_mode: PresentModePolicy::AutoVsync,
+        }
+    );
+    assert_eq!(
+        ViewportSwapchainPolicy::from_main_surface(pair, vk::PresentModeKHR::IMMEDIATE),
+        ViewportSwapchainPolicy {
+            surface_format: SurfaceFormatPolicy::Exact(pair),
+            present_mode: PresentModePolicy::AutoNoVsync,
+        }
     );
 }

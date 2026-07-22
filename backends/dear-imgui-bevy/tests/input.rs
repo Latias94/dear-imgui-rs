@@ -91,15 +91,12 @@ fn run_condition_value<M>(app: &mut App, system: impl IntoSystem<(), bool, M> + 
 }
 
 fn request_text_cursor_and_ime(
-    mut imgui_context: NonSendMut<ImguiContext>,
+    imgui_context: NonSend<ImguiContext>,
     frame_state: NonSend<ImguiFrameState>,
 ) {
     let ui = frame_state.ui().expect("Dear ImGui frame should be open");
     ui.set_mouse_cursor(Some(imgui::MouseCursor::TextInput));
-    imgui_context
-        .context_mut()
-        .io_mut()
-        .set_mouse_draw_cursor(false);
+    ui.set_mouse_draw_cursor(false);
 
     let raw_context = imgui_context.context().as_raw();
     // SAFETY: This test owns the backend context resource and mutates the live frame's platform IME
@@ -112,15 +109,12 @@ fn request_text_cursor_and_ime(
 }
 
 fn request_text_cursor_and_secondary_viewport_ime(
-    mut imgui_context: NonSendMut<ImguiContext>,
+    imgui_context: NonSend<ImguiContext>,
     frame_state: NonSend<ImguiFrameState>,
 ) {
     let ui = frame_state.ui().expect("Dear ImGui frame should be open");
     ui.set_mouse_cursor(Some(imgui::MouseCursor::TextInput));
-    imgui_context
-        .context_mut()
-        .io_mut()
-        .set_mouse_draw_cursor(false);
+    ui.set_mouse_draw_cursor(false);
 
     let raw_context = imgui_context.context().as_raw();
     unsafe {
@@ -132,15 +126,12 @@ fn request_text_cursor_and_secondary_viewport_ime(
 }
 
 fn request_primary_cursor_and_secondary_viewport_ime(
-    mut imgui_context: NonSendMut<ImguiContext>,
+    imgui_context: NonSend<ImguiContext>,
     frame_state: NonSend<ImguiFrameState>,
 ) {
     let ui = frame_state.ui().expect("Dear ImGui frame should be open");
     ui.set_mouse_cursor(Some(imgui::MouseCursor::TextInput));
-    imgui_context
-        .context_mut()
-        .io_mut()
-        .set_mouse_draw_cursor(false);
+    ui.set_mouse_draw_cursor(false);
 
     let raw_context = imgui_context.context().as_raw();
     unsafe {
@@ -152,15 +143,12 @@ fn request_primary_cursor_and_secondary_viewport_ime(
 }
 
 fn request_software_cursor(
-    mut imgui_context: NonSendMut<ImguiContext>,
+    imgui_context: NonSend<ImguiContext>,
     frame_state: NonSend<ImguiFrameState>,
 ) {
     let ui = frame_state.ui().expect("Dear ImGui frame should be open");
     ui.set_mouse_cursor(Some(imgui::MouseCursor::Hand));
-    imgui_context
-        .context_mut()
-        .io_mut()
-        .set_mouse_draw_cursor(true);
+    ui.set_mouse_draw_cursor(true);
 
     let raw_context = imgui_context.context().as_raw();
     // SAFETY: This test owns the backend context resource and mutates the live frame's platform IME
@@ -172,16 +160,10 @@ fn request_software_cursor(
     }
 }
 
-fn request_hidden_cursor(
-    mut imgui_context: NonSendMut<ImguiContext>,
-    frame_state: NonSend<ImguiFrameState>,
-) {
+fn request_hidden_cursor(frame_state: NonSend<ImguiFrameState>) {
     let ui = frame_state.ui().expect("Dear ImGui frame should be open");
     ui.set_mouse_cursor(None);
-    imgui_context
-        .context_mut()
-        .io_mut()
-        .set_mouse_draw_cursor(false);
+    ui.set_mouse_draw_cursor(false);
 }
 
 fn key_input(

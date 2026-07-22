@@ -6,7 +6,7 @@ use dear_imgui_rs::platform_io::Viewport;
 use dear_imgui_rs::{ContextBinding, ContextId, ContextLifecycle};
 
 use super::runtime::{AshViewportError, RuntimeControl};
-use super::{SurfaceAdapter, ViewportAshData, khr_surface, sys, vk};
+use super::{SurfaceAdapter, ViewportAshData, ViewportSwapchainPolicy, khr_surface, sys, vk};
 
 #[derive(Clone)]
 pub(super) struct GlobalHandles {
@@ -17,6 +17,7 @@ pub(super) struct GlobalHandles {
     pub(super) graphics_queue_family_index: u32,
     pub(super) present_queue_family_index: u32,
     pub(super) in_flight_frames: usize,
+    pub(super) swapchain_policy: ViewportSwapchainPolicy,
     pub(super) surface_adapter: Arc<dyn SurfaceAdapter>,
 }
 
@@ -255,6 +256,14 @@ pub enum SurfaceSupportError {
     PresentModesQuery(vk::Result),
     #[error("the surface reports no present modes")]
     NoPresentModes,
+    #[error("the surface does not support the requested format/color-space pair {requested:?}")]
+    SurfaceFormatUnsupported { requested: vk::SurfaceFormatKHR },
+    #[error("the surface has no supported 8-bit sRGB format paired with SRGB_NONLINEAR")]
+    SrgbSurfaceFormatUnsupported,
+    #[error("the surface does not support the requested present mode {requested:?}")]
+    PresentModeUnsupported { requested: vk::PresentModeKHR },
+    #[error("the automatic present-mode policy found no supported fallback")]
+    AutomaticPresentModeUnsupported,
 }
 
 pub(super) struct SurfaceSupport {

@@ -1,69 +1,57 @@
 use std::cell::{Cell, RefCell};
 use std::marker::PhantomData;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use dear_imgui_rs::{
-    Context, ContextAttachment, ContextAttachmentError, ContextAttachmentLease,
-    ContextAttachmentRole, ContextBinding, ContextBindingError, ContextDestroyed, ContextTeardown,
+    Context, ContextAttachmentTeardownError, ContextBinding, ContextBindingError, ContextDestroyed,
+    ContextTeardown,
 };
-use thiserror::Error;
 use winit::event::Event;
 use winit::event_loop::ActiveEventLoop;
+#[cfg(target_os = "linux")]
+use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
 
 use super::callbacks::{
-    claim_platform_callbacks, preflight_platform_callbacks, release_platform_callbacks,
-    setup_monitors,
+    MonitorOwnership, PlatformCallbackContract, PreparedMonitors, claim_platform_callbacks,
+    has_owned_platform_callback_in_current_context, preflight_platform_callbacks,
+    preflight_platform_window_destruction, prepare_monitors, publish_monitors,
+    release_platform_callbacks, validate_platform_callback_contract,
 };
-use super::registry::{register_runtime, unregister_runtime};
+use super::registry::{preflight_viewport_ownership, register_runtime, unregister_runtime};
 use super::viewport_data::{init_main_viewport, preflight_main_viewport};
+use crate::platform::{WinitPlatformControl, WinitPlatformError};
 
-struct WinitPlatformAttachmentMarker;
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ConstructionStage {
+    Attachment,
+    Registry,
+    MainViewport,
+    Callbacks,
+    Monitors,
+    BackendFlags,
+}
 
-/// Failure to attach or operate a Winit multi-viewport platform runtime.
-#[derive(Clone, Debug, Eq, Error, PartialEq)]
-#[non_exhaustive]
-pub enum WinitPlatformError {
-    /// The Dear ImGui Context rejected the platform attachment.
-    #[error(transparent)]
-    Attachment(#[from] ContextAttachmentError),
-    /// The originating Dear ImGui Context can no longer be entered normally.
-    #[error(transparent)]
-    Context(#[from] ContextBindingError),
-    /// The Context passed to an operation is not the runtime's Context.
-    #[error("the Winit platform runtime belongs to a different Dear ImGui context")]
-    ContextMismatch,
-    /// The build artifact lacks the aggregate callback bridge required by this backend.
-    #[error("dear-imgui-sys was built without PlatformIO aggregate ABI hooks")]
-    AggregateCallbackHooksUnavailable,
-    /// Another platform backend already owns one of the required callback slots.
-    #[error("ImGuiPlatformIO callback `{callback}` is already owned by another platform backend")]
-    PlatformCallbackOccupied { callback: &'static str },
-    /// A callback installed by this runtime was replaced while it remained attached.
-    #[error("Winit platform callback `{callback}` was replaced while the runtime was attached")]
-    PlatformCallbackReplaced { callback: &'static str },
-    /// A viewport already has platform data owned by another backend.
-    #[error("viewport platform data or handle is already owned by another platform backend")]
-    ForeignPlatformUserData,
-    /// Dear ImGui requested a new viewport outside a scoped Winit event-loop entry.
-    #[error("Winit viewport creation requires WinitPlatformRuntime::with_event_loop")]
-    EventLoopUnavailable,
-    /// Winit failed to create a secondary viewport window.
-    #[error("Winit failed to create a secondary viewport window: {message}")]
-    WindowCreation { message: String },
-    /// A Rust platform callback panicked; the panic was contained at the C ABI boundary.
-    #[error("Winit platform callback `{callback}` panicked")]
-    CallbackPanicked { callback: &'static str },
-    /// The owning runtime has already shut down.
-    #[error("the Winit platform runtime is no longer attached")]
-    RuntimeDetached,
+impl ConstructionStage {
+    #[cfg(test)]
+    pub(super) const fn name(self) -> &'static str {
+        match self {
+            Self::Attachment => "attachment",
+            Self::Registry => "registry",
+            Self::MainViewport => "main viewport",
+            Self::Callbacks => "callbacks",
+            Self::Monitors => "monitors",
+            Self::BackendFlags => "backend flags",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum RuntimeState {
     Constructing,
     Attached,
+    Faulted,
     ShuttingDown,
     Detached,
     ContextDestroyed,
@@ -85,43 +73,56 @@ impl<'scope> EventLoopScope<'scope> {
     }
 }
 
-pub(super) struct RuntimeControl {
+pub(crate) struct RuntimeControl {
     context_raw: *mut dear_imgui_rs::sys::ImGuiContext,
     binding: ContextBinding,
+    platform: Weak<WinitPlatformControl>,
     state: Cell<RuntimeState>,
     event_loop: Cell<*const ActiveEventLoop>,
     teardown_callbacks_active: Cell<bool>,
+    platform_callback_contract: Cell<Option<PlatformCallbackContract>>,
+    platform_callback_drift: Cell<Option<&'static str>>,
     fault: RefCell<Option<WinitPlatformError>>,
-    prior_backend_flags: dear_imgui_rs::BackendFlags,
+    monitor_ownership: RefCell<Option<MonitorOwnership>>,
     main_window: RefCell<Option<Arc<Window>>>,
     pub(super) viewports: RefCell<Vec<super::registry::ViewportEntry>>,
 }
 
 impl RuntimeControl {
-    fn new(context: &Context, main_window: Arc<Window>) -> Self {
+    fn new(
+        context: &Context,
+        platform: &Rc<WinitPlatformControl>,
+        main_window: Arc<Window>,
+    ) -> Self {
         Self {
             context_raw: context.as_raw(),
             binding: context.binding(),
+            platform: Rc::downgrade(platform),
             state: Cell::new(RuntimeState::Constructing),
             event_loop: Cell::new(std::ptr::null()),
             teardown_callbacks_active: Cell::new(false),
+            platform_callback_contract: Cell::new(None),
+            platform_callback_drift: Cell::new(None),
             fault: RefCell::new(None),
-            prior_backend_flags: context.io().backend_flags(),
+            monitor_ownership: RefCell::new(None),
             main_window: RefCell::new(Some(main_window)),
             viewports: RefCell::new(Vec::new()),
         }
     }
 
     #[cfg(test)]
-    pub(super) fn new_for_test(context: &Context) -> Self {
+    pub(super) fn new_for_test(context: &Context, platform: &Rc<WinitPlatformControl>) -> Self {
         Self {
             context_raw: context.as_raw(),
             binding: context.binding(),
+            platform: Rc::downgrade(platform),
             state: Cell::new(RuntimeState::Constructing),
             event_loop: Cell::new(std::ptr::null()),
             teardown_callbacks_active: Cell::new(false),
+            platform_callback_contract: Cell::new(None),
+            platform_callback_drift: Cell::new(None),
             fault: RefCell::new(None),
-            prior_backend_flags: context.io().backend_flags(),
+            monitor_ownership: RefCell::new(None),
             main_window: RefCell::new(None),
             viewports: RefCell::new(Vec::new()),
         }
@@ -135,12 +136,40 @@ impl RuntimeControl {
         &self.binding
     }
 
-    pub(super) fn state(&self) -> RuntimeState {
-        self.state.get()
+    pub(super) fn platform_control(&self) -> Result<Rc<WinitPlatformControl>, WinitPlatformError> {
+        self.platform
+            .upgrade()
+            .ok_or(WinitPlatformError::RuntimeDetached)
     }
 
-    pub(super) fn prior_backend_flags(&self) -> dear_imgui_rs::BackendFlags {
-        self.prior_backend_flags
+    pub(crate) fn validate_publication_contract_in_current_context(
+        &self,
+    ) -> Result<(), WinitPlatformError> {
+        validate_platform_callback_contract(self)?;
+        let platform_io = unsafe { dear_imgui_rs::sys::igGetPlatformIO_Nil() };
+        if platform_io.is_null() {
+            return Err(WinitPlatformError::ContextMismatch);
+        }
+        let monitors_match = self
+            .monitor_ownership
+            .borrow()
+            .as_ref()
+            .is_some_and(|ownership| unsafe { ownership.installed_matches(platform_io) });
+        if !monitors_match {
+            return Err(WinitPlatformError::PlatformStateReplaced {
+                field: "PlatformIO.Monitors",
+            });
+        }
+        unsafe { preflight_viewport_ownership(self, platform_io)? };
+        Ok(())
+    }
+
+    pub(crate) fn owns_any_platform_callback_in_current_context(&self) -> bool {
+        has_owned_platform_callback_in_current_context(self)
+    }
+
+    pub(super) fn state(&self) -> RuntimeState {
+        self.state.get()
     }
 
     pub(super) fn is_callback_accessible(&self) -> bool {
@@ -152,6 +181,31 @@ impl RuntimeControl {
 
     pub(super) fn teardown_callbacks_active(&self) -> bool {
         self.teardown_callbacks_active.get()
+    }
+
+    pub(super) fn platform_callback_contract(&self) -> Option<PlatformCallbackContract> {
+        self.platform_callback_contract.get()
+    }
+
+    fn install_platform_callback_contract(&self, contract: PlatformCallbackContract) {
+        debug_assert!(self.platform_callback_contract.get().is_none());
+        debug_assert!(self.platform_callback_drift.get().is_none());
+        self.platform_callback_contract.set(Some(contract));
+    }
+
+    pub(super) fn platform_callback_drift(&self) -> Option<&'static str> {
+        self.platform_callback_drift.get()
+    }
+
+    pub(super) fn record_platform_callback_drift(&self, callback: &'static str) {
+        if self.platform_callback_drift.get().is_none() {
+            self.platform_callback_drift.set(Some(callback));
+        }
+    }
+
+    pub(super) fn clear_platform_callback_contract(&self) {
+        self.platform_callback_contract.set(None);
+        self.platform_callback_drift.set(None);
     }
 
     pub(super) fn active_event_loop(&self) -> Option<&ActiveEventLoop> {
@@ -172,7 +226,29 @@ impl RuntimeControl {
         }
     }
 
+    pub(crate) fn mark_faulted(&self) {
+        if matches!(
+            self.state.get(),
+            RuntimeState::Constructing | RuntimeState::Attached
+        ) {
+            self.state.set(RuntimeState::Faulted);
+            self.event_loop.set(std::ptr::null());
+        }
+    }
+
+    pub(super) fn record_terminal_fault(&self, fault: WinitPlatformError) {
+        self.mark_faulted();
+        if let Ok(platform) = self.platform_control() {
+            platform.fail_current_contract(fault);
+        }
+    }
+
     fn poll_fault(&self) -> Result<(), WinitPlatformError> {
+        if let Ok(platform) = self.platform_control()
+            && let Some(fault) = platform.terminal_fault()
+        {
+            return Err(fault);
+        }
         match self.fault.borrow_mut().take() {
             Some(fault) => Err(fault),
             None => Ok(()),
@@ -218,7 +294,7 @@ impl RuntimeControl {
 
     fn begin_shutdown(&self) -> bool {
         match self.state.get() {
-            RuntimeState::Constructing | RuntimeState::Attached => {
+            RuntimeState::Constructing | RuntimeState::Attached | RuntimeState::Faulted => {
                 self.state.set(RuntimeState::ShuttingDown);
                 self.event_loop.set(std::ptr::null());
                 true
@@ -232,31 +308,68 @@ impl RuntimeControl {
     fn finish_shutdown(&self) {
         self.event_loop.set(std::ptr::null());
         self.teardown_callbacks_active.set(false);
+        self.clear_platform_callback_contract();
         unregister_runtime(self.binding.id());
         self.main_window.borrow_mut().take();
         self.state.set(RuntimeState::Detached);
     }
 
-    fn shutdown_native(&self) -> Result<(), WinitPlatformError> {
-        let callback_error = release_platform_callbacks(self);
-        self.drop_all_viewports();
-        self.finish_shutdown();
-        callback_error
+    fn install_monitor_ownership(&self, ownership: MonitorOwnership) {
+        let replaced = self.monitor_ownership.borrow_mut().replace(ownership);
+        debug_assert!(replaced.is_none());
     }
 
-    fn shutdown_explicit(&self) -> Result<(), WinitPlatformError> {
-        if !self.begin_shutdown() {
-            return match self.state.get() {
-                RuntimeState::Detached | RuntimeState::ContextDestroyed => Ok(()),
-                RuntimeState::ShuttingDown => self.poll_fault(),
-                RuntimeState::Constructing | RuntimeState::Attached => unreachable!(),
-            };
+    fn restore_monitors_in_current_context(&self) -> Result<(), WinitPlatformError> {
+        if unsafe { dear_imgui_rs::sys::igGetCurrentContext() } != self.context_raw {
+            return Err(WinitPlatformError::ContextMismatch);
         }
+        let Some(ownership) = self.monitor_ownership.borrow_mut().take() else {
+            return Ok(());
+        };
+        unsafe {
+            let raw = dear_imgui_rs::sys::igGetPlatformIO_Nil();
+            if raw.is_null() {
+                ownership.context_destroyed();
+            } else {
+                ownership.restore_if_owned(raw);
+            }
+        }
+        Ok(())
+    }
 
-        let shutdown_result = self.binding.try_with_bound_context(|| unsafe {
-            dear_imgui_rs::sys::igDestroyPlatformWindows();
-            self.shutdown_native()
-        });
+    fn discard_prior_monitors_after_context_destroyed(&self) {
+        if let Some(ownership) = self.monitor_ownership.borrow_mut().take() {
+            unsafe { ownership.context_destroyed() };
+        }
+    }
+
+    fn shutdown_native(&self) -> Result<(), WinitPlatformError> {
+        let callback_error = release_platform_callbacks(self);
+        let deferred_fault = self.poll_fault();
+        self.drop_all_viewports();
+        let monitor_error = self.restore_monitors_in_current_context();
+        self.finish_shutdown();
+        deferred_fault.and(callback_error).and(monitor_error)
+    }
+
+    fn shutdown_explicit(&self, context: &mut Context) -> Result<(), WinitPlatformError> {
+        let shutdown_result = self
+            .binding
+            .try_with_bound_context(|| match self.state.get() {
+                RuntimeState::Constructing | RuntimeState::Attached | RuntimeState::Faulted => {
+                    context.end_frame();
+                    preflight_platform_window_destruction(self)?;
+                    if !self.begin_shutdown() {
+                        return self.poll_fault();
+                    }
+                    self.teardown_callbacks_active.set(true);
+                    let _restore = TeardownCallbackRestore { control: self };
+                    context.destroy_platform_windows();
+                    self.shutdown_native()
+                }
+                RuntimeState::ShuttingDown => self.poll_fault(),
+                RuntimeState::Detached | RuntimeState::ContextDestroyed => Ok(()),
+            });
         match shutdown_result {
             Ok(result) => result,
             Err(ContextBindingError::Dropping | ContextBindingError::NativeDestroyed) => {
@@ -285,33 +398,57 @@ impl RuntimeControl {
     }
 }
 
-impl ContextAttachment for RuntimeControl {
-    fn quiesce(&self, _context: &ContextTeardown<'_>) {
+impl RuntimeControl {
+    pub(crate) fn quiesce_from_platform(&self) {
         self.begin_shutdown();
     }
 
-    fn release_platform_windows(&self, context: &ContextTeardown<'_>) {
+    pub(crate) fn release_from_platform_teardown(
+        &self,
+        context: &ContextTeardown<'_>,
+    ) -> Result<(), ContextAttachmentTeardownError> {
         if !matches!(self.state.get(), RuntimeState::ShuttingDown) {
-            return;
+            return Ok(());
         }
 
-        context.with_bound_context(|| {
-            self.teardown_callbacks_active.set(true);
-            let _restore = TeardownCallbackRestore { control: self };
-            unsafe { dear_imgui_rs::sys::igDestroyPlatformWindows() };
-            if let Err(error) = self.shutdown_native() {
+        context
+            .with_bound_context(|| {
+                preflight_platform_window_destruction(self)?;
+                self.teardown_callbacks_active.set(true);
+                let _restore = TeardownCallbackRestore { control: self };
+                unsafe { dear_imgui_rs::sys::igDestroyPlatformWindows() };
+                self.shutdown_native()
+            })
+            .map_err(|error| {
+                let message = error.to_string();
                 self.record_fault(error);
-            }
-        });
+                ContextAttachmentTeardownError::new(message)
+            })
     }
 
-    fn context_destroyed(&self, _context: ContextDestroyed) {
+    pub(crate) fn context_destroyed_from_platform(&self, _context: ContextDestroyed) {
         self.event_loop.set(std::ptr::null());
         self.teardown_callbacks_active.set(false);
+        self.clear_platform_callback_contract();
         unregister_runtime(self.binding.id());
         self.drop_all_viewports_after_context_destroyed();
+        self.discard_prior_monitors_after_context_destroyed();
         self.main_window.borrow_mut().take();
         self.state.set(RuntimeState::ContextDestroyed);
+    }
+
+    pub(crate) fn shutdown_from_platform(
+        &self,
+        context: &mut Context,
+    ) -> Result<(), WinitPlatformError> {
+        self.shutdown_explicit(context)
+    }
+
+    pub(crate) fn is_released(&self) -> bool {
+        matches!(
+            self.state.get(),
+            RuntimeState::Detached | RuntimeState::ContextDestroyed
+        )
     }
 }
 
@@ -336,68 +473,242 @@ impl Drop for TeardownCallbackRestore<'_> {
     }
 }
 
+struct RuntimeConstruction<'a> {
+    context: &'a mut Context,
+    platform: Rc<WinitPlatformControl>,
+    control: Rc<RuntimeControl>,
+    #[cfg(test)]
+    owned_platform: Option<crate::WinitPlatform>,
+    prepared_monitors: Option<PreparedMonitors>,
+    runtime_installed: bool,
+    runtime_registered: bool,
+    main_viewport_initialized: bool,
+    callbacks_claimed: bool,
+    committed: bool,
+}
+
+impl<'a> RuntimeConstruction<'a> {
+    fn new(
+        context: &'a mut Context,
+        platform: Rc<WinitPlatformControl>,
+        control: Rc<RuntimeControl>,
+        #[cfg(test)] owned_platform: Option<crate::WinitPlatform>,
+        prepared_monitors: PreparedMonitors,
+    ) -> Self {
+        Self {
+            context,
+            platform,
+            control,
+            #[cfg(test)]
+            owned_platform,
+            prepared_monitors: Some(prepared_monitors),
+            runtime_installed: false,
+            runtime_registered: false,
+            main_viewport_initialized: false,
+            callbacks_claimed: false,
+            committed: false,
+        }
+    }
+
+    fn commit(mut self) -> Result<WinitPlatformRuntime, WinitPlatformError> {
+        self.control.state.set(RuntimeState::Attached);
+        self.committed = true;
+        Ok(WinitPlatformRuntime {
+            control: Rc::clone(&self.control),
+            platform: Rc::clone(&self.platform),
+            #[cfg(test)]
+            owned_platform: self.owned_platform.take(),
+        })
+    }
+}
+
+impl Drop for RuntimeConstruction<'_> {
+    fn drop(&mut self) {
+        if self.committed {
+            return;
+        }
+
+        self.control.binding.with_bound_context(|| {
+            let _ = self.control.restore_monitors_in_current_context();
+            if self.callbacks_claimed {
+                let _ = release_platform_callbacks(&self.control);
+            }
+            if self.main_viewport_initialized {
+                self.control.drop_all_viewports();
+            }
+        });
+        if self.runtime_registered {
+            unregister_runtime(self.control.binding.id());
+        }
+        if self.runtime_installed {
+            self.platform.clear_runtime(&self.control);
+        }
+        self.control.main_window.borrow_mut().take();
+        self.control.state.set(RuntimeState::Detached);
+    }
+}
+
 /// Owning Winit platform runtime for Dear ImGui multi-viewport support.
 ///
-/// The runtime owns the main window, all secondary viewport windows, the platform callback claim,
-/// and the Context attachment that orders platform-window teardown after renderer teardown.
+/// The runtime shares the `WinitPlatform`'s Context-bound main-window owner, and owns secondary
+/// viewport windows plus the platform callback claim. It does not install a second platform
+/// attachment; Context teardown reaches it through the platform owner's single attachment.
 pub struct WinitPlatformRuntime {
     control: Rc<RuntimeControl>,
-    attachment: Option<ContextAttachmentLease>,
+    platform: Rc<WinitPlatformControl>,
+    #[cfg(test)]
+    // Test construction has no native Window, so the runtime keeps its synthetic base platform
+    // owner alive and tears it down after the multi-viewport contract.
+    owned_platform: Option<crate::WinitPlatform>,
 }
 
 impl WinitPlatformRuntime {
-    /// Attaches Winit multi-viewport support to `context` and takes shared ownership of the main
-    /// application window.
+    /// Attaches Winit multi-viewport support to the already attached platform main window.
+    ///
+    /// The platform must use [`crate::HiDpiMode::Default`]. Locked and rounded modes remap the
+    /// single-window coordinate space, while Winit's native platform-window callbacks operate in
+    /// desktop logical coordinates and therefore cannot be mixed without incorrect input and
+    /// window geometry.
     pub fn new(
         context: &mut Context,
-        main_window: Arc<Window>,
+        platform: &crate::WinitPlatform,
     ) -> Result<Self, WinitPlatformError> {
         if !dear_imgui_rs::sys::HAS_PLATFORM_IO_AGGREGATE_HOOKS {
             return Err(WinitPlatformError::AggregateCallbackHooksUnavailable);
         }
+        validate_multi_viewport_hidpi_mode(platform.hidpi_mode())?;
+        let platform_control = platform.control();
+        platform_control.ensure_context(context)?;
+        let main_window = platform_control.attached_window()?;
+        platform_control.validate_operational_contract()?;
 
+        preflight_window_system(&main_window)?;
+        let prepared_monitors = prepare_monitors(context, &main_window)?;
         preflight_platform_callbacks(context)?;
         preflight_main_viewport(context)?;
 
-        let control = Rc::new(RuntimeControl::new(context, Arc::clone(&main_window)));
-        let mut attachment = context.register_attachment::<WinitPlatformAttachmentMarker>(
-            ContextAttachmentRole::Platform,
-            Rc::clone(&control) as Rc<dyn ContextAttachment>,
-        )?;
-
-        register_runtime(&control);
-        if let Err(error) = init_main_viewport(&control, main_window) {
-            unregister_runtime(control.binding.id());
-            attachment.detach();
-            return Err(error);
-        }
-        claim_platform_callbacks(context);
-        setup_monitors(&control, context);
-        claim_backend_flags(&control, context);
-        control.state.set(RuntimeState::Attached);
-
-        Ok(Self {
+        let control = Rc::new(RuntimeControl::new(
+            context,
+            &platform_control,
+            Arc::clone(&main_window),
+        ));
+        Self::construct(
+            context,
+            platform_control,
             control,
-            attachment: Some(attachment),
-        })
+            #[cfg(test)]
+            None,
+            Some(main_window),
+            prepared_monitors,
+            |_, _| Ok(()),
+        )
     }
 
     #[cfg(test)]
     pub(super) fn new_for_test(context: &mut Context) -> Result<Self, WinitPlatformError> {
+        Self::new_for_test_with(context, vec![test_monitor()], |_, _| Ok(()))
+    }
+
+    #[cfg(test)]
+    pub(super) fn new_for_test_with_platform(
+        context: &mut Context,
+        platform: &crate::WinitPlatform,
+    ) -> Result<Self, WinitPlatformError> {
+        let platform_control = platform.control();
+        platform_control.ensure_context(context)?;
+        platform_control.validate_operational_contract()?;
+        let prepared_monitors =
+            super::callbacks::prepare_monitors_for_test(context, vec![test_monitor()])?;
         preflight_platform_callbacks(context)?;
-        let control = Rc::new(RuntimeControl::new_for_test(context));
-        let attachment = context.register_attachment::<WinitPlatformAttachmentMarker>(
-            ContextAttachmentRole::Platform,
-            Rc::clone(&control) as Rc<dyn ContextAttachment>,
-        )?;
-        register_runtime(&control);
-        claim_platform_callbacks(context);
-        claim_backend_flags(&control, context);
-        control.state.set(RuntimeState::Attached);
-        Ok(Self {
+        preflight_main_viewport(context)?;
+        let control = Rc::new(RuntimeControl::new_for_test(context, &platform_control));
+        Self::construct(
+            context,
+            platform_control,
             control,
-            attachment: Some(attachment),
-        })
+            None,
+            None,
+            prepared_monitors,
+            |_, _| Ok(()),
+        )
+    }
+
+    #[cfg(test)]
+    pub(super) fn new_for_test_with(
+        context: &mut Context,
+        monitors: Vec<dear_imgui_rs::sys::ImGuiPlatformMonitor>,
+        checkpoint: impl FnMut(ConstructionStage, &mut Context) -> Result<(), WinitPlatformError>,
+    ) -> Result<Self, WinitPlatformError> {
+        let platform = crate::WinitPlatform::new(context)?;
+        let platform_control = platform.control();
+        let prepared_monitors = super::callbacks::prepare_monitors_for_test(context, monitors)?;
+        preflight_platform_callbacks(context)?;
+        preflight_main_viewport(context)?;
+        let control = Rc::new(RuntimeControl::new_for_test(context, &platform_control));
+        Self::construct(
+            context,
+            platform_control,
+            control,
+            Some(platform),
+            None,
+            prepared_monitors,
+            checkpoint,
+        )
+    }
+
+    fn construct(
+        context: &mut Context,
+        platform: Rc<WinitPlatformControl>,
+        control: Rc<RuntimeControl>,
+        #[cfg(test)] owned_platform: Option<crate::WinitPlatform>,
+        main_window: Option<Arc<Window>>,
+        prepared_monitors: PreparedMonitors,
+        mut checkpoint: impl FnMut(ConstructionStage, &mut Context) -> Result<(), WinitPlatformError>,
+    ) -> Result<Self, WinitPlatformError> {
+        let mut transaction = RuntimeConstruction::new(
+            context,
+            platform,
+            control,
+            #[cfg(test)]
+            owned_platform,
+            prepared_monitors,
+        );
+
+        transaction
+            .platform
+            .install_runtime(Rc::clone(&transaction.control))?;
+        transaction.runtime_installed = true;
+        checkpoint(ConstructionStage::Attachment, transaction.context)?;
+
+        register_runtime(&transaction.control);
+        transaction.runtime_registered = true;
+        checkpoint(ConstructionStage::Registry, transaction.context)?;
+
+        if let Some(main_window) = main_window {
+            init_main_viewport(&transaction.control, main_window)?;
+            transaction.main_viewport_initialized = true;
+        }
+        checkpoint(ConstructionStage::MainViewport, transaction.context)?;
+
+        let callback_contract = claim_platform_callbacks(transaction.context);
+        transaction
+            .control
+            .install_platform_callback_contract(callback_contract);
+        transaction.callbacks_claimed = true;
+        checkpoint(ConstructionStage::Callbacks, transaction.context)?;
+
+        let prepared_monitors = transaction
+            .prepared_monitors
+            .take()
+            .expect("monitor storage is present until publication");
+        let ownership = publish_monitors(transaction.context, prepared_monitors);
+        transaction.control.install_monitor_ownership(ownership);
+        checkpoint(ConstructionStage::Monitors, transaction.context)?;
+
+        claim_backend_flags(&transaction.control, transaction.context);
+        checkpoint(ConstructionStage::BackendFlags, transaction.context)?;
+
+        transaction.commit()
     }
 
     /// Returns the runtime-owned main window.
@@ -405,6 +716,13 @@ impl WinitPlatformRuntime {
         self.control
             .main_window()
             .ok_or(WinitPlatformError::RuntimeDetached)
+    }
+
+    #[cfg(test)]
+    pub(super) fn owned_platform_for_test_mut(&mut self) -> &mut crate::WinitPlatform {
+        self.owned_platform
+            .as_mut()
+            .expect("test runtimes always retain their synthetic platform owner")
     }
 
     /// Runs `callback` while viewport callbacks may access `event_loop`.
@@ -431,15 +749,15 @@ impl WinitPlatformRuntime {
         callback: impl for<'scope> FnOnce(EventLoopScope<'scope>) -> R,
     ) -> Result<R, WinitPlatformError> {
         self.poll_fault()?;
-        if self.control.state.get() != RuntimeState::Attached {
-            return Err(WinitPlatformError::RuntimeDetached);
-        }
+        self.ensure_attached()?;
         let result = self.control.enter_event_loop(event_loop, callback);
         self.poll_fault()?;
         Ok(result)
     }
 
-    /// Returns and clears the oldest pending callback fault.
+    /// Returns and clears the oldest retryable callback fault.
+    ///
+    /// Contract drift and callback panics are terminal and remain observable until shutdown.
     pub fn poll_fault(&self) -> Result<(), WinitPlatformError> {
         self.control.poll_fault()
     }
@@ -451,10 +769,11 @@ impl WinitPlatformRuntime {
         context: &mut Context,
         event: &Event<T>,
     ) -> Result<bool, WinitPlatformError> {
+        validate_multi_viewport_hidpi_mode(platform.hidpi_mode())?;
         self.ensure_context(context)?;
         self.poll_fault()?;
         self.ensure_attached()?;
-        let consumed = super::events::handle_event(self, platform, context, event);
+        let consumed = super::events::handle_event(self, platform, context, event)?;
         self.poll_fault()?;
         Ok(consumed)
     }
@@ -475,16 +794,38 @@ impl WinitPlatformRuntime {
 
     /// Explicitly releases platform callbacks and windows.
     ///
-    /// The operation is idempotent. Use this path when shutdown errors need to be reported; Drop
-    /// performs the same cleanup on a best-effort basis.
-    pub fn shutdown(&mut self) -> Result<(), WinitPlatformError> {
+    /// The operation is idempotent. The explicit Context lets the core close an open frame before
+    /// any platform callback or native window state is released. Dropping the runtime without a
+    /// Context defers native cleanup to the Context attachment instead.
+    pub fn shutdown(&mut self, context: &mut Context) -> Result<(), WinitPlatformError> {
+        self.ensure_context(context)?;
         let pending_fault = self.control.poll_fault().err();
-        let result = self.control.shutdown_explicit();
-        if !matches!(self.control.state(), RuntimeState::Attached)
-            && let Some(mut attachment) = self.attachment.take()
-        {
-            attachment.detach();
+        let result = self.control.shutdown_explicit(context);
+        let released = matches!(
+            self.control.state(),
+            RuntimeState::Detached | RuntimeState::ContextDestroyed
+        );
+        if released {
+            self.platform.clear_runtime(&self.control);
         }
+        #[cfg(test)]
+        let result = if released {
+            if let Some(platform) = self.owned_platform.as_mut() {
+                let platform_result = platform.shutdown(context);
+                match (result, platform_result) {
+                    (Err(primary), Err(secondary)) => {
+                        self.control.record_fault(secondary);
+                        Err(primary)
+                    }
+                    (Ok(()), platform_result) => platform_result,
+                    (result, Ok(())) => result,
+                }
+            } else {
+                result
+            }
+        } else {
+            result
+        };
         match (pending_fault, result) {
             (Some(fault), Err(shutdown_error)) => {
                 self.control.record_fault(shutdown_error);
@@ -504,11 +845,15 @@ impl WinitPlatformRuntime {
     }
 
     fn ensure_attached(&self) -> Result<(), WinitPlatformError> {
-        if self.control.state() == RuntimeState::Attached {
-            Ok(())
-        } else {
-            Err(WinitPlatformError::RuntimeDetached)
+        if self.control.state() != RuntimeState::Attached {
+            return self
+                .control
+                .poll_fault()
+                .and(Err(WinitPlatformError::RuntimeDetached));
         }
+        self.control
+            .platform_control()?
+            .validate_operational_contract()
     }
 
     pub(super) fn control(&self) -> &Rc<RuntimeControl> {
@@ -516,10 +861,60 @@ impl WinitPlatformRuntime {
     }
 }
 
-impl Drop for WinitPlatformRuntime {
-    fn drop(&mut self) {
-        let _ = self.shutdown();
+fn validate_window_system(
+    is_supported_desktop: bool,
+    is_wayland: bool,
+) -> Result<(), WinitPlatformError> {
+    if !is_supported_desktop {
+        return Err(WinitPlatformError::UnsupportedWindowSystem {
+            target: std::env::consts::OS,
+        });
     }
+    if is_wayland {
+        Err(WinitPlatformError::WaylandUnsupported)
+    } else {
+        Ok(())
+    }
+}
+
+pub(super) fn validate_multi_viewport_hidpi_mode(
+    mode: crate::HiDpiMode,
+) -> Result<(), WinitPlatformError> {
+    if mode == crate::HiDpiMode::Default {
+        Ok(())
+    } else {
+        Err(WinitPlatformError::CustomHiDpiModeUnsupported)
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn preflight_window_system(window: &Window) -> Result<(), WinitPlatformError> {
+    let handle = window
+        .window_handle()
+        .map_err(|error| WinitPlatformError::WindowOperation {
+            operation: "query raw window handle",
+            message: error.to_string(),
+        })?
+        .as_raw();
+    validate_window_system(true, matches!(handle, RawWindowHandle::Wayland(_)))
+}
+
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+fn preflight_window_system(_window: &Window) -> Result<(), WinitPlatformError> {
+    validate_window_system(true, false)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+fn preflight_window_system(_window: &Window) -> Result<(), WinitPlatformError> {
+    validate_window_system(false, false)
+}
+
+#[cfg(test)]
+pub(super) fn validate_window_system_for_test(
+    is_supported_desktop: bool,
+    is_wayland: bool,
+) -> Result<(), WinitPlatformError> {
+    validate_window_system(is_supported_desktop, is_wayland)
 }
 
 fn claim_backend_flags(control: &RuntimeControl, context: &mut Context) {
@@ -531,4 +926,22 @@ fn claim_backend_flags(control: &RuntimeControl, context: &mut Context) {
                 | dear_imgui_rs::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT,
         );
     });
+}
+
+#[cfg(test)]
+fn test_monitor() -> dear_imgui_rs::sys::ImGuiPlatformMonitor {
+    dear_imgui_rs::sys::ImGuiPlatformMonitor {
+        MainPos: dear_imgui_rs::sys::ImVec2 { x: 0.0, y: 0.0 },
+        MainSize: dear_imgui_rs::sys::ImVec2 {
+            x: 1920.0,
+            y: 1080.0,
+        },
+        WorkPos: dear_imgui_rs::sys::ImVec2 { x: 0.0, y: 0.0 },
+        WorkSize: dear_imgui_rs::sys::ImVec2 {
+            x: 1920.0,
+            y: 1040.0,
+        },
+        DpiScale: 1.0,
+        PlatformHandle: std::ptr::null_mut(),
+    }
 }

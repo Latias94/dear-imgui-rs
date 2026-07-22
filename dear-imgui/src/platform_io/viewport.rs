@@ -178,15 +178,24 @@ impl Viewport {
         }
     }
 
-    /// Check whether this is Dear ImGui's application-owned main viewport.
+    /// Check whether this is the currently bound Context's application-owned main viewport.
+    ///
+    /// Viewport IDs are not used for this decision because the same numeric ID may appear in
+    /// different Contexts. Returns `false` when no Context is current.
     pub fn is_main(&self) -> bool {
-        self.id() == super::MAIN_VIEWPORT_ID
+        unsafe {
+            if sys::igGetCurrentContext().is_null() {
+                return false;
+            }
+            let main = sys::igGetMainViewport();
+            !main.is_null() && std::ptr::eq(self.as_raw(), main.cast_const())
+        }
     }
 
     /// Check whether this is a secondary platform window managed for Dear ImGui.
     ///
     /// Dear ImGui also sets `ViewportFlags::IS_PLATFORM_WINDOW` on the main viewport after the
-    /// first frame, so this helper additionally excludes [`super::MAIN_VIEWPORT_ID`].
+    /// first frame, so this helper additionally excludes [`Viewport::is_main`].
     pub fn is_platform_window(&self) -> bool {
         !self.is_main()
             && (self.inner().Flags & (crate::ViewportFlags::IS_PLATFORM_WINDOW.bits())) != 0
@@ -439,23 +448,50 @@ mod tests {
 
     #[test]
     fn main_viewport_identity_does_not_depend_on_platform_window_flags() {
-        let raw = new_viewport();
+        let _guard = crate::test_support::imgui_context_guard();
+        let mut context = Context::create();
+        let main = context.main_viewport().as_raw_mut();
+        let secondary = new_viewport();
         unsafe {
-            (*raw).ID = super::super::MAIN_VIEWPORT_ID.raw();
-            (*raw).Flags = crate::ViewportFlags::IS_PLATFORM_WINDOW.bits()
+            (*main).Flags = crate::ViewportFlags::IS_PLATFORM_WINDOW.bits()
                 | crate::ViewportFlags::OWNED_BY_APP.bits();
+            (*secondary).ID = (*main).ID;
+            (*secondary).Flags = crate::ViewportFlags::IS_PLATFORM_WINDOW.bits();
 
-            let viewport = Viewport::from_raw_mut(raw);
-            assert!(viewport.is_main());
-            assert!(!viewport.is_platform_window());
-            assert!(viewport.is_owned_by_app());
+            let main_viewport = Viewport::from_raw_mut(main);
+            assert!(main_viewport.is_main());
+            assert!(!main_viewport.is_platform_window());
+            assert!(main_viewport.is_owned_by_app());
 
-            viewport.inner_mut().ID = 0x2222_2222;
-            assert!(!viewport.is_main());
-            assert!(viewport.is_platform_window());
+            let secondary_viewport = Viewport::from_raw_mut(secondary);
+            assert_eq!(secondary_viewport.id(), main_viewport.id());
+            assert!(!secondary_viewport.is_main());
+            assert!(secondary_viewport.is_platform_window());
 
-            sys::ImGuiViewport_destroy(raw);
+            sys::ImGuiViewport_destroy(secondary);
         }
+    }
+
+    #[test]
+    fn main_viewport_identity_is_scoped_to_the_current_context() {
+        let _guard = crate::test_support::imgui_context_guard();
+        let context_a = Context::create();
+        let binding_a = context_a.binding();
+        let main_a = unsafe { sys::igGetMainViewport() };
+        unsafe { sys::igSetCurrentContext(std::ptr::null_mut()) };
+        let _context_b = Context::create();
+        let main_b = unsafe { sys::igGetMainViewport() };
+
+        unsafe {
+            assert_eq!((*main_a).ID, (*main_b).ID);
+            assert!(!Viewport::from_raw(main_a).is_main());
+            assert!(Viewport::from_raw(main_b).is_main());
+        }
+
+        binding_a.with_bound_context(|| unsafe {
+            assert!(Viewport::from_raw(main_a).is_main());
+            assert!(!Viewport::from_raw(main_b).is_main());
+        });
     }
 
     #[test]

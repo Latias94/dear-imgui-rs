@@ -652,8 +652,12 @@ impl AppWindow {
             flags.insert(ConfigFlags::DOCKING_ENABLE);
             io.set_config_flags(flags);
         }
-        let mut platform = WinitPlatform::new(&mut context);
-        platform.attach_window(&window, dear_imgui_winit::HiDpiMode::Default, &mut context);
+        let mut platform = WinitPlatform::new(&mut context)?;
+        platform.attach_window(
+            Arc::clone(&window),
+            dear_imgui_winit::HiDpiMode::Default,
+            &mut context,
+        )?;
 
         // Renderer
         let init_info =
@@ -746,7 +750,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context);
+            .prepare_frame(&self.window, &mut self.imgui.context)?;
         // Work on local copies during the UI frame to avoid borrowing self while Ui is alive
         let mut rot = self.rot;
         let mut light_dir = self.light_dir;
@@ -814,7 +818,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_render_with_ui(&ui, &self.window);
+            .prepare_render_with_ui(&ui, &self.window)?;
         let draw_data = self.imgui.context.render();
         // Persist state after the UI frame ends
         self.rot = rot;
@@ -1337,10 +1341,15 @@ impl ApplicationHandler for App {
             window_id,
             event: event.clone(),
         };
-        window
-            .imgui
-            .platform
-            .handle_event(&mut window.imgui.context, &window.window, &full_event);
+        if let Err(error) = window.imgui.platform.handle_event(
+            &mut window.imgui.context,
+            &window.window,
+            &full_event,
+        ) {
+            eprintln!("Winit platform error: {error}");
+            event_loop.exit();
+            return;
+        }
 
         match event {
             WindowEvent::Resized(physical_size) => {

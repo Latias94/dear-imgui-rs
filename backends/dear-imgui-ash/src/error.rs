@@ -30,6 +30,14 @@ pub enum RendererError {
     #[error("Invalid render state: {0}")]
     InvalidRenderState(String),
 
+    /// Context renderer state was already claimed before Ash initialization.
+    #[error("Dear ImGui renderer state `{field}` is already occupied")]
+    RendererStateOccupied { field: &'static str },
+
+    /// Context renderer state changed after Ash published its ownership contract.
+    #[error("Dear ImGui renderer state `{field}` was replaced while Ash was attached")]
+    RendererStateReplaced { field: &'static str },
+
     /// Draw frame resources are unavailable.
     #[error("Frame resources are not initialized")]
     FrameResourcesUnavailable,

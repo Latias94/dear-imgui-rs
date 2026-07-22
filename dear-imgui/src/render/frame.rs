@@ -75,6 +75,11 @@ impl<'ctx> RenderedFrame<'ctx> {
         unsafe { self.draw_data.as_ref() }
     }
 
+    fn with_owner_context<R>(&mut self, f: impl FnOnce(&mut Context) -> R) -> R {
+        let binding = self.context.binding();
+        binding.with_bound_context(|| f(self.context))
+    }
+
     /// Apply renderer feedback before drawing commands that depend on new texture identifiers.
     pub fn reconcile_texture_feedback(
         &mut self,
@@ -93,9 +98,9 @@ impl<'ctx> RenderedFrame<'ctx> {
             }
             return Err(RendererConsumerError::NoActiveConsumer);
         };
+        let feedback = feedback.into_iter().collect();
         let progress = self
-            .context
-            .complete_synchronous_render(epoch, feedback.into_iter().collect())?;
+            .with_owner_context(|context| context.complete_synchronous_render(epoch, feedback))?;
         self.reconciled = true;
         Ok(progress)
     }
@@ -111,11 +116,12 @@ impl Deref for RenderedFrame<'_> {
 
 impl Drop for RenderedFrame<'_> {
     fn drop(&mut self) {
-        if !self.reconciled
-            && let Some(epoch) = self.epoch
-        {
-            self.context.abandon_synchronous_render(epoch);
-        }
-        self.context.collect_retired_textures();
+        let abandoned_epoch = (!self.reconciled).then_some(self.epoch).flatten();
+        self.with_owner_context(|context| {
+            if let Some(epoch) = abandoned_epoch {
+                context.abandon_synchronous_render(epoch);
+            }
+            context.collect_retired_textures();
+        });
     }
 }

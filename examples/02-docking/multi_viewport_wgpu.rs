@@ -238,26 +238,92 @@ struct AppWindow {
     test_engine: Option<TestEngine>,
     #[cfg(feature = "test-engine")]
     viewport_smoke: Option<ViewportSmokeState>,
+    #[cfg(feature = "test-engine")]
+    test_engine_shutdown_complete: bool,
+    renderer_shutdown_complete: bool,
+    viewport_runtime_shutdown_complete: bool,
+    platform_shutdown_complete: bool,
 }
 
 impl Drop for AppWindow {
     fn drop(&mut self) {
-        #[cfg(feature = "test-engine")]
-        if let Some(engine) = self.test_engine.as_mut() {
-            let _ = engine.shutdown();
-        }
-        self.renderer
-            .shutdown(&mut self.imgui)
-            .expect("WGPU renderer shutdown failed");
-        if let Some(runtime) = self.viewport_runtime.as_mut() {
-            runtime
-                .shutdown()
-                .expect("Winit multi-viewport shutdown failed");
+        if let Err(error) = self.shutdown() {
+            eprintln!("WGPU example fallback shutdown failed: {error}");
         }
     }
 }
 
 impl AppWindow {
+    fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if !self.renderer_shutdown_complete {
+            if let Err(error) = self.renderer.shutdown(&mut self.imgui) {
+                return Err(format!("WGPU renderer shutdown failed: {error}").into());
+            }
+            self.renderer_shutdown_complete = true;
+        }
+
+        let runtime_error = if !self.viewport_runtime_shutdown_complete {
+            let (viewport_runtime, imgui) = (&mut self.viewport_runtime, &mut self.imgui);
+            viewport_runtime
+                .as_mut()
+                .and_then(|runtime| runtime.shutdown(imgui).err())
+        } else {
+            None
+        };
+
+        let platform_error = if !self.platform_shutdown_complete {
+            let (platform, imgui) = (&mut self.platform, &mut self.imgui);
+            platform.shutdown(imgui).err()
+        } else {
+            None
+        };
+        if platform_error.is_none() && !self.platform_shutdown_complete {
+            // `WinitPlatform::shutdown` is the authoritative final release for both its base
+            // attachment and a runtime that has already completed native cleanup with a fault.
+            self.viewport_runtime_shutdown_complete = true;
+            self.platform_shutdown_complete = true;
+        }
+
+        if let Some(platform) = platform_error {
+            return match runtime_error {
+                None => Err(format!("Winit platform shutdown failed: {platform}").into()),
+                Some(runtime) => Err(format!(
+                    "Winit multi-viewport shutdown failed: {runtime}; Winit platform shutdown failed: {platform}"
+                )
+                .into()),
+            };
+        }
+
+        #[cfg(feature = "test-engine")]
+        let test_engine_error = if !self.test_engine_shutdown_complete {
+            self.test_engine
+                .as_mut()
+                .and_then(|engine| engine.shutdown().err())
+        } else {
+            None
+        };
+        #[cfg(feature = "test-engine")]
+        if test_engine_error.is_none() {
+            self.test_engine_shutdown_complete = true;
+        }
+
+        #[cfg(not(feature = "test-engine"))]
+        let test_engine_error: Option<String> = None;
+        #[cfg(feature = "test-engine")]
+        let test_engine_error = test_engine_error.map(|error| error.to_string());
+        let runtime_error = runtime_error.map(|error| error.to_string());
+
+        match (runtime_error, test_engine_error) {
+            (None, None) => Ok(()),
+            (Some(error), None) => Err(format!("Winit multi-viewport shutdown failed: {error}").into()),
+            (None, Some(error)) => Err(format!("test engine shutdown failed: {error}").into()),
+            (Some(runtime), Some(test_engine)) => Err(format!(
+                "Winit multi-viewport shutdown failed: {runtime}; test engine shutdown failed: {test_engine}"
+            )
+            .into()),
+        }
+    }
+
     fn new(event_loop: &ActiveEventLoop) -> Result<Self, Box<dyn std::error::Error>> {
         // Winit + WGPU multi-viewport is experimental.
         // Enabled by default on desktop native targets. The Linux path is exercised
@@ -329,7 +395,9 @@ impl AppWindow {
             color_space: wgpu::SurfaceColorSpace::Auto,
             width: size.width.max(1),
             height: size.height.max(1),
-            present_mode: wgpu::PresentMode::Fifo,
+            // Secondary viewports inherit this policy. AutoNoVsync prefers low-latency present
+            // modes and falls back portably when a surface cannot provide one.
+            present_mode: wgpu::PresentMode::AutoNoVsync,
             alpha_mode: wgpu::CompositeAlphaMode::Opaque,
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
@@ -370,16 +438,17 @@ impl AppWindow {
             io.set_config_flags(flags);
         }
 
-        let mut platform = WinitPlatform::new(&mut imgui);
-        platform.attach_window(&window, HiDpiMode::Default, &mut imgui);
+        let mut platform = WinitPlatform::new(&mut imgui)?;
+        platform.attach_window(Arc::clone(&window), HiDpiMode::Default, &mut imgui)?;
         let viewport_runtime = enable_viewports
-            .then(|| winit_mvp::WinitPlatformRuntime::new(&mut imgui, Arc::clone(&window)))
+            .then(|| winit_mvp::WinitPlatformRuntime::new(&mut imgui, &platform))
             .transpose()?;
 
         // WGPU renderer
         let init_info = WgpuInitInfo::new(device.clone(), queue.clone(), surface_config.format)
             .with_instance(instance.clone())
-            .with_adapter(adapter.clone());
+            .with_adapter(adapter.clone())
+            .with_viewport_surface_config((&surface_config).into());
         let mut renderer = WgpuRenderer::new(init_info, &mut imgui)?;
         renderer.set_gamma_mode(GammaMode::Auto);
 
@@ -454,6 +523,11 @@ impl AppWindow {
             test_engine,
             #[cfg(feature = "test-engine")]
             viewport_smoke,
+            #[cfg(feature = "test-engine")]
+            test_engine_shutdown_complete: false,
+            renderer_shutdown_complete: false,
+            viewport_runtime_shutdown_complete: false,
+            platform_shutdown_complete: false,
         };
 
         Ok(app)
@@ -531,7 +605,7 @@ impl AppWindow {
             self.queue.submit(Some(encoder.finish()));
         }
 
-        self.platform.prepare_frame(&self.window, &mut self.imgui);
+        self.platform.prepare_frame(&self.window, &mut self.imgui)?;
         #[cfg(feature = "test-engine")]
         let mut viewport_count =
             i32::try_from(self.imgui.platform_io().viewports_iter().count()).unwrap_or(i32::MAX);
@@ -687,6 +761,12 @@ struct App {
     error: Option<String>,
 }
 
+impl App {
+    fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.window.as_mut().map_or(Ok(()), AppWindow::shutdown)
+    }
+}
+
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         match AppWindow::new(event_loop) {
@@ -731,9 +811,14 @@ impl ApplicationHandler for App {
                 return;
             }
         } else {
-            let _ = app
+            if let Err(error) = app
                 .platform
-                .handle_event(&mut app.imgui, &app.window, &full);
+                .handle_event(&mut app.imgui, &app.window, &full)
+            {
+                self.error = Some(error.to_string());
+                event_loop.exit();
+                return;
+            }
         }
 
         match event {
@@ -788,18 +873,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     event_loop.set_control_flow(ControlFlow::Poll);
 
     let mut app = App::default();
-    event_loop.run_app(&mut app)?;
-    if let Some(error) = app.error.take() {
-        return Err(error.into());
-    }
+    let event_loop_result = event_loop.run_app(&mut app);
+    let app_error = app.error.take();
     #[cfg(feature = "test-engine")]
     let smoke_result = app
         .window
         .as_ref()
         .and_then(|window| window.viewport_smoke.as_ref())
         .and_then(ViewportSmokeState::completed_result);
+    let shutdown_result = app.shutdown();
     // A success artifact is evidence that renderer, platform, and Context teardown completed.
     drop(app);
+
+    let mut errors = Vec::new();
+    if let Err(error) = event_loop_result {
+        errors.push(format!("event loop failed: {error}"));
+    }
+    if let Some(error) = app_error {
+        errors.push(error);
+    }
+    if let Err(error) = shutdown_result {
+        errors.push(error.to_string());
+    }
+    if !errors.is_empty() {
+        return Err(errors.join("; ").into());
+    }
+
     #[cfg(feature = "test-engine")]
     if let Some(result) = smoke_result {
         result.write_after_teardown()?;

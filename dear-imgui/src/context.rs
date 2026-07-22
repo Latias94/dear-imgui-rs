@@ -21,13 +21,14 @@ mod texture_registry;
 
 pub use self::attachment::{
     ContextAttachment, ContextAttachmentError, ContextAttachmentLease, ContextAttachmentPhase,
-    ContextAttachmentRole, ContextDestroyed, ContextTeardown,
+    ContextAttachmentRole, ContextAttachmentTeardownError, ContextDestroyed, ContextTeardown,
 };
 pub use self::binding::{
     ContextAliveToken, ContextBinding, ContextBindingError, ContextId, ContextLifecycle,
 };
 pub use self::core::Context;
 pub use self::frame::{FrameLifecycleState, FramePrepareOptions, FrameResult, FrameToken};
+pub use self::snapshot_hub::RendererTextureReset;
 pub use self::suspended::SuspendedContext;
 pub(crate) use self::texture_registry::SharedTextureRegistry;
 

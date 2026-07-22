@@ -40,9 +40,9 @@ the matching WGPU runtime before Dear ImGui creates a secondary platform window:
 ```rust,no_run
 use dear_imgui_rs::Context;
 use std::sync::Arc;
-use dear_imgui_wgpu::{WgpuInitInfo, WgpuRenderer, wgpu};
+use dear_imgui_wgpu::{WgpuInitInfo, WgpuRenderer, WgpuViewportSurfaceConfig, wgpu};
 use dear_imgui_wgpu::multi_viewport::WinitViewportRuntime;
-use dear_imgui_winit::multi_viewport::WinitPlatformRuntime;
+use dear_imgui_winit::{HiDpiMode, WinitPlatform, multi_viewport::WinitPlatformRuntime};
 
 # fn enable_viewports(
 #     imgui: &mut Context,
@@ -52,18 +52,37 @@ use dear_imgui_winit::multi_viewport::WinitPlatformRuntime;
 #     device: wgpu::Device,
 #     queue: wgpu::Queue,
 #     format: wgpu::TextureFormat,
-# ) -> Result<(WinitPlatformRuntime, WinitViewportRuntime), Box<dyn std::error::Error>> {
+# ) -> Result<(WinitPlatform, WinitPlatformRuntime, WinitViewportRuntime), Box<dyn std::error::Error>> {
 imgui.enable_multi_viewport();
-let platform = WinitPlatformRuntime::new(imgui, main_window)?;
+let mut platform = WinitPlatform::new(imgui)?;
+platform.attach_window(Arc::clone(&main_window), HiDpiMode::Default, imgui)?;
+let runtime = WinitPlatformRuntime::new(imgui, &platform)?;
 
+let viewport_surface = WgpuViewportSurfaceConfig {
+    present_mode: wgpu::PresentMode::AutoNoVsync,
+    ..Default::default()
+};
 let init = WgpuInitInfo::new(device, queue, format)
     .with_instance(instance)
-    .with_adapter(adapter);
+    .with_adapter(adapter)
+    .with_viewport_surface_config(viewport_surface);
 let renderer = WgpuRenderer::new(init, imgui)?;
 let renderer = WinitViewportRuntime::attach(imgui, renderer)?;
-# Ok((platform, renderer))
+# Ok((platform, runtime, renderer))
 # }
 ```
+
+`WgpuViewportSurfaceConfig` defaults to `Fifo`, opaque composition, and a maximum frame latency of
+`2` for compatibility with WGPU's normal surface defaults. Use
+`WgpuViewportSurfaceConfig::from(&main_surface_config)` when secondary windows should inherit the
+main surface's scheduling and compositor policy, or set `present_mode` to `AutoNoVsync` to prefer
+`Immediate` and then `Mailbox` while retaining WGPU's portable `Fifo` fallback.
+
+The renderer currently produces sRGB UI output and does not perform HDR transfer-function or
+wide-gamut conversion. WGPU 30 secondary surfaces therefore request `SurfaceColorSpace::Srgb`
+explicitly and reject a render-target format that the surface cannot present in sRGB. Keep the
+main surface in the same sRGB contract; HDR or wide-gamut output needs an application-owned color
+conversion pass rather than a different secondary-surface setting.
 
 For SDL3, initialize `Sdl3PlatformBackend` first and then call
 `dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRuntime::attach`. Both typed constructors
@@ -75,7 +94,11 @@ that already exist, and requires an active Context `Platform` attachment. Attach
 the error returns the unchanged renderer through `WgpuViewportAttachError`. Moving the runtime does
 not move callback-visible renderer storage. Callback replacement, panic, reentry, rendering, and
 terminal surface failures are contained at the C ABI boundary and returned by `poll_fault` or the
-next Rust runtime entry.
+next Rust runtime entry. A terminal fault revokes renderer viewport capability and stops
+create/resize/render/present work. Its `Renderer_DestroyWindow` callback remains available only
+for cleanup: a Context- and viewport-identity sidecar releases the owned WGPU surface even when
+foreign code cleared or replaced `RendererUserData`, before the platform backend destroys the
+native window.
 
 From a repository checkout, run the same native Winit/WGPU Test Engine contract used by the
 release gate. It moves a window into a real secondary OS viewport, renders its GPU surface, merges
@@ -97,7 +120,7 @@ Shut down renderer ownership before the platform runtime:
 # use dear_imgui_winit::multi_viewport::WinitPlatformRuntime;
 # fn shutdown(renderer: &mut WinitViewportRuntime, platform: &mut WinitPlatformRuntime, imgui: &mut Context) -> Result<(), Box<dyn std::error::Error>> {
 renderer.shutdown(imgui)?;
-platform.shutdown()?;
+platform.shutdown(imgui)?;
 # Ok(())
 # }
 ```
@@ -107,37 +130,50 @@ it never enters the platform-window phase. The Winit or SDL3 platform owner rema
 responsible for destroying native windows. Context-first teardown invokes the same shared state
 machine in ordered renderer-resource and platform-window phases.
 
-Managed texture shutdown follows the same ownership rule. The runtime destroys the actual WGPU
-textures first, calls `Context::reset_renderer_texture_bindings(&consumer)` while its generation is
-idle, and only then releases the consumer. This causes live textures to be requested again after a
-device rebuild without acknowledging a destroy that never happened.
+Managed texture shutdown follows the same ownership rule. The runtime first obtains
+`Context::prepare_renderer_texture_reset(&consumer)` while its complete GPU texture map is still
+intact. A pending frame or detached snapshot rejects that preparation without changing either
+side. After preparation succeeds, it destroys the WGPU map and commits the permit, which
+infallibly clears native bindings before releasing the consumer. This causes live textures to be
+requested again after a device rebuild without acknowledging a destroy that never happened.
 
 Explicit renderer shutdown is idempotent and retryable. In particular, an outstanding detached
-snapshot leaves the runtime in `Detached` with its renderer retained; finish or abandon the epoch,
-poll Context completions, and call `shutdown` again. Runtime `Drop` performs terminal best-effort
-cleanup because it cannot report errors or safely wait for detached work. Use explicit shutdown
-when managed texture reset or callback ownership errors matter. Foreign callback and backend-state
-replacements are preserved rather than overwritten during either path.
+snapshot leaves the runtime attached with its renderer retained; finish or abandon the epoch, poll
+Context completions, and call `shutdown` again. Runtime `Drop` cannot prepare the required
+Context-owned renderer reset, so it defers its attachment unchanged to Context teardown: it does
+not destroy WGPU resources, clear callbacks, or alter native renderer publication while Context is
+alive. Dropping the wrapper therefore does not make the Context available for a replacement runtime;
+use explicit shutdown when the application needs to release renderer ownership before Context
+teardown. Foreign callback and backend-state replacements are preserved rather than overwritten.
 
 ## Selecting wgpu version
 
-Release 0.16 defaults to WGPU 30.
+The `0.16.0-alpha.1` candidate defaults to WGPU 30. Until it is published, test
+the candidate from `main`:
+
+```toml
+[dependencies]
+dear-imgui-wgpu = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
+```
+
+After publication, use the exact prerelease requirement for the compatibility
+routes below.
 
 If your ecosystem is pinned to `wgpu` v29, v28, or v27, select it explicitly:
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { version = "0.16", default-features = false, features = ["wgpu-29"] }
+dear-imgui-wgpu = { version = "=0.16.0-alpha.1", default-features = false, features = ["wgpu-29"] }
 ```
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { version = "0.16", default-features = false, features = ["wgpu-28"] }
+dear-imgui-wgpu = { version = "=0.16.0-alpha.1", default-features = false, features = ["wgpu-28"] }
 ```
 
 ```toml
 [dependencies]
-dear-imgui-wgpu = { version = "0.16", default-features = false, features = ["wgpu-27"] }
+dear-imgui-wgpu = { version = "=0.16.0-alpha.1", default-features = false, features = ["wgpu-27"] }
 ```
 
 ## What You Get
@@ -156,7 +192,7 @@ dear-imgui-wgpu = { version = "0.16", default-features = false, features = ["wgp
 
 | Track | wgpu support |
 |-------|--------------|
-| `main` (unpublished 0.16.0) | 30 (default), 29 (`wgpu-29`), 28 (`wgpu-28`), 27 (`wgpu-27`) |
+| `main` (unpublished 0.16.0-alpha.1) | 30 (default), 29 (`wgpu-29`), 28 (`wgpu-28`), 27 (`wgpu-27`) |
 
 See also: [docs/COMPATIBILITY.md](https://github.com/Latias94/dear-imgui-rs/blob/main/docs/COMPATIBILITY.md) for the full workspace matrix.
 

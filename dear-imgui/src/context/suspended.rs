@@ -44,7 +44,13 @@ impl SuspendedContext {
         Self::try_create_internal(None)
     }
 
-    /// Tries to create a new suspended Dear ImGui context with a shared font atlas
+    /// Tries to create a new suspended Dear ImGui context with a shared font atlas.
+    ///
+    /// Multiple contexts may share the atlas while using legacy renderer-managed texture handling.
+    /// Once a managed renderer claims the atlas, registering another context returns
+    /// [`ImGuiError::SharedFontAtlasManaged`](crate::ImGuiError::SharedFontAtlasManaged).
+    /// If its prior managed Context was dropped without a committed renderer reset, this returns
+    /// [`ImGuiError::SharedFontAtlasRendererReleasePending`](crate::ImGuiError::SharedFontAtlasRendererReleasePending).
     pub fn try_create_with_shared_font_atlas(
         shared_font_atlas: SharedFontAtlas,
     ) -> crate::error::ImGuiResult<Self> {
@@ -56,7 +62,11 @@ impl SuspendedContext {
         Self::try_create().expect("Failed to create Dear ImGui context")
     }
 
-    /// Creates a new suspended Dear ImGui context with a shared font atlas (panics on error)
+    /// Creates a new suspended Dear ImGui context with a shared font atlas (panics on error).
+    ///
+    /// This panics if a managed renderer has already claimed the atlas. Use
+    /// [`SuspendedContext::try_create_with_shared_font_atlas`] to handle ownership and
+    /// pending-release errors.
     pub fn create_with_shared_font_atlas(shared_font_atlas: SharedFontAtlas) -> Self {
         Self::try_create_with_shared_font_atlas(shared_font_atlas)
             .expect("Failed to create Dear ImGui context")
@@ -74,6 +84,7 @@ impl SuspendedContext {
             Some(atlas) => atlas.as_ptr(),
             None => ptr::null_mut(),
         };
+        crate::fonts::validate_font_atlas_context_registration(shared_font_atlas_ptr)?;
 
         let id =
             ContextId::allocate().ok_or_else(|| crate::error::ImGuiError::ContextCreation {

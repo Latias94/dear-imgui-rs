@@ -41,6 +41,10 @@ pub enum RendererError {
     #[error("Dear ImGui context is already configured for a renderer backend")]
     ContextAlreadyHasRenderer,
 
+    /// Renderer-owned Dear ImGui state changed while this renderer remained attached.
+    #[error("WGPU renderer lost ownership of Dear ImGui field `{field}`")]
+    RendererStateDrift { field: &'static str },
+
     /// Draw buffer length exceeds renderer index ranges.
     #[error("{buffer} draw buffer length exceeds renderer limits")]
     DrawBufferTooLarge { buffer: &'static str },
@@ -92,6 +96,10 @@ pub enum RendererError {
     /// Context-owned renderer consumer state rejected the operation.
     #[error(transparent)]
     RendererConsumer(#[from] dear_imgui_rs::render::RendererConsumerError),
+
+    /// Context attachment registration rejected the renderer's deferred-drop cleanup hook.
+    #[error(transparent)]
+    ContextAttachment(#[from] dear_imgui_rs::ContextAttachmentError),
 
     /// A request was completed with the wrong feedback kind.
     #[error(transparent)]

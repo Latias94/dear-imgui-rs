@@ -14,7 +14,7 @@ pub struct AshRenderer {
     pub(super) descriptor_pool: vk::DescriptorPool,
     pub(super) textures: TextureManager,
     pub(super) consumer: Option<RendererConsumer>,
-    pub(super) renderer_flags_added: BackendFlags,
+    pub(super) context_state: RendererContextState,
     pub(super) default_texture_id: u64,
     pub(super) options: Options,
     pub(super) frames: Frames,

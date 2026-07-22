@@ -542,12 +542,14 @@ fn demo_surface_plots(ui: &Ui, plot_ui: &Plot3DUi) {
             Surface3D::new("Wave Surface", &x_grid, &y_grid, &zs)
                 .scale(range_min as f64, range_max as f64)
                 .flags(flags)
-                .plot(plot_ui);
+                .try_plot(plot_ui)
+                .expect("surface grid must remain valid");
         } else {
             Surface3D::new("Wave Surface", &x_grid, &y_grid, &zs)
                 .scale(0.0, 0.0)
                 .flags(flags)
-                .plot(plot_ui);
+                .try_plot(plot_ui)
+                .expect("surface grid must remain valid");
         }
     }
 }

@@ -116,6 +116,7 @@ struct SwapchainState {
     image_views: Vec<vk::ImageView>,
     framebuffers: Vec<vk::Framebuffer>,
     present_semaphores: Vec<vk::Semaphore>,
+    present_mode: vk::PresentModeKHR,
 }
 
 impl SwapchainState {
@@ -232,6 +233,7 @@ impl SwapchainState {
             image_views,
             framebuffers,
             present_semaphores,
+            present_mode,
         })
     }
 
@@ -260,15 +262,26 @@ impl SwapchainState {
         render_pass: vk::RenderPass,
     ) -> Result<(), Box<dyn Error>> {
         unsafe { ctx.device.device_wait_idle()? };
-        let new_format = pick_surface_format(ctx)?;
-        let replacement =
-            match Self::new_with_old(ctx, window, render_pass, new_format, self.swapchain) {
-                Ok(replacement) => replacement,
-                Err(error) => {
-                    self.destroy_resources(&ctx.device);
-                    return Err(error);
-                }
-            };
+        if !surface_supports_format(ctx, self.surface_format)? {
+            return Err(format!(
+                "main surface no longer supports the renderer pair {:?}; rebuilding the renderer is required",
+                self.surface_format
+            )
+            .into());
+        }
+        let replacement = match Self::new_with_old(
+            ctx,
+            window,
+            render_pass,
+            self.surface_format,
+            self.swapchain,
+        ) {
+            Ok(replacement) => replacement,
+            Err(error) => {
+                self.destroy_resources(&ctx.device);
+                return Err(error);
+            }
+        };
         let mut previous = std::mem::replace(self, replacement);
         previous.destroy_resources(&ctx.device);
         Ok(())
@@ -539,9 +552,12 @@ fn pick_surface_format(ctx: &VulkanContext) -> Result<vk::SurfaceFormatKHR, vk::
             .get_physical_device_surface_formats(ctx.physical_device, ctx.surface)?
     };
     if formats.len() == 1 && formats[0].format == vk::Format::UNDEFINED {
+        if formats[0].color_space != vk::ColorSpaceKHR::SRGB_NONLINEAR {
+            return Err(vk::Result::ERROR_FORMAT_NOT_SUPPORTED);
+        }
         return Ok(vk::SurfaceFormatKHR {
             format: vk::Format::B8G8R8A8_SRGB,
-            color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
+            color_space: formats[0].color_space,
         });
     }
 
@@ -552,11 +568,31 @@ fn pick_surface_format(ctx: &VulkanContext) -> Result<vk::SurfaceFormatKHR, vk::
         vk::Format::R8G8B8A8_UNORM,
     ];
     for p in preferred {
-        if let Some(f) = formats.iter().find(|f| f.format == p) {
+        if let Some(f) = formats
+            .iter()
+            .find(|f| f.format == p && f.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR)
+        {
             return Ok(*f);
         }
     }
-    Ok(*formats.first().unwrap())
+    Err(vk::Result::ERROR_FORMAT_NOT_SUPPORTED)
+}
+
+fn surface_supports_format(
+    ctx: &VulkanContext,
+    requested: vk::SurfaceFormatKHR,
+) -> Result<bool, vk::Result> {
+    let formats = unsafe {
+        ctx.surface_loader
+            .get_physical_device_surface_formats(ctx.physical_device, ctx.surface)?
+    };
+    Ok(
+        if formats.len() == 1 && formats[0].format == vk::Format::UNDEFINED {
+            formats[0].color_space == requested.color_space
+        } else {
+            formats.contains(&requested)
+        },
+    )
 }
 
 fn pick_present_mode(modes: &[vk::PresentModeKHR]) -> vk::PresentModeKHR {
@@ -1045,14 +1081,16 @@ struct App {
     vk: VulkanState,
     // Keep the platform window alive until renderer, swapchains, and surfaces have been dropped.
     window: sdl3::video::Window,
+    gpu_idle_for_shutdown: bool,
+    renderer_shutdown_complete: bool,
+    platform_shutdown_complete: bool,
 }
 
 impl Drop for App {
     fn drop(&mut self) {
-        let _ = unsafe { self.vk.ctx.device.device_wait_idle() };
-        let _ = self.destroy_external_texture();
-        let _ = self.imgui.renderer.shutdown(&mut self.imgui.context);
-        let _ = self.shutdown_platform_backend();
+        if let Err(error) = self.shutdown() {
+            eprintln!("SDL3 + Ash example fallback shutdown failed: {error}");
+        }
     }
 }
 
@@ -1107,7 +1145,9 @@ impl App {
         }
 
         // SDL3 platform backend for Vulkan (sets Platform_CreateVkSurface for multi-viewport).
-        let mut sdl3_backend = Sdl3PlatformBackend::init_for_vulkan(&mut context, &window)?;
+        // SAFETY: `window` outlives ordered shutdown and Context teardown through App ownership.
+        let mut sdl3_backend =
+            unsafe { Sdl3PlatformBackend::init_for_vulkan(&mut context, &window)? };
         sdl3_backend.set_gamepad_mode(&mut context, GamepadMode::AutoAll)?;
 
         // Create a managed ImGui texture (CPU-side pixels; backend will create GPU texture).
@@ -1159,6 +1199,11 @@ impl App {
                         present_queue: ctx.queue,
                         graphics_queue_family_index: ctx.queue_family_index,
                         present_queue_family_index: ctx.queue_family_index,
+                        swapchain_policy:
+                            dear_imgui_ash::multi_viewport_sdl3::ViewportSwapchainPolicy::from_main_surface(
+                                swapchain.surface_format,
+                                swapchain.present_mode,
+                            ),
                     },
                 )?
             })
@@ -1194,7 +1239,32 @@ impl App {
                 frame_index: 0,
                 swapchain_dirty: false,
             },
+            gpu_idle_for_shutdown: false,
+            renderer_shutdown_complete: false,
+            platform_shutdown_complete: false,
         })
+    }
+
+    fn shutdown(&mut self) -> Result<(), Box<dyn Error>> {
+        if !self.gpu_idle_for_shutdown {
+            unsafe { self.vk.ctx.device.device_wait_idle()? };
+            self.gpu_idle_for_shutdown = true;
+        }
+
+        self.destroy_external_texture()?;
+
+        if !self.renderer_shutdown_complete {
+            self.imgui.renderer.shutdown(&mut self.imgui.context)?;
+            self.renderer_shutdown_complete = true;
+            self.enable_viewports = false;
+        }
+
+        if !self.platform_shutdown_complete {
+            self.shutdown_platform_backend()?;
+            self.platform_shutdown_complete = true;
+        }
+
+        Ok(())
     }
 
     fn init_external_texture(&mut self) -> Result<(), Box<dyn Error>> {
@@ -1245,7 +1315,10 @@ impl App {
 
     fn shutdown_platform_backend(&mut self) -> Result<(), imgui_sdl3_backend::Sdl3BackendError> {
         if let Some(mut backend) = self.sdl3_backend.take() {
-            backend.shutdown(&mut self.imgui.context)?;
+            if let Err(error) = backend.shutdown(&mut self.imgui.context) {
+                self.sdl3_backend = Some(backend);
+                return Err(error);
+            }
         }
         Ok(())
     }
@@ -1410,12 +1483,7 @@ impl App {
             }
         }
 
-        unsafe { self.vk.ctx.device.device_wait_idle()? };
-        self.destroy_external_texture()?;
-        self.imgui.renderer.shutdown(&mut self.imgui.context)?;
-        self.enable_viewports = false;
-        self.shutdown_platform_backend()?;
-        Ok(())
+        self.shutdown()
     }
 }
 
@@ -1475,8 +1543,6 @@ fn render_main_window(
             )?;
         }
     }
-    vk_state.images_in_flight[image_index as usize] = frame.fence;
-
     unsafe {
         vk_state
             .ctx
@@ -1509,6 +1575,7 @@ fn render_main_window(
             frame.fence,
         )?;
     }
+    vk_state.images_in_flight[image_index as usize] = frame.fence;
 
     let present_info = vk::PresentInfoKHR::default()
         .wait_semaphores(std::slice::from_ref(&present_semaphore))

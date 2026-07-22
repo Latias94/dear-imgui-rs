@@ -107,6 +107,19 @@ fn resolve_imgui_includes(cfg: &BuildConfig) -> (PathBuf, PathBuf) {
     (imgui_src, cimgui_root)
 }
 
+fn native_binding_spec() -> &'static build_support::binding::CrateBindingSpec {
+    build_support::binding::CrateBindingSpec::for_crate_and_target(env!("CARGO_PKG_NAME"), "native")
+        .expect("missing dear-node-editor-sys native binding spec")
+}
+
+#[cfg(feature = "bindgen")]
+fn apply_bindgen_defines(mut builder: bindgen::Builder) -> bindgen::Builder {
+    for define in native_binding_spec().binding_defines() {
+        builder = builder.clang_arg(define.clang_arg());
+    }
+    builder
+}
+
 #[cfg(feature = "bindgen")]
 fn generate_bindings(
     cfg: &BuildConfig,
@@ -118,7 +131,7 @@ fn generate_bindings(
         panic_wasm_unsupported();
     }
 
-    let bindings = bindgen::Builder::default()
+    let builder = bindgen::Builder::default()
         .header(
             cfg.manifest_dir
                 .join("shim/node_editor_extra.h")
@@ -144,9 +157,8 @@ fn generate_bindings(
         .clang_arg(format!(
             "-I{}",
             node_editor_root.join("imgui-node-editor").display()
-        ))
-        .clang_arg("-DIMGUI_USE_WCHAR32")
-        .clang_arg("-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
+        ));
+    let bindings = apply_bindgen_defines(builder)
         .clang_arg("-x")
         .clang_arg("c++")
         .clang_arg("-std=c++17")
@@ -347,17 +359,12 @@ fn build_with_cc(cfg: &BuildConfig, node_editor_root: &Path, imgui_src: &Path, c
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
     build_support::configure_cpp_runtime_linkage(&mut build, &cfg.target_os, &cfg.target_env);
-    for (k, v) in env::vars() {
-        if let Some(suffix) = k.strip_prefix("DEP_DEAR_IMGUI_DEFINE_") {
-            build.define(suffix, v.as_str());
-        }
-    }
+    native_binding_spec().apply_extension_binding_defines(&mut build, env::vars());
     build.include(imgui_src);
     build.include(cimgui_root);
     build.include(node_editor_root);
     build.include(node_editor_root.join("imgui-node-editor"));
     build.include(cfg.manifest_dir.join("shim"));
-    build.define("IMGUI_USE_WCHAR32", None);
     // Keep ImGui internal ABI macros in lockstep with dear-imgui-sys. imgui-node-editor includes
     // imgui_internal.h, so local-only layout-affecting defines can corrupt the shared context.
 

@@ -3,9 +3,17 @@
 //! This module contains the core `WinitPlatform` struct and its implementation
 //! for integrating Dear ImGui with winit windowing.
 
-use std::ffi::c_void;
+use std::cell::{Cell, RefCell};
+use std::ffi::{c_char, c_void};
+use std::rc::Rc;
+use std::sync::Arc;
 
-use dear_imgui_rs::{BackendFlags, ConfigFlags, Context};
+use dear_imgui_rs::{
+    BackendFlags, ConfigFlags, Context, ContextAttachment, ContextAttachmentError,
+    ContextAttachmentLease, ContextAttachmentRole, ContextAttachmentTeardownError, ContextBinding,
+    ContextBindingError, ContextDestroyed, ContextTeardown,
+};
+use thiserror::Error;
 use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::event::{Event, WindowEvent};
 use winit::window::{Window, WindowAttributes};
@@ -18,6 +26,126 @@ use web_time::Instant;
 use crate::cursor::CursorSettings;
 use crate::events;
 use crate::sanitize;
+
+struct WinitPlatformAttachmentMarker;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PlatformState {
+    Active,
+    Faulted,
+    ShuttingDown,
+    Detached,
+    ContextDestroyed,
+}
+
+/// Failure to attach or operate the Winit platform backend.
+#[derive(Clone, Debug, Eq, Error, PartialEq)]
+#[non_exhaustive]
+pub enum WinitPlatformError {
+    /// The Dear ImGui Context rejected the platform attachment.
+    #[error(transparent)]
+    Attachment(#[from] ContextAttachmentError),
+    /// The originating Dear ImGui Context can no longer be entered normally.
+    #[error(transparent)]
+    Context(#[from] ContextBindingError),
+    /// The supplied Context is not the Context owned by this platform backend.
+    #[error("the Winit platform backend belongs to a different Dear ImGui context")]
+    ContextMismatch,
+    /// Another platform backend already owns a required global field.
+    #[error("Dear ImGui platform state `{field}` is already owned")]
+    PlatformStateOccupied { field: &'static str },
+    /// A field claimed by this platform backend changed while it remained attached.
+    #[error("Dear ImGui platform state `{field}` changed while Winit was attached")]
+    PlatformStateReplaced { field: &'static str },
+    /// No main window has been attached to the platform backend.
+    #[error("attach a main Winit window before using this operation")]
+    WindowNotAttached,
+    /// The supplied window is not the platform backend's attached main window.
+    #[error("the Winit window does not match the platform backend's attached main window")]
+    WindowMismatch,
+    /// Multi-viewport support is already attached to this platform owner.
+    #[error("Winit multi-viewport support is already attached")]
+    RuntimeAlreadyAttached,
+    /// A configuration mutation would invalidate the active multi-viewport coordinate contract.
+    #[error("Winit platform configuration is locked while multi-viewport support is attached")]
+    RuntimeConfigurationLocked,
+    /// The build artifact lacks the aggregate callback bridge required by this backend.
+    #[error("dear-imgui-sys was built without PlatformIO aggregate ABI hooks")]
+    AggregateCallbackHooksUnavailable,
+    /// Another platform backend already owns one of the required callback slots.
+    #[error("ImGuiPlatformIO callback `{callback}` is already owned by another platform backend")]
+    PlatformCallbackOccupied { callback: &'static str },
+    /// Another platform backend already advertises a capability owned by this runtime.
+    #[error("Dear ImGui backend capability `{flag}` is already owned by another platform backend")]
+    PlatformCapabilityOccupied { flag: &'static str },
+    /// A slot in the captured platform callback table changed while the runtime remained attached.
+    #[error(
+        "Winit platform callback table slot `{callback}` changed while the runtime was attached"
+    )]
+    PlatformCallbackReplaced { callback: &'static str },
+    /// Platform teardown was requested before the renderer released its viewport callback.
+    #[error("renderer state `{field}` is still installed; shut down the renderer before Winit")]
+    RendererShutdownRequired { field: &'static str },
+    /// A viewport already has platform data owned by another backend.
+    #[error("viewport platform data or handle is already owned by another platform backend")]
+    ForeignPlatformUserData,
+    /// Winit did not expose any monitor geometry that can back Dear ImGui viewports.
+    #[error("Winit did not expose any monitor geometry")]
+    NoMonitors,
+    /// Winit exposed monitor geometry that violates Dear ImGui's platform contract.
+    #[error("Winit monitor {monitor} is invalid: {reason}")]
+    InvalidMonitorGeometry {
+        monitor: usize,
+        reason: &'static str,
+    },
+    /// The current logical desktop model cannot represent monitors with different scale factors.
+    #[error(
+        "mixed-DPI monitor layouts are unsupported by the Winit multi-viewport logical coordinate model"
+    )]
+    MixedMonitorScaleFactorsUnsupported,
+    /// Custom single-window coordinate scaling is not implemented for platform viewports.
+    #[error("Winit multi-viewport requires HiDpiMode::Default")]
+    CustomHiDpiModeUnsupported,
+    /// Wayland cannot provide the desktop-space positioning required by Dear ImGui viewports.
+    #[error("Wayland is unsupported by the Winit multi-viewport backend; use X11 on Linux")]
+    WaylandUnsupported,
+    /// The target has no supported native desktop window-system contract.
+    #[error("the Winit multi-viewport backend does not support target `{target}`")]
+    UnsupportedWindowSystem { target: &'static str },
+    /// A requested viewport flag cannot be implemented faithfully for this operation.
+    #[error("Winit cannot honor viewport flag `{flag}` during {operation}")]
+    UnsupportedViewportFlag {
+        flag: &'static str,
+        operation: &'static str,
+    },
+    /// The monitor count cannot be represented by Dear ImGui's native vector.
+    #[error("the Winit monitor count exceeds i32::MAX")]
+    MonitorCountOverflow,
+    /// Dear ImGui's allocator could not reserve monitor storage.
+    #[error("Dear ImGui failed to allocate Winit monitor storage")]
+    MonitorStorageAllocationFailed,
+    /// Dear ImGui requested a new viewport outside a scoped Winit event-loop entry.
+    #[error("Winit viewport creation requires WinitPlatformRuntime::with_event_loop")]
+    EventLoopUnavailable,
+    /// Winit failed to create a secondary viewport window.
+    #[error("Winit failed to create a secondary viewport window: {message}")]
+    WindowCreation { message: String },
+    /// A fallible operation on a secondary Winit window failed.
+    #[error("Winit viewport operation `{operation}` failed: {message}")]
+    WindowOperation {
+        operation: &'static str,
+        message: String,
+    },
+    /// A Rust platform callback panicked; the panic was contained at the C ABI boundary.
+    #[error("Winit platform callback `{callback}` panicked")]
+    CallbackPanicked { callback: &'static str },
+    /// The owning runtime has already shut down or entered a terminal fault.
+    #[error("the Winit platform runtime is no longer attached")]
+    RuntimeDetached,
+    #[cfg(test)]
+    #[error("injected Winit construction failure after {stage}")]
+    InjectedConstructionFailure { stage: &'static str },
+}
 
 type SetImeDataCallback = unsafe extern "C" fn(
     *mut dear_imgui_rs::sys::ImGuiContext,
@@ -39,108 +167,614 @@ unsafe extern "C" fn imgui_winit_set_ime_data(
         if viewport.is_null() || data.is_null() {
             return;
         }
-
-        // Prefer the target viewport window when multi-viewport owns it, then fall back to the
-        // main-window pointer stored in Platform_ImeUserData.
-        let pio = platform_io_for_ime_context(ctx);
-        if pio.is_null() {
+        let Some(control) = platform_control_for_context(ctx) else {
             return;
-        }
-
-        let user_data = ime_window_ptr_for_viewport(ctx, viewport, pio);
-        if user_data.is_null() {
-            return;
-        }
-
-        // Safety: we rely on the application to keep the Window alive while the
-        // ImGui context is active. This matches typical winit usage.
-        let window: &Window = &*user_data;
-        let ime: &ImGuiPlatformImeData = &*data;
-        let vp: &ImGuiViewport = &*viewport;
-
-        // If IME is not visible and not expecting text input, there's nothing to do.
-        if !ime.WantVisible && !ime.WantTextInput {
-            return;
-        }
-
-        // Dear ImGui gives InputPos in the same coordinate space as the viewport's
-        // Pos. Convert to client-area coordinates by subtracting viewport origin.
-        let rel_x = (ime.InputPos.x - vp.Pos.x) as f64;
-        let rel_y = (ime.InputPos.y - vp.Pos.y) as f64;
-
-        let pos = LogicalPosition::new(rel_x, rel_y);
-
-        // Use the reported line height as a reasonable IME region height. Width is
-        // not very important for most IME implementations.
-        let line_h = if ime.InputLineHeight > 0.0 {
-            ime.InputLineHeight as f64
-        } else {
-            16.0
         };
-        let size = LogicalSize::new(line_h, line_h);
+        let _ = control.binding.try_with_bound_context(|| {
+            if let Err(error) = control.validate_complete_contract_in_current_context() {
+                control.fail_current_contract(error);
+                return;
+            }
+            #[cfg(feature = "multi-viewport")]
+            let window = crate::multi_viewport::window_for_viewport(ctx, viewport)
+                .or_else(|| control.attached_window().ok());
+            #[cfg(not(feature = "multi-viewport"))]
+            let window = control.attached_window().ok();
+            let Some(window) = window else {
+                return;
+            };
 
-        window.set_ime_cursor_area(pos, size);
+            let ime: &ImGuiPlatformImeData = &*data;
+            let vp: &ImGuiViewport = &*viewport;
+            if !ime.WantVisible && !ime.WantTextInput {
+                return;
+            }
+            let pos = LogicalPosition::new(
+                (ime.InputPos.x - vp.Pos.x) as f64,
+                (ime.InputPos.y - vp.Pos.y) as f64,
+            );
+            let line_height = if ime.InputLineHeight > 0.0 {
+                ime.InputLineHeight as f64
+            } else {
+                16.0
+            };
+            window.set_ime_cursor_area(pos, LogicalSize::new(line_height, line_height));
+        });
     }));
     if res.is_err() {
-        #[cfg(feature = "multi-viewport")]
-        crate::multi_viewport::record_callback_panic(ctx, "Platform_SetImeDataFn");
+        if let Some(control) = platform_control_for_context(ctx) {
+            let _ = control.binding.try_with_bound_context(|| {
+                control.fail_current_contract(WinitPlatformError::CallbackPanicked {
+                    callback: "Platform_SetImeDataFn",
+                });
+            });
+        }
     }
 }
 
-fn is_winit_set_ime_data(callback: Option<SetImeDataCallback>) -> bool {
-    callback.is_some_and(|callback| {
-        std::ptr::fn_addr_eq(callback, imgui_winit_set_ime_data as SetImeDataCallback)
+fn ime_callback_eq(left: Option<SetImeDataCallback>, right: Option<SetImeDataCallback>) -> bool {
+    match (left, right) {
+        (Some(left), Some(right)) => std::ptr::fn_addr_eq(left, right),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+const WINIT_BASE_FLAGS: BackendFlags = BackendFlags::HAS_MOUSE_CURSORS;
+#[cfg(feature = "multi-viewport")]
+const WINIT_VIEWPORT_FLAGS: BackendFlags =
+    BackendFlags::PLATFORM_HAS_VIEWPORTS.union(BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT);
+#[cfg(not(feature = "multi-viewport"))]
+const WINIT_VIEWPORT_FLAGS: BackendFlags = BackendFlags::empty();
+const WINIT_RESERVED_FLAGS: BackendFlags = WINIT_BASE_FLAGS
+    .union(BackendFlags::HAS_SET_MOUSE_POS)
+    .union(WINIT_VIEWPORT_FLAGS)
+    .union(BackendFlags::HAS_PARENT_VIEWPORT);
+
+#[repr(C)]
+struct PlatformOwnerToken {
+    marker: u8,
+}
+
+fn winit_backend_name_ptr() -> *const c_char {
+    concat!("dear-imgui-winit ", env!("CARGO_PKG_VERSION"), "\0")
+        .as_ptr()
+        .cast()
+}
+
+struct RegisteredPlatform {
+    context_raw: usize,
+    context_id: dear_imgui_rs::ContextId,
+    control: std::rc::Weak<WinitPlatformControl>,
+}
+
+thread_local! {
+    static PLATFORM_CONTROLS: RefCell<Vec<RegisteredPlatform>> = const { RefCell::new(Vec::new()) };
+}
+
+fn register_platform_control(control: &Rc<WinitPlatformControl>) {
+    PLATFORM_CONTROLS.with(|controls| {
+        let mut controls = controls.borrow_mut();
+        controls.retain(|entry| entry.control.strong_count() > 0);
+        controls.push(RegisteredPlatform {
+            context_raw: control.context_raw as usize,
+            context_id: control.binding.id(),
+            control: Rc::downgrade(control),
+        });
+    });
+}
+
+fn unregister_platform_control(context_id: dear_imgui_rs::ContextId) {
+    PLATFORM_CONTROLS.with(|controls| {
+        controls
+            .borrow_mut()
+            .retain(|entry| entry.context_id != context_id);
+    });
+}
+
+fn platform_control_for_context(
+    context_raw: *mut dear_imgui_rs::sys::ImGuiContext,
+) -> Option<Rc<WinitPlatformControl>> {
+    if context_raw.is_null() {
+        return None;
+    }
+    PLATFORM_CONTROLS.with(|controls| {
+        let mut controls = controls.borrow_mut();
+        controls.retain(|entry| entry.control.strong_count() > 0);
+        controls
+            .iter()
+            .find(|entry| entry.context_raw == context_raw as usize)
+            .and_then(|entry| entry.control.upgrade())
     })
 }
 
-#[cfg(feature = "multi-viewport")]
-pub(crate) unsafe fn clear_ime_callback_if_owned(
-    platform_io: *mut dear_imgui_rs::sys::ImGuiPlatformIO,
-    window: *const Window,
-) -> bool {
-    if platform_io.is_null()
-        || window.is_null()
-        || !is_winit_set_ime_data(unsafe { (*platform_io).Platform_SetImeDataFn })
-        || unsafe { (*platform_io).Platform_ImeUserData } != window.cast_mut().cast()
-    {
-        return false;
-    }
-
-    unsafe {
-        (*platform_io).Platform_SetImeDataFn = None;
-        (*platform_io).Platform_ImeUserData = std::ptr::null_mut();
-    }
-    true
+pub(crate) struct WinitPlatformControl {
+    context_raw: *mut dear_imgui_rs::sys::ImGuiContext,
+    binding: ContextBinding,
+    state: Cell<PlatformState>,
+    token: Box<PlatformOwnerToken>,
+    installed_name: Cell<*const c_char>,
+    baseline_ime_callback: Cell<Option<SetImeDataCallback>>,
+    baseline_ime_user_data: Cell<*mut c_void>,
+    attached_window: RefCell<Option<Arc<Window>>>,
+    terminal_fault: RefCell<Option<WinitPlatformError>>,
+    #[cfg(feature = "multi-viewport")]
+    runtime: RefCell<Option<Rc<crate::multi_viewport::RuntimeControl>>>,
 }
 
-unsafe fn ime_window_ptr_for_viewport(
-    _ctx: *mut dear_imgui_rs::sys::ImGuiContext,
-    _viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
-    pio: *mut dear_imgui_rs::sys::ImGuiPlatformIO,
-) -> *const Window {
-    #[cfg(feature = "multi-viewport")]
-    {
-        let viewport_window =
-            unsafe { crate::multi_viewport::window_ptr_for_viewport(_ctx, _viewport) };
-        if !viewport_window.is_null() {
-            return viewport_window;
+impl WinitPlatformControl {
+    fn preflight(
+        context: &Context,
+    ) -> Result<(Option<SetImeDataCallback>, *mut c_void), WinitPlatformError> {
+        context.binding().with_bound_context(|| unsafe {
+            let io = dear_imgui_rs::sys::igGetIO_Nil();
+            let platform_io = dear_imgui_rs::sys::igGetPlatformIO_Nil();
+            if io.is_null() || platform_io.is_null() {
+                return Err(WinitPlatformError::ContextMismatch);
+            }
+            for (occupied, field) in [
+                (!(*io).BackendPlatformName.is_null(), "BackendPlatformName"),
+                (
+                    !(*io).BackendPlatformUserData.is_null(),
+                    "BackendPlatformUserData",
+                ),
+                (
+                    !(*platform_io).Platform_ImeUserData.is_null(),
+                    "Platform_ImeUserData",
+                ),
+            ] {
+                if occupied {
+                    return Err(WinitPlatformError::PlatformStateOccupied { field });
+                }
+            }
+            let occupied_flags =
+                BackendFlags::from_bits_retain((*io).BackendFlags) & WINIT_RESERVED_FLAGS;
+            if !occupied_flags.is_empty() {
+                return Err(WinitPlatformError::PlatformStateOccupied {
+                    field: "BackendFlags",
+                });
+            }
+            Ok((
+                (*platform_io).Platform_SetImeDataFn,
+                (*platform_io).Platform_ImeUserData,
+            ))
+        })
+    }
+
+    fn claim(
+        context: &mut Context,
+    ) -> Result<(Rc<Self>, ContextAttachmentLease), WinitPlatformError> {
+        let (baseline_ime_callback, baseline_ime_user_data) = Self::preflight(context)?;
+        let control = Rc::new(Self {
+            context_raw: context.as_raw(),
+            binding: context.binding(),
+            state: Cell::new(PlatformState::Active),
+            token: Box::new(PlatformOwnerToken { marker: 1 }),
+            installed_name: Cell::new(std::ptr::null()),
+            baseline_ime_callback: Cell::new(baseline_ime_callback),
+            baseline_ime_user_data: Cell::new(baseline_ime_user_data),
+            attached_window: RefCell::new(None),
+            terminal_fault: RefCell::new(None),
+            #[cfg(feature = "multi-viewport")]
+            runtime: RefCell::new(None),
+        });
+        let attachment = context.register_attachment::<WinitPlatformAttachmentMarker>(
+            ContextAttachmentRole::Platform,
+            Rc::clone(&control) as Rc<dyn ContextAttachment>,
+        )?;
+
+        context.binding().with_bound_context(|| unsafe {
+            let io = dear_imgui_rs::sys::igGetIO_Nil();
+            (*io).BackendPlatformName = winit_backend_name_ptr();
+            control.installed_name.set(winit_backend_name_ptr());
+            (*io).BackendPlatformUserData = control.token_ptr();
+            (*io).BackendFlags |= WINIT_BASE_FLAGS.bits();
+        });
+        register_platform_control(&control);
+        Ok((control, attachment))
+    }
+
+    fn token_ptr(&self) -> *mut c_void {
+        std::ptr::from_ref::<PlatformOwnerToken>(&self.token)
+            .cast_mut()
+            .cast()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn binding(&self) -> &ContextBinding {
+        &self.binding
+    }
+
+    fn expected_owned_flags(&self) -> BackendFlags {
+        #[cfg(feature = "multi-viewport")]
+        let viewport_flags = self
+            .runtime
+            .borrow()
+            .as_ref()
+            .filter(|runtime| !runtime.is_released())
+            .map_or(BackendFlags::empty(), |_| WINIT_VIEWPORT_FLAGS);
+        #[cfg(not(feature = "multi-viewport"))]
+        let viewport_flags = BackendFlags::empty();
+        WINIT_BASE_FLAGS | viewport_flags
+    }
+
+    pub(crate) fn ensure_context(&self, context: &Context) -> Result<(), WinitPlatformError> {
+        if context.id() == self.binding.id() {
+            Ok(())
+        } else {
+            Err(WinitPlatformError::ContextMismatch)
         }
     }
 
-    if pio.is_null() {
-        std::ptr::null()
-    } else {
-        unsafe { (*pio).Platform_ImeUserData as *const Window }
+    fn ensure_active(&self) -> Result<(), WinitPlatformError> {
+        if let Some(error) = self.terminal_fault.borrow().clone() {
+            return Err(error);
+        }
+        match self.state.get() {
+            PlatformState::Active => Ok(()),
+            PlatformState::Faulted
+            | PlatformState::ShuttingDown
+            | PlatformState::Detached
+            | PlatformState::ContextDestroyed => Err(WinitPlatformError::RuntimeDetached),
+        }
+    }
+
+    fn validate_base_contract_in_current_context(&self) -> Result<(), WinitPlatformError> {
+        self.ensure_active()?;
+        unsafe {
+            if dear_imgui_rs::sys::igGetCurrentContext() != self.context_raw {
+                return Err(WinitPlatformError::ContextMismatch);
+            }
+            let io = dear_imgui_rs::sys::igGetIO_Nil();
+            let platform_io = dear_imgui_rs::sys::igGetPlatformIO_Nil();
+            if io.is_null() || platform_io.is_null() {
+                return Err(WinitPlatformError::ContextMismatch);
+            }
+            for (matches, field) in [
+                (
+                    (*io).BackendPlatformName == self.installed_name.get(),
+                    "BackendPlatformName",
+                ),
+                (
+                    (*io).BackendPlatformUserData == self.token_ptr(),
+                    "BackendPlatformUserData",
+                ),
+                (
+                    (BackendFlags::from_bits_retain((*io).BackendFlags) & WINIT_RESERVED_FLAGS)
+                        == self.expected_owned_flags(),
+                    "BackendFlags",
+                ),
+            ] {
+                if !matches {
+                    return Err(WinitPlatformError::PlatformStateReplaced { field });
+                }
+            }
+
+            let attached_window = self.attached_window.borrow();
+            let expected_window = attached_window.as_ref().map(Arc::as_ptr);
+            let callback_matches = match ((*platform_io).Platform_SetImeDataFn, expected_window) {
+                (actual, None) => ime_callback_eq(actual, self.baseline_ime_callback.get()),
+                (Some(actual), Some(_)) => {
+                    std::ptr::fn_addr_eq(actual, imgui_winit_set_ime_data as SetImeDataCallback)
+                }
+                _ => false,
+            };
+            if !callback_matches {
+                return Err(WinitPlatformError::PlatformStateReplaced {
+                    field: "Platform_SetImeDataFn",
+                });
+            }
+            let expected_user_data = expected_window
+                .map_or(self.baseline_ime_user_data.get(), |window| {
+                    window.cast_mut().cast()
+                });
+            if (*platform_io).Platform_ImeUserData != expected_user_data {
+                return Err(WinitPlatformError::PlatformStateReplaced {
+                    field: "Platform_ImeUserData",
+                });
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_complete_contract_in_current_context(
+        &self,
+    ) -> Result<(), WinitPlatformError> {
+        self.validate_base_contract_in_current_context()?;
+        #[cfg(feature = "multi-viewport")]
+        if let Some(runtime) = self.runtime.borrow().as_ref() {
+            runtime.validate_publication_contract_in_current_context()?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_operational_contract(&self) -> Result<(), WinitPlatformError> {
+        self.binding.try_with_bound_context(|| {
+            let result = self.validate_complete_contract_in_current_context();
+            if let Err(error) = &result {
+                self.fail_current_contract(error.clone());
+            }
+            result
+        })?
+    }
+
+    pub(crate) fn terminal_fault(&self) -> Option<WinitPlatformError> {
+        if matches!(
+            self.state.get(),
+            PlatformState::Detached | PlatformState::ContextDestroyed
+        ) {
+            None
+        } else {
+            self.terminal_fault.borrow().clone()
+        }
+    }
+
+    pub(crate) fn owns_base_publication_in_current_context(&self) -> bool {
+        unsafe {
+            if dear_imgui_rs::sys::igGetCurrentContext() != self.context_raw {
+                return false;
+            }
+            let io = dear_imgui_rs::sys::igGetIO_Nil();
+            let platform_io = dear_imgui_rs::sys::igGetPlatformIO_Nil();
+            if io.is_null() || platform_io.is_null() {
+                return false;
+            }
+            if (*io).BackendPlatformName == self.installed_name.get()
+                || (*io).BackendPlatformUserData == self.token_ptr()
+            {
+                return true;
+            }
+            let attached_window = self.attached_window.borrow();
+            let Some(window) = attached_window.as_ref() else {
+                return false;
+            };
+            let expected_window = Arc::as_ptr(window).cast_mut().cast::<c_void>();
+            (*platform_io)
+                .Platform_SetImeDataFn
+                .is_some_and(|callback| {
+                    std::ptr::fn_addr_eq(callback, imgui_winit_set_ime_data as SetImeDataCallback)
+                })
+                || (*platform_io).Platform_ImeUserData == expected_window
+        }
+    }
+
+    fn owns_any_publication_or_callback_in_current_context(&self) -> bool {
+        if self.owns_base_publication_in_current_context() {
+            return true;
+        }
+        #[cfg(feature = "multi-viewport")]
+        if let Some(runtime) = self.runtime.borrow().as_ref() {
+            return runtime.owns_any_platform_callback_in_current_context();
+        }
+        false
+    }
+
+    pub(crate) fn fail_current_contract(&self, error: WinitPlatformError) {
+        let owns_winit_state = self.owns_any_publication_or_callback_in_current_context();
+        if self.terminal_fault.borrow().is_none() {
+            *self.terminal_fault.borrow_mut() = Some(error);
+        }
+        self.state.set(PlatformState::Faulted);
+        #[cfg(feature = "multi-viewport")]
+        if let Some(runtime) = self.runtime.borrow().as_ref() {
+            runtime.mark_faulted();
+        }
+        unsafe {
+            if owns_winit_state && dear_imgui_rs::sys::igGetCurrentContext() == self.context_raw {
+                let io = dear_imgui_rs::sys::igGetIO_Nil();
+                if !io.is_null() {
+                    (*io).BackendFlags &= !(WINIT_BASE_FLAGS | WINIT_VIEWPORT_FLAGS).bits();
+                }
+            }
+        }
+    }
+
+    pub(crate) fn attached_window(&self) -> Result<Arc<Window>, WinitPlatformError> {
+        self.attached_window
+            .borrow()
+            .clone()
+            .ok_or(WinitPlatformError::WindowNotAttached)
+    }
+
+    fn ensure_window(&self, window: &Window) -> Result<Arc<Window>, WinitPlatformError> {
+        let attached = self.attached_window()?;
+        if std::ptr::eq(Arc::as_ptr(&attached), window) {
+            Ok(attached)
+        } else {
+            Err(WinitPlatformError::WindowMismatch)
+        }
+    }
+
+    fn validate_entry(&self, context: &Context, window: &Window) -> Result<(), WinitPlatformError> {
+        self.ensure_context(context)?;
+        self.ensure_window(window)?;
+        self.validate_operational_contract()
+    }
+
+    fn validate_window_entry(&self, window: &Window) -> Result<(), WinitPlatformError> {
+        self.ensure_window(window)?;
+        self.validate_operational_contract()
+    }
+
+    fn attach_window(
+        &self,
+        context: &mut Context,
+        window: Arc<Window>,
+    ) -> Result<(), WinitPlatformError> {
+        self.ensure_context(context)?;
+        self.validate_operational_contract()?;
+        self.binding.try_with_bound_context(|| {
+            if let Some(existing) = self.attached_window.borrow().as_ref()
+                && !Arc::ptr_eq(existing, &window)
+            {
+                return Err(WinitPlatformError::WindowMismatch);
+            }
+            unsafe {
+                let platform_io = dear_imgui_rs::sys::igGetPlatformIO_Nil();
+                (*platform_io).Platform_SetImeDataFn = Some(imgui_winit_set_ime_data);
+                (*platform_io).Platform_ImeUserData = Arc::as_ptr(&window).cast_mut().cast();
+            }
+            self.attached_window.borrow_mut().replace(window);
+            Ok(())
+        })?
+    }
+
+    fn detach_window(
+        &self,
+        context: &mut Context,
+        window: &Arc<Window>,
+    ) -> Result<(), WinitPlatformError> {
+        self.ensure_context(context)?;
+        self.validate_operational_contract()?;
+        self.binding.try_with_bound_context(|| {
+            let attached = self.attached_window()?;
+            if !Arc::ptr_eq(&attached, window) {
+                return Err(WinitPlatformError::WindowMismatch);
+            }
+            unsafe {
+                let platform_io = dear_imgui_rs::sys::igGetPlatformIO_Nil();
+                (*platform_io).Platform_SetImeDataFn = self.baseline_ime_callback.get();
+                (*platform_io).Platform_ImeUserData = self.baseline_ime_user_data.get();
+            }
+            self.attached_window.borrow_mut().take();
+            Ok(())
+        })?
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    pub(crate) fn install_runtime(
+        &self,
+        runtime: Rc<crate::multi_viewport::RuntimeControl>,
+    ) -> Result<(), WinitPlatformError> {
+        let mut slot = self.runtime.borrow_mut();
+        if slot.is_some() {
+            return Err(WinitPlatformError::RuntimeAlreadyAttached);
+        }
+        *slot = Some(runtime);
+        Ok(())
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    pub(crate) fn clear_runtime(&self, runtime: &Rc<crate::multi_viewport::RuntimeControl>) {
+        let mut slot = self.runtime.borrow_mut();
+        if slot
+            .as_ref()
+            .is_some_and(|installed| Rc::ptr_eq(installed, runtime))
+        {
+            slot.take();
+        }
+    }
+
+    fn release_base_in_current_context(&self) -> Result<(), WinitPlatformError> {
+        let mut replaced = None;
+        let owns_base_publication = self.owns_base_publication_in_current_context();
+        unsafe {
+            let io = dear_imgui_rs::sys::igGetIO_Nil();
+            let platform_io = dear_imgui_rs::sys::igGetPlatformIO_Nil();
+            if io.is_null() || platform_io.is_null() {
+                return Err(WinitPlatformError::ContextMismatch);
+            }
+            let attached_window = self
+                .attached_window
+                .borrow()
+                .as_ref()
+                .map(|window| Arc::as_ptr(window).cast_mut().cast::<c_void>());
+            if let Some(expected_window) = attached_window {
+                let callback_is_ours =
+                    (*platform_io)
+                        .Platform_SetImeDataFn
+                        .is_some_and(|callback| {
+                            std::ptr::fn_addr_eq(
+                                callback,
+                                imgui_winit_set_ime_data as SetImeDataCallback,
+                            )
+                        });
+                if callback_is_ours {
+                    (*platform_io).Platform_SetImeDataFn = self.baseline_ime_callback.get();
+                } else {
+                    replaced.get_or_insert("Platform_SetImeDataFn");
+                }
+                if (*platform_io).Platform_ImeUserData == expected_window {
+                    (*platform_io).Platform_ImeUserData = self.baseline_ime_user_data.get();
+                } else {
+                    replaced.get_or_insert("Platform_ImeUserData");
+                }
+            } else {
+                if !ime_callback_eq(
+                    (*platform_io).Platform_SetImeDataFn,
+                    self.baseline_ime_callback.get(),
+                ) {
+                    replaced.get_or_insert("Platform_SetImeDataFn");
+                }
+                if (*platform_io).Platform_ImeUserData != self.baseline_ime_user_data.get() {
+                    replaced.get_or_insert("Platform_ImeUserData");
+                }
+            }
+            let expected_flags = self.expected_owned_flags();
+            if owns_base_publication
+                && self.terminal_fault.borrow().is_none()
+                && (BackendFlags::from_bits_retain((*io).BackendFlags) & WINIT_RESERVED_FLAGS)
+                    != expected_flags
+            {
+                replaced.get_or_insert("BackendFlags");
+            }
+            if (*io).BackendPlatformUserData == self.token_ptr() {
+                (*io).BackendPlatformUserData = std::ptr::null_mut();
+            } else {
+                replaced.get_or_insert("BackendPlatformUserData");
+            }
+            if (*io).BackendPlatformName == self.installed_name.get() {
+                (*io).BackendPlatformName = std::ptr::null();
+            } else {
+                replaced.get_or_insert("BackendPlatformName");
+            }
+            if owns_base_publication {
+                (*io).BackendFlags &= !WINIT_BASE_FLAGS.bits();
+            }
+        }
+        if let Some(window) = self.attached_window.borrow_mut().take() {
+            window.set_ime_allowed(false);
+        }
+        replaced.map_or(Ok(()), |field| {
+            Err(WinitPlatformError::PlatformStateReplaced { field })
+        })
     }
 }
 
-unsafe fn platform_io_for_ime_context(
-    ctx: *mut dear_imgui_rs::sys::ImGuiContext,
-) -> *mut dear_imgui_rs::sys::ImGuiPlatformIO {
-    if ctx.is_null() {
-        unsafe { dear_imgui_rs::sys::igGetPlatformIO_Nil() }
-    } else {
-        unsafe { dear_imgui_rs::sys::igGetPlatformIO_ContextPtr(ctx) }
+impl ContextAttachment for WinitPlatformControl {
+    fn quiesce(
+        &self,
+        _context: &ContextTeardown<'_>,
+    ) -> Result<(), ContextAttachmentTeardownError> {
+        self.state.set(PlatformState::ShuttingDown);
+        #[cfg(feature = "multi-viewport")]
+        if let Some(runtime) = self.runtime.borrow().as_ref() {
+            runtime.quiesce_from_platform();
+        }
+        Ok(())
+    }
+
+    fn release_platform_windows(
+        &self,
+        context: &ContextTeardown<'_>,
+    ) -> Result<(), ContextAttachmentTeardownError> {
+        #[cfg(feature = "multi-viewport")]
+        if let Some(runtime) = self.runtime.borrow().as_ref() {
+            runtime.release_from_platform_teardown(context)?;
+        }
+        context
+            .with_bound_context(|| self.release_base_in_current_context())
+            .map_err(|error| ContextAttachmentTeardownError::new(error.to_string()))
+    }
+
+    fn context_destroyed(&self, _context: ContextDestroyed) {
+        #[cfg(feature = "multi-viewport")]
+        if let Some(runtime) = self.runtime.borrow_mut().take() {
+            runtime.context_destroyed_from_platform(_context);
+        }
+        self.attached_window.borrow_mut().take();
+        unregister_platform_control(self.binding.id());
+        self.state.set(PlatformState::ContextDestroyed);
     }
 }
 
@@ -158,6 +792,8 @@ pub enum HiDpiMode {
 
 /// Main platform backend for Dear ImGui with winit integration
 pub struct WinitPlatform {
+    control: Rc<WinitPlatformControl>,
+    attachment: Option<ContextAttachmentLease>,
     hidpi_mode: HiDpiMode,
     hidpi_factor: f64,
     cursor_cache: Option<CursorSettings>,
@@ -176,36 +812,36 @@ impl WinitPlatform {
     /// use dear_imgui_winit::WinitPlatform;
     ///
     /// let mut imgui_ctx = Context::create();
-    /// let mut platform = WinitPlatform::new(&mut imgui_ctx);
+    /// let mut platform = WinitPlatform::new(&mut imgui_ctx).unwrap();
     /// ```
-    pub fn new(imgui_ctx: &mut Context) -> Self {
-        // Set backend platform name for diagnostics before borrowing Io
-        let _ = imgui_ctx.set_platform_name(Some(format!(
-            "dear-imgui-winit {}",
-            env!("CARGO_PKG_VERSION")
-        )));
-
-        let io = imgui_ctx.io_mut();
-
-        // Set backend flags
-        let mut backend_flags = io.backend_flags();
-        backend_flags.insert(BackendFlags::HAS_MOUSE_CURSORS | BackendFlags::HAS_SET_MOUSE_POS);
-
-        io.set_backend_flags(backend_flags);
-
-        Self {
+    pub fn new(imgui_ctx: &mut Context) -> Result<Self, WinitPlatformError> {
+        let (control, attachment) = WinitPlatformControl::claim(imgui_ctx)?;
+        Ok(Self {
+            control,
+            attachment: Some(attachment),
             hidpi_mode: HiDpiMode::default(),
             hidpi_factor: 1.0,
             cursor_cache: None,
             ime_enabled: false,
             ime_auto_manage: true,
             last_frame: Instant::now(),
-        }
+        })
     }
 
-    /// Set the DPI scaling mode
-    pub fn set_hidpi_mode(&mut self, hidpi_mode: HiDpiMode) {
+    /// Set the DPI scaling mode.
+    ///
+    /// The mode is part of the primary-window coordinate mapping, so it cannot change while a
+    /// multi-viewport runtime is attached. Secondary windows always use Winit desktop logical
+    /// coordinates.
+    pub fn set_hidpi_mode(&mut self, hidpi_mode: HiDpiMode) -> Result<(), WinitPlatformError> {
+        self.ensure_runtime_configuration_mutable()?;
         self.hidpi_mode = hidpi_mode;
+        Ok(())
+    }
+
+    /// Return the configured DPI scaling mode.
+    pub fn hidpi_mode(&self) -> HiDpiMode {
+        self.hidpi_mode
     }
 
     /// Enable or disable IME events for the attached window.
@@ -215,9 +851,12 @@ impl WinitPlatform {
     /// backend will override this based on `io.want_text_input()` every frame.
     /// Use this helper for immediate overrides (e.g. when auto-management is
     /// disabled or you want to force a specific state for a while).
-    pub fn set_ime_allowed(&mut self, window: &Window, allowed: bool) {
+    pub fn set_ime_allowed(&mut self, allowed: bool) -> Result<(), WinitPlatformError> {
+        let window = self.control.attached_window()?;
+        self.control.validate_window_entry(&window)?;
         window.set_ime_allowed(allowed);
         self.ime_enabled = allowed;
+        Ok(())
     }
 
     /// Returns whether IME is currently allowed for the attached window.
@@ -243,21 +882,29 @@ impl WinitPlatform {
         self.hidpi_factor
     }
 
-    /// Attach the platform to a window
+    /// Attach the platform to a window.
+    ///
+    /// The platform keeps shared ownership of the exact window allocation until detach or
+    /// Context teardown, so the native IME callback cannot outlive the Winit window.
     pub fn attach_window(
         &mut self,
-        window: &Window,
+        window: Arc<Window>,
         hidpi_mode: HiDpiMode,
         imgui_ctx: &mut Context,
-    ) {
+    ) -> Result<(), WinitPlatformError> {
+        // This must precede the IME attachment and every cached scale update. Reattaching the
+        // same window with a different coordinate mode is still a contract violation once
+        // secondary viewports exist.
+        self.ensure_runtime_configuration_mutable()?;
+        self.control.attach_window(imgui_ctx, Arc::clone(&window))?;
         self.hidpi_mode = hidpi_mode;
-        self.hidpi_factor = self.hidpi_factor_for_window(window);
+        self.hidpi_factor = self.hidpi_factor_for_window(&window);
 
         // Convert via winit scale then adapt to our active HiDPI mode
         let logical_size = window
             .inner_size()
             .to_logical(sanitize::positive_finite_or(window.scale_factor(), 1.0));
-        let logical_size = self.scale_size_from_winit(window, logical_size);
+        let logical_size = self.scale_size_from_winit(&window, logical_size);
         let io = imgui_ctx.io_mut();
 
         io.set_display_size(sanitize::finite_non_negative_size(logical_size));
@@ -266,44 +913,92 @@ impl WinitPlatform {
         // Enable IME by default so WindowEvent::Ime events and IME composition
         // are available on desktop platforms. Auto-management (when enabled)
         // will further refine this for text widgets.
-        self.set_ime_allowed(window, true);
-
-        // Register Dear ImGui -> winit IME bridge so text input widgets can
-        // move the platform IME candidate/composition window near the caret.
-        unsafe {
-            let pio = imgui_ctx.platform_io_mut().as_raw_mut();
-            if !pio.is_null() {
-                if (*pio).Platform_SetImeDataFn.is_none() {
-                    (*pio).Platform_SetImeDataFn = Some(imgui_winit_set_ime_data);
-                    (*pio).Platform_ImeUserData = window as *const Window as *mut c_void;
-                } else if is_winit_set_ime_data((*pio).Platform_SetImeDataFn) {
-                    (*pio).Platform_ImeUserData = window as *const Window as *mut c_void;
-                }
-            }
-        }
+        self.set_ime_allowed(true)?;
+        Ok(())
     }
 
     /// Detach the platform from a window and clear winit-owned IME hooks.
     ///
-    /// Call this before destroying a window when the Dear ImGui context will outlive it. The
-    /// method only clears the IME callback/userdata pair if it is still owned by this backend and
-    /// still points at `window`.
-    pub fn detach_window(&mut self, window: &Window, imgui_ctx: &mut Context) {
+    /// Multi-viewport support must be shut down before detaching the shared main window.
+    pub fn detach_window(
+        &mut self,
+        imgui_ctx: &mut Context,
+    ) -> Result<Arc<Window>, WinitPlatformError> {
+        #[cfg(feature = "multi-viewport")]
+        if self.control.runtime.borrow().is_some() {
+            return Err(WinitPlatformError::RuntimeAlreadyAttached);
+        }
+        let window = self.control.attached_window()?;
+        self.control.detach_window(imgui_ctx, &window)?;
         window.set_ime_allowed(false);
         self.ime_enabled = false;
+        Ok(window)
+    }
 
-        unsafe {
-            let pio = imgui_ctx.platform_io_mut().as_raw_mut();
-            if pio.is_null() || !is_winit_set_ime_data((*pio).Platform_SetImeDataFn) {
-                return;
-            }
-
-            let window_ptr = window as *const Window as *mut c_void;
-            if (*pio).Platform_ImeUserData == window_ptr {
-                (*pio).Platform_ImeUserData = std::ptr::null_mut();
-                (*pio).Platform_SetImeDataFn = None;
-            }
+    /// Explicitly releases every Winit-owned field from the bound Context.
+    ///
+    /// Multi-viewport state, when present, is released first. The operation preserves foreign
+    /// replacements and reports the first ownership violation after clearing fields that still
+    /// have Winit's exact pointer identity.
+    pub fn shutdown(&mut self, imgui_ctx: &mut Context) -> Result<(), WinitPlatformError> {
+        self.control.ensure_context(imgui_ctx)?;
+        if matches!(
+            self.control.state.get(),
+            PlatformState::Detached | PlatformState::ContextDestroyed
+        ) {
+            return Ok(());
         }
+        let terminal_fault = self.control.terminal_fault();
+        #[cfg(feature = "multi-viewport")]
+        let pending_error = {
+            let mut pending_error = None;
+            if let Some(runtime) = self.control.runtime.borrow().clone() {
+                if let Err(error) = runtime.shutdown_from_platform(imgui_ctx) {
+                    if !runtime.is_released() {
+                        return Err(error);
+                    }
+                    pending_error = Some(error);
+                }
+                self.control.clear_runtime(&runtime);
+            }
+            pending_error
+        };
+        #[cfg(not(feature = "multi-viewport"))]
+        let pending_error = None;
+
+        let result = self
+            .control
+            .binding
+            .try_with_bound_context(|| self.control.release_base_in_current_context())?;
+        unregister_platform_control(self.control.binding.id());
+        self.control.state.set(PlatformState::Detached);
+        if let Some(mut attachment) = self.attachment.take() {
+            attachment.detach();
+        }
+        match (terminal_fault.or(pending_error), result) {
+            (Some(error), _) => Err(error),
+            (None, result) => result,
+        }
+    }
+
+    /// Returns the Context-bound owner shared with the multi-viewport runtime.
+    #[cfg(any(feature = "multi-viewport", test))]
+    pub(crate) fn control(&self) -> Rc<WinitPlatformControl> {
+        Rc::clone(&self.control)
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    pub(crate) fn ensure_runtime_configuration_mutable(&self) -> Result<(), WinitPlatformError> {
+        if self.control.runtime.borrow().is_some() {
+            Err(WinitPlatformError::RuntimeConfigurationLocked)
+        } else {
+            Ok(())
+        }
+    }
+
+    #[cfg(not(feature = "multi-viewport"))]
+    pub(crate) fn ensure_runtime_configuration_mutable(&self) -> Result<(), WinitPlatformError> {
+        Ok(())
     }
 
     /// Handle a winit event.
@@ -319,8 +1014,12 @@ impl WinitPlatform {
         imgui_ctx: &mut Context,
         window: &Window,
         event: &Event<T>,
-    ) -> bool {
-        match event {
+    ) -> Result<bool, WinitPlatformError> {
+        if !event_targets_window(window.id(), event) {
+            return Ok(false);
+        }
+        self.control.validate_entry(imgui_ctx, window)?;
+        Ok(match event {
             Event::WindowEvent { event, .. } => {
                 self.handle_window_event_internal(imgui_ctx, window, event)
             }
@@ -329,7 +1028,7 @@ impl WinitPlatform {
                 false
             }
             _ => false,
-        }
+        })
     }
 
     /// Handle a single window event for a given window.
@@ -342,8 +1041,9 @@ impl WinitPlatform {
         imgui_ctx: &mut Context,
         window: &Window,
         event: &WindowEvent,
-    ) -> bool {
-        self.handle_window_event_internal(imgui_ctx, window, event)
+    ) -> Result<bool, WinitPlatformError> {
+        self.control.validate_entry(imgui_ctx, window)?;
+        Ok(self.handle_window_event_internal(imgui_ctx, window, event))
     }
 
     /// Internal implementation for window event handling.
@@ -401,11 +1101,6 @@ impl WinitPlatform {
                         .config_flags()
                         .contains(dear_imgui_rs::ConfigFlags::VIEWPORTS_ENABLE)
                     {
-                        // Main window always maps to the main Dear ImGui viewport.
-                        let main_viewport_id = imgui_ctx.main_viewport().id();
-                        imgui_ctx
-                            .io_mut()
-                            .add_mouse_viewport_event(main_viewport_id);
                         // Feed absolute/screen coordinates in logical pixels, matching io.DisplaySize.
                         let scale = sanitize::positive_finite_or(window.scale_factor(), 1.0);
                         let pos_logical = position.to_logical::<f64>(scale);
@@ -413,13 +1108,14 @@ impl WinitPlatform {
                             let base_logical = base_phys.to_logical::<f64>(scale);
                             let sx = base_logical.x + pos_logical.x;
                             let sy = base_logical.y + pos_logical.y;
-                            return events::handle_cursor_moved([sx, sy], imgui_ctx);
-                        } else if let Ok(base_phys) = window.outer_position() {
-                            let base_logical = base_phys.to_logical::<f64>(scale);
-                            let sx = base_logical.x + pos_logical.x;
-                            let sy = base_logical.y + pos_logical.y;
+                            // Main window always maps to the main Dear ImGui viewport.
+                            let main_viewport_id = imgui_ctx.main_viewport().id();
+                            imgui_ctx
+                                .io_mut()
+                                .add_mouse_viewport_event(main_viewport_id);
                             return events::handle_cursor_moved([sx, sy], imgui_ctx);
                         }
+                        return imgui_ctx.io().want_capture_mouse();
                     }
                 }
                 // Fallback: local logical coordinates
@@ -463,7 +1159,12 @@ impl WinitPlatform {
     }
 
     /// Prepare for rendering - should be called before Dear ImGui rendering
-    pub fn prepare_render(&mut self, imgui_ctx: &mut Context, window: &Window) {
+    pub fn prepare_render(
+        &mut self,
+        imgui_ctx: &mut Context,
+        window: &Window,
+    ) -> Result<(), WinitPlatformError> {
+        self.control.validate_entry(imgui_ctx, window)?;
         let now = Instant::now();
         let delta = now - self.last_frame;
         let delta_s = delta.as_secs() as f32 + delta.subsec_nanos() as f32 / 1_000_000_000.0;
@@ -509,23 +1210,43 @@ impl WinitPlatform {
             }
         }
         // Note: cursor shape update is exposed via prepare_render_with_ui()
+        Ok(())
     }
 
     /// Prepare frame - alias for prepare_render for compatibility
-    pub fn prepare_frame(&mut self, window: &Window, imgui_ctx: &mut Context) {
-        self.prepare_render(imgui_ctx, window);
+    pub fn prepare_frame(
+        &mut self,
+        window: &Window,
+        imgui_ctx: &mut Context,
+    ) -> Result<(), WinitPlatformError> {
+        self.prepare_render(imgui_ctx, window)
     }
 
     /// Toggle Dear ImGui software-drawn cursor.
     /// When enabled, the OS cursor is hidden and ImGui draws the cursor in draw data.
-    pub fn set_software_cursor_enabled(&mut self, imgui_ctx: &mut Context, enabled: bool) {
+    pub fn set_software_cursor_enabled(
+        &mut self,
+        imgui_ctx: &mut Context,
+        enabled: bool,
+    ) -> Result<(), WinitPlatformError> {
+        self.control.ensure_context(imgui_ctx)?;
+        self.control.validate_operational_contract()?;
         imgui_ctx.io_mut().set_mouse_draw_cursor(enabled);
         // Invalidate cursor cache so next prepare_render_with_ui applies visibility change
         self.cursor_cache = None;
+        Ok(())
     }
 
     /// Update cursor given a Ui reference (preferred, matches upstream)
-    pub fn prepare_render_with_ui(&mut self, ui: &dear_imgui_rs::Ui, window: &Window) {
+    pub fn prepare_render_with_ui(
+        &mut self,
+        ui: &dear_imgui_rs::Ui,
+        window: &Window,
+    ) -> Result<(), WinitPlatformError> {
+        if ui.context_id() != self.control.binding.id() {
+            return Err(WinitPlatformError::ContextMismatch);
+        }
+        self.control.validate_window_entry(window)?;
         // Auto-manage IME allowed state based on Dear ImGui's intent. This lets
         // the platform show/hide IME (and soft keyboards on mobile) only when
         // text input widgets are active.
@@ -556,6 +1277,7 @@ impl WinitPlatform {
                 self.cursor_cache = Some(cursor);
             }
         }
+        Ok(())
     }
 
     /// Scale a logical size from winit to our active HiDPI mode
@@ -622,6 +1344,42 @@ impl WinitPlatform {
     }
 }
 
+impl Drop for WinitPlatform {
+    fn drop(&mut self) {
+        #[cfg(feature = "multi-viewport")]
+        let runtime_attached = self.control.runtime.borrow().is_some();
+        #[cfg(not(feature = "multi-viewport"))]
+        let runtime_attached = false;
+        if !runtime_attached
+            && self
+                .control
+                .binding
+                .try_with_bound_context(|| self.control.release_base_in_current_context())
+                .is_ok()
+        {
+            unregister_platform_control(self.control.binding.id());
+            self.control.state.set(PlatformState::Detached);
+            if let Some(mut attachment) = self.attachment.take() {
+                attachment.detach();
+            }
+            return;
+        }
+        if let Some(attachment) = self.attachment.take() {
+            attachment.defer_to_context();
+        }
+    }
+}
+
+fn event_targets_window<T>(window_id: winit::window::WindowId, event: &Event<T>) -> bool {
+    !matches!(
+        event,
+        Event::WindowEvent {
+            window_id: event_window_id,
+            ..
+        } if *event_window_id != window_id
+    )
+}
+
 fn rescale_mouse_pos_for_hidpi_change(
     mouse: [f32; 2],
     old_hidpi: f64,
@@ -635,8 +1393,17 @@ fn rescale_mouse_pos_for_hidpi_change(
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::{CStr, CString};
+
     use super::*;
     use crate::test_util::test_sync::lock_context;
+
+    unsafe extern "C" fn foreign_ime_callback(
+        _context: *mut dear_imgui_rs::sys::ImGuiContext,
+        _viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+        _data: *mut dear_imgui_rs::sys::ImGuiPlatformImeData,
+    ) {
+    }
 
     #[test]
     fn test_hidpi_mode_default() {
@@ -647,7 +1414,7 @@ mod tests {
     fn test_platform_creation() {
         let _guard = lock_context();
         let mut ctx = Context::create();
-        let platform = WinitPlatform::new(&mut ctx);
+        let platform = WinitPlatform::new(&mut ctx).unwrap();
 
         assert_eq!(platform.hidpi_mode, HiDpiMode::Default);
         assert_eq!(platform.hidpi_factor, 1.0);
@@ -656,16 +1423,342 @@ mod tests {
     }
 
     #[test]
+    fn platform_claim_publishes_stable_identity_and_cleans_up_exact_ownership() {
+        let _guard = lock_context();
+        let mut context = Context::create();
+        let platform_io =
+            unsafe { dear_imgui_rs::sys::igGetPlatformIO_ContextPtr(context.as_raw()) };
+        let baseline_ime_callback = unsafe { (*platform_io).Platform_SetImeDataFn };
+        let baseline_ime_user_data = unsafe { (*platform_io).Platform_ImeUserData };
+
+        let platform = WinitPlatform::new(&mut context).unwrap();
+        let control = platform.control();
+        let io = unsafe { dear_imgui_rs::sys::igGetIO_ContextPtr(context.as_raw()) };
+
+        assert_ne!(std::mem::size_of::<PlatformOwnerToken>(), 0);
+        assert_eq!(
+            unsafe { (*io).BackendPlatformName },
+            winit_backend_name_ptr()
+        );
+        assert_eq!(
+            unsafe { (*io).BackendPlatformUserData },
+            control.token_ptr()
+        );
+        assert_eq!(
+            unsafe { CStr::from_ptr((*io).BackendPlatformName) },
+            unsafe { CStr::from_ptr(winit_backend_name_ptr()) }
+        );
+        assert_eq!(
+            BackendFlags::from_bits_retain(unsafe { (*io).BackendFlags }) & WINIT_RESERVED_FLAGS,
+            WINIT_BASE_FLAGS
+        );
+        assert!(ime_callback_eq(
+            unsafe { (*platform_io).Platform_SetImeDataFn },
+            baseline_ime_callback
+        ));
+        assert_eq!(
+            unsafe { (*platform_io).Platform_ImeUserData },
+            baseline_ime_user_data
+        );
+
+        drop(platform);
+
+        assert!(unsafe { (*io).BackendPlatformName.is_null() });
+        assert!(unsafe { (*io).BackendPlatformUserData.is_null() });
+        assert!(
+            (BackendFlags::from_bits_retain(unsafe { (*io).BackendFlags }) & WINIT_RESERVED_FLAGS)
+                .is_empty()
+        );
+        assert!(ime_callback_eq(
+            unsafe { (*platform_io).Platform_SetImeDataFn },
+            baseline_ime_callback
+        ));
+        assert_eq!(
+            unsafe { (*platform_io).Platform_ImeUserData },
+            baseline_ime_user_data
+        );
+    }
+
+    #[test]
+    fn platform_attachment_is_unique_per_context_and_reusable_after_release() {
+        let _guard = lock_context();
+        let mut context = Context::create();
+        let platform = WinitPlatform::new(&mut context).unwrap();
+
+        let error = match WinitPlatform::new(&mut context) {
+            Ok(_) => panic!("a Context cannot have two Winit platform owners"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            error,
+            WinitPlatformError::PlatformStateOccupied {
+                field: "BackendPlatformName"
+            }
+        );
+
+        drop(platform);
+        drop(WinitPlatform::new(&mut context).unwrap());
+    }
+
+    #[test]
+    fn base_contract_reports_each_replaced_owned_field() {
+        let _guard = lock_context();
+        let mut context = Context::create();
+        let mut platform = WinitPlatform::new(&mut context).unwrap();
+        let control = platform.control();
+        let io = unsafe { dear_imgui_rs::sys::igGetIO_ContextPtr(context.as_raw()) };
+        let platform_io =
+            unsafe { dear_imgui_rs::sys::igGetPlatformIO_ContextPtr(context.as_raw()) };
+        let baseline_ime_callback = unsafe { (*platform_io).Platform_SetImeDataFn };
+
+        let validate = || {
+            control
+                .binding()
+                .with_bound_context(|| control.validate_complete_contract_in_current_context())
+        };
+
+        unsafe { (*io).BackendPlatformName = std::ptr::null() };
+        assert_eq!(
+            validate(),
+            Err(WinitPlatformError::PlatformStateReplaced {
+                field: "BackendPlatformName"
+            })
+        );
+        unsafe { (*io).BackendPlatformName = winit_backend_name_ptr() };
+
+        unsafe { (*io).BackendPlatformUserData = std::ptr::null_mut() };
+        assert_eq!(
+            validate(),
+            Err(WinitPlatformError::PlatformStateReplaced {
+                field: "BackendPlatformUserData"
+            })
+        );
+        unsafe { (*io).BackendPlatformUserData = control.token_ptr() };
+
+        unsafe { (*io).BackendFlags &= !WINIT_BASE_FLAGS.bits() };
+        assert_eq!(
+            validate(),
+            Err(WinitPlatformError::PlatformStateReplaced {
+                field: "BackendFlags"
+            })
+        );
+        unsafe { (*io).BackendFlags |= WINIT_BASE_FLAGS.bits() };
+
+        unsafe { (*platform_io).Platform_SetImeDataFn = Some(foreign_ime_callback) };
+        assert_eq!(
+            validate(),
+            Err(WinitPlatformError::PlatformStateReplaced {
+                field: "Platform_SetImeDataFn"
+            })
+        );
+        unsafe { (*platform_io).Platform_SetImeDataFn = baseline_ime_callback };
+
+        let foreign_ime_user_data = std::ptr::dangling_mut::<u8>().cast();
+        unsafe { (*platform_io).Platform_ImeUserData = foreign_ime_user_data };
+        assert_eq!(
+            validate(),
+            Err(WinitPlatformError::PlatformStateReplaced {
+                field: "Platform_ImeUserData"
+            })
+        );
+        unsafe { (*platform_io).Platform_ImeUserData = std::ptr::null_mut() };
+
+        platform.shutdown(&mut context).unwrap();
+    }
+
+    #[test]
+    fn public_base_entry_latches_contract_drift_until_ordered_shutdown() {
+        let _guard = lock_context();
+        let mut context = Context::create();
+        let mut platform = WinitPlatform::new(&mut context).unwrap();
+        let io = unsafe { dear_imgui_rs::sys::igGetIO_ContextPtr(context.as_raw()) };
+        unsafe { (*io).BackendPlatformName = std::ptr::null() };
+
+        let expected = WinitPlatformError::PlatformStateReplaced {
+            field: "BackendPlatformName",
+        };
+        assert_eq!(
+            platform.set_software_cursor_enabled(&mut context, true),
+            Err(expected.clone())
+        );
+        assert!(
+            !BackendFlags::from_bits_retain(unsafe { (*io).BackendFlags })
+                .contains(WINIT_BASE_FLAGS)
+        );
+
+        unsafe { (*io).BackendPlatformName = winit_backend_name_ptr() };
+        assert_eq!(
+            platform.set_software_cursor_enabled(&mut context, false),
+            Err(expected.clone())
+        );
+        assert_eq!(platform.shutdown(&mut context), Err(expected));
+        assert!(unsafe { (*io).BackendPlatformName.is_null() });
+        assert!(unsafe { (*io).BackendPlatformUserData.is_null() });
+        assert_eq!(platform.shutdown(&mut context), Ok(()));
+    }
+
+    #[test]
+    fn shutdown_preserves_a_same_text_foreign_backend_name_pointer() {
+        let _guard = lock_context();
+        let mut context = Context::create();
+        let mut platform = WinitPlatform::new(&mut context).unwrap();
+        let io = unsafe { dear_imgui_rs::sys::igGetIO_ContextPtr(context.as_raw()) };
+        let foreign_name = CString::new(
+            unsafe { CStr::from_ptr(winit_backend_name_ptr()) }
+                .to_bytes()
+                .to_vec(),
+        )
+        .unwrap();
+        assert_ne!(foreign_name.as_ptr(), winit_backend_name_ptr());
+        unsafe { (*io).BackendPlatformName = foreign_name.as_ptr() };
+
+        assert_eq!(
+            platform.shutdown(&mut context),
+            Err(WinitPlatformError::PlatformStateReplaced {
+                field: "BackendPlatformName"
+            })
+        );
+        assert_eq!(unsafe { (*io).BackendPlatformName }, foreign_name.as_ptr());
+        assert_eq!(
+            unsafe { CStr::from_ptr((*io).BackendPlatformName) },
+            unsafe { CStr::from_ptr(winit_backend_name_ptr()) }
+        );
+        assert!(unsafe { (*io).BackendPlatformUserData.is_null() });
+
+        unsafe { (*io).BackendPlatformName = std::ptr::null() };
+        drop(WinitPlatform::new(&mut context).unwrap());
+    }
+
+    #[test]
+    fn explicit_shutdown_preserves_complete_foreign_base_takeover_and_flags() {
+        let _guard = lock_context();
+        let mut context = Context::create();
+        let mut platform = WinitPlatform::new(&mut context).unwrap();
+        let io = unsafe { dear_imgui_rs::sys::igGetIO_ContextPtr(context.as_raw()) };
+        let foreign_name = CString::new("foreign-platform").unwrap();
+        let foreign_token = std::ptr::dangling_mut::<u8>().cast();
+        unsafe {
+            (*io).BackendPlatformName = foreign_name.as_ptr();
+            (*io).BackendPlatformUserData = foreign_token;
+        }
+
+        assert_eq!(
+            platform.shutdown(&mut context),
+            Err(WinitPlatformError::PlatformStateReplaced {
+                field: "BackendPlatformUserData"
+            })
+        );
+        assert_eq!(unsafe { (*io).BackendPlatformName }, foreign_name.as_ptr());
+        assert_eq!(unsafe { (*io).BackendPlatformUserData }, foreign_token);
+        assert!(
+            BackendFlags::from_bits_retain(unsafe { (*io).BackendFlags })
+                .contains(WINIT_BASE_FLAGS)
+        );
+
+        unsafe {
+            (*io).BackendPlatformName = std::ptr::null();
+            (*io).BackendPlatformUserData = std::ptr::null_mut();
+            (*io).BackendFlags &= !WINIT_BASE_FLAGS.bits();
+        }
+    }
+
+    #[test]
+    fn drop_preserves_complete_foreign_base_takeover_and_flags() {
+        let _guard = lock_context();
+        let mut context = Context::create();
+        let io = unsafe { dear_imgui_rs::sys::igGetIO_ContextPtr(context.as_raw()) };
+        let foreign_name = CString::new("foreign-platform").unwrap();
+        let foreign_token = std::ptr::dangling_mut::<u8>().cast();
+        let platform = WinitPlatform::new(&mut context).unwrap();
+        unsafe {
+            (*io).BackendPlatformName = foreign_name.as_ptr();
+            (*io).BackendPlatformUserData = foreign_token;
+        }
+
+        drop(platform);
+
+        assert_eq!(unsafe { (*io).BackendPlatformName }, foreign_name.as_ptr());
+        assert_eq!(unsafe { (*io).BackendPlatformUserData }, foreign_token);
+        assert!(
+            BackendFlags::from_bits_retain(unsafe { (*io).BackendFlags })
+                .contains(WINIT_BASE_FLAGS)
+        );
+
+        unsafe {
+            (*io).BackendPlatformName = std::ptr::null();
+            (*io).BackendPlatformUserData = std::ptr::null_mut();
+            (*io).BackendFlags &= !WINIT_BASE_FLAGS.bits();
+        }
+    }
+
+    #[test]
+    fn complete_foreign_takeover_does_not_revoke_foreign_flags_on_contract_fault() {
+        let _guard = lock_context();
+        let mut context = Context::create();
+        let mut platform = WinitPlatform::new(&mut context).unwrap();
+        let io = unsafe { dear_imgui_rs::sys::igGetIO_ContextPtr(context.as_raw()) };
+        let foreign_name = CString::new("foreign-platform").unwrap();
+        let foreign_token = std::ptr::dangling_mut::<u8>().cast();
+        unsafe {
+            (*io).BackendPlatformName = foreign_name.as_ptr();
+            (*io).BackendPlatformUserData = foreign_token;
+        }
+
+        let expected = WinitPlatformError::PlatformStateReplaced {
+            field: "BackendPlatformName",
+        };
+        assert_eq!(
+            platform.set_software_cursor_enabled(&mut context, true),
+            Err(expected.clone())
+        );
+        assert!(
+            BackendFlags::from_bits_retain(unsafe { (*io).BackendFlags })
+                .contains(WINIT_BASE_FLAGS)
+        );
+        assert_eq!(platform.shutdown(&mut context), Err(expected));
+        assert_eq!(unsafe { (*io).BackendPlatformName }, foreign_name.as_ptr());
+        assert_eq!(unsafe { (*io).BackendPlatformUserData }, foreign_token);
+        assert!(
+            BackendFlags::from_bits_retain(unsafe { (*io).BackendFlags })
+                .contains(WINIT_BASE_FLAGS)
+        );
+
+        unsafe {
+            (*io).BackendPlatformName = std::ptr::null();
+            (*io).BackendPlatformUserData = std::ptr::null_mut();
+            (*io).BackendFlags &= !WINIT_BASE_FLAGS.bits();
+        }
+    }
+
+    #[test]
     fn test_hidpi_mode_setting() {
         let _guard = lock_context();
         let mut ctx = Context::create();
-        let mut platform = WinitPlatform::new(&mut ctx);
+        let mut platform = WinitPlatform::new(&mut ctx).unwrap();
 
-        platform.set_hidpi_mode(HiDpiMode::Locked(2.0));
+        platform.set_hidpi_mode(HiDpiMode::Locked(2.0)).unwrap();
         assert_eq!(platform.hidpi_mode, HiDpiMode::Locked(2.0));
 
-        platform.set_hidpi_mode(HiDpiMode::Rounded);
+        platform.set_hidpi_mode(HiDpiMode::Rounded).unwrap();
         assert_eq!(platform.hidpi_mode, HiDpiMode::Rounded);
+    }
+
+    #[test]
+    fn full_window_events_are_filtered_by_window_id_before_dispatch() {
+        let target = winit::window::WindowId::from(41_u64);
+        let foreign = winit::window::WindowId::from(42_u64);
+        let foreign_event = Event::<()>::WindowEvent {
+            window_id: foreign,
+            event: WindowEvent::Focused(true),
+        };
+        let target_event = Event::<()>::WindowEvent {
+            window_id: target,
+            event: WindowEvent::Focused(true),
+        };
+
+        assert!(!event_targets_window(target, &foreign_event));
+        assert!(event_targets_window(target, &target_event));
+        assert!(event_targets_window(target, &Event::<()>::AboutToWait));
     }
 
     #[test]
@@ -686,104 +1779,6 @@ mod tests {
             rescale_mouse_pos_for_hidpi_change([f32::MAX, 20.0], 1.0, f64::MAX),
             None
         );
-    }
-
-    #[test]
-    fn test_ime_callback_ownership_detection() {
-        unsafe extern "C" fn other_ime_callback(
-            _ctx: *mut dear_imgui_rs::sys::ImGuiContext,
-            _viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
-            _data: *mut dear_imgui_rs::sys::ImGuiPlatformImeData,
-        ) {
-        }
-
-        assert!(is_winit_set_ime_data(Some(imgui_winit_set_ime_data)));
-        assert!(!is_winit_set_ime_data(Some(other_ime_callback)));
-        assert!(!is_winit_set_ime_data(None));
-    }
-
-    #[cfg(feature = "multi-viewport")]
-    #[test]
-    fn runtime_ime_cleanup_preserves_foreign_replacements() {
-        let _guard = lock_context();
-        let mut context = Context::create();
-        let platform_io = context.platform_io_mut().as_raw_mut();
-        let window = std::ptr::NonNull::<Window>::dangling().as_ptr();
-        unsafe {
-            (*platform_io).Platform_SetImeDataFn = Some(imgui_winit_set_ime_data);
-            (*platform_io).Platform_ImeUserData = window.cast();
-            assert!(clear_ime_callback_if_owned(platform_io, window));
-            assert!((*platform_io).Platform_SetImeDataFn.is_none());
-
-            (*platform_io).Platform_SetImeDataFn = Some(other_ime_callback_for_test);
-            (*platform_io).Platform_ImeUserData = window.cast();
-            assert!(!clear_ime_callback_if_owned(platform_io, window));
-            assert!(std::ptr::fn_addr_eq(
-                (*platform_io).Platform_SetImeDataFn.unwrap(),
-                other_ime_callback_for_test as SetImeDataCallback
-            ));
-            (*platform_io).Platform_SetImeDataFn = None;
-            (*platform_io).Platform_ImeUserData = std::ptr::null_mut();
-        }
-    }
-
-    #[cfg(feature = "multi-viewport")]
-    unsafe extern "C" fn other_ime_callback_for_test(
-        _context: *mut dear_imgui_rs::sys::ImGuiContext,
-        _viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
-        _data: *mut dear_imgui_rs::sys::ImGuiPlatformImeData,
-    ) {
-    }
-
-    #[test]
-    fn ime_platform_io_lookup_uses_passed_context() {
-        let _guard = lock_context();
-
-        let ctx_a = Context::create();
-        let raw_a = ctx_a.as_raw();
-        let marker_a = std::ptr::NonNull::<Window>::dangling().as_ptr();
-        unsafe {
-            let platform_io_a = dear_imgui_rs::sys::igGetPlatformIO_ContextPtr(raw_a);
-            (*platform_io_a).Platform_ImeUserData = marker_a.cast();
-            dear_imgui_rs::sys::igSetCurrentContext(std::ptr::null_mut());
-        }
-
-        let ctx_b = Context::create();
-        let raw_b = ctx_b.as_raw();
-        let marker_b = std::ptr::NonNull::<u8>::dangling().as_ptr();
-        unsafe {
-            let platform_io_b = dear_imgui_rs::sys::igGetPlatformIO_ContextPtr(raw_b);
-            (*platform_io_b).Platform_ImeUserData = marker_b.cast();
-
-            let selected = platform_io_for_ime_context(raw_a);
-            assert_eq!((*selected).Platform_ImeUserData, marker_a.cast());
-            assert_ne!((*selected).Platform_ImeUserData, marker_b.cast());
-
-            dear_imgui_rs::sys::igSetCurrentContext(raw_a);
-        }
-        drop(ctx_a);
-        unsafe {
-            dear_imgui_rs::sys::igSetCurrentContext(raw_b);
-        }
-        drop(ctx_b);
-    }
-
-    #[test]
-    fn ime_window_ptr_falls_back_to_platform_ime_user_data() {
-        let _guard = lock_context();
-
-        let ctx = Context::create();
-        let raw = ctx.as_raw();
-        let marker = std::ptr::NonNull::<Window>::dangling().as_ptr() as *const Window;
-        unsafe {
-            let platform_io = dear_imgui_rs::sys::igGetPlatformIO_ContextPtr(raw);
-            (*platform_io).Platform_ImeUserData = marker.cast_mut().cast();
-
-            assert_eq!(
-                ime_window_ptr_for_viewport(raw, std::ptr::null_mut(), platform_io),
-                marker
-            );
-        }
     }
 
     #[test]

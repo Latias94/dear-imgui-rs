@@ -126,6 +126,7 @@ struct SwapchainState {
     image_views: Vec<vk::ImageView>,
     framebuffers: Vec<vk::Framebuffer>,
     present_semaphores: Vec<vk::Semaphore>,
+    present_mode: vk::PresentModeKHR,
 }
 
 impl SwapchainState {
@@ -242,6 +243,7 @@ impl SwapchainState {
             image_views,
             framebuffers,
             present_semaphores,
+            present_mode,
         })
     }
 
@@ -270,15 +272,26 @@ impl SwapchainState {
         render_pass: vk::RenderPass,
     ) -> Result<(), Box<dyn std::error::Error>> {
         unsafe { ctx.device.device_wait_idle()? };
-        let new_format = pick_surface_format(ctx, window)?;
-        let replacement =
-            match Self::new_with_old(ctx, window, render_pass, new_format, self.swapchain) {
-                Ok(replacement) => replacement,
-                Err(error) => {
-                    self.destroy_resources(&ctx.device);
-                    return Err(error);
-                }
-            };
+        if !surface_supports_format(ctx, self.surface_format)? {
+            return Err(format!(
+                "main surface no longer supports the renderer pair {:?}; rebuilding the renderer is required",
+                self.surface_format
+            )
+            .into());
+        }
+        let replacement = match Self::new_with_old(
+            ctx,
+            window,
+            render_pass,
+            self.surface_format,
+            self.swapchain,
+        ) {
+            Ok(replacement) => replacement,
+            Err(error) => {
+                self.destroy_resources(&ctx.device);
+                return Err(error);
+            }
+        };
         let mut previous = std::mem::replace(self, replacement);
         previous.destroy_resources(&ctx.device);
         Ok(())
@@ -380,13 +393,15 @@ struct AppWindow {
     vk: VulkanState,
     // Keep the platform window alive until renderer, swapchains, and surfaces have been dropped.
     window: Arc<Window>,
+    renderer_shutdown_complete: bool,
+    viewport_runtime_shutdown_complete: bool,
+    platform_shutdown_complete: bool,
 }
 
 impl Drop for AppWindow {
     fn drop(&mut self) {
-        let _ = self.imgui.renderer.shutdown(&mut self.imgui.context);
-        if let Some(runtime) = self.imgui.viewport_runtime.as_mut() {
-            let _ = runtime.shutdown();
+        if let Err(error) = self.shutdown() {
+            error!("Ash example fallback shutdown failed: {error}");
         }
     }
 }
@@ -394,9 +409,57 @@ impl Drop for AppWindow {
 #[derive(Default)]
 struct App {
     window: Option<Box<AppWindow>>,
+    error: Option<String>,
 }
 
 impl AppWindow {
+    fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if !self.renderer_shutdown_complete {
+            if let Err(error) = self.imgui.renderer.shutdown(&mut self.imgui.context) {
+                return Err(format!("Ash renderer shutdown failed: {error}").into());
+            }
+            self.renderer_shutdown_complete = true;
+        }
+
+        let runtime_error = if !self.viewport_runtime_shutdown_complete {
+            let ImguiState {
+                viewport_runtime,
+                context,
+                ..
+            } = &mut self.imgui;
+            viewport_runtime
+                .as_mut()
+                .and_then(|runtime| runtime.shutdown(context).err())
+        } else {
+            None
+        };
+
+        let platform_error = if !self.platform_shutdown_complete {
+            let ImguiState {
+                platform, context, ..
+            } = &mut self.imgui;
+            platform.shutdown(context).err()
+        } else {
+            None
+        };
+        if platform_error.is_none() && !self.platform_shutdown_complete {
+            // The base platform owns the final attachment and can complete a runtime that has
+            // already released native state while reporting a deferred callback fault.
+            self.viewport_runtime_shutdown_complete = true;
+            self.platform_shutdown_complete = true;
+        }
+
+        match (runtime_error, platform_error) {
+            (None, None) => Ok(()),
+            (Some(error), None) => Err(format!("Winit multi-viewport shutdown failed: {error}").into()),
+            (None, Some(error)) => Err(format!("Winit platform shutdown failed: {error}").into()),
+            (Some(runtime), Some(platform)) => Err(format!(
+                "Winit multi-viewport shutdown failed: {runtime}; Winit platform shutdown failed: {platform}"
+            )
+            .into()),
+        }
+    }
+
     fn new(event_loop: &ActiveEventLoop) -> Result<Self, Box<dyn std::error::Error>> {
         let enable_viewports = cfg!(any(
             target_os = "windows",
@@ -432,11 +495,11 @@ impl AppWindow {
             io.set_config_flags(flags);
         }
 
-        let mut platform = WinitPlatform::new(&mut imgui);
-        platform.attach_window(&window, HiDpiMode::Default, &mut imgui);
+        let mut platform = WinitPlatform::new(&mut imgui)?;
+        platform.attach_window(Arc::clone(&window), HiDpiMode::Default, &mut imgui)?;
 
         let viewport_runtime = enable_viewports
-            .then(|| winit_mvp::WinitPlatformRuntime::new(&mut imgui, Arc::clone(&window)))
+            .then(|| winit_mvp::WinitPlatformRuntime::new(&mut imgui, &platform))
             .transpose()?;
 
         let framebuffer_srgb = is_srgb_format(swapchain.surface_format.format);
@@ -468,6 +531,10 @@ impl AppWindow {
                         present_queue: ctx.queue,
                         graphics_queue_family_index: ctx.queue_family_index,
                         present_queue_family_index: ctx.queue_family_index,
+                        swapchain_policy: ash_mvp::ViewportSwapchainPolicy::from_main_surface(
+                            swapchain.surface_format,
+                            swapchain.present_mode,
+                        ),
                     },
                 )?
             })
@@ -498,6 +565,9 @@ impl AppWindow {
                 frame_index: 0,
                 swapchain_dirty: false,
             },
+            renderer_shutdown_complete: false,
+            viewport_runtime_shutdown_complete: false,
+            platform_shutdown_complete: false,
         })
     }
 
@@ -528,7 +598,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context);
+            .prepare_frame(&self.window, &mut self.imgui.context)?;
         let ui = self.imgui.context.frame();
 
         ui.window("Multi-Viewport (ash)")
@@ -567,10 +637,11 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_render_with_ui(&ui, &self.window);
+            .prepare_render_with_ui(&ui, &self.window)?;
         let draw_data = self.imgui.context.render();
 
-        let frame = &self.vk.frames[self.vk.frame_index % self.vk.frames.len()];
+        let frame_index = self.vk.frame_index % self.vk.frames.len();
+        let frame = &self.vk.frames[frame_index];
 
         unsafe {
             self.vk
@@ -608,10 +679,7 @@ impl AppWindow {
                 )?;
             }
         }
-        self.vk.images_in_flight[image_index as usize] = frame.fence;
-
         unsafe {
-            self.vk.ctx.device.reset_fences(&[frame.fence])?;
             self.vk
                 .ctx
                 .device
@@ -635,13 +703,23 @@ impl AppWindow {
             .command_buffers(std::slice::from_ref(&frame.command_buffer))
             .signal_semaphores(std::slice::from_ref(&present_semaphore));
 
+        let submitted_fence = frame.fence;
         unsafe {
-            self.vk.ctx.device.queue_submit(
+            self.vk.ctx.device.reset_fences(&[submitted_fence])?;
+            if let Err(error) = self.vk.ctx.device.queue_submit(
                 self.vk.ctx.queue,
                 std::slice::from_ref(&submit_info),
-                frame.fence,
-            )?;
+                submitted_fence,
+            ) {
+                replace_frame_sync(
+                    &self.vk.ctx.device,
+                    self.vk.ctx.command_pool,
+                    &mut self.vk.frames[frame_index],
+                )?;
+                return Err(Box::new(error));
+            }
         }
+        self.vk.images_in_flight[image_index as usize] = submitted_fence;
 
         let present_info = vk::PresentInfoKHR::default()
             .wait_semaphores(std::slice::from_ref(&present_semaphore))
@@ -703,6 +781,7 @@ impl ApplicationHandler for App {
             }
             Err(e) => {
                 error!("Failed to create window: {e}");
+                self.error = Some(e.to_string());
                 event_loop.exit();
             }
         }
@@ -735,12 +814,21 @@ impl ApplicationHandler for App {
                 runtime.handle_event(&mut app.imgui.platform, &mut app.imgui.context, &full)
             {
                 error!("Winit viewport event error: {error}");
+                self.error = Some(error.to_string());
+                event_loop.exit();
+                return;
             }
         } else {
-            let _ = app
-                .imgui
-                .platform
-                .handle_event(&mut app.imgui.context, &app.window, &full);
+            if let Err(error) =
+                app.imgui
+                    .platform
+                    .handle_event(&mut app.imgui.context, &app.window, &full)
+            {
+                error!("Winit platform event error: {error}");
+                self.error = Some(error.to_string());
+                event_loop.exit();
+                return;
+            }
         }
 
         match event {
@@ -769,10 +857,14 @@ impl ApplicationHandler for App {
                 // We drive rendering from the main window. Secondary viewport windows are
                 // rendered via ImGui's platform callbacks during `app.render()`.
                 if is_main_window {
-                    if let Err(e) = app.render_with_event_loop(event_loop) {
-                        error!("Render error: {e}");
+                    match app.render_with_event_loop(event_loop) {
+                        Ok(()) => app.window.request_redraw(),
+                        Err(error) => {
+                            error!("Render error: {error}");
+                            self.error = Some(error.to_string());
+                            event_loop.exit();
+                        }
                     }
-                    app.window.request_redraw();
                 }
             }
             _ => {}
@@ -788,8 +880,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     event_loop.set_control_flow(ControlFlow::Poll);
 
     let mut app = App::default();
-    event_loop.run_app(&mut app)?;
-    Ok(())
+    let event_loop_result = event_loop.run_app(&mut app);
+    let app_error = app.error.take();
+    let shutdown_result = app
+        .window
+        .as_mut()
+        .map_or(Ok(()), |window| window.shutdown());
+    drop(app);
+
+    let mut errors = Vec::new();
+    if let Err(error) = event_loop_result {
+        errors.push(format!("event loop failed: {error}"));
+    }
+    if let Some(error) = app_error {
+        errors.push(error);
+    }
+    if let Err(error) = shutdown_result {
+        errors.push(error.to_string());
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; ").into())
+    }
 }
 
 fn pick_physical_device(
@@ -843,6 +956,15 @@ fn pick_surface_format(
         ctx.surface_loader
             .get_physical_device_surface_formats(ctx.physical_device, ctx.surface)?
     };
+    if formats.len() == 1 && formats[0].format == vk::Format::UNDEFINED {
+        if formats[0].color_space != vk::ColorSpaceKHR::SRGB_NONLINEAR {
+            return Err("main surface does not expose an SRGB_NONLINEAR color space".into());
+        }
+        return Ok(vk::SurfaceFormatKHR {
+            format: vk::Format::B8G8R8A8_SRGB,
+            color_space: formats[0].color_space,
+        });
+    }
     let preferred = [
         vk::Format::B8G8R8A8_SRGB,
         vk::Format::R8G8B8A8_SRGB,
@@ -850,11 +972,31 @@ fn pick_surface_format(
         vk::Format::R8G8B8A8_UNORM,
     ];
     for p in preferred {
-        if let Some(f) = formats.iter().find(|f| f.format == p) {
+        if let Some(f) = formats
+            .iter()
+            .find(|f| f.format == p && f.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR)
+        {
             return Ok(*f);
         }
     }
-    Ok(formats[0])
+    Err("main surface has no supported 8-bit sRGB/SRGB_NONLINEAR pair".into())
+}
+
+fn surface_supports_format(
+    ctx: &VulkanContext,
+    requested: vk::SurfaceFormatKHR,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let formats = unsafe {
+        ctx.surface_loader
+            .get_physical_device_surface_formats(ctx.physical_device, ctx.surface)?
+    };
+    Ok(
+        if formats.len() == 1 && formats[0].format == vk::Format::UNDEFINED {
+            formats[0].color_space == requested.color_space
+        } else {
+            formats.contains(&requested)
+        },
+    )
 }
 
 fn pick_present_mode(modes: &[vk::PresentModeKHR]) -> vk::PresentModeKHR {
@@ -1084,6 +1226,18 @@ fn create_frame_syncs(
         }
     }
     Ok(frames)
+}
+
+fn replace_frame_sync(
+    device: &Device,
+    command_pool: vk::CommandPool,
+    frame: &mut FrameSync,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let replacement = create_frame_sync(device, command_pool)?;
+    let previous = std::mem::replace(frame, replacement);
+    let mut previous = vec![previous];
+    destroy_frame_syncs(device, command_pool, &mut previous);
+    Ok(())
 }
 
 fn destroy_frame_syncs(

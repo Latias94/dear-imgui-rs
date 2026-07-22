@@ -24,12 +24,14 @@ Continue with the complete, feature-free `Application` lifecycle when the progra
 cargo run -p dear-imgui-examples --bin application_lifecycle
 ```
 
-For a new project, add one dependency:
+For a new project, add the unreleased `0.16.0-alpha.1` candidate from `main`:
 
 ```toml
 [dependencies]
-dear-app = "0.16"
+dear-app = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", package = "dear-app" }
 ```
+
+After publication, replace that dependency with `dear-app = "=0.16.0-alpha.1"`.
 
 ```rust
 use dear_app::{AppConfig, RunError, imgui::Condition, run_ui};
@@ -116,14 +118,17 @@ The v0.16 multi-viewport adapters own their renderer and callback storage. Call 
 
 `dear-app` applications choose ownership explicitly: `DockingConfig::full_viewport()` lets the runtime draw the host, while `DockingConfig::application_managed()` only enables docking for an application-owned layout.
 
+`dear-app` does not support Dear ImGui platform multi-viewport in 0.16. Docking remains available in its main window; use the Winit or SDL3 owning-runtime examples below for native secondary windows.
+
 ```text
 cargo run -p dear-imgui-examples --bin dear_app_docking
 cargo run -p dear-imgui-examples --bin dockspace_minimal
-cargo run -p dear-imgui-examples --bin game_engine_docking
+cargo run -p dear-imgui-examples --bin game_engine_docking --features multi-viewport
 cargo run -p dear-imgui-examples --bin multi_viewport_wgpu --features multi-viewport
 cargo run -p dear-imgui-examples --bin multi_viewport_ash --features multi-viewport
 cargo run -p dear-imgui-examples --bin sdl3_wgpu_multi_viewport --features sdl3-wgpu-multi-viewport
 cargo run -p dear-imgui-examples --bin sdl3_ash_multi_viewport --features sdl3-ash-multi-viewport
+cargo run -p dear-imgui-examples --bin sdl3_sdlgpu_multi_view --features sdl3-gpu-multi-viewport
 ```
 
 Secondary windows are rendered by the owning platform/renderer runtimes; only the main window should drive the application's primary surface render loop.

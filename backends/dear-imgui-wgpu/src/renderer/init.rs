@@ -76,7 +76,7 @@ impl WgpuRenderer {
     /// ```
     pub fn empty() -> Self {
         Self {
-            context_binding: None,
+            context_state: None,
             backend_data: None,
             shader_manager: ShaderManager::new(),
             texture_manager: WgpuTextureManager::new(),
@@ -85,6 +85,7 @@ impl WgpuRenderer {
             #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
             viewport_clear_color: Color::BLACK,
             renderer_consumer: None,
+            drop_deferral: None,
         }
     }
 
@@ -130,7 +131,7 @@ impl WgpuRenderer {
 
     fn ensure_uninitialized(&self) -> RendererResult<()> {
         if self.backend_data.is_some()
-            || self.context_binding.is_some()
+            || self.context_state.is_some()
             || self.renderer_consumer.is_some()
         {
             return Err(RendererError::InvalidRenderState(
@@ -165,35 +166,56 @@ impl WgpuRenderer {
         imgui_ctx: &mut Context,
         prepare_font_atlas: bool,
     ) -> RendererResult<()> {
-        let renderer_flags_added = Self::configure_imgui_context(imgui_ctx)?;
+        let (renderer_flags_added, renderer_name_ptr) = Self::configure_imgui_context(imgui_ctx)?;
+        if let Err(error) = self.bind_context(imgui_ctx, renderer_flags_added) {
+            Self::clear_unbound_imgui_context(imgui_ctx, renderer_flags_added, renderer_name_ptr);
+            return Err(error);
+        }
         let consumer = match imgui_ctx.create_renderer_consumer() {
             Ok(consumer) => consumer,
             Err(error) => {
-                Self::unconfigure_imgui_context(imgui_ctx, renderer_flags_added);
+                self.clear_bound_imgui_context(imgui_ctx);
                 return Err(error.into());
             }
         };
-        if let Err(error) = self.bind_context(imgui_ctx, renderer_flags_added) {
-            drop(consumer);
-            Self::unconfigure_imgui_context(imgui_ctx, renderer_flags_added);
-            return Err(error);
-        }
         self.renderer_consumer = Some(consumer);
 
         // A newly attached renderer cannot inherit GPU bindings from a previous renderer/device.
-        if let Err(error) = imgui_ctx.reset_renderer_texture_bindings(self.renderer_consumer()?) {
-            self.renderer_consumer = None;
-            Self::unconfigure_imgui_context(imgui_ctx, renderer_flags_added);
-            self.clear_context_binding();
-            return Err(error.into());
-        }
+        // There is no local map yet, but use the same explicit permit/commit transaction as every
+        // destructive path so the Context validates the consumer generation before publication
+        // changes.
+        let consumer = self
+            .renderer_consumer
+            .take()
+            .ok_or(RendererError::ContextNotBound)?;
+        let reset = match imgui_ctx.prepare_renderer_texture_reset(&consumer) {
+            Ok(reset) => reset,
+            Err(error) => {
+                drop(consumer);
+                self.clear_bound_imgui_context(imgui_ctx);
+                return Err(error.into());
+            }
+        };
+        let _invalidated = reset.commit();
+        self.texture_manager.clear_destroyed_managed_textures();
+        self.renderer_consumer = Some(consumer);
 
         if prepare_font_atlas && let Err(error) = self.prepare_font_atlas(imgui_ctx) {
-            self.texture_manager.clear_managed_textures();
-            let reset_result = imgui_ctx.reset_renderer_texture_bindings(self.renderer_consumer()?);
-            self.renderer_consumer = None;
-            Self::unconfigure_imgui_context(imgui_ctx, renderer_flags_added);
-            self.clear_context_binding();
+            let consumer = self
+                .renderer_consumer
+                .take()
+                .ok_or(RendererError::ContextNotBound)?;
+            let reset_result = match imgui_ctx.prepare_renderer_texture_reset(&consumer) {
+                Ok(reset) => {
+                    self.texture_manager.clear_managed_textures();
+                    let _invalidated = reset.commit();
+                    self.texture_manager.clear_destroyed_managed_textures();
+                    Ok(())
+                }
+                Err(error) => Err(error),
+            };
+            drop(consumer);
+            self.clear_bound_imgui_context(imgui_ctx);
             reset_result?;
             return Err(error);
         }
@@ -202,7 +224,35 @@ impl WgpuRenderer {
     }
 
     fn ensure_context_available(imgui_context: &Context) -> RendererResult<()> {
+        if !imgui_context.io().backend_renderer_user_data().is_null() {
+            return Err(RendererError::ContextAlreadyHasRenderer);
+        }
+        if imgui_context.io().backend_renderer_name().is_some() {
+            return Err(RendererError::ContextAlreadyHasRenderer);
+        }
+        let reserved_flags = BackendFlags::RENDERER_HAS_VTX_OFFSET
+            | BackendFlags::RENDERER_HAS_TEXTURES
+            | BackendFlags::from_bits_retain(
+                dear_imgui_rs::sys::ImGuiBackendFlags_RendererHasViewports as i32,
+            );
+        if !(imgui_context.io().backend_flags() & reserved_flags).is_empty() {
+            return Err(RendererError::ContextAlreadyHasRenderer);
+        }
+
         let platform_io = imgui_context.platform_io();
+        // SAFETY: PlatformIO belongs to this Context and is immutably borrowed for the check.
+        let raw = unsafe { &*platform_io.as_raw() };
+        if unsafe { !platform_io.renderer_render_state().is_null() }
+            || raw.Renderer_TextureMaxWidth != 0
+            || raw.Renderer_TextureMaxHeight != 0
+            || raw.Renderer_CreateWindow.is_some()
+            || raw.Renderer_DestroyWindow.is_some()
+            || raw.Renderer_SetWindowSize.is_some()
+            || raw.Renderer_RenderWindow.is_some()
+            || raw.Renderer_SwapBuffers.is_some()
+        {
+            return Err(RendererError::ContextAlreadyHasRenderer);
+        }
         let draw_callbacks_occupied = platform_io.draw_callback_reset_render_state_raw().is_some()
             || platform_io.draw_callback_set_sampler_linear_raw().is_some()
             || platform_io
@@ -262,7 +312,12 @@ impl WgpuRenderer {
         self.viewport_clear_color
     }
 
-    fn configure_imgui_context(imgui_context: &mut Context) -> RendererResult<BackendFlags> {
+    pub(super) fn configure_imgui_context(
+        imgui_context: &mut Context,
+    ) -> RendererResult<(BackendFlags, *const std::ffi::c_char)> {
+        // Keep this function transactional even when called directly by an internal recovery
+        // path: no renderer field may be overwritten after the preflight has passed.
+        Self::ensure_context_available(imgui_context)?;
         imgui_context
             .set_renderer_name(Some(format!(
                 "dear-imgui-wgpu {}",
@@ -273,6 +328,11 @@ impl WgpuRenderer {
                     "failed to configure Dear ImGui renderer name: {error}"
                 ))
             })?;
+        let renderer_name_ptr = imgui_context
+            .io()
+            .backend_renderer_name()
+            .expect("WGPU just published BackendRendererName")
+            .as_ptr();
 
         let io = imgui_context.io_mut();
         let previous_flags = io.backend_flags();
@@ -296,7 +356,33 @@ impl WgpuRenderer {
                 .set_draw_callback_set_sampler_nearest_raw(Some(draw_callback_set_sampler_nearest));
         }
 
-        Ok(renderer_flags & !previous_flags)
+        Ok((renderer_flags & !previous_flags, renderer_name_ptr))
+    }
+
+    fn clear_unbound_imgui_context(
+        imgui_context: &mut Context,
+        renderer_flags_added: BackendFlags,
+        renderer_name_ptr: *const std::ffi::c_char,
+    ) {
+        let owned_name = imgui_context
+            .io()
+            .backend_renderer_name()
+            .is_some_and(|name| name.as_ptr() == renderer_name_ptr);
+        if owned_name {
+            imgui_context
+                .set_renderer_name::<String>(None)
+                .expect("clearing WGPU BackendRendererName must not fail");
+        }
+        let io = imgui_context.io_mut();
+        io.set_backend_flags(io.backend_flags() & !renderer_flags_added);
+        Self::clear_owned_draw_callbacks(imgui_context.platform_io_mut());
+    }
+
+    pub(super) fn clear_bound_imgui_context(&mut self, imgui_context: &mut Context) {
+        if let Some(state) = self.context_state.as_ref() {
+            state.clear_with_context(imgui_context);
+        }
+        self.clear_context_state();
     }
 
     /// Prepare the bound context's font atlas for rendering.
@@ -423,21 +509,57 @@ mod tests {
     }
 
     #[test]
-    fn unconfigure_removes_only_flags_added_by_wgpu() {
+    fn context_preflight_rejects_reserved_renderer_flags() {
         let mut context = Context::create();
         context
             .io_mut()
             .set_backend_flags(BackendFlags::RENDERER_HAS_TEXTURES);
 
-        let added = WgpuRenderer::configure_imgui_context(&mut context)
-            .expect("fresh context should accept WGPU renderer state");
-        assert_eq!(added, BackendFlags::RENDERER_HAS_VTX_OFFSET);
+        assert!(matches!(
+            WgpuRenderer::ensure_context_available(&context),
+            Err(RendererError::ContextAlreadyHasRenderer)
+        ));
+        context.io_mut().set_backend_flags(BackendFlags::empty());
+    }
 
-        WgpuRenderer::unconfigure_imgui_context(&mut context, added);
-        assert_eq!(
-            context.io().backend_flags(),
-            BackendFlags::RENDERER_HAS_TEXTURES
+    #[test]
+    fn context_preflight_always_rejects_the_viewport_renderer_capability() {
+        let context = Context::create();
+        let viewport_flag = BackendFlags::from_bits_retain(
+            dear_imgui_rs::sys::ImGuiBackendFlags_RendererHasViewports as i32,
         );
+        let raw_io = unsafe { dear_imgui_rs::sys::igGetIO_ContextPtr(context.as_raw()) };
+        unsafe { (*raw_io).BackendFlags = viewport_flag.bits() };
+        let flags_before = context.io().backend_flags();
+
+        assert!(matches!(
+            WgpuRenderer::ensure_context_available(&context),
+            Err(RendererError::ContextAlreadyHasRenderer)
+        ));
+        assert_eq!(context.io().backend_flags(), flags_before);
+        assert!(context.io().backend_renderer_user_data().is_null());
+        assert!(context.io().backend_renderer_name().is_none());
+
+        unsafe { (*raw_io).BackendFlags = 0 };
+    }
+
+    #[test]
+    fn unconfigure_removes_the_exclusive_wgpu_claim() {
+        let mut context = Context::create();
+        let (added, _) = WgpuRenderer::configure_imgui_context(&mut context)
+            .expect("fresh context should accept WGPU renderer state");
+        assert_eq!(
+            added,
+            BackendFlags::RENDERER_HAS_VTX_OFFSET | BackendFlags::RENDERER_HAS_TEXTURES
+        );
+        let mut renderer = WgpuRenderer::empty();
+        renderer
+            .bind_context(&mut context, added)
+            .expect("configured Context should bind once");
+
+        renderer.clear_bound_imgui_context(&mut context);
+        assert_eq!(context.io().backend_flags(), BackendFlags::empty());
+        assert!(context.io().backend_renderer_user_data().is_null());
         assert!(context.io().backend_renderer_name().is_none());
         assert!(
             context

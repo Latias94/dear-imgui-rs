@@ -17,6 +17,124 @@ use crate::{
 
 use super::recovery::OwnedGpuGeneration;
 
+pub(crate) fn platform_error(
+    stage: &'static str,
+    error: dear_imgui_winit::WinitPlatformError,
+) -> RunError {
+    RunError::application(stage, error.to_string())
+}
+
+pub(crate) fn preserve_initialization_error(
+    primary_error: RunError,
+    cleanup: impl FnOnce() -> Result<(), RunError>,
+) -> RunError {
+    if let Err(cleanup_error) = cleanup() {
+        tracing::warn!(
+            primary = %primary_error,
+            cleanup = %cleanup_error,
+            "Dear App initialization cleanup failed; preserving the original initialization error"
+        );
+    }
+    primary_error
+}
+
+fn shutdown_after_initialization_failure<A: Application>(
+    application: &mut A,
+    context: &mut imgui::Context,
+    window: &Window,
+) -> Result<(), RunError> {
+    let mut shutdown = ShutdownContext {
+        imgui: context,
+        window,
+        generation: None,
+    };
+    application.shutdown(&mut shutdown)
+}
+
+fn abort_context_initialization<A: Application>(
+    application: &mut A,
+    mut context: imgui::Context,
+    window: &Window,
+    primary_error: RunError,
+) -> RunError {
+    preserve_initialization_error(primary_error, || {
+        shutdown_after_initialization_failure(application, &mut context, window)
+    })
+}
+
+fn abort_platform_initialization<A: Application>(
+    application: &mut A,
+    mut context: imgui::Context,
+    window: &Window,
+    mut platform: dear_imgui_winit::WinitPlatform,
+    primary_error: RunError,
+) -> RunError {
+    preserve_initialization_error(primary_error, move || {
+        let application_result =
+            shutdown_after_initialization_failure(application, &mut context, window);
+        let platform_result = platform.shutdown(&mut context).map_err(|error| {
+            platform_error("Winit platform cleanup after initialization failure", error)
+        });
+
+        match platform_result {
+            Ok(()) => {
+                drop(platform);
+                drop(context);
+                application_result
+            }
+            Err(error) => {
+                // A failed explicit platform release leaves Context attachment state uncertain.
+                // Quarantine both values rather than allowing Context drop to invoke the fallback.
+                std::mem::forget(platform);
+                std::mem::forget(context);
+                application_result.and(Err(error))
+            }
+        }
+    })
+}
+
+/// Completes the fallible portion of UI initialization after Context configuration.
+///
+/// The two cleanup callbacks consume every value that was successfully published before the
+/// failing operation. Keeping those ownership transfers in one place makes it impossible for a
+/// later platform-construction failure to bypass the application shutdown hook.
+fn initialize_configured_ui<A, P>(
+    application: &mut A,
+    context: imgui::Context,
+    configure: impl FnOnce(&mut A, &mut imgui::Context) -> Result<(), RunError>,
+    create_platform: impl FnOnce(&mut A, &mut imgui::Context) -> Result<P, RunError>,
+    attach_window: impl FnOnce(&mut A, &mut P, &mut imgui::Context) -> Result<(), RunError>,
+    abort_without_platform: impl FnOnce(&mut A, imgui::Context, RunError) -> RunError,
+    abort_with_platform: impl FnOnce(&mut A, imgui::Context, P, RunError) -> RunError,
+) -> Result<(imgui::Context, P), RunError> {
+    let mut context = context;
+    if let Err(error) = configure(application, &mut context) {
+        return Err(abort_without_platform(application, context, error));
+    }
+
+    let mut platform = match create_platform(application, &mut context) {
+        Ok(platform) => platform,
+        Err(error) => return Err(abort_without_platform(application, context, error)),
+    };
+
+    if let Err(error) = attach_window(application, &mut platform, &mut context) {
+        return Err(abort_with_platform(application, context, platform, error));
+    }
+
+    Ok((context, platform))
+}
+
+pub(crate) fn validate_supported_imgui_config(context: &imgui::Context) -> Result<(), RunError> {
+    if context
+        .io()
+        .config_flags()
+        .contains(ConfigFlags::VIEWPORTS_ENABLE)
+    {
+        return Err(RunError::MultiViewportUnsupported);
+    }
+    Ok(())
+}
+
 #[cfg(feature = "imnodes")]
 use dear_imnodes as imnodes;
 #[cfg(feature = "implot")]
@@ -171,31 +289,40 @@ impl UiState {
         config: &AppConfig,
         application: &mut A,
     ) -> Result<Self, RunError> {
-        let mut context = imgui::Context::try_create().map_err(RunError::ImGuiContext)?;
-        configure_context(&mut context, config);
-        {
-            let mut init = InitContext {
-                imgui: &mut context,
-                window: &window.window,
-                config,
-            };
-            if let Err(error) = application.configure_imgui(&mut init) {
-                let mut shutdown = ShutdownContext {
-                    imgui: init.imgui,
-                    window: init.window,
-                    generation: None,
+        let context = imgui::Context::try_create().map_err(RunError::ImGuiContext)?;
+        let (context, platform) = initialize_configured_ui(
+            application,
+            context,
+            |application, context| {
+                configure_context(context, config);
+                let mut init = InitContext {
+                    imgui: context,
+                    window: &window.window,
+                    config,
                 };
-                let _ = application.shutdown(&mut shutdown);
-                return Err(error);
-            }
-        }
-
-        let mut platform = dear_imgui_winit::WinitPlatform::new(&mut context);
-        platform.attach_window(
-            &window.window,
-            dear_imgui_winit::HiDpiMode::Default,
-            &mut context,
-        );
+                application.configure_imgui(&mut init)?;
+                validate_supported_imgui_config(context)
+            },
+            |_, context| {
+                dear_imgui_winit::WinitPlatform::new(context)
+                    .map_err(|error| platform_error("Winit platform initialization", error))
+            },
+            |_, platform, context| {
+                platform
+                    .attach_window(
+                        Arc::clone(&window.window),
+                        dear_imgui_winit::HiDpiMode::Default,
+                        context,
+                    )
+                    .map_err(|error| platform_error("Winit main-window attachment", error))
+            },
+            |application, context, error| {
+                abort_context_initialization(application, context, &window.window, error)
+            },
+            |application, context, platform, error| {
+                abort_platform_initialization(application, context, &window.window, platform, error)
+            },
+        )?;
 
         #[cfg(feature = "implot")]
         let implot = config
@@ -228,14 +355,43 @@ impl UiState {
         })
     }
 
-    pub(crate) fn teardown(self) {
+    pub(crate) fn release_platform(&mut self) -> Result<(), RunError> {
+        self.platform
+            .shutdown(&mut self.context)
+            .map_err(|error| platform_error("Winit platform shutdown", error))
+    }
+
+    pub(crate) fn release_platform_then_teardown_or_quarantine(mut self) -> Result<(), RunError> {
+        if let Err(error) = self.release_platform() {
+            // Platform shutdown can report an ownership conflict after partially observing Context
+            // state. Keep the complete graph alive rather than falling back to Context drop.
+            std::mem::forget(self);
+            return Err(error);
+        }
+        self.teardown_after_platform_release();
+        Ok(())
+    }
+
+    pub(crate) fn teardown_after_platform_release(self) {
+        let Self {
+            context,
+            platform,
+            #[cfg(feature = "implot")]
+            implot,
+            #[cfg(feature = "imnodes")]
+            imnodes,
+            #[cfg(feature = "implot3d")]
+            implot3d,
+            docking: _,
+        } = self;
+        drop(platform);
         #[cfg(feature = "implot3d")]
-        drop(self.implot3d);
+        drop(implot3d);
         #[cfg(feature = "imnodes")]
-        drop(self.imnodes);
+        drop(imnodes);
         #[cfg(feature = "implot")]
-        drop(self.implot);
-        drop(self.context);
+        drop(implot);
+        drop(context);
     }
 }
 
@@ -247,6 +403,15 @@ pub(crate) struct GpuState {
 }
 
 impl GpuState {
+    pub(crate) fn release_renderer(
+        &mut self,
+        context: &mut imgui::Context,
+    ) -> Result<(), RunError> {
+        self.renderer
+            .shutdown(context)
+            .map_err(RunError::RendererRelease)
+    }
+
     pub(crate) fn teardown(self) {
         let Self {
             adapter,
@@ -388,4 +553,156 @@ fn configure_context(context: &mut imgui::Context, config: &AppConfig) {
         flags = ConfigFlags::from_bits_retain(flags.bits() | extra.bits());
     }
     io.set_config_flags(flags);
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{cell::Cell, rc::Rc};
+
+    use super::{initialize_configured_ui, platform_error, preserve_initialization_error};
+    use crate::RunError;
+
+    #[derive(Debug)]
+    struct TestPlatform(Rc<Cell<usize>>);
+
+    impl Drop for TestPlatform {
+        fn drop(&mut self) {
+            self.0.set(self.0.get() + 1);
+        }
+    }
+
+    #[derive(Default)]
+    struct InitializationProbe {
+        configured: usize,
+        shutdown_calls: usize,
+    }
+
+    #[test]
+    fn initialization_cleanup_runs_once_and_preserves_the_primary_error() {
+        let cleanup_calls = Cell::new(0);
+        let primary = RunError::application("initialization", "primary failure");
+
+        let error = preserve_initialization_error(primary, || {
+            cleanup_calls.set(cleanup_calls.get() + 1);
+            Err(RunError::application("shutdown", "cleanup failure"))
+        });
+
+        assert_eq!(cleanup_calls.get(), 1);
+        assert_eq!(
+            error.to_string(),
+            "application callback failed during initialization: primary failure"
+        );
+    }
+
+    #[test]
+    fn successful_initialization_does_not_run_cleanup() {
+        let cleanup_calls = Cell::new(0);
+        let value = 41_u8;
+
+        let result = Ok(value).map_err(|error: RunError| {
+            preserve_initialization_error(error, || {
+                cleanup_calls.set(cleanup_calls.get() + 1);
+                Ok(())
+            })
+        });
+
+        assert!(matches!(result, Ok(actual) if actual == value));
+        assert_eq!(cleanup_calls.get(), 0);
+    }
+
+    #[test]
+    fn platform_constructor_failure_after_configuration_runs_shutdown_once() {
+        let _guard = crate::runtime::imgui_test_guard();
+        let mut probe = InitializationProbe::default();
+        let mut context = dear_imgui_rs::Context::create();
+        let mut existing_platform = Some(
+            dear_imgui_winit::WinitPlatform::new(&mut context)
+                .expect("the first platform attachment must succeed"),
+        );
+
+        let result = initialize_configured_ui(
+            &mut probe,
+            context,
+            |state, _| {
+                state.configured += 1;
+                Ok(())
+            },
+            |_, context| {
+                dear_imgui_winit::WinitPlatform::new(context)
+                    .map_err(|error| platform_error("Winit platform initialization", error))
+            },
+            |_, _, _| unreachable!("attach must not run after constructor failure"),
+            |state, mut context, primary| {
+                preserve_initialization_error(primary, || {
+                    state.shutdown_calls += 1;
+                    existing_platform
+                        .take()
+                        .expect("the original platform must still own its attachment")
+                        .shutdown(&mut context)
+                        .expect("the original platform shutdown must succeed");
+                    drop(context);
+                    Err(RunError::application(
+                        "shutdown",
+                        "injected cleanup failure",
+                    ))
+                })
+            },
+            |_, _, _, _| unreachable!("platform cleanup requires a constructed platform"),
+        );
+        let error = result
+            .err()
+            .expect("the second platform attachment must be rejected");
+
+        assert_eq!(probe.configured, 1);
+        assert_eq!(probe.shutdown_calls, 1);
+        assert!(
+            error
+                .to_string()
+                .starts_with("application callback failed during Winit platform initialization:")
+        );
+    }
+
+    #[test]
+    fn main_window_attachment_failure_after_configuration_runs_shutdown_once() {
+        let _guard = crate::runtime::imgui_test_guard();
+        let dropped_platforms = Rc::new(Cell::new(0));
+        let mut probe = InitializationProbe::default();
+
+        let error = initialize_configured_ui(
+            &mut probe,
+            dear_imgui_rs::Context::create(),
+            |state, _| {
+                state.configured += 1;
+                Ok(())
+            },
+            |_, _| Ok(TestPlatform(Rc::clone(&dropped_platforms))),
+            |_, _, _| {
+                Err(RunError::application(
+                    "Winit main-window attachment",
+                    "injected attachment failure",
+                ))
+            },
+            |_, _, _| unreachable!("constructor cleanup must not run after attachment failure"),
+            |state, context, platform, primary| {
+                preserve_initialization_error(primary, || {
+                    state.shutdown_calls += 1;
+                    drop(platform);
+                    drop(context);
+                    Err(RunError::application(
+                        "shutdown",
+                        "injected cleanup failure",
+                    ))
+                })
+            },
+        )
+        .expect_err("the attachment failure must be reported");
+
+        assert_eq!(probe.configured, 1);
+        assert_eq!(probe.shutdown_calls, 1);
+        assert_eq!(dropped_platforms.get(), 1);
+        assert_eq!(
+            error.to_string(),
+            "application callback failed during Winit main-window attachment: injected attachment failure"
+        );
+    }
 }

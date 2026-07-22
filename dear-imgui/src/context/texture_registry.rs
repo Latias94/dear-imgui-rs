@@ -3,10 +3,11 @@ use std::collections::HashMap;
 use std::fmt;
 use std::num::NonZeroU64;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::render::snapshot::{
-    RendererConsumerError, ResolvedSnapshotTexture, SnapshotError, SnapshotTextureId,
-    TextureFeedback, TextureFeedbackResult, TextureRequestKind,
+    PendingTextureRequest, RendererConsumerError, ResolvedSnapshotTexture, SnapshotError,
+    SnapshotTextureId, TextureFeedback, TextureFeedbackResult, TextureOp, TextureRequestKind,
 };
 use crate::sys;
 use crate::texture::{
@@ -21,6 +22,8 @@ pub(crate) type SharedTextureRegistry = Rc<RefCell<ManagedTextureRegistry>>;
 
 #[derive(Debug)]
 pub(crate) struct FontAtlasSnapshotTarget {
+    atlas: *mut sys::ImFontAtlas,
+    context: ContextId,
     textures: Vec<FontAtlasTextureTarget>,
 }
 
@@ -32,8 +35,16 @@ pub(crate) struct FontAtlasTextureTarget {
 }
 
 impl FontAtlasSnapshotTarget {
-    pub(crate) fn new(textures: Vec<FontAtlasTextureTarget>) -> Self {
-        Self { textures }
+    pub(crate) fn new(
+        atlas: *mut sys::ImFontAtlas,
+        context: ContextId,
+        textures: Vec<FontAtlasTextureTarget>,
+    ) -> Self {
+        Self {
+            atlas,
+            context,
+            textures,
+        }
     }
 
     pub(crate) fn resolve(
@@ -51,6 +62,46 @@ impl FontAtlasSnapshotTarget {
 
     fn find(&self, id: SnapshotTextureId) -> Option<FontAtlasTextureTarget> {
         self.textures.iter().find(|target| target.id == id).copied()
+    }
+
+    fn track_operation(&self, id: SnapshotTextureId, operation: &mut Arc<TextureOp>) -> u64 {
+        crate::fonts::track_font_atlas_texture_operation(self.atlas, id, operation)
+    }
+
+    pub(crate) fn record_request_reference(&self, id: SnapshotTextureId, epoch: u64) {
+        crate::fonts::record_font_atlas_texture_reference(self.atlas, id, epoch);
+    }
+
+    fn identity_is_known(&self, id: SnapshotTextureId) -> bool {
+        matches!(id, SnapshotTextureId::FontAtlas { context, .. } if context == self.context)
+            && crate::fonts::font_atlas_texture_identity_is_known(self.atlas, id)
+    }
+
+    fn revision_is_current(&self, id: SnapshotTextureId, revision: u64) -> bool {
+        self.find(id).is_some()
+            && crate::fonts::font_atlas_texture_revision_is_current(self.atlas, id, revision)
+    }
+
+    pub(crate) fn prune_tombstones(&self, watermark: u64) {
+        crate::fonts::prune_font_atlas_texture_tombstones(self.atlas, self.context, watermark);
+    }
+
+    pub(crate) fn reset_renderer_bindings(&self) -> usize {
+        let mut reset = 0;
+        for target in &self.textures {
+            let texture = unsafe { TextureData::from_raw(target.texture) };
+            if texture.ref_count() != 1 || texture.status() == TextureStatus::Destroyed {
+                continue;
+            }
+            unsafe {
+                // The pointer came from this transaction's current atlas list. The renderer has
+                // already released the resource represented by its binding.
+                texture.set_status(TextureStatus::Destroyed);
+            }
+            reset += 1;
+        }
+        crate::fonts::mark_font_atlas_renderer_reset(self.atlas);
+        reset
     }
 }
 
@@ -73,18 +124,26 @@ pub(crate) struct ManagedTextureRegistry {
     slots: Vec<TextureSlot>,
     reusable: Vec<u32>,
     by_native: HashMap<usize, ManagedTextureId>,
+    native_refresh_generation: u64,
 }
 
 enum TextureSlot {
     Active(TextureEntry),
     Retiring(TextureEntry),
-    Retired { generation: NonZeroU64 },
+    NativeExposed {
+        entry: TextureEntry,
+        release_after_refresh: u64,
+    },
+    Retired {
+        generation: NonZeroU64,
+    },
     Exhausted,
 }
 
 struct TextureEntry {
     generation: NonZeroU64,
     revision: u64,
+    operation: Option<Arc<TextureOp>>,
     last_reference_epoch: u64,
     destroy_ack_epoch: Option<u64>,
     texture: OwnedTextureData,
@@ -102,11 +161,17 @@ impl fmt::Debug for ManagedTextureRegistry {
             .iter()
             .filter(|slot| matches!(slot, TextureSlot::Retiring(_)))
             .count();
+        let native_exposed = self
+            .slots
+            .iter()
+            .filter(|slot| matches!(slot, TextureSlot::NativeExposed { .. }))
+            .count();
         formatter
             .debug_struct("ManagedTextureRegistry")
             .field("context", &self.context)
             .field("active", &active)
             .field("retiring", &retiring)
+            .field("native_exposed", &native_exposed)
             .field("slot_count", &self.slots.len())
             .finish()
     }
@@ -119,6 +184,7 @@ impl ManagedTextureRegistry {
             slots: Vec::new(),
             reusable: Vec::new(),
             by_native: HashMap::new(),
+            native_refresh_generation: 0,
         }))
     }
 
@@ -140,7 +206,9 @@ impl ManagedTextureRegistry {
             .get(id.slot() as usize)
             .ok_or(ManagedTextureError::UnknownSlot(id))?;
         let generation = match slot {
-            TextureSlot::Active(entry) | TextureSlot::Retiring(entry) => entry.generation,
+            TextureSlot::Active(entry)
+            | TextureSlot::Retiring(entry)
+            | TextureSlot::NativeExposed { entry, .. } => entry.generation,
             TextureSlot::Retired { generation } => *generation,
             TextureSlot::Exhausted => return Err(ManagedTextureError::AlreadyRemoved(id)),
         };
@@ -154,9 +222,9 @@ impl ManagedTextureRegistry {
         match self.slot(id)? {
             TextureSlot::Active(entry) => Ok(entry),
             TextureSlot::Retiring(_) => Err(ManagedTextureError::Retiring(id)),
-            TextureSlot::Retired { .. } | TextureSlot::Exhausted => {
-                Err(ManagedTextureError::AlreadyRemoved(id))
-            }
+            TextureSlot::NativeExposed { .. }
+            | TextureSlot::Retired { .. }
+            | TextureSlot::Exhausted => Err(ManagedTextureError::AlreadyRemoved(id)),
         }
     }
 
@@ -170,7 +238,9 @@ impl ManagedTextureRegistry {
             .get_mut(id.slot() as usize)
             .ok_or(ManagedTextureError::UnknownSlot(id))?;
         let generation = match slot {
-            TextureSlot::Active(entry) | TextureSlot::Retiring(entry) => entry.generation,
+            TextureSlot::Active(entry)
+            | TextureSlot::Retiring(entry)
+            | TextureSlot::NativeExposed { entry, .. } => entry.generation,
             TextureSlot::Retired { generation } => *generation,
             TextureSlot::Exhausted => return Err(ManagedTextureError::AlreadyRemoved(id)),
         };
@@ -180,9 +250,9 @@ impl ManagedTextureRegistry {
         match slot {
             TextureSlot::Active(entry) => Ok(entry),
             TextureSlot::Retiring(_) => Err(ManagedTextureError::Retiring(id)),
-            TextureSlot::Retired { .. } | TextureSlot::Exhausted => {
-                Err(ManagedTextureError::AlreadyRemoved(id))
-            }
+            TextureSlot::NativeExposed { .. }
+            | TextureSlot::Retired { .. }
+            | TextureSlot::Exhausted => Err(ManagedTextureError::AlreadyRemoved(id)),
         }
     }
 
@@ -220,7 +290,8 @@ impl ManagedTextureRegistry {
         }
         let entry = TextureEntry {
             generation,
-            revision: 1,
+            revision: 0,
+            operation: None,
             last_reference_epoch: 0,
             destroy_ack_epoch: None,
             texture,
@@ -264,7 +335,9 @@ impl ManagedTextureRegistry {
         if let Some(id) = self.id_for_native(native) {
             let entry = match self.slot(id)? {
                 TextureSlot::Active(entry) | TextureSlot::Retiring(entry) => entry,
-                TextureSlot::Retired { .. } | TextureSlot::Exhausted => {
+                TextureSlot::NativeExposed { .. }
+                | TextureSlot::Retired { .. }
+                | TextureSlot::Exhausted => {
                     return Err(ManagedTextureError::AlreadyRemoved(id).into());
                 }
             };
@@ -287,7 +360,9 @@ impl ManagedTextureRegistry {
         for id in ids {
             match self.slot(*id)? {
                 TextureSlot::Active(_) | TextureSlot::Retiring(_) => {}
-                TextureSlot::Retired { .. } | TextureSlot::Exhausted => {
+                TextureSlot::NativeExposed { .. }
+                | TextureSlot::Retired { .. }
+                | TextureSlot::Exhausted => {
                     return Err(ManagedTextureError::AlreadyRemoved(*id));
                 }
             }
@@ -296,7 +371,9 @@ impl ManagedTextureRegistry {
             let slot = &mut self.slots[id.slot() as usize];
             let entry = match slot {
                 TextureSlot::Active(entry) | TextureSlot::Retiring(entry) => entry,
-                TextureSlot::Retired { .. } | TextureSlot::Exhausted => unreachable!(),
+                TextureSlot::NativeExposed { .. }
+                | TextureSlot::Retired { .. }
+                | TextureSlot::Exhausted => unreachable!(),
             };
             entry.last_reference_epoch = entry.last_reference_epoch.max(epoch);
         }
@@ -318,11 +395,51 @@ impl ManagedTextureRegistry {
         f: impl for<'texture> FnOnce(ManagedTextureMut<'texture>) -> R,
     ) -> Result<R, ManagedTextureError> {
         let entry = self.active_entry_mut(id)?;
-        entry.revision = entry
-            .revision
-            .checked_add(1)
-            .expect("managed texture revision space exhausted");
         Ok(f(ManagedTextureMut::new(&mut entry.texture)))
+    }
+
+    pub(crate) fn track_snapshot_operations(
+        &mut self,
+        requests: &mut [PendingTextureRequest],
+        atlas: &FontAtlasSnapshotTarget,
+    ) -> Result<(), ManagedTextureError> {
+        for request in requests {
+            request.revision = match request.texture {
+                SnapshotTextureId::User(id) => {
+                    match self.slot(id)? {
+                        TextureSlot::Active(_) | TextureSlot::Retiring(_) => {}
+                        TextureSlot::NativeExposed { .. }
+                        | TextureSlot::Retired { .. }
+                        | TextureSlot::Exhausted => {
+                            return Err(ManagedTextureError::AlreadyRemoved(id));
+                        }
+                    }
+                    let slot_index = id.slot() as usize;
+                    let entry = match &mut self.slots[slot_index] {
+                        TextureSlot::Active(entry) | TextureSlot::Retiring(entry) => entry,
+                        _ => unreachable!("validated texture slot changed without mutation"),
+                    };
+                    if entry
+                        .operation
+                        .as_deref()
+                        .is_none_or(|current| current != request.op.as_ref())
+                    {
+                        entry.revision = entry
+                            .revision
+                            .checked_add(1)
+                            .expect("managed texture revision space exhausted");
+                        entry.operation = Some(Arc::clone(&request.op));
+                    } else if let Some(current) = &entry.operation {
+                        request.op = Arc::clone(current);
+                    }
+                    entry.revision
+                }
+                SnapshotTextureId::FontAtlas { .. } => {
+                    atlas.track_operation(request.texture, &mut request.op)
+                }
+            };
+        }
+        Ok(())
     }
 
     fn remove(&mut self, id: ManagedTextureId, watermark: u64) -> Result<(), ManagedTextureError> {
@@ -340,6 +457,12 @@ impl ManagedTextureRegistry {
                 return Err(ManagedTextureError::AlreadyRetiring(id));
             }
             TextureSlot::Retiring(_) => return Err(ManagedTextureError::StaleGeneration(id)),
+            TextureSlot::NativeExposed { entry, .. } if entry.generation == id.generation() => {
+                return Err(ManagedTextureError::AlreadyRemoved(id));
+            }
+            TextureSlot::NativeExposed { .. } => {
+                return Err(ManagedTextureError::StaleGeneration(id));
+            }
             TextureSlot::Retired { generation } if *generation == id.generation() => {
                 return Err(ManagedTextureError::AlreadyRemoved(id));
             }
@@ -355,10 +478,6 @@ impl ManagedTextureRegistry {
         else {
             unreachable!("validated active texture slot changed without a mutable alias")
         };
-        entry.revision = entry
-            .revision
-            .checked_add(1)
-            .expect("managed texture revision space exhausted");
         let has_renderer_binding =
             !entry.texture.tex_id().is_null() || !entry.texture.backend_user_data().is_null();
         let has_outstanding_reference = entry.last_reference_epoch > watermark;
@@ -366,7 +485,7 @@ impl ManagedTextureRegistry {
             mark_want_destroy(&mut entry.texture);
             self.slots[slot_index] = TextureSlot::Retiring(entry);
         } else {
-            self.unregister_and_retire(slot_index, entry);
+            self.unregister_and_expose(slot_index, entry);
         }
         Ok(())
     }
@@ -377,6 +496,7 @@ impl ManagedTextureRegistry {
         atlas: &FontAtlasSnapshotTarget,
         epoch: u64,
     ) -> Result<usize, RendererConsumerError> {
+        let mut applied = 0;
         for item in feedback {
             let key = item.key();
             match key.texture {
@@ -389,12 +509,14 @@ impl ManagedTextureRegistry {
                         }
                     }
                     TextureSlot::Retiring(_) => {}
-                    TextureSlot::Retired { .. } | TextureSlot::Exhausted => {
+                    TextureSlot::NativeExposed { .. }
+                    | TextureSlot::Retired { .. }
+                    | TextureSlot::Exhausted => {
                         return Err(ManagedTextureError::AlreadyRemoved(id).into());
                     }
                 },
                 SnapshotTextureId::FontAtlas { .. } => {
-                    if atlas.find(key.texture).is_none() {
+                    if !atlas.identity_is_known(key.texture) {
                         return Err(RendererConsumerError::StaleFontAtlas);
                     }
                 }
@@ -421,8 +543,13 @@ impl ManagedTextureRegistry {
                     let (entry, retiring) = match slot {
                         TextureSlot::Active(entry) => (entry, false),
                         TextureSlot::Retiring(entry) => (entry, true),
-                        TextureSlot::Retired { .. } | TextureSlot::Exhausted => unreachable!(),
+                        TextureSlot::NativeExposed { .. }
+                        | TextureSlot::Retired { .. }
+                        | TextureSlot::Exhausted => unreachable!(),
                     };
+                    if entry.revision != key.revision {
+                        continue;
+                    }
                     match item.result() {
                         TextureFeedbackResult::Uploaded { texture_id } => {
                             unsafe {
@@ -432,7 +559,7 @@ impl ManagedTextureRegistry {
                             }
                             if retiring {
                                 mark_want_destroy(&mut entry.texture);
-                            } else if entry.revision == key.revision {
+                            } else {
                                 unsafe {
                                     // This is the sole validated reconciliation path for managed
                                     // renderer state.
@@ -449,11 +576,15 @@ impl ManagedTextureRegistry {
                             entry.destroy_ack_epoch = Some(epoch);
                         }
                     }
+                    applied += 1;
                 }
                 SnapshotTextureId::FontAtlas { .. } => {
-                    let target = atlas
-                        .find(key.texture)
-                        .expect("validated font atlas texture disappeared");
+                    if !atlas.revision_is_current(key.texture, key.revision) {
+                        continue;
+                    }
+                    let target = atlas.find(key.texture).expect(
+                        "current font atlas ledger entry must be present in the fresh observation",
+                    );
                     let texture = unsafe { TextureData::from_raw(target.texture) };
                     match item.result() {
                         TextureFeedbackResult::Uploaded { texture_id } => {
@@ -461,12 +592,10 @@ impl ManagedTextureRegistry {
                                 // The atlas target and request identity were validated above.
                                 texture.set_tex_id(texture_id);
                             }
-                            if target.revision == key.revision {
-                                unsafe {
-                                    // Matching revision proves this upload completes the current
-                                    // atlas contents.
-                                    texture.set_status(TextureStatus::OK);
-                                }
+                            unsafe {
+                                // Matching revision proves this upload completes the current
+                                // atlas contents.
+                                texture.set_status(TextureStatus::OK);
                             }
                         }
                         TextureFeedbackResult::Destroyed => {
@@ -476,10 +605,11 @@ impl ManagedTextureRegistry {
                             }
                         }
                     }
+                    applied += 1;
                 }
             }
         }
-        Ok(feedback.len())
+        Ok(applied)
     }
 
     pub(crate) fn reap_destroyed(&mut self, watermark: u64) {
@@ -514,53 +644,123 @@ impl ManagedTextureRegistry {
             else {
                 continue;
             };
-            self.unregister_and_retire(slot_index, entry);
+            self.unregister_and_expose(slot_index, entry);
         }
     }
 
-    pub(crate) fn acknowledge_renderer_reset(&mut self, watermark: u64) {
+    pub(crate) fn reset_renderer_bindings(&mut self, watermark: u64) -> usize {
+        let mut reset = 0;
         for slot in &mut self.slots {
-            let TextureSlot::Retiring(entry) = slot else {
-                continue;
+            let (entry, retiring) = match slot {
+                TextureSlot::Active(entry) => (entry, false),
+                TextureSlot::Retiring(entry) => (entry, true),
+                TextureSlot::NativeExposed { .. }
+                | TextureSlot::Retired { .. }
+                | TextureSlot::Exhausted => continue,
             };
             if entry.texture.status() == TextureStatus::Destroyed {
+                if retiring {
+                    entry.destroy_ack_epoch = Some(watermark);
+                }
+                continue;
+            }
+            unsafe {
+                // The renderer has already released the resource. Resetting through the
+                // Context-owned allocation avoids stale pointers cached by PlatformIO.Textures.
+                entry.texture.set_status(TextureStatus::Destroyed);
+            }
+            if retiring {
                 entry.destroy_ack_epoch = Some(watermark);
             }
+            reset += 1;
         }
         self.reap_destroyed(watermark);
+        reset
     }
 
-    fn unregister_and_retire(&mut self, slot_index: usize, mut entry: TextureEntry) {
+    fn unregister_and_expose(&mut self, slot_index: usize, mut entry: TextureEntry) {
         let native = entry.texture.as_mut().as_raw_mut();
         unsafe {
             sys::igUnregisterUserTexture(native);
         }
         self.by_native.remove(&(native as usize));
-        let generation = entry.generation;
-        drop(entry);
-        self.slots[slot_index] = TextureSlot::Retired { generation };
-        self.reusable
-            .push(u32::try_from(slot_index).expect("texture slot index must fit u32"));
+        let release_after_refresh = self
+            .native_refresh_generation
+            .checked_add(1)
+            .expect("native texture-list refresh generation exhausted");
+        self.slots[slot_index] = TextureSlot::NativeExposed {
+            entry,
+            release_after_refresh,
+        };
     }
 
-    pub(super) fn teardown(&mut self) {
-        self.by_native.clear();
-        self.reusable.clear();
-        for slot in &mut self.slots {
-            let generation = match slot {
-                TextureSlot::Active(entry) | TextureSlot::Retiring(entry) => entry.generation,
-                TextureSlot::Retired { .. } | TextureSlot::Exhausted => continue,
+    pub(crate) fn observe_native_texture_list_refresh(&mut self) {
+        self.native_refresh_generation = self
+            .native_refresh_generation
+            .checked_add(1)
+            .expect("native texture-list refresh generation exhausted");
+        let ready = self
+            .slots
+            .iter()
+            .enumerate()
+            .filter_map(|(index, slot)| match slot {
+                TextureSlot::NativeExposed {
+                    release_after_refresh,
+                    ..
+                } if *release_after_refresh <= self.native_refresh_generation => Some(index),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        for slot_index in ready {
+            let generation = match &self.slots[slot_index] {
+                TextureSlot::NativeExposed { entry, .. } => entry.generation,
+                _ => continue,
             };
-            let previous = std::mem::replace(slot, TextureSlot::Retired { generation });
+            let previous = std::mem::replace(
+                &mut self.slots[slot_index],
+                TextureSlot::Retired { generation },
+            );
+            let TextureSlot::NativeExposed { entry, .. } = previous else {
+                unreachable!("native-exposed texture changed without a mutable alias")
+            };
+            drop(entry);
+            self.reusable
+                .push(u32::try_from(slot_index).expect("texture slot index must fit u32"));
+        }
+    }
+
+    pub(super) fn prepare_teardown(&mut self) {
+        let registered = self
+            .slots
+            .iter()
+            .enumerate()
+            .filter_map(|(index, slot)| {
+                matches!(slot, TextureSlot::Active(_) | TextureSlot::Retiring(_)).then_some(index)
+            })
+            .collect::<Vec<_>>();
+        for slot_index in registered {
+            let generation = match &self.slots[slot_index] {
+                TextureSlot::Active(entry) | TextureSlot::Retiring(entry) => entry.generation,
+                _ => continue,
+            };
+            let previous = std::mem::replace(
+                &mut self.slots[slot_index],
+                TextureSlot::Retired { generation },
+            );
             let entry = match previous {
                 TextureSlot::Active(entry) | TextureSlot::Retiring(entry) => entry,
-                TextureSlot::Retired { .. } | TextureSlot::Exhausted => unreachable!(),
+                _ => unreachable!("registered texture changed without a mutable alias"),
             };
-            unsafe {
-                sys::igUnregisterUserTexture(entry.texture.as_raw() as *mut sys::ImTextureData);
-            }
-            drop(entry);
+            self.unregister_and_expose(slot_index, entry);
         }
+        self.by_native.clear();
+        self.reusable.clear();
+    }
+
+    pub(super) fn release_after_native_destroy(&mut self) {
+        self.by_native.clear();
+        self.reusable.clear();
+        self.slots.clear();
     }
 }
 
@@ -679,6 +879,16 @@ mod tests {
         drop(context_b);
         let mut context_a = suspended_a.activate().expect("Context A should reactivate");
         context_a.remove_texture(first_id).expect("unused texture");
+        let before_refresh_id = context_a.register_texture(texture());
+        assert_ne!(
+            before_refresh_id.slot(),
+            first_id.slot(),
+            "a native-exposed allocation must not be reused before the texture list refreshes"
+        );
+        context_a
+            .texture_registry
+            .borrow_mut()
+            .observe_native_texture_list_refresh();
         let replacement_id = context_a.register_texture(texture());
         assert_eq!(replacement_id.slot(), first_id.slot());
         assert_ne!(replacement_id.generation(), first_id.generation());
@@ -734,5 +944,43 @@ mod tests {
             context.texture_registry.borrow().id_for_native(native),
             None
         );
+    }
+
+    #[test]
+    fn removed_storage_outlives_the_cached_native_texture_list() {
+        let mut context = Context::create();
+        context.io_mut().set_display_size([128.0, 128.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        assert!(context.font_atlas().build());
+        let id = context.register_texture(texture());
+        let native = context
+            .texture_registry
+            .borrow()
+            .active_entry(id)
+            .expect("registered texture")
+            .texture
+            .as_raw();
+
+        drop(context.begin_frame());
+        let platform_io = unsafe { &*context.platform_io_ptr("test") };
+        assert!((0..platform_io.Textures.Size).any(|index| unsafe {
+            std::ptr::eq(
+                *platform_io.Textures.Data.add(index as usize),
+                native.cast_mut(),
+            )
+        }));
+
+        context.remove_texture(id).expect("unused texture");
+        assert!(matches!(
+            &context.texture_registry.borrow().slots[id.slot() as usize],
+            TextureSlot::NativeExposed { entry, .. }
+                if std::ptr::eq(entry.texture.as_raw(), native)
+        ));
+
+        drop(context.begin_frame());
+        assert!(matches!(
+            &context.texture_registry.borrow().slots[id.slot() as usize],
+            TextureSlot::Retired { generation } if *generation == id.generation()
+        ));
     }
 }

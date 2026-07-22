@@ -925,6 +925,79 @@ typedef __builtin_va_list va_list;
         pub blocklisted_types: &'static [&'static str],
     }
 
+    /// One preprocessor definition emitted by a canonical crate binding profile.
+    ///
+    /// A definition without an explicit value is represented as a flag.  Values
+    /// that spell a disabled boolean are discarded before they cross a build
+    /// script boundary, because `-DNAME=0` still satisfies `#ifdef NAME`.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct CrateBindingDefine<'a> {
+        pub name: &'a str,
+        pub value: Option<&'a str>,
+    }
+
+    impl<'a> CrateBindingDefine<'a> {
+        pub fn from_definition(definition: &'a str) -> Option<Self> {
+            let (name, value) = definition.split_once('=').unwrap_or((definition, ""));
+            Self::from_metadata(name, value)
+        }
+
+        pub fn from_metadata(name: &'a str, value: &'a str) -> Option<Self> {
+            let value = value.trim();
+            if ["0", "false", "off", "no"]
+                .iter()
+                .any(|disabled| value.eq_ignore_ascii_case(disabled))
+            {
+                return None;
+            }
+            Some(Self {
+                name,
+                value: (!value.is_empty()).then_some(value),
+            })
+        }
+
+        pub fn clang_arg(self) -> String {
+            match self.value {
+                Some(value) => format!("-D{}={value}", self.name),
+                None => format!("-D{}", self.name),
+            }
+        }
+
+        pub fn applies_to_native_compilation(self) -> bool {
+            // Wrapper C++ includes imgui.h first; asking cimgui.h to redeclare
+            // those enums is valid for bindgen's C view but not for compilation.
+            self.name != "CIMGUI_DEFINE_ENUMS_AND_STRUCTS"
+        }
+    }
+
+    /// An owned preprocessor definition resolved for an extension build.
+    ///
+    /// Owned definitions let build-script backends consume the same canonical
+    /// and propagated define stream without borrowing environment storage.
+    #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+    pub struct OwnedCrateBindingDefine {
+        pub name: String,
+        pub value: Option<String>,
+    }
+
+    impl OwnedCrateBindingDefine {
+        pub fn clang_arg(&self) -> String {
+            match self.value.as_deref() {
+                Some(value) => format!("-D{}={value}", self.name),
+                None => format!("-D{}", self.name),
+            }
+        }
+    }
+
+    impl<'a> From<CrateBindingDefine<'a>> for OwnedCrateBindingDefine {
+        fn from(define: CrateBindingDefine<'a>) -> Self {
+            Self {
+                name: define.name.to_owned(),
+                value: define.value.map(str::to_owned),
+            }
+        }
+    }
+
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct CrateBindingSpec {
         pub owner: BindingOwner,
@@ -943,6 +1016,86 @@ typedef __builtin_va_list va_list;
     impl CrateBindingSpec {
         pub fn maintained() -> &'static [Self] {
             MAINTAINED_CRATE_BINDING_SPECS
+        }
+
+        /// Return the single ordered target/profile define stream consumed by
+        /// bindgen and native extension compilation.
+        pub fn binding_defines(&self) -> impl Iterator<Item = CrateBindingDefine<'static>> + '_ {
+            self.profile
+                .clang_defines
+                .iter()
+                .chain(self.target.clang_defines())
+                .filter_map(|definition| CrateBindingDefine::from_definition(definition))
+        }
+
+        pub fn native_binding_defines(
+            &self,
+        ) -> impl Iterator<Item = CrateBindingDefine<'static>> + '_ {
+            self.binding_defines()
+                .filter(|define| define.applies_to_native_compilation())
+        }
+
+        pub fn apply_native_binding_defines(&self, build: &mut cc::Build) {
+            for define in self.native_binding_defines() {
+                build.define(define.name, define.value);
+            }
+        }
+
+        pub fn apply_extension_binding_defines<I, K, V>(
+            &self,
+            build: &mut cc::Build,
+            environment: I,
+        ) where
+            I: IntoIterator<Item = (K, V)>,
+            K: AsRef<str>,
+            V: AsRef<str>,
+        {
+            for define in self.resolved_extension_binding_defines(environment) {
+                build.define(&define.name, define.value.as_deref());
+            }
+        }
+
+        /// Resolve the native canonical defines and propagated core defines for
+        /// an extension build.
+        ///
+        /// Canonical definitions retain profile order. Propagated definitions
+        /// are filtered for disabled boolean values, excluded when canonical,
+        /// then sorted and deduplicated to preserve the historical build
+        /// contract across compiler backends.
+        pub fn resolved_extension_binding_defines<I, K, V>(
+            &self,
+            environment: I,
+        ) -> Vec<OwnedCrateBindingDefine>
+        where
+            I: IntoIterator<Item = (K, V)>,
+            K: AsRef<str>,
+            V: AsRef<str>,
+        {
+            let canonical = self
+                .native_binding_defines()
+                .map(|define| define.name)
+                .collect::<BTreeSet<_>>();
+            let mut resolved = self
+                .native_binding_defines()
+                .map(OwnedCrateBindingDefine::from)
+                .collect::<Vec<_>>();
+            let mut propagated = environment
+                .into_iter()
+                .filter_map(|(key, value)| {
+                    let name = key
+                        .as_ref()
+                        .strip_prefix("DEP_DEAR_IMGUI_SYS_DEFINE_")
+                        .or_else(|| key.as_ref().strip_prefix("DEP_DEAR_IMGUI_DEFINE_"))?;
+                    CrateBindingDefine::from_metadata(name, value.as_ref()).and_then(|define| {
+                        (!canonical.contains(define.name))
+                            .then(|| OwnedCrateBindingDefine::from(define))
+                    })
+                })
+                .collect::<Vec<_>>();
+            propagated.sort_unstable();
+            propagated.dedup();
+            resolved.extend(propagated);
+            resolved
         }
 
         pub fn for_owner(owner: BindingOwner) -> impl Iterator<Item = &'static Self> {
@@ -4213,13 +4366,13 @@ pub const DEFAULT_GITHUB_REPO: &str = "dear-imgui";
 mod binding_contract_tests {
     use super::binding::{
         ArtifactProfile, BindingOwner, BindingSpec, BuildRequest, BuildRequestInput,
-        CORE_BUILD_ENV_VARS, CORE_WASM_TARGET, CoreArtifactIdentity, CrateBindingInclude,
-        CrateBindingIncludeRoot, CrateBindingLanguage, CrateBindingProvenance, CrateBindingSpec,
-        CrateBindingTarget, ExtensionArtifactProfile, ExtensionArtifactProfileInput,
-        ExtensionBinding, ExtensionBindingIdentity, HeaderShim, NativeAbiProfile, SourceRevisions,
-        TargetFacts, bindgen_rerun_env_vars, is_supported_wasm_target,
-        parse_crate_binding_source_revision, validate_bindgen_environment,
-        validate_wasm_feature_contract,
+        CORE_BUILD_ENV_VARS, CORE_WASM_TARGET, CoreArtifactIdentity, CrateBindingDefine,
+        CrateBindingInclude, CrateBindingIncludeRoot, CrateBindingLanguage, CrateBindingProvenance,
+        CrateBindingSpec, CrateBindingTarget, ExtensionArtifactProfile,
+        ExtensionArtifactProfileInput, ExtensionBinding, ExtensionBindingIdentity, HeaderShim,
+        NativeAbiProfile, SourceRevisions, TargetFacts, bindgen_rerun_env_vars,
+        is_supported_wasm_target, parse_crate_binding_source_revision,
+        validate_bindgen_environment, validate_wasm_feature_contract,
     };
     use std::collections::BTreeSet;
     use std::fs;
@@ -5196,6 +5349,160 @@ imgui-revision = "b61e56346a92cfcaf1f43a545ca37b0b32239654"
                 );
             }
         }
+    }
+
+    #[test]
+    fn maintained_crate_binding_specs_emit_one_ordered_define_profile() {
+        for spec in CrateBindingSpec::maintained() {
+            let expected = spec
+                .profile
+                .clang_defines
+                .iter()
+                .chain(spec.target.clang_defines())
+                .map(|define| format!("-D{define}"))
+                .collect::<Vec<_>>();
+            let actual = spec
+                .binding_defines()
+                .map(CrateBindingDefine::clang_arg)
+                .collect::<Vec<_>>();
+            let native = spec
+                .native_binding_defines()
+                .map(CrateBindingDefine::clang_arg)
+                .collect::<Vec<_>>();
+
+            assert_eq!(actual, expected, "{} {}", spec.crate_name, spec.target.id());
+            assert_eq!(
+                native,
+                expected
+                    .iter()
+                    .filter(|define| *define != "-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
+                    .cloned()
+                    .collect::<Vec<_>>(),
+                "{} {} native define projection",
+                spec.crate_name,
+                spec.target.id()
+            );
+            if spec.target == CrateBindingTarget::Native {
+                assert!(
+                    actual
+                        .iter()
+                        .any(|arg| arg == "-DIMGUI_DISABLE_OBSOLETE_FUNCTIONS"),
+                    "{} native regeneration omitted the core layout define",
+                    spec.crate_name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn disabled_boolean_defines_are_absent_from_binding_and_metadata_routes() {
+        let mut spec =
+            *CrateBindingSpec::for_owner(BindingOwner::Extension(ExtensionBinding::ImPlot))
+                .find(|spec| spec.target == CrateBindingTarget::Native)
+                .unwrap();
+        spec.profile.clang_defines = &["ENABLED=1", "ZERO=0", "FALSE=false", "OFF=OFF"];
+
+        assert_eq!(
+            spec.binding_defines()
+                .map(CrateBindingDefine::clang_arg)
+                .collect::<Vec<_>>(),
+            ["-DENABLED=1", "-DIMGUI_DISABLE_OBSOLETE_FUNCTIONS",]
+        );
+
+        for value in ["0", "false", "FALSE", "off", "OFF", "no", "NO"] {
+            assert_eq!(CrateBindingDefine::from_metadata("DISABLED", value), None);
+        }
+        for (value, expected) in [
+            ("", "-DENABLED"),
+            ("1", "-DENABLED=1"),
+            ("true", "-DENABLED=true"),
+            ("custom", "-DENABLED=custom"),
+        ] {
+            assert_eq!(
+                CrateBindingDefine::from_metadata("ENABLED", value)
+                    .unwrap()
+                    .clang_arg(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn extension_define_resolution_is_backend_neutral_and_deterministic() {
+        let spec = CrateBindingSpec::for_owner(BindingOwner::Extension(ExtensionBinding::ImPlot))
+            .find(|spec| spec.target == CrateBindingTarget::Native)
+            .unwrap();
+        let mut expected = spec
+            .native_binding_defines()
+            .map(CrateBindingDefine::clang_arg)
+            .collect::<Vec<_>>();
+        expected.extend(["-DALPHA".to_owned(), "-DZETA=2".to_owned()]);
+
+        let actual = spec
+            .resolved_extension_binding_defines([
+                ("IGNORED", "1"),
+                ("DEP_DEAR_IMGUI_SYS_DEFINE_ZETA", "2"),
+                ("DEP_DEAR_IMGUI_DEFINE_ALPHA", ""),
+                ("DEP_DEAR_IMGUI_SYS_DEFINE_DISABLED", "false"),
+                ("DEP_DEAR_IMGUI_DEFINE_IMGUI_USE_WCHAR32", "override"),
+                ("DEP_DEAR_IMGUI_DEFINE_ZETA", "2"),
+                ("DEP_DEAR_IMGUI_SYS_DEFINE_ZERO", "0"),
+            ])
+            .iter()
+            .map(|define| define.clang_arg())
+            .collect::<Vec<_>>();
+
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn maintained_extension_build_routes_do_not_hard_code_bindgen_defines() {
+        let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        for crate_name in [
+            "dear-imgui-test-engine-sys",
+            "dear-imguizmo-quat-sys",
+            "dear-imguizmo-sys",
+            "dear-imnodes-sys",
+            "dear-implot-sys",
+            "dear-implot3d-sys",
+            "dear-node-editor-sys",
+        ] {
+            let path = workspace_root
+                .join("extensions")
+                .join(crate_name)
+                .join("build.rs");
+            let source = fs::read_to_string(&path).unwrap();
+            assert!(
+                source.contains("binding_defines()"),
+                "{} does not consume the canonical binding define profile",
+                path.display()
+            );
+            assert!(
+                source.contains("apply_extension_binding_defines"),
+                "{} does not derive native defines from the canonical profile",
+                path.display()
+            );
+            assert!(
+                !source.contains(".clang_arg(\"-D"),
+                "{} still hard-codes a bindgen define",
+                path.display()
+            );
+        }
+
+        let implot_build = fs::read_to_string(
+            workspace_root
+                .join("extensions")
+                .join("dear-implot-sys")
+                .join("build.rs"),
+        )
+        .unwrap();
+        assert!(implot_build.contains("resolved_extension_binding_defines(env::vars())"));
+        assert!(!implot_build.contains("strip_prefix(\"DEP_DEAR_IMGUI"));
+
+        let core_build =
+            fs::read_to_string(workspace_root.join("dear-imgui-sys/build.rs")).unwrap();
+        assert!(!core_build.contains("cargo:DEFINE_IMGUI_ENABLE_TEST_ENGINE={}"));
+        assert!(!core_build.contains("cargo:DEFINE_IMGUITEST={}"));
     }
 
     #[test]

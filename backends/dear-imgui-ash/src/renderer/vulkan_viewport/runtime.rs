@@ -1,18 +1,22 @@
 use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
 use std::fmt;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use dear_imgui_rs::render::RenderedFrame;
+#[cfg(test)]
+use dear_imgui_rs::render::FrameSnapshot;
+use dear_imgui_rs::render::{RenderedFrame, RendererConsumer};
 use dear_imgui_rs::{
-    BackendFlags, Context, ContextAttachment, ContextAttachmentError, ContextAttachmentLease,
-    ContextAttachmentRole, ContextBinding, ContextBindingError, ContextDestroyed, ContextId,
-    ContextLifecycle, ContextTeardown, TextureData, TextureId,
+    Context, ContextAttachment, ContextAttachmentError, ContextAttachmentLease,
+    ContextAttachmentRole, ContextAttachmentTeardownError, ContextBinding, ContextBindingError,
+    ContextDestroyed, ContextId, ContextLifecycle, ContextTeardown, Id, TextureData, TextureId,
+    platform_io::{PlatformIo, Viewport},
 };
 use thiserror::Error;
 
 use super::callbacks::{
-    claim_callbacks, destroy_renderer_viewport_resources, detect_callback_drift,
+    claim_callbacks, destroy_renderer_viewport_resources, detect_runtime_contract_drift,
     preflight_callbacks, release_callbacks,
 };
 use super::registry::{
@@ -65,6 +69,12 @@ pub enum AshViewportError {
     /// Another renderer owns one renderer callback slot.
     #[error("ImGuiPlatformIO callback `{callback}` is already owned by another renderer")]
     RendererCallbackOccupied { callback: &'static str },
+    /// Another renderer already advertises multi-viewport renderer support.
+    #[error("RENDERER_HAS_VIEWPORTS is already advertised by another renderer")]
+    RendererViewportCapabilityOccupied,
+    /// This runtime's renderer capability bit was cleared while it remained attached.
+    #[error("RENDERER_HAS_VIEWPORTS was cleared while the Ash runtime was attached")]
+    RendererViewportCapabilityLost,
     /// A callback claimed by this runtime was replaced while attached.
     #[error("Ash renderer callback `{callback}` was replaced while the runtime was attached")]
     RendererCallbackReplaced { callback: &'static str },
@@ -211,14 +221,16 @@ enum CallbackState {
 enum ShutdownAction<'a> {
     Quiesce,
     Explicit(&'a mut Context),
-    BestEffort,
-    ContextResources,
+    ContextTeardown,
 }
 
 enum RendererStorage {
     Real(Box<AshRenderer>),
     #[cfg(test)]
-    Fake(Box<u8>),
+    Fake {
+        probe: Box<u8>,
+        consumer: Option<RendererConsumer>,
+    },
 }
 
 impl RendererStorage {
@@ -226,7 +238,15 @@ impl RendererStorage {
         match self {
             Self::Real(renderer) => Some(renderer),
             #[cfg(test)]
-            Self::Fake(_) => None,
+            Self::Fake { .. } => None,
+        }
+    }
+
+    fn ensure_operational(&self) -> Result<(), AshViewportError> {
+        match self {
+            Self::Real(renderer) => renderer.ensure_operational().map_err(Into::into),
+            #[cfg(test)]
+            Self::Fake { .. } => Ok(()),
         }
     }
 
@@ -234,7 +254,7 @@ impl RendererStorage {
     fn address(&self) -> *const () {
         match self {
             Self::Real(renderer) => std::ptr::from_ref(renderer.as_ref()).cast(),
-            Self::Fake(renderer) => std::ptr::from_ref(renderer.as_ref()).cast(),
+            Self::Fake { probe, .. } => std::ptr::from_ref(probe.as_ref()).cast(),
         }
     }
 }
@@ -247,8 +267,9 @@ pub(super) struct RuntimeControl {
     globals: RefCell<Option<GlobalHandles>>,
     attachment: RefCell<Option<ContextAttachmentLease>>,
     callback_state: Cell<CallbackState>,
-    prior_backend_flags: BackendFlags,
-    renderer_flags_added: BackendFlags,
+    // ImGui clears PlatformRequestClose at the end of UpdatePlatformWindows, including failures
+    // raised by Renderer_CreateWindow in that same call.
+    failed_viewports: RefCell<HashSet<Id>>,
     retained_viewports: RefCell<Vec<Box<super::ViewportAshData>>>,
     faults: RefCell<Option<AshViewportError>>,
     #[cfg(test)]
@@ -257,6 +278,8 @@ pub(super) struct RuntimeControl {
     callback_probe_count: Cell<usize>,
     #[cfg(test)]
     transitions: RefCell<Vec<&'static str>>,
+    #[cfg(test)]
+    renderer_contract_fault: Cell<Option<&'static str>>,
 }
 
 impl fmt::Debug for RuntimeControl {
@@ -285,11 +308,6 @@ impl RuntimeControl {
         renderer: RendererStorage,
         globals: Option<GlobalHandles>,
     ) -> Self {
-        let renderer_flags_added = match &renderer {
-            RendererStorage::Real(renderer) => renderer.renderer_flags_added,
-            #[cfg(test)]
-            RendererStorage::Fake(_) => BackendFlags::empty(),
-        };
         Self {
             context_raw: context.as_raw(),
             binding: context.binding(),
@@ -298,8 +316,7 @@ impl RuntimeControl {
             globals: RefCell::new(globals),
             attachment: RefCell::new(None),
             callback_state: Cell::new(CallbackState::Unclaimed),
-            prior_backend_flags: context.io().backend_flags(),
-            renderer_flags_added,
+            failed_viewports: RefCell::new(HashSet::new()),
             retained_viewports: RefCell::new(Vec::new()),
             faults: RefCell::new(None),
             #[cfg(test)]
@@ -308,6 +325,8 @@ impl RuntimeControl {
             callback_probe_count: Cell::new(0),
             #[cfg(test)]
             transitions: RefCell::new(Vec::new()),
+            #[cfg(test)]
+            renderer_contract_fault: Cell::new(None),
         }
     }
 
@@ -323,16 +342,20 @@ impl RuntimeControl {
         self.globals.borrow().clone()
     }
 
-    pub(super) fn prior_backend_flags(&self) -> BackendFlags {
-        self.prior_backend_flags
-    }
-
     pub(super) fn is_callback_accessible(&self) -> bool {
         self.state.get() == RuntimeState::Attached
             && self.callback_state.get() != CallbackState::Released
     }
 
-    pub(super) fn should_detect_callback_drift(&self) -> bool {
+    pub(super) fn can_enter_callback(&self) -> bool {
+        self.is_callback_accessible()
+            && self
+                .faults
+                .try_borrow()
+                .is_ok_and(|faults| faults.is_none())
+    }
+
+    pub(super) fn should_validate_runtime_contract(&self) -> bool {
         self.state.get() == RuntimeState::Attached
             && self.callback_state.get() == CallbackState::Claimed
     }
@@ -394,13 +417,74 @@ impl RuntimeControl {
         }
     }
 
-    pub(super) fn record_callback_replaced(&self, callback: &'static str) {
-        self.record_fault(AshViewportError::RendererCallbackReplaced { callback });
+    pub(super) fn record_runtime_contract_fault(&self, fault: AshViewportError) {
+        self.record_fault(fault);
         self.begin_shutdown();
     }
 
+    pub(super) fn validate_renderer_contract(&self) -> Result<(), AshViewportError> {
+        #[cfg(test)]
+        if let Some(field) = self.renderer_contract_fault.get() {
+            return Err(RendererError::RendererStateReplaced { field }.into());
+        }
+        let renderer =
+            self.renderer
+                .try_borrow()
+                .map_err(|_| AshViewportError::CallbackReentered {
+                    callback: "validate renderer runtime contract",
+                })?;
+        renderer
+            .as_ref()
+            .ok_or(AshViewportError::RuntimeDetached)?
+            .ensure_operational()
+    }
+
+    /// Returns whether the current Context still has an exact core renderer publication owned by
+    /// this runtime. A callback-table takeover may replace every viewport callback while leaving
+    /// a partially owned core lease behind; in that case failure handling must still revoke the
+    /// viewport capability. If ownership cannot be proven, callers preserve the shared bit.
+    pub(super) fn owns_core_renderer_publication(&self, platform_io: &PlatformIo) -> bool {
+        let Ok(renderer) = self.renderer.try_borrow() else {
+            return false;
+        };
+        match renderer.as_ref() {
+            Some(RendererStorage::Real(renderer)) => renderer
+                .context_state
+                .owns_core_publication_bound(platform_io),
+            #[cfg(test)]
+            Some(RendererStorage::Fake { .. }) | None => false,
+            #[cfg(not(test))]
+            None => false,
+        }
+    }
+
+    pub(super) fn mark_viewport_create_failed(&self, viewport: &mut Viewport) {
+        self.failed_viewports.borrow_mut().insert(viewport.id());
+        viewport.set_platform_request_close(true);
+    }
+
+    pub(super) fn clear_viewport_create_failure(&self, viewport: &Viewport) {
+        self.failed_viewports.borrow_mut().remove(&viewport.id());
+    }
+
+    pub(super) fn clear_viewport_create_failures(&self) {
+        self.failed_viewports.borrow_mut().clear();
+    }
+
+    pub(super) fn reassert_failed_viewport_closures(&self, platform_io: &mut PlatformIo) {
+        let failed_viewports = self.failed_viewports.borrow();
+        if failed_viewports.is_empty() {
+            return;
+        }
+        for viewport in platform_io.viewports_iter_mut() {
+            if failed_viewports.contains(&viewport.id()) {
+                viewport.set_platform_request_close(true);
+            }
+        }
+    }
+
     fn detect_and_take_fault(&self) -> Option<AshViewportError> {
-        detect_callback_drift(self);
+        detect_runtime_contract_drift(self);
         self.faults.borrow_mut().take()
     }
 
@@ -446,6 +530,7 @@ impl RuntimeControl {
                 .as_mut()
                 .and_then(RendererStorage::real_mut)
                 .ok_or(AshViewportError::RuntimeDetached)?;
+            renderer.ensure_operational()?;
             callback(renderer)
         }?;
         self.finish_entry()?;
@@ -467,12 +552,13 @@ impl RuntimeControl {
             let renderer = match renderer.as_ref() {
                 Some(RendererStorage::Real(renderer)) => renderer.as_ref(),
                 #[cfg(test)]
-                Some(RendererStorage::Fake(_)) | None => {
+                Some(RendererStorage::Fake { .. }) | None => {
                     return Err(AshViewportError::RuntimeDetached);
                 }
                 #[cfg(not(test))]
                 None => return Err(AshViewportError::RuntimeDetached),
             };
+            renderer.ensure_operational()?;
             callback(renderer)
         };
         self.finish_entry()?;
@@ -494,6 +580,7 @@ impl RuntimeControl {
             .as_mut()
             .and_then(RendererStorage::real_mut)
             .ok_or(AshViewportError::RuntimeDetached)?;
+        renderer.ensure_operational()?;
         let globals = self.globals().ok_or(AshViewportError::RuntimeDetached)?;
         callback(renderer, &globals)
     }
@@ -512,7 +599,7 @@ impl RuntimeControl {
             return Ok(None);
         };
         #[cfg(test)]
-        if matches!(storage, RendererStorage::Fake(_)) {
+        if matches!(storage, RendererStorage::Fake { .. }) {
             return Ok(None);
         }
         let renderer = storage
@@ -537,39 +624,141 @@ impl RuntimeControl {
         }
     }
 
-    fn release_renderer_explicit(&self, context: &mut Context) -> Result<(), AshViewportError> {
-        let mut renderer =
+    fn shutdown_explicit(&self, context: &mut Context) -> Result<(), AshViewportError> {
+        // Validate snapshot completion before mutating any viewport, callback, or runtime state.
+        // A failed permit preparation must leave the entire multi-viewport runtime retryable.
+        let consumer = {
+            let mut storage = self.renderer.try_borrow_mut().map_err(|_| {
+                AshViewportError::CallbackReentered {
+                    callback: "Ash viewport runtime shutdown",
+                }
+            })?;
+            let storage = storage.as_mut().ok_or(AshViewportError::RuntimeDetached)?;
+            match storage {
+                RendererStorage::Real(renderer) => renderer.take_shutdown_consumer()?,
+                #[cfg(test)]
+                RendererStorage::Fake { consumer, .. } => {
+                    consumer.take().ok_or(RendererError::RendererNotAttached)?
+                }
+            }
+        };
+
+        let permit = match context.prepare_renderer_texture_reset(&consumer) {
+            Ok(permit) => permit,
+            Err(error) => {
+                self.restore_explicit_shutdown_consumer(consumer)?;
+                return Err(RendererError::from(error).into());
+            }
+        };
+
+        self.begin_shutdown();
+        if let Err(error) = destroy_renderer_viewport_resources(self) {
+            drop(permit);
+            self.restore_explicit_shutdown_consumer(consumer)?;
+            return Err(error);
+        }
+        let callback_result = release_callbacks(self);
+        self.mark_detached();
+
+        let (shutdown_result, destroyed) = {
+            let mut storage = self.renderer.try_borrow_mut().map_err(|_| {
+                AshViewportError::CallbackReentered {
+                    callback: "Ash viewport runtime shutdown",
+                }
+            })?;
+            match storage.as_mut().ok_or(AshViewportError::RuntimeDetached)? {
+                RendererStorage::Real(renderer) => {
+                    let shutdown_result = renderer.destroy_internal();
+                    (shutdown_result, renderer.destroyed)
+                }
+                #[cfg(test)]
+                RendererStorage::Fake { .. } => (Ok(()), true),
+            }
+        };
+
+        if !destroyed {
+            drop(permit);
+            self.restore_explicit_shutdown_consumer(consumer)?;
+            return first_error([
+                callback_result.err(),
+                map_renderer_shutdown_result(shutdown_result, "renderer shutdown").err(),
+            ]);
+        }
+
+        // The renderer's complete texture map is gone, so the already-validated reset can now
+        // invalidate Context-owned bindings before we publish the renderer teardown.
+        let _ = permit.commit();
+        let renderer = {
+            let mut storage = self.renderer.try_borrow_mut().map_err(|_| {
+                AshViewportError::CallbackReentered {
+                    callback: "Ash viewport runtime shutdown",
+                }
+            })?;
+            match storage.as_mut().ok_or(AshViewportError::RuntimeDetached)? {
+                RendererStorage::Real(renderer) => renderer.finalize_shutdown_after_reset(context),
+                #[cfg(test)]
+                RendererStorage::Fake { .. } => {}
+            }
+            storage.take()
+        };
+        drop(renderer);
+        drop(consumer);
+        self.globals.borrow_mut().take();
+        self.set_state(RuntimeState::ResourceDropped);
+        self.detach_attachment();
+        first_error([
+            callback_result.err(),
+            map_renderer_shutdown_result(shutdown_result, "renderer shutdown").err(),
+        ])
+    }
+
+    fn restore_explicit_shutdown_consumer(
+        &self,
+        consumer: RendererConsumer,
+    ) -> Result<(), AshViewportError> {
+        let mut storage =
             self.renderer
                 .try_borrow_mut()
                 .map_err(|_| AshViewportError::CallbackReentered {
                     callback: "Ash viewport runtime shutdown",
                 })?;
-        let Some(storage) = renderer.as_mut() else {
-            self.globals.borrow_mut().take();
-            self.set_state(RuntimeState::ResourceDropped);
-            return Ok(());
-        };
-        let shutdown_result = match storage {
-            RendererStorage::Real(renderer) => renderer.shutdown(context),
+        match storage.as_mut().ok_or(AshViewportError::RuntimeDetached)? {
+            RendererStorage::Real(renderer) => renderer.restore_shutdown_consumer(consumer),
             #[cfg(test)]
-            RendererStorage::Fake(_) => Ok(()),
-        };
-        let may_release = match storage {
-            RendererStorage::Real(renderer) => renderer.destroyed,
-            #[cfg(test)]
-            RendererStorage::Fake(_) => true,
-        };
-        if !may_release {
-            return shutdown_result.map_err(Into::into);
+            RendererStorage::Fake {
+                consumer: stored_consumer,
+                ..
+            } => {
+                debug_assert!(stored_consumer.is_none());
+                *stored_consumer = Some(consumer);
+            }
         }
-        let renderer = renderer.take();
-        drop(renderer);
-        self.globals.borrow_mut().take();
-        self.set_state(RuntimeState::ResourceDropped);
-        map_renderer_shutdown_result(shutdown_result, "renderer shutdown")
+        Ok(())
     }
 
-    fn release_renderer_without_context_reset(&self) -> Result<(), AshViewportError> {
+    fn take_context_teardown_consumer(&self) -> Result<RendererConsumer, AshViewportError> {
+        let mut storage =
+            self.renderer
+                .try_borrow_mut()
+                .map_err(|_| AshViewportError::CallbackReentered {
+                    callback: "Context renderer-resource teardown",
+                })?;
+        match storage.as_mut().ok_or(AshViewportError::RuntimeDetached)? {
+            RendererStorage::Real(renderer) => {
+                renderer.take_shutdown_consumer().map_err(Into::into)
+            }
+            #[cfg(test)]
+            RendererStorage::Fake { consumer, .. } => consumer
+                .take()
+                .ok_or(RendererError::RendererNotAttached)
+                .map_err(Into::into),
+        }
+    }
+
+    /// Releases the renderer after Context entered its terminal teardown phase.
+    ///
+    /// This may run only from the release closure of `ContextTeardown::with_renderer_texture_reset`.
+    fn release_renderer_during_context_teardown(&self) -> Result<(), AshViewportError> {
         let mut renderer =
             self.renderer
                 .try_borrow_mut()
@@ -582,14 +771,14 @@ impl RuntimeControl {
             return Ok(());
         };
         let shutdown_result = match storage {
-            RendererStorage::Real(renderer) => renderer.shutdown_without_context_reset(),
+            RendererStorage::Real(renderer) => renderer.shutdown_during_context_teardown(),
             #[cfg(test)]
-            RendererStorage::Fake(_) => Ok(()),
+            RendererStorage::Fake { .. } => Ok(()),
         };
         let may_release = match storage {
             RendererStorage::Real(renderer) => renderer.destroyed,
             #[cfg(test)]
-            RendererStorage::Fake(_) => true,
+            RendererStorage::Fake { .. } => true,
         };
         if !may_release {
             return shutdown_result.map_err(Into::into);
@@ -601,82 +790,72 @@ impl RuntimeControl {
         map_renderer_shutdown_result(shutdown_result, "renderer teardown")
     }
 
+    /// Releases remaining renderer resources after native Context destruction.
+    ///
+    /// A previous Context teardown can only reach this retry path after a retryable Vulkan wait
+    /// failure. Native ImGui state is gone, so the renderer must not attempt a texture reset or
+    /// touch current-context global pointers.
+    fn release_renderer_after_context_destroyed(&self) -> Result<(), AshViewportError> {
+        let mut renderer =
+            self.renderer
+                .try_borrow_mut()
+                .map_err(|_| AshViewportError::CallbackReentered {
+                    callback: "destroyed Context renderer-resource cleanup",
+                })?;
+        let Some(storage) = renderer.as_mut() else {
+            self.globals.borrow_mut().take();
+            self.set_state(RuntimeState::ResourceDropped);
+            return Ok(());
+        };
+        let shutdown_result = match storage {
+            RendererStorage::Real(renderer) => renderer.shutdown_after_context_destroyed(),
+            #[cfg(test)]
+            RendererStorage::Fake { .. } => Ok(()),
+        };
+        let may_release = match storage {
+            RendererStorage::Real(renderer) => renderer.destroyed,
+            #[cfg(test)]
+            RendererStorage::Fake { .. } => true,
+        };
+        if !may_release {
+            return shutdown_result.map_err(Into::into);
+        }
+        let renderer = renderer.take();
+        drop(renderer);
+        self.globals.borrow_mut().take();
+        self.set_state(RuntimeState::ResourceDropped);
+        map_renderer_shutdown_result(
+            shutdown_result,
+            "renderer cleanup after Context destruction",
+        )
+    }
+
     fn shutdown_once(&self, action: ShutdownAction<'_>) -> Result<(), AshViewportError> {
         if self.state.get() == RuntimeState::ResourceDropped {
-            if !matches!(action, ShutdownAction::ContextResources) {
+            if !matches!(action, ShutdownAction::ContextTeardown) {
                 self.detach_attachment();
             }
             return Ok(());
         }
 
-        self.begin_shutdown();
-        if matches!(action, ShutdownAction::Quiesce) {
-            return release_callbacks(self);
-        }
-
-        let viewport_error = match destroy_renderer_viewport_resources(self) {
-            Ok(()) => None,
-            Err(error) if matches!(action, ShutdownAction::Explicit(_)) => return Err(error),
-            Err(error) => Some(error),
-        };
-        let callback_result = release_callbacks(self);
-
         match action {
-            ShutdownAction::Quiesce => unreachable!(),
-            ShutdownAction::Explicit(context) => {
-                self.mark_detached();
-                let renderer_result = self.release_renderer_explicit(context);
-                if self.state.get() == RuntimeState::ResourceDropped {
-                    self.detach_attachment();
-                }
-                first_error([viewport_error, callback_result.err(), renderer_result.err()])
+            ShutdownAction::Quiesce => {
+                self.begin_shutdown();
+                release_callbacks(self)
             }
-            ShutdownAction::BestEffort => {
+            ShutdownAction::Explicit(context) => self.shutdown_explicit(context),
+            ShutdownAction::ContextTeardown => {
+                self.begin_shutdown();
+                let viewport_error = destroy_renderer_viewport_resources(self).err();
+                let callback_result = release_callbacks(self);
                 if viewport_error.is_some() {
                     return first_error([viewport_error, callback_result.err()]);
                 }
                 self.mark_detached();
-                let renderer_result = self.release_renderer_without_context_reset();
-                if self.state.get() == RuntimeState::ResourceDropped {
-                    self.clear_bound_renderer_configuration();
-                    self.detach_attachment();
-                }
-                first_error([callback_result.err(), renderer_result.err()])
-            }
-            ShutdownAction::ContextResources => {
-                if viewport_error.is_some() {
-                    return first_error([viewport_error, callback_result.err()]);
-                }
-                self.mark_detached();
-                let renderer_result = self.release_renderer_without_context_reset();
+                let renderer_result = self.release_renderer_during_context_teardown();
                 first_error([callback_result.err(), renderer_result.err()])
             }
         }
-    }
-
-    fn clear_bound_renderer_configuration(&self) {
-        let io = unsafe { dear_imgui_rs::sys::igGetIO_Nil() };
-        let platform_io = unsafe { dear_imgui_rs::sys::igGetPlatformIO_Nil() };
-        if io.is_null() || platform_io.is_null() {
-            return;
-        }
-        let platform_io =
-            unsafe { dear_imgui_rs::platform_io::PlatformIo::from_raw_mut(platform_io) };
-        let renderer_name = unsafe {
-            (!(*io).BackendRendererName.is_null())
-                .then(|| std::ffi::CStr::from_ptr((*io).BackendRendererName))
-        };
-        let renderer_name_is_ours = AshRenderer::renderer_name_is_ours(renderer_name);
-        let draw_callbacks_are_ours = AshRenderer::owned_draw_callbacks_match(platform_io);
-        unsafe {
-            if renderer_name_is_ours {
-                (*io).BackendRendererName = std::ptr::null();
-            }
-            if renderer_name_is_ours && draw_callbacks_are_ours {
-                (*io).BackendFlags &= !self.renderer_flags_added.bits();
-            }
-        }
-        AshRenderer::clear_owned_draw_callbacks(platform_io);
     }
 
     fn owner_dropped(&self) {
@@ -684,13 +863,13 @@ impl RuntimeControl {
             return;
         }
         match self.binding.lifecycle() {
-            ContextLifecycle::Alive | ContextLifecycle::Dropping => {
-                let _ = self.binding.try_with_bound_context(|| {
-                    if let Err(error) = self.shutdown_once(ShutdownAction::BestEffort) {
-                        self.record_fault(error);
-                    }
-                });
-            }
+            // `Drop` has no exclusive `&mut Context`, so it cannot prepare and commit the
+            // renderer-texture reset transaction. Leave the attachment owned by Context instead
+            // of releasing Vulkan resources behind still-live managed texture bindings.
+            ContextLifecycle::Alive => self.defer_attachment_to_context(),
+            // Context has already begun its ordered teardown and still owns this attachment.
+            // Its RendererResources phase performs the terminal cleanup with the Context bound.
+            ContextLifecycle::Dropping => {}
             ContextLifecycle::NativeDestroyed => {
                 if let Err(error) = self.retry_detached_cleanup() {
                     self.record_fault(error);
@@ -710,6 +889,12 @@ impl RuntimeControl {
         }
     }
 
+    fn defer_attachment_to_context(&self) {
+        if let Some(attachment) = self.attachment.borrow_mut().take() {
+            attachment.defer_to_context();
+        }
+    }
+
     fn recover_renderer(&self) -> AshRenderer {
         self.globals.borrow_mut().take();
         match self
@@ -720,7 +905,9 @@ impl RuntimeControl {
         {
             RendererStorage::Real(renderer) => *renderer,
             #[cfg(test)]
-            RendererStorage::Fake(_) => unreachable!("test runtime does not recover AshRenderer"),
+            RendererStorage::Fake { .. } => {
+                unreachable!("test runtime does not recover AshRenderer")
+            }
         }
     }
 
@@ -756,7 +943,7 @@ impl RuntimeControl {
                 Ok(())
             })?;
         }
-        self.release_renderer_without_context_reset()
+        self.release_renderer_after_context_destroyed()
     }
 
     #[cfg(test)]
@@ -770,6 +957,24 @@ impl RuntimeControl {
             .borrow()
             .as_ref()
             .map_or(std::ptr::null(), RendererStorage::address)
+    }
+
+    #[cfg(test)]
+    fn snapshot_for_shutdown_test(&self, context: &mut Context) -> FrameSnapshot {
+        let renderer = self.renderer.borrow();
+        let consumer = match renderer.as_ref() {
+            Some(RendererStorage::Fake {
+                consumer: Some(consumer),
+                ..
+            }) => consumer,
+            Some(RendererStorage::Real(_))
+            | Some(RendererStorage::Fake { consumer: None, .. })
+            | None => panic!("test runtime has no active renderer consumer"),
+        };
+        context
+            .begin_frame()
+            .render_snapshot(consumer)
+            .expect("test runtime consumer must capture a snapshot")
     }
 
     #[cfg(test)]
@@ -801,6 +1006,11 @@ impl RuntimeControl {
     }
 
     #[cfg(test)]
+    pub(super) fn replace_renderer_contract_for_test(&self, field: &'static str) {
+        self.renderer_contract_fault.set(Some(field));
+    }
+
+    #[cfg(test)]
     fn trigger_reentrant_entry_for_test(&self) {
         let _borrow = self.renderer.borrow_mut();
         let error = self
@@ -821,20 +1031,52 @@ impl RuntimeControl {
 }
 
 impl ContextAttachment for RuntimeControl {
-    fn quiesce(&self, context: &ContextTeardown<'_>) {
-        context.with_bound_context(|| {
-            if let Err(error) = self.shutdown_once(ShutdownAction::Quiesce) {
+    fn quiesce(&self, context: &ContextTeardown<'_>) -> Result<(), ContextAttachmentTeardownError> {
+        context.with_bound_context(|| match self.shutdown_once(ShutdownAction::Quiesce) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                let teardown_error = ContextAttachmentTeardownError::new(error.to_string());
                 self.record_fault(error);
+                Err(teardown_error)
             }
-        });
+        })
     }
 
-    fn release_renderer_resources(&self, context: &ContextTeardown<'_>) {
+    fn release_renderer_resources(
+        &self,
+        context: &ContextTeardown<'_>,
+    ) -> Result<(), ContextAttachmentTeardownError> {
         context.with_bound_context(|| {
-            if let Err(error) = self.shutdown_once(ShutdownAction::ContextResources) {
-                self.record_fault(error);
+            let consumer = self
+                .take_context_teardown_consumer()
+                .map_err(|error| ContextAttachmentTeardownError::new(error.to_string()))?;
+            let mut terminal_error = None;
+            let reset = context.with_renderer_texture_reset(&consumer, || {
+                match self.shutdown_once(ShutdownAction::ContextTeardown) {
+                    Ok(()) => Ok(()),
+                    Err(error) if self.state.get() == RuntimeState::ResourceDropped => {
+                        terminal_error = Some(error);
+                        Ok(())
+                    }
+                    Err(error) => Err(ContextAttachmentTeardownError::new(error.to_string())),
+                }
+            });
+            if let Err(error) = reset {
+                if let Err(restore_error) = self.restore_explicit_shutdown_consumer(consumer) {
+                    self.record_fault(restore_error);
+                }
+                return Err(error);
             }
-        });
+            drop(consumer);
+
+            if let Some(error) = terminal_error {
+                let teardown_error = ContextAttachmentTeardownError::new(error.to_string());
+                self.record_fault(error);
+                Err(teardown_error)
+            } else {
+                Ok(())
+            }
+        })
     }
 
     fn context_destroyed(&self, _context: ContextDestroyed) {
@@ -863,13 +1105,11 @@ impl OwningViewportRuntime {
         config: VulkanViewportConfig,
         surface_adapter: Arc<dyn SurfaceAdapter>,
     ) -> Result<Self, AshViewportAttachError> {
-        if let Err(error) = renderer.ensure_context_matches(context) {
-            return Err(AshViewportAttachError::new(error.into(), renderer));
-        }
-        if let Err(error) = preflight_callbacks(context) {
-            return Err(AshViewportAttachError::new(error, renderer));
-        }
-        if let Err(error) = preflight_runtime(context.id()) {
+        if let Err(error) = preflight_attachment_with(context, || {
+            renderer.ensure_context_matches(context)?;
+            renderer.ensure_operational()?;
+            Ok(())
+        }) {
             return Err(AshViewportAttachError::new(error, renderer));
         }
 
@@ -882,11 +1122,19 @@ impl OwningViewportRuntime {
             graphics_queue_family_index: config.graphics_queue_family_index,
             present_queue_family_index: config.present_queue_family_index,
             in_flight_frames: renderer.options.in_flight_frames.max(1),
+            swapchain_policy: config.swapchain_policy,
             surface_adapter,
         };
         let validation = validate_vulkan_config(&globals).and_then(|()| {
             query_surface_support(&globals, validation_surface)
-                .map(|_| ())
+                .and_then(|support| {
+                    super::swapchain::resolve_swapchain_policy(
+                        globals.swapchain_policy,
+                        &support.formats,
+                        &support.present_modes,
+                    )
+                    .map(|_| ())
+                })
                 .map_err(Into::into)
         });
         if let Err(error) = validation {
@@ -915,9 +1163,21 @@ impl OwningViewportRuntime {
     pub(super) fn attach_for_test(context: &mut Context) -> Result<Self, AshViewportError> {
         preflight_callbacks(context)?;
         preflight_runtime(context.id())?;
+        let consumer = context
+            .create_renderer_consumer()
+            .map_err(RendererError::from)?;
+        // The fake renderer below has no Vulkan texture map and cannot have submitted an epoch.
+        // Commit the empty transaction before the test runtime claims callbacks.
+        let reset = context
+            .prepare_renderer_texture_reset(&consumer)
+            .map_err(RendererError::from)?;
+        let _ = reset.commit();
         let control = Rc::new(RuntimeControl::new_with_storage(
             context,
-            RendererStorage::Fake(Box::new(0)),
+            RendererStorage::Fake {
+                probe: Box::new(0),
+                consumer: Some(consumer),
+            },
             None,
         ));
         let attachment = context.register_attachment::<AshRendererAttachmentMarker>(
@@ -957,6 +1217,7 @@ impl OwningViewportRuntime {
     ) -> Result<Option<TextureRetirementBatch>, AshViewportError> {
         self.control
             .with_renderer(AshRenderer::pending_texture_retirement)
+            .and_then(|result| result.map_err(Into::into))
     }
 
     pub(crate) fn wait_for_texture_retirements(
@@ -1016,7 +1277,9 @@ impl OwningViewportRuntime {
     ) -> Result<TextureId, AshViewportError> {
         self.control
             .with_renderer_mut("register_texture_descriptor_set", |renderer| {
-                Ok(renderer.register_texture_descriptor_set(set))
+                renderer
+                    .register_texture_descriptor_set(set)
+                    .map_err(Into::into)
             })
     }
 
@@ -1063,10 +1326,14 @@ impl OwningViewportRuntime {
         texture: TextureId,
         image_view: ash::vk::ImageView,
     ) -> Result<bool, AshViewportError> {
-        self.control
-            .with_renderer_mut("update_external_texture_view_unchecked", |renderer| {
-                Ok(unsafe { renderer.update_external_texture_view_unchecked(texture, image_view) })
-            })
+        self.control.with_renderer_mut(
+            "update_external_texture_view_unchecked",
+            |renderer| unsafe {
+                renderer
+                    .update_external_texture_view_unchecked(texture, image_view)
+                    .map_err(Into::into)
+            },
+        )
     }
 
     pub(crate) fn update_external_texture_sampler(
@@ -1087,10 +1354,14 @@ impl OwningViewportRuntime {
         texture: TextureId,
         sampler: ash::vk::Sampler,
     ) -> Result<bool, AshViewportError> {
-        self.control
-            .with_renderer_mut("update_external_texture_sampler_unchecked", |renderer| {
-                Ok(unsafe { renderer.update_external_texture_sampler_unchecked(texture, sampler) })
-            })
+        self.control.with_renderer_mut(
+            "update_external_texture_sampler_unchecked",
+            |renderer| unsafe {
+                renderer
+                    .update_external_texture_sampler_unchecked(texture, sampler)
+                    .map_err(Into::into)
+            },
+        )
     }
 
     pub(crate) fn unregister_texture(&self, texture: TextureId) -> Result<(), AshViewportError> {
@@ -1105,9 +1376,10 @@ impl OwningViewportRuntime {
         texture: TextureId,
     ) -> Result<(), AshViewportError> {
         self.control
-            .with_renderer_mut("unregister_texture_unchecked", |renderer| {
-                unsafe { renderer.unregister_texture_unchecked(texture) };
-                Ok(())
+            .with_renderer_mut("unregister_texture_unchecked", |renderer| unsafe {
+                renderer
+                    .unregister_texture_unchecked(texture)
+                    .map_err(Into::into)
             })
     }
 
@@ -1167,6 +1439,11 @@ impl OwningViewportRuntime {
     }
 
     #[cfg(test)]
+    pub(super) fn snapshot_for_shutdown_test(&self, context: &mut Context) -> FrameSnapshot {
+        self.control.snapshot_for_shutdown_test(context)
+    }
+
+    #[cfg(test)]
     pub(super) fn state_for_test(&self) -> RuntimeState {
         self.control.state()
     }
@@ -1195,6 +1472,15 @@ impl OwningViewportRuntime {
     pub(super) fn callback_probe_count_for_test(&self) -> usize {
         self.control.callback_probe_count_for_test()
     }
+}
+
+pub(super) fn preflight_attachment_with(
+    context: &Context,
+    validate_renderer: impl FnOnce() -> Result<(), AshViewportError>,
+) -> Result<(), AshViewportError> {
+    validate_renderer()?;
+    preflight_callbacks(context)?;
+    preflight_runtime(context.id())
 }
 
 impl Drop for OwningViewportRuntime {

@@ -50,6 +50,7 @@ use dear_imgui_rs as imgui;
 use imgui::render::{DrawCmdSnapshot, DrawIdx, SnapshotTextureId, TextureBinding};
 use std::collections::{HashMap, HashSet};
 use std::mem::size_of;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 pub use crate::texture::ImguiBevyTextures;
 use crate::{ImguiBackendStatus, ImguiViewportWindow};
@@ -762,18 +763,6 @@ struct ImguiRenderTexture {
     nearest_bind_group: BindGroup,
 }
 
-impl ImguiRenderTexture {
-    fn clone_for_legacy_id(&self) -> Self {
-        Self {
-            texture: None,
-            _view: None,
-            extent: None,
-            linear_bind_group: self.linear_bind_group.clone(),
-            nearest_bind_group: self.nearest_bind_group.clone(),
-        }
-    }
-}
-
 struct ImguiTextureUpload<'a> {
     format: imgui::texture::TextureFormat,
     width: u32,
@@ -861,12 +850,39 @@ struct ImguiViewportTarget {
     window: Entity,
 }
 
+/// Error returned when external texture registration conflicts with a live managed alias.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum ImguiTextureBindGroupError {
+    /// The renderer currently uses this legacy ID to identify a Context-managed texture.
+    ManagedTextureIdInUse { texture: imgui::TextureId },
+}
+
+impl std::fmt::Display for ImguiTextureBindGroupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ManagedTextureIdInUse { texture } => write!(
+                f,
+                "texture ID {} is an active Bevy managed-texture alias",
+                texture.id()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ImguiTextureBindGroupError {}
+
 /// Texture bind groups currently known to the Bevy-native ImGui renderer.
 #[derive(Resource, Default)]
 pub struct ImguiTextureBindGroups {
     textures: HashMap<TextureBinding, ImguiRenderTexture>,
     bevy_image_bindings: HashSet<TextureBinding>,
     managed_texture_ids: HashMap<SnapshotTextureId, imgui::TextureId>,
+    managed_texture_aliases: HashMap<imgui::TextureId, SnapshotTextureId>,
+    /// Managed texture identities sealed by a Destroy request until the renderer has completed
+    /// the snapshot epoch that carried that request. Keeping the epoch prevents an older delayed
+    /// snapshot from reviving a texture while allowing high-churn identities to be reclaimed.
+    destroyed_managed_textures: HashMap<SnapshotTextureId, u64>,
     next_managed_texture_id: u64,
 }
 
@@ -875,8 +891,19 @@ impl ImguiTextureBindGroups {
     ///
     /// Context-managed textures are intentionally excluded: their bind groups may only change
     /// while processing the matching snapshot request and feedback pair.
-    pub fn insert(&mut self, texture: imgui::TextureId, bind_group: BindGroup) {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ImguiTextureBindGroupError::ManagedTextureIdInUse`] when `texture` is the active
+    /// legacy alias of a Context-managed texture.
+    pub fn insert(
+        &mut self,
+        texture: imgui::TextureId,
+        bind_group: BindGroup,
+    ) -> Result<(), ImguiTextureBindGroupError> {
+        self.validate_external_texture_id(texture)?;
         self.insert_binding(TextureBinding::Legacy(texture), bind_group);
+        Ok(())
     }
 
     fn insert_binding(&mut self, texture: TextureBinding, bind_group: BindGroup) {
@@ -894,8 +921,15 @@ impl ImguiTextureBindGroups {
     }
 
     /// Remove the bind group for an external ImGui texture ID.
-    pub fn remove(&mut self, texture: imgui::TextureId) {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ImguiTextureBindGroupError::ManagedTextureIdInUse`] when `texture` is the active
+    /// legacy alias of a Context-managed texture.
+    pub fn remove(&mut self, texture: imgui::TextureId) -> Result<(), ImguiTextureBindGroupError> {
+        self.validate_external_texture_id(texture)?;
         self.remove_binding(&TextureBinding::Legacy(texture));
+        Ok(())
     }
 
     fn remove_binding(&mut self, texture: &TextureBinding) {
@@ -916,10 +950,20 @@ impl ImguiTextureBindGroups {
     }
 
     fn get(&self, texture: &TextureBinding, sampler: ImguiSampler) -> Option<&BindGroup> {
-        self.textures.get(texture).map(|texture| match sampler {
-            ImguiSampler::Linear => &texture.linear_bind_group,
-            ImguiSampler::Nearest => &texture.nearest_bind_group,
-        })
+        let managed_alias = match texture {
+            TextureBinding::Legacy(texture_id) => self
+                .managed_texture_aliases
+                .get(texture_id)
+                .copied()
+                .map(TextureBinding::Managed),
+            TextureBinding::Managed(_) => None,
+        };
+        self.textures
+            .get(managed_alias.as_ref().unwrap_or(texture))
+            .map(|texture| match sampler {
+                ImguiSampler::Linear => &texture.linear_bind_group,
+                ImguiSampler::Nearest => &texture.nearest_bind_group,
+            })
     }
 
     fn insert_render_texture(
@@ -935,25 +979,102 @@ impl ImguiTextureBindGroups {
         if let Some(texture_id) = self.managed_texture_ids.get(&id) {
             return *texture_id;
         }
-        let sequence = self
-            .next_managed_texture_id
-            .checked_add(1)
-            .expect("Bevy managed texture ID space exhausted");
-        assert!(
-            sequence < MANAGED_TEXTURE_NAMESPACE,
-            "Bevy managed texture ID namespace exhausted"
-        );
-        self.next_managed_texture_id = sequence;
-        let texture_id = imgui::TextureId::new(MANAGED_TEXTURE_NAMESPACE | sequence);
-        self.managed_texture_ids.insert(id, texture_id);
-        texture_id
+        loop {
+            let sequence = self
+                .next_managed_texture_id
+                .checked_add(1)
+                .expect("Bevy managed texture ID space exhausted");
+            assert!(
+                sequence < MANAGED_TEXTURE_NAMESPACE,
+                "Bevy managed texture ID namespace exhausted"
+            );
+            self.next_managed_texture_id = sequence;
+            let texture_id = imgui::TextureId::new(MANAGED_TEXTURE_NAMESPACE | sequence);
+            if self.managed_texture_aliases.contains_key(&texture_id)
+                || self
+                    .textures
+                    .contains_key(&TextureBinding::Legacy(texture_id))
+            {
+                continue;
+            }
+            self.managed_texture_ids.insert(id, texture_id);
+            self.managed_texture_aliases.insert(texture_id, id);
+            return texture_id;
+        }
+    }
+
+    fn validate_external_texture_id(
+        &self,
+        texture: imgui::TextureId,
+    ) -> Result<(), ImguiTextureBindGroupError> {
+        if self.managed_texture_aliases.contains_key(&texture) {
+            Err(ImguiTextureBindGroupError::ManagedTextureIdInUse { texture })
+        } else {
+            Ok(())
+        }
     }
 
     fn remove_managed_texture(&mut self, id: SnapshotTextureId) {
         self.remove_binding(&TextureBinding::Managed(id));
         if let Some(texture_id) = self.managed_texture_ids.remove(&id) {
-            self.remove_binding(&TextureBinding::Legacy(texture_id));
+            self.managed_texture_aliases.remove(&texture_id);
         }
+    }
+
+    fn destroy_managed_texture(&mut self, id: SnapshotTextureId, destroy_epoch: u64) {
+        self.destroyed_managed_textures
+            .entry(id)
+            .and_modify(|epoch| *epoch = (*epoch).max(destroy_epoch))
+            .or_insert(destroy_epoch);
+        self.remove_managed_texture(id);
+    }
+
+    fn managed_texture_is_destroyed(&self, id: SnapshotTextureId) -> bool {
+        self.destroyed_managed_textures.contains_key(&id)
+    }
+
+    fn accepts_managed_texture_upload(&self, id: SnapshotTextureId) -> bool {
+        !self.managed_texture_is_destroyed(id)
+    }
+
+    fn prune_destroyed_managed_textures(&mut self, completion_watermark: u64) {
+        self.destroyed_managed_textures
+            .retain(|_, destroy_epoch| *destroy_epoch > completion_watermark);
+    }
+
+    fn has_managed_resources(&self) -> bool {
+        !self.managed_texture_ids.is_empty()
+            || self
+                .textures
+                .keys()
+                .any(|binding| matches!(binding, TextureBinding::Managed(_)))
+    }
+
+    fn take_managed_renderer_state(&mut self) -> Vec<ImguiRenderTexture> {
+        let mut released = Vec::new();
+        for (id, texture_id) in self.managed_texture_ids.drain() {
+            self.managed_texture_aliases.remove(&texture_id);
+            let binding = TextureBinding::Managed(id);
+            self.bevy_image_bindings.remove(&binding);
+            if let Some(texture) = self.textures.remove(&binding) {
+                released.push(texture);
+            }
+        }
+        debug_assert!(self.managed_texture_aliases.is_empty());
+        self.managed_texture_aliases.clear();
+        let orphaned = self
+            .textures
+            .keys()
+            .copied()
+            .filter(|binding| matches!(binding, TextureBinding::Managed(_)))
+            .collect::<Vec<_>>();
+        for binding in orphaned {
+            if let Some(texture) = self.textures.remove(&binding) {
+                released.push(texture);
+            }
+        }
+        self.destroyed_managed_textures.clear();
+        released
     }
 
     fn insert_bevy_image(&mut self, texture: TextureBinding, bind_group: BindGroup) {
@@ -1045,6 +1166,7 @@ pub struct ImguiExtractedRenderFrame {
     snapshot: Option<imgui::render::snapshot::FrameSnapshot>,
     camera_targets: Vec<ImguiCameraTarget>,
     texture_feedback: Vec<imgui::render::snapshot::TextureFeedback>,
+    completion_watermark: u64,
 }
 
 impl ImguiExtractedRenderFrame {
@@ -1064,6 +1186,12 @@ impl ImguiExtractedRenderFrame {
     #[must_use]
     pub fn camera_targets(&self) -> &[ImguiCameraTarget] {
         &self.camera_targets
+    }
+
+    /// Highest snapshot epoch that the render world has committed or abandoned.
+    #[must_use]
+    pub fn completion_watermark(&self) -> u64 {
+        self.completion_watermark
     }
 
     fn replace(
@@ -1094,13 +1222,20 @@ impl ImguiExtractedRenderFrame {
     fn commit(&mut self) {
         let feedback = std::mem::take(&mut self.texture_feedback);
         if let Some(snapshot) = self.snapshot.take() {
+            // The mailbox is single-slot and this resource owns at most one extracted snapshot;
+            // an older snapshot is committed or abandoned before a newer one can be processed.
+            // Therefore the highest locally completed sequence is the renderer's safe watermark.
+            self.completion_watermark = self.completion_watermark.max(snapshot.epoch().sequence());
             let _ = snapshot.commit(feedback);
         }
     }
 
     fn abandon(&mut self) {
         self.texture_feedback.clear();
-        drop(self.snapshot.take());
+        if let Some(snapshot) = self.snapshot.take() {
+            self.completion_watermark = self.completion_watermark.max(snapshot.epoch().sequence());
+            drop(snapshot);
+        }
     }
 }
 
@@ -1113,9 +1248,121 @@ impl Drop for ImguiExtractedRenderFrame {
 #[derive(Resource, Default)]
 struct ImguiRenderExtractionInstalled;
 
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+enum ImguiRendererReleasePhase {
+    #[default]
+    NotInstalled,
+    Released {
+        generation: u64,
+    },
+    Acknowledged {
+        generation: u64,
+    },
+    Live {
+        generation: u64,
+    },
+    Requested {
+        generation: u64,
+        resources_live: bool,
+    },
+}
+
+#[derive(Resource, Clone, Debug, Default)]
+pub(crate) struct ImguiRendererRelease {
+    phase: Arc<Mutex<ImguiRendererReleasePhase>>,
+}
+
+impl ImguiRendererRelease {
+    fn phase(&self) -> MutexGuard<'_, ImguiRendererReleasePhase> {
+        self.phase
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn install(&self) {
+        let mut phase = self.phase();
+        if matches!(*phase, ImguiRendererReleasePhase::NotInstalled) {
+            *phase = ImguiRendererReleasePhase::Released { generation: 1 };
+        }
+    }
+
+    pub(crate) fn request_release(&self) -> bool {
+        let mut phase = self.phase();
+        match *phase {
+            ImguiRendererReleasePhase::NotInstalled => true,
+            ImguiRendererReleasePhase::Released { generation } => {
+                *phase = ImguiRendererReleasePhase::Requested {
+                    generation,
+                    resources_live: false,
+                };
+                true
+            }
+            ImguiRendererReleasePhase::Live { generation } => {
+                *phase = ImguiRendererReleasePhase::Requested {
+                    generation,
+                    resources_live: true,
+                };
+                false
+            }
+            ImguiRendererReleasePhase::Requested { resources_live, .. } => !resources_live,
+            ImguiRendererReleasePhase::Acknowledged { .. } => true,
+        }
+    }
+
+    pub(crate) fn release_requested(&self) -> bool {
+        matches!(
+            *self.phase(),
+            ImguiRendererReleasePhase::Requested { .. }
+                | ImguiRendererReleasePhase::Acknowledged { .. }
+        )
+    }
+
+    fn update_resources_live(&self, resources_live: bool) {
+        let mut phase = self.phase();
+        match (*phase, resources_live) {
+            (ImguiRendererReleasePhase::Released { generation }, true) => {
+                let generation = generation
+                    .checked_add(1)
+                    .expect("Bevy renderer release generation space exhausted");
+                *phase = ImguiRendererReleasePhase::Live { generation };
+            }
+            (ImguiRendererReleasePhase::Live { generation }, false) => {
+                *phase = ImguiRendererReleasePhase::Released { generation };
+            }
+            _ => {}
+        }
+    }
+
+    fn requested_generation(&self) -> Option<u64> {
+        match *self.phase() {
+            ImguiRendererReleasePhase::Requested { generation, .. } => Some(generation),
+            _ => None,
+        }
+    }
+
+    fn acknowledge_release(&self, generation: u64) -> bool {
+        let mut phase = self.phase();
+        match *phase {
+            ImguiRendererReleasePhase::Requested {
+                generation: expected,
+                ..
+            } if expected == generation => {
+                *phase = ImguiRendererReleasePhase::Acknowledged { generation };
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+pub(crate) fn render_integration_available(app: &App) -> bool {
+    app.get_sub_app(RenderApp).is_some()
+}
+
 pub(crate) fn install_render_extraction(app: &mut App) -> bool {
     install_imgui_shader_asset(app);
     app.init_resource::<crate::context::ImguiFrameMailbox>();
+    app.init_resource::<ImguiRendererRelease>();
     let snapshot_mailbox = app
         .world()
         .resource::<crate::context::ImguiFrameMailbox>()
@@ -1125,7 +1372,12 @@ pub(crate) fn install_render_extraction(app: &mut App) -> bool {
         return false;
     }
 
-    install_standard_draw_callbacks(app);
+    let renderer_release = app.world().resource::<ImguiRendererRelease>().clone();
+    renderer_release.install();
+    if let Some(mut imgui_context) = app.world_mut().get_non_send_mut::<crate::ImguiContext>() {
+        imgui_context.attach_renderer_release(renderer_release.clone());
+    }
+
     let render_app = app
         .get_sub_app_mut(RenderApp)
         .expect("RenderApp availability was checked before installing callbacks");
@@ -1148,6 +1400,7 @@ pub(crate) fn install_render_extraction(app: &mut App) -> bool {
         .init_resource::<ImguiQueuedPipelines>()
         .init_gpu_resource::<ImguiPipelineGpuResources>()
         .insert_resource(snapshot_mailbox)
+        .insert_resource(renderer_release)
         .insert_resource(ImguiRenderExtractionInstalled)
         .add_systems(
             ExtractSchedule,
@@ -1165,7 +1418,11 @@ pub(crate) fn install_render_extraction(app: &mut App) -> bool {
         )
         .add_systems(
             Render,
-            (prepare_imgui_texture_bind_groups, commit_imgui_render_frame)
+            (
+                release_imgui_renderer_resources,
+                prepare_imgui_texture_bind_groups,
+                commit_imgui_render_frame,
+            )
                 .chain()
                 .in_set(RenderSystems::PrepareBindGroups),
         )
@@ -1194,14 +1451,13 @@ pub(crate) fn install_render_extraction(app: &mut App) -> bool {
     true
 }
 
-fn install_standard_draw_callbacks(app: &mut App) {
-    let Some(mut imgui_context) = app.world_mut().get_non_send_mut::<crate::ImguiContext>() else {
-        return;
-    };
-    install_standard_draw_callbacks_for_context(imgui_context.context_mut());
-}
+pub(crate) fn install_standard_draw_callbacks_for_context(
+    context: &mut imgui::Context,
+) -> Result<(), &'static str> {
+    if let Some(slot) = standard_draw_callback_conflict(context) {
+        return Err(slot);
+    }
 
-pub(crate) fn install_standard_draw_callbacks_for_context(context: &mut imgui::Context) {
     let platform_io = context.platform_io_mut();
     unsafe {
         platform_io.set_draw_callback_reset_render_state_raw(Some(imgui_bevy_draw_callback_reset));
@@ -1209,24 +1465,164 @@ pub(crate) fn install_standard_draw_callbacks_for_context(context: &mut imgui::C
         platform_io
             .set_draw_callback_set_sampler_nearest_raw(Some(imgui_bevy_draw_callback_nearest));
     }
+    Ok(())
 }
 
+pub(crate) fn standard_draw_callback_conflict(context: &imgui::Context) -> Option<&'static str> {
+    let platform_io = context.platform_io();
+    for (slot, actual, expected) in [
+        (
+            "DrawCallback_ResetRenderState",
+            platform_io.draw_callback_reset_render_state_raw(),
+            imgui_bevy_draw_callback_reset
+                as unsafe extern "C" fn(
+                    *const imgui::sys::ImDrawList,
+                    *const imgui::sys::ImDrawCmd,
+                ),
+        ),
+        (
+            "DrawCallback_SetSamplerLinear",
+            platform_io.draw_callback_set_sampler_linear_raw(),
+            imgui_bevy_draw_callback_linear
+                as unsafe extern "C" fn(
+                    *const imgui::sys::ImDrawList,
+                    *const imgui::sys::ImDrawCmd,
+                ),
+        ),
+        (
+            "DrawCallback_SetSamplerNearest",
+            platform_io.draw_callback_set_sampler_nearest_raw(),
+            imgui_bevy_draw_callback_nearest
+                as unsafe extern "C" fn(
+                    *const imgui::sys::ImDrawList,
+                    *const imgui::sys::ImDrawCmd,
+                ),
+        ),
+    ] {
+        if actual.is_some_and(|actual| !std::ptr::fn_addr_eq(actual, expected)) {
+            return Some(slot);
+        }
+    }
+    None
+}
+
+pub(crate) fn standard_draw_callback_occupied(context: &imgui::Context) -> Option<&'static str> {
+    let platform_io = context.platform_io();
+    [
+        (
+            "DrawCallback_ResetRenderState",
+            platform_io.draw_callback_reset_render_state_raw(),
+        ),
+        (
+            "DrawCallback_SetSamplerLinear",
+            platform_io.draw_callback_set_sampler_linear_raw(),
+        ),
+        (
+            "DrawCallback_SetSamplerNearest",
+            platform_io.draw_callback_set_sampler_nearest_raw(),
+        ),
+    ]
+    .into_iter()
+    .find_map(|(slot, callback)| callback.is_some().then_some(slot))
+}
+
+pub(crate) fn standard_draw_callback_contract(context: &imgui::Context) -> [usize; 3] {
+    let platform_io = context.platform_io();
+    [
+        platform_io
+            .draw_callback_reset_render_state_raw()
+            .map_or(0, |callback| callback as usize),
+        platform_io
+            .draw_callback_set_sampler_linear_raw()
+            .map_or(0, |callback| callback as usize),
+        platform_io
+            .draw_callback_set_sampler_nearest_raw()
+            .map_or(0, |callback| callback as usize),
+    ]
+}
+
+pub(crate) fn clear_standard_draw_callbacks_if_owned(context: &mut imgui::Context) {
+    let platform_io = context.platform_io_mut();
+    unsafe {
+        if platform_io
+            .draw_callback_reset_render_state_raw()
+            .is_some_and(|callback| {
+                std::ptr::fn_addr_eq(
+                    callback,
+                    imgui_bevy_draw_callback_reset
+                        as unsafe extern "C" fn(
+                            *const imgui::sys::ImDrawList,
+                            *const imgui::sys::ImDrawCmd,
+                        ),
+                )
+            })
+        {
+            platform_io.set_draw_callback_reset_render_state_raw(None);
+        }
+        if platform_io
+            .draw_callback_set_sampler_linear_raw()
+            .is_some_and(|callback| {
+                std::ptr::fn_addr_eq(
+                    callback,
+                    imgui_bevy_draw_callback_linear
+                        as unsafe extern "C" fn(
+                            *const imgui::sys::ImDrawList,
+                            *const imgui::sys::ImDrawCmd,
+                        ),
+                )
+            })
+        {
+            platform_io.set_draw_callback_set_sampler_linear_raw(None);
+        }
+        if platform_io
+            .draw_callback_set_sampler_nearest_raw()
+            .is_some_and(|callback| {
+                std::ptr::fn_addr_eq(
+                    callback,
+                    imgui_bevy_draw_callback_nearest
+                        as unsafe extern "C" fn(
+                            *const imgui::sys::ImDrawList,
+                            *const imgui::sys::ImDrawCmd,
+                        ),
+                )
+            })
+        {
+            platform_io.set_draw_callback_set_sampler_nearest_raw(None);
+        }
+    }
+}
+
+#[used]
+static IMGUI_BEVY_DRAW_CALLBACK_RESET_TAG: u8 = 0x31;
+#[used]
+static IMGUI_BEVY_DRAW_CALLBACK_LINEAR_TAG: u8 = 0x52;
+#[used]
+static IMGUI_BEVY_DRAW_CALLBACK_NEAREST_TAG: u8 = 0x73;
+
+#[inline(never)]
 unsafe extern "C" fn imgui_bevy_draw_callback_reset(
     _parent_list: *const imgui::sys::ImDrawList,
     _cmd: *const imgui::sys::ImDrawCmd,
 ) {
+    // The callback address is protocol data. A distinct volatile tag keeps LTO/ICF from folding
+    // this marker together with the sampler markers.
+    unsafe { std::ptr::read_volatile(&IMGUI_BEVY_DRAW_CALLBACK_RESET_TAG) };
 }
 
+#[inline(never)]
 unsafe extern "C" fn imgui_bevy_draw_callback_linear(
     _parent_list: *const imgui::sys::ImDrawList,
     _cmd: *const imgui::sys::ImDrawCmd,
 ) {
+    unsafe { std::ptr::read_volatile(&IMGUI_BEVY_DRAW_CALLBACK_LINEAR_TAG) };
 }
 
+#[inline(never)]
 unsafe extern "C" fn imgui_bevy_draw_callback_nearest(
     _parent_list: *const imgui::sys::ImDrawList,
     _cmd: *const imgui::sys::ImDrawCmd,
 ) {
+    unsafe { std::ptr::read_volatile(&IMGUI_BEVY_DRAW_CALLBACK_NEAREST_TAG) };
 }
 
 fn install_imgui_shader_asset(app: &mut App) {
@@ -1255,11 +1651,17 @@ fn extract_imgui_render_frame(
     mut extracted: ResMut<ImguiExtractedRenderFrame>,
     output: Extract<Res<crate::ImguiFrameOutput>>,
     snapshot_mailbox: Res<crate::context::ImguiFrameMailbox>,
+    renderer_release: Res<ImguiRendererRelease>,
     backend_status: Extract<Res<ImguiBackendStatus>>,
     primary_window: Extract<Query<Entity, With<PrimaryWindow>>>,
     viewport_windows: Extract<Query<(Entity, &ImguiViewportWindow)>>,
     cameras: Extract<OverlayCameraQuery<'_>>,
 ) {
+    if renderer_release.release_requested() {
+        snapshot_mailbox.clear();
+        extracted.clear(output.frame_index());
+        return;
+    }
     let Some((frame_index, snapshot)) = snapshot_mailbox.take() else {
         extracted.clear(output.frame_index());
         return;
@@ -1436,17 +1838,24 @@ struct ImguiTextureBindGroupParams<'w> {
     render_queue: Option<Res<'w, RenderQueue>>,
     pipeline_cache: Option<Res<'w, PipelineCache>>,
     pipeline: Res<'w, ImguiRenderPipeline>,
+    renderer_release: Res<'w, ImguiRendererRelease>,
 }
 
 fn prepare_imgui_texture_bind_groups(
     mut params: ImguiTextureBindGroupParams,
     mut texture_bind_groups: ResMut<ImguiTextureBindGroups>,
 ) {
+    if params.renderer_release.release_requested() {
+        return;
+    }
     let (Some(render_device), Some(render_queue), Some(pipeline_cache)) = (
         params.render_device,
         params.render_queue,
         params.pipeline_cache,
     ) else {
+        params
+            .renderer_release
+            .update_resources_live(texture_bind_groups.has_managed_resources());
         return;
     };
 
@@ -1459,12 +1868,20 @@ fn prepare_imgui_texture_bind_groups(
             &params.pipeline,
             &mut texture_bind_groups,
         );
+        params
+            .renderer_release
+            .update_resources_live(texture_bind_groups.has_managed_resources());
         return;
     };
 
     let mut texture_feedback = Vec::new();
     for request in snapshot.texture_requests() {
         let snapshot_texture = request.texture();
+        if !matches!(request.operation(), imgui::render::TextureOp::Destroy)
+            && !texture_bind_groups.accepts_managed_texture_upload(snapshot_texture)
+        {
+            continue;
+        }
         match request.operation() {
             imgui::render::TextureOp::Create {
                 format,
@@ -1491,13 +1908,10 @@ fn prepare_imgui_texture_bind_groups(
                 ) {
                     let tex_id = texture_bind_groups.managed_texture_id(snapshot_texture);
                     texture_bind_groups.insert_render_texture(
-                        TextureBinding::Legacy(tex_id),
-                        render_texture.clone_for_legacy_id(),
-                    );
-                    texture_bind_groups.insert_render_texture(
                         TextureBinding::Managed(snapshot_texture),
                         render_texture,
                     );
+                    params.renderer_release.update_resources_live(true);
                     if let Ok(feedback) = request.uploaded(tex_id) {
                         texture_feedback.push(feedback);
                     }
@@ -1552,7 +1966,8 @@ fn prepare_imgui_texture_bind_groups(
                 }
             }
             imgui::render::TextureOp::Destroy => {
-                texture_bind_groups.remove_managed_texture(snapshot_texture);
+                texture_bind_groups
+                    .destroy_managed_texture(snapshot_texture, snapshot.epoch().sequence());
                 if let Ok(feedback) = request.destroyed() {
                     texture_feedback.push(feedback);
                 }
@@ -1569,10 +1984,39 @@ fn prepare_imgui_texture_bind_groups(
         &mut texture_bind_groups,
     );
     params.extracted.extend_texture_feedback(texture_feedback);
+    params
+        .renderer_release
+        .update_resources_live(texture_bind_groups.has_managed_resources());
 }
 
-fn commit_imgui_render_frame(mut extracted: ResMut<ImguiExtractedRenderFrame>) {
+fn release_imgui_renderer_resources(
+    renderer_release: Res<ImguiRendererRelease>,
+    snapshot_mailbox: Res<crate::context::ImguiFrameMailbox>,
+    mut extracted: ResMut<ImguiExtractedRenderFrame>,
+    mut prepared: ResMut<ImguiPreparedRenderFrame>,
+    mut texture_bind_groups: ResMut<ImguiTextureBindGroups>,
+) {
+    let Some(generation) = renderer_release.requested_generation() else {
+        return;
+    };
+
+    snapshot_mailbox.clear();
+    extracted.clear(0);
+    prepared.clear(None);
+    let released_gpu_resources = texture_bind_groups.take_managed_renderer_state();
+    drop(released_gpu_resources);
+    assert!(
+        renderer_release.acknowledge_release(generation),
+        "Bevy renderer release acknowledgement generation changed during cleanup"
+    );
+}
+
+fn commit_imgui_render_frame(
+    mut extracted: ResMut<ImguiExtractedRenderFrame>,
+    mut texture_bind_groups: ResMut<ImguiTextureBindGroups>,
+) {
     extracted.commit();
+    texture_bind_groups.prune_destroyed_managed_textures(extracted.completion_watermark());
 }
 
 fn validate_managed_texture_extent(render_device: &RenderDevice, width: u32, height: u32) -> bool {
@@ -2632,6 +3076,7 @@ mod tests {
     use bevy_asset::AssetId;
     use bevy_ecs::schedule::ScheduleLabel;
     use bevy_render::{renderer::initialize_renderer, settings::WgpuSettings};
+    use bevy_window::Window;
 
     type RawDrawCallback =
         unsafe extern "C" fn(*const imgui::sys::ImDrawList, *const imgui::sys::ImDrawCmd);
@@ -2680,6 +3125,282 @@ mod tests {
             .iter()
             .find(|request| request.texture() == imgui::render::SnapshotTextureId::User(texture))
             .expect("snapshot should contain the user texture request")
+    }
+
+    fn register_test_texture(context: &mut imgui::Context) -> imgui::ManagedTextureId {
+        let mut texture = imgui::texture::OwnedTextureData::new();
+        texture.create(imgui::TextureFormat::RGBA32, 1, 1);
+        texture.set_data(&[255, 255, 255, 255]);
+        context.register_texture(texture)
+    }
+
+    #[test]
+    fn renderer_release_rejects_a_stale_generation_acknowledgement() {
+        let release = ImguiRendererRelease::default();
+        release.install();
+        release.update_resources_live(true);
+        assert!(!release.request_release());
+        let generation = release.requested_generation().unwrap();
+
+        assert!(!release.acknowledge_release(generation + 1));
+        assert_eq!(release.requested_generation(), Some(generation));
+        assert!(release.acknowledge_release(generation));
+        assert!(release.request_release());
+    }
+
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    #[test]
+    fn acknowledged_release_freezes_extra_updates_until_viewport_world_teardown_finishes() {
+        let mut app = App::new();
+        app.add_plugins(bevy_render::extract_plugin::ExtractPlugin::default());
+        app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
+        app.add_plugins(crate::ImguiPlugin::new(crate::ImguiBackendConfig {
+            name: "release-freeze".to_owned(),
+            docking: true,
+            multi_viewport: true,
+            viewport_window: Default::default(),
+        }));
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+        app.world_mut()
+            .get_non_send_mut::<crate::ImguiContext>()
+            .unwrap()
+            .context_mut()
+            .font_atlas()
+            .build();
+        let viewport_id = imgui::Id::from(0xA11);
+        app.world_mut()
+            .get_non_send_mut::<crate::ImguiViewportBridge>()
+            .unwrap()
+            .queue(crate::ImguiViewportCommand::Create(
+                crate::ImguiViewportSnapshot {
+                    id: viewport_id,
+                    pos: [10.0, 20.0],
+                    size: [320.0, 180.0],
+                    dpi_scale: 1.0,
+                    flags: imgui::ViewportFlags::IS_PLATFORM_WINDOW,
+                },
+            ));
+        app.update();
+        assert!(
+            app.world()
+                .get_non_send::<crate::ImguiViewportBridge>()
+                .unwrap()
+                .viewport_window(viewport_id)
+                .is_some()
+        );
+
+        let release = app.world().resource::<ImguiRendererRelease>().clone();
+        release.update_resources_live(true);
+        let owner = app
+            .world_mut()
+            .remove_non_send::<crate::ImguiContext>()
+            .unwrap();
+        let error = owner
+            .into_inner()
+            .expect_err("live render resources must request asynchronous release");
+        assert_eq!(
+            error.error(),
+            crate::ImguiContextIntoInnerErrorReason::RenderWorldReleasePending
+        );
+        let generation = release.requested_generation().unwrap();
+        assert!(release.acknowledge_release(generation));
+        assert!(release.release_requested());
+        app.insert_non_send(error.into_owner());
+
+        let frame_index = app
+            .world()
+            .get_non_send::<crate::context::ImguiFrameState>()
+            .unwrap()
+            .frame_index();
+        app.update();
+        assert_eq!(
+            app.world()
+                .get_non_send::<crate::context::ImguiFrameState>()
+                .unwrap()
+                .frame_index(),
+            frame_index,
+            "an acknowledged release must not resume native frame production"
+        );
+
+        let owner = app
+            .world_mut()
+            .remove_non_send::<crate::ImguiContext>()
+            .unwrap();
+        let error = owner
+            .into_inner()
+            .expect_err("secondary viewport entities require one World cleanup pass");
+        assert_eq!(
+            error.error(),
+            crate::ImguiContextIntoInnerErrorReason::ViewportWorldReleasePending
+        );
+        app.insert_non_send(error.into_owner());
+        app.update();
+        let owner = app
+            .world_mut()
+            .remove_non_send::<crate::ImguiContext>()
+            .unwrap();
+        owner
+            .into_inner()
+            .expect("a frozen extra update must complete ECS release without reopening a frame");
+    }
+
+    #[test]
+    fn managed_texture_tombstone_blocks_revival_until_renderer_reset() {
+        let mut context = managed_context();
+        let first = imgui::render::SnapshotTextureId::User(register_test_texture(&mut context));
+        let second = imgui::render::SnapshotTextureId::User(register_test_texture(&mut context));
+        let mut bindings = ImguiTextureBindGroups::default();
+
+        let first_renderer_id = bindings.managed_texture_id(first);
+        assert!(matches!(
+            bindings.validate_external_texture_id(first_renderer_id),
+            Err(ImguiTextureBindGroupError::ManagedTextureIdInUse { texture })
+                if texture == first_renderer_id
+        ));
+        bindings.destroy_managed_texture(first, 4);
+        bindings.destroy_managed_texture(first, 5);
+        assert!(bindings.managed_texture_is_destroyed(first));
+        assert!(!bindings.managed_texture_ids.contains_key(&first));
+        assert!(
+            !bindings
+                .managed_texture_aliases
+                .contains_key(&first_renderer_id)
+        );
+        assert_eq!(
+            bindings.validate_external_texture_id(first_renderer_id),
+            Ok(())
+        );
+
+        let released = bindings.take_managed_renderer_state();
+        assert!(released.is_empty());
+        assert!(!bindings.managed_texture_is_destroyed(first));
+        let second_renderer_id = bindings.managed_texture_id(second);
+        assert_ne!(second_renderer_id, first_renderer_id);
+    }
+
+    #[test]
+    fn managed_texture_tombstones_prune_after_completed_epochs() {
+        let mut context = managed_context();
+        let mut bindings = ImguiTextureBindGroups::default();
+        let mut ids = Vec::new();
+        for _ in 0..128 {
+            ids.push(imgui::render::SnapshotTextureId::User(
+                register_test_texture(&mut context),
+            ));
+        }
+
+        for (epoch, id) in ids.iter().copied().enumerate() {
+            bindings.destroy_managed_texture(id, epoch as u64 + 1);
+        }
+        assert_eq!(bindings.destroyed_managed_textures.len(), ids.len());
+        assert!(bindings.managed_texture_is_destroyed(ids[0]));
+
+        bindings.prune_destroyed_managed_textures(127);
+        assert_eq!(bindings.destroyed_managed_textures.len(), 1);
+        assert!(bindings.managed_texture_is_destroyed(ids[127]));
+
+        bindings.prune_destroyed_managed_textures(128);
+        assert!(bindings.destroyed_managed_textures.is_empty());
+        assert!(
+            !bindings.managed_texture_is_destroyed(ids[0]),
+            "a tombstone is retired only after its destroy epoch is complete"
+        );
+    }
+
+    #[test]
+    fn stale_create_and_update_uploads_cannot_revive_a_destroyed_texture() {
+        let mut context = managed_context();
+        let texture = imgui::render::SnapshotTextureId::User(register_test_texture(&mut context));
+        let mut bindings = ImguiTextureBindGroups::default();
+        let renderer_id = bindings.managed_texture_id(texture);
+        assert!(!renderer_id.is_null());
+        bindings.destroy_managed_texture(texture, 7);
+
+        for operation in ["Create", "Update"] {
+            assert!(
+                !bindings.accepts_managed_texture_upload(texture),
+                "a stale {operation} request must be rejected by the same gate used by the render system"
+            );
+            if bindings.accepts_managed_texture_upload(texture) {
+                let _ = bindings.managed_texture_id(texture);
+            }
+            assert!(
+                !bindings.managed_texture_ids.contains_key(&texture),
+                "a stale {operation} request must not allocate a replacement renderer ID"
+            );
+            assert!(
+                !bindings
+                    .textures
+                    .contains_key(&TextureBinding::Managed(texture)),
+                "a stale {operation} request must not restore a managed GPU binding"
+            );
+        }
+
+        bindings.prune_destroyed_managed_textures(6);
+        assert!(!bindings.accepts_managed_texture_upload(texture));
+        bindings.prune_destroyed_managed_textures(7);
+        assert!(bindings.accepts_managed_texture_upload(texture));
+    }
+
+    #[test]
+    fn context_extraction_waits_for_render_world_release_before_native_mutation() {
+        let mut context = managed_context();
+        let consumer = context.create_renderer_consumer().unwrap();
+        let texture = register_test_texture(&mut context);
+        let snapshot = managed_snapshot(&mut context, &consumer, Some(texture));
+        let renderer_texture = imgui::TextureId::new(0xCAFE);
+        let feedback = user_texture_request(&snapshot, texture)
+            .uploaded(renderer_texture)
+            .unwrap();
+        snapshot.commit([feedback]).unwrap();
+        context.poll_snapshot_completions().unwrap();
+
+        context.prepare_frame(
+            imgui::FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
+        );
+        context
+            .frame()
+            .text("frame remains open while release is pending");
+
+        let release = ImguiRendererRelease::default();
+        release.install();
+        release.update_resources_live(true);
+        let mut owner = crate::ImguiContext::new(context);
+        owner.renderer_consumer = Some(consumer);
+        owner.attach_renderer_release(release.clone());
+
+        let error = owner
+            .into_inner()
+            .expect_err("live render-world resources must prevent Context extraction");
+        assert_eq!(
+            error.error(),
+            crate::ImguiContextIntoInnerErrorReason::RenderWorldReleasePending
+        );
+        let owner = error.into_owner();
+        assert_eq!(
+            owner.context().frame_lifecycle_state(),
+            imgui::FrameLifecycleState::InFrame,
+            "release preflight must run before ending the native frame"
+        );
+        owner
+            .context()
+            .with_texture(texture, |texture| {
+                assert_eq!(texture.status(), imgui::TextureStatus::OK);
+                assert_eq!(texture.texture_id(), renderer_texture);
+            })
+            .unwrap();
+
+        let generation = release.requested_generation().unwrap();
+        assert!(release.acknowledge_release(generation));
+        let context = owner
+            .into_inner()
+            .expect("acknowledged render-world release should allow extraction");
+        context
+            .with_texture(texture, |texture| {
+                assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+                assert!(texture.texture_id().is_null());
+            })
+            .unwrap();
     }
 
     #[test]
@@ -2785,6 +3506,35 @@ mod tests {
         assert_eq!(progress.committed(), 0);
         assert_eq!(progress.abandoned(), 0);
         assert_eq!(progress.feedback_applied(), 0);
+    }
+
+    #[test]
+    fn mailbox_epoch_jump_abandons_every_skipped_snapshot_before_committing_the_latest() {
+        let mut context = managed_context();
+        let consumer = context.create_renderer_consumer().unwrap();
+        let first = managed_snapshot(&mut context, &consumer, None);
+        let second = managed_snapshot(&mut context, &consumer, None);
+        let third = managed_snapshot(&mut context, &consumer, None);
+        assert_eq!(first.epoch().sequence(), 1);
+        assert_eq!(second.epoch().sequence(), 2);
+        assert_eq!(third.epoch().sequence(), 3);
+
+        let mailbox = crate::context::ImguiFrameMailbox::default();
+        let mut extracted = ImguiExtractedRenderFrame::default();
+        mailbox.publish(1, first);
+        mailbox.publish(2, second);
+        let (frame_index, second) = mailbox.take().unwrap();
+        extracted.replace(frame_index, second, Vec::new());
+        mailbox.publish(3, third);
+        let (frame_index, third) = mailbox.take().unwrap();
+        extracted.replace(frame_index, third, Vec::new());
+        extracted.commit();
+
+        let progress = context.poll_snapshot_completions().unwrap();
+        assert_eq!(progress.abandoned(), 2);
+        assert_eq!(progress.committed(), 1);
+        assert_eq!(progress.watermark(), 3);
+        assert_eq!(extracted.completion_watermark(), 3);
     }
 
     #[test]
@@ -2905,6 +3655,58 @@ mod tests {
             platform_io.draw_callback_set_sampler_nearest_raw(),
             imgui_bevy_draw_callback_nearest,
         );
+    }
+
+    #[test]
+    fn standard_draw_callback_markers_keep_distinct_addresses_and_snapshot_classes() {
+        let callbacks = [
+            imgui_bevy_draw_callback_reset as RawDrawCallback,
+            imgui_bevy_draw_callback_linear as RawDrawCallback,
+            imgui_bevy_draw_callback_nearest as RawDrawCallback,
+        ];
+        for left in 0..callbacks.len() {
+            for right in left + 1..callbacks.len() {
+                assert!(
+                    !std::ptr::fn_addr_eq(callbacks[left], callbacks[right]),
+                    "standard callback markers must remain pairwise distinct after optimization"
+                );
+            }
+        }
+
+        let mut context = managed_context();
+        install_standard_draw_callbacks_for_context(&mut context).unwrap();
+        let consumer = context.create_renderer_consumer().unwrap();
+        context.prepare_frame(
+            imgui::FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
+        );
+        let frame = context.begin_frame();
+        {
+            let draw_list = frame.ui().get_background_draw_list();
+            draw_list.add_draw_cmd();
+            for callback in callbacks {
+                unsafe { draw_list.add_callback(Some(callback), std::ptr::null_mut(), 0) };
+            }
+        }
+        let snapshot = frame.render_snapshot(&consumer).unwrap();
+        let classes = snapshot
+            .draw_data()
+            .draw_lists
+            .iter()
+            .flat_map(|list| list.commands.iter())
+            .filter_map(|command| match command {
+                DrawCmdSnapshot::ResetRenderState => Some("reset"),
+                DrawCmdSnapshot::SetSamplerLinear => Some("linear"),
+                DrawCmdSnapshot::SetSamplerNearest => Some("nearest"),
+                DrawCmdSnapshot::Elements { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(classes, ["reset", "linear", "nearest"]);
+        drop(snapshot);
+        context.poll_snapshot_completions().unwrap();
+        let _ = context
+            .prepare_renderer_texture_reset(&consumer)
+            .unwrap()
+            .commit();
     }
 
     #[test]
@@ -3255,15 +4057,16 @@ mod tests {
             framebuffer_scale: [1.0, 1.0],
             draw_lists: vec![draw_list_for_test()],
         };
-        let viewports = [imgui::render::ViewportDrawDataSnapshot {
-            viewport_id: secondary_viewport,
-            draw: imgui::render::DrawDataSnapshot {
+        let viewports = [imgui::render::ViewportDrawDataSnapshot::new(
+            secondary_viewport,
+            false,
+            imgui::render::DrawDataSnapshot {
                 display_pos: [0.0, 0.0],
                 display_size: [32.0, 32.0],
                 framebuffer_scale: [1.0, 1.0],
                 draw_lists: vec![draw_list_for_test()],
             },
-        }];
+        )];
         let targets = [
             camera_target_for_test(primary_camera, None),
             camera_target_for_test(secondary_camera, Some(secondary_viewport)),

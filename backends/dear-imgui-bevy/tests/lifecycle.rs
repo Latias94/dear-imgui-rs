@@ -108,6 +108,19 @@ fn lifecycle_primary_context_pass_opens_shared_frame_and_snapshots_once() {
     );
 
     app.update();
+
+    let first_output = app.world().resource::<ImguiFrameOutput>();
+    assert!(
+        first_output.snapshot_error().is_none(),
+        "first frame snapshot failed: {:?}",
+        first_output.snapshot_error()
+    );
+    assert!(
+        app.world()
+            .get_non_send::<ImguiFrameState>()
+            .is_some_and(|state| !state.is_frame_open()),
+        "the first update must close the Bevy-managed frame"
+    );
     app.update();
 
     let trace = app.world().resource::<LifecycleTrace>();
@@ -117,12 +130,9 @@ fn lifecycle_primary_context_pass_opens_shared_frame_and_snapshots_once() {
     let output = app.world().resource::<ImguiFrameOutput>();
     assert_eq!(output.frame_index(), 2);
     #[cfg(feature = "render")]
-    assert_eq!(
-        output
-            .snapshot_epoch()
-            .expect("render builds should hand off a detached snapshot")
-            .sequence(),
-        2
+    assert!(
+        output.snapshot_epoch().is_none(),
+        "a compiled render feature must not imply an installed Bevy RenderApp"
     );
 
     let state = app
@@ -152,8 +162,8 @@ fn lifecycle_clears_last_snapshot_when_primary_window_is_missing() {
         app.world()
             .resource::<ImguiFrameOutput>()
             .snapshot_epoch()
-            .is_some(),
-        "first update should produce a render snapshot epoch"
+            .is_none(),
+        "an app without RenderApp must not publish a detached render snapshot"
     );
 
     let mut primary_query = app
@@ -248,6 +258,7 @@ fn lifecycle_multi_viewport_request_does_not_advertise_viewports_without_render_
         name: "viewport-request".to_owned(),
         docking: true,
         multi_viewport: true,
+        viewport_window: Default::default(),
     });
 
     app.update();
@@ -284,7 +295,7 @@ fn lifecycle_multi_viewport_request_does_not_advertise_viewports_without_render_
 
 #[cfg(all(feature = "render", feature = "multi-viewport"))]
 #[test]
-fn lifecycle_feature_enabled_without_runtime_viewport_support_uses_primary_snapshot_path() {
+fn lifecycle_feature_enabled_without_render_app_closes_without_snapshotting() {
     let _guard = imgui_context_guard();
     let mut app = app_with_primary_window();
     app.add_systems(ImguiPrimaryContextPass, |mut contexts: ImguiContexts| {
@@ -297,8 +308,23 @@ fn lifecycle_feature_enabled_without_runtime_viewport_support_uses_primary_snaps
     app.update();
 
     let output = app.world().resource::<ImguiFrameOutput>();
-    assert!(output.snapshot_epoch().is_some());
+    assert!(output.snapshot_epoch().is_none());
     assert!(output.snapshot_error().is_none());
+}
+
+#[test]
+#[should_panic(expected = "replacing ImguiContext after ImguiPlugin installation is unsupported")]
+fn lifecycle_rejects_runtime_context_replacement_before_opening_a_frame() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_primary_window();
+    let previous = app
+        .world_mut()
+        .remove_non_send::<ImguiContext>()
+        .expect("ImguiPlugin should install an ImGui context");
+    drop(previous);
+    app.insert_non_send(ImguiContext::new(dear_imgui_rs::Context::create()));
+
+    app.update();
 }
 
 #[cfg(all(
@@ -319,6 +345,7 @@ fn lifecycle_multi_viewport_request_advertises_viewports_after_render_app_instal
         name: "viewport-supported".to_owned(),
         docking: true,
         multi_viewport: true,
+        viewport_window: Default::default(),
     }));
 
     let mut window = Window {

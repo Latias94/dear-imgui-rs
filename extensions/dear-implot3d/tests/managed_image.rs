@@ -209,7 +209,7 @@ fn managed_image_rejects_a_foreign_context_before_plot_ffi() {
 }
 
 #[test]
-fn managed_image_rejects_a_stale_generation_before_plot_ffi() {
+fn managed_image_rejects_a_retired_identity_before_plot_ffi() {
     let _guard = test_guard();
     let mut imgui = Context::create();
     prepare_imgui(&mut imgui);
@@ -241,7 +241,7 @@ fn managed_image_rejects_a_stale_generation_before_plot_ffi() {
         }));
         let message = panic_message(result.expect_err("stale texture should be rejected"));
         assert!(
-            message.contains("stale generation"),
+            message.contains("already removed"),
             "unexpected panic: {message}"
         );
     }

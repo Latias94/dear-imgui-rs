@@ -96,6 +96,18 @@ pub enum InitError {
     #[error(transparent)]
     RendererConsumer(#[from] dear_imgui_rs::render::RendererConsumerError),
 
+    /// A renderer-owned Context state slot was already occupied.
+    #[error("Glow renderer state slot `{field}` is already occupied")]
+    RendererStateOccupied { field: &'static str },
+
+    /// A renderer callback slot was already occupied.
+    #[error("Glow renderer callback `{callback}` is already occupied")]
+    RendererCallbackOccupied { callback: &'static str },
+
+    /// One or more flags reserved by Glow were already set.
+    #[error("Glow renderer capability flags {flags:#x} are already occupied")]
+    RendererCapabilityOccupied { flags: i32 },
+
     /// Generic initialization error
     #[error("Initialization error: {0}")]
     Generic(String),
@@ -160,6 +172,26 @@ pub enum RenderError {
     /// Context-owned renderer epoch validation failed.
     #[error(transparent)]
     RendererConsumer(#[from] dear_imgui_rs::render::RendererConsumerError),
+
+    /// A custom texture map panicked while preparing renderer-owned resources for release.
+    #[error("custom TextureMap::clear panicked during renderer teardown")]
+    TextureMapCleanupPanicked,
+
+    /// A Context-owned renderer state slot changed after Glow published it.
+    #[error("Glow renderer state slot `{field}` drifted while attached")]
+    RendererStateDrift { field: &'static str },
+
+    /// A renderer callback owned by Glow was replaced while attached.
+    #[error("Glow renderer callback `{callback}` was replaced while attached")]
+    RendererCallbackReplaced { callback: &'static str },
+
+    /// A capability reserved by Glow disappeared while attached.
+    #[error("Glow renderer capability `{flag}` drifted while attached")]
+    RendererCapabilityDrift { flag: &'static str },
+
+    /// The originating Context can no longer be entered for state validation.
+    #[error(transparent)]
+    ContextBinding(#[from] dear_imgui_rs::ContextBindingError),
 
     /// Texture feedback was constructed for the wrong request kind.
     #[error(transparent)]

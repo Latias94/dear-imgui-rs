@@ -9,7 +9,7 @@ impl WgpuRenderer {
 
     /// Check if the renderer is initialized
     pub fn is_initialized(&self) -> bool {
-        self.context_binding.is_some()
+        self.context_state.is_some()
             && self.renderer_consumer.is_some()
             && self
                 .backend_data

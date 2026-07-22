@@ -117,6 +117,34 @@ impl Context {
         self.frame_lifecycle_state_unlocked()
     }
 
+    /// End an open frame without producing render data.
+    ///
+    /// Returns `true` when an open native frame was closed and `false` when the Context was
+    /// already idle or rendered. The operation is idempotent so engine teardown can revoke UI
+    /// access before detaching platform and renderer state.
+    #[doc(alias = "EndFrame")]
+    pub fn end_frame(&mut self) -> bool {
+        let _guard = CTX_MUTEX.lock();
+        self.assert_current_context("Context::end_frame()");
+        self.end_frame_for_teardown_unlocked()
+    }
+
+    pub(super) fn end_frame_for_teardown_unlocked(&mut self) -> bool {
+        if self.raw.is_null() || !unsafe { (*self.raw).WithinFrameScope } {
+            return false;
+        }
+        unsafe {
+            with_bound_context(self.raw, || {
+                let _ = crate::list_clipper::forget_context_clippers(self.raw);
+                sys::igEndFrame();
+            });
+        }
+        self.texture_registry
+            .borrow_mut()
+            .observe_native_texture_list_refresh();
+        true
+    }
+
     /// Begin a Dear ImGui frame and return an explicit frame token.
     ///
     /// Engine integrations should prefer this when the frame is owned by a schedule rather than a
@@ -224,10 +252,10 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
         self.assert_current_context("Context::render()");
         self.assert_can_render_unlocked("Context::render()");
 
-        unsafe {
+        let draw_data = unsafe {
             let abandoned_clippers = crate::list_clipper::forget_context_clippers(self.raw);
             if abandoned_clippers != 0 {
-                sys::igEndFrame();
+                self.end_frame_for_teardown_unlocked();
                 panic!(
                     "Context::render() rejected a frame with {abandoned_clippers} list clipper token(s) still active or forgotten"
                 );
@@ -238,7 +266,11 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
                 panic!("Context::render() returned null draw data");
             }
             std::ptr::NonNull::new_unchecked(dd as *mut crate::render::DrawData)
-        }
+        };
+        self.texture_registry
+            .borrow_mut()
+            .observe_native_texture_list_refresh();
+        draw_data
     }
 
     /// Render the current frame and build a thread-safe main-viewport snapshot.
@@ -382,14 +414,7 @@ impl Drop for FrameToken<'_> {
         }
 
         let _guard = CTX_MUTEX.lock();
-        if self.ctx.frame_lifecycle_state_unlocked() == FrameLifecycleState::InFrame {
-            unsafe {
-                with_bound_context(self.ctx.raw, || {
-                    let _ = crate::list_clipper::forget_context_clippers(self.ctx.raw);
-                    sys::igEndFrame();
-                })
-            };
-        }
+        self.ctx.end_frame_for_teardown_unlocked();
         self.closed = true;
     }
 }

@@ -12,11 +12,6 @@ pub(crate) fn axis_tick_count_to_i32(caller: &str, count: usize) -> i32 {
         .unwrap_or_else(|_| panic!("{caller} n_ticks exceeded ImPlot3D's i32 range"))
 }
 
-pub(crate) fn surface_count_to_i32(count: usize) -> Option<i32> {
-    let count = i32::try_from(count).ok()?;
-    (count > 0).then_some(count)
-}
-
 pub(crate) const IMPLOT3D_AUTO: i32 = -1;
 
 thread_local! {
@@ -235,7 +230,7 @@ pub(crate) fn imvec4<T: ImVec4Ctor>(x: f32, y: f32, z: f32, w: f32) -> T {
 mod tests {
     use super::{
         Plot3DDataLayout, Plot3DDataOffset, Plot3DDataStride, axis_tick_count_to_i32,
-        plot3d_spec_from, surface_count_to_i32,
+        plot3d_spec_from,
     };
 
     #[test]
@@ -258,14 +253,6 @@ mod tests {
     #[should_panic(expected = "requires a non-zero stride")]
     fn zero_data_stride_panics_before_ffi() {
         let _ = Plot3DDataStride::bytes(0);
-    }
-
-    #[test]
-    fn surface_count_checks_implot3d_i32_range() {
-        assert_eq!(surface_count_to_i32(1), Some(1));
-        assert_eq!(surface_count_to_i32(0), None);
-        assert_eq!(surface_count_to_i32(i32::MAX as usize), Some(i32::MAX));
-        assert_eq!(surface_count_to_i32(i32::MAX as usize + 1), None);
     }
 
     #[test]

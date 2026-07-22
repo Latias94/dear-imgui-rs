@@ -35,18 +35,29 @@ impl GlowRenderer {
         &mut self,
         gl: &Context,
         requests: &[TextureRequest],
+        request_epoch: u64,
     ) -> RenderResult<Vec<TextureFeedback>> {
-        requests
-            .iter()
-            .map(|request| self.process_texture_request(gl, request))
-            .collect()
+        let mut feedback = Vec::with_capacity(requests.len());
+        for request in requests {
+            if let Some(item) = self.process_texture_request(gl, request, request_epoch)? {
+                feedback.push(item);
+            }
+        }
+        Ok(feedback)
     }
 
     fn process_texture_request(
         &mut self,
         gl: &Context,
         request: &TextureRequest,
-    ) -> RenderResult<TextureFeedback> {
+        request_epoch: u64,
+    ) -> RenderResult<Option<TextureFeedback>> {
+        let texture = request.texture();
+        if !matches!(request.operation(), TextureOp::Destroy)
+            && self.destroyed_managed_textures.contains_key(&texture)
+        {
+            return Ok(None);
+        }
         match request.operation() {
             TextureOp::Create {
                 format,
@@ -66,7 +77,7 @@ impl GlowRenderer {
                         pixels,
                     },
                 )?;
-                Ok(request.uploaded(texture_id)?)
+                Ok(Some(request.uploaded(texture_id)?))
             }
             TextureOp::Update {
                 format,
@@ -82,13 +93,28 @@ impl GlowRenderer {
                     *height,
                     rects,
                 )?;
-                Ok(request.uploaded(texture_id)?)
+                Ok(Some(request.uploaded(texture_id)?))
             }
             TextureOp::Destroy => {
-                self.destroy_managed_texture(gl, request.texture());
-                Ok(request.destroyed()?)
+                self.seal_destroyed_managed_texture(texture, request_epoch);
+                self.destroy_managed_texture(gl, texture);
+                Ok(Some(request.destroyed()?))
             }
         }
+    }
+
+    fn seal_destroyed_managed_texture(&mut self, texture: SnapshotTextureId, request_epoch: u64) {
+        self.destroyed_managed_textures
+            .entry(texture)
+            .and_modify(|destroy_epoch| {
+                *destroy_epoch = (*destroy_epoch).max(request_epoch);
+            })
+            .or_insert(request_epoch);
+    }
+
+    pub(super) fn prune_destroyed_managed_textures(&mut self, completion_watermark: u64) {
+        self.destroyed_managed_textures
+            .retain(|_, destroy_epoch| *destroy_epoch > completion_watermark);
     }
 
     fn create_managed_texture(
@@ -135,6 +161,10 @@ impl GlowRenderer {
         }
         .map_err(RenderError::DeviceObjectInit)?;
 
+        // Publish ownership before entering application-provided TextureMap code. If that code
+        // unwinds, explicit renderer teardown still clears any partial map state before deleting
+        // the GL object.
+        self.track_owned_texture(gl_texture);
         let texture_id = match self.texture_map_mut().register_texture(
             gl_texture,
             create.width,
@@ -144,10 +174,10 @@ impl GlowRenderer {
             Ok(texture_id) => texture_id,
             Err(error) => {
                 unsafe { gl.delete_texture(gl_texture) };
+                self.forget_owned_texture(gl_texture);
                 return Err(RenderError::DeviceObjectInit(error));
             }
         };
-        self.track_owned_texture(gl_texture);
         self.managed_textures.insert(
             key,
             ManagedTextureBinding {
@@ -234,13 +264,31 @@ impl GlowRenderer {
         width: u32,
         height: u32,
         data: &[u8],
-    ) -> InitResult<()> {
-        let gl = self.gl_context.clone().ok_or(InitError::MissingGlContext)?;
-        self.update_texture_with_context(&gl, texture_id, width, height, data)
+    ) -> RenderResult<()> {
+        self.ensure_operational()?;
+        let gl = self
+            .gl_context
+            .clone()
+            .ok_or(RenderError::MissingGlContext)?;
+        self.update_legacy_texture(&gl, texture_id, width, height, data)
+            .map_err(RenderError::DeviceObjectInit)
     }
 
     /// Update a renderer-owned legacy texture using an externally managed OpenGL context.
     pub fn update_texture_with_context(
+        &mut self,
+        gl: &Context,
+        texture_id: TextureId,
+        width: u32,
+        height: u32,
+        data: &[u8],
+    ) -> RenderResult<()> {
+        self.ensure_operational()?;
+        self.update_legacy_texture(gl, texture_id, width, height, data)
+            .map_err(RenderError::DeviceObjectInit)
+    }
+
+    fn update_legacy_texture(
         &mut self,
         gl: &Context,
         texture_id: TextureId,
@@ -272,13 +320,31 @@ impl GlowRenderer {
         height: u32,
         format: TextureFormat,
         data: &[u8],
-    ) -> InitResult<TextureId> {
-        let gl = self.gl_context.clone().ok_or(InitError::MissingGlContext)?;
-        self.register_texture_with_context(&gl, width, height, format, data)
+    ) -> RenderResult<TextureId> {
+        self.ensure_operational()?;
+        let gl = self
+            .gl_context
+            .clone()
+            .ok_or(RenderError::MissingGlContext)?;
+        self.register_legacy_texture(&gl, width, height, format, data)
+            .map_err(RenderError::DeviceObjectInit)
     }
 
     /// Register a renderer-owned legacy texture using an external OpenGL context.
     pub fn register_texture_with_context(
+        &mut self,
+        gl: &Context,
+        width: u32,
+        height: u32,
+        format: TextureFormat,
+        data: &[u8],
+    ) -> RenderResult<TextureId> {
+        self.ensure_operational()?;
+        self.register_legacy_texture(gl, width, height, format, data)
+            .map_err(RenderError::DeviceObjectInit)
+    }
+
+    fn register_legacy_texture(
         &mut self,
         gl: &Context,
         width: u32,
@@ -399,7 +465,9 @@ fn validate_update_rect(
 mod tests {
     use super::*;
     use crate::{
-        shaders::Shaders, state::GlStateBackup, texture::SimpleTextureMap, versions::GlVersion,
+        shaders::Shaders,
+        texture::{SimpleTextureMap, TextureMap},
+        versions::GlVersion,
     };
     use dear_imgui_rs::render::{SnapshotTextureId, TextureRequestKind};
     use dear_imgui_rs::{
@@ -415,6 +483,87 @@ mod tests {
     static DELETED_TEXTURES: AtomicU32 = AtomicU32::new(0);
     static GL_TEST_LOCK: Mutex<()> = Mutex::new(());
 
+    #[derive(Default)]
+    struct PanicOnceTextureMap {
+        inner: SimpleTextureMap,
+        panic_on_register: bool,
+    }
+
+    impl TextureMap for PanicOnceTextureMap {
+        fn get(&self, texture_id: TextureId) -> Option<GlTexture> {
+            self.inner.get(texture_id)
+        }
+
+        fn set(&mut self, texture_id: TextureId, gl_texture: GlTexture) {
+            self.inner.set(texture_id, gl_texture);
+        }
+
+        fn remove(&mut self, texture_id: TextureId) -> Option<GlTexture> {
+            self.inner.remove(texture_id)
+        }
+
+        fn clear(&mut self) {
+            self.inner.clear();
+        }
+
+        fn register_texture(
+            &mut self,
+            gl_texture: GlTexture,
+            width: u32,
+            height: u32,
+            format: TextureFormat,
+        ) -> InitResult<TextureId> {
+            if self.panic_on_register {
+                self.panic_on_register = false;
+                panic!("injected TextureMap::register_texture panic");
+            }
+            self.inner
+                .register_texture(gl_texture, width, height, format)
+        }
+
+        fn update_texture(
+            &mut self,
+            texture_id: TextureId,
+            gl_texture: GlTexture,
+            width: u32,
+            height: u32,
+        ) {
+            self.inner
+                .update_texture(texture_id, gl_texture, width, height);
+        }
+
+        fn texture_format(&self, texture_id: TextureId) -> Option<TextureFormat> {
+            self.inner.texture_format(texture_id)
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    struct FakeUploadState {
+        active_texture: u32,
+        texture_bindings: [u32; 4],
+        unpack_alignment: i32,
+        unpack_row_length: i32,
+        unpack_skip_pixels: i32,
+        unpack_skip_rows: i32,
+    }
+
+    impl FakeUploadState {
+        const DEFAULT: Self = Self {
+            active_texture: glow::TEXTURE0,
+            texture_bindings: [0; 4],
+            unpack_alignment: 4,
+            unpack_row_length: 0,
+            unpack_skip_pixels: 0,
+            unpack_skip_rows: 0,
+        };
+
+        fn active_unit_index(self) -> usize {
+            usize::try_from(self.active_texture - glow::TEXTURE0).unwrap()
+        }
+    }
+
+    static FAKE_UPLOAD_STATE: Mutex<FakeUploadState> = Mutex::new(FakeUploadState::DEFAULT);
+
     fn make_test_renderer() -> GlowRenderer {
         GlowRenderer {
             shaders: Shaders {
@@ -426,7 +575,6 @@ mod tests {
                 attrib_location_vtx_uv: 0,
                 attrib_location_vtx_color: 0,
             },
-            state_backup: GlStateBackup::default(),
             vbo_handle: None,
             ebo_handle: None,
             owned_textures: Vec::new(),
@@ -440,8 +588,15 @@ mod tests {
             has_clip_origin_support: false,
             is_destroyed: false,
             gl_context: None,
+            context_binding: None,
+            backend_user_data: Box::default(),
+            renderer_name_ptr: std::ptr::null(),
+            renderer_texture_max: [0, 0],
+            renderer_state_fault: None,
+            synthetic_test_renderer: true,
             texture_map: Some(Box::new(SimpleTextureMap::default())),
             managed_textures: std::collections::HashMap::new(),
+            destroyed_managed_textures: std::collections::HashMap::new(),
             renderer_consumer: None,
             framebuffer_srgb: false,
             color_gamma_override: None,
@@ -460,6 +615,8 @@ mod tests {
     }
 
     fn make_fake_gl() -> glow::Context {
+        set_fake_upload_state(FakeUploadState::DEFAULT);
+
         unsafe extern "system" fn fake_gl_get_string(_name: u32) -> *const u8 {
             c"4.6".as_ptr().cast()
         }
@@ -470,15 +627,23 @@ mod tests {
             if data.is_null() {
                 return;
             }
+            let state = *FAKE_UPLOAD_STATE.lock().unwrap();
             let value = match pname {
-                glow::ACTIVE_TEXTURE => glow::TEXTURE0 as i32,
-                glow::TEXTURE_BINDING_2D => 0,
-                glow::UNPACK_ALIGNMENT => 4,
+                glow::ACTIVE_TEXTURE => state.active_texture as i32,
+                glow::TEXTURE_BINDING_2D => {
+                    state.texture_bindings[state.active_unit_index()] as i32
+                }
+                glow::UNPACK_ALIGNMENT => state.unpack_alignment,
+                glow::UNPACK_ROW_LENGTH => state.unpack_row_length,
+                glow::UNPACK_SKIP_PIXELS => state.unpack_skip_pixels,
+                glow::UNPACK_SKIP_ROWS => state.unpack_skip_rows,
                 _ => 0,
             };
             unsafe { *data = value };
         }
-        unsafe extern "system" fn fake_gl_active_texture(_texture: u32) {}
+        unsafe extern "system" fn fake_gl_active_texture(texture: u32) {
+            FAKE_UPLOAD_STATE.lock().unwrap().active_texture = texture;
+        }
         unsafe extern "system" fn fake_gl_gen_textures(count: i32, textures: *mut u32) {
             for index in 0..count.max(0) as usize {
                 unsafe { *textures.add(index) = NEXT_TEXTURE.fetch_add(1, Ordering::SeqCst) };
@@ -488,11 +653,23 @@ mod tests {
             DELETED_TEXTURES.fetch_add(count.max(0) as u32, Ordering::SeqCst);
         }
         unsafe extern "system" fn fake_gl_bind_texture(_target: u32, texture: u32) {
+            let mut state = FAKE_UPLOAD_STATE.lock().unwrap();
+            let unit = state.active_unit_index();
+            state.texture_bindings[unit] = texture;
             if texture != 0 {
                 LAST_BOUND_TEXTURE.store(texture, Ordering::SeqCst);
             }
         }
-        unsafe extern "system" fn fake_gl_pixel_store_i(_pname: u32, _param: i32) {}
+        unsafe extern "system" fn fake_gl_pixel_store_i(pname: u32, param: i32) {
+            let mut state = FAKE_UPLOAD_STATE.lock().unwrap();
+            match pname {
+                glow::UNPACK_ALIGNMENT => state.unpack_alignment = param,
+                glow::UNPACK_ROW_LENGTH => state.unpack_row_length = param,
+                glow::UNPACK_SKIP_PIXELS => state.unpack_skip_pixels = param,
+                glow::UNPACK_SKIP_ROWS => state.unpack_skip_rows = param,
+                _ => {}
+            }
+        }
         unsafe extern "system" fn fake_gl_tex_parameter_i(_target: u32, _pname: u32, _param: i32) {}
         unsafe extern "system" fn fake_gl_tex_image_2d(
             _target: u32,
@@ -505,6 +682,7 @@ mod tests {
             _type_: u32,
             _pixels: *const std::ffi::c_void,
         ) {
+            assert_normalized_upload_state();
         }
         unsafe extern "system" fn fake_gl_tex_sub_image_2d(
             _target: u32,
@@ -517,6 +695,7 @@ mod tests {
             _type_: u32,
             _pixels: *const std::ffi::c_void,
         ) {
+            assert_normalized_upload_state();
         }
 
         unsafe {
@@ -538,6 +717,24 @@ mod tests {
                 .cast()
             })
         }
+    }
+
+    fn assert_normalized_upload_state() {
+        let state = *FAKE_UPLOAD_STATE.lock().unwrap();
+        assert_eq!(state.active_texture, glow::TEXTURE0);
+        assert_ne!(state.texture_bindings[0], 11);
+        assert_eq!(state.unpack_alignment, 1);
+        assert_eq!(state.unpack_row_length, 0);
+        assert_eq!(state.unpack_skip_pixels, 0);
+        assert_eq!(state.unpack_skip_rows, 0);
+    }
+
+    fn set_fake_upload_state(state: FakeUploadState) {
+        *FAKE_UPLOAD_STATE.lock().unwrap() = state;
+    }
+
+    fn fake_upload_state() -> FakeUploadState {
+        *FAKE_UPLOAD_STATE.lock().unwrap()
     }
 
     fn register_rgba_texture(context: &mut ImGuiContext) -> ManagedTextureId {
@@ -569,6 +766,15 @@ mod tests {
             .expect("frame should contain the user texture request")
     }
 
+    fn process_frame_requests(
+        renderer: &mut GlowRenderer,
+        gl: &glow::Context,
+        frame: &dear_imgui_rs::render::RenderedFrame<'_>,
+    ) -> RenderResult<Vec<TextureFeedback>> {
+        let request_epoch = frame.epoch().map_or(0, |epoch| epoch.sequence());
+        renderer.process_texture_requests(gl, frame.texture_requests(), request_epoch)
+    }
+
     #[test]
     fn row_packing_removes_padding_without_touching_native_texture_state() {
         let packed = tightly_pack_rows(
@@ -580,6 +786,46 @@ mod tests {
         )
         .expect("padded rows should be accepted");
         assert_eq!(&*packed, &[1, 2, 3, 4, 5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn texture_uploads_restore_unit_zero_active_unit_and_unpack_state() {
+        let _guard = GL_TEST_LOCK.lock().unwrap();
+        let gl = make_fake_gl();
+        let original = FakeUploadState {
+            active_texture: glow::TEXTURE0 + 3,
+            texture_bindings: [11, 0, 0, 33],
+            unpack_alignment: 8,
+            unpack_row_length: 7,
+            unpack_skip_pixels: 2,
+            unpack_skip_rows: 3,
+        };
+
+        set_fake_upload_state(original);
+        let rgba = create_texture_from_rgba(&gl, 1, 1, &[1, 2, 3, 4]).unwrap();
+        assert_eq!(fake_upload_state(), original);
+
+        set_fake_upload_state(original);
+        let alpha = create_texture_from_alpha(&gl, 1, 1, &[255]).unwrap();
+        assert_eq!(fake_upload_state(), original);
+
+        set_fake_upload_state(original);
+        update_texture(
+            &gl,
+            rgba,
+            GlTextureUpdate::new([0, 0], [1, 1], TextureFormat::RGBA32, &[5, 6, 7, 8]),
+        )
+        .unwrap();
+        assert_eq!(fake_upload_state(), original);
+
+        set_fake_upload_state(original);
+        upload_texture_data(&gl, alpha, 1, 1, TextureFormat::RGBA32, &[9, 10, 11, 12]).unwrap();
+        assert_eq!(fake_upload_state(), original);
+
+        unsafe {
+            gl.delete_texture(rgba);
+            gl.delete_texture(alpha);
+        }
     }
 
     #[test]
@@ -600,8 +846,7 @@ mod tests {
             user_request(frame.texture_requests(), texture).kind(),
             TextureRequestKind::Create
         );
-        let feedback = renderer
-            .process_texture_requests(&gl, frame.texture_requests())
+        let feedback = process_frame_requests(&mut renderer, &gl, &frame)
             .expect("create requests should upload");
         frame
             .reconcile_texture_feedback(feedback)
@@ -623,8 +868,7 @@ mod tests {
             user_request(frame.texture_requests(), texture).kind(),
             TextureRequestKind::Update
         );
-        let feedback = renderer
-            .process_texture_requests(&gl, frame.texture_requests())
+        let feedback = process_frame_requests(&mut renderer, &gl, &frame)
             .expect("update requests should upload");
         frame
             .reconcile_texture_feedback(feedback)
@@ -639,24 +883,133 @@ mod tests {
             TextureRequestKind::Destroy
         );
         let deleted_before = DELETED_TEXTURES.load(Ordering::SeqCst);
-        let feedback = renderer
-            .process_texture_requests(&gl, frame.texture_requests())
+        let feedback = process_frame_requests(&mut renderer, &gl, &frame)
             .expect("destroy requests should retire GPU resources");
         assert!(!renderer.managed_textures.contains_key(&key));
         assert_eq!(DELETED_TEXTURES.load(Ordering::SeqCst), deleted_before + 1);
-        frame
+        let destroy_epoch = frame
+            .epoch()
+            .expect("managed frame must have an epoch")
+            .sequence();
+        let duplicate_feedback = renderer
+            .process_texture_requests(
+                &gl,
+                frame.texture_requests(),
+                destroy_epoch.saturating_sub(1),
+            )
+            .expect("repeated destroy requests should be idempotent");
+        assert_eq!(duplicate_feedback.len(), 1);
+        assert_eq!(DELETED_TEXTURES.load(Ordering::SeqCst), deleted_before + 1);
+        assert_eq!(renderer.destroyed_managed_textures[&key], destroy_epoch);
+        let progress = frame
             .reconcile_texture_feedback(feedback)
             .expect("destroy feedback should reconcile");
+        renderer.prune_destroyed_managed_textures(progress.watermark());
+        assert!(renderer.destroyed_managed_textures.is_empty());
         drop(frame);
 
         renderer.destroy(&gl, &mut context).unwrap();
+        assert!(renderer.destroyed_managed_textures.is_empty());
         assert!(renderer.renderer_consumer.is_none());
-        assert!(
-            !context
-                .io()
-                .backend_flags()
-                .contains(dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES)
+    }
+
+    #[test]
+    fn texture_map_register_panic_keeps_the_gl_texture_owned_until_teardown() {
+        let _guard = GL_TEST_LOCK.lock().unwrap();
+        let mut context = ImGuiContext::create();
+        context.prepare_frame(
+            FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
         );
+        assert!(context.font_atlas().build());
+        let texture = register_rgba_texture(&mut context);
+        let mut renderer = make_protocol_renderer(&mut context);
+        renderer.texture_map = Some(Box::new(PanicOnceTextureMap {
+            inner: SimpleTextureMap::default(),
+            panic_on_register: true,
+        }));
+        let gl = make_fake_gl();
+        DELETED_TEXTURES.store(0, Ordering::SeqCst);
+
+        let frame = render_managed_frame(&mut context, Some(texture));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = process_frame_requests(&mut renderer, &gl, &frame);
+        }));
+
+        assert!(result.is_err());
+        assert_eq!(renderer.owned_textures.len(), 1);
+        assert!(renderer.managed_textures.is_empty());
+        assert_eq!(DELETED_TEXTURES.load(Ordering::SeqCst), 0);
+
+        drop(frame);
+        renderer.destroy(&gl, &mut context).unwrap();
+        assert!(renderer.owned_textures.is_empty());
+        assert_eq!(DELETED_TEXTURES.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn destroyed_identity_ignores_old_work_until_its_destroy_epoch_completes() {
+        let _guard = GL_TEST_LOCK.lock().unwrap();
+        let mut context = ImGuiContext::create();
+        context.prepare_frame(
+            FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
+        );
+        assert!(context.font_atlas().build());
+        let texture = register_rgba_texture(&mut context);
+        let mut renderer = make_protocol_renderer(&mut context);
+        let gl = make_fake_gl();
+        let key = SnapshotTextureId::User(texture);
+        renderer.seal_destroyed_managed_texture(key, 5);
+        renderer.seal_destroyed_managed_texture(key, 3);
+        assert_eq!(renderer.destroyed_managed_textures[&key], 5);
+        renderer.prune_destroyed_managed_textures(4);
+        assert_eq!(renderer.destroyed_managed_textures[&key], 5);
+        let next_texture = NEXT_TEXTURE.load(Ordering::SeqCst);
+
+        let frame = render_managed_frame(&mut context, Some(texture));
+        let feedback = renderer
+            .process_texture_request(&gl, user_request(frame.texture_requests(), texture), 3)
+            .expect("late upload should be ignored");
+        assert!(feedback.is_none());
+        assert!(renderer.managed_textures.is_empty());
+        assert_eq!(NEXT_TEXTURE.load(Ordering::SeqCst), next_texture);
+        drop(frame);
+
+        renderer.prune_destroyed_managed_textures(5);
+        assert!(renderer.destroyed_managed_textures.is_empty());
+
+        renderer.destroy(&gl, &mut context).unwrap();
+        assert!(renderer.destroyed_managed_textures.is_empty());
+    }
+
+    #[test]
+    fn destroy_tombstones_are_bounded_by_the_completion_watermark() {
+        let _guard = GL_TEST_LOCK.lock().unwrap();
+        let context = ImGuiContext::create();
+        let mut renderer = make_test_renderer();
+
+        for epoch in 1..=1_024 {
+            renderer.seal_destroyed_managed_texture(
+                SnapshotTextureId::FontAtlas {
+                    context: context.id(),
+                    stamp: 1,
+                    generation: epoch,
+                },
+                epoch,
+            );
+        }
+        assert_eq!(renderer.destroyed_managed_textures.len(), 1_024);
+
+        renderer.prune_destroyed_managed_textures(512);
+        assert_eq!(renderer.destroyed_managed_textures.len(), 512);
+        assert!(
+            renderer
+                .destroyed_managed_textures
+                .values()
+                .all(|destroy_epoch| *destroy_epoch > 512)
+        );
+
+        renderer.prune_destroyed_managed_textures(1_024);
+        assert!(renderer.destroyed_managed_textures.is_empty());
     }
 
     #[test]
@@ -672,9 +1025,8 @@ mod tests {
         let gl = make_fake_gl();
 
         let frame = render_managed_frame(&mut context, Some(texture));
-        let feedback = renderer
-            .process_texture_requests(&gl, frame.texture_requests())
-            .expect("first create should upload");
+        let feedback =
+            process_frame_requests(&mut renderer, &gl, &frame).expect("first create should upload");
         let key = SnapshotTextureId::User(texture);
         let first_binding = renderer.managed_textures[&key];
         let texture_count = renderer.managed_textures.len();
@@ -686,8 +1038,7 @@ mod tests {
             user_request(retry.texture_requests(), texture).kind(),
             TextureRequestKind::Create
         );
-        let feedback = renderer
-            .process_texture_requests(&gl, retry.texture_requests())
+        let feedback = process_frame_requests(&mut renderer, &gl, &retry)
             .expect("abandoned create should retry idempotently");
         assert_eq!(renderer.managed_textures.len(), texture_count);
         assert_eq!(
@@ -702,28 +1053,6 @@ mod tests {
             .reconcile_texture_feedback(feedback)
             .expect("retry feedback should reconcile");
         drop(retry);
-
-        renderer.destroy(&gl, &mut context).unwrap();
-    }
-
-    #[test]
-    fn render_rejects_a_frame_without_the_renderer_epoch() {
-        let _guard = GL_TEST_LOCK.lock().unwrap();
-        let mut context = ImGuiContext::create();
-        let mut renderer = make_protocol_renderer(&mut context);
-        let gl = make_fake_gl();
-        assert!(context.font_atlas().build());
-
-        context.prepare_frame(FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0));
-        let frame = context.begin_frame();
-        frame.ui().text("legacy renderer frame");
-        let frame = frame.render();
-        assert!(frame.epoch().is_none());
-
-        let error = renderer
-            .render_with_context(&gl, frame)
-            .expect_err("Glow must reject frames that bypass its renderer consumer");
-        assert!(matches!(error, RenderError::MissingRendererEpoch));
 
         renderer.destroy(&gl, &mut context).unwrap();
     }
@@ -773,8 +1102,7 @@ mod tests {
         DELETED_TEXTURES.store(0, Ordering::SeqCst);
 
         let mut frame = render_managed_frame(&mut context, Some(texture));
-        let feedback = renderer
-            .process_texture_requests(&gl, frame.texture_requests())
+        let feedback = process_frame_requests(&mut renderer, &gl, &frame)
             .expect("create requests should upload");
         frame
             .reconcile_texture_feedback(feedback)
@@ -809,15 +1137,117 @@ mod tests {
     }
 
     #[test]
-    fn legacy_texture_ids_do_not_enter_the_managed_request_map() {
+    fn outstanding_snapshot_rejects_teardown_before_any_gl_resource_changes() {
+        let _guard = GL_TEST_LOCK.lock().unwrap();
         let mut context = ImGuiContext::create();
+        context.prepare_frame(
+            FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
+        );
+        assert!(context.font_atlas().build());
+        let texture = register_rgba_texture(&mut context);
+        let mut renderer = make_protocol_renderer(&mut context);
+        let gl = make_fake_gl();
+        DELETED_TEXTURES.store(0, Ordering::SeqCst);
+
+        let uploaded = {
+            let consumer = renderer.renderer_consumer.as_ref().unwrap();
+            let frame = context.begin_frame();
+            frame.ui().image(texture, [8.0, 8.0]);
+            frame.render_snapshot(consumer).unwrap()
+        };
+        let feedback = renderer
+            .process_texture_requests(
+                &gl,
+                uploaded.texture_requests(),
+                uploaded.epoch().sequence(),
+            )
+            .unwrap();
+        uploaded.commit(feedback).unwrap();
+        context.poll_snapshot_completions().unwrap();
+
+        let owned_texture_count = u32::try_from(renderer.owned_textures.len()).unwrap();
+        let renderer_texture_ids = renderer
+            .managed_textures
+            .values()
+            .map(|binding| binding.texture_id)
+            .collect::<Vec<_>>();
+        assert!(owned_texture_count > 0);
+        let bound_texture = context
+            .with_texture(texture, |texture| texture.texture_id())
+            .unwrap();
+        assert!(!bound_texture.is_null());
+
+        context.prepare_frame(
+            FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
+        );
+        let outstanding = {
+            let consumer = renderer.renderer_consumer.as_ref().unwrap();
+            context.begin_frame().render_snapshot(consumer).unwrap()
+        };
+
+        for result in [
+            renderer.destroy_device_objects(&gl, &mut context),
+            renderer.destroy(&gl, &mut context),
+        ] {
+            assert!(matches!(
+                result,
+                Err(RenderError::RendererConsumer(
+                    dear_imgui_rs::render::RendererConsumerError::OutstandingEpochs { count: 1 }
+                ))
+            ));
+            assert_eq!(DELETED_TEXTURES.load(Ordering::SeqCst), 0);
+            assert_eq!(renderer.owned_textures.len() as u32, owned_texture_count);
+            assert_eq!(renderer.managed_textures.len(), renderer_texture_ids.len());
+            assert!(
+                renderer_texture_ids
+                    .iter()
+                    .all(|texture_id| renderer.texture_map().get(*texture_id).is_some())
+            );
+            assert!(renderer.renderer_consumer.is_some());
+            assert!(!renderer.is_destroyed);
+            context
+                .with_texture(texture, |texture| {
+                    assert_eq!(texture.texture_id(), bound_texture)
+                })
+                .unwrap();
+        }
+
+        drop(outstanding);
+        context.poll_snapshot_completions().unwrap();
+        renderer.destroy_device_objects(&gl, &mut context).unwrap();
+        assert_eq!(DELETED_TEXTURES.load(Ordering::SeqCst), owned_texture_count);
+        assert!(renderer.managed_textures.is_empty());
+        assert!(
+            renderer_texture_ids
+                .into_iter()
+                .all(|texture_id| renderer.texture_map().get(texture_id).is_none())
+        );
+        assert!(renderer.renderer_consumer.is_some());
+        context
+            .with_texture(texture, |texture| assert!(texture.texture_id().is_null()))
+            .unwrap();
+
+        renderer.destroy(&gl, &mut context).unwrap();
+        assert!(renderer.renderer_consumer.is_none());
+    }
+
+    #[test]
+    fn legacy_texture_ids_do_not_enter_the_managed_request_map() {
+        let _guard = GL_TEST_LOCK.lock().unwrap();
+        let mut context = ImGuiContext::create();
+        context.prepare_frame(
+            FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
+        );
         assert!(context.font_atlas().build());
         let mut renderer = make_protocol_renderer(&mut context);
+        let gl = make_fake_gl();
         let texture_id = TextureId::new(77);
         let gl_texture = glow::NativeTexture(std::num::NonZeroU32::new(88).unwrap());
         renderer.texture_map_mut().set(texture_id, gl_texture);
 
-        context.prepare_frame(FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0));
+        context.prepare_frame(
+            FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
+        );
         let frame = context.begin_frame();
         frame.ui().get_foreground_draw_list().add_image(
             texture_id,
@@ -828,11 +1258,26 @@ mod tests {
             [1.0, 1.0, 1.0, 1.0],
         );
         let mut frame = frame.render();
-        assert!(frame.texture_requests().is_empty());
+        assert!(
+            frame
+                .texture_requests()
+                .iter()
+                .all(|request| matches!(request.texture(), SnapshotTextureId::FontAtlas { .. }))
+        );
+        let feedback = process_frame_requests(&mut renderer, &gl, &frame)
+            .expect("font atlas requests should upload");
         frame
-            .reconcile_texture_feedback(std::iter::empty())
-            .expect("legacy frames reconcile without managed feedback");
+            .reconcile_texture_feedback(feedback)
+            .expect("font atlas feedback should reconcile");
+        drop(frame);
+        assert!(
+            renderer
+                .managed_textures
+                .keys()
+                .all(|texture| matches!(texture, SnapshotTextureId::FontAtlas { .. }))
+        );
         assert_eq!(renderer.texture_map().get(texture_id), Some(gl_texture));
+        renderer.destroy(&gl, &mut context).unwrap();
     }
 
     #[test]

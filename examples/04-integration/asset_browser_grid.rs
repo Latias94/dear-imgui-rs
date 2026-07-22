@@ -183,12 +183,12 @@ impl AppWindow {
 
         let mut imgui_context = Context::create();
         imgui_context.set_ini_filename(None::<String>).unwrap();
-        let mut platform = WinitPlatform::new(&mut imgui_context);
+        let mut platform = WinitPlatform::new(&mut imgui_context)?;
         platform.attach_window(
-            &window,
+            Arc::clone(&window),
             dear_imgui_winit::HiDpiMode::Default,
             &mut imgui_context,
-        );
+        )?;
 
         let gl = unsafe {
             glow::Context::from_loader_function_cstr(|s| {
@@ -297,7 +297,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context);
+            .prepare_frame(&self.window, &mut self.imgui.context)?;
         let ui = self.imgui.context.frame();
 
         // Inline browser UI to avoid &Ui + &mut self borrow conflict
@@ -387,7 +387,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_render_with_ui(&ui, &self.window);
+            .prepare_render_with_ui(&ui, &self.window)?;
         let draw_data = self.imgui.context.render();
         if let Some(gl) = self.imgui.renderer.gl_context() {
             unsafe {
@@ -442,11 +442,15 @@ impl ApplicationHandler for App {
         let Some(window) = self.window.as_mut() else {
             return;
         };
-        window.imgui.platform.handle_window_event(
+        if let Err(error) = window.imgui.platform.handle_window_event(
             &mut window.imgui.context,
             &window.window,
             &event,
-        );
+        ) {
+            eprintln!("Winit platform error: {error}");
+            event_loop.exit();
+            return;
+        }
         match event {
             WindowEvent::Resized(sz) => {
                 window.resize(sz);

@@ -2,6 +2,13 @@
 //!
 //! This module provides access to Dear ImGui's platform IO system, which handles
 //! multi-viewport and platform-specific functionality.
+//!
+//! Main viewport identity is a property of the currently bound Context, not a stable numeric ID.
+//! Use [`Viewport::is_main`] while inspecting a live viewport.
+//!
+//! ```compile_fail
+//! use dear_imgui_rs::platform_io::MAIN_VIEWPORT_ID;
+//! ```
 
 // Multi-viewport requires platform callbacks (C calling back into Rust). On the
 // web (wasm32 import-style build), this is not supported yet, so we currently
@@ -23,15 +30,9 @@ mod render_state;
 mod renderer_callbacks;
 #[cfg(test)]
 mod tests;
-mod textures;
 
 pub use core::PlatformIo;
 pub use viewport::Viewport;
-
-/// Dear ImGui's stable identifier for the application-owned main viewport.
-///
-/// Unlike viewport flags, this identity does not change when multi-viewport support becomes active.
-pub const MAIN_VIEWPORT_ID: crate::Id = crate::Id(0x1111_1111);
 
 #[cfg(feature = "multi-viewport")]
 pub(crate) use accessors::assert_monitor_contract;

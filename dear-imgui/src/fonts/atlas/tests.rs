@@ -621,7 +621,7 @@ fn owned_atlas_rejects_legacy_to_managed_after_adding_another_font() {
 }
 
 #[test]
-fn owned_atlas_rejects_managed_to_legacy_without_preloading() {
+fn owned_atlas_keeps_managed_mode_for_the_context_lifetime() {
     let mut ctx = crate::Context::create();
     let _consumer = ctx
         .create_renderer_consumer()
@@ -641,8 +641,10 @@ fn owned_atlas_rejects_managed_to_legacy_without_preloading() {
     assert!(result.is_err());
 
     assert!(ctx.font_atlas().build());
-    ctx.frame().text("legacy after preload");
-    assert!(ctx.render().valid());
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = ctx.frame();
+    }));
+    assert!(result.is_err());
 }
 
 #[test]
@@ -680,82 +682,178 @@ fn shared_atlas_updates_once_per_context_frame_and_has_one_owner() {
 }
 
 #[test]
-fn shared_atlas_texture_binding_waits_for_the_final_context_before_invalidation() {
+fn shared_atlas_is_legacy_only_until_one_context_remains() {
     let shared_atlas = SharedFontAtlas::create();
     let raw = shared_atlas.as_ptr();
     let mut ctx_a = crate::Context::create_with_shared_font_atlas(shared_atlas.clone());
-    let consumer_a = ctx_a
-        .create_renderer_consumer()
-        .expect("context A's managed renderer consumer should attach");
-    let _ = ctx_a.font_atlas().add_font_default(None);
+    assert!(ctx_a.font_atlas().build());
     ctx_a.io_mut().set_display_size([128.0, 128.0]);
     ctx_a.io_mut().set_delta_time(1.0 / 60.0);
-    ctx_a
-        .io_mut()
-        .set_backend_flags(crate::BackendFlags::RENDERER_HAS_TEXTURES);
-    ctx_a.frame().text("context A");
-    let mut rendered_a = ctx_a.render();
-    let created = rendered_a
-        .texture_requests()
-        .iter()
-        .find(|request| {
-            matches!(
-                request.texture(),
-                crate::render::SnapshotTextureId::FontAtlas { .. }
-            )
-        })
-        .expect("the shared atlas should request its initial upload")
-        .uploaded(crate::TextureId::new(123))
-        .unwrap();
-    rendered_a.reconcile_texture_feedback([created]).unwrap();
-    drop(rendered_a);
+    ctx_a.frame().text("legacy context A");
+    let _ = ctx_a.render();
     let suspended_a = ctx_a.suspend();
 
     let mut ctx_b = crate::Context::create_with_shared_font_atlas(shared_atlas.clone());
-    let consumer_b = ctx_b
-        .create_renderer_consumer()
-        .expect("context B's managed renderer consumer should attach");
     ctx_b.io_mut().set_display_size([128.0, 128.0]);
     ctx_b.io_mut().set_delta_time(1.0 / 60.0);
-    ctx_b
-        .io_mut()
-        .set_backend_flags(crate::BackendFlags::RENDERER_HAS_TEXTURES);
-    ctx_b.frame().text("context B");
-    let mut rendered_b = ctx_b.render();
-    let updated = rendered_b
-        .texture_requests()
-        .iter()
-        .find(|request| {
-            matches!(
-                request.texture(),
-                crate::render::SnapshotTextureId::FontAtlas { .. }
-            )
-        })
-        .expect("the second Context should receive the shared atlas update")
-        .uploaded(crate::TextureId::new(123))
-        .unwrap();
-    rendered_b.reconcile_texture_feedback([updated]).unwrap();
-    drop(rendered_b);
-    assert_eq!(unsafe { (*raw).RefCount }, 2);
+    ctx_b.frame().text("legacy context B");
+    let _ = ctx_b.render();
+    let builder = unsafe { (*raw).Builder };
+    let frame_count = unsafe { (*builder).FrameCount };
+    let texture = unsafe { (*raw).TexData };
+    let status = unsafe { (*texture).Status };
+    let texture_id = unsafe { (*texture).TexID };
 
-    assert_eq!(ctx_b.reset_renderer_texture_bindings(&consumer_b), Ok(0));
-    let shared_texture = unsafe { crate::TextureData::from_raw_ref((*raw).TexData) };
-    assert_eq!(shared_texture.status(), crate::TextureStatus::OK);
-    assert_eq!(shared_texture.tex_id(), crate::TextureId::new(123));
+    assert!(matches!(
+        ctx_b.create_renderer_consumer(),
+        Err(
+            crate::render::RendererConsumerError::SharedFontAtlasRequiresExclusiveContext {
+                registered_contexts: 2,
+            }
+        )
+    ));
+    assert_eq!(unsafe { (*builder).FrameCount }, frame_count);
+    assert_eq!(unsafe { (*texture).Status }, status);
+    assert_eq!(unsafe { (*texture).TexID }, texture_id);
 
     drop(ctx_b);
-    assert_eq!(unsafe { (*raw).RefCount }, 1);
-    let mut ctx_a = suspended_a
-        .activate()
-        .expect("the first shared-atlas context should reactivate");
-    assert_eq!(ctx_a.reset_renderer_texture_bindings(&consumer_a), Ok(1));
-    let invalidated = unsafe { crate::TextureData::from_raw_ref((*raw).TexData) };
-    assert_eq!(invalidated.status(), crate::TextureStatus::WantCreate);
-    assert!(invalidated.tex_id().is_null());
-    assert!(invalidated.backend_user_data().is_null());
+    let mut ctx_a = suspended_a.activate().expect("context A should reactivate");
+    ctx_a.font_atlas().clear();
+    let _ = ctx_a.font_atlas().add_font_default(None);
+    let _consumer = ctx_a
+        .create_renderer_consumer()
+        .expect("the remaining sole Context may attach a managed renderer");
+    ctx_a
+        .io_mut()
+        .set_backend_flags(crate::BackendFlags::RENDERER_HAS_TEXTURES);
+    ctx_a.frame().text("sole managed context");
+    assert!(ctx_a.render().valid());
+}
 
-    drop(ctx_a);
-    drop(shared_atlas);
+#[test]
+fn managed_shared_atlas_rejects_a_second_context_before_native_creation() {
+    let shared_atlas = SharedFontAtlas::create();
+    let raw = shared_atlas.as_ptr();
+    let mut first = crate::Context::create_with_shared_font_atlas(shared_atlas.clone());
+    let _consumer = first
+        .create_renderer_consumer()
+        .expect("the sole Context should attach");
+    let suspended = first.suspend();
+
+    assert!(matches!(
+        crate::Context::try_create_with_shared_font_atlas(shared_atlas.clone()),
+        Err(crate::ImGuiError::SharedFontAtlasManaged)
+    ));
+    assert_eq!(unsafe { (*raw).RefCount }, 1);
+
+    let mut first = suspended
+        .activate()
+        .expect("the first Context remains usable");
+    let _ = first.font_atlas().add_font_default(None);
+    first.io_mut().set_display_size([128.0, 128.0]);
+    first.io_mut().set_delta_time(1.0 / 60.0);
+    first
+        .io_mut()
+        .set_backend_flags(crate::BackendFlags::RENDERER_HAS_TEXTURES);
+    first.frame().text("still usable");
+    assert!(first.render().valid());
+}
+
+#[test]
+fn shared_atlas_assigns_a_fresh_managed_namespace_after_reentry() {
+    fn capture_namespace(
+        context: &mut crate::Context,
+        consumer: &crate::render::RendererConsumer,
+    ) -> u64 {
+        context.io_mut().set_display_size([128.0, 128.0]);
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context
+            .io_mut()
+            .set_backend_flags(crate::BackendFlags::RENDERER_HAS_TEXTURES);
+        context.frame().text("managed namespace");
+        let rendered = context.render();
+        let namespace = rendered
+            .texture_requests()
+            .iter()
+            .find_map(|request| match request.texture() {
+                crate::render::SnapshotTextureId::FontAtlas { stamp, .. } => Some(stamp),
+                crate::render::SnapshotTextureId::User(_) => None,
+            })
+            .expect("managed atlas should emit a texture request");
+        drop(rendered);
+        context
+            .prepare_renderer_texture_reset(consumer)
+            .unwrap()
+            .commit();
+        namespace
+    }
+
+    let shared_atlas = SharedFontAtlas::create();
+    let first_namespace = {
+        let mut context = crate::Context::create_with_shared_font_atlas(shared_atlas.clone());
+        let consumer = context.create_renderer_consumer().unwrap();
+        let _ = context.font_atlas().add_font_default(None);
+        capture_namespace(&mut context, &consumer)
+    };
+    let second_namespace = {
+        let mut context = crate::Context::create_with_shared_font_atlas(shared_atlas.clone());
+        let consumer = context.create_renderer_consumer().unwrap();
+        capture_namespace(&mut context, &consumer)
+    };
+    assert_ne!(first_namespace, second_namespace);
+}
+
+#[test]
+fn shared_atlas_rejects_reentry_when_a_custom_renderer_skips_reset() {
+    let shared_atlas = SharedFontAtlas::create();
+    let raw = shared_atlas.as_ptr();
+    let first_texture;
+
+    {
+        let mut context = crate::Context::create_with_shared_font_atlas(shared_atlas.clone());
+        let _ = context.font_atlas().add_font_default(None);
+        let _consumer = context.create_renderer_consumer().unwrap();
+        context.prepare_frame(
+            crate::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0).renderer_has_textures(),
+        );
+        context.frame().text("first managed renderer");
+        let mut rendered = context.render();
+        assert!(rendered.texture_requests().iter().any(|request| matches!(
+            request.texture(),
+            crate::render::SnapshotTextureId::FontAtlas { .. }
+        )));
+        let feedback = rendered
+            .texture_requests()
+            .iter()
+            .enumerate()
+            .map(|(index, request)| match request.operation() {
+                crate::render::TextureOp::Create { .. }
+                | crate::render::TextureOp::Update { .. } => request
+                    .uploaded(crate::TextureId::new(4_000 + index as u64))
+                    .unwrap(),
+                crate::render::TextureOp::Destroy => request.destroyed().unwrap(),
+            })
+            .collect::<Vec<_>>();
+        rendered.reconcile_texture_feedback(feedback).unwrap();
+        drop(rendered);
+
+        first_texture = unsafe { (*raw).TexData };
+        assert!(!first_texture.is_null());
+        assert_eq!(unsafe { (*first_texture).Status }, sys::ImTextureStatus_OK);
+        assert_ne!(unsafe { (*first_texture).TexID }, 0 as sys::ImTextureID);
+    }
+
+    assert_eq!(
+        unsafe { (*first_texture).Status },
+        sys::ImTextureStatus_OK,
+        "Context teardown must not clear a binding without renderer release proof"
+    );
+    assert_ne!(unsafe { (*first_texture).TexID }, 0 as sys::ImTextureID);
+    assert!(matches!(
+        crate::Context::try_create_with_shared_font_atlas(shared_atlas.clone()),
+        Err(crate::ImGuiError::SharedFontAtlasRendererReleasePending)
+    ));
+    assert_eq!(unsafe { (*raw).RefCount }, 0);
 }
 
 #[test]
@@ -827,7 +925,7 @@ fn shared_atlas_rejects_mixed_renderer_texture_capabilities() {
 }
 
 #[test]
-fn shared_atlas_resets_renderer_capability_after_the_last_context_unregisters() {
+fn shared_atlas_allows_mode_change_after_a_committed_renderer_reset() {
     let shared_atlas = SharedFontAtlas::create();
     let raw = shared_atlas.as_ptr();
 
@@ -843,18 +941,23 @@ fn shared_atlas_resets_renderer_capability_after_the_last_context_unregisters() 
 
     {
         let mut managed = crate::Context::create_with_shared_font_atlas(shared_atlas.clone());
-        let _consumer = managed
-            .create_renderer_consumer()
-            .expect("the managed renderer consumer should attach");
         managed.font_atlas().clear();
         let _ = managed.font_atlas().add_font_default(None);
+        let consumer = managed
+            .create_renderer_consumer()
+            .expect("the managed renderer consumer should attach");
         managed.io_mut().set_display_size([128.0, 128.0]);
         managed.io_mut().set_delta_time(1.0 / 60.0);
         let backend_flags =
             managed.io().backend_flags() | crate::BackendFlags::RENDERER_HAS_TEXTURES;
         managed.io_mut().set_backend_flags(backend_flags);
         managed.frame().text("managed renderer");
-        let _ = managed.render();
+        let rendered = managed.render();
+        drop(rendered);
+        managed
+            .prepare_renderer_texture_reset(&consumer)
+            .unwrap()
+            .commit();
     }
     assert_eq!(unsafe { (*raw).RefCount }, 0);
 }
@@ -890,7 +993,7 @@ fn shared_atlas_requires_legacy_preloading_after_managed_use() {
 
     {
         let mut managed = crate::Context::create_with_shared_font_atlas(shared_atlas.clone());
-        let _consumer = managed
+        let consumer = managed
             .create_renderer_consumer()
             .expect("the managed renderer consumer should attach");
         let _ = managed.font_atlas().add_font_default(None);
@@ -900,7 +1003,12 @@ fn shared_atlas_requires_legacy_preloading_after_managed_use() {
             .io_mut()
             .set_backend_flags(crate::BackendFlags::RENDERER_HAS_TEXTURES);
         managed.frame().text("managed atlas");
-        let _ = managed.render();
+        let rendered = managed.render();
+        drop(rendered);
+        managed
+            .prepare_renderer_texture_reset(&consumer)
+            .unwrap()
+            .commit();
     }
 
     let mut legacy = crate::Context::create_with_shared_font_atlas(shared_atlas);

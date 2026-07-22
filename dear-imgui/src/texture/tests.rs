@@ -172,3 +172,24 @@ fn initial_pixel_upload_preserves_the_create_request() {
     texture.set_data(&[4, 3, 2, 1]);
     assert_eq!(texture.status(), TextureStatus::WantUpdates);
 }
+
+#[test]
+fn full_updates_reject_unrepresentable_dimensions_before_copying() {
+    let width = u16::MAX as u32 + 1;
+    let mut texture = OwnedTextureData::new();
+    texture.create(TextureFormat::Alpha8, width, 1);
+    texture.set_data(&vec![1; width as usize]);
+    assert_eq!(texture.status(), TextureStatus::WantCreate);
+
+    unsafe {
+        // The test acts as the only renderer owner for this unregistered texture.
+        texture.set_status(TextureStatus::OK);
+    }
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        texture.set_data(&vec![2; width as usize]);
+    }));
+
+    assert!(result.is_err());
+    assert_eq!(texture.status(), TextureStatus::OK);
+    assert!(texture.pixels().unwrap().iter().all(|pixel| *pixel == 1));
+}

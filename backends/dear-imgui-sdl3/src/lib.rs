@@ -81,8 +81,9 @@ use dear_imgui_rs::ContextBinding;
     feature = "sdlrenderer3-renderer",
     feature = "sdlgpu3-renderer"
 ))]
-use dear_imgui_rs::render::{DrawData, RenderedFrame, RendererConsumer};
+use dear_imgui_rs::render::{DrawData, RenderedFrame};
 #[cfg(any(
+    test,
     feature = "opengl3-renderer",
     feature = "sdlrenderer3-renderer",
     feature = "sdlgpu3-renderer"
@@ -115,7 +116,7 @@ pub use self::backend::Sdl3PlatformBackend;
 pub use self::backend::Sdl3RendererBackend;
 #[cfg(feature = "sdlgpu3-renderer")]
 pub use self::backend::{SdlGpu3PreparedFrame, SdlGpu3RendererBackend};
-pub use self::core::Sdl3BackendError;
+pub use self::core::{Sdl3BackendError, Sdl3OpenGlViewportSwapInterval};
 use self::core::{ffi, sdl3_new_frame_impl, with_context};
 #[cfg(feature = "opengl3-renderer")]
 use self::core::{init_opengl3_impl, new_frame_opengl3_impl, shutdown_opengl3_renderer_impl};
@@ -136,14 +137,13 @@ use self::core::{init_sdlgpu3_impl, new_frame_sdlgpu3_impl, shutdown_sdlgpu3_ren
     feature = "sdlrenderer3-renderer",
     feature = "sdlgpu3-renderer"
 ))]
-use self::renderer_textures::RendererTextureStore;
-use self::runtime::RuntimeRegistration;
 #[cfg(any(
     feature = "opengl3-renderer",
     feature = "sdlrenderer3-renderer",
     feature = "sdlgpu3-renderer"
 ))]
 use self::runtime::RuntimeState;
+use self::runtime::{NativeRendererKind, PlatformGraphicsKind, RuntimeRegistration};
 #[cfg(feature = "sdlrenderer3-renderer")]
 use self::viewport::init_for_canvas;
 use self::viewport::{

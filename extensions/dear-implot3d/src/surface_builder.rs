@@ -1,12 +1,13 @@
 use std::borrow::Cow;
 
 use crate::item_style::{Plot3DItemStyle, plot3d_spec_with_style};
-use crate::{
-    Item3DFlags, Plot3DDataLayout, Plot3DUi, Surface3DFlags, debug_before_plot, plot3d_spec_from,
-    surface_count_to_i32, sys,
+use crate::plots::{
+    Plot3DError, SurfaceGrid, SurfaceGridShape, SurfaceLabel, submit_surface_grid,
+    submit_surface_raw,
 };
+use crate::{Item3DFlags, Plot3DDataLayout, Plot3DUi, Surface3DFlags, plot3d_spec_from};
 
-/// Surface (grid) plot builder (f32 variant)
+/// Surface (grid) plot builder (f32 variant).
 pub struct Surface3DBuilder<'ui> {
     pub(crate) _ui: &'ui Plot3DUi<'ui>,
     pub(crate) label: Cow<'ui, str>,
@@ -26,57 +27,43 @@ impl<'ui> Surface3DBuilder<'ui> {
         self.scale_max = max;
         self
     }
+
     pub fn flags(mut self, flags: Surface3DFlags) -> Self {
         self.flags = flags;
         self
     }
-    pub fn plot(self) {
-        self._ui.with_bound_context(|| {
-            let x_count = match i32::try_from(self.xs.len()) {
-                Ok(v) => v,
-                Err(_) => return,
-            };
-            let y_count = match i32::try_from(self.ys.len()) {
-                Ok(v) => v,
-                Err(_) => return,
-            };
-            let expected = match self.xs.len().checked_mul(self.ys.len()) {
-                Some(v) => v,
-                None => return,
-            };
-            if self.zs.len() != expected {
-                return;
-            }
-            let label = self.label.as_ref();
-            let label = if label.contains('\0') {
-                "surface"
-            } else {
-                label
-            };
-            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-                let spec = plot3d_spec_with_style(
-                    self.style,
-                    self.flags.bits() | self.item_flags.bits(),
-                    Plot3DDataLayout::DEFAULT,
-                );
-                sys::ImPlot3D_PlotSurface_FloatPtr(
-                    label_ptr,
-                    self.xs.as_ptr(),
-                    self.ys.as_ptr(),
-                    self.zs.as_ptr(),
-                    x_count,
-                    y_count,
-                    self.scale_min,
-                    self.scale_max,
-                    spec,
-                );
-            })
-        })
+
+    /// Submit the surface after validating its complete grid shape.
+    #[must_use = "surface plot errors must be handled"]
+    pub fn plot(self) -> Result<(), Plot3DError> {
+        let Surface3DBuilder {
+            _ui,
+            label,
+            xs,
+            ys,
+            zs,
+            scale_min,
+            scale_max,
+            flags,
+            item_flags,
+            style,
+        } = self;
+
+        let label = SurfaceLabel::checked(label.as_ref())?;
+        let grid = SurfaceGrid::from_axes(xs, ys, zs)?;
+        submit_surface_grid(_ui, label, &grid, scale_min, scale_max, || {
+            plot3d_spec_with_style(
+                style,
+                flags.bits() | item_flags.bits(),
+                Plot3DDataLayout::DEFAULT,
+            )
+        });
+        Ok(())
     }
 }
 
 impl<'ui> Plot3DUi<'ui> {
-    /// Start a surface plot (f32)
+    /// Start a surface plot (f32) from X/Y grid axes.
     pub fn surface_f32(
         &'ui self,
         label: impl Into<Cow<'ui, str>>,
@@ -98,83 +85,34 @@ impl<'ui> Plot3DUi<'ui> {
         })
     }
 
-    /// Raw surface plot (f32) with an explicit data layout.
+    /// Submit a surface from already flattened, contiguous per-vertex arrays.
     ///
-    /// # Safety
+    /// `xs_flat`, `ys_flat`, and `zs` must each contain exactly `x_count * y_count` values. The
+    /// contiguous path does not accept an offset or stride; use [`Self::surface_f32_raw`] when
+    /// the native layout is intentionally non-contiguous.
     ///
-    /// `layout` must use the automatic or contiguous `f32` stride because this method creates its
-    /// own flattened coordinate arrays. The normalized offset may be any sample index.
-    pub unsafe fn surface_f32_raw<S: AsRef<str>>(
-        &self,
-        label: S,
-        xs: &[f32],
-        ys: &[f32],
-        zs: &[f32],
-        scale_min: f64,
-        scale_max: f64,
-        flags: Surface3DFlags,
-        layout: Plot3DDataLayout,
-    ) {
-        self.with_bound_context(|| {
-            debug_before_plot();
-            let x_count = xs.len();
-            let y_count = ys.len();
-            let Some(x_count_i32) = surface_count_to_i32(x_count) else {
-                return;
-            };
-            let Some(y_count_i32) = surface_count_to_i32(y_count) else {
-                return;
-            };
-            let expected = match x_count.checked_mul(y_count) {
-                Some(v) => v,
-                None => return,
-            };
-            if zs.len() != expected {
-                // Invalid grid: require zs to be x_count * y_count
-                return;
-            }
-
-            // Flatten xs/ys to per-vertex arrays expected by the C++ API (length = x_count * y_count)
-            let mut xs_flat = Vec::with_capacity(expected);
-            let mut ys_flat = Vec::with_capacity(expected);
-            for yi in 0..y_count {
-                for xi in 0..x_count {
-                    xs_flat.push(xs[xi]);
-                    ys_flat.push(ys[yi]);
-                }
-            }
-
-            let label = label.as_ref();
-            if label.contains('\0') {
-                return;
-            }
-            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-                let spec = plot3d_spec_from(flags.bits(), layout);
-                sys::ImPlot3D_PlotSurface_FloatPtr(
-                    label_ptr,
-                    xs_flat.as_ptr(),
-                    ys_flat.as_ptr(),
-                    zs.as_ptr(),
-                    x_count_i32,
-                    y_count_i32,
-                    scale_min,
-                    scale_max,
-                    spec,
-                );
-            })
-        })
-    }
-
-    /// Plot a surface with already flattened per-vertex X/Y arrays (no internal allocation)
+    /// ```no_run
+    /// use dear_implot3d::{Plot3DError, Plot3DUi, Surface3DFlags};
     ///
-    /// Use this when you already have per-vertex `xs_flat` and `ys_flat` of length `x_count * y_count`,
-    /// matching the layout of `zs`. This avoids per-frame allocations for large dynamic grids.
-    /// # Safety
-    ///
-    /// For every submitted grid index, `layout` must address an initialized, properly aligned
-    /// `f32` within each coordinate allocation. All three allocations must remain alive for this
-    /// call.
-    pub unsafe fn surface_f32_flat<S: AsRef<str>>(
+    /// fn submit(plot_ui: &Plot3DUi<'_>) -> Result<(), Plot3DError> {
+    ///     let xs = [0.0, 1.0, 0.0, 1.0];
+    ///     let ys = [0.0, 0.0, 1.0, 1.0];
+    ///     let zs = [0.0, 1.0, 1.0, 2.0];
+    ///     plot_ui.surface_f32_flat(
+    ///         "surface",
+    ///         &xs,
+    ///         &ys,
+    ///         &zs,
+    ///         2,
+    ///         2,
+    ///         0.0,
+    ///         0.0,
+    ///         Surface3DFlags::NONE,
+    ///     )
+    /// }
+    /// ```
+    #[must_use = "surface plot errors must be handled"]
+    pub fn surface_f32_flat<S: AsRef<str>>(
         &self,
         label: S,
         xs_flat: &[f32],
@@ -185,40 +123,66 @@ impl<'ui> Plot3DUi<'ui> {
         scale_min: f64,
         scale_max: f64,
         flags: Surface3DFlags,
+    ) -> Result<(), Plot3DError> {
+        let label = SurfaceLabel::checked(label.as_ref())?;
+        let grid = SurfaceGrid::from_flattened(xs_flat, ys_flat, zs, x_count, y_count)?;
+        submit_surface_grid(self, label, &grid, scale_min, scale_max, || {
+            plot3d_spec_from(flags.bits(), Plot3DDataLayout::DEFAULT)
+        });
+        Ok(())
+    }
+
+    /// Submit a surface with an explicitly arbitrary native data layout.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that every coordinate read performed by ImPlot3D from `xs`, `ys`,
+    /// and `zs` using `layout`, `x_count`, and `y_count` addresses initialized, properly aligned,
+    /// live `f32` values. The slices need not be exactly `x_count * y_count` elements because a
+    /// custom stride or offset may address a larger allocation.
+    ///
+    /// Calling this arbitrary-layout API without an `unsafe` block is rejected:
+    ///
+    /// ```compile_fail
+    /// use dear_implot3d::{Plot3DDataLayout, Plot3DUi, Surface3DFlags};
+    ///
+    /// fn submit(plot_ui: &Plot3DUi<'_>) {
+    ///     let values = [0.0; 4];
+    ///     let _ = plot_ui.surface_f32_raw(
+    ///         "surface",
+    ///         &values,
+    ///         &values,
+    ///         &values,
+    ///         2,
+    ///         2,
+    ///         0.0,
+    ///         0.0,
+    ///         Surface3DFlags::NONE,
+    ///         Plot3DDataLayout::DEFAULT,
+    ///     );
+    /// }
+    /// ```
+    #[must_use = "surface plot errors must be handled"]
+    pub unsafe fn surface_f32_raw<S: AsRef<str>>(
+        &self,
+        label: S,
+        xs: &[f32],
+        ys: &[f32],
+        zs: &[f32],
+        x_count: usize,
+        y_count: usize,
+        scale_min: f64,
+        scale_max: f64,
+        flags: Surface3DFlags,
         layout: Plot3DDataLayout,
-    ) {
-        self.with_bound_context(|| {
-            debug_before_plot();
-            let Some(x_count_i32) = surface_count_to_i32(x_count) else {
-                return;
-            };
-            let Some(y_count_i32) = surface_count_to_i32(y_count) else {
-                return;
-            };
-            let Some(expected) = x_count.checked_mul(y_count) else {
-                return;
-            };
-            if xs_flat.len() != expected || ys_flat.len() != expected || zs.len() != expected {
-                return;
-            }
-            let label = label.as_ref();
-            if label.contains('\0') {
-                return;
-            }
-            dear_imgui_rs::with_scratch_txt(label, |label_ptr| unsafe {
-                let spec = plot3d_spec_from(flags.bits(), layout);
-                sys::ImPlot3D_PlotSurface_FloatPtr(
-                    label_ptr,
-                    xs_flat.as_ptr(),
-                    ys_flat.as_ptr(),
-                    zs.as_ptr(),
-                    x_count_i32,
-                    y_count_i32,
-                    scale_min,
-                    scale_max,
-                    spec,
-                );
-            })
-        })
+    ) -> Result<(), Plot3DError> {
+        let label = SurfaceLabel::checked(label.as_ref())?;
+        let shape = SurfaceGridShape::checked(x_count, y_count)?;
+        unsafe {
+            submit_surface_raw(
+                self, label, xs, ys, zs, shape, scale_min, scale_max, flags, layout,
+            );
+        }
+        Ok(())
     }
 }

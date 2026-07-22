@@ -51,8 +51,9 @@ it or acknowledging the request.
 `AshRenderer::cmd_draw` returns the highest pending `TextureRetirementBatch`. The safe
 `wait_for_texture_retirements(batch)` path waits for device idle and only then releases the Vulkan
 resources. The next frame can then acknowledge Dear ImGui's repeated destroy request.
-`pending_texture_retirement()` recovers the current token if command recording returns an error
-after retirement began.
+`pending_texture_retirement() -> RendererResult<Option<TextureRetirementBatch>>` recovers the
+current token if command recording returns an error after retirement began. Resource and texture
+entries consistently return `RendererDestroyed` after shutdown, before touching Vulkan.
 
 Advanced render loops may instead associate the batch with synchronization submitted after all
 relevant Ash uploads, main-viewport commands, and secondary-viewport commands. Once every relevant
@@ -70,16 +71,25 @@ Call `AshRenderer::shutdown(&mut imgui)` before dropping a single-viewport Conte
 Shutdown waits for device idle, destroys active and retiring GPU textures, resets Context-owned
 renderer bindings, and then releases the renderer consumer. In multi-viewport mode, call the
 owning renderer runtime's `shutdown(&mut imgui)` before shutting down the platform runtime.
+Dropping a renderer while its Context is still alive deliberately does not release Vulkan
+resources: `Drop` cannot validate and commit the Context texture-reset transaction. Explicit
+shutdown is therefore required for deterministic cleanup; after native Context teardown, `Drop`
+may release any remaining Vulkan resources best-effort.
 
-That order is significant: `Context::reset_renderer_texture_bindings` is a
-renderer-reset acknowledgement and may run only after the corresponding Vulkan
-resources are actually gone. Finishing CPU command recording is not enough.
+Shutdown prepares the Context texture reset while the complete Vulkan texture map is still intact.
+If preparation or a retryable device wait fails, no binding is reset and the renderer keeps its
+consumer for a later retry. `ERROR_DEVICE_LOST` is terminal: Ash releases the no-longer-reachable
+map, commits the prepared reset, and then returns the original device-loss error.
+
+That order is significant: `Context::prepare_renderer_texture_reset` validates an idle renderer
+before resource release, and its returned permit may be committed only after the corresponding
+Vulkan resources are actually gone. Finishing CPU command recording is not enough.
 
 ## External textures & custom sampler
 
 To display an existing Vulkan image via the legacy `TextureId` path:
 
-- `AshRenderer::register_external_texture_with_sampler(image_view, sampler) -> TextureId`
+- `AshRenderer::register_external_texture_with_sampler(image_view, sampler) -> RendererResult<TextureId>`
 - `AshRenderer::update_external_texture_view(texture_id, image_view) -> RendererResult<bool>`
 - `AshRenderer::update_external_texture_sampler(texture_id, sampler) -> RendererResult<bool>`
 - `AshRenderer::unregister_texture(texture_id) -> RendererResult<()>` (frees the descriptor set only for textures
@@ -108,12 +118,14 @@ initialize `Sdl3PlatformBackend::init_for_vulkan` before attaching the renderer 
 
 ```rust,no_run
 # use ash::vk;
-# use dear_imgui_ash::multi_viewport::VulkanViewportConfig;
+# use dear_imgui_ash::multi_viewport::{ViewportSwapchainPolicy, VulkanViewportConfig};
 # fn config(
 #     entry: ash::Entry,
 #     instance: ash::Instance,
 #     physical_device: vk::PhysicalDevice,
 #     main_surface: vk::SurfaceKHR,
+#     main_surface_format: vk::SurfaceFormatKHR,
+#     main_present_mode: vk::PresentModeKHR,
 #     present_queue: vk::Queue,
 #     graphics_family: u32,
 #     present_family: u32,
@@ -126,9 +138,21 @@ VulkanViewportConfig {
     present_queue,
     graphics_queue_family_index: graphics_family,
     present_queue_family_index: present_family,
+    swapchain_policy: ViewportSwapchainPolicy::from_main_surface(
+        main_surface_format,
+        main_present_mode,
+    ),
 }
 # }
 ```
+
+`swapchain_policy` is resolved for every secondary surface during creation and recreation.
+`from_main_surface` requires the main swapchain's complete format/color-space pair and preserves
+its presentation intent: `FIFO`/`FIFO_RELAXED` select automatic VSync, while other modes select
+automatic no-VSync with portable fallback. Use `SurfaceFormatPolicy::AutoSrgb` when secondary
+surfaces may not expose the main pair, or `PresentModePolicy::Exact` when fallback is not allowed.
+Unsupported exact choices return `SurfaceSupportError` instead of silently selecting a different
+swapchain configuration.
 
 All handles must have one device lineage: the instance owns the physical device and
 `validation_surface`; `AshRenderer`'s device was created from that physical device with
@@ -153,7 +177,7 @@ Initialize the owning Winit platform runtime first, then consume the renderer in
 ```rust,no_run
 use dear_imgui_ash::{AshRenderer, multi_viewport as ash_mvp};
 use dear_imgui_rs::Context;
-use dear_imgui_winit::multi_viewport as winit_mvp;
+use dear_imgui_winit::{HiDpiMode, WinitPlatform, multi_viewport as winit_mvp};
 use std::sync::Arc;
 
 # fn attach_viewports(
@@ -162,16 +186,18 @@ use std::sync::Arc;
 #     main_window: Arc<winit::window::Window>,
 #     config: ash_mvp::VulkanViewportConfig,
 # ) -> Result<
-#     (winit_mvp::WinitPlatformRuntime, ash_mvp::WinitViewportRuntime),
+#     (WinitPlatform, winit_mvp::WinitPlatformRuntime, ash_mvp::WinitViewportRuntime),
 #     Box<dyn std::error::Error>,
 # > {
 imgui.enable_multi_viewport();
-let platform = winit_mvp::WinitPlatformRuntime::new(imgui, main_window)?;
+let mut platform = WinitPlatform::new(imgui)?;
+platform.attach_window(Arc::clone(&main_window), HiDpiMode::Default, imgui)?;
+let runtime = winit_mvp::WinitPlatformRuntime::new(imgui, &platform)?;
 
 // SAFETY: all raw handles and queue-family indices in config belong to the
 // renderer's logical-device lineage. The wrapper owns renderer address stability.
 let renderer = unsafe { ash_mvp::WinitViewportRuntime::attach(imgui, renderer, config)? };
-# Ok((platform, renderer))
+# Ok((platform, runtime, renderer))
 # }
 ```
 
@@ -194,9 +220,20 @@ imgui.render_platform_windows_default();
 The Ash runtime owns the renderer in stable boxed storage and claims only the five `Renderer_*`
 slots. The wrapper itself may be moved safely. Attachment refuses occupied renderer callbacks,
 foreign `RendererUserData`, an already registered renderer, missing platform lifecycle callbacks,
-and secondary platform windows created before renderer registration. It never overwrites platform
-slots. Callback panics, reentry, Vulkan failures, and ownership drift are contained and reported by
-the next Rust entry point such as `poll_fault` or `cmd_draw`.
+an existing `RENDERER_HAS_VIEWPORTS` capability, and secondary platform windows created before
+renderer registration. It never overwrites platform slots. Callback panics, reentry, Vulkan
+failures, and ownership drift are contained and reported by the next Rust entry point such as
+`poll_fault` or `cmd_draw`. Replacing any claimed renderer callback immediately clears
+`RENDERER_HAS_VIEWPORTS`, so a partial foreign callback table is never advertised as a usable
+renderer backend. Every Rust and C callback entry also requires Ash's renderer capability, the
+platform capability, and both platform create/destroy callbacks to remain present. Losing any
+dependency records a typed fault and stops callback work before another Vulkan command is issued.
+
+A failed `Renderer_CreateWindow` remains registered until its matching destroy callback. The
+runtime reasserts `PlatformRequestClose` after ImGui clears the same-frame request at the end of
+`UpdatePlatformWindows()`. Once a swapchain image has been acquired, every fallible wait, command
+buffer, draw, fence, and submit step either completes or performs an idle-and-rebuild recovery;
+the acquired image and binary semaphore are never silently carried into the next frame.
 
 Shut down the renderer runtime before the platform backend:
 
@@ -210,7 +247,7 @@ Shut down the renderer runtime before the platform backend:
 #     imgui: &mut Context,
 # ) -> Result<(), Box<dyn std::error::Error>> {
 renderer.shutdown(imgui)?;
-platform.shutdown()?;
+platform.shutdown(imgui)?;
 # Ok(())
 # }
 ```
@@ -251,8 +288,8 @@ textures, the shader gamma path will not match (you'll effectively decode twice)
 
 | Item          | Version |
 |---------------|---------|
-| Crate         | 0.16.0  |
-| dear-imgui-rs | 0.16.0  |
+| Crate         | 0.16.0-alpha.1  |
+| dear-imgui-rs | 0.16.0-alpha.1  |
 | ash           | 0.38    |
 | ash-window    | 0.13 (`multi-viewport-winit`) |
 

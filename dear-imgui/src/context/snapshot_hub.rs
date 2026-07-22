@@ -104,12 +104,18 @@ impl SnapshotHub {
         consumer: &RendererConsumer,
         pending: PendingSnapshot,
         registry: &mut ManagedTextureRegistry,
+        atlas: &FontAtlasSnapshotTarget,
     ) -> Result<FrameSnapshot, SnapshotError> {
         let generation = self.validate_consumer(consumer, ConsumerMode::Detached)?;
         let sequence = self.allocate_epoch()?;
         let epoch = SnapshotEpoch::new(self.context, generation, sequence);
         let referenced = pending.referenced_user_textures();
         registry.record_snapshot_references(&referenced, sequence.get())?;
+        for request in &pending.texture_requests {
+            if matches!(request.texture, SnapshotTextureId::FontAtlas { .. }) {
+                atlas.record_request_reference(request.texture, sequence.get());
+            }
+        }
         let (snapshot, expected) = pending.into_frame(epoch, self.sender.clone());
         let previous = self.outstanding.insert(
             sequence.get(),
@@ -126,6 +132,7 @@ impl SnapshotHub {
     pub(super) fn begin_synchronous(
         &mut self,
         pending: Vec<PendingTextureRequest>,
+        atlas: &FontAtlasSnapshotTarget,
     ) -> Result<(SnapshotEpoch, Vec<TextureRequest>), RendererConsumerError> {
         let generation = self.claim_active_mode(ConsumerMode::Synchronous)?;
         if !self.outstanding.is_empty() {
@@ -133,6 +140,11 @@ impl SnapshotHub {
         }
         let sequence = self.allocate_epoch()?;
         let epoch = SnapshotEpoch::new(self.context, generation, sequence);
+        for request in &pending {
+            if matches!(request.texture, SnapshotTextureId::FontAtlas { .. }) {
+                atlas.record_request_reference(request.texture, sequence.get());
+            }
+        }
         let (requests, expected) = finalize_texture_requests(pending, epoch);
         self.outstanding.insert(
             sequence.get(),
@@ -294,10 +306,10 @@ impl SnapshotHub {
     pub(super) fn poll(
         &mut self,
         registry: &mut ManagedTextureRegistry,
-        atlas: FontAtlasSnapshotTarget,
+        atlas: &FontAtlasSnapshotTarget,
     ) -> Result<SnapshotCompletionProgress, RendererConsumerError> {
         self.drain_messages();
-        self.advance(registry, &atlas)
+        self.advance(registry, atlas)
     }
 
     fn advance(
@@ -309,6 +321,7 @@ impl SnapshotHub {
             watermark: self.completion_watermark,
             ..Default::default()
         };
+        let previous_watermark = self.completion_watermark;
 
         while let Some((&sequence, outstanding)) = self.outstanding.first_key_value() {
             if outstanding.completion.is_none() {
@@ -345,7 +358,10 @@ impl SnapshotHub {
             progress.watermark = sequence;
         }
 
-        registry.reap_destroyed(self.completion_watermark);
+        if self.completion_watermark != previous_watermark {
+            registry.reap_destroyed(self.completion_watermark);
+            atlas.prune_tombstones(self.completion_watermark);
+        }
         if matches!(self.phase, ConsumerPhase::Draining(_)) && self.outstanding.is_empty() {
             self.phase = ConsumerPhase::Unbound;
         }
@@ -489,14 +505,53 @@ fn validate_feedback(
     Ok(())
 }
 
+/// One-use permission to reset Context-owned renderer texture bindings.
+///
+/// [`Context::prepare_renderer_texture_reset`] validates that the matching renderer consumer is
+/// idle before any GPU resource is released. The permit then keeps both the Context and consumer
+/// borrowed while the backend destroys its texture map. Call [`Self::commit`] only after those GPU
+/// resources are no longer reachable. Dropping the permit without committing leaves every native
+/// binding unchanged.
+#[must_use = "destroy the renderer texture map, then commit this reset permit"]
+pub struct RendererTextureReset<'context, 'consumer> {
+    context: &'context mut Context,
+    _consumer: &'consumer RendererConsumer,
+    watermark: u64,
+}
+
+impl RendererTextureReset<'_, '_> {
+    /// Clear the bindings covered by this already-validated reset transaction.
+    ///
+    /// This operation is infallible because the permit exclusively borrows the Context, keeps the
+    /// validated consumer alive, and was created only after all of its epochs completed.
+    #[must_use]
+    pub fn commit(self) -> usize {
+        let binding = self.context.binding();
+        binding.with_bound_context(|| self.commit_unlocked())
+    }
+
+    fn commit_unlocked(self) -> usize {
+        self.context
+            .commit_renderer_texture_reset_unlocked(self.watermark)
+    }
+}
+
 impl Context {
     /// Register the sole renderer consumer for this Context.
     ///
     /// A consumer generation is claimed by its first synchronous render or detached snapshot and
     /// cannot switch modes. Dropping it begins draining any outstanding detached epochs.
+    ///
+    /// A [`SharedFontAtlas`](crate::SharedFontAtlas) must be registered with exactly one context
+    /// before it can enter managed renderer mode. If multiple contexts still share the atlas, this
+    /// returns [`RendererConsumerError::SharedFontAtlasRequiresExclusiveContext`]. Multiple-context
+    /// shared atlases remain available to legacy renderer-managed texture handling.
     pub fn create_renderer_consumer(&mut self) -> Result<RendererConsumer, RendererConsumerError> {
         let _guard = CTX_MUTEX.lock();
         self.assert_current_context("Context::create_renderer_consumer()");
+        let io = self.io_ptr("Context::create_renderer_consumer()");
+        let atlas = unsafe { (*io).Fonts };
+        crate::fonts::claim_font_atlas_managed_renderer(atlas, self.raw)?;
         let _ = self.poll_snapshot_completions()?;
         self.snapshot_hub.attach_consumer()
     }
@@ -507,32 +562,95 @@ impl Context {
     ) -> Result<SnapshotCompletionProgress, RendererConsumerError> {
         let _guard = CTX_MUTEX.lock();
         self.assert_current_context("Context::poll_snapshot_completions()");
-        let atlas = self.font_atlas_snapshot_target(false);
+        let atlas = self.font_atlas_snapshot_target();
+        self.poll_snapshot_completions_with_target(&atlas)
+    }
+
+    fn poll_snapshot_completions_with_target(
+        &mut self,
+        atlas: &FontAtlasSnapshotTarget,
+    ) -> Result<SnapshotCompletionProgress, RendererConsumerError> {
         self.snapshot_hub
             .poll(&mut self.texture_registry.borrow_mut(), atlas)
     }
 
-    /// Clear native bindings after this renderer has destroyed all of its GPU textures.
+    /// Validate an idle renderer generation before destroying its complete GPU texture map.
     ///
-    /// The consumer must belong to this Context and have no outstanding synchronous frame or
-    /// detached snapshot. Active textures will be requested again on a later frame; retiring
-    /// textures receive a shutdown acknowledgement and can be reclaimed once their watermark is
-    /// complete.
-    pub fn reset_renderer_texture_bindings(
+    /// This two-phase transaction is the only safe renderer-reset path. Prepare the reset while
+    /// the renderer is still intact, release every GPU resource keyed by this consumer, then call
+    /// [`RendererTextureReset::commit`]. If preparation fails, the backend can return without
+    /// partially destroying its resource map. Dropping the permit without commit does not mutate
+    /// native texture state.
+    ///
+    /// A single-call reset is intentionally unavailable because the Context cannot prove that an
+    /// external renderer released its GPU map first:
+    ///
+    /// ```compile_fail
+    /// use dear_imgui_rs::Context;
+    ///
+    /// let mut context = Context::create();
+    /// let consumer = context.create_renderer_consumer().unwrap();
+    /// let _ = context.reset_renderer_texture_bindings(&consumer);
+    /// ```
+    pub fn prepare_renderer_texture_reset<'context, 'consumer>(
+        &'context mut self,
+        consumer: &'consumer RendererConsumer,
+    ) -> Result<RendererTextureReset<'context, 'consumer>, RendererConsumerError> {
+        let _guard = CTX_MUTEX.lock();
+        self.prepare_renderer_texture_reset_unlocked(consumer)
+    }
+
+    /// Prepares a reset while `Context::drop` already owns the Context lock.
+    ///
+    /// The only caller is the phase-limited attachment capability. Not reacquiring the global
+    /// lock avoids recursive locking during Context teardown while retaining the ordinary public
+    /// transaction for all external renderers.
+    pub(super) fn prepare_renderer_texture_reset_during_teardown(
         &mut self,
         consumer: &RendererConsumer,
-    ) -> Result<usize, RendererConsumerError> {
-        let _guard = CTX_MUTEX.lock();
-        self.assert_current_context("Context::reset_renderer_texture_bindings()");
-        let _ = self.poll_snapshot_completions()?;
+    ) -> Result<u64, RendererConsumerError> {
+        self.validate_renderer_texture_reset_unlocked(consumer)
+    }
+
+    fn prepare_renderer_texture_reset_unlocked<'context, 'consumer>(
+        &'context mut self,
+        consumer: &'consumer RendererConsumer,
+    ) -> Result<RendererTextureReset<'context, 'consumer>, RendererConsumerError> {
+        let watermark = self.validate_renderer_texture_reset_unlocked(consumer)?;
+        Ok(RendererTextureReset {
+            context: self,
+            _consumer: consumer,
+            watermark,
+        })
+    }
+
+    fn validate_renderer_texture_reset_unlocked(
+        &mut self,
+        consumer: &RendererConsumer,
+    ) -> Result<u64, RendererConsumerError> {
+        self.assert_current_context("Context::prepare_renderer_texture_reset()");
+        let atlas = self.font_atlas_snapshot_target();
+        let _ = self.poll_snapshot_completions_with_target(&atlas)?;
         self.snapshot_hub.validate_idle_consumer(consumer)?;
-        let invalidated = self
-            .platform_io_mut()
-            .invalidate_renderer_texture_bindings();
-        let watermark = self.snapshot_hub.completion_watermark();
-        let mut registry = self.texture_registry.borrow_mut();
-        registry.acknowledge_renderer_reset(watermark);
-        Ok(invalidated)
+        Ok(self.snapshot_hub.completion_watermark())
+    }
+
+    pub(super) fn commit_renderer_texture_reset_during_teardown(
+        &mut self,
+        watermark: u64,
+    ) -> usize {
+        self.commit_renderer_texture_reset_unlocked(watermark)
+    }
+
+    fn commit_renderer_texture_reset_unlocked(&mut self, watermark: u64) -> usize {
+        self.assert_current_context("RendererTextureReset::commit()");
+        let atlas = self.font_atlas_snapshot_target();
+        let mut invalidated = atlas.reset_renderer_bindings();
+        invalidated += self
+            .texture_registry
+            .borrow_mut()
+            .reset_renderer_bindings(watermark);
+        invalidated
     }
 
     pub(super) fn poll_snapshot_completions_or_panic(&mut self, caller: &str) {
@@ -546,29 +664,39 @@ impl Context {
         consumer: &RendererConsumer,
         draw_data: *const crate::render::DrawData,
     ) -> Result<FrameSnapshot, SnapshotError> {
-        let _ = self.poll_snapshot_completions()?;
-        let atlas = self.font_atlas_snapshot_target(true);
-        let pending = {
+        let atlas = self.font_atlas_snapshot_target();
+        let _ = self.poll_snapshot_completions_with_target(&atlas)?;
+        let mut pending = {
             let registry = self.texture_registry.borrow();
             let mut resolve = |native| registry.resolve_snapshot_texture(native, &atlas);
             capture_draw_data(unsafe { &*draw_data }, &mut resolve)?
         };
-        self.snapshot_hub
-            .begin_snapshot(consumer, pending, &mut self.texture_registry.borrow_mut())
+        self.texture_registry
+            .borrow_mut()
+            .track_snapshot_operations(&mut pending.texture_requests, &atlas)?;
+        self.snapshot_hub.begin_snapshot(
+            consumer,
+            pending,
+            &mut self.texture_registry.borrow_mut(),
+            &atlas,
+        )
     }
 
     pub(super) fn begin_synchronous_render(
         &mut self,
         draw_data: *const crate::render::DrawData,
     ) -> Result<(SnapshotEpoch, Vec<TextureRequest>), SnapshotError> {
-        let _ = self.poll_snapshot_completions()?;
-        let atlas = self.font_atlas_snapshot_target(true);
-        let pending = {
+        let atlas = self.font_atlas_snapshot_target();
+        let _ = self.poll_snapshot_completions_with_target(&atlas)?;
+        let mut pending = {
             let registry = self.texture_registry.borrow();
             let mut resolve = |native| registry.resolve_snapshot_texture(native, &atlas);
             capture_texture_requests_only(unsafe { &*draw_data }, &mut resolve)?
         };
-        Ok(self.snapshot_hub.begin_synchronous(pending)?)
+        self.texture_registry
+            .borrow_mut()
+            .track_snapshot_operations(&mut pending, &atlas)?;
+        Ok(self.snapshot_hub.begin_synchronous(pending, &atlas)?)
     }
 
     pub(crate) fn complete_synchronous_render(
@@ -576,7 +704,7 @@ impl Context {
         epoch: SnapshotEpoch,
         feedback: Vec<TextureFeedback>,
     ) -> Result<SnapshotCompletionProgress, RendererConsumerError> {
-        let atlas = self.font_atlas_snapshot_target(false);
+        let atlas = self.font_atlas_snapshot_target();
         self.snapshot_hub.complete_synchronous(
             epoch,
             feedback,
@@ -586,7 +714,7 @@ impl Context {
     }
 
     pub(crate) fn abandon_synchronous_render(&mut self, epoch: SnapshotEpoch) {
-        let atlas = self.font_atlas_snapshot_target(false);
+        let atlas = self.font_atlas_snapshot_target();
         self.snapshot_hub.abandon_synchronous(
             epoch,
             &mut self.texture_registry.borrow_mut(),
@@ -599,28 +727,32 @@ impl Context {
         &mut self,
         consumer: &RendererConsumer,
     ) -> Result<FrameSnapshot, SnapshotError> {
-        let _ = self.poll_snapshot_completions()?;
-        let atlas = self.font_atlas_snapshot_target(true);
+        let atlas = self.font_atlas_snapshot_target();
+        let _ = self.poll_snapshot_completions_with_target(&atlas)?;
         let platform_io_ptr = self.platform_io_ptr("Context::capture_platform_snapshot()");
         let platform_io =
             unsafe { crate::platform_io::PlatformIo::from_raw(platform_io_ptr.cast_const()) };
-        let pending = {
+        let mut pending = {
             let registry = self.texture_registry.borrow();
             let mut resolve = |native| registry.resolve_snapshot_texture(native, &atlas);
             capture_platform_io(platform_io, &mut resolve)?
         };
-        self.snapshot_hub
-            .begin_snapshot(consumer, pending, &mut self.texture_registry.borrow_mut())
+        self.texture_registry
+            .borrow_mut()
+            .track_snapshot_operations(&mut pending.texture_requests, &atlas)?;
+        self.snapshot_hub.begin_snapshot(
+            consumer,
+            pending,
+            &mut self.texture_registry.borrow_mut(),
+            &atlas,
+        )
     }
 
-    pub(super) fn font_atlas_snapshot_target(
-        &self,
-        advance_revision: bool,
-    ) -> FontAtlasSnapshotTarget {
+    pub(super) fn font_atlas_snapshot_target(&self) -> FontAtlasSnapshotTarget {
         let io = self.io_ptr("Context snapshot texture capture");
         let atlas = unsafe { (*io).Fonts };
         assert!(!atlas.is_null(), "Context has no font atlas");
-        let textures = crate::fonts::font_atlas_snapshot_identities(atlas, advance_revision)
+        let textures = crate::fonts::font_atlas_snapshot_identities(atlas, self.raw)
             .into_iter()
             .map(|identity| {
                 FontAtlasTextureTarget::new(
@@ -634,6 +766,6 @@ impl Context {
                 )
             })
             .collect();
-        FontAtlasSnapshotTarget::new(textures)
+        FontAtlasSnapshotTarget::new(atlas, self.id(), textures)
     }
 }

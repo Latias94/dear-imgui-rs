@@ -1,10 +1,110 @@
 //! Texture management for Dear ImGui
 
-use crate::{GlTexture, InitError, InitResult};
+use crate::{GlTexture, GlVersion, InitError, InitResult};
 use dear_imgui_rs::{TextureFormat, TextureId};
 use glow::{Context, HasContext};
 use std::borrow::Cow;
 use std::collections::HashMap;
+
+struct TextureUploadStateGuard<'a> {
+    gl: &'a Context,
+    active_texture: u32,
+    texture_2d_binding_unit_0: Option<GlTexture>,
+    unpack_alignment: i32,
+    unpack_row_state: Option<[i32; 3]>,
+}
+
+impl<'a> TextureUploadStateGuard<'a> {
+    fn enter(gl: &'a Context) -> Self {
+        unsafe {
+            let active_texture = u32::try_from(gl.get_parameter_i32(glow::ACTIVE_TEXTURE))
+                .ok()
+                .unwrap_or(glow::TEXTURE0);
+            gl.active_texture(glow::TEXTURE0);
+            let texture_2d_binding_unit_0 =
+                u32::try_from(gl.get_parameter_i32(glow::TEXTURE_BINDING_2D))
+                    .ok()
+                    .and_then(std::num::NonZeroU32::new)
+                    .map(glow::NativeTexture);
+            let unpack_alignment = gl.get_parameter_i32(glow::UNPACK_ALIGNMENT);
+            let gl_version = GlVersion::read(gl);
+            let unpack_row_state = (!gl_version.is_es || gl_version.major >= 3).then(|| {
+                [
+                    gl.get_parameter_i32(glow::UNPACK_ROW_LENGTH),
+                    gl.get_parameter_i32(glow::UNPACK_SKIP_PIXELS),
+                    gl.get_parameter_i32(glow::UNPACK_SKIP_ROWS),
+                ]
+            });
+
+            if unpack_row_state.is_some() {
+                gl.pixel_store_i32(glow::UNPACK_ROW_LENGTH, 0);
+                gl.pixel_store_i32(glow::UNPACK_SKIP_PIXELS, 0);
+                gl.pixel_store_i32(glow::UNPACK_SKIP_ROWS, 0);
+            }
+            gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+
+            Self {
+                gl,
+                active_texture,
+                texture_2d_binding_unit_0,
+                unpack_alignment,
+                unpack_row_state,
+            }
+        }
+    }
+}
+
+impl Drop for TextureUploadStateGuard<'_> {
+    fn drop(&mut self) {
+        unsafe {
+            if let Some([row_length, skip_pixels, skip_rows]) = self.unpack_row_state {
+                self.gl.pixel_store_i32(glow::UNPACK_ROW_LENGTH, row_length);
+                self.gl
+                    .pixel_store_i32(glow::UNPACK_SKIP_PIXELS, skip_pixels);
+                self.gl.pixel_store_i32(glow::UNPACK_SKIP_ROWS, skip_rows);
+            }
+            self.gl
+                .pixel_store_i32(glow::UNPACK_ALIGNMENT, self.unpack_alignment);
+            self.gl.active_texture(glow::TEXTURE0);
+            self.gl
+                .bind_texture(glow::TEXTURE_2D, self.texture_2d_binding_unit_0);
+            self.gl.active_texture(self.active_texture);
+        }
+    }
+}
+
+struct PendingTexture<'a> {
+    gl: &'a Context,
+    texture: Option<GlTexture>,
+}
+
+impl<'a> PendingTexture<'a> {
+    fn create(gl: &'a Context) -> InitResult<Self> {
+        let texture = unsafe { gl.create_texture() }.map_err(InitError::CreateTexture)?;
+        Ok(Self {
+            gl,
+            texture: Some(texture),
+        })
+    }
+
+    fn handle(&self) -> GlTexture {
+        self.texture.expect("pending texture must own a handle")
+    }
+
+    fn commit(mut self) -> GlTexture {
+        self.texture
+            .take()
+            .expect("pending texture must own a handle")
+    }
+}
+
+impl Drop for PendingTexture<'_> {
+    fn drop(&mut self) {
+        if let Some(texture) = self.texture.take() {
+            unsafe { self.gl.delete_texture(texture) };
+        }
+    }
+}
 
 pub(crate) fn gl_texture_size_i32(dimension: &'static str, value: u32) -> InitResult<i32> {
     i32::try_from(value).map_err(|_| InitError::TextureDimensionOutOfRange { dimension, value })
@@ -163,10 +263,10 @@ pub fn create_texture_from_rgba(
     data: &[u8],
 ) -> InitResult<GlTexture> {
     let (width_i32, height_i32) = checked_gl_texture_size(width, height)?;
+    let _state = TextureUploadStateGuard::enter(gl);
+    let texture = PendingTexture::create(gl)?;
     unsafe {
-        let texture = gl.create_texture().map_err(InitError::CreateTexture)?;
-
-        gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+        gl.bind_texture(glow::TEXTURE_2D, Some(texture.handle()));
         gl.tex_image_2d(
             glow::TEXTURE_2D,
             0,
@@ -200,11 +300,8 @@ pub fn create_texture_from_rgba(
             glow::TEXTURE_WRAP_T,
             glow::CLAMP_TO_EDGE as i32,
         );
-
-        gl.bind_texture(glow::TEXTURE_2D, None);
-
-        Ok(texture)
     }
+    Ok(texture.commit())
 }
 
 /// Create a texture from raw alpha data (single channel)
@@ -216,17 +313,11 @@ pub fn create_texture_from_alpha(
 ) -> InitResult<GlTexture> {
     let (width_i32, height_i32) = checked_gl_texture_size(width, height)?;
     let rgba_data = alpha8_to_rgba(data, width, height)?;
+    let _state = TextureUploadStateGuard::enter(gl);
+    let texture = PendingTexture::create(gl)?;
 
     unsafe {
-        let texture = gl.create_texture().map_err(InitError::CreateTexture)?;
-
-        gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-
-        // Set pixel store parameters
-        gl.pixel_store_i32(glow::UNPACK_ROW_LENGTH, 0);
-        gl.pixel_store_i32(glow::UNPACK_SKIP_PIXELS, 0);
-        gl.pixel_store_i32(glow::UNPACK_SKIP_ROWS, 0);
-        gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
+        gl.bind_texture(glow::TEXTURE_2D, Some(texture.handle()));
 
         gl.tex_image_2d(
             glow::TEXTURE_2D,
@@ -261,11 +352,8 @@ pub fn create_texture_from_alpha(
             glow::TEXTURE_WRAP_T,
             glow::CLAMP_TO_EDGE as i32,
         );
-
-        gl.bind_texture(glow::TEXTURE_2D, None);
-
-        Ok(texture)
     }
+    Ok(texture.commit())
 }
 
 /// A validated sub-image upload for an existing OpenGL texture.
@@ -306,19 +394,9 @@ pub fn update_texture(
     let (width, height) = checked_gl_texture_size(width, height)?;
     let data =
         validated_rgba_upload_data(update.format, update.size[0], update.size[1], update.data)?;
+    let _state = TextureUploadStateGuard::enter(gl);
     unsafe {
-        let last_active = u32::try_from(gl.get_parameter_i32(glow::ACTIVE_TEXTURE))
-            .ok()
-            .unwrap_or(glow::TEXTURE0);
-        let last_texture = u32::try_from(gl.get_parameter_i32(glow::TEXTURE_BINDING_2D))
-            .ok()
-            .and_then(std::num::NonZeroU32::new)
-            .map(glow::NativeTexture);
-        let last_unpack = gl.get_parameter_i32(glow::UNPACK_ALIGNMENT);
-
-        gl.active_texture(glow::TEXTURE0);
         gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-        gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
         gl.tex_sub_image_2d(
             glow::TEXTURE_2D,
             0,
@@ -330,10 +408,6 @@ pub fn update_texture(
             glow::UNSIGNED_BYTE,
             glow::PixelUnpackData::Slice(Some(data.as_ref())),
         );
-
-        gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, last_unpack);
-        gl.bind_texture(glow::TEXTURE_2D, last_texture);
-        gl.active_texture(last_active);
     }
     Ok(())
 }
@@ -398,20 +472,10 @@ pub(crate) fn upload_texture_data(
 ) -> InitResult<()> {
     let (width_i32, height_i32) = checked_gl_texture_size(width, height)?;
     let data = validated_rgba_upload_data(format, width, height, data)?;
+    let _state = TextureUploadStateGuard::enter(gl);
 
     unsafe {
-        let last_active = u32::try_from(gl.get_parameter_i32(glow::ACTIVE_TEXTURE))
-            .ok()
-            .unwrap_or(glow::TEXTURE0);
-        let last_texture = u32::try_from(gl.get_parameter_i32(glow::TEXTURE_BINDING_2D))
-            .ok()
-            .and_then(std::num::NonZeroU32::new)
-            .map(glow::NativeTexture);
-        let last_unpack = gl.get_parameter_i32(glow::UNPACK_ALIGNMENT);
-
-        gl.active_texture(glow::TEXTURE0);
         gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-        gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
         gl.tex_image_2d(
             glow::TEXTURE_2D,
             0,
@@ -423,10 +487,6 @@ pub(crate) fn upload_texture_data(
             glow::UNSIGNED_BYTE,
             glow::PixelUnpackData::Slice(Some(data.as_ref())),
         );
-
-        gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, last_unpack);
-        gl.bind_texture(glow::TEXTURE_2D, last_texture);
-        gl.active_texture(last_active);
     }
 
     Ok(())

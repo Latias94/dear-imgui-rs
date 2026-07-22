@@ -76,6 +76,12 @@ impl Context {
     }
 
     /// Tries to create a new active Dear ImGui context with a shared font atlas.
+    ///
+    /// Multiple contexts may share the atlas while using legacy renderer-managed texture handling.
+    /// Once a managed renderer claims the atlas, registering another context returns
+    /// [`ImGuiError::SharedFontAtlasManaged`](crate::ImGuiError::SharedFontAtlasManaged).
+    /// If its prior managed Context was dropped without a committed renderer reset, this returns
+    /// [`ImGuiError::SharedFontAtlasRendererReleasePending`](crate::ImGuiError::SharedFontAtlasRendererReleasePending).
     pub fn try_create_with_shared_font_atlas(
         shared_font_atlas: SharedFontAtlas,
     ) -> crate::error::ImGuiResult<Context> {
@@ -90,6 +96,10 @@ impl Context {
     }
 
     /// Creates a new active Dear ImGui context with a shared font atlas (panics on error).
+    ///
+    /// This panics if a managed renderer has already claimed the atlas. Use
+    /// [`Context::try_create_with_shared_font_atlas`] to handle ownership and pending-release
+    /// errors.
     pub fn create_with_shared_font_atlas(shared_font_atlas: SharedFontAtlas) -> Context {
         Self::try_create_with_shared_font_atlas(shared_font_atlas)
             .expect("Failed to create Dear ImGui context")
@@ -169,6 +179,7 @@ impl Context {
             Some(atlas) => atlas.as_ptr(),
             None => ptr::null_mut(),
         };
+        crate::fonts::validate_font_atlas_context_registration(shared_font_atlas_ptr)?;
 
         let id =
             ContextId::allocate().ok_or_else(|| crate::error::ImGuiError::ContextCreation {
@@ -276,7 +287,6 @@ impl Drop for Context {
         }
 
         self.state.begin_drop();
-        self.snapshot_hub.close();
         let attachment_controls = self.attachments.begin_teardown();
         let context_id = self.state.id();
         let raw = self.raw;
@@ -285,28 +295,26 @@ impl Drop for Context {
         // End the native frame while backend callbacks and attachment state are still live.
         // EndFrame may update viewport bookkeeping, so quiescing backends first would make an
         // otherwise recoverable dropped FrameToken depend on torn-down callback state.
-        unsafe {
-            let _ = crate::list_clipper::forget_context_clippers(raw);
-            if (*raw).WithinFrameScope {
-                sys::igEndFrame();
+        self.end_frame_for_teardown_unlocked();
+
+        for phase in [
+            ContextAttachmentPhase::Quiesce,
+            ContextAttachmentPhase::RendererResources,
+            ContextAttachmentPhase::PlatformWindows,
+        ] {
+            if !run_pre_destroy_phase(&attachment_controls, self, phase) {
+                // Continuing would destroy resources whose preceding teardown phase failed. We
+                // cannot unwind safely either: native Context fields still borrow Rust storage.
+                std::process::abort();
+            }
+            if phase == ContextAttachmentPhase::RendererResources {
+                // Renderer attachments must still see their active consumer and any detached
+                // epoch while proving that a texture reset is safe. After that phase no native
+                // renderer resource may observe a completion, so close the hub before platform
+                // windows and native Context state begin disappearing.
+                self.snapshot_hub.close();
             }
         }
-
-        run_pre_destroy_phase(
-            &attachment_controls,
-            &self.state,
-            ContextAttachmentPhase::Quiesce,
-        );
-        run_pre_destroy_phase(
-            &attachment_controls,
-            &self.state,
-            ContextAttachmentPhase::RendererResources,
-        );
-        run_pre_destroy_phase(
-            &attachment_controls,
-            &self.state,
-            ContextAttachmentPhase::PlatformWindows,
-        );
 
         unsafe {
             let io = sys::igGetIO_ContextPtr(raw);
@@ -320,19 +328,22 @@ impl Drop for Context {
             } else {
                 std::ptr::null_mut()
             };
-            self.texture_registry.borrow_mut().teardown();
+            self.texture_registry.borrow_mut().prepare_teardown();
             with_bound_context(raw, || {
                 crate::platform_io::clear_aggregate_callbacks_for_current_context();
             });
             #[cfg(feature = "stack-layout")]
             sys::ImGuiStack_DestroyContextState(raw);
-            crate::fonts::unregister_font_atlas_context(font_atlas, raw);
+            crate::fonts::unregister_font_atlas_context(font_atlas, raw, context_id);
             if let Some(shared_font_atlas) = &self.shared_font_atlas {
                 with_bound_context(raw, || {
                     shared_font_atlas.unregister_from_current_context();
                 });
             }
             sys::igDestroyContext(raw);
+            self.texture_registry
+                .borrow_mut()
+                .release_after_native_destroy();
             // Native context destruction may invoke typed destroy callbacks, so their registry
             // entries must outlive `igDestroyContext` itself.
             crate::platform_io::clear_typed_callbacks_for_context(raw);
@@ -341,6 +352,8 @@ impl Drop for Context {
 
         self.raw = ptr::null_mut();
         self.state.mark_native_destroyed();
-        run_post_destroy(attachment_controls, context_id);
+        if !run_post_destroy(attachment_controls, context_id) {
+            std::process::abort();
+        }
     }
 }

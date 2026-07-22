@@ -43,6 +43,10 @@ pub mod viewport;
 
 use bevy_app::{App, Plugin};
 use bevy_ecs::resource::Resource;
+use std::ffi::c_char;
+#[cfg(feature = "render")]
+use std::ffi::c_void;
+use std::rc::Rc;
 
 pub use self::context::{ImguiContexts, ImguiFrameOutput, ImguiFrameState};
 pub use self::helpers::configure_example_context;
@@ -51,7 +55,7 @@ pub use self::schedule::{ImguiBeginFrame, ImguiEndFrame, ImguiPrimaryContextPass
 pub use self::texture::ImguiBevyTextures;
 pub use self::viewport::{
     ImguiViewportBridge, ImguiViewportCamera, ImguiViewportCommand, ImguiViewportFeedback,
-    ImguiViewportId, ImguiViewportSnapshot, ImguiViewportWindow,
+    ImguiViewportId, ImguiViewportSnapshot, ImguiViewportWindow, ImguiViewportWindowConfig,
 };
 
 const MULTI_VIEWPORT_FEATURE_ENABLED: bool = cfg!(feature = "multi-viewport");
@@ -91,11 +95,22 @@ impl Plugin for ImguiPlugin {
         schedule::install_imgui_schedules(app);
         input::install_input_mapping(app);
         context::install_context_lifecycle(app);
-        viewport::install_viewport_bridge(app);
+        #[cfg(feature = "render")]
+        let render_integration_available = render::render_integration_available(app);
+        #[cfg(not(feature = "render"))]
+        let render_integration_available = false;
+        preflight_backend_context_claims(
+            app.world()
+                .get_non_send::<ImguiContext>()
+                .expect("ImguiContext must exist before backend initialization"),
+            render_integration_available,
+        );
         #[cfg(feature = "render")]
         let render_integration_installed = render::install_render_extraction(app);
         #[cfg(not(feature = "render"))]
         let render_integration_installed = false;
+        debug_assert_eq!(render_integration_installed, render_integration_available);
+        viewport::install_viewport_bridge(app);
         refresh_backend_status(app, render_integration_installed);
     }
 
@@ -110,11 +125,113 @@ impl Plugin for ImguiPlugin {
 
 fn refresh_backend_status(app: &mut App, render_integration_installed: bool) {
     let effective_config = app.world().resource::<ImguiBackendConfig>().clone();
+    #[cfg(feature = "render")]
+    if render_integration_installed {
+        app.world_mut()
+            .get_non_send_mut::<ImguiContext>()
+            .expect("ImguiContext must exist before renderer validation")
+            .assert_active_renderer_ownership();
+    }
+    preflight_backend_context_claims(
+        app.world()
+            .get_non_send::<ImguiContext>()
+            .expect("ImguiContext must exist before backend initialization"),
+        render_integration_installed,
+    );
+    #[cfg(feature = "render")]
+    if render_integration_installed {
+        app.world_mut()
+            .get_non_send_mut::<ImguiContext>()
+            .expect("ImguiContext must exist before renderer initialization")
+            .ensure_renderer_consumer()
+            .unwrap_or_else(|error| {
+                panic!(
+                    "ImguiPlugin could not claim the Dear ImGui context for managed rendering: {error}"
+                )
+            });
+    }
     sync_backend_context_config(app, &effective_config, render_integration_installed);
     app.insert_resource(ImguiBackendStatus::from_config(
         &effective_config,
         render_integration_installed,
     ));
+}
+
+/// Validate every Dear ImGui backend slot that Bevy may claim before mutating the context.
+///
+/// Renderer-consumer creation claims the font atlas and snapshot hub, so this preflight must run
+/// before that operation. The sync function repeats the check after consumer creation as a local
+/// invariant for callers that do not go through [`refresh_backend_status`].
+fn preflight_backend_context_claims(
+    imgui_context: &ImguiContext,
+    render_integration_installed: bool,
+) {
+    let context = &imgui_context.context;
+    let backend_ownership = &imgui_context.backend_ownership;
+
+    match backend_ownership.platform_name.as_deref() {
+        Some(expected) => assert!(
+            context.io().backend_platform_name().is_some_and(|actual| {
+                actual.as_ptr() == backend_ownership.platform_name_ptr
+                    && actual.to_bytes() == expected.as_bytes()
+            }),
+            "dear-imgui-bevy BackendPlatformName ownership changed while the backend was active"
+        ),
+        None => {
+            // An external platform backend is valid when Bevy was not the claimant. This branch
+            // only determines whether the later sync may write the platform name; it does not
+            // mutate or clear the foreign state.
+            let _ = backend_ownership.viewport_contract
+                || (context.io().backend_platform_name().is_none()
+                    && !has_platform_backend_state(context));
+        }
+    }
+
+    #[cfg(feature = "render")]
+    if render_integration_installed {
+        let renderer_was_owned = backend_ownership.standard_draw_callbacks;
+        let renderer_flags = dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES
+            | dear_imgui_rs::BackendFlags::RENDERER_HAS_VTX_OFFSET;
+        let current_flags = context.io().backend_flags();
+        if !renderer_was_owned {
+            if let Some(field) =
+                renderer_backend_claim_conflict(context, backend_ownership.flags_added)
+            {
+                panic!(
+                    "dear-imgui-bevy cannot claim the renderer backend while `{field}` is owned by another integration"
+                );
+            }
+            if let Some(slot) = render::standard_draw_callback_occupied(context) {
+                panic!(
+                    "dear-imgui-bevy cannot claim draw callback `{slot}` because another renderer owns it"
+                );
+            }
+        } else {
+            assert!(
+                current_flags.contains(renderer_flags),
+                "dear-imgui-bevy renderer capability flags changed while the backend was active"
+            );
+            let expected_name = backend_ownership
+                .renderer_name
+                .as_deref()
+                .expect("owned draw callbacks require an owned renderer name");
+            assert!(
+                context.io().backend_renderer_name().is_some_and(|actual| {
+                    actual.as_ptr() == backend_ownership.renderer_name_ptr
+                        && actual.to_bytes() == expected_name.as_bytes()
+                }),
+                "dear-imgui-bevy BackendRendererName ownership changed while the backend was active"
+            );
+        }
+        if renderer_was_owned && let Some(slot) = render::standard_draw_callback_conflict(context) {
+            panic!(
+                "dear-imgui-bevy cannot claim draw callback `{slot}` because another renderer owns it"
+            );
+        }
+    }
+
+    #[cfg(not(feature = "render"))]
+    let _ = render_integration_installed;
 }
 
 fn sync_backend_context_config(
@@ -125,7 +242,19 @@ fn sync_backend_context_config(
     let Some(mut imgui_context) = app.world_mut().get_non_send_mut::<ImguiContext>() else {
         return;
     };
-    let context = imgui_context.context_mut();
+    #[cfg(feature = "render")]
+    if render_integration_installed {
+        imgui_context.assert_active_renderer_ownership();
+    }
+    preflight_backend_context_claims(&imgui_context, render_integration_installed);
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    imgui_context.assert_attached_viewport_callback_ownership();
+    imgui_context.frame_lifecycle.revoke();
+    let ImguiContext {
+        context,
+        backend_ownership,
+        ..
+    } = &mut *imgui_context;
     let mut config_flags = context.io().config_flags();
     if config.docking {
         config_flags.insert(dear_imgui_rs::ConfigFlags::DOCKING_ENABLE);
@@ -135,46 +264,99 @@ fn sync_backend_context_config(
     context.io_mut().set_config_flags(config_flags);
 
     let imgui_name = sanitized_imgui_backend_name(&config.name);
-    context
-        .set_platform_name(Some(imgui_name.clone()))
-        .expect("sanitized backend names must be valid C strings");
-    if !config.multi_viewport || !MULTI_VIEWPORT_FEATURE_ENABLED || !NATIVE_PLATFORM_TARGET {
-        clear_platform_backend_handlers(context);
-        unsafe {
-            // No platform callback can observe the cleared backend pointer after its table is gone.
+    let claim_platform_name = match backend_ownership.platform_name.as_deref() {
+        Some(expected) => {
+            assert!(
+                context.io().backend_platform_name().is_some_and(|actual| {
+                    actual.as_ptr() == backend_ownership.platform_name_ptr
+                        && actual.to_bytes() == expected.as_bytes()
+                }),
+                "dear-imgui-bevy BackendPlatformName ownership changed while the backend was active"
+            );
+            true
+        }
+        None => {
+            backend_ownership.viewport_contract
+                || (context.io().backend_platform_name().is_none()
+                    && !has_platform_backend_state(context))
+        }
+    };
+    if claim_platform_name {
+        context
+            .set_platform_name(Some(imgui_name.clone()))
+            .expect("sanitized backend names must be valid C strings");
+        backend_ownership.platform_name = Some(imgui_name.clone());
+        backend_ownership.platform_name_ptr = context
+            .io()
+            .backend_platform_name()
+            .expect("the installed platform name must remain available")
+            .as_ptr();
+    }
+
+    if render_integration_installed {
+        let renderer_was_owned = backend_ownership.standard_draw_callbacks;
+        let renderer_flags = dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES
+            | dear_imgui_rs::BackendFlags::RENDERER_HAS_VTX_OFFSET;
+        let current_flags = context.io().backend_flags();
+        #[cfg(feature = "render")]
+        {
+            if !renderer_was_owned {
+                if let Some(field) =
+                    renderer_backend_claim_conflict(context, backend_ownership.flags_added)
+                {
+                    panic!(
+                        "dear-imgui-bevy cannot claim the renderer backend while `{field}` is owned by another integration"
+                    );
+                }
+            } else {
+                assert!(
+                    current_flags.contains(renderer_flags),
+                    "dear-imgui-bevy renderer capability flags changed while the backend was active"
+                );
+                let expected_name = backend_ownership
+                    .renderer_name
+                    .as_deref()
+                    .expect("owned draw callbacks require an owned renderer name");
+                assert!(
+                    context.io().backend_renderer_name().is_some_and(|actual| {
+                        actual.as_ptr() == backend_ownership.renderer_name_ptr
+                            && actual.to_bytes() == expected_name.as_bytes()
+                    }),
+                    "dear-imgui-bevy BackendRendererName ownership changed while the backend was active"
+                );
+            }
+            render::install_standard_draw_callbacks_for_context(context).unwrap_or_else(|slot| {
+                panic!(
+                    "dear-imgui-bevy cannot claim draw callback `{slot}` because another renderer owns it"
+                )
+            });
+            backend_ownership.standard_draw_callbacks = true;
+        }
+
+        if !renderer_was_owned {
+            backend_ownership.flags_added |= renderer_flags & !current_flags;
             context
                 .io_mut()
-                .set_backend_platform_user_data(std::ptr::null_mut());
+                .set_backend_flags(current_flags | renderer_flags);
         }
-    }
-    clear_renderer_backend_handlers(context);
-    unsafe {
-        // No renderer callback can observe the cleared backend pointer after its table is gone.
         context
-            .io_mut()
-            .set_backend_renderer_user_data(std::ptr::null_mut());
-    }
-    let mut backend_flags = context.io().backend_flags();
-    if render_integration_installed {
-        #[cfg(feature = "render")]
-        render::install_standard_draw_callbacks_for_context(context);
-        backend_flags.insert(
-            dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES
-                | dear_imgui_rs::BackendFlags::RENDERER_HAS_VTX_OFFSET,
-        );
-        context
-            .set_renderer_name(Some(imgui_name))
+            .set_renderer_name(Some(imgui_name.clone()))
             .expect("sanitized backend names must be valid C strings");
-    } else {
-        backend_flags.remove(
-            dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES
-                | dear_imgui_rs::BackendFlags::RENDERER_HAS_VTX_OFFSET,
-        );
-        context
-            .set_renderer_name::<String>(None)
-            .expect("clearing BackendRendererName must not fail");
+        backend_ownership.renderer_name = Some(imgui_name);
+        backend_ownership.renderer_name_ptr = context
+            .io()
+            .backend_renderer_name()
+            .expect("the installed renderer name must remain available")
+            .as_ptr();
     }
-    context.io_mut().set_backend_flags(backend_flags);
+    #[cfg(not(feature = "render"))]
+    let _ = render_integration_installed;
+    #[cfg(feature = "render")]
+    if render_integration_installed {
+        imgui_context.record_renderer_runtime_contract();
+    }
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    imgui_context.record_attached_viewport_runtime_contract();
 }
 
 fn sanitized_imgui_backend_name(name: &str) -> String {
@@ -182,7 +364,7 @@ fn sanitized_imgui_backend_name(name: &str) -> String {
 }
 
 /// Static configuration for the Bevy backend.
-#[derive(Resource, Debug, Clone, Eq, PartialEq)]
+#[derive(Resource, Debug, Clone, PartialEq)]
 pub struct ImguiBackendConfig {
     /// User-facing label recorded in the Dear ImGui context and diagnostics.
     pub name: String,
@@ -194,6 +376,8 @@ pub struct ImguiBackendConfig {
     /// advertised after the native PlatformIO lifecycle bridge, all-window input feedback, and
     /// secondary viewport render routing are all available.
     pub multi_viewport: bool,
+    /// Presentation and composition policy copied into every secondary viewport window.
+    pub viewport_window: ImguiViewportWindowConfig,
 }
 
 impl Default for ImguiBackendConfig {
@@ -202,6 +386,7 @@ impl Default for ImguiBackendConfig {
             name: "dear-imgui-bevy".to_owned(),
             docking: true,
             multi_viewport: false,
+            viewport_window: ImguiViewportWindowConfig::default(),
         }
     }
 }
@@ -277,13 +462,169 @@ impl Default for ImguiBackendStatus {
 /// Dear ImGui has process-global current-context state and `dear_imgui_rs::Context` is intentionally
 /// not `Send`/`Sync`. Storing it as a Bevy non-send resource keeps UI lifecycle work on the main
 /// thread until later tasks add schedule-specific accessors.
+#[cfg(feature = "render")]
+#[derive(Clone, Copy)]
+struct ImguiRendererRuntimeContract {
+    backend_user_data: *mut c_void,
+    backend_name: *const c_char,
+    owned_flags: i32,
+    render_state: *mut c_void,
+    texture_max_width: i32,
+    texture_max_height: i32,
+    viewport_callbacks: [usize; 5],
+    draw_callbacks: [usize; 3],
+}
+
+#[cfg(feature = "render")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ImguiRendererOwnershipError {
+    /// A renderer field no longer matches the value installed by this backend.
+    FieldReplaced { field: &'static str },
+}
+
+#[cfg(feature = "render")]
+impl std::fmt::Display for ImguiRendererOwnershipError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::FieldReplaced { field } => {
+                write!(
+                    formatter,
+                    "Dear ImGui renderer field `{field}` was replaced"
+                )
+            }
+        }
+    }
+}
+
+#[cfg(feature = "render")]
+impl std::error::Error for ImguiRendererOwnershipError {}
+
+struct ImguiBackendOwnership {
+    flags_added: dear_imgui_rs::BackendFlags,
+    platform_name: Option<String>,
+    platform_name_ptr: *const c_char,
+    renderer_name: Option<String>,
+    renderer_name_ptr: *const c_char,
+    standard_draw_callbacks: bool,
+    viewport_contract: bool,
+    #[cfg(feature = "render")]
+    renderer_contract: Option<ImguiRendererRuntimeContract>,
+    #[cfg(feature = "render")]
+    renderer_fault: Option<ImguiRendererOwnershipError>,
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+enum ImguiViewportBridgeLifecycle {
+    Detached,
+    Attached(viewport::ImguiViewportBridgeKeepalive),
+    EcsReleasePending(viewport::ImguiViewportBridgeKeepalive),
+}
+
+impl Default for ImguiBackendOwnership {
+    fn default() -> Self {
+        Self {
+            flags_added: dear_imgui_rs::BackendFlags::empty(),
+            platform_name: None,
+            platform_name_ptr: std::ptr::null(),
+            renderer_name: None,
+            renderer_name_ptr: std::ptr::null(),
+            standard_draw_callbacks: false,
+            viewport_contract: false,
+            #[cfg(feature = "render")]
+            renderer_contract: None,
+            #[cfg(feature = "render")]
+            renderer_fault: None,
+        }
+    }
+}
+
 pub struct ImguiContext {
     context: dear_imgui_rs::Context,
+    frame_lifecycle: Rc<context::ImguiFrameLifecycleControl>,
+    backend_ownership: ImguiBackendOwnership,
     #[cfg(feature = "render")]
     renderer_consumer: Option<dear_imgui_rs::render::RendererConsumer>,
+    #[cfg(feature = "render")]
+    renderer_release: Option<render::ImguiRendererRelease>,
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-    pub(crate) viewport_bridge_keepalive: Option<viewport::ImguiViewportBridgeKeepalive>,
+    viewport_bridge: ImguiViewportBridgeLifecycle,
 }
+
+/// Reason a Bevy-owned Context could not be detached yet.
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum ImguiContextIntoInnerErrorReason {
+    /// The Bevy render world still owns managed GPU resources and must run its cleanup schedule.
+    RenderWorldReleasePending,
+    /// The core renderer-consumer contract rejected the requested detachment.
+    Renderer(dear_imgui_rs::render::RendererConsumerError),
+    /// A foreign integration replaced only part of the Bevy renderer contract.
+    #[cfg(feature = "render")]
+    RendererOwnership(ImguiRendererOwnershipError),
+    /// A foreign callback replaced part of the Bevy viewport bridge during its lifetime.
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    ViewportCallbackOwnership(viewport::ImguiViewportCallbackOwnershipError),
+    /// Secondary Bevy window or camera entities must be released before extraction can finish.
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    ViewportWorldReleasePending,
+}
+
+impl std::fmt::Display for ImguiContextIntoInnerErrorReason {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::RenderWorldReleasePending => formatter.write_str(
+                "Bevy render-world resources are still live; run the render schedule and retry Context extraction",
+            ),
+            Self::Renderer(error) => error.fmt(formatter),
+            #[cfg(feature = "render")]
+            Self::RendererOwnership(error) => error.fmt(formatter),
+            #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+            Self::ViewportCallbackOwnership(error) => error.fmt(formatter),
+            #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+            Self::ViewportWorldReleasePending => formatter.write_str(
+                "Bevy secondary viewport entities are still live; return this owner to the World, run one update, and retry Context extraction",
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ImguiContextIntoInnerErrorReason {}
+
+/// Retryable failure returned when a Bevy-owned Context cannot be detached yet.
+pub struct ImguiContextIntoInnerError {
+    error: ImguiContextIntoInnerErrorReason,
+    owner: ImguiContext,
+}
+
+impl ImguiContextIntoInnerError {
+    /// Lifecycle reason that prevented detachment.
+    #[must_use]
+    pub fn error(&self) -> ImguiContextIntoInnerErrorReason {
+        self.error
+    }
+
+    /// Recover the still-owned wrapper, complete or abandon pending work, and retry shutdown.
+    #[must_use]
+    pub fn into_owner(self) -> ImguiContext {
+        self.owner
+    }
+}
+
+impl std::fmt::Debug for ImguiContextIntoInnerError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ImguiContextIntoInnerError")
+            .field("error", &self.error)
+            .finish_non_exhaustive()
+    }
+}
+
+impl std::fmt::Display for ImguiContextIntoInnerError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(formatter)
+    }
+}
+
+impl std::error::Error for ImguiContextIntoInnerError {}
 
 impl ImguiContext {
     /// Wrap an existing Dear ImGui context for insertion into a Bevy world.
@@ -291,10 +632,14 @@ impl ImguiContext {
     pub fn new(context: dear_imgui_rs::Context) -> Self {
         Self {
             context,
+            frame_lifecycle: Rc::new(context::ImguiFrameLifecycleControl::default()),
+            backend_ownership: ImguiBackendOwnership::default(),
             #[cfg(feature = "render")]
             renderer_consumer: None,
+            #[cfg(feature = "render")]
+            renderer_release: None,
             #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-            viewport_bridge_keepalive: None,
+            viewport_bridge: ImguiViewportBridgeLifecycle::Detached,
         }
     }
 
@@ -305,76 +650,328 @@ impl ImguiContext {
     }
 
     /// Mutably borrow the inner Dear ImGui context.
+    ///
+    /// # Panics
+    ///
+    /// Panics while `ImguiPrimaryContextPass` exposes a live [`dear_imgui_rs::Ui`]. Use
+    /// [`ImguiContexts`] for UI work and mutate the Context outside that schedule.
     #[must_use]
     pub fn context_mut(&mut self) -> &mut dear_imgui_rs::Context {
+        assert!(
+            !self.frame_lifecycle.is_frame_open(),
+            "ImguiContext::context_mut() is unavailable while ImguiPrimaryContextPass exposes a live Ui"
+        );
+        self.frame_lifecycle.revoke();
         &mut self.context
+    }
+
+    pub(crate) fn frame_lifecycle_control(&self) -> Rc<context::ImguiFrameLifecycleControl> {
+        Rc::clone(&self.frame_lifecycle)
+    }
+
+    fn revoke_frame_access(&mut self) {
+        self.frame_lifecycle.revoke();
+        let _ = self.context.end_frame();
+    }
+
+    /// Run teardown work while this wrapper's native Dear ImGui context is current.
+    ///
+    /// Bevy normally owns the active context for its schedules, but a host can temporarily bind a
+    /// different context through [`dear_imgui_rs::ContextBinding`]. Core renderer operations and
+    /// frame finalization deliberately require their owner to be current, so teardown must bind
+    /// the whole transaction rather than only the initial `EndFrame` call.
+    fn with_bound_context<R>(&mut self, operation: impl FnOnce(&mut Self) -> R) -> R {
+        let binding = self.context.binding();
+        binding.with_bound_context(|| operation(self))
+    }
+
+    #[cfg(feature = "render")]
+    pub(crate) fn attach_renderer_release(&mut self, release: render::ImguiRendererRelease) {
+        self.renderer_release = Some(release);
+    }
+
+    #[cfg(feature = "render")]
+    pub(crate) fn assert_active_renderer_ownership(&mut self) {
+        let Some(expected) = self.backend_ownership.renderer_contract else {
+            return;
+        };
+        let actual = ImguiRendererRuntimeContract::capture(&self.context);
+        let error = self
+            .backend_ownership
+            .renderer_fault
+            .or_else(|| expected.first_drift(actual));
+        let Some(error) = error else {
+            return;
+        };
+        self.backend_ownership.renderer_fault.get_or_insert(error);
+        if expected.retains_any_identity(actual) {
+            let io = self.context.io_mut();
+            let owned_flags = dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES
+                | dear_imgui_rs::BackendFlags::RENDERER_HAS_VTX_OFFSET;
+            io.set_backend_flags(io.backend_flags() & !owned_flags);
+        }
+        panic!("dear-imgui-bevy renderer ownership changed: {error}");
+    }
+
+    #[cfg(feature = "render")]
+    fn renderer_capabilities_still_owned(&self) -> bool {
+        self.backend_ownership
+            .renderer_contract
+            .is_some_and(|expected| {
+                expected.retains_any_identity(ImguiRendererRuntimeContract::capture(&self.context))
+            })
+    }
+
+    #[cfg(feature = "render")]
+    fn record_renderer_runtime_contract(&mut self) {
+        self.backend_ownership.renderer_contract = self
+            .backend_ownership
+            .standard_draw_callbacks
+            .then(|| ImguiRendererRuntimeContract::capture(&self.context));
+    }
+
+    #[cfg(feature = "render")]
+    fn preflight_renderer_teardown_ownership(&mut self) -> Result<(), ImguiRendererOwnershipError> {
+        if let Some(error) = self.backend_ownership.renderer_fault.take() {
+            return Err(error);
+        }
+        let Some(expected) = self.backend_ownership.renderer_contract else {
+            return Ok(());
+        };
+        let actual = ImguiRendererRuntimeContract::capture(&self.context);
+        let Some(error) = expected.first_drift(actual) else {
+            return Ok(());
+        };
+        if expected.retains_any_identity(actual) {
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    pub(crate) fn mark_viewport_backend_owned(&mut self) {
+        let flags = dear_imgui_rs::BackendFlags::PLATFORM_HAS_VIEWPORTS
+            | dear_imgui_rs::BackendFlags::RENDERER_HAS_VIEWPORTS
+            | dear_imgui_rs::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT;
+        debug_assert!((self.context.io().backend_flags() & flags).is_empty());
+        self.backend_ownership.flags_added |= flags;
+        self.backend_ownership.viewport_contract = true;
+    }
+
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    pub(crate) fn attach_viewport_bridge(
+        &mut self,
+        keepalive: viewport::ImguiViewportBridgeKeepalive,
+    ) {
+        assert!(
+            matches!(self.viewport_bridge, ImguiViewportBridgeLifecycle::Detached),
+            "dear-imgui-bevy viewport bridge was attached more than once"
+        );
+        self.mark_viewport_backend_owned();
+        self.viewport_bridge = ImguiViewportBridgeLifecycle::Attached(keepalive);
+    }
+
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    fn assert_attached_viewport_callback_ownership(&mut self) {
+        if let ImguiViewportBridgeLifecycle::Attached(keepalive) = &self.viewport_bridge {
+            viewport::platform_callback_ownership(&mut self.context, keepalive).unwrap_or_else(
+                |error| panic!("dear-imgui-bevy viewport callback ownership changed: {error}"),
+            );
+        }
+    }
+
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    fn record_attached_viewport_runtime_contract(&mut self) {
+        if let ImguiViewportBridgeLifecycle::Attached(keepalive) = &self.viewport_bridge {
+            viewport::record_platform_runtime_contract(&mut self.context, keepalive);
+        }
+    }
+
+    #[cfg(all(
+        feature = "render",
+        feature = "multi-viewport",
+        not(target_arch = "wasm32")
+    ))]
+    fn assert_viewport_callback_ownership(&mut self) {
+        let ImguiViewportBridgeLifecycle::Attached(keepalive) = &self.viewport_bridge else {
+            panic!("dear-imgui-bevy viewport bridge is not attached");
+        };
+        viewport::platform_callback_ownership(&mut self.context, keepalive).unwrap_or_else(
+            |error| panic!("dear-imgui-bevy viewport callback ownership changed: {error}"),
+        );
     }
 
     /// Consume the wrapper and return the Dear ImGui context.
     ///
-    /// This resets every renderer-owned texture binding before releasing the Bevy renderer
-    /// consumer. The operation fails while the render world still owns a detached frame; in that
-    /// case this wrapper and its Context are dropped because they can no longer be returned with a
-    /// valid renderer contract.
-    pub fn into_inner(
-        mut self,
-    ) -> Result<dear_imgui_rs::Context, dear_imgui_rs::render::RendererConsumerError> {
-        self.reset_renderer_texture_bindings()?;
-        self.clear_backend_data();
-        self.detach_renderer_consumer()?;
-        let this = std::mem::ManuallyDrop::new(self);
+    /// This resets every Bevy-owned texture binding before releasing the Bevy renderer consumer.
+    /// A complete foreign renderer takeover preserves its raw renderer fields but receives fresh
+    /// managed-texture requests; a partial takeover returns a typed error before frame or renderer
+    /// state changes. The operation also fails while the render world still owns a detached frame;
+    /// in either case the returned error retains this wrapper so the caller can resolve pending
+    /// work and retry without reconstructing ownership.
+    pub fn into_inner(mut self) -> Result<dear_imgui_rs::Context, ImguiContextIntoInnerError> {
+        let teardown = self.with_bound_context(|this| {
+            #[cfg(feature = "render")]
+            this.preflight_renderer_teardown_ownership()
+                .map_err(ImguiContextIntoInnerErrorReason::RendererOwnership)?;
+            #[cfg(feature = "render")]
+            if this
+                .renderer_release
+                .as_ref()
+                .is_some_and(|release| !release.request_release())
+            {
+                return Err(ImguiContextIntoInnerErrorReason::RenderWorldReleasePending);
+            }
+            // Keep a retryable owner completely intact until the render world has accepted the
+            // release request. Once preflight succeeds, revoke Rust UI access before ending the
+            // native frame and entering the irreversible texture-reset transaction.
+            this.revoke_frame_access();
+            this.commit_renderer_texture_reset_after_release()
+                .map_err(ImguiContextIntoInnerErrorReason::Renderer)?;
+            this.detach_renderer_consumer()
+                .map_err(ImguiContextIntoInnerErrorReason::Renderer)?;
+            this.clear_backend_data()
+        });
+        if let Err(error) = teardown {
+            return Err(ImguiContextIntoInnerError { error, owner: self });
+        }
+        let mut this = std::mem::ManuallyDrop::new(self);
         // SAFETY: `this` will not run `Drop`, and we return ownership of the inner context to the
-        // caller exactly once.
-        Ok(unsafe { std::ptr::read(&this.context) })
+        // caller exactly once. Every remaining field is dropped explicitly below.
+        let context = unsafe { std::ptr::read(&this.context) };
+        unsafe {
+            std::ptr::drop_in_place(&mut this.frame_lifecycle);
+            std::ptr::drop_in_place(&mut this.backend_ownership);
+            #[cfg(feature = "render")]
+            std::ptr::drop_in_place(&mut this.renderer_consumer);
+            #[cfg(feature = "render")]
+            std::ptr::drop_in_place(&mut this.renderer_release);
+            #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+            std::ptr::drop_in_place(&mut this.viewport_bridge);
+        }
+        Ok(context)
     }
 
-    fn clear_backend_data(&mut self) {
-        #[cfg(feature = "multi-viewport")]
-        {
-            // Destroy secondary viewport state while the renderer/platform callbacks and their
-            // backend user data are still available to Dear ImGui.
-            self.context.destroy_platform_windows();
-        }
-
-        clear_renderer_backend_handlers(&mut self.context);
-        clear_platform_backend_handlers(&mut self.context);
-        unsafe {
-            // Both callback tables are gone, so neither can dereference the cleared pointers.
-            self.context
-                .io_mut()
-                .set_backend_platform_user_data(std::ptr::null_mut());
-        }
+    fn clear_backend_data(&mut self) -> Result<(), ImguiContextIntoInnerErrorReason> {
+        #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+        let (viewport_capabilities_still_owned, viewport_result) = self.advance_viewport_release();
         #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
         {
-            self.viewport_bridge_keepalive = None;
+            if self.backend_ownership.viewport_contract && viewport_capabilities_still_owned {
+                let mut config_flags = self.context.io().config_flags();
+                config_flags.remove(dear_imgui_rs::ConfigFlags::VIEWPORTS_ENABLE);
+                self.context.io_mut().set_config_flags(config_flags);
+            }
+            self.backend_ownership.viewport_contract = false;
         }
-        self.context
-            .set_platform_name::<String>(None)
-            .expect("clearing BackendPlatformName must not fail");
-        unsafe {
-            // Renderer callbacks were cleared before this backend pointer.
-            self.context
-                .io_mut()
-                .set_backend_renderer_user_data(std::ptr::null_mut());
-        }
-        self.context
-            .set_renderer_name::<String>(None)
-            .expect("clearing BackendRendererName must not fail");
 
-        let mut backend_flags = self.context.io().backend_flags();
-        backend_flags.remove(
-            dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES
-                | dear_imgui_rs::BackendFlags::RENDERER_HAS_VTX_OFFSET
-                | dear_imgui_rs::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT,
-        );
-        #[cfg(feature = "multi-viewport")]
+        #[cfg(feature = "render")]
+        let renderer_capabilities_still_owned = self.renderer_capabilities_still_owned();
+        #[cfg(feature = "render")]
+        if self.backend_ownership.standard_draw_callbacks {
+            render::clear_standard_draw_callbacks_if_owned(&mut self.context);
+            self.backend_ownership.standard_draw_callbacks = false;
+        }
+        #[cfg(feature = "render")]
         {
-            backend_flags.remove(
-                dear_imgui_rs::BackendFlags::PLATFORM_HAS_VIEWPORTS
-                    | dear_imgui_rs::BackendFlags::RENDERER_HAS_VIEWPORTS,
+            self.backend_ownership.renderer_contract = None;
+        }
+
+        let flags_added = std::mem::replace(
+            &mut self.backend_ownership.flags_added,
+            dear_imgui_rs::BackendFlags::empty(),
+        );
+        let mut flags_to_clear = flags_added;
+        #[cfg(feature = "render")]
+        if !renderer_capabilities_still_owned {
+            flags_to_clear.remove(
+                dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES
+                    | dear_imgui_rs::BackendFlags::RENDERER_HAS_VTX_OFFSET,
             );
         }
-        self.context.io_mut().set_backend_flags(backend_flags);
+        #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+        if !viewport_capabilities_still_owned {
+            flags_to_clear.remove(
+                dear_imgui_rs::BackendFlags::PLATFORM_HAS_VIEWPORTS
+                    | dear_imgui_rs::BackendFlags::RENDERER_HAS_VIEWPORTS
+                    | dear_imgui_rs::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT,
+            );
+        }
+        let current_flags = self.context.io().backend_flags();
+        self.context
+            .io_mut()
+            .set_backend_flags(current_flags & !flags_to_clear);
+
+        clear_backend_name_if_owned(
+            &mut self.context,
+            &mut self.backend_ownership.platform_name,
+            &mut self.backend_ownership.platform_name_ptr,
+            BackendNameKind::Platform,
+        );
+        clear_backend_name_if_owned(
+            &mut self.context,
+            &mut self.backend_ownership.renderer_name,
+            &mut self.backend_ownership.renderer_name_ptr,
+            BackendNameKind::Renderer,
+        );
+
+        #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+        viewport_result?;
+        Ok(())
+    }
+
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    fn advance_viewport_release(&mut self) -> (bool, Result<(), ImguiContextIntoInnerErrorReason>) {
+        let lifecycle = std::mem::replace(
+            &mut self.viewport_bridge,
+            ImguiViewportBridgeLifecycle::Detached,
+        );
+        match lifecycle {
+            ImguiViewportBridgeLifecycle::Detached => (false, Ok(())),
+            ImguiViewportBridgeLifecycle::Attached(keepalive) => {
+                let capabilities_still_owned =
+                    viewport::platform_capabilities_still_owned(&mut self.context, &keepalive);
+                let ownership_error =
+                    viewport::detach_owned_bridge(&mut self.context, &keepalive).err();
+                let ecs_release_pending = viewport::viewport_ecs_release_pending(&keepalive);
+                if ownership_error.is_some() || ecs_release_pending {
+                    self.viewport_bridge =
+                        ImguiViewportBridgeLifecycle::EcsReleasePending(keepalive);
+                } else {
+                    viewport::finish_viewport_ecs_release(&keepalive);
+                }
+
+                if let Some(error) = ownership_error {
+                    return (
+                        capabilities_still_owned,
+                        Err(ImguiContextIntoInnerErrorReason::ViewportCallbackOwnership(
+                            error,
+                        )),
+                    );
+                }
+                if ecs_release_pending {
+                    return (
+                        capabilities_still_owned,
+                        Err(ImguiContextIntoInnerErrorReason::ViewportWorldReleasePending),
+                    );
+                }
+                (capabilities_still_owned, Ok(()))
+            }
+            ImguiViewportBridgeLifecycle::EcsReleasePending(keepalive) => {
+                let capabilities_still_owned =
+                    viewport::platform_capabilities_still_owned(&mut self.context, &keepalive);
+                if viewport::viewport_ecs_release_pending(&keepalive) {
+                    self.viewport_bridge =
+                        ImguiViewportBridgeLifecycle::EcsReleasePending(keepalive);
+                    return (
+                        capabilities_still_owned,
+                        Err(ImguiContextIntoInnerErrorReason::ViewportWorldReleasePending),
+                    );
+                }
+                viewport::finish_viewport_ecs_release(&keepalive);
+                (capabilities_still_owned, Ok(()))
+            }
+        }
     }
 
     #[cfg(feature = "render")]
@@ -383,11 +980,18 @@ impl ImguiContext {
     ) -> Result<(), dear_imgui_rs::render::RendererConsumerError> {
         if self.renderer_consumer.is_none() {
             let consumer = self.context.create_renderer_consumer()?;
-            if let Err(error) = self.context.reset_renderer_texture_bindings(&consumer) {
-                drop(consumer);
-                let _ = self.context.poll_snapshot_completions();
-                return Err(error);
-            }
+            // A newly-created Bevy consumer has not published any Bevy GPU resources. Preparing
+            // and committing the empty reset transaction still clears stale native bindings from
+            // a prior renderer generation before this consumer starts producing snapshots.
+            let reset = match self.context.prepare_renderer_texture_reset(&consumer) {
+                Ok(reset) => reset,
+                Err(error) => {
+                    drop(consumer);
+                    let _ = self.context.poll_snapshot_completions();
+                    return Err(error);
+                }
+            };
+            let _ = reset.commit();
             self.renderer_consumer = Some(consumer);
         }
         Ok(())
@@ -399,28 +1003,41 @@ impl ImguiContext {
         multi_viewport_supported: bool,
     ) -> Result<dear_imgui_rs::render::FrameSnapshot, dear_imgui_rs::render::SnapshotError> {
         self.ensure_renderer_consumer()?;
-        let consumer = self
-            .renderer_consumer
-            .as_ref()
-            .expect("renderer consumer was initialized");
         #[cfg(feature = "multi-viewport")]
         if multi_viewport_supported {
-            let snapshot = self.context.render_platform_viewport_snapshot(consumer)?;
+            #[cfg(not(target_arch = "wasm32"))]
+            self.assert_viewport_callback_ownership();
+            let snapshot = {
+                let consumer = self
+                    .renderer_consumer
+                    .as_ref()
+                    .expect("renderer consumer was initialized");
+                self.context.render_platform_viewport_snapshot(consumer)?
+            };
+            #[cfg(not(target_arch = "wasm32"))]
+            self.assert_viewport_callback_ownership();
             #[cfg(not(target_arch = "wasm32"))]
             self.context.update_platform_windows();
             return Ok(snapshot);
         }
         #[cfg(not(feature = "multi-viewport"))]
         let _ = multi_viewport_supported;
+        let consumer = self
+            .renderer_consumer
+            .as_ref()
+            .expect("renderer consumer was initialized");
         self.context.render_snapshot(consumer)
     }
 
-    fn reset_renderer_texture_bindings(
+    fn commit_renderer_texture_reset_after_release(
         &mut self,
     ) -> Result<(), dear_imgui_rs::render::RendererConsumerError> {
         #[cfg(feature = "render")]
         if let Some(consumer) = self.renderer_consumer.as_ref() {
-            let _ = self.context.reset_renderer_texture_bindings(consumer)?;
+            // `into_inner` reaches this point only after the render world's release generation
+            // acknowledged destruction of every Bevy-managed GPU resource.
+            let reset = self.context.prepare_renderer_texture_reset(consumer)?;
+            let _ = reset.commit();
         }
         Ok(())
     }
@@ -437,71 +1054,246 @@ impl ImguiContext {
     }
 }
 
-pub(crate) fn clear_platform_backend_handlers(context: &mut dear_imgui_rs::Context) {
-    let platform_io = context.platform_io_mut();
-    let clipboard_handlers = ClipboardPlatformHandlers::capture(platform_io.as_raw());
+impl Drop for ImguiContext {
+    fn drop(&mut self) {
+        self.with_bound_context(|this| {
+            this.revoke_frame_access();
+            #[cfg(feature = "render")]
+            if let Some(release) = this.renderer_release.as_ref() {
+                let _ = release.request_release();
+            }
+            let _ = this.clear_backend_data();
+        });
+    }
+}
+
+#[derive(Clone, Copy)]
+enum BackendNameKind {
+    Platform,
+    Renderer,
+}
+
+fn clear_backend_name_if_owned(
+    context: &mut dear_imgui_rs::Context,
+    owned_name: &mut Option<String>,
+    owned_name_ptr: &mut *const c_char,
+    kind: BackendNameKind,
+) {
+    let Some(expected) = owned_name.take() else {
+        *owned_name_ptr = std::ptr::null();
+        return;
+    };
+    let expected_ptr = std::mem::replace(owned_name_ptr, std::ptr::null());
+    let still_owned = match kind {
+        BackendNameKind::Platform => context.io().backend_platform_name(),
+        BackendNameKind::Renderer => context.io().backend_renderer_name(),
+    }
+    .is_some_and(|actual| {
+        actual.as_ptr() == expected_ptr && actual.to_bytes() == expected.as_bytes()
+    });
+    if !still_owned {
+        return;
+    }
+    match kind {
+        BackendNameKind::Platform => context
+            .set_platform_name::<String>(None)
+            .expect("clearing BackendPlatformName must not fail"),
+        BackendNameKind::Renderer => context
+            .set_renderer_name::<String>(None)
+            .expect("clearing BackendRendererName must not fail"),
+    }
+}
+
+fn has_platform_backend_state(context: &dear_imgui_rs::Context) -> bool {
+    let raw = unsafe { &*context.platform_io().as_raw() };
+    !context.io().backend_platform_user_data().is_null()
+        || !raw.Monitors.Data.is_null()
+        || raw.Monitors.Size != 0
+        || raw.Monitors.Capacity != 0
+        || raw.Platform_CreateWindow.is_some()
+        || raw.Platform_DestroyWindow.is_some()
+        || raw.Platform_ShowWindow.is_some()
+        || raw.Platform_SetWindowPos.is_some()
+        || raw.Platform_GetWindowPos.is_some()
+        || raw.Platform_SetWindowSize.is_some()
+        || raw.Platform_GetWindowSize.is_some()
+        || raw.Platform_GetWindowFramebufferScale.is_some()
+        || raw.Platform_SetWindowFocus.is_some()
+        || raw.Platform_GetWindowFocus.is_some()
+        || raw.Platform_GetWindowMinimized.is_some()
+        || raw.Platform_SetWindowTitle.is_some()
+        || raw.Platform_SetWindowAlpha.is_some()
+        || raw.Platform_UpdateWindow.is_some()
+        || raw.Platform_RenderWindow.is_some()
+        || raw.Platform_SwapBuffers.is_some()
+        || raw.Platform_GetWindowDpiScale.is_some()
+        || raw.Platform_OnChangedViewport.is_some()
+        || raw.Platform_GetWindowWorkAreaInsets.is_some()
+        || raw.Platform_CreateVkSurface.is_some()
+}
+
+#[cfg(feature = "render")]
+fn renderer_backend_claim_conflict(
+    context: &dear_imgui_rs::Context,
+    owned_flags: dear_imgui_rs::BackendFlags,
+) -> Option<&'static str> {
+    if !context.io().backend_renderer_user_data().is_null() {
+        return Some("BackendRendererUserData");
+    }
+    if context.io().backend_renderer_name().is_some() {
+        return Some("BackendRendererName");
+    }
+    let reserved_flags = dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES
+        | dear_imgui_rs::BackendFlags::RENDERER_HAS_VTX_OFFSET;
     #[cfg(feature = "multi-viewport")]
-    unsafe {
-        // Callers only use this during initial configuration or after platform windows have been
-        // destroyed, so Dear ImGui cannot invoke the callback table being cleared.
-        platform_io.clear_platform_handlers();
+    let reserved_flags = reserved_flags | dear_imgui_rs::BackendFlags::RENDERER_HAS_VIEWPORTS;
+    if !(context.io().backend_flags() & reserved_flags & !owned_flags).is_empty() {
+        return Some("BackendFlags");
     }
-    #[cfg(not(feature = "multi-viewport"))]
-    unsafe {
-        dear_imgui_rs::sys::ImGuiPlatformIO_ClearPlatformHandlers(platform_io.as_raw_mut());
-    }
-    clipboard_handlers.restore(platform_io.as_raw_mut());
-}
 
-struct ClipboardPlatformHandlers {
-    get: Option<
-        unsafe extern "C" fn(ctx: *mut dear_imgui_rs::sys::ImGuiContext) -> *const std::ffi::c_char,
-    >,
-    set: Option<
-        unsafe extern "C" fn(
-            ctx: *mut dear_imgui_rs::sys::ImGuiContext,
-            text: *const std::ffi::c_char,
+    let platform_io = context.platform_io();
+    let raw = unsafe { &*platform_io.as_raw() };
+    if unsafe { !platform_io.renderer_render_state().is_null() } {
+        return Some("Renderer_RenderState");
+    }
+    for (occupied, field) in [
+        (
+            raw.Renderer_TextureMaxWidth != 0,
+            "Renderer_TextureMaxWidth",
         ),
-    >,
-    user_data: *mut std::ffi::c_void,
+        (
+            raw.Renderer_TextureMaxHeight != 0,
+            "Renderer_TextureMaxHeight",
+        ),
+        (raw.Renderer_CreateWindow.is_some(), "Renderer_CreateWindow"),
+        (
+            raw.Renderer_DestroyWindow.is_some(),
+            "Renderer_DestroyWindow",
+        ),
+        (
+            raw.Renderer_SetWindowSize.is_some(),
+            "Renderer_SetWindowSize",
+        ),
+        (raw.Renderer_RenderWindow.is_some(), "Renderer_RenderWindow"),
+        (raw.Renderer_SwapBuffers.is_some(), "Renderer_SwapBuffers"),
+    ] {
+        if occupied {
+            return Some(field);
+        }
+    }
+    None
 }
 
-impl ClipboardPlatformHandlers {
-    fn capture(platform_io: *const dear_imgui_rs::sys::ImGuiPlatformIO) -> Self {
-        let platform_io = unsafe { &*platform_io };
+#[cfg(feature = "render")]
+fn renderer_owned_flag_mask() -> i32 {
+    (dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES
+        | dear_imgui_rs::BackendFlags::RENDERER_HAS_VTX_OFFSET)
+        .bits()
+}
+
+#[cfg(feature = "render")]
+impl ImguiRendererRuntimeContract {
+    fn capture(context: &dear_imgui_rs::Context) -> Self {
+        let io = context.io();
+        let platform_io = context.platform_io();
+        let raw = unsafe { &*platform_io.as_raw() };
         Self {
-            get: platform_io.Platform_GetClipboardTextFn,
-            set: platform_io.Platform_SetClipboardTextFn,
-            user_data: platform_io.Platform_ClipboardUserData,
+            backend_user_data: io.backend_renderer_user_data(),
+            backend_name: io
+                .backend_renderer_name()
+                .map_or(std::ptr::null(), std::ffi::CStr::as_ptr),
+            owned_flags: io.backend_flags().bits() & renderer_owned_flag_mask(),
+            render_state: unsafe { platform_io.renderer_render_state() },
+            texture_max_width: raw.Renderer_TextureMaxWidth,
+            texture_max_height: raw.Renderer_TextureMaxHeight,
+            viewport_callbacks: [
+                raw.Renderer_CreateWindow
+                    .map_or(0, |callback| callback as usize),
+                raw.Renderer_DestroyWindow
+                    .map_or(0, |callback| callback as usize),
+                raw.Renderer_SetWindowSize
+                    .map_or(0, |callback| callback as usize),
+                raw.Renderer_RenderWindow
+                    .map_or(0, |callback| callback as usize),
+                raw.Renderer_SwapBuffers
+                    .map_or(0, |callback| callback as usize),
+            ],
+            draw_callbacks: render::standard_draw_callback_contract(context),
         }
     }
 
-    fn restore(self, platform_io: *mut dear_imgui_rs::sys::ImGuiPlatformIO) {
-        let platform_io = unsafe { &mut *platform_io };
-        platform_io.Platform_GetClipboardTextFn = self.get;
-        platform_io.Platform_SetClipboardTextFn = self.set;
-        platform_io.Platform_ClipboardUserData = self.user_data;
+    fn first_drift(self, actual: Self) -> Option<ImguiRendererOwnershipError> {
+        for (changed, field) in [
+            (
+                actual.backend_user_data != self.backend_user_data,
+                "BackendRendererUserData",
+            ),
+            (
+                actual.backend_name != self.backend_name,
+                "BackendRendererName",
+            ),
+            (actual.owned_flags != self.owned_flags, "BackendFlags"),
+            (
+                actual.render_state != self.render_state,
+                "Renderer_RenderState",
+            ),
+            (
+                actual.texture_max_width != self.texture_max_width,
+                "Renderer_TextureMaxWidth",
+            ),
+            (
+                actual.texture_max_height != self.texture_max_height,
+                "Renderer_TextureMaxHeight",
+            ),
+        ] {
+            if changed {
+                return Some(ImguiRendererOwnershipError::FieldReplaced { field });
+            }
+        }
+        for ((actual, expected), field) in actual
+            .viewport_callbacks
+            .into_iter()
+            .zip(self.viewport_callbacks)
+            .zip([
+                "Renderer_CreateWindow",
+                "Renderer_DestroyWindow",
+                "Renderer_SetWindowSize",
+                "Renderer_RenderWindow",
+                "Renderer_SwapBuffers",
+            ])
+        {
+            if actual != expected {
+                return Some(ImguiRendererOwnershipError::FieldReplaced { field });
+            }
+        }
+        actual
+            .draw_callbacks
+            .into_iter()
+            .zip(self.draw_callbacks)
+            .zip([
+                "DrawCallback_ResetRenderState",
+                "DrawCallback_SetSamplerLinear",
+                "DrawCallback_SetSamplerNearest",
+            ])
+            .find_map(|((actual, expected), field)| {
+                (actual != expected).then_some(ImguiRendererOwnershipError::FieldReplaced { field })
+            })
     }
-}
 
-fn clear_renderer_backend_handlers(context: &mut dear_imgui_rs::Context) {
-    let platform_io = context.platform_io_mut();
-    #[cfg(feature = "multi-viewport")]
-    unsafe {
-        // Bevy does not expose renderer callbacks after this point, and teardown destroys all
-        // platform windows before reaching this helper.
-        platform_io.clear_renderer_handlers();
-    }
-    #[cfg(not(feature = "multi-viewport"))]
-    unsafe {
-        dear_imgui_rs::sys::ImGuiPlatformIO_ClearRendererHandlers(platform_io.as_raw_mut());
-    }
-}
-
-impl Drop for ImguiContext {
-    fn drop(&mut self) {
-        self.clear_backend_data();
-        let _ = self.detach_renderer_consumer();
+    fn retains_any_identity(self, actual: Self) -> bool {
+        (!self.backend_user_data.is_null() && actual.backend_user_data == self.backend_user_data)
+            || (!self.backend_name.is_null() && actual.backend_name == self.backend_name)
+            || (!self.render_state.is_null() && actual.render_state == self.render_state)
+            || self
+                .viewport_callbacks
+                .into_iter()
+                .zip(actual.viewport_callbacks)
+                .any(|(expected, actual)| expected != 0 && expected == actual)
+            || self
+                .draw_callbacks
+                .into_iter()
+                .zip(actual.draw_callbacks)
+                .any(|(expected, actual)| expected != 0 && expected == actual)
     }
 }
 

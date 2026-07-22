@@ -19,16 +19,26 @@ Dear ImGui context or panel whose settings and drafts it should retain.
 
 ## Cargo Integration
 
+`0.16.0-alpha.1` is not published yet. Test the candidate from `main`:
+
 ```toml
 [dependencies]
-dear-imgui-rs = "0.16.0"
-dear-imgui-reflect = "0.16.0"
+dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
+dear-imgui-reflect = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
+```
+
+After publication, use the exact prerelease requirements:
+
+```toml
+[dependencies]
+dear-imgui-rs = "=0.16.0-alpha.1"
+dear-imgui-reflect = "=0.16.0-alpha.1"
 ```
 
 Optional math support:
 
 ```toml
-dear-imgui-reflect = { version = "0.16.0", features = ["glam", "mint"] }
+dear-imgui-reflect = { version = "=0.16.0-alpha.1", features = ["glam", "mint"] }
 glam = "0.32"
 mint = "0.5"
 ```
@@ -183,8 +193,8 @@ See `examples/03-features/reflect_demo.rs` for a complete inspector and
 
 | Item | Version |
 |---|---|
-| Crate | 0.16.0 |
-| dear-imgui-rs | 0.16.0 |
+| Crate | 0.16.0-alpha.1 |
+| dear-imgui-rs | 0.16.0-alpha.1 |
 
 ## License
 

@@ -5,6 +5,12 @@
 ))]
 use super::core::assert_current_draw_data;
 use super::*;
+#[cfg(any(
+    feature = "opengl3-renderer",
+    feature = "sdlrenderer3-renderer",
+    feature = "sdlgpu3-renderer"
+))]
+use dear_imgui_rs::render::RendererConsumer;
 
 #[cfg(any(
     feature = "opengl3-renderer",
@@ -13,7 +19,11 @@ use super::*;
 ))]
 fn prepare_renderer_consumer(imgui: &mut Context) -> Result<RendererConsumer, Sdl3BackendError> {
     let consumer = imgui.create_renderer_consumer()?;
-    imgui.reset_renderer_texture_bindings(&consumer)?;
+    // A new consumer has not submitted an epoch or produced a Context-managed texture mapping.
+    // The empty transaction only clears bindings from an already-released predecessor before this
+    // renderer can publish new texture requests.
+    let reset = imgui.prepare_renderer_texture_reset(&consumer)?;
+    let _ = reset.commit();
     Ok(consumer)
 }
 
@@ -25,10 +35,24 @@ fn prepare_renderer_consumer(imgui: &mut Context) -> Result<RendererConsumer, Sd
 fn prepare_renderer_runtime(
     imgui: &mut Context,
     renderer_shutdown: fn(),
-) -> Result<(RuntimeRegistration, RendererConsumer), Sdl3BackendError> {
-    let mut runtime = RuntimeRegistration::prepare(imgui, Some(renderer_shutdown))?;
+    renderer_device_objects_destroy: fn(),
+    renderer_texture_update: fn(&mut dear_imgui_rs::TextureData),
+    platform_graphics: PlatformGraphicsKind,
+    native_renderer: NativeRendererKind,
+) -> Result<RuntimeRegistration, Sdl3BackendError> {
+    let mut runtime = RuntimeRegistration::prepare_with_backend(
+        imgui,
+        Some(renderer_shutdown),
+        Some(renderer_device_objects_destroy),
+        Some(renderer_texture_update),
+        platform_graphics,
+        native_renderer,
+    )?;
     match prepare_renderer_consumer(imgui) {
-        Ok(consumer) => Ok((runtime, consumer)),
+        Ok(consumer) => {
+            runtime.control().install_renderer_consumer(consumer);
+            Ok(runtime)
+        }
         Err(error) => {
             runtime.native_initialization_failed();
             Err(error)
@@ -72,6 +96,17 @@ fn ensure_matching_rendered_frame(
     Ok(())
 }
 
+#[cfg(feature = "sdlrenderer3-renderer")]
+fn ensure_matching_sdl_renderer(
+    expected: *mut SDL_Renderer,
+    actual: *mut SDL_Renderer,
+) -> Result<(), Sdl3BackendError> {
+    if expected != actual {
+        return Err(Sdl3BackendError::RendererMismatch);
+    }
+    Ok(())
+}
+
 #[cfg(all(
     test,
     any(
@@ -106,14 +141,28 @@ mod renderer_contract_tests {
                 if expected == owner_binding.id() && actual == frame.context_id()
         ));
     }
+
+    #[cfg(feature = "sdlrenderer3-renderer")]
+    #[test]
+    fn foreign_sdl_renderer_is_rejected_before_texture_or_draw_work() {
+        let _guard = crate::tests::test_guard();
+        let expected = 0x101_usize as *mut SDL_Renderer;
+        let foreign = 0x102_usize as *mut SDL_Renderer;
+
+        assert!(ensure_matching_sdl_renderer(expected, expected).is_ok());
+        assert!(matches!(
+            ensure_matching_sdl_renderer(expected, foreign),
+            Err(Sdl3BackendError::RendererMismatch)
+        ));
+    }
 }
 
 /// RAII owner for the SDL3 platform backend without an official renderer shim.
 ///
-/// This owner and its Context attachment share one runtime control. Dropping either
-/// side first runs the same idempotent teardown, and Context-first teardown releases
-/// platform windows before the native Context is destroyed.
-#[must_use = "dropping the backend owner shuts down the SDL3 platform backend"]
+/// This owner and its Context attachment share one runtime control. Explicit shutdown uses the
+/// supplied Context to normalize any open frame. Dropping the owner defers native cleanup to the
+/// Context attachment so Context-first teardown preserves the same ordering.
+#[must_use = "call shutdown for reported cleanup errors, or retain the owner until Context teardown"]
 #[derive(Debug)]
 pub struct Sdl3PlatformBackend {
     runtime: RuntimeRegistration,
@@ -122,9 +171,21 @@ pub struct Sdl3PlatformBackend {
 impl Sdl3PlatformBackend {
     fn initialize(
         imgui: &mut Context,
+        platform_graphics: PlatformGraphicsKind,
+        gl_viewport_swap_interval: Sdl3OpenGlViewportSwapInterval,
         initialize_native: impl FnOnce(&mut Context) -> Result<(), Sdl3BackendError>,
     ) -> Result<Self, Sdl3BackendError> {
-        let mut runtime = RuntimeRegistration::prepare(imgui, None)?;
+        let mut runtime = RuntimeRegistration::prepare_with_backend(
+            imgui,
+            None,
+            None,
+            None,
+            platform_graphics,
+            NativeRendererKind::None,
+        )?;
+        if platform_graphics == PlatformGraphicsKind::OpenGl {
+            runtime.set_gl_viewport_swap_interval(gl_viewport_swap_interval);
+        }
         if let Err(error) = initialize_native(imgui) {
             runtime.native_initialization_failed();
             return Err(error);
@@ -149,63 +210,171 @@ impl Sdl3PlatformBackend {
     }
 
     /// Initialize the SDL3 platform backend for non-OpenGL renderers.
-    pub fn init_for_other(imgui: &mut Context, window: &Window) -> Result<Self, Sdl3BackendError> {
-        Self::initialize(imgui, |imgui| init_for_other(imgui, window))
+    ///
+    /// # Safety
+    ///
+    /// `window` must remain alive at the same native allocation until explicit shutdown succeeds
+    /// or `imgui` finishes attachment teardown. Dropping this owner alone does not end that
+    /// requirement because cleanup is deferred to the Context.
+    pub unsafe fn init_for_other(
+        imgui: &mut Context,
+        window: &Window,
+    ) -> Result<Self, Sdl3BackendError> {
+        Self::initialize(
+            imgui,
+            PlatformGraphicsKind::Other,
+            Sdl3OpenGlViewportSwapInterval::Immediate,
+            |imgui| init_for_other(imgui, window),
+        )
     }
 
     /// Initialize the SDL3 platform backend for an OpenGL context without
     /// initializing the official OpenGL3 renderer.
-    pub fn init_platform_for_opengl(
+    ///
+    /// # Safety
+    ///
+    /// `window` and `gl_context` must remain valid and associated with each other until explicit
+    /// shutdown succeeds or `imgui` finishes attachment teardown. Dropping this owner alone does
+    /// not end their lifetime requirement. The caller must also make `gl_context` current on
+    /// `window` before every renderer operation that touches OpenGL state, including rendering,
+    /// device-object changes, and shutdown.
+    pub unsafe fn init_platform_for_opengl(
         imgui: &mut Context,
         window: &Window,
         gl_context: &GLContext,
     ) -> Result<Self, Sdl3BackendError> {
-        Self::initialize(imgui, |imgui| {
-            init_platform_for_opengl(imgui, window, gl_context)
-        })
+        unsafe {
+            Self::init_platform_for_opengl_with_viewport_swap_interval(
+                imgui,
+                window,
+                gl_context,
+                Sdl3OpenGlViewportSwapInterval::default(),
+            )
+        }
+    }
+
+    /// Initialize the SDL3 OpenGL platform backend with an explicit secondary-viewport
+    /// swap-interval policy.
+    ///
+    /// # Safety
+    ///
+    /// `window` and `gl_context` must remain valid and associated with each other until explicit
+    /// shutdown succeeds or `imgui` finishes attachment teardown. Dropping this owner alone does
+    /// not end their lifetime requirement. The caller must also make `gl_context` current on
+    /// `window` before every renderer operation that touches OpenGL state, including rendering,
+    /// device-object changes, and shutdown.
+    pub unsafe fn init_platform_for_opengl_with_viewport_swap_interval(
+        imgui: &mut Context,
+        window: &Window,
+        gl_context: &GLContext,
+        viewport_swap_interval: Sdl3OpenGlViewportSwapInterval,
+    ) -> Result<Self, Sdl3BackendError> {
+        Self::initialize(
+            imgui,
+            PlatformGraphicsKind::OpenGl,
+            viewport_swap_interval,
+            |imgui| init_platform_for_opengl(imgui, window, gl_context),
+        )
     }
 
     /// Initialize the SDL3 platform backend for Vulkan renderers.
-    pub fn init_for_vulkan(imgui: &mut Context, window: &Window) -> Result<Self, Sdl3BackendError> {
-        Self::initialize(imgui, |imgui| init_for_vulkan(imgui, window))
+    ///
+    /// # Safety
+    ///
+    /// `window` must remain alive at the same native allocation until explicit shutdown succeeds
+    /// or `imgui` finishes attachment teardown.
+    pub unsafe fn init_for_vulkan(
+        imgui: &mut Context,
+        window: &Window,
+    ) -> Result<Self, Sdl3BackendError> {
+        Self::initialize(
+            imgui,
+            PlatformGraphicsKind::Other,
+            Sdl3OpenGlViewportSwapInterval::Immediate,
+            |imgui| init_for_vulkan(imgui, window),
+        )
     }
 
     /// Initialize the SDL3 platform backend for Direct3D renderers.
-    pub fn init_for_d3d(imgui: &mut Context, window: &Window) -> Result<Self, Sdl3BackendError> {
-        Self::initialize(imgui, |imgui| init_for_d3d(imgui, window))
+    ///
+    /// # Safety
+    ///
+    /// `window` must remain alive at the same native allocation until explicit shutdown succeeds
+    /// or `imgui` finishes attachment teardown.
+    pub unsafe fn init_for_d3d(
+        imgui: &mut Context,
+        window: &Window,
+    ) -> Result<Self, Sdl3BackendError> {
+        Self::initialize(
+            imgui,
+            PlatformGraphicsKind::Other,
+            Sdl3OpenGlViewportSwapInterval::Immediate,
+            |imgui| init_for_d3d(imgui, window),
+        )
     }
 
     /// Initialize the SDL3 platform backend for Metal renderers.
-    pub fn init_for_metal(imgui: &mut Context, window: &Window) -> Result<Self, Sdl3BackendError> {
-        Self::initialize(imgui, |imgui| init_for_metal(imgui, window))
+    ///
+    /// # Safety
+    ///
+    /// `window` must remain alive at the same native allocation until explicit shutdown succeeds
+    /// or `imgui` finishes attachment teardown.
+    pub unsafe fn init_for_metal(
+        imgui: &mut Context,
+        window: &Window,
+    ) -> Result<Self, Sdl3BackendError> {
+        Self::initialize(
+            imgui,
+            PlatformGraphicsKind::Other,
+            Sdl3OpenGlViewportSwapInterval::Immediate,
+            |imgui| init_for_metal(imgui, window),
+        )
     }
 
     /// Initialize the SDL3 platform backend for SDL_Renderer-based renderers.
     ///
     /// # Safety
     ///
-    /// The caller must provide a valid `SDL_Renderer` pointer associated with `window`.
+    /// The caller must provide a valid `SDL_Renderer` pointer associated with `window`. Both
+    /// native objects must remain alive until explicit shutdown succeeds or `imgui` finishes
+    /// attachment teardown; dropping this owner alone does not end that requirement.
     pub unsafe fn init_for_sdl_renderer(
         imgui: &mut Context,
         window: &Window,
         renderer: *mut sdl3_sys::render::SDL_Renderer,
     ) -> Result<Self, Sdl3BackendError> {
-        Self::initialize(imgui, |imgui| unsafe {
-            init_for_sdl_renderer(imgui, window, renderer)
-        })
+        Self::initialize(
+            imgui,
+            PlatformGraphicsKind::Other,
+            Sdl3OpenGlViewportSwapInterval::Immediate,
+            |imgui| unsafe { init_for_sdl_renderer(imgui, window, renderer) },
+        )
     }
 
     /// Initialize the SDL3 platform backend for SDL GPU renderers.
-    pub fn init_for_sdl_gpu(
+    ///
+    /// # Safety
+    ///
+    /// `window` must remain alive at the same native allocation until explicit shutdown succeeds
+    /// or `imgui` finishes attachment teardown.
+    pub unsafe fn init_for_sdl_gpu(
         imgui: &mut Context,
         window: &Window,
     ) -> Result<Self, Sdl3BackendError> {
-        Self::initialize(imgui, |imgui| init_for_sdl_gpu(imgui, window))
+        Self::initialize(
+            imgui,
+            PlatformGraphicsKind::Other,
+            Sdl3OpenGlViewportSwapInterval::Immediate,
+            |imgui| init_for_sdl_gpu(imgui, window),
+        )
     }
 
     /// Begin a new SDL3 platform frame.
     pub fn new_frame(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
-        self.entry(imgui, sdl3_new_frame_impl)
+        self.entry(imgui, || {
+            sdl3_new_frame_impl();
+            self.runtime.control().refresh_platform_monitors_bound();
+        })
     }
 
     /// Process a single low-level SDL3 event with the captured ImGui context.
@@ -248,7 +417,8 @@ impl Sdl3PlatformBackend {
 
     /// Shut down the SDL3 platform backend.
     ///
-    /// This operation is idempotent. Drop performs the same cleanup on a best-effort basis.
+    /// This operation is idempotent. Drop defers native cleanup to Context teardown because it
+    /// cannot safely normalize an open frame without the mutable Context.
     pub fn shutdown(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
         self.runtime.shutdown_platform(imgui)
     }
@@ -256,62 +426,137 @@ impl Sdl3PlatformBackend {
 
 /// RAII owner for SDL3 platform + official OpenGL3 renderer backends.
 #[cfg(feature = "opengl3-renderer")]
-#[must_use = "dropping the backend owner shuts down the SDL3 + OpenGL3 backends"]
+#[must_use = "call shutdown for reported cleanup errors, or retain the owner until Context teardown"]
 #[derive(Debug)]
 pub struct Sdl3OpenGl3Backend {
     runtime: RuntimeRegistration,
-    consumer: Option<RendererConsumer>,
-    textures: RendererTextureStore,
 }
 
 #[cfg(feature = "opengl3-renderer")]
 impl Sdl3OpenGl3Backend {
-    fn from_initialized_context(runtime: RuntimeRegistration, consumer: RendererConsumer) -> Self {
-        Self {
-            runtime,
-            consumer: Some(consumer),
-            textures: RendererTextureStore::default(),
-        }
+    fn from_initialized_context(runtime: RuntimeRegistration) -> Self {
+        Self { runtime }
     }
 
     /// Initialize the SDL3 platform backend and the official OpenGL3 renderer.
-    pub fn init(
+    ///
+    /// # Safety
+    ///
+    /// `window` and `gl_context` must remain valid and associated with each other until explicit
+    /// shutdown succeeds or `imgui` finishes attachment teardown. Dropping this owner alone does
+    /// not end their lifetime requirement. The caller must also make `gl_context` current on
+    /// `window` before every renderer operation that touches OpenGL state, including rendering,
+    /// device-object changes, and shutdown.
+    pub unsafe fn init(
         imgui: &mut Context,
         window: &Window,
         gl_context: &GLContext,
         glsl_version: &str,
     ) -> Result<Self, Sdl3BackendError> {
-        let (mut runtime, consumer) =
-            prepare_renderer_runtime(imgui, shutdown_opengl3_renderer_impl)?;
+        unsafe {
+            Self::init_with_viewport_swap_interval(
+                imgui,
+                window,
+                gl_context,
+                glsl_version,
+                Sdl3OpenGlViewportSwapInterval::default(),
+            )
+        }
+    }
+
+    /// Initialize the SDL3 platform backend and official OpenGL3 renderer with an explicit
+    /// secondary-viewport swap-interval policy.
+    ///
+    /// # Safety
+    ///
+    /// `window` and `gl_context` must remain valid and associated with each other until explicit
+    /// shutdown succeeds or `imgui` finishes attachment teardown. Dropping this owner alone does
+    /// not end their lifetime requirement. The caller must also make `gl_context` current on
+    /// `window` before every renderer operation that touches OpenGL state, including rendering,
+    /// device-object changes, and shutdown.
+    pub unsafe fn init_with_viewport_swap_interval(
+        imgui: &mut Context,
+        window: &Window,
+        gl_context: &GLContext,
+        glsl_version: &str,
+        viewport_swap_interval: Sdl3OpenGlViewportSwapInterval,
+    ) -> Result<Self, Sdl3BackendError> {
+        let mut runtime = prepare_renderer_runtime(
+            imgui,
+            shutdown_opengl3_renderer_impl,
+            destroy_opengl3_device_objects,
+            update_opengl3_texture,
+            PlatformGraphicsKind::OpenGl,
+            NativeRendererKind::OpenGl3,
+        )?;
+        runtime.set_gl_viewport_swap_interval(viewport_swap_interval);
         if let Err(error) = init_for_opengl(imgui, window, gl_context, glsl_version) {
             runtime.native_initialization_failed();
-            drop(consumer);
             return Err(error);
         }
         runtime.finish_native_initialization(imgui)?;
-        Ok(Self::from_initialized_context(runtime, consumer))
+        Ok(Self::from_initialized_context(runtime))
     }
 
     /// Initialize the SDL3 + OpenGL3 backends with the upstream default GLSL version.
-    pub fn init_default(
+    ///
+    /// # Safety
+    ///
+    /// `window` and `gl_context` must remain valid and associated with each other until explicit
+    /// shutdown succeeds or `imgui` finishes attachment teardown. Dropping this owner alone does
+    /// not end their lifetime requirement.
+    pub unsafe fn init_default(
         imgui: &mut Context,
         window: &Window,
         gl_context: &GLContext,
     ) -> Result<Self, Sdl3BackendError> {
-        let (mut runtime, consumer) =
-            prepare_renderer_runtime(imgui, shutdown_opengl3_renderer_impl)?;
+        unsafe {
+            Self::init_default_with_viewport_swap_interval(
+                imgui,
+                window,
+                gl_context,
+                Sdl3OpenGlViewportSwapInterval::default(),
+            )
+        }
+    }
+
+    /// Initialize the SDL3 + OpenGL3 backends with the upstream default GLSL version and an
+    /// explicit secondary-viewport swap-interval policy.
+    ///
+    /// # Safety
+    ///
+    /// `window` and `gl_context` must remain valid and associated with each other until explicit
+    /// shutdown succeeds or `imgui` finishes attachment teardown. Dropping this owner alone does
+    /// not end their lifetime requirement.
+    pub unsafe fn init_default_with_viewport_swap_interval(
+        imgui: &mut Context,
+        window: &Window,
+        gl_context: &GLContext,
+        viewport_swap_interval: Sdl3OpenGlViewportSwapInterval,
+    ) -> Result<Self, Sdl3BackendError> {
+        let mut runtime = prepare_renderer_runtime(
+            imgui,
+            shutdown_opengl3_renderer_impl,
+            destroy_opengl3_device_objects,
+            update_opengl3_texture,
+            PlatformGraphicsKind::OpenGl,
+            NativeRendererKind::OpenGl3,
+        )?;
+        runtime.set_gl_viewport_swap_interval(viewport_swap_interval);
         if let Err(error) = init_for_opengl_default(imgui, window, gl_context) {
             runtime.native_initialization_failed();
-            drop(consumer);
             return Err(error);
         }
         runtime.finish_native_initialization(imgui)?;
-        Ok(Self::from_initialized_context(runtime, consumer))
+        Ok(Self::from_initialized_context(runtime))
     }
 
     /// Begin a new SDL3 + OpenGL3 frame.
     pub fn new_frame(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
-        run_renderer_entry(&self.runtime, imgui, new_frame_opengl3_impl)
+        run_renderer_entry(&self.runtime, imgui, || {
+            new_frame_opengl3_impl();
+            self.runtime.control().refresh_platform_monitors_bound();
+        })
     }
 
     /// Process a single low-level SDL3 event with the captured ImGui context.
@@ -326,19 +571,24 @@ impl Sdl3OpenGl3Backend {
     /// Consume and render one synchronous frame using the official OpenGL3 renderer.
     pub fn render(&mut self, mut frame: RenderedFrame<'_>) -> Result<(), Sdl3BackendError> {
         ensure_matching_rendered_frame(self.runtime.control().binding(), &frame)?;
-        self.runtime.poll_fault()?;
-        if self.runtime.control().state() != RuntimeState::Attached {
-            return Err(Sdl3BackendError::RuntimeDetached);
-        }
+        self.runtime.control().ensure_bound_entry()?;
+        let request_epoch = frame.epoch().map_or(0, |epoch| epoch.sequence());
         let feedback = self
             .runtime
             .control()
             .binding()
             .try_with_bound_context(|| {
-                self.textures
-                    .process_requests(frame.texture_requests(), update_opengl3_texture)
+                self.runtime
+                    .control()
+                    .process_texture_requests(frame.texture_requests(), request_epoch)
             })??;
-        frame.reconcile_texture_feedback(feedback)?;
+        let progress = frame.reconcile_texture_feedback(feedback)?;
+        self.runtime
+            .control()
+            .mark_textures_reconciled(frame.texture_requests());
+        self.runtime
+            .control()
+            .prune_destroyed_textures(progress.watermark());
         self.runtime
             .control()
             .binding()
@@ -382,92 +632,96 @@ impl Sdl3OpenGl3Backend {
     }
 
     /// Destroy OpenGL3 renderer device objects.
+    ///
+    /// This validates an idle Context renderer consumer before native destruction begins. If a
+    /// detached [`dear_imgui_rs::render::FrameSnapshot`] is still outstanding, this returns an
+    /// error without destroying any native object. Commit or drop every snapshot, then retry.
     pub fn destroy_device_objects(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
-        run_renderer_entry(&self.runtime, imgui, destroy_opengl3_device_objects)?;
-        self.textures.forget_destroyed_by_upstream();
-        imgui.reset_renderer_texture_bindings(self.consumer())?;
-        Ok(())
+        self.runtime
+            .destroy_renderer_device_objects(imgui, destroy_opengl3_device_objects)
     }
 
     /// Shut down the official OpenGL3 renderer and SDL3 platform backend.
+    ///
+    /// Shutdown validates the Context renderer consumer before changing callbacks or releasing
+    /// native resources. An outstanding detached snapshot must be committed or dropped before
+    /// retrying this operation.
     pub fn shutdown(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
-        let result = self
-            .runtime
-            .shutdown_renderer(imgui, self.consumer.as_ref(), || {
-                self.textures.forget_destroyed_by_upstream()
-            });
-        if matches!(
-            self.runtime.control().state(),
-            RuntimeState::Detached | RuntimeState::ResourceDropped
-        ) {
-            self.consumer.take();
-        }
-        result
+        self.runtime.shutdown_renderer(imgui)
     }
 
     /// Returns and clears the oldest pending SDL3 platform callback fault.
     pub fn poll_fault(&self) -> Result<(), Sdl3BackendError> {
         self.runtime.poll_fault()
     }
-
-    fn consumer(&self) -> &RendererConsumer {
-        self.consumer
-            .as_ref()
-            .expect("SDL3 OpenGL3 renderer consumer was already detached")
-    }
 }
 
 #[cfg(feature = "sdlgpu3-renderer")]
-#[must_use = "dropping the backend owner shuts down the SDL3 + SDLGPU3 backends"]
+#[must_use = "call shutdown for reported cleanup errors, or retain the owner until Context teardown"]
 #[derive(Debug)]
 pub struct SdlGpu3RendererBackend {
     runtime: RuntimeRegistration,
-    consumer: Option<RendererConsumer>,
-    textures: RendererTextureStore,
 }
 
 #[cfg(feature = "sdlgpu3-renderer")]
 impl SdlGpu3RendererBackend {
-    fn from_initialized_context(runtime: RuntimeRegistration, consumer: RendererConsumer) -> Self {
-        Self {
-            runtime,
-            consumer: Some(consumer),
-            textures: RendererTextureStore::default(),
-        }
+    fn from_initialized_context(runtime: RuntimeRegistration) -> Self {
+        Self { runtime }
     }
 
     /// Initialize the SDL3 platform backend and the official SDLGPU3 renderer.
-    pub fn init(
+    ///
+    /// # Safety
+    ///
+    /// `window` and every native GPU object referenced by `info` must remain valid until explicit
+    /// shutdown succeeds or `imgui` finishes attachment teardown. Dropping this owner alone does
+    /// not end their lifetime requirement.
+    pub unsafe fn init(
         imgui: &mut Context,
         window: &Window,
         info: SdlGpu3InitInfo<'_>,
     ) -> Result<Self, Sdl3BackendError> {
-        let (mut runtime, consumer) =
-            prepare_renderer_runtime(imgui, shutdown_sdlgpu3_renderer_impl)?;
+        let mut runtime = prepare_renderer_runtime(
+            imgui,
+            shutdown_sdlgpu3_renderer_impl,
+            destroy_sdlgpu3_device_objects,
+            update_sdlgpu3_texture,
+            PlatformGraphicsKind::Other,
+            NativeRendererKind::SdlGpu3,
+        )?;
         if let Err(error) = init_for_sdlgpu3(imgui, window, info) {
             runtime.native_initialization_failed();
-            drop(consumer);
             return Err(error);
         }
         runtime.finish_native_initialization(imgui)?;
-        Ok(Self::from_initialized_context(runtime, consumer))
+        Ok(Self::from_initialized_context(runtime))
     }
 
     /// Initialize the SDL3 platform backend and the official SDLGPU3 renderer.
-    pub fn init_default(
+    ///
+    /// # Safety
+    ///
+    /// `window` and `gpu` must remain valid until explicit shutdown succeeds or `imgui` finishes
+    /// attachment teardown. Dropping this owner alone does not end their lifetime requirement.
+    pub unsafe fn init_default(
         imgui: &mut Context,
         window: &Window,
         gpu: &Device,
     ) -> Result<Self, Sdl3BackendError> {
-        let (mut runtime, consumer) =
-            prepare_renderer_runtime(imgui, shutdown_sdlgpu3_renderer_impl)?;
+        let mut runtime = prepare_renderer_runtime(
+            imgui,
+            shutdown_sdlgpu3_renderer_impl,
+            destroy_sdlgpu3_device_objects,
+            update_sdlgpu3_texture,
+            PlatformGraphicsKind::Other,
+            NativeRendererKind::SdlGpu3,
+        )?;
         if let Err(error) = init_for_sdlgpu3_default(imgui, window, gpu) {
             runtime.native_initialization_failed();
-            drop(consumer);
             return Err(error);
         }
         runtime.finish_native_initialization(imgui)?;
-        Ok(Self::from_initialized_context(runtime, consumer))
+        Ok(Self::from_initialized_context(runtime))
     }
 
     /// Process a single low-level SDL3 event with the captured ImGui context.
@@ -481,29 +735,43 @@ impl SdlGpu3RendererBackend {
 
     /// Begin a new SDL3 + SDLGPU3 frame.
     pub fn new_frame(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
-        run_renderer_entry(&self.runtime, imgui, new_frame_sdlgpu3_impl)
+        run_renderer_entry(&self.runtime, imgui, || {
+            new_frame_sdlgpu3_impl();
+            self.runtime.control().refresh_platform_monitors_bound();
+        })
     }
 
     /// Process texture requests and prepare one synchronous frame for an SDL GPU render pass.
-    pub fn prepare_render<'renderer, 'ctx, 'command>(
+    ///
+    /// # Safety
+    ///
+    /// `command_buffer` must come from the same live `SDL_GPUDevice` supplied at backend
+    /// initialization and must remain in a state that permits upload and render preparation
+    /// commands. The `sdl3` wrapper does not expose enough provenance to validate this relation.
+    pub unsafe fn prepare_render<'renderer, 'ctx, 'command>(
         &'renderer mut self,
         mut frame: RenderedFrame<'ctx>,
         command_buffer: &'command CommandBuffer,
     ) -> Result<SdlGpu3PreparedFrame<'renderer, 'ctx, 'command>, Sdl3BackendError> {
         ensure_matching_rendered_frame(self.runtime.control().binding(), &frame)?;
-        self.runtime.poll_fault()?;
-        if self.runtime.control().state() != RuntimeState::Attached {
-            return Err(Sdl3BackendError::RuntimeDetached);
-        }
+        self.runtime.control().ensure_bound_entry()?;
+        let request_epoch = frame.epoch().map_or(0, |epoch| epoch.sequence());
         let feedback = self
             .runtime
             .control()
             .binding()
             .try_with_bound_context(|| {
-                self.textures
-                    .process_requests(frame.texture_requests(), update_sdlgpu3_texture)
+                self.runtime
+                    .control()
+                    .process_texture_requests(frame.texture_requests(), request_epoch)
             })??;
-        frame.reconcile_texture_feedback(feedback)?;
+        let progress = frame.reconcile_texture_feedback(feedback)?;
+        self.runtime
+            .control()
+            .mark_textures_reconciled(frame.texture_requests());
+        self.runtime
+            .control()
+            .prune_destroyed_textures(progress.watermark());
         self.runtime
             .control()
             .binding()
@@ -522,47 +790,37 @@ impl SdlGpu3RendererBackend {
     }
 
     /// Create SDL GPU3 renderer device objects.
+    ///
+    /// This first destroys the previous device objects and therefore requires the same idle
+    /// renderer consumer as [`Self::destroy_device_objects`].
     pub fn create_device_objects(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
         self.destroy_device_objects(imgui)?;
         run_renderer_entry(&self.runtime, imgui, create_sdlgpu3_device_objects)?;
-        // Upstream CreateDeviceObjects starts by running its own destroy pass.
-        imgui.reset_renderer_texture_bindings(self.consumer())?;
         Ok(())
     }
 
     /// Destroy SDL GPU3 renderer device objects.
+    ///
+    /// This validates an idle Context renderer consumer before native destruction begins. If a
+    /// detached [`dear_imgui_rs::render::FrameSnapshot`] is still outstanding, this returns an
+    /// error without destroying any native object. Commit or drop every snapshot, then retry.
     pub fn destroy_device_objects(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
-        run_renderer_entry(&self.runtime, imgui, destroy_sdlgpu3_device_objects)?;
-        self.textures.forget_destroyed_by_upstream();
-        imgui.reset_renderer_texture_bindings(self.consumer())?;
-        Ok(())
+        self.runtime
+            .destroy_renderer_device_objects(imgui, destroy_sdlgpu3_device_objects)
     }
 
     /// Shut down the official SDLGPU3 renderer and SDL3 platform backend.
+    ///
+    /// Shutdown validates the Context renderer consumer before changing callbacks or releasing
+    /// native resources. An outstanding detached snapshot must be committed or dropped before
+    /// retrying this operation.
     pub fn shutdown(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
-        let result = self
-            .runtime
-            .shutdown_renderer(imgui, self.consumer.as_ref(), || {
-                self.textures.forget_destroyed_by_upstream()
-            });
-        if matches!(
-            self.runtime.control().state(),
-            RuntimeState::Detached | RuntimeState::ResourceDropped
-        ) {
-            self.consumer.take();
-        }
-        result
+        self.runtime.shutdown_renderer(imgui)
     }
 
     /// Returns and clears the oldest pending SDL3 platform callback fault.
     pub fn poll_fault(&self) -> Result<(), Sdl3BackendError> {
         self.runtime.poll_fault()
-    }
-
-    fn consumer(&self) -> &RendererConsumer {
-        self.consumer
-            .as_ref()
-            .expect("SDL3 GPU renderer consumer was already detached")
     }
 }
 
@@ -578,7 +836,14 @@ pub struct SdlGpu3PreparedFrame<'renderer, 'ctx, 'command> {
 #[cfg(feature = "sdlgpu3-renderer")]
 impl SdlGpu3PreparedFrame<'_, '_, '_> {
     /// Submit the prepared Dear ImGui draw data into the active SDL GPU render pass.
-    pub fn render(self, render_pass: &mut RenderPass) -> Result<(), Sdl3BackendError> {
+    ///
+    /// # Safety
+    ///
+    /// `render_pass` must be active on `self`'s command buffer, originate from the same live
+    /// `SDL_GPUDevice` used to initialize the backend, and have attachments compatible with the
+    /// backend's configured color format and sample count.
+    pub unsafe fn render(self, render_pass: &mut RenderPass) -> Result<(), Sdl3BackendError> {
+        self.backend.runtime.control().ensure_bound_entry()?;
         self.backend
             .runtime
             .control()
@@ -593,44 +858,56 @@ impl SdlGpu3PreparedFrame<'_, '_, '_> {
 
 /// RAII owner for SDL3 platform + official SDLRenderer3 renderer backends.
 #[cfg(feature = "sdlrenderer3-renderer")]
-#[must_use = "dropping the backend owner shuts down the SDL3 + SDLRenderer3 backends"]
+#[must_use = "call shutdown for reported cleanup errors, or retain the owner until Context teardown"]
 #[derive(Debug)]
 pub struct Sdl3RendererBackend {
     runtime: RuntimeRegistration,
-    consumer: Option<RendererConsumer>,
-    textures: RendererTextureStore,
+    renderer: *mut sdl3_sys::render::SDL_Renderer,
 }
 
 #[cfg(feature = "sdlrenderer3-renderer")]
 impl Sdl3RendererBackend {
-    fn from_initialized_context(runtime: RuntimeRegistration, consumer: RendererConsumer) -> Self {
-        Self {
-            runtime,
-            consumer: Some(consumer),
-            textures: RendererTextureStore::default(),
-        }
+    fn from_initialized_context(
+        runtime: RuntimeRegistration,
+        renderer: *mut sdl3_sys::render::SDL_Renderer,
+    ) -> Self {
+        Self { runtime, renderer }
     }
 
     /// Initialize the SDL3 platform backend and the official SDLRenderer3 renderer.
-    pub fn init(
+    ///
+    /// # Safety
+    ///
+    /// `window`, `canvas`, and their associated native `SDL_Renderer` must remain valid until
+    /// explicit shutdown succeeds or `imgui` finishes attachment teardown. Dropping this owner
+    /// alone does not end their lifetime requirement.
+    pub unsafe fn init(
         imgui: &mut Context,
         window: &Window,
         canvas: &WindowCanvas,
     ) -> Result<Self, Sdl3BackendError> {
-        let (mut runtime, consumer) =
-            prepare_renderer_runtime(imgui, shutdown_sdlrenderer3_renderer_impl)?;
+        let mut runtime = prepare_renderer_runtime(
+            imgui,
+            shutdown_sdlrenderer3_renderer_impl,
+            destroy_sdlrenderer3_device_objects,
+            update_sdlrenderer3_texture,
+            PlatformGraphicsKind::Other,
+            NativeRendererKind::SdlRenderer3,
+        )?;
         if let Err(error) = init_for_canvas(imgui, window, canvas) {
             runtime.native_initialization_failed();
-            drop(consumer);
             return Err(error);
         }
         runtime.finish_native_initialization(imgui)?;
-        Ok(Self::from_initialized_context(runtime, consumer))
+        Ok(Self::from_initialized_context(runtime, canvas.raw()))
     }
 
     /// Begin a new SDL3 + SDLRenderer3 frame.
     pub fn new_frame(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
-        run_renderer_entry(&self.runtime, imgui, new_frame_sdlrenderer3_impl)
+        run_renderer_entry(&self.runtime, imgui, || {
+            new_frame_sdlrenderer3_impl();
+            self.runtime.control().refresh_platform_monitors_bound();
+        })
     }
 
     /// Process a single low-level SDL3 event with the captured ImGui context.
@@ -648,20 +925,26 @@ impl Sdl3RendererBackend {
         mut frame: RenderedFrame<'_>,
         canvas: &WindowCanvas,
     ) -> Result<(), Sdl3BackendError> {
+        ensure_matching_sdl_renderer(self.renderer, canvas.raw())?;
         ensure_matching_rendered_frame(self.runtime.control().binding(), &frame)?;
-        self.runtime.poll_fault()?;
-        if self.runtime.control().state() != RuntimeState::Attached {
-            return Err(Sdl3BackendError::RuntimeDetached);
-        }
+        self.runtime.control().ensure_bound_entry()?;
+        let request_epoch = frame.epoch().map_or(0, |epoch| epoch.sequence());
         let feedback = self
             .runtime
             .control()
             .binding()
             .try_with_bound_context(|| {
-                self.textures
-                    .process_requests(frame.texture_requests(), update_sdlrenderer3_texture)
+                self.runtime
+                    .control()
+                    .process_texture_requests(frame.texture_requests(), request_epoch)
             })??;
-        frame.reconcile_texture_feedback(feedback)?;
+        let progress = frame.reconcile_texture_feedback(feedback)?;
+        self.runtime
+            .control()
+            .mark_textures_reconciled(frame.texture_requests());
+        self.runtime
+            .control()
+            .prune_destroyed_textures(progress.watermark());
         self.runtime
             .control()
             .binding()
@@ -705,38 +988,27 @@ impl Sdl3RendererBackend {
     }
 
     /// Destroy SDLRenderer3 renderer device objects.
+    ///
+    /// This validates an idle Context renderer consumer before native destruction begins. If a
+    /// detached [`dear_imgui_rs::render::FrameSnapshot`] is still outstanding, this returns an
+    /// error without destroying any native object. Commit or drop every snapshot, then retry.
     pub fn destroy_device_objects(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
-        run_renderer_entry(&self.runtime, imgui, destroy_sdlrenderer3_device_objects)?;
-        self.textures.forget_destroyed_by_upstream();
-        imgui.reset_renderer_texture_bindings(self.consumer())?;
-        Ok(())
+        self.runtime
+            .destroy_renderer_device_objects(imgui, destroy_sdlrenderer3_device_objects)
     }
 
     /// Shut down the official SDLRenderer3 renderer and SDL3 platform backend.
+    ///
+    /// Shutdown validates the Context renderer consumer before changing callbacks or releasing
+    /// native resources. An outstanding detached snapshot must be committed or dropped before
+    /// retrying this operation.
     pub fn shutdown(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
-        let result = self
-            .runtime
-            .shutdown_renderer(imgui, self.consumer.as_ref(), || {
-                self.textures.forget_destroyed_by_upstream()
-            });
-        if matches!(
-            self.runtime.control().state(),
-            RuntimeState::Detached | RuntimeState::ResourceDropped
-        ) {
-            self.consumer.take();
-        }
-        result
+        self.runtime.shutdown_renderer(imgui)
     }
 
     /// Returns and clears the oldest pending SDL3 platform callback fault.
     pub fn poll_fault(&self) -> Result<(), Sdl3BackendError> {
         self.runtime.poll_fault()
-    }
-
-    fn consumer(&self) -> &RendererConsumer {
-        self.consumer
-            .as_ref()
-            .expect("SDL3 renderer consumer was already detached")
     }
 }
 

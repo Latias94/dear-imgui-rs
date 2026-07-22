@@ -80,12 +80,12 @@ impl AppWindow {
 
         let mut imgui_context = Context::create();
         imgui_context.set_ini_filename(None::<String>).unwrap();
-        let mut platform = WinitPlatform::new(&mut imgui_context);
+        let mut platform = WinitPlatform::new(&mut imgui_context)?;
         platform.attach_window(
-            &window,
+            Arc::clone(&window),
             dear_imgui_winit::HiDpiMode::Default,
             &mut imgui_context,
-        );
+        )?;
 
         let gl = unsafe {
             glow::Context::from_loader_function_cstr(|s| {
@@ -165,7 +165,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context);
+            .prepare_frame(&self.window, &mut self.imgui.context)?;
         let ui = self.imgui.context.frame();
 
         ui.window("File Browser (ImGui)")
@@ -230,7 +230,7 @@ impl AppWindow {
         }
         self.imgui
             .platform
-            .prepare_render_with_ui(&ui, &self.window);
+            .prepare_render_with_ui(&ui, &self.window)?;
         let draw_data = self.imgui.context.render();
         self.imgui.renderer.new_frame()?;
         self.imgui.renderer.render(draw_data)?;
@@ -256,12 +256,20 @@ impl ThumbnailRenderer for GlowThumbnailRenderer<'_> {
             &image.rgba,
         )
         .map_err(|e| format!("{e}"))?;
-        Ok(self.texture_map.register_texture(
+        match self.texture_map.register_texture(
             gl_tex,
             image.width,
             image.height,
             dear_imgui_rs::TextureFormat::RGBA32,
-        ))
+        ) {
+            Ok(texture_id) => Ok(texture_id),
+            Err(error) => {
+                unsafe {
+                    self.gl.delete_texture(gl_tex);
+                }
+                Err(error.to_string())
+            }
+        }
     }
 
     fn destroy(&mut self, texture_id: TextureId) {
@@ -303,9 +311,15 @@ impl ApplicationHandler for App {
             return;
         }
         // Feed to ImGui platform first (window-local path)
-        w.imgui
-            .platform
-            .handle_window_event(&mut w.imgui.context, &w.window, &event);
+        if let Err(error) =
+            w.imgui
+                .platform
+                .handle_window_event(&mut w.imgui.context, &w.window, &event)
+        {
+            eprintln!("Winit platform error: {error}");
+            event_loop.exit();
+            return;
+        }
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => w.resize(size),

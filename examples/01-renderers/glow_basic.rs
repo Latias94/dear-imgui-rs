@@ -86,12 +86,12 @@ impl AppWindow {
         let mut imgui_context = Context::create();
         imgui_context.set_ini_filename(None::<String>).unwrap();
 
-        let mut platform = WinitPlatform::new(&mut imgui_context);
+        let mut platform = WinitPlatform::new(&mut imgui_context)?;
         platform.attach_window(
-            &window,
+            Arc::clone(&window),
             dear_imgui_winit::HiDpiMode::Default,
             &mut imgui_context,
-        );
+        )?;
 
         // Create Glow context and renderer
         let gl = unsafe {
@@ -147,12 +147,12 @@ impl AppWindow {
         if self.imgui.context.io().mouse_draw_cursor() != want_sw {
             self.imgui
                 .platform
-                .set_software_cursor_enabled(&mut self.imgui.context, want_sw);
+                .set_software_cursor_enabled(&mut self.imgui.context, want_sw)?;
         }
 
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context);
+            .prepare_frame(&self.window, &mut self.imgui.context)?;
         let ui = self.imgui.context.frame();
 
         // Main window content
@@ -212,7 +212,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_render_with_ui(&ui, &self.window);
+            .prepare_render_with_ui(&ui, &self.window)?;
         let draw_data = self.imgui.context.render();
 
         self.imgui.renderer.new_frame()?;
@@ -253,11 +253,15 @@ impl ApplicationHandler for App {
         };
 
         // Handle the event with ImGui first (window-local path)
-        window.imgui.platform.handle_window_event(
+        if let Err(error) = window.imgui.platform.handle_window_event(
             &mut window.imgui.context,
             &window.window,
             &event,
-        );
+        ) {
+            eprintln!("Winit platform event error: {error}");
+            event_loop.exit();
+            return;
+        }
 
         match event {
             WindowEvent::Resized(physical_size) => {

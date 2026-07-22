@@ -164,8 +164,12 @@ impl AppWindow {
             dear_imgui_rs::sys::igStyleColorsDark(std::ptr::null_mut());
         }
 
-        let mut platform = WinitPlatform::new(&mut context);
-        platform.attach_window(&window, dear_imgui_winit::HiDpiMode::Default, &mut context);
+        let mut platform = WinitPlatform::new(&mut context)?;
+        platform.attach_window(
+            Arc::clone(&window),
+            dear_imgui_winit::HiDpiMode::Default,
+            &mut context,
+        )?;
 
         // Renderer
         let init_info =
@@ -237,10 +241,11 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context);
+            .prepare_frame(&self.window, &mut self.imgui.context)?;
         let ui = self.imgui.context.frame();
 
         let io = ui.io();
+        let mut ime_error = None;
 
         ui.window("IME Debug")
             .size([520.0, 260.0], Condition::FirstUseEver)
@@ -304,9 +309,10 @@ impl AppWindow {
                         "Enable IME"
                     }) {
                         self.ime_force_state = !self.ime_force_state;
-                        self.imgui
-                            .platform
-                            .set_ime_allowed(&self.window, self.ime_force_state);
+                        if let Err(error) = self.imgui.platform.set_ime_allowed(self.ime_force_state)
+                        {
+                            ime_error = Some(error);
+                        }
                     }
                 }
 
@@ -323,7 +329,10 @@ impl AppWindow {
         // Let the platform backend update IME/cursor state based on the UI we just built.
         self.imgui
             .platform
-            .prepare_render_with_ui(&ui, &self.window);
+            .prepare_render_with_ui(&ui, &self.window)?;
+        if let Some(error) = ime_error {
+            return Err(error.into());
+        }
 
         // Clear + render
         let mut encoder = self
@@ -406,11 +415,15 @@ impl ApplicationHandler for App {
             None => return,
         };
 
-        window.imgui.platform.handle_window_event(
+        if let Err(error) = window.imgui.platform.handle_window_event(
             &mut window.imgui.context,
             &window.window,
             &event,
-        );
+        ) {
+            eprintln!("Winit platform error: {error}");
+            event_loop.exit();
+            return;
+        }
 
         match event {
             WindowEvent::Resized(size) => {

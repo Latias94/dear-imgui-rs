@@ -95,7 +95,10 @@ impl Context {
     ///
     /// # Panics
     ///
-    /// Panics unless [`Self::update_platform_windows`] completed for the current rendered frame.
+    /// Panics unless [`Self::update_platform_windows`] completed for the current frame after
+    /// [`Self::render`], or unless the installed backends provide `Platform_RenderWindow` or
+    /// `Renderer_RenderWindow`. Snapshot-driven renderers should render their detached viewport
+    /// data directly instead of calling this default callback pump.
     #[cfg(feature = "multi-viewport")]
     #[doc(alias = "RenderPlatformWindowsDefault")]
     pub fn render_platform_windows_default(&mut self) {
@@ -105,9 +108,16 @@ impl Context {
                 let raw = &*self.raw;
                 assert!(
                     raw.FrameCount > 0
-                        && raw.FrameCountEnded == raw.FrameCount
+                        && raw.FrameCountRendered == raw.FrameCount
                         && raw.FrameCountPlatformEnded == raw.FrameCount,
                     "Context::render_platform_windows_default() requires a rendered frame followed by Context::update_platform_windows()"
+                );
+                let platform_io = sys::igGetPlatformIO_Nil();
+                assert!(
+                    !platform_io.is_null()
+                        && ((*platform_io).Platform_RenderWindow.is_some()
+                            || (*platform_io).Renderer_RenderWindow.is_some()),
+                    "Context::render_platform_windows_default() requires Platform_RenderWindow or Renderer_RenderWindow; render snapshots directly when the renderer does not use default callbacks"
                 );
                 sys::igRenderPlatformWindowsDefault(std::ptr::null_mut(), std::ptr::null_mut());
             });
@@ -119,19 +129,15 @@ impl Context {
     /// This function should be called during shutdown to properly clean up
     /// all platform windows and their associated resources.
     ///
-    /// # Panics
-    ///
-    /// Panics if called while a Dear ImGui frame is open.
+    /// Any open frame is ended first through the same idempotent lifecycle path used by Context
+    /// destruction. This lets backends revoke UI access before destroying secondary windows.
     #[cfg(feature = "multi-viewport")]
     #[doc(alias = "DestroyPlatformWindows")]
     pub fn destroy_platform_windows(&mut self) {
         let _guard = CTX_MUTEX.lock();
+        self.end_frame_for_teardown_unlocked();
         unsafe {
             with_bound_context(self.raw, || {
-                assert!(
-                    !(*self.raw).WithinFrameScope,
-                    "Context::destroy_platform_windows() cannot run while a Dear ImGui frame is open"
-                );
                 sys::igDestroyPlatformWindows();
             });
         }

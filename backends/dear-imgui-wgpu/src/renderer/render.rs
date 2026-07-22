@@ -6,7 +6,7 @@ use crate::wgpu;
 use crate::{GammaMode, RendererError, RendererResult, Uniforms};
 use dear_imgui_rs::{
     Context, ContextBinding, TextureId,
-    render::{DrawData, RenderedFrame, TextureOp},
+    render::{DrawData, RenderedFrame},
     sys,
 };
 use wgpu::RenderPass;
@@ -50,6 +50,7 @@ impl WgpuRenderer {
         mut frame: RenderedFrame<'_>,
         render_pass: &mut RenderPass,
     ) -> RendererResult<()> {
+        self.ensure_renderer_contract()?;
         self.ensure_frame_matches(&frame)?;
         let binding = self.bound_context()?;
         with_bound_context(&binding, || {
@@ -74,25 +75,20 @@ impl WgpuRenderer {
     }
 
     fn reconcile_frame_textures(&mut self, frame: &mut RenderedFrame<'_>) -> RendererResult<()> {
-        let destroyed = frame
-            .texture_requests()
-            .iter()
-            .filter_map(|request| {
-                matches!(request.operation(), TextureOp::Destroy).then_some(request.texture())
-            })
-            .collect::<Vec<_>>();
+        let request_epoch = frame.epoch().map_or(0, |epoch| epoch.sequence());
         let backend_data = self.backend_data.as_mut().ok_or_else(|| {
             RendererError::InvalidRenderState("Renderer not initialized".to_owned())
         })?;
         let feedback = self.texture_manager.handle_texture_requests(
             frame.texture_requests(),
+            request_epoch,
             &backend_data.device,
             &backend_data.queue,
             &mut backend_data.render_resources,
         )?;
-        frame.reconcile_texture_feedback(feedback)?;
+        let progress = frame.reconcile_texture_feedback(feedback)?;
         self.texture_manager
-            .acknowledge_destroyed_textures(destroyed);
+            .prune_destroyed_managed_textures(progress.watermark());
         Ok(())
     }
 
@@ -102,6 +98,7 @@ impl WgpuRenderer {
         render_pass: &mut RenderPass,
         platform_io: *mut sys::ImGuiPlatformIO,
     ) -> RendererResult<()> {
+        self.ensure_renderer_contract()?;
         // Early out if nothing to draw (avoid binding/drawing without buffers)
         let mut total_vtx_count = 0usize;
         let mut total_idx_count = 0usize;
@@ -175,6 +172,7 @@ impl WgpuRenderer {
         fb_width: u32,
         fb_height: u32,
     ) -> RendererResult<()> {
+        self.ensure_renderer_contract()?;
         self.ensure_frame_matches(&frame)?;
         let binding = self.bound_context()?;
         with_bound_context(&binding, || {
@@ -219,6 +217,7 @@ impl WgpuRenderer {
         advance_frame: bool,
         platform_io: *mut sys::ImGuiPlatformIO,
     ) -> RendererResult<()> {
+        self.ensure_renderer_contract()?;
         // Log only when the override framebuffer size doesn't match the draw data scale.
         // This helps diagnose HiDPI/viewport scaling issues without spamming per-frame traces.
         #[cfg(feature = "mv-log")]

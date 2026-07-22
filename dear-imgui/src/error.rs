@@ -26,6 +26,18 @@ pub enum ImGuiError {
     #[error("A Dear ImGui context is already active")]
     ContextAlreadyActive,
 
+    /// A managed renderer exclusively owns the shared font atlas.
+    #[error(
+        "Cannot register another Dear ImGui context: the shared font atlas is exclusively owned by a managed renderer"
+    )]
+    SharedFontAtlasManaged,
+
+    /// A prior managed renderer did not commit its texture reset before Context teardown.
+    #[error(
+        "Cannot register another Dear ImGui context: the shared font atlas still belongs to a renderer whose texture release was not committed; release the renderer resources, then drop and recreate the atlas"
+    )]
+    SharedFontAtlasRendererReleasePending,
+
     /// Invalid operation attempted
     #[error("Invalid operation: {operation}")]
     InvalidOperation { operation: String },

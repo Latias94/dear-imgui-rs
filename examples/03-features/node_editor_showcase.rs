@@ -399,8 +399,8 @@ impl AppWindow {
         let mut context = Context::create();
         context.set_ini_filename(None::<String>).unwrap();
 
-        let mut platform = WinitPlatform::new(&mut context);
-        platform.attach_window(&window, HiDpiMode::Default, &mut context);
+        let mut platform = WinitPlatform::new(&mut context)?;
+        platform.attach_window(Arc::clone(&window), HiDpiMode::Default, &mut context)?;
 
         let init_info = WgpuInitInfo::new(device.clone(), queue.clone(), surface_desc.format);
         let mut renderer =
@@ -473,7 +473,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_frame(&self.window, &mut self.imgui.context);
+            .prepare_frame(&self.window, &mut self.imgui.context)?;
         let ui = self.imgui.context.frame();
 
         draw_blueprints_window(
@@ -486,7 +486,7 @@ impl AppWindow {
 
         self.imgui
             .platform
-            .prepare_render_with_ui(&ui, &self.window);
+            .prepare_render_with_ui(&ui, &self.window)?;
         let draw_data = self.imgui.context.render();
 
         let (output, reconfigure_after_present) = match self.surface.get_current_texture() {
@@ -566,11 +566,15 @@ impl ApplicationHandler for App {
                 return;
             }
 
-            window.imgui.platform.handle_window_event(
+            if let Err(error) = window.imgui.platform.handle_window_event(
                 &mut window.imgui.context,
                 &window.window,
                 &event,
-            );
+            ) {
+                eprintln!("Winit platform error: {error}");
+                event_loop.exit();
+                return;
+            }
 
             match event {
                 WindowEvent::CloseRequested => event_loop.exit(),

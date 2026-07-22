@@ -103,6 +103,12 @@ pub enum RunError {
     Render(#[source] dear_imgui_wgpu::RendererError),
     #[error("WGPU resource invalidation failed: {0}")]
     GpuInvalidation(#[source] dear_imgui_wgpu::RendererError),
+    #[error("WGPU renderer release failed: {0}")]
+    RendererRelease(#[source] dear_imgui_wgpu::RendererError),
+    #[error(
+        "dear-app does not support Dear ImGui platform viewports; remove ConfigFlags::VIEWPORTS_ENABLE"
+    )]
+    MultiViewportUnsupported,
     #[error("WGPU surface validation failed while acquiring the next frame")]
     SurfaceValidation,
     #[error("application callback failed during {stage}: {message}")]
