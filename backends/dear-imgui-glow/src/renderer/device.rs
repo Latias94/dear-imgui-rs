@@ -688,9 +688,13 @@ mod tests {
             .set_renderer_name(Some("foreign renderer".to_owned()))
             .unwrap();
         let foreign_name_ptr = context.io().backend_renderer_name().unwrap().as_ptr();
+        #[cfg(feature = "multi-viewport")]
         let foreign_flags = BackendFlags::RENDERER_HAS_VTX_OFFSET
             | BackendFlags::RENDERER_HAS_TEXTURES
             | BackendFlags::RENDERER_HAS_VIEWPORTS;
+        #[cfg(not(feature = "multi-viewport"))]
+        let foreign_flags =
+            BackendFlags::RENDERER_HAS_VTX_OFFSET | BackendFlags::RENDERER_HAS_TEXTURES;
         unsafe {
             context
                 .io_mut()
