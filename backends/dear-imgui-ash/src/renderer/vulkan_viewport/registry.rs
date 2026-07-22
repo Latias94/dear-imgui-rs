@@ -27,15 +27,79 @@ struct RegisteredRuntime {
     control: Weak<RuntimeControl>,
 }
 
-struct ViewportDataState {
+/// Identifies the exact native viewport that received an Ash renderer sidecar.
+///
+/// Dear ImGui may reuse viewport IDs after a viewport is destroyed, so the address is retained
+/// alongside the ID and must match the result of a later internal lookup.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct ViewportIdentity {
+    pub(super) id: sys::ImGuiID,
+    pub(super) address: usize,
+}
+
+impl ViewportIdentity {
+    pub(super) fn from_viewport(viewport: &Viewport) -> Self {
+        Self {
+            id: viewport.id().raw(),
+            address: viewport.as_raw() as usize,
+        }
+    }
+}
+
+pub(super) fn resolve_viewport_by_id(
+    identity: ViewportIdentity,
+    find: impl FnOnce(sys::ImGuiID) -> *mut sys::ImGuiViewport,
+) -> Option<*mut sys::ImGuiViewport> {
+    let viewport = find(identity.id);
+    (!viewport.is_null() && viewport as usize == identity.address).then_some(viewport)
+}
+
+/// Resolves a registered viewport through Dear ImGui's internal live-viewport registry.
+///
+/// `PlatformIO.Viewports` is only a public presentation of the viewport set and can omit hidden
+/// viewports, so it must not be used to decide whether a registered sidecar is still live.
+pub(super) fn resolve_viewport(identity: ViewportIdentity) -> Option<*mut sys::ImGuiViewport> {
+    resolve_viewport_by_id(identity, |id| {
+        // SAFETY: the caller runs while the owning Context is current and alive. The returned
+        // pointer is compared only; it is converted to a Viewport by the teardown caller.
+        unsafe { sys::igFindViewportByID(id) }
+    })
+}
+
+pub(super) struct RegisteredViewportData {
     context_raw: usize,
     binding: ContextBinding,
+    identity: ViewportIdentity,
     pointer: usize,
+}
+
+impl RegisteredViewportData {
+    fn owns(&self, context: *mut sys::ImGuiContext, viewport: &Viewport) -> bool {
+        !context.is_null()
+            && self.context_raw == context as usize
+            && binding_has_native_context(&self.binding)
+            && self.identity == ViewportIdentity::from_viewport(viewport)
+            && self.pointer == viewport.renderer_user_data() as usize
+    }
+
+    pub(super) fn identity(&self) -> ViewportIdentity {
+        self.identity
+    }
+
+    pub(super) fn renderer_data(&self) -> *mut ViewportAshData {
+        self.pointer as *mut ViewportAshData
+    }
+
+    pub(super) fn into_box(self) -> Box<ViewportAshData> {
+        // SAFETY: entries are created only by `register_viewport_data` from an owned Box and are
+        // removed from this registry exactly once before ownership is reconstructed here.
+        unsafe { Box::from_raw(self.pointer as *mut ViewportAshData) }
+    }
 }
 
 thread_local! {
     static RUNTIMES: RefCell<Vec<RegisteredRuntime>> = const { RefCell::new(Vec::new()) };
-    static VIEWPORT_DATA: RefCell<Vec<ViewportDataState>> = const { RefCell::new(Vec::new()) };
+    static VIEWPORT_DATA: RefCell<Vec<RegisteredViewportData>> = const { RefCell::new(Vec::new()) };
     #[cfg(test)]
     static FAIL_NEXT_VIEWPORT_REGISTRATION: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
@@ -125,6 +189,7 @@ fn binding_has_native_context(binding: &ContextBinding) -> bool {
 
 pub(super) fn register_viewport_data(
     context: &ContextBinding,
+    identity: ViewportIdentity,
     pointer: *mut ViewportAshData,
 ) -> Result<(), AshViewportError> {
     if pointer.is_null() {
@@ -151,9 +216,10 @@ pub(super) fn register_viewport_data(
             .iter()
             .any(|state| state.binding.id() == context.id() && state.pointer == pointer as usize)
         {
-            data.push(ViewportDataState {
+            data.push(RegisteredViewportData {
                 context_raw: context_raw as usize,
                 binding: context.clone(),
+                identity,
                 pointer: pointer as usize,
             });
         }
@@ -168,15 +234,12 @@ pub(super) fn unregister_viewport_data(pointer: *mut ViewportAshData) {
     });
 }
 
-fn owns_viewport_data(context: *mut sys::ImGuiContext, pointer: *mut ViewportAshData) -> bool {
-    !context.is_null()
-        && !pointer.is_null()
+fn owns_viewport_data(context: *mut sys::ImGuiContext, viewport: &Viewport) -> bool {
+    !viewport.renderer_user_data().is_null()
         && VIEWPORT_DATA.with(|data| {
-            data.borrow().iter().any(|state| {
-                state.context_raw == context as usize
-                    && binding_has_native_context(&state.binding)
-                    && state.pointer == pointer as usize
-            })
+            data.borrow()
+                .iter()
+                .any(|state| state.owns(context, viewport))
         })
 }
 
@@ -185,7 +248,7 @@ pub(super) unsafe fn viewport_user_data_mut(
     viewport: &mut Viewport,
 ) -> Option<&mut ViewportAshData> {
     let pointer = viewport.renderer_user_data().cast::<ViewportAshData>();
-    owns_viewport_data(context, pointer).then(|| unsafe { &mut *pointer })
+    owns_viewport_data(context, viewport).then(|| unsafe { &mut *pointer })
 }
 
 pub(super) unsafe fn take_viewport_data_from_viewport(
@@ -193,7 +256,7 @@ pub(super) unsafe fn take_viewport_data_from_viewport(
     viewport: &mut Viewport,
 ) -> Option<Box<ViewportAshData>> {
     let pointer = viewport.renderer_user_data().cast::<ViewportAshData>();
-    if !owns_viewport_data(context, pointer) {
+    if !owns_viewport_data(context, viewport) {
         return None;
     }
     unregister_viewport_data(pointer);
@@ -203,20 +266,72 @@ pub(super) unsafe fn take_viewport_data_from_viewport(
     Some(unsafe { Box::from_raw(pointer) })
 }
 
-pub(super) fn take_viewport_data(context: ContextId) -> Vec<Box<ViewportAshData>> {
+pub(super) fn take_registered_viewport_data(context: ContextId) -> Vec<RegisteredViewportData> {
     VIEWPORT_DATA.with(|data| {
         let mut data = data.borrow_mut();
-        let mut pointers = Vec::new();
-        data.retain(|state| {
-            if state.binding.id() == context {
-                pointers.push(unsafe { Box::from_raw(state.pointer as *mut ViewportAshData) });
-                false
+        let entries = std::mem::take(&mut *data);
+        let mut retained = Vec::with_capacity(entries.len());
+        let mut taken = Vec::new();
+        for entry in entries {
+            if entry.binding.id() == context {
+                taken.push(entry);
             } else {
-                true
+                retained.push(entry);
             }
-        });
-        pointers
+        }
+        *data = retained;
+        taken
     })
+}
+
+pub(super) fn restore_registered_viewport_data(entry: RegisteredViewportData) {
+    VIEWPORT_DATA.with(|data| data.borrow_mut().push(entry));
+}
+
+/// Verifies every live Ash sidecar before teardown mutates a native viewport or drops a Vulkan
+/// allocation. A missing or address-mismatched viewport is already gone and can be reclaimed
+/// later without touching native memory; a live slot containing another pointer is a fail-closed
+/// ownership fault.
+pub(super) fn preflight_registered_viewport_data(
+    context: *mut sys::ImGuiContext,
+    binding: &ContextBinding,
+) -> Result<(), AshViewportError> {
+    if context.is_null() || current_context() != context || !binding_has_native_context(binding) {
+        return Err(AshViewportError::BoundContextMismatch {
+            expected: binding.id(),
+        });
+    }
+    let registered = VIEWPORT_DATA.with(|data| {
+        data.borrow()
+            .iter()
+            .filter(|entry| {
+                entry.context_raw == context as usize
+                    && entry.binding.id() == binding.id()
+                    && binding_has_native_context(&entry.binding)
+            })
+            .map(|entry| (entry.identity, entry.pointer))
+            .collect::<Vec<_>>()
+    });
+    for (identity, pointer) in registered {
+        let Some(viewport) = resolve_viewport(identity) else {
+            continue;
+        };
+        // SAFETY: the current Context and resolver proved this is the exact live viewport.
+        let viewport = unsafe { Viewport::from_raw_mut(viewport) };
+        if viewport.renderer_user_data() as usize != pointer {
+            return Err(AshViewportError::RendererUserDataOwnershipLost {
+                callback: "viewport runtime shutdown",
+            });
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn take_viewport_data(context: ContextId) -> Vec<Box<ViewportAshData>> {
+    take_registered_viewport_data(context)
+        .into_iter()
+        .map(RegisteredViewportData::into_box)
+        .collect()
 }
 
 #[cfg(test)]

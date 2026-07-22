@@ -6,8 +6,10 @@ use dear_imgui_rs::platform_io::{PlatformIo, Viewport};
 use dear_imgui_rs::{BackendFlags, Context};
 
 use super::registry::{
-    current_context, register_viewport_data, runtime_for_context, take_viewport_data,
-    take_viewport_data_from_viewport, viewport_user_data_mut, with_current_runtime,
+    ViewportIdentity, current_context, preflight_registered_viewport_data, register_viewport_data,
+    resolve_viewport, restore_registered_viewport_data, runtime_for_context,
+    take_registered_viewport_data, take_viewport_data_from_viewport, viewport_user_data_mut,
+    with_current_runtime,
 };
 use super::runtime::{AshViewportError, RuntimeControl};
 use super::*;
@@ -207,7 +209,7 @@ pub(super) fn detect_runtime_contract_drift(control: &RuntimeControl) {
         }
         let platform_io = unsafe { PlatformIo::from_raw_mut(platform_io) };
         let validation = (|| {
-            control.reassert_failed_viewport_closures(platform_io);
+            control.reassert_failed_viewport_closures();
             let flags = BackendFlags::from_bits_retain(unsafe { (*io).BackendFlags });
             if !flags.contains(BackendFlags::RENDERER_HAS_VIEWPORTS) {
                 return Err(AshViewportError::RendererViewportCapabilityLost);
@@ -318,34 +320,36 @@ pub(super) fn destroy_renderer_viewport_resources(
             expected: control.binding().id(),
         });
     }
-    let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
-    if platform_io.is_null() {
-        return Err(AshViewportError::InvalidCallbackArgument {
-            callback: "release viewport resources",
-        });
-    }
-
+    preflight_registered_viewport_data(control.context_raw(), control.binding())?;
     control.with_renderer_teardown(|renderer, globals| {
         control.wait_device_idle(renderer, "viewport runtime shutdown")?;
         let surface_loader = khr_surface::Instance::new(&globals.entry, &globals.instance);
-        let platform_io = unsafe { PlatformIo::from_raw_mut(platform_io) };
         let mut ownership_fault = None;
-        for viewport in platform_io.viewports_iter_mut() {
-            let pointer = viewport.renderer_user_data();
-            let Some(data) =
-                (unsafe { take_viewport_data_from_viewport(control.context_raw(), viewport) })
-            else {
-                if !pointer.is_null() && ownership_fault.is_none() {
+        for entry in take_registered_viewport_data(control.binding().id()) {
+            let identity = entry.identity();
+            let pointer = entry.renderer_data().cast::<c_void>();
+            let Some(viewport) = resolve_viewport(identity) else {
+                entry
+                    .into_box()
+                    .destroy_after_device_idle(renderer, &surface_loader)?;
+                continue;
+            };
+            let viewport = unsafe { Viewport::from_raw_mut(viewport) };
+            if !std::ptr::eq(viewport.renderer_user_data(), pointer) {
+                if ownership_fault.is_none() {
                     ownership_fault = Some(AshViewportError::RendererUserDataOwnershipLost {
                         callback: "viewport runtime shutdown",
                     });
                 }
+                // The viewport is still live but no longer points to this sidecar. Retain the
+                // registration instead of guessing whether another live viewport references it.
+                restore_registered_viewport_data(entry);
                 continue;
-            };
-            data.destroy_after_device_idle(renderer, &surface_loader)?;
-        }
-        for data in take_viewport_data(control.binding().id()) {
-            data.destroy_after_device_idle(renderer, &surface_loader)?;
+            }
+            unsafe { viewport.set_renderer_user_data(std::ptr::null_mut()) };
+            entry
+                .into_box()
+                .destroy_after_device_idle(renderer, &surface_loader)?;
         }
         ownership_fault.map_or(Ok(()), Err)
     })?;
@@ -466,9 +470,10 @@ unsafe fn renderer_create_window(
             return Err(error);
         }
 
+        let identity = ViewportIdentity::from_viewport(viewport);
         publish_registered_box_transactionally(
             Box::new(data),
-            |pointer| register_viewport_data(control.binding(), pointer),
+            |pointer| register_viewport_data(control.binding(), identity, pointer),
             |pointer| unsafe { viewport.set_renderer_user_data(pointer.cast()) },
             |data| {
                 data.destroy_after_device_idle(renderer, &surface_loader)?;

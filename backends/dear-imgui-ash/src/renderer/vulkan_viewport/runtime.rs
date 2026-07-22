@@ -471,14 +471,24 @@ impl RuntimeControl {
         self.failed_viewports.borrow_mut().clear();
     }
 
-    pub(super) fn reassert_failed_viewport_closures(&self, platform_io: &mut PlatformIo) {
-        let failed_viewports = self.failed_viewports.borrow();
+    pub(super) fn reassert_failed_viewport_closures(&self) {
+        let failed_viewports = self
+            .failed_viewports
+            .borrow()
+            .iter()
+            .copied()
+            .collect::<Vec<_>>();
         if failed_viewports.is_empty() {
             return;
         }
-        for viewport in platform_io.viewports_iter_mut() {
-            if failed_viewports.contains(&viewport.id()) {
-                viewport.set_platform_request_close(true);
+        for id in failed_viewports {
+            // A failed secondary viewport may be hidden from `PlatformIO.Viewports` while Dear
+            // ImGui still owns it internally. Reassert the close request through the complete
+            // internal lookup so its platform/renderer sidecars can be destroyed normally.
+            let viewport = unsafe { sys::igFindViewportByID(id.raw()) };
+            if !viewport.is_null() {
+                // SAFETY: this runtime's Context is current while contract drift is checked.
+                unsafe { Viewport::from_raw_mut(viewport) }.set_platform_request_close(true);
             }
         }
     }
@@ -846,11 +856,11 @@ impl RuntimeControl {
             ShutdownAction::Explicit(context) => self.shutdown_explicit(context),
             ShutdownAction::ContextTeardown => {
                 self.begin_shutdown();
-                let viewport_error = destroy_renderer_viewport_resources(self).err();
+                // A failed ownership preflight leaves every sidecar and callback publication
+                // intact. Do not clear `Renderer_DestroyWindow` while it is still the only safe
+                // way to reclaim a live foreign-replaced slot.
+                destroy_renderer_viewport_resources(self)?;
                 let callback_result = release_callbacks(self);
-                if viewport_error.is_some() {
-                    return first_error([viewport_error, callback_result.err()]);
-                }
                 self.mark_detached();
                 let renderer_result = self.release_renderer_during_context_teardown();
                 first_error([callback_result.err(), renderer_result.err()])

@@ -733,9 +733,42 @@ pub(crate) struct ImguiViewportBridgeState {
     focus_ready: HashSet<ImguiViewportId>,
 }
 
+/// Identifies one exact Dear ImGui viewport without retaining a dereferenceable native pointer.
+///
+/// Dear ImGui may omit a still-live viewport from `PlatformIO.Viewports`, and can later reuse its
+/// numeric ID. Cleanup therefore resolves the ID through Dear ImGui's internal registry and
+/// verifies the address before touching native fields.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ImguiViewportIdentity {
+    id: ImguiViewportId,
+    address: usize,
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+impl ImguiViewportIdentity {
+    fn capture(viewport: &imgui::Viewport) -> Self {
+        Self {
+            id: viewport.id(),
+            address: viewport.as_raw() as usize,
+        }
+    }
+
+    unsafe fn resolve(self) -> Option<*mut sys::ImGuiViewport> {
+        let viewport = unsafe { sys::igFindViewportByID(self.id.raw()) };
+        (!viewport.is_null() && viewport as usize == self.address).then_some(viewport)
+    }
+}
+
 #[derive(Debug)]
 struct ImguiViewportPlatformHandle {
-    _viewport_id: ImguiViewportId,
+    identity: ImguiViewportIdentity,
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+#[derive(Clone, Copy)]
+struct ImguiViewportHandleRef {
+    identity: ImguiViewportIdentity,
+    pointer: *mut c_void,
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -744,32 +777,59 @@ impl ImguiViewportBridgeState {
         self.commands.push(command);
     }
 
-    fn platform_handle(&mut self, viewport_id: ImguiViewportId) -> *mut c_void {
+    fn platform_handle(&mut self, identity: ImguiViewportIdentity) -> *mut c_void {
+        let viewport_id = identity.id;
+        if self
+            .viewport_handles
+            .get(&viewport_id)
+            .is_some_and(|handle| handle.identity != identity)
+        {
+            // The old native viewport was removed before Dear ImGui reused its ID. No retained
+            // address is dereferenced here, so this only releases a Rust-side stale handle.
+            self.viewport_handles.remove(&viewport_id);
+        }
         if !self.viewport_handles.contains_key(&viewport_id)
             && let Some(handle) = self.retired_viewport_handles.remove(&viewport_id)
         {
-            self.viewport_handles.insert(viewport_id, handle);
+            if handle.identity == identity {
+                self.viewport_handles.insert(viewport_id, handle);
+            }
         }
-        let handle = self.viewport_handles.entry(viewport_id).or_insert_with(|| {
-            Box::new(ImguiViewportPlatformHandle {
-                _viewport_id: viewport_id,
-            })
-        });
+        let handle = self
+            .viewport_handles
+            .entry(viewport_id)
+            .or_insert_with(|| Box::new(ImguiViewportPlatformHandle { identity }));
+        debug_assert_eq!(handle.identity, identity);
         (&mut **handle as *mut ImguiViewportPlatformHandle).cast::<c_void>()
     }
 
     fn take_platform_handle(
         &mut self,
-        viewport_id: ImguiViewportId,
+        identity: ImguiViewportIdentity,
     ) -> Option<Box<ImguiViewportPlatformHandle>> {
-        let active = self.viewport_handles.remove(&viewport_id);
-        let retired = self.retired_viewport_handles.remove(&viewport_id);
-        debug_assert!(active.is_none() || retired.is_none());
-        active.or(retired)
+        let viewport_id = identity.id;
+        if self
+            .viewport_handles
+            .get(&viewport_id)
+            .is_some_and(|handle| handle.identity == identity)
+        {
+            return self.viewport_handles.remove(&viewport_id);
+        }
+        if self
+            .retired_viewport_handles
+            .get(&viewport_id)
+            .is_some_and(|handle| handle.identity == identity)
+        {
+            return self.retired_viewport_handles.remove(&viewport_id);
+        }
+        None
     }
 
     fn remove_platform_handle(&mut self, viewport_id: ImguiViewportId) {
-        drop(self.take_platform_handle(viewport_id));
+        let active = self.viewport_handles.remove(&viewport_id);
+        let retired = self.retired_viewport_handles.remove(&viewport_id);
+        debug_assert!(active.is_none() || retired.is_none());
+        drop(active.or(retired));
     }
 
     fn retire_stale_platform_handles(&mut self, live_viewports: &HashSet<ImguiViewportId>) {
@@ -1853,6 +1913,7 @@ unsafe extern "C" fn platform_create_window(viewport: *mut imgui::Viewport) {
     let Some(viewport) = (unsafe { viewport.as_mut() }) else {
         return;
     };
+    let identity = ImguiViewportIdentity::capture(viewport);
     let Some(result) = (unsafe {
         with_current_bridge_mut(|bridge| {
             for (occupied, field) in [
@@ -1869,7 +1930,7 @@ unsafe extern "C" fn platform_create_window(viewport: *mut imgui::Viewport) {
                     });
                 }
             }
-            let handle = bridge.platform_handle(viewport.id());
+            let handle = bridge.platform_handle(identity);
             bridge.set_viewport_flags(viewport.id(), viewport.flags());
             bridge.queue(ImguiViewportCommand::Create(
                 ImguiViewportSnapshot::from_viewport(viewport),
@@ -1920,13 +1981,14 @@ unsafe extern "C" fn platform_destroy_window(viewport: *mut imgui::Viewport) {
     let Some(viewport) = (unsafe { viewport.as_mut() }) else {
         return;
     };
-    let viewport_id = viewport.id();
+    let identity = ImguiViewportIdentity::capture(viewport);
+    let viewport_id = identity.id;
     let owned_by_app = viewport
         .flags()
         .contains(imgui::ViewportFlags::OWNED_BY_APP);
     let Some(owned_handle) = (unsafe {
         with_current_bridge_mut(|bridge| {
-            let owned_handle = bridge.take_platform_handle(viewport_id);
+            let owned_handle = bridge.take_platform_handle(identity);
             if !owned_by_app {
                 bridge.queue(ImguiViewportCommand::Destroy { id: viewport_id });
             }
@@ -2215,18 +2277,34 @@ fn mark_platform_viewport_requests(
         return;
     }
 
-    for viewport in context.platform_io_mut().viewports_iter_mut() {
-        let id = viewport.id();
-        if moved.contains(&id) {
-            viewport.set_platform_request_move(true);
+    let viewport_ids = moved
+        .iter()
+        .chain(resized.iter())
+        .chain(closed.iter())
+        .copied()
+        .collect::<HashSet<_>>();
+    let binding = context.binding();
+    binding.with_bound_context(|| {
+        for id in viewport_ids {
+            // Dear ImGui filters hidden, inactive, and zero-sized viewports out of the public
+            // list. Window events still belong to their live internal viewport.
+            let viewport = unsafe { sys::igFindViewportByID(id.raw()) };
+            if viewport.is_null() {
+                continue;
+            }
+            // SAFETY: the current Context owns the viewport returned by Dear ImGui's lookup.
+            let viewport = unsafe { imgui::Viewport::from_raw_mut(viewport) };
+            if moved.contains(&id) {
+                viewport.set_platform_request_move(true);
+            }
+            if resized.contains(&id) {
+                viewport.set_platform_request_resize(true);
+            }
+            if closed.contains(&id) {
+                viewport.set_platform_request_close(true);
+            }
         }
-        if resized.contains(&id) {
-            viewport.set_platform_request_resize(true);
-        }
-        if closed.contains(&id) {
-            viewport.set_platform_request_close(true);
-        }
-    }
+    });
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -2552,8 +2630,13 @@ fn clear_imgui_viewport_platform_handles_for_keepalive(
         .viewport_handles
         .values()
         .chain(state.retired_viewport_handles.values())
-        .map(|handle| (&**handle as *const ImguiViewportPlatformHandle).cast::<c_void>())
-        .collect::<HashSet<_>>();
+        .map(|handle| ImguiViewportHandleRef {
+            identity: handle.identity,
+            pointer: (&**handle as *const ImguiViewportPlatformHandle)
+                .cast_mut()
+                .cast::<c_void>(),
+        })
+        .collect::<Vec<_>>();
     drop(state);
     clear_imgui_viewport_platform_handles_for_owned_handles(context, &owned_handles);
 }
@@ -2571,35 +2654,50 @@ fn clear_stale_imgui_viewport_platform_handles(
         .viewport_handles
         .iter()
         .filter(|(viewport_id, _)| !live_viewports.contains(viewport_id))
-        .map(|(_, handle)| (&**handle as *const ImguiViewportPlatformHandle).cast::<c_void>())
-        .collect::<HashSet<_>>();
+        .map(|(_, handle)| ImguiViewportHandleRef {
+            identity: handle.identity,
+            pointer: (&**handle as *const ImguiViewportPlatformHandle)
+                .cast_mut()
+                .cast::<c_void>(),
+        })
+        .collect::<Vec<_>>();
     clear_imgui_viewport_platform_handles_for_owned_handles(context, &owned_handles);
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 fn clear_imgui_viewport_platform_handles_for_owned_handles(
     context: &mut imgui::Context,
-    owned_handles: &HashSet<*const c_void>,
+    owned_handles: &[ImguiViewportHandleRef],
 ) {
     if owned_handles.is_empty() {
         return;
     }
 
-    for viewport in context.platform_io_mut().viewports_iter_mut() {
-        // SAFETY: each matching pointer identifies an allocation owned by this bridge. Foreign
-        // replacements in the other fields are preserved byte-for-byte.
-        unsafe {
-            if owned_handles.contains(&(viewport.platform_handle() as *const c_void)) {
-                viewport.set_platform_handle(std::ptr::null_mut());
-            }
-            if owned_handles.contains(&(viewport.platform_user_data() as *const c_void)) {
-                viewport.set_platform_user_data(std::ptr::null_mut());
-            }
-            if owned_handles.contains(&(viewport.platform_handle_raw() as *const c_void)) {
-                viewport.set_platform_handle_raw(std::ptr::null_mut());
+    let binding = context.binding();
+    binding.with_bound_context(|| {
+        for owned_handle in owned_handles {
+            // `PlatformIO.Viewports` intentionally omits hidden, inactive, and zero-sized
+            // viewports. Resolve through Dear ImGui's full internal list instead, then require
+            // the recorded address to prevent an ID-reused viewport from inheriting old state.
+            let Some(viewport) = (unsafe { owned_handle.identity.resolve() }) else {
+                continue;
+            };
+            // SAFETY: the internal lookup returned the exact still-live viewport for the bound
+            // Context. Each field is cleared only when it still contains this bridge's handle.
+            let viewport = unsafe { imgui::Viewport::from_raw_mut(viewport) };
+            unsafe {
+                if viewport.platform_handle() == owned_handle.pointer {
+                    viewport.set_platform_handle(std::ptr::null_mut());
+                }
+                if viewport.platform_user_data() == owned_handle.pointer {
+                    viewport.set_platform_user_data(std::ptr::null_mut());
+                }
+                if viewport.platform_handle_raw() == owned_handle.pointer {
+                    viewport.set_platform_handle_raw(std::ptr::null_mut());
+                }
             }
         }
-    }
+    });
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -2615,10 +2713,8 @@ pub(crate) fn prepare_platform_viewports_for_frame(
     platform_callback_ownership(context, &bridge.inner)?;
 
     let mut live_feedback = HashSet::new();
-    let main_viewport_id = {
-        let main_viewport = context.main_viewport();
-        main_viewport.id()
-    };
+    let main_viewport_identity = ImguiViewportIdentity::capture(context.main_viewport());
+    let main_viewport_id = main_viewport_identity.id;
     bridge.set_viewport_window(main_viewport_id, primary_window);
     bridge.set_viewport_feedback(
         main_viewport_id,
@@ -2660,7 +2756,7 @@ pub(crate) fn prepare_platform_viewports_for_frame(
             .focus_ready
             .retain(|viewport_id| live_feedback.contains(viewport_id));
         state.retire_stale_platform_handles(&live_feedback);
-        state.platform_handle(main_viewport_id)
+        state.platform_handle(main_viewport_identity)
     };
     let main_viewport = context.main_viewport();
     // SAFETY: the bridge owns this stable handle and retains it for the complete viewport frame.
@@ -4164,12 +4260,18 @@ mod tests {
             .inner
             .state
             .borrow_mut()
-            .platform_handle(stale_viewport);
+            .platform_handle(ImguiViewportIdentity {
+                id: stale_viewport,
+                address: 0,
+            });
         bridge
             .inner
             .state
             .borrow_mut()
-            .platform_handle(live_viewport);
+            .platform_handle(ImguiViewportIdentity {
+                id: live_viewport,
+                address: 0,
+            });
 
         prepare_platform_viewports_for_frame(
             &mut context,
@@ -4196,34 +4298,12 @@ mod tests {
     }
 
     #[test]
-    fn prepare_platform_viewports_clears_pruned_imgui_platform_handles() {
+    fn cleanup_clears_handles_filtered_from_the_public_viewport_snapshot() {
         let mut context = imgui::Context::create();
         let mut bridge = ImguiViewportBridge::default();
         let keepalive = bridge.keepalive();
         unsafe { install_owned_platform_callbacks(&mut context, &keepalive).unwrap() };
         let primary_window = Entity::from_raw_u32(1).expect("test entity index should be valid");
-        let stale_viewport = imgui::Id::from(0x600);
-        let stale_handle = bridge
-            .inner
-            .state
-            .borrow_mut()
-            .platform_handle(stale_viewport);
-        let stale_raw_viewport = unsafe { sys::ImGuiViewport_ImGuiViewport() };
-        assert!(
-            !stale_raw_viewport.is_null(),
-            "test viewport allocation should succeed"
-        );
-
-        let main_raw_viewport = context.main_viewport().as_raw_mut();
-        let mut viewport_ptrs = [main_raw_viewport, stale_raw_viewport];
-        unsafe {
-            (*stale_raw_viewport).ID = stale_viewport.raw();
-            (*stale_raw_viewport).PlatformHandle = stale_handle;
-            (*stale_raw_viewport).PlatformUserData = stale_handle;
-        }
-        let _viewports_guard = unsafe {
-            PlatformViewportsGuard::replace(&mut context, &mut viewport_ptrs, stale_raw_viewport)
-        };
 
         prepare_platform_viewports_for_frame(
             &mut context,
@@ -4236,14 +4316,27 @@ mod tests {
         )
         .unwrap();
 
-        unsafe {
+        let main_viewport = context.main_viewport().as_raw_mut();
+        assert!(unsafe { !(*main_viewport).PlatformHandle.is_null() });
+        let mut filtered_snapshot = [];
+        {
+            // Dear ImGui's internal list still includes the main viewport. This only models the
+            // filtered public `PlatformIO.Viewports` snapshot that hides a live viewport.
+            let _viewports_guard = unsafe {
+                PlatformViewportsGuard::replace(
+                    &mut context,
+                    &mut filtered_snapshot,
+                    std::ptr::null_mut(),
+                )
+            };
+            clear_imgui_viewport_platform_handles(&mut context, &bridge);
             assert!(
-                (*stale_raw_viewport).PlatformHandle.is_null(),
-                "pruning a backend-owned viewport handle must clear ImGui's PlatformHandle first"
+                unsafe { (*main_viewport).PlatformHandle.is_null() },
+                "cleanup must clear a hidden backend-owned PlatformHandle before dropping it"
             );
             assert!(
-                (*stale_raw_viewport).PlatformUserData.is_null(),
-                "pruning a backend-owned viewport handle must clear ImGui's PlatformUserData first"
+                unsafe { (*main_viewport).PlatformUserData.is_null() },
+                "cleanup must clear a hidden backend-owned PlatformUserData before dropping it"
             );
         }
 

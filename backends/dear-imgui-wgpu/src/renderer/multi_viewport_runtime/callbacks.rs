@@ -10,7 +10,7 @@ use dear_imgui_rs::{BackendFlags, Context};
 use super::platform_adapter;
 use super::registry::{
     ViewportDataDestroy, ViewportDataLookup, ViewportIdentity, current_context,
-    destroy_viewport_data, drop_orphaned_viewport_data, preflight_viewport_data_ownership,
+    destroy_registered_viewport_data, destroy_viewport_data, preflight_viewport_data_ownership,
     register_viewport_data, runtime_for_context, viewport_data_lookup, with_current_runtime,
 };
 use super::runtime::{RuntimeControl, WgpuViewportError};
@@ -302,27 +302,7 @@ pub(super) fn preflight_renderer_viewport_resources(
             expected: control.binding().id(),
         });
     }
-    let platform_io = unsafe { dear_imgui_rs::sys::igGetPlatformIO_Nil() };
-    if platform_io.is_null() {
-        return Err(WgpuViewportError::SurfaceOperationFailed {
-            operation: "read PlatformIO during viewport ownership preflight",
-        });
-    }
-    let platform_io = unsafe { PlatformIo::from_raw(platform_io) };
-    let reachable_viewports = platform_io
-        .viewports_iter()
-        .map(|viewport| {
-            (
-                ViewportIdentity::capture(viewport),
-                viewport.renderer_user_data() as usize,
-            )
-        })
-        .collect::<Vec<_>>();
-    preflight_viewport_data_ownership(
-        control.context_raw(),
-        control.binding(),
-        &reachable_viewports,
-    )
+    preflight_viewport_data_ownership(control.context_raw(), control.binding())
 }
 
 pub(super) fn release_callbacks(control: &RuntimeControl) -> Result<(), WgpuViewportError> {
@@ -401,27 +381,7 @@ pub(super) fn destroy_renderer_viewport_resources(
             operation: "injected viewport cleanup failure",
         });
     }
-    let platform_io = unsafe { dear_imgui_rs::sys::igGetPlatformIO_Nil() };
-    if platform_io.is_null() {
-        return Err(WgpuViewportError::SurfaceOperationFailed {
-            operation: "read PlatformIO during viewport teardown",
-        });
-    }
-    let platform_io = unsafe { PlatformIo::from_raw_mut(platform_io) };
-    for viewport in platform_io.viewports_iter_mut() {
-        match unsafe { destroy_viewport_data(control.context_raw(), viewport) } {
-            ViewportDataDestroy::Destroyed | ViewportDataDestroy::Absent => {}
-            ViewportDataDestroy::OwnershipLost => {
-                return Err(WgpuViewportError::RendererUserDataOwnershipLost {
-                    callback: "Renderer_DestroyWindow",
-                });
-            }
-        }
-    }
-    // Drop allocations whose native viewport is no longer present. Every reachable viewport was
-    // removed above, before the platform backend is allowed to destroy native windows.
-    drop_orphaned_viewport_data(control.binding().id());
-    Ok(())
+    destroy_registered_viewport_data(control.context_raw(), control.binding())
 }
 
 pub(super) fn publish_registered_box<T>(

@@ -47,6 +47,34 @@ impl ViewportIdentity {
             id: viewport.id().raw(),
         }
     }
+
+    /// Resolves this identity through Dear ImGui's complete internal viewport list.
+    ///
+    /// `PlatformIO.Viewports` is a presentation-facing list and may omit still-live hidden
+    /// viewports. The address comparison makes an ID reuse or stale registry entry fail closed
+    /// without dereferencing the address retained by this identity.
+    pub(super) fn with_live_viewport<R>(
+        self,
+        expected_context: *mut dear_imgui_rs::sys::ImGuiContext,
+        callback: impl FnOnce(&mut Viewport) -> R,
+    ) -> Option<R> {
+        if expected_context.is_null() || current_context() != expected_context {
+            return None;
+        }
+        // SAFETY: the caller proved that the expected live Context is current. Dear ImGui owns
+        // the returned viewport while it remains in that Context's internal viewport list.
+        let viewport = unsafe { dear_imgui_rs::sys::igFindViewportByID(self.id) };
+        if viewport.is_null() || viewport as usize != self.address {
+            return None;
+        }
+        // SAFETY: `igFindViewportByID` returned this exact live viewport for the current Context.
+        Some(callback(unsafe { Viewport::from_raw_mut(viewport) }))
+    }
+
+    #[cfg(test)]
+    pub(super) const fn for_test(address: usize, id: u32) -> Self {
+        Self { address, id }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -294,8 +322,62 @@ pub(super) fn viewport_data_lookup(viewport: &Viewport) -> ViewportDataLookup {
     })
 }
 
-/// Verifies that every renderer-owned slot reachable from the bound Context still points at the
-/// exact allocation recorded by this runtime.
+fn registered_viewport_data(
+    context: *mut dear_imgui_rs::sys::ImGuiContext,
+    binding: &ContextBinding,
+) -> Vec<(ViewportIdentity, usize)> {
+    VIEWPORT_DATA.with(|data| {
+        data.borrow()
+            .iter()
+            .filter(|state| {
+                state.context_raw == context as usize
+                    && state.binding.id() == binding.id()
+                    && binding_has_native_context(&state.binding)
+            })
+            .map(|state| (state.viewport, state.pointer))
+            .collect()
+    })
+}
+
+fn take_registered_viewport_data(
+    context: *mut dear_imgui_rs::sys::ImGuiContext,
+    binding: &ContextBinding,
+    viewport: ViewportIdentity,
+    pointer: usize,
+) -> Option<ViewportDataState> {
+    VIEWPORT_DATA.with(|data| {
+        let mut data = data.borrow_mut();
+        data.iter()
+            .position(|state| {
+                state.context_raw == context as usize
+                    && state.binding.id() == binding.id()
+                    && state.viewport == viewport
+                    && state.pointer == pointer
+            })
+            .map(|position| data.remove(position))
+    })
+}
+
+fn renderer_user_data_ownership_error() -> WgpuViewportError {
+    WgpuViewportError::RendererUserDataOwnershipLost {
+        callback: "Renderer_DestroyWindow",
+    }
+}
+
+fn ensure_current_context(
+    context: *mut dear_imgui_rs::sys::ImGuiContext,
+    binding: &ContextBinding,
+) -> Result<(), WgpuViewportError> {
+    if context.is_null() || current_context() != context {
+        return Err(WgpuViewportError::BoundContextMismatch {
+            expected: binding.id(),
+        });
+    }
+    Ok(())
+}
+
+/// Verifies that every renderer-owned sidecar still points at its exact allocation in Dear
+/// ImGui's complete internal viewport list.
 ///
 /// This is intentionally read-only. Teardown must reject a partial foreign takeover before it
 /// drops any sidecar or releases `Renderer_DestroyWindow`; otherwise Dear ImGui can later reach a
@@ -303,34 +385,49 @@ pub(super) fn viewport_data_lookup(viewport: &Viewport) -> ViewportDataLookup {
 pub(super) fn preflight_viewport_data_ownership(
     context: *mut dear_imgui_rs::sys::ImGuiContext,
     binding: &ContextBinding,
-    reachable_viewports: &[(ViewportIdentity, usize)],
 ) -> Result<(), WgpuViewportError> {
-    VIEWPORT_DATA.with(|data| {
-        let data = data.borrow();
-        for (viewport, slot) in reachable_viewports {
-            let state = data.iter().find(|state| {
-                state.context_raw == context as usize
-                    && state.binding.id() == binding.id()
-                    && state.viewport == *viewport
-            });
-            match state {
-                Some(state) => {
-                    if state.pointer != *slot {
-                        return Err(WgpuViewportError::RendererUserDataOwnershipLost {
-                            callback: "Renderer_DestroyWindow",
-                        });
-                    }
-                }
-                None if *slot != 0 => {
-                    return Err(WgpuViewportError::RendererUserDataOwnershipLost {
-                        callback: "Renderer_DestroyWindow",
-                    });
-                }
-                None => {}
-            }
+    ensure_current_context(context, binding)?;
+    for (viewport, pointer) in registered_viewport_data(context, binding) {
+        let owns_slot = viewport.with_live_viewport(context, |viewport| {
+            viewport.renderer_user_data() as usize == pointer
+        });
+        if owns_slot == Some(false) {
+            return Err(renderer_user_data_ownership_error());
         }
-        Ok(())
-    })
+    }
+    Ok(())
+}
+
+/// Clears and drops every renderer sidecar registered for the bound Context.
+///
+/// The caller must preflight first. Each identity is resolved immediately before native state is
+/// touched; an absent or address-mismatched viewport is already gone or has been replaced, so its
+/// Rust allocation is released without dereferencing or writing the retained address.
+pub(super) fn destroy_registered_viewport_data(
+    context: *mut dear_imgui_rs::sys::ImGuiContext,
+    binding: &ContextBinding,
+) -> Result<(), WgpuViewportError> {
+    ensure_current_context(context, binding)?;
+    for (viewport, pointer) in registered_viewport_data(context, binding) {
+        let slot_cleared = viewport.with_live_viewport(context, |viewport| {
+            if viewport.renderer_user_data() as usize != pointer {
+                return false;
+            }
+            // SAFETY: the registry and immediately-resolved native slot both prove ownership.
+            unsafe { viewport.set_renderer_user_data(std::ptr::null_mut()) };
+            true
+        });
+        if slot_cleared == Some(false) {
+            return Err(renderer_user_data_ownership_error());
+        }
+
+        let state = take_registered_viewport_data(context, binding, viewport, pointer);
+        if let Some(state) = state {
+            // SAFETY: registry removal transfers the sole allocation ownership into this function.
+            unsafe { state.drop_allocation() };
+        }
+    }
+    Ok(())
 }
 
 pub(super) unsafe fn destroy_viewport_data(

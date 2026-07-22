@@ -954,7 +954,7 @@ impl RendererRuntime {
 
     fn pending_texture_retirement(&self) -> Result<Option<TextureRetirementBatch>, Box<dyn Error>> {
         Ok(match self {
-            Self::Single(renderer) => renderer.pending_texture_retirement(),
+            Self::Single(renderer) => renderer.pending_texture_retirement()?,
             Self::Viewports(runtime) => runtime.pending_texture_retirement()?,
         })
     }

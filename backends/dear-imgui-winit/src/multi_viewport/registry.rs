@@ -20,8 +20,28 @@ thread_local! {
 }
 
 pub(super) struct ViewportEntry {
-    viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+    identity: ViewportIdentity,
     data: Box<ViewportData>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ViewportIdentity {
+    address: usize,
+    id: u32,
+}
+
+impl ViewportIdentity {
+    unsafe fn capture(viewport: *mut dear_imgui_rs::sys::ImGuiViewport) -> Self {
+        Self {
+            address: viewport as usize,
+            id: unsafe { (*viewport).ID },
+        }
+    }
+
+    unsafe fn resolve(self) -> Option<*mut dear_imgui_rs::sys::ImGuiViewport> {
+        let viewport = unsafe { dear_imgui_rs::sys::igFindViewportByID(self.id) };
+        (!viewport.is_null() && viewport as usize == self.address).then_some(viewport)
+    }
 }
 
 impl ViewportEntry {
@@ -29,23 +49,49 @@ impl ViewportEntry {
         std::ptr::from_ref::<ViewportData>(&self.data).cast_mut()
     }
 
+    fn matches_viewport(&self, viewport: *mut dear_imgui_rs::sys::ImGuiViewport) -> bool {
+        viewport as usize == self.identity.address
+    }
+
+    unsafe fn resolve_viewport(&self) -> Option<*mut dear_imgui_rs::sys::ImGuiViewport> {
+        unsafe { self.identity.resolve() }
+    }
+
+    unsafe fn native_ownership_loss(
+        &self,
+        viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
+    ) -> Option<&'static str> {
+        debug_assert!(self.matches_viewport(viewport));
+        let viewport = unsafe { &*viewport };
+        if viewport.PlatformUserData != self.data_ptr().cast() {
+            Some("PlatformUserData")
+        } else if viewport.PlatformHandle != self.data.window_ptr().cast_mut().cast() {
+            Some("PlatformHandle")
+        } else if !viewport.PlatformHandleRaw.is_null() {
+            Some("PlatformHandleRaw")
+        } else {
+            None
+        }
+    }
+
     unsafe fn native_fields_are_owned(&self) -> bool {
-        let viewport = unsafe { &*self.viewport };
-        viewport.PlatformUserData == self.data_ptr().cast()
-            && viewport.PlatformHandle == self.data.window_ptr().cast_mut().cast()
-            && viewport.PlatformHandleRaw.is_null()
+        let Some(viewport) = (unsafe { self.resolve_viewport() }) else {
+            return false;
+        };
+        unsafe { self.native_ownership_loss(viewport).is_none() }
+    }
+
+    fn viewport_id(&self) -> u32 {
+        self.identity.id
     }
 
     pub(super) fn detach_and_drop(self) {
-        if self.viewport.is_null() {
-            return;
-        }
-
-        // SAFETY: this path is called only while the Context is alive or from its platform-window
-        // teardown phase. The entry was created from this live viewport and remains registered
-        // until this operation takes its Box exactly once.
-        unsafe {
-            let viewport = &mut *self.viewport;
+        // Resolve through Dear ImGui's complete internal viewport list before touching native
+        // storage. `PlatformIO.Viewports` intentionally omits hidden viewports, and a destroyed
+        // viewport must never be reached through the address retained by this sidecar.
+        if let Some(viewport) = unsafe { self.resolve_viewport() } {
+            // SAFETY: `igFindViewportByID` returned this exact still-live viewport address.
+            let viewport = unsafe { &mut *viewport };
             if viewport.PlatformUserData == self.data_ptr().cast() {
                 viewport.PlatformUserData = std::ptr::null_mut();
             }
@@ -133,13 +179,19 @@ pub(super) fn insert_viewport_data(
     }
 
     let mut viewports = control.viewports.borrow_mut();
-    if viewports.iter().any(|entry| entry.viewport == viewport) {
+    if viewports
+        .iter()
+        .any(|entry| entry.matches_viewport(viewport))
+    {
         return Err(WinitPlatformError::ForeignPlatformUserData);
     }
 
     let mut data = Box::new(data);
     let data_ptr = std::ptr::from_mut::<ViewportData>(&mut data);
-    viewports.push(ViewportEntry { viewport, data });
+    viewports.push(ViewportEntry {
+        identity: unsafe { ViewportIdentity::capture(viewport) },
+        data,
+    });
     Ok(data_ptr)
 }
 
@@ -152,7 +204,7 @@ pub(super) fn owns_viewport_data(
         return false;
     }
     control.viewports.borrow().iter().any(|entry| {
-        entry.viewport == viewport
+        entry.matches_viewport(viewport)
             && std::ptr::eq(entry.data_ptr(), data)
             && unsafe { entry.native_fields_are_owned() }
     })
@@ -168,7 +220,7 @@ pub(super) fn with_viewport_data<R>(
     }
     let viewports = control.viewports.borrow();
     let entry = viewports.iter().find(|entry| {
-        entry.viewport == viewport
+        entry.matches_viewport(viewport)
             // SAFETY: `viewport` is live for the callback or Context-bound event routing call.
             && unsafe { entry.native_fields_are_owned() }
     })?;
@@ -193,7 +245,7 @@ pub(super) fn remove_viewport_data(
     let entry = {
         let mut viewports = control.viewports.borrow_mut();
         let Some(index) = viewports.iter().position(|entry| {
-            entry.viewport == viewport
+            entry.matches_viewport(viewport)
                 // SAFETY: the callback supplies a live viewport for the current Context.
                 && unsafe { entry.native_fields_are_owned() }
         }) else {
@@ -203,6 +255,14 @@ pub(super) fn remove_viewport_data(
     };
     entry.detach_and_drop();
     true
+}
+
+fn discard_destroyed_viewport_data(control: &RuntimeControl) {
+    control.viewports.borrow_mut().retain(|entry| {
+        // SAFETY: callers hold the current live Context. The resolver never dereferences the
+        // retained address and only returns a pointer Dear ImGui still owns under this identity.
+        unsafe { entry.resolve_viewport().is_some() }
+    });
 }
 
 pub(super) unsafe fn preflight_viewport_ownership(
@@ -225,13 +285,18 @@ pub(super) unsafe fn preflight_viewport_ownership(
     } else {
         unsafe { std::slice::from_raw_parts(native_viewports.Data, count) }
     };
+    discard_destroyed_viewport_data(control);
     let entries = control.viewports.borrow();
 
     for entry in entries.iter() {
-        if !native_viewports.contains(&entry.viewport)
-            || unsafe { !entry.native_fields_are_owned() }
-        {
-            return Err(WinitPlatformError::ForeignPlatformUserData);
+        let Some(viewport) = (unsafe { entry.resolve_viewport() }) else {
+            continue;
+        };
+        if let Some(field) = unsafe { entry.native_ownership_loss(viewport) } {
+            return Err(WinitPlatformError::ViewportOwnershipLost {
+                viewport_id: entry.viewport_id(),
+                field,
+            });
         }
     }
     for &viewport in native_viewports {
@@ -239,14 +304,25 @@ pub(super) unsafe fn preflight_viewport_ownership(
             return Err(WinitPlatformError::ForeignPlatformUserData);
         }
         let viewport = unsafe { &*viewport };
+        let viewport_ptr = std::ptr::from_ref(viewport).cast_mut();
         if (!viewport.PlatformUserData.is_null()
             || !viewport.PlatformHandle.is_null()
             || !viewport.PlatformHandleRaw.is_null())
             && !entries.iter().any(|entry| {
-                std::ptr::eq(entry.viewport, viewport) && unsafe { entry.native_fields_are_owned() }
+                entry.matches_viewport(viewport_ptr) && unsafe { entry.native_fields_are_owned() }
             })
         {
-            return Err(WinitPlatformError::ForeignPlatformUserData);
+            let field = if !viewport.PlatformUserData.is_null() {
+                "PlatformUserData"
+            } else if !viewport.PlatformHandle.is_null() {
+                "PlatformHandle"
+            } else {
+                "PlatformHandleRaw"
+            };
+            return Err(WinitPlatformError::ViewportOwnershipLost {
+                viewport_id: viewport.ID,
+                field,
+            });
         }
     }
     Ok(())

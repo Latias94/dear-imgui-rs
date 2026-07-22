@@ -346,7 +346,11 @@ impl RuntimeControl {
     fn shutdown_native(&self) -> Result<(), WinitPlatformError> {
         let callback_error = release_platform_callbacks(self);
         let deferred_fault = self.poll_fault();
-        self.drop_all_viewports();
+        // `DestroyPlatformWindows` has already visited the complete internal viewport list.
+        // Residual entries may refer to viewports that were filtered out of the public
+        // `PlatformIO.Viewports` snapshot or have since been deleted, so release only their Rust
+        // sidecars here and never dereference their retained addresses.
+        self.discard_all_viewports_without_touching_native();
         let monitor_error = self.restore_monitors_in_current_context();
         self.finish_shutdown();
         deferred_fault.and(callback_error).and(monitor_error)
@@ -387,9 +391,9 @@ impl RuntimeControl {
         }
     }
 
-    fn drop_all_viewports_after_context_destroyed(&self) {
-        // Native viewport pointers are invalid now. Dropping the entries releases only their
-        // Rust-owned windows and sidecars without dereferencing those pointers.
+    fn discard_all_viewports_without_touching_native(&self) {
+        // Native viewport pointers may have been filtered from the public snapshot or invalidated
+        // by core teardown. Dropping the entries releases only Rust-owned windows and sidecars.
         self.viewports.borrow_mut().clear();
     }
 
@@ -431,7 +435,7 @@ impl RuntimeControl {
         self.teardown_callbacks_active.set(false);
         self.clear_platform_callback_contract();
         unregister_runtime(self.binding.id());
-        self.drop_all_viewports_after_context_destroyed();
+        self.discard_all_viewports_without_touching_native();
         self.discard_prior_monitors_after_context_destroyed();
         self.main_window.borrow_mut().take();
         self.state.set(RuntimeState::ContextDestroyed);

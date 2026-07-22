@@ -297,7 +297,7 @@ impl GlowRenderer {
             return Some(RendererStateFault::State("ImGuiPlatformIO"));
         }
         let platform_io = unsafe { &*platform_io };
-        if platform_io.Renderer_RenderState != std::ptr::null_mut() {
+        if !platform_io.Renderer_RenderState.is_null() {
             return Some(RendererStateFault::State("Renderer_RenderState"));
         }
         if platform_io.Renderer_TextureMaxWidth != self.renderer_texture_max[0] {

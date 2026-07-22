@@ -10,10 +10,10 @@ use dear_imgui_rs::{
 };
 
 use super::callbacks::{
-    destroy_renderer_viewport_resources, framebuffer_size_for_reconfigure, publish_registered_box,
-    render_callback_matches, renderer_create_window_sys, renderer_destroy_window_sys,
-    renderer_render_window_sys, renderer_set_window_size_sys, renderer_swap_buffers_sys,
-    unary_callback_matches,
+    destroy_renderer_viewport_resources, framebuffer_size_for_reconfigure,
+    preflight_renderer_viewport_resources, publish_registered_box, render_callback_matches,
+    renderer_create_window_sys, renderer_destroy_window_sys, renderer_render_window_sys,
+    renderer_set_window_size_sys, renderer_swap_buffers_sys, unary_callback_matches,
 };
 use super::registry::{
     ViewportIdentity, fail_next_viewport_registration, preflight_runtime,
@@ -115,6 +115,32 @@ impl Drop for DropProbe {
     }
 }
 
+struct PublicViewportListSizeGuard {
+    platform_io: *mut sys::ImGuiPlatformIO,
+    original_size: std::os::raw::c_int,
+}
+
+impl PublicViewportListSizeGuard {
+    fn hide_all(context: &mut Context) -> Self {
+        let platform_io = context.platform_io_mut().as_raw_mut();
+        // Dear ImGui's internal viewport list remains intact. This only simulates the filtered
+        // `PlatformIO.Viewports` public snapshot while native cleanup is in progress.
+        let original_size = unsafe { (*platform_io).Viewports.Size };
+        unsafe { (*platform_io).Viewports.Size = 0 };
+        Self {
+            platform_io,
+            original_size,
+        }
+    }
+}
+
+impl Drop for PublicViewportListSizeGuard {
+    fn drop(&mut self) {
+        // SAFETY: tests drop this guard before the Context that owns PlatformIO.
+        unsafe { (*self.platform_io).Viewports.Size = self.original_size };
+    }
+}
+
 #[derive(Clone, Copy)]
 enum MissingRuntimeDependency {
     RendererCapability,
@@ -201,6 +227,30 @@ fn viewport_identity(viewport: &mut sys::ImGuiViewport) -> ViewportIdentity {
     ViewportIdentity::capture(unsafe {
         dear_imgui_rs::platform_io::Viewport::from_raw_mut(viewport)
     })
+}
+
+#[test]
+fn viewport_identity_resolves_only_the_current_id_and_address() {
+    let _guard = lock_context();
+    let context = Context::create();
+    let viewport = unsafe { sys::igGetMainViewport() };
+    let id = unsafe { (*viewport).ID };
+    let identity = viewport_identity(unsafe { &mut *viewport });
+
+    assert_eq!(
+        identity.with_live_viewport(context.as_raw(), |viewport| viewport.id().raw()),
+        Some(id)
+    );
+    assert!(
+        ViewportIdentity::for_test((viewport as usize).wrapping_add(1), id)
+            .with_live_viewport(context.as_raw(), |_| ())
+            .is_none()
+    );
+    assert!(
+        ViewportIdentity::for_test(viewport as usize, id.wrapping_add(1))
+            .with_live_viewport(context.as_raw(), |_| ())
+            .is_none()
+    );
 }
 
 fn publish_drop_probe(context: &Context, viewport: &mut sys::ImGuiViewport, drops: Rc<Cell<u32>>) {
@@ -1011,7 +1061,7 @@ fn cleared_renderer_user_data_is_terminal_but_destroy_still_reclaims_sidecar() {
 }
 
 #[test]
-fn shutdown_rejects_foreign_reachable_sidecar_before_mutating_runtime() {
+fn shutdown_rejects_foreign_sidecar_filtered_from_public_snapshot_before_mutating_runtime() {
     let _guard = lock_context();
     let mut context = Context::create();
     let _platform = attach_test_platform(&mut context);
@@ -1024,12 +1074,15 @@ fn shutdown_rejects_foreign_reachable_sidecar_before_mutating_runtime() {
     let owned = unsafe { (*viewport).RendererUserData };
     let foreign = std::ptr::dangling_mut::<c_void>();
     unsafe { (*viewport).RendererUserData = foreign };
+    let hidden_from_public_snapshot = PublicViewportListSizeGuard::hide_all(&mut context);
 
     assert!(matches!(
-        runtime.shutdown(&mut context),
-        Err(WgpuViewportError::RendererUserDataOwnershipLost {
+        control
+            .binding()
+            .try_with_bound_context(|| preflight_renderer_viewport_resources(&control)),
+        Ok(Err(WgpuViewportError::RendererUserDataOwnershipLost {
             callback: "Renderer_DestroyWindow"
-        })
+        }))
     ));
     assert_eq!(runtime.state_for_test(), RuntimeState::Attached);
     assert!(control.has_renderer_for_test());
@@ -1067,9 +1120,37 @@ fn shutdown_rejects_foreign_reachable_sidecar_before_mutating_runtime() {
     ));
 
     // Restoring the exact slot makes the original runtime safely teardown-able again.
+    drop(hidden_from_public_snapshot);
     unsafe { (*viewport).RendererUserData = owned };
     runtime.shutdown(&mut context).unwrap();
     assert_eq!(drops.get(), 1);
+}
+
+#[test]
+fn shutdown_clears_sidecar_filtered_from_public_snapshot() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let _platform = attach_test_platform(&mut context);
+    let mut runtime =
+        OwningViewportRuntime::attach_for_test(&mut context, WgpuRenderer::empty()).unwrap();
+    let drops = Rc::new(Cell::new(0));
+    let viewport = unsafe { sys::igGetMainViewport() };
+    publish_drop_probe(&context, unsafe { &mut *viewport }, Rc::clone(&drops));
+    let hidden_from_public_snapshot = PublicViewportListSizeGuard::hide_all(&mut context);
+
+    let control = runtime.control_for_test();
+    assert!(matches!(
+        control
+            .binding()
+            .try_with_bound_context(|| destroy_renderer_viewport_resources(&control)),
+        Ok(Ok(()))
+    ));
+
+    assert_eq!(drops.get(), 1);
+    assert_eq!(viewport_data_count(context.id()), 0);
+    assert!(unsafe { (*viewport).RendererUserData }.is_null());
+    drop(hidden_from_public_snapshot);
+    runtime.shutdown(&mut context).unwrap();
 }
 
 #[test]

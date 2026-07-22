@@ -12,6 +12,7 @@ use super::callbacks::{
     record_viewport_failure, run_callback, winit_create_window, winit_destroy_window,
     winit_get_window_pos_out,
 };
+use super::registry::preflight_viewport_ownership;
 use super::runtime::{ConstructionStage, RuntimeState, WinitPlatformRuntime};
 use crate::test_util::test_sync::lock_context;
 
@@ -739,12 +740,33 @@ fn shutdown_rejects_foreign_viewport_fields_before_aggregate_destroy() {
 
     assert_eq!(
         runtime.shutdown(&mut context),
-        Err(WinitPlatformError::ForeignPlatformUserData)
+        Err(WinitPlatformError::ViewportOwnershipLost {
+            viewport_id: unsafe { (*viewport).ID },
+            field: "PlatformHandle",
+        })
     );
     assert_eq!(runtime.control().state(), RuntimeState::Attached);
     assert_eq!(unsafe { (*viewport).PlatformHandle }, foreign);
 
     unsafe { (*viewport).PlatformHandle = std::ptr::null_mut() };
+    runtime.shutdown(&mut context).unwrap();
+}
+
+#[test]
+fn preflight_keeps_owned_viewports_filtered_from_the_public_snapshot() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let mut runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
+    let platform_io = context.platform_io_mut().as_raw_mut();
+    let original_size = unsafe { (*platform_io).Viewports.Size };
+
+    // Dear ImGui rebuilds `PlatformIO.Viewports` as a filtered public snapshot. An owned
+    // viewport can be hidden in that snapshot while still remaining live in its internal list.
+    unsafe { (*platform_io).Viewports.Size = 0 };
+    let result = unsafe { preflight_viewport_ownership(runtime.control(), platform_io) };
+    unsafe { (*platform_io).Viewports.Size = original_size };
+
+    assert_eq!(result, Ok(()));
     runtime.shutdown(&mut context).unwrap();
 }
 

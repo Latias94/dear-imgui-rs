@@ -89,6 +89,14 @@ pub enum WinitPlatformError {
     /// A viewport already has platform data owned by another backend.
     #[error("viewport platform data or handle is already owned by another platform backend")]
     ForeignPlatformUserData,
+    /// A live viewport stopped matching the Winit platform data registered for it.
+    #[error("Winit lost ownership of viewport {viewport_id} field `{field}`")]
+    ViewportOwnershipLost {
+        /// Dear ImGui viewport identifier whose native platform state drifted.
+        viewport_id: u32,
+        /// Native platform field whose value no longer matches Winit's registration.
+        field: &'static str,
+    },
     /// Winit did not expose any monitor geometry that can back Dear ImGui viewports.
     #[error("Winit did not expose any monitor geometry")]
     NoMonitors,
