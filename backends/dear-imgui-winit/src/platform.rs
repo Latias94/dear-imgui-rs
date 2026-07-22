@@ -767,7 +767,7 @@ impl ContextAttachment for WinitPlatformControl {
     ) -> Result<(), ContextAttachmentTeardownError> {
         let runtime = self.runtime.borrow().clone();
         context
-            .with_bound_context(|| {
+            .with_bound_context(|| -> Result<(), WinitPlatformError> {
                 // `WinitPlatformRuntime::shutdown` already performed its typed preflight and
                 // opened this callback guard before it entered the core transaction. Preserve
                 // that error path instead of wrapping it through the generic attachment error.
@@ -797,7 +797,7 @@ impl ContextAttachment for WinitPlatformControl {
             return Ok(());
         };
 
-        let result = context.with_bound_context(|| {
+        let result = context.with_bound_context(|| -> Result<(), WinitPlatformError> {
             runtime.finish_context_platform_window_teardown()?;
             Ok(())
         });
