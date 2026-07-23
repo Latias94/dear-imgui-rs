@@ -75,7 +75,11 @@ impl BuildConfig {
         }
     }
     fn artifact_features(&self) -> Vec<&'static str> {
-        let mut features = vec!["platform-io-aggregate-hooks", "wchar32"];
+        let mut features = vec![
+            "platform-io-aggregate-hooks",
+            build_support::SAFE_DEMO_FONT_BOUNDARY_ARTIFACT_FEATURE,
+            "wchar32",
+        ];
         if cfg!(feature = "stack-layout") {
             features.push("stack-layout");
         }
@@ -222,6 +226,7 @@ fn main() {
     println!("cargo:rerun-if-changed=src/bindings_pregenerated_windows.rs");
     println!("cargo:rerun-if-changed=src/wasm_bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=src/imgui_test_engine_hooks.cpp");
+    println!("cargo:rerun-if-changed=src/demo_window_shim.cpp");
     println!("cargo:rerun-if-changed=src/platform_io_hooks.cpp");
     println!("cargo:rerun-if-changed=src/stack_layout_shim.cpp");
     println!("cargo:rerun-if-changed=src/stack_layout_imgui_externs.cpp.inc");
@@ -232,6 +237,8 @@ fn main() {
     println!("cargo:rerun-if-changed=backend-shims/android.cpp");
     println!("cargo:rerun-if-changed=backend-shims/win32.cpp");
     println!("cargo:rerun-if-changed=backend-shims/dx11.cpp");
+    println!("cargo:rerun-if-changed=third-party/cimgui/imgui/imgui.cpp");
+    println!("cargo:rerun-if-changed=third-party/cimgui/imgui/imgui_demo.cpp");
     for name in CORE_BUILD_ENV_VARS {
         println!("cargo:rerun-if-env-changed={name}");
     }
@@ -603,23 +610,26 @@ fn build_with_cc_cfg(cfg: &BuildConfig) {
     let imgui_src = cfg.imgui_src();
     let mut build = new_native_cpp_build(cfg);
     build.include(&cimgui_root);
-    if cfg!(feature = "stack-layout") {
-        build.file(write_stack_layout_patched_imgui_cpp(
-            cfg,
-            &imgui_src.join("imgui.cpp"),
-        ));
+    let imgui_cpp = if cfg!(feature = "stack-layout") {
+        let patched = write_stack_layout_patched_imgui_cpp(cfg, &imgui_src.join("imgui.cpp"));
         build.file(cfg.manifest_dir.join("src/stack_layout_shim.cpp"));
+        patched
     } else {
-        build.file(imgui_src.join("imgui.cpp"));
-    }
+        imgui_src.join("imgui.cpp")
+    };
+    build.file(write_safe_demo_patched_imgui_cpp(cfg, &imgui_cpp));
     build.file(imgui_src.join("imgui_draw.cpp"));
     build.file(imgui_src.join("imgui_widgets.cpp"));
     build.file(imgui_src.join("imgui_tables.cpp"));
+    build.file(cfg.manifest_dir.join("src/demo_window_shim.cpp"));
     build.file(cfg.manifest_dir.join("src/platform_io_hooks.cpp"));
     // Include official demo/metrics/debug windows for native builds so symbols like
     // ImGui::ShowDemoWindow/ShowAboutWindow/ShowStyleEditor resolve.
     // This is excluded from the WASM single‑module path below.
-    build.file(imgui_src.join("imgui_demo.cpp"));
+    build.file(write_safe_demo_patched_imgui_demo_cpp(
+        cfg,
+        &imgui_src.join("imgui_demo.cpp"),
+    ));
     build.file(cimgui_root.join("cimgui.cpp"));
     if cfg!(feature = "test-engine") {
         build.define("IMGUI_ENABLE_TEST_ENGINE", None);
@@ -641,6 +651,37 @@ fn build_with_cc_cfg(cfg: &BuildConfig) {
     }
 
     build.compile("dear_imgui");
+}
+
+fn write_safe_demo_patched_imgui_cpp(cfg: &BuildConfig, imgui_cpp: &Path) -> PathBuf {
+    let source = std::fs::read_to_string(imgui_cpp)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", imgui_cpp.display()));
+    let patched = build_support::patch_imgui_cpp_for_safe_demo(&source).unwrap_or_else(|error| {
+        panic!(
+            "failed to patch {} for safe demo windows: {error}",
+            imgui_cpp.display()
+        )
+    });
+    let out = cfg.out_dir.join("imgui_safe_demo_patched.cpp");
+    std::fs::write(&out, patched)
+        .unwrap_or_else(|error| panic!("failed to write {}: {error}", out.display()));
+    out
+}
+
+fn write_safe_demo_patched_imgui_demo_cpp(cfg: &BuildConfig, imgui_demo_cpp: &Path) -> PathBuf {
+    let source = std::fs::read_to_string(imgui_demo_cpp)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", imgui_demo_cpp.display()));
+    let patched =
+        build_support::patch_imgui_demo_cpp_for_safe_demo(&source).unwrap_or_else(|error| {
+            panic!(
+                "failed to patch {} for safe demo windows: {error}",
+                imgui_demo_cpp.display()
+            )
+        });
+    let out = cfg.out_dir.join("imgui_demo_safe_demo_patched.cpp");
+    std::fs::write(&out, patched)
+        .unwrap_or_else(|error| panic!("failed to write {}: {error}", out.display()));
+    out
 }
 
 // imgui-node-editor's stack layout extension is not a standalone widget layer:

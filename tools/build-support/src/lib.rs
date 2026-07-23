@@ -4,6 +4,293 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 static STATIC_CPP_STDLIB_LINK_EMITTED: AtomicBool = AtomicBool::new(false);
 
+/// Native artifact capability for the repository-owned safe demo-window ABI.
+pub const SAFE_DEMO_FONT_BOUNDARY_ARTIFACT_FEATURE: &str = "safe-demo-font-boundary-v1";
+
+/// Extra C symbols exported by the WebAssembly cimgui provider.
+pub const SAFE_DEMO_FONT_BOUNDARY_WASM_EXPORTS: &[&str] = &[
+    "dear_imgui_rs_show_demo_window_without_font_atlas",
+    "dear_imgui_rs_show_font_atlas_debug_panel",
+    "dear_imgui_rs_show_metrics_window_without_font_atlas",
+    "dear_imgui_rs_show_style_editor_without_font_atlas",
+];
+
+/// Patch `imgui.cpp` so the metrics window can omit the destructive font-atlas panel.
+pub fn patch_imgui_cpp_for_safe_demo(source: &str) -> Result<String, String> {
+    let (mut patched, newline) = normalize_cpp_source(source);
+
+    patched = replace_cpp_source_once(
+        &patched,
+        "void ImGui::ShowMetricsWindow(bool* p_open)\n{",
+        concat!(
+            "static void DearImGuiRsShowMetricsWindowInternal(bool* p_open, bool show_font_atlas)\n",
+            "{\n",
+            "    using namespace ImGui;"
+        ),
+        "ShowMetricsWindow definition",
+    )?;
+
+    patched = replace_cpp_source_once(
+        &patched,
+        concat!(
+            "    // Details for Fonts\n",
+            "    for (ImFontAtlas* atlas : g.FontAtlases)\n",
+            "        if (TreeNode((void*)atlas, \"Fonts (%d), Textures (%d)\", atlas->Fonts.Size, atlas->TexList.Size))\n",
+            "        {\n",
+            "            ShowFontAtlas(atlas);\n",
+            "            TreePop();\n",
+            "        }"
+        ),
+        concat!(
+            "    // Details for Fonts\n",
+            "    if (show_font_atlas)\n",
+            "    {\n",
+            "        for (ImFontAtlas* atlas : g.FontAtlases)\n",
+            "            if (TreeNode((void*)atlas, \"Fonts (%d), Textures (%d)\", atlas->Fonts.Size, atlas->TexList.Size))\n",
+            "            {\n",
+            "                ShowFontAtlas(atlas);\n",
+            "                TreePop();\n",
+            "            }\n",
+            "    }"
+        ),
+        "ShowMetricsWindow font-atlas section",
+    )?;
+
+    patched = replace_cpp_source_once(
+        &patched,
+        "    End();\n}\n\nvoid ImGui::DebugBreakClearData()",
+        concat!(
+            "    End();\n",
+            "}\n\n",
+            "void ImGui::ShowMetricsWindow(bool* p_open)\n",
+            "{\n",
+            "    ::DearImGuiRsShowMetricsWindowInternal(p_open, true);\n",
+            "}\n\n",
+            "void DearImGuiRsShowMetricsWindowWithoutFontAtlas(bool* p_open)\n",
+            "{\n",
+            "    DearImGuiRsShowMetricsWindowInternal(p_open, false);\n",
+            "}\n\n",
+            "void ImGui::DebugBreakClearData()"
+        ),
+        "ShowMetricsWindow wrapper boundary",
+    )?;
+
+    patched = replace_cpp_source_once(
+        &patched,
+        "void ImGui::ShowMetricsWindow(bool*) {}",
+        concat!(
+            "void ImGui::ShowMetricsWindow(bool*) {}\n",
+            "void DearImGuiRsShowMetricsWindowWithoutFontAtlas(bool*) {}"
+        ),
+        "disabled ShowMetricsWindow stub",
+    )?;
+
+    Ok(restore_cpp_newlines(patched, newline))
+}
+
+/// Patch `imgui_demo.cpp` so demo and style windows can omit font-atlas debug controls.
+pub fn patch_imgui_demo_cpp_for_safe_demo(source: &str) -> Result<String, String> {
+    let (mut patched, newline) = normalize_cpp_source(source);
+
+    patched = replace_cpp_source_once(
+        &patched,
+        "void ImGui::ShowDemoWindow(bool* p_open)\n{",
+        concat!(
+            "void DearImGuiRsShowMetricsWindowWithoutFontAtlas(bool* p_open);\n",
+            "void DearImGuiRsShowStyleEditorWithoutFontAtlas(ImGuiStyle* ref);\n\n",
+            "static void DearImGuiRsShowDemoWindowInternal(bool* p_open, bool show_font_atlas)\n",
+            "{\n",
+            "    using namespace ImGui;"
+        ),
+        "ShowDemoWindow definition",
+    )?;
+
+    patched = replace_cpp_source_once(
+        &patched,
+        "    if (demo_data.ShowMetrics)              { ImGui::ShowMetricsWindow(&demo_data.ShowMetrics); }",
+        concat!(
+            "    if (demo_data.ShowMetrics)\n",
+            "    {\n",
+            "        if (show_font_atlas)\n",
+            "            ImGui::ShowMetricsWindow(&demo_data.ShowMetrics);\n",
+            "        else\n",
+            "            DearImGuiRsShowMetricsWindowWithoutFontAtlas(&demo_data.ShowMetrics);\n",
+            "    }"
+        ),
+        "ShowDemoWindow metrics call",
+    )?;
+
+    patched = replace_cpp_source_once(
+        &patched,
+        concat!(
+            "    if (demo_data.ShowStyleEditor)\n",
+            "    {\n",
+            "        ImGui::Begin(\"Dear ImGui Style Editor\", &demo_data.ShowStyleEditor);\n",
+            "        ImGui::ShowStyleEditor();\n",
+            "        ImGui::End();\n",
+            "    }"
+        ),
+        concat!(
+            "    if (demo_data.ShowStyleEditor)\n",
+            "    {\n",
+            "        ImGui::Begin(\"Dear ImGui Style Editor\", &demo_data.ShowStyleEditor);\n",
+            "        if (show_font_atlas)\n",
+            "            ImGui::ShowStyleEditor();\n",
+            "        else\n",
+            "            DearImGuiRsShowStyleEditorWithoutFontAtlas(NULL);\n",
+            "        ImGui::End();\n",
+            "    }"
+        ),
+        "ShowDemoWindow style-editor call",
+    )?;
+
+    patched = replace_cpp_source_once(
+        &patched,
+        "static void DemoWindowWidgets(ImGuiDemoWindowData* demo_data);",
+        "static void DemoWindowWidgets(ImGuiDemoWindowData* demo_data, bool show_font_atlas);",
+        "DemoWindowWidgets declaration",
+    )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        "    DemoWindowWidgets(&demo_data);",
+        "    DemoWindowWidgets(&demo_data, show_font_atlas);",
+        "DemoWindowWidgets call",
+    )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        "static void DemoWindowWidgets(ImGuiDemoWindowData* demo_data)\n{",
+        "static void DemoWindowWidgets(ImGuiDemoWindowData* demo_data, bool show_font_atlas)\n{",
+        "DemoWindowWidgets definition",
+    )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        "    DemoWindowWidgetsFonts();",
+        "    if (show_font_atlas)\n        DemoWindowWidgetsFonts();",
+        "DemoWindowWidgets font-atlas call",
+    )?;
+
+    patched = replace_cpp_source_once(
+        &patched,
+        concat!(
+            "    ImGui::PopItemWidth();\n",
+            "    ImGui::End();\n",
+            "}\n\n",
+            "//-----------------------------------------------------------------------------\n",
+            "// [SECTION] DemoWindowMenuBar()"
+        ),
+        concat!(
+            "    ImGui::PopItemWidth();\n",
+            "    ImGui::End();\n",
+            "}\n\n",
+            "void ImGui::ShowDemoWindow(bool* p_open)\n",
+            "{\n",
+            "    ::DearImGuiRsShowDemoWindowInternal(p_open, true);\n",
+            "}\n\n",
+            "void DearImGuiRsShowDemoWindowWithoutFontAtlas(bool* p_open)\n",
+            "{\n",
+            "    DearImGuiRsShowDemoWindowInternal(p_open, false);\n",
+            "}\n\n",
+            "//-----------------------------------------------------------------------------\n",
+            "// [SECTION] DemoWindowMenuBar()"
+        ),
+        "ShowDemoWindow wrapper boundary",
+    )?;
+
+    patched = replace_cpp_source_once(
+        &patched,
+        "void ImGui::ShowStyleEditor(ImGuiStyle* ref)\n{",
+        concat!(
+            "static void DearImGuiRsShowStyleEditorInternal(ImGuiStyle* ref, bool show_font_atlas)\n",
+            "{\n",
+            "    using namespace ImGui;"
+        ),
+        "ShowStyleEditor definition",
+    )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        "        if (BeginTabItem(\"Fonts\"))",
+        "        if (show_font_atlas && BeginTabItem(\"Fonts\"))",
+        "ShowStyleEditor font-atlas tab",
+    )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        concat!(
+            "    PopItemWidth();\n",
+            "}\n\n",
+            "//-----------------------------------------------------------------------------\n",
+            "// [SECTION] User Guide / ShowUserGuide()"
+        ),
+        concat!(
+            "    PopItemWidth();\n",
+            "}\n\n",
+            "void ImGui::ShowStyleEditor(ImGuiStyle* ref)\n",
+            "{\n",
+            "    ::DearImGuiRsShowStyleEditorInternal(ref, true);\n",
+            "}\n\n",
+            "void DearImGuiRsShowStyleEditorWithoutFontAtlas(ImGuiStyle* ref)\n",
+            "{\n",
+            "    DearImGuiRsShowStyleEditorInternal(ref, false);\n",
+            "}\n\n",
+            "//-----------------------------------------------------------------------------\n",
+            "// [SECTION] User Guide / ShowUserGuide()"
+        ),
+        "ShowStyleEditor wrapper boundary",
+    )?;
+
+    patched = replace_cpp_source_once(
+        &patched,
+        "void ImGui::ShowDemoWindow(bool*) {}",
+        concat!(
+            "void ImGui::ShowDemoWindow(bool*) {}\n",
+            "void DearImGuiRsShowDemoWindowWithoutFontAtlas(bool*) {}"
+        ),
+        "disabled ShowDemoWindow stub",
+    )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        "void ImGui::ShowStyleEditor(ImGuiStyle*) {}",
+        concat!(
+            "void ImGui::ShowStyleEditor(ImGuiStyle*) {}\n",
+            "void DearImGuiRsShowStyleEditorWithoutFontAtlas(ImGuiStyle*) {}"
+        ),
+        "disabled ShowStyleEditor stub",
+    )?;
+
+    Ok(restore_cpp_newlines(patched, newline))
+}
+
+fn normalize_cpp_source(source: &str) -> (String, &'static str) {
+    let newline = if source.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    (source.replace("\r\n", "\n"), newline)
+}
+
+fn restore_cpp_newlines(source: String, newline: &str) -> String {
+    if newline == "\r\n" {
+        source.replace('\n', "\r\n")
+    } else {
+        source
+    }
+}
+
+fn replace_cpp_source_once(
+    source: &str,
+    marker: &str,
+    replacement: &str,
+    description: &str,
+) -> Result<String, String> {
+    let count = source.match_indices(marker).count();
+    if count != 1 {
+        return Err(format!(
+            "{description}: expected exactly one source marker, found {count}"
+        ));
+    }
+    Ok(source.replacen(marker, replacement, 1))
+}
+
 #[cfg(any(feature = "binding-spec", test))]
 pub mod binding {
     use std::collections::{BTreeMap, BTreeSet};
@@ -4364,6 +4651,7 @@ pub const DEFAULT_GITHUB_REPO: &str = "dear-imgui";
 
 #[cfg(test)]
 mod binding_contract_tests {
+    use super::SAFE_DEMO_FONT_BOUNDARY_ARTIFACT_FEATURE;
     use super::binding::{
         ArtifactProfile, BindingOwner, BindingSpec, BuildRequest, BuildRequestInput,
         CORE_BUILD_ENV_VARS, CORE_WASM_TARGET, CoreArtifactIdentity, CrateBindingDefine,
@@ -4416,7 +4704,11 @@ mod binding_contract_tests {
             target_endian: "little",
             target_pointer_width: "64",
             cargo_profile: "release",
-            artifact_features: vec!["platform-io-aggregate-hooks", "wchar32"],
+            artifact_features: vec![
+                "platform-io-aggregate-hooks",
+                SAFE_DEMO_FONT_BOUNDARY_ARTIFACT_FEATURE,
+                "wchar32",
+            ],
             environment: values,
         })
     }
@@ -4428,7 +4720,11 @@ mod binding_contract_tests {
             "x86_64-pc-windows-msvc",
             "static",
             "md",
-            ["platform-io-aggregate-hooks", "wchar32"],
+            [
+                "platform-io-aggregate-hooks",
+                SAFE_DEMO_FONT_BOUNDARY_ARTIFACT_FEATURE,
+                "wchar32",
+            ],
             SourceRevisions::new(
                 "1261b231939fc210032f30c4ee8a8f0440372237",
                 "b61e56346a92cfcaf1f43a545ca37b0b32239654",
@@ -4446,6 +4742,7 @@ mod binding_contract_tests {
             "md",
             [
                 "platform-io-aggregate-hooks",
+                SAFE_DEMO_FONT_BOUNDARY_ARTIFACT_FEATURE,
                 "wchar32",
                 "freetype",
                 "stack-layout",
@@ -4926,14 +5223,18 @@ mod binding_contract_tests {
             "x86_64-pc-windows-msvc",
             "static",
             "md",
-            ["platform-io-aggregate-hooks", "wchar32"],
+            [
+                "platform-io-aggregate-hooks",
+                SAFE_DEMO_FONT_BOUNDARY_ARTIFACT_FEATURE,
+                "wchar32",
+            ],
             SourceRevisions::new(
                 "1261b231939fc210032f30c4ee8a8f0440372237",
                 "b61e56346a92cfcaf1f43a545ca37b0b32239654",
             ),
             "fnv1a64:0123456789abcdef",
         );
-        assert_eq!(profile.deterministic_hash(), "fnv1a64:1c6bc757a0743a80");
+        assert_eq!(profile.deterministic_hash(), "fnv1a64:2b8ec258d4aa24c6");
     }
 
     #[test]
@@ -5842,6 +6143,92 @@ mod tests {
 
     #[cfg(any(feature = "pkg-config", feature = "vcpkg"))]
     const TARGET_ENV_VARS: [&str; 2] = ["CARGO_CFG_TARGET_OS", "CARGO_CFG_TARGET_ENV"];
+
+    #[test]
+    fn metrics_patch_guards_only_the_font_atlas_section() {
+        let source = concat!(
+            "void ImGui::ShowMetricsWindow(bool* p_open)\n",
+            "{\n",
+            "    KeepOrdinaryMetrics();\n",
+            "    // Details for Fonts\n",
+            "    for (ImFontAtlas* atlas : g.FontAtlases)\n",
+            "        if (TreeNode((void*)atlas, \"Fonts (%d), Textures (%d)\", atlas->Fonts.Size, atlas->TexList.Size))\n",
+            "        {\n",
+            "            ShowFontAtlas(atlas);\n",
+            "            TreePop();\n",
+            "        }\n",
+            "    End();\n",
+            "}\n\n",
+            "void ImGui::DebugBreakClearData()\n",
+            "{\n",
+            "}\n\n",
+            "void ImGui::ShowMetricsWindow(bool*) {}\n",
+        );
+
+        let patched = patch_imgui_cpp_for_safe_demo(source).unwrap();
+
+        assert!(patched.contains("KeepOrdinaryMetrics();"));
+        assert!(patched.contains("if (show_font_atlas)"));
+        assert!(patched.contains("void ImGui::ShowMetricsWindow(bool* p_open)"));
+        assert!(
+            patched.contains("void DearImGuiRsShowMetricsWindowWithoutFontAtlas(bool* p_open)")
+        );
+    }
+
+    #[test]
+    fn demo_patch_preserves_non_font_demo_and_style_controls() {
+        let source = concat!(
+            "static void DemoWindowWidgets(ImGuiDemoWindowData* demo_data);\n",
+            "void ImGui::ShowDemoWindow(bool* p_open)\n",
+            "{\n",
+            "    KeepOrdinaryDemo();\n",
+            "    if (demo_data.ShowMetrics)              { ImGui::ShowMetricsWindow(&demo_data.ShowMetrics); }\n",
+            "    if (demo_data.ShowStyleEditor)\n",
+            "    {\n",
+            "        ImGui::Begin(\"Dear ImGui Style Editor\", &demo_data.ShowStyleEditor);\n",
+            "        ImGui::ShowStyleEditor();\n",
+            "        ImGui::End();\n",
+            "    }\n",
+            "    DemoWindowWidgets(&demo_data);\n",
+            "    ImGui::PopItemWidth();\n",
+            "    ImGui::End();\n",
+            "}\n\n",
+            "//-----------------------------------------------------------------------------\n",
+            "// [SECTION] DemoWindowMenuBar()\n",
+            "static void DemoWindowWidgets(ImGuiDemoWindowData* demo_data)\n",
+            "{\n",
+            "    DemoWindowWidgetsFonts();\n",
+            "}\n",
+            "void ImGui::ShowStyleEditor(ImGuiStyle* ref)\n",
+            "{\n",
+            "        if (BeginTabItem(\"Colors\"))\n",
+            "            KeepColorEditor();\n",
+            "        if (BeginTabItem(\"Fonts\"))\n",
+            "            ShowFontAtlas(atlas);\n",
+            "    PopItemWidth();\n",
+            "}\n\n",
+            "//-----------------------------------------------------------------------------\n",
+            "// [SECTION] User Guide / ShowUserGuide()\n",
+            "void ImGui::ShowDemoWindow(bool*) {}\n",
+            "void ImGui::ShowStyleEditor(ImGuiStyle*) {}\n",
+        );
+
+        let patched = patch_imgui_demo_cpp_for_safe_demo(source).unwrap();
+
+        assert!(patched.contains("KeepOrdinaryDemo();"));
+        assert!(patched.contains("KeepColorEditor();"));
+        assert!(
+            patched.contains(
+                "DemoWindowWidgets(ImGuiDemoWindowData* demo_data, bool show_font_atlas)"
+            )
+        );
+        assert!(patched.contains("if (show_font_atlas)\n        DemoWindowWidgetsFonts();"));
+        assert!(patched.contains("show_font_atlas && BeginTabItem(\"Fonts\")"));
+        assert!(patched.contains("void DearImGuiRsShowDemoWindowWithoutFontAtlas(bool* p_open)"));
+        assert!(
+            patched.contains("void DearImGuiRsShowStyleEditorWithoutFontAtlas(ImGuiStyle* ref)")
+        );
+    }
 
     #[test]
     fn static_cpp_stdlib_is_limited_to_windows_gnu_targets() {

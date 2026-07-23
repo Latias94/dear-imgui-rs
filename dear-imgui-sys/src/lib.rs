@@ -104,6 +104,17 @@ compile_error!("feature `prebuilt` is native-only and cannot be combined with WA
 mod ffi;
 pub use ffi::*;
 
+#[cfg_attr(
+    dear_imgui_rs_wasm_import_target,
+    link(wasm_import_module = "imgui-sys-v0")
+)]
+unsafe extern "C" {
+    pub fn dear_imgui_rs_show_demo_window_without_font_atlas(p_open: *mut bool);
+    pub fn dear_imgui_rs_show_metrics_window_without_font_atlas(p_open: *mut bool);
+    pub fn dear_imgui_rs_show_style_editor_without_font_atlas(ref_: *mut ImGuiStyle);
+    pub fn dear_imgui_rs_show_font_atlas_debug_panel();
+}
+
 /// Optional backend shim entry points for downstream integrations.
 ///
 /// These modules expose the repository-owned C shim ABI for selected official

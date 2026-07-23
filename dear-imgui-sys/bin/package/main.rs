@@ -39,8 +39,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Package features (comma-separated), e.g. "wchar32,freetype".
     //
-    // We always compile with `IMGUI_USE_WCHAR32`, so this is always declared to allow the sys
-    // build script to reject ABI-incompatible prebuilts.
+    // We always compile with `IMGUI_USE_WCHAR32` and the repository-owned safe demo shim, so
+    // those capabilities are always declared to let the sys build script reject incompatible
+    // prebuilts.
     // Artifact-changing features must match the Cargo profile that built this binary. The
     // optional environment list may add metadata but cannot claim an unavailable artifact.
     let explicit_features = env::var("IMGUI_SYS_PKG_FEATURES").unwrap_or_default();
@@ -54,7 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "stack-layout" => cfg!(feature = "stack-layout"),
             "freetype" => cfg!(feature = "freetype"),
             "test-engine" => cfg!(feature = "test-engine"),
-            "wchar32" | "platform-io-aggregate-hooks" => true,
+            "wchar32" | "platform-io-aggregate-hooks" | "safe-demo-font-boundary-v1" => true,
             _ => {
                 return Err(
                     format!("IMGUI_SYS_PKG_FEATURES contains unknown feature {feature}").into(),

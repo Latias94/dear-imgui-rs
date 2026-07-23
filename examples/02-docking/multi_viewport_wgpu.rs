@@ -663,7 +663,7 @@ impl AppWindow {
 
         // Optionally show demo to validate interaction
         // let mut show_demo = true;
-        // unsafe { ui.show_demo_window(&mut show_demo) };
+        // ui.show_demo_window(&mut show_demo);
 
         let mut encoder = self
             .device

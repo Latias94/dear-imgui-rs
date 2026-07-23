@@ -186,8 +186,7 @@ fn run_inner(_argc: c_int, _argv: *mut *mut c_char) -> Result<c_int, Box<dyn std
             });
 
         if show_demo_window {
-            // SAFETY: This demo assumes the destructive font-atlas controls are not activated.
-            unsafe { ui.show_demo_window(&mut show_demo_window) };
+            ui.show_demo_window(&mut show_demo_window);
         }
 
         let draw_data = imgui.render();

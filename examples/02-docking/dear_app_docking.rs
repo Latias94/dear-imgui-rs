@@ -247,8 +247,7 @@ impl Application for DockDemoState {
         }
 
         if state.show_imgui_demo {
-            // SAFETY: This demo assumes the destructive font-atlas controls are not activated.
-            unsafe { ui.show_demo_window(&mut state.show_imgui_demo) };
+            ui.show_demo_window(&mut state.show_imgui_demo);
         }
         Ok(())
     }

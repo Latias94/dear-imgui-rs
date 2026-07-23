@@ -1439,8 +1439,7 @@ impl App {
                 });
 
             if self.imgui.show_demo {
-                // SAFETY: This demo assumes the destructive font-atlas controls are not activated.
-                unsafe { ui.show_demo_window(&mut self.imgui.show_demo) };
+                ui.show_demo_window(&mut self.imgui.show_demo);
             }
 
             if let Some((texture, sampler)) = external_sampler_update {

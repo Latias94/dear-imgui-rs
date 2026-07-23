@@ -3,31 +3,48 @@ use super::*;
 impl Ui {
     /// Renders a style editor block (not a window) for the given `Style` structure.
     ///
-    /// # Safety
-    ///
-    /// With `BackendFlags::RENDERER_HAS_TEXTURES`, upstream intentionally leaves the font atlas
-    /// unlocked during a frame. The Fonts tab's Remove control deletes an `ImFont` and then the
-    /// same native debug function continues reading that pointer; other destructive controls also
-    /// bypass Rust's atlas-generation tracking. The caller must ensure those controls cannot be
-    /// activated. Changing `FontSizeBase` or the font-scale controls is supported.
+    /// The safe editor retains all upstream style controls except its destructive Fonts tab.
+    /// Font selection and font-scale controls remain available because they do not mutate the
+    /// atlas topology.
     #[doc(alias = "ShowStyleEditor")]
-    pub unsafe fn show_style_editor(&self, style: &mut crate::style::Style) {
+    pub fn show_style_editor(&self, style: &mut crate::style::Style) {
         self.run_with_bound_context(|| unsafe {
-            crate::sys::igShowStyleEditor(style.raw_mut());
+            crate::sys::dear_imgui_rs_show_style_editor_without_font_atlas(style.raw_mut());
         });
     }
 
     /// Renders a style editor block (not a window) for the currently active style.
     ///
+    /// The safe editor retains all upstream style controls except its destructive Fonts tab.
+    #[doc(alias = "ShowStyleEditor")]
+    pub fn show_default_style_editor(&self) {
+        self.run_with_bound_context(|| unsafe {
+            crate::sys::dear_imgui_rs_show_style_editor_without_font_atlas(std::ptr::null_mut());
+        });
+    }
+
+    /// Renders the exact upstream style editor for the given `Style` structure.
+    ///
+    /// Prefer [`show_style_editor`](Self::show_style_editor) unless the application deliberately
+    /// owns the full font-atlas mutation contract.
+    ///
     /// # Safety
     ///
-    /// With `BackendFlags::RENDERER_HAS_TEXTURES`, upstream intentionally leaves the font atlas
-    /// unlocked during a frame. The Fonts tab's Remove control deletes an `ImFont` and then the
-    /// same native debug function continues reading that pointer; other destructive controls also
-    /// bypass Rust's atlas-generation tracking. The caller must ensure those controls cannot be
-    /// activated. Changing `FontSizeBase` or the font-scale controls is supported.
-    #[doc(alias = "ShowStyleEditor")]
-    pub unsafe fn show_default_style_editor(&self) {
+    /// The upstream Fonts tab exposes destructive font-atlas operations that bypass Rust's atlas
+    /// generation tracking. The caller must uphold the native font-atlas contract.
+    pub unsafe fn show_upstream_style_editor(&self, style: &mut crate::style::Style) {
+        self.run_with_bound_context(|| unsafe {
+            crate::sys::igShowStyleEditor(style.raw_mut());
+        });
+    }
+
+    /// Renders the exact upstream style editor for the active style.
+    ///
+    /// # Safety
+    ///
+    /// The upstream Fonts tab exposes destructive font-atlas operations that bypass Rust's atlas
+    /// generation tracking. The caller must uphold the native font-atlas contract.
+    pub unsafe fn show_upstream_default_style_editor(&self) {
         self.run_with_bound_context(|| unsafe {
             crate::sys::igShowStyleEditor(std::ptr::null_mut());
         });
@@ -120,5 +137,16 @@ impl Ui {
         self.run_with_bound_context(|| unsafe {
             sys::igShowFontSelector(self.scratch_txt(label));
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn safe_style_editors_keep_font_atlas_controls_explicit() {
+        let _: fn(&crate::Ui, &mut crate::Style) = crate::Ui::show_style_editor;
+        let _: fn(&crate::Ui) = crate::Ui::show_default_style_editor;
+        let _: unsafe fn(&crate::Ui, &mut crate::Style) = crate::Ui::show_upstream_style_editor;
+        let _: unsafe fn(&crate::Ui) = crate::Ui::show_upstream_default_style_editor;
     }
 }

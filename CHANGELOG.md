@@ -59,7 +59,7 @@ Multi-context use is one major beneficiary rather than the sole motivation: the 
 - Make external font data an explicit unsafe boundary. `FontSource` is now opaque; its TTF/OTF, compressed TTF, Base85, and file constructors, plus the corresponding direct `FontAtlas::add_font_from_*` methods, are `unsafe` because the upstream native parsers do not consistently enforce input bounds. Remove `FontConfig::font_data_owned_by_atlas`; memory inputs are copied into Dear ImGui-owned allocations. Direct glyph ranges and `GlyphRangesBuilder::add_ranges` now accept structured `&[(u32, u32)]` pairs instead of raw sentinel arrays.
 - Remove safe raw font-atlas texture escape hatches `FontAtlas::{get_tex_ref,set_tex_ref,get_tex_data,get_tex_data_ptr,tex_data_mut}`. Use `FontAtlas::texture_id()` for the current legacy handle, `FontAtlas::tex_data()` for a read-only `FontAtlasTexture<'_>` lease, and `unsafe { ctx.font_atlas().set_texture_id(texture_id) }` only when a legacy renderer can uphold the GPU-handle and synchronization contract. While a texture lease is alive, atlas operations or frame advancement that could invalidate it are rejected; custom-rectangle updates after a legacy atlas upload also fail explicitly because only `RENDERER_HAS_TEXTURES` backends can consume partial updates.
 - Reject every structural `FontAtlas` mutator while any registered context is inside a frame, including managed frames where Dear ImGui leaves `FontAtlas::Locked` clear; perform such changes before `Context::frame()` or after `Context::render()`.
-- Make `Ui::{show_demo_window,show_metrics_window,show_style_editor,show_default_style_editor}` unsafe because upstream Fonts panels expose destructive atlas controls when `RENDERER_HAS_TEXTURES` leaves the atlas unlocked, including a Remove path that deletes an `ImFont` and then continues reading it in the same native call. Normal `FontSizeBase` and scale controls remain supported; callers must prevent destructive controls from being activated or use application-owned diagnostics.
+- Split built-in diagnostics at the exact font-atlas boundary. `Ui::{show_demo_window,show_metrics_window,show_style_editor,show_default_style_editor}` remain safe and retain every control outside upstream `ShowFontAtlas()` panels, including ordinary font selection and scaling; use the explicitly unsafe `show_upstream_*` variants for the exact native windows, or `show_font_atlas_debug_panel()` for the isolated font diagnostics. Native source, prebuilt, and WASM provider routes compile the same checked shim, and prebuilt manifests reject artifacts without that ABI capability.
 - Remove the core `tracing` feature, `dear_imgui_rs::logging`, exported `imgui_*` logging macros, process-global subscriber helpers, and logging side effects from error constructors. Applications now own subscriber policy; `dear-imgui-wgpu` emits its existing diagnostics only with its opt-in `tracing` feature. This completes and expands the opt-in tracing direction contributed by [@DBLouis](https://github.com/DBLouis) in [PR #42](https://github.com/Latias94/dear-imgui-rs/pull/42).
 - Make `test-engine` a native source-only feature. It now implies `build-from-source` and is rejected with the WASM import provider instead of compiling without its promised native hooks.
 - Make `prebuilt` native-only and reject it with the WASM import provider. Its download/extraction stack is now confined to the host build graph, while the package helper consumes build-script-generated artifact metadata without adding build-support to the target dependency graph.
@@ -216,14 +216,25 @@ Use `SharedFontAtlas::create()` only when multiple legacy-rendered contexts inte
 
 #### Built-in font debug tools
 
-Dear ImGui's Demo, Metrics, and Style Editor windows can open upstream Fonts panels with controls that mutate the atlas during a frame. When `BackendFlags::RENDERER_HAS_TEXTURES` is active, upstream leaves the atlas unlocked so dynamic sizing can work, but the same panel also exposes Remove: it deletes an `ImFont` and the native debug function continues reading that pointer in the same call. Rust lifetimes cannot constrain a mutation performed internally by that monolithic C++ UI function, so these wrappers are unsafe:
+Dear ImGui's Demo, Metrics, and Style Editor windows can open upstream Fonts panels with controls that mutate the atlas during a frame. When `BackendFlags::RENDERER_HAS_TEXTURES` is active, upstream leaves the atlas unlocked so dynamic sizing can work, but the same panel also exposes Remove: it deletes an `ImFont` and the native debug function continues reading that pointer in the same call. Rust lifetimes cannot constrain a mutation performed internally by that C++ UI function, so the normal wrappers now preserve every non-font control and omit only the `ShowFontAtlas()` paths:
 
 ```rust
-// SAFETY: This integration prevents the upstream Fonts panels and destructive controls from being activated.
-unsafe { ui.show_demo_window(&mut demo_open) };
+ui.show_demo_window(&mut demo_open);
+ui.show_metrics_window(&mut metrics_open);
+ui.show_default_style_editor();
 ```
 
-Changing `FontSizeBase`, `FontScaleMain`, or `FontScaleDpi` is supported and is not the reason for the unsafe boundary. Do not use these wrappers when arbitrary users can reach the destructive font/atlas controls; build application-owned diagnostics instead.
+The exact upstream windows remain available only through explicitly named unsafe entry points. Use them when the integration owns the complete native atlas contract, or open the hazardous panel directly when diagnosing fonts:
+
+```rust
+// SAFETY: The application prevents destructive atlas controls from invalidating live Rust state.
+unsafe {
+    ui.show_upstream_demo_window(&mut demo_open);
+    ui.show_font_atlas_debug_panel();
+}
+```
+
+Changing `FontSizeBase`, `FontScaleMain`, or `FontScaleDpi` remains supported in the safe Style Editor and is not part of the unsafe boundary.
 
 #### Context-owned rendering and managed textures
 

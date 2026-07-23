@@ -16,6 +16,7 @@ from _verification import VerificationError, temporary_workspace
 
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
+SAFE_DEMO_FONT_BOUNDARY_FEATURE = "safe-demo-font-boundary-v1"
 
 
 @dataclass(frozen=True)
@@ -45,19 +46,39 @@ class ExtensionSpec:
 PREBUILT_PROFILES = (
     PrebuiltProfile(
         "normal",
-        frozenset(("platform-io-aggregate-hooks", "wchar32")),
+        frozenset(
+            (
+                "platform-io-aggregate-hooks",
+                SAFE_DEMO_FONT_BOUNDARY_FEATURE,
+                "wchar32",
+            )
+        ),
         (),
         True,
     ),
     PrebuiltProfile(
         "stack-layout",
-        frozenset(("platform-io-aggregate-hooks", "stack-layout", "wchar32")),
+        frozenset(
+            (
+                "platform-io-aggregate-hooks",
+                SAFE_DEMO_FONT_BOUNDARY_FEATURE,
+                "stack-layout",
+                "wchar32",
+            )
+        ),
         ("stack-layout",),
         True,
     ),
     PrebuiltProfile(
         "freetype",
-        frozenset(("platform-io-aggregate-hooks", "freetype", "wchar32")),
+        frozenset(
+            (
+                "platform-io-aggregate-hooks",
+                SAFE_DEMO_FONT_BOUNDARY_FEATURE,
+                "freetype",
+                "wchar32",
+            )
+        ),
         ("freetype",),
         False,
     ),
@@ -66,6 +87,7 @@ PREBUILT_PROFILES = (
         frozenset(
             (
                 "platform-io-aggregate-hooks",
+                SAFE_DEMO_FONT_BOUNDARY_FEATURE,
                 "stack-layout",
                 "freetype",
                 "wchar32",

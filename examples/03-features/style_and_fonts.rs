@@ -1680,8 +1680,7 @@ impl AppWindow {
                 ui.separator();
                 ui.text("Built-in Style Editor");
                 let mut style_copy = ui.clone_style();
-                // SAFETY: This demo assumes the destructive font-atlas controls are not activated.
-                unsafe { ui.show_style_editor(&mut style_copy) };
+                ui.show_style_editor(&mut style_copy);
             });
 
         self.imgui
