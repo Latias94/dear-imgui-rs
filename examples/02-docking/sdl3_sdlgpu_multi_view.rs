@@ -1,15 +1,32 @@
 use dear_imgui_rs::{Condition, ConfigFlags, Context};
-use dear_imgui_sdl3::{self as imgui_sdl3_backend, SdlGpu3RendererBackend};
+use dear_imgui_sdl3::{self as imgui_sdl3_backend, SdlGpu3InitInfo, SdlGpu3RendererBackend};
 use sdl3::event::{Event, WindowEvent};
 use sdl3::gpu::{PresentMode, ShaderFormat, SwapchainComposition};
 use sdl3::keyboard::Keycode;
 use sdl3::pixels::Color;
 use std::error::Error;
 
-fn main() -> Result<(), Box<dyn Error>> {
-    // Enable VSYNC on Renderer
-    sdl3::hint::set(sdl3::hint::names::RENDER_VSYNC, "1");
+fn select_present_mode(mailbox_supported: bool) -> PresentMode {
+    if mailbox_supported {
+        PresentMode::Mailbox
+    } else {
+        PresentMode::Vsync
+    }
+}
 
+fn low_latency_present_mode(gpu: &sdl3::gpu::Device, window: &sdl3::video::Window) -> PresentMode {
+    // The device claims `window` before this query. Mailbox avoids presenting stale queued frames.
+    let mailbox_supported = unsafe {
+        sdl3::sys::gpu::SDL_WindowSupportsGPUPresentMode(
+            gpu.raw(),
+            window.raw(),
+            sdl3::sys::gpu::SDL_GPUPresentMode::MAILBOX,
+        )
+    };
+    select_present_mode(mailbox_supported)
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
     // Enable native IME UI before creating any SDL3 windows (recommended for IME-heavy locales).
     imgui_sdl3_backend::enable_native_ime_ui();
 
@@ -60,11 +77,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         style.set_font_scale_dpi(window_scale);
     }
 
-    gpu.set_swapchain_parameters(&window, PresentMode::Vsync, SwapchainComposition::Sdr)?;
+    let present_mode = low_latency_present_mode(&gpu, &window);
+    gpu.set_swapchain_parameters(&window, present_mode, SwapchainComposition::Sdr)?;
 
     // SAFETY: `window` and `gpu` outlive explicit shutdown and Context teardown on early return.
-    let mut sdl3_backend =
-        unsafe { SdlGpu3RendererBackend::init_default(&mut imgui, &window, &gpu)? };
+    let mut init_info = SdlGpu3InitInfo::from_window(&gpu, &window);
+    init_info.present_mode = present_mode;
+    let mut sdl3_backend = unsafe { SdlGpu3RendererBackend::init(&mut imgui, &window, init_info)? };
 
     let mut show_demo = false;
     let mut show_debug = false;
@@ -158,4 +177,15 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     sdl3_backend.shutdown(&mut imgui)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mailbox_is_preferred_when_supported() {
+        assert_eq!(select_present_mode(true), PresentMode::Mailbox);
+        assert_eq!(select_present_mode(false), PresentMode::Vsync);
+    }
 }
