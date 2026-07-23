@@ -476,8 +476,7 @@ impl AppWindow {
                 }
             });
 
-        // SAFETY: This demo assumes the destructive font-atlas controls are not activated.
-        unsafe { ui.show_demo_window(&mut true) };
+        ui.show_demo_window(&mut true);
 
         // Finalize inputs on platform and build draw data.
         self.imgui

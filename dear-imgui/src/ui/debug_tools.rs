@@ -1,18 +1,33 @@
 use super::*;
 
 impl Ui {
-    /// Renders a demo window (previously called a test window), which demonstrates most
-    /// Dear ImGui features.
+    /// Renders Dear ImGui's demo window without its destructive font-atlas debug controls.
+    ///
+    /// This preserves the ordinary demo, Metrics/Debugger, and Style Editor controls. Only the
+    /// panels backed by upstream `ShowFontAtlas()` are omitted, so the safe API does not bypass
+    /// Rust's font-atlas lifetime and generation tracking.
+    ///
+    /// Use [`show_upstream_demo_window`](Self::show_upstream_demo_window) to opt into the exact
+    /// upstream window, including its font-atlas controls.
+    #[doc(alias = "ShowDemoWindow")]
+    pub fn show_demo_window(&self, opened: &mut bool) {
+        self.run_with_bound_context(|| unsafe {
+            crate::sys::dear_imgui_rs_show_demo_window_without_font_atlas(opened);
+        });
+    }
+
+    /// Renders the exact upstream Dear ImGui demo window, including font-atlas debug controls.
+    ///
+    /// Prefer [`show_demo_window`](Self::show_demo_window) unless the application deliberately
+    /// owns the full font-atlas mutation contract.
     ///
     /// # Safety
     ///
-    /// With `BackendFlags::RENDERER_HAS_TEXTURES`, upstream intentionally leaves the font atlas
-    /// unlocked during a frame. The Fonts panel's Remove control deletes an `ImFont` and then the
-    /// same native debug function continues reading that pointer; other destructive controls also
-    /// bypass Rust's atlas-generation tracking. The caller must ensure those controls cannot be
-    /// activated. Changing `FontSizeBase` or the font-scale controls is supported.
-    #[doc(alias = "ShowDemoWindow")]
-    pub unsafe fn show_demo_window(&self, opened: &mut bool) {
+    /// With `BackendFlags::RENDERER_HAS_TEXTURES`, the upstream Fonts panel can delete an
+    /// `ImFont` and continue reading it in the same native call. Other destructive controls also
+    /// bypass Rust's atlas-generation tracking. The caller must prevent those controls from being
+    /// activated or otherwise uphold the native font-atlas contract.
+    pub unsafe fn show_upstream_demo_window(&self, opened: &mut bool) {
         self.run_with_bound_context(|| unsafe {
             crate::sys::igShowDemoWindow(opened);
         });
@@ -28,22 +43,42 @@ impl Ui {
         });
     }
 
-    /// Renders a metrics/debug window.
+    /// Renders a metrics/debug window without its destructive font-atlas tree.
     ///
     /// Displays Dear ImGui internals: draw commands (with individual draw calls and vertices),
     /// window list, basic internal state, etc.
+    #[doc(alias = "ShowMetricsWindow")]
+    pub fn show_metrics_window(&self, opened: &mut bool) {
+        self.run_with_bound_context(|| unsafe {
+            crate::sys::dear_imgui_rs_show_metrics_window_without_font_atlas(opened);
+        });
+    }
+
+    /// Renders the exact upstream metrics/debug window, including its font-atlas tree.
     ///
     /// # Safety
     ///
-    /// With `BackendFlags::RENDERER_HAS_TEXTURES`, upstream intentionally leaves the font atlas
-    /// unlocked during a frame. The Fonts section's Remove control deletes an `ImFont` and then the
-    /// same native debug function continues reading that pointer; other destructive controls also
-    /// bypass Rust's atlas-generation tracking. The caller must ensure those controls cannot be
-    /// activated. Changing `FontSizeBase` or the font-scale controls is supported.
-    #[doc(alias = "ShowMetricsWindow")]
-    pub unsafe fn show_metrics_window(&self, opened: &mut bool) {
+    /// The upstream Fonts tree can mutate or destroy font-atlas data while Rust font handles and
+    /// renderer state are live. The caller must uphold the native font-atlas contract.
+    pub unsafe fn show_upstream_metrics_window(&self, opened: &mut bool) {
         self.run_with_bound_context(|| unsafe {
             crate::sys::igShowMetricsWindow(opened);
+        });
+    }
+
+    /// Renders upstream's internal Font Atlas debug panel for this context.
+    ///
+    /// This is the isolated font-specific part omitted from the safe demo, metrics, and style
+    /// editor APIs.
+    ///
+    /// # Safety
+    ///
+    /// The panel exposes destructive atlas operations and may continue using native font pointers
+    /// after a control mutates the atlas. The caller must uphold the native font-atlas contract.
+    #[doc(alias = "ShowFontAtlas")]
+    pub unsafe fn show_font_atlas_debug_panel(&self) {
+        self.run_with_bound_context(|| unsafe {
+            crate::sys::dear_imgui_rs_show_font_atlas_debug_panel();
         });
     }
 
@@ -127,9 +162,12 @@ impl Ui {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn font_atlas_debug_windows_are_explicitly_unsafe() {
-        let _: unsafe fn(&crate::Ui, &mut bool) = crate::Ui::show_demo_window;
-        let _: unsafe fn(&crate::Ui, &mut bool) = crate::Ui::show_metrics_window;
+    fn safe_debug_windows_keep_font_atlas_controls_explicit() {
+        let _: fn(&crate::Ui, &mut bool) = crate::Ui::show_demo_window;
+        let _: fn(&crate::Ui, &mut bool) = crate::Ui::show_metrics_window;
+        let _: unsafe fn(&crate::Ui, &mut bool) = crate::Ui::show_upstream_demo_window;
+        let _: unsafe fn(&crate::Ui, &mut bool) = crate::Ui::show_upstream_metrics_window;
+        let _: unsafe fn(&crate::Ui) = crate::Ui::show_font_atlas_debug_panel;
     }
 
     #[test]
@@ -140,7 +178,13 @@ mod tests {
         let _ = ctx.font_atlas().build();
         let ui = ctx.frame();
 
+        let mut demo_open = true;
+        ui.show_demo_window(&mut demo_open);
+        let mut metrics_open = true;
+        ui.show_metrics_window(&mut metrics_open);
+
         ui.window("debug_helpers").build(|| {
+            ui.show_default_style_editor();
             let cursor_y = ui.cursor_pos_y();
             ui.debug_text_encoding("A UTF-8 string: 界");
             assert!(ui.cursor_pos_y() > cursor_y);

@@ -112,9 +112,10 @@ state-aware APIs:
   atlas-validated `CustomRectId`, strict `CustomRectData`, and copy-out `CustomRectSnapshot` values.
   Pixel writes queue the exact managed texture region for renderer upload; `Ui::image_custom_rect`
   resolves current texture and UV data at submission time.
-- `Ui::{show_demo_window,show_metrics_window,show_style_editor,show_default_style_editor}` remains an
-  explicit unsafe boundary because upstream Fonts panels can perform destructive atlas operations
-  during the call; the safe layer does not claim control over later user interaction.
+- `Ui::{show_demo_window,show_metrics_window,show_style_editor,show_default_style_editor}` are safe
+  curated upstream diagnostics: they retain all controls outside the destructive `ShowFontAtlas()`
+  paths, including ordinary font selection and scaling. Exact upstream surfaces remain explicitly
+  named `unsafe` APIs, and `Ui::show_font_atlas_debug_panel()` isolates the font-atlas boundary.
 - `ListClipper::unknown_count()` returns a distinct token whose `next_range()` protocol is finalized
   by consuming `finish(final_items_count)`. Known counts reject the native `INT_MAX` sentinel.
   Clipper tokens enforce native LIFO plus their exact frame, window `Begin`, and table instance. An

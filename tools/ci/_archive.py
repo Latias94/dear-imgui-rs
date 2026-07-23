@@ -28,6 +28,7 @@ REQUIRED_CORE_BINDINGS = (
 )
 SYS_SENTINELS = {
     "dear-imgui-sys": (
+        "src/demo_window_shim.cpp",
         "src/platform_io_hooks.cpp",
         "third-party/cimgui/cimgui.cpp",
         "third-party/cimgui/imgui/imgui.cpp",

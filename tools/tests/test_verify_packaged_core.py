@@ -28,11 +28,15 @@ CLI = importlib.import_module("verify_packaged_core")
 
 
 PROFILE_FEATURES = {
-    "normal": "platform-io-aggregate-hooks,wchar32",
-    "freetype": "freetype,platform-io-aggregate-hooks,wchar32",
-    "stack-layout": "platform-io-aggregate-hooks,stack-layout,wchar32",
+    "normal": "platform-io-aggregate-hooks,safe-demo-font-boundary-v1,wchar32",
+    "freetype": (
+        "freetype,platform-io-aggregate-hooks,safe-demo-font-boundary-v1,wchar32"
+    ),
+    "stack-layout": (
+        "platform-io-aggregate-hooks,safe-demo-font-boundary-v1,stack-layout,wchar32"
+    ),
     "stack-layout-freetype": (
-        "freetype,platform-io-aggregate-hooks,stack-layout,wchar32"
+        "freetype,platform-io-aggregate-hooks,safe-demo-font-boundary-v1,stack-layout,wchar32"
     ),
 }
 CANDIDATE_SHA = "cccccccccccccccccccccccccccccccccccccccc"
@@ -250,7 +254,7 @@ class PrebuiltArchiveSelectionTests(unittest.TestCase):
 
             self.assertEqual(
                 PREBUILT.core_artifact_profile_hash(fields, archive),
-                "fnv1a64:1c6bc757a0743a80",
+                "fnv1a64:2b8ec258d4aa24c6",
             )
 
     def test_core_identity_anchors_candidate_and_rejects_legacy_manifests(self):

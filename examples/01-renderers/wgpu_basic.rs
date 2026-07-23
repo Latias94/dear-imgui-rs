@@ -318,8 +318,7 @@ impl AppWindow {
 
         // Show demo window if requested
         if self.imgui.demo_open {
-            // SAFETY: This demo assumes the destructive font-atlas controls are not activated.
-            unsafe { ui.show_demo_window(&mut self.imgui.demo_open) };
+            ui.show_demo_window(&mut self.imgui.demo_open);
         }
 
         self.imgui

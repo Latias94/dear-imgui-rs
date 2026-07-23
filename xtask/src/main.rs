@@ -1151,6 +1151,20 @@ fn build_cimgui_provider() -> Result<()> {
         .join("imGuIZMO.quat")
         .join("imguizmo_quat");
     let out_js = out_dir.join("imgui-sys-v0.js"); // Output to .js, not .wasm
+    let patched_imgui_cpp = out_dir.join("imgui_safe_demo_patched.cpp");
+    let patched_imgui_demo_cpp = out_dir.join("imgui_demo_safe_demo_patched.cpp");
+    let imgui_cpp_source = fs::read_to_string(imgui_src.join("imgui.cpp"))?;
+    fs::write(
+        &patched_imgui_cpp,
+        build_support::patch_imgui_cpp_for_safe_demo(&imgui_cpp_source)
+            .map_err(anyhow::Error::msg)?,
+    )?;
+    let imgui_demo_cpp_source = fs::read_to_string(imgui_src.join("imgui_demo.cpp"))?;
+    fs::write(
+        &patched_imgui_demo_cpp,
+        build_support::patch_imgui_demo_cpp_for_safe_demo(&imgui_demo_cpp_source)
+            .map_err(anyhow::Error::msg)?,
+    )?;
 
     // Generate ES module glue export names by scanning pregenerated wasm bindings
     let bindings = sys_root.join("src").join("wasm_bindings_pregenerated.rs");
@@ -1169,6 +1183,9 @@ fn build_cimgui_provider() -> Result<()> {
                 }
             }
         }
+    }
+    for name in build_support::SAFE_DEMO_FONT_BOUNDARY_WASM_EXPORTS {
+        names.insert((*name).to_owned());
     }
     // Also include ImPlot symbols from dear-implot-sys wasm bindings when available,
     // so the provider can satisfy imports from the ImPlot FFI crate.
@@ -1390,11 +1407,12 @@ fn build_cimgui_provider() -> Result<()> {
         .arg("-I")
         .arg(&imguizmo_src)
         .arg(cimgui_root.join("cimgui.cpp"))
-        .arg(imgui_src.join("imgui.cpp"))
+        .arg(&patched_imgui_cpp)
         .arg(imgui_src.join("imgui_draw.cpp"))
         .arg(imgui_src.join("imgui_widgets.cpp"))
         .arg(imgui_src.join("imgui_tables.cpp"))
-        .arg(imgui_src.join("imgui_demo.cpp"))
+        .arg(&patched_imgui_demo_cpp)
+        .arg(sys_root.join("src").join("demo_window_shim.cpp"))
         .arg(cimplot_root.join("cimplot.cpp"))
         .arg(implot_src.join("implot.cpp"))
         .arg(implot_src.join("implot_items.cpp"))

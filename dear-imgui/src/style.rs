@@ -16,8 +16,7 @@
 //! }
 //! // Optionally show the style editor for the current style
 //! # let ui = ctx.frame();
-//! // SAFETY: Do not activate the upstream Fonts tab's destructive atlas controls.
-//! unsafe { ui.show_default_style_editor() };
+//! ui.show_default_style_editor();
 //! ```
 //!
 //! Quick example (temporary style color):

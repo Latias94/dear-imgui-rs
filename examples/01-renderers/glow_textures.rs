@@ -434,8 +434,7 @@ impl AppWindow {
         self.imgui.texture_demo.show_ui(ui);
 
         // Show demo window
-        // SAFETY: This demo assumes the destructive font-atlas controls are not activated.
-        unsafe { ui.show_demo_window(&mut true) };
+        ui.show_demo_window(&mut true);
 
         // Render
         if let Some(gl) = self.imgui.renderer.gl_context() {
