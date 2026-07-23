@@ -192,7 +192,7 @@ class ApiSurfaceReportTests(unittest.TestCase):
                 for name, decision in policy.items()
                 if decision.classification == "unsafe-wrapper"
             },
-            {"ShowDemoWindow", "ShowMetricsWindow", "ShowStyleEditor"},
+            set(),
         )
 
     def test_alias_collector_accepts_only_public_safe_items(self):

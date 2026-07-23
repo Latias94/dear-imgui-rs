@@ -4651,6 +4651,7 @@ pub const DEFAULT_GITHUB_REPO: &str = "dear-imgui";
 
 #[cfg(test)]
 mod binding_contract_tests {
+    use super::SAFE_DEMO_FONT_BOUNDARY_ARTIFACT_FEATURE;
     use super::binding::{
         ArtifactProfile, BindingOwner, BindingSpec, BuildRequest, BuildRequestInput,
         CORE_BUILD_ENV_VARS, CORE_WASM_TARGET, CoreArtifactIdentity, CrateBindingDefine,
