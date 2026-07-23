@@ -132,8 +132,10 @@ struct DearImguiSdl3FakeNativeState {
     int swap_window_calls = 0;
     int gpu_claim_calls = 0;
     int gpu_configure_calls = 0;
+    int gpu_mailbox_configure_calls = 0;
     int gpu_release_calls = 0;
     SDL_GLContext set_swap_interval_context = nullptr;
+    SDL_GPUPresentMode last_gpu_present_mode = SDL_GPU_PRESENTMODE_VSYNC;
     bool fail_get_attribute = false;
     bool fail_set_attribute = false;
     bool fail_get_swap_interval = false;
@@ -142,6 +144,7 @@ struct DearImguiSdl3FakeNativeState {
     bool fail_swap_window = false;
     bool fail_gpu_claim = false;
     bool fail_gpu_configure = false;
+    bool fail_gpu_mailbox_configure = false;
 };
 
 thread_local DearImguiSdl3FakeNativeState fake_native_state;
@@ -224,9 +227,14 @@ bool SDLCALL fake_set_gpu_swapchain_parameters(
     SDL_GPUDevice*,
     SDL_Window*,
     SDL_GPUSwapchainComposition,
-    SDL_GPUPresentMode
+    SDL_GPUPresentMode present_mode
 ) {
     fake_native_state.gpu_configure_calls++;
+    fake_native_state.last_gpu_present_mode = present_mode;
+    if (present_mode == SDL_GPU_PRESENTMODE_MAILBOX) {
+        fake_native_state.gpu_mailbox_configure_calls++;
+        return !fake_native_state.fail_gpu_mailbox_configure;
+    }
     return !fake_native_state.fail_gpu_configure;
 }
 
@@ -507,6 +515,28 @@ std::uint64_t dear_imgui_sdl3_native_contract_self_test() {
         failures |= UINT64_C(1) << 5;
 
     fake_native_state = DearImguiSdl3FakeNativeState{};
+    fake_native_state.fail_gpu_mailbox_configure = true;
+    dear_imgui_sdl3_native_begin(DEAR_IMGUI_SDL3_PHASE_SDLGPU_CREATE, 0, 0, 0, &viewport);
+    dear_imgui_sdl3_hook_claim_window_for_gpu_device(
+        fake_native_state.gpu_device,
+        fake_native_state.viewport_window
+    );
+    dear_imgui_sdl3_hook_set_gpu_swapchain_parameters(
+        fake_native_state.gpu_device,
+        fake_native_state.viewport_window,
+        SDL_GPU_SWAPCHAINCOMPOSITION_SDR,
+        SDL_GPU_PRESENTMODE_MAILBOX
+    );
+    faults = dear_imgui_sdl3_native_end();
+    if (faults != 0
+        || fake_native_state.gpu_claim_calls != 1
+        || fake_native_state.gpu_configure_calls != 2
+        || fake_native_state.gpu_mailbox_configure_calls != 1
+        || fake_native_state.last_gpu_present_mode != SDL_GPU_PRESENTMODE_VSYNC
+        || fake_native_state.gpu_release_calls != 0)
+        failures |= UINT64_C(1) << 8;
+
+    fake_native_state = DearImguiSdl3FakeNativeState{};
     dear_imgui_sdl3_native_begin(DEAR_IMGUI_SDL3_PHASE_PLATFORM_CREATE, 0, 0, 0, &viewport);
     faults = dear_imgui_sdl3_native_begin(
         DEAR_IMGUI_SDL3_PHASE_PLATFORM_CREATE,
@@ -684,6 +714,16 @@ bool SDLCALL dear_imgui_sdl3_hook_set_gpu_swapchain_parameters(
         swapchain_composition,
         present_mode
     );
+    // Mailbox support is window-specific. A secondary viewport may land on a display where the
+    // low-latency mode selected for the main window is unavailable.
+    if (!state.gpu_configured && present_mode == SDL_GPU_PRESENTMODE_MAILBOX) {
+        state.gpu_configured = native_ops->set_gpu_swapchain_parameters(
+            device,
+            window,
+            swapchain_composition,
+            SDL_GPU_PRESENTMODE_VSYNC
+        );
+    }
     if (!state.gpu_configured)
         state.faults |= DEAR_IMGUI_SDL3_FAULT_SDLGPU_CONFIGURE;
     return state.gpu_configured;
