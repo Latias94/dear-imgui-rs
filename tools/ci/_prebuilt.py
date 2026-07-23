@@ -48,7 +48,7 @@ PREBUILT_PROFILES = (
         "normal",
         frozenset(
             (
-                "platform-io-aggregate-hooks",
+                "platform-io-aggregate-hooks-v2",
                 SAFE_DEMO_FONT_BOUNDARY_FEATURE,
                 "wchar32",
             )
@@ -60,7 +60,7 @@ PREBUILT_PROFILES = (
         "stack-layout",
         frozenset(
             (
-                "platform-io-aggregate-hooks",
+                "platform-io-aggregate-hooks-v2",
                 SAFE_DEMO_FONT_BOUNDARY_FEATURE,
                 "stack-layout",
                 "wchar32",
@@ -73,7 +73,7 @@ PREBUILT_PROFILES = (
         "freetype",
         frozenset(
             (
-                "platform-io-aggregate-hooks",
+                "platform-io-aggregate-hooks-v2",
                 SAFE_DEMO_FONT_BOUNDARY_FEATURE,
                 "freetype",
                 "wchar32",
@@ -86,7 +86,7 @@ PREBUILT_PROFILES = (
         "stack-layout-freetype",
         frozenset(
             (
-                "platform-io-aggregate-hooks",
+                "platform-io-aggregate-hooks-v2",
                 SAFE_DEMO_FONT_BOUNDARY_FEATURE,
                 "stack-layout",
                 "freetype",

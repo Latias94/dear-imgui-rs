@@ -60,6 +60,13 @@ def _top_level_segments(
 def _contains_by_value_aggregate(
     type_tokens: Sequence[api_surface_report._RustToken],
 ) -> bool:
+    while (
+        len(type_tokens) >= 2
+        and type_tokens[0].value == "("
+        and _matching_parenthesis(type_tokens, 0) == len(type_tokens) - 1
+    ):
+        type_tokens = type_tokens[1:-1]
+
     first_type_token = next(
         (token.value for token in type_tokens if token.value not in {"mut", "const"}),
         None,
@@ -129,11 +136,10 @@ def audit_sources(
         relative = path.resolve().relative_to(resolved_root).as_posix()
 
         for index, token in enumerate(tokens):
-            if token.value != "fn" or index < 3:
+            if token.value != "fn" or index < 2:
                 continue
             if not (
-                tokens[index - 3].value == "unsafe"
-                and tokens[index - 2].value == "extern"
+                tokens[index - 2].value == "extern"
                 and tokens[index - 1].kind == "string"
                 and tokens[index - 1].value in {"C", "C-unwind"}
             ):

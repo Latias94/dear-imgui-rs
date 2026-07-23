@@ -30,6 +30,31 @@ class AggregateCallbackAbiPolicyTests(unittest.TestCase):
                 [("set_size", 1), ("get_insets", 2)],
             )
 
+    def test_rejects_safe_and_parenthesized_aggregate_callbacks(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "crate" / "src"
+            source.mkdir(parents=True)
+            (source / "lib.rs").write_text(
+                'extern "C" fn safe_set_size(v: sys::ImVec2) {}\n'
+                'extern "C-unwind" fn safe_get_insets() -> sys::ImVec4_c { todo!() }\n'
+                'unsafe extern "C" fn grouped_set_size(v: (sys::ImVec2)) {}\n'
+                'unsafe extern "C-unwind" fn grouped_get_insets() -> (sys::ImVec4_c) { todo!() }\n',
+                encoding="utf-8",
+            )
+
+            violations = aggregate_callback_abi_policy.audit_sources(root, (source,))
+
+            self.assertEqual(
+                [(violation.function, violation.line) for violation in violations],
+                [
+                    ("safe_set_size", 1),
+                    ("safe_get_insets", 2),
+                    ("grouped_set_size", 3),
+                    ("grouped_get_insets", 4),
+                ],
+            )
+
     def test_allows_pointer_parameters_and_ignores_tests_and_text(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

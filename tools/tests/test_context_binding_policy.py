@@ -81,6 +81,23 @@ class ContextBindingPolicyTests(unittest.TestCase):
 
             self.assertEqual(len(audit.unexpected), 1)
 
+    def test_does_not_treat_feature_named_test_as_a_test_module(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "crate" / "src"
+            source.mkdir(parents=True)
+            (source / "lib.rs").write_text(
+                '#[cfg(all(feature = "test", feature = "native"))]\n'
+                "mod production {\n"
+                "    fn bypass() { unsafe { sys::igSetCurrentContext(ctx) } }\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            audit = context_binding_policy.audit_sources(root, (source,), {})
+
+            self.assertEqual(len(audit.unexpected), 1)
+
     def test_allowlist_count_is_reviewed_exactly(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

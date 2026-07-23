@@ -76,7 +76,7 @@ impl BuildConfig {
     }
     fn artifact_features(&self) -> Vec<&'static str> {
         let mut features = vec![
-            "platform-io-aggregate-hooks",
+            "platform-io-aggregate-hooks-v2",
             build_support::SAFE_DEMO_FONT_BOUNDARY_ARTIFACT_FEATURE,
             "wchar32",
         ];

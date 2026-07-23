@@ -211,7 +211,7 @@ requested artifact profile:
 - crate name and version
 - target triple, static link type, and MSVC CRT (`md` or `mt`)
 - normalized core artifact features, including `wchar32`,
-  `platform-io-aggregate-hooks`, `safe-demo-font-boundary-v1`, and optional
+  `platform-io-aggregate-hooks-v2`, `safe-demo-font-boundary-v1`, and optional
   `stack-layout` or `freetype`
 - the exact 40-hex cimgui and nested Dear ImGui source revisions
 - the deterministic binding-spec hash

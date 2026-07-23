@@ -537,6 +537,29 @@ std::uint64_t dear_imgui_sdl3_native_contract_self_test() {
         failures |= UINT64_C(1) << 8;
 
     fake_native_state = DearImguiSdl3FakeNativeState{};
+    fake_native_state.fail_gpu_mailbox_configure = true;
+    fake_native_state.fail_gpu_configure = true;
+    dear_imgui_sdl3_native_begin(DEAR_IMGUI_SDL3_PHASE_SDLGPU_CREATE, 0, 0, 0, &viewport);
+    dear_imgui_sdl3_hook_claim_window_for_gpu_device(
+        fake_native_state.gpu_device,
+        fake_native_state.viewport_window
+    );
+    dear_imgui_sdl3_hook_set_gpu_swapchain_parameters(
+        fake_native_state.gpu_device,
+        fake_native_state.viewport_window,
+        SDL_GPU_SWAPCHAINCOMPOSITION_SDR,
+        SDL_GPU_PRESENTMODE_MAILBOX
+    );
+    faults = dear_imgui_sdl3_native_end();
+    if ((faults & DEAR_IMGUI_SDL3_FAULT_SDLGPU_CONFIGURE) == 0
+        || fake_native_state.gpu_claim_calls != 1
+        || fake_native_state.gpu_configure_calls != 2
+        || fake_native_state.gpu_mailbox_configure_calls != 1
+        || fake_native_state.last_gpu_present_mode != SDL_GPU_PRESENTMODE_VSYNC
+        || fake_native_state.gpu_release_calls != 1)
+        failures |= UINT64_C(1) << 9;
+
+    fake_native_state = DearImguiSdl3FakeNativeState{};
     dear_imgui_sdl3_native_begin(DEAR_IMGUI_SDL3_PHASE_PLATFORM_CREATE, 0, 0, 0, &viewport);
     faults = dear_imgui_sdl3_native_begin(
         DEAR_IMGUI_SDL3_PHASE_PLATFORM_CREATE,

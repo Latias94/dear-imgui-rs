@@ -111,9 +111,8 @@ def _cfg_test_module_ranges(
                 attr_index += 1
                 continue
             attribute = header[attr_index + 2 : end - 1]
-            values = [token.value for token in attribute]
             cfg_test |= api_surface_report._is_cfg_test(attribute) or _cfg_all_requires_test(
-                values
+                attribute
             )
             attr_index = end
         if cfg_test:
@@ -123,21 +122,23 @@ def _cfg_test_module_ranges(
     return tuple(ranges)
 
 
-def _cfg_all_requires_test(values: Sequence[str]) -> bool:
+def _cfg_all_requires_test(
+    values: Sequence[api_surface_report._RustToken],
+) -> bool:
     if (
         len(values) < 7
-        or values[:4] != ["cfg", "(", "all", "("]
-        or values[-2:] != [")", ")"]
+        or [token.value for token in values[:4]] != ["cfg", "(", "all", "("]
+        or [token.value for token in values[-2:]] != [")", ")"]
     ):
         return False
 
     depth = 0
-    for value in values[4:-2]:
-        if value == "(":
+    for token in values[4:-2]:
+        if token.value == "(":
             depth += 1
-        elif value == ")":
+        elif token.value == ")":
             depth = max(0, depth - 1)
-        elif value == "test" and depth == 0:
+        elif token.kind == "ident" and token.value == "test" and depth == 0:
             return True
     return False
 

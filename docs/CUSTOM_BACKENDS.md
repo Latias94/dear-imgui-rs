@@ -580,7 +580,7 @@ this conditional teardown and sticky fail-closed behavior.
 
 The shim must be compiled with the native artifact. Builds that omit native C++
 hooks cannot install these callbacks, and compatible prebuilts declare
-`platform-io-aggregate-hooks`. The repository probe invokes all seven real C++
+`platform-io-aggregate-hooks-v2`. The repository probe invokes all seven real C++
 slots and runs on MSVC with both dynamic (`/MD`) and static (`/MT`) CRT profiles;
 use an equivalent ABI probe when maintaining an out-of-tree native artifact.
 
