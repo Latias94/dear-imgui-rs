@@ -559,6 +559,14 @@ context's `PlatformIo`. `clear_platform_handlers`,
 `clear_renderer_handlers`, and `Context` destruction clear both Rust callback
 registries and the shim's per-`PlatformIo` storage.
 
+A backend that wraps an existing aggregate callback must keep a pure pass-through
+in C++ or use the repository-owned C++ invocation bridge for the saved native
+callback; Rust must not invoke the captured by-value slot directly. The shared
+C++ shim address is not sufficient callback identity: a replacement installed
+through the pointer setter keeps that same address while changing the shim's
+stored pointer callback. Ownership-aware teardown must snapshot and restore
+that stored callback as well as the raw slot.
+
 The bulk clear methods are appropriate only when the caller owns the complete
 corresponding table. A composable renderer shutdown must compare every
 `Renderer_*` slot with its installed thunk and clear only matches. If another

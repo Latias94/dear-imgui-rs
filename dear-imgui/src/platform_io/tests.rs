@@ -902,6 +902,15 @@ fn cpp_platform_io_probe_round_trips_all_aggregate_slots() {
         platform_io.set_platform_get_window_work_area_insets(Some(get_work_area_insets));
         platform_io.set_renderer_set_window_size(Some(renderer_set_size));
     }
+    let stored_renderer_size_callback = unsafe {
+        sys::ImGuiPlatformIO_RendererSetWindowSizePointerParam(platform_io.as_raw_mut())
+            .expect("safe renderer setter must retain its pointer callback")
+    };
+    assert!(std::ptr::fn_addr_eq(
+        stored_renderer_size_callback,
+        trampolines::renderer_set_window_size
+            as unsafe extern "C" fn(*mut sys::ImGuiViewport, *const sys::ImVec2),
+    ));
 
     let mut result = sys::DearImguiRsPlatformIoAggregateProbeResult::default();
     unsafe {
@@ -910,6 +919,60 @@ fn cpp_platform_io_probe_round_trips_all_aggregate_slots() {
             &mut result,
         ));
     }
+
+    let mut viewport = sys::ImGuiViewport::default();
+    let pos = sys::ImVec2 { x: 1.0, y: 2.0 };
+    let size = sys::ImVec2 { x: 3.0, y: 4.0 };
+    let renderer_size = sys::ImVec2 { x: 15.0, y: 16.0 };
+    let mut invoked_pos = sys::ImVec2::zero();
+    let mut invoked_size = sys::ImVec2::zero();
+    let mut invoked_scale = sys::ImVec2::zero();
+    let mut invoked_insets = sys::ImVec4::default();
+    unsafe {
+        let callbacks = platform_io.as_raw_mut();
+        assert!(sys::ImGuiPlatformIO_InvokePlatformSetWindowPos(
+            callbacks,
+            &mut viewport,
+            &pos,
+        ));
+        assert!(sys::ImGuiPlatformIO_InvokePlatformGetWindowPos(
+            callbacks,
+            &mut viewport,
+            &mut invoked_pos,
+        ));
+        assert!(sys::ImGuiPlatformIO_InvokePlatformSetWindowSize(
+            callbacks,
+            &mut viewport,
+            &size,
+        ));
+        assert!(sys::ImGuiPlatformIO_InvokePlatformGetWindowSize(
+            callbacks,
+            &mut viewport,
+            &mut invoked_size,
+        ));
+        assert!(
+            sys::ImGuiPlatformIO_InvokePlatformGetWindowFramebufferScale(
+                callbacks,
+                &mut viewport,
+                &mut invoked_scale,
+            )
+        );
+        assert!(sys::ImGuiPlatformIO_InvokePlatformGetWindowWorkAreaInsets(
+            callbacks,
+            &mut viewport,
+            &mut invoked_insets,
+        ));
+        assert!(sys::ImGuiPlatformIO_InvokeRendererSetWindowSize(
+            callbacks,
+            &mut viewport,
+            &renderer_size,
+        ));
+    }
+
+    assert_eq!(invoked_pos, sys::ImVec2 { x: 5.0, y: 6.0 });
+    assert_eq!(invoked_size, sys::ImVec2 { x: 7.0, y: 8.0 });
+    assert_eq!(invoked_scale, sys::ImVec2 { x: 9.0, y: 10.0 });
+    assert_eq!(invoked_insets, sys::ImVec4::new(11.0, 12.0, 13.0, 14.0));
 
     assert_eq!(
         (result.PlatformGetWindowPos.x, result.PlatformGetWindowPos.y),

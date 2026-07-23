@@ -110,8 +110,10 @@ def _cfg_test_module_ranges(
             if end is None:
                 attr_index += 1
                 continue
-            cfg_test |= api_surface_report._is_cfg_test(
-                header[attr_index + 2 : end - 1]
+            attribute = header[attr_index + 2 : end - 1]
+            values = [token.value for token in attribute]
+            cfg_test |= api_surface_report._is_cfg_test(attribute) or _cfg_all_requires_test(
+                values
             )
             attr_index = end
         if cfg_test:
@@ -119,6 +121,25 @@ def _cfg_test_module_ranges(
                 (tokens[cursor].start, tokens[brace_matches[cursor]].end)
             )
     return tuple(ranges)
+
+
+def _cfg_all_requires_test(values: Sequence[str]) -> bool:
+    if (
+        len(values) < 7
+        or values[:4] != ["cfg", "(", "all", "("]
+        or values[-2:] != [")", ")"]
+    ):
+        return False
+
+    depth = 0
+    for value in values[4:-2]:
+        if value == "(":
+            depth += 1
+        elif value == ")":
+            depth = max(0, depth - 1)
+        elif value == "test" and depth == 0:
+            return True
+    return False
 
 
 def _inside_ranges(offset: int, ranges: Sequence[tuple[int, int]]) -> bool:

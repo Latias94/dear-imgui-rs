@@ -95,6 +95,18 @@ macro_rules! for_each_renderer_callback {
     };
 }
 
+macro_rules! for_each_renderer_non_aggregate_callback {
+    ($macro:ident) => {
+        $macro!(DrawCallback_ResetRenderState);
+        $macro!(DrawCallback_SetSamplerLinear);
+        $macro!(DrawCallback_SetSamplerNearest);
+        $macro!(Renderer_CreateWindow);
+        $macro!(Renderer_DestroyWindow);
+        $macro!(Renderer_RenderWindow);
+        $macro!(Renderer_SwapBuffers);
+    };
+}
+
 macro_rules! for_each_renderer_value {
     ($macro:ident) => {
         $macro!(Renderer_TextureMaxWidth);
@@ -145,6 +157,81 @@ impl PlatformCallbacks {
         // The bindgen platform IO value has no Rust destructor. Copying it here
         // snapshots pointer-sized callback state without taking native ownership.
         unsafe { Self::capture(&self.raw) }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum RendererSetWindowSizeCallback {
+    Native(Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, sys::ImVec2_c)>),
+    Pointer(unsafe extern "C" fn(*mut sys::ImGuiViewport, *const sys::ImVec2)),
+}
+
+impl RendererSetWindowSizeCallback {
+    unsafe fn capture(platform_io: *mut sys::ImGuiPlatformIO) -> Self {
+        if let Some(callback) =
+            unsafe { sys::ImGuiPlatformIO_RendererSetWindowSizePointerParam(platform_io) }
+        {
+            Self::Pointer(callback)
+        } else {
+            Self::Native(unsafe { (*platform_io).Renderer_SetWindowSize })
+        }
+    }
+
+    fn is_some(self) -> bool {
+        match self {
+            Self::Native(callback) => callback.is_some(),
+            Self::Pointer(_) => true,
+        }
+    }
+
+    fn same_callback(self, other: Self) -> bool {
+        match (self, other) {
+            (Self::Native(left), Self::Native(right)) => callback_eq!(left, right),
+            (Self::Pointer(left), Self::Pointer(right)) => std::ptr::fn_addr_eq(left, right),
+            _ => false,
+        }
+    }
+
+    unsafe fn install(self, platform_io: *mut sys::ImGuiPlatformIO) {
+        match self {
+            Self::Native(callback) => unsafe {
+                sys::ImGuiPlatformIO_Set_Renderer_SetWindowSize_PointerParam(platform_io, None);
+                (*platform_io).Renderer_SetWindowSize = callback;
+            },
+            Self::Pointer(callback) => unsafe {
+                sys::ImGuiPlatformIO_Set_Renderer_SetWindowSize_PointerParam(
+                    platform_io,
+                    Some(callback),
+                );
+            },
+        }
+    }
+}
+
+pub(super) struct RendererSetWindowSizeInvocation {
+    callback: RendererSetWindowSizeCallback,
+    native_callbacks: PlatformCallbacks,
+}
+
+impl RendererSetWindowSizeInvocation {
+    pub(super) fn invoke(
+        &self,
+        viewport: *mut sys::ImGuiViewport,
+        size: *const sys::ImVec2,
+    ) -> bool {
+        match self.callback {
+            RendererSetWindowSizeCallback::Native(_) => unsafe {
+                sys::ImGuiPlatformIO_InvokeRendererSetWindowSize(
+                    &self.native_callbacks.raw,
+                    viewport,
+                    size,
+                )
+            },
+            RendererSetWindowSizeCallback::Pointer(callback) => {
+                unsafe { callback(viewport, size) };
+                true
+            }
+        }
     }
 }
 
@@ -268,6 +355,7 @@ fn restored_owned_pointer<T: Copy + Eq>(baseline: T, installed: T, current: T) -
 
 pub(super) struct PlatformClaimBaseline {
     callbacks: PlatformCallbacks,
+    renderer_set_window_size: RendererSetWindowSizeCallback,
     backend: BackendState,
     renderer_backend: RendererBackendState,
     main_viewport: ViewportPlatformState,
@@ -277,6 +365,7 @@ impl PlatformClaimBaseline {
     pub(super) fn snapshot(&self) -> Self {
         Self {
             callbacks: self.callbacks.snapshot(),
+            renderer_set_window_size: self.renderer_set_window_size,
             backend: self.backend,
             renderer_backend: self.renderer_backend,
             main_viewport: self.main_viewport,
@@ -309,14 +398,18 @@ impl PlatformShutdownRestore {
 
 pub(super) struct RendererCallbackOwnership {
     baseline: PlatformCallbacks,
+    baseline_set_window_size: RendererSetWindowSizeCallback,
     original: PlatformCallbacks,
+    original_set_window_size: RendererSetWindowSizeCallback,
     installed: PlatformCallbacks,
+    installed_set_window_size: RendererSetWindowSizeCallback,
     baseline_backend: RendererBackendState,
     installed_backend: RendererBackendState,
 }
 
 pub(super) struct RendererShutdownRestore {
     callbacks: PlatformCallbacks,
+    set_window_size: RendererSetWindowSizeCallback,
     backend: RendererBackendState,
     foreign_capabilities: bool,
 }
@@ -426,6 +519,7 @@ pub(super) fn preflight_platform_claim(
 
         Ok(PlatformClaimBaseline {
             callbacks: PlatformCallbacks::capture(platform_io),
+            renderer_set_window_size: RendererSetWindowSizeCallback::capture(platform_io),
             backend: BackendState::capture(io),
             renderer_backend: RendererBackendState::capture(io),
             main_viewport: ViewportPlatformState::capture(main_viewport),
@@ -448,6 +542,13 @@ impl RendererCallbackOwnership {
         }
 
         let original = unsafe { PlatformCallbacks::capture(platform_io) };
+        let original_set_window_size =
+            unsafe { RendererSetWindowSizeCallback::capture(platform_io) };
+        let installed_set_window_size = if original_set_window_size.is_some() {
+            RendererSetWindowSizeCallback::Pointer(sdl3_renderer_set_window_size)
+        } else {
+            RendererSetWindowSizeCallback::Native(None)
+        };
         unsafe {
             if original.raw.Renderer_CreateWindow.is_some() {
                 (*platform_io).Renderer_CreateWindow = Some(sdl3_renderer_create_window);
@@ -455,8 +556,8 @@ impl RendererCallbackOwnership {
             if original.raw.Renderer_DestroyWindow.is_some() {
                 (*platform_io).Renderer_DestroyWindow = Some(sdl3_renderer_destroy_window);
             }
-            if original.raw.Renderer_SetWindowSize.is_some() {
-                (*platform_io).Renderer_SetWindowSize = Some(sdl3_renderer_set_window_size);
+            if original_set_window_size.is_some() {
+                installed_set_window_size.install(platform_io);
             }
             if original.raw.Renderer_RenderWindow.is_some() {
                 (*platform_io).Renderer_RenderWindow = Some(sdl3_renderer_render_window);
@@ -468,8 +569,11 @@ impl RendererCallbackOwnership {
 
         Ok(Some(Self {
             baseline: baseline.callbacks.snapshot(),
+            baseline_set_window_size: baseline.renderer_set_window_size,
             original,
+            original_set_window_size,
             installed: unsafe { PlatformCallbacks::capture(platform_io) },
+            installed_set_window_size,
             baseline_backend: baseline.renderer_backend,
             installed_backend: unsafe { RendererBackendState::capture(io) },
         }))
@@ -484,9 +588,11 @@ impl RendererCallbackOwnership {
         }
 
         let current = unsafe { PlatformCallbacks::capture(platform_io) };
+        let current_set_window_size =
+            unsafe { RendererSetWindowSizeCallback::capture(platform_io) };
         let current_backend = unsafe { RendererBackendState::capture(io) };
         let complete_foreign_takeover =
-            self.is_complete_foreign_takeover(&current, current_backend);
+            self.is_complete_foreign_takeover(&current, current_set_window_size, current_backend);
         let capabilities_were_revoked =
             control.capabilities_were_revoked(SDL_RENDERER_RESERVED_FLAGS);
         let mut owned = true;
@@ -499,7 +605,14 @@ impl RendererCallbackOwnership {
                 }
             };
         }
-        for_each_renderer_callback!(detect_replacement);
+        for_each_renderer_non_aggregate_callback!(detect_replacement);
+        if !self
+            .installed_set_window_size
+            .same_callback(current_set_window_size)
+        {
+            control.record_renderer_callback_replaced("Renderer_SetWindowSize");
+            owned = false;
+        }
         macro_rules! detect_value_replacement {
             ($field:ident) => {
                 if self.installed.raw.$field != current.raw.$field {
@@ -540,6 +653,7 @@ impl RendererCallbackOwnership {
     fn is_complete_foreign_takeover(
         &self,
         current: &PlatformCallbacks,
+        current_set_window_size: RendererSetWindowSizeCallback,
         current_backend: RendererBackendState,
     ) -> bool {
         let foreign_core_identity = !current_backend.user_data.is_null()
@@ -560,7 +674,14 @@ impl RendererCallbackOwnership {
                 }
             };
         }
-        for_each_renderer_callback!(require_owned_callback_replacement);
+        for_each_renderer_non_aggregate_callback!(require_owned_callback_replacement);
+        if self.original_set_window_size.is_some()
+            && self
+                .installed_set_window_size
+                .same_callback(current_set_window_size)
+        {
+            all_owned_callbacks_replaced = false;
+        }
         all_owned_callbacks_replaced
     }
 
@@ -574,6 +695,8 @@ impl RendererCallbackOwnership {
             return Err(Sdl3BackendError::PlatformStateUnavailable);
         }
         let current = unsafe { PlatformCallbacks::capture(platform_io) };
+        let current_set_window_size =
+            unsafe { RendererSetWindowSizeCallback::capture(platform_io) };
         let current_backend = unsafe { RendererBackendState::capture(io) };
         let _ = unsafe { self.detect_replacements(control) };
 
@@ -583,7 +706,8 @@ impl RendererCallbackOwnership {
                     (*platform_io).$field = self.installed.raw.$field;
                 };
             }
-            for_each_renderer_callback!(restore_owned_callback);
+            for_each_renderer_non_aggregate_callback!(restore_owned_callback);
+            self.installed_set_window_size.install(platform_io);
             macro_rules! restore_owned_value {
                 ($field:ident) => {
                     (*platform_io).$field = self.installed.raw.$field;
@@ -595,6 +719,7 @@ impl RendererCallbackOwnership {
 
         Ok(RendererShutdownRestore {
             callbacks: current,
+            set_window_size: current_set_window_size,
             backend: current_backend,
             foreign_capabilities: control.capabilities_are_foreign(SDL_RENDERER_RESERVED_FLAGS),
         })
@@ -610,6 +735,8 @@ impl RendererCallbackOwnership {
             return Err(Sdl3BackendError::PlatformStateUnavailable);
         }
         let current = unsafe { PlatformCallbacks::capture(platform_io) };
+        let current_set_window_size =
+            unsafe { RendererSetWindowSizeCallback::capture(platform_io) };
         let current_backend = unsafe { RendererBackendState::capture(io) };
         let _ = unsafe { self.detect_replacements(control) };
 
@@ -619,7 +746,8 @@ impl RendererCallbackOwnership {
                     (*platform_io).$field = self.original.raw.$field;
                 };
             }
-            for_each_renderer_callback!(restore_original_callback);
+            for_each_renderer_non_aggregate_callback!(restore_original_callback);
+            self.original_set_window_size.install(platform_io);
             macro_rules! restore_original_value {
                 ($field:ident) => {
                     (*platform_io).$field = self.original.raw.$field;
@@ -631,6 +759,7 @@ impl RendererCallbackOwnership {
 
         Ok(RendererShutdownRestore {
             callbacks: current,
+            set_window_size: current_set_window_size,
             backend: current_backend,
             foreign_capabilities: control.capabilities_are_foreign(SDL_RENDERER_RESERVED_FLAGS),
         })
@@ -651,7 +780,8 @@ impl RendererCallbackOwnership {
                     (*platform_io).$field = self.original.raw.$field;
                 };
             }
-            for_each_renderer_callback!(restore_original_callback);
+            for_each_renderer_non_aggregate_callback!(restore_original_callback);
+            self.original_set_window_size.install(platform_io);
             macro_rules! restore_original_value {
                 ($field:ident) => {
                     (*platform_io).$field = self.original.raw.$field;
@@ -698,7 +828,21 @@ impl RendererCallbackOwnership {
                     }
                 };
             }
-            for_each_renderer_callback!(restore_callback);
+            for_each_renderer_non_aggregate_callback!(restore_callback);
+            let restored_set_window_size = if self
+                .baseline_set_window_size
+                .same_callback(self.installed_set_window_size)
+            {
+                restore.set_window_size
+            } else if self
+                .installed_set_window_size
+                .same_callback(restore.set_window_size)
+            {
+                self.baseline_set_window_size
+            } else {
+                restore.set_window_size
+            };
+            restored_set_window_size.install(platform_io);
             macro_rules! restore_value {
                 ($field:ident) => {
                     (*platform_io).$field = restored_owned_pointer(
@@ -752,10 +896,11 @@ impl RendererCallbackOwnership {
         self.original.raw.Renderer_RenderWindow
     }
 
-    pub(super) fn original_set_window_size(
-        &self,
-    ) -> Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, sys::ImVec2_c)> {
-        self.original.raw.Renderer_SetWindowSize
+    pub(super) fn original_set_window_size_invocation(&self) -> RendererSetWindowSizeInvocation {
+        RendererSetWindowSizeInvocation {
+            callback: self.original_set_window_size,
+            native_callbacks: self.original.snapshot(),
+        }
     }
 
     pub(super) fn original_swap_buffers(
@@ -786,61 +931,11 @@ impl PlatformCallbackOwnership {
             if original.raw.Platform_DestroyWindow.is_some() {
                 (*platform_io).Platform_DestroyWindow = Some(sdl3_destroy_window);
             }
-            if original.raw.Platform_ShowWindow.is_some() {
-                (*platform_io).Platform_ShowWindow = Some(sdl3_show_window);
-            }
-            if original.raw.Platform_SetWindowPos.is_some() {
-                (*platform_io).Platform_SetWindowPos = Some(sdl3_set_window_pos);
-            }
-            if original.raw.Platform_GetWindowPos.is_some() {
-                (*platform_io).Platform_GetWindowPos = Some(sdl3_get_window_pos);
-            }
-            if original.raw.Platform_SetWindowSize.is_some() {
-                (*platform_io).Platform_SetWindowSize = Some(sdl3_set_window_size);
-            }
-            if original.raw.Platform_GetWindowSize.is_some() {
-                (*platform_io).Platform_GetWindowSize = Some(sdl3_get_window_size);
-            }
-            if original.raw.Platform_GetWindowFramebufferScale.is_some() {
-                (*platform_io).Platform_GetWindowFramebufferScale =
-                    Some(sdl3_get_window_framebuffer_scale);
-            }
-            if original.raw.Platform_SetWindowFocus.is_some() {
-                (*platform_io).Platform_SetWindowFocus = Some(sdl3_set_window_focus);
-            }
-            if original.raw.Platform_GetWindowFocus.is_some() {
-                (*platform_io).Platform_GetWindowFocus = Some(sdl3_get_window_focus);
-            }
-            if original.raw.Platform_GetWindowMinimized.is_some() {
-                (*platform_io).Platform_GetWindowMinimized = Some(sdl3_get_window_minimized);
-            }
-            if original.raw.Platform_SetWindowTitle.is_some() {
-                (*platform_io).Platform_SetWindowTitle = Some(sdl3_set_window_title);
-            }
-            if original.raw.Platform_SetWindowAlpha.is_some() {
-                (*platform_io).Platform_SetWindowAlpha = Some(sdl3_set_window_alpha);
-            }
-            if original.raw.Platform_UpdateWindow.is_some() {
-                (*platform_io).Platform_UpdateWindow = Some(sdl3_update_window);
-            }
             if original.raw.Platform_RenderWindow.is_some() {
                 (*platform_io).Platform_RenderWindow = Some(sdl3_render_window);
             }
             if original.raw.Platform_SwapBuffers.is_some() {
                 (*platform_io).Platform_SwapBuffers = Some(sdl3_swap_buffers);
-            }
-            if original.raw.Platform_GetWindowDpiScale.is_some() {
-                (*platform_io).Platform_GetWindowDpiScale = Some(sdl3_get_window_dpi_scale);
-            }
-            if original.raw.Platform_OnChangedViewport.is_some() {
-                (*platform_io).Platform_OnChangedViewport = Some(sdl3_on_changed_viewport);
-            }
-            if original.raw.Platform_GetWindowWorkAreaInsets.is_some() {
-                (*platform_io).Platform_GetWindowWorkAreaInsets =
-                    Some(sdl3_get_window_work_area_insets);
-            }
-            if original.raw.Platform_CreateVkSurface.is_some() {
-                (*platform_io).Platform_CreateVkSurface = Some(sdl3_create_vk_surface);
             }
         }
         let installed = unsafe { PlatformCallbacks::capture(platform_io) };
@@ -1085,13 +1180,6 @@ impl PlatformCallbackOwnership {
         self.original.raw.Platform_CreateWindow
     }
 
-    pub(super) fn select_original<R: Copy>(
-        &self,
-        select: impl FnOnce(&sys::ImGuiPlatformIO) -> R,
-    ) -> R {
-        select(&self.original.raw)
-    }
-
     pub(super) fn original_destroy_window(
         &self,
     ) -> Option<unsafe extern "C" fn(*mut sys::ImGuiViewport)> {
@@ -1258,7 +1346,8 @@ pub(super) unsafe fn restore_baseline_after_failed_initialization(baseline: Plat
                 };
             }
             for_each_callback!(restore_callback);
-            for_each_renderer_callback!(restore_callback);
+            for_each_renderer_non_aggregate_callback!(restore_callback);
+            baseline.renderer_set_window_size.install(platform_io);
             macro_rules! restore_renderer_value {
                 ($field:ident) => {
                     (*platform_io).$field = baseline.callbacks.raw.$field;
@@ -1291,218 +1380,6 @@ pub(super) unsafe fn restore_baseline_after_failed_initialization(baseline: Plat
 
 fn register_runtime(control: &Rc<RuntimeControl>) {
     crate::runtime::register_runtime(control);
-}
-
-unsafe extern "C" fn sdl3_show_window(viewport: *mut sys::ImGuiViewport) {
-    run_callback("Platform_ShowWindow", (), |control| unsafe {
-        if let Some(callback) = control
-            .original_platform_callback(|raw| raw.Platform_ShowWindow)
-            .flatten()
-        {
-            callback(viewport);
-        }
-    });
-}
-
-unsafe extern "C" fn sdl3_set_window_pos(
-    viewport: *mut sys::ImGuiViewport,
-    position: sys::ImVec2_c,
-) {
-    run_callback("Platform_SetWindowPos", (), |control| unsafe {
-        if let Some(callback) = control
-            .original_platform_callback(|raw| raw.Platform_SetWindowPos)
-            .flatten()
-        {
-            callback(viewport, position);
-        }
-    });
-}
-
-unsafe extern "C" fn sdl3_get_window_pos(viewport: *mut sys::ImGuiViewport) -> sys::ImVec2_c {
-    run_callback(
-        "Platform_GetWindowPos",
-        sys::ImVec2_c { x: 0.0, y: 0.0 },
-        |control| unsafe {
-            control
-                .original_platform_callback(|raw| raw.Platform_GetWindowPos)
-                .flatten()
-                .map_or(sys::ImVec2_c { x: 0.0, y: 0.0 }, |callback| {
-                    callback(viewport)
-                })
-        },
-    )
-}
-
-unsafe extern "C" fn sdl3_set_window_size(viewport: *mut sys::ImGuiViewport, size: sys::ImVec2_c) {
-    run_callback("Platform_SetWindowSize", (), |control| unsafe {
-        if let Some(callback) = control
-            .original_platform_callback(|raw| raw.Platform_SetWindowSize)
-            .flatten()
-        {
-            callback(viewport, size);
-        }
-    });
-}
-
-unsafe extern "C" fn sdl3_get_window_size(viewport: *mut sys::ImGuiViewport) -> sys::ImVec2_c {
-    run_callback(
-        "Platform_GetWindowSize",
-        sys::ImVec2_c { x: 0.0, y: 0.0 },
-        |control| unsafe {
-            control
-                .original_platform_callback(|raw| raw.Platform_GetWindowSize)
-                .flatten()
-                .map_or(sys::ImVec2_c { x: 0.0, y: 0.0 }, |callback| {
-                    callback(viewport)
-                })
-        },
-    )
-}
-
-unsafe extern "C" fn sdl3_get_window_framebuffer_scale(
-    viewport: *mut sys::ImGuiViewport,
-) -> sys::ImVec2_c {
-    run_callback(
-        "Platform_GetWindowFramebufferScale",
-        sys::ImVec2_c { x: 1.0, y: 1.0 },
-        |control| unsafe {
-            control
-                .original_platform_callback(|raw| raw.Platform_GetWindowFramebufferScale)
-                .flatten()
-                .map_or(sys::ImVec2_c { x: 1.0, y: 1.0 }, |callback| {
-                    callback(viewport)
-                })
-        },
-    )
-}
-
-unsafe extern "C" fn sdl3_set_window_focus(viewport: *mut sys::ImGuiViewport) {
-    run_callback("Platform_SetWindowFocus", (), |control| unsafe {
-        if let Some(callback) = control
-            .original_platform_callback(|raw| raw.Platform_SetWindowFocus)
-            .flatten()
-        {
-            callback(viewport);
-        }
-    });
-}
-
-unsafe extern "C" fn sdl3_get_window_focus(viewport: *mut sys::ImGuiViewport) -> bool {
-    run_callback("Platform_GetWindowFocus", false, |control| unsafe {
-        control
-            .original_platform_callback(|raw| raw.Platform_GetWindowFocus)
-            .flatten()
-            .is_some_and(|callback| callback(viewport))
-    })
-}
-
-unsafe extern "C" fn sdl3_get_window_minimized(viewport: *mut sys::ImGuiViewport) -> bool {
-    run_callback("Platform_GetWindowMinimized", true, |control| unsafe {
-        control
-            .original_platform_callback(|raw| raw.Platform_GetWindowMinimized)
-            .flatten()
-            .is_none_or(|callback| callback(viewport))
-    })
-}
-
-unsafe extern "C" fn sdl3_set_window_title(
-    viewport: *mut sys::ImGuiViewport,
-    title: *const std::ffi::c_char,
-) {
-    run_callback("Platform_SetWindowTitle", (), |control| unsafe {
-        if let Some(callback) = control
-            .original_platform_callback(|raw| raw.Platform_SetWindowTitle)
-            .flatten()
-        {
-            callback(viewport, title);
-        }
-    });
-}
-
-unsafe extern "C" fn sdl3_set_window_alpha(viewport: *mut sys::ImGuiViewport, alpha: f32) {
-    run_callback("Platform_SetWindowAlpha", (), |control| unsafe {
-        if let Some(callback) = control
-            .original_platform_callback(|raw| raw.Platform_SetWindowAlpha)
-            .flatten()
-        {
-            callback(viewport, alpha);
-        }
-    });
-}
-
-unsafe extern "C" fn sdl3_update_window(viewport: *mut sys::ImGuiViewport) {
-    run_callback("Platform_UpdateWindow", (), |control| unsafe {
-        if let Some(callback) = control
-            .original_platform_callback(|raw| raw.Platform_UpdateWindow)
-            .flatten()
-        {
-            callback(viewport);
-        }
-    });
-}
-
-unsafe extern "C" fn sdl3_get_window_dpi_scale(viewport: *mut sys::ImGuiViewport) -> f32 {
-    run_callback("Platform_GetWindowDpiScale", 1.0, |control| unsafe {
-        control
-            .original_platform_callback(|raw| raw.Platform_GetWindowDpiScale)
-            .flatten()
-            .map_or(1.0, |callback| callback(viewport))
-    })
-}
-
-unsafe extern "C" fn sdl3_on_changed_viewport(viewport: *mut sys::ImGuiViewport) {
-    run_callback("Platform_OnChangedViewport", (), |control| unsafe {
-        if let Some(callback) = control
-            .original_platform_callback(|raw| raw.Platform_OnChangedViewport)
-            .flatten()
-        {
-            callback(viewport);
-        }
-    });
-}
-
-unsafe extern "C" fn sdl3_get_window_work_area_insets(
-    viewport: *mut sys::ImGuiViewport,
-) -> sys::ImVec4_c {
-    run_callback(
-        "Platform_GetWindowWorkAreaInsets",
-        sys::ImVec4_c {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-            w: 0.0,
-        },
-        |control| unsafe {
-            control
-                .original_platform_callback(|raw| raw.Platform_GetWindowWorkAreaInsets)
-                .flatten()
-                .map_or(
-                    sys::ImVec4_c {
-                        x: 0.0,
-                        y: 0.0,
-                        z: 0.0,
-                        w: 0.0,
-                    },
-                    |callback| callback(viewport),
-                )
-        },
-    )
-}
-
-unsafe extern "C" fn sdl3_create_vk_surface(
-    viewport: *mut sys::ImGuiViewport,
-    instance: u64,
-    allocators: *const c_void,
-    surface: *mut u64,
-) -> i32 {
-    run_callback("Platform_CreateVkSurface", -1, |control| unsafe {
-        control
-            .original_platform_callback(|raw| raw.Platform_CreateVkSurface)
-            .flatten()
-            .map_or(-1, |callback| {
-                callback(viewport, instance, allocators, surface)
-            })
-    })
 }
 
 unsafe extern "C" fn sdl3_create_window(viewport: *mut sys::ImGuiViewport) {
@@ -1780,10 +1657,10 @@ unsafe extern "C" fn sdl3_renderer_render_window(
 
 unsafe extern "C" fn sdl3_renderer_set_window_size(
     viewport: *mut sys::ImGuiViewport,
-    size: sys::ImVec2_c,
+    size: *const sys::ImVec2,
 ) {
     run_callback("Renderer_SetWindowSize", (), |control| unsafe {
-        if viewport.is_null() || control.viewport_failed(viewport) {
+        if viewport.is_null() || size.is_null() || control.viewport_failed(viewport) {
             return;
         }
         if !control.validate_renderer_ownership_bound()
@@ -1793,9 +1670,7 @@ unsafe extern "C" fn sdl3_renderer_set_window_size(
             control.mark_viewport_failed(viewport);
             return;
         }
-        if let Some(callback) = control.original_renderer_set_window_size() {
-            callback(viewport, size);
-        }
+        let _ = control.invoke_original_renderer_set_window_size(viewport, size);
     });
 }
 
@@ -2001,7 +1876,7 @@ pub(super) unsafe fn renderer_render_window_callback_for_test(viewport: *mut sys
 ))]
 pub(super) unsafe fn renderer_set_window_size_callback_for_test(
     viewport: *mut sys::ImGuiViewport,
-    size: sys::ImVec2_c,
+    size: *const sys::ImVec2,
 ) {
     unsafe { sdl3_renderer_set_window_size(viewport, size) }
 }

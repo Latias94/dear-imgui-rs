@@ -2157,7 +2157,7 @@ unsafe extern "C" fn platform_show_window(viewport: *mut imgui::Viewport) {
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-unsafe extern "C" fn platform_set_window_pos(viewport: *mut imgui::Viewport, pos: sys::ImVec2) {
+unsafe fn platform_set_window_pos(viewport: *mut imgui::Viewport, pos: sys::ImVec2) {
     let Some(viewport) = (unsafe { viewport.as_ref() }) else {
         return;
     };
@@ -2172,7 +2172,7 @@ unsafe extern "C" fn platform_set_window_pos(viewport: *mut imgui::Viewport, pos
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-unsafe extern "C" fn platform_set_window_size(viewport: *mut imgui::Viewport, size: sys::ImVec2) {
+unsafe fn platform_set_window_size(viewport: *mut imgui::Viewport, size: sys::ImVec2) {
     let Some(viewport) = (unsafe { viewport.as_ref() }) else {
         return;
     };
