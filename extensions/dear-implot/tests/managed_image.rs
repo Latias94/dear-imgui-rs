@@ -3,7 +3,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::{Mutex, OnceLock};
 
 use dear_imgui_rs::render::{DrawCmdSnapshot, SnapshotTextureId, TextureBinding, TextureOp};
-use dear_imgui_rs::{BackendFlags, Context, ManagedTextureId, TextureId};
+use dear_imgui_rs::{BackendFlags, Context, ManagedTextureError, ManagedTextureId, TextureId};
 use dear_implot::{ImPlotPoint, PlotContext};
 
 fn test_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -204,8 +204,15 @@ fn managed_image_rejects_a_stale_generation_before_plot_ffi() {
     imgui
         .remove_texture(stale)
         .expect("unsubmitted texture should retire immediately");
+    // Native state may still cache the removed allocation until the next frame closes.
+    drop(imgui.begin_frame());
     let replacement = register_texture(&mut imgui);
     assert_ne!(stale, replacement);
+    assert_eq!(
+        imgui.with_texture(stale, |_| ()),
+        Err(ManagedTextureError::StaleGeneration(stale)),
+        "the refreshed slot must reject its retired generation"
+    );
     let plot = PlotContext::create(&imgui);
 
     {
