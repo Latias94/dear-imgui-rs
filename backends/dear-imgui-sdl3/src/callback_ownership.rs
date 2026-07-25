@@ -82,19 +82,6 @@ macro_rules! for_each_user_data {
     };
 }
 
-macro_rules! for_each_renderer_callback {
-    ($macro:ident) => {
-        $macro!(DrawCallback_ResetRenderState);
-        $macro!(DrawCallback_SetSamplerLinear);
-        $macro!(DrawCallback_SetSamplerNearest);
-        $macro!(Renderer_CreateWindow);
-        $macro!(Renderer_DestroyWindow);
-        $macro!(Renderer_SetWindowSize);
-        $macro!(Renderer_RenderWindow);
-        $macro!(Renderer_SwapBuffers);
-    };
-}
-
 macro_rules! for_each_renderer_non_aggregate_callback {
     ($macro:ident) => {
         $macro!(DrawCallback_ResetRenderState);
@@ -104,6 +91,13 @@ macro_rules! for_each_renderer_non_aggregate_callback {
         $macro!(Renderer_DestroyWindow);
         $macro!(Renderer_RenderWindow);
         $macro!(Renderer_SwapBuffers);
+    };
+}
+
+macro_rules! for_each_renderer_callback {
+    ($macro:ident) => {
+        for_each_renderer_non_aggregate_callback!($macro);
+        $macro!(Renderer_SetWindowSize);
     };
 }
 
@@ -1670,7 +1664,7 @@ unsafe extern "C" fn sdl3_renderer_set_window_size(
             control.mark_viewport_failed(viewport);
             return;
         }
-        let _ = control.invoke_original_renderer_set_window_size(viewport, size);
+        control.invoke_original_renderer_set_window_size(viewport, size);
     });
 }
 

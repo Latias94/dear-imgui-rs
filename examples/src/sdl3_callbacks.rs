@@ -28,7 +28,11 @@ use sdl3::sys::video::SDL_WindowID;
 
 /// Prefer a responsive frame cadence while a native platform modal loop drives callbacks.
 pub fn configure_main_callback_rate() {
-    sdl3::hint::set_with_priority("SDL_MAIN_CALLBACK_RATE", "120", &sdl3::hint::Hint::Default);
+    sdl3::hint::set_with_priority(
+        sdl3::hint::names::MAIN_CALLBACK_RATE,
+        "120",
+        &sdl3::hint::Hint::Default,
+    );
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -150,53 +154,30 @@ impl QueuedSdl3Event {
     /// Events that the backend does not consume invoke `callback` with `None`. The reconstructed
     /// `SDL_Event` remains valid only for the duration of the callback.
     pub fn with_imgui_event<R>(&self, callback: impl FnOnce(Option<&SDL_Event>) -> R) -> R {
-        match &self.imgui_event {
-            Some(QueuedImGuiEvent::MouseMotion(event)) => {
-                let raw = SDL_Event { motion: *event };
-                callback(Some(&raw))
-            }
-            Some(QueuedImGuiEvent::MouseWheel(event)) => {
-                let raw = SDL_Event { wheel: *event };
-                callback(Some(&raw))
-            }
-            Some(QueuedImGuiEvent::MouseButton(event)) => {
-                let raw = SDL_Event { button: *event };
-                callback(Some(&raw))
-            }
+        let raw = match &self.imgui_event {
+            Some(QueuedImGuiEvent::MouseMotion(event)) => Some(SDL_Event { motion: *event }),
+            Some(QueuedImGuiEvent::MouseWheel(event)) => Some(SDL_Event { wheel: *event }),
+            Some(QueuedImGuiEvent::MouseButton(event)) => Some(SDL_Event { button: *event }),
             Some(QueuedImGuiEvent::TextInput {
                 timestamp,
                 window_id,
                 text,
-            }) => {
-                let raw = SDL_Event {
-                    text: SDL_TextInputEvent {
-                        r#type: SDL_EVENT_TEXT_INPUT,
-                        reserved: 0,
-                        timestamp: *timestamp,
-                        windowID: *window_id,
-                        text: text.as_ptr(),
-                    },
-                };
-                callback(Some(&raw))
-            }
-            Some(QueuedImGuiEvent::Keyboard(event)) => {
-                let raw = SDL_Event { key: *event };
-                callback(Some(&raw))
-            }
-            Some(QueuedImGuiEvent::Display(event)) => {
-                let raw = SDL_Event { display: *event };
-                callback(Some(&raw))
-            }
-            Some(QueuedImGuiEvent::Window(event)) => {
-                let raw = SDL_Event { window: *event };
-                callback(Some(&raw))
-            }
-            Some(QueuedImGuiEvent::GamepadDevice(event)) => {
-                let raw = SDL_Event { gdevice: *event };
-                callback(Some(&raw))
-            }
-            None => callback(None),
-        }
+            }) => Some(SDL_Event {
+                text: SDL_TextInputEvent {
+                    r#type: SDL_EVENT_TEXT_INPUT,
+                    reserved: 0,
+                    timestamp: *timestamp,
+                    windowID: *window_id,
+                    text: text.as_ptr(),
+                },
+            }),
+            Some(QueuedImGuiEvent::Keyboard(event)) => Some(SDL_Event { key: *event }),
+            Some(QueuedImGuiEvent::Display(event)) => Some(SDL_Event { display: *event }),
+            Some(QueuedImGuiEvent::Window(event)) => Some(SDL_Event { window: *event }),
+            Some(QueuedImGuiEvent::GamepadDevice(event)) => Some(SDL_Event { gdevice: *event }),
+            None => None,
+        };
+        callback(raw.as_ref())
     }
 
     /// Whether this event invalidates the main window's drawable surface size.

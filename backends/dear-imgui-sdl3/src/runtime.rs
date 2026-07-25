@@ -852,13 +852,15 @@ impl RuntimeControl {
         &self,
         viewport: *mut sys::ImGuiViewport,
         size: *const sys::ImVec2,
-    ) -> bool {
+    ) {
         let invocation = self
             .renderer_callbacks
             .borrow()
             .as_ref()
             .map(RendererCallbackOwnership::original_set_window_size_invocation);
-        invocation.is_some_and(|invocation| invocation.invoke(viewport, size))
+        if let Some(invocation) = invocation {
+            invocation.invoke(viewport, size);
+        }
     }
 
     pub(super) fn original_renderer_swap_buffers(

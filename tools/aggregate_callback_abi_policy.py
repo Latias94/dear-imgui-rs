@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import bisect
 import pathlib
 import sys
 from dataclasses import dataclass
@@ -22,21 +21,6 @@ class AggregateCallbackViolation:
     path: str
     line: int
     function: str
-
-
-def _matching_parenthesis(
-    tokens: Sequence[api_surface_report._RustToken], opening: int
-) -> int | None:
-    depth = 0
-    for index in range(opening, len(tokens)):
-        value = tokens[index].value
-        if value == "(":
-            depth += 1
-        elif value == ")":
-            depth -= 1
-            if depth == 0:
-                return index
-    return None
 
 
 def _matching_group(
@@ -86,7 +70,7 @@ def _contains_by_value_aggregate(
     while (
         len(type_tokens) >= 2
         and type_tokens[0].value == "("
-        and _matching_parenthesis(type_tokens, 0) == len(type_tokens) - 1
+        and _matching_group(type_tokens, 0) == len(type_tokens) - 1
     ):
         type_tokens = type_tokens[1:-1]
 
@@ -261,7 +245,7 @@ def audit_sources(
                 opening += 1
             if opening >= len(tokens) or tokens[opening].value != "(":
                 continue
-            closing = _matching_parenthesis(tokens, opening)
+            closing = _matching_group(tokens, opening)
             if closing is None or not _signature_has_by_value_aggregate(
                 tokens, opening, closing, aliases
             ):
@@ -271,7 +255,7 @@ def audit_sources(
             violations.append(
                 AggregateCallbackViolation(
                     path=relative,
-                    line=bisect.bisect_right(line_starts, token.start),
+                    line=context_binding_policy._line_number(line_starts, token.start),
                     function=function,
                 )
             )
