@@ -7,6 +7,7 @@
 
 use std::collections::VecDeque;
 use std::ffi::CString;
+use std::sync::Mutex;
 
 use sdl3::event::{Event, WindowEvent};
 use sdl3::keyboard::Keycode;
@@ -186,15 +187,40 @@ impl QueuedSdl3Event {
     }
 }
 
-/// FIFO handoff from `SDL_AppEvent` to `SDL_AppIterate`.
+/// Short-held synchronized handoff from `SDL_AppEvent` to `SDL_AppIterate`.
+#[derive(Default)]
+pub struct Sdl3CallbackEventHandoff {
+    events: Mutex<Sdl3CallbackEventQueue>,
+}
+
+impl Sdl3CallbackEventHandoff {
+    /// Copy one callback event while SDL's transient payload pointers remain valid.
+    pub fn push(&self, raw: &SDL_Event) {
+        self.events
+            .lock()
+            .expect("SDL3 callback event handoff mutex poisoned")
+            .push(raw);
+    }
+
+    /// Move the currently queued events into a main-thread-owned batch.
+    pub fn drain(&self) -> Sdl3CallbackEventQueue {
+        std::mem::take(
+            &mut *self
+                .events
+                .lock()
+                .expect("SDL3 callback event handoff mutex poisoned"),
+        )
+    }
+}
+
+/// One main-thread-owned FIFO batch drained from [`Sdl3CallbackEventHandoff`].
 #[derive(Default)]
 pub struct Sdl3CallbackEventQueue {
     events: VecDeque<QueuedSdl3Event>,
 }
 
 impl Sdl3CallbackEventQueue {
-    /// Copy one callback event while SDL's transient payload pointers remain valid.
-    pub fn push(&mut self, raw: &SDL_Event) {
+    fn push(&mut self, raw: &SDL_Event) {
         self.events.push_back(QueuedSdl3Event::from_raw(raw));
     }
 
@@ -217,6 +243,7 @@ pub fn requests_exit(event: &QueuedSdl3Event, main_window_id: u32) -> bool {
 mod tests {
     use super::*;
     use std::ffi::CStr;
+    use std::sync::Arc;
     use std::thread;
 
     #[test]
@@ -232,10 +259,10 @@ mod tests {
                     text: source.as_ptr(),
                 },
             };
-            let mut queue = Sdl3CallbackEventQueue::default();
-            queue.push(&raw);
+            let handoff = Sdl3CallbackEventHandoff::default();
+            handoff.push(&raw);
             drop(source);
-            queue
+            handoff.drain()
         })
         .join()
         .expect("callback worker must not panic");
@@ -265,10 +292,10 @@ mod tests {
                     data: data.as_ptr(),
                 },
             };
-            let mut queue = Sdl3CallbackEventQueue::default();
-            queue.push(&raw);
+            let handoff = Sdl3CallbackEventHandoff::default();
+            handoff.push(&raw);
             drop((source, data));
-            queue
+            handoff.drain()
         })
         .join()
         .expect("callback worker must not panic");
@@ -289,8 +316,9 @@ mod tests {
                 data2: 0,
             },
         };
-        let mut queue = Sdl3CallbackEventQueue::default();
-        queue.push(&raw);
+        let handoff = Sdl3CallbackEventHandoff::default();
+        handoff.push(&raw);
+        let mut queue = handoff.drain();
 
         let queued = queue.pop().expect("event must be queued");
         queued.with_imgui_event(|raw| {
@@ -314,8 +342,9 @@ mod tests {
                 data2: 1080,
             },
         };
-        let mut queue = Sdl3CallbackEventQueue::default();
-        queue.push(&raw);
+        let handoff = Sdl3CallbackEventHandoff::default();
+        handoff.push(&raw);
+        let mut queue = handoff.drain();
 
         assert!(
             queue
@@ -341,7 +370,9 @@ mod tests {
 
     #[test]
     fn callback_events_can_cross_from_a_worker_thread() {
-        let mut queue = thread::spawn(|| {
+        let handoff = Arc::new(Sdl3CallbackEventHandoff::default());
+        let callback_handoff = Arc::clone(&handoff);
+        thread::spawn(move || {
             let raw = SDL_Event {
                 quit: sdl3::sys::events::SDL_QuitEvent {
                     r#type: sdl3::sys::events::SDL_EVENT_QUIT,
@@ -349,14 +380,44 @@ mod tests {
                     timestamp: 42,
                 },
             };
-            let mut queue = Sdl3CallbackEventQueue::default();
-            queue.push(&raw);
-            queue
+            callback_handoff.push(&raw);
         })
         .join()
         .expect("callback worker must not panic");
 
+        let mut queue = handoff.drain();
         let event = queue.pop().expect("event must cross to the main thread");
         assert!(requests_exit(&event, 1));
+    }
+
+    #[test]
+    fn consuming_one_batch_does_not_block_the_next_callback() {
+        let handoff = Arc::new(Sdl3CallbackEventHandoff::default());
+        let first = SDL_Event {
+            quit: sdl3::sys::events::SDL_QuitEvent {
+                r#type: sdl3::sys::events::SDL_EVENT_QUIT,
+                reserved: 0,
+                timestamp: 1,
+            },
+        };
+        handoff.push(&first);
+        let mut first_batch = handoff.drain();
+
+        let callback_handoff = Arc::clone(&handoff);
+        thread::spawn(move || {
+            let second = SDL_Event {
+                quit: sdl3::sys::events::SDL_QuitEvent {
+                    r#type: sdl3::sys::events::SDL_EVENT_QUIT,
+                    reserved: 0,
+                    timestamp: 2,
+                },
+            };
+            callback_handoff.push(&second);
+        })
+        .join()
+        .expect("callback must not wait for the drained batch");
+
+        assert!(first_batch.pop().is_some());
+        assert!(handoff.drain().pop().is_some());
     }
 }

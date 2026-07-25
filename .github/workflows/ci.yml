@@ -181,7 +181,7 @@ jobs:
       - name: Test SDL3 callback event handoff
         run: cargo nextest run -p dear-imgui-examples --lib --features "sdl3-platform"
 
-      - name: Test SDL3 GPU callback example
+      - name: Test SDL3 GPU present-mode policy
         run: cargo nextest run -p dear-imgui-examples --bin sdl3_sdlgpu_multi_view --features "sdl3-gpu-multi-viewport"
 
       - name: Test SDL3 foreign pointer callback teardown

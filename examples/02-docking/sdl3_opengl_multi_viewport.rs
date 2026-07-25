@@ -10,12 +10,12 @@
 //! Run with:
 //! `cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport,sdl3-opengl3`
 
+use std::cell::RefCell;
 use std::error::Error;
-use std::sync::Mutex;
 use std::time::Instant;
 
 use dear_imgui_examples::sdl3_callbacks::{
-    Sdl3CallbackEventQueue, configure_main_callback_rate, requests_exit,
+    Sdl3CallbackEventHandoff, configure_main_callback_rate, requests_exit,
 };
 use dear_imgui_rs::{Condition, ConfigFlags, Context, TextureId};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode, Sdl3OpenGl3Backend};
@@ -25,8 +25,8 @@ use sdl3_main::{AppResult, AppResultWithState, MainThreadData, app_impl};
 const ENABLE_VIEWPORTS: bool = true;
 
 struct OpenGlApp {
-    events: Sdl3CallbackEventQueue,
-    main: MainThreadData<MainData>,
+    events: Sdl3CallbackEventHandoff,
+    main: MainThreadData<RefCell<MainData>>,
 }
 
 struct MainData {
@@ -105,8 +105,8 @@ impl OpenGlApp {
         imgui.style_mut().set_font_scale_dpi(window.display_scale());
 
         Ok(Self {
-            events: Sdl3CallbackEventQueue::default(),
-            main: MainThreadData::assert_new(MainData {
+            events: Sdl3CallbackEventHandoff::default(),
+            main: MainThreadData::assert_new(RefCell::new(MainData {
                 sdl3_backend,
                 imgui,
                 game_tex,
@@ -116,13 +116,15 @@ impl OpenGlApp {
                 _video: video,
                 _sdl: sdl,
                 last_frame: Instant::now(),
-            }),
+            })),
         })
     }
 
-    fn process_events(&mut self) -> AppResult {
-        while let Some(event) = self.events.pop() {
-            let main = self.main.assert_get_mut();
+    fn process_events(&self) -> AppResult {
+        let mut events = self.events.drain();
+        let mut main_guard = self.main.assert_get().borrow_mut();
+        let main = &mut *main_guard;
+        while let Some(event) = events.pop() {
             let backend_result = event.with_imgui_event(|raw| match raw {
                 Some(raw) => main.sdl3_backend.process_event(&mut main.imgui, raw),
                 None => Ok(false),
@@ -138,8 +140,9 @@ impl OpenGlApp {
         AppResult::Continue
     }
 
-    fn render(&mut self) -> Result<(), Box<dyn Error>> {
-        let main = self.main.assert_get_mut();
+    fn render(&self) -> Result<(), Box<dyn Error>> {
+        let mut main_guard = self.main.assert_get().borrow_mut();
+        let main = &mut *main_guard;
         let now = Instant::now();
         main.imgui
             .io_mut()
@@ -195,8 +198,9 @@ impl OpenGlApp {
         Ok(())
     }
 
-    fn shutdown(&mut self) {
-        let main = self.main.assert_get_mut();
+    fn shutdown(&self) {
+        let mut main_guard = self.main.assert_get().borrow_mut();
+        let main = &mut *main_guard;
         if let Err(error) = main.sdl3_backend.shutdown(&mut main.imgui) {
             eprintln!("SDL3 OpenGL backend shutdown failed: {error}");
         }
@@ -205,9 +209,9 @@ impl OpenGlApp {
 
 #[app_impl]
 impl OpenGlApp {
-    fn app_init() -> AppResultWithState<Box<Mutex<Self>>> {
+    fn app_init() -> AppResultWithState<Box<Self>> {
         match Self::new() {
-            Ok(app) => AppResultWithState::Continue(Box::new(Mutex::new(app))),
+            Ok(app) => AppResultWithState::Continue(Box::new(app)),
             Err(error) => {
                 eprintln!("failed to initialize SDL3 OpenGL example: {error}");
                 AppResultWithState::Failure(None)
@@ -215,7 +219,7 @@ impl OpenGlApp {
         }
     }
 
-    fn app_iterate(&mut self) -> AppResult {
+    fn app_iterate(&self) -> AppResult {
         let event_result = self.process_events();
         if event_result != AppResult::Continue {
             return event_result;
@@ -229,12 +233,12 @@ impl OpenGlApp {
         }
     }
 
-    fn app_event(&mut self, raw: &sdl3::sys::events::SDL_Event) -> AppResult {
+    fn app_event(&self, raw: &sdl3::sys::events::SDL_Event) -> AppResult {
         self.events.push(raw);
         AppResult::Continue
     }
 
-    fn app_quit(state: Option<&mut Self>) {
+    fn app_quit(state: Option<&Self>) {
         if let Some(app) = state {
             app.shutdown();
         }

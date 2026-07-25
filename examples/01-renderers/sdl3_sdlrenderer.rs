@@ -3,11 +3,11 @@
 //! Run with:
 //!   cargo run -p dear-imgui-examples --bin sdl3_sdlrenderer --features sdl3-sdlrenderer3
 
+use std::cell::RefCell;
 use std::error::Error;
-use std::sync::Mutex;
 
 use dear_imgui_examples::sdl3_callbacks::{
-    Sdl3CallbackEventQueue, configure_main_callback_rate, requests_exit,
+    Sdl3CallbackEventHandoff, configure_main_callback_rate, requests_exit,
 };
 use dear_imgui_rs::{Condition, Context};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, Sdl3RendererBackend};
@@ -16,8 +16,8 @@ use sdl3::{Sdl, VideoSubsystem};
 use sdl3_main::{AppResult, AppResultWithState, MainThreadData, app_impl};
 
 struct SdlRendererApp {
-    main: MainThreadData<MainData>,
-    events: Sdl3CallbackEventQueue,
+    main: MainThreadData<RefCell<MainData>>,
+    events: Sdl3CallbackEventHandoff,
 }
 
 struct MainData {
@@ -68,7 +68,7 @@ impl SdlRendererApp {
             unsafe { Sdl3RendererBackend::init(&mut imgui, canvas.window(), &canvas)? };
 
         Ok(Self {
-            main: MainThreadData::assert_new(MainData {
+            main: MainThreadData::assert_new(RefCell::new(MainData {
                 sdl3_backend,
                 imgui,
                 canvas,
@@ -77,14 +77,15 @@ impl SdlRendererApp {
                 show_demo: false,
                 show_debug: false,
                 show_about: false,
-            }),
-            events: Sdl3CallbackEventQueue::default(),
+            })),
+            events: Sdl3CallbackEventHandoff::default(),
         })
     }
 
-    fn iterate(&mut self) -> Result<AppResult, Box<dyn Error>> {
-        let Self { main, events } = self;
-        let main = main.assert_get_mut();
+    fn iterate(&self) -> Result<AppResult, Box<dyn Error>> {
+        let mut events = self.events.drain();
+        let mut main_guard = self.main.assert_get().borrow_mut();
+        let main = &mut *main_guard;
         while let Some(event) = events.pop() {
             event.with_imgui_event(|raw| -> Result<(), Box<dyn Error>> {
                 if let Some(raw) = raw {
@@ -128,8 +129,9 @@ impl SdlRendererApp {
         Ok(AppResult::Continue)
     }
 
-    fn shutdown(&mut self) {
-        let main = self.main.assert_get_mut();
+    fn shutdown(&self) {
+        let mut main_guard = self.main.assert_get().borrow_mut();
+        let main = &mut *main_guard;
         if let Err(error) = main.sdl3_backend.shutdown(&mut main.imgui) {
             eprintln!("SDL3 SDLRenderer backend shutdown failed: {error}");
         }
@@ -138,9 +140,9 @@ impl SdlRendererApp {
 
 #[app_impl]
 impl SdlRendererApp {
-    fn app_init() -> AppResultWithState<Box<Mutex<Self>>> {
+    fn app_init() -> AppResultWithState<Box<Self>> {
         match Self::new() {
-            Ok(app) => AppResultWithState::Continue(Box::new(Mutex::new(app))),
+            Ok(app) => AppResultWithState::Continue(Box::new(app)),
             Err(error) => {
                 eprintln!("failed to initialize SDL3 SDLRenderer example: {error}");
                 AppResultWithState::Failure(None)
@@ -148,7 +150,7 @@ impl SdlRendererApp {
         }
     }
 
-    fn app_iterate(&mut self) -> AppResult {
+    fn app_iterate(&self) -> AppResult {
         match self.iterate() {
             Ok(result) => result,
             Err(error) => {
@@ -158,12 +160,12 @@ impl SdlRendererApp {
         }
     }
 
-    fn app_event(&mut self, raw: &sdl3::sys::events::SDL_Event) -> AppResult {
+    fn app_event(&self, raw: &sdl3::sys::events::SDL_Event) -> AppResult {
         self.events.push(raw);
         AppResult::Continue
     }
 
-    fn app_quit(state: Option<&mut Self>) {
+    fn app_quit(state: Option<&Self>) {
         if let Some(app) = state {
             app.shutdown();
         }

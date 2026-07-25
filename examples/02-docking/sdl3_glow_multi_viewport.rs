@@ -18,13 +18,13 @@
 //! python3 tools/ci/run_contract.py sdl3-glow-multi-viewport-smoke
 //! ```
 
+use std::cell::RefCell;
 use std::error::Error;
 use std::rc::Rc;
-use std::sync::Mutex;
 use std::time::Instant;
 
 use dear_imgui_examples::sdl3_callbacks::{
-    Sdl3CallbackEventQueue, configure_main_callback_rate, requests_exit,
+    Sdl3CallbackEventHandoff, configure_main_callback_rate, requests_exit,
 };
 use dear_imgui_glow::{GlowRenderer, SimpleTextureMap, multi_viewport::GlowViewportRuntime};
 use dear_imgui_rs::{Condition, ConfigFlags, Context};
@@ -182,8 +182,8 @@ type RunResult = Option<CompletedViewportSmoke>;
 type RunResult = ();
 
 struct GlowApp {
-    main: MainThreadData<Option<MainData>>,
-    events: Sdl3CallbackEventQueue,
+    main: MainThreadData<RefCell<Option<MainData>>>,
+    events: Sdl3CallbackEventHandoff,
 }
 
 struct MainData {
@@ -207,15 +207,15 @@ impl GlowApp {
         imgui_sdl3_backend::enable_native_ime_ui();
         configure_main_callback_rate();
         Ok(Self {
-            main: MainThreadData::assert_new(Some(MainData::new()?)),
-            events: Sdl3CallbackEventQueue::default(),
+            main: MainThreadData::assert_new(RefCell::new(Some(MainData::new()?))),
+            events: Sdl3CallbackEventHandoff::default(),
         })
     }
 
-    fn process_events(&mut self) -> Result<AppResult, Box<dyn Error>> {
-        let Self { main, events } = self;
+    fn process_events(&self) -> Result<AppResult, Box<dyn Error>> {
+        let mut events = self.events.drain();
+        let mut main = self.main.assert_get().borrow_mut();
         let main = main
-            .assert_get_mut()
             .as_mut()
             .expect("SDL3 Glow state must be active while callbacks run");
         while let Some(event) = events.pop() {
@@ -232,16 +232,17 @@ impl GlowApp {
         Ok(AppResult::Continue)
     }
 
-    fn render(&mut self) -> Result<bool, Box<dyn Error>> {
+    fn render(&self) -> Result<bool, Box<dyn Error>> {
         self.main
-            .assert_get_mut()
+            .assert_get()
+            .borrow_mut()
             .as_mut()
             .expect("SDL3 Glow state must be active while callbacks run")
             .render()
     }
 
-    fn shutdown(&mut self) {
-        let main = self.main.assert_get_mut().take();
+    fn shutdown(&self) {
+        let main = self.main.assert_get().borrow_mut().take();
         let Some(main) = main else {
             return;
         };
@@ -542,9 +543,9 @@ impl MainData {
 
 #[app_impl]
 impl GlowApp {
-    fn app_init() -> AppResultWithState<Box<Mutex<Self>>> {
+    fn app_init() -> AppResultWithState<Box<Self>> {
         match Self::new() {
-            Ok(app) => AppResultWithState::Continue(Box::new(Mutex::new(app))),
+            Ok(app) => AppResultWithState::Continue(Box::new(app)),
             Err(error) => {
                 eprintln!("failed to initialize SDL3 Glow example: {error}");
                 AppResultWithState::Failure(None)
@@ -552,7 +553,7 @@ impl GlowApp {
         }
     }
 
-    fn app_iterate(&mut self) -> AppResult {
+    fn app_iterate(&self) -> AppResult {
         match self.process_events() {
             Ok(AppResult::Continue) => {}
             Ok(result) => return result,
@@ -571,12 +572,12 @@ impl GlowApp {
         }
     }
 
-    fn app_event(&mut self, raw: &sdl3::sys::events::SDL_Event) -> AppResult {
+    fn app_event(&self, raw: &sdl3::sys::events::SDL_Event) -> AppResult {
         self.events.push(raw);
         AppResult::Continue
     }
 
-    fn app_quit(state: Option<&mut Self>) {
+    fn app_quit(state: Option<&Self>) {
         if let Some(app) = state {
             app.shutdown();
         }

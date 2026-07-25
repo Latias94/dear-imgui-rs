@@ -13,9 +13,9 @@
 //! - Secondary viewports create their own Vulkan `SurfaceKHR` + swapchain.
 //! - Per-viewport surface creation is delegated to SDL3 via `Platform_CreateVkSurface`.
 
+use std::cell::RefCell;
 use std::error::Error;
 use std::ffi::CString;
-use std::sync::Mutex;
 use std::time::Instant;
 
 use ash::khr::{surface as khr_surface, swapchain as khr_swapchain};
@@ -23,7 +23,7 @@ use ash::{Device, Entry, Instance, vk};
 use dear_imgui_ash::multi_viewport_sdl3::{Sdl3ViewportRuntime, VulkanViewportConfig};
 use dear_imgui_ash::{AshRenderer, Options as AshOptions, TextureRetirementBatch};
 use dear_imgui_examples::sdl3_callbacks::{
-    Sdl3CallbackEventQueue, configure_main_callback_rate, requests_exit,
+    Sdl3CallbackEventHandoff, configure_main_callback_rate, requests_exit,
 };
 use dear_imgui_rs::{Condition, ConfigFlags, Context, render::RenderedFrame};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode, Sdl3PlatformBackend};
@@ -1090,8 +1090,8 @@ struct App {
 }
 
 struct Sdl3AshApp {
-    events: Sdl3CallbackEventQueue,
-    main: MainThreadData<MainData>,
+    events: Sdl3CallbackEventHandoff,
+    main: MainThreadData<RefCell<MainData>>,
 }
 
 struct MainData {
@@ -1607,7 +1607,7 @@ fn render_main_window(
 
 #[app_impl]
 impl Sdl3AshApp {
-    fn app_init() -> AppResultWithState<Box<Mutex<Self>>> {
+    fn app_init() -> AppResultWithState<Box<Self>> {
         let result = (|| -> Result<Self, Box<dyn Error>> {
             imgui_sdl3_backend::enable_native_ime_ui();
             configure_main_callback_rate();
@@ -1619,17 +1619,17 @@ impl Sdl3AshApp {
             let _ = video.vulkan_load_library_default();
             let app = App::new(&video)?;
             Ok(Self {
-                events: Sdl3CallbackEventQueue::default(),
-                main: MainThreadData::assert_new(MainData {
+                events: Sdl3CallbackEventHandoff::default(),
+                main: MainThreadData::assert_new(RefCell::new(MainData {
                     app,
                     _video: video,
                     _sdl: sdl,
-                }),
+                })),
             })
         })();
 
         match result {
-            Ok(app) => AppResultWithState::Continue(Box::new(Mutex::new(app))),
+            Ok(app) => AppResultWithState::Continue(Box::new(app)),
             Err(error) => {
                 eprintln!("failed to initialize SDL3 Ash example: {error}");
                 AppResultWithState::Failure(None)
@@ -1637,9 +1637,10 @@ impl Sdl3AshApp {
         }
     }
 
-    fn app_iterate(&mut self) -> AppResult {
-        let Self { events, main, .. } = self;
-        let main = &mut main.assert_get_mut().app;
+    fn app_iterate(&self) -> AppResult {
+        let mut events = self.events.drain();
+        let mut main_guard = self.main.assert_get().borrow_mut();
+        let main = &mut main_guard.app;
         while let Some(event) = events.pop() {
             match main.process_event(&event) {
                 Ok(AppResult::Continue) => {}
@@ -1659,14 +1660,14 @@ impl Sdl3AshApp {
         }
     }
 
-    fn app_event(&mut self, raw: &sdl3::sys::events::SDL_Event) -> AppResult {
+    fn app_event(&self, raw: &sdl3::sys::events::SDL_Event) -> AppResult {
         self.events.push(raw);
         AppResult::Continue
     }
 
-    fn app_quit(state: Option<&mut Self>) {
+    fn app_quit(state: Option<&Self>) {
         if let Some(app) = state {
-            if let Err(error) = app.main.assert_get_mut().app.shutdown() {
+            if let Err(error) = app.main.assert_get().borrow_mut().app.shutdown() {
                 eprintln!("SDL3 Ash shutdown failed: {error}");
             }
         }
