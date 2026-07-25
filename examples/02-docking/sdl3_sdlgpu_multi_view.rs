@@ -1,8 +1,9 @@
+use dear_imgui_examples::sdl3_callbacks::{
+    Sdl3CallbackEventQueue, configure_main_callback_rate, requests_exit,
+};
 use dear_imgui_rs::{Condition, ConfigFlags, Context};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, SdlGpu3InitInfo, SdlGpu3RendererBackend};
-use sdl3::event::{Event, WindowEvent};
 use sdl3::gpu::{PresentMode, ShaderFormat, SwapchainComposition};
-use sdl3::keyboard::Keycode;
 use sdl3::pixels::Color;
 use sdl3::{Sdl, VideoSubsystem};
 use sdl3_main::{AppResult, AppResultWithState, MainThreadData, app_impl};
@@ -29,8 +30,16 @@ fn low_latency_present_mode(gpu: &sdl3::gpu::Device, window: &sdl3::video::Windo
     select_present_mode(mailbox_supported)
 }
 
+fn secondary_viewport_present_mode() -> PresentMode {
+    // On D3D12, SDL claims new viewport windows with VSync before applying the requested mode.
+    // Switching the newly claimed viewport to Mailbox waits for the shared queue to drain, which
+    // turns a normal viewport drag into a synchronous UI stall. The primary window keeps Mailbox.
+    PresentMode::Vsync
+}
+
 struct SdlGpuApp {
     main: MainThreadData<MainData>,
+    events: Sdl3CallbackEventQueue,
 }
 
 struct MainData {
@@ -50,7 +59,7 @@ impl SdlGpuApp {
         // Enable native IME UI before creating any SDL3 windows (recommended for IME-heavy locales).
         imgui_sdl3_backend::enable_native_ime_ui();
         // Bound the nonblocking callback loop without overriding an application/user choice.
-        sdl3::hint::set_with_priority("SDL_MAIN_CALLBACK_RATE", "120", &sdl3::hint::Hint::Default);
+        configure_main_callback_rate();
 
         let sdl_ctx = sdl3::init()?;
         let video = sdl_ctx.video()?;
@@ -99,7 +108,7 @@ impl SdlGpuApp {
 
         // SAFETY: `window` and `gpu` are stored with the backend and outlive explicit shutdown.
         let mut init_info = SdlGpu3InitInfo::from_window(&gpu, &window);
-        init_info.present_mode = present_mode;
+        init_info.present_mode = secondary_viewport_present_mode();
         let sdl3_backend = unsafe { SdlGpu3RendererBackend::init(&mut imgui, &window, init_info)? };
 
         Ok(Self {
@@ -114,14 +123,28 @@ impl SdlGpuApp {
                 show_debug: false,
                 show_about: false,
             }),
+            events: Sdl3CallbackEventQueue::default(),
         })
     }
 
-    fn render(&mut self) -> Result<(), Box<dyn Error>> {
-        let main = self.main.assert_get_mut();
+    fn iterate(&mut self) -> Result<AppResult, Box<dyn Error>> {
+        let Self { main, events } = self;
+        let main = main.assert_get_mut();
+        while let Some(event) = events.pop() {
+            event.with_imgui_event(|raw| -> Result<(), Box<dyn Error>> {
+                if let Some(raw) = raw {
+                    let _ = main.sdl3_backend.process_event(&mut main.imgui, raw)?;
+                }
+                Ok(())
+            })?;
+            if requests_exit(&event, main.window.id()) {
+                return Ok(AppResult::Success);
+            }
+        }
+
         if main.window.is_minimized() {
             sdl3::timer::delay(10);
-            return Ok(());
+            return Ok(AppResult::Continue);
         }
 
         main.sdl3_backend.new_frame(&mut main.imgui)?;
@@ -188,7 +211,14 @@ impl SdlGpuApp {
             Ok(())
         };
         if let Err(error) = main_render {
-            draw_cmd.cancel();
+            // A swapchain texture may have been acquired, so SDL requires this command buffer to
+            // be submitted even after render preparation or rendering failed. The closure above
+            // ends any pass it begins before returning its error.
+            if let Err(submit_error) = draw_cmd.submit() {
+                eprintln!(
+                    "failed to submit an SDLGPU command buffer after render failure: {submit_error}"
+                );
+            }
             return Err(error);
         }
 
@@ -200,33 +230,7 @@ impl SdlGpuApp {
 
         draw_cmd.submit()?;
 
-        Ok(())
-    }
-
-    fn process_event(&mut self, raw: &sdl3::sys::events::SDL_Event) -> AppResult {
-        let Some(main_thread) = sdl3_main::MainThreadToken::get() else {
-            return AppResult::Continue;
-        };
-        let main = self.main.get_mut(main_thread);
-
-        if let Err(error) = main.sdl3_backend.process_event(&mut main.imgui, raw) {
-            eprintln!("SDL3 backend event processing failed: {error}");
-            return AppResult::Failure;
-        }
-
-        match Event::from_ll(*raw) {
-            Event::Quit { .. }
-            | Event::KeyDown {
-                keycode: Some(Keycode::Escape),
-                ..
-            } => AppResult::Success,
-            Event::Window {
-                window_id,
-                win_event: WindowEvent::CloseRequested,
-                ..
-            } if window_id == main.window.id() => AppResult::Success,
-            _ => AppResult::Continue,
-        }
+        Ok(AppResult::Continue)
     }
 
     fn shutdown(&mut self) {
@@ -263,8 +267,8 @@ impl SdlGpuApp {
     }
 
     fn app_iterate(&mut self) -> AppResult {
-        match self.render() {
-            Ok(()) => AppResult::Continue,
+        match self.iterate() {
+            Ok(result) => result,
             Err(error) => {
                 eprintln!("SDL3 SDLGPU frame failed: {error}");
                 AppResult::Failure
@@ -273,7 +277,8 @@ impl SdlGpuApp {
     }
 
     fn app_event(&mut self, raw: &sdl3::sys::events::SDL_Event) -> AppResult {
-        self.process_event(raw)
+        self.events.push(raw);
+        AppResult::Continue
     }
 
     fn app_quit(state: Option<&mut Self>) {
@@ -291,5 +296,10 @@ mod tests {
     fn mailbox_is_preferred_when_supported() {
         assert_eq!(select_present_mode(true), PresentMode::Mailbox);
         assert_eq!(select_present_mode(false), PresentMode::Vsync);
+    }
+
+    #[test]
+    fn secondary_viewports_stay_on_vsync() {
+        assert_eq!(secondary_viewport_present_mode(), PresentMode::Vsync);
     }
 }

@@ -1,144 +1,155 @@
 //! SDL3 + OpenGL3 multi-viewport example.
 //!
-//! This is an experimental example showing how to drive Dear ImGui using:
-//! - SDL3 window + GL context
-//! - official C++ backends: imgui_impl_sdl3.cpp + imgui_impl_opengl3.cpp
+//! This experimental example drives Dear ImGui using:
+//! - an SDL3 window and OpenGL context;
+//! - the official `imgui_impl_sdl3.cpp` and `imgui_impl_opengl3.cpp` backends;
 //! - the high-level `dear-imgui-rs` API.
-//! - Requires `dear-imgui-sdl3` feature `opengl3-renderer`.
+//!
+//! It requires the `dear-imgui-sdl3` `opengl3-renderer` feature.
 //!
 //! Run with:
-//!   cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport,sdl3-opengl3
+//! `cargo run -p dear-imgui-examples --bin sdl3_opengl_multi_viewport --features multi-viewport,sdl3-opengl3`
 
 use std::error::Error;
+use std::sync::Mutex;
 use std::time::Instant;
 
+use dear_imgui_examples::sdl3_callbacks::{
+    Sdl3CallbackEventQueue, configure_main_callback_rate, requests_exit,
+};
 use dear_imgui_rs::{Condition, ConfigFlags, Context, TextureId};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode, Sdl3OpenGl3Backend};
-use sdl3::event::Event;
-use sdl3::keyboard::Keycode;
 use sdl3::video::{GLProfile, SwapInterval, WindowPos};
+use sdl3_main::{AppResult, AppResultWithState, MainThreadData, app_impl};
 
-fn main() -> Result<(), Box<dyn Error>> {
-    // Enable multi-viewport at runtime.
-    const ENABLE_VIEWPORTS: bool = true;
+const ENABLE_VIEWPORTS: bool = true;
 
-    // Enable native IME UI before creating any SDL3 windows.
-    imgui_sdl3_backend::enable_native_ime_ui();
+struct OpenGlApp {
+    events: Sdl3CallbackEventQueue,
+    main: MainThreadData<MainData>,
+}
 
-    let sdl = sdl3::init()?;
-    let video = sdl.video()?;
+struct MainData {
+    sdl3_backend: Sdl3OpenGl3Backend,
+    imgui: Context,
+    game_tex: glow::Texture,
+    gl: glow::Context,
+    gl_context: sdl3::video::GLContext,
+    window: sdl3::video::Window,
+    _video: sdl3::VideoSubsystem,
+    _sdl: sdl3::Sdl,
+    last_frame: Instant,
+}
 
-    let gl_attr = video.gl_attr();
-    gl_attr.set_context_version(3, 2);
-    gl_attr.set_context_profile(GLProfile::Core);
-    gl_attr.set_depth_size(0);
+impl OpenGlApp {
+    fn new() -> Result<Self, Box<dyn Error>> {
+        configure_main_callback_rate();
+        imgui_sdl3_backend::enable_native_ime_ui();
 
-    // Determine a reasonable initial window size based on display scale.
-    let main_scale = video
-        .get_primary_display()?
-        .get_content_scale()
-        .unwrap_or(1.0);
+        let sdl = sdl3::init()?;
+        let video = sdl.video()?;
 
-    let mut window = video
-        .window(
-            "Dear ImGui + SDL3 + OpenGL3 (multi-viewport)",
-            (800.0 * main_scale) as u32,
-            (600.0 * main_scale) as u32,
-        )
-        .opengl()
-        .resizable()
-        .hidden()
-        .high_pixel_density()
-        .build()
-        .map_err(|e| format!("failed to create SDL3 window: {e}"))?;
+        let gl_attr = video.gl_attr();
+        gl_attr.set_context_version(3, 2);
+        gl_attr.set_context_profile(GLProfile::Core);
+        gl_attr.set_depth_size(0);
 
-    let gl_context = window
-        .gl_create_context()
-        .map_err(|e| format!("SDL_GL_CreateContext failed: {e}"))?;
-    window
-        .gl_make_current(&gl_context)
-        .map_err(|e| format!("SDL_GL_MakeCurrent failed: {e}"))?;
-    let _ = video.gl_set_swap_interval(SwapInterval::VSync);
-    window.set_position(WindowPos::Centered, WindowPos::Centered);
-    window.show();
+        let main_scale = video
+            .get_primary_display()?
+            .get_content_scale()
+            .unwrap_or(1.0);
 
-    // Optional: create a glow context for clearing the main framebuffer.
-    let gl = unsafe { create_glow_context(&video) };
+        let mut window = video
+            .window(
+                "Dear ImGui + SDL3 + OpenGL3 (multi-viewport)",
+                (800.0 * main_scale) as u32,
+                (600.0 * main_scale) as u32,
+            )
+            .opengl()
+            .resizable()
+            .hidden()
+            .high_pixel_density()
+            .build()
+            .map_err(|error| format!("failed to create SDL3 window: {error}"))?;
 
-    // Create a simple OpenGL texture that we can show inside an ImGui window.
-    // This demonstrates how to bridge your own GL rendering with ImGui, and the
-    // texture will keep working even when the window is dragged to another viewport.
-    let game_tex = unsafe { create_game_texture(&gl) };
-    // On native GL, `glow::Texture` is a small integer handle wrapper (NativeTexture).
-    // We treat the underlying GL name (NonZeroU32) as a legacy ImTextureID.
-    let game_tex_name = game_tex.0.get(); // NonZeroU32 -> u32
-    let game_tex_id = TextureId::from(game_tex_name);
+        let gl_context = window
+            .gl_create_context()
+            .map_err(|error| format!("SDL_GL_CreateContext failed: {error}"))?;
+        window
+            .gl_make_current(&gl_context)
+            .map_err(|error| format!("SDL_GL_MakeCurrent failed: {error}"))?;
+        let _ = video.gl_set_swap_interval(SwapInterval::VSync);
+        window.set_position(WindowPos::Centered, WindowPos::Centered);
+        window.show();
 
-    // Build ImGui context.
-    let mut imgui = Context::create();
-    {
-        let io = imgui.io_mut();
-        let mut flags = io.config_flags();
-        flags.insert(ConfigFlags::DOCKING_ENABLE);
-        if ENABLE_VIEWPORTS {
-            flags.insert(ConfigFlags::VIEWPORTS_ENABLE);
+        // SAFETY: the window's OpenGL context is current on this thread.
+        let gl = unsafe { create_glow_context(&video) };
+        // SAFETY: the glow context was created from the current OpenGL context.
+        let game_tex = unsafe { create_game_texture(&gl) };
+
+        let mut imgui = Context::create();
+        {
+            let io = imgui.io_mut();
+            let mut flags = io.config_flags();
+            flags.insert(ConfigFlags::DOCKING_ENABLE);
+            if ENABLE_VIEWPORTS {
+                flags.insert(ConfigFlags::VIEWPORTS_ENABLE);
+            }
+            io.set_config_flags(flags);
         }
-        io.set_config_flags(flags);
+
+        // SAFETY: the window and GL context are retained until explicit backend shutdown.
+        let mut sdl3_backend =
+            unsafe { Sdl3OpenGl3Backend::init(&mut imgui, &window, &gl_context, "#version 150")? };
+        sdl3_backend.set_gamepad_mode(&mut imgui, GamepadMode::AutoAll)?;
+        imgui.style_mut().set_font_scale_dpi(window.display_scale());
+
+        Ok(Self {
+            events: Sdl3CallbackEventQueue::default(),
+            main: MainThreadData::assert_new(MainData {
+                sdl3_backend,
+                imgui,
+                game_tex,
+                gl,
+                gl_context,
+                window,
+                _video: video,
+                _sdl: sdl,
+                last_frame: Instant::now(),
+            }),
+        })
     }
 
-    // Initialize SDL3 + OpenGL3 backends (C++ side).
-    // SAFETY: `window` and `gl_context` outlive shutdown and Context teardown on early return.
-    let mut sdl3_backend =
-        unsafe { Sdl3OpenGl3Backend::init(&mut imgui, &window, &gl_context, "#version 150")? };
-    // Let the backend merge all connected gamepads instead of only the first one.
-    sdl3_backend.set_gamepad_mode(&mut imgui, GamepadMode::AutoAll)?;
-
-    // Basic style scaling using the window's display scale.
-    let window_scale = window.display_scale();
-    {
-        let style = imgui.style_mut();
-        style.set_font_scale_dpi(window_scale);
-    }
-
-    let mut last_frame = Instant::now();
-
-    'main: loop {
-        // 1) Pump events: low-level SDL_Event for ImGui backend + high-level Event for us.
-        while let Some(raw) = imgui_sdl3_backend::sdl3_poll_event_ll() {
-            // Feed the official SDL3 backend.
-            let _ = sdl3_backend.process_event(&mut imgui, &raw)?;
-
-            // Convert to high-level Event for our own logic.
-            let event = Event::from_ll(raw);
-            match event {
-                Event::Quit { .. } => break 'main,
-                Event::KeyDown {
-                    keycode: Some(Keycode::Escape),
-                    ..
-                } => break 'main,
-                Event::Window {
-                    win_event: sdl3::event::WindowEvent::CloseRequested,
-                    window_id,
-                    ..
-                } if window_id == window.id() => break 'main,
-                _ => {}
+    fn process_events(&mut self) -> AppResult {
+        while let Some(event) = self.events.pop() {
+            let main = self.main.assert_get_mut();
+            let backend_result = event.with_imgui_event(|raw| match raw {
+                Some(raw) => main.sdl3_backend.process_event(&mut main.imgui, raw),
+                None => Ok(false),
+            });
+            if let Err(error) = backend_result {
+                eprintln!("SDL3 backend event processing failed: {error}");
+                return AppResult::Failure;
+            }
+            if requests_exit(&event, main.window.id()) {
+                return AppResult::Success;
             }
         }
+        AppResult::Continue
+    }
 
-        // 2) Update delta time.
+    fn render(&mut self) -> Result<(), Box<dyn Error>> {
+        let main = self.main.assert_get_mut();
         let now = Instant::now();
-        let dt = (now - last_frame).as_secs_f32();
-        last_frame = now;
-        imgui.io_mut().set_delta_time(dt);
+        main.imgui
+            .io_mut()
+            .set_delta_time((now - main.last_frame).as_secs_f32());
+        main.last_frame = now;
 
-        // 3) Start a new ImGui frame.
-        sdl3_backend.new_frame(&mut imgui)?;
-        let ui = imgui.frame();
-
-        // Create a dockspace over the main viewport so there is always content.
+        main.sdl3_backend.new_frame(&mut main.imgui)?;
+        let ui = main.imgui.frame();
         ui.dockspace_over_main_viewport();
 
-        // Simple test window that you can tear out as a separate OS window.
         ui.window("Main")
             .size([420.0, 260.0], Condition::FirstUseEver)
             .build(|| {
@@ -148,9 +159,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 ui.text("Gamepad: SDL3 backend in AutoAll mode (all controllers merged)");
             });
 
-        // "Game View" window showing a static OpenGL texture. You can drag this
-        // window into other viewports (OS windows), and the same texture will be
-        // rendered there via the official OpenGL backend.
+        let game_tex_id = TextureId::from(main.game_tex.0.get());
         ui.window("Game View")
             .size([420.0, 420.0], Condition::FirstUseEver)
             .build(|| {
@@ -160,37 +169,76 @@ fn main() -> Result<(), Box<dyn Error>> {
                 ui.image(game_tex_id, [side, side]);
             });
 
-        // 4) Render ImGui.
-        let draw_data = imgui.render();
-
-        // Clear the main framebuffer using glow (optional but recommended).
+        let draw_data = main.imgui.render();
         unsafe {
             use glow::HasContext;
 
-            let (w, h) = window.size_in_pixels();
-            gl.viewport(0, 0, w as i32, h as i32);
-            gl.clear_color(0.1, 0.12, 0.15, 1.0);
-            gl.clear(glow::COLOR_BUFFER_BIT);
+            let (width, height) = main.window.size_in_pixels();
+            main.gl.viewport(0, 0, width as i32, height as i32);
+            main.gl.clear_color(0.1, 0.12, 0.15, 1.0);
+            main.gl.clear(glow::COLOR_BUFFER_BIT);
         }
+        main.sdl3_backend.render(draw_data)?;
 
-        sdl3_backend.render(draw_data)?;
-
-        // 5) Optionally render additional platform windows when multi-viewport is enabled.
-        if ENABLE_VIEWPORTS {
-            let io_flags = imgui.io().config_flags();
-            if io_flags.contains(ConfigFlags::VIEWPORTS_ENABLE) {
-                imgui.update_platform_windows();
-                imgui.render_platform_windows_default();
-                let _ = window.gl_make_current(&gl_context);
-            }
+        if ENABLE_VIEWPORTS
+            && main
+                .imgui
+                .io()
+                .config_flags()
+                .contains(ConfigFlags::VIEWPORTS_ENABLE)
+        {
+            main.imgui.update_platform_windows();
+            main.imgui.render_platform_windows_default();
+            main.window.gl_make_current(&main.gl_context)?;
         }
-
-        // Present the main window.
-        window.gl_swap_window();
+        main.window.gl_swap_window();
+        Ok(())
     }
 
-    sdl3_backend.shutdown(&mut imgui)?;
-    Ok(())
+    fn shutdown(&mut self) {
+        let main = self.main.assert_get_mut();
+        if let Err(error) = main.sdl3_backend.shutdown(&mut main.imgui) {
+            eprintln!("SDL3 OpenGL backend shutdown failed: {error}");
+        }
+    }
+}
+
+#[app_impl]
+impl OpenGlApp {
+    fn app_init() -> AppResultWithState<Box<Mutex<Self>>> {
+        match Self::new() {
+            Ok(app) => AppResultWithState::Continue(Box::new(Mutex::new(app))),
+            Err(error) => {
+                eprintln!("failed to initialize SDL3 OpenGL example: {error}");
+                AppResultWithState::Failure(None)
+            }
+        }
+    }
+
+    fn app_iterate(&mut self) -> AppResult {
+        let event_result = self.process_events();
+        if event_result != AppResult::Continue {
+            return event_result;
+        }
+        match self.render() {
+            Ok(()) => AppResult::Continue,
+            Err(error) => {
+                eprintln!("SDL3 OpenGL frame failed: {error}");
+                AppResult::Failure
+            }
+        }
+    }
+
+    fn app_event(&mut self, raw: &sdl3::sys::events::SDL_Event) -> AppResult {
+        self.events.push(raw);
+        AppResult::Continue
+    }
+
+    fn app_quit(state: Option<&mut Self>) {
+        if let Some(app) = state {
+            app.shutdown();
+        }
+    }
 }
 
 /// Create a glow context from an SDL3 `VideoSubsystem`.
@@ -205,38 +253,36 @@ unsafe fn create_glow_context(video: &sdl3::VideoSubsystem) -> glow::Context {
         glow::Context::from_loader_function(|name| {
             video
                 .gl_get_proc_address(name)
-                .map(|f| f as *const c_void)
+                .map(|function| function as *const c_void)
                 .unwrap_or(std::ptr::null())
         })
     }
 }
 
-/// Create a simple gradient texture using raw OpenGL calls via glow.
+/// Create the gradient texture displayed by the game-view window.
 ///
-/// This texture can be used as an ImGui `TextureId` (legacy path) with the
-/// official `imgui_impl_opengl3` backend by casting the GL texture handle
-/// into an integer.
+/// # Safety
+///
+/// The supplied context must be current for the calling thread.
 unsafe fn create_game_texture(gl: &glow::Context) -> glow::Texture {
     use glow::HasContext;
 
     const WIDTH: i32 = 256;
     const HEIGHT: i32 = 256;
 
-    // Generate pixel data on the CPU (simple gradient).
     let mut pixels = Vec::with_capacity((WIDTH * HEIGHT * 4) as usize);
     for y in 0..HEIGHT {
         for x in 0..WIDTH {
-            let r = (x as f32 / WIDTH as f32 * 255.0) as u8;
-            let g = (y as f32 / HEIGHT as f32 * 255.0) as u8;
-            let b = (((x + y) as f32 / (WIDTH + HEIGHT) as f32) * 255.0) as u8;
-            pixels.extend_from_slice(&[r, g, b, 255]);
+            let red = (x as f32 / WIDTH as f32 * 255.0) as u8;
+            let green = (y as f32 / HEIGHT as f32 * 255.0) as u8;
+            let blue = (((x + y) as f32 / (WIDTH + HEIGHT) as f32) * 255.0) as u8;
+            pixels.extend_from_slice(&[red, green, blue, 255]);
         }
     }
 
-    // Create and upload the texture.
-    let tex = unsafe { gl.create_texture() }.expect("failed to create GL texture");
+    let texture = unsafe { gl.create_texture() }.expect("failed to create GL texture");
     unsafe {
-        gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+        gl.bind_texture(glow::TEXTURE_2D, Some(texture));
         gl.tex_parameter_i32(
             glow::TEXTURE_2D,
             glow::TEXTURE_MIN_FILTER,
@@ -257,7 +303,6 @@ unsafe fn create_game_texture(gl: &glow::Context) -> glow::Texture {
             glow::TEXTURE_WRAP_T,
             glow::CLAMP_TO_EDGE as i32,
         );
-
         gl.tex_image_2d(
             glow::TEXTURE_2D,
             0,
@@ -269,8 +314,7 @@ unsafe fn create_game_texture(gl: &glow::Context) -> glow::Texture {
             glow::UNSIGNED_BYTE,
             glow::PixelUnpackData::Slice(Some(&pixels)),
         );
-
         gl.bind_texture(glow::TEXTURE_2D, None);
     }
-    tex
+    texture
 }

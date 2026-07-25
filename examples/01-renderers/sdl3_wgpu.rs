@@ -1,232 +1,243 @@
 //! SDL3 + WGPU renderer example (single window, no multi-viewport).
 //!
 //! This demonstrates driving Dear ImGui with:
-//! - SDL3 for window + events
-//! - WGPU for rendering
-//! - Official SDL3 platform backend (via `dear-imgui-sdl3`)
-//! - Rust WGPU renderer backend (`dear-imgui-wgpu`)
+//! - SDL3 for window + events;
+//! - WGPU for rendering;
+//! - the official SDL3 platform backend via `dear-imgui-sdl3`;
+//! - the Rust WGPU renderer backend, `dear-imgui-wgpu`.
 //!
 //! Run with:
-//!   cargo run -p dear-imgui-examples --bin sdl3_wgpu
+//! `cargo run -p dear-imgui-examples --bin sdl3_wgpu`
 //!
-//! For native multi-viewport, see `sdl3_wgpu_multi_viewport.rs` and run with:
-//!   cargo run -p dear-imgui-examples --bin sdl3_wgpu_multi_viewport --features sdl3-wgpu-multi-viewport
+//! For native multi-viewport, see `sdl3_wgpu_multi_viewport.rs` and run it with the
+//! `sdl3-wgpu-multi-viewport` feature.
 
 use std::error::Error;
+use std::sync::Mutex;
 use std::time::Instant;
 
+use dear_imgui_examples::sdl3_callbacks::{
+    Sdl3CallbackEventQueue, configure_main_callback_rate, requests_exit,
+};
 use dear_imgui_rs::{Condition, ConfigFlags, Context};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode, Sdl3PlatformBackend};
 use dear_imgui_wgpu::{WgpuInitInfo, WgpuRenderer};
-use sdl3::event::Event;
-use sdl3::keyboard::Keycode;
 use sdl3::video::{SwapInterval, WindowPos};
+use sdl3_main::{AppResult, AppResultWithState, MainThreadData, app_impl};
 
-fn main() -> Result<(), Box<dyn Error>> {
-    // Enable native IME UI before creating any SDL3 windows (recommended for IME-heavy locales).
-    imgui_sdl3_backend::enable_native_ime_ui();
+struct WgpuApp {
+    events: Sdl3CallbackEventQueue,
+    main: MainThreadData<MainData>,
+}
 
-    // Initialize SDL3 (video + events).
-    let sdl = sdl3::init()?;
-    let video = sdl.video()?;
+struct MainData {
+    renderer: WgpuRenderer,
+    sdl3_backend: Sdl3PlatformBackend,
+    imgui: Context,
+    surface: wgpu::Surface<'static>,
+    queue: wgpu::Queue,
+    device: wgpu::Device,
+    _adapter: wgpu::Adapter,
+    _instance: wgpu::Instance,
+    surface_config: wgpu::SurfaceConfiguration,
+    window: sdl3::video::Window,
+    _video: sdl3::VideoSubsystem,
+    _sdl: sdl3::Sdl,
+    last_frame: Instant,
+    show_demo: bool,
+}
 
-    // Create a basic window (no GL context needed for WGPU).
-    let main_scale = video
-        .get_primary_display()?
-        .get_content_scale()
-        .unwrap_or(1.0);
+impl WgpuApp {
+    fn new() -> Result<Self, Box<dyn Error>> {
+        configure_main_callback_rate();
+        imgui_sdl3_backend::enable_native_ime_ui();
 
-    let mut window = video
-        .window(
-            "Dear ImGui SDL3 + WGPU",
-            (1200.0 * main_scale) as u32,
-            (720.0 * main_scale) as u32,
-        )
-        .resizable()
-        .high_pixel_density()
-        .build()
-        .map_err(|e| format!("failed to create SDL3 window: {e}"))?;
-    window.set_position(WindowPos::Centered, WindowPos::Centered);
+        let sdl = sdl3::init()?;
+        let video = sdl.video()?;
+        let main_scale = video
+            .get_primary_display()?
+            .get_content_scale()
+            .unwrap_or(1.0);
+        let mut window = video
+            .window(
+                "Dear ImGui SDL3 + WGPU",
+                (1200.0 * main_scale) as u32,
+                (720.0 * main_scale) as u32,
+            )
+            .resizable()
+            .high_pixel_density()
+            .build()
+            .map_err(|error| format!("failed to create SDL3 window: {error}"))?;
+        window.set_position(WindowPos::Centered, WindowPos::Centered);
+        let _ = video.gl_set_swap_interval(SwapInterval::Immediate);
 
-    // Disable vsync at SDL level (WGPU present mode controls timing).
-    let _ = video.gl_set_swap_interval(SwapInterval::Immediate);
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::PRIMARY,
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
+        });
+        // SAFETY: the retained SDL3 window stays valid until after this surface is dropped.
+        let surface = unsafe {
+            instance.create_surface_unsafe(
+                wgpu::SurfaceTargetUnsafe::from_display_and_window(&window, &window)
+                    .expect("failed to create SurfaceTarget from SDL3 window"),
+            )?
+        };
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: Some(&surface),
+            apply_limit_buckets: false,
+            force_fallback_adapter: false,
+        }))
+        .expect("failed to find suitable WGPU adapter");
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))?;
 
-    // Initialize WGPU instance, surface, device and queue.
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-        backends: wgpu::Backends::PRIMARY,
-        ..wgpu::InstanceDescriptor::new_without_display_handle()
-    });
+        let (width, height) = window.size_in_pixels();
+        let capabilities = surface.get_capabilities(&adapter);
+        let preferred_srgb = [
+            wgpu::TextureFormat::Bgra8UnormSrgb,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+        ];
+        let format = preferred_srgb
+            .iter()
+            .copied()
+            .find(|format| capabilities.formats.contains(format))
+            .unwrap_or(capabilities.formats[0]);
+        let surface_config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format,
+            color_space: wgpu::SurfaceColorSpace::Auto,
+            width,
+            height,
+            present_mode: wgpu::PresentMode::Fifo,
+            alpha_mode: wgpu::CompositeAlphaMode::Auto,
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+        surface.configure(&device, &surface_config);
 
-    // SAFETY: SDL3 window handle is valid for the duration of the surface.
-    let surface = unsafe {
-        instance.create_surface_unsafe(
-            wgpu::SurfaceTargetUnsafe::from_display_and_window(&window, &window)
-                .expect("failed to create SurfaceTarget from SDL3 window"),
-        )?
-    };
+        let mut imgui = Context::create();
+        imgui.set_ini_filename(None::<String>)?;
+        {
+            let io = imgui.io_mut();
+            let mut flags = io.config_flags();
+            flags.insert(ConfigFlags::NAV_ENABLE_KEYBOARD);
+            flags.insert(ConfigFlags::NAV_ENABLE_GAMEPAD);
+            io.set_config_flags(flags);
+            imgui.style_mut().set_font_scale_dpi(main_scale);
+        }
+        // SAFETY: the retained window outlives explicit platform shutdown.
+        let mut sdl3_backend = unsafe { Sdl3PlatformBackend::init_for_other(&mut imgui, &window)? };
+        sdl3_backend.set_gamepad_mode(&mut imgui, GamepadMode::AutoAll)?;
+        let renderer = WgpuRenderer::new(
+            WgpuInitInfo::new(device.clone(), queue.clone(), surface_config.format),
+            &mut imgui,
+        )?;
 
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        power_preference: wgpu::PowerPreference::HighPerformance,
-        compatible_surface: Some(&surface),
-        apply_limit_buckets: false,
-        force_fallback_adapter: false,
-    }))
-    .expect("failed to find suitable WGPU adapter");
-
-    let (device, queue) =
-        pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))?;
-
-    // Configure surface using the window's backing pixel size.
-    let (width, height) = window.size_in_pixels();
-    let caps = surface.get_capabilities(&adapter);
-    let preferred_srgb = [
-        wgpu::TextureFormat::Bgra8UnormSrgb,
-        wgpu::TextureFormat::Rgba8UnormSrgb,
-    ];
-    let format = preferred_srgb
-        .iter()
-        .cloned()
-        .find(|f| caps.formats.contains(f))
-        .unwrap_or(caps.formats[0]);
-
-    let mut surface_config = wgpu::SurfaceConfiguration {
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        format,
-        color_space: wgpu::SurfaceColorSpace::Auto,
-        width,
-        height,
-        present_mode: wgpu::PresentMode::Fifo,
-        alpha_mode: wgpu::CompositeAlphaMode::Auto,
-        view_formats: vec![],
-        desired_maximum_frame_latency: 2,
-    };
-    surface.configure(&device, &surface_config);
-
-    // Dear ImGui context.
-    let mut imgui = Context::create();
-    imgui.set_ini_filename(None::<String>)?;
-
-    // Enable basic navigation and scale style/fonts using the display scale.
-    {
-        let io = imgui.io_mut();
-        let mut flags = io.config_flags();
-        flags.insert(ConfigFlags::NAV_ENABLE_KEYBOARD);
-        flags.insert(ConfigFlags::NAV_ENABLE_GAMEPAD);
-        io.set_config_flags(flags);
-
-        let style = imgui.style_mut();
-        style.set_font_scale_dpi(main_scale);
+        Ok(Self {
+            events: Sdl3CallbackEventQueue::default(),
+            main: MainThreadData::assert_new(MainData {
+                renderer,
+                sdl3_backend,
+                imgui,
+                surface,
+                queue,
+                device,
+                _adapter: adapter,
+                _instance: instance,
+                surface_config,
+                window,
+                _video: video,
+                _sdl: sdl,
+                last_frame: Instant::now(),
+                show_demo: true,
+            }),
+        })
     }
 
-    // Initialize SDL3 platform backend (for "other" renderer).
-    // SAFETY: `window` outlives explicit shutdown and Context teardown on early return.
-    let mut sdl3_backend = unsafe { Sdl3PlatformBackend::init_for_other(&mut imgui, &window)? };
-    // Use AutoAll so all connected gamepads are merged into ImGui's gamepad state.
-    sdl3_backend.set_gamepad_mode(&mut imgui, GamepadMode::AutoAll)?;
-
-    // Initialize WGPU renderer backend.
-    let init_info = WgpuInitInfo::new(device.clone(), queue.clone(), surface_config.format);
-    let mut renderer = WgpuRenderer::new(init_info, &mut imgui)?;
-
-    let mut last_frame = Instant::now();
-    let mut show_demo = true;
-
-    'running: loop {
-        // Handle events (both for ImGui via SDL3 backend and our own logic).
-        while let Some(raw) = imgui_sdl3_backend::sdl3_poll_event_ll() {
-            // Feed ImGui SDL3 backend.
-            let _ = sdl3_backend.process_event(&mut imgui, &raw)?;
-
-            // Convert to high-level Event for application logic.
-            let event = Event::from_ll(raw);
-            match event {
-                Event::Quit { .. } => break 'running,
-                Event::KeyDown {
-                    keycode: Some(Keycode::Escape),
-                    ..
-                } => break 'running,
-                Event::Window {
-                    win_event: sdl3::event::WindowEvent::CloseRequested,
-                    window_id,
-                    ..
-                } if window_id == window.id() => break 'running,
-                Event::Window {
-                    win_event: sdl3::event::WindowEvent::PixelSizeChanged(_, _),
-                    window_id,
-                    ..
-                } if window_id == window.id() => {
-                    // Reconfigure WGPU surface when window pixel size changes.
-                    let (w, h) = window.size_in_pixels();
-                    if w > 0 && h > 0 {
-                        surface_config.width = w;
-                        surface_config.height = h;
-                        surface.configure(&device, &surface_config);
-                    }
-                }
-                _ => {}
+    fn process_events(&mut self) -> AppResult {
+        while let Some(event) = self.events.pop() {
+            let main = self.main.assert_get_mut();
+            let backend_result = event.with_imgui_event(|raw| match raw {
+                Some(raw) => main.sdl3_backend.process_event(&mut main.imgui, raw),
+                None => Ok(false),
+            });
+            if let Err(error) = backend_result {
+                eprintln!("SDL3 backend event processing failed: {error}");
+                return AppResult::Failure;
+            }
+            if requests_exit(&event, main.window.id()) {
+                return AppResult::Success;
+            }
+            if event.is_pixel_size_changed_for(main.window.id()) {
+                Self::reconfigure_surface(main);
             }
         }
+        AppResult::Continue
+    }
 
-        // Update delta time.
+    fn reconfigure_surface(main: &mut MainData) {
+        let (width, height) = main.window.size_in_pixels();
+        if width > 0 && height > 0 {
+            main.surface_config.width = width;
+            main.surface_config.height = height;
+            main.surface.configure(&main.device, &main.surface_config);
+        }
+    }
+
+    fn render(&mut self) -> Result<(), Box<dyn Error>> {
+        let main = self.main.assert_get_mut();
         let now = Instant::now();
-        let dt = (now - last_frame).as_secs_f32();
-        last_frame = now;
-        imgui.io_mut().set_delta_time(dt);
-
-        // Start a new ImGui frame.
-        sdl3_backend.new_frame(&mut imgui)?;
-        let ui = imgui.frame();
-
-        // Basic UI: show demo window and a small control window.
+        main.imgui
+            .io_mut()
+            .set_delta_time((now - main.last_frame).as_secs_f32());
+        main.last_frame = now;
+        main.sdl3_backend.new_frame(&mut main.imgui)?;
+        let ui = main.imgui.frame();
         ui.window("SDL3 + WGPU")
             .size([400.0, 200.0], Condition::FirstUseEver)
             .build(|| {
                 ui.text("Dear ImGui running on SDL3 + WGPU");
                 ui.separator();
-                ui.checkbox("Show demo window", &mut show_demo);
-
+                ui.checkbox("Show demo window", &mut main.show_demo);
                 ui.text("Gamepad: SDL3 backend in AutoAll mode (all controllers merged)");
-
                 ui.text(format!(
                     "Application average {:.3} ms/frame ({:.1} FPS)",
                     1000.0 / ui.io().framerate(),
                     ui.io().framerate()
                 ));
             });
-
-        if show_demo {
-            ui.show_demo_window(&mut show_demo);
+        if main.show_demo {
+            ui.show_demo_window(&mut main.show_demo);
         }
+        let draw_data = main.imgui.render();
 
-        let draw_data = imgui.render();
-
-        // Acquire next frame from the WGPU surface.
-        let (frame, reconfigure_after_present) = match surface.get_current_texture() {
+        let (frame, reconfigure_after_present) = match main.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
             wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
             wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
-                surface.configure(&device, &surface_config);
-                continue;
+                drop(draw_data);
+                Self::reconfigure_surface(main);
+                return Ok(());
             }
             wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
-                continue;
+                drop(draw_data);
+                return Ok(());
             }
             wgpu::CurrentSurfaceTexture::Validation => {
                 return Err("surface acquisition failed with a WGPU validation error".into());
             }
         };
-
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
-
-        // Record ImGui draw calls into WGPU command buffer.
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("sdl3_wgpu_encoder"),
-        });
-
+        let mut encoder = main
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("sdl3_wgpu_encoder"),
+            });
         {
-            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("sdl3_wgpu_render_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
@@ -247,24 +258,67 @@ fn main() -> Result<(), Box<dyn Error>> {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-
-            renderer.new_frame()?;
-            renderer.render_with_fb_size(
+            main.renderer.new_frame()?;
+            main.renderer.render_with_fb_size(
                 draw_data,
-                &mut rpass,
-                surface_config.width,
-                surface_config.height,
+                &mut render_pass,
+                main.surface_config.width,
+                main.surface_config.height,
             )?;
         }
-
-        queue.submit(std::iter::once(encoder.finish()));
-        queue.present(frame);
+        main.queue.submit(std::iter::once(encoder.finish()));
+        main.queue.present(frame);
         if reconfigure_after_present {
-            surface.configure(&device, &surface_config);
+            Self::reconfigure_surface(main);
+        }
+        Ok(())
+    }
+
+    fn shutdown(&mut self) {
+        let main = self.main.assert_get_mut();
+        if let Err(error) = main.renderer.shutdown(&mut main.imgui) {
+            eprintln!("WGPU renderer shutdown failed: {error}");
+        }
+        if let Err(error) = main.sdl3_backend.shutdown(&mut main.imgui) {
+            eprintln!("SDL3 platform backend shutdown failed: {error}");
+        }
+    }
+}
+
+#[app_impl]
+impl WgpuApp {
+    fn app_init() -> AppResultWithState<Box<Mutex<Self>>> {
+        match Self::new() {
+            Ok(app) => AppResultWithState::Continue(Box::new(Mutex::new(app))),
+            Err(error) => {
+                eprintln!("failed to initialize SDL3 WGPU example: {error}");
+                AppResultWithState::Failure(None)
+            }
         }
     }
 
-    renderer.shutdown(&mut imgui)?;
-    sdl3_backend.shutdown(&mut imgui)?;
-    Ok(())
+    fn app_iterate(&mut self) -> AppResult {
+        let event_result = self.process_events();
+        if event_result != AppResult::Continue {
+            return event_result;
+        }
+        match self.render() {
+            Ok(()) => AppResult::Continue,
+            Err(error) => {
+                eprintln!("SDL3 WGPU frame failed: {error}");
+                AppResult::Failure
+            }
+        }
+    }
+
+    fn app_event(&mut self, raw: &sdl3::sys::events::SDL_Event) -> AppResult {
+        self.events.push(raw);
+        AppResult::Continue
+    }
+
+    fn app_quit(state: Option<&mut Self>) {
+        if let Some(app) = state {
+            app.shutdown();
+        }
+    }
 }

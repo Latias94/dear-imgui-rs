@@ -4,111 +4,168 @@
 //!   cargo run -p dear-imgui-examples --bin sdl3_sdlrenderer --features sdl3-sdlrenderer3
 
 use std::error::Error;
+use std::sync::Mutex;
 
+use dear_imgui_examples::sdl3_callbacks::{
+    Sdl3CallbackEventQueue, configure_main_callback_rate, requests_exit,
+};
 use dear_imgui_rs::{Condition, Context};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, Sdl3RendererBackend};
-
-use sdl3::event::Event;
-use sdl3::keyboard::Keycode;
 use sdl3::pixels::Color;
+use sdl3::{Sdl, VideoSubsystem};
+use sdl3_main::{AppResult, AppResultWithState, MainThreadData, app_impl};
 
-fn main() -> Result<(), Box<dyn Error>> {
-    // Enable VSYNC on Renderer
-    sdl3::hint::set(sdl3::hint::names::RENDER_VSYNC, "1");
+struct SdlRendererApp {
+    main: MainThreadData<MainData>,
+    events: Sdl3CallbackEventQueue,
+}
 
-    // Enable native IME UI before creating any SDL3 windows (recommended for IME-heavy locales).
-    imgui_sdl3_backend::enable_native_ime_ui();
+struct MainData {
+    sdl3_backend: Sdl3RendererBackend,
+    imgui: Context,
+    canvas: sdl3::render::Canvas<sdl3::video::Window>,
+    _video: VideoSubsystem,
+    _sdl: Sdl,
+    show_demo: bool,
+    show_debug: bool,
+    show_about: bool,
+}
 
-    // Initialize SDL3
-    let sdl_ctx = sdl3::init()?;
-    let video = sdl_ctx.video()?;
+impl SdlRendererApp {
+    fn new() -> Result<Self, Box<dyn Error>> {
+        configure_main_callback_rate();
+        sdl3::hint::set(sdl3::hint::names::RENDER_VSYNC, "1");
+        imgui_sdl3_backend::enable_native_ime_ui();
 
-    let main_scale = video
-        .get_primary_display()?
-        .get_content_scale()
-        .unwrap_or(1.0);
-    let window = video
-        .window(
-            "SDL Test",
-            (1200.0 * main_scale) as u32,
-            (720.0 * main_scale) as u32,
-        )
-        .position_centered()
-        .resizable()
-        .high_pixel_density()
-        .build()?;
+        let sdl_ctx = sdl3::init()?;
+        let video = sdl_ctx.video()?;
+        let main_scale = video
+            .get_primary_display()?
+            .get_content_scale()
+            .unwrap_or(1.0);
+        let window = video
+            .window(
+                "SDL Test",
+                (1200.0 * main_scale) as u32,
+                (720.0 * main_scale) as u32,
+            )
+            .position_centered()
+            .resizable()
+            .high_pixel_density()
+            .build()?;
 
-    // Create renderer/canvas
-    let mut canvas = window.into_canvas();
-
-    canvas.set_draw_color(Color::RGB(0, 255, 255));
-    canvas.clear();
-    canvas.present();
-
-    //IMGUI Context
-    let mut imgui = Context::create();
-    imgui.set_ini_filename(None::<String>)?;
-    imgui.set_log_filename(None::<String>)?;
-
-    // SAFETY: `canvas` owns the Window and SDL_Renderer through shutdown or Context teardown.
-    let mut sdl3_backend =
-        unsafe { Sdl3RendererBackend::init(&mut imgui, canvas.window(), &canvas)? };
-
-    let mut show_demo = false;
-    let mut show_debug = false;
-    let mut show_about = false;
-
-    'running: loop {
+        let mut canvas = window.into_canvas();
+        canvas.set_draw_color(Color::RGB(0, 255, 255));
         canvas.clear();
+        canvas.present();
 
-        //input
-        while let Some(raw) = imgui_sdl3_backend::sdl3_poll_event_ll() {
-            if sdl3_backend.process_event(&mut imgui, &raw)? {
-                //event was processed by imgui... we coudlshortcut the loop here
-            }
-            let event = Event::from_ll(raw);
-            match event {
-                Event::Quit { .. }
-                | Event::KeyDown {
-                    keycode: Some(Keycode::Escape),
-                    ..
-                } => {
-                    break 'running;
+        let mut imgui = Context::create();
+        imgui.set_ini_filename(None::<String>)?;
+        imgui.set_log_filename(None::<String>)?;
+
+        // SAFETY: `canvas` owns the Window and SDL_Renderer through shutdown or Context teardown.
+        let sdl3_backend =
+            unsafe { Sdl3RendererBackend::init(&mut imgui, canvas.window(), &canvas)? };
+
+        Ok(Self {
+            main: MainThreadData::assert_new(MainData {
+                sdl3_backend,
+                imgui,
+                canvas,
+                _video: video,
+                _sdl: sdl_ctx,
+                show_demo: false,
+                show_debug: false,
+                show_about: false,
+            }),
+            events: Sdl3CallbackEventQueue::default(),
+        })
+    }
+
+    fn iterate(&mut self) -> Result<AppResult, Box<dyn Error>> {
+        let Self { main, events } = self;
+        let main = main.assert_get_mut();
+        while let Some(event) = events.pop() {
+            event.with_imgui_event(|raw| -> Result<(), Box<dyn Error>> {
+                if let Some(raw) = raw {
+                    let _ = main.sdl3_backend.process_event(&mut main.imgui, raw)?;
                 }
-                _ => (),
+                Ok(())
+            })?;
+            if requests_exit(&event, main.canvas.window().id()) {
+                return Ok(AppResult::Success);
             }
         }
 
-        sdl3_backend.new_frame(&mut imgui)?;
-        let ui = imgui.frame();
+        main.canvas.clear();
+        main.sdl3_backend.new_frame(&mut main.imgui)?;
+        let ui = main.imgui.frame();
 
         ui.window("SDL3 + IMGUI")
             .size([400.0, 200.0], Condition::FirstUseEver)
             .build(|| {
                 ui.text("Dear ImGui running on SDL3 + SDL_Renderer");
                 ui.separator();
-                ui.checkbox("Show demo window", &mut show_demo);
-                ui.checkbox("Show debug log window", &mut show_debug);
-                ui.checkbox("Show about window", &mut show_about);
+                ui.checkbox("Show demo window", &mut main.show_demo);
+                ui.checkbox("Show debug log window", &mut main.show_debug);
+                ui.checkbox("Show about window", &mut main.show_about);
             });
 
-        if show_demo {
-            ui.show_demo_window(&mut show_demo);
+        if main.show_demo {
+            ui.show_demo_window(&mut main.show_demo);
         }
-        if show_debug {
-            ui.show_debug_log_window(&mut show_debug);
+        if main.show_debug {
+            ui.show_debug_log_window(&mut main.show_debug);
         }
-        if show_about {
-            ui.show_about_window(&mut show_about);
+        if main.show_about {
+            ui.show_about_window(&mut main.show_about);
         }
 
-        //update/render
-        let draw_data = imgui.render();
-        sdl3_backend.render(draw_data, &canvas)?;
+        let draw_data = main.imgui.render();
+        main.sdl3_backend.render(draw_data, &main.canvas)?;
+        main.canvas.present();
 
-        canvas.present();
+        Ok(AppResult::Continue)
     }
 
-    sdl3_backend.shutdown(&mut imgui)?;
-    Ok(())
+    fn shutdown(&mut self) {
+        let main = self.main.assert_get_mut();
+        if let Err(error) = main.sdl3_backend.shutdown(&mut main.imgui) {
+            eprintln!("SDL3 SDLRenderer backend shutdown failed: {error}");
+        }
+    }
+}
+
+#[app_impl]
+impl SdlRendererApp {
+    fn app_init() -> AppResultWithState<Box<Mutex<Self>>> {
+        match Self::new() {
+            Ok(app) => AppResultWithState::Continue(Box::new(Mutex::new(app))),
+            Err(error) => {
+                eprintln!("failed to initialize SDL3 SDLRenderer example: {error}");
+                AppResultWithState::Failure(None)
+            }
+        }
+    }
+
+    fn app_iterate(&mut self) -> AppResult {
+        match self.iterate() {
+            Ok(result) => result,
+            Err(error) => {
+                eprintln!("SDL3 SDLRenderer frame failed: {error}");
+                AppResult::Failure
+            }
+        }
+    }
+
+    fn app_event(&mut self, raw: &sdl3::sys::events::SDL_Event) -> AppResult {
+        self.events.push(raw);
+        AppResult::Continue
+    }
+
+    fn app_quit(state: Option<&mut Self>) {
+        if let Some(app) = state {
+            app.shutdown();
+        }
+    }
 }

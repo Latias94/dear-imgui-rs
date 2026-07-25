@@ -68,6 +68,8 @@ sdl3-ash-multi-viewport = [
 sdl3-platform = [
     "dep:sdl3",
     "dep:dear-imgui-sdl3",
+    "dep:sdl3-main",
+    "sdl3/main",
 ]
 
 # SDL3 + official OpenGL3 renderer backend.
@@ -88,13 +90,13 @@ sdl3-sdlgpu3 = [
     "dear-imgui-sdl3/sdlgpu3-renderer",
 ]
 
-# SDL main callbacks keep the application frame running during native live move/resize loops.
+# SDL main callbacks keep every SDL3 application frame running during native live move/resize
+# loops. The shared event queue forwards callback-thread events to the main thread before
+# touching an ImGui context or renderer.
 sdl3-gpu-multi-viewport = [
     "sdl3-sdlgpu3",
     "dear-imgui-rs/multi-viewport",
     "dear-imgui-sdl3/multi-viewport",
-    "dep:sdl3-main",
-    "sdl3/main",
 ]
 
 [[bin]]
