@@ -68,6 +68,8 @@ sdl3-ash-multi-viewport = [
 sdl3-platform = [
     "dep:sdl3",
     "dep:dear-imgui-sdl3",
+    "dep:sdl3-main",
+    "sdl3/main",
 ]
 
 # SDL3 + official OpenGL3 renderer backend.
@@ -88,9 +90,13 @@ sdl3-sdlgpu3 = [
     "dear-imgui-sdl3/sdlgpu3-renderer",
 ]
 
+# SDL main callbacks keep every SDL3 application frame running during native live move/resize
+# loops. The shared event queue forwards callback-thread events to the main thread before
+# touching an ImGui context or renderer.
 sdl3-gpu-multi-viewport = [
     "sdl3-sdlgpu3",
-    "multi-viewport"
+    "dear-imgui-rs/multi-viewport",
+    "dear-imgui-sdl3/multi-viewport",
 ]
 
 [[bin]]
@@ -308,7 +314,7 @@ required-features = ["test-engine"]
 [[bin]]
 name = "sdl3_sdlgpu_multi_view"
 path = "02-docking/sdl3_sdlgpu_multi_view.rs"
-required-features = ["sdl3-sdlgpu3", "multi-viewport"]
+required-features = ["sdl3-gpu-multi-viewport"]
 
 [dependencies]
 dear-imgui-rs.workspace = true
@@ -328,6 +334,7 @@ dear-implot3d = { workspace = true, optional = true }
 dear-file-browser = { workspace = true, optional = true }
 dear-imgui-reflect = { workspace = true, optional = true, features = ["glam"] }
 dear-imgui-test-engine = { workspace = true, optional = true }
+sdl3-main = { version = "0.6", optional = true }
 wgpu = { workspace = true }
 winit = { workspace = true }
 glam = { workspace = true }

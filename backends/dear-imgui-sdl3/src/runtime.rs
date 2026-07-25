@@ -794,16 +794,6 @@ impl RuntimeControl {
             .and_then(PlatformCallbackOwnership::original_create_window)
     }
 
-    pub(super) fn original_platform_callback<R: Copy>(
-        &self,
-        select: impl FnOnce(&sys::ImGuiPlatformIO) -> R,
-    ) -> Option<R> {
-        self.callbacks
-            .borrow()
-            .as_ref()
-            .map(|callbacks| callbacks.select_original(select))
-    }
-
     pub(super) fn original_destroy_window(
         &self,
     ) -> Option<unsafe extern "C" fn(*mut sys::ImGuiViewport)> {
@@ -858,13 +848,19 @@ impl RuntimeControl {
             .and_then(RendererCallbackOwnership::original_render_window)
     }
 
-    pub(super) fn original_renderer_set_window_size(
+    pub(super) fn invoke_original_renderer_set_window_size(
         &self,
-    ) -> Option<unsafe extern "C" fn(*mut sys::ImGuiViewport, sys::ImVec2_c)> {
-        self.renderer_callbacks
+        viewport: *mut sys::ImGuiViewport,
+        size: *const sys::ImVec2,
+    ) {
+        let invocation = self
+            .renderer_callbacks
             .borrow()
             .as_ref()
-            .and_then(RendererCallbackOwnership::original_set_window_size)
+            .map(RendererCallbackOwnership::original_set_window_size_invocation);
+        if let Some(invocation) = invocation {
+            invocation.invoke(viewport, size);
+        }
     }
 
     pub(super) fn original_renderer_swap_buffers(
@@ -1732,6 +1728,7 @@ mod tests {
         static PLATFORM_SWAP_COUNT: Cell<usize> = const { Cell::new(0) };
         static RENDERER_RENDER_COUNT: Cell<usize> = const { Cell::new(0) };
         static RENDERER_SET_SIZE_COUNT: Cell<usize> = const { Cell::new(0) };
+        static RENDERER_POINTER_SET_SIZE: Cell<(u32, u32)> = const { Cell::new((0, 0)) };
         static OWNED_RENDERER_DESTROY_COUNT: Cell<usize> = const { Cell::new(0) };
         static FOREIGN_RENDERER_DESTROY_COUNT: Cell<usize> = const { Cell::new(0) };
         static RENDERER_DESTROY_OBSERVED_USER_DATA: Cell<usize> = const { Cell::new(0) };
@@ -1826,6 +1823,33 @@ mod tests {
         _viewport: *mut sys::ImGuiViewport,
         _size: sys::ImVec2_c,
     ) {
+    }
+
+    #[cfg(any(
+        feature = "opengl3-renderer",
+        feature = "sdlrenderer3-renderer",
+        feature = "sdlgpu3-renderer"
+    ))]
+    unsafe extern "C" fn foreign_renderer_set_window_size_pointer(
+        _viewport: *mut sys::ImGuiViewport,
+        _size: *const sys::ImVec2,
+    ) {
+    }
+
+    #[cfg(any(
+        feature = "opengl3-renderer",
+        feature = "sdlrenderer3-renderer",
+        feature = "sdlgpu3-renderer"
+    ))]
+    unsafe extern "C" fn recording_renderer_set_window_size_pointer(
+        _viewport: *mut sys::ImGuiViewport,
+        size: *const sys::ImVec2,
+    ) {
+        if let Some(size) = unsafe { size.as_ref() } {
+            RENDERER_POINTER_SET_SIZE.with(|recorded| {
+                recorded.set((size.x.to_bits(), size.y.to_bits()));
+            });
+        }
     }
 
     unsafe extern "C" fn synthetic_platform_render_window(
@@ -2067,6 +2091,20 @@ mod tests {
         feature = "sdlgpu3-renderer"
     ))]
     fn synthetic_renderer_registration(context: &mut Context) -> RuntimeRegistration {
+        synthetic_renderer_registration_with_pointer_callback(context, None)
+    }
+
+    #[cfg(any(
+        feature = "opengl3-renderer",
+        feature = "sdlrenderer3-renderer",
+        feature = "sdlgpu3-renderer"
+    ))]
+    fn synthetic_renderer_registration_with_pointer_callback(
+        context: &mut Context,
+        original_pointer_callback: Option<
+            unsafe extern "C" fn(*mut sys::ImGuiViewport, *const sys::ImVec2),
+        >,
+    ) -> RuntimeRegistration {
         #[cfg(feature = "opengl3-renderer")]
         let native_renderer = NativeRendererKind::OpenGl3;
         #[cfg(all(not(feature = "opengl3-renderer"), feature = "sdlrenderer3-renderer"))]
@@ -2122,6 +2160,12 @@ mod tests {
             (*platform_io).Renderer_RenderWindow = Some(synthetic_renderer_render_window);
             (*platform_io).Renderer_DestroyWindow = Some(synthetic_renderer_destroy_window);
             (*platform_io).Renderer_SetWindowSize = Some(synthetic_renderer_set_window_size);
+            if let Some(original_pointer_callback) = original_pointer_callback {
+                sys::ImGuiPlatformIO_Set_Renderer_SetWindowSize_PointerParam(
+                    platform_io,
+                    Some(original_pointer_callback),
+                );
+            }
             (*main_viewport).PlatformUserData = OWNED_VIEWPORT_DATA as *mut _;
             (*main_viewport).PlatformHandle = OWNED_VIEWPORT_HANDLE as *mut _;
         });
@@ -3078,12 +3122,6 @@ mod tests {
         assert!(matches!(
             runtime.poll_fault(),
             Err(Sdl3BackendError::PlatformStateReplaced {
-                field: "Platform_ClipboardUserData"
-            })
-        ));
-        assert!(matches!(
-            runtime.poll_fault(),
-            Err(Sdl3BackendError::PlatformStateReplaced {
                 field: "BackendPlatformUserData"
             })
         ));
@@ -3302,6 +3340,101 @@ mod tests {
         feature = "sdlgpu3-renderer"
     ))]
     #[test]
+    fn pointer_callback_replacement_survives_renderer_shutdown() {
+        let _guard = crate::tests::test_guard();
+        let mut context = Context::create();
+        let mut registration = synthetic_renderer_registration(&mut context);
+
+        context.binding().with_bound_context(|| unsafe {
+            sys::ImGuiPlatformIO_Set_Renderer_SetWindowSize_PointerParam(
+                sys::igGetPlatformIO_Nil(),
+                Some(foreign_renderer_set_window_size_pointer),
+            );
+        });
+
+        assert!(matches!(
+            registration.poll_fault(),
+            Err(Sdl3BackendError::RendererCallbackReplaced {
+                callback: "Renderer_SetWindowSize"
+            })
+        ));
+
+        let shutdown = registration.shutdown_platform(&mut context);
+        assert!(matches!(
+            shutdown,
+            Ok(())
+                | Err(Sdl3BackendError::RendererCallbackReplaced {
+                    callback: "Renderer_SetWindowSize"
+                })
+        ));
+
+        context.binding().with_bound_context(|| unsafe {
+            let platform_io = sys::igGetPlatformIO_Nil();
+            let restored = sys::ImGuiPlatformIO_RendererSetWindowSizePointerParam(platform_io)
+                .expect("foreign pointer callback must survive SDL3 teardown");
+            assert!(std::ptr::fn_addr_eq(
+                restored,
+                foreign_renderer_set_window_size_pointer
+                    as unsafe extern "C" fn(*mut sys::ImGuiViewport, *const sys::ImVec2),
+            ));
+            sys::ImGuiPlatformIO_Set_Renderer_SetWindowSize_PointerParam(platform_io, None);
+        });
+    }
+
+    #[cfg(any(
+        feature = "opengl3-renderer",
+        feature = "sdlrenderer3-renderer",
+        feature = "sdlgpu3-renderer"
+    ))]
+    #[test]
+    fn pointer_original_callback_is_invoked() {
+        let _guard = crate::tests::test_guard();
+        RENDERER_POINTER_SET_SIZE.with(|recorded| recorded.set((0, 0)));
+        let mut context = Context::create();
+        let mut registration = synthetic_renderer_registration_with_pointer_callback(
+            &mut context,
+            Some(recording_renderer_set_window_size_pointer),
+        );
+
+        let mut viewport = sys::ImGuiViewport {
+            PlatformUserData: OWNED_VIEWPORT_DATA as *mut _,
+            PlatformHandle: OWNED_VIEWPORT_HANDLE as *mut _,
+            RendererUserData: OWNED_BACKEND_DATA as *mut _,
+            ..Default::default()
+        };
+        registration
+            .control
+            .remember_owned_viewport(&mut viewport, unsafe {
+                ViewportPlatformState::capture(&viewport)
+            });
+        registration
+            .control
+            .remember_owned_renderer_viewport(&mut viewport, viewport.RendererUserData);
+        let size = sys::ImVec2_c { x: 320.0, y: 240.0 };
+        context.binding().with_bound_context(|| unsafe {
+            renderer_set_window_size_callback_for_test(&mut viewport, &size)
+        });
+        assert_eq!(
+            RENDERER_POINTER_SET_SIZE.with(Cell::get),
+            (size.x.to_bits(), size.y.to_bits())
+        );
+
+        assert!(registration.shutdown_platform(&mut context).is_ok());
+        context.binding().with_bound_context(|| unsafe {
+            let platform_io = sys::igGetPlatformIO_Nil();
+            assert!(
+                sys::ImGuiPlatformIO_RendererSetWindowSizePointerParam(platform_io).is_none(),
+                "the original native renderer callback must not outlive its renderer teardown"
+            );
+        });
+    }
+
+    #[cfg(any(
+        feature = "opengl3-renderer",
+        feature = "sdlrenderer3-renderer",
+        feature = "sdlgpu3-renderer"
+    ))]
+    #[test]
     fn native_renderer_shutdown_preserves_foreign_callback_and_backend_replacements() {
         let _guard = crate::tests::test_guard();
         RENDERER_RENDER_COUNT.with(|count| count.set(0));
@@ -3438,11 +3571,9 @@ mod tests {
         registration
             .control
             .remember_owned_renderer_viewport(&mut owned_viewport, owned_viewport.RendererUserData);
+        let size = sys::ImVec2_c { x: 320.0, y: 240.0 };
         context.binding().with_bound_context(|| unsafe {
-            renderer_set_window_size_callback_for_test(
-                &mut owned_viewport,
-                sys::ImVec2_c { x: 320.0, y: 240.0 },
-            )
+            renderer_set_window_size_callback_for_test(&mut owned_viewport, &size)
         });
         assert_eq!(RENDERER_SET_SIZE_COUNT.with(Cell::get), 1);
 

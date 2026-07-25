@@ -28,15 +28,15 @@ CLI = importlib.import_module("verify_packaged_core")
 
 
 PROFILE_FEATURES = {
-    "normal": "platform-io-aggregate-hooks,safe-demo-font-boundary-v1,wchar32",
+    "normal": "platform-io-aggregate-hooks-v2,safe-demo-font-boundary-v1,wchar32",
     "freetype": (
-        "freetype,platform-io-aggregate-hooks,safe-demo-font-boundary-v1,wchar32"
+        "freetype,platform-io-aggregate-hooks-v2,safe-demo-font-boundary-v1,wchar32"
     ),
     "stack-layout": (
-        "platform-io-aggregate-hooks,safe-demo-font-boundary-v1,stack-layout,wchar32"
+        "platform-io-aggregate-hooks-v2,safe-demo-font-boundary-v1,stack-layout,wchar32"
     ),
     "stack-layout-freetype": (
-        "freetype,platform-io-aggregate-hooks,safe-demo-font-boundary-v1,stack-layout,wchar32"
+        "freetype,platform-io-aggregate-hooks-v2,safe-demo-font-boundary-v1,stack-layout,wchar32"
     ),
 }
 CANDIDATE_SHA = "cccccccccccccccccccccccccccccccccccccccc"
@@ -69,8 +69,14 @@ def write_prebuilt_archive(
     suffix: str = "",
     candidate_sha: str | None = CANDIDATE_SHA,
     version: str = "0.16.0",
+    artifact_features: str | None = None,
 ) -> Path:
     path = directory / f"dear-imgui-{profile}{suffix}.tar.gz"
+    selected_features = (
+        artifact_features
+        if artifact_features is not None
+        else PROFILE_FEATURES[profile]
+    )
     manifest = "\n".join(
         (
             "dear-imgui prebuilt",
@@ -83,7 +89,7 @@ def write_prebuilt_archive(
             f"target={target}",
             "link=static",
             f"crt={crt}",
-            f"features={PROFILE_FEATURES[profile]}",
+            f"features={selected_features}",
             "cimgui_revision=1261b231939fc210032f30c4ee8a8f0440372237",
             "imgui_revision=b61e56346a92cfcaf1f43a545ca37b0b32239654",
             "binding_spec_hash=fnv1a64:0123456789abcdef",
@@ -242,6 +248,29 @@ class PrebuiltArchiveSelectionTests(unittest.TestCase):
                     profile_scope="base",
                 )
 
+    def test_rejects_legacy_aggregate_hook_profile_before_link(self):
+        with TemporaryDirectory() as temporary:
+            package_dir = Path(temporary)
+            write_prebuilt_archive(
+                package_dir,
+                "normal",
+                artifact_features=(
+                    "platform-io-aggregate-hooks,"
+                    "safe-demo-font-boundary-v1,wchar32"
+                ),
+            )
+
+            with self.assertRaisesRegex(
+                PREBUILT.VerificationError,
+                "unsupported dear_imgui artifact profile",
+            ):
+                PREBUILT.select_core_prebuilt_archives(
+                    package_dir,
+                    "x86_64-unknown-linux-gnu",
+                    "",
+                    profile_scope="base",
+                )
+
     def test_core_profile_hash_matches_the_rust_contract_vector(self):
         with TemporaryDirectory() as temporary:
             archive = write_prebuilt_archive(
@@ -254,7 +283,7 @@ class PrebuiltArchiveSelectionTests(unittest.TestCase):
 
             self.assertEqual(
                 PREBUILT.core_artifact_profile_hash(fields, archive),
-                "fnv1a64:2b8ec258d4aa24c6",
+                "fnv1a64:62d3ba35a0eee8a8",
             )
 
     def test_core_identity_anchors_candidate_and_rejects_legacy_manifests(self):

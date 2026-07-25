@@ -902,6 +902,15 @@ fn cpp_platform_io_probe_round_trips_all_aggregate_slots() {
         platform_io.set_platform_get_window_work_area_insets(Some(get_work_area_insets));
         platform_io.set_renderer_set_window_size(Some(renderer_set_size));
     }
+    let stored_renderer_size_callback = unsafe {
+        sys::ImGuiPlatformIO_RendererSetWindowSizePointerParam(platform_io.as_raw_mut())
+            .expect("safe renderer setter must retain its pointer callback")
+    };
+    assert!(std::ptr::fn_addr_eq(
+        stored_renderer_size_callback,
+        trampolines::renderer_set_window_size
+            as unsafe extern "C" fn(*mut sys::ImGuiViewport, *const sys::ImVec2),
+    ));
 
     let mut result = sys::DearImguiRsPlatformIoAggregateProbeResult::default();
     unsafe {

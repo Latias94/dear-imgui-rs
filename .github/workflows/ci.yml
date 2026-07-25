@@ -178,6 +178,26 @@ jobs:
       - name: Check SDL3 GPU multi-viewport example
         run: cargo check -p dear-imgui-examples --features "sdl3-gpu-multi-viewport" --bin sdl3_sdlgpu_multi_view
 
+      - name: Restore cached SDL3 runtime
+        if: runner.os == 'Windows'
+        run: >-
+          python tools/ci/run_contract.py windows-sdl3-runtime
+          --target-dir target
+          --profile debug
+          --github-path "$env:GITHUB_PATH"
+
+      - name: Test SDL3 callback event handoff
+        run: cargo nextest run -p dear-imgui-examples --lib --features "sdl3-platform"
+
+      - name: Test SDL3 GPU present-mode policy
+        run: cargo nextest run -p dear-imgui-examples --bin sdl3_sdlgpu_multi_view --features "sdl3-gpu-multi-viewport"
+
+      - name: Test SDL3 foreign pointer callback teardown
+        run: cargo nextest run -p dear-imgui-sdl3 --lib --features "sdlgpu3-renderer,multi-viewport" pointer_callback_replacement_survives_renderer_shutdown
+
+      - name: Test SDL3 original pointer callback lifecycle
+        run: cargo nextest run -p dear-imgui-sdl3 --lib --features "sdlgpu3-renderer,multi-viewport" pointer_original_callback_is_invoked
+
       - name: Check SDL3 WGPU renderer example
         run: cargo check -p dear-imgui-examples --features "sdl3-platform" --bin sdl3_wgpu
 

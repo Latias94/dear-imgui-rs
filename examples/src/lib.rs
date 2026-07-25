@@ -1,5 +1,8 @@
 //! Shared application-level helpers for repository examples.
 
+#[cfg(feature = "sdl3-platform")]
+pub mod sdl3_callbacks;
+
 /// Install the tracing subscriber used by native examples.
 pub fn init_tracing_with_filter(filter: &str) {
     tracing_subscriber::fmt()

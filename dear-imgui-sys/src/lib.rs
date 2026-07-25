@@ -434,6 +434,13 @@ unsafe extern "C" {
         user_callback: unsafe extern "C" fn(vp: *mut ImGuiViewport, size: *const ImVec2),
     ) -> std::os::raw::c_int;
 
+    fn dear_imgui_rs_platform_io_get_renderer_set_window_size_pointer_param(
+        platform_io: *mut ImGuiPlatformIO,
+        out_callback: *mut Option<
+            unsafe extern "C" fn(vp: *mut ImGuiViewport, size: *const ImVec2),
+        >,
+    ) -> std::os::raw::c_int;
+
     fn dear_imgui_rs_platform_io_clear_renderer_set_window_size_if_pointer_param(
         platform_io: *mut ImGuiPlatformIO,
         user_callback: unsafe extern "C" fn(vp: *mut ImGuiViewport, size: *const ImVec2),
@@ -445,9 +452,15 @@ unsafe extern "C" {
     ) -> std::os::raw::c_int;
 
     fn dear_imgui_rs_platform_io_invoke_platform_set_window_pos(
-        platform_io: *mut ImGuiPlatformIO,
+        callbacks: *const ImGuiPlatformIO,
         viewport: *mut ImGuiViewport,
         pos: *const ImVec2,
+    ) -> std::os::raw::c_int;
+
+    fn dear_imgui_rs_platform_io_invoke_renderer_set_window_size(
+        callbacks: *const ImGuiPlatformIO,
+        viewport: *mut ImGuiViewport,
+        size: *const ImVec2,
     ) -> std::os::raw::c_int;
 
     fn dear_imgui_rs_platform_io_aggregate_callback_storage_count() -> std::os::raw::c_int;
@@ -856,6 +869,35 @@ pub unsafe fn ImGuiPlatformIO_RendererSetWindowSizeMatchesPointerParam(
     }
 }
 
+/// Return the pointer-parameter callback currently stored for `Renderer_SetWindowSize`.
+///
+/// This is an internal ownership primitive for backends that must preserve a foreign aggregate
+/// callback replacement even though all pointer-parameter callbacks share one C++ hook address.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn ImGuiPlatformIO_RendererSetWindowSizePointerParam(
+    platform_io: *mut ImGuiPlatformIO,
+) -> Option<unsafe extern "C" fn(vp: *mut ImGuiViewport, size: *const ImVec2)> {
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    unsafe {
+        let mut callback = None;
+        if dear_imgui_rs_platform_io_get_renderer_set_window_size_pointer_param(
+            platform_io,
+            &mut callback,
+        ) != 0
+        {
+            return callback;
+        }
+        None
+    }
+
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    {
+        let _ = platform_io;
+        None
+    }
+}
+
 /// Clear `Renderer_SetWindowSize` only when it is still owned by the given pointer callback.
 ///
 /// This is an internal ownership primitive for renderer backends.
@@ -908,10 +950,10 @@ pub unsafe fn ImGuiPlatformIO_ProbeAggregateCallbacks(
     }
 }
 
-/// Invoke `Platform_SetWindowPos` from C++ while passing the input from Rust by pointer.
+/// Invoke a saved `Platform_SetWindowPos` callback through C++.
 ///
-/// This test-support helper prevents Rust integration tests from directly calling a C++ callback
-/// slot whose signature contains an aggregate by value.
+/// This prevents Rust from directly calling a C++ callback slot whose signature contains an
+/// aggregate by value.
 ///
 /// # Safety
 ///
@@ -919,24 +961,50 @@ pub unsafe fn ImGuiPlatformIO_ProbeAggregateCallbacks(
 #[doc(hidden)]
 #[inline]
 pub unsafe fn ImGuiPlatformIO_InvokePlatformSetWindowPos(
-    platform_io: *mut ImGuiPlatformIO,
+    callbacks: *const ImGuiPlatformIO,
     viewport: *mut ImGuiViewport,
     pos: *const ImVec2,
 ) -> bool {
     #[cfg(dear_imgui_rs_platform_io_hooks)]
     unsafe {
-        return dear_imgui_rs_platform_io_invoke_platform_set_window_pos(
-            platform_io,
-            viewport,
-            pos,
+        return dear_imgui_rs_platform_io_invoke_platform_set_window_pos(callbacks, viewport, pos)
+            != 0;
+    }
+
+    #[cfg(not(dear_imgui_rs_platform_io_hooks))]
+    {
+        let _ = callbacks;
+        let _ = viewport;
+        let _ = pos;
+        false
+    }
+}
+
+/// Invoke a saved `Renderer_SetWindowSize` callback through C++ using a pointer parameter.
+///
+/// # Safety
+///
+/// All pointers must be valid live values. `callbacks` may point to a snapshot of a live callback
+/// table, and the callback must remain callable for the duration of this call.
+#[doc(hidden)]
+#[inline]
+pub unsafe fn ImGuiPlatformIO_InvokeRendererSetWindowSize(
+    callbacks: *const ImGuiPlatformIO,
+    viewport: *mut ImGuiViewport,
+    size: *const ImVec2,
+) -> bool {
+    #[cfg(dear_imgui_rs_platform_io_hooks)]
+    unsafe {
+        return dear_imgui_rs_platform_io_invoke_renderer_set_window_size(
+            callbacks, viewport, size,
         ) != 0;
     }
 
     #[cfg(not(dear_imgui_rs_platform_io_hooks))]
     {
-        let _ = platform_io;
+        let _ = callbacks;
         let _ = viewport;
-        let _ = pos;
+        let _ = size;
         false
     }
 }

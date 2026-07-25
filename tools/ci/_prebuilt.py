@@ -16,6 +16,7 @@ from _verification import VerificationError, temporary_workspace
 
 
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
+PLATFORM_IO_AGGREGATE_HOOKS_FEATURE = "platform-io-aggregate-hooks-v2"
 SAFE_DEMO_FONT_BOUNDARY_FEATURE = "safe-demo-font-boundary-v1"
 
 
@@ -48,7 +49,7 @@ PREBUILT_PROFILES = (
         "normal",
         frozenset(
             (
-                "platform-io-aggregate-hooks",
+                PLATFORM_IO_AGGREGATE_HOOKS_FEATURE,
                 SAFE_DEMO_FONT_BOUNDARY_FEATURE,
                 "wchar32",
             )
@@ -60,7 +61,7 @@ PREBUILT_PROFILES = (
         "stack-layout",
         frozenset(
             (
-                "platform-io-aggregate-hooks",
+                PLATFORM_IO_AGGREGATE_HOOKS_FEATURE,
                 SAFE_DEMO_FONT_BOUNDARY_FEATURE,
                 "stack-layout",
                 "wchar32",
@@ -73,7 +74,7 @@ PREBUILT_PROFILES = (
         "freetype",
         frozenset(
             (
-                "platform-io-aggregate-hooks",
+                PLATFORM_IO_AGGREGATE_HOOKS_FEATURE,
                 SAFE_DEMO_FONT_BOUNDARY_FEATURE,
                 "freetype",
                 "wchar32",
@@ -86,7 +87,7 @@ PREBUILT_PROFILES = (
         "stack-layout-freetype",
         frozenset(
             (
-                "platform-io-aggregate-hooks",
+                PLATFORM_IO_AGGREGATE_HOOKS_FEATURE,
                 SAFE_DEMO_FONT_BOUNDARY_FEATURE,
                 "stack-layout",
                 "freetype",

@@ -559,6 +559,14 @@ context's `PlatformIo`. `clear_platform_handlers`,
 `clear_renderer_handlers`, and `Context` destruction clear both Rust callback
 registries and the shim's per-`PlatformIo` storage.
 
+A backend that wraps an existing aggregate callback must keep a pure pass-through
+in C++ or use the repository-owned C++ invocation bridge for the saved native
+callback; Rust must not invoke the captured by-value slot directly. The shared
+C++ shim address is not sufficient callback identity: a replacement installed
+through the pointer setter keeps that same address while changing the shim's
+stored pointer callback. Ownership-aware teardown must snapshot and restore
+that stored callback as well as the raw slot.
+
 The bulk clear methods are appropriate only when the caller owns the complete
 corresponding table. A composable renderer shutdown must compare every
 `Renderer_*` slot with its installed thunk and clear only matches. If another
@@ -572,7 +580,7 @@ this conditional teardown and sticky fail-closed behavior.
 
 The shim must be compiled with the native artifact. Builds that omit native C++
 hooks cannot install these callbacks, and compatible prebuilts declare
-`platform-io-aggregate-hooks`. The repository probe invokes all seven real C++
+`platform-io-aggregate-hooks-v2`. The repository probe invokes all seven real C++
 slots and runs on MSVC with both dynamic (`/MD`) and static (`/MT`) CRT profiles;
 use an equivalent ABI probe when maintaining an out-of-tree native artifact.
 

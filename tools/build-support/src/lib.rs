@@ -4705,7 +4705,7 @@ mod binding_contract_tests {
             target_pointer_width: "64",
             cargo_profile: "release",
             artifact_features: vec![
-                "platform-io-aggregate-hooks",
+                "platform-io-aggregate-hooks-v2",
                 SAFE_DEMO_FONT_BOUNDARY_ARTIFACT_FEATURE,
                 "wchar32",
             ],
@@ -4721,7 +4721,7 @@ mod binding_contract_tests {
             "static",
             "md",
             [
-                "platform-io-aggregate-hooks",
+                "platform-io-aggregate-hooks-v2",
                 SAFE_DEMO_FONT_BOUNDARY_ARTIFACT_FEATURE,
                 "wchar32",
             ],
@@ -4741,7 +4741,7 @@ mod binding_contract_tests {
             "static",
             "md",
             [
-                "platform-io-aggregate-hooks",
+                "platform-io-aggregate-hooks-v2",
                 SAFE_DEMO_FONT_BOUNDARY_ARTIFACT_FEATURE,
                 "wchar32",
                 "freetype",
@@ -5224,7 +5224,7 @@ mod binding_contract_tests {
             "static",
             "md",
             [
-                "platform-io-aggregate-hooks",
+                "platform-io-aggregate-hooks-v2",
                 SAFE_DEMO_FONT_BOUNDARY_ARTIFACT_FEATURE,
                 "wchar32",
             ],
@@ -5234,7 +5234,7 @@ mod binding_contract_tests {
             ),
             "fnv1a64:0123456789abcdef",
         );
-        assert_eq!(profile.deterministic_hash(), "fnv1a64:2b8ec258d4aa24c6");
+        assert_eq!(profile.deterministic_hash(), "fnv1a64:62d3ba35a0eee8a8");
     }
 
     #[test]

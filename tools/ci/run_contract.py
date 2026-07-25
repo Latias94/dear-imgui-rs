@@ -39,6 +39,7 @@ from _windows_native import (  # noqa: E402
     install_vcpkg_packages,
     locate_vcpkg_executable,
     resolve_vcpkg_root,
+    restore_cached_sdl3_runtime,
     vcpkg_github_environment,
     vcpkg_root_candidates,
     verify_mingw_imports,
@@ -444,6 +445,14 @@ def _build_parser() -> argparse.ArgumentParser:
     sdl3_consumer.add_argument("--workspace", required=True, type=Path)
     sdl3_consumer.add_argument("--repo-root", type=Path, default=WORKSPACE_ROOT)
 
+    sdl3_runtime = commands.add_parser(
+        "windows-sdl3-runtime",
+        help="Restore SDL3.dll after Cargo build-cache restoration",
+    )
+    sdl3_runtime.add_argument("--target-dir", type=Path, default=Path("target"))
+    sdl3_runtime.add_argument("--profile", default="debug")
+    sdl3_runtime.add_argument("--github-path", required=True, type=Path)
+
     mingw_environment = commands.add_parser(
         "windows-mingw-env", help="Publish the selected MinGW tool directory"
     )
@@ -525,6 +534,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         elif args.contract == "windows-sdl3-consumer":
             check_sdl3_vcpkg_consumer(args.workspace, args.repo_root)
+        elif args.contract == "windows-sdl3-runtime":
+            runtime = restore_cached_sdl3_runtime(args.target_dir, args.profile)
+            append_github_paths(args.github_path, (runtime.parent.resolve(),))
         elif args.contract == "windows-mingw-env":
             configure_windows_mingw(
                 msys2_root=args.msys2_root,

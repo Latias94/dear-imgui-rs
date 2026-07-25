@@ -13,6 +13,7 @@
 //! - Secondary viewports create their own Vulkan `SurfaceKHR` + swapchain.
 //! - Per-viewport surface creation is delegated to SDL3 via `Platform_CreateVkSurface`.
 
+use std::cell::RefCell;
 use std::error::Error;
 use std::ffi::CString;
 use std::time::Instant;
@@ -21,11 +22,13 @@ use ash::khr::{surface as khr_surface, swapchain as khr_swapchain};
 use ash::{Device, Entry, Instance, vk};
 use dear_imgui_ash::multi_viewport_sdl3::{Sdl3ViewportRuntime, VulkanViewportConfig};
 use dear_imgui_ash::{AshRenderer, Options as AshOptions, TextureRetirementBatch};
+use dear_imgui_examples::sdl3_callbacks::{
+    Sdl3CallbackEventHandoff, configure_main_callback_rate, requests_exit,
+};
 use dear_imgui_rs::{Condition, ConfigFlags, Context, render::RenderedFrame};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode, Sdl3PlatformBackend};
-use sdl3::event::Event;
-use sdl3::keyboard::Keycode;
 use sdl3::video::{SwapInterval, WindowPos};
+use sdl3_main::{AppResult, AppResultWithState, MainThreadData, app_impl};
 
 const FRAMES_IN_FLIGHT: usize = 2;
 
@@ -1086,6 +1089,18 @@ struct App {
     platform_shutdown_complete: bool,
 }
 
+struct Sdl3AshApp {
+    events: Sdl3CallbackEventHandoff,
+    main: MainThreadData<RefCell<MainData>>,
+}
+
+struct MainData {
+    // Field order keeps renderer, swapchains, and windows alive only while SDL is initialized.
+    app: App,
+    _video: sdl3::VideoSubsystem,
+    _sdl: sdl3::Sdl,
+}
+
 impl Drop for App {
     fn drop(&mut self) {
         if let Err(error) = self.shutdown() {
@@ -1345,144 +1360,135 @@ impl App {
         self.imgui.frame = self.imgui.frame.wrapping_add(1);
     }
 
-    fn run(&mut self) -> Result<(), Box<dyn Error>> {
-        self.init_external_texture()?;
-
-        'main: loop {
-            while let Some(raw) = imgui_sdl3_backend::sdl3_poll_event_ll() {
+    fn process_event(
+        &mut self,
+        event: &dear_imgui_examples::sdl3_callbacks::QueuedSdl3Event,
+    ) -> Result<AppResult, Box<dyn Error>> {
+        event.with_imgui_event(|raw| -> Result<(), Box<dyn Error>> {
+            if let Some(raw) = raw {
                 let backend = self
                     .sdl3_backend
                     .as_mut()
                     .expect("SDL3 backend must be active while the app is running");
-                let _ = backend.process_event(&mut self.imgui.context, &raw)?;
-
-                let event = Event::from_ll(raw);
-                match event {
-                    Event::Quit { .. } => break 'main,
-                    Event::KeyDown {
-                        keycode: Some(Keycode::Escape),
-                        ..
-                    } => break 'main,
-                    Event::Window {
-                        win_event: sdl3::event::WindowEvent::CloseRequested,
-                        window_id,
-                        ..
-                    } if window_id == self.window.id() => break 'main,
-                    Event::Window {
-                        win_event: sdl3::event::WindowEvent::PixelSizeChanged(_, _),
-                        window_id,
-                        ..
-                    } if window_id == self.window.id() => {
-                        let (w, h) = self.window.size_in_pixels();
-                        if w > 0 && h > 0 {
-                            self.vk.swapchain_dirty = true;
-                        }
-                    }
-                    _ => {}
-                }
+                let _ = backend.process_event(&mut self.imgui.context, raw)?;
             }
+            Ok(())
+        })?;
 
-            let now = Instant::now();
-            let dt = (now - self.imgui.last_frame).as_secs_f32();
-            self.imgui.last_frame = now;
-            self.imgui.context.io_mut().set_delta_time(dt);
+        if requests_exit(event, self.window.id()) {
+            return Ok(AppResult::Success);
+        }
+        if event.is_pixel_size_changed_for(self.window.id()) {
+            let (width, height) = self.window.size_in_pixels();
+            if width > 0 && height > 0 {
+                self.vk.swapchain_dirty = true;
+            }
+        }
+        Ok(AppResult::Continue)
+    }
 
-            // Update animated texture (marks WantUpdates).
-            self.update_texture();
+    fn iterate(&mut self) -> Result<(), Box<dyn Error>> {
+        self.init_external_texture()?;
 
-            self.sdl3_backend
-                .as_mut()
-                .expect("SDL3 backend must be active while the app is running")
-                .new_frame(&mut self.imgui.context)?;
-            let ui = self.imgui.context.frame();
+        let now = Instant::now();
+        let dt = (now - self.imgui.last_frame).as_secs_f32();
+        self.imgui.last_frame = now;
+        self.imgui.context.io_mut().set_delta_time(dt);
 
-            ui.dockspace_over_main_viewport();
+        // Update animated texture (marks WantUpdates).
+        self.update_texture();
 
-            let mut external_sampler_update = None;
-            ui.window("SDL3 + Ash (multi-viewport)")
-                .size([460.0, 280.0], Condition::FirstUseEver)
-                .build(|| {
-                    ui.text("Drag ImGui windows outside to spawn OS windows.");
+        self.sdl3_backend
+            .as_mut()
+            .expect("SDL3 backend must be active while the app is running")
+            .new_frame(&mut self.imgui.context)?;
+        let ui = self.imgui.context.frame();
+
+        ui.dockspace_over_main_viewport();
+
+        let mut external_sampler_update = None;
+        ui.window("SDL3 + Ash (multi-viewport)")
+            .size([460.0, 280.0], Condition::FirstUseEver)
+            .build(|| {
+                ui.text("Drag ImGui windows outside to spawn OS windows.");
+                ui.separator();
+                ui.checkbox("Show demo window", &mut self.imgui.show_demo);
+                ui.color_edit4("Clear color", &mut self.imgui.clear_color);
+                ui.separator();
+                ui.text("Animated ImGui-managed texture:");
+                ui.image(self.imgui.img_tex, [256.0, 256.0]);
+
+                if let Some(external) = self.imgui.external.as_mut() {
                     ui.separator();
-                    ui.checkbox("Show demo window", &mut self.imgui.show_demo);
-                    ui.color_edit4("Clear color", &mut self.imgui.clear_color);
-                    ui.separator();
-                    ui.text("Animated ImGui-managed texture:");
-                    ui.image(self.imgui.img_tex, [256.0, 256.0]);
+                    ui.text("External Vulkan texture (legacy TextureId):");
 
-                    if let Some(external) = self.imgui.external.as_mut() {
-                        ui.separator();
-                        ui.text("External Vulkan texture (legacy TextureId):");
-
-                        let mut use_linear = external.use_linear_sampler;
-                        ui.checkbox("Use linear sampler", &mut use_linear);
-                        if use_linear != external.use_linear_sampler {
-                            external.use_linear_sampler = use_linear;
-                            let sampler = if use_linear {
-                                external.sampler_linear
-                            } else {
-                                external.sampler_nearest
-                            };
-                            external_sampler_update = Some((external.tex_id, sampler));
-                        }
-
-                        ui.image(external.tex_id, [256.0, 256.0]);
-                    } else {
-                        ui.separator();
-                        ui.text("External texture not available.");
+                    let mut use_linear = external.use_linear_sampler;
+                    ui.checkbox("Use linear sampler", &mut use_linear);
+                    if use_linear != external.use_linear_sampler {
+                        external.use_linear_sampler = use_linear;
+                        let sampler = if use_linear {
+                            external.sampler_linear
+                        } else {
+                            external.sampler_nearest
+                        };
+                        external_sampler_update = Some((external.tex_id, sampler));
                     }
-                    ui.text(format!(
-                        "Application average {:.3} ms/frame ({:.1} FPS)",
-                        1000.0 / ui.io().framerate(),
-                        ui.io().framerate()
-                    ));
-                });
 
-            if self.imgui.show_demo {
-                ui.show_demo_window(&mut self.imgui.show_demo);
-            }
-
-            if let Some((texture, sampler)) = external_sampler_update {
-                if !self
-                    .imgui
-                    .renderer
-                    .update_external_texture_sampler(texture, sampler)?
-                {
-                    return Err("external texture registration disappeared".into());
+                    ui.image(external.tex_id, [256.0, 256.0]);
+                } else {
+                    ui.separator();
+                    ui.text("External texture not available.");
                 }
-            }
-            self.imgui
+                ui.text(format!(
+                    "Application average {:.3} ms/frame ({:.1} FPS)",
+                    1000.0 / ui.io().framerate(),
+                    ui.io().framerate()
+                ));
+            });
+
+        if self.imgui.show_demo {
+            ui.show_demo_window(&mut self.imgui.show_demo);
+        }
+
+        if let Some((texture, sampler)) = external_sampler_update {
+            if !self
+                .imgui
                 .renderer
-                .set_viewport_clear_color(self.imgui.clear_color)?;
-
-            let texture_retirement = {
-                let frame = self.imgui.context.render();
-                let clear_color = self.imgui.clear_color;
-                render_main_window(
-                    &mut self.vk,
-                    &mut self.imgui.renderer,
-                    &self.window,
-                    clear_color,
-                    frame,
-                )?
-            };
-
-            if self.enable_viewports {
-                let io_flags = self.imgui.context.io().config_flags();
-                if io_flags.contains(ConfigFlags::VIEWPORTS_ENABLE) {
-                    self.imgui.context.update_platform_windows();
-                    self.imgui.context.render_platform_windows_default();
-                }
+                .update_external_texture_sampler(texture, sampler)?
+            {
+                return Err("external texture registration disappeared".into());
             }
+        }
+        self.imgui
+            .renderer
+            .set_viewport_clear_color(self.imgui.clear_color)?;
 
-            if let Some(retirement) = texture_retirement {
-                self.imgui
-                    .renderer
-                    .wait_for_texture_retirements(retirement)?;
+        let texture_retirement = {
+            let frame = self.imgui.context.render();
+            let clear_color = self.imgui.clear_color;
+            render_main_window(
+                &mut self.vk,
+                &mut self.imgui.renderer,
+                &self.window,
+                clear_color,
+                frame,
+            )?
+        };
+
+        if self.enable_viewports {
+            let io_flags = self.imgui.context.io().config_flags();
+            if io_flags.contains(ConfigFlags::VIEWPORTS_ENABLE) {
+                self.imgui.context.update_platform_windows();
+                self.imgui.context.render_platform_windows_default();
             }
         }
 
-        self.shutdown()
+        if let Some(retirement) = texture_retirement {
+            self.imgui
+                .renderer
+                .wait_for_texture_retirements(retirement)?;
+        }
+        Ok(())
     }
 }
 
@@ -1599,15 +1605,71 @@ fn render_main_window(
     Ok(texture_retirement)
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
-    imgui_sdl3_backend::enable_native_ime_ui();
+#[app_impl]
+impl Sdl3AshApp {
+    fn app_init() -> AppResultWithState<Box<Self>> {
+        let result = (|| -> Result<Self, Box<dyn Error>> {
+            imgui_sdl3_backend::enable_native_ime_ui();
+            configure_main_callback_rate();
 
-    let sdl = sdl3::init()?;
-    let video = sdl.video()?;
+            let sdl = sdl3::init()?;
+            let video = sdl.video()?;
+            // Optional: ensure SDL loads Vulkan loader early (the first Vulkan window would also
+            // load it, but doing so here makes initialization failures deterministic).
+            let _ = video.vulkan_load_library_default();
+            let app = App::new(&video)?;
+            Ok(Self {
+                events: Sdl3CallbackEventHandoff::default(),
+                main: MainThreadData::assert_new(RefCell::new(MainData {
+                    app,
+                    _video: video,
+                    _sdl: sdl,
+                })),
+            })
+        })();
 
-    // Optional: ensure SDL loads Vulkan loader early (first Vulkan window would also load it).
-    let _ = video.vulkan_load_library_default();
+        match result {
+            Ok(app) => AppResultWithState::Continue(Box::new(app)),
+            Err(error) => {
+                eprintln!("failed to initialize SDL3 Ash example: {error}");
+                AppResultWithState::Failure(None)
+            }
+        }
+    }
 
-    let mut app = App::new(&video)?;
-    app.run()
+    fn app_iterate(&self) -> AppResult {
+        let mut events = self.events.drain();
+        let mut main_guard = self.main.assert_get().borrow_mut();
+        let main = &mut main_guard.app;
+        while let Some(event) = events.pop() {
+            match main.process_event(&event) {
+                Ok(AppResult::Continue) => {}
+                Ok(result) => return result,
+                Err(error) => {
+                    eprintln!("SDL3 Ash event processing failed: {error}");
+                    return AppResult::Failure;
+                }
+            }
+        }
+        match main.iterate() {
+            Ok(()) => AppResult::Continue,
+            Err(error) => {
+                eprintln!("SDL3 Ash frame failed: {error}");
+                AppResult::Failure
+            }
+        }
+    }
+
+    fn app_event(&self, raw: &sdl3::sys::events::SDL_Event) -> AppResult {
+        self.events.push(raw);
+        AppResult::Continue
+    }
+
+    fn app_quit(state: Option<&Self>) {
+        if let Some(app) = state {
+            if let Err(error) = app.main.assert_get().borrow_mut().app.shutdown() {
+                eprintln!("SDL3 Ash shutdown failed: {error}");
+            }
+        }
+    }
 }

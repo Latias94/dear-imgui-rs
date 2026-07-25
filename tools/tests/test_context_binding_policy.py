@@ -47,6 +47,57 @@ class ContextBindingPolicyTests(unittest.TestCase):
 
             self.assertTrue(audit.passed())
 
+    def test_ignores_cfg_all_test_modules(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "crate" / "src"
+            source.mkdir(parents=True)
+            (source / "lib.rs").write_text(
+                "#[cfg(all(test, feature = \"native\"))]\n"
+                "mod tests {\n"
+                "    fn raw_fixture() { unsafe { sys::igSetCurrentContext(ctx) } }\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            audit = context_binding_policy.audit_sources(root, (source,), {})
+
+            self.assertTrue(audit.passed())
+
+    def test_does_not_ignore_cfg_all_not_test_modules(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "crate" / "src"
+            source.mkdir(parents=True)
+            (source / "lib.rs").write_text(
+                "#[cfg(all(not(test), feature = \"native\"))]\n"
+                "mod production {\n"
+                "    fn bypass() { unsafe { sys::igSetCurrentContext(ctx) } }\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            audit = context_binding_policy.audit_sources(root, (source,), {})
+
+            self.assertEqual(len(audit.unexpected), 1)
+
+    def test_does_not_treat_feature_named_test_as_a_test_module(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "crate" / "src"
+            source.mkdir(parents=True)
+            (source / "lib.rs").write_text(
+                '#[cfg(all(feature = "test", feature = "native"))]\n'
+                "mod production {\n"
+                "    fn bypass() { unsafe { sys::igSetCurrentContext(ctx) } }\n"
+                "}\n",
+                encoding="utf-8",
+            )
+
+            audit = context_binding_policy.audit_sources(root, (source,), {})
+
+            self.assertEqual(len(audit.unexpected), 1)
+
     def test_allowlist_count_is_reviewed_exactly(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
