@@ -28,6 +28,7 @@ _CRT_SUFFIXES = {"md": "-static-md", "mt": "-static"}
 _ENVIRONMENT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _DLL_IMPORT = re.compile(r"^\s*DLL Name:\s*(.*?)\s*$", re.MULTILINE)
 _FORBIDDEN_CPP_RUNTIME = "libstdc++-6.dll"
+_SDL3_RUNTIME_NAME = "SDL3.dll"
 
 
 class WindowsNativeError(RuntimeError):
@@ -493,6 +494,44 @@ def check_sdl3_vcpkg_consumer(
     """Create and execute the temporary SDL3 consumer contract."""
     consumer = create_sdl3_vcpkg_consumer(workspace, repository_root)
     return consumer.command.execute(runner=runner)
+
+
+def restore_cached_sdl3_runtime(
+    target_directory: PathInput,
+    profile: str = "debug",
+) -> Path:
+    """Restore SDL3's runtime DLL after Cargo restores build-script output from cache."""
+    if not profile or Path(profile).name != profile:
+        raise WindowsNativeError(f"invalid Cargo profile directory: {profile!r}")
+
+    profile_directory = Path(target_directory) / profile
+    candidates = tuple(
+        sorted(
+            (
+                path
+                for path in (
+                    profile_directory / "build"
+                ).glob(f"sdl3-sys-*/out/bin/{_SDL3_RUNTIME_NAME}")
+                if path.is_file()
+            ),
+            key=lambda path: (path.as_posix().casefold(), path.as_posix()),
+        )
+    )
+    if not candidates:
+        raise WindowsNativeError(
+            "Cargo produced no cached SDL3 runtime DLL under "
+            f"{profile_directory / 'build'}"
+        )
+
+    source = candidates[0]
+    if source.stat().st_size == 0:
+        raise WindowsNativeError(f"cached SDL3 runtime DLL is empty: {source}")
+
+    destination = profile_directory / _SDL3_RUNTIME_NAME
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, destination)
+    print(f"Restored SDL3 runtime: {source} -> {destination}")
+    return destination
 
 
 def calculate_mingw_environment(

@@ -124,6 +124,77 @@ class VcpkgRootTests(unittest.TestCase):
                 WINDOWS_NATIVE.resolve_vcpkg_root(candidates[:1])
 
 
+class Sdl3RuntimeTests(unittest.TestCase):
+    def test_restores_cached_runtime_to_the_cargo_profile_directory(self):
+        with TemporaryDirectory() as temporary:
+            target = Path(temporary) / "target"
+            cached = (
+                target
+                / "debug"
+                / "build"
+                / "sdl3-sys-a"
+                / "out"
+                / "bin"
+                / "SDL3.dll"
+            )
+            cached.parent.mkdir(parents=True)
+            cached.write_bytes(b"MZ-cached-sdl3")
+
+            restored = WINDOWS_NATIVE.restore_cached_sdl3_runtime(target)
+
+            self.assertEqual(restored, target / "debug" / "SDL3.dll")
+            self.assertEqual(restored.read_bytes(), b"MZ-cached-sdl3")
+
+    def test_selects_cached_runtime_deterministically(self):
+        with TemporaryDirectory() as temporary:
+            target = Path(temporary) / "target"
+            for build_hash, payload in (
+                ("sdl3-sys-b", b"MZ-second"),
+                ("sdl3-sys-a", b"MZ-first"),
+            ):
+                cached = (
+                    target
+                    / "debug"
+                    / "build"
+                    / build_hash
+                    / "out"
+                    / "bin"
+                    / "SDL3.dll"
+                )
+                cached.parent.mkdir(parents=True)
+                cached.write_bytes(payload)
+
+            restored = WINDOWS_NATIVE.restore_cached_sdl3_runtime(target)
+
+            self.assertEqual(restored.read_bytes(), b"MZ-first")
+
+    def test_rejects_missing_or_empty_cached_runtime(self):
+        with TemporaryDirectory() as temporary:
+            target = Path(temporary) / "target"
+            with self.assertRaisesRegex(
+                WINDOWS_NATIVE.WindowsNativeError,
+                "no cached SDL3 runtime DLL",
+            ):
+                WINDOWS_NATIVE.restore_cached_sdl3_runtime(target)
+
+            cached = (
+                target
+                / "debug"
+                / "build"
+                / "sdl3-sys-a"
+                / "out"
+                / "bin"
+                / "SDL3.dll"
+            )
+            cached.parent.mkdir(parents=True)
+            cached.touch()
+            with self.assertRaisesRegex(
+                WINDOWS_NATIVE.WindowsNativeError,
+                "runtime DLL is empty",
+            ):
+                WINDOWS_NATIVE.restore_cached_sdl3_runtime(target)
+
+
 class VcpkgStatusTests(unittest.TestCase):
     def _root(self, temporary):
         root = Path(temporary) / "vcpkg"

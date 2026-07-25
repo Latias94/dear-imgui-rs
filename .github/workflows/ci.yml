@@ -178,6 +178,14 @@ jobs:
       - name: Check SDL3 GPU multi-viewport example
         run: cargo check -p dear-imgui-examples --features "sdl3-gpu-multi-viewport" --bin sdl3_sdlgpu_multi_view
 
+      - name: Restore cached SDL3 runtime
+        if: runner.os == 'Windows'
+        run: >-
+          python tools/ci/run_contract.py windows-sdl3-runtime
+          --target-dir target
+          --profile debug
+          --github-path "$env:GITHUB_PATH"
+
       - name: Test SDL3 callback event handoff
         run: cargo nextest run -p dear-imgui-examples --lib --features "sdl3-platform"
 
