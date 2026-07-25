@@ -7,7 +7,7 @@ import bisect
 import pathlib
 import sys
 from dataclasses import dataclass
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 
 import api_surface_report
 import context_binding_policy
@@ -39,6 +39,27 @@ def _matching_parenthesis(
     return None
 
 
+def _matching_group(
+    tokens: Sequence[api_surface_report._RustToken], opening: int
+) -> int | None:
+    closing_for = {"(": ")", "[": "]", "<": ">"}
+    opening_value = tokens[opening].value
+    closing_value = closing_for.get(opening_value)
+    if closing_value is None:
+        return None
+
+    depth = 0
+    for index in range(opening, len(tokens)):
+        value = tokens[index].value
+        if value == opening_value:
+            depth += 1
+        elif value == closing_value:
+            depth -= 1
+            if depth == 0:
+                return index
+    return None
+
+
 def _top_level_segments(
     tokens: Sequence[api_surface_report._RustToken],
 ) -> Iterable[Sequence[api_surface_report._RustToken]]:
@@ -59,6 +80,8 @@ def _top_level_segments(
 
 def _contains_by_value_aggregate(
     type_tokens: Sequence[api_surface_report._RustToken],
+    aliases: Mapping[str, Sequence[Sequence[api_surface_report._RustToken]]],
+    resolving: frozenset[str] = frozenset(),
 ) -> bool:
     while (
         len(type_tokens) >= 2
@@ -82,8 +105,31 @@ def _contains_by_value_aggregate(
             depth += 1
         elif token.value in closing:
             depth = max(0, depth - 1)
-        elif token.value in AGGREGATE_TYPES and depth == 0:
-            return True
+        elif depth == 0:
+            if token.value in AGGREGATE_TYPES:
+                return True
+            if token.value not in resolving:
+                for alias in aliases.get(token.value, ()):
+                    if _contains_by_value_aggregate(
+                        alias,
+                        aliases,
+                        resolving | {token.value},
+                    ):
+                        return True
+
+    index = 0
+    while index < len(type_tokens):
+        if type_tokens[index].value not in {"(", "[", "<"}:
+            index += 1
+            continue
+        closing_index = _matching_group(type_tokens, index)
+        if closing_index is None:
+            index += 1
+            continue
+        for segment in _top_level_segments(type_tokens[index + 1 : closing_index]):
+            if _contains_by_value_aggregate(segment, aliases, resolving):
+                return True
+        index = closing_index + 1
     return False
 
 
@@ -91,13 +137,16 @@ def _signature_has_by_value_aggregate(
     tokens: Sequence[api_surface_report._RustToken],
     opening: int,
     closing: int,
+    aliases: Mapping[str, Sequence[Sequence[api_surface_report._RustToken]]],
 ) -> bool:
     for parameter in _top_level_segments(tokens[opening + 1 : closing]):
         colon = next(
             (index for index, token in enumerate(parameter) if token.value == ":"),
             None,
         )
-        if colon is not None and _contains_by_value_aggregate(parameter[colon + 1 :]):
+        if colon is not None and _contains_by_value_aggregate(
+            parameter[colon + 1 :], aliases
+        ):
             return True
 
     cursor = closing + 1
@@ -110,9 +159,56 @@ def _signature_has_by_value_aggregate(
         end = cursor
         while end < len(tokens) and tokens[end].value not in {"{", ";", "where"}:
             end += 1
-        if _contains_by_value_aggregate(tokens[cursor:end]):
+        if _contains_by_value_aggregate(tokens[cursor:end], aliases):
             return True
     return False
+
+
+def _aggregate_type_aliases(
+    tokens: Sequence[api_surface_report._RustToken],
+    ignored_ranges: Sequence[tuple[int, int]],
+) -> dict[str, list[Sequence[api_surface_report._RustToken]]]:
+    """Collect type/import aliases for conservative workspace-wide resolution."""
+
+    aliases: dict[str, list[Sequence[api_surface_report._RustToken]]] = {}
+
+    def add_alias(name: str, source: Sequence[api_surface_report._RustToken]) -> None:
+        aliases.setdefault(name, []).append(source)
+
+    for index, token in enumerate(tokens):
+        if context_binding_policy._inside_ranges(token.start, ignored_ranges):
+            continue
+
+        if token.value == "type" and index + 1 < len(tokens):
+            name = tokens[index + 1]
+            if name.kind != "ident":
+                continue
+            equals = index + 2
+            while equals < len(tokens) and tokens[equals].value not in {"=", ";"}:
+                equals += 1
+            if equals >= len(tokens) or tokens[equals].value != "=":
+                continue
+            end = equals + 1
+            while end < len(tokens) and tokens[end].value != ";":
+                end += 1
+            add_alias(name.value, tokens[equals + 1 : end])
+            continue
+
+        if token.value != "use":
+            continue
+        end = index + 1
+        while end < len(tokens) and tokens[end].value != ";":
+            end += 1
+        statement = tokens[index + 1 : end]
+        for alias_index, alias_token in enumerate(statement[:-1]):
+            if alias_token.value != "as" or statement[alias_index + 1].kind != "ident":
+                continue
+            source_start = alias_index
+            while source_start > 0 and statement[source_start - 1].value not in {"{", ","}:
+                source_start -= 1
+            source = statement[source_start:alias_index]
+            add_alias(statement[alias_index + 1].value, source)
+    return aliases
 
 
 def audit_sources(
@@ -121,6 +217,8 @@ def audit_sources(
 ) -> tuple[AggregateCallbackViolation, ...]:
     violations: list[AggregateCallbackViolation] = []
     resolved_root = repo_root.resolve()
+    source_records = []
+    aliases: dict[str, list[Sequence[api_surface_report._RustToken]]] = {}
 
     for path in context_binding_policy._iter_rust_sources(roots):
         source = path.read_text(encoding="utf-8")
@@ -131,10 +229,15 @@ def audit_sources(
             if standalone_test
             else context_binding_policy._cfg_test_module_ranges(tokens)
         )
+        local_aliases = _aggregate_type_aliases(tokens, test_ranges)
+        for name, definitions in local_aliases.items():
+            aliases.setdefault(name, []).extend(definitions)
         line_starts = [0]
         line_starts.extend(index + 1 for index, char in enumerate(source) if char == "\n")
         relative = path.resolve().relative_to(resolved_root).as_posix()
+        source_records.append((tokens, standalone_test, test_ranges, line_starts, relative))
 
+    for tokens, standalone_test, test_ranges, line_starts, relative in source_records:
         for index, token in enumerate(tokens):
             if token.value != "fn" or index < 2:
                 continue
@@ -160,7 +263,7 @@ def audit_sources(
                 continue
             closing = _matching_parenthesis(tokens, opening)
             if closing is None or not _signature_has_by_value_aggregate(
-                tokens, opening, closing
+                tokens, opening, closing, aliases
             ):
                 continue
 

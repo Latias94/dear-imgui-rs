@@ -3418,6 +3418,13 @@ mod tests {
         );
 
         assert!(registration.shutdown_platform(&mut context).is_ok());
+        context.binding().with_bound_context(|| unsafe {
+            let platform_io = sys::igGetPlatformIO_Nil();
+            assert!(
+                sys::ImGuiPlatformIO_RendererSetWindowSizePointerParam(platform_io).is_none(),
+                "the original native renderer callback must not outlive its renderer teardown"
+            );
+        });
     }
 
     #[cfg(any(

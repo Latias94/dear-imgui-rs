@@ -55,6 +55,51 @@ class AggregateCallbackAbiPolicyTests(unittest.TestCase):
                 ],
             )
 
+    def test_rejects_transitive_type_and_import_aliases(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "crate" / "src"
+            source.mkdir(parents=True)
+            (source / "lib.rs").write_text(
+                'type Position = sys::ImVec2;\n'
+                'type Insets = Position;\n'
+                'use sys::ImVec4_c as Margins;\n'
+                'unsafe extern "C" fn set_position(value: Insets) {}\n'
+                'unsafe extern "C" fn get_margins() -> Margins { todo!() }\n',
+                encoding="utf-8",
+            )
+
+            violations = aggregate_callback_abi_policy.audit_sources(root, (source,))
+
+            self.assertEqual(
+                [(violation.function, violation.line) for violation in violations],
+                [("set_position", 4), ("get_margins", 5)],
+            )
+
+    def test_rejects_cross_module_reexports_and_generic_alias_arguments(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "crate" / "src"
+            source.mkdir(parents=True)
+            (source / "aliases.rs").write_text(
+                "pub type Position = sys::ImVec2;\n"
+                "pub type Identity<T> = T;\n",
+                encoding="utf-8",
+            )
+            (source / "lib.rs").write_text(
+                "pub use crate::aliases::Position as ExportedPosition;\n"
+                'unsafe extern "C" fn set_position(value: ExportedPosition) {}\n'
+                'unsafe extern "C" fn set_generic(value: Identity<sys::ImVec4>) {}\n',
+                encoding="utf-8",
+            )
+
+            violations = aggregate_callback_abi_policy.audit_sources(root, (source,))
+
+            self.assertEqual(
+                [(violation.function, violation.line) for violation in violations],
+                [("set_position", 2), ("set_generic", 3)],
+            )
+
     def test_allows_pointer_parameters_and_ignores_tests_and_text(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -66,6 +111,8 @@ class AggregateCallbackAbiPolicyTests(unittest.TestCase):
                 'unsafe extern "C" fn set_size(v: *const sys::ImVec2) {}\n'
                 'unsafe extern "C" fn get_size(out: *mut sys::ImVec2_c) {}\n'
                 'unsafe extern "C" fn wrapped(v: Option<*const sys::ImVec2>) {}\n'
+                'type PositionRef = *const sys::ImVec4;\n'
+                'unsafe extern "C" fn aliased_pointer(v: PositionRef) {}\n'
                 '#[cfg(test)]\n'
                 'mod tests {\n'
                 '    unsafe extern "C" fn fixture(v: sys::ImVec2) {}\n'
