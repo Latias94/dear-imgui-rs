@@ -19,13 +19,16 @@ use super::{
     ActiveUiCapability, ImguiActiveRendererContextError, ImguiActiveUi, ImguiContextError,
     ImguiContexts, ImguiFrameOutput, ImguiFrameState,
 };
+#[cfg(feature = "render")]
+use crate::input::ImguiContextInputMetrics;
 
 pub(crate) fn install_context_lifecycle(app: &mut App) {
     app.insert_non_send(ImguiActiveUi::default());
     app.insert_non_send(ImguiFrameState::default());
     app.init_resource::<ImguiFrameOutput>();
     #[cfg(feature = "render")]
-    app.init_resource::<ImguiFrameMailbox>();
+    app.init_resource::<ImguiFrameMailbox>()
+        .init_resource::<platform::ImguiPlatformImeFeedback>();
 }
 
 struct PrimaryFrameMetrics {
@@ -65,10 +68,17 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
         .get_non_send::<ImguiContexts>()
         .and_then(ImguiContexts::primary_id);
     let primary_metrics = primary_frame_metrics(world);
+    #[cfg(feature = "render")]
+    let routed_metrics = world
+        .get_resource::<ImguiContextInputMetrics>()
+        .cloned()
+        .unwrap_or_default();
     let active = world
         .get_non_send::<ImguiActiveUi>()
         .expect("ImguiPlugin must install the active UI capability")
         .capability();
+    #[cfg(feature = "render")]
+    platform::begin_platform_ime_feedback(world);
 
     for context_id in order {
         let is_primary = Some(context_id) == primary_id;
@@ -96,7 +106,11 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
             clear_context_output(world, context_id);
             continue;
         }
-        if is_primary && primary_metrics.is_none() {
+        #[cfg(feature = "render")]
+        let has_routed_metrics = routed_metrics.get(context_id).is_some();
+        #[cfg(not(feature = "render"))]
+        let has_routed_metrics = false;
+        if is_primary && primary_metrics.is_none() && !has_routed_metrics {
             #[cfg(feature = "render")]
             poll_context_completions_fail_closed(world, context_id);
             clear_context_output(world, context_id);
@@ -112,9 +126,11 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
             Err(error) => panic!("{error}"),
         };
 
-        let metrics = (Some(context_id) == primary_id)
+        let primary_metrics_for_context = (Some(context_id) == primary_id)
             .then_some(primary_metrics.as_ref())
             .flatten();
+        #[cfg(feature = "render")]
+        let routed_metrics_for_context = routed_metrics.get(context_id);
         #[cfg(feature = "render")]
         let snapshot_mailbox = world.resource::<ImguiFrameMailbox>().clone();
         let result = panic::catch_unwind(AssertUnwindSafe(|| {
@@ -126,22 +142,57 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
                         platform::prepare_primary_platform_frame(world, context);
                     }
 
-                    let (display_size, framebuffer_scale, delta_time) = metrics.map_or_else(
-                        || {
-                            (
-                                finite_display_size(context.io().display_size()),
-                                finite_framebuffer_scale(context.io().display_framebuffer_scale()),
-                                context.io().delta_time().max(f32::EPSILON),
-                            )
-                        },
-                        |metrics| {
+                    let (display_size, framebuffer_scale, delta_time) = {
+                        #[cfg(feature = "render")]
+                        if let Some(metrics) = routed_metrics_for_context {
                             (
                                 metrics.display_size,
                                 metrics.framebuffer_scale,
-                                metrics.delta_time,
+                                primary_metrics_for_context.map_or_else(
+                                    || context.io().delta_time().max(f32::EPSILON),
+                                    |metrics| metrics.delta_time,
+                                ),
                             )
-                        },
-                    );
+                        } else {
+                            primary_metrics_for_context.map_or_else(
+                                || {
+                                    (
+                                        finite_display_size(context.io().display_size()),
+                                        finite_framebuffer_scale(
+                                            context.io().display_framebuffer_scale(),
+                                        ),
+                                        context.io().delta_time().max(f32::EPSILON),
+                                    )
+                                },
+                                |metrics| {
+                                    (
+                                        metrics.display_size,
+                                        metrics.framebuffer_scale,
+                                        metrics.delta_time,
+                                    )
+                                },
+                            )
+                        }
+                        #[cfg(not(feature = "render"))]
+                        primary_metrics_for_context.map_or_else(
+                            || {
+                                (
+                                    finite_display_size(context.io().display_size()),
+                                    finite_framebuffer_scale(
+                                        context.io().display_framebuffer_scale(),
+                                    ),
+                                    context.io().delta_time().max(f32::EPSILON),
+                                )
+                            },
+                            |metrics| {
+                                (
+                                    metrics.display_size,
+                                    metrics.framebuffer_scale,
+                                    metrics.delta_time,
+                                )
+                            },
+                        )
+                    };
 
                     #[cfg(feature = "render")]
                     if renderer_consumer.is_some() {
@@ -174,8 +225,17 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
 
                     let schedule_found = try_run_context_schedule(world, config.schedule());
                     drop(schedule_capability);
+                    #[cfg(feature = "render")]
+                    platform::record_context_platform_ime_feedback(
+                        world,
+                        context_id,
+                        is_primary,
+                        context_raw,
+                    );
                     if is_primary {
-                        platform::sync_primary_window_platform_feedback(world, ui, context_raw);
+                        platform::sync_primary_window_platform_feedback(world, ui);
+                        #[cfg(not(feature = "render"))]
+                        platform::sync_primary_window_ime_feedback(world, context_raw);
                     }
                     world
                         .get_non_send_mut::<ImguiFrameState>()
@@ -262,6 +322,8 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
             panic::resume_unwind(payload);
         }
     }
+    #[cfg(feature = "render")]
+    platform::finish_platform_ime_feedback(world);
 }
 
 fn try_run_context_schedule(world: &mut World, label: InternedScheduleLabel) -> bool {
@@ -322,7 +384,7 @@ fn finish_frame_output(
     world: &mut World,
     context_id: imgui::ContextId,
     frame_index: u64,
-    include_platform_viewports: bool,
+    _include_platform_viewports: bool,
     output: PendingFrameOutput,
 ) {
     match output {
@@ -337,7 +399,7 @@ fn finish_frame_output(
                 &mailbox,
                 &releases,
                 frame_index,
-                include_platform_viewports,
+                _include_platform_viewports,
                 snapshot,
             );
         }
@@ -371,10 +433,7 @@ fn primary_frame_metrics(world: &mut World) -> Option<PrimaryFrameMetrics> {
     let window = query.single(world).ok()?;
     Some(PrimaryFrameMetrics {
         display_size: finite_display_size([window.width(), window.height()]),
-        framebuffer_scale: finite_framebuffer_scale([
-            window.scale_factor() as f32,
-            window.scale_factor() as f32,
-        ]),
+        framebuffer_scale: finite_framebuffer_scale([window.scale_factor(), window.scale_factor()]),
         delta_time,
     })
 }

@@ -1,3 +1,6 @@
+#[cfg(feature = "render")]
+use std::collections::{HashMap, HashSet};
+
 use bevy_ecs::prelude::*;
 use bevy_ecs::world::World;
 use bevy_math::Vec2;
@@ -9,6 +12,20 @@ use crate::input::{ImguiInputState, map_imgui_mouse_cursor};
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_window::{Monitor, PrimaryMonitor};
+
+#[cfg(feature = "render")]
+#[derive(Resource, Default)]
+pub(super) struct ImguiPlatformImeFeedback {
+    previous_windows: HashSet<Entity>,
+    requests: HashMap<Entity, ImguiPlatformImeRequest>,
+}
+
+#[cfg(feature = "render")]
+#[derive(Clone, Copy, Default)]
+struct ImguiPlatformImeRequest {
+    wants_text_input: bool,
+    input_position: Option<[f32; 2]>,
+}
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(super) fn prepare_primary_platform_frame(world: &mut World, context: &mut imgui::Context) {
@@ -74,29 +91,12 @@ pub(super) fn prepare_primary_platform_frame(world: &mut World, context: &mut im
     });
 }
 
-pub(super) fn sync_primary_window_platform_feedback(
-    world: &mut World,
-    ui: &imgui::Ui,
-    context_raw: *mut imgui::sys::ImGuiContext,
-) {
+pub(super) fn sync_primary_window_platform_feedback(world: &mut World, ui: &imgui::Ui) {
     let hovered_window = world
         .get_resource::<ImguiInputState>()
         .and_then(ImguiInputState::mouse_hovered_window);
-    let Some((primary_entity, viewport_entities)) = ({
-        let mut query =
-            world.query::<(Entity, Option<&PrimaryWindow>, Option<&ImguiViewportWindow>)>();
-        let mut primary = None;
-        let mut viewports = Vec::new();
-        for (entity, primary_window, viewport_window) in query.iter(world) {
-            if primary_window.is_some() {
-                primary = Some(entity);
-            }
-            if let Some(viewport_window) = viewport_window {
-                viewports.push((entity, viewport_window.viewport_id.raw()));
-            }
-        }
-        primary.map(|primary| (primary, viewports))
-    }) else {
+    let Some((primary_entity, viewport_entities)) = primary_window_and_viewport_entities(world)
+    else {
         return;
     };
 
@@ -108,18 +108,6 @@ pub(super) fn sync_primary_window_platform_feedback(
                     .any(|(entity, _)| entity == candidate)
         })
         .unwrap_or(primary_entity);
-    // SAFETY: the serial driver retains the owning active Context and keeps its frame open for
-    // this call. The raw pointer was captured immediately before `Context::frame()`.
-    let ime_data = unsafe { &(*context_raw).PlatformImeData };
-    let ime_target = (ime_data.ViewportId != 0)
-        .then_some(ime_data.ViewportId)
-        .and_then(|viewport_id| {
-            viewport_entities
-                .iter()
-                .find_map(|(entity, candidate)| (*candidate == viewport_id).then_some(*entity))
-        })
-        .unwrap_or(primary_entity);
-    let ime_position = [ime_data.InputPos.x, ime_data.InputPos.y];
     let hide_os_cursor = ui.io().mouse_draw_cursor() || ui.mouse_cursor().is_none();
     let cursor_icon = (!hide_os_cursor)
         .then(|| ui.mouse_cursor().and_then(map_imgui_mouse_cursor))
@@ -129,20 +117,13 @@ pub(super) fn sync_primary_window_platform_feedback(
     {
         let mut query = world.query::<(
             Entity,
-            &mut Window,
             &mut CursorOptions,
             Option<&mut CursorIcon>,
             Option<&PrimaryWindow>,
             Option<&ImguiViewportWindow>,
         )>();
-        for (
-            entity,
-            mut window,
-            mut cursor_options,
-            current_cursor_icon,
-            primary_window,
-            viewport_window,
-        ) in query.iter_mut(world)
+        for (entity, mut cursor_options, current_cursor_icon, primary_window, viewport_window) in
+            query.iter_mut(world)
         {
             if primary_window.is_none() && viewport_window.is_none() {
                 continue;
@@ -159,17 +140,6 @@ pub(super) fn sync_primary_window_platform_feedback(
                 (None, Some(_)) => cursor_edits.push(CursorEdit::Remove(entity)),
                 (None, None) => {}
             }
-
-            let owns_ime = entity == ime_target;
-            window.ime_enabled = owns_ime && ime_data.WantTextInput;
-            if owns_ime {
-                window.ime_position = ime_position_for_window(
-                    entity,
-                    &window,
-                    ime_position,
-                    primary_window.is_some(),
-                );
-            }
         }
     }
 
@@ -183,6 +153,143 @@ pub(super) fn sync_primary_window_platform_feedback(
             }
         }
     }
+}
+
+#[cfg(not(feature = "render"))]
+pub(super) fn sync_primary_window_ime_feedback(
+    world: &mut World,
+    context_raw: *mut imgui::sys::ImGuiContext,
+) {
+    let Some((primary_entity, viewport_entities)) = primary_window_and_viewport_entities(world)
+    else {
+        return;
+    };
+    // SAFETY: the serial driver retains the owning active Context and keeps its frame open for
+    // this call. The raw pointer was captured immediately before `Context::frame()`.
+    let ime_data = unsafe { &(*context_raw).PlatformImeData };
+    let ime_target = (ime_data.ViewportId != 0)
+        .then_some(ime_data.ViewportId)
+        .and_then(|viewport_id| {
+            viewport_entities
+                .iter()
+                .find_map(|(entity, candidate)| (*candidate == viewport_id).then_some(*entity))
+        })
+        .unwrap_or(primary_entity);
+    let ime_position = [ime_data.InputPos.x, ime_data.InputPos.y];
+
+    let mut query = world.query::<(
+        Entity,
+        &mut Window,
+        Option<&PrimaryWindow>,
+        Option<&ImguiViewportWindow>,
+    )>();
+    for (entity, mut window, primary_window, viewport_window) in query.iter_mut(world) {
+        if primary_window.is_none() && viewport_window.is_none() {
+            continue;
+        }
+        let owns_ime = entity == ime_target;
+        window.ime_enabled = owns_ime && ime_data.WantTextInput;
+        if owns_ime {
+            window.ime_position =
+                ime_position_for_window(entity, &window, ime_position, primary_window.is_some());
+        }
+    }
+}
+
+#[cfg(feature = "render")]
+pub(super) fn begin_platform_ime_feedback(world: &mut World) {
+    world
+        .resource_mut::<ImguiPlatformImeFeedback>()
+        .requests
+        .clear();
+}
+
+#[cfg(feature = "render")]
+pub(super) fn record_context_platform_ime_feedback(
+    world: &mut World,
+    context_id: imgui::ContextId,
+    is_primary: bool,
+    context_raw: *mut imgui::sys::ImGuiContext,
+) {
+    // SAFETY: the serial driver retains the owning active Context and keeps its frame open for
+    // this call. The raw pointer was captured immediately before `Context::frame()`.
+    let ime_data = unsafe { &(*context_raw).PlatformImeData };
+    let mut windows = world
+        .get_resource::<ImguiInputState>()
+        .map(|state| state.context_window_focus_states(context_id))
+        .unwrap_or_default();
+    let primary_and_viewports = primary_window_and_viewport_entities(world);
+
+    if is_primary && !windows.iter().any(|(_, focused)| *focused) {
+        if let Some((primary_window, _)) = primary_and_viewports.as_ref() {
+            windows.push((*primary_window, true));
+        }
+    }
+    if ime_data.ViewportId != 0
+        && let Some((_, viewport_entities)) = primary_and_viewports.as_ref()
+        && let Some(viewport_window) = viewport_entities.iter().find_map(|(entity, viewport_id)| {
+            (*viewport_id == ime_data.ViewportId).then_some(*entity)
+        })
+    {
+        windows.clear();
+        windows.push((viewport_window, true));
+    }
+
+    let ime_position = [ime_data.InputPos.x, ime_data.InputPos.y];
+    let mut feedback = world.resource_mut::<ImguiPlatformImeFeedback>();
+    for (window, focused) in windows {
+        let request = feedback.requests.entry(window).or_default();
+        if focused && ime_data.WantTextInput {
+            request.wants_text_input = true;
+            request.input_position = Some(ime_position);
+        }
+    }
+}
+
+#[cfg(feature = "render")]
+pub(super) fn finish_platform_ime_feedback(world: &mut World) {
+    let (requests, previous_windows) = {
+        let mut feedback = world.resource_mut::<ImguiPlatformImeFeedback>();
+        let requests = std::mem::take(&mut feedback.requests);
+        let previous_windows = std::mem::replace(
+            &mut feedback.previous_windows,
+            requests.keys().copied().collect(),
+        );
+        (requests, previous_windows)
+    };
+    let mut affected_windows = previous_windows;
+    affected_windows.extend(requests.keys().copied());
+
+    let mut query = world.query::<(Entity, &mut Window, Option<&PrimaryWindow>)>();
+    for (entity, mut window, primary_window) in query.iter_mut(world) {
+        if !affected_windows.contains(&entity) {
+            continue;
+        }
+        let Some(request) = requests.get(&entity) else {
+            window.ime_enabled = false;
+            continue;
+        };
+        window.ime_enabled = request.wants_text_input;
+        if let Some(ime_position) = request.input_position {
+            window.ime_position =
+                ime_position_for_window(entity, &window, ime_position, primary_window.is_some());
+        }
+    }
+}
+
+fn primary_window_and_viewport_entities(world: &mut World) -> Option<(Entity, Vec<(Entity, u32)>)> {
+    let mut query = world.query::<(Entity, Option<&PrimaryWindow>, Option<&ImguiViewportWindow>)>();
+    let mut primary = None;
+    let mut viewports = Vec::new();
+    for (entity, primary_window, viewport_window) in query.iter(world) {
+        if primary_window.is_some() {
+            primary = Some(entity);
+        }
+        if let Some(viewport_window) = viewport_window {
+            viewports.push((entity, viewport_window.viewport_id.raw()));
+        }
+    }
+    primary.map(|primary| (primary, viewports))
 }
 
 enum CursorEdit {

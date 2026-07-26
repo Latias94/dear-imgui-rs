@@ -108,7 +108,7 @@ fn move_player(
     state: Res<AppState>,
     mut player: Query<&mut Transform, With<Player>>,
 ) {
-    if state.paused || capture.wants_keyboard_input() {
+    if state.paused || capture.primary_wants_keyboard_input() {
         return;
     }
 
@@ -180,13 +180,16 @@ fn tools_ui(
                 ui.text("Input Policy");
                 ui.text(format!(
                     "ImGui wants mouse: {}",
-                    capture.wants_pointer_input()
+                    capture.primary_wants_pointer_input()
                 ));
                 ui.text(format!(
                     "ImGui wants keyboard: {}",
-                    capture.wants_keyboard_input()
+                    capture.primary_wants_keyboard_input()
                 ));
-                ui.text(format!("ImGui wants text: {}", capture.wants_text_input()));
+                ui.text(format!(
+                    "ImGui wants text: {}",
+                    capture.primary_wants_text_input()
+                ));
             }
         });
 

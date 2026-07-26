@@ -1,17 +1,57 @@
+#[cfg(feature = "render")]
+use bevy_app::PostUpdate;
+#[cfg(feature = "render")]
+use bevy_app::Update;
 use bevy_app::{App, PreUpdate};
+#[cfg(feature = "render")]
+use bevy_asset::{Assets, RenderAssetUsages};
+#[cfg(feature = "render")]
+use bevy_camera::{Camera, RenderTarget, Viewport};
+#[cfg(feature = "render")]
+use bevy_core_pipeline::Core2d;
 use bevy_ecs::message::Messages;
 use bevy_ecs::prelude::*;
+#[cfg(feature = "render")]
+use bevy_ecs::schedule::ScheduleLabel;
+#[cfg(feature = "render")]
+use bevy_ecs::system::RunSystemOnce;
+#[cfg(feature = "render")]
+use bevy_image::Image;
 use bevy_input::ButtonState;
 use bevy_input::keyboard::{Key as BevyKey, KeyCode, KeyboardFocusLost, KeyboardInput};
 use bevy_input::mouse::{
     MouseButton as BevyMouseButton, MouseButtonInput, MouseScrollUnit, MouseWheel,
 };
 use bevy_input::touch::{TouchInput, TouchPhase};
+#[cfg(feature = "render")]
+use bevy_math::UVec2;
 use bevy_math::{IVec2, Vec2};
+#[cfg(feature = "render")]
+use bevy_render::{
+    camera::CameraRenderGraph,
+    render_resource::{Extent3d, TextureDimension, TextureFormat},
+    texture::ManualTextureViews,
+};
+#[cfg(feature = "render")]
+use bevy_window::WindowRef;
 use bevy_window::{
     CursorEntered, CursorIcon, CursorLeft, CursorMoved, CursorOptions, Ime, PrimaryWindow,
     SystemCursorIcon, Window, WindowFocused, WindowPosition, WindowResized, WindowResolution,
     WindowScaleFactorChanged,
+};
+#[cfg(not(feature = "render"))]
+use dear_imgui_bevy::input::{
+    imgui_primary_wants_keyboard_input, imgui_primary_wants_pointer_input,
+    imgui_primary_wants_text_input,
+};
+#[cfg(feature = "render")]
+use dear_imgui_bevy::{
+    ContextId, ImguiContextConfig,
+    input::{
+        imgui_context_wants_keyboard_input, imgui_context_wants_pointer_input,
+        imgui_window_wants_pointer_input,
+    },
+    route::{ImguiInputPolicy, ImguiInputRoute, ImguiRenderRoute},
 };
 use dear_imgui_bevy::{
     ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, ImguiUi, ImguiViewportWindow,
@@ -40,6 +80,24 @@ fn app_with_primary_window() -> (App, Entity) {
     window.resolution.set_scale_factor(2.0);
 
     let primary = app.world_mut().spawn((window, PrimaryWindow)).id();
+    #[cfg(feature = "render")]
+    {
+        let primary_context = app
+            .world()
+            .non_send::<ImguiContexts>()
+            .primary_id()
+            .expect("ImguiPlugin should install a primary Context");
+        let region = {
+            let window = app
+                .world()
+                .get::<Window>(primary)
+                .expect("the primary Window was just spawned");
+            bevy_math::Rect::from_corners(Vec2::ZERO, Vec2::new(window.width(), window.height()))
+        };
+        app.world_mut()
+            .spawn(ImguiInputRoute::logical(primary_context, primary, region));
+        app.world_mut().run_schedule(PostUpdate);
+    }
     prepare_imgui_context(&mut app);
     (app, primary)
 }
@@ -64,6 +122,116 @@ fn configure_primary<T>(app: &mut App, configure: impl FnOnce(&mut imgui::Contex
     contexts
         .configure(primary_id, configure)
         .unwrap_or_else(|error| panic!("primary Context should be configurable: {error}"))
+}
+
+#[cfg(feature = "render")]
+#[derive(ScheduleLabel, Clone, Debug, Eq, Hash, PartialEq)]
+struct RoutedInputSecondaryUi;
+
+#[cfg(feature = "render")]
+#[derive(Resource, Default)]
+struct ScopedCaptureRunCount(u32);
+
+#[cfg(feature = "render")]
+fn count_scoped_capture(mut count: ResMut<ScopedCaptureRunCount>) {
+    count.0 += 1;
+}
+
+#[cfg(feature = "render")]
+fn configure_context<T>(
+    app: &mut App,
+    context_id: ContextId,
+    configure: impl FnOnce(&mut imgui::Context) -> T,
+) -> T {
+    let mut contexts = app
+        .world_mut()
+        .get_non_send_mut::<ImguiContexts>()
+        .expect("ImguiPlugin should install the Context registry");
+    contexts
+        .configure(context_id, configure)
+        .unwrap_or_else(|error| panic!("Context should be configurable: {error}"))
+}
+
+#[cfg(feature = "render")]
+fn prepare_context(app: &mut App, context_id: ContextId) {
+    configure_context(app, context_id, |context| {
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context.io_mut().set_config_input_trickle_event_queue(false);
+        let _ = context.font_atlas().build();
+        let _ = context.set_ini_filename::<std::path::PathBuf>(None);
+    });
+}
+
+#[cfg(feature = "render")]
+fn routed_input_app() -> (App, ContextId, Entity, Entity) {
+    let mut app = App::new();
+    app.init_resource::<Assets<Image>>()
+        .init_resource::<ManualTextureViews>()
+        .add_plugins(ImguiPlugin::default());
+
+    let primary_context = app
+        .world()
+        .non_send::<ImguiContexts>()
+        .primary_id()
+        .expect("ImguiPlugin should install a primary Context");
+    let mut primary_window = Window {
+        resolution: WindowResolution::new(640, 480),
+        ..Default::default()
+    };
+    primary_window.focused = true;
+    let primary_window = app.world_mut().spawn((primary_window, PrimaryWindow)).id();
+    let mut secondary_window = Window {
+        resolution: WindowResolution::new(640, 480),
+        ..Default::default()
+    };
+    secondary_window.focused = false;
+    let secondary_window = app.world_mut().spawn(secondary_window).id();
+    prepare_context(&mut app, primary_context);
+    (app, primary_context, primary_window, secondary_window)
+}
+
+#[cfg(feature = "render")]
+fn add_routed_input_context(app: &mut App) -> ContextId {
+    app.init_schedule(RoutedInputSecondaryUi);
+    let context_id = app
+        .world_mut()
+        .non_send_mut::<ImguiContexts>()
+        .create(ImguiContextConfig::new(RoutedInputSecondaryUi))
+        .expect("secondary Context admission must succeed");
+    prepare_context(app, context_id);
+    context_id
+}
+
+#[cfg(feature = "render")]
+fn logical_window_region(app: &App, window: Entity) -> bevy_math::Rect {
+    let window = app
+        .world()
+        .get::<Window>(window)
+        .expect("input host Window must exist");
+    bevy_math::Rect::from_corners(Vec2::ZERO, Vec2::new(window.width(), window.height()))
+}
+
+#[cfg(feature = "render")]
+fn resolve_routed_input(app: &mut App) {
+    app.world_mut().run_schedule(PostUpdate);
+}
+
+#[cfg(feature = "render")]
+fn run_routed_input(app: &mut App) {
+    app.world_mut().run_schedule(PreUpdate);
+}
+
+#[cfg(feature = "render")]
+fn begin_frame_for_context(
+    app: &mut App,
+    context_id: ContextId,
+    assert_ui: impl FnOnce(&imgui::Ui),
+) {
+    configure_context(app, context_id, |context| {
+        let frame = context.begin_frame();
+        assert_ui(frame.ui());
+        let _ = frame.render();
+    });
 }
 
 fn current_frame_input_chars() -> Vec<u32> {
@@ -96,6 +264,11 @@ fn run_input_systems(app: &mut App) {
 
 fn run_condition_value<M>(app: &mut App, system: impl IntoSystem<(), bool, M> + 'static) -> bool {
     app.world_mut().run_system_cached(system).unwrap()
+}
+
+#[cfg(feature = "render")]
+fn run_condition_once<M>(app: &mut App, system: impl IntoSystem<(), bool, M>) -> bool {
+    app.world_mut().run_system_once(system).unwrap()
 }
 
 fn request_text_cursor_and_ime(imgui: ImguiUi) {
@@ -540,6 +713,77 @@ fn input_platform_feedback_routes_cursor_independently_from_ime_viewport() {
     let secondary_window = secondary_entity.get::<Window>().unwrap();
     assert!(secondary_window.ime_enabled);
     assert_eq!(secondary_window.ime_position, Vec2::new(77.0, 88.0));
+}
+
+#[cfg(feature = "render")]
+#[test]
+fn input_platform_feedback_enables_ime_for_a_focused_secondary_context_route() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary_context, primary_window, secondary_window) = routed_input_app();
+    let secondary_context = add_routed_input_context(&mut app);
+    let primary_region = logical_window_region(&app, primary_window);
+    let secondary_region = logical_window_region(&app, secondary_window);
+    app.world_mut().spawn(ImguiInputRoute::logical(
+        primary_context,
+        primary_window,
+        primary_region,
+    ));
+    app.world_mut().spawn(ImguiInputRoute::logical(
+        secondary_context,
+        secondary_window,
+        secondary_region,
+    ));
+    resolve_routed_input(&mut app);
+    app.add_systems(RoutedInputSecondaryUi, request_text_cursor_and_ime);
+
+    app.world_mut()
+        .resource_mut::<Messages<WindowFocused>>()
+        .write(WindowFocused {
+            window: primary_window,
+            focused: false,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<WindowFocused>>()
+        .write(WindowFocused {
+            window: secondary_window,
+            focused: true,
+        });
+    app.update();
+
+    assert!(
+        !app.world()
+            .entity(primary_window)
+            .get::<Window>()
+            .expect("primary Window must exist")
+            .ime_enabled,
+        "a secondary Context must not enable IME on the primary Window"
+    );
+    let secondary = app
+        .world()
+        .entity(secondary_window)
+        .get::<Window>()
+        .unwrap();
+    assert!(
+        secondary.ime_enabled,
+        "a focused secondary Context must enable its host Window IME"
+    );
+    assert_eq!(secondary.ime_position, Vec2::new(222.0, 333.0));
+
+    app.world_mut()
+        .resource_mut::<Messages<WindowFocused>>()
+        .write(WindowFocused {
+            window: secondary_window,
+            focused: false,
+        });
+    app.update();
+    assert!(
+        !app.world()
+            .entity(secondary_window)
+            .get::<Window>()
+            .expect("secondary Window must exist")
+            .ime_enabled,
+        "losing the routed focus must clear the previous IME request"
+    );
 }
 
 #[test]
@@ -1420,4 +1664,654 @@ fn input_capture_predicates_and_run_conditions_expose_imgui_policy_hints() {
     assert!(run_condition_value(&mut app, imgui_wants_keyboard_input));
     assert!(run_condition_value(&mut app, imgui_wants_text_input));
     assert!(run_condition_value(&mut app, imgui_wants_any_input));
+}
+
+#[cfg(not(feature = "render"))]
+#[test]
+fn primary_capture_queries_follow_legacy_primary_input_without_render_routes() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary_window) = app_with_primary_window();
+    let primary_context = app
+        .world()
+        .non_send::<ImguiContexts>()
+        .primary_id()
+        .expect("ImguiPlugin should install a primary Context");
+    configure_primary(&mut app, |_| unsafe {
+        let io = imgui::sys::igGetIO_Nil();
+        (*io).WantCaptureMouse = true;
+        (*io).WantCaptureKeyboard = true;
+        (*io).WantTextInput = true;
+    });
+
+    run_input_systems(&mut app);
+
+    let capture = app.world().resource::<ImguiInputCapture>();
+    assert_eq!(capture.primary(), capture.aggregate());
+    assert_eq!(capture.context(primary_context), capture.aggregate());
+    assert_eq!(capture.window(primary_window), capture.aggregate());
+    assert!(capture.primary_wants_pointer_input());
+    assert!(capture.primary_wants_keyboard_input());
+    assert!(capture.primary_wants_text_input());
+    assert!(run_condition_value(
+        &mut app,
+        imgui_primary_wants_pointer_input
+    ));
+    assert!(run_condition_value(
+        &mut app,
+        imgui_primary_wants_keyboard_input
+    ));
+    assert!(run_condition_value(
+        &mut app,
+        imgui_primary_wants_text_input
+    ));
+}
+
+#[cfg(feature = "render")]
+#[test]
+fn input_routes_isolate_contexts_windows_focus_and_sticky_releases() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary_context, primary_window, secondary_window) = routed_input_app();
+    let secondary_context = add_routed_input_context(&mut app);
+    app.world_mut()
+        .get_mut::<Window>(primary_window)
+        .expect("primary Window must exist")
+        .resolution
+        .set_scale_factor(2.0);
+
+    let primary_region = logical_window_region(&app, primary_window);
+    let secondary_region = logical_window_region(&app, secondary_window);
+    app.world_mut().spawn(ImguiInputRoute::logical(
+        primary_context,
+        primary_window,
+        primary_region,
+    ));
+    app.world_mut().spawn(ImguiInputRoute::logical(
+        secondary_context,
+        secondary_window,
+        secondary_region,
+    ));
+    resolve_routed_input(&mut app);
+
+    app.world_mut()
+        .resource_mut::<Messages<WindowFocused>>()
+        .write(WindowFocused {
+            window: primary_window,
+            focused: true,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<CursorMoved>>()
+        .write(CursorMoved {
+            window: primary_window,
+            position: Vec2::new(20.0, 30.0),
+            delta: None,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<MouseButtonInput>>()
+        .write(MouseButtonInput {
+            button: BevyMouseButton::Left,
+            state: ButtonState::Pressed,
+            window: primary_window,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<KeyboardInput>>()
+        .write(key_input(
+            primary_window,
+            KeyCode::KeyA,
+            BevyKey::Character("a".into()),
+            ButtonState::Pressed,
+            Some("a"),
+        ));
+    app.world_mut()
+        .resource_mut::<Messages<Ime>>()
+        .write(Ime::Enabled {
+            window: primary_window,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<Ime>>()
+        .write(Ime::Commit {
+            window: primary_window,
+            value: "A".to_owned(),
+        });
+    run_routed_input(&mut app);
+
+    let input_state = app.world().resource::<ImguiInputState>();
+    assert_eq!(
+        input_state
+            .for_context_window(primary_context, primary_window)
+            .expect("primary route should own input")
+            .ime_enabled,
+        true
+    );
+    assert!(
+        input_state
+            .for_context_window(secondary_context, secondary_window)
+            .is_none(),
+        "events from one host window must not create state for another Context"
+    );
+
+    configure_context(&mut app, primary_context, |context| {
+        assert_eq!(context.io().display_size(), [320.0, 240.0]);
+        assert_eq!(context.io().display_framebuffer_scale(), [2.0, 2.0]);
+    });
+    configure_context(&mut app, secondary_context, |context| {
+        assert_eq!(context.io().display_size(), [640.0, 480.0]);
+        assert_eq!(context.io().display_framebuffer_scale(), [1.0, 1.0]);
+    });
+    begin_frame_for_context(&mut app, primary_context, |ui| {
+        assert_eq!(ui.mouse_pos(), [20.0, 30.0]);
+        assert!(ui.is_key_down(imgui::Key::A));
+        assert!(ui.is_mouse_down(imgui::MouseButton::Left));
+        assert!(current_frame_input_chars().contains(&('A' as u32)));
+    });
+    begin_frame_for_context(&mut app, secondary_context, |ui| {
+        assert!(!ui.is_key_down(imgui::Key::A));
+        assert!(!ui.is_mouse_down(imgui::MouseButton::Left));
+    });
+
+    app.world_mut()
+        .resource_mut::<Messages<WindowFocused>>()
+        .write(WindowFocused {
+            window: primary_window,
+            focused: false,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<WindowFocused>>()
+        .write(WindowFocused {
+            window: secondary_window,
+            focused: true,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<CursorMoved>>()
+        .write(CursorMoved {
+            window: secondary_window,
+            position: Vec2::new(50.0, 60.0),
+            delta: None,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<MouseButtonInput>>()
+        .write(MouseButtonInput {
+            button: BevyMouseButton::Right,
+            state: ButtonState::Pressed,
+            window: secondary_window,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<KeyboardInput>>()
+        .write(key_input(
+            secondary_window,
+            KeyCode::KeyB,
+            BevyKey::Character("b".into()),
+            ButtonState::Pressed,
+            Some("b"),
+        ));
+    app.world_mut()
+        .resource_mut::<Messages<Ime>>()
+        .write(Ime::Commit {
+            window: secondary_window,
+            value: "界".to_owned(),
+        });
+    run_routed_input(&mut app);
+
+    begin_frame_for_context(&mut app, primary_context, |ui| {
+        assert!(!ui.is_key_down(imgui::Key::A));
+        assert!(!ui.is_mouse_down(imgui::MouseButton::Left));
+        assert!(!ui.is_key_down(imgui::Key::B));
+    });
+    begin_frame_for_context(&mut app, secondary_context, |ui| {
+        assert_eq!(ui.mouse_pos(), [50.0, 60.0]);
+        assert!(ui.is_key_down(imgui::Key::B));
+        assert!(ui.is_mouse_down(imgui::MouseButton::Right));
+        assert!(current_frame_input_chars().contains(&('界' as u32)));
+    });
+
+    app.world_mut().despawn(primary_window);
+    run_routed_input(&mut app);
+    begin_frame_for_context(&mut app, secondary_context, |ui| {
+        assert!(
+            ui.is_key_down(imgui::Key::B),
+            "removing one routed window must not release another Context's keys"
+        );
+        assert!(ui.is_mouse_down(imgui::MouseButton::Right));
+    });
+}
+
+#[cfg(feature = "render")]
+#[test]
+fn input_routes_respect_exclusive_priority_and_explicit_shared_fanout() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary_context, primary_window, _) = routed_input_app();
+    let secondary_context = add_routed_input_context(&mut app);
+    let region = logical_window_region(&app, primary_window);
+    app.world_mut().spawn(
+        ImguiInputRoute::logical(primary_context, primary_window, region)
+            .with_policy(ImguiInputPolicy::exclusive(-3)),
+    );
+    app.world_mut().spawn(
+        ImguiInputRoute::logical(secondary_context, primary_window, region)
+            .with_policy(ImguiInputPolicy::exclusive(7)),
+    );
+    resolve_routed_input(&mut app);
+
+    app.world_mut()
+        .resource_mut::<Messages<CursorMoved>>()
+        .write(CursorMoved {
+            window: primary_window,
+            position: Vec2::new(100.0, 120.0),
+            delta: None,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<MouseButtonInput>>()
+        .write(MouseButtonInput {
+            button: BevyMouseButton::Left,
+            state: ButtonState::Pressed,
+            window: primary_window,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<KeyboardInput>>()
+        .write(key_input(
+            primary_window,
+            KeyCode::KeyP,
+            BevyKey::Character("p".into()),
+            ButtonState::Pressed,
+            Some("p"),
+        ));
+    run_routed_input(&mut app);
+
+    begin_frame_for_context(&mut app, primary_context, |ui| {
+        assert!(!ui.is_key_down(imgui::Key::P));
+        assert!(!ui.is_mouse_down(imgui::MouseButton::Left));
+    });
+    begin_frame_for_context(&mut app, secondary_context, |ui| {
+        assert_eq!(ui.mouse_pos(), [100.0, 120.0]);
+        assert!(ui.is_key_down(imgui::Key::P));
+        assert!(ui.is_mouse_down(imgui::MouseButton::Left));
+    });
+
+    let (mut app, primary_context, primary_window, _) = routed_input_app();
+    let secondary_context = add_routed_input_context(&mut app);
+    let region = logical_window_region(&app, primary_window);
+    app.world_mut().spawn(
+        ImguiInputRoute::logical(primary_context, primary_window, region)
+            .with_policy(ImguiInputPolicy::Shared),
+    );
+    app.world_mut().spawn(
+        ImguiInputRoute::logical(secondary_context, primary_window, region)
+            .with_policy(ImguiInputPolicy::Shared),
+    );
+    resolve_routed_input(&mut app);
+
+    app.world_mut()
+        .resource_mut::<Messages<CursorMoved>>()
+        .write(CursorMoved {
+            window: primary_window,
+            position: Vec2::new(80.0, 90.0),
+            delta: None,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<MouseButtonInput>>()
+        .write(MouseButtonInput {
+            button: BevyMouseButton::Middle,
+            state: ButtonState::Pressed,
+            window: primary_window,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<KeyboardInput>>()
+        .write(key_input(
+            primary_window,
+            KeyCode::KeyS,
+            BevyKey::Character("s".into()),
+            ButtonState::Pressed,
+            Some("s"),
+        ));
+    run_routed_input(&mut app);
+
+    for context_id in [primary_context, secondary_context] {
+        begin_frame_for_context(&mut app, context_id, |ui| {
+            assert_eq!(ui.mouse_pos(), [80.0, 90.0]);
+            assert!(ui.is_key_down(imgui::Key::S));
+            assert!(ui.is_mouse_down(imgui::MouseButton::Middle));
+        });
+    }
+}
+
+#[cfg(feature = "render")]
+#[test]
+fn input_routes_recompute_a_stationary_pointer_before_button_dispatch() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary_context, primary_window, _) = routed_input_app();
+    let secondary_context = add_routed_input_context(&mut app);
+    let region = logical_window_region(&app, primary_window);
+    let primary_route = app
+        .world_mut()
+        .spawn(
+            ImguiInputRoute::logical(primary_context, primary_window, region)
+                .with_policy(ImguiInputPolicy::exclusive(0)),
+        )
+        .id();
+    let secondary_route = app
+        .world_mut()
+        .spawn(
+            ImguiInputRoute::logical(secondary_context, primary_window, region)
+                .with_policy(ImguiInputPolicy::exclusive(-1)),
+        )
+        .id();
+    resolve_routed_input(&mut app);
+
+    app.world_mut()
+        .resource_mut::<Messages<CursorMoved>>()
+        .write(CursorMoved {
+            window: primary_window,
+            position: Vec2::new(100.0, 120.0),
+            delta: None,
+        });
+    run_routed_input(&mut app);
+    begin_frame_for_context(&mut app, primary_context, |ui| {
+        assert_eq!(ui.mouse_pos(), [100.0, 120.0]);
+    });
+
+    app.world_mut().entity_mut(primary_route).insert(
+        ImguiInputRoute::logical(primary_context, primary_window, region)
+            .with_policy(ImguiInputPolicy::exclusive(-2)),
+    );
+    app.world_mut().entity_mut(secondary_route).insert(
+        ImguiInputRoute::logical(secondary_context, primary_window, region)
+            .with_policy(ImguiInputPolicy::exclusive(1)),
+    );
+    resolve_routed_input(&mut app);
+
+    app.world_mut()
+        .resource_mut::<Messages<MouseButtonInput>>()
+        .write(MouseButtonInput {
+            button: BevyMouseButton::Left,
+            state: ButtonState::Pressed,
+            window: primary_window,
+        });
+    run_routed_input(&mut app);
+
+    begin_frame_for_context(&mut app, primary_context, |ui| {
+        assert!(
+            !ui.is_mouse_down(imgui::MouseButton::Left),
+            "a cached pointer target must not bypass updated exclusive priority"
+        );
+    });
+    begin_frame_for_context(&mut app, secondary_context, |ui| {
+        assert_eq!(ui.mouse_pos(), [100.0, 120.0]);
+        assert!(
+            ui.is_mouse_down(imgui::MouseButton::Left),
+            "the newly selected route must receive a stationary pointer click"
+        );
+    });
+}
+
+#[cfg(feature = "render")]
+#[test]
+fn camera_viewport_input_routes_partition_one_window_in_physical_regions() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary_context, primary_window, _) = routed_input_app();
+    let secondary_context = add_routed_input_context(&mut app);
+    let left_camera = app
+        .world_mut()
+        .spawn((
+            Camera {
+                viewport: Some(Viewport {
+                    physical_position: UVec2::ZERO,
+                    physical_size: UVec2::new(320, 480),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            RenderTarget::Window(WindowRef::Entity(primary_window)),
+            CameraRenderGraph::new(Core2d),
+        ))
+        .id();
+    let right_camera = app
+        .world_mut()
+        .spawn((
+            Camera {
+                viewport: Some(Viewport {
+                    physical_position: UVec2::new(320, 0),
+                    physical_size: UVec2::new(320, 480),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            RenderTarget::Window(WindowRef::Entity(primary_window)),
+            CameraRenderGraph::new(Core2d),
+        ))
+        .id();
+    app.world_mut()
+        .spawn(ImguiRenderRoute::new(primary_context, left_camera));
+    app.world_mut()
+        .spawn(ImguiRenderRoute::new(secondary_context, right_camera));
+    app.world_mut()
+        .spawn(ImguiInputRoute::from_camera(primary_context, left_camera));
+    app.world_mut().spawn(
+        ImguiInputRoute::from_camera(secondary_context, right_camera)
+            .with_policy(ImguiInputPolicy::exclusive(1)),
+    );
+    resolve_routed_input(&mut app);
+
+    app.world_mut()
+        .resource_mut::<Messages<CursorMoved>>()
+        .write(CursorMoved {
+            window: primary_window,
+            position: Vec2::new(100.0, 140.0),
+            delta: None,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<MouseButtonInput>>()
+        .write(MouseButtonInput {
+            button: BevyMouseButton::Left,
+            state: ButtonState::Pressed,
+            window: primary_window,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<KeyboardInput>>()
+        .write(key_input(
+            primary_window,
+            KeyCode::KeyL,
+            BevyKey::Character("l".into()),
+            ButtonState::Pressed,
+            Some("l"),
+        ));
+    run_routed_input(&mut app);
+    begin_frame_for_context(&mut app, primary_context, |ui| {
+        assert_eq!(ui.mouse_pos(), [100.0, 140.0]);
+        assert!(ui.is_key_down(imgui::Key::L));
+        assert!(ui.is_mouse_down(imgui::MouseButton::Left));
+    });
+    begin_frame_for_context(&mut app, secondary_context, |ui| {
+        assert!(!ui.is_key_down(imgui::Key::L));
+        assert!(!ui.is_mouse_down(imgui::MouseButton::Left));
+    });
+
+    app.world_mut()
+        .resource_mut::<Messages<CursorMoved>>()
+        .write(CursorMoved {
+            window: primary_window,
+            position: Vec2::new(420.0, 140.0),
+            delta: None,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<MouseButtonInput>>()
+        .write(MouseButtonInput {
+            button: BevyMouseButton::Right,
+            state: ButtonState::Pressed,
+            window: primary_window,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<KeyboardInput>>()
+        .write(key_input(
+            primary_window,
+            KeyCode::KeyR,
+            BevyKey::Character("r".into()),
+            ButtonState::Pressed,
+            Some("r"),
+        ));
+    run_routed_input(&mut app);
+    begin_frame_for_context(&mut app, primary_context, |ui| {
+        assert!(!ui.is_key_down(imgui::Key::L));
+        assert!(!ui.is_mouse_down(imgui::MouseButton::Left));
+        assert!(!ui.is_key_down(imgui::Key::R));
+    });
+    begin_frame_for_context(&mut app, secondary_context, |ui| {
+        assert_eq!(ui.mouse_pos(), [100.0, 140.0]);
+        assert!(ui.is_key_down(imgui::Key::R));
+        assert!(ui.is_mouse_down(imgui::MouseButton::Right));
+    });
+}
+
+#[cfg(feature = "render")]
+#[test]
+fn logical_image_input_maps_only_the_declared_host_region_and_drives_frame_metrics() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary_context, primary_window, _) = routed_input_app();
+    let image = Image::new_fill(
+        Extent3d {
+            width: 200,
+            height: 100,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        &[0, 0, 0, 255],
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::MAIN_WORLD,
+    );
+    let image = app.world_mut().resource_mut::<Assets<Image>>().add(image);
+    let camera = app
+        .world_mut()
+        .spawn((
+            Camera {
+                is_active: true,
+                ..Default::default()
+            },
+            RenderTarget::Image(image.into()),
+            CameraRenderGraph::new(Core2d),
+        ))
+        .id();
+    app.world_mut()
+        .spawn(ImguiRenderRoute::new(primary_context, camera));
+    app.world_mut().spawn(ImguiInputRoute::logical(
+        primary_context,
+        primary_window,
+        bevy_math::Rect::from_corners(Vec2::new(100.0, 200.0), Vec2::new(500.0, 400.0)),
+    ));
+    resolve_routed_input(&mut app);
+
+    app.world_mut()
+        .resource_mut::<Messages<CursorMoved>>()
+        .write(CursorMoved {
+            window: primary_window,
+            position: Vec2::new(300.0, 300.0),
+            delta: None,
+        });
+    run_routed_input(&mut app);
+    configure_context(&mut app, primary_context, |context| {
+        assert_eq!(context.io().display_size(), [200.0, 100.0]);
+        assert_eq!(context.io().display_framebuffer_scale(), [1.0, 1.0]);
+    });
+    begin_frame_for_context(&mut app, primary_context, |ui| {
+        assert_eq!(ui.mouse_pos(), [100.0, 50.0]);
+    });
+
+    app.world_mut()
+        .resource_mut::<Messages<CursorMoved>>()
+        .write(CursorMoved {
+            window: primary_window,
+            position: Vec2::new(550.0, 300.0),
+            delta: None,
+        });
+    run_routed_input(&mut app);
+    begin_frame_for_context(&mut app, primary_context, |ui| {
+        assert!(
+            ui.mouse_pos()[0] < -1.0e30 && ui.mouse_pos()[1] < -1.0e30,
+            "offscreen Contexts must not infer a host-window coordinate outside their logical source"
+        );
+    });
+
+    app.update();
+    configure_context(&mut app, primary_context, |context| {
+        assert_eq!(
+            context.io().display_size(),
+            [200.0, 100.0],
+            "the frame driver must preserve routed image dimensions"
+        );
+    });
+}
+
+#[cfg(feature = "render")]
+#[test]
+fn scoped_capture_queries_update_before_update_and_clear_when_a_window_disappears() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary_context, primary_window, secondary_window) = routed_input_app();
+    let secondary_context = add_routed_input_context(&mut app);
+    let primary_region = logical_window_region(&app, primary_window);
+    let secondary_region = logical_window_region(&app, secondary_window);
+    app.world_mut().spawn(ImguiInputRoute::logical(
+        primary_context,
+        primary_window,
+        primary_region,
+    ));
+    app.world_mut().spawn(ImguiInputRoute::logical(
+        secondary_context,
+        secondary_window,
+        secondary_region,
+    ));
+    resolve_routed_input(&mut app);
+    app.init_resource::<ScopedCaptureRunCount>().add_systems(
+        Update,
+        count_scoped_capture.run_if(imgui_context_wants_keyboard_input(primary_context)),
+    );
+
+    configure_context(&mut app, primary_context, |_| unsafe {
+        let io = imgui::sys::igGetIO_Nil();
+        (*io).WantCaptureKeyboard = true;
+    });
+    configure_context(&mut app, secondary_context, |_| unsafe {
+        let io = imgui::sys::igGetIO_Nil();
+        (*io).WantCaptureMouse = true;
+    });
+    assert!(!run_condition_once(
+        &mut app,
+        imgui_context_wants_keyboard_input(primary_context)
+    ));
+    assert!(!run_condition_once(
+        &mut app,
+        imgui_window_wants_pointer_input(secondary_window)
+    ));
+
+    run_routed_input(&mut app);
+    {
+        let capture = app.world().resource::<ImguiInputCapture>();
+        assert!(capture.wants_keyboard_input_for_context(primary_context));
+        assert!(!capture.wants_pointer_input_for_context(primary_context));
+        assert!(capture.wants_pointer_input_for_context(secondary_context));
+        assert!(capture.wants_pointer_input_for_window(secondary_window));
+        assert!(capture.wants_keyboard_input());
+        assert!(capture.wants_pointer_input());
+    }
+    assert!(run_condition_once(
+        &mut app,
+        imgui_context_wants_keyboard_input(primary_context)
+    ));
+    assert!(run_condition_once(
+        &mut app,
+        imgui_context_wants_pointer_input(secondary_context)
+    ));
+    assert!(run_condition_once(
+        &mut app,
+        imgui_window_wants_pointer_input(secondary_window)
+    ));
+    app.update();
+    assert_eq!(
+        app.world().resource::<ScopedCaptureRunCount>().0,
+        1,
+        "scoped capture must be available before normal Update systems run"
+    );
+
+    app.world_mut().despawn(secondary_window);
+    run_routed_input(&mut app);
+    let capture = app.world().resource::<ImguiInputCapture>();
+    assert!(capture.for_context(primary_context).is_some());
+    assert!(capture.for_context(secondary_context).is_none());
+    assert!(capture.for_window(secondary_window).is_none());
 }
