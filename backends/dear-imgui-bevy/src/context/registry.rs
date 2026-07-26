@@ -575,7 +575,7 @@ impl ImguiContexts {
         };
     }
 
-    #[cfg(feature = "render")]
+    #[cfg(any(feature = "render", feature = "multi-viewport"))]
     pub(crate) fn with_primary_owner<T>(
         &mut self,
         operation: impl FnOnce(&mut ContextOwner) -> T,

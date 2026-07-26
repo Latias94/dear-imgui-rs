@@ -66,7 +66,7 @@ pub(super) fn prepare_primary_platform_frame(world: &mut World, context: &mut im
         primary_entity,
         &primary_window,
         &monitors,
-        viewport_feedback,
+        viewport_feedback.into_iter(),
         enable_viewports,
     )
     .unwrap_or_else(|error| {
