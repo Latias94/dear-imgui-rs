@@ -1,5 +1,5 @@
 use dear_imgui_rs::{
-    KeyChord, KeyMods, MouseButton, TableColumnIndex, TableColumnRef, with_scratch_txt,
+    Direction, KeyChord, KeyMods, MouseButton, TableColumnIndex, TableColumnRef, with_scratch_txt,
     with_scratch_txt_two,
 };
 use dear_imgui_test_engine_sys as sys;
@@ -596,6 +596,36 @@ impl ScriptTest<'_> {
             )
         });
         ffi_status("imgui_test_engine_script_window_resize", status)
+    }
+
+    /// Docks `source` as a tab in `destination`.
+    pub fn dock_into(&mut self, source: &str, destination: &str) -> TestEngineResult<()> {
+        self.dock_into_with_options(source, destination, Direction::None, false)
+    }
+
+    /// Docks `source` relative to `destination`.
+    ///
+    /// `Direction::None` creates a tab. Cardinal directions create a split, and
+    /// `outer_docking` targets the outside edge of the destination dock tree.
+    pub fn dock_into_with_options(
+        &mut self,
+        source: &str,
+        destination: &str,
+        direction: Direction,
+        outer_docking: bool,
+    ) -> TestEngineResult<()> {
+        validate_reference("dock_into_with_options", "source", source, false)?;
+        validate_reference("dock_into_with_options", "destination", destination, false)?;
+        let status = with_scratch_txt_two(source, destination, |source_ptr, dest_ptr| unsafe {
+            sys::imgui_test_engine_script_dock_into(
+                self.script.raw(),
+                source_ptr,
+                dest_ptr,
+                direction as i32,
+                outer_docking,
+            )
+        });
+        ffi_status("imgui_test_engine_script_dock_into", status)
     }
 
     pub fn sleep_seconds(&mut self, seconds: f32) -> TestEngineResult<()> {

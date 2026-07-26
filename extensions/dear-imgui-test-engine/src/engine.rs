@@ -425,6 +425,28 @@ impl TestEngine {
         })
     }
 
+    /// Sets how much context is retained and printed when a test fails.
+    pub fn set_verbose_level_on_error(&mut self, level: VerboseLevel) -> TestEngineResult<()> {
+        self.require_ready("TestEngine::set_verbose_level_on_error")?;
+        self.call_attached(
+            "imgui_test_engine_set_verbose_level_on_error",
+            |raw| unsafe {
+                sys::imgui_test_engine_set_verbose_level_on_error(
+                    raw,
+                    level as sys::ImGuiTestEngineVerboseLevel,
+                )
+            },
+        )
+    }
+
+    /// Mirrors Test Engine log output to the process terminal.
+    pub fn set_log_to_tty(&mut self, enabled: bool) -> TestEngineResult<()> {
+        self.require_ready("TestEngine::set_log_to_tty")?;
+        self.call_attached("imgui_test_engine_set_log_to_tty", |raw| unsafe {
+            sys::imgui_test_engine_set_log_to_tty(raw, enabled)
+        })
+    }
+
     pub fn set_capture_enabled(&mut self, enabled: bool) -> TestEngineResult<()> {
         self.require_ready("TestEngine::set_capture_enabled")?;
         self.call_attached("imgui_test_engine_set_capture_enabled", |raw| unsafe {

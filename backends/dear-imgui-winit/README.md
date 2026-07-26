@@ -86,12 +86,13 @@ APIs of interest:
 Choose the mode before creating `WinitPlatformRuntime`. While that runtime is attached,
 `set_hidpi_mode` and `attach_window` return
 `WinitPlatformError::RuntimeConfigurationLocked` without modifying the main-window or coordinate
-state. This preserves the single desktop-logical coordinate model shared by primary and secondary
-viewports.
+state. This preserves the single platform-native desktop coordinate model shared by primary and
+secondary viewports.
 
-When DPI changes (`ScaleFactorChanged`), the backend adjusts:
-- `io.display_size`, `io.display_framebuffer_scale`
-- mouse position (keeping pointer location consistent across scales)
+When DPI changes (`ScaleFactorChanged`), the backend updates `io.display_size` and
+`io.display_framebuffer_scale`. Single-window mode also adjusts the stored mouse position to keep
+the pointer location consistent across scales; a live multi-viewport runtime already receives
+absolute mouse positions in its native desktop coordinate space.
 
 Helpers are provided if you pass winit logical values around and need the same
 coordinates ImGui uses:
@@ -166,7 +167,7 @@ When software cursor is enabled:
 This backend sets (when appropriate):
 - `BackendFlags::HAS_MOUSE_CURSORS`
 - `BackendFlags::PLATFORM_HAS_VIEWPORTS` while `WinitPlatformRuntime` is attached
-- `BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT` while `WinitPlatformRuntime` is attached
+- `BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT` on Windows while `WinitPlatformRuntime` is attached
 
 For diagnostics, the backend also sets `BackendPlatformName` to `"dear-imgui-winit {version}"`.
 
@@ -219,15 +220,26 @@ per-window opacity API, so it does not install `Platform_SetWindowAlpha`; enabli
 docking payloads therefore fails core capability validation instead of silently accepting a no-op.
 Unimplemented foreign callbacks, including alpha, work-area-inset, and Vulkan-surface hooks, stay
 outside Winit's callback lease and may change without faulting the runtime.
-Programmatic move and resize notifications are suppressed through the following Dear ImGui frame,
-touch events from secondary windows use the same touch-to-mouse path as the primary window, and
-`NO_INPUTS` viewports use Winit cursor hit testing so drag targets behind them remain reachable.
-Windows and X11 also honor `NO_TASK_BAR_ICON` at creation. Because this integration currently uses
-Winit logical coordinates, construction rejects mixed-DPI monitor layouts instead of publishing an
-overlapping or discontinuous monitor map.
+Native move, resize, and DPI notifications are treated as authoritative platform feedback, while
+touch events from secondary windows use the same touch-to-mouse path as the primary window.
+`NO_INPUTS` viewports pass hit tests through so drag targets behind them remain reachable. Windows
+does this with `WM_NCHITTEST`, discovers the hovered native window from the global pointer every
+frame, and raises a moving viewport above its docking target without activating it or changing
+compositor window styles. Mouse capture is transferred to the main window if the viewport that
+started a drag is destroyed. Other desktop targets use Winit cursor hit testing.
+Windows and X11 also honor `NO_TASK_BAR_ICON` at creation. Multi-viewport geometry follows the
+native desktop coordinate space required by Dear ImGui: Windows and X11 use physical virtual-desktop
+pixels with `FramebufferScale = (1, 1)`, while macOS uses Cocoa points with its backing scale.
+`DpiScale` remains separate from framebuffer scale, so mixed-DPI monitor layouts are supported
+without overlapping or discontinuous monitor rectangles. The monitor publication is refreshed at
+the frame-preparation boundary and preserves the prior PlatformIO owner during teardown. Runtime
+attachment invalidates mouse coordinates cached in the single-window coordinate space; shutdown
+restores the base logical display metrics and invalidates the desktop-space cache before returning
+control to the single-window backend. On Windows, decorated client positions are converted with the
+target viewport DPI rather than the source monitor's current frame size.
 
 Multi-viewport requires `HiDpiMode::Default`. `Rounded` and `Locked` remap the primary-window
-coordinate space, while secondary windows use Winit's desktop logical coordinates; mixing those
+coordinate space, while secondary windows use Winit's native desktop coordinates; mixing those
 models is rejected instead of publishing inconsistent input and window geometry.
 
 Native Linux multi-viewport support is X11-only. Runtime construction rejects Wayland before any

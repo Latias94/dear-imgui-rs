@@ -13,7 +13,10 @@ use super::callbacks::{
     winit_get_window_pos_out,
 };
 use super::registry::preflight_viewport_ownership;
-use super::runtime::{ConstructionStage, RuntimeState, WinitPlatformRuntime};
+use super::runtime::{
+    ConstructionStage, RuntimeState, WinitPlatformRuntime,
+    apply_raw_io_coordinate_contract_for_test,
+};
 use crate::test_util::test_sync::lock_context;
 
 unsafe extern "C" fn foreign_unary(_viewport: *mut dear_imgui_rs::sys::ImGuiViewport) {}
@@ -132,18 +135,6 @@ fn valid_test_monitor() -> dear_imgui_rs::sys::ImGuiPlatformMonitor {
         DpiScale: 1.0,
         PlatformHandle: std::ptr::null_mut(),
     }
-}
-
-#[test]
-fn logical_monitor_coordinates_reject_mixed_dpi_layouts() {
-    assert_eq!(
-        super::callbacks::validate_monitor_scale_factors_for_test(&[1.0, 1.0]),
-        Ok(())
-    );
-    assert_eq!(
-        super::callbacks::validate_monitor_scale_factors_for_test(&[1.0, 1.5]),
-        Err(WinitPlatformError::MixedMonitorScaleFactorsUnsupported)
-    );
 }
 
 #[test]
@@ -457,6 +448,62 @@ fn shutdown_preserves_a_foreign_empty_monitor_replacement_without_double_free() 
     assert!(monitors.Data.is_null());
     assert_eq!(monitors.Size, 0);
     assert_eq!(monitors.Capacity, 0);
+}
+
+#[test]
+fn coordinate_contract_transition_restores_metrics_and_invalidates_pointer_cache() {
+    let _guard = lock_context();
+    let context = Context::create();
+    let io = unsafe { &mut *dear_imgui_rs::sys::igGetIO_ContextPtr(context.as_raw()) };
+    io.MousePos = dear_imgui_rs::sys::ImVec2 { x: 42.0, y: 27.0 };
+    io.MouseHoveredViewport = 99;
+
+    apply_raw_io_coordinate_contract_for_test(io, [800.0, 600.0], [1.5, 1.5]);
+
+    assert_eq!(io.DisplaySize.x, 800.0);
+    assert_eq!(io.DisplaySize.y, 600.0);
+    assert_eq!(io.DisplayFramebufferScale.x, 1.5);
+    assert_eq!(io.DisplayFramebufferScale.y, 1.5);
+    assert_eq!(io.MousePos.x, -f32::MAX);
+    assert_eq!(io.MousePos.y, -f32::MAX);
+    assert_eq!(io.MouseHoveredViewport, 0);
+}
+
+#[test]
+fn monitor_refresh_replaces_owned_storage_and_restores_the_prior_publication() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let before = snapshot_publication_state(&context);
+    let mut runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
+    let previous_data = unsafe { (*context.platform_io().as_raw()).Monitors.Data };
+    let mut replacement = valid_test_monitor();
+    replacement.MainPos = dear_imgui_rs::sys::ImVec2 {
+        x: -1600.0,
+        y: 40.0,
+    };
+    replacement.WorkPos = replacement.MainPos;
+    replacement.DpiScale = 1.5;
+
+    assert_eq!(
+        runtime
+            .control()
+            .refresh_monitors_for_test(&context, &[replacement]),
+        Ok(true)
+    );
+    let monitors = unsafe { &(*context.platform_io().as_raw()).Monitors };
+    assert_ne!(monitors.Data, previous_data);
+    assert_eq!(monitors.Size, 1);
+    assert_eq!(unsafe { (*monitors.Data).MainPos }, replacement.MainPos);
+    assert_eq!(unsafe { (*monitors.Data).DpiScale }, 1.5);
+    assert_eq!(
+        runtime
+            .control()
+            .refresh_monitors_for_test(&context, &[replacement]),
+        Ok(false)
+    );
+
+    runtime.shutdown(&mut context).unwrap();
+    assert_publication_state_restored(&context, before);
 }
 
 #[test]
@@ -1123,7 +1170,10 @@ fn platform_owner_rejects_reserved_foreign_flags_transactionally() {
     for flag in [
         BackendFlags::PLATFORM_HAS_VIEWPORTS,
         BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT,
-    ] {
+    ]
+    .into_iter()
+    .filter(|flag| crate::platform::WINIT_VIEWPORT_FLAGS.contains(*flag))
+    {
         let mut context = Context::create();
         let mut flags = context.io().backend_flags();
         flags.insert(flag);

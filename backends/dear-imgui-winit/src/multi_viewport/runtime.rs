@@ -16,11 +16,18 @@ use winit::window::Window;
 use super::callbacks::{
     MonitorOwnership, PlatformCallbackContract, PreparedMonitors, claim_platform_callbacks,
     has_owned_platform_callback_in_current_context, preflight_platform_callbacks,
-    preflight_platform_window_destruction, prepare_monitors, publish_monitors,
+    preflight_platform_window_destruction, prepare_monitors, publish_monitors, refresh_monitors,
     release_platform_callbacks, validate_platform_callback_contract,
 };
-use super::registry::{preflight_viewport_ownership, register_runtime, unregister_runtime};
+#[cfg(target_os = "windows")]
+use super::native_cursor_hittest::query_native_mouse_state;
+#[cfg(target_os = "windows")]
+use super::registry::viewport_id_for_native_window;
+use super::registry::{
+    preflight_viewport_ownership, register_runtime, secondary_viewport_windows, unregister_runtime,
+};
 use super::viewport_data::{init_main_viewport, preflight_main_viewport};
+use crate::cursor::CursorSettings;
 use crate::platform::{WinitPlatformControl, WinitPlatformError};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -55,6 +62,50 @@ pub(super) enum RuntimeState {
     ShuttingDown,
     Detached,
     ContextDestroyed,
+}
+
+fn invalidate_mouse_coordinate_cache(io: &mut dear_imgui_rs::Io) {
+    let unavailable = [-f32::MAX, -f32::MAX];
+    io.set_mouse_pos(unavailable);
+    io.add_mouse_pos_event(unavailable);
+    io.add_mouse_viewport_event(dear_imgui_rs::Id::default());
+}
+
+fn invalidate_raw_mouse_coordinate_cache(io: &mut dear_imgui_rs::sys::ImGuiIO) {
+    io.MousePos = dear_imgui_rs::sys::ImVec2 {
+        x: -f32::MAX,
+        y: -f32::MAX,
+    };
+    io.MouseHoveredViewport = 0;
+    unsafe {
+        dear_imgui_rs::sys::ImGuiIO_AddMousePosEvent(io, -f32::MAX, -f32::MAX);
+        dear_imgui_rs::sys::ImGuiIO_AddMouseViewportEvent(io, 0);
+    }
+}
+
+#[cfg(test)]
+pub(super) fn apply_raw_io_coordinate_contract_for_test(
+    io: &mut dear_imgui_rs::sys::ImGuiIO,
+    display_size: [f32; 2],
+    framebuffer_scale: [f32; 2],
+) {
+    apply_raw_io_coordinate_contract(io, display_size, framebuffer_scale);
+}
+
+fn apply_raw_io_coordinate_contract(
+    io: &mut dear_imgui_rs::sys::ImGuiIO,
+    display_size: [f32; 2],
+    framebuffer_scale: [f32; 2],
+) {
+    io.DisplaySize = dear_imgui_rs::sys::ImVec2 {
+        x: display_size[0],
+        y: display_size[1],
+    };
+    io.DisplayFramebufferScale = dear_imgui_rs::sys::ImVec2 {
+        x: framebuffer_scale[0],
+        y: framebuffer_scale[1],
+    };
+    invalidate_raw_mouse_coordinate_cache(io);
 }
 
 /// A closure-scoped view of Winit's active event loop.
@@ -341,6 +392,22 @@ impl RuntimeControl {
         Ok(())
     }
 
+    fn restore_single_window_io_in_current_context(&self) -> Result<(), WinitPlatformError> {
+        if unsafe { dear_imgui_rs::sys::igGetCurrentContext() } != self.context_raw {
+            return Err(WinitPlatformError::ContextMismatch);
+        }
+        let Some(main_window) = self.main_window() else {
+            return Ok(());
+        };
+        let io = unsafe { dear_imgui_rs::sys::igGetIO_ContextPtr(self.context_raw) };
+        let Some(io) = (unsafe { io.as_mut() }) else {
+            return Err(WinitPlatformError::ContextMismatch);
+        };
+        let (display_size, framebuffer_scale) = super::single_window_display_metrics(&main_window);
+        apply_raw_io_coordinate_contract(io, display_size, framebuffer_scale);
+        Ok(())
+    }
+
     fn discard_prior_monitors_after_context_destroyed(&self) {
         if let Some(ownership) = self.monitor_ownership.borrow_mut().take() {
             unsafe { ownership.context_destroyed() };
@@ -356,8 +423,12 @@ impl RuntimeControl {
         // sidecars here and never dereference their retained addresses.
         self.discard_all_viewports_without_touching_native();
         let monitor_error = self.restore_monitors_in_current_context();
+        let io_error = self.restore_single_window_io_in_current_context();
         self.finish_shutdown();
-        deferred_fault.and(callback_error).and(monitor_error)
+        deferred_fault
+            .and(callback_error)
+            .and(monitor_error)
+            .and(io_error)
     }
 
     fn shutdown_explicit(&self, context: &mut Context) -> Result<(), WinitPlatformError> {
@@ -447,6 +518,74 @@ impl RuntimeControl {
 
     pub(super) fn main_window(&self) -> Option<Arc<Window>> {
         self.main_window.borrow().clone()
+    }
+
+    pub(crate) fn apply_cursor_settings(&self, settings: CursorSettings) {
+        for window in secondary_viewport_windows(self) {
+            settings.apply(&window);
+        }
+    }
+
+    pub(crate) fn set_ime_allowed(&self, allowed: bool) {
+        for window in secondary_viewport_windows(self) {
+            window.set_ime_allowed(allowed);
+        }
+    }
+
+    pub(crate) fn refresh_monitors(&self, context: &Context) -> Result<(), WinitPlatformError> {
+        let Some(main_window) = self.main_window() else {
+            return Err(WinitPlatformError::RuntimeDetached);
+        };
+        self.binding.try_with_bound_context(|| {
+            let mut ownership = self.monitor_ownership.borrow_mut();
+            let Some(ownership) = ownership.as_mut() else {
+                return Err(WinitPlatformError::RuntimeDetached);
+            };
+            if refresh_monitors(context, &main_window, ownership)? {
+                super::mvlog("[winit-mv] refreshed monitor topology");
+            }
+            Ok(())
+        })?
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(crate) fn refresh_native_mouse(
+        &self,
+        context: &mut Context,
+    ) -> Result<(), WinitPlatformError> {
+        self.binding.try_with_bound_context(|| {
+            let mouse = query_native_mouse_state();
+            let hovered_viewport = mouse
+                .and_then(|state| state.hovered_window)
+                .and_then(|window| viewport_id_for_native_window(self, window))
+                .unwrap_or_default();
+            let app_is_focused = mouse
+                .and_then(|state| state.focused_window)
+                .and_then(|window| viewport_id_for_native_window(self, window))
+                .is_some();
+
+            let io = context.io_mut();
+            if app_is_focused && let Some(mouse) = mouse {
+                io.add_mouse_pos_event([mouse.position[0] as f32, mouse.position[1] as f32]);
+            }
+            io.add_mouse_viewport_event(dear_imgui_rs::Id::from(hovered_viewport));
+            Ok(())
+        })?
+    }
+
+    #[cfg(test)]
+    pub(super) fn refresh_monitors_for_test(
+        &self,
+        context: &Context,
+        monitors: &[dear_imgui_rs::sys::ImGuiPlatformMonitor],
+    ) -> Result<bool, WinitPlatformError> {
+        self.binding.try_with_bound_context(|| {
+            let mut ownership = self.monitor_ownership.borrow_mut();
+            let Some(ownership) = ownership.as_mut() else {
+                return Err(WinitPlatformError::RuntimeDetached);
+            };
+            super::callbacks::refresh_monitors_for_test(context, monitors, ownership)
+        })?
     }
 }
 
@@ -623,8 +762,8 @@ impl WinitPlatformRuntime {
     ///
     /// The platform must use [`crate::HiDpiMode::Default`]. Locked and rounded modes remap the
     /// single-window coordinate space, while Winit's native platform-window callbacks operate in
-    /// desktop logical coordinates and therefore cannot be mixed without incorrect input and
-    /// window geometry.
+    /// platform-native desktop coordinates and therefore cannot be mixed without incorrect input
+    /// and window geometry.
     pub fn new(
         context: &mut Context,
         platform: &crate::WinitPlatform,
@@ -648,16 +787,21 @@ impl WinitPlatformRuntime {
             &platform_control,
             Arc::clone(&main_window),
         ));
-        Self::construct(
+        let runtime = Self::construct(
             context,
             platform_control,
             control,
             #[cfg(test)]
             None,
-            Some(main_window),
+            Some(Arc::clone(&main_window)),
             prepared_monitors,
             |_, _| Ok(()),
-        )
+        )?;
+        let io = context.io_mut();
+        io.set_display_size(super::desktop_size_for_window(&main_window));
+        io.set_display_framebuffer_scale(super::framebuffer_scale_for_window(&main_window));
+        invalidate_mouse_coordinate_cache(io);
+        Ok(runtime)
     }
 
     #[cfg(test)]
@@ -976,11 +1120,7 @@ pub(super) fn validate_window_system_for_test(
 fn claim_backend_flags(control: &RuntimeControl, context: &mut Context) {
     control.binding().with_bound_context(|| {
         let io = context.io_mut();
-        io.set_backend_flags(
-            io.backend_flags()
-                | dear_imgui_rs::BackendFlags::PLATFORM_HAS_VIEWPORTS
-                | dear_imgui_rs::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT,
-        );
+        io.set_backend_flags(io.backend_flags() | crate::platform::WINIT_VIEWPORT_FLAGS);
     });
 }
 

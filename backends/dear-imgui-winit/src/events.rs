@@ -252,26 +252,7 @@ pub(crate) fn handle_touch_event_at(
 /// Handle touch events by converting them to mouse events.
 pub fn handle_touch_event(touch: &winit::event::Touch, window: &Window, imgui_ctx: &mut Context) {
     let position = touch_logical_position(touch, window);
-    #[cfg(feature = "multi-viewport")]
-    let (position, viewport) = if imgui_ctx
-        .io()
-        .config_flags()
-        .contains(dear_imgui_rs::ConfigFlags::VIEWPORTS_ENABLE)
-    {
-        let viewport = Some(imgui_ctx.main_viewport().id());
-        let position = position.and_then(|position| {
-            crate::multi_viewport::client_to_screen_pos(
-                window,
-                [f64::from(position[0]), f64::from(position[1])],
-            )
-        });
-        (position, viewport)
-    } else {
-        (position, None)
-    };
-    #[cfg(not(feature = "multi-viewport"))]
-    let viewport = None;
-    let _ = handle_touch_event_at(touch, position, viewport, imgui_ctx);
+    let _ = handle_touch_event_at(touch, position, None, imgui_ctx);
 }
 
 /// Handle device events (raw input events)

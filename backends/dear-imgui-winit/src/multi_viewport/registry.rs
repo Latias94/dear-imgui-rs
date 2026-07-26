@@ -234,6 +234,26 @@ pub(super) fn window_for_viewport(
     with_viewport_data(control, viewport, |data| Arc::clone(data.window()))
 }
 
+pub(super) fn secondary_viewport_windows(control: &RuntimeControl) -> Vec<Arc<Window>> {
+    control
+        .viewports
+        .borrow()
+        .iter()
+        .filter(|entry| !entry.data.is_main())
+        .map(|entry| Arc::clone(entry.data.window()))
+        .collect()
+}
+
+#[cfg(target_os = "windows")]
+pub(super) fn viewport_id_for_native_window(
+    control: &RuntimeControl,
+    native_window: usize,
+) -> Option<u32> {
+    control.viewports.borrow().iter().find_map(|entry| {
+        (entry.data.native_window_id() == native_window).then_some(entry.viewport_id())
+    })
+}
+
 pub(super) fn remove_viewport_data(
     control: &RuntimeControl,
     viewport: *mut dear_imgui_rs::sys::ImGuiViewport,

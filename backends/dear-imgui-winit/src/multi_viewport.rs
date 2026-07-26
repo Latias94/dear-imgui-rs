@@ -7,7 +7,9 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
 mod callbacks;
+mod coordinates;
 mod events;
+mod native_cursor_hittest;
 mod registry;
 mod runtime;
 #[cfg(test)]
@@ -17,9 +19,13 @@ mod viewport_data;
 use std::sync::Arc;
 use winit::window::Window;
 
+pub(crate) use self::coordinates::{
+    client_physical_to_screen_pos, desktop_size_for_window, framebuffer_scale_for_window,
+    ime_cursor_area_for_viewport, single_window_display_metrics, window_position_from_desktop,
+    window_size_from_desktop,
+};
 pub(crate) use self::runtime::RuntimeControl;
 pub use self::runtime::{EventLoopScope, WinitPlatformRuntime};
-pub(crate) use self::viewport_data::client_to_screen_pos;
 pub use crate::WinitPlatformError;
 
 // Debug logging helper (off by default). Enable by building this crate with

@@ -103,6 +103,7 @@ glutin = "0.32"
 glutin-winit = "0.5"
 raw-window-handle = "0.6"
 image = "0.25"
+windows-sys = "0.61.2"
 
 # Build dependencies
 bindgen = "0.72"

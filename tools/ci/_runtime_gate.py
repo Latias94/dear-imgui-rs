@@ -814,6 +814,7 @@ def _validate_viewport_payload(payload: Mapping[str, object]) -> list[str]:
         payload,
         (
             "secondary_viewport_observed",
+            "secondary_viewport_while_held_observed",
             "merge_observed",
             "teardown_complete",
         ),
@@ -989,6 +990,7 @@ def _run_viewport_smoke(
                 "VK_DRIVER_FILES": lavapipe_icd,
                 "VK_ICD_FILENAMES": lavapipe_icd,
                 "DEAR_IMGUI_REQUIRE_SOFTWARE_VULKAN": "1",
+                "DEAR_IMGUI_VIEWPORT_DRAG_SMOKE": "1",
             }
         elif spec.gate == _SDL3_GLOW_VIEWPORT_SMOKE.gate:
             tools = _require_linux_sdl3_glow_tools()
