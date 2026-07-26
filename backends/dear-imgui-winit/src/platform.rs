@@ -111,9 +111,10 @@ pub enum WinitPlatformError {
         monitor: usize,
         reason: &'static str,
     },
-    /// The current logical desktop model cannot represent monitors with different scale factors.
+    /// Retained for source compatibility; mixed-DPI monitor layouts are now supported.
+    #[deprecated(note = "mixed-DPI monitor layouts are supported; this variant is never returned")]
     #[error(
-        "mixed-DPI monitor layouts are unsupported by the Winit multi-viewport logical coordinate model"
+        "mixed-DPI monitor layouts are supported; this compatibility variant is never returned"
     )]
     MixedMonitorScaleFactorsUnsupported,
     /// Custom single-window coordinate scaling is not implemented for platform viewports.
@@ -202,26 +203,49 @@ unsafe extern "C" fn imgui_winit_set_ime_data(
             if !ime.WantVisible && !ime.WantTextInput {
                 return;
             }
-            let pos = LogicalPosition::new(
-                (ime.InputPos.x - vp.Pos.x) as f64,
-                (ime.InputPos.y - vp.Pos.y) as f64,
-            );
             let line_height = if ime.InputLineHeight > 0.0 {
-                ime.InputLineHeight as f64
+                ime.InputLineHeight
             } else {
-                16.0
+                16.0_f32
             };
-            window.set_ime_cursor_area(pos, LogicalSize::new(line_height, line_height));
+            #[cfg(feature = "multi-viewport")]
+            let area = if control.has_live_runtime() {
+                crate::multi_viewport::ime_cursor_area_for_viewport(
+                    &window,
+                    [ime.InputPos.x, ime.InputPos.y],
+                    [vp.Pos.x, vp.Pos.y],
+                    line_height,
+                )
+            } else {
+                Some((
+                    LogicalPosition::new(
+                        f64::from(ime.InputPos.x - vp.Pos.x),
+                        f64::from(ime.InputPos.y - vp.Pos.y),
+                    ),
+                    LogicalSize::new(f64::from(line_height), f64::from(line_height)),
+                ))
+            };
+            #[cfg(not(feature = "multi-viewport"))]
+            let area = Some((
+                LogicalPosition::new(
+                    f64::from(ime.InputPos.x - vp.Pos.x),
+                    f64::from(ime.InputPos.y - vp.Pos.y),
+                ),
+                LogicalSize::new(f64::from(line_height), f64::from(line_height)),
+            ));
+            if let Some((position, size)) = area {
+                window.set_ime_cursor_area(position, size);
+            }
         });
     }));
-    if res.is_err() {
-        if let Some(control) = platform_control_for_context(ctx) {
-            let _ = control.binding.try_with_bound_context(|| {
-                control.fail_current_contract(WinitPlatformError::CallbackPanicked {
-                    callback: "Platform_SetImeDataFn",
-                });
+    if res.is_err()
+        && let Some(control) = platform_control_for_context(ctx)
+    {
+        let _ = control.binding.try_with_bound_context(|| {
+            control.fail_current_contract(WinitPlatformError::CallbackPanicked {
+                callback: "Platform_SetImeDataFn",
             });
-        }
+        });
     }
 }
 
@@ -234,11 +258,13 @@ fn ime_callback_eq(left: Option<SetImeDataCallback>, right: Option<SetImeDataCal
 }
 
 const WINIT_BASE_FLAGS: BackendFlags = BackendFlags::HAS_MOUSE_CURSORS;
-#[cfg(feature = "multi-viewport")]
-const WINIT_VIEWPORT_FLAGS: BackendFlags =
+#[cfg(all(feature = "multi-viewport", target_os = "windows"))]
+pub(crate) const WINIT_VIEWPORT_FLAGS: BackendFlags =
     BackendFlags::PLATFORM_HAS_VIEWPORTS.union(BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT);
+#[cfg(all(feature = "multi-viewport", not(target_os = "windows")))]
+pub(crate) const WINIT_VIEWPORT_FLAGS: BackendFlags = BackendFlags::PLATFORM_HAS_VIEWPORTS;
 #[cfg(not(feature = "multi-viewport"))]
-const WINIT_VIEWPORT_FLAGS: BackendFlags = BackendFlags::empty();
+pub(crate) const WINIT_VIEWPORT_FLAGS: BackendFlags = BackendFlags::empty();
 const WINIT_RESERVED_FLAGS: BackendFlags = WINIT_BASE_FLAGS
     .union(BackendFlags::HAS_SET_MOUSE_POS)
     .union(WINIT_VIEWPORT_FLAGS)
@@ -310,9 +336,12 @@ pub(crate) struct WinitPlatformControl {
     baseline_ime_callback: Cell<Option<SetImeDataCallback>>,
     baseline_ime_user_data: Cell<*mut c_void>,
     attached_window: RefCell<Option<Arc<Window>>>,
+    ime_allowed: Cell<bool>,
     terminal_fault: RefCell<Option<WinitPlatformError>>,
     #[cfg(feature = "multi-viewport")]
     runtime: RefCell<Option<Rc<crate::multi_viewport::RuntimeControl>>>,
+    #[cfg(feature = "multi-viewport")]
+    cursor_settings: Cell<Option<CursorSettings>>,
 }
 
 impl WinitPlatformControl {
@@ -367,9 +396,12 @@ impl WinitPlatformControl {
             baseline_ime_callback: Cell::new(baseline_ime_callback),
             baseline_ime_user_data: Cell::new(baseline_ime_user_data),
             attached_window: RefCell::new(None),
+            ime_allowed: Cell::new(false),
             terminal_fault: RefCell::new(None),
             #[cfg(feature = "multi-viewport")]
             runtime: RefCell::new(None),
+            #[cfg(feature = "multi-viewport")]
+            cursor_settings: Cell::new(None),
         });
         let attachment = context.register_attachment::<WinitPlatformAttachmentMarker>(
             ContextAttachmentRole::Platform,
@@ -587,6 +619,71 @@ impl WinitPlatformControl {
             .borrow()
             .clone()
             .ok_or(WinitPlatformError::WindowNotAttached)
+    }
+
+    pub(crate) fn set_ime_allowed_for_owned_windows(&self, allowed: bool) {
+        self.ime_allowed.set(allowed);
+        if let Some(window) = self.attached_window.borrow().as_ref() {
+            window.set_ime_allowed(allowed);
+        }
+        #[cfg(feature = "multi-viewport")]
+        if let Some(runtime) = self.runtime.borrow().as_ref() {
+            runtime.set_ime_allowed(allowed);
+        }
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    pub(crate) fn has_live_runtime(&self) -> bool {
+        self.runtime
+            .borrow()
+            .as_ref()
+            .is_some_and(|runtime| !runtime.is_released())
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    pub(crate) fn refresh_runtime_state(
+        &self,
+        context: &mut Context,
+    ) -> Result<(), WinitPlatformError> {
+        let runtime = self
+            .runtime
+            .borrow()
+            .as_ref()
+            .filter(|runtime| !runtime.is_released())
+            .cloned();
+        let Some(runtime) = runtime else {
+            return Ok(());
+        };
+        let result = runtime.refresh_monitors(context);
+        #[cfg(target_os = "windows")]
+        let result = result.and_then(|()| runtime.refresh_native_mouse(context));
+        if let Err(error) = result {
+            self.fail_current_contract(error.clone());
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    pub(crate) fn set_cursor_settings(&self, settings: Option<CursorSettings>) {
+        self.cursor_settings.set(settings);
+        let Some(settings) = settings else {
+            return;
+        };
+        if let Some(window) = self.attached_window.borrow().as_ref() {
+            settings.apply(window);
+        }
+        if let Some(runtime) = self.runtime.borrow().as_ref() {
+            runtime.apply_cursor_settings(settings);
+        }
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    pub(crate) fn apply_current_window_state(&self, window: &Window) {
+        window.set_ime_allowed(self.ime_allowed.get());
+        if let Some(settings) = self.cursor_settings.get() {
+            settings.apply(window);
+        }
     }
 
     fn ensure_window(&self, window: &Window) -> Result<Arc<Window>, WinitPlatformError> {
@@ -896,8 +993,8 @@ impl WinitPlatform {
     /// Set the DPI scaling mode.
     ///
     /// The mode is part of the primary-window coordinate mapping, so it cannot change while a
-    /// multi-viewport runtime is attached. Secondary windows always use Winit desktop logical
-    /// coordinates.
+    /// multi-viewport runtime is attached. Secondary windows always use Winit's native desktop
+    /// coordinate space.
     pub fn set_hidpi_mode(&mut self, hidpi_mode: HiDpiMode) -> Result<(), WinitPlatformError> {
         self.ensure_runtime_configuration_mutable()?;
         self.hidpi_mode = hidpi_mode;
@@ -919,7 +1016,7 @@ impl WinitPlatform {
     pub fn set_ime_allowed(&mut self, allowed: bool) -> Result<(), WinitPlatformError> {
         let window = self.control.attached_window()?;
         self.control.validate_window_entry(&window)?;
-        window.set_ime_allowed(allowed);
+        self.control.set_ime_allowed_for_owned_windows(allowed);
         self.ime_enabled = allowed;
         Ok(())
     }
@@ -1120,6 +1217,15 @@ impl WinitPlatform {
     ) -> bool {
         match event {
             WindowEvent::Resized(physical_size) => {
+                #[cfg(feature = "multi-viewport")]
+                if self.control.has_live_runtime() {
+                    let io = imgui_ctx.io_mut();
+                    io.set_display_size(crate::multi_viewport::desktop_size_for_window(window));
+                    io.set_display_framebuffer_scale(
+                        crate::multi_viewport::framebuffer_scale_for_window(window),
+                    );
+                    return false;
+                }
                 let logical_size = physical_size
                     .to_logical(sanitize::positive_finite_or(window.scale_factor(), 1.0));
                 let logical_size = self.scale_size_from_winit(window, logical_size);
@@ -1130,6 +1236,18 @@ impl WinitPlatform {
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 let new_hidpi = self.hidpi_factor_for_scale(*scale_factor);
+                #[cfg(feature = "multi-viewport")]
+                if self.control.has_live_runtime() {
+                    // Native desktop coordinates do not change when a viewport crosses a DPI
+                    // boundary. Only its UI DPI and framebuffer relation change.
+                    self.hidpi_factor = new_hidpi;
+                    let io = imgui_ctx.io_mut();
+                    io.set_display_size(crate::multi_viewport::desktop_size_for_window(window));
+                    io.set_display_framebuffer_scale(
+                        crate::multi_viewport::framebuffer_scale_for_window(window),
+                    );
+                    return false;
+                }
                 // Adjust mouse position proportionally when DPI factor changes
                 {
                     let io = imgui_ctx.io_mut();
@@ -1158,29 +1276,19 @@ impl WinitPlatform {
                 events::handle_keyboard_input(event, imgui_ctx)
             }
             WindowEvent::CursorMoved { position, .. } => {
-                // With multi-viewports enabled, feed absolute/screen coordinates like upstream backends
                 #[cfg(feature = "multi-viewport")]
                 {
-                    if imgui_ctx
-                        .io()
-                        .config_flags()
-                        .contains(dear_imgui_rs::ConfigFlags::VIEWPORTS_ENABLE)
-                    {
-                        // Feed absolute/screen coordinates in logical pixels, matching io.DisplaySize.
-                        let scale = sanitize::positive_finite_or(window.scale_factor(), 1.0);
-                        let pos_logical = position.to_logical::<f64>(scale);
-                        if let Ok(base_phys) = window.inner_position() {
-                            let base_logical = base_phys.to_logical::<f64>(scale);
-                            let sx = base_logical.x + pos_logical.x;
-                            let sy = base_logical.y + pos_logical.y;
-                            // Main window always maps to the main Dear ImGui viewport.
-                            let main_viewport_id = imgui_ctx.main_viewport().id();
-                            imgui_ctx
-                                .io_mut()
-                                .add_mouse_viewport_event(main_viewport_id);
-                            return events::handle_cursor_moved([sx, sy], imgui_ctx);
-                        }
-                        return imgui_ctx.io().want_capture_mouse();
+                    if self.control.has_live_runtime() {
+                        let Some(position) = crate::multi_viewport::client_physical_to_screen_pos(
+                            window,
+                            [position.x, position.y],
+                        ) else {
+                            return imgui_ctx.io().want_capture_mouse();
+                        };
+                        return events::handle_cursor_moved(
+                            [f64::from(position[0]), f64::from(position[1])],
+                            imgui_ctx,
+                        );
                     }
                 }
                 // Fallback: local logical coordinates
@@ -1199,8 +1307,6 @@ impl WinitPlatform {
                 {
                     let io = imgui_ctx.io_mut();
                     io.add_mouse_pos_event([-f32::MAX, -f32::MAX]);
-                    // No Dear ImGui viewport is hovered anymore.
-                    io.add_mouse_viewport_event(dear_imgui_rs::Id::default());
                 }
                 false
             }
@@ -1215,6 +1321,20 @@ impl WinitPlatform {
                 imgui_ctx.io().want_capture_keyboard()
             }
             WindowEvent::Touch(touch) => {
+                #[cfg(feature = "multi-viewport")]
+                if self.control.has_live_runtime() {
+                    let position = crate::multi_viewport::client_physical_to_screen_pos(
+                        window,
+                        [touch.location.x, touch.location.y],
+                    );
+                    let _ = events::handle_touch_event_at(
+                        touch,
+                        position,
+                        Some(imgui_ctx.main_viewport().id()),
+                        imgui_ctx,
+                    );
+                    return imgui_ctx.io().want_capture_mouse();
+                }
                 events::handle_touch_event(touch, window, imgui_ctx);
                 imgui_ctx.io().want_capture_mouse()
             }
@@ -1237,36 +1357,32 @@ impl WinitPlatform {
 
         imgui_ctx.io_mut().set_delta_time(delta_s);
 
-        // In multi-viewport mode, keep DisplaySize/FramebufferScale in sync every frame.
-        // This matches upstream backends (SDL/GLFW) and avoids stale or spurious DPI
-        // changes affecting the main viewport after platform windows are moved.
+        // Keep the main viewport's native desktop coordinate unit and framebuffer relation in
+        // sync while an owning multi-viewport runtime is attached.
         #[cfg(feature = "multi-viewport")]
         {
-            if imgui_ctx
-                .io()
-                .config_flags()
-                .contains(ConfigFlags::VIEWPORTS_ENABLE)
-            {
+            if self.control.has_live_runtime() {
+                self.control.refresh_runtime_state(imgui_ctx)?;
                 let winit_scale = sanitize::positive_finite_or(window.scale_factor(), 1.0);
                 let hidpi = self.hidpi_factor_for_scale(winit_scale);
                 self.hidpi_factor = hidpi;
 
-                let logical_size = window.inner_size().to_logical(winit_scale);
-                let logical_size = self.scale_size_from_winit(window, logical_size);
                 let io = imgui_ctx.io_mut();
-                io.set_display_size(sanitize::finite_non_negative_size(logical_size));
-                io.set_display_framebuffer_scale(sanitize::framebuffer_scale(hidpi, 1.0));
+                io.set_display_size(crate::multi_viewport::desktop_size_for_window(window));
+                io.set_display_framebuffer_scale(
+                    crate::multi_viewport::framebuffer_scale_for_window(window),
+                );
             }
         }
 
-        // If backend supports setting mouse pos and ImGui requests it, honor it
-        // Skip when multi-viewports are enabled (no global cursor set in winit)
-        if imgui_ctx.io().want_set_mouse_pos()
-            && !imgui_ctx
-                .io()
-                .config_flags()
-                .contains(ConfigFlags::VIEWPORTS_ENABLE)
-        {
+        #[cfg(feature = "multi-viewport")]
+        let runtime_owns_desktop_cursor = self.control.has_live_runtime();
+        #[cfg(not(feature = "multi-viewport"))]
+        let runtime_owns_desktop_cursor = false;
+
+        // If backend supports setting mouse pos and ImGui requests it, honor it. Winit cannot set
+        // a global desktop pointer, so a live multi-viewport runtime intentionally skips this.
+        if imgui_ctx.io().want_set_mouse_pos() && !runtime_owns_desktop_cursor {
             let pos = imgui_ctx.io().mouse_pos();
             let logical_pos = self
                 .scale_pos_for_winit(window, LogicalPosition::new(pos[0] as f64, pos[1] as f64));
@@ -1318,10 +1434,10 @@ impl WinitPlatform {
         if self.ime_auto_manage {
             let want_text = ui.io().want_text_input();
             if want_text && !self.ime_enabled {
-                window.set_ime_allowed(true);
+                self.control.set_ime_allowed_for_owned_windows(true);
                 self.ime_enabled = true;
             } else if !want_text && self.ime_enabled {
-                window.set_ime_allowed(false);
+                self.control.set_ime_allowed_for_owned_windows(false);
                 self.ime_enabled = false;
             }
         }
@@ -1338,9 +1454,16 @@ impl WinitPlatform {
                 draw_cursor: ui.io().mouse_draw_cursor(),
             };
             if self.cursor_cache != Some(cursor) {
+                #[cfg(feature = "multi-viewport")]
+                self.control.set_cursor_settings(Some(cursor));
+                #[cfg(not(feature = "multi-viewport"))]
                 cursor.apply(window);
                 self.cursor_cache = Some(cursor);
             }
+        } else {
+            self.cursor_cache = None;
+            #[cfg(feature = "multi-viewport")]
+            self.control.set_cursor_settings(None);
         }
         Ok(())
     }

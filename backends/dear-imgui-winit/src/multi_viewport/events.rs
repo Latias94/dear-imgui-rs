@@ -3,7 +3,6 @@ use winit::event::{Event, WindowEvent};
 
 use super::registry::with_viewport_data;
 use super::runtime::{RuntimeControl, WinitPlatformRuntime};
-use super::viewport_data::classify_window_event_echo;
 use crate::sanitize;
 
 pub(super) fn route_secondary_event<T>(
@@ -35,36 +34,21 @@ pub(super) fn route_secondary_event<T>(
 
                     let window = data.window();
                     match event {
-                        WindowEvent::Moved(position) => {
-                            let frame = dear_imgui_rs::sys::igGetFrameCount();
-                            let (report, pending) = classify_window_event_echo(
-                                frame,
-                                data.pending_window_pos_echo.get(),
-                                [i64::from(position.x), i64::from(position.y)],
-                            );
-                            data.pending_window_pos_echo.set(pending);
-                            if report {
-                                (*viewport).PlatformRequestMove = true;
-                            }
+                        WindowEvent::Moved(_) => {
+                            (*viewport).PlatformRequestMove = true;
                         }
-                        WindowEvent::Resized(size) => {
-                            let frame = dear_imgui_rs::sys::igGetFrameCount();
-                            let (report, pending) = classify_window_event_echo(
-                                frame,
-                                data.pending_window_size_echo.get(),
-                                [i64::from(size.width), i64::from(size.height)],
-                            );
-                            data.pending_window_size_echo.set(pending);
-                            if report {
-                                (*viewport).PlatformRequestResize = true;
-                            }
+                        WindowEvent::Resized(_) => {
+                            (*viewport).PlatformRequestResize = true;
                         }
                         WindowEvent::ScaleFactorChanged { .. } => {
                             let scale =
                                 sanitize::positive_finite_f32_or(window.scale_factor() as f32, 1.0);
                             (*viewport).DpiScale = scale;
-                            (*viewport).FramebufferScale.x = scale;
-                            (*viewport).FramebufferScale.y = scale;
+                            let framebuffer_scale = super::framebuffer_scale_for_window(window);
+                            (*viewport).FramebufferScale.x = framebuffer_scale[0];
+                            (*viewport).FramebufferScale.y = framebuffer_scale[1];
+                            (*viewport).PlatformRequestMove = true;
+                            (*viewport).PlatformRequestResize = true;
                         }
                         WindowEvent::CloseRequested => {
                             (*viewport).PlatformRequestClose = true;
@@ -87,27 +71,19 @@ pub(super) fn route_secondary_event<T>(
                             crate::events::handle_mouse_button(*button, *state, context)
                         }
                         WindowEvent::CursorMoved { position, .. } => {
-                            let position = position.to_logical::<f64>(
-                                sanitize::positive_finite_or(window.scale_factor(), 1.0),
-                            );
-                            let local = [position.x, position.y];
-                            let Some(position) =
-                                super::viewport_data::client_to_screen_pos(window, local)
-                            else {
+                            let Some(position) = super::client_physical_to_screen_pos(
+                                window,
+                                [position.x, position.y],
+                            ) else {
                                 return Some(context.io().want_capture_mouse());
                             };
-                            context
-                                .io_mut()
-                                .add_mouse_viewport_event(dear_imgui_rs::Id::from((*viewport).ID));
                             crate::events::handle_cursor_moved(
                                 [position[0] as f64, position[1] as f64],
                                 context,
                             )
                         }
                         WindowEvent::CursorLeft { .. } => {
-                            let io = context.io_mut();
-                            io.add_mouse_pos_event([-f32::MAX, -f32::MAX]);
-                            io.add_mouse_viewport_event(dear_imgui_rs::Id::default());
+                            context.io_mut().add_mouse_pos_event([-f32::MAX, -f32::MAX]);
                             false
                         }
                         WindowEvent::Focused(focused) => {
@@ -118,13 +94,10 @@ pub(super) fn route_secondary_event<T>(
                             context.io().want_capture_keyboard()
                         }
                         WindowEvent::Touch(touch) => {
-                            let position = crate::events::touch_logical_position(touch, window)
-                                .and_then(|local| {
-                                    super::viewport_data::client_to_screen_pos(
-                                        window,
-                                        [f64::from(local[0]), f64::from(local[1])],
-                                    )
-                                });
+                            let position = super::client_physical_to_screen_pos(
+                                window,
+                                [touch.location.x, touch.location.y],
+                            );
                             let _ = crate::events::handle_touch_event_at(
                                 touch,
                                 position,

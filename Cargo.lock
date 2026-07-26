@@ -2777,6 +2777,7 @@ dependencies = [
  "thiserror 2.0.18",
  "web-sys",
  "web-time",
+ "windows-sys 0.61.2",
  "winit",
 ]
 
