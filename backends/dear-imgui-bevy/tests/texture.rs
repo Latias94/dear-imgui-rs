@@ -9,8 +9,8 @@ use bevy_image::Image;
 use bevy_render::{Render, RenderApp, extract_plugin::ExtractPlugin};
 use bevy_window::{PrimaryWindow, Window, WindowRef, WindowResolution};
 use dear_imgui_bevy::{
-    ImguiBevyTextures, ImguiContext, ImguiContexts, ImguiFrameOutput, ImguiPlugin,
-    ImguiPrimaryContextPass, render::ImguiExtractedBevyTextures,
+    ImguiBevyTextures, ImguiContexts, ImguiFrameOutput, ImguiPlugin, ImguiPrimaryContextPass,
+    ImguiUi, render::ImguiExtractedBevyTextures,
 };
 use dear_imgui_rs::{self as imgui, render::TextureBinding};
 use std::sync::{Mutex, OnceLock};
@@ -48,11 +48,21 @@ fn app_with_render_world() -> App {
         RenderTarget::Window(WindowRef::Primary),
     ));
 
-    let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
-    let ctx = context.context_mut();
-    ctx.io_mut().set_config_input_trickle_event_queue(false);
-    let _ = ctx.font_atlas().build();
-    let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
+    let primary_id = app
+        .world()
+        .get_non_send::<ImguiContexts>()
+        .unwrap()
+        .primary_id()
+        .unwrap();
+    app.world_mut()
+        .get_non_send_mut::<ImguiContexts>()
+        .unwrap()
+        .configure(primary_id, |context| {
+            context.io_mut().set_config_input_trickle_event_queue(false);
+            let _ = context.font_atlas().build();
+            let _ = context.set_ini_filename::<std::path::PathBuf>(None);
+        })
+        .unwrap();
 
     app
 }
@@ -61,24 +71,33 @@ fn register_managed_texture(app: &mut App) -> imgui::ManagedTextureId {
     let mut texture = imgui::texture::OwnedTextureData::new();
     texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
     texture.set_data(&[255, 0, 255, 255]);
-    let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
-    let texture_id = context.context_mut().register_texture(texture);
-    drop(context);
+    let primary_id = app
+        .world()
+        .get_non_send::<ImguiContexts>()
+        .unwrap()
+        .primary_id()
+        .unwrap();
+    let texture_id = app
+        .world_mut()
+        .get_non_send_mut::<ImguiContexts>()
+        .unwrap()
+        .configure(primary_id, |context| context.register_texture(texture))
+        .unwrap();
 
     app.insert_non_send(ManagedTexture(texture_id));
     texture_id
 }
 
-fn draw_managed_texture(mut contexts: ImguiContexts, texture: NonSend<ManagedTexture>) {
-    let ui = contexts
-        .primary_ui_mut()
+fn draw_managed_texture(imgui: ImguiUi, texture: NonSend<ManagedTexture>) {
+    let ui = imgui
+        .ui()
         .expect("texture test should run inside an open ImGui frame");
     ui.image(texture.0, [16.0, 16.0]);
 }
 
-fn draw_bevy_image(mut contexts: ImguiContexts, texture: Res<BevyImageTexture>) {
-    let ui = contexts
-        .primary_ui_mut()
+fn draw_bevy_image(imgui: ImguiUi, texture: Res<BevyImageTexture>) {
+    let ui = imgui
+        .ui()
         .expect("texture test should run inside an open ImGui frame");
     ui.get_foreground_draw_list().add_image(
         texture.texture_id,
@@ -115,14 +134,24 @@ fn managed_texture_create_request_repeats_without_gpu_feedback() {
     );
 
     let texture = app.world().get_non_send::<ManagedTexture>().unwrap().0;
-    let context = app.world().get_non_send::<ImguiContext>().unwrap();
-    context
-        .context()
-        .with_texture(texture, |texture| {
-            assert_eq!(texture.status(), imgui::texture::TextureStatus::WantCreate);
-            assert!(texture.texture_id().is_null());
+    let primary_id = app
+        .world()
+        .get_non_send::<ImguiContexts>()
+        .unwrap()
+        .primary_id()
+        .unwrap();
+    app.world_mut()
+        .get_non_send_mut::<ImguiContexts>()
+        .unwrap()
+        .configure(primary_id, |context| {
+            context
+                .with_texture(texture, |texture| {
+                    assert_eq!(texture.status(), imgui::texture::TextureStatus::WantCreate);
+                    assert!(texture.texture_id().is_null());
+                })
+                .expect("managed texture should remain active");
         })
-        .expect("managed texture should remain active");
+        .unwrap();
 
     let prepared = app
         .sub_app(RenderApp)

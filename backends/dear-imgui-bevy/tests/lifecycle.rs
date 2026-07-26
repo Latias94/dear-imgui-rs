@@ -1,389 +1,519 @@
-use bevy_app::App;
+use std::sync::{Mutex, OnceLock};
+
+use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
+use bevy_ecs::schedule::{ScheduleLabel, Schedules};
 use bevy_time::{Real, Time};
 use bevy_window::{PrimaryWindow, Window, WindowResolution};
 use dear_imgui_bevy::{
-    ImguiBackendConfig, ImguiContext, ImguiContexts, ImguiFrameOutput, ImguiFrameState,
-    ImguiPlugin, ImguiPrimaryContextPass,
+    ContextId, ImguiContextConfig, ImguiContextError, ImguiContexts, ImguiPlugin,
+    ImguiPrimaryContextPass, ImguiUi,
 };
-use dear_imgui_rs::{self as imgui, ConfigFlags};
-use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 fn imgui_context_guard() -> std::sync::MutexGuard<'static, ()> {
     static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
-    GUARD.get_or_init(|| Mutex::new(())).lock().unwrap()
+    GUARD
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
+
+#[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
+struct ContextPassA;
+
+#[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
+struct ContextPassB;
+
+#[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
+struct MissingContextPass;
 
 #[derive(Resource, Default)]
 struct LifecycleTrace {
-    entries: Vec<&'static str>,
-    frame_indices: Vec<u64>,
+    expected: Vec<ContextId>,
+    visits: Vec<(ContextId, u64)>,
+    wrong_schedule: bool,
+    outside_frame: bool,
+    mutation_rejected: bool,
+    expected_raw: Vec<(ContextId, usize)>,
+    wrong_current_context: bool,
     delta_times: Vec<f32>,
+    display_metrics: Vec<([f32; 2], [f32; 2])>,
 }
 
 fn app_with_primary_window() -> App {
     let mut app = App::new();
-    app.add_plugins(ImguiPlugin::default());
-
-    let mut window = Window {
-        resolution: WindowResolution::new(1280, 720),
-        ..Default::default()
-    };
-    window.resolution.set_scale_factor(2.0);
-    app.world_mut().spawn((window, PrimaryWindow));
-
-    let mut context = app
-        .world_mut()
-        .get_non_send_mut::<ImguiContext>()
-        .expect("ImguiPlugin should install an ImGui context");
-    let ctx = context.context_mut();
-    ctx.io_mut().set_config_input_trickle_event_queue(false);
-    let _ = ctx.font_atlas().build();
-    let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
-
+    app.world_mut().spawn((
+        Window {
+            resolution: WindowResolution::new(640, 480),
+            ..Default::default()
+        },
+        PrimaryWindow,
+    ));
     app
 }
 
-fn app_with_primary_window_and_config(config: ImguiBackendConfig) -> App {
-    let mut app = App::new();
-    app.add_plugins(ImguiPlugin::new(config));
-
-    let mut window = Window {
-        resolution: WindowResolution::new(1280, 720),
-        ..Default::default()
-    };
-    window.resolution.set_scale_factor(2.0);
-    app.world_mut().spawn((window, PrimaryWindow));
-
-    let mut context = app
-        .world_mut()
-        .get_non_send_mut::<ImguiContext>()
-        .expect("ImguiPlugin should install an ImGui context");
-    let ctx = context.context_mut();
-    ctx.io_mut().set_config_input_trickle_event_queue(false);
-    let _ = ctx.font_atlas().build();
-    let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
-
-    app
+fn record_ui(ui: ImguiUi, mut trace: ResMut<LifecycleTrace>) {
+    let context_id = ui
+        .context_id()
+        .expect("UI schedule must expose its Context");
+    let frame_index = ui.frame_index().expect("UI schedule must expose its frame");
+    let current_ui = ui.ui().expect("UI schedule must expose a live Ui");
+    assert_eq!(current_ui.context_id(), context_id);
+    let current_raw = unsafe { dear_imgui_rs::sys::igGetCurrentContext() } as usize;
+    if let Some(expected_raw) = trace
+        .expected_raw
+        .iter()
+        .find(|(expected_id, _)| *expected_id == context_id)
+        .map(|(_, raw)| *raw)
+    {
+        trace.wrong_current_context |= current_raw != expected_raw;
+    }
+    current_ui.text(format!(
+        "Context {:?}, frame {frame_index}",
+        context_id.get()
+    ));
+    trace.visits.push((context_id, frame_index));
 }
 
-fn first_ui_system(mut contexts: ImguiContexts, mut trace: ResMut<LifecycleTrace>) {
-    let frame_index = contexts.frame_index().expect("frame should be open");
-    let ui = contexts
-        .primary_ui_mut()
-        .expect("ImguiPrimaryContextPass should run inside an open frame");
-    assert_eq!(ui.io().display_size(), [640.0, 360.0]);
-    assert_eq!(ui.io().display_framebuffer_scale(), [2.0, 2.0]);
-    ui.text("first system");
-    trace.entries.push("first");
-    trace.frame_indices.push(frame_index);
-}
-
-fn second_ui_system(mut contexts: ImguiContexts, mut trace: ResMut<LifecycleTrace>) {
-    let frame_index = contexts.frame_index().expect("frame should be open");
-    let ui = contexts
-        .primary_ui_mut()
-        .expect("ImguiPrimaryContextPass should expose the same open frame");
-    ui.text("second system");
-    trace.entries.push("second");
-    trace.frame_indices.push(frame_index);
-}
-
-fn capture_delta_time(mut contexts: ImguiContexts, mut trace: ResMut<LifecycleTrace>) {
-    let ui = contexts
-        .primary_ui_mut()
-        .expect("ImguiPrimaryContextPass should run inside an open frame");
+fn capture_primary_metrics(ui: ImguiUi, mut trace: ResMut<LifecycleTrace>) {
+    let ui = ui.ui().expect("primary metrics require a live Ui");
     trace.delta_times.push(ui.io().delta_time());
+    trace
+        .display_metrics
+        .push((ui.io().display_size(), ui.io().display_framebuffer_scale()));
+}
+
+fn reject_cross_context_access(ui: ImguiUi, mut trace: ResMut<LifecycleTrace>) {
+    let active = ui.context_id().expect("Context A must be active");
+    let other = trace
+        .expected
+        .iter()
+        .copied()
+        .find(|context_id| *context_id != active)
+        .expect("the test installs multiple Contexts");
+    trace.wrong_schedule = matches!(
+        ui.ui_for(other),
+        Err(ImguiContextError::WrongSchedule {
+            requested,
+            active: actual,
+            ..
+        }) if requested == other && actual == active
+    );
+}
+
+fn reject_raw_mutation_during_ui(
+    mut contexts: NonSendMut<ImguiContexts>,
+    mut trace: ResMut<LifecycleTrace>,
+) {
+    let target = trace
+        .expected
+        .last()
+        .copied()
+        .expect("the test installs an additional Context");
+    let current_before_create = unsafe { dear_imgui_rs::sys::igGetCurrentContext() };
+    let configure_rejected = matches!(
+        contexts.configure(target, |_| ()),
+        Err(ImguiContextError::RawMutationWhileFrameOpen { .. })
+    );
+    let create_rejected = matches!(
+        contexts.create(ImguiContextConfig::new(MissingContextPass)),
+        Err(ImguiContextError::RawMutationWhileFrameOpen { .. })
+    );
+    let removal_rejected = matches!(
+        contexts.remove(target),
+        Err(ImguiContextError::RawMutationWhileFrameOpen { .. })
+    );
+    let current_after_create = unsafe { dear_imgui_rs::sys::igGetCurrentContext() };
+    trace.mutation_rejected = configure_rejected
+        && create_rejected
+        && removal_rejected
+        && current_after_create == current_before_create;
+}
+
+fn observe_ui_outside_context_schedule(ui: ImguiUi, mut trace: ResMut<LifecycleTrace>) {
+    trace.outside_frame = matches!(ui.ui(), Err(ImguiContextError::NoOpenFrame));
 }
 
 #[test]
-fn lifecycle_primary_context_pass_opens_shared_frame_and_snapshots_once() {
+fn primary_and_two_additional_contexts_run_in_stable_order_with_independent_frames() {
     let _guard = imgui_context_guard();
     let mut app = app_with_primary_window();
-    app.init_resource::<LifecycleTrace>();
-    app.add_systems(
-        ImguiPrimaryContextPass,
-        (first_ui_system, second_ui_system).chain(),
-    );
+    app.init_resource::<LifecycleTrace>()
+        .add_systems(ImguiPrimaryContextPass, record_ui)
+        .add_systems(ContextPassA, record_ui)
+        .add_systems(ContextPassB, record_ui)
+        .add_plugins(ImguiPlugin::default());
+
+    let (primary, context_a, context_b, expected_raw) = {
+        let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
+        let primary = contexts.primary_id().unwrap();
+        let context_a = contexts
+            .create(ImguiContextConfig::new(ContextPassA))
+            .unwrap();
+        let context_b = contexts
+            .create(ImguiContextConfig::new(ContextPassB))
+            .unwrap();
+        let mut expected_raw = Vec::new();
+        for context_id in [primary, context_a, context_b, primary] {
+            let raw = contexts
+                .configure(context_id, |context| {
+                    let raw = context.as_raw();
+                    assert_eq!(
+                        unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
+                        raw,
+                        "configuration must activate exactly the requested Context"
+                    );
+                    raw as usize
+                })
+                .unwrap();
+            if !expected_raw
+                .iter()
+                .any(|(expected_id, _)| *expected_id == context_id)
+            {
+                expected_raw.push((context_id, raw));
+            }
+        }
+        (primary, context_a, context_b, expected_raw)
+    };
+    {
+        let mut trace = app.world_mut().resource_mut::<LifecycleTrace>();
+        trace.expected = vec![primary, context_a, context_b];
+        trace.expected_raw = expected_raw;
+    }
 
     app.update();
-
-    let first_output = app.world().resource::<ImguiFrameOutput>();
-    assert!(
-        first_output.snapshot_error().is_none(),
-        "first frame snapshot failed: {:?}",
-        first_output.snapshot_error()
-    );
-    assert!(
-        app.world()
-            .get_non_send::<ImguiFrameState>()
-            .is_some_and(|state| !state.is_frame_open()),
-        "the first update must close the Bevy-managed frame"
-    );
     app.update();
 
     let trace = app.world().resource::<LifecycleTrace>();
-    assert_eq!(trace.entries, ["first", "second", "first", "second"]);
-    assert_eq!(trace.frame_indices, [1, 1, 2, 2]);
-
-    let output = app.world().resource::<ImguiFrameOutput>();
-    assert_eq!(output.frame_index(), 2);
-    #[cfg(feature = "render")]
-    assert!(
-        output.snapshot_epoch().is_none(),
-        "a compiled render feature must not imply an installed Bevy RenderApp"
-    );
-
-    let state = app
-        .world()
-        .get_non_send::<ImguiFrameState>()
-        .expect("frame state should be installed");
-    assert!(!state.is_frame_open());
-
-    let context = app
-        .world()
-        .get_non_send::<ImguiContext>()
-        .expect("ImguiContext should still exist");
     assert_eq!(
-        context.context().frame_lifecycle_state(),
-        imgui::FrameLifecycleState::Rendered
+        trace.visits,
+        vec![
+            (primary, 1),
+            (context_a, 1),
+            (context_b, 1),
+            (primary, 2),
+            (context_a, 2),
+            (context_b, 2),
+        ]
     );
-}
-
-#[test]
-fn lifecycle_clears_last_snapshot_when_primary_window_is_missing() {
-    let _guard = imgui_context_guard();
-    let mut app = app_with_primary_window();
-
-    app.update();
-    #[cfg(feature = "render")]
+    let contexts = app.world().get_non_send::<ImguiContexts>().unwrap();
+    assert_eq!(contexts.ids().collect::<Vec<_>>(), trace.expected);
+    assert_eq!(contexts.frame_index(primary).unwrap(), 2);
+    assert_eq!(contexts.frame_index(context_a).unwrap(), 2);
+    assert_eq!(contexts.frame_index(context_b).unwrap(), 2);
     assert!(
-        app.world()
-            .resource::<ImguiFrameOutput>()
-            .snapshot_epoch()
-            .is_none(),
-        "an app without RenderApp must not publish a detached render snapshot"
-    );
-
-    let mut primary_query = app
-        .world_mut()
-        .query_filtered::<Entity, With<PrimaryWindow>>();
-    let primary = primary_query
-        .single(app.world())
-        .expect("test app should have one primary window");
-    app.world_mut().despawn(primary);
-
-    app.update();
-
-    let output = app.world().resource::<ImguiFrameOutput>();
-    assert_eq!(output.frame_index(), 1);
-    assert!(
-        output.snapshot_epoch().is_none(),
-        "removing the primary window must not leave stale draw data for render extraction"
+        !trace.wrong_current_context,
+        "every UI schedule must run with its own native Context current"
     );
 }
 
 #[test]
-fn lifecycle_ui_access_is_unavailable_outside_primary_context_pass() {
+fn primary_schedule_receives_bevy_time_and_logical_window_metrics() {
     let _guard = imgui_context_guard();
-    let app = app_with_primary_window();
-
-    let state = app
-        .world()
-        .get_non_send::<ImguiFrameState>()
-        .expect("frame state should be installed");
-    assert!(!state.is_frame_open());
-    assert!(state.ui().is_none());
-}
-
-#[test]
-fn lifecycle_uses_bevy_real_delta_time_when_available() {
-    let _guard = imgui_context_guard();
-    let mut app = app_with_primary_window();
+    let mut app = App::new();
+    let mut window = Window {
+        resolution: WindowResolution::new(1280, 720),
+        ..Default::default()
+    };
+    window.resolution.set_scale_factor(2.0);
+    app.world_mut().spawn((window, PrimaryWindow));
     let mut real_time = Time::<Real>::default();
     real_time.advance_by(Duration::from_millis(42));
-    app.insert_resource(real_time);
-    app.init_resource::<LifecycleTrace>();
-    app.add_systems(ImguiPrimaryContextPass, capture_delta_time);
+    app.insert_resource(real_time)
+        .init_resource::<LifecycleTrace>()
+        .add_systems(ImguiPrimaryContextPass, capture_primary_metrics)
+        .add_plugins(ImguiPlugin::default());
 
     app.update();
 
     let trace = app.world().resource::<LifecycleTrace>();
     assert_eq!(trace.delta_times.len(), 1);
-    assert!(
-        (trace.delta_times[0] - 0.042).abs() < f32::EPSILON,
-        "Dear ImGui delta time should come from Bevy Time<Real>"
-    );
+    assert!((trace.delta_times[0] - 0.042).abs() < f32::EPSILON);
+    assert_eq!(trace.display_metrics, [([640.0, 360.0], [2.0, 2.0])]);
 }
 
 #[test]
-fn lifecycle_invalid_window_scale_factor_falls_back_before_begin_frame() {
-    let _guard = imgui_context_guard();
-    let mut app = app_with_primary_window();
-    let mut primary_query = app
-        .world_mut()
-        .query_filtered::<Entity, With<PrimaryWindow>>();
-    let primary = primary_query
-        .single(app.world())
-        .expect("test app should have one primary window");
-    {
-        let mut window = app
-            .world_mut()
-            .get_mut::<Window>(primary)
-            .expect("primary window should exist");
-        window.resolution.set(f32::NAN, -10.0);
-        window.resolution.set_scale_factor(f32::NAN);
-    }
-    app.init_resource::<LifecycleTrace>();
-    app.add_systems(ImguiPrimaryContextPass, capture_delta_time);
-
-    app.update();
-
-    let context = app
-        .world()
-        .get_non_send::<ImguiContext>()
-        .expect("ImguiContext should still exist");
-    assert_eq!(context.context().io().display_size(), [0.0, 0.0]);
-    assert_eq!(
-        context.context().io().display_framebuffer_scale(),
-        [1.0, 1.0]
-    );
-}
-
-#[test]
-fn lifecycle_multi_viewport_request_does_not_advertise_viewports_without_render_app() {
-    let _guard = imgui_context_guard();
-    let mut app = app_with_primary_window_and_config(ImguiBackendConfig {
-        name: "viewport-request".to_owned(),
-        docking: true,
-        multi_viewport: true,
-        viewport_window: Default::default(),
-    });
-
-    app.update();
-
-    let context = app
-        .world()
-        .get_non_send::<ImguiContext>()
-        .expect("ImguiContext should still exist");
-    let io = context.context().io();
-    let flags = io.config_flags();
-    assert!(
-        !flags.contains(ConfigFlags::VIEWPORTS_ENABLE),
-        "Bevy backend should not advertise Dear ImGui OS-level viewports until render routing is actually installed"
-    );
-    #[cfg(feature = "multi-viewport")]
-    {
-        assert!(
-            !io.backend_flags()
-                .contains(imgui::BackendFlags::PLATFORM_HAS_VIEWPORTS),
-            "Platform viewport backend capability should not be advertised before full routing support"
-        );
-        assert!(
-            !io.backend_flags()
-                .contains(imgui::BackendFlags::RENDERER_HAS_VIEWPORTS),
-            "Renderer viewport backend capability should not be advertised before full routing support"
-        );
-        assert!(
-            !io.backend_flags()
-                .contains(imgui::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT),
-            "Hovered viewport feedback should not be advertised while viewports are disabled"
-        );
-    }
-}
-
-#[cfg(all(feature = "render", feature = "multi-viewport"))]
-#[test]
-fn lifecycle_feature_enabled_without_render_app_closes_without_snapshotting() {
-    let _guard = imgui_context_guard();
-    let mut app = app_with_primary_window();
-    app.add_systems(ImguiPrimaryContextPass, |mut contexts: ImguiContexts| {
-        let ui = contexts.primary_ui_mut().expect("frame should be open");
-        ui.window("Primary Draw").build(|| {
-            ui.text("This draw data belongs to the primary Bevy window.");
-        });
-    });
-
-    app.update();
-
-    let output = app.world().resource::<ImguiFrameOutput>();
-    assert!(output.snapshot_epoch().is_none());
-    assert!(output.snapshot_error().is_none());
-}
-
-#[test]
-#[should_panic(expected = "replacing ImguiContext after ImguiPlugin installation is unsupported")]
-fn lifecycle_rejects_runtime_context_replacement_before_opening_a_frame() {
-    let _guard = imgui_context_guard();
-    let mut app = app_with_primary_window();
-    let previous = app
-        .world_mut()
-        .remove_non_send::<ImguiContext>()
-        .expect("ImguiPlugin should install an ImGui context");
-    drop(previous);
-    app.insert_non_send(ImguiContext::new(dear_imgui_rs::Context::create()));
-
-    app.update();
-}
-
-#[cfg(all(
-    feature = "render",
-    feature = "multi-viewport",
-    not(target_arch = "wasm32")
-))]
-#[test]
-fn lifecycle_multi_viewport_request_advertises_viewports_after_render_app_installation() {
-    use bevy_ecs::schedule::ScheduleLabel;
-    use bevy_render::{Render, RenderApp, extract_plugin::ExtractPlugin};
-
+fn primary_schedule_sanitizes_invalid_window_metrics_before_begin_frame() {
     let _guard = imgui_context_guard();
     let mut app = App::new();
-    app.add_plugins(ExtractPlugin::default());
-    app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
-    app.add_plugins(ImguiPlugin::new(ImguiBackendConfig {
-        name: "viewport-supported".to_owned(),
-        docking: true,
-        multi_viewport: true,
-        viewport_window: Default::default(),
-    }));
-
-    let mut window = Window {
-        resolution: WindowResolution::new(1280, 720),
-        ..Default::default()
-    };
-    window.resolution.set_scale_factor(2.0);
+    let mut window = Window::default();
+    window.resolution.set(f32::NAN, -10.0);
+    window.resolution.set_scale_factor(f32::NAN);
     app.world_mut().spawn((window, PrimaryWindow));
-
-    {
-        let mut context = app
-            .world_mut()
-            .get_non_send_mut::<ImguiContext>()
-            .expect("ImguiPlugin should install an ImGui context");
-        let ctx = context.context_mut();
-        ctx.io_mut().set_config_input_trickle_event_queue(false);
-        let _ = ctx.font_atlas().build();
-        let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
-    }
+    app.init_resource::<LifecycleTrace>()
+        .add_systems(ImguiPrimaryContextPass, capture_primary_metrics)
+        .add_plugins(ImguiPlugin::default());
 
     app.update();
 
-    let context = app
+    assert_eq!(
+        app.world().resource::<LifecycleTrace>().display_metrics,
+        [([1.0, 1.0], [1.0, 1.0])]
+    );
+}
+
+#[test]
+fn ui_access_reports_wrong_schedule_and_is_revoked_outside_the_context_pass() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_primary_window();
+    app.init_resource::<LifecycleTrace>()
+        .add_systems(ImguiPrimaryContextPass, reject_cross_context_access)
+        .add_systems(ContextPassA, record_ui)
+        .add_systems(Update, observe_ui_outside_context_schedule)
+        .add_plugins(ImguiPlugin::default());
+
+    let (primary, context_a) = {
+        let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
+        let primary = contexts.primary_id().unwrap();
+        let context_a = contexts
+            .create(ImguiContextConfig::new(ContextPassA))
+            .unwrap();
+        (primary, context_a)
+    };
+    app.world_mut().resource_mut::<LifecycleTrace>().expected = vec![primary, context_a];
+
+    app.update();
+
+    let trace = app.world().resource::<LifecycleTrace>();
+    assert!(trace.wrong_schedule);
+    assert!(trace.outside_frame);
+}
+
+#[test]
+fn any_live_ui_blocks_raw_mutation_of_every_registered_context() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_primary_window();
+    app.init_resource::<LifecycleTrace>()
+        .add_systems(ImguiPrimaryContextPass, reject_raw_mutation_during_ui)
+        .add_systems(ContextPassA, record_ui)
+        .add_plugins(ImguiPlugin::default());
+
+    let (primary, context_a) = {
+        let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
+        let primary = contexts.primary_id().unwrap();
+        let context_a = contexts
+            .create(ImguiContextConfig::new(ContextPassA))
+            .unwrap();
+        (primary, context_a)
+    };
+    app.world_mut().resource_mut::<LifecycleTrace>().expected = vec![primary, context_a];
+
+    app.update();
+    assert!(app.world().resource::<LifecycleTrace>().mutation_rejected);
+
+    app.world_mut()
+        .get_non_send_mut::<ImguiContexts>()
+        .unwrap()
+        .configure(context_a, |context| {
+            context.io_mut().set_delta_time(1.0 / 120.0);
+        })
+        .expect("configuration must become available after the UI schedule");
+}
+
+#[test]
+fn duplicate_schedule_and_stale_context_errors_are_typed_and_recover_ownership() {
+    let _guard = imgui_context_guard();
+    let mut contexts = ImguiContexts::with_primary(dear_imgui_rs::SuspendedContext::create());
+    let context_a = contexts
+        .create(ImguiContextConfig::new(ContextPassA))
+        .unwrap();
+    let rejected = dear_imgui_rs::SuspendedContext::create();
+    let rejected_id = rejected.id();
+
+    let error = contexts
+        .insert_suspended(rejected, ImguiContextConfig::new(ContextPassA))
+        .expect_err("duplicate schedule ownership must be rejected");
+    assert!(matches!(
+        error.error(),
+        ImguiContextError::DuplicateSchedule { owner, .. } if *owner == context_a
+    ));
+    let rejected = error.into_context();
+    assert_eq!(rejected.id(), rejected_id);
+
+    let removed = contexts.remove(context_a).unwrap();
+    assert_eq!(removed.id(), context_a);
+    assert!(matches!(
+        contexts.configure(context_a, |_| ()),
+        Err(ImguiContextError::UnknownContext { context_id }) if context_id == context_a
+    ));
+}
+
+#[test]
+fn additional_multi_viewport_admission_fails_without_consuming_the_context() {
+    let _guard = imgui_context_guard();
+    let mut contexts = ImguiContexts::with_primary(dear_imgui_rs::SuspendedContext::create());
+    let additional = dear_imgui_rs::SuspendedContext::create();
+    let additional_id = additional.id();
+
+    let error = contexts
+        .insert_suspended(
+            additional,
+            ImguiContextConfig::new(ContextPassA).with_multi_viewport(true),
+        )
+        .expect_err("additional native viewport state is not Context-namespaced yet");
+
+    assert!(matches!(
+        error.error(),
+        ImguiContextError::AdditionalMultiViewportUnsupported
+    ));
+    assert_eq!(error.into_context().id(), additional_id);
+    assert!(!contexts.contains(additional_id));
+}
+
+#[test]
+fn missing_schedule_is_context_local_and_does_not_stop_later_contexts() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_primary_window();
+    app.init_resource::<LifecycleTrace>()
+        .add_systems(ImguiPrimaryContextPass, record_ui)
+        .add_systems(ContextPassB, record_ui)
+        .add_plugins(ImguiPlugin::default());
+
+    let (primary, missing, healthy) = {
+        let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
+        let primary = contexts.primary_id().unwrap();
+        let missing = contexts
+            .create(ImguiContextConfig::new(MissingContextPass))
+            .unwrap();
+        let healthy = contexts
+            .create(ImguiContextConfig::new(ContextPassB))
+            .unwrap();
+        (primary, missing, healthy)
+    };
+    app.world_mut().resource_mut::<LifecycleTrace>().expected = vec![primary, missing, healthy];
+
+    app.update();
+
+    let contexts = app.world().get_non_send::<ImguiContexts>().unwrap();
+    assert!(matches!(
+        contexts.last_error(missing).unwrap(),
+        Some(ImguiContextError::MissingSchedule { context_id, .. }) if *context_id == missing
+    ));
+    assert_eq!(contexts.frame_index(missing).unwrap(), 0);
+    assert_eq!(contexts.frame_index(healthy).unwrap(), 1);
+    assert!(
+        app.world()
+            .resource::<LifecycleTrace>()
+            .visits
+            .contains(&(healthy, 1))
+    );
+}
+
+#[derive(Resource, Default)]
+struct PanicOnce(bool);
+
+fn panic_once(mut state: ResMut<PanicOnce>) {
+    if !state.0 {
+        state.0 = true;
+        panic!("intentional Context schedule panic");
+    }
+}
+
+#[test]
+fn schedule_panic_reinserts_the_schedule_and_restores_context_ownership() {
+    let _guard = imgui_context_guard();
+    let foreign = dear_imgui_rs::Context::create();
+    let foreign_raw = foreign.as_raw();
+
+    let mut app = app_with_primary_window();
+    app.init_resource::<PanicOnce>()
+        .init_resource::<LifecycleTrace>()
+        .add_systems(ImguiPrimaryContextPass, panic_once)
+        .add_plugins(ImguiPlugin::default());
+    let primary = app
         .world()
-        .get_non_send::<ImguiContext>()
-        .expect("ImguiContext should still exist");
-    let io = context.context().io();
-    assert!(io.config_flags().contains(ConfigFlags::VIEWPORTS_ENABLE));
-    assert!(
-        io.backend_flags()
-            .contains(imgui::BackendFlags::PLATFORM_HAS_VIEWPORTS)
+        .get_non_send::<ImguiContexts>()
+        .unwrap()
+        .primary_id()
+        .unwrap();
+
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| app.update()));
+    assert!(panic.is_err());
+    assert_eq!(
+        unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
+        foreign_raw
     );
+    {
+        let contexts = app.world().get_non_send::<ImguiContexts>().unwrap();
+        assert!(contexts.contains(primary));
+        assert_eq!(contexts.frame_index(primary).unwrap(), 0);
+    }
     assert!(
-        io.backend_flags()
-            .contains(imgui::BackendFlags::RENDERER_HAS_VIEWPORTS)
+        app.world()
+            .resource::<Schedules>()
+            .contains(ImguiPrimaryContextPass),
+        "the nested Context schedule must survive unwinding"
     );
-    assert!(
-        io.backend_flags()
-            .contains(imgui::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT)
+    assert_eq!(
+        unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
+        foreign_raw
+    );
+    drop(app);
+    assert_eq!(
+        unsafe { dear_imgui_rs::sys::igGetCurrentContext() },
+        foreign_raw
+    );
+    drop(foreign);
+}
+
+#[test]
+fn primary_without_a_window_does_not_advance_or_replay_a_frame() {
+    let _guard = imgui_context_guard();
+    let mut app = App::new();
+    app.init_resource::<LifecycleTrace>()
+        .add_systems(ImguiPrimaryContextPass, record_ui)
+        .add_plugins(ImguiPlugin::default());
+    let primary = app
+        .world()
+        .get_non_send::<ImguiContexts>()
+        .unwrap()
+        .primary_id()
+        .unwrap();
+
+    app.update();
+
+    assert_eq!(
+        app.world()
+            .get_non_send::<ImguiContexts>()
+            .unwrap()
+            .frame_index(primary)
+            .unwrap(),
+        0
+    );
+    assert!(app.world().resource::<LifecycleTrace>().visits.is_empty());
+}
+
+#[test]
+fn removing_the_primary_context_does_not_stop_an_additional_context() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_primary_window();
+    app.init_resource::<LifecycleTrace>()
+        .add_systems(ContextPassA, record_ui)
+        .add_plugins(ImguiPlugin::default());
+
+    let (primary, additional) = {
+        let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
+        let primary = contexts.primary_id().unwrap();
+        let additional = contexts
+            .create(ImguiContextConfig::new(ContextPassA))
+            .unwrap();
+        (primary, additional)
+    };
+    app.world_mut().resource_mut::<LifecycleTrace>().expected = vec![additional];
+    app.world_mut()
+        .get_non_send_mut::<ImguiContexts>()
+        .unwrap()
+        .remove(primary)
+        .expect("a primary Context without render-world work should detach immediately");
+
+    app.update();
+
+    let contexts = app.world().get_non_send::<ImguiContexts>().unwrap();
+    assert_eq!(contexts.primary_id(), None);
+    assert_eq!(contexts.frame_index(additional).unwrap(), 1);
+    assert_eq!(
+        app.world().resource::<LifecycleTrace>().visits,
+        vec![(additional, 1)]
     );
 }

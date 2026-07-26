@@ -19,7 +19,7 @@ use bevy_window::{PrimaryWindow, Window, WindowRef, WindowResolution};
 #[cfg(feature = "multi-viewport")]
 use dear_imgui_bevy::ImguiBackendConfig;
 use dear_imgui_bevy::{
-    ImguiContext, ImguiContexts, ImguiFrameOutput, ImguiPlugin, ImguiPrimaryContextPass,
+    ImguiContexts, ImguiFrameOutput, ImguiPlugin, ImguiPrimaryContextPass, ImguiUi,
     ImguiViewportWindow,
     render::{
         IMGUI_FRAGMENT_ENTRY_POINT, IMGUI_SHADER_HANDLE, IMGUI_SHADER_SOURCE,
@@ -39,6 +39,19 @@ fn imgui_context_guard() -> std::sync::MutexGuard<'static, ()> {
 struct ManagedTexture(imgui::ManagedTextureId);
 
 const LEGACY_RENDER_TEXTURE_ID: imgui::TextureId = imgui::TextureId::new(0xD1A6);
+
+fn configure_primary<T>(app: &mut App, configure: impl FnOnce(&mut imgui::Context) -> T) -> T {
+    let mut contexts = app
+        .world_mut()
+        .get_non_send_mut::<ImguiContexts>()
+        .expect("ImguiPlugin should install the Context registry");
+    let primary_id = contexts
+        .primary_id()
+        .expect("ImguiPlugin should install a primary Context");
+    contexts
+        .configure(primary_id, configure)
+        .unwrap_or_else(|error| panic!("primary Context should be configurable: {error}"))
+}
 
 #[derive(Resource, Default)]
 #[cfg(feature = "multi-viewport")]
@@ -93,28 +106,26 @@ fn app_with_primary_window() -> (App, Entity, Entity, imgui::ManagedTextureId) {
     let mut texture = imgui::texture::OwnedTextureData::new();
     texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
     texture.set_data(&[255, 0, 255, 255]);
-    let texture_id = {
-        let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
-        let ctx = context.context_mut();
-        ctx.io_mut().set_config_input_trickle_event_queue(false);
-        let _ = ctx.font_atlas().build();
-        let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
-        ctx.register_texture(texture)
-    };
+    let texture_id = configure_primary(&mut app, |context| {
+        context.io_mut().set_config_input_trickle_event_queue(false);
+        let _ = context.font_atlas().build();
+        let _ = context.set_ini_filename::<std::path::PathBuf>(None);
+        context.register_texture(texture)
+    });
     app.insert_non_send(ManagedTexture(texture_id));
 
     (app, primary_window, camera, texture_id)
 }
 
-fn draw_managed_texture(mut contexts: ImguiContexts, texture: NonSend<ManagedTexture>) {
-    let ui = contexts
-        .primary_ui_mut()
+fn draw_managed_texture(imgui: ImguiUi, texture: NonSend<ManagedTexture>) {
+    let ui = imgui
+        .ui()
         .expect("render extraction test should run inside an open ImGui frame");
     ui.image(texture.0, [16.0, 16.0]);
 }
 
-fn draw_legacy_texture(mut contexts: ImguiContexts) {
-    let Some(ui) = contexts.primary_ui_mut() else {
+fn draw_legacy_texture(imgui: ImguiUi) {
+    let Ok(ui) = imgui.ui() else {
         return;
     };
     ui.get_foreground_draw_list().add_image(
@@ -165,12 +176,7 @@ fn render_extract_moves_context_owned_managed_frame_and_commits_once() {
         draw.texture == TextureBinding::Managed(imgui::render::SnapshotTextureId::User(texture_id))
     }));
 
-    let progress = app
-        .world_mut()
-        .get_non_send_mut::<ImguiContext>()
-        .unwrap()
-        .context_mut()
-        .poll_snapshot_completions()
+    let progress = configure_primary(&mut app, |context| context.poll_snapshot_completions())
         .expect("request-bound empty feedback should still complete the snapshot epoch");
     assert_eq!(progress.committed(), 1);
     assert_eq!(progress.feedback_applied(), 0);
@@ -504,21 +510,19 @@ fn renderer_prepare_routes_secondary_viewport_draws_only_to_matching_window() {
         ))
         .id();
 
-    {
-        let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
-        let ctx = context.context_mut();
-        ctx.io_mut().set_config_input_trickle_event_queue(false);
-        let _ = ctx.font_atlas().build();
-        let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
-        ctx.io_mut().set_config_viewports_no_auto_merge(true);
-    }
+    configure_primary(&mut app, |context| {
+        context.io_mut().set_config_input_trickle_event_queue(false);
+        let _ = context.font_atlas().build();
+        let _ = context.set_ini_filename::<std::path::PathBuf>(None);
+        context.io_mut().set_config_viewports_no_auto_merge(true);
+    });
 
     app.init_resource::<SecondaryViewportRouteState>();
     app.add_systems(
         ImguiPrimaryContextPass,
-        move |mut contexts: ImguiContexts, mut route: ResMut<SecondaryViewportRouteState>| {
-            let ui = contexts
-                .primary_ui_mut()
+        move |imgui: ImguiUi, mut route: ResMut<SecondaryViewportRouteState>| {
+            let ui = imgui
+                .ui()
                 .expect("render extraction test should run inside an open ImGui frame");
             let main_viewport_id = ui.main_viewport().id();
             ui.set_next_window_viewport(main_viewport_id);

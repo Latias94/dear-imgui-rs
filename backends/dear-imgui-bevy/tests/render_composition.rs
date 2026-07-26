@@ -30,7 +30,7 @@ use bevy::{
 #[cfg(feature = "bevy-ui")]
 use dear_imgui_bevy::render::ImguiUiRenderOrder;
 use dear_imgui_bevy::{
-    ImguiContext, ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, configure_example_context,
+    ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, ImguiUi, configure_example_context,
     render::{ImguiOverlayCamera, ImguiRenderSystems},
 };
 use std::collections::HashMap;
@@ -84,8 +84,13 @@ fn post_process_and_imgui_pixels_coexist_across_camera_msaa_and_hdr_modes() {
     ));
 
     {
-        let mut context = app.world_mut().non_send_mut::<ImguiContext>();
-        configure_example_context(&mut context, false);
+        let mut contexts = app.world_mut().non_send_mut::<ImguiContexts>();
+        let primary = contexts.primary_id().expect("primary Context must exist");
+        contexts
+            .configure(primary, |context| {
+                configure_example_context(context, false);
+            })
+            .expect("primary Context configuration must succeed");
     }
 
     for kind in [CameraKind::Core2d, CameraKind::Core3d] {
@@ -200,8 +205,13 @@ fn render_ui_order(order: ImguiUiRenderOrder) -> [u8; 4] {
         PrimaryWindow,
     ));
     {
-        let mut context = app.world_mut().non_send_mut::<ImguiContext>();
-        configure_example_context(&mut context, false);
+        let mut contexts = app.world_mut().non_send_mut::<ImguiContexts>();
+        let primary = contexts.primary_id().expect("primary Context must exist");
+        contexts
+            .configure(primary, |context| {
+                configure_example_context(context, false);
+            })
+            .expect("primary Context configuration must succeed");
     }
 
     let mut image = Image::new_target_texture(WIDTH, HEIGHT, TextureFormat::Rgba8UnormSrgb, None);
@@ -279,8 +289,8 @@ fn spawn_case(app: &mut App, kind: CameraKind, msaa: Msaa, hdr: bool) {
         .spawn((Readback::texture(image), CompositionCase(name)));
 }
 
-fn draw_composition_fixture(mut contexts: ImguiContexts) {
-    let Some(ui) = contexts.primary_ui_mut() else {
+fn draw_composition_fixture(imgui: ImguiUi) {
+    let Ok(ui) = imgui.ui() else {
         return;
     };
     ui.get_background_draw_list()

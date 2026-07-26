@@ -199,12 +199,19 @@ mod tests {
             viewport_window: Default::default(),
         }));
         app.world_mut().spawn((Window::default(), PrimaryWindow));
-        app.world_mut()
-            .get_non_send_mut::<crate::ImguiContext>()
+        let primary_id = app
+            .world()
+            .get_non_send::<crate::ImguiContexts>()
             .unwrap()
-            .context_mut()
-            .font_atlas()
-            .build();
+            .primary_id()
+            .unwrap();
+        app.world_mut()
+            .get_non_send_mut::<crate::ImguiContexts>()
+            .unwrap()
+            .configure(primary_id, |context| {
+                context.font_atlas().build();
+            })
+            .unwrap();
         let viewport_id = imgui::Id::from(0xA11);
         app.world_mut()
             .get_non_send_mut::<crate::ImguiViewportBridge>()
@@ -229,21 +236,26 @@ mod tests {
 
         let release = app.world().resource::<ImguiRendererRelease>().clone();
         release.update_resources_live(true);
-        let owner = app
-            .world_mut()
-            .remove_non_send::<crate::ImguiContext>()
-            .unwrap();
-        let error = owner
-            .into_inner()
-            .expect_err("live render resources must request asynchronous release");
-        assert_eq!(
-            error.error(),
-            crate::ImguiContextIntoInnerErrorReason::RenderWorldReleasePending
+        assert!(matches!(
+            app.world_mut()
+                .get_non_send_mut::<crate::ImguiContexts>()
+                .unwrap()
+                .remove(primary_id),
+            Err(crate::ImguiContextError::RemovalPending {
+                context_id,
+                reason: crate::context::ownership::ImguiContextIntoInnerErrorReason::RenderWorldReleasePending,
+            }) if context_id == primary_id
+        ));
+        assert!(
+            app.world()
+                .get_non_send::<crate::ImguiContexts>()
+                .unwrap()
+                .contains(primary_id),
+            "a pending removal must retain Context ownership for retry"
         );
         let generation = release.requested_generation().unwrap();
         assert!(release.acknowledge_release(generation));
         assert!(release.release_requested());
-        app.insert_non_send(error.into_owner());
 
         let frame_index = app
             .world()
@@ -260,26 +272,31 @@ mod tests {
             "an acknowledged release must not resume native frame production"
         );
 
-        let owner = app
-            .world_mut()
-            .remove_non_send::<crate::ImguiContext>()
-            .unwrap();
-        let error = owner
-            .into_inner()
-            .expect_err("secondary viewport entities require one World cleanup pass");
-        assert_eq!(
-            error.error(),
-            crate::ImguiContextIntoInnerErrorReason::ViewportWorldReleasePending
-        );
-        app.insert_non_send(error.into_owner());
+        assert!(matches!(
+            app.world_mut()
+                .get_non_send_mut::<crate::ImguiContexts>()
+                .unwrap()
+                .remove(primary_id),
+            Err(crate::ImguiContextError::RemovalPending {
+                context_id,
+                reason: crate::context::ownership::ImguiContextIntoInnerErrorReason::ViewportWorldReleasePending,
+            }) if context_id == primary_id
+        ));
         app.update();
-        let owner = app
+        let context = app
             .world_mut()
-            .remove_non_send::<crate::ImguiContext>()
-            .unwrap();
-        owner
-            .into_inner()
+            .get_non_send_mut::<crate::ImguiContexts>()
+            .unwrap()
+            .remove(primary_id)
             .expect("a frozen extra update must complete ECS release without reopening a frame");
+        assert_eq!(context.id(), primary_id);
+        assert!(
+            !app.world()
+                .get_non_send::<crate::ImguiContexts>()
+                .unwrap()
+                .contains(primary_id),
+            "a completed retry must remove exactly the requested Context"
+        );
     }
 
     #[test]
@@ -381,62 +398,68 @@ mod tests {
     }
 
     #[test]
-    fn context_extraction_waits_for_render_world_release_before_native_mutation() {
-        let mut context = managed_context();
-        let consumer = context.create_renderer_consumer().unwrap();
-        let texture = register_test_texture(&mut context);
-        let snapshot = managed_snapshot(&mut context, &consumer, Some(texture));
+    fn context_teardown_waits_for_render_world_release_before_native_mutation() {
+        let context = managed_context();
+        let mut owner = crate::context::ownership::ContextOwner::new(context.suspend());
+        let backend = crate::context::ownership::BackendAttachment {
+            config: crate::ImguiBackendConfig::default(),
+            render_integration_installed: true,
+        };
+        owner.preflight_renderer_admission(&backend).unwrap();
+        owner.commit_renderer_admission(&backend);
         let renderer_texture = imgui::TextureId::new(0xCAFE);
-        let feedback = user_texture_request(&snapshot, texture)
-            .uploaded(renderer_texture)
+        let texture = owner
+            .try_with_active_renderer_context(false, |context, consumer| {
+                let consumer = consumer.expect("renderer admission must install a consumer");
+                let texture = register_test_texture(context);
+                let snapshot = managed_snapshot(context, consumer, Some(texture));
+                let feedback = user_texture_request(&snapshot, texture)
+                    .uploaded(renderer_texture)
+                    .unwrap();
+                snapshot.commit([feedback]).unwrap();
+                context.poll_snapshot_completions().unwrap();
+                Ok::<_, ()>(texture)
+            })
             .unwrap();
-        snapshot.commit([feedback]).unwrap();
-        context.poll_snapshot_completions().unwrap();
-
-        context.prepare_frame(
-            imgui::FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
-        );
-        context
-            .frame()
-            .text("frame remains open while release is pending");
-
         let release = ImguiRendererRelease::default();
         release.install();
         release.update_resources_live(true);
-        let mut owner = crate::ImguiContext::new(context);
-        owner.renderer_consumer = Some(consumer);
         owner.attach_renderer_release(release.clone());
 
         let error = owner
-            .into_inner()
-            .expect_err("live render-world resources must prevent Context extraction");
+            .try_detach_backend()
+            .expect_err("live render-world resources must prevent Context teardown");
         assert_eq!(
-            error.error(),
-            crate::ImguiContextIntoInnerErrorReason::RenderWorldReleasePending
-        );
-        let owner = error.into_owner();
-        assert_eq!(
-            owner.context().frame_lifecycle_state(),
-            imgui::FrameLifecycleState::InFrame,
-            "release preflight must run before ending the native frame"
+            error,
+            crate::context::ownership::ImguiContextIntoInnerErrorReason::RenderWorldReleasePending
         );
         owner
-            .context()
-            .with_texture(texture, |texture| {
-                assert_eq!(texture.status(), imgui::TextureStatus::OK);
-                assert_eq!(texture.texture_id(), renderer_texture);
+            .try_with_active_renderer_context(false, |context, _| {
+                context
+                    .with_texture(texture, |texture| {
+                        assert_eq!(texture.status(), imgui::TextureStatus::OK);
+                        assert_eq!(texture.texture_id(), renderer_texture);
+                    })
+                    .unwrap();
+                Ok::<_, ()>(())
             })
             .unwrap();
 
         let generation = release.requested_generation().unwrap();
         assert!(release.acknowledge_release(generation));
-        let context = owner
-            .into_inner()
-            .expect("acknowledged render-world release should allow extraction");
+        owner
+            .try_detach_backend()
+            .expect("acknowledged render-world release should allow teardown");
+        let mut context = owner.into_suspended();
         context
-            .with_texture(texture, |texture| {
-                assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
-                assert!(texture.texture_id().is_null());
+            .try_with_active(|context| {
+                context
+                    .with_texture(texture, |texture| {
+                        assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+                        assert!(texture.texture_id().is_null());
+                    })
+                    .unwrap();
+                Ok::<_, ()>(())
             })
             .unwrap();
     }
@@ -675,24 +698,31 @@ mod tests {
         app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
         app.add_plugins(crate::ImguiPlugin::default());
 
-        let context = app
+        let primary_id = app
             .world()
-            .get_non_send::<crate::ImguiContext>()
-            .expect("ImguiPlugin should install the context");
-        let platform_io = context.context().platform_io();
-
-        assert_fn_ptr_eq(
-            platform_io.draw_callback_reset_render_state_raw(),
-            imgui_bevy_draw_callback_reset,
-        );
-        assert_fn_ptr_eq(
-            platform_io.draw_callback_set_sampler_linear_raw(),
-            imgui_bevy_draw_callback_linear,
-        );
-        assert_fn_ptr_eq(
-            platform_io.draw_callback_set_sampler_nearest_raw(),
-            imgui_bevy_draw_callback_nearest,
-        );
+            .get_non_send::<crate::ImguiContexts>()
+            .expect("ImguiPlugin should install the Context registry")
+            .primary_id()
+            .expect("ImguiPlugin should install the primary Context");
+        app.world_mut()
+            .get_non_send_mut::<crate::ImguiContexts>()
+            .unwrap()
+            .configure(primary_id, |context| {
+                let platform_io = context.platform_io();
+                assert_fn_ptr_eq(
+                    platform_io.draw_callback_reset_render_state_raw(),
+                    imgui_bevy_draw_callback_reset,
+                );
+                assert_fn_ptr_eq(
+                    platform_io.draw_callback_set_sampler_linear_raw(),
+                    imgui_bevy_draw_callback_linear,
+                );
+                assert_fn_ptr_eq(
+                    platform_io.draw_callback_set_sampler_nearest_raw(),
+                    imgui_bevy_draw_callback_nearest,
+                );
+            })
+            .unwrap();
     }
 
     #[test]

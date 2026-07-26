@@ -63,8 +63,16 @@ pub(crate) fn install_render_extraction(
 
     let renderer_release = app.world().resource::<ImguiRendererRelease>().clone();
     renderer_release.install();
-    if let Some(mut imgui_context) = app.world_mut().get_non_send_mut::<crate::ImguiContext>() {
-        imgui_context.attach_renderer_release(renderer_release.clone());
+    if let Some(mut contexts) = app.world_mut().get_non_send_mut::<crate::ImguiContexts>()
+        && contexts.primary_id().is_some()
+    {
+        contexts
+            .with_primary_owner(|owner| {
+                owner.attach_renderer_release(renderer_release.clone());
+            })
+            .unwrap_or_else(|error| {
+                panic!("dear-imgui-bevy could not attach the primary renderer release: {error}")
+            });
     }
 
     let render_app = app

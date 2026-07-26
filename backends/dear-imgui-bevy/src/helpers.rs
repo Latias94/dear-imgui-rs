@@ -1,7 +1,6 @@
 //! Shared helper utilities for the backend's example and editor-facing setup.
 
-use crate::ImguiContext;
-use dear_imgui_rs::ConfigFlags;
+use dear_imgui_rs::{ConfigFlags, Context};
 
 /// Configure a Dear ImGui context for the backend examples.
 ///
@@ -10,8 +9,7 @@ use dear_imgui_rs::ConfigFlags;
 /// - optionally enables docking;
 /// - builds the default font atlas;
 /// - disables `.ini` persistence.
-pub fn configure_example_context(imgui: &mut ImguiContext, enable_docking: bool) {
-    let context = imgui.context_mut();
+pub fn configure_example_context(context: &mut Context, enable_docking: bool) {
     context.io_mut().set_config_input_trickle_event_queue(false);
 
     let mut flags = context.io().config_flags();

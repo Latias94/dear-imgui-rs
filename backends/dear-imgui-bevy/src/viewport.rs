@@ -1152,13 +1152,14 @@ pub(crate) fn install_viewport_bridge(_app: &mut App) {
         );
         attach_bridge_to_imgui_context(app.world_mut());
         app.add_systems(
-            crate::ImguiEndFrame,
+            crate::schedule::ImguiContextDriver,
             (
-                apply_viewport_commands_system.after(crate::context::end_primary_frame_system),
+                apply_viewport_commands_system,
                 ApplyDeferred,
                 acknowledge_viewport_ecs_despawns_system,
             )
-                .chain_ignore_deferred(),
+                .chain_ignore_deferred()
+                .in_set(crate::schedule::ImguiContextDriverSystems::Platform),
         );
         app.add_systems(
             Last,
@@ -1187,23 +1188,41 @@ fn attach_bridge_to_imgui_context(world: &mut World) {
         bridge.keepalive()
     };
 
-    let Some(mut imgui_context) = world.get_non_send_mut::<crate::ImguiContext>() else {
+    let Some(mut contexts) = world.get_non_send_mut::<crate::ImguiContexts>() else {
         return;
     };
-    let attachment = imgui_context
-        .context_mut()
-        .register_attachment::<ImguiViewportBridgeAttachmentMarker>(
-            imgui::ContextAttachmentRole::Platform,
-            viewport_bridge_teardown_attachment(Rc::clone(&bridge_keepalive)),
-        )
+    if contexts.primary_id().is_none() {
+        return;
+    }
+    contexts
+        .with_primary_owner(|owner| {
+            let attachment = owner
+                .try_with_active_context(|context| {
+                    let attachment = context
+                        .register_attachment::<ImguiViewportBridgeAttachmentMarker>(
+                            imgui::ContextAttachmentRole::Platform,
+                            viewport_bridge_teardown_attachment(Rc::clone(&bridge_keepalive)),
+                        )
+                        .unwrap_or_else(|error| {
+                            panic!(
+                                "cannot register Dear ImGui viewport teardown attachment: {error}"
+                            )
+                        });
+                    // SAFETY: the bridge resource keeps the allocation stable while installation
+                    // publishes its pointer, and the owner retains the cloned Rc immediately after
+                    // installation succeeds.
+                    unsafe { install_owned_platform_callbacks(context, &bridge_keepalive) }
+                        .unwrap_or_else(|error| {
+                            panic!("cannot install Dear ImGui viewport callbacks: {error}")
+                        });
+                    Ok::<_, std::convert::Infallible>(attachment)
+                })
+                .unwrap_or_else(|never| match never {});
+            owner.attach_viewport_bridge(bridge_keepalive, attachment);
+        })
         .unwrap_or_else(|error| {
-            panic!("cannot register Dear ImGui viewport teardown attachment: {error}")
+            panic!("cannot attach the primary Dear ImGui viewport bridge: {error}")
         });
-    // SAFETY: the bridge resource keeps the allocation stable while installation publishes its
-    // pointer, and the context retains the cloned Rc immediately after installation succeeds.
-    unsafe { install_owned_platform_callbacks(imgui_context.context_mut(), &bridge_keepalive) }
-        .unwrap_or_else(|error| panic!("cannot install Dear ImGui viewport callbacks: {error}"));
-    imgui_context.attach_viewport_bridge(bridge_keepalive, attachment);
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -2320,7 +2339,7 @@ fn sync_os_viewport_window_events(
     mut events: OsViewportWindowEvents,
     windows: Query<&Window>,
     viewport_windows: Query<(Entity, &ImguiViewportWindow)>,
-    mut imgui_context: NonSendMut<crate::ImguiContext>,
+    mut contexts: NonSendMut<crate::ImguiContexts>,
     mut bridge: NonSendMut<ImguiViewportBridge>,
 ) {
     let window_to_viewport = viewport_windows.iter().collect::<HashMap<_, _>>();
@@ -2377,12 +2396,26 @@ fn sync_os_viewport_window_events(
         }
     }
 
-    mark_platform_viewport_requests(
-        imgui_context.context_mut(),
-        moved_viewports.iter().copied(),
-        resized_viewports.iter().copied(),
-        closed_viewports.iter().copied(),
-    );
+    if let Some(primary_id) = contexts.primary_id() {
+        let result = contexts.configure(primary_id, |context| {
+            mark_platform_viewport_requests(
+                context,
+                moved_viewports.iter().copied(),
+                resized_viewports.iter().copied(),
+                closed_viewports.iter().copied(),
+            );
+        });
+        match result {
+            Ok(()) => {}
+            Err(
+                crate::ImguiContextError::TeardownInProgress { .. }
+                | crate::ImguiContextError::UnknownContext { .. },
+            ) => {}
+            Err(error) => {
+                panic!("cannot apply primary Dear ImGui viewport requests: {error}")
+            }
+        }
+    }
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -2704,7 +2737,7 @@ fn cleanup_secondary_viewports_when_primary_is_unavailable(
     primary_windows: Query<Entity, With<PrimaryWindow>>,
     viewport_windows: Query<Entity, With<ImguiViewportWindow>>,
     viewport_cameras: Query<Entity, With<ImguiViewportCamera>>,
-    mut imgui_context: NonSendMut<crate::ImguiContext>,
+    mut contexts: NonSendMut<crate::ImguiContexts>,
     bridge: NonSendMut<ImguiViewportBridge>,
 ) {
     let primary_window = primary_windows.single().ok();
@@ -2728,7 +2761,21 @@ fn cleanup_secondary_viewports_when_primary_is_unavailable(
     for entity in viewport_entities {
         ecs_commands.entity(entity).despawn();
     }
-    clear_imgui_viewport_platform_handles(imgui_context.context_mut(), &bridge);
+    if let Some(primary_id) = contexts.primary_id() {
+        let result = contexts.configure(primary_id, |context| {
+            clear_imgui_viewport_platform_handles(context, &bridge);
+        });
+        match result {
+            Ok(()) => {}
+            Err(
+                crate::ImguiContextError::TeardownInProgress { .. }
+                | crate::ImguiContextError::UnknownContext { .. },
+            ) => {}
+            Err(error) => {
+                panic!("cannot clear primary Dear ImGui viewport handles: {error}")
+            }
+        }
+    }
     bridge
         .inner
         .clear_viewport_state_preserving_pending_despawns();

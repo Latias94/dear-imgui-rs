@@ -9,7 +9,7 @@ use bevy::{
     window::{PresentMode, WindowPlugin, WindowTheme},
 };
 use dear_imgui_bevy::{
-    ImguiContext, ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, configure_example_context,
+    ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, ImguiUi, configure_example_context,
     input::ImguiInputCapture, render::ImguiOverlayCamera,
 };
 use dear_imgui_rs::Condition;
@@ -82,9 +82,17 @@ fn setup_scene(mut commands: Commands) {
     ));
 }
 
-fn setup_imgui(mut commands: Commands, mut imgui: NonSendMut<ImguiContext>) {
+fn setup_imgui(mut commands: Commands, mut contexts: NonSendMut<ImguiContexts>) -> Result {
     commands.spawn((Camera2d, ImguiOverlayCamera));
-    configure_example_context(&mut imgui, false);
+    let primary_id = contexts
+        .primary_id()
+        .ok_or("ImguiPlugin should install a primary Context before Startup")?;
+    contexts
+        .configure(primary_id, |context| {
+            configure_example_context(context, false);
+        })
+        .map_err(|error| format!("failed to configure the primary Dear ImGui Context: {error}"))?;
+    Ok(())
 }
 
 fn close_on_escape(input: Res<ButtonInput<KeyCode>>, mut exit: MessageWriter<AppExit>) {
@@ -142,14 +150,12 @@ fn apply_player_tint(state: Res<AppState>, mut player: Query<&mut Sprite, With<P
 }
 
 fn tools_ui(
-    mut contexts: ImguiContexts,
+    imgui: ImguiUi,
     capture: Res<ImguiInputCapture>,
     mut state: ResMut<AppState>,
     player: Query<&Transform, With<Player>>,
-) {
-    let Some(ui) = contexts.primary_ui_mut() else {
-        return;
-    };
+) -> Result {
+    let ui = imgui.ui()?;
 
     ui.window("App Tools")
         .position([48.0, 48.0], Condition::FirstUseEver)
@@ -183,4 +189,6 @@ fn tools_ui(
                 ui.text(format!("ImGui wants text: {}", capture.wants_text_input()));
             }
         });
+
+    Ok(())
 }

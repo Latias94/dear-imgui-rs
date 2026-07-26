@@ -14,7 +14,7 @@ use bevy_window::{
     WindowScaleFactorChanged,
 };
 use dear_imgui_bevy::{
-    ImguiContext, ImguiFrameState, ImguiPlugin, ImguiPrimaryContextPass, ImguiViewportWindow,
+    ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, ImguiUi, ImguiViewportWindow,
     input::{
         ImguiInputCapture, ImguiInputState, imgui_wants_any_input, imgui_wants_keyboard_input,
         imgui_wants_pointer_input, imgui_wants_pointer_input_unless_popup_close,
@@ -45,15 +45,25 @@ fn app_with_primary_window() -> (App, Entity) {
 }
 
 fn prepare_imgui_context(app: &mut App) {
-    let mut context = app
+    configure_primary(app, |context| {
+        context.io_mut().set_delta_time(1.0 / 60.0);
+        context.io_mut().set_config_input_trickle_event_queue(false);
+        let _ = context.font_atlas().build();
+        let _ = context.set_ini_filename::<std::path::PathBuf>(None);
+    });
+}
+
+fn configure_primary<T>(app: &mut App, configure: impl FnOnce(&mut imgui::Context) -> T) -> T {
+    let mut contexts = app
         .world_mut()
-        .get_non_send_mut::<ImguiContext>()
-        .expect("ImguiPlugin should install an ImGui context");
-    let ctx = context.context_mut();
-    ctx.io_mut().set_delta_time(1.0 / 60.0);
-    ctx.io_mut().set_config_input_trickle_event_queue(false);
-    let _ = ctx.font_atlas().build();
-    let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
+        .get_non_send_mut::<ImguiContexts>()
+        .expect("ImguiPlugin should install the Context registry");
+    let primary_id = contexts
+        .primary_id()
+        .expect("ImguiPlugin should install a primary Context");
+    contexts
+        .configure(primary_id, configure)
+        .unwrap_or_else(|error| panic!("primary Context should be configurable: {error}"))
 }
 
 fn current_frame_input_chars() -> Vec<u32> {
@@ -73,13 +83,11 @@ fn current_frame_input_chars() -> Vec<u32> {
 }
 
 fn begin_frame_and_assert(app: &mut App, assert_ui: impl FnOnce(&imgui::Ui)) {
-    let mut context = app
-        .world_mut()
-        .get_non_send_mut::<ImguiContext>()
-        .expect("ImguiContext should exist");
-    let frame = context.context_mut().begin_frame();
-    assert_ui(frame.ui());
-    let _ = frame.render();
+    configure_primary(app, |context| {
+        let frame = context.begin_frame();
+        assert_ui(frame.ui());
+        let _ = frame.render();
+    });
 }
 
 fn run_input_systems(app: &mut App) {
@@ -90,78 +98,78 @@ fn run_condition_value<M>(app: &mut App, system: impl IntoSystem<(), bool, M> + 
     app.world_mut().run_system_cached(system).unwrap()
 }
 
-fn request_text_cursor_and_ime(
-    imgui_context: NonSend<ImguiContext>,
-    frame_state: NonSend<ImguiFrameState>,
-) {
-    let ui = frame_state.ui().expect("Dear ImGui frame should be open");
+fn request_text_cursor_and_ime(imgui: ImguiUi) {
+    let ui = imgui.ui().expect("Dear ImGui frame should be open");
     ui.set_mouse_cursor(Some(imgui::MouseCursor::TextInput));
     ui.set_mouse_draw_cursor(false);
 
-    let raw_context = imgui_context.context().as_raw();
-    // SAFETY: This test owns the backend context resource and mutates the live frame's platform IME
-    // data to simulate Dear ImGui output that normally comes from an active text widget.
-    unsafe {
-        let ime_data = &mut (*raw_context).PlatformImeData;
-        ime_data.WantTextInput = true;
-        ime_data.InputPos = imgui::sys::ImVec2_c { x: 222.0, y: 333.0 };
-    }
+    ui.with_bound_context(|| {
+        // SAFETY: `ImguiUi` keeps this exact Context bound for the closure, and the test mutates
+        // only its live frame's platform IME output to simulate an active text widget.
+        unsafe {
+            let raw_context = imgui::sys::igGetCurrentContext();
+            let ime_data = &mut (*raw_context).PlatformImeData;
+            ime_data.WantTextInput = true;
+            ime_data.InputPos = imgui::sys::ImVec2_c { x: 222.0, y: 333.0 };
+        }
+    });
 }
 
-fn request_text_cursor_and_secondary_viewport_ime(
-    imgui_context: NonSend<ImguiContext>,
-    frame_state: NonSend<ImguiFrameState>,
-) {
-    let ui = frame_state.ui().expect("Dear ImGui frame should be open");
+fn request_text_cursor_and_secondary_viewport_ime(imgui: ImguiUi) {
+    let ui = imgui.ui().expect("Dear ImGui frame should be open");
     ui.set_mouse_cursor(Some(imgui::MouseCursor::TextInput));
     ui.set_mouse_draw_cursor(false);
 
-    let raw_context = imgui_context.context().as_raw();
-    unsafe {
-        let ime_data = &mut (*raw_context).PlatformImeData;
-        ime_data.WantTextInput = true;
-        ime_data.InputPos = imgui::sys::ImVec2_c { x: 144.0, y: 205.0 };
-        ime_data.ViewportId = 0x501;
-    }
+    ui.with_bound_context(|| {
+        // SAFETY: `ImguiUi` keeps this exact Context bound while this test updates its live
+        // platform IME output.
+        unsafe {
+            let raw_context = imgui::sys::igGetCurrentContext();
+            let ime_data = &mut (*raw_context).PlatformImeData;
+            ime_data.WantTextInput = true;
+            ime_data.InputPos = imgui::sys::ImVec2_c { x: 144.0, y: 205.0 };
+            ime_data.ViewportId = 0x501;
+        }
+    });
 }
 
-fn request_primary_cursor_and_secondary_viewport_ime(
-    imgui_context: NonSend<ImguiContext>,
-    frame_state: NonSend<ImguiFrameState>,
-) {
-    let ui = frame_state.ui().expect("Dear ImGui frame should be open");
+fn request_primary_cursor_and_secondary_viewport_ime(imgui: ImguiUi) {
+    let ui = imgui.ui().expect("Dear ImGui frame should be open");
     ui.set_mouse_cursor(Some(imgui::MouseCursor::TextInput));
     ui.set_mouse_draw_cursor(false);
 
-    let raw_context = imgui_context.context().as_raw();
-    unsafe {
-        let ime_data = &mut (*raw_context).PlatformImeData;
-        ime_data.WantTextInput = true;
-        ime_data.InputPos = imgui::sys::ImVec2_c { x: 77.0, y: 88.0 };
-        ime_data.ViewportId = 0x502;
-    }
+    ui.with_bound_context(|| {
+        // SAFETY: `ImguiUi` keeps this exact Context bound while this test updates its live
+        // platform IME output.
+        unsafe {
+            let raw_context = imgui::sys::igGetCurrentContext();
+            let ime_data = &mut (*raw_context).PlatformImeData;
+            ime_data.WantTextInput = true;
+            ime_data.InputPos = imgui::sys::ImVec2_c { x: 77.0, y: 88.0 };
+            ime_data.ViewportId = 0x502;
+        }
+    });
 }
 
-fn request_software_cursor(
-    imgui_context: NonSend<ImguiContext>,
-    frame_state: NonSend<ImguiFrameState>,
-) {
-    let ui = frame_state.ui().expect("Dear ImGui frame should be open");
+fn request_software_cursor(imgui: ImguiUi) {
+    let ui = imgui.ui().expect("Dear ImGui frame should be open");
     ui.set_mouse_cursor(Some(imgui::MouseCursor::Hand));
     ui.set_mouse_draw_cursor(true);
 
-    let raw_context = imgui_context.context().as_raw();
-    // SAFETY: This test owns the backend context resource and mutates the live frame's platform IME
-    // data to keep the assertion focused on cursor visibility.
-    unsafe {
-        let ime_data = &mut (*raw_context).PlatformImeData;
-        ime_data.WantTextInput = false;
-        ime_data.InputPos = imgui::sys::ImVec2_c { x: 0.0, y: 0.0 };
-    }
+    ui.with_bound_context(|| {
+        // SAFETY: `ImguiUi` keeps this exact Context bound while this test clears its live
+        // platform IME output to keep the assertion focused on cursor visibility.
+        unsafe {
+            let raw_context = imgui::sys::igGetCurrentContext();
+            let ime_data = &mut (*raw_context).PlatformImeData;
+            ime_data.WantTextInput = false;
+            ime_data.InputPos = imgui::sys::ImVec2_c { x: 0.0, y: 0.0 };
+        }
+    });
 }
 
-fn request_hidden_cursor(frame_state: NonSend<ImguiFrameState>) {
-    let ui = frame_state.ui().expect("Dear ImGui frame should be open");
+fn request_hidden_cursor(imgui: ImguiUi) {
+    let ui = imgui.ui().expect("Dear ImGui frame should be open");
     ui.set_mouse_cursor(None);
     ui.set_mouse_draw_cursor(false);
 }
@@ -214,15 +222,10 @@ fn primary_window_input_maps_window_mouse_and_scroll_into_imgui_io() {
 
     run_input_systems(&mut app);
 
-    {
-        let context = app
-            .world()
-            .get_non_send::<ImguiContext>()
-            .unwrap()
-            .context();
+    configure_primary(&mut app, |context| {
         assert_eq!(context.io().display_size(), [800.0, 600.0]);
         assert_eq!(context.io().display_framebuffer_scale(), [2.0, 2.0]);
-    }
+    });
 
     begin_frame_and_assert(&mut app, |ui| {
         assert_eq!(ui.mouse_pos(), [123.0, 45.0]);
@@ -237,14 +240,12 @@ fn primary_window_input_maps_window_mouse_and_scroll_into_imgui_io() {
 fn primary_window_input_reports_main_hovered_viewport_when_viewports_are_enabled() {
     let _guard = imgui_context_guard();
     let (mut app, primary) = app_with_primary_window();
-    let main_viewport_id = {
-        let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
-        let context = context.context_mut();
+    let main_viewport_id = configure_primary(&mut app, |context| {
         context
             .io_mut()
             .set_config_flags(imgui::ConfigFlags::VIEWPORTS_ENABLE);
         context.main_viewport().id()
-    };
+    });
 
     app.world_mut()
         .resource_mut::<Messages<CursorMoved>>()
@@ -374,15 +375,10 @@ fn input_resize_dpi_and_cursor_leave_messages_update_imgui_io() {
 
     run_input_systems(&mut app);
 
-    {
-        let context = app
-            .world()
-            .get_non_send::<ImguiContext>()
-            .unwrap()
-            .context();
+    configure_primary(&mut app, |context| {
         assert_eq!(context.io().display_size(), [1024.0, 768.0]);
         assert_eq!(context.io().display_framebuffer_scale(), [1.5, 1.5]);
-    }
+    });
 
     begin_frame_and_assert(&mut app, |ui| {
         assert!(
@@ -418,13 +414,10 @@ fn input_invalid_window_metrics_are_sanitized_before_reaching_imgui_io() {
 
     run_input_systems(&mut app);
 
-    let context = app
-        .world()
-        .get_non_send::<ImguiContext>()
-        .unwrap()
-        .context();
-    assert_eq!(context.io().display_size(), [0.0, 0.0]);
-    assert_eq!(context.io().display_framebuffer_scale(), [1.0, 1.0]);
+    configure_primary(&mut app, |context| {
+        assert_eq!(context.io().display_size(), [0.0, 0.0]);
+        assert_eq!(context.io().display_framebuffer_scale(), [1.0, 1.0]);
+    });
 }
 
 #[test]
@@ -937,14 +930,12 @@ fn input_keyboard_focus_lost_releases_tracked_state_without_window_message() {
 fn input_missing_primary_window_releases_tracked_state_and_clears_window_state() {
     let _guard = imgui_context_guard();
     let (mut app, primary) = app_with_primary_window();
-    let main_viewport_id = {
-        let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
-        let context = context.context_mut();
+    let main_viewport_id = configure_primary(&mut app, |context| {
         context
             .io_mut()
             .set_config_flags(imgui::ConfigFlags::VIEWPORTS_ENABLE);
         context.main_viewport().id()
-    };
+    });
 
     app.world_mut()
         .resource_mut::<Messages<CursorMoved>>()
@@ -1176,11 +1167,10 @@ fn input_secondary_viewport_window_messages_use_imgui_platform_coordinates_when_
         let mut window = app.world_mut().get_mut::<Window>(secondary).unwrap();
         window.resolution.set_scale_factor(2.0);
     }
-    {
-        let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
-        let io = context.context_mut().io_mut();
+    configure_primary(&mut app, |context| {
+        let io = context.io_mut();
         io.set_config_flags(io.config_flags() | imgui::ConfigFlags::VIEWPORTS_ENABLE);
-    }
+    });
 
     app.world_mut()
         .resource_mut::<Messages<CursorMoved>>()
@@ -1258,11 +1248,10 @@ fn input_cursor_left_from_previous_window_does_not_clear_new_hovered_viewport_po
             ImguiViewportWindow { viewport_id },
         ))
         .id();
-    {
-        let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
-        let io = context.context_mut().io_mut();
+    configure_primary(&mut app, |context| {
+        let io = context.io_mut();
         io.set_config_flags(io.config_flags() | imgui::ConfigFlags::VIEWPORTS_ENABLE);
-    }
+    });
 
     app.world_mut()
         .resource_mut::<Messages<CursorMoved>>()
@@ -1319,11 +1308,10 @@ fn input_stale_hovered_viewport_window_clears_imgui_mouse_hover() {
             ImguiViewportWindow { viewport_id },
         ))
         .id();
-    {
-        let mut context = app.world_mut().get_non_send_mut::<ImguiContext>().unwrap();
-        let io = context.context_mut().io_mut();
+    configure_primary(&mut app, |context| {
+        let io = context.io_mut();
         io.set_config_flags(io.config_flags() | imgui::ConfigFlags::VIEWPORTS_ENABLE);
-    }
+    });
 
     app.world_mut()
         .resource_mut::<Messages<CursorMoved>>()

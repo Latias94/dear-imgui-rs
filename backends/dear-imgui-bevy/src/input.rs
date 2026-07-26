@@ -5,7 +5,7 @@
 //! without consuming or rewriting Bevy's messages. Gameplay systems should use Dear ImGui's capture
 //! flags as policy hints instead of expecting this backend to stop Bevy input propagation.
 
-use crate::{ImguiContext, ImguiViewportWindow};
+use crate::{ImguiContextError, ImguiContexts, ImguiViewportWindow};
 use bevy_app::{App, PreUpdate};
 use bevy_ecs::message::MessageReader;
 use bevy_ecs::prelude::*;
@@ -185,34 +185,56 @@ pub(crate) fn install_input_mapping(app: &mut App) {
 pub fn primary_window_input_system(
     primary_window: Query<(Entity, &Window), With<PrimaryWindow>>,
     viewport_windows: Query<(Entity, &Window, &ImguiViewportWindow), Without<PrimaryWindow>>,
-    mut imgui_context: NonSendMut<ImguiContext>,
+    mut contexts: NonSendMut<ImguiContexts>,
     mut input_state: ResMut<ImguiInputState>,
     mut capture: ResMut<ImguiInputCapture>,
     mut messages: ImguiInputMessageReaders,
 ) {
-    let Ok((primary_window_entity, window)) = primary_window.single() else {
-        let context = imgui_context.context_mut();
-        release_input_for_missing_primary_window(context, &mut input_state);
+    let Some(primary_id) = contexts.primary_id() else {
         *capture = ImguiInputCapture::default();
-        discard_unread_messages(
-            &mut messages.window_resized,
-            &mut messages.window_scale_factor_changed,
-            &mut messages.window_backend_scale_factor_changed,
-            &mut messages.window_focused,
-            &mut messages.cursor_entered,
-            &mut messages.cursor_moved,
-            &mut messages.cursor_left,
-            &mut messages.mouse_button_input,
-            &mut messages.mouse_wheel,
-            &mut messages.keyboard_input,
-            &mut messages.keyboard_focus_lost,
-            &mut messages.touch_input,
-            &mut messages.ime,
-        );
+        discard_all_unread_messages(&mut messages);
         return;
     };
 
-    let context = imgui_context.context_mut();
+    let result = contexts.configure(primary_id, |context| {
+        translate_primary_window_input(
+            &primary_window,
+            &viewport_windows,
+            context,
+            &mut input_state,
+            &mut capture,
+            &mut messages,
+        );
+    });
+    match result {
+        Ok(()) => {}
+        Err(
+            ImguiContextError::TeardownInProgress { .. } | ImguiContextError::UnknownContext { .. },
+        ) => {
+            *capture = ImguiInputCapture::default();
+            discard_all_unread_messages(&mut messages);
+        }
+        Err(error) => {
+            panic!("dear-imgui-bevy could not prepare primary Context input: {error}")
+        }
+    }
+}
+
+fn translate_primary_window_input(
+    primary_window: &Query<(Entity, &Window), With<PrimaryWindow>>,
+    viewport_windows: &Query<(Entity, &Window, &ImguiViewportWindow), Without<PrimaryWindow>>,
+    context: &mut imgui::Context,
+    input_state: &mut ImguiInputState,
+    capture: &mut ImguiInputCapture,
+    messages: &mut ImguiInputMessageReaders,
+) {
+    let Ok((primary_window_entity, window)) = primary_window.single() else {
+        release_input_for_missing_primary_window(context, input_state);
+        *capture = ImguiInputCapture::default();
+        discard_all_unread_messages(messages);
+        return;
+    };
+
     sync_window_metrics(context, window);
     let primary_viewport_id = context.main_viewport().id();
     let primary_window = ImguiInputWindow {
@@ -224,7 +246,7 @@ pub fn primary_window_input_system(
     };
     prune_stale_window_state(
         context,
-        &mut input_state,
+        input_state,
         primary_window,
         &viewport_windows,
         window.focused,
@@ -269,14 +291,14 @@ pub fn primary_window_input_system(
         messages.keyboard_focus_lost.clear();
     }
     if focus_events.is_empty() && !keyboard_focus_lost {
-        sync_initial_focus(context, &mut input_state, primary_window, window.focused);
+        sync_initial_focus(context, input_state, primary_window, window.focused);
     } else if input_state.primary_window_focused.is_none() {
         input_state.primary_window_focused = Some(window.focused);
     }
-    apply_focus_events(context, &mut input_state, &focus_events);
+    apply_focus_events(context, input_state, &focus_events);
 
     if keyboard_focus_lost {
-        apply_focus_event(context, &mut input_state, primary_window, false);
+        apply_focus_event(context, input_state, primary_window, false);
     }
 
     for (_event, window) in messages.cursor_entered.read().filter_map(|event| {
@@ -355,7 +377,7 @@ pub fn primary_window_input_system(
     for event in messages.keyboard_input.read().filter(|event| {
         imgui_window_for_event(event.window, primary_window, &viewport_windows).is_some()
     }) {
-        apply_keyboard_input(context, &mut input_state, event);
+        apply_keyboard_input(context, input_state, event);
     }
 
     for event in messages.touch_input.read().filter_map(|event| {
@@ -363,7 +385,7 @@ pub fn primary_window_input_system(
             .map(|window| (event, window))
     }) {
         let (event, window) = event;
-        apply_touch_input(context, &mut input_state, event, window);
+        apply_touch_input(context, input_state, event, window);
     }
 
     for event in messages.ime.read() {
@@ -374,11 +396,29 @@ pub fn primary_window_input_system(
             | Ime::Disabled { window } => *window,
         };
         if imgui_window_for_event(window, primary_window, &viewport_windows).is_some() {
-            apply_ime_event(context, &mut input_state, event);
+            apply_ime_event(context, input_state, event);
         }
     }
 
     capture.update_from_io(context.io());
+}
+
+fn discard_all_unread_messages(messages: &mut ImguiInputMessageReaders) {
+    discard_unread_messages(
+        &mut messages.window_resized,
+        &mut messages.window_scale_factor_changed,
+        &mut messages.window_backend_scale_factor_changed,
+        &mut messages.window_focused,
+        &mut messages.cursor_entered,
+        &mut messages.cursor_moved,
+        &mut messages.cursor_left,
+        &mut messages.mouse_button_input,
+        &mut messages.mouse_wheel,
+        &mut messages.keyboard_input,
+        &mut messages.keyboard_focus_lost,
+        &mut messages.touch_input,
+        &mut messages.ime,
+    );
 }
 
 #[derive(SystemParam)]

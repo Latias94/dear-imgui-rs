@@ -9,7 +9,7 @@ use bevy::{
     window::{PresentMode, WindowPlugin, WindowTheme},
 };
 use dear_imgui_bevy::{
-    ImguiContext, ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, configure_example_context,
+    ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, ImguiUi, configure_example_context,
     render::ImguiOverlayCamera,
 };
 use dear_imgui_rs::Condition;
@@ -40,9 +40,17 @@ fn main() {
         .run();
 }
 
-fn setup(mut commands: Commands, mut imgui: NonSendMut<ImguiContext>) {
+fn setup(mut commands: Commands, mut contexts: NonSendMut<ImguiContexts>) -> Result {
     commands.spawn((Camera2d, ImguiOverlayCamera));
-    configure_example_context(&mut imgui, false);
+    let primary_id = contexts
+        .primary_id()
+        .ok_or("ImguiPlugin should install a primary Context before Startup")?;
+    contexts
+        .configure(primary_id, |context| {
+            configure_example_context(context, false);
+        })
+        .map_err(|error| format!("failed to configure the primary Dear ImGui Context: {error}"))?;
+    Ok(())
 }
 
 fn close_on_escape(input: Res<ButtonInput<KeyCode>>, mut exit: MessageWriter<AppExit>) {
@@ -51,11 +59,9 @@ fn close_on_escape(input: Res<ButtonInput<KeyCode>>, mut exit: MessageWriter<App
     }
 }
 
-fn simple_ui(mut contexts: ImguiContexts, mut state: ResMut<SimpleUiState>) {
-    let frame_index = contexts.frame_index().unwrap_or_default();
-    let Some(ui) = contexts.primary_ui_mut() else {
-        return;
-    };
+fn simple_ui(imgui: ImguiUi, mut state: ResMut<SimpleUiState>) -> Result {
+    let frame_index = imgui.frame_index()?;
+    let ui = imgui.ui()?;
 
     ui.window("Tools")
         .size([320.0, 180.0], Condition::FirstUseEver)
@@ -75,4 +81,6 @@ fn simple_ui(mut contexts: ImguiContexts, mut state: ResMut<SimpleUiState>) {
     if state.show_demo_window {
         ui.show_demo_window(&mut state.show_demo_window);
     }
+
+    Ok(())
 }

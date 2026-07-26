@@ -14,8 +14,8 @@ use bevy::{
     window::{PresentMode, WindowPlugin, WindowTheme},
 };
 use dear_imgui_bevy::{
-    ImguiBackendConfig, ImguiBackendStatus, ImguiBevyTextures, ImguiContext, ImguiContexts,
-    ImguiPlugin, ImguiPrimaryContextPass, configure_example_context,
+    ImguiBackendConfig, ImguiBackendStatus, ImguiBevyTextures, ImguiContexts, ImguiPlugin,
+    ImguiPrimaryContextPass, ImguiUi, configure_example_context,
     render::{ImguiOverlayCamera, ImguiOverlayDisabled},
 };
 use dear_imgui_rs::{
@@ -86,9 +86,9 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut textures: ResMut<ImguiBevyTextures>,
-    mut imgui: NonSendMut<ImguiContext>,
+    mut contexts: NonSendMut<ImguiContexts>,
     mut editor: ResMut<EditorState>,
-) {
+) -> Result {
     // Keep the primary target as an ImGui-only editor surface. The scene is rendered by the
     // offscreen camera below and shown through the docked Scene window.
     commands.spawn((
@@ -160,7 +160,15 @@ fn setup(
     ));
 
     editor.selected = Some(light_panel);
-    configure_example_context(&mut imgui, true);
+    let primary_id = contexts
+        .primary_id()
+        .ok_or("ImguiPlugin should install a primary Context before Startup")?;
+    contexts
+        .configure(primary_id, |context| {
+            configure_example_context(context, true);
+        })
+        .map_err(|error| format!("failed to configure the primary Dear ImGui Context: {error}"))?;
+    Ok(())
 }
 
 fn spawn_rect(
@@ -211,17 +219,15 @@ fn animate_scene(
 }
 
 fn editor_ui(
-    mut contexts: ImguiContexts,
+    imgui: ImguiUi,
     preview: Res<ScenePreview>,
     mut editor: ResMut<EditorState>,
     objects: Query<(Entity, &Name, &Transform), With<SceneObject>>,
     frame_count: Res<FrameCount>,
     backend: Res<ImguiBackendStatus>,
-) {
-    let frame_index = contexts.frame_index().unwrap_or_default();
-    let Some(ui) = contexts.primary_ui_mut() else {
-        return;
-    };
+) -> Result {
+    let frame_index = imgui.frame_index()?;
+    let ui = imgui.ui()?;
 
     let root_id = ui.get_id("DearImguiBevyGameEngineDockspace");
     let viewport = ui.main_viewport();
@@ -229,7 +235,7 @@ fn editor_ui(
         Ok(target) => target,
         Err(error) => {
             error!("invalid game-engine dockspace target: {error}");
-            return;
+            return Ok(());
         }
     };
     let dockspace_id = match ui.dockspace_over_main_viewport_with_layout(
@@ -240,7 +246,7 @@ fn editor_ui(
         Ok(id) => id,
         Err(error) => {
             error!("failed to apply game-engine dock layout: {error}");
-            return;
+            return Ok(());
         }
     };
 
@@ -279,6 +285,8 @@ fn editor_ui(
     if backend.multi_viewport_supported {
         render_detached_viewport_window(ui, frame_index);
     }
+
+    Ok(())
 }
 
 fn game_engine_dock_layout() -> DockLayout {
