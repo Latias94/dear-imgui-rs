@@ -153,87 +153,98 @@ pub struct ImguiPreparedDraw {
 /// CPU-side renderer preparation result for the last extracted ImGui frame.
 #[derive(Resource, Clone, Debug, Default)]
 pub struct ImguiPreparedRenderFrame {
-    frame_index: Option<u64>,
-    uniforms: Option<ImguiUniforms>,
-    uniforms_by_view: HashMap<RetainedViewEntity, ImguiUniforms>,
-    vertices: Vec<ImguiGpuVertex>,
-    indices: Vec<DrawIdx>,
-    draws: Vec<ImguiPreparedDraw>,
-    texture_request_count: usize,
+    data: PreparedFrameData,
 }
 
 impl ImguiPreparedRenderFrame {
-    /// Frame index copied from the extracted frame.
+    /// Frame index copied from one extracted Context frame.
     #[must_use]
-    pub fn frame_index(&self) -> Option<u64> {
-        self.frame_index
+    pub fn frame_index(&self, context_id: imgui::ContextId) -> Option<u64> {
+        self.data
+            .contexts
+            .get(&context_id)
+            .map(|metadata| metadata.frame_index)
     }
 
-    /// Uniforms derived from the source snapshot's display rectangle.
-    #[must_use]
-    pub fn uniforms(&self) -> Option<ImguiUniforms> {
-        self.uniforms
+    /// Contexts represented by the current prepared batch.
+    pub fn context_ids(&self) -> impl Iterator<Item = imgui::ContextId> + '_ {
+        self.data.contexts.keys().copied()
     }
 
-    /// Uniforms for one routed Bevy view.
+    /// Uniforms for one Context routed to one Bevy view.
     #[must_use]
-    pub fn uniforms_for_view(&self, view: RetainedViewEntity) -> Option<ImguiUniforms> {
-        self.uniforms_by_view.get(&view).copied().or(self.uniforms)
+    pub fn uniforms_for_view(
+        &self,
+        context_id: imgui::ContextId,
+        view: RetainedViewEntity,
+    ) -> Option<ImguiUniforms> {
+        self.data
+            .uniforms_by_context_view
+            .get(&(context_id, view))
+            .copied()
     }
 
     /// Flattened ImGui vertices for the current extracted frame.
     #[must_use]
     pub fn vertices(&self) -> &[ImguiGpuVertex] {
-        &self.vertices
+        &self.data.vertices
     }
 
     /// Flattened ImGui indices for the current extracted frame.
     #[must_use]
     pub fn indices(&self) -> &[DrawIdx] {
-        &self.indices
+        &self.data.indices
     }
 
     /// Renderer-ready draw commands grouped by extracted camera target.
     #[must_use]
     pub fn draws(&self) -> &[ImguiPreparedDraw] {
-        &self.draws
+        &self.data.draws
     }
 
-    /// Number of texture requests carried by the source snapshot.
+    /// Number of texture requests carried by one source snapshot.
     #[must_use]
-    pub fn texture_request_count(&self) -> usize {
-        self.texture_request_count
+    pub fn texture_request_count(&self, context_id: imgui::ContextId) -> usize {
+        self.data
+            .contexts
+            .get(&context_id)
+            .map(|metadata| metadata.texture_request_count)
+            .unwrap_or_default()
     }
 
     pub(super) fn replace(&mut self, frame: PreparedFrameData) {
-        self.frame_index = Some(frame.frame_index);
-        self.uniforms = frame.uniforms;
-        self.uniforms_by_view = frame.uniforms_by_view;
-        self.vertices = frame.vertices;
-        self.indices = frame.indices;
-        self.draws = frame.draws;
-        self.texture_request_count = frame.texture_request_count;
+        self.data = frame;
     }
 
-    pub(super) fn clear(&mut self, frame_index: Option<u64>) {
-        self.frame_index = frame_index;
-        self.uniforms = None;
-        self.uniforms_by_view.clear();
-        self.vertices.clear();
-        self.indices.clear();
-        self.draws.clear();
-        self.texture_request_count = 0;
+    pub(super) fn clear(&mut self) {
+        self.data.clear();
     }
 }
 
-pub(super) struct PreparedFrameData {
+#[derive(Clone, Copy, Debug)]
+pub(super) struct PreparedContextMetadata {
     pub(super) frame_index: u64,
-    pub(super) uniforms: Option<ImguiUniforms>,
-    pub(super) uniforms_by_view: HashMap<RetainedViewEntity, ImguiUniforms>,
+    pub(super) texture_request_count: usize,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct PreparedFrameData {
+    pub(super) contexts: HashMap<imgui::ContextId, PreparedContextMetadata>,
+    pub(super) uniforms_by_context_view:
+        HashMap<(imgui::ContextId, RetainedViewEntity), ImguiUniforms>,
     pub(super) vertices: Vec<ImguiGpuVertex>,
     pub(super) indices: Vec<DrawIdx>,
     pub(super) draws: Vec<ImguiPreparedDraw>,
-    pub(super) texture_request_count: usize,
+}
+
+impl PreparedFrameData {
+    fn clear(&mut self) {
+        self.contexts.clear();
+        self.uniforms_by_context_view.clear();
+        self.vertices.clear();
+        self.indices.clear();
+        self.draws.clear();
+    }
 }
 
 /// Optional GPU buffers populated when a real Bevy renderer has `RenderDevice` / `RenderQueue`.
@@ -313,13 +324,14 @@ pub(super) fn pad_index_buffer_for_copy_alignment(indices: &mut RawBufferVec<Dra
 /// GPU resources shared by all ImGui overlay draws.
 #[derive(Resource)]
 pub struct ImguiPipelineGpuResources {
-    uniforms_by_view: HashMap<RetainedViewEntity, ImguiCameraUniformResources>,
+    uniforms_by_context_view:
+        HashMap<(imgui::ContextId, RetainedViewEntity), ImguiCameraUniformResources>,
     _fallback_texture: Texture,
     _fallback_view: TextureView,
     fallback_bind_group: BindGroup,
 }
 
-struct ImguiCameraUniformResources {
+pub(super) struct ImguiCameraUniformResources {
     buffer: Buffer,
     bind_group: BindGroup,
 }
@@ -364,7 +376,7 @@ impl FromWorld for ImguiPipelineGpuResources {
             &sampler,
         );
         Self {
-            uniforms_by_view: HashMap::new(),
+            uniforms_by_context_view: HashMap::new(),
             _fallback_texture: fallback_texture,
             _fallback_view: fallback_view,
             fallback_bind_group,
@@ -381,43 +393,57 @@ impl ImguiPipelineGpuResources {
         pipeline_cache: &PipelineCache,
         pipeline: &ImguiRenderPipeline,
     ) {
-        let active_views = prepared
+        let active_context_views = prepared
             .draws()
             .iter()
-            .map(|draw| draw.view)
+            .map(|draw| (draw.context_id, draw.view))
             .collect::<std::collections::HashSet<_>>();
-        self.uniforms_by_view
-            .retain(|view, _| active_views.contains(view));
+        self.uniforms_by_context_view
+            .retain(|key, _| active_context_views.contains(key));
 
-        for view in active_views {
-            let Some(uniforms) = prepared.uniforms_for_view(view) else {
+        for (context_id, view) in active_context_views {
+            let Some(uniforms) = prepared.uniforms_for_view(context_id, view) else {
                 continue;
             };
-            let resources = self.uniforms_by_view.entry(view).or_insert_with(|| {
-                create_camera_uniform_resources(render_device, pipeline_cache, pipeline)
-            });
+            let resources = self
+                .uniforms_by_context_view
+                .entry((context_id, view))
+                .or_insert_with(|| {
+                    create_camera_uniform_resources(render_device, pipeline_cache, pipeline)
+                });
             render_queue.write_buffer(&resources.buffer, 0, bytemuck::bytes_of(&uniforms));
         }
     }
 
     pub(super) fn update_camera_uniforms(
         &self,
+        context_id: imgui::ContextId,
         view: RetainedViewEntity,
         render_queue: &RenderQueue,
         uniforms: ImguiUniforms,
     ) -> Option<&BindGroup> {
-        let resources = self.uniforms_by_view.get(&view)?;
+        let resources = self.uniforms_by_context_view.get(&(context_id, view))?;
         render_queue.write_buffer(&resources.buffer, 0, bytemuck::bytes_of(&uniforms));
         Some(&resources.bind_group)
     }
 
     #[must_use]
     pub fn uniform_bind_group_count(&self) -> usize {
-        self.uniforms_by_view.len()
+        self.uniforms_by_context_view.len()
     }
 
     pub(super) fn fallback_bind_group(&self) -> &BindGroup {
         &self.fallback_bind_group
+    }
+
+    pub(super) fn take_context(
+        &mut self,
+        context_id: imgui::ContextId,
+    ) -> Vec<ImguiCameraUniformResources> {
+        self.uniforms_by_context_view
+            .extract_if(|(candidate, _), _| *candidate == context_id)
+            .map(|(_, resources)| resources)
+            .collect()
     }
 }
 
@@ -727,22 +753,33 @@ impl ImguiTextureBindGroups {
         !self.managed_texture_is_destroyed(id)
     }
 
-    pub(super) fn prune_destroyed_managed_textures(&mut self, completion_watermark: u64) {
-        self.destroyed_managed_textures
-            .retain(|_, destroy_epoch| *destroy_epoch > completion_watermark);
+    pub(super) fn prune_destroyed_managed_textures(
+        &mut self,
+        completion_watermarks: &HashMap<imgui::ContextId, u64>,
+    ) {
+        self.destroyed_managed_textures.retain(|id, destroy_epoch| {
+            completion_watermarks
+                .get(&snapshot_texture_context_id(*id))
+                .is_none_or(|watermark| *destroy_epoch > *watermark)
+        });
     }
 
-    pub(super) fn has_managed_resources(&self) -> bool {
-        !self.managed_texture_ids.is_empty()
-            || self
-                .textures
-                .keys()
-                .any(|binding| matches!(binding, TextureBinding::Managed(_)))
-    }
-
-    pub(super) fn take_managed_renderer_state(&mut self) -> Vec<ImguiRenderTexture> {
+    pub(super) fn take_managed_renderer_state(
+        &mut self,
+        context_id: imgui::ContextId,
+    ) -> Vec<ImguiRenderTexture> {
         let mut released = Vec::new();
-        for (id, texture_id) in self.managed_texture_ids.drain() {
+        let managed_ids = self
+            .managed_texture_ids
+            .keys()
+            .filter(|id| snapshot_texture_context_id(**id) == context_id)
+            .copied()
+            .collect::<Vec<_>>();
+        for id in managed_ids {
+            let texture_id = self
+                .managed_texture_ids
+                .remove(&id)
+                .expect("selected managed texture identity must still exist");
             self.managed_texture_aliases.remove(&texture_id);
             let binding = TextureBinding::Managed(id);
             self.bevy_image_bindings.remove(&binding);
@@ -750,20 +787,25 @@ impl ImguiTextureBindGroups {
                 released.push(texture);
             }
         }
-        debug_assert!(self.managed_texture_aliases.is_empty());
-        self.managed_texture_aliases.clear();
         let orphaned = self
             .textures
             .keys()
             .copied()
-            .filter(|binding| matches!(binding, TextureBinding::Managed(_)))
+            .filter(|binding| {
+                matches!(
+                    binding,
+                    TextureBinding::Managed(id)
+                        if snapshot_texture_context_id(*id) == context_id
+                )
+            })
             .collect::<Vec<_>>();
         for binding in orphaned {
             if let Some(texture) = self.textures.remove(&binding) {
                 released.push(texture);
             }
         }
-        self.destroyed_managed_textures.clear();
+        self.destroyed_managed_textures
+            .retain(|id, _| snapshot_texture_context_id(*id) != context_id);
         released
     }
 
@@ -790,6 +832,13 @@ impl ImguiTextureBindGroups {
         for binding in stale_bindings {
             self.remove_binding(&binding);
         }
+    }
+}
+
+fn snapshot_texture_context_id(id: SnapshotTextureId) -> imgui::ContextId {
+    match id {
+        SnapshotTextureId::User(id) => id.context_id(),
+        SnapshotTextureId::FontAtlas { context, .. } => context,
     }
 }
 
@@ -852,219 +901,598 @@ impl ImguiQueuedPipelines {
     }
 }
 
-/// Render-side owner of the last extracted primary ImGui frame.
-#[derive(Resource, Debug, Default)]
-pub struct ImguiExtractedRenderFrame {
-    frame_index: Option<u64>,
+#[derive(Debug)]
+struct ImguiExtractedContextFrame {
+    frame_index: u64,
     snapshot: Option<imgui::render::snapshot::FrameSnapshot>,
-    route_epoch: u64,
     route_snapshots: Vec<ImguiRenderRouteSnapshot>,
     camera_targets: Vec<ImguiCameraTarget>,
     texture_feedback: Vec<imgui::render::snapshot::TextureFeedback>,
-    completion_watermark: u64,
+}
+
+/// Render-side owner of the latest extracted frame for every Dear ImGui Context.
+#[derive(Resource, Debug, Default)]
+pub struct ImguiExtractedRenderFrame {
+    frames: HashMap<imgui::ContextId, ImguiExtractedContextFrame>,
+    completion_watermarks: HashMap<imgui::ContextId, u64>,
+    route_epoch: u64,
 }
 
 impl ImguiExtractedRenderFrame {
-    /// Frame index copied from [`crate::ImguiFrameOutput`].
+    /// Frame index copied from the main-world Context output.
     #[must_use]
-    pub fn frame_index(&self) -> Option<u64> {
-        self.frame_index
+    pub fn frame_index(&self, context_id: imgui::ContextId) -> Option<u64> {
+        self.frames.get(&context_id).map(|frame| frame.frame_index)
     }
 
-    /// Snapshot moved from the main/UI world, if it has not been completed yet.
+    /// Snapshot moved from the main world for `context_id`, if it is not terminal yet.
     #[must_use]
-    pub fn snapshot(&self) -> Option<&imgui::render::snapshot::FrameSnapshot> {
-        self.snapshot.as_ref()
+    pub fn snapshot(
+        &self,
+        context_id: imgui::ContextId,
+    ) -> Option<&imgui::render::snapshot::FrameSnapshot> {
+        self.frames
+            .get(&context_id)
+            .and_then(|frame| frame.snapshot.as_ref())
     }
 
-    /// Main-world route epoch captured with this frame.
+    /// Contexts that currently have extracted frame metadata.
+    pub fn context_ids(&self) -> impl Iterator<Item = imgui::ContextId> + '_ {
+        self.frames.keys().copied()
+    }
+
+    /// Latest main-world route epoch observed by extraction.
     #[must_use]
     pub const fn route_epoch(&self) -> u64 {
         self.route_epoch
     }
 
-    /// Camera targets associated with the extracted snapshot.
+    /// Camera targets associated with one extracted Context snapshot.
     #[must_use]
-    pub fn camera_targets(&self) -> &[ImguiCameraTarget] {
-        &self.camera_targets
+    pub fn camera_targets(&self, context_id: imgui::ContextId) -> &[ImguiCameraTarget] {
+        self.frames
+            .get(&context_id)
+            .map_or(&[], |frame| frame.camera_targets.as_slice())
     }
 
-    /// Highest snapshot epoch that the render world has committed or abandoned.
+    /// Highest contiguous completion watermark confirmed by the owning core Context.
     #[must_use]
-    pub fn completion_watermark(&self) -> u64 {
-        self.completion_watermark
+    pub fn completion_watermark(&self, context_id: imgui::ContextId) -> u64 {
+        self.completion_watermarks
+            .get(&context_id)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    pub(super) fn begin_extraction(
+        &mut self,
+        route_epoch: u64,
+        completion_watermarks: HashMap<imgui::ContextId, u64>,
+    ) {
+        self.abandon_all();
+        self.frames.clear();
+        self.route_epoch = route_epoch;
+        for (context_id, watermark) in completion_watermarks {
+            let current = self.completion_watermarks.entry(context_id).or_default();
+            *current = (*current).max(watermark);
+        }
     }
 
     pub(super) fn replace(
         &mut self,
-        frame_index: u64,
-        snapshot: imgui::render::snapshot::FrameSnapshot,
-        route_epoch: u64,
+        context_id: imgui::ContextId,
+        frame: crate::context::PendingFrame,
         route_snapshots: Vec<ImguiRenderRouteSnapshot>,
     ) {
-        self.abandon();
-        self.frame_index = Some(frame_index);
-        self.snapshot = Some(snapshot);
-        self.route_epoch = route_epoch;
-        self.route_snapshots = route_snapshots;
-        self.camera_targets.clear();
+        debug_assert_eq!(frame.snapshot.epoch().context_id(), context_id);
+        let previous = self.frames.insert(
+            context_id,
+            ImguiExtractedContextFrame {
+                frame_index: frame.frame_index,
+                snapshot: Some(frame.snapshot),
+                route_snapshots,
+                camera_targets: Vec::new(),
+                texture_feedback: Vec::new(),
+            },
+        );
+        drop(previous);
     }
 
-    pub(super) fn clear(&mut self, frame_index: u64, route_epoch: u64) {
-        self.abandon();
-        self.frame_index = (frame_index > 0).then_some(frame_index);
-        self.route_epoch = route_epoch;
-        self.route_snapshots.clear();
-        self.camera_targets.clear();
+    pub(super) fn route_snapshots(
+        &self,
+        context_id: imgui::ContextId,
+    ) -> &[ImguiRenderRouteSnapshot] {
+        self.frames
+            .get(&context_id)
+            .map_or(&[], |frame| frame.route_snapshots.as_slice())
     }
 
-    pub(super) fn route_snapshots(&self) -> &[ImguiRenderRouteSnapshot] {
-        &self.route_snapshots
-    }
-
-    pub(super) fn replace_camera_targets(&mut self, camera_targets: Vec<ImguiCameraTarget>) {
-        self.camera_targets = camera_targets;
+    pub(super) fn replace_camera_targets(
+        &mut self,
+        context_id: imgui::ContextId,
+        camera_targets: Vec<ImguiCameraTarget>,
+    ) {
+        if let Some(frame) = self.frames.get_mut(&context_id) {
+            frame.camera_targets = camera_targets;
+        }
     }
 
     pub(super) fn extend_texture_feedback(
         &mut self,
+        context_id: imgui::ContextId,
         feedback: impl IntoIterator<Item = imgui::render::snapshot::TextureFeedback>,
     ) {
-        self.texture_feedback.extend(feedback);
-    }
-
-    pub(super) fn commit(&mut self) {
-        let feedback = std::mem::take(&mut self.texture_feedback);
-        if let Some(snapshot) = self.snapshot.take() {
-            // The mailbox is single-slot and this resource owns at most one extracted snapshot;
-            // an older snapshot is committed or abandoned before a newer one can be processed.
-            // Therefore the highest locally completed sequence is the renderer's safe watermark.
-            self.completion_watermark = self.completion_watermark.max(snapshot.epoch().sequence());
-            let _ = snapshot.commit(feedback);
+        if let Some(frame) = self.frames.get_mut(&context_id) {
+            frame.texture_feedback.extend(feedback);
         }
     }
 
-    pub(super) fn abandon(&mut self) {
-        self.texture_feedback.clear();
-        if let Some(snapshot) = self.snapshot.take() {
-            self.completion_watermark = self.completion_watermark.max(snapshot.epoch().sequence());
-            drop(snapshot);
+    pub(super) fn commit_all(&mut self) {
+        for frame in self.frames.values_mut() {
+            let feedback = std::mem::take(&mut frame.texture_feedback);
+            if let Some(snapshot) = frame.snapshot.take() {
+                let _ = snapshot.commit(feedback);
+            }
+        }
+    }
+
+    pub(super) fn remove_context(&mut self, context_id: imgui::ContextId) {
+        let removed = self.frames.remove(&context_id);
+        drop(removed);
+        self.completion_watermarks.remove(&context_id);
+    }
+
+    fn abandon_all(&mut self) {
+        for frame in self.frames.values_mut() {
+            frame.texture_feedback.clear();
+            drop(frame.snapshot.take());
         }
     }
 }
 
 impl Drop for ImguiExtractedRenderFrame {
     fn drop(&mut self) {
-        self.abandon();
+        self.abandon_all();
     }
 }
 
 #[derive(Resource, Default)]
 pub(super) struct ImguiRenderExtractionInstalled;
 
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Resource, Debug, Default)]
+pub(super) struct ImguiRenderDeviceState {
+    generation: u64,
+}
+
+impl ImguiRenderDeviceState {
+    pub(super) fn advance(&mut self) -> (u64, bool) {
+        let recovering = self.generation != 0;
+        self.generation = self
+            .generation
+            .checked_add(1)
+            .expect("Bevy render device generation space exhausted");
+        (self.generation, recovering)
+    }
+}
+
+#[derive(Debug)]
 enum ImguiRendererReleasePhase {
-    #[default]
-    NotInstalled,
-    Released {
-        generation: u64,
-    },
-    Acknowledged {
-        generation: u64,
-    },
     Live {
         generation: u64,
     },
     Requested {
         generation: u64,
-        resources_live: bool,
+    },
+    Detached {
+        generation: u64,
+        packet: Option<ImguiRendererReleasePacket>,
+    },
+    ResourcesReleased {
+        generation: u64,
+    },
+    RecoveryDetached {
+        generation: u64,
+        device_generation: u64,
+        packet: Option<ImguiRendererReleasePacket>,
+    },
+    RecoveryResourcesReleased {
+        generation: u64,
+        device_generation: u64,
     },
 }
 
-#[derive(Resource, Clone, Debug, Default)]
-pub(crate) struct ImguiRendererRelease {
-    phase: Arc<Mutex<ImguiRendererReleasePhase>>,
+#[derive(Default)]
+pub(super) struct ImguiRendererReleasePacket {
+    pub(super) textures: Vec<ImguiRenderTexture>,
+    pub(super) uniforms: Vec<ImguiCameraUniformResources>,
 }
 
-impl ImguiRendererRelease {
-    fn phase(&self) -> MutexGuard<'_, ImguiRendererReleasePhase> {
-        self.phase
+impl std::fmt::Debug for ImguiRendererReleasePacket {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ImguiRendererReleasePacket")
+            .field("texture_count", &self.textures.len())
+            .field("uniform_count", &self.uniforms.len())
+            .finish()
+    }
+}
+
+impl ImguiRendererReleasePacket {
+    pub(super) fn new(
+        textures: Vec<ImguiRenderTexture>,
+        uniforms: Vec<ImguiCameraUniformResources>,
+    ) -> Self {
+        Self { textures, uniforms }
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.textures.is_empty() && self.uniforms.is_empty()
+    }
+
+    fn append(&mut self, mut other: Self) {
+        self.textures.append(&mut other.textures);
+        self.uniforms.append(&mut other.uniforms);
+    }
+}
+
+#[derive(Debug, Default)]
+struct ImguiRendererReleaseState {
+    next_generation: u64,
+    device_generation: u64,
+    phases: HashMap<imgui::ContextId, ImguiRendererReleasePhase>,
+}
+
+#[derive(Resource, Clone, Debug, Default)]
+pub(crate) struct ImguiRendererReleases {
+    state: Arc<Mutex<ImguiRendererReleaseState>>,
+}
+
+impl ImguiRendererReleases {
+    fn state(&self) -> MutexGuard<'_, ImguiRendererReleaseState> {
+        self.state
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    pub(super) fn install(&self) {
-        let mut phase = self.phase();
-        if matches!(*phase, ImguiRendererReleasePhase::NotInstalled) {
-            *phase = ImguiRendererReleasePhase::Released { generation: 1 };
+    pub(crate) fn admit(&self, context_id: imgui::ContextId) -> ImguiRendererReleaseLease {
+        let mut state = self.state();
+        assert!(
+            !state.phases.contains_key(&context_id),
+            "a Bevy renderer release lease already exists for Context {context_id:?}"
+        );
+        let generation = state
+            .next_generation
+            .checked_add(1)
+            .expect("Bevy renderer release generation space exhausted");
+        state.next_generation = generation;
+        state
+            .phases
+            .insert(context_id, ImguiRendererReleasePhase::Live { generation });
+        ImguiRendererReleaseLease {
+            context_id,
+            generation,
+            releases: self.clone(),
         }
     }
 
-    pub(crate) fn request_release(&self) -> bool {
-        let mut phase = self.phase();
-        match *phase {
-            ImguiRendererReleasePhase::NotInstalled => true,
-            ImguiRendererReleasePhase::Released { generation } => {
-                *phase = ImguiRendererReleasePhase::Requested {
-                    generation,
-                    resources_live: false,
-                };
-                true
-            }
-            ImguiRendererReleasePhase::Live { generation } => {
-                *phase = ImguiRendererReleasePhase::Requested {
-                    generation,
-                    resources_live: true,
-                };
-                false
-            }
-            ImguiRendererReleasePhase::Requested { resources_live, .. } => !resources_live,
-            ImguiRendererReleasePhase::Acknowledged { .. } => true,
-        }
-    }
-
-    pub(crate) fn release_requested(&self) -> bool {
+    pub(crate) fn release_requested(&self, context_id: imgui::ContextId) -> bool {
         matches!(
-            *self.phase(),
-            ImguiRendererReleasePhase::Requested { .. }
-                | ImguiRendererReleasePhase::Acknowledged { .. }
+            self.state().phases.get(&context_id),
+            Some(
+                ImguiRendererReleasePhase::Requested { .. }
+                    | ImguiRendererReleasePhase::Detached { .. }
+                    | ImguiRendererReleasePhase::ResourcesReleased { .. }
+                    | ImguiRendererReleasePhase::RecoveryDetached { .. }
+                    | ImguiRendererReleasePhase::RecoveryResourcesReleased { .. }
+            )
         )
     }
 
-    pub(super) fn update_resources_live(&self, resources_live: bool) {
-        let mut phase = self.phase();
-        match (*phase, resources_live) {
-            (ImguiRendererReleasePhase::Released { generation }, true) => {
-                let generation = generation
-                    .checked_add(1)
-                    .expect("Bevy renderer release generation space exhausted");
-                *phase = ImguiRendererReleasePhase::Live { generation };
-            }
-            (ImguiRendererReleasePhase::Live { generation }, false) => {
-                *phase = ImguiRendererReleasePhase::Released { generation };
-            }
-            _ => {}
-        }
+    pub(crate) fn release_requested_contexts(&self) -> HashSet<imgui::ContextId> {
+        self.state()
+            .phases
+            .iter()
+            .filter_map(|(context_id, phase)| {
+                (!matches!(phase, ImguiRendererReleasePhase::Live { .. })).then_some(*context_id)
+            })
+            .collect()
     }
 
-    pub(super) fn requested_generation(&self) -> Option<u64> {
-        match *self.phase() {
-            ImguiRendererReleasePhase::Requested { generation, .. } => Some(generation),
-            _ => None,
-        }
+    pub(crate) fn recovery_requested(&self, context_id: imgui::ContextId) -> bool {
+        matches!(
+            self.state().phases.get(&context_id),
+            Some(
+                ImguiRendererReleasePhase::RecoveryDetached { .. }
+                    | ImguiRendererReleasePhase::RecoveryResourcesReleased { .. }
+            )
+        )
     }
 
-    pub(super) fn acknowledge_release(&self, generation: u64) -> bool {
-        let mut phase = self.phase();
-        match *phase {
+    pub(super) fn requested_releases(&self) -> Vec<(imgui::ContextId, u64)> {
+        let mut requested = self
+            .state()
+            .phases
+            .iter()
+            .filter_map(|(context_id, phase)| match phase {
+                ImguiRendererReleasePhase::Requested { generation } => {
+                    Some((*context_id, *generation))
+                }
+                ImguiRendererReleasePhase::Live { .. }
+                | ImguiRendererReleasePhase::Detached { .. }
+                | ImguiRendererReleasePhase::ResourcesReleased { .. }
+                | ImguiRendererReleasePhase::RecoveryDetached { .. }
+                | ImguiRendererReleasePhase::RecoveryResourcesReleased { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        requested.sort_by_key(|(context_id, _)| context_id.get().get());
+        requested
+    }
+
+    pub(super) fn registered_contexts(&self) -> Vec<imgui::ContextId> {
+        let mut contexts = self.state().phases.keys().copied().collect::<Vec<_>>();
+        contexts.sort_by_key(|context_id| context_id.get().get());
+        contexts
+    }
+
+    pub(super) fn begin_device_recovery(
+        &self,
+        device_generation: u64,
+        mut packets: HashMap<imgui::ContextId, ImguiRendererReleasePacket>,
+    ) -> bool {
+        let mut state = self.state();
+        if device_generation <= state.device_generation {
+            return false;
+        }
+        state.device_generation = device_generation;
+        for (context_id, phase) in &mut state.phases {
+            let packet = packets.remove(context_id).unwrap_or_default();
+            match phase {
+                ImguiRendererReleasePhase::Live { generation } => {
+                    *phase = ImguiRendererReleasePhase::RecoveryDetached {
+                        generation: *generation,
+                        device_generation,
+                        packet: Some(packet),
+                    };
+                }
+                ImguiRendererReleasePhase::Requested { generation } => {
+                    *phase = ImguiRendererReleasePhase::Detached {
+                        generation: *generation,
+                        packet: Some(packet),
+                    };
+                }
+                ImguiRendererReleasePhase::Detached {
+                    packet: detached_packet,
+                    ..
+                } => {
+                    detached_packet
+                        .as_mut()
+                        .expect("detached renderer release must retain its resource packet")
+                        .append(packet);
+                }
+                ImguiRendererReleasePhase::ResourcesReleased { .. } => {
+                    assert!(
+                        packet.is_empty(),
+                        "renderer resources reappeared after Context teardown released them"
+                    );
+                }
+                ImguiRendererReleasePhase::RecoveryDetached {
+                    device_generation: pending_generation,
+                    packet: detached_packet,
+                    ..
+                } => {
+                    *pending_generation = device_generation;
+                    detached_packet
+                        .as_mut()
+                        .expect("detached renderer recovery must retain its resource packet")
+                        .append(packet);
+                }
+                ImguiRendererReleasePhase::RecoveryResourcesReleased {
+                    device_generation: pending_generation,
+                    ..
+                } => {
+                    assert!(
+                        packet.is_empty(),
+                        "renderer resources reappeared after device recovery released them"
+                    );
+                    *pending_generation = device_generation;
+                }
+            }
+        }
+        drop(packets);
+        true
+    }
+
+    pub(super) fn acknowledge_release(
+        &self,
+        context_id: imgui::ContextId,
+        generation: u64,
+        packet: ImguiRendererReleasePacket,
+    ) -> bool {
+        let mut state = self.state();
+        let Some(phase) = state.phases.get_mut(&context_id) else {
+            return false;
+        };
+        let expected = match phase {
+            ImguiRendererReleasePhase::Requested { generation } => *generation,
+            ImguiRendererReleasePhase::Live { .. }
+            | ImguiRendererReleasePhase::Detached { .. }
+            | ImguiRendererReleasePhase::ResourcesReleased { .. }
+            | ImguiRendererReleasePhase::RecoveryDetached { .. }
+            | ImguiRendererReleasePhase::RecoveryResourcesReleased { .. } => return false,
+        };
+        if expected != generation {
+            return false;
+        }
+        *phase = ImguiRendererReleasePhase::Detached {
+            generation,
+            packet: Some(packet),
+        };
+        true
+    }
+
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.state().phases.len()
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct ImguiRendererReleaseLease {
+    context_id: imgui::ContextId,
+    generation: u64,
+    releases: ImguiRendererReleases,
+}
+
+impl ImguiRendererReleaseLease {
+    pub(crate) fn request_release(&self) -> bool {
+        let mut state = self.releases.state();
+        let Some(phase) = state.phases.get_mut(&self.context_id) else {
+            return true;
+        };
+        let previous = std::mem::replace(
+            phase,
             ImguiRendererReleasePhase::Requested {
-                generation: expected,
-                ..
-            } if expected == generation => {
-                *phase = ImguiRendererReleasePhase::Acknowledged { generation };
+                generation: self.generation,
+            },
+        );
+        match previous {
+            ImguiRendererReleasePhase::Live { generation } if generation == self.generation => {
+                false
+            }
+            ImguiRendererReleasePhase::Requested { generation }
+                if generation == self.generation =>
+            {
+                false
+            }
+            previous @ (ImguiRendererReleasePhase::Detached { generation, .. }
+            | ImguiRendererReleasePhase::ResourcesReleased { generation })
+                if generation == self.generation =>
+            {
+                *phase = previous;
                 true
             }
-            _ => false,
+            ImguiRendererReleasePhase::RecoveryDetached {
+                generation, packet, ..
+            } if generation == self.generation => {
+                *phase = ImguiRendererReleasePhase::Detached { generation, packet };
+                true
+            }
+            ImguiRendererReleasePhase::RecoveryResourcesReleased { generation, .. }
+                if generation == self.generation =>
+            {
+                *phase = ImguiRendererReleasePhase::ResourcesReleased { generation };
+                true
+            }
+            previous => {
+                *phase = previous;
+                panic!(
+                    "Bevy renderer release lease generation changed for Context {:?}",
+                    self.context_id
+                )
+            }
+        }
+    }
+
+    pub(crate) fn release_renderer_resources(&self) {
+        let packet = {
+            let mut state = self.releases.state();
+            let phase = state.phases.get_mut(&self.context_id).unwrap_or_else(|| {
+                panic!(
+                    "Bevy renderer release lease disappeared for Context {:?}",
+                    self.context_id
+                )
+            });
+            match phase {
+                ImguiRendererReleasePhase::Detached { generation, packet }
+                    if *generation == self.generation =>
+                {
+                    let packet = packet.take().expect(
+                        "Bevy renderer release resources were consumed without advancing state",
+                    );
+                    *phase = ImguiRendererReleasePhase::ResourcesReleased {
+                        generation: self.generation,
+                    };
+                    Some(packet)
+                }
+                ImguiRendererReleasePhase::ResourcesReleased { generation }
+                    if *generation == self.generation =>
+                {
+                    None
+                }
+                ImguiRendererReleasePhase::RecoveryDetached {
+                    generation,
+                    device_generation,
+                    packet,
+                } if *generation == self.generation => {
+                    let device_generation = *device_generation;
+                    let packet = packet.take().expect(
+                        "Bevy renderer recovery resources were consumed without advancing state",
+                    );
+                    *phase = ImguiRendererReleasePhase::RecoveryResourcesReleased {
+                        generation: self.generation,
+                        device_generation,
+                    };
+                    Some(packet)
+                }
+                ImguiRendererReleasePhase::RecoveryResourcesReleased { generation, .. }
+                    if *generation == self.generation =>
+                {
+                    None
+                }
+                phase => {
+                    panic!(
+                        "Bevy renderer resources for Context {:?} released in invalid phase: {phase:?}",
+                        self.context_id
+                    )
+                }
+            }
+        };
+        drop(packet);
+    }
+
+    pub(crate) fn finish_device_recovery(&self) {
+        let mut state = self.releases.state();
+        let expected_device_generation = state.device_generation;
+        let phase = state.phases.get_mut(&self.context_id).unwrap_or_else(|| {
+            panic!(
+                "Bevy renderer recovery lease disappeared for Context {:?}",
+                self.context_id
+            )
+        });
+        match phase {
+            ImguiRendererReleasePhase::RecoveryResourcesReleased {
+                generation,
+                device_generation,
+            } if *generation == self.generation
+                && *device_generation == expected_device_generation =>
+            {
+                *phase = ImguiRendererReleasePhase::Live {
+                    generation: self.generation,
+                };
+            }
+            phase => {
+                panic!(
+                    "Bevy renderer recovery for Context {:?} completed in invalid phase: {phase:?}",
+                    self.context_id
+                )
+            }
+        }
+    }
+
+    pub(crate) fn retire(self) {
+        let mut state = self.releases.state();
+        match state.phases.get(&self.context_id) {
+            Some(ImguiRendererReleasePhase::ResourcesReleased { generation })
+                if *generation == self.generation =>
+            {
+                state.phases.remove(&self.context_id);
+            }
+            phase => {
+                panic!(
+                    "Bevy renderer release lease for Context {:?} retired before acknowledgement: {phase:?}",
+                    self.context_id
+                )
+            }
         }
     }
 }

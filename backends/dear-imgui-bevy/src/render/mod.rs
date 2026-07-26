@@ -20,7 +20,7 @@ use bevy_image::Image;
 use bevy_math::{UVec2, UVec4};
 use bevy_mesh::VertexBufferLayout;
 use bevy_render::{
-    Extract, ExtractSchedule, GpuResourceAppExt, Render, RenderApp, RenderSystems,
+    Extract, ExtractSchedule, Render, RenderApp, RenderStartup, RenderSystems,
     camera::ExtractedCamera,
     render_asset::RenderAssets,
     render_resource::{
@@ -74,13 +74,13 @@ pub(crate) use plugin::{
     standard_draw_callback_conflict, standard_draw_callback_contract,
     standard_draw_callback_occupied,
 };
-pub(crate) use resources::ImguiRendererRelease;
 pub use resources::{
     ImguiCameraTarget, ImguiCameraViewport, ImguiExtractedBevyTextures, ImguiExtractedRenderFrame,
     ImguiGpuBuffers, ImguiOverlayCamera, ImguiOverlayDisabled, ImguiPipelineGpuResources,
     ImguiPreparedDraw, ImguiPreparedRenderFrame, ImguiQueuedPipelines, ImguiSampler,
     ImguiScissorRect, ImguiTextureBindGroupError, ImguiTextureBindGroups,
 };
+pub(crate) use resources::{ImguiRendererReleaseLease, ImguiRendererReleases};
 
 type ViewportCameraQuery<'w> = Query<
     'w,
@@ -108,10 +108,11 @@ mod tests {
     };
     use super::prepare::{
         convert_imgui_texture_pixels, convert_imgui_texture_update_rects,
-        draw_indices_reference_out_of_bounds, intersect_scissor_with_camera_viewport,
-        managed_texture_extent_supported, prepare_bevy_image_texture_bind_groups,
-        prepare_draw_data, retain_extracted_bevy_image_bindings, scissor_for_render_pass,
-        scissor_from_clip_rect, validate_texture_update_rect,
+        draw_indices_reference_out_of_bounds, initialize_imgui_gpu_resources,
+        intersect_scissor_with_camera_viewport, managed_texture_extent_supported,
+        prepare_bevy_image_texture_bind_groups, prepare_draw_data,
+        retain_extracted_bevy_image_bindings, scissor_for_render_pass, scissor_from_clip_rect,
+        validate_texture_update_rect,
     };
     use super::resources::{ImguiTextureViewCompatibility, pad_index_buffer_for_copy_alignment};
     use super::*;
@@ -177,18 +178,143 @@ mod tests {
         context.register_texture(texture)
     }
 
-    #[test]
-    fn renderer_release_rejects_a_stale_generation_acknowledgement() {
-        let release = ImguiRendererRelease::default();
-        release.install();
-        release.update_resources_live(true);
-        assert!(!release.request_release());
-        let generation = release.requested_generation().unwrap();
+    fn pending_frame(
+        frame_index: u64,
+        snapshot: imgui::render::FrameSnapshot,
+    ) -> crate::context::PendingFrame {
+        crate::context::PendingFrame {
+            frame_index,
+            include_platform_viewports: false,
+            snapshot,
+        }
+    }
 
-        assert!(!release.acknowledge_release(generation + 1));
-        assert_eq!(release.requested_generation(), Some(generation));
-        assert!(release.acknowledge_release(generation));
-        assert!(release.request_release());
+    #[test]
+    fn renderer_release_rejects_stale_and_cross_context_acknowledgements() {
+        let context_a = test_context_id();
+        let context_b = test_context_id();
+        let releases = ImguiRendererReleases::default();
+        let lease_a = releases.admit(context_a);
+        let lease_b = releases.admit(context_b);
+
+        assert!(!lease_a.request_release());
+        assert!(!lease_b.request_release());
+        let requested = releases.requested_releases();
+        assert_eq!(requested.len(), 2);
+        let generation_a = requested
+            .iter()
+            .find_map(|(context_id, generation)| (*context_id == context_a).then_some(*generation))
+            .expect("Context A should request renderer release");
+        let generation_b = requested
+            .iter()
+            .find_map(|(context_id, generation)| (*context_id == context_b).then_some(*generation))
+            .expect("Context B should request renderer release");
+        assert_ne!(generation_a, generation_b);
+
+        assert!(!releases.acknowledge_release(
+            context_b,
+            generation_a,
+            super::resources::ImguiRendererReleasePacket::default(),
+        ));
+        assert!(!releases.acknowledge_release(
+            context_a,
+            generation_b,
+            super::resources::ImguiRendererReleasePacket::default(),
+        ));
+        assert_eq!(releases.requested_releases(), requested);
+
+        assert!(releases.acknowledge_release(
+            context_a,
+            generation_a,
+            super::resources::ImguiRendererReleasePacket::default(),
+        ));
+        assert!(lease_a.request_release());
+        assert!(
+            releases.release_requested(context_b),
+            "acknowledging Context A must leave Context B's request intact"
+        );
+        assert_eq!(
+            releases.requested_releases(),
+            vec![(context_b, generation_b)]
+        );
+
+        lease_a.release_renderer_resources();
+        lease_a.retire();
+        assert!(releases.acknowledge_release(
+            context_b,
+            generation_b,
+            super::resources::ImguiRendererReleasePacket::default(),
+        ));
+        lease_b.release_renderer_resources();
+        lease_b.retire();
+        assert_eq!(releases.len(), 0);
+    }
+
+    #[test]
+    fn renderer_recovery_coalesces_repeated_device_generations_per_context() {
+        let context_a = test_context_id();
+        let context_b = test_context_id();
+        let releases = ImguiRendererReleases::default();
+        let lease_a = releases.admit(context_a);
+        let lease_b = releases.admit(context_b);
+
+        assert!(releases.begin_device_recovery(1, HashMap::new()));
+        assert!(releases.recovery_requested(context_a));
+        assert!(releases.recovery_requested(context_b));
+        assert!(
+            !releases.begin_device_recovery(1, HashMap::new()),
+            "the same render-device generation must be rejected as stale"
+        );
+        assert!(
+            releases.begin_device_recovery(2, HashMap::new()),
+            "a newer device generation must supersede unfinished recovery work"
+        );
+
+        lease_a.release_renderer_resources();
+        assert!(
+            releases.begin_device_recovery(3, HashMap::new()),
+            "a newer device generation must supersede a Context after its old packet is released"
+        );
+        lease_a.finish_device_recovery();
+        assert!(!releases.release_requested(context_a));
+        assert!(
+            releases.recovery_requested(context_b),
+            "finishing Context A must not resume Context B"
+        );
+
+        lease_b.release_renderer_resources();
+        lease_b.finish_device_recovery();
+        assert!(!releases.release_requested(context_b));
+    }
+
+    #[test]
+    fn renderer_teardown_wins_when_device_recovery_interleaves() {
+        let context_a = test_context_id();
+        let context_b = test_context_id();
+        let releases = ImguiRendererReleases::default();
+        let lease_a = releases.admit(context_a);
+        let lease_b = releases.admit(context_b);
+
+        assert!(!lease_a.request_release());
+        assert!(releases.begin_device_recovery(1, HashMap::new()));
+        assert!(
+            !releases.recovery_requested(context_a),
+            "a Context already being removed must not re-enter renderer recovery"
+        );
+        assert!(releases.recovery_requested(context_b));
+        assert!(
+            lease_a.request_release(),
+            "device recovery must transfer an existing teardown packet without another render ack"
+        );
+
+        lease_a.release_renderer_resources();
+        lease_a.retire();
+        assert_eq!(releases.len(), 1);
+        assert!(releases.recovery_requested(context_b));
+
+        lease_b.release_renderer_resources();
+        lease_b.finish_device_recovery();
+        assert!(!releases.release_requested(context_b));
     }
 
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -239,8 +365,7 @@ mod tests {
                 .is_some()
         );
 
-        let release = app.world().resource::<ImguiRendererRelease>().clone();
-        release.update_resources_live(true);
+        let releases = app.world().resource::<ImguiRendererReleases>().clone();
         assert!(matches!(
             app.world_mut()
                 .get_non_send_mut::<crate::ImguiContexts>()
@@ -258,9 +383,17 @@ mod tests {
                 .contains(primary_id),
             "a pending removal must retain Context ownership for retry"
         );
-        let generation = release.requested_generation().unwrap();
-        assert!(release.acknowledge_release(generation));
-        assert!(release.release_requested());
+        let requested = releases.requested_releases();
+        let [(requested_context, generation)] = requested.as_slice() else {
+            panic!("the primary Context should request renderer release");
+        };
+        assert_eq!(*requested_context, primary_id);
+        assert!(releases.acknowledge_release(
+            primary_id,
+            *generation,
+            super::resources::ImguiRendererReleasePacket::default(),
+        ));
+        assert!(releases.release_requested(primary_id));
 
         let frame_index = app
             .world()
@@ -309,6 +442,7 @@ mod tests {
         let mut context = managed_context();
         let first = imgui::render::SnapshotTextureId::User(register_test_texture(&mut context));
         let second = imgui::render::SnapshotTextureId::User(register_test_texture(&mut context));
+        let context_id = context.id();
         let mut bindings = ImguiTextureBindGroups::default();
 
         let first_renderer_id = bindings.managed_texture_id(first);
@@ -331,7 +465,7 @@ mod tests {
             Ok(())
         );
 
-        let released = bindings.take_managed_renderer_state();
+        let released = bindings.take_managed_renderer_state(context_id);
         assert!(released.is_empty());
         assert!(!bindings.managed_texture_is_destroyed(first));
         let second_renderer_id = bindings.managed_texture_id(second);
@@ -341,6 +475,7 @@ mod tests {
     #[test]
     fn managed_texture_tombstones_prune_after_completed_epochs() {
         let mut context = managed_context();
+        let context_id = context.id();
         let mut bindings = ImguiTextureBindGroups::default();
         let mut ids = Vec::new();
         for _ in 0..128 {
@@ -355,11 +490,11 @@ mod tests {
         assert_eq!(bindings.destroyed_managed_textures.len(), ids.len());
         assert!(bindings.managed_texture_is_destroyed(ids[0]));
 
-        bindings.prune_destroyed_managed_textures(127);
+        bindings.prune_destroyed_managed_textures(&HashMap::from([(context_id, 127)]));
         assert_eq!(bindings.destroyed_managed_textures.len(), 1);
         assert!(bindings.managed_texture_is_destroyed(ids[127]));
 
-        bindings.prune_destroyed_managed_textures(128);
+        bindings.prune_destroyed_managed_textures(&HashMap::from([(context_id, 128)]));
         assert!(bindings.destroyed_managed_textures.is_empty());
         assert!(
             !bindings.managed_texture_is_destroyed(ids[0]),
@@ -371,6 +506,7 @@ mod tests {
     fn stale_create_and_update_uploads_cannot_revive_a_destroyed_texture() {
         let mut context = managed_context();
         let texture = imgui::render::SnapshotTextureId::User(register_test_texture(&mut context));
+        let context_id = context.id();
         let mut bindings = ImguiTextureBindGroups::default();
         let renderer_id = bindings.managed_texture_id(texture);
         assert!(!renderer_id.is_null());
@@ -396,9 +532,9 @@ mod tests {
             );
         }
 
-        bindings.prune_destroyed_managed_textures(6);
+        bindings.prune_destroyed_managed_textures(&HashMap::from([(context_id, 6)]));
         assert!(!bindings.accepts_managed_texture_upload(texture));
-        bindings.prune_destroyed_managed_textures(7);
+        bindings.prune_destroyed_managed_textures(&HashMap::from([(context_id, 7)]));
         assert!(bindings.accepts_managed_texture_upload(texture));
     }
 
@@ -406,9 +542,11 @@ mod tests {
     fn context_teardown_waits_for_render_world_release_before_native_mutation() {
         let context = managed_context();
         let mut owner = crate::context::ownership::ContextOwner::new(context.suspend());
+        let releases = ImguiRendererReleases::default();
         let backend = crate::context::ownership::BackendAttachment {
             config: crate::ImguiBackendConfig::default(),
             render_integration_installed: true,
+            renderer_releases: Some(releases.clone()),
         };
         owner.preflight_renderer_admission(&backend).unwrap();
         owner.commit_renderer_admission(&backend);
@@ -426,10 +564,6 @@ mod tests {
                 Ok::<_, ()>(texture)
             })
             .unwrap();
-        let release = ImguiRendererRelease::default();
-        release.install();
-        release.update_resources_live(true);
-        owner.attach_renderer_release(release.clone());
 
         let error = owner
             .try_detach_backend()
@@ -450,11 +584,19 @@ mod tests {
             })
             .unwrap();
 
-        let generation = release.requested_generation().unwrap();
-        assert!(release.acknowledge_release(generation));
+        let requested = releases.requested_releases();
+        let [(requested_context, generation)] = requested.as_slice() else {
+            panic!("the owned Context should request renderer release");
+        };
+        assert!(releases.acknowledge_release(
+            *requested_context,
+            *generation,
+            super::resources::ImguiRendererReleasePacket::default(),
+        ));
         owner
             .try_detach_backend()
             .expect("acknowledged render-world release should allow teardown");
+        assert_eq!(releases.len(), 0);
         let mut context = owner.into_suspended();
         context
             .try_with_active(|context| {
@@ -467,6 +609,86 @@ mod tests {
                 Ok::<_, ()>(())
             })
             .unwrap();
+    }
+
+    #[test]
+    fn device_recovery_resets_each_context_texture_and_resumes_its_consumer() {
+        let releases = ImguiRendererReleases::default();
+        let backend = crate::context::ownership::BackendAttachment {
+            config: crate::ImguiBackendConfig::default(),
+            render_integration_installed: true,
+            renderer_releases: Some(releases.clone()),
+        };
+        let make_owner = || {
+            let context = managed_context();
+            let context_id = context.id();
+            let mut owner = crate::context::ownership::ContextOwner::new(context.suspend());
+            owner.preflight_renderer_admission(&backend).unwrap();
+            owner.commit_renderer_admission(&backend);
+            let texture = owner
+                .try_with_active_renderer_context(false, |context, consumer| {
+                    let consumer = consumer.expect("renderer admission must install a consumer");
+                    let texture = register_test_texture(context);
+                    let snapshot = managed_snapshot(context, consumer, Some(texture));
+                    let feedback = user_texture_request(&snapshot, texture)
+                        .uploaded(imgui::TextureId::new(0xCAFE))
+                        .unwrap();
+                    snapshot.commit([feedback]).unwrap();
+                    context.poll_snapshot_completions().unwrap();
+                    Ok::<_, std::convert::Infallible>(texture)
+                })
+                .unwrap_or_else(|never| match never {});
+            (context_id, owner, texture)
+        };
+        let (context_a, mut owner_a, texture_a) = make_owner();
+        let (context_b, mut owner_b, texture_b) = make_owner();
+
+        assert!(releases.begin_device_recovery(1, HashMap::new()));
+        assert!(releases.recovery_requested(context_a));
+        assert!(releases.recovery_requested(context_b));
+        assert!(owner_a.try_recover_renderer().is_ok());
+        assert!(owner_b.try_recover_renderer().is_ok());
+
+        for (owner, context_id, texture) in [
+            (&mut owner_a, context_a, texture_a),
+            (&mut owner_b, context_b, texture_b),
+        ] {
+            assert!(!releases.recovery_requested(context_id));
+            owner
+                .try_with_active_renderer_context(false, |context, consumer| {
+                    assert!(
+                        consumer.is_some(),
+                        "device recovery must resume the admitted renderer consumer"
+                    );
+                    context
+                        .with_texture(texture, |texture| {
+                            assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+                            assert!(texture.texture_id().is_null());
+                        })
+                        .unwrap();
+                    Ok::<_, std::convert::Infallible>(())
+                })
+                .unwrap_or_else(|never| match never {});
+        }
+
+        for owner in [&mut owner_a, &mut owner_b] {
+            assert_eq!(
+                owner.try_detach_backend(),
+                Err(
+                    crate::context::ownership::ImguiContextIntoInnerErrorReason::RenderWorldReleasePending
+                )
+            );
+        }
+        for (context_id, generation) in releases.requested_releases() {
+            assert!(releases.acknowledge_release(
+                context_id,
+                generation,
+                super::resources::ImguiRendererReleasePacket::default(),
+            ));
+        }
+        owner_a.try_detach_backend().unwrap();
+        owner_b.try_detach_backend().unwrap();
+        assert_eq!(releases.len(), 0);
     }
 
     #[test]
@@ -489,9 +711,10 @@ mod tests {
         let feedback = user_texture_request(&create, texture)
             .uploaded(renderer_texture)
             .unwrap();
-        extracted.replace(1, create, 0, Vec::new());
-        extracted.extend_texture_feedback([feedback]);
-        extracted.commit();
+        let context_id = context.id();
+        extracted.replace(context_id, pending_frame(1, create), Vec::new());
+        extracted.extend_texture_feedback(context_id, [feedback]);
+        extracted.commit_all();
         let progress = context.poll_snapshot_completions().unwrap();
         assert_eq!(progress.committed(), 1);
         assert_eq!(progress.feedback_applied(), 1);
@@ -515,9 +738,9 @@ mod tests {
         let feedback = user_texture_request(&update, texture)
             .uploaded(renderer_texture)
             .unwrap();
-        extracted.replace(2, update, 0, Vec::new());
-        extracted.extend_texture_feedback([feedback]);
-        extracted.commit();
+        extracted.replace(context_id, pending_frame(2, update), Vec::new());
+        extracted.extend_texture_feedback(context_id, [feedback]);
+        extracted.commit_all();
         let progress = context.poll_snapshot_completions().unwrap();
         assert_eq!(progress.committed(), 1);
         assert_eq!(progress.feedback_applied(), 1);
@@ -529,9 +752,9 @@ mod tests {
             imgui::render::snapshot::TextureRequestKind::Destroy
         );
         let feedback = user_texture_request(&destroy, texture).destroyed().unwrap();
-        extracted.replace(3, destroy, 0, Vec::new());
-        extracted.extend_texture_feedback([feedback]);
-        extracted.commit();
+        extracted.replace(context_id, pending_frame(3, destroy), Vec::new());
+        extracted.extend_texture_feedback(context_id, [feedback]);
+        extracted.commit_all();
         let progress = context.poll_snapshot_completions().unwrap();
         assert_eq!(progress.committed(), 1);
         assert_eq!(progress.feedback_applied(), 1);
@@ -557,16 +780,17 @@ mod tests {
         let first = managed_snapshot(&mut context, &consumer, None);
         let second = managed_snapshot(&mut context, &consumer, None);
         let mut extracted = ImguiExtractedRenderFrame::default();
+        let context_id = context.id();
 
-        extracted.replace(1, first, 0, Vec::new());
-        extracted.replace(2, second, 0, Vec::new());
-        extracted.commit();
+        extracted.replace(context_id, pending_frame(1, first), Vec::new());
+        extracted.replace(context_id, pending_frame(2, second), Vec::new());
+        extracted.commit_all();
 
         let progress = context.poll_snapshot_completions().unwrap();
         assert_eq!(progress.abandoned(), 1);
         assert_eq!(progress.committed(), 1);
         assert_eq!(progress.watermark(), 2);
-        extracted.commit();
+        extracted.commit_all();
         let progress = context.poll_snapshot_completions().unwrap();
         assert_eq!(progress.watermark(), 2);
         assert_eq!(progress.committed(), 0);
@@ -587,20 +811,145 @@ mod tests {
 
         let mailbox = crate::context::ImguiFrameMailbox::default();
         let mut extracted = ImguiExtractedRenderFrame::default();
-        mailbox.publish(1, first);
-        mailbox.publish(2, second);
-        let (frame_index, second) = mailbox.take().unwrap();
-        extracted.replace(frame_index, second, 0, Vec::new());
-        mailbox.publish(3, third);
-        let (frame_index, third) = mailbox.take().unwrap();
-        extracted.replace(frame_index, third, 0, Vec::new());
-        extracted.commit();
+        let context_id = context.id();
+        mailbox.publish(context_id, pending_frame(1, first));
+        mailbox.publish(context_id, pending_frame(2, second));
+        let second = mailbox
+            .take_all()
+            .remove(&context_id)
+            .expect("Context snapshot should remain in the mailbox");
+        extracted.replace(context_id, second, Vec::new());
+        mailbox.publish(context_id, pending_frame(3, third));
+        let third = mailbox
+            .take_all()
+            .remove(&context_id)
+            .expect("Context snapshot should remain in the mailbox");
+        extracted.replace(context_id, third, Vec::new());
+        extracted.commit_all();
 
         let progress = context.poll_snapshot_completions().unwrap();
         assert_eq!(progress.abandoned(), 2);
         assert_eq!(progress.committed(), 1);
         assert_eq!(progress.watermark(), 3);
-        assert_eq!(extracted.completion_watermark(), 3);
+        mailbox.update_completion_watermark(context_id, progress.watermark());
+        extracted.begin_extraction(0, mailbox.completion_watermarks());
+        assert_eq!(extracted.completion_watermark(context_id), 3);
+    }
+
+    #[test]
+    fn replacing_context_a_mailbox_slot_does_not_touch_context_b() {
+        let mut context_a = managed_context();
+        let consumer_a = context_a.create_renderer_consumer().unwrap();
+        let first_a = managed_snapshot(&mut context_a, &consumer_a, None);
+        let second_a = managed_snapshot(&mut context_a, &consumer_a, None);
+        let context_a_id = context_a.id();
+        let mut context_a = context_a.suspend();
+
+        let mut context_b = managed_context();
+        let consumer_b = context_b.create_renderer_consumer().unwrap();
+        let first_b = managed_snapshot(&mut context_b, &consumer_b, None);
+        let context_b_id = context_b.id();
+        let mut context_b = context_b.suspend();
+
+        let mailbox = crate::context::ImguiFrameMailbox::default();
+        mailbox.publish(context_a_id, pending_frame(1, first_a));
+        mailbox.publish(context_b_id, pending_frame(1, first_b));
+        mailbox.publish(context_a_id, pending_frame(2, second_a));
+        assert_eq!(mailbox.len(), 2);
+
+        let pending = mailbox.take_all();
+        assert_eq!(pending.len(), 2);
+        assert_eq!(pending[&context_a_id].frame_index, 2);
+        assert_eq!(pending[&context_b_id].frame_index, 1);
+
+        let mut extracted = ImguiExtractedRenderFrame::default();
+        for (context_id, frame) in pending {
+            extracted.replace(context_id, frame, Vec::new());
+        }
+        extracted.commit_all();
+
+        context_a
+            .try_with_active(|context| {
+                let progress = context.poll_snapshot_completions().unwrap();
+                assert_eq!(progress.abandoned(), 1);
+                assert_eq!(progress.committed(), 1);
+                assert_eq!(progress.watermark(), 2);
+                Ok::<_, std::convert::Infallible>(())
+            })
+            .unwrap_or_else(|never| match never {});
+        context_b
+            .try_with_active(|context| {
+                let progress = context.poll_snapshot_completions().unwrap();
+                assert_eq!(progress.abandoned(), 0);
+                assert_eq!(progress.committed(), 1);
+                assert_eq!(progress.watermark(), 1);
+                Ok::<_, std::convert::Infallible>(())
+            })
+            .unwrap_or_else(|never| match never {});
+    }
+
+    #[test]
+    fn releasing_context_a_resource_packet_does_not_change_context_b() {
+        let mut context_a = managed_context();
+        let texture_a =
+            imgui::render::SnapshotTextureId::User(register_test_texture(&mut context_a));
+        let context_a = context_a.suspend();
+        let context_a_id = context_a.id();
+
+        let mut context_b_owner = managed_context();
+        let texture_b =
+            imgui::render::SnapshotTextureId::User(register_test_texture(&mut context_b_owner));
+        let context_b = context_b_owner.suspend();
+        let context_b_id = context_b.id();
+
+        let mut bindings = ImguiTextureBindGroups::default();
+        let renderer_texture_a = bindings.managed_texture_id(texture_a);
+        let renderer_texture_b = bindings.managed_texture_id(texture_b);
+        assert_ne!(renderer_texture_a, renderer_texture_b);
+
+        let releases = ImguiRendererReleases::default();
+        let lease_a = releases.admit(context_a_id);
+        let lease_b = releases.admit(context_b_id);
+
+        assert!(!lease_a.request_release());
+        let requested = releases.requested_releases();
+        let [(requested_context, generation)] = requested.as_slice() else {
+            panic!("only Context A should request release");
+        };
+        assert_eq!(*requested_context, context_a_id);
+        let packet = super::resources::ImguiRendererReleasePacket::new(
+            bindings.take_managed_renderer_state(context_a_id),
+            Vec::new(),
+        );
+        assert!(packet.is_empty());
+        assert!(!bindings.managed_texture_ids.contains_key(&texture_a));
+        assert_eq!(
+            bindings.managed_texture_ids.get(&texture_b),
+            Some(&renderer_texture_b),
+            "collecting Context A's release packet must retain Context B's renderer mapping"
+        );
+        assert!(releases.acknowledge_release(context_a_id, *generation, packet));
+
+        lease_a.release_renderer_resources();
+        lease_a.retire();
+        assert_eq!(releases.len(), 1);
+        assert!(!releases.release_requested(context_b_id));
+        assert!(releases.requested_releases().is_empty());
+
+        assert!(!lease_b.request_release());
+        let requested = releases.requested_releases();
+        let [(requested_context, generation)] = requested.as_slice() else {
+            panic!("Context B should remain independently releasable");
+        };
+        assert_eq!(*requested_context, context_b_id);
+        assert!(releases.acknowledge_release(
+            context_b_id,
+            *generation,
+            super::resources::ImguiRendererReleasePacket::default(),
+        ));
+        lease_b.release_renderer_resources();
+        lease_b.retire();
+        assert_eq!(releases.len(), 0);
     }
 
     #[test]
@@ -609,7 +958,8 @@ mod tests {
         let consumer = context.create_renderer_consumer().unwrap();
         let snapshot = managed_snapshot(&mut context, &consumer, None);
         let mut extracted = ImguiExtractedRenderFrame::default();
-        extracted.replace(1, snapshot, 0, Vec::new());
+        let context_id = context.id();
+        extracted.replace(context_id, pending_frame(1, snapshot), Vec::new());
 
         drop(extracted);
 
@@ -1414,6 +1764,7 @@ mod tests {
         let RenderHarnessResources {
             render_device,
             pipeline_cache,
+            ..
         } = initialize_render_harness_resources();
         let pipeline = ImguiRenderPipeline::default();
         let mut extracted = ImguiExtractedBevyTextures::default();
@@ -1500,6 +1851,7 @@ mod tests {
         let RenderHarnessResources {
             render_device,
             pipeline_cache,
+            ..
         } = initialize_render_harness_resources();
         let pipeline = ImguiRenderPipeline::default();
         let mut extracted = ImguiExtractedBevyTextures::default();
@@ -1529,8 +1881,53 @@ mod tests {
         );
     }
 
+    #[test]
+    #[ignore = "requires DEAR_IMGUI_BEVY_GPU_HARNESS=1 and a working native wgpu adapter"]
+    fn repeated_render_startup_rebuilds_gpu_resources_and_freezes_each_context() {
+        if std::env::var_os("DEAR_IMGUI_BEVY_GPU_HARNESS").is_none() {
+            return;
+        }
+
+        let RenderHarnessResources {
+            render_device,
+            render_queue,
+            pipeline_cache,
+        } = initialize_render_harness_resources();
+        let context_a = test_context_id();
+        let context_b = test_context_id();
+        let releases = ImguiRendererReleases::default();
+        let lease_a = releases.admit(context_a);
+        let lease_b = releases.admit(context_b);
+        let mut world = World::new();
+        world.insert_resource(render_device);
+        world.insert_resource(render_queue);
+        world.insert_resource(pipeline_cache);
+        world.insert_resource(ImguiRenderPipeline::default());
+        world.insert_resource(super::resources::ImguiRenderDeviceState::default());
+        world.insert_resource(releases.clone());
+        world.insert_resource(crate::context::ImguiFrameMailbox::default());
+        world.insert_resource(ImguiExtractedRenderFrame::default());
+        world.insert_resource(ImguiPreparedRenderFrame::default());
+
+        initialize_imgui_gpu_resources(&mut world);
+        assert!(world.contains_resource::<ImguiPipelineGpuResources>());
+        assert!(!releases.recovery_requested(context_a));
+        assert!(!releases.recovery_requested(context_b));
+
+        initialize_imgui_gpu_resources(&mut world);
+        assert!(world.contains_resource::<ImguiPipelineGpuResources>());
+        assert!(releases.recovery_requested(context_a));
+        assert!(releases.recovery_requested(context_b));
+
+        lease_a.release_renderer_resources();
+        lease_a.finish_device_recovery();
+        lease_b.release_renderer_resources();
+        lease_b.finish_device_recovery();
+    }
+
     struct RenderHarnessResources {
         render_device: RenderDevice,
+        render_queue: RenderQueue,
         pipeline_cache: PipelineCache,
     }
 
@@ -1545,9 +1942,11 @@ mod tests {
             &settings,
         ));
         let render_device = resources.0.clone();
+        let render_queue = resources.1.clone();
         let render_adapter = resources.3.clone();
         RenderHarnessResources {
             render_device: render_device.clone(),
+            render_queue,
             pipeline_cache: PipelineCache::new(render_device, render_adapter, true),
         }
     }

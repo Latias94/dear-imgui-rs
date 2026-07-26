@@ -138,9 +138,17 @@ impl Plugin for ImguiPlugin {
 
 fn refresh_backend_status(app: &mut App, render_integration_installed: bool) {
     let effective_config = app.world().resource::<ImguiBackendConfig>().clone();
+    #[cfg(feature = "render")]
+    let renderer_releases = render_integration_installed.then(|| {
+        app.world()
+            .resource::<render::ImguiRendererReleases>()
+            .clone()
+    });
     let attachment = BackendAttachment {
         config: effective_config.clone(),
         render_integration_installed,
+        #[cfg(feature = "render")]
+        renderer_releases,
     };
     let mut contexts = app
         .world_mut()
@@ -344,6 +352,8 @@ impl Default for ImguiBackendOwnership {
 pub(crate) struct BackendAttachment {
     pub(crate) config: ImguiBackendConfig,
     pub(crate) render_integration_installed: bool,
+    #[cfg(feature = "render")]
+    pub(crate) renderer_releases: Option<render::ImguiRendererReleases>,
 }
 
 /// Reason a registered Context cannot finish Context-local teardown yet.
@@ -386,7 +396,7 @@ pub(crate) struct ContextOwner {
     #[cfg(feature = "render")]
     renderer_consumer: Option<dear_imgui_rs::render::RendererConsumer>,
     #[cfg(feature = "render")]
-    renderer_release: Option<render::ImguiRendererRelease>,
+    renderer_release: Option<render::ImguiRendererReleaseLease>,
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     viewport_bridge: ImguiViewportBridgeLifecycle,
 }
@@ -608,6 +618,11 @@ impl ContextOwner {
         if !backend.render_integration_installed || self.renderer_consumer.is_some() {
             return;
         }
+        let context_id = self
+            .context
+            .as_ref()
+            .expect("Context owner must retain its suspended Context")
+            .id();
         let consumer = self
             .context
             .as_mut()
@@ -626,6 +641,11 @@ impl ContextOwner {
             })
             .unwrap_or_else(|never| match never {});
         self.renderer_consumer = Some(consumer);
+        let releases = backend
+            .renderer_releases
+            .as_ref()
+            .expect("installed Bevy rendering must provide a Context release registry");
+        self.renderer_release = Some(releases.admit(context_id));
     }
 
     #[cfg(not(feature = "render"))]
@@ -702,11 +722,6 @@ impl ContextOwner {
             .expect("detached Context owner must retain its suspended Context")
     }
 
-    #[cfg(feature = "render")]
-    pub(crate) fn attach_renderer_release(&mut self, release: render::ImguiRendererRelease) {
-        self.renderer_release = Some(release);
-    }
-
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     pub(crate) fn attach_viewport_bridge(
         &mut self,
@@ -725,6 +740,36 @@ impl ContextOwner {
             keepalive,
             attachment,
         };
+    }
+
+    #[cfg(feature = "render")]
+    pub(crate) fn try_recover_renderer(
+        &mut self,
+    ) -> Result<(), ImguiActiveRendererContextError<dear_imgui_rs::render::RendererConsumerError>>
+    {
+        let renderer_consumer = self
+            .renderer_consumer
+            .as_ref()
+            .expect("renderer recovery requires an admitted consumer");
+        let renderer_release = self
+            .renderer_release
+            .as_ref()
+            .expect("renderer recovery requires a release lease");
+        let renderer_ownership = &mut self.backend_ownership;
+        self.context
+            .as_mut()
+            .expect("Context owner must retain its suspended Context")
+            .try_with_active(|context| {
+                validate_active_renderer_ownership(context, renderer_ownership)
+                    .map_err(ImguiActiveRendererContextError::RendererOwnership)?;
+                let reset = context
+                    .prepare_renderer_texture_reset(renderer_consumer)
+                    .map_err(ImguiActiveRendererContextError::Operation)?;
+                renderer_release.release_renderer_resources();
+                let _invalidated = reset.commit();
+                renderer_release.finish_device_recovery();
+                Ok(())
+            })
     }
 
     pub(crate) fn try_detach_backend(&mut self) -> Result<(), ImguiContextIntoInnerErrorReason> {
@@ -754,9 +799,12 @@ impl ContextOwner {
         let ownership = &mut self.backend_ownership;
         #[cfg(feature = "render")]
         let consumer = &mut self.renderer_consumer;
+        #[cfg(feature = "render")]
+        let renderer_release = self.renderer_release.as_ref();
         #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
         let viewport_bridge = &mut self.viewport_bridge;
-        self.context
+        let result = self
+            .context
             .as_mut()
             .expect("Context owner must retain its suspended Context")
             .try_with_active(|context| {
@@ -765,7 +813,10 @@ impl ContextOwner {
                     let reset = context
                         .prepare_renderer_texture_reset(renderer_consumer)
                         .map_err(ImguiContextIntoInnerErrorReason::Renderer)?;
-                    let _ = reset.commit();
+                    renderer_release
+                        .expect("an admitted Bevy renderer consumer must retain its release lease")
+                        .release_renderer_resources();
+                    let _invalidated = reset.commit();
                 }
                 #[cfg(feature = "render")]
                 {
@@ -780,7 +831,14 @@ impl ContextOwner {
                     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
                     viewport_bridge,
                 )
-            })
+            });
+        #[cfg(feature = "render")]
+        if result.is_ok()
+            && let Some(renderer_release) = self.renderer_release.take()
+        {
+            renderer_release.retire();
+        }
+        result
     }
 
     fn best_effort_shutdown(&mut self) {

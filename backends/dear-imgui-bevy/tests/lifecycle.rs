@@ -3,11 +3,15 @@ use std::sync::{Mutex, OnceLock};
 use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::{ScheduleLabel, Schedules};
+#[cfg(feature = "render")]
+use bevy_render::{Render, RenderApp, extract_plugin::ExtractPlugin};
 use bevy_time::{Real, Time};
 use bevy_window::{PrimaryWindow, Window, WindowResolution};
+#[cfg(feature = "render")]
+use dear_imgui_bevy::ImguiContextIntoInnerErrorReason;
 use dear_imgui_bevy::{
-    ContextId, ImguiContextConfig, ImguiContextError, ImguiContexts, ImguiPlugin,
-    ImguiPrimaryContextPass, ImguiUi,
+    ContextId, ImguiContextConfig, ImguiContextError, ImguiContexts, ImguiFrameOutput,
+    ImguiFrameState, ImguiPlugin, ImguiPrimaryContextPass, ImguiUi,
 };
 use std::time::Duration;
 
@@ -53,11 +57,18 @@ fn app_with_primary_window() -> App {
     app
 }
 
-fn record_ui(ui: ImguiUi, mut trace: ResMut<LifecycleTrace>) {
+fn record_ui(
+    ui: ImguiUi,
+    frame_state: NonSend<ImguiFrameState>,
+    mut trace: ResMut<LifecycleTrace>,
+) {
     let context_id = ui
         .context_id()
         .expect("UI schedule must expose its Context");
     let frame_index = ui.frame_index().expect("UI schedule must expose its frame");
+    assert_eq!(frame_state.context_id(), Some(context_id));
+    assert_eq!(frame_state.frame_index(), Some(frame_index));
+    assert!(frame_state.is_frame_open());
     let current_ui = ui.ui().expect("UI schedule must expose a live Ui");
     assert_eq!(current_ui.context_id(), context_id);
     let current_raw = unsafe { dear_imgui_rs::sys::igGetCurrentContext() } as usize;
@@ -202,6 +213,22 @@ fn primary_and_two_additional_contexts_run_in_stable_order_with_independent_fram
     assert_eq!(contexts.frame_index(primary).unwrap(), 2);
     assert_eq!(contexts.frame_index(context_a).unwrap(), 2);
     assert_eq!(contexts.frame_index(context_b).unwrap(), 2);
+    let output = app.world().resource::<ImguiFrameOutput>();
+    for context_id in [primary, context_a, context_b] {
+        let context_output = output
+            .get(context_id)
+            .expect("every completed Context must retain independent frame output");
+        assert_eq!(context_output.frame_index(), 2);
+        assert!(context_output.snapshot_epoch().is_none());
+        assert!(context_output.snapshot_error().is_none());
+    }
+    let frame_state = app
+        .world()
+        .get_non_send::<ImguiFrameState>()
+        .expect("ImguiPlugin must retain serial frame state");
+    assert!(!frame_state.is_frame_open());
+    assert_eq!(frame_state.context_id(), None);
+    assert_eq!(frame_state.frame_index(), None);
     assert!(
         !trace.wrong_current_context,
         "every UI schedule must run with its own native Context current"
@@ -512,8 +539,144 @@ fn removing_the_primary_context_does_not_stop_an_additional_context() {
     let contexts = app.world().get_non_send::<ImguiContexts>().unwrap();
     assert_eq!(contexts.primary_id(), None);
     assert_eq!(contexts.frame_index(additional).unwrap(), 1);
+    let output = app.world().resource::<ImguiFrameOutput>();
+    assert!(
+        output.get(primary).is_none(),
+        "frame output must discard Contexts after removal"
+    );
+    assert_eq!(
+        output
+            .get(additional)
+            .expect("the surviving Context must retain its output")
+            .frame_index(),
+        1
+    );
     assert_eq!(
         app.world().resource::<LifecycleTrace>().visits,
         vec![(additional, 1)]
+    );
+}
+
+#[cfg(feature = "render")]
+#[test]
+fn context_local_renderer_release_does_not_pause_another_context() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_primary_window();
+    app.add_plugins(ExtractPlugin::default())
+        .init_resource::<LifecycleTrace>()
+        .add_systems(ImguiPrimaryContextPass, record_ui)
+        .add_systems(ContextPassA, record_ui)
+        .add_plugins(ImguiPlugin::default());
+    app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
+
+    let (context_a, context_b) = {
+        let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
+        let context_a = contexts.primary_id().unwrap();
+        let context_b = contexts
+            .create(ImguiContextConfig::new(ContextPassA))
+            .unwrap();
+        (context_a, context_b)
+    };
+    app.world_mut().resource_mut::<LifecycleTrace>().expected = vec![context_a, context_b];
+
+    app.update();
+
+    {
+        let output = app.world().resource::<ImguiFrameOutput>();
+        for context_id in [context_a, context_b] {
+            let context_output = output
+                .get(context_id)
+                .expect("both Contexts must publish their first render snapshot");
+            assert_eq!(context_output.frame_index(), 1);
+            assert_eq!(
+                context_output
+                    .snapshot_epoch()
+                    .expect("render integration must publish a snapshot epoch")
+                    .context_id(),
+                context_id
+            );
+            assert!(context_output.snapshot_error().is_none());
+        }
+    }
+
+    let removal = app
+        .world_mut()
+        .get_non_send_mut::<ImguiContexts>()
+        .unwrap()
+        .remove(context_a)
+        .expect_err("the render world must acknowledge Context A before removal");
+    assert!(matches!(
+        removal,
+        ImguiContextError::RemovalPending {
+            context_id,
+            reason: ImguiContextIntoInnerErrorReason::RenderWorldReleasePending,
+        } if context_id == context_a
+    ));
+
+    app.update();
+
+    {
+        let contexts = app.world().get_non_send::<ImguiContexts>().unwrap();
+        assert_eq!(contexts.frame_index(context_a).unwrap(), 1);
+        assert_eq!(contexts.frame_index(context_b).unwrap(), 2);
+    }
+    assert_eq!(
+        app.world().resource::<LifecycleTrace>().visits,
+        vec![(context_a, 1), (context_b, 1), (context_b, 2)],
+        "Context A teardown must not reopen A or interrupt Context B"
+    );
+    {
+        let output = app.world().resource::<ImguiFrameOutput>();
+        let context_a_output = output
+            .get(context_a)
+            .expect("teardown output remains observable until Context A is removed");
+        assert_eq!(context_a_output.frame_index(), 1);
+        assert!(context_a_output.snapshot_epoch().is_none());
+        assert!(context_a_output.snapshot_error().is_none());
+
+        let context_b_output = output
+            .get(context_b)
+            .expect("Context B must keep producing snapshots during Context A release");
+        assert_eq!(context_b_output.frame_index(), 2);
+        let context_b_epoch = context_b_output
+            .snapshot_epoch()
+            .expect("Context B must publish its second snapshot");
+        assert_eq!(context_b_epoch.context_id(), context_b);
+        assert_eq!(context_b_epoch.sequence(), 2);
+        assert!(context_b_output.snapshot_error().is_none());
+    }
+
+    let removed = app
+        .world_mut()
+        .get_non_send_mut::<ImguiContexts>()
+        .unwrap()
+        .remove(context_a)
+        .expect("render-world acknowledgement must make Context A removable");
+    assert_eq!(removed.id(), context_a);
+
+    app.update();
+
+    let contexts = app.world().get_non_send::<ImguiContexts>().unwrap();
+    assert!(!contexts.contains(context_a));
+    assert_eq!(contexts.frame_index(context_b).unwrap(), 3);
+    let output = app.world().resource::<ImguiFrameOutput>();
+    assert!(output.get(context_a).is_none());
+    let context_b_output = output
+        .get(context_b)
+        .expect("Context B output must survive Context A teardown");
+    assert_eq!(context_b_output.frame_index(), 3);
+    let context_b_epoch = context_b_output
+        .snapshot_epoch()
+        .expect("Context B must publish after Context A is removed");
+    assert_eq!(context_b_epoch.context_id(), context_b);
+    assert_eq!(context_b_epoch.sequence(), 3);
+    assert_eq!(
+        app.world().resource::<LifecycleTrace>().visits,
+        vec![
+            (context_a, 1),
+            (context_b, 1),
+            (context_b, 2),
+            (context_b, 3),
+        ]
     );
 }

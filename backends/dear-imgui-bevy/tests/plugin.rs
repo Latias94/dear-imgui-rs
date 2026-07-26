@@ -381,6 +381,8 @@ fn renderer_ownership_drift_fails_closed_and_removal_can_be_repaired() {
     assert_eq!(
         app.world()
             .resource::<dear_imgui_bevy::ImguiFrameOutput>()
+            .get(primary_id)
+            .expect("the rejected Context must retain diagnostic frame output")
             .frame_index(),
         0,
         "a rejected primary frame must not become the latest completed frame"

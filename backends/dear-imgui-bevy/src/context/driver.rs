@@ -1,4 +1,7 @@
-use std::panic::{self, AssertUnwindSafe};
+use std::{
+    collections::HashSet,
+    panic::{self, AssertUnwindSafe},
+};
 
 use bevy_app::App;
 use bevy_ecs::{
@@ -54,6 +57,10 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
         .get_non_send::<ImguiContexts>()
         .map(ImguiContexts::drive_order)
         .unwrap_or_default();
+    let live_contexts = order.iter().copied().collect::<HashSet<_>>();
+    world
+        .resource_mut::<ImguiFrameOutput>()
+        .retain_contexts(|context_id| live_contexts.contains(&context_id));
     let primary_id = world
         .get_non_send::<ImguiContexts>()
         .and_then(ImguiContexts::primary_id);
@@ -66,19 +73,33 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
     for context_id in order {
         let is_primary = Some(context_id) == primary_id;
         #[cfg(feature = "render")]
-        if is_primary
-            && world
-                .resource::<crate::render::ImguiRendererRelease>()
-                .release_requested()
+        if world
+            .resource::<crate::render::ImguiRendererReleases>()
+            .recovery_requested(context_id)
         {
-            poll_primary_completions_fail_closed(world, context_id);
-            clear_primary_output(world);
+            world
+                .get_non_send_mut::<ImguiContexts>()
+                .expect("ImguiPlugin must retain the Context registry")
+                .recover_renderer(context_id)
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "Dear ImGui renderer recovery failed for Context {context_id:?}: {error}"
+                    )
+                });
+        }
+        #[cfg(feature = "render")]
+        if world
+            .resource::<crate::render::ImguiRendererReleases>()
+            .release_requested(context_id)
+        {
+            poll_context_completions_fail_closed(world, context_id);
+            clear_context_output(world, context_id);
             continue;
         }
         if is_primary && primary_metrics.is_none() {
             #[cfg(feature = "render")]
-            poll_primary_completions_fail_closed(world, context_id);
-            clear_primary_output(world);
+            poll_context_completions_fail_closed(world, context_id);
+            clear_context_output(world, context_id);
             continue;
         }
         let taken = world
@@ -94,6 +115,8 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
         let metrics = (Some(context_id) == primary_id)
             .then_some(primary_metrics.as_ref())
             .flatten();
+        #[cfg(feature = "render")]
+        let snapshot_mailbox = world.resource::<ImguiFrameMailbox>().clone();
         let result = panic::catch_unwind(AssertUnwindSafe(|| {
             owner.try_with_active_renderer_context_checked(
                 config.multi_viewport(),
@@ -120,6 +143,17 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
                         },
                     );
 
+                    #[cfg(feature = "render")]
+                    if renderer_consumer.is_some() {
+                        let progress = context.poll_snapshot_completions().unwrap_or_else(|error| {
+                            panic!(
+                                "Context {context_id:?} rejected Bevy renderer completion: {error}"
+                            )
+                        });
+                        snapshot_mailbox
+                            .update_completion_watermark(context_id, progress.watermark());
+                    }
+
                     let mut prepare = imgui::FramePrepareOptions::new(display_size, delta_time)
                         .framebuffer_scale(framebuffer_scale);
                     if renderer_consumer.is_some() {
@@ -133,22 +167,20 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
 
                     let schedule_capability =
                         active_for_frame(&active, context_id, config.schedule(), frame_index, ui);
-                    if is_primary {
-                        world
-                            .get_non_send_mut::<ImguiFrameState>()
-                            .expect("primary frame state must be installed")
-                            .begin(frame_index);
-                    }
+                    world
+                        .get_non_send_mut::<ImguiFrameState>()
+                        .expect("active frame state must be installed")
+                        .begin(context_id, frame_index);
 
                     let schedule_found = try_run_context_schedule(world, config.schedule());
                     drop(schedule_capability);
                     if is_primary {
                         platform::sync_primary_window_platform_feedback(world, ui, context_raw);
-                        world
-                            .get_non_send_mut::<ImguiFrameState>()
-                            .expect("primary frame state must be installed")
-                            .end();
                     }
+                    world
+                        .get_non_send_mut::<ImguiFrameState>()
+                        .expect("active frame state must be installed")
+                        .end();
                     if !schedule_found {
                         let _ = context.end_frame();
                         return Err(ImguiContextError::MissingSchedule {
@@ -181,18 +213,22 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
             )
         }));
 
-        if Some(context_id) == primary_id {
-            world
-                .get_non_send_mut::<ImguiFrameState>()
-                .expect("primary frame state must be installed")
-                .end();
-        }
+        world
+            .get_non_send_mut::<ImguiFrameState>()
+            .expect("active frame state must be installed")
+            .end();
         active.revoke();
 
         let (completed_frame, context_error, panic_payload) = match result {
             Ok(Ok(output)) => {
                 let finalized = panic::catch_unwind(AssertUnwindSafe(|| {
-                    finish_frame_output(world, is_primary, frame_index, output);
+                    finish_frame_output(
+                        world,
+                        context_id,
+                        frame_index,
+                        config.multi_viewport(),
+                        output,
+                    );
                 }));
                 match finalized {
                     Ok(()) => (Some(frame_index), None, None),
@@ -200,16 +236,12 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
                 }
             }
             Ok(Err(ImguiActiveRendererContextError::Operation(error))) => {
-                if is_primary {
-                    clear_primary_output(world);
-                }
+                clear_context_output(world, context_id);
                 (None, Some(error), None)
             }
             #[cfg(feature = "render")]
             Ok(Err(ImguiActiveRendererContextError::RendererOwnership(source))) => {
-                if is_primary {
-                    clear_primary_output(world);
-                }
+                clear_context_output(world, context_id);
                 (
                     None,
                     Some(ImguiContextError::RendererOwnership { context_id, source }),
@@ -217,9 +249,7 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
                 )
             }
             Err(payload) => {
-                if is_primary {
-                    clear_primary_output(world);
-                }
+                clear_context_output(world, context_id);
                 (None, None, Some(payload))
             }
         };
@@ -257,63 +287,64 @@ fn try_run_context_schedule(world: &mut World, label: InternedScheduleLabel) -> 
 }
 
 #[cfg(feature = "render")]
-fn poll_primary_completions_fail_closed(world: &mut World, context_id: imgui::ContextId) {
+fn poll_context_completions_fail_closed(world: &mut World, context_id: imgui::ContextId) {
     let result = world
         .get_non_send_mut::<ImguiContexts>()
         .expect("ImguiPlugin must retain the Context registry")
         .configure(context_id, |context| context.poll_snapshot_completions());
     match result {
-        Ok(Ok(_)) => {}
+        Ok(Ok(progress)) => world
+            .resource::<ImguiFrameMailbox>()
+            .update_completion_watermark(context_id, progress.watermark()),
         Ok(Err(error)) => {
             panic!(
-                "primary Dear ImGui snapshot completion failed while frames were paused: {error}"
+                "Dear ImGui snapshot completion for Context {context_id:?} failed while frames were paused: {error}"
             )
         }
         Err(
             ImguiContextError::UnknownContext { .. } | ImguiContextError::TeardownInProgress { .. },
         ) => {}
         Err(error) => {
-            panic!("primary Dear ImGui completion polling was rejected: {error}")
+            panic!("Dear ImGui completion polling for Context {context_id:?} was rejected: {error}")
         }
     }
 }
 
-fn clear_primary_output(world: &mut World) {
+fn clear_context_output(world: &mut World, context_id: imgui::ContextId) {
     #[cfg(feature = "render")]
-    world.resource::<ImguiFrameMailbox>().clear();
-    world.resource_mut::<ImguiFrameOutput>().clear_snapshot();
+    world.resource::<ImguiFrameMailbox>().clear(context_id);
+    world
+        .resource_mut::<ImguiFrameOutput>()
+        .clear_snapshot(context_id);
 }
 
 fn finish_frame_output(
     world: &mut World,
-    is_primary: bool,
+    context_id: imgui::ContextId,
     frame_index: u64,
+    include_platform_viewports: bool,
     output: PendingFrameOutput,
 ) {
     match output {
         #[cfg(feature = "render")]
         PendingFrameOutput::Snapshot(snapshot) => {
-            if is_primary {
-                let mailbox = world.resource::<ImguiFrameMailbox>().clone();
-                let release = world
-                    .resource::<crate::render::ImguiRendererRelease>()
-                    .clone();
-                world.resource_mut::<ImguiFrameOutput>().set_snapshot(
-                    &mailbox,
-                    &release,
-                    frame_index,
-                    snapshot,
-                );
-            } else {
-                drop(snapshot);
-            }
+            let mailbox = world.resource::<ImguiFrameMailbox>().clone();
+            let releases = world
+                .resource::<crate::render::ImguiRendererReleases>()
+                .clone();
+            world.resource_mut::<ImguiFrameOutput>().set_snapshot(
+                context_id,
+                &mailbox,
+                &releases,
+                frame_index,
+                include_platform_viewports,
+                snapshot,
+            );
         }
         PendingFrameOutput::Rendered => {
-            if is_primary {
-                world
-                    .resource_mut::<ImguiFrameOutput>()
-                    .complete_without_snapshot(frame_index);
-            }
+            world
+                .resource_mut::<ImguiFrameOutput>()
+                .complete_without_snapshot(context_id, frame_index);
         }
     }
 }

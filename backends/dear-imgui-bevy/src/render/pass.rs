@@ -1,5 +1,7 @@
 //! Single-sample Dear ImGui overlay and final window-output passes.
 
+use std::collections::hash_map::Entry;
+
 use super::prepare::{render_viewport_for_pass, scissor_for_render_pass};
 use super::*;
 
@@ -12,6 +14,7 @@ pub(super) struct ImguiRenderPassParams<'w> {
     gpu_buffers: Res<'w, ImguiGpuBuffers>,
     gpu_resources: Option<Res<'w, ImguiPipelineGpuResources>>,
     texture_bind_groups: Res<'w, ImguiTextureBindGroups>,
+    renderer_releases: Res<'w, ImguiRendererReleases>,
 }
 
 pub(super) fn render_imgui_overlay(
@@ -47,30 +50,46 @@ pub(super) fn render_imgui_overlay(
         return;
     };
 
+    let released_contexts = params.renderer_releases.release_requested_contexts();
     let mut drawable = params
         .prepared
         .draws()
         .iter()
-        .filter(|draw| prepared_draw_matches_view(draw, view, camera, texture_usages, msaa))
+        .filter(|draw| {
+            !released_contexts.contains(&draw.context_id)
+                && prepared_draw_matches_view(draw, view, camera, texture_usages, msaa)
+        })
         .collect::<Vec<_>>();
     if drawable.is_empty() {
         return;
     }
     drawable.sort_by_key(|draw| (draw.order, draw.context_id.get().get()));
 
-    let Some(uniforms) = params.prepared.uniforms_for_view(view_id) else {
+    let gamma = ImguiUniforms::gamma_for_target(view.target_format, camera.compositing_space);
+    let mut common_bind_groups = HashMap::new();
+    for context_id in drawable.iter().map(|draw| draw.context_id) {
+        let Entry::Vacant(entry) = common_bind_groups.entry(context_id) else {
+            continue;
+        };
+        let Some(uniforms) = params
+            .prepared
+            .uniforms_for_view(context_id, view_id)
+            .map(|uniforms| uniforms.with_gamma(gamma))
+        else {
+            continue;
+        };
+        let Some(bind_group) =
+            gpu_resources.update_camera_uniforms(context_id, view_id, &render_queue, uniforms)
+        else {
+            continue;
+        };
+        entry.insert(bind_group);
+    }
+    drawable.retain(|draw| common_bind_groups.contains_key(&draw.context_id));
+    if drawable.is_empty() {
         return;
-    };
-    let uniforms = uniforms.with_gamma(ImguiUniforms::gamma_for_target(
-        view.target_format,
-        camera.compositing_space,
-    ));
+    }
     let render_target_size = camera.physical_target_size.map(|size| [size.x, size.y]);
-    let Some(common_bind_group) =
-        gpu_resources.update_camera_uniforms(view_id, &render_queue, uniforms)
-    else {
-        return;
-    };
 
     let color_attachment = view_target.get_unsampled_color_attachment();
     let mut render_pass =
@@ -94,7 +113,6 @@ pub(super) fn render_imgui_overlay(
             });
 
     render_pass.set_pipeline(pipeline);
-    render_pass.set_bind_group(0, common_bind_group, &[]);
     if let Some(viewport) = render_viewport_for_pass(&drawable, render_target_size) {
         render_pass.set_viewport(
             viewport.physical_position[0] as f32,
@@ -116,7 +134,11 @@ pub(super) fn render_imgui_overlay(
         return;
     }
 
+    let mut bound_context = None;
     for draw in drawable {
+        let common_bind_group = common_bind_groups
+            .get(&draw.context_id)
+            .expect("drawable Context must retain its prepared uniform bind group");
         let texture_bind_group = params
             .texture_bind_groups
             .get(&draw.texture, draw.sampler)
@@ -124,6 +146,10 @@ pub(super) fn render_imgui_overlay(
         let Some(scissor) = scissor_for_render_pass(draw, render_target_size) else {
             continue;
         };
+        if bound_context != Some(draw.context_id) {
+            render_pass.set_bind_group(0, *common_bind_group, &[]);
+            bound_context = Some(draw.context_id);
+        }
         render_pass.set_bind_group(1, texture_bind_group, &[]);
         render_pass.set_scissor_rect(scissor.x, scissor.y, scissor.width, scissor.height);
         render_pass.draw_indexed(draw.index_range.clone(), draw.vertex_offset, 0..1);

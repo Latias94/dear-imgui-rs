@@ -105,6 +105,12 @@ pub enum ImguiContextError {
         context_id: ContextId,
         source: dear_imgui_rs::render::RendererConsumerError,
     },
+    /// Device recovery could not reset this Context's renderer generation.
+    #[cfg(feature = "render")]
+    RendererRecovery {
+        context_id: ContextId,
+        source: dear_imgui_rs::render::RendererConsumerError,
+    },
     /// Renderer fields changed after this backend acquired them.
     #[cfg(feature = "render")]
     RendererOwnership {
@@ -181,6 +187,11 @@ impl fmt::Display for ImguiContextError {
                 "Context {context_id:?} cannot enter managed renderer mode: {source}"
             ),
             #[cfg(feature = "render")]
+            Self::RendererRecovery { context_id, source } => write!(
+                formatter,
+                "Context {context_id:?} could not recover its managed renderer state: {source}"
+            ),
+            #[cfg(feature = "render")]
             Self::RendererOwnership { context_id, source } => {
                 write!(
                     formatter,
@@ -209,7 +220,9 @@ impl std::error::Error for ImguiContextError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             #[cfg(feature = "render")]
-            Self::RendererAdmission { source, .. } => Some(source),
+            Self::RendererAdmission { source, .. } | Self::RendererRecovery { source, .. } => {
+                Some(source)
+            }
             #[cfg(feature = "render")]
             Self::RendererOwnership { source, .. } => Some(source),
             Self::ContextCreation(error) => Some(error),
@@ -541,6 +554,34 @@ impl ImguiContexts {
             .take()
             .expect("a ready Context slot must retain its owner");
         Ok((owner, slot.config.clone(), next_frame))
+    }
+
+    #[cfg(feature = "render")]
+    pub(crate) fn recover_renderer(
+        &mut self,
+        context_id: ContextId,
+    ) -> Result<(), ImguiContextError> {
+        let slot = self
+            .slots
+            .get_mut(&context_id)
+            .ok_or(ImguiContextError::UnknownContext { context_id })?;
+        if slot.state != ContextSlotState::Ready {
+            return Err(ImguiContextError::TeardownInProgress { context_id });
+        }
+        let owner = slot
+            .owner
+            .as_mut()
+            .expect("a ready Context slot must retain its owner");
+        match owner.try_recover_renderer() {
+            Ok(()) => Ok(()),
+            Err(super::ownership::ImguiActiveRendererContextError::Operation(source)) => {
+                Err(ImguiContextError::RendererRecovery { context_id, source })
+            }
+            Err(super::ownership::ImguiActiveRendererContextError::RendererOwnership(source)) => {
+                slot.state = ContextSlotState::Teardown;
+                Err(ImguiContextError::RendererOwnership { context_id, source })
+            }
+        }
     }
 
     pub(crate) fn finish_drive(

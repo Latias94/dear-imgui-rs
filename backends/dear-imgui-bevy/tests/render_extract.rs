@@ -26,8 +26,8 @@ use bevy_window::{PrimaryWindow, Window, WindowRef, WindowResolution};
 #[cfg(feature = "multi-viewport")]
 use dear_imgui_bevy::ImguiBackendConfig;
 use dear_imgui_bevy::{
-    ImguiBackendStatus, ImguiContexts, ImguiFrameOutput, ImguiPlugin, ImguiPrimaryContextPass,
-    ImguiUi, ImguiViewportCamera, ImguiViewportWindow,
+    ImguiContextConfig, ImguiContexts, ImguiFrameOutput, ImguiPlugin, ImguiPrimaryContextPass,
+    ImguiUi,
     render::{
         IMGUI_FRAGMENT_ENTRY_POINT, IMGUI_SHADER_HANDLE, IMGUI_SHADER_SOURCE,
         IMGUI_VERTEX_ENTRY_POINT, ImguiExtractedRenderFrame, ImguiPipelineKey,
@@ -39,6 +39,8 @@ use dear_imgui_bevy::{
         ImguiResolvedRoutes,
     },
 };
+#[cfg(not(feature = "multi-viewport"))]
+use dear_imgui_bevy::{ImguiViewportCamera, ImguiViewportWindow};
 use dear_imgui_rs::{self as imgui, render::TextureBinding};
 use std::sync::{Mutex, OnceLock};
 
@@ -53,6 +55,17 @@ fn imgui_context_guard() -> std::sync::MutexGuard<'static, ()> {
 struct ManagedTexture(imgui::ManagedTextureId);
 
 const LEGACY_RENDER_TEXTURE_ID: imgui::TextureId = imgui::TextureId::new(0xD1A6);
+const SECONDARY_RENDER_TEXTURE_ID: imgui::TextureId = imgui::TextureId::new(0x5EC0);
+
+#[derive(ScheduleLabel, Clone, Debug, Eq, Hash, PartialEq)]
+struct SecondaryContextPass;
+
+fn primary_context_id(app: &App) -> imgui::ContextId {
+    app.world()
+        .non_send::<ImguiContexts>()
+        .primary_id()
+        .expect("ImguiPlugin should install a primary Context")
+}
 
 fn configure_primary<T>(app: &mut App, configure: impl FnOnce(&mut imgui::Context) -> T) -> T {
     let mut contexts = app
@@ -65,6 +78,25 @@ fn configure_primary<T>(app: &mut App, configure: impl FnOnce(&mut imgui::Contex
     contexts
         .configure(primary_id, configure)
         .unwrap_or_else(|error| panic!("primary Context should be configurable: {error}"))
+}
+
+fn add_secondary_context(app: &mut App) -> imgui::ContextId {
+    app.init_schedule(SecondaryContextPass);
+    app.add_systems(SecondaryContextPass, draw_secondary_legacy_texture);
+    let secondary_id = app
+        .world_mut()
+        .non_send_mut::<ImguiContexts>()
+        .create(ImguiContextConfig::new(SecondaryContextPass))
+        .expect("the secondary Context should be admitted");
+    app.world_mut()
+        .non_send_mut::<ImguiContexts>()
+        .configure(secondary_id, |context| {
+            context.io_mut().set_config_input_trickle_event_queue(false);
+            let _ = context.font_atlas().build();
+            let _ = context.set_ini_filename::<std::path::PathBuf>(None);
+        })
+        .expect("the secondary Context should be configurable");
+    secondary_id
 }
 
 #[derive(Resource, Default)]
@@ -243,15 +275,33 @@ fn draw_legacy_texture(imgui: ImguiUi) {
     );
 }
 
+fn draw_secondary_legacy_texture(imgui: ImguiUi) {
+    let ui = imgui
+        .ui()
+        .expect("the secondary render extraction schedule should expose a live Ui");
+    ui.get_foreground_draw_list().add_image(
+        SECONDARY_RENDER_TEXTURE_ID,
+        [24.0, 24.0],
+        [48.0, 48.0],
+        [0.0, 0.0],
+        [1.0, 1.0],
+        [1.0, 1.0, 1.0, 1.0],
+    );
+}
+
 #[test]
 fn render_extract_moves_context_owned_managed_frame_and_commits_once() {
     let _guard = imgui_context_guard();
     let (mut app, primary_window, camera, texture_id) = app_with_primary_window();
+    let context_id = primary_context_id(&app);
     app.add_systems(ImguiPrimaryContextPass, draw_managed_texture);
 
     app.update();
 
     let output = app.world().resource::<ImguiFrameOutput>();
+    let output = output
+        .get(context_id)
+        .expect("the primary Context should publish frame output");
     assert_eq!(output.frame_index(), 1);
     let epoch = output
         .snapshot_epoch()
@@ -263,20 +313,20 @@ fn render_extract_moves_context_owned_managed_frame_and_commits_once() {
         .sub_app(RenderApp)
         .world()
         .resource::<ImguiExtractedRenderFrame>();
-    assert_eq!(extracted.frame_index(), Some(1));
+    assert_eq!(extracted.frame_index(context_id), Some(1));
     assert!(
-        extracted.snapshot().is_none(),
+        extracted.snapshot(context_id).is_none(),
         "the full render schedule must consume the move-only snapshot"
     );
-    assert_eq!(extracted.camera_targets().len(), 1);
+    assert_eq!(extracted.camera_targets(context_id).len(), 1);
 
     let prepared = app
         .sub_app(RenderApp)
         .world()
         .resource::<ImguiPreparedRenderFrame>();
-    assert_eq!(prepared.frame_index(), Some(1));
+    assert_eq!(prepared.frame_index(context_id), Some(1));
     assert!(!prepared.draws().is_empty());
-    assert!(prepared.texture_request_count() >= 1);
+    assert!(prepared.texture_request_count(context_id) >= 1);
     assert!(prepared.draws().iter().any(|draw| {
         draw.texture == TextureBinding::Managed(imgui::render::SnapshotTextureId::User(texture_id))
     }));
@@ -289,9 +339,121 @@ fn render_extract_moves_context_owned_managed_frame_and_commits_once() {
 }
 
 #[test]
+fn render_extract_batches_independent_contexts_without_aliasing_shared_resources() {
+    let _guard = imgui_context_guard();
+    let (mut app, _primary_window, camera, _texture_id) = app_with_primary_window();
+    let primary_id = primary_context_id(&app);
+    let secondary_id = add_secondary_context(&mut app);
+    app.world_mut()
+        .spawn(ImguiRenderRoute::new(secondary_id, camera));
+    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
+
+    app.update();
+
+    let output = app.world().resource::<ImguiFrameOutput>();
+    for context_id in [primary_id, secondary_id] {
+        let context_output = output
+            .get(context_id)
+            .expect("every driven Context should publish independent frame output");
+        assert_eq!(context_output.frame_index(), 1);
+        let epoch = context_output
+            .snapshot_epoch()
+            .expect("every rendered Context should publish a snapshot epoch");
+        assert_eq!(epoch.context_id(), context_id);
+        assert_eq!(epoch.sequence(), 1);
+        assert!(context_output.snapshot_error().is_none());
+    }
+
+    let render_world = app.sub_app(RenderApp).world();
+    let extracted = render_world.resource::<ImguiExtractedRenderFrame>();
+    let mut extracted_contexts = extracted.context_ids().collect::<Vec<_>>();
+    extracted_contexts.sort_by_key(|context_id| context_id.get().get());
+    let mut expected_contexts = vec![primary_id, secondary_id];
+    expected_contexts.sort_by_key(|context_id| context_id.get().get());
+    assert_eq!(extracted_contexts, expected_contexts);
+    for context_id in [primary_id, secondary_id] {
+        assert_eq!(extracted.frame_index(context_id), Some(1));
+        assert!(
+            extracted.snapshot(context_id).is_none(),
+            "the render schedule must terminally consume each move-only snapshot"
+        );
+        assert_eq!(extracted.camera_targets(context_id).len(), 1);
+    }
+    let primary_view = extracted.camera_targets(primary_id)[0].view;
+    let secondary_view = extracted.camera_targets(secondary_id)[0].view;
+    assert_eq!(
+        primary_view, secondary_view,
+        "this fixture deliberately routes two Contexts through one Bevy view"
+    );
+
+    let prepared = render_world.resource::<ImguiPreparedRenderFrame>();
+    assert_eq!(prepared.frame_index(primary_id), Some(1));
+    assert_eq!(prepared.frame_index(secondary_id), Some(1));
+    assert!(
+        prepared
+            .uniforms_for_view(primary_id, primary_view)
+            .is_some()
+    );
+    assert!(
+        prepared
+            .uniforms_for_view(secondary_id, secondary_view)
+            .is_some(),
+        "uniform ownership must be keyed by both Context and view"
+    );
+    assert!(prepared.texture_request_count(primary_id) >= 1);
+    assert!(prepared.texture_request_count(secondary_id) >= 1);
+
+    let primary_draw = prepared
+        .draws()
+        .iter()
+        .find(|draw| {
+            draw.context_id == primary_id
+                && draw.texture == TextureBinding::Legacy(LEGACY_RENDER_TEXTURE_ID)
+        })
+        .expect("the primary Context draw should be part of the shared batch");
+    let secondary_draw = prepared
+        .draws()
+        .iter()
+        .find(|draw| {
+            draw.context_id == secondary_id
+                && draw.texture == TextureBinding::Legacy(SECONDARY_RENDER_TEXTURE_ID)
+        })
+        .expect("the secondary Context draw should be part of the shared batch");
+    assert!(
+        primary_draw.index_range.end <= secondary_draw.index_range.start
+            || secondary_draw.index_range.end <= primary_draw.index_range.start,
+        "Context-local indices must be rebased into non-overlapping shared-buffer ranges"
+    );
+    assert_ne!(
+        primary_draw.vertex_offset, secondary_draw.vertex_offset,
+        "Context-local vertices must be rebased into the shared vertex buffer"
+    );
+    assert!(
+        primary_draw.index_range.end as usize <= prepared.indices().len()
+            && secondary_draw.index_range.end as usize <= prepared.indices().len()
+    );
+
+    let (primary_progress, secondary_progress) = {
+        let mut contexts = app.world_mut().non_send_mut::<ImguiContexts>();
+        let primary_progress = contexts
+            .configure(primary_id, |context| context.poll_snapshot_completions())
+            .expect("the primary Context should remain configurable")
+            .expect("the primary snapshot completion should be valid");
+        let secondary_progress = contexts
+            .configure(secondary_id, |context| context.poll_snapshot_completions())
+            .expect("the secondary Context should remain configurable")
+            .expect("the secondary snapshot completion should be valid");
+        (primary_progress, secondary_progress)
+    };
+    assert_eq!(primary_progress.committed(), 1);
+    assert_eq!(secondary_progress.committed(), 1);
+}
+
+#[test]
 fn render_extract_clears_stale_snapshot_after_primary_window_is_removed() {
     let _guard = imgui_context_guard();
     let (mut app, primary_window, _camera, _texture_id) = app_with_primary_window();
+    let context_id = primary_context_id(&app);
     app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
 
     app.update();
@@ -308,16 +470,23 @@ fn render_extract_clears_stale_snapshot_after_primary_window_is_removed() {
     app.world_mut().despawn(primary_window);
     app.update();
 
+    let output = app.world().resource::<ImguiFrameOutput>();
+    let context_output = output
+        .get(context_id)
+        .expect("the primary Context should retain its last completed output");
+    assert_eq!(context_output.frame_index(), 1);
+    assert!(context_output.snapshot_epoch().is_none());
+
     let render_world = app.sub_app(RenderApp).world();
     let extracted = render_world.resource::<ImguiExtractedRenderFrame>();
-    assert_eq!(extracted.frame_index(), Some(1));
+    assert_eq!(extracted.frame_index(context_id), None);
     assert!(
-        extracted.snapshot().is_none(),
+        extracted.snapshot(context_id).is_none(),
         "render extraction must not keep drawing the last frame after the primary window disappears"
     );
 
     let prepared = render_world.resource::<ImguiPreparedRenderFrame>();
-    assert_eq!(prepared.frame_index(), Some(1));
+    assert_eq!(prepared.frame_index(context_id), None);
     assert!(prepared.draws().is_empty());
     assert!(prepared.vertices().is_empty());
     assert!(prepared.indices().is_empty());
@@ -327,6 +496,7 @@ fn render_extract_clears_stale_snapshot_after_primary_window_is_removed() {
 fn render_extract_materializes_the_unique_auto_primary_camera() {
     let _guard = imgui_context_guard();
     let (mut app, primary_window, _camera, _texture_id) = app_with_primary_window();
+    let context_id = primary_context_id(&app);
     let primary_target =
         NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap());
     let auto_primary_camera = app
@@ -359,7 +529,7 @@ fn render_extract_materializes_the_unique_auto_primary_camera() {
         .sub_app(RenderApp)
         .world()
         .resource::<ImguiExtractedRenderFrame>();
-    let targets = extracted.camera_targets();
+    let targets = extracted.camera_targets(context_id);
     assert_eq!(
         targets.len(),
         1,
@@ -375,6 +545,7 @@ fn render_extract_materializes_the_unique_auto_primary_camera() {
 fn render_route_freezes_after_same_frame_camera_updates() {
     let _guard = imgui_context_guard();
     let (mut app, _primary_window, camera, _texture_id) = app_with_primary_window();
+    let context_id = primary_context_id(&app);
     let render_entity = render_entity_for_camera(&mut app, camera);
     app.add_systems(Update, move |mut cameras: Query<&mut Camera>| {
         cameras
@@ -398,12 +569,7 @@ fn render_route_freezes_after_same_frame_camera_updates() {
     let routes = app.world().resource::<ImguiResolvedRoutes>();
     assert_eq!(
         routes
-            .render_route(
-                app.world()
-                    .non_send::<ImguiContexts>()
-                    .primary_id()
-                    .expect("the primary Context should exist")
-            )
+            .render_route(context_id)
             .expect("the updated camera should remain routable")
             .camera_order(),
         13
@@ -412,7 +578,7 @@ fn render_route_freezes_after_same_frame_camera_updates() {
         .sub_app(RenderApp)
         .world()
         .resource::<ImguiExtractedRenderFrame>()
-        .camera_targets();
+        .camera_targets(context_id);
     assert_eq!(targets.len(), 1);
     assert_eq!(targets[0].camera, camera);
     assert_eq!(targets[0].camera_order, 13);
@@ -475,7 +641,7 @@ fn render_extract_prefers_an_explicit_route_over_auto_primary() {
         .sub_app(RenderApp)
         .world()
         .resource::<ImguiExtractedRenderFrame>();
-    let targets = extracted.camera_targets();
+    let targets = extracted.camera_targets(context_id);
     assert_eq!(
         targets.len(),
         1,
@@ -542,7 +708,7 @@ fn render_extract_preserves_explicit_route_viewport_for_render_pass() {
         .world()
         .resource::<ImguiExtractedRenderFrame>();
     let target = extracted
-        .camera_targets()
+        .camera_targets(context_id)
         .iter()
         .find(|target| target.camera == routed_camera)
         .expect("the explicitly routed camera should be extracted");
@@ -574,6 +740,7 @@ fn render_extract_preserves_explicit_route_viewport_for_render_pass() {
 fn render_extract_does_not_broadcast_one_context_to_unrouted_windows() {
     let _guard = imgui_context_guard();
     let (mut app, primary_window, primary_camera, _texture_id) = app_with_primary_window();
+    let context_id = primary_context_id(&app);
     let secondary_window = app.world_mut().spawn(Window::default()).id();
     let secondary_camera = app
         .world_mut()
@@ -594,7 +761,7 @@ fn render_extract_does_not_broadcast_one_context_to_unrouted_windows() {
         .sub_app(RenderApp)
         .world()
         .resource::<ImguiExtractedRenderFrame>();
-    let targets = extracted.camera_targets();
+    let targets = extracted.camera_targets(context_id);
     let expected_primary_target =
         NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap());
     assert_eq!(targets.len(), 1);
@@ -628,28 +795,16 @@ fn render_extract_does_not_broadcast_one_context_to_unrouted_windows() {
 }
 
 #[test]
-fn render_extract_keeps_same_target_views_with_different_render_identity_distinct() {
+fn render_extract_keeps_same_target_context_views_with_different_render_identity_distinct() {
     let _guard = imgui_context_guard();
     let (mut app, primary_window, primary_camera, _texture_id) = app_with_primary_window();
-    let context_id = app
-        .world()
-        .non_send::<ImguiContexts>()
-        .primary_id()
-        .expect("the primary Context should exist");
-    let secondary_viewport_id = imgui::Id::from(0x1D3E_171);
+    let primary_id = primary_context_id(&app);
+    let secondary_id = add_secondary_context(&mut app);
     let primary_target =
         NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap());
     app.world_mut()
-        .spawn(ImguiRenderRoute::new(context_id, primary_camera));
-    app.world_mut()
-        .entity_mut(primary_window)
-        .insert(ImguiViewportWindow {
-            viewport_id: secondary_viewport_id,
-        });
-    app.world_mut()
-        .resource_mut::<ImguiBackendStatus>()
-        .multi_viewport_supported = true;
-    let viewport_camera = app
+        .spawn(ImguiRenderRoute::new(primary_id, primary_camera));
+    let secondary_camera = app
         .world_mut()
         .spawn((
             Camera {
@@ -658,15 +813,14 @@ fn render_extract_keeps_same_target_views_with_different_render_identity_distinc
             },
             RenderTarget::Window(WindowRef::Primary),
             CameraRenderGraph::new(Core2d),
-            ImguiViewportCamera {
-                viewport_id: secondary_viewport_id,
-            },
         ))
         .id();
+    app.world_mut()
+        .spawn(ImguiRenderRoute::new(secondary_id, secondary_camera));
     let secondary_usages = TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_SRC;
     install_render_view(
         &mut app,
-        viewport_camera,
+        secondary_camera,
         primary_target.clone(),
         11,
         [1280, 720],
@@ -679,21 +833,19 @@ fn render_extract_keeps_same_target_views_with_different_render_identity_distinc
 
     app.update();
 
-    let targets = app
+    let extracted = app
         .sub_app(RenderApp)
         .world()
-        .resource::<ImguiExtractedRenderFrame>()
-        .camera_targets();
-    assert_eq!(targets.len(), 2);
-    let primary = targets
-        .iter()
-        .find(|target| target.camera == primary_camera)
-        .expect("the explicit ordinary route should materialize");
-    let secondary = targets
-        .iter()
-        .find(|target| target.camera == viewport_camera)
-        .expect("the backend-owned viewport route should materialize");
+        .resource::<ImguiExtractedRenderFrame>();
+    let primary_targets = extracted.camera_targets(primary_id);
+    let secondary_targets = extracted.camera_targets(secondary_id);
+    assert_eq!(primary_targets.len(), 1);
+    assert_eq!(secondary_targets.len(), 1);
+    let primary = &primary_targets[0];
+    let secondary = &secondary_targets[0];
 
+    assert_eq!(primary.camera, primary_camera);
+    assert_eq!(secondary.camera, secondary_camera);
     assert_eq!(primary.target, primary_target);
     assert_eq!(secondary.target, primary_target);
     assert_ne!(primary.view, secondary.view);
@@ -749,7 +901,7 @@ fn render_extract_reports_a_stale_render_view_without_retargeting() {
         .world()
         .resource::<ImguiExtractedRenderFrame>();
     assert!(
-        extracted.camera_targets().is_empty(),
+        extracted.camera_targets(context_id).is_empty(),
         "a stale view must fail closed rather than draw through a changed camera"
     );
     let prepared = app
@@ -875,7 +1027,7 @@ fn render_extract_reports_a_missing_render_view_without_replaying_an_old_target(
         .sub_app(RenderApp)
         .world()
         .resource::<ImguiExtractedRenderFrame>();
-    assert!(extracted.camera_targets().is_empty());
+    assert!(extracted.camera_targets(context_id).is_empty());
     assert!(
         app.world()
             .resource::<ImguiDiagnostics>()
@@ -893,6 +1045,7 @@ fn render_extract_reports_a_missing_render_view_without_replaying_an_old_target(
 fn render_extract_ignores_viewport_window_mapping_until_multi_viewport_is_supported() {
     let _guard = imgui_context_guard();
     let (mut app, primary_window, primary_camera, _texture_id) = app_with_primary_window();
+    let context_id = primary_context_id(&app);
     let secondary_viewport_id = imgui::Id::from(0xC0FFEE);
     let secondary_window = app
         .world_mut()
@@ -925,7 +1078,7 @@ fn render_extract_ignores_viewport_window_mapping_until_multi_viewport_is_suppor
         .sub_app(RenderApp)
         .world()
         .resource::<ImguiExtractedRenderFrame>();
-    let targets = extracted.camera_targets();
+    let targets = extracted.camera_targets(context_id);
     let expected_primary_target =
         NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap());
     assert_eq!(targets.len(), 1);
@@ -965,6 +1118,7 @@ fn renderer_prepare_routes_secondary_viewport_draws_only_to_matching_window() {
         viewport_window: Default::default(),
     }));
     app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
+    let context_id = primary_context_id(&app);
 
     let mut window = Window {
         resolution: WindowResolution::new(1280, 720),
@@ -1102,7 +1256,7 @@ fn renderer_prepare_routes_secondary_viewport_draws_only_to_matching_window() {
         .world()
         .resource::<ImguiExtractedRenderFrame>();
     assert!(
-        extracted.snapshot().is_none(),
+        extracted.snapshot(context_id).is_none(),
         "secondary viewport snapshots must also be committed after preparation"
     );
 
@@ -1127,7 +1281,7 @@ fn renderer_prepare_routes_secondary_viewport_draws_only_to_matching_window() {
     assert!(
         !secondary_draws.is_empty(),
         "secondary target was not prepared; targets={:?}; diagnostics={:?}",
-        extracted.camera_targets(),
+        extracted.camera_targets(context_id),
         app.world()
             .resource::<ImguiDiagnostics>()
             .entries_for(ImguiDiagnosticOrigin::RenderExtraction)
@@ -1140,9 +1294,20 @@ fn renderer_prepare_routes_secondary_viewport_draws_only_to_matching_window() {
         draw.target == expected_secondary_target && draw.viewport_id == Some(secondary_viewport_id)
     }));
     assert_ne!(
-        prepared.uniforms_for_view(primary_view),
-        prepared.uniforms_for_view(secondary_view),
+        prepared.uniforms_for_view(context_id, primary_view),
+        prepared.uniforms_for_view(context_id, secondary_view),
         "secondary viewport rendering needs a viewport-specific projection"
+    );
+
+    let first_poll = configure_primary(&mut app, |context| context.poll_snapshot_completions())
+        .expect("the snapshot fanned out across main and platform views should complete");
+    let second_poll = configure_primary(&mut app, |context| context.poll_snapshot_completions())
+        .expect("re-polling the Context should remain valid");
+    assert_eq!(first_poll.committed(), 1);
+    assert_eq!(
+        second_poll.committed(),
+        0,
+        "render fanout must produce exactly one terminal completion for its source snapshot"
     );
 }
 
@@ -1150,6 +1315,7 @@ fn renderer_prepare_routes_secondary_viewport_draws_only_to_matching_window() {
 fn renderer_prepare_flattens_extracted_snapshot_for_pipeline_consumption() {
     let _guard = imgui_context_guard();
     let (mut app, primary_window, _camera, _texture_id) = app_with_primary_window();
+    let context_id = primary_context_id(&app);
     app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
 
     app.update();
@@ -1158,11 +1324,11 @@ fn renderer_prepare_flattens_extracted_snapshot_for_pipeline_consumption() {
         .sub_app(RenderApp)
         .world()
         .resource::<ImguiPreparedRenderFrame>();
-    assert_eq!(prepared.frame_index(), Some(1));
+    assert_eq!(prepared.frame_index(context_id), Some(1));
     assert!(!prepared.vertices().is_empty());
     assert!(!prepared.indices().is_empty());
     assert!(
-        prepared.texture_request_count() >= 1,
+        prepared.texture_request_count(context_id) >= 1,
         "Context-owned capture should carry the font-atlas request alongside legacy draws"
     );
 

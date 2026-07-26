@@ -21,8 +21,8 @@ pub use self::context::ownership::{
     ImguiBackendConfig, ImguiBackendStatus, ImguiContextIntoInnerErrorReason, ImguiPlugin,
 };
 pub use self::context::{
-    ImguiContextAdmissionError, ImguiContextConfig, ImguiContextError, ImguiContexts,
-    ImguiFrameOutput, ImguiFrameState, ImguiUi,
+    ImguiContextAdmissionError, ImguiContextConfig, ImguiContextError, ImguiContextFrameOutput,
+    ImguiContexts, ImguiFrameOutput, ImguiFrameState, ImguiUi,
 };
 pub use self::helpers::configure_example_context;
 pub use self::schedule::ImguiPrimaryContextPass;

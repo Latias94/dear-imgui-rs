@@ -1,37 +1,142 @@
 //! CPU draw preparation, GPU uploads, and texture reconciliation.
 
 use super::resources::{
-    ImguiRenderTexture, ImguiTextureUpload, ImguiTextureViewCompatibility, PreparedFrameData,
+    ImguiRenderTexture, ImguiRendererReleasePacket, ImguiTextureUpload,
+    ImguiTextureViewCompatibility, PreparedContextMetadata, PreparedFrameData,
 };
 use super::*;
+
+pub(super) fn initialize_imgui_gpu_resources(world: &mut World) {
+    let (device_generation, recovering) = world
+        .resource_mut::<super::resources::ImguiRenderDeviceState>()
+        .advance();
+
+    if recovering {
+        let renderer_releases = world.resource::<ImguiRendererReleases>().clone();
+        let context_ids = renderer_releases.registered_contexts();
+        let snapshot_mailbox = world
+            .resource::<crate::context::ImguiFrameMailbox>()
+            .clone();
+        for context_id in &context_ids {
+            snapshot_mailbox.remove_context(*context_id);
+        }
+        {
+            let mut extracted = world.resource_mut::<ImguiExtractedRenderFrame>();
+            for context_id in &context_ids {
+                extracted.remove_context(*context_id);
+            }
+        }
+        world.resource_mut::<ImguiPreparedRenderFrame>().clear();
+
+        let mut packets = context_ids
+            .iter()
+            .copied()
+            .map(|context_id| (context_id, ImguiRendererReleasePacket::default()))
+            .collect::<HashMap<_, _>>();
+        {
+            let mut texture_bind_groups = world.resource_mut::<ImguiTextureBindGroups>();
+            for context_id in &context_ids {
+                let textures = texture_bind_groups.take_managed_renderer_state(*context_id);
+                packets
+                    .get_mut(context_id)
+                    .expect("registered Context must have a recovery packet")
+                    .textures = textures;
+            }
+        }
+        {
+            let mut gpu_resources = world.resource_mut::<ImguiPipelineGpuResources>();
+            for context_id in &context_ids {
+                let uniforms = gpu_resources.take_context(*context_id);
+                packets
+                    .get_mut(context_id)
+                    .expect("registered Context must have a recovery packet")
+                    .uniforms = uniforms;
+            }
+        }
+        assert!(
+            renderer_releases.begin_device_recovery(device_generation, packets),
+            "Bevy renderer device generation did not advance during RenderStartup"
+        );
+    }
+
+    world.insert_resource(ImguiGpuBuffers::default());
+    world.insert_resource(ImguiTextureBindGroups::default());
+    world.insert_resource(ImguiQueuedPipelines::default());
+    world.insert_resource(SpecializedRenderPipelines::<ImguiRenderPipeline>::default());
+    let gpu_resources = ImguiPipelineGpuResources::from_world(world);
+    world.insert_resource(gpu_resources);
+}
 
 pub(super) fn prepare_imgui_render_frame(
     extracted: Res<ImguiExtractedRenderFrame>,
     mut prepared: ResMut<ImguiPreparedRenderFrame>,
 ) {
-    let Some(snapshot) = extracted.snapshot() else {
-        prepared.clear(extracted.frame_index());
-        return;
-    };
+    let mut context_ids = extracted.context_ids().collect::<Vec<_>>();
+    context_ids.sort_by_key(|context_id| context_id.get().get());
+    let mut contexts = HashMap::new();
+    let mut uniforms_by_context_view = HashMap::new();
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    let mut draws = Vec::new();
 
-    let Some(frame_index) = extracted.frame_index() else {
-        prepared.clear(None);
-        return;
-    };
+    for context_id in context_ids {
+        let Some(snapshot) = extracted.snapshot(context_id) else {
+            continue;
+        };
+        let Some(frame_index) = extracted.frame_index(context_id) else {
+            continue;
+        };
+        contexts.insert(
+            context_id,
+            PreparedContextMetadata {
+                frame_index,
+                texture_request_count: snapshot.texture_requests().len(),
+            },
+        );
 
-    let draw_data = snapshot.draw_data();
-    let primary_uniforms = valid_display_rect(draw_data)
-        .map(|_| ImguiUniforms::from_display_rect(draw_data.display_pos, draw_data.display_size));
-    let (vertices, indices, draws, uniforms_by_view) =
-        prepare_snapshot_draw_data(snapshot, extracted.camera_targets());
+        let (context_vertices, context_indices, mut context_draws, uniforms_by_view) =
+            prepare_snapshot_draw_data(snapshot, extracted.camera_targets(context_id));
+        let Ok(index_base) = u32::try_from(indices.len()) else {
+            continue;
+        };
+        let Ok(vertex_base) = i32::try_from(vertices.len()) else {
+            continue;
+        };
+        context_draws.retain_mut(|draw| {
+            let Some(index_start) = draw.index_range.start.checked_add(index_base) else {
+                return false;
+            };
+            let Some(index_end) = draw.index_range.end.checked_add(index_base) else {
+                return false;
+            };
+            let Some(vertex_offset) = draw.vertex_offset.checked_add(vertex_base) else {
+                return false;
+            };
+            draw.index_range = index_start..index_end;
+            draw.vertex_offset = vertex_offset;
+            true
+        });
+        uniforms_by_context_view.extend(
+            uniforms_by_view
+                .into_iter()
+                .map(|(view, uniforms)| ((context_id, view), uniforms)),
+        );
+        vertices.extend(context_vertices);
+        indices.extend(context_indices);
+        draws.extend(context_draws);
+    }
+
+    if contexts.is_empty() {
+        prepared.clear();
+        return;
+    }
+
     prepared.replace(PreparedFrameData {
-        frame_index,
-        uniforms: primary_uniforms,
-        uniforms_by_view,
+        contexts,
+        uniforms_by_context_view,
         vertices,
         indices,
         draws,
-        texture_request_count: snapshot.texture_requests().len(),
     });
 }
 
@@ -81,141 +186,132 @@ pub(super) struct ImguiTextureBindGroupParams<'w> {
     render_queue: Option<Res<'w, RenderQueue>>,
     pipeline_cache: Option<Res<'w, PipelineCache>>,
     pipeline: Res<'w, ImguiRenderPipeline>,
-    renderer_release: Res<'w, ImguiRendererRelease>,
+    renderer_releases: Res<'w, ImguiRendererReleases>,
 }
 
 pub(super) fn prepare_imgui_texture_bind_groups(
     mut params: ImguiTextureBindGroupParams,
     mut texture_bind_groups: ResMut<ImguiTextureBindGroups>,
 ) {
-    if params.renderer_release.release_requested() {
-        return;
-    }
     let (Some(render_device), Some(render_queue), Some(pipeline_cache)) = (
         params.render_device,
         params.render_queue,
         params.pipeline_cache,
     ) else {
-        params
-            .renderer_release
-            .update_resources_live(texture_bind_groups.has_managed_resources());
         return;
     };
 
-    let Some(snapshot) = params.extracted.snapshot() else {
-        prepare_bevy_image_texture_bind_groups(
-            params.gpu_images.as_deref(),
-            &params.extracted_bevy_textures,
-            &render_device,
-            &pipeline_cache,
-            &params.pipeline,
-            &mut texture_bind_groups,
-        );
-        params
-            .renderer_release
-            .update_resources_live(texture_bind_groups.has_managed_resources());
-        return;
-    };
-
-    let mut texture_feedback = Vec::new();
-    for request in snapshot.texture_requests() {
-        let snapshot_texture = request.texture();
-        if !matches!(request.operation(), imgui::render::TextureOp::Destroy)
-            && !texture_bind_groups.accepts_managed_texture_upload(snapshot_texture)
-        {
+    let mut context_ids = params.extracted.context_ids().collect::<Vec<_>>();
+    context_ids.sort_by_key(|context_id| context_id.get().get());
+    for context_id in context_ids {
+        if params.renderer_releases.release_requested(context_id) {
             continue;
         }
-        match request.operation() {
-            imgui::render::TextureOp::Create {
-                format,
-                width,
-                height,
-                row_pitch,
-                pixels,
-            } => {
-                if !validate_managed_texture_extent(&render_device, *width, *height) {
-                    continue;
-                }
-                if let Some(render_texture) = create_imgui_render_texture(
-                    &render_device,
-                    &render_queue,
-                    &pipeline_cache,
-                    &params.pipeline,
-                    ImguiTextureUpload {
-                        format: *format,
-                        width: *width,
-                        height: *height,
-                        row_pitch: *row_pitch,
-                        pixels,
-                    },
-                ) {
-                    let tex_id = texture_bind_groups.managed_texture_id(snapshot_texture);
-                    texture_bind_groups.insert_render_texture(
-                        TextureBinding::Managed(snapshot_texture),
-                        render_texture,
-                    );
-                    params.renderer_release.update_resources_live(true);
-                    if let Ok(feedback) = request.uploaded(tex_id) {
-                        texture_feedback.push(feedback);
-                    }
-                }
+        let mut texture_feedback = Vec::new();
+        let Some(snapshot) = params.extracted.snapshot(context_id) else {
+            continue;
+        };
+        for request in snapshot.texture_requests() {
+            let snapshot_texture = request.texture();
+            if !matches!(request.operation(), imgui::render::TextureOp::Destroy)
+                && !texture_bind_groups.accepts_managed_texture_upload(snapshot_texture)
+            {
+                continue;
             }
-            imgui::render::TextureOp::Update {
-                format,
-                width,
-                height,
-                rects,
-            } => {
-                if !validate_managed_texture_extent(&render_device, *width, *height) {
-                    continue;
-                }
-                if let Some(render_texture) = texture_bind_groups
-                    .textures
-                    .get(&TextureBinding::Managed(snapshot_texture))
-                {
-                    let Some(texture_extent) = render_texture.extent else {
-                        continue;
-                    };
-                    if texture_extent != [*width, *height] {
+            match request.operation() {
+                imgui::render::TextureOp::Create {
+                    format,
+                    width,
+                    height,
+                    row_pitch,
+                    pixels,
+                } => {
+                    if !validate_managed_texture_extent(&render_device, *width, *height) {
                         continue;
                     }
-                    let Some(texture) = render_texture.texture.as_ref() else {
-                        continue;
-                    };
-                    let Some(updates) =
-                        convert_imgui_texture_update_rects(*format, *width, *height, rects)
-                    else {
-                        continue;
-                    };
-                    for update in updates {
-                        write_texture_rows(
-                            &render_queue,
-                            texture,
-                            update.origin,
-                            update.width,
-                            update.height,
-                            update.row_pitch,
-                            &update.pixels,
+                    if let Some(render_texture) = create_imgui_render_texture(
+                        &render_device,
+                        &render_queue,
+                        &pipeline_cache,
+                        &params.pipeline,
+                        ImguiTextureUpload {
+                            format: *format,
+                            width: *width,
+                            height: *height,
+                            row_pitch: *row_pitch,
+                            pixels,
+                        },
+                    ) {
+                        let tex_id = texture_bind_groups.managed_texture_id(snapshot_texture);
+                        texture_bind_groups.insert_render_texture(
+                            TextureBinding::Managed(snapshot_texture),
+                            render_texture,
                         );
-                    }
-                    if let Some(texture_id) = texture_bind_groups
-                        .managed_texture_ids
-                        .get(&snapshot_texture)
-                        .copied()
-                        && let Ok(feedback) = request.uploaded(texture_id)
-                    {
-                        texture_feedback.push(feedback);
+                        if let Ok(feedback) = request.uploaded(tex_id) {
+                            texture_feedback.push(feedback);
+                        }
                     }
                 }
-            }
-            imgui::render::TextureOp::Destroy => {
-                texture_bind_groups
-                    .destroy_managed_texture(snapshot_texture, snapshot.epoch().sequence());
-                if let Ok(feedback) = request.destroyed() {
-                    texture_feedback.push(feedback);
+                imgui::render::TextureOp::Update {
+                    format,
+                    width,
+                    height,
+                    rects,
+                } => {
+                    if !validate_managed_texture_extent(&render_device, *width, *height) {
+                        continue;
+                    }
+                    if let Some(render_texture) = texture_bind_groups
+                        .textures
+                        .get(&TextureBinding::Managed(snapshot_texture))
+                    {
+                        let Some(texture_extent) = render_texture.extent else {
+                            continue;
+                        };
+                        if texture_extent != [*width, *height] {
+                            continue;
+                        }
+                        let Some(texture) = render_texture.texture.as_ref() else {
+                            continue;
+                        };
+                        let Some(updates) =
+                            convert_imgui_texture_update_rects(*format, *width, *height, rects)
+                        else {
+                            continue;
+                        };
+                        for update in updates {
+                            write_texture_rows(
+                                &render_queue,
+                                texture,
+                                update.origin,
+                                update.width,
+                                update.height,
+                                update.row_pitch,
+                                &update.pixels,
+                            );
+                        }
+                        if let Some(texture_id) = texture_bind_groups
+                            .managed_texture_ids
+                            .get(&snapshot_texture)
+                            .copied()
+                            && let Ok(feedback) = request.uploaded(texture_id)
+                        {
+                            texture_feedback.push(feedback);
+                        }
+                    }
+                }
+                imgui::render::TextureOp::Destroy => {
+                    texture_bind_groups
+                        .destroy_managed_texture(snapshot_texture, snapshot.epoch().sequence());
+                    if let Ok(feedback) = request.destroyed() {
+                        texture_feedback.push(feedback);
+                    }
                 }
             }
         }
+        params
+            .extracted
+            .extend_texture_feedback(context_id, texture_feedback);
     }
 
     prepare_bevy_image_texture_bind_groups(
@@ -226,41 +322,41 @@ pub(super) fn prepare_imgui_texture_bind_groups(
         &params.pipeline,
         &mut texture_bind_groups,
     );
-    params.extracted.extend_texture_feedback(texture_feedback);
-    params
-        .renderer_release
-        .update_resources_live(texture_bind_groups.has_managed_resources());
 }
 
 pub(super) fn release_imgui_renderer_resources(
-    renderer_release: Res<ImguiRendererRelease>,
+    renderer_releases: Res<ImguiRendererReleases>,
     snapshot_mailbox: Res<crate::context::ImguiFrameMailbox>,
     mut extracted: ResMut<ImguiExtractedRenderFrame>,
-    mut prepared: ResMut<ImguiPreparedRenderFrame>,
     mut texture_bind_groups: ResMut<ImguiTextureBindGroups>,
+    mut gpu_resources: Option<ResMut<ImguiPipelineGpuResources>>,
 ) {
-    let Some(generation) = renderer_release.requested_generation() else {
-        return;
-    };
-
-    snapshot_mailbox.clear();
-    let route_epoch = extracted.route_epoch();
-    extracted.clear(0, route_epoch);
-    prepared.clear(None);
-    let released_gpu_resources = texture_bind_groups.take_managed_renderer_state();
-    drop(released_gpu_resources);
-    assert!(
-        renderer_release.acknowledge_release(generation),
-        "Bevy renderer release acknowledgement generation changed during cleanup"
-    );
+    for (context_id, generation) in renderer_releases.requested_releases() {
+        snapshot_mailbox.remove_context(context_id);
+        extracted.remove_context(context_id);
+        let textures = texture_bind_groups.take_managed_renderer_state(context_id);
+        let uniforms = gpu_resources
+            .as_deref_mut()
+            .map(|resources| resources.take_context(context_id))
+            .unwrap_or_default();
+        let packet = super::resources::ImguiRendererReleasePacket::new(textures, uniforms);
+        assert!(
+            renderer_releases.acknowledge_release(context_id, generation, packet),
+            "Bevy renderer release acknowledgement generation changed during cleanup"
+        );
+    }
 }
 
 pub(super) fn commit_imgui_render_frame(
     mut extracted: ResMut<ImguiExtractedRenderFrame>,
     mut texture_bind_groups: ResMut<ImguiTextureBindGroups>,
 ) {
-    extracted.commit();
-    texture_bind_groups.prune_destroyed_managed_textures(extracted.completion_watermark());
+    let completion_watermarks = extracted
+        .context_ids()
+        .map(|context_id| (context_id, extracted.completion_watermark(context_id)))
+        .collect::<HashMap<_, _>>();
+    extracted.commit_all();
+    texture_bind_groups.prune_destroyed_managed_textures(&completion_watermarks);
 }
 
 fn validate_managed_texture_extent(render_device: &RenderDevice, width: u32, height: u32) -> bool {

@@ -6,10 +6,11 @@ use super::extract::{
 use super::pass::{ensure_presentable_window_outputs, render_imgui_overlay};
 use super::pipeline::queue_imgui_pipelines;
 use super::prepare::{
-    commit_imgui_render_frame, prepare_imgui_render_frame, prepare_imgui_texture_bind_groups,
-    prepare_imgui_uniform_bind_groups, release_imgui_renderer_resources, upload_imgui_buffers,
+    commit_imgui_render_frame, initialize_imgui_gpu_resources, prepare_imgui_render_frame,
+    prepare_imgui_texture_bind_groups, prepare_imgui_uniform_bind_groups,
+    release_imgui_renderer_resources, upload_imgui_buffers,
 };
-use super::resources::ImguiRenderExtractionInstalled;
+use super::resources::{ImguiRenderDeviceState, ImguiRenderExtractionInstalled};
 use super::*;
 
 /// Marker proving the render feature is compiled in.
@@ -53,7 +54,7 @@ pub(crate) fn install_render_extraction(
 ) -> bool {
     install_imgui_shader_asset(app);
     app.init_resource::<crate::context::ImguiFrameMailbox>();
-    app.init_resource::<ImguiRendererRelease>();
+    app.init_resource::<ImguiRendererReleases>();
     let snapshot_mailbox = app
         .world()
         .resource::<crate::context::ImguiFrameMailbox>()
@@ -67,19 +68,7 @@ pub(crate) fn install_render_extraction(
         return false;
     }
 
-    let renderer_release = app.world().resource::<ImguiRendererRelease>().clone();
-    renderer_release.install();
-    if let Some(mut contexts) = app.world_mut().get_non_send_mut::<crate::ImguiContexts>()
-        && contexts.primary_id().is_some()
-    {
-        contexts
-            .with_primary_owner(|owner| {
-                owner.attach_renderer_release(renderer_release.clone());
-            })
-            .unwrap_or_else(|error| {
-                panic!("dear-imgui-bevy could not attach the primary renderer release: {error}")
-            });
-    }
+    let renderer_releases = app.world().resource::<ImguiRendererReleases>().clone();
 
     let render_app = app
         .get_sub_app_mut(RenderApp)
@@ -101,11 +90,15 @@ pub(crate) fn install_render_extraction(
         .init_resource::<SpecializedRenderPipelines<ImguiRenderPipeline>>()
         .init_resource::<ImguiTextureBindGroups>()
         .init_resource::<ImguiQueuedPipelines>()
-        .init_gpu_resource::<ImguiPipelineGpuResources>()
+        .init_resource::<ImguiRenderDeviceState>()
         .insert_resource(snapshot_mailbox)
-        .insert_resource(renderer_release)
+        .insert_resource(renderer_releases)
         .insert_resource(diagnostics)
         .insert_resource(ImguiRenderExtractionInstalled)
+        .add_systems(
+            RenderStartup,
+            initialize_imgui_gpu_resources.ambiguous_with_all(),
+        )
         .add_systems(
             ExtractSchedule,
             (extract_imgui_bevy_textures, extract_imgui_render_frame).chain(),
@@ -113,6 +106,7 @@ pub(crate) fn install_render_extraction(
         .add_systems(
             Render,
             (
+                release_imgui_renderer_resources,
                 resolve_extracted_imgui_render_routes,
                 prepare_imgui_render_frame,
                 queue_imgui_pipelines,
@@ -126,11 +120,7 @@ pub(crate) fn install_render_extraction(
         )
         .add_systems(
             Render,
-            (
-                release_imgui_renderer_resources,
-                prepare_imgui_texture_bind_groups,
-                commit_imgui_render_frame,
-            )
+            (prepare_imgui_texture_bind_groups, commit_imgui_render_frame)
                 .chain()
                 .in_set(RenderSystems::PrepareBindGroups),
         )

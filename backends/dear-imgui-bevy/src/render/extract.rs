@@ -1,5 +1,7 @@
 //! Main-world route extraction and render-world view resolution.
 
+use std::collections::{HashMap, HashSet};
+
 use super::resources::ImguiRenderRouteSnapshot;
 use super::*;
 
@@ -16,9 +18,8 @@ pub(super) fn extract_imgui_bevy_textures(
 
 pub(super) fn extract_imgui_render_frame(
     mut extracted: ResMut<ImguiExtractedRenderFrame>,
-    output: Extract<Res<crate::ImguiFrameOutput>>,
     snapshot_mailbox: Res<crate::context::ImguiFrameMailbox>,
-    renderer_release: Res<ImguiRendererRelease>,
+    renderer_releases: Res<ImguiRendererReleases>,
     backend_status: Extract<Res<ImguiBackendStatus>>,
     resolved_routes: Extract<Res<crate::route::ImguiResolvedRoutes>>,
     primary_window: Extract<Query<Entity, With<PrimaryWindow>>>,
@@ -26,87 +27,97 @@ pub(super) fn extract_imgui_render_frame(
     viewport_windows: Extract<ViewportWindowQuery<'_>>,
 ) {
     let route_epoch = resolved_routes.epoch();
-
-    if renderer_release.release_requested() {
-        snapshot_mailbox.clear();
-        extracted.clear(output.frame_index(), route_epoch);
-        return;
-    }
-    let Some((frame_index, snapshot)) = snapshot_mailbox.take() else {
-        extracted.clear(output.frame_index(), route_epoch);
-        return;
-    };
-
-    let context_id = snapshot.epoch().context_id();
-    let mut route_snapshots = resolved_routes
-        .render_routes()
+    extracted.begin_extraction(route_epoch, snapshot_mailbox.completion_watermarks());
+    let mut pending = snapshot_mailbox.take_all().into_iter().collect::<Vec<_>>();
+    pending.sort_by_key(|(context_id, _)| context_id.get().get());
+    let pending_contexts = pending
         .iter()
-        .filter(|route| route.context_id() == context_id)
-        .map(|route| ImguiRenderRouteSnapshot {
-            context_id,
-            route_epoch,
-            route_entity: route.route_entity(),
-            camera: route.camera(),
-            order: route.order(),
-            camera_order: route.camera_order(),
-            camera_schedule: route.camera_schedule(),
-            target: route.target().clone(),
-            physical_target_size: [
-                route.target_info().physical_size.x,
-                route.target_info().physical_size.y,
-            ],
-            viewport_id: None,
-            camera_viewport: route.camera_viewport().map(ImguiCameraViewport::from),
-        })
-        .collect::<Vec<_>>();
-
-    if backend_status.multi_viewport_supported {
-        let primary_window = primary_window.single().ok();
-        route_snapshots.extend(viewport_cameras.iter().filter_map(
-            |(camera_entity, camera, target, camera_graph, viewport_camera)| {
-                if !camera.is_active
-                    || !matches!(camera.output_mode, CameraOutputMode::Write { .. })
-                {
-                    return None;
-                }
-                let camera_schedule = camera_graph.0;
-                if camera_schedule != Core2d.intern() && camera_schedule != Core3d.intern() {
-                    return None;
-                }
-                let target = target.normalize(primary_window)?;
-                let NormalizedRenderTarget::Window(window) = &target else {
-                    return None;
-                };
-                let Ok((window, viewport_window)) = viewport_windows.get(window.entity()) else {
-                    return None;
-                };
-                if viewport_window.viewport_id != viewport_camera.viewport_id {
-                    return None;
-                }
-                let physical_target_size = window.physical_size();
-                let mut camera_viewport = camera.viewport.clone();
-                if let Some(viewport) = &mut camera_viewport {
-                    viewport.clamp_to_size(physical_target_size);
-                }
-                Some(ImguiRenderRouteSnapshot {
-                    context_id,
-                    route_epoch,
-                    route_entity: None,
-                    camera: camera_entity,
-                    order: 0,
-                    camera_order: camera.order,
-                    camera_schedule,
-                    target,
-                    physical_target_size: [physical_target_size.x, physical_target_size.y],
-                    viewport_id: Some(viewport_camera.viewport_id),
-                    camera_viewport: camera_viewport.as_ref().map(ImguiCameraViewport::from),
-                })
-            },
-        ));
+        .map(|(context_id, _)| *context_id)
+        .collect::<HashSet<_>>();
+    let mut main_routes = HashMap::<imgui::ContextId, Vec<_>>::new();
+    for route in resolved_routes.render_routes() {
+        if !pending_contexts.contains(&route.context_id()) {
+            continue;
+        }
+        main_routes
+            .entry(route.context_id())
+            .or_default()
+            .push(ImguiRenderRouteSnapshot {
+                context_id: route.context_id(),
+                route_epoch,
+                route_entity: route.route_entity(),
+                camera: route.camera(),
+                order: route.order(),
+                camera_order: route.camera_order(),
+                camera_schedule: route.camera_schedule(),
+                target: route.target().clone(),
+                physical_target_size: [
+                    route.target_info().physical_size.x,
+                    route.target_info().physical_size.y,
+                ],
+                viewport_id: None,
+                camera_viewport: route.camera_viewport().map(ImguiCameraViewport::from),
+            });
     }
 
-    route_snapshots.sort_by_key(|route| (route.viewport_id.is_some(), route.order, route.camera));
-    extracted.replace(frame_index, snapshot, route_epoch, route_snapshots);
+    for (context_id, frame) in pending {
+        if renderer_releases.release_requested(context_id) {
+            drop(frame);
+            continue;
+        }
+
+        let mut route_snapshots = main_routes.remove(&context_id).unwrap_or_default();
+
+        if frame.include_platform_viewports && backend_status.multi_viewport_supported {
+            let primary_window = primary_window.single().ok();
+            route_snapshots.extend(viewport_cameras.iter().filter_map(
+                |(camera_entity, camera, target, camera_graph, viewport_camera)| {
+                    if !camera.is_active
+                        || !matches!(camera.output_mode, CameraOutputMode::Write { .. })
+                    {
+                        return None;
+                    }
+                    let camera_schedule = camera_graph.0;
+                    if camera_schedule != Core2d.intern() && camera_schedule != Core3d.intern() {
+                        return None;
+                    }
+                    let target = target.normalize(primary_window)?;
+                    let NormalizedRenderTarget::Window(window) = &target else {
+                        return None;
+                    };
+                    let Ok((window, viewport_window)) = viewport_windows.get(window.entity())
+                    else {
+                        return None;
+                    };
+                    if viewport_window.viewport_id != viewport_camera.viewport_id {
+                        return None;
+                    }
+                    let physical_target_size = window.physical_size();
+                    let mut camera_viewport = camera.viewport.clone();
+                    if let Some(viewport) = &mut camera_viewport {
+                        viewport.clamp_to_size(physical_target_size);
+                    }
+                    Some(ImguiRenderRouteSnapshot {
+                        context_id,
+                        route_epoch,
+                        route_entity: None,
+                        camera: camera_entity,
+                        order: 0,
+                        camera_order: camera.order,
+                        camera_schedule,
+                        target,
+                        physical_target_size: [physical_target_size.x, physical_target_size.y],
+                        viewport_id: Some(viewport_camera.viewport_id),
+                        camera_viewport: camera_viewport.as_ref().map(ImguiCameraViewport::from),
+                    })
+                },
+            ));
+        }
+
+        route_snapshots
+            .sort_by_key(|route| (route.viewport_id.is_some(), route.order, route.camera));
+        extracted.replace(context_id, frame, route_snapshots);
+    }
 }
 
 pub(super) fn resolve_extracted_imgui_render_routes(
@@ -120,68 +131,72 @@ pub(super) fn resolve_extracted_imgui_render_routes(
     diagnostics: Res<crate::route::ImguiDiagnostics>,
 ) {
     let route_epoch = extracted.route_epoch();
-    let route_snapshots = extracted.route_snapshots().to_vec();
-    let mut camera_targets = Vec::with_capacity(route_snapshots.len());
+    let mut context_ids = extracted.context_ids().collect::<Vec<_>>();
+    context_ids.sort_by_key(|context_id| context_id.get().get());
     let mut route_diagnostics = Vec::new();
 
-    for route in route_snapshots {
-        let mut matching_views = views
-            .iter()
-            .filter(|(view, _, _, _)| view.retained_view_entity.main_entity.id() == route.camera);
-        let Some((view, camera, texture_usages, msaa)) = matching_views.next() else {
-            route_diagnostics.push(extraction_diagnostic(
-                &route,
-                crate::route::ImguiDiagnosticKind::MissingExtractedView,
-            ));
-            continue;
-        };
-        let diagnostic_kind = if matching_views.next().is_some() {
-            Some(crate::route::ImguiDiagnosticKind::StaleExtractedView)
-        } else if !matches!(camera.output_mode, CameraOutputMode::Write { .. }) {
-            Some(crate::route::ImguiDiagnosticKind::CameraDoesNotWrite)
-        } else if camera.schedule != route.camera_schedule
-            || (camera.schedule != Core2d.intern() && camera.schedule != Core3d.intern())
-        {
-            Some(crate::route::ImguiDiagnosticKind::UnsupportedCameraSchedule)
-        } else if !extracted_view_matches_route(&route, view, camera)
-            || !texture_usages.0.contains(TextureUsages::RENDER_ATTACHMENT)
-        {
-            Some(crate::route::ImguiDiagnosticKind::StaleExtractedView)
-        } else {
-            None
-        };
-        if let Some(kind) = diagnostic_kind {
-            route_diagnostics.push(extraction_diagnostic(&route, kind));
-            continue;
+    for context_id in context_ids {
+        let route_snapshots = extracted.route_snapshots(context_id).to_vec();
+        let mut camera_targets = Vec::with_capacity(route_snapshots.len());
+        for route in route_snapshots {
+            let mut matching_views = views.iter().filter(|(view, _, _, _)| {
+                view.retained_view_entity.main_entity.id() == route.camera
+            });
+            let Some((view, camera, texture_usages, msaa)) = matching_views.next() else {
+                route_diagnostics.push(extraction_diagnostic(
+                    &route,
+                    crate::route::ImguiDiagnosticKind::MissingExtractedView,
+                ));
+                continue;
+            };
+            let diagnostic_kind = if matching_views.next().is_some() {
+                Some(crate::route::ImguiDiagnosticKind::StaleExtractedView)
+            } else if !matches!(camera.output_mode, CameraOutputMode::Write { .. }) {
+                Some(crate::route::ImguiDiagnosticKind::CameraDoesNotWrite)
+            } else if camera.schedule != route.camera_schedule
+                || (camera.schedule != Core2d.intern() && camera.schedule != Core3d.intern())
+            {
+                Some(crate::route::ImguiDiagnosticKind::UnsupportedCameraSchedule)
+            } else if !extracted_view_matches_route(&route, view, camera)
+                || !texture_usages.0.contains(TextureUsages::RENDER_ATTACHMENT)
+            {
+                Some(crate::route::ImguiDiagnosticKind::StaleExtractedView)
+            } else {
+                None
+            };
+            if let Some(kind) = diagnostic_kind {
+                route_diagnostics.push(extraction_diagnostic(&route, kind));
+                continue;
+            }
+
+            camera_targets.push(ImguiCameraTarget {
+                context_id: route.context_id,
+                route_epoch,
+                camera: route.camera,
+                view: view.retained_view_entity,
+                order: route.order,
+                camera_order: route.camera_order,
+                camera_schedule: route.camera_schedule,
+                target: route.target,
+                target_format: view.target_format,
+                texture_usages: texture_usages.0,
+                msaa: *msaa,
+                physical_target_size: route.physical_target_size,
+                viewport_id: route.viewport_id,
+                camera_viewport: route.camera_viewport,
+            });
         }
 
-        camera_targets.push(ImguiCameraTarget {
-            context_id: route.context_id,
-            route_epoch,
-            camera: route.camera,
-            view: view.retained_view_entity,
-            order: route.order,
-            camera_order: route.camera_order,
-            camera_schedule: route.camera_schedule,
-            target: route.target,
-            target_format: view.target_format,
-            texture_usages: texture_usages.0,
-            msaa: *msaa,
-            physical_target_size: route.physical_target_size,
-            viewport_id: route.viewport_id,
-            camera_viewport: route.camera_viewport,
+        camera_targets.sort_by_key(|target| {
+            (
+                target.camera,
+                target.order,
+                target.context_id.get().get(),
+                target.viewport_id.is_some(),
+            )
         });
+        extracted.replace_camera_targets(context_id, camera_targets);
     }
-
-    camera_targets.sort_by_key(|target| {
-        (
-            target.camera,
-            target.order,
-            target.context_id.get().get(),
-            target.viewport_id.is_some(),
-        )
-    });
-    extracted.replace_camera_targets(camera_targets);
     diagnostics.replace(
         crate::route::ImguiDiagnosticOrigin::RenderExtraction,
         route_epoch,
