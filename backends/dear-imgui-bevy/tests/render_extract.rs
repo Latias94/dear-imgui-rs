@@ -680,7 +680,9 @@ fn renderer_pipeline_resources_and_descriptors_are_installed() {
     let pipeline = render_world.resource::<ImguiRenderPipeline>();
     let descriptor = pipeline.specialize(ImguiPipelineKey {
         target_format: TextureFormat::Rgba8UnormSrgb,
-        sample_count: 4,
+    });
+    let hdr_descriptor = pipeline.specialize(ImguiPipelineKey {
+        target_format: TextureFormat::Rgba16Float,
     });
 
     assert_eq!(descriptor.layout.len(), 2);
@@ -700,7 +702,15 @@ fn renderer_pipeline_resources_and_descriptors_are_installed() {
         Some(IMGUI_VERTEX_ENTRY_POINT)
     );
     assert_eq!(descriptor.vertex.buffers.len(), 1);
-    assert_eq!(descriptor.multisample.count, 4);
+    assert_eq!(descriptor.multisample.count, 1);
+    assert_eq!(
+        hdr_descriptor.fragment.as_ref().unwrap().targets[0]
+            .as_ref()
+            .unwrap()
+            .format,
+        TextureFormat::Rgba16Float,
+        "target format must remain part of pipeline specialization"
+    );
 
     let fragment = descriptor
         .fragment

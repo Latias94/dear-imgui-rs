@@ -861,7 +861,7 @@ jobs:
           libasound2-dev
           libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev
           libxkbcommon-dev libwayland-dev libudev-dev
-          mesa-common-dev libgl1-mesa-dev cmake
+          mesa-common-dev mesa-vulkan-drivers libgl1-mesa-dev cmake
 
       - name: Add wasm32 target
         run: rustup target add --toolchain stable wasm32-unknown-unknown
@@ -895,6 +895,13 @@ jobs:
 
       - name: Run Bevy backend tests
         run: cargo +stable nextest run -p dear-imgui-bevy --features render
+
+      - name: Run Bevy GPU composition tests
+        run: cargo +stable nextest run -p dear-imgui-bevy --features render,bevy-ui --test render_composition
+        env:
+          DEAR_IMGUI_BEVY_GPU_TESTS: "1"
+          WGPU_BACKEND: vulkan
+          WGPU_FORCE_FALLBACK_ADAPTER: "1"
 
       - name: Check Bevy backend native multi-viewport platform bridge
         run: cargo +stable check -p dear-imgui-bevy --features multi-viewport

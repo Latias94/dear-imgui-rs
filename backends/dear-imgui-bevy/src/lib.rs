@@ -68,19 +68,41 @@ const NATIVE_PLATFORM_TARGET: bool = !cfg!(target_arch = "wasm32");
 #[derive(Debug, Clone, Default)]
 pub struct ImguiPlugin {
     config: ImguiBackendConfig,
+    #[cfg(feature = "render")]
+    ui_render_order: render::ImguiUiRenderOrder,
 }
 
 impl ImguiPlugin {
     /// Create a plugin with explicit backend configuration.
     #[must_use]
     pub fn new(config: ImguiBackendConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            ..Self::default()
+        }
     }
 
     /// Borrow the plugin configuration.
     #[must_use]
     pub fn config(&self) -> &ImguiBackendConfig {
         &self.config
+    }
+
+    /// Configure whether Dear ImGui or Bevy UI is drawn on top for the same camera.
+    ///
+    /// This setting takes effect when the `bevy-ui` Cargo feature is enabled.
+    #[cfg(feature = "render")]
+    #[must_use]
+    pub fn with_ui_render_order(mut self, order: render::ImguiUiRenderOrder) -> Self {
+        self.ui_render_order = order;
+        self
+    }
+
+    /// Return the configured Dear ImGui/Bevy UI draw order.
+    #[cfg(feature = "render")]
+    #[must_use]
+    pub fn ui_render_order(&self) -> render::ImguiUiRenderOrder {
+        self.ui_render_order
     }
 }
 
@@ -106,7 +128,8 @@ impl Plugin for ImguiPlugin {
             render_integration_available,
         );
         #[cfg(feature = "render")]
-        let render_integration_installed = render::install_render_extraction(app);
+        let render_integration_installed =
+            render::install_render_extraction(app, self.ui_render_order);
         #[cfg(not(feature = "render"))]
         let render_integration_installed = false;
         debug_assert_eq!(render_integration_installed, render_integration_available);
@@ -117,7 +140,8 @@ impl Plugin for ImguiPlugin {
     fn finish(&self, _app: &mut App) {
         #[cfg(feature = "render")]
         {
-            let render_integration_installed = render::install_render_extraction(_app);
+            let render_integration_installed =
+                render::install_render_extraction(_app, self.ui_render_order);
             refresh_backend_status(_app, render_integration_installed);
         }
     }

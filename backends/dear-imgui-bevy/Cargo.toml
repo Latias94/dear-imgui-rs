@@ -38,12 +38,13 @@ bevy_render = { version = "=0.19.0", default-features = false, optional = true }
 bevy_shader = { version = "=0.19.0", default-features = false, optional = true }
 bevy_tasks = { version = "=0.19.0", default-features = false }
 bevy_time = { version = "=0.19.0", default-features = false, features = ["std"] }
+bevy_ui_render = { version = "=0.19.0", default-features = false, optional = true }
 bevy_utils = { version = "=0.19.0", default-features = false }
 bevy_winit = { version = "=0.19.0", default-features = false, features = ["x11"], optional = true }
 bytemuck = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
-bevy = { version = "=0.19.0", default-features = false, features = ["2d", "default_platform"] }
+bevy = { version = "=0.19.0", default-features = false, features = ["2d", "default_platform", "ui"] }
 dear-imguizmo.workspace = true
 dear-imnodes.workspace = true
 dear-implot.workspace = true
@@ -66,6 +67,8 @@ render = [
     "dep:bevy_shader",
     "dep:bytemuck",
 ]
+# Orders Dear ImGui explicitly against Bevy UI on cameras that render both layers.
+bevy-ui = ["render", "dep:bevy_ui_render"]
 
 [[example]]
 name = "simple"
