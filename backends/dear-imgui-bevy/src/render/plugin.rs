@@ -1,6 +1,8 @@
 //! Render-world plugin installation and Dear ImGui callback ownership.
 
-use super::extract::{extract_imgui_bevy_textures, extract_imgui_render_frame};
+use super::extract::{
+    extract_imgui_bevy_textures, extract_imgui_render_frame, resolve_extracted_imgui_render_routes,
+};
 use super::pass::{ensure_presentable_window_outputs, render_imgui_overlay};
 use super::pipeline::queue_imgui_pipelines;
 use super::prepare::{
@@ -56,6 +58,10 @@ pub(crate) fn install_render_extraction(
         .world()
         .resource::<crate::context::ImguiFrameMailbox>()
         .clone();
+    let diagnostics = app
+        .world()
+        .resource::<crate::route::ImguiDiagnostics>()
+        .clone();
 
     if app.get_sub_app_mut(RenderApp).is_none() {
         return false;
@@ -98,6 +104,7 @@ pub(crate) fn install_render_extraction(
         .init_gpu_resource::<ImguiPipelineGpuResources>()
         .insert_resource(snapshot_mailbox)
         .insert_resource(renderer_release)
+        .insert_resource(diagnostics)
         .insert_resource(ImguiRenderExtractionInstalled)
         .add_systems(
             ExtractSchedule,
@@ -105,7 +112,11 @@ pub(crate) fn install_render_extraction(
         )
         .add_systems(
             Render,
-            (prepare_imgui_render_frame, queue_imgui_pipelines)
+            (
+                resolve_extracted_imgui_render_routes,
+                prepare_imgui_render_frame,
+                queue_imgui_pipelines,
+            )
                 .chain()
                 .in_set(RenderSystems::Queue),
         )

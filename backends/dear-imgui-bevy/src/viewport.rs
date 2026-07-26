@@ -14,6 +14,12 @@ use bevy_app::{Last, PreUpdate};
 use bevy_camera::{
     Camera, Camera2d, CameraOutputMode, ClearColorConfig, RenderTarget, visibility::RenderLayers,
 };
+#[cfg(all(
+    feature = "render",
+    feature = "multi-viewport",
+    not(target_arch = "wasm32")
+))]
+use bevy_core_pipeline::Core2d;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_ecs::message::MessageReader;
 use bevy_ecs::prelude::*;
@@ -22,6 +28,12 @@ use bevy_ecs::schedule::{ApplyDeferred, IntoScheduleConfigs};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_ecs::system::SystemParam;
 use bevy_math::IVec2;
+#[cfg(all(
+    feature = "render",
+    feature = "multi-viewport",
+    not(target_arch = "wasm32")
+))]
+use bevy_render::camera::CameraRenderGraph;
 #[cfg(all(
     feature = "render",
     feature = "multi-viewport",
@@ -475,6 +487,20 @@ impl ImguiViewportBridgeShared {
     fn record_runtime_contract(&self, context: &mut imgui::Context) {
         let binding = context.binding();
         binding.with_bound_context(|| self.record_runtime_contract_raw(context.as_raw()));
+    }
+
+    fn record_owned_platform_name(&self, context: &mut imgui::Context) {
+        let binding = context.binding();
+        binding.with_bound_context(|| {
+            let Some(mut runtime_contract) = self.runtime_contract.get() else {
+                panic!("Dear ImGui viewport runtime contract was unavailable");
+            };
+            let Some(io) = (unsafe { sys::igGetIO_ContextPtr(context.as_raw()).as_ref() }) else {
+                panic!("Dear ImGui viewport runtime contract lost its IO");
+            };
+            runtime_contract.backend_platform_name = io.BackendPlatformName;
+            self.runtime_contract.set(Some(runtime_contract));
+        });
     }
 
     fn record_runtime_contract_raw(&self, context_raw: *mut sys::ImGuiContext) {
@@ -1712,11 +1738,11 @@ fn platform_callback_ownership_raw(
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-pub(crate) fn record_platform_runtime_contract(
+pub(crate) fn record_owned_platform_name(
     context: &mut imgui::Context,
     keepalive: &ImguiViewportBridgeKeepalive,
 ) {
-    keepalive.record_runtime_contract(context);
+    keepalive.record_owned_platform_name(context);
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -3043,8 +3069,8 @@ fn ensure_viewport_camera(
             Camera2d,
             viewport_camera(transparent, flags),
             RenderTarget::Window(WindowRef::Entity(window_entity)),
+            CameraRenderGraph::new(Core2d),
             RenderLayers::none(),
-            crate::render::ImguiOverlayCamera,
             ImguiViewportCamera { viewport_id },
         ))
         .id();
@@ -4120,6 +4146,68 @@ mod tests {
         assert_eq!(unsafe { *actual.Data }, monitor);
         let _ = detach_owned_bridge(&mut context, &keepalive);
         unsafe { context.platform_io_mut().set_monitors(&[]) };
+    }
+
+    #[test]
+    fn owned_platform_name_rebase_preserves_every_other_runtime_contract_field() {
+        let mut context = imgui::Context::create();
+        let bridge = ImguiViewportBridge::default();
+        let keepalive = bridge.keepalive();
+        unsafe { install_owned_platform_callbacks(&mut context, &keepalive).unwrap() };
+
+        let before = keepalive
+            .runtime_contract
+            .get()
+            .expect("callback installation records a runtime contract");
+        context.set_platform_name(Some("dear-imgui-bevy")).unwrap();
+        keepalive.record_owned_platform_name(&mut context);
+        let after = keepalive
+            .runtime_contract
+            .get()
+            .expect("rebasing the owned name retains a runtime contract");
+
+        assert_ne!(
+            before.backend_platform_name, after.backend_platform_name,
+            "the backend name write must replace only its own baseline"
+        );
+        assert_eq!(
+            (
+                before.backend_platform_user_data,
+                before.owned_flags,
+                before.main_viewport_platform_user_data,
+                before.main_viewport_platform_handle,
+                before.main_viewport_platform_handle_raw,
+            ),
+            (
+                after.backend_platform_user_data,
+                after.owned_flags,
+                after.main_viewport_platform_user_data,
+                after.main_viewport_platform_handle,
+                after.main_viewport_platform_handle_raw,
+            ),
+            "rebasing the backend name must not accept unrelated platform drift"
+        );
+        assert_eq!(
+            platform_callback_ownership(&mut context, &keepalive),
+            Ok(())
+        );
+
+        let foreign_handle = std::ptr::dangling_mut::<u16>().cast::<c_void>();
+        unsafe {
+            (*context.main_viewport().as_raw_mut()).PlatformHandle = foreign_handle;
+        }
+        assert_eq!(
+            platform_callback_ownership(&mut context, &keepalive),
+            Err(ImguiViewportCallbackOwnershipError::ViewportFieldReplaced {
+                field: "PlatformHandle",
+            })
+        );
+
+        unsafe {
+            (*context.main_viewport().as_raw_mut()).PlatformHandle = std::ptr::null_mut();
+        }
+        let _ = detach_owned_bridge(&mut context, &keepalive);
+        context.set_platform_name::<String>(None).unwrap();
     }
 
     #[test]

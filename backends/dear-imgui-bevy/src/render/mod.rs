@@ -8,14 +8,16 @@
 use bevy_app::App;
 use bevy_asset::{Assets, Handle, uuid_handle};
 use bevy_camera::{
-    Camera, CameraOutputMode, ClearColor, ClearColorConfig, CompositingSpace,
-    NormalizedRenderTarget, RenderTarget, Viewport,
+    Camera, CameraMainTextureUsages, CameraOutputMode, ClearColor, ClearColorConfig,
+    CompositingSpace, NormalizedRenderTarget, RenderTarget, Viewport,
 };
 use bevy_core_pipeline::{Core2d, Core2dSystems, Core3d, Core3dSystems, upscaling::upscaling};
 use bevy_ecs::entity::ContainsEntity;
 use bevy_ecs::prelude::*;
+use bevy_ecs::schedule::ScheduleLabel;
 use bevy_ecs::system::SystemParam;
 use bevy_image::Image;
+use bevy_math::{UVec2, UVec4};
 use bevy_mesh::VertexBufferLayout;
 use bevy_render::{
     Extract, ExtractSchedule, GpuResourceAppExt, Render, RenderApp, RenderSystems,
@@ -39,10 +41,10 @@ use bevy_render::{
         RenderContext, RenderDevice, RenderGraph, RenderGraphSystems, RenderQueue, ViewQuery,
     },
     texture::GpuImage,
-    view::{ExtractedView, ExtractedWindows, ViewTarget},
+    view::{ExtractedView, ExtractedWindows, Msaa, RetainedViewEntity, ViewTarget},
 };
 use bevy_shader::Shader;
-use bevy_window::PrimaryWindow;
+use bevy_window::{PrimaryWindow, Window};
 use bytemuck::{Pod, Zeroable};
 use dear_imgui_rs as imgui;
 use imgui::render::{DrawCmdSnapshot, DrawIdx, SnapshotTextureId, TextureBinding};
@@ -51,7 +53,7 @@ use std::mem::size_of;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 pub use crate::texture::ImguiBevyTextures;
-use crate::{ImguiBackendStatus, ImguiViewportWindow};
+use crate::{ImguiBackendStatus, ImguiViewportCamera, ImguiViewportWindow};
 
 mod extract;
 mod pass;
@@ -80,17 +82,20 @@ pub use resources::{
     ImguiScissorRect, ImguiTextureBindGroupError, ImguiTextureBindGroups,
 };
 
-type OverlayCameraQuery<'w> = Query<
+type ViewportCameraQuery<'w> = Query<
     'w,
     'w,
     (
         Entity,
         &'w Camera,
         &'w RenderTarget,
-        Option<&'w ImguiOverlayCamera>,
-        Option<&'w ImguiOverlayDisabled>,
+        &'w bevy_render::camera::CameraRenderGraph,
+        &'w ImguiViewportCamera,
     ),
 >;
+
+type ViewportWindowQuery<'w> =
+    Query<'w, 'w, (&'w Window, &'w ImguiViewportWindow), With<ImguiViewportWindow>>;
 
 const COPY_BYTES_PER_ROW_ALIGNMENT: u32 = 256;
 const MANAGED_TEXTURE_NAMESPACE: u64 = 0x4000_0000_0000_0000;
@@ -484,7 +489,7 @@ mod tests {
         let feedback = user_texture_request(&create, texture)
             .uploaded(renderer_texture)
             .unwrap();
-        extracted.replace(1, create, Vec::new());
+        extracted.replace(1, create, 0, Vec::new());
         extracted.extend_texture_feedback([feedback]);
         extracted.commit();
         let progress = context.poll_snapshot_completions().unwrap();
@@ -510,7 +515,7 @@ mod tests {
         let feedback = user_texture_request(&update, texture)
             .uploaded(renderer_texture)
             .unwrap();
-        extracted.replace(2, update, Vec::new());
+        extracted.replace(2, update, 0, Vec::new());
         extracted.extend_texture_feedback([feedback]);
         extracted.commit();
         let progress = context.poll_snapshot_completions().unwrap();
@@ -524,7 +529,7 @@ mod tests {
             imgui::render::snapshot::TextureRequestKind::Destroy
         );
         let feedback = user_texture_request(&destroy, texture).destroyed().unwrap();
-        extracted.replace(3, destroy, Vec::new());
+        extracted.replace(3, destroy, 0, Vec::new());
         extracted.extend_texture_feedback([feedback]);
         extracted.commit();
         let progress = context.poll_snapshot_completions().unwrap();
@@ -553,8 +558,8 @@ mod tests {
         let second = managed_snapshot(&mut context, &consumer, None);
         let mut extracted = ImguiExtractedRenderFrame::default();
 
-        extracted.replace(1, first, Vec::new());
-        extracted.replace(2, second, Vec::new());
+        extracted.replace(1, first, 0, Vec::new());
+        extracted.replace(2, second, 0, Vec::new());
         extracted.commit();
 
         let progress = context.poll_snapshot_completions().unwrap();
@@ -585,10 +590,10 @@ mod tests {
         mailbox.publish(1, first);
         mailbox.publish(2, second);
         let (frame_index, second) = mailbox.take().unwrap();
-        extracted.replace(frame_index, second, Vec::new());
+        extracted.replace(frame_index, second, 0, Vec::new());
         mailbox.publish(3, third);
         let (frame_index, third) = mailbox.take().unwrap();
-        extracted.replace(frame_index, third, Vec::new());
+        extracted.replace(frame_index, third, 0, Vec::new());
         extracted.commit();
 
         let progress = context.poll_snapshot_completions().unwrap();
@@ -604,7 +609,7 @@ mod tests {
         let consumer = context.create_renderer_consumer().unwrap();
         let snapshot = managed_snapshot(&mut context, &consumer, None);
         let mut extracted = ImguiExtractedRenderFrame::default();
-        extracted.replace(1, snapshot, Vec::new());
+        extracted.replace(1, snapshot, 0, Vec::new());
 
         drop(extracted);
 
@@ -811,18 +816,7 @@ mod tests {
                 ],
             }],
         };
-        let targets = [ImguiCameraTarget {
-            camera,
-            order: 0,
-            target: NormalizedRenderTarget::Window(
-                bevy_window::WindowRef::Entity(camera)
-                    .normalize(None)
-                    .expect("entity window target should normalize"),
-            ),
-            viewport_id: None,
-            camera_viewport: None,
-            explicit: false,
-        }];
+        let targets = [camera_target_for_test(camera, None)];
 
         let (_, _, draws, _) = prepare_draw_data(&draw, &[], &targets);
 
@@ -874,18 +868,7 @@ mod tests {
                 },
             ],
         };
-        let targets = [ImguiCameraTarget {
-            camera,
-            order: 0,
-            target: NormalizedRenderTarget::Window(
-                bevy_window::WindowRef::Entity(camera)
-                    .normalize(None)
-                    .expect("entity window target should normalize"),
-            ),
-            viewport_id: None,
-            camera_viewport: None,
-            explicit: false,
-        }];
+        let targets = [camera_target_for_test(camera, None)];
 
         let (_, _, draws, _) = prepare_draw_data(&draw, &[], &targets);
 
@@ -940,18 +923,7 @@ mod tests {
                 ],
             }],
         };
-        let targets = [ImguiCameraTarget {
-            camera,
-            order: 0,
-            target: NormalizedRenderTarget::Window(
-                bevy_window::WindowRef::Entity(camera)
-                    .normalize(None)
-                    .expect("entity window target should normalize"),
-            ),
-            viewport_id: None,
-            camera_viewport: None,
-            explicit: false,
-        }];
+        let targets = [camera_target_for_test(camera, None)];
 
         let (_, _, draws, _) = prepare_draw_data(&draw, &[], &targets);
 
@@ -1023,8 +995,19 @@ mod tests {
     fn render_pass_scissor_is_clamped_to_real_render_target_size() {
         let scissor = scissor_for_render_pass(
             &ImguiPreparedDraw {
+                context_id: test_context_id(),
+                route_epoch: 0,
                 camera: Entity::from_raw_u32(13).expect("test entity index should be valid"),
+                view: RetainedViewEntity::new(
+                    Entity::from_raw_u32(13)
+                        .expect("test entity index should be valid")
+                        .into(),
+                    None,
+                    0,
+                ),
                 order: 0,
+                camera_order: 0,
+                camera_schedule: Core2d.intern(),
                 target: NormalizedRenderTarget::Window(
                     bevy_window::WindowRef::Entity(
                         Entity::from_raw_u32(14).expect("test entity index should be valid"),
@@ -1032,6 +1015,10 @@ mod tests {
                     .normalize(None)
                     .expect("entity window target should normalize"),
                 ),
+                target_format: TextureFormat::Rgba8UnormSrgb,
+                texture_usages: TextureUsages::RENDER_ATTACHMENT,
+                msaa: Msaa::Off,
+                physical_target_size: [570, 390],
                 viewport_id: Some(imgui::Id::from(0x570)),
                 texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
                 sampler: ImguiSampler::Linear,
@@ -1072,22 +1059,14 @@ mod tests {
             draw_lists: vec![draw_list_for_test()],
         };
         let target = ImguiCameraTarget {
-            camera,
-            order: 0,
-            target: NormalizedRenderTarget::Window(
-                bevy_window::WindowRef::Entity(camera)
-                    .normalize(None)
-                    .expect("entity window target should normalize"),
-            ),
-            viewport_id: None,
             camera_viewport: Some(ImguiCameraViewport {
                 physical_position: [640, 0],
                 physical_size: [640, 720],
             }),
-            explicit: true,
+            ..camera_target_for_test(camera, None)
         };
 
-        let (_, _, draws, uniforms_by_camera) = prepare_draw_data(&draw, &[], &[target]);
+        let (_, _, draws, uniforms_by_view) = prepare_draw_data(&draw, &[], &[target]);
 
         assert_eq!(draws.len(), 1);
         assert_eq!(
@@ -1106,7 +1085,9 @@ mod tests {
             "commands outside the camera viewport are clipped instead of scaled into it"
         );
         assert_eq!(
-            uniforms_by_camera.get(&camera).copied(),
+            uniforms_by_view
+                .get(&RetainedViewEntity::new(camera.into(), None, 0))
+                .copied(),
             Some(ImguiUniforms::from_display_rect(
                 [320.0, 0.0],
                 [320.0, 360.0]
@@ -1140,12 +1121,20 @@ mod tests {
             camera_target_for_test(secondary_camera, Some(secondary_viewport)),
         ];
 
-        let (_, _, draws, uniforms_by_camera) = prepare_draw_data(&draw, &viewports, &targets);
+        let (_, _, draws, uniforms_by_view) = prepare_draw_data(&draw, &viewports, &targets);
 
         assert_eq!(draws.len(), 1);
         assert_eq!(draws[0].camera, secondary_camera);
-        assert!(!uniforms_by_camera.contains_key(&primary_camera));
-        assert!(uniforms_by_camera.contains_key(&secondary_camera));
+        assert!(!uniforms_by_view.contains_key(&RetainedViewEntity::new(
+            primary_camera.into(),
+            None,
+            0
+        )));
+        assert!(uniforms_by_view.contains_key(&RetainedViewEntity::new(
+            secondary_camera.into(),
+            None,
+            0
+        )));
     }
 
     #[test]
@@ -1624,16 +1613,28 @@ mod tests {
 
     fn camera_target_for_test(camera: Entity, viewport_id: Option<imgui::Id>) -> ImguiCameraTarget {
         ImguiCameraTarget {
+            context_id: test_context_id(),
+            route_epoch: 0,
             camera,
+            view: RetainedViewEntity::new(camera.into(), None, 0),
             order: 0,
+            camera_order: 0,
+            camera_schedule: Core2d.intern(),
             target: NormalizedRenderTarget::Window(
                 bevy_window::WindowRef::Entity(camera)
                     .normalize(None)
                     .expect("entity window target should normalize"),
             ),
+            target_format: TextureFormat::Rgba8UnormSrgb,
+            texture_usages: TextureUsages::RENDER_ATTACHMENT,
+            msaa: Msaa::Off,
+            physical_target_size: [64, 64],
             viewport_id,
             camera_viewport: None,
-            explicit: false,
         }
+    }
+
+    fn test_context_id() -> imgui::ContextId {
+        imgui::SuspendedContext::create().id()
     }
 }

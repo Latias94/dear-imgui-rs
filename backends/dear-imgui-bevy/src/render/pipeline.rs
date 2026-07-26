@@ -290,24 +290,28 @@ pub(super) fn queue_imgui_pipelines(
     mut pipelines: ResMut<SpecializedRenderPipelines<ImguiRenderPipeline>>,
     mut queued: ResMut<ImguiQueuedPipelines>,
 ) {
-    queued.by_camera.clear();
+    queued.by_view.clear();
 
     let Some(pipeline_cache) = pipeline_cache else {
         return;
     };
 
     for view in &views {
-        let camera = view.retained_view_entity.main_entity.id();
-        if !prepared.draws().iter().any(|draw| draw.camera == camera) {
+        let view_id = view.retained_view_entity;
+        let Some(draw) = prepared
+            .draws()
+            .iter()
+            .find(|draw| draw.view == view_id && draw.target_format == view.target_format)
+        else {
             continue;
-        }
+        };
         let pipeline_id = pipelines.specialize(
             &pipeline_cache,
             &pipeline,
             ImguiPipelineKey {
-                target_format: view.target_format,
+                target_format: draw.target_format,
             },
         );
-        queued.by_camera.insert(camera, pipeline_id);
+        queued.by_view.insert(view_id, pipeline_id);
     }
 }

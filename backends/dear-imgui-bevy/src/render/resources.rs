@@ -8,34 +8,63 @@ use super::*;
 /// Camera/render-target association for an extracted ImGui overlay frame.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ImguiCameraTarget {
+    /// Context whose immutable snapshot is routed to this view.
+    pub context_id: imgui::ContextId,
+    /// Main-world route epoch captured with this target.
+    pub route_epoch: u64,
     /// Main-world camera entity that should receive the ImGui overlay.
     pub camera: Entity,
-    /// Camera order, preserved so the renderer can match Bevy's camera ordering.
+    /// Stable Bevy render-view identity for this camera epoch.
+    pub view: RetainedViewEntity,
+    /// Explicit overlay order among Contexts routed to one view.
     pub order: isize,
+    /// Bevy camera order captured when the route was resolved.
+    pub camera_order: isize,
+    /// Bevy render-graph schedule captured when the route was resolved.
+    pub camera_schedule: bevy_ecs::schedule::InternedScheduleLabel,
     /// Normalized render target resolved from the camera and current primary window.
     pub target: NormalizedRenderTarget,
+    /// Actual main-pass texture format of the extracted Bevy view.
+    pub target_format: TextureFormat,
+    /// Actual usages of the extracted Bevy main-pass texture.
+    pub texture_usages: TextureUsages,
+    /// Actual MSAA mode of the extracted Bevy view.
+    pub msaa: Msaa,
+    /// Physical size of the complete render target.
+    pub physical_target_size: [u32; 2],
     /// Dear ImGui viewport whose draw data should be rendered into this target.
     pub viewport_id: Option<imgui::Id>,
     /// Physical camera viewport to use when rendering this overlay target.
     pub camera_viewport: Option<ImguiCameraViewport>,
-    /// Whether this target was selected from an explicitly marked [`ImguiOverlayCamera`].
-    pub explicit: bool,
 }
 
-/// Marker component for cameras that explicitly receive Dear ImGui overlay rendering.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct ImguiRenderRouteSnapshot {
+    pub(super) context_id: imgui::ContextId,
+    pub(super) route_epoch: u64,
+    pub(super) route_entity: Option<Entity>,
+    pub(super) camera: Entity,
+    pub(super) order: isize,
+    pub(super) camera_order: isize,
+    pub(super) camera_schedule: bevy_ecs::schedule::InternedScheduleLabel,
+    pub(super) target: NormalizedRenderTarget,
+    pub(super) physical_target_size: [u32; 2],
+    pub(super) viewport_id: Option<imgui::Id>,
+    pub(super) camera_viewport: Option<ImguiCameraViewport>,
+}
+
+/// Legacy camera marker retained until the public-surface cleanup.
 ///
-/// If at least one active camera for a render target has this marker, unmarked cameras on that
-/// render target are ignored for ImGui overlay extraction. If no camera on a render target is
-/// marked, the backend keeps its fallback behavior and uses the highest-order active camera for
-/// that target.
+/// This marker no longer affects routing. Use [`crate::route::ImguiRenderRoute`] for explicit
+/// routing; the primary Context uses deterministic `AutoPrimary` routing when no declaration
+/// exists.
 #[derive(Component, Debug, Clone, Copy, Default, Eq, PartialEq)]
 pub struct ImguiOverlayCamera;
 
-/// Marker component for cameras that should not receive Dear ImGui overlay rendering.
+/// Legacy camera marker retained until the public-surface cleanup.
 ///
-/// This is useful for editor shell scene cameras that render to a `Handle<Image>` later shown
-/// inside an ImGui viewport. Without this marker, the global overlay pass would also draw ImGui into
-/// that offscreen scene target.
+/// This marker no longer affects routing. Secondary windows and offscreen targets receive no
+/// automatic route, so they need no opt-out marker.
 #[derive(Component, Debug, Clone, Copy, Default, Eq, PartialEq)]
 pub struct ImguiOverlayDisabled;
 
@@ -79,12 +108,30 @@ pub enum ImguiSampler {
 /// Renderer-ready draw command prepared from an extracted [`FrameSnapshot`](imgui::render::FrameSnapshot).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ImguiPreparedDraw {
+    /// Context that produced this draw command.
+    pub context_id: imgui::ContextId,
+    /// Main-world route epoch captured with this draw command.
+    pub route_epoch: u64,
     /// Main-world camera entity associated with this draw.
     pub camera: Entity,
-    /// Camera order preserved from Bevy extraction.
+    /// Stable Bevy render-view identity associated with this draw.
+    pub view: RetainedViewEntity,
+    /// Explicit overlay order among Contexts routed to one view.
     pub order: isize,
+    /// Bevy camera order captured with the view.
+    pub camera_order: isize,
+    /// Bevy render-graph schedule captured with the view.
+    pub camera_schedule: bevy_ecs::schedule::InternedScheduleLabel,
     /// Normalized render target associated with the camera.
     pub target: NormalizedRenderTarget,
+    /// Actual main-pass texture format associated with the view.
+    pub target_format: TextureFormat,
+    /// Actual main-pass texture usages associated with the view.
+    pub texture_usages: TextureUsages,
+    /// Actual camera MSAA mode associated with the view.
+    pub msaa: Msaa,
+    /// Physical size of the complete render target captured for this route epoch.
+    pub physical_target_size: [u32; 2],
     /// Dear ImGui viewport that produced this draw command.
     pub viewport_id: Option<imgui::Id>,
     /// Texture binding requested by the ImGui draw command.
@@ -108,7 +155,7 @@ pub struct ImguiPreparedDraw {
 pub struct ImguiPreparedRenderFrame {
     frame_index: Option<u64>,
     uniforms: Option<ImguiUniforms>,
-    uniforms_by_camera: HashMap<Entity, ImguiUniforms>,
+    uniforms_by_view: HashMap<RetainedViewEntity, ImguiUniforms>,
     vertices: Vec<ImguiGpuVertex>,
     indices: Vec<DrawIdx>,
     draws: Vec<ImguiPreparedDraw>,
@@ -128,13 +175,10 @@ impl ImguiPreparedRenderFrame {
         self.uniforms
     }
 
-    /// Uniforms for a camera's routed viewport draw data.
+    /// Uniforms for one routed Bevy view.
     #[must_use]
-    pub fn uniforms_for_camera(&self, camera: Entity) -> Option<ImguiUniforms> {
-        self.uniforms_by_camera
-            .get(&camera)
-            .copied()
-            .or(self.uniforms)
+    pub fn uniforms_for_view(&self, view: RetainedViewEntity) -> Option<ImguiUniforms> {
+        self.uniforms_by_view.get(&view).copied().or(self.uniforms)
     }
 
     /// Flattened ImGui vertices for the current extracted frame.
@@ -164,7 +208,7 @@ impl ImguiPreparedRenderFrame {
     pub(super) fn replace(&mut self, frame: PreparedFrameData) {
         self.frame_index = Some(frame.frame_index);
         self.uniforms = frame.uniforms;
-        self.uniforms_by_camera = frame.uniforms_by_camera;
+        self.uniforms_by_view = frame.uniforms_by_view;
         self.vertices = frame.vertices;
         self.indices = frame.indices;
         self.draws = frame.draws;
@@ -174,7 +218,7 @@ impl ImguiPreparedRenderFrame {
     pub(super) fn clear(&mut self, frame_index: Option<u64>) {
         self.frame_index = frame_index;
         self.uniforms = None;
-        self.uniforms_by_camera.clear();
+        self.uniforms_by_view.clear();
         self.vertices.clear();
         self.indices.clear();
         self.draws.clear();
@@ -185,7 +229,7 @@ impl ImguiPreparedRenderFrame {
 pub(super) struct PreparedFrameData {
     pub(super) frame_index: u64,
     pub(super) uniforms: Option<ImguiUniforms>,
-    pub(super) uniforms_by_camera: HashMap<Entity, ImguiUniforms>,
+    pub(super) uniforms_by_view: HashMap<RetainedViewEntity, ImguiUniforms>,
     pub(super) vertices: Vec<ImguiGpuVertex>,
     pub(super) indices: Vec<DrawIdx>,
     pub(super) draws: Vec<ImguiPreparedDraw>,
@@ -269,7 +313,7 @@ pub(super) fn pad_index_buffer_for_copy_alignment(indices: &mut RawBufferVec<Dra
 /// GPU resources shared by all ImGui overlay draws.
 #[derive(Resource)]
 pub struct ImguiPipelineGpuResources {
-    uniforms_by_camera: HashMap<Entity, ImguiCameraUniformResources>,
+    uniforms_by_view: HashMap<RetainedViewEntity, ImguiCameraUniformResources>,
     _fallback_texture: Texture,
     _fallback_view: TextureView,
     fallback_bind_group: BindGroup,
@@ -320,7 +364,7 @@ impl FromWorld for ImguiPipelineGpuResources {
             &sampler,
         );
         Self {
-            uniforms_by_camera: HashMap::new(),
+            uniforms_by_view: HashMap::new(),
             _fallback_texture: fallback_texture,
             _fallback_view: fallback_view,
             fallback_bind_group,
@@ -337,20 +381,20 @@ impl ImguiPipelineGpuResources {
         pipeline_cache: &PipelineCache,
         pipeline: &ImguiRenderPipeline,
     ) {
-        let active_cameras = prepared
+        let active_views = prepared
             .draws()
             .iter()
-            .map(|draw| draw.camera)
+            .map(|draw| draw.view)
             .collect::<std::collections::HashSet<_>>();
-        self.uniforms_by_camera
-            .retain(|camera, _| active_cameras.contains(camera));
+        self.uniforms_by_view
+            .retain(|view, _| active_views.contains(view));
 
-        for camera in active_cameras {
-            let Some(uniforms) = prepared.uniforms_for_camera(camera) else {
+        for view in active_views {
+            let Some(uniforms) = prepared.uniforms_for_view(view) else {
                 continue;
             };
-            let resources = self.uniforms_by_camera.entry(camera).or_insert_with(|| {
-                create_camera_uniform_resources(camera, render_device, pipeline_cache, pipeline)
+            let resources = self.uniforms_by_view.entry(view).or_insert_with(|| {
+                create_camera_uniform_resources(render_device, pipeline_cache, pipeline)
             });
             render_queue.write_buffer(&resources.buffer, 0, bytemuck::bytes_of(&uniforms));
         }
@@ -358,18 +402,18 @@ impl ImguiPipelineGpuResources {
 
     pub(super) fn update_camera_uniforms(
         &self,
-        camera: Entity,
+        view: RetainedViewEntity,
         render_queue: &RenderQueue,
         uniforms: ImguiUniforms,
     ) -> Option<&BindGroup> {
-        let resources = self.uniforms_by_camera.get(&camera)?;
+        let resources = self.uniforms_by_view.get(&view)?;
         render_queue.write_buffer(&resources.buffer, 0, bytemuck::bytes_of(&uniforms));
         Some(&resources.bind_group)
     }
 
     #[must_use]
     pub fn uniform_bind_group_count(&self) -> usize {
-        self.uniforms_by_camera.len()
+        self.uniforms_by_view.len()
     }
 
     pub(super) fn fallback_bind_group(&self) -> &BindGroup {
@@ -378,13 +422,11 @@ impl ImguiPipelineGpuResources {
 }
 
 fn create_camera_uniform_resources(
-    camera: Entity,
     render_device: &RenderDevice,
     pipeline_cache: &PipelineCache,
     pipeline: &ImguiRenderPipeline,
 ) -> ImguiCameraUniformResources {
     let common_layout = pipeline_cache.get_bind_group_layout(pipeline.common_layout());
-    let _ = camera;
     let uniform_buffer = render_device.create_buffer(&BufferDescriptor {
         label: Some("dear_imgui_bevy_uniforms_camera"),
         size: size_of::<ImguiUniforms>() as BufferAddress,
@@ -492,12 +534,6 @@ impl ImguiTextureViewCompatibility {
         };
         self.view_dimension.unwrap_or(default_dimension)
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct ImguiViewportTarget {
-    pub(super) viewport_id: imgui::Id,
-    pub(super) window: Entity,
 }
 
 /// Error returned when external texture registration conflicts with a live managed alias.
@@ -790,29 +826,29 @@ impl ImguiExtractedBevyTextures {
     }
 }
 
-/// Pipeline ids queued for the current render frame, keyed by main-world camera entity.
+/// Pipeline ids queued for the current render frame, keyed by stable Bevy view identity.
 #[derive(Resource, Default)]
 pub struct ImguiQueuedPipelines {
-    pub(super) by_camera: HashMap<Entity, CachedRenderPipelineId>,
+    pub(super) by_view: HashMap<RetainedViewEntity, CachedRenderPipelineId>,
 }
 
 impl ImguiQueuedPipelines {
-    /// Queued pipeline for a main-world camera entity.
+    /// Queued pipeline for one stable Bevy view.
     #[must_use]
-    pub fn get(&self, camera: Entity) -> Option<CachedRenderPipelineId> {
-        self.by_camera.get(&camera).copied()
+    pub fn get(&self, view: RetainedViewEntity) -> Option<CachedRenderPipelineId> {
+        self.by_view.get(&view).copied()
     }
 
     /// Number of queued camera pipelines.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.by_camera.len()
+        self.by_view.len()
     }
 
     /// Whether no camera pipelines are queued.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.by_camera.is_empty()
+        self.by_view.is_empty()
     }
 }
 
@@ -821,6 +857,8 @@ impl ImguiQueuedPipelines {
 pub struct ImguiExtractedRenderFrame {
     frame_index: Option<u64>,
     snapshot: Option<imgui::render::snapshot::FrameSnapshot>,
+    route_epoch: u64,
+    route_snapshots: Vec<ImguiRenderRouteSnapshot>,
     camera_targets: Vec<ImguiCameraTarget>,
     texture_feedback: Vec<imgui::render::snapshot::TextureFeedback>,
     completion_watermark: u64,
@@ -839,6 +877,12 @@ impl ImguiExtractedRenderFrame {
         self.snapshot.as_ref()
     }
 
+    /// Main-world route epoch captured with this frame.
+    #[must_use]
+    pub const fn route_epoch(&self) -> u64 {
+        self.route_epoch
+    }
+
     /// Camera targets associated with the extracted snapshot.
     #[must_use]
     pub fn camera_targets(&self) -> &[ImguiCameraTarget] {
@@ -855,18 +899,31 @@ impl ImguiExtractedRenderFrame {
         &mut self,
         frame_index: u64,
         snapshot: imgui::render::snapshot::FrameSnapshot,
-        camera_targets: Vec<ImguiCameraTarget>,
+        route_epoch: u64,
+        route_snapshots: Vec<ImguiRenderRouteSnapshot>,
     ) {
         self.abandon();
         self.frame_index = Some(frame_index);
         self.snapshot = Some(snapshot);
-        self.camera_targets = camera_targets;
+        self.route_epoch = route_epoch;
+        self.route_snapshots = route_snapshots;
+        self.camera_targets.clear();
     }
 
-    pub(super) fn clear(&mut self, frame_index: u64) {
+    pub(super) fn clear(&mut self, frame_index: u64, route_epoch: u64) {
         self.abandon();
         self.frame_index = (frame_index > 0).then_some(frame_index);
+        self.route_epoch = route_epoch;
+        self.route_snapshots.clear();
         self.camera_targets.clear();
+    }
+
+    pub(super) fn route_snapshots(&self) -> &[ImguiRenderRouteSnapshot] {
+        &self.route_snapshots
+    }
+
+    pub(super) fn replace_camera_targets(&mut self, camera_targets: Vec<ImguiCameraTarget>) {
+        self.camera_targets = camera_targets;
     }
 
     pub(super) fn extend_texture_feedback(

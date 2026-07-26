@@ -43,6 +43,8 @@ use std::ffi::c_void;
 use crate::context::{ImguiContextConfig, ImguiContextError, ImguiContexts};
 #[cfg(feature = "render")]
 use crate::render;
+#[cfg(feature = "render")]
+use crate::route;
 use crate::viewport::ImguiViewportWindowConfig;
 use crate::{BEVY_TARGET_VERSION, RUST_TARGET_VERSION};
 use crate::{input, schedule, viewport};
@@ -106,6 +108,8 @@ impl Plugin for ImguiPlugin {
             ));
         }
         schedule::install_imgui_schedules(app);
+        #[cfg(feature = "render")]
+        route::install_route_resolution(app);
         input::install_input_mapping(app);
         crate::context::install_context_lifecycle(app);
         #[cfg(feature = "render")]
@@ -411,7 +415,7 @@ impl ContextOwner {
             .try_with_active(operation)
     }
 
-    #[cfg(feature = "render")]
+    #[cfg(all(feature = "render", test))]
     pub(crate) fn try_with_active_renderer_context<T, E>(
         &mut self,
         multi_viewport: bool,
@@ -633,11 +637,21 @@ impl ContextOwner {
         config: &ImguiContextConfig,
     ) -> Result<(), ImguiContextError> {
         let ownership = &mut self.backend_ownership;
+        #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+        let viewport_keepalive = match &self.viewport_bridge {
+            ImguiViewportBridgeLifecycle::Attached { keepalive, .. } => Some(keepalive),
+            ImguiViewportBridgeLifecycle::Detached
+            | ImguiViewportBridgeLifecycle::EcsReleasePending(_) => None,
+        };
         self.context
             .as_mut()
             .expect("Context owner must retain its suspended Context")
             .try_with_active(|context| {
                 sync_backend_context_config(context, ownership, backend, config);
+                #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+                if let Some(keepalive) = viewport_keepalive {
+                    viewport::record_owned_platform_name(context, keepalive);
+                }
                 Ok::<_, std::convert::Infallible>(())
             })
             .unwrap_or_else(|never| match never {});

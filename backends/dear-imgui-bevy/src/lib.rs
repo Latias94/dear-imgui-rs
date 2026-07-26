@@ -10,6 +10,9 @@ pub mod schedule;
 pub mod texture;
 pub mod viewport;
 
+#[cfg(feature = "render")]
+pub mod route;
+
 pub use dear_imgui_rs::ContextId;
 
 #[cfg(feature = "render")]

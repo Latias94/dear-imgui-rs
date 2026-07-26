@@ -1,31 +1,42 @@
 #![cfg(feature = "render")]
 
-use bevy_app::App;
+use bevy::prelude::GlobalTransform;
+use bevy_app::{App, Update};
 use bevy_asset::Assets;
-use bevy_camera::{Camera, NormalizedRenderTarget, RenderTarget, Viewport};
+use bevy_camera::{
+    Camera, CameraMainTextureUsages, CameraOutputMode, ClearColorConfig, NormalizedRenderTarget,
+    RenderTarget, Viewport,
+};
+use bevy_core_pipeline::Core2d;
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::ScheduleLabel;
-use bevy_math::UVec2;
+use bevy_math::{Mat4, UVec2, UVec4};
 use bevy_render::{
-    Render, RenderApp,
+    ExtractSchedule, Render, RenderApp,
+    camera::{CameraRenderGraph, ExtractedCamera},
     extract_plugin::ExtractPlugin,
     render_resource::{
         BindGroupLayoutEntry, BindingType, BlendState, SamplerBindingType,
-        SpecializedRenderPipeline, TextureFormat,
+        SpecializedRenderPipeline, TextureFormat, TextureUsages,
     },
+    view::{ColorGrading, ExtractedView, Msaa, RetainedViewEntity},
 };
 use bevy_shader::Shader;
 use bevy_window::{PrimaryWindow, Window, WindowRef, WindowResolution};
 #[cfg(feature = "multi-viewport")]
 use dear_imgui_bevy::ImguiBackendConfig;
 use dear_imgui_bevy::{
-    ImguiContexts, ImguiFrameOutput, ImguiPlugin, ImguiPrimaryContextPass, ImguiUi,
-    ImguiViewportWindow,
+    ImguiBackendStatus, ImguiContexts, ImguiFrameOutput, ImguiPlugin, ImguiPrimaryContextPass,
+    ImguiUi, ImguiViewportCamera, ImguiViewportWindow,
     render::{
         IMGUI_FRAGMENT_ENTRY_POINT, IMGUI_SHADER_HANDLE, IMGUI_SHADER_SOURCE,
-        IMGUI_VERTEX_ENTRY_POINT, ImguiExtractedRenderFrame, ImguiOverlayCamera,
-        ImguiOverlayDisabled, ImguiPipelineKey, ImguiPreparedRenderFrame, ImguiQueuedPipelines,
-        ImguiRenderPipeline, ImguiTextureBindGroups, imgui_vertex_buffer_layout,
+        IMGUI_VERTEX_ENTRY_POINT, ImguiExtractedRenderFrame, ImguiPipelineKey,
+        ImguiPreparedRenderFrame, ImguiQueuedPipelines, ImguiRenderPipeline,
+        ImguiTextureBindGroups, imgui_vertex_buffer_layout,
+    },
+    route::{
+        ImguiDiagnosticKind, ImguiDiagnosticOrigin, ImguiDiagnostics, ImguiRenderRoute,
+        ImguiResolvedRoutes,
     },
 };
 use dear_imgui_rs::{self as imgui, render::TextureBinding};
@@ -33,7 +44,10 @@ use std::sync::{Mutex, OnceLock};
 
 fn imgui_context_guard() -> std::sync::MutexGuard<'static, ()> {
     static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
-    GUARD.get_or_init(|| Mutex::new(())).lock().unwrap()
+    GUARD
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 struct ManagedTexture(imgui::ManagedTextureId);
@@ -57,8 +71,6 @@ fn configure_primary<T>(app: &mut App, configure: impl FnOnce(&mut imgui::Contex
 #[cfg(feature = "multi-viewport")]
 struct SecondaryViewportRouteState {
     viewport_id: Option<imgui::Id>,
-    window: Option<Entity>,
-    camera: Option<Entity>,
 }
 
 fn app_with_primary_window() -> (App, Entity, Entity, imgui::ManagedTextureId) {
@@ -82,6 +94,7 @@ fn app_with_primary_window() -> (App, Entity, Entity, imgui::ManagedTextureId) {
                 ..Default::default()
             },
             RenderTarget::Window(WindowRef::Primary),
+            CameraRenderGraph::new(Core2d),
         ))
         .id();
 
@@ -92,6 +105,7 @@ fn app_with_primary_window() -> (App, Entity, Entity, imgui::ManagedTextureId) {
             ..Default::default()
         },
         RenderTarget::Window(WindowRef::Primary),
+        CameraRenderGraph::new(Core2d),
     ));
 
     app.world_mut().spawn((
@@ -100,8 +114,24 @@ fn app_with_primary_window() -> (App, Entity, Entity, imgui::ManagedTextureId) {
             ..Default::default()
         },
         RenderTarget::Window(WindowRef::Primary),
-        ImguiOverlayDisabled,
+        CameraRenderGraph::new(Core2d),
     ));
+
+    install_render_view(
+        &mut app,
+        camera,
+        NormalizedRenderTarget::Window(
+            WindowRef::Entity(primary_window)
+                .normalize(None)
+                .expect("entity window target should normalize"),
+        ),
+        3,
+        [1280, 720],
+        None,
+        TextureFormat::Rgba8UnormSrgb,
+        CameraMainTextureUsages::default().0,
+        Msaa::Off,
+    );
 
     let mut texture = imgui::texture::OwnedTextureData::new();
     texture.create(imgui::texture::TextureFormat::RGBA32, 1, 1);
@@ -115,6 +145,81 @@ fn app_with_primary_window() -> (App, Entity, Entity, imgui::ManagedTextureId) {
     app.insert_non_send(ManagedTexture(texture_id));
 
     (app, primary_window, camera, texture_id)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn install_render_view(
+    app: &mut App,
+    camera: Entity,
+    target: NormalizedRenderTarget,
+    camera_order: isize,
+    physical_target_size: [u32; 2],
+    viewport: Option<Viewport>,
+    target_format: TextureFormat,
+    texture_usages: TextureUsages,
+    msaa: Msaa,
+) -> (Entity, RetainedViewEntity) {
+    let physical_target_size = UVec2::from(physical_target_size);
+    let physical_viewport_size = viewport
+        .as_ref()
+        .map_or(physical_target_size, |viewport| viewport.physical_size);
+    let physical_viewport_position = viewport
+        .as_ref()
+        .map_or(UVec2::ZERO, |viewport| viewport.physical_position);
+    let hdr = target_format == TextureFormat::Rgba16Float;
+    let view = RetainedViewEntity::new(camera.into(), None, 0);
+
+    let render_entity = app
+        .sub_app_mut(RenderApp)
+        .world_mut()
+        .spawn((
+            ExtractedView {
+                retained_view_entity: view,
+                clip_from_view: Mat4::IDENTITY,
+                world_from_view: GlobalTransform::IDENTITY,
+                clip_from_world: None,
+                target_format,
+                viewport: UVec4::new(
+                    physical_viewport_position.x,
+                    physical_viewport_position.y,
+                    physical_viewport_size.x,
+                    physical_viewport_size.y,
+                ),
+                color_grading: ColorGrading::default(),
+                invert_culling: false,
+            },
+            ExtractedCamera {
+                target: Some(target),
+                physical_viewport_size: Some(physical_viewport_size),
+                physical_target_size: Some(physical_target_size),
+                viewport,
+                schedule: Core2d.intern(),
+                order: camera_order,
+                output_mode: CameraOutputMode::default(),
+                msaa_writeback: Default::default(),
+                clear_color: ClearColorConfig::Default,
+                sorted_camera_index_for_target: 0,
+                exposure: 1.0,
+                hdr,
+                compositing_space: None,
+            },
+            CameraMainTextureUsages(texture_usages),
+            msaa,
+        ))
+        .id();
+
+    (render_entity, view)
+}
+
+fn render_entity_for_camera(app: &mut App, camera: Entity) -> Entity {
+    let render_world = app.sub_app_mut(RenderApp).world_mut();
+    let mut views = render_world.query::<(Entity, &ExtractedView)>();
+    views
+        .iter(render_world)
+        .find_map(|(entity, view)| {
+            (view.retained_view_entity.main_entity.id() == camera).then_some(entity)
+        })
+        .expect("the camera should have an installed render view")
 }
 
 fn draw_managed_texture(imgui: ImguiUi, texture: NonSend<ManagedTexture>) {
@@ -219,10 +324,12 @@ fn render_extract_clears_stale_snapshot_after_primary_window_is_removed() {
 }
 
 #[test]
-fn render_extract_uses_one_overlay_camera_per_render_target() {
+fn render_extract_materializes_the_unique_auto_primary_camera() {
     let _guard = imgui_context_guard();
     let (mut app, primary_window, _camera, _texture_id) = app_with_primary_window();
-    let overlay_camera = app
+    let primary_target =
+        NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap());
+    let auto_primary_camera = app
         .world_mut()
         .spawn((
             Camera {
@@ -230,8 +337,20 @@ fn render_extract_uses_one_overlay_camera_per_render_target() {
                 ..Default::default()
             },
             RenderTarget::Window(WindowRef::Primary),
+            CameraRenderGraph::new(Core2d),
         ))
         .id();
+    install_render_view(
+        &mut app,
+        auto_primary_camera,
+        primary_target.clone(),
+        12,
+        [1280, 720],
+        None,
+        TextureFormat::Rgba8UnormSrgb,
+        CameraMainTextureUsages::default().0,
+        Msaa::Off,
+    );
     app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
 
     app.update();
@@ -244,20 +363,78 @@ fn render_extract_uses_one_overlay_camera_per_render_target() {
     assert_eq!(
         targets.len(),
         1,
-        "the same ImGui overlay must not be drawn once for every active Bevy camera on a target"
+        "AutoPrimary must resolve to one unique highest-order primary-window camera"
     );
-    assert_eq!(targets[0].camera, overlay_camera);
-    assert_eq!(targets[0].order, 12);
+    assert_eq!(targets[0].camera, auto_primary_camera);
+    assert_eq!(targets[0].order, 0);
+    assert_eq!(targets[0].camera_order, 12);
+    assert_eq!(targets[0].target, primary_target);
+}
+
+#[test]
+fn render_route_freezes_after_same_frame_camera_updates() {
+    let _guard = imgui_context_guard();
+    let (mut app, _primary_window, camera, _texture_id) = app_with_primary_window();
+    let render_entity = render_entity_for_camera(&mut app, camera);
+    app.add_systems(Update, move |mut cameras: Query<&mut Camera>| {
+        cameras
+            .get_mut(camera)
+            .expect("the primary camera should remain live")
+            .order = 13;
+    });
+    app.sub_app_mut(RenderApp).add_systems(
+        ExtractSchedule,
+        move |mut cameras: Query<&mut ExtractedCamera>| {
+            cameras
+                .get_mut(render_entity)
+                .expect("the primary render view should remain live")
+                .order = 13;
+        },
+    );
+    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
+
+    app.update();
+
+    let routes = app.world().resource::<ImguiResolvedRoutes>();
     assert_eq!(
-        targets[0].target,
-        NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap())
+        routes
+            .render_route(
+                app.world()
+                    .non_send::<ImguiContexts>()
+                    .primary_id()
+                    .expect("the primary Context should exist")
+            )
+            .expect("the updated camera should remain routable")
+            .camera_order(),
+        13
+    );
+    let targets = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<ImguiExtractedRenderFrame>()
+        .camera_targets();
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0].camera, camera);
+    assert_eq!(targets[0].camera_order, 13);
+    assert!(
+        app.world()
+            .resource::<ImguiDiagnostics>()
+            .entries_for(ImguiDiagnosticOrigin::RenderExtraction)
+            .all(|diagnostic| diagnostic.kind() != &ImguiDiagnosticKind::StaleExtractedView)
     );
 }
 
 #[test]
-fn render_extract_prefers_explicit_overlay_camera_over_higher_order_fallback() {
+fn render_extract_prefers_an_explicit_route_over_auto_primary() {
     let _guard = imgui_context_guard();
     let (mut app, primary_window, _camera, _texture_id) = app_with_primary_window();
+    let context_id = app
+        .world()
+        .non_send::<ImguiContexts>()
+        .primary_id()
+        .expect("the primary Context should exist");
+    let primary_target =
+        NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap());
     let explicit_camera = app
         .world_mut()
         .spawn((
@@ -266,7 +443,7 @@ fn render_extract_prefers_explicit_overlay_camera_over_higher_order_fallback() {
                 ..Default::default()
             },
             RenderTarget::Window(WindowRef::Primary),
-            ImguiOverlayCamera,
+            CameraRenderGraph::new(Core2d),
         ))
         .id();
     app.world_mut().spawn((
@@ -275,7 +452,21 @@ fn render_extract_prefers_explicit_overlay_camera_over_higher_order_fallback() {
             ..Default::default()
         },
         RenderTarget::Window(WindowRef::Primary),
+        CameraRenderGraph::new(Core2d),
     ));
+    app.world_mut()
+        .spawn(ImguiRenderRoute::new(context_id, explicit_camera));
+    install_render_view(
+        &mut app,
+        explicit_camera,
+        primary_target.clone(),
+        -100,
+        [1280, 720],
+        None,
+        TextureFormat::Rgba8UnormSrgb,
+        CameraMainTextureUsages::default().0,
+        Msaa::Off,
+    );
     app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
 
     app.update();
@@ -288,36 +479,60 @@ fn render_extract_prefers_explicit_overlay_camera_over_higher_order_fallback() {
     assert_eq!(
         targets.len(),
         1,
-        "only one overlay camera should be selected for one render target"
+        "an explicit ordinary route must suppress AutoPrimary for that Context"
     );
     assert_eq!(targets[0].camera, explicit_camera);
-    assert!(targets[0].explicit);
+    assert_eq!(targets[0].context_id, context_id);
+    assert_eq!(targets[0].order, 0);
+    assert_eq!(targets[0].camera_order, -100);
+    assert_eq!(targets[0].target, primary_target);
     assert_eq!(
-        targets[0].target,
-        NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap())
+        targets[0].route_epoch,
+        app.world().resource::<ImguiResolvedRoutes>().epoch()
     );
 }
 
 #[test]
-fn render_extract_preserves_explicit_overlay_camera_viewport_for_render_pass() {
+fn render_extract_preserves_explicit_route_viewport_for_render_pass() {
     let _guard = imgui_context_guard();
-    let (mut app, _primary_window, _camera, _texture_id) = app_with_primary_window();
-    let overlay_camera = app
+    let (mut app, primary_window, _camera, _texture_id) = app_with_primary_window();
+    let context_id = app
+        .world()
+        .non_send::<ImguiContexts>()
+        .primary_id()
+        .expect("the primary Context should exist");
+    let primary_target =
+        NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap());
+    let viewport = Viewport {
+        physical_position: UVec2::new(320, 0),
+        physical_size: UVec2::new(640, 360),
+        ..Default::default()
+    };
+    let routed_camera = app
         .world_mut()
         .spawn((
             Camera {
                 order: 50,
-                viewport: Some(Viewport {
-                    physical_position: UVec2::new(320, 0),
-                    physical_size: UVec2::new(640, 360),
-                    ..Default::default()
-                }),
+                viewport: Some(viewport.clone()),
                 ..Default::default()
             },
             RenderTarget::Window(WindowRef::Primary),
-            ImguiOverlayCamera,
+            CameraRenderGraph::new(Core2d),
         ))
         .id();
+    app.world_mut()
+        .spawn(ImguiRenderRoute::new(context_id, routed_camera));
+    install_render_view(
+        &mut app,
+        routed_camera,
+        primary_target,
+        50,
+        [1280, 720],
+        Some(viewport),
+        TextureFormat::Rgba8UnormSrgb,
+        CameraMainTextureUsages::default().0,
+        Msaa::Off,
+    );
     app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
 
     app.update();
@@ -329,8 +544,8 @@ fn render_extract_preserves_explicit_overlay_camera_viewport_for_render_pass() {
     let target = extracted
         .camera_targets()
         .iter()
-        .find(|target| target.camera == overlay_camera)
-        .expect("explicit overlay camera should be extracted");
+        .find(|target| target.camera == routed_camera)
+        .expect("the explicitly routed camera should be extracted");
     assert_eq!(
         target
             .camera_viewport
@@ -345,8 +560,8 @@ fn render_extract_preserves_explicit_overlay_camera_viewport_for_render_pass() {
     let draw = prepared
         .draws()
         .iter()
-        .find(|draw| draw.camera == overlay_camera)
-        .expect("explicit overlay camera should receive prepared draw commands");
+        .find(|draw| draw.camera == routed_camera)
+        .expect("the explicitly routed camera should receive prepared draw commands");
     assert_eq!(
         draw.camera_viewport
             .map(|viewport| { (viewport.physical_position, viewport.physical_size) }),
@@ -356,7 +571,7 @@ fn render_extract_preserves_explicit_overlay_camera_viewport_for_render_pass() {
 }
 
 #[test]
-fn render_extract_routes_overlay_to_primary_and_secondary_windows() {
+fn render_extract_does_not_broadcast_one_context_to_unrouted_windows() {
     let _guard = imgui_context_guard();
     let (mut app, primary_window, primary_camera, _texture_id) = app_with_primary_window();
     let secondary_window = app.world_mut().spawn(Window::default()).id();
@@ -368,6 +583,7 @@ fn render_extract_routes_overlay_to_primary_and_secondary_windows() {
                 ..Default::default()
             },
             RenderTarget::Window(WindowRef::Entity(secondary_window)),
+            CameraRenderGraph::new(Core2d),
         ))
         .id();
     app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
@@ -381,14 +597,9 @@ fn render_extract_routes_overlay_to_primary_and_secondary_windows() {
     let targets = extracted.camera_targets();
     let expected_primary_target =
         NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap());
-    let expected_secondary_target = NormalizedRenderTarget::Window(
-        WindowRef::Entity(secondary_window).normalize(None).unwrap(),
-    );
-    assert_eq!(targets.len(), 2);
+    assert_eq!(targets.len(), 1);
     assert_eq!(targets[0].camera, primary_camera);
     assert_eq!(targets[0].target, expected_primary_target);
-    assert_eq!(targets[1].camera, secondary_camera);
-    assert_eq!(targets[1].target, expected_secondary_target);
 
     let prepared = app
         .sub_app(RenderApp)
@@ -405,16 +616,275 @@ fn render_extract_routes_overlay_to_primary_and_secondary_windows() {
         .filter(|draw| draw.camera == secondary_camera)
         .collect::<Vec<_>>();
     assert!(!primary_draws.is_empty());
-    assert!(!secondary_draws.is_empty());
+    assert!(
+        secondary_draws.is_empty(),
+        "ordinary Context draw data must not be broadcast to an unrelated window"
+    );
     assert!(
         primary_draws
             .iter()
             .all(|draw| draw.target == expected_primary_target)
     );
+}
+
+#[test]
+fn render_extract_keeps_same_target_views_with_different_render_identity_distinct() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary_window, primary_camera, _texture_id) = app_with_primary_window();
+    let context_id = app
+        .world()
+        .non_send::<ImguiContexts>()
+        .primary_id()
+        .expect("the primary Context should exist");
+    let secondary_viewport_id = imgui::Id::from(0x1D3E_171);
+    let primary_target =
+        NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap());
+    app.world_mut()
+        .spawn(ImguiRenderRoute::new(context_id, primary_camera));
+    app.world_mut()
+        .entity_mut(primary_window)
+        .insert(ImguiViewportWindow {
+            viewport_id: secondary_viewport_id,
+        });
+    app.world_mut()
+        .resource_mut::<ImguiBackendStatus>()
+        .multi_viewport_supported = true;
+    let viewport_camera = app
+        .world_mut()
+        .spawn((
+            Camera {
+                order: 11,
+                ..Default::default()
+            },
+            RenderTarget::Window(WindowRef::Primary),
+            CameraRenderGraph::new(Core2d),
+            ImguiViewportCamera {
+                viewport_id: secondary_viewport_id,
+            },
+        ))
+        .id();
+    let secondary_usages = TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_SRC;
+    install_render_view(
+        &mut app,
+        viewport_camera,
+        primary_target.clone(),
+        11,
+        [1280, 720],
+        None,
+        TextureFormat::Rgba16Float,
+        secondary_usages,
+        Msaa::Sample4,
+    );
+    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
+
+    app.update();
+
+    let targets = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<ImguiExtractedRenderFrame>()
+        .camera_targets();
+    assert_eq!(targets.len(), 2);
+    let primary = targets
+        .iter()
+        .find(|target| target.camera == primary_camera)
+        .expect("the explicit ordinary route should materialize");
+    let secondary = targets
+        .iter()
+        .find(|target| target.camera == viewport_camera)
+        .expect("the backend-owned viewport route should materialize");
+
+    assert_eq!(primary.target, primary_target);
+    assert_eq!(secondary.target, primary_target);
+    assert_ne!(primary.view, secondary.view);
+    assert_eq!(primary.target_format, TextureFormat::Rgba8UnormSrgb);
+    assert_eq!(secondary.target_format, TextureFormat::Rgba16Float);
+    assert_eq!(primary.texture_usages, CameraMainTextureUsages::default().0);
+    assert_eq!(secondary.texture_usages, secondary_usages);
+    assert_eq!(primary.msaa, Msaa::Off);
+    assert_eq!(secondary.msaa, Msaa::Sample4);
+}
+
+#[test]
+fn render_extract_reports_a_stale_render_view_without_retargeting() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary_window, _primary_camera, _texture_id) = app_with_primary_window();
+    let context_id = app
+        .world()
+        .non_send::<ImguiContexts>()
+        .primary_id()
+        .expect("the primary Context should exist");
+    let primary_target =
+        NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap());
+    let routed_camera = app
+        .world_mut()
+        .spawn((
+            Camera {
+                order: 7,
+                ..Default::default()
+            },
+            RenderTarget::Window(WindowRef::Primary),
+            CameraRenderGraph::new(Core2d),
+        ))
+        .id();
+    app.world_mut()
+        .spawn(ImguiRenderRoute::new(context_id, routed_camera));
+    install_render_view(
+        &mut app,
+        routed_camera,
+        primary_target,
+        8,
+        [1280, 720],
+        None,
+        TextureFormat::Rgba8UnormSrgb,
+        CameraMainTextureUsages::default().0,
+        Msaa::Off,
+    );
+    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
+
+    app.update();
+
+    let extracted = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<ImguiExtractedRenderFrame>();
     assert!(
-        secondary_draws
-            .iter()
-            .all(|draw| draw.target == expected_secondary_target)
+        extracted.camera_targets().is_empty(),
+        "a stale view must fail closed rather than draw through a changed camera"
+    );
+    let prepared = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<ImguiPreparedRenderFrame>();
+    assert!(prepared.draws().is_empty());
+    assert!(
+        app.world()
+            .resource::<ImguiDiagnostics>()
+            .entries_for(ImguiDiagnosticOrigin::RenderExtraction)
+            .any(|diagnostic| {
+                diagnostic.kind() == &ImguiDiagnosticKind::StaleExtractedView
+                    && diagnostic.context_id() == Some(context_id)
+                    && diagnostic.camera() == Some(routed_camera)
+            }),
+        "render-world rejection must be observable through the main-world diagnostics resource"
+    );
+}
+
+#[test]
+fn render_extract_rejects_output_mode_and_schedule_drift_after_route_resolution() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary_window, _primary_camera, _texture_id) = app_with_primary_window();
+    let context_id = app
+        .world()
+        .non_send::<ImguiContexts>()
+        .primary_id()
+        .expect("the primary Context should exist");
+    let primary_target =
+        NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap());
+    let routed_camera = app
+        .world_mut()
+        .spawn((
+            Camera {
+                order: 23,
+                ..Default::default()
+            },
+            RenderTarget::Window(WindowRef::Primary),
+            CameraRenderGraph::new(Core2d),
+        ))
+        .id();
+    app.world_mut()
+        .spawn(ImguiRenderRoute::new(context_id, routed_camera));
+    let (render_entity, _) = install_render_view(
+        &mut app,
+        routed_camera,
+        primary_target,
+        23,
+        [1280, 720],
+        None,
+        TextureFormat::Rgba8UnormSrgb,
+        CameraMainTextureUsages::default().0,
+        Msaa::Off,
+    );
+    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
+
+    app.sub_app_mut(RenderApp)
+        .world_mut()
+        .entity_mut(render_entity)
+        .get_mut::<ExtractedCamera>()
+        .expect("the installed render view should have camera metadata")
+        .output_mode = CameraOutputMode::Skip;
+    app.update();
+    assert!(
+        app.world()
+            .resource::<ImguiDiagnostics>()
+            .entries_for(ImguiDiagnosticOrigin::RenderExtraction)
+            .any(|diagnostic| {
+                diagnostic.kind() == &ImguiDiagnosticKind::CameraDoesNotWrite
+                    && diagnostic.camera() == Some(routed_camera)
+            })
+    );
+
+    {
+        let render_world = app.sub_app_mut(RenderApp).world_mut();
+        let mut render_entity = render_world.entity_mut(render_entity);
+        let mut render_camera = render_entity
+            .get_mut::<ExtractedCamera>()
+            .expect("the installed render view should have camera metadata");
+        render_camera.output_mode = CameraOutputMode::default();
+        render_camera.schedule = Update.intern();
+    }
+    app.update();
+    assert!(
+        app.world()
+            .resource::<ImguiDiagnostics>()
+            .entries_for(ImguiDiagnosticOrigin::RenderExtraction)
+            .any(|diagnostic| {
+                diagnostic.kind() == &ImguiDiagnosticKind::UnsupportedCameraSchedule
+                    && diagnostic.camera() == Some(routed_camera)
+            })
+    );
+}
+
+#[test]
+fn render_extract_reports_a_missing_render_view_without_replaying_an_old_target() {
+    let _guard = imgui_context_guard();
+    let (mut app, _primary_window, _primary_camera, _texture_id) = app_with_primary_window();
+    let context_id = app
+        .world()
+        .non_send::<ImguiContexts>()
+        .primary_id()
+        .expect("the primary Context should exist");
+    let missing_camera = app
+        .world_mut()
+        .spawn((
+            Camera {
+                order: 17,
+                ..Default::default()
+            },
+            RenderTarget::Window(WindowRef::Primary),
+            CameraRenderGraph::new(Core2d),
+        ))
+        .id();
+    app.world_mut()
+        .spawn(ImguiRenderRoute::new(context_id, missing_camera));
+    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
+
+    app.update();
+
+    let extracted = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<ImguiExtractedRenderFrame>();
+    assert!(extracted.camera_targets().is_empty());
+    assert!(
+        app.world()
+            .resource::<ImguiDiagnostics>()
+            .entries_for(ImguiDiagnosticOrigin::RenderExtraction)
+            .any(|diagnostic| {
+                diagnostic.kind() == &ImguiDiagnosticKind::MissingExtractedView
+                    && diagnostic.context_id() == Some(context_id)
+                    && diagnostic.camera() == Some(missing_camera)
+            })
     );
 }
 
@@ -441,6 +911,10 @@ fn render_extract_ignores_viewport_window_mapping_until_multi_viewport_is_suppor
                 ..Default::default()
             },
             RenderTarget::Window(WindowRef::Entity(secondary_window)),
+            CameraRenderGraph::new(Core2d),
+            ImguiViewportCamera {
+                viewport_id: secondary_viewport_id,
+            },
         ))
         .id();
     app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
@@ -454,17 +928,10 @@ fn render_extract_ignores_viewport_window_mapping_until_multi_viewport_is_suppor
     let targets = extracted.camera_targets();
     let expected_primary_target =
         NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap());
-    let expected_secondary_target = NormalizedRenderTarget::Window(
-        WindowRef::Entity(secondary_window).normalize(None).unwrap(),
-    );
-
-    assert_eq!(targets.len(), 2);
+    assert_eq!(targets.len(), 1);
     assert_eq!(targets[0].camera, primary_camera);
     assert_eq!(targets[0].viewport_id, None);
     assert_eq!(targets[0].target, expected_primary_target);
-    assert_eq!(targets[1].camera, secondary_camera);
-    assert_eq!(targets[1].viewport_id, None);
-    assert_eq!(targets[1].target, expected_secondary_target);
 
     let prepared = app
         .sub_app(RenderApp)
@@ -475,6 +942,13 @@ fn render_extract_ignores_viewport_window_mapping_until_multi_viewport_is_suppor
             .draws()
             .iter()
             .all(|draw| draw.viewport_id.is_none())
+    );
+    assert!(
+        prepared
+            .draws()
+            .iter()
+            .all(|draw| draw.camera != secondary_camera),
+        "a native viewport camera is inert until the complete multi-viewport backend is supported"
     );
 }
 
@@ -507,8 +981,22 @@ fn renderer_prepare_routes_secondary_viewport_draws_only_to_matching_window() {
                 ..Default::default()
             },
             RenderTarget::Window(WindowRef::Primary),
+            CameraRenderGraph::new(Core2d),
         ))
         .id();
+    let primary_target =
+        NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap());
+    let (_, primary_view) = install_render_view(
+        &mut app,
+        primary_camera,
+        primary_target.clone(),
+        3,
+        [1280, 720],
+        None,
+        TextureFormat::Rgba8UnormSrgb,
+        CameraMainTextureUsages::default().0,
+        Msaa::Off,
+    );
 
     configure_primary(&mut app, |context| {
         context.io_mut().set_config_input_trickle_event_queue(false);
@@ -550,32 +1038,63 @@ fn renderer_prepare_routes_secondary_viewport_draws_only_to_matching_window() {
         .resource::<SecondaryViewportRouteState>()
         .viewport_id
         .expect("first frame should create a Dear ImGui viewport for the secondary window");
-    let secondary_window = app
-        .world_mut()
-        .spawn((
-            Window::default(),
-            ImguiViewportWindow {
-                viewport_id: secondary_viewport_id,
-            },
-        ))
-        .id();
-    let secondary_camera = app
-        .world_mut()
-        .spawn((
-            Camera {
-                order: 7,
-                ..Default::default()
-            },
-            RenderTarget::Window(WindowRef::Entity(secondary_window)),
-        ))
-        .id();
-    {
-        let mut route = app
-            .world_mut()
-            .resource_mut::<SecondaryViewportRouteState>();
-        route.window = Some(secondary_window);
-        route.camera = Some(secondary_camera);
-    }
+    let (secondary_window, secondary_camera, secondary_camera_order, secondary_target_size) = {
+        let world = app.world_mut();
+        let (secondary_window, secondary_target_size) = {
+            let mut windows =
+                world.query::<(Entity, &Window, &dear_imgui_bevy::ImguiViewportWindow)>();
+            let matching = windows
+                .iter(world)
+                .filter_map(|(entity, window, viewport)| {
+                    (viewport.viewport_id == secondary_viewport_id)
+                        .then_some((entity, window.physical_size()))
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                matching.len(),
+                1,
+                "one ImGui viewport must own exactly one Bevy window"
+            );
+            matching[0]
+        };
+        let (secondary_camera, secondary_camera_order) = {
+            let mut cameras =
+                world.query::<(Entity, &Camera, &dear_imgui_bevy::ImguiViewportCamera)>();
+            let matching = cameras
+                .iter(world)
+                .filter_map(|(entity, camera, viewport)| {
+                    (viewport.viewport_id == secondary_viewport_id)
+                        .then_some((entity, camera.order))
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                matching.len(),
+                1,
+                "one ImGui viewport must own exactly one Bevy camera"
+            );
+            matching[0]
+        };
+        (
+            secondary_window,
+            secondary_camera,
+            secondary_camera_order,
+            [secondary_target_size.x, secondary_target_size.y],
+        )
+    };
+    let secondary_target = NormalizedRenderTarget::Window(
+        WindowRef::Entity(secondary_window).normalize(None).unwrap(),
+    );
+    let (_, secondary_view) = install_render_view(
+        &mut app,
+        secondary_camera,
+        secondary_target.clone(),
+        secondary_camera_order,
+        secondary_target_size,
+        None,
+        TextureFormat::Rgba8UnormSrgb,
+        CameraMainTextureUsages::default().0,
+        Msaa::Off,
+    );
     app.update();
 
     let extracted = app
@@ -591,11 +1110,8 @@ fn renderer_prepare_routes_secondary_viewport_draws_only_to_matching_window() {
         .sub_app(RenderApp)
         .world()
         .resource::<ImguiPreparedRenderFrame>();
-    let expected_primary_target =
-        NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap());
-    let expected_secondary_target = NormalizedRenderTarget::Window(
-        WindowRef::Entity(secondary_window).normalize(None).unwrap(),
-    );
+    let expected_primary_target = primary_target;
+    let expected_secondary_target = secondary_target;
     let primary_draws = prepared
         .draws()
         .iter()
@@ -608,7 +1124,15 @@ fn renderer_prepare_routes_secondary_viewport_draws_only_to_matching_window() {
         .collect::<Vec<_>>();
 
     assert!(!primary_draws.is_empty());
-    assert!(!secondary_draws.is_empty());
+    assert!(
+        !secondary_draws.is_empty(),
+        "secondary target was not prepared; targets={:?}; diagnostics={:?}",
+        extracted.camera_targets(),
+        app.world()
+            .resource::<ImguiDiagnostics>()
+            .entries_for(ImguiDiagnosticOrigin::RenderExtraction)
+            .collect::<Vec<_>>(),
+    );
     assert!(primary_draws.iter().all(|draw| {
         draw.target == expected_primary_target && draw.viewport_id != Some(secondary_viewport_id)
     }));
@@ -616,8 +1140,8 @@ fn renderer_prepare_routes_secondary_viewport_draws_only_to_matching_window() {
         draw.target == expected_secondary_target && draw.viewport_id == Some(secondary_viewport_id)
     }));
     assert_ne!(
-        prepared.uniforms_for_camera(primary_camera),
-        prepared.uniforms_for_camera(secondary_camera),
+        prepared.uniforms_for_view(primary_view),
+        prepared.uniforms_for_view(secondary_view),
         "secondary viewport rendering needs a viewport-specific projection"
     );
 }

@@ -15,7 +15,13 @@ pub(super) struct ImguiRenderPassParams<'w> {
 }
 
 pub(super) fn render_imgui_overlay(
-    view: ViewQuery<(&ViewTarget, &ExtractedView, Option<&ExtractedCamera>)>,
+    view: ViewQuery<(
+        &ViewTarget,
+        &ExtractedView,
+        &ExtractedCamera,
+        &CameraMainTextureUsages,
+        &Msaa,
+    )>,
     params: ImguiRenderPassParams,
     mut render_context: RenderContext,
 ) {
@@ -32,37 +38,36 @@ pub(super) fn render_imgui_overlay(
         return;
     }
 
-    let (view_target, view, camera_metadata) = view.into_inner();
-    let camera = view.retained_view_entity.main_entity.id();
-    let Some(pipeline_id) = params.queued.get(camera) else {
+    let (view_target, view, camera, texture_usages, msaa) = view.into_inner();
+    let view_id = view.retained_view_entity;
+    let Some(pipeline_id) = params.queued.get(view_id) else {
         return;
     };
     let Some(pipeline) = pipeline_cache.get_render_pipeline(pipeline_id) else {
         return;
     };
 
-    let drawable = params
+    let mut drawable = params
         .prepared
         .draws()
         .iter()
-        .filter(|draw| draw.camera == camera)
+        .filter(|draw| prepared_draw_matches_view(draw, view, camera, texture_usages, msaa))
         .collect::<Vec<_>>();
     if drawable.is_empty() {
         return;
     }
+    drawable.sort_by_key(|draw| (draw.order, draw.context_id.get().get()));
 
-    let Some(uniforms) = params.prepared.uniforms_for_camera(camera) else {
+    let Some(uniforms) = params.prepared.uniforms_for_view(view_id) else {
         return;
     };
     let uniforms = uniforms.with_gamma(ImguiUniforms::gamma_for_target(
         view.target_format,
-        camera_metadata.and_then(|camera| camera.compositing_space),
+        camera.compositing_space,
     ));
-    let render_target_size = camera_metadata
-        .and_then(|camera| camera.physical_target_size)
-        .map(|size| [size.x, size.y]);
+    let render_target_size = camera.physical_target_size.map(|size| [size.x, size.y]);
     let Some(common_bind_group) =
-        gpu_resources.update_camera_uniforms(camera, &render_queue, uniforms)
+        gpu_resources.update_camera_uniforms(view_id, &render_queue, uniforms)
     else {
         return;
     };
@@ -123,6 +128,46 @@ pub(super) fn render_imgui_overlay(
         render_pass.set_scissor_rect(scissor.x, scissor.y, scissor.width, scissor.height);
         render_pass.draw_indexed(draw.index_range.clone(), draw.vertex_offset, 0..1);
     }
+}
+
+fn prepared_draw_matches_view(
+    draw: &ImguiPreparedDraw,
+    view: &ExtractedView,
+    camera: &ExtractedCamera,
+    texture_usages: &CameraMainTextureUsages,
+    msaa: &Msaa,
+) -> bool {
+    let Some(physical_target_size) = camera.physical_target_size else {
+        return false;
+    };
+    let mut camera_viewport = camera.viewport.clone();
+    if let Some(viewport) = &mut camera_viewport {
+        viewport.clamp_to_size(physical_target_size);
+    }
+    let (viewport_position, viewport_size) = draw
+        .camera_viewport
+        .map_or(([0, 0], draw.physical_target_size), |viewport| {
+            (viewport.physical_position, viewport.physical_size)
+        });
+
+    draw.view == view.retained_view_entity
+        && draw.target_format == view.target_format
+        && matches!(camera.output_mode, CameraOutputMode::Write { .. })
+        && camera.schedule == draw.camera_schedule
+        && camera.target.as_ref() == Some(&draw.target)
+        && draw.camera_order == camera.order
+        && draw.texture_usages == texture_usages.0
+        && draw.msaa == *msaa
+        && draw.physical_target_size == [physical_target_size.x, physical_target_size.y]
+        && camera_viewport.as_ref().map(ImguiCameraViewport::from) == draw.camera_viewport
+        && camera.physical_viewport_size.map(|size| [size.x, size.y]) == Some(viewport_size)
+        && view.viewport
+            == UVec4::new(
+                viewport_position[0],
+                viewport_position[1],
+                viewport_size[0],
+                viewport_size[1],
+            )
 }
 
 /// Touches swapchain outputs immediately before Bevy presents them.

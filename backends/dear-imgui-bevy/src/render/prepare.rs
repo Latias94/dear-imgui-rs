@@ -22,12 +22,12 @@ pub(super) fn prepare_imgui_render_frame(
     let draw_data = snapshot.draw_data();
     let primary_uniforms = valid_display_rect(draw_data)
         .map(|_| ImguiUniforms::from_display_rect(draw_data.display_pos, draw_data.display_size));
-    let (vertices, indices, draws, uniforms_by_camera) =
+    let (vertices, indices, draws, uniforms_by_view) =
         prepare_snapshot_draw_data(snapshot, extracted.camera_targets());
     prepared.replace(PreparedFrameData {
         frame_index,
         uniforms: primary_uniforms,
-        uniforms_by_camera,
+        uniforms_by_view,
         vertices,
         indices,
         draws,
@@ -244,7 +244,8 @@ pub(super) fn release_imgui_renderer_resources(
     };
 
     snapshot_mailbox.clear();
-    extracted.clear(0);
+    let route_epoch = extracted.route_epoch();
+    extracted.clear(0, route_epoch);
     prepared.clear(None);
     let released_gpu_resources = texture_bind_groups.take_managed_renderer_state();
     drop(released_gpu_resources);
@@ -664,7 +665,7 @@ fn prepare_snapshot_draw_data(
     Vec<ImguiGpuVertex>,
     Vec<DrawIdx>,
     Vec<ImguiPreparedDraw>,
-    HashMap<Entity, ImguiUniforms>,
+    HashMap<RetainedViewEntity, ImguiUniforms>,
 ) {
     prepare_draw_data(snapshot.draw_data(), snapshot.viewports(), camera_targets)
 }
@@ -677,7 +678,7 @@ pub(super) fn prepare_draw_data(
     Vec<ImguiGpuVertex>,
     Vec<DrawIdx>,
     Vec<ImguiPreparedDraw>,
-    HashMap<Entity, ImguiUniforms>,
+    HashMap<RetainedViewEntity, ImguiUniforms>,
 ) {
     let viewport_draws = snapshot_viewport_draws(main_draw, viewports);
     let vertex_count = viewport_draws
@@ -693,7 +694,7 @@ pub(super) fn prepare_draw_data(
     let mut vertices = Vec::with_capacity(vertex_count);
     let mut indices = Vec::with_capacity(index_count);
     let mut draws = Vec::new();
-    let mut uniforms_by_camera = HashMap::new();
+    let mut uniforms_by_view = HashMap::new();
 
     let mut list_vertex_base = 0usize;
     let mut list_index_base = 0usize;
@@ -721,7 +722,7 @@ pub(super) fn prepare_draw_data(
             continue;
         }
         for (target, uniforms) in &target_cameras {
-            uniforms_by_camera.insert(target.camera, *uniforms);
+            uniforms_by_view.insert(target.view, *uniforms);
         }
 
         let mut active_sampler = ImguiSampler::Linear;
@@ -788,9 +789,18 @@ pub(super) fn prepare_draw_data(
 
                 for (target, _) in &target_cameras {
                     draws.push(ImguiPreparedDraw {
+                        context_id: target.context_id,
+                        route_epoch: target.route_epoch,
                         camera: target.camera,
+                        view: target.view,
                         order: target.order,
+                        camera_order: target.camera_order,
+                        camera_schedule: target.camera_schedule,
                         target: target.target.clone(),
+                        target_format: target.target_format,
+                        texture_usages: target.texture_usages,
+                        msaa: target.msaa,
+                        physical_target_size: target.physical_target_size,
                         viewport_id,
                         texture,
                         sampler: active_sampler,
@@ -808,7 +818,7 @@ pub(super) fn prepare_draw_data(
         }
     }
 
-    (vertices, indices, draws, uniforms_by_camera)
+    (vertices, indices, draws, uniforms_by_view)
 }
 
 fn snapshot_viewport_draws<'draw>(
