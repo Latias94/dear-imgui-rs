@@ -53,7 +53,7 @@ See the [compatibility guide](docs/COMPATIBILITY.md), [custom backend guide](doc
 
 - Added `Ui::{calc_text_size,calc_text_size_with_opts}` and direct `u32` table column user IDs. Fixes [#39](https://github.com/Latias94/dear-imgui-rs/issues/39) and [#40](https://github.com/Latias94/dear-imgui-rs/issues/40), reported by [@TheDaChicken](https://github.com/TheDaChicken).
 - Added typed item-flag and style-variable scopes, broader safe keyboard/gamepad/text IO coverage, effective managed texture lookup, and checked `TextureId` conversions for integers, non-zero integers, and pointers. [PR #41](https://github.com/Latias94/dear-imgui-rs/pull/41)
-- Added a checked unknown-count list-clipper protocol, bounded `TestRunner::{run_headless,run_with_renderer}`, and typed Test Engine lifecycle/results.
+- Added a checked unknown-count list-clipper protocol, bounded `TestRunner::{run_headless,run_with_renderer}`, and typed Test Engine lifecycle/results, docking automation, and terminal/error logging.
 - Reorganized examples by learning path and added copy-runnable examples for `dear-app`, fonts, managed textures, multi-viewport backends, and render-thread snapshots.
 - Replaced repository-maintained release and submodule shell helpers with cross-platform Python tooling; safe extension crates now forward their complete source, prebuilt, and supported WASM routes.
 - Updated WGPU integrations to WGPU 30 while retaining compile coverage for supported older WGPU backend versions.
@@ -63,6 +63,7 @@ See the [compatibility guide](docs/COMPATIBILITY.md), [custom backend guide](doc
 - Fixed dynamic font-size atlas replacement, stale managed texture feedback, SDL3 callback lifetime, the Windows MSVC aggregate callback ABI, and close-time viewport teardown. This resolves [#49](https://github.com/Latias94/dear-imgui-rs/issues/49), reported by [@TheDaChicken](https://github.com/TheDaChicken).
 - Kept SDL3 applications rendering during native Windows move/resize loops; the SDLGPU multi-viewport example now remains responsive while dragging and shuts down only after GPU work is idle. [PR #53](https://github.com/Latias94/dear-imgui-rs/pull/53)
 - Made WGPU secondary viewport present mode, alpha mode, frame latency, color-space validation, and surface recovery explicit instead of forcing `Fifo`. Fixes [#51](https://github.com/Latias94/dear-imgui-rs/issues/51), reported by [@DrBarnabus](https://github.com/DrBarnabus).
+- Winit multi-viewport now supports mixed-DPI desktop layouts, resolves hovered viewports through native Windows hit testing, and keeps the moving viewport above its docking target without making it globally top-most. Capture handoff and native move/resize feedback keep undocking and redocking continuous.
 - Statically linked the C++ standard library for Windows GNU builds, removing the downstream `libstdc++-6.dll` runtime requirement. Fixes [#36](https://github.com/Latias94/dear-imgui-rs/issues/36), reported by [@HampusMat](https://github.com/HampusMat).
 - Fixed renderer resource leaks and stale reuse across texture removal, atlas repacks, callback replacement, and WGPU device-object recreation.
 - Fixed tree-node scope/ID handling, combo default focus, backward multi-select ranges, file-browser selection after rescans, and the single-`#` text-measurement out-of-bounds read.

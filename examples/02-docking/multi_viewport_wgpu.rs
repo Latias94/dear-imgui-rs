@@ -27,6 +27,8 @@
 //! - Secondary OS windows are enabled only on desktop native targets
 //!   (Windows/macOS/Linux); Linux is exercised with Xvfb and Mesa Lavapipe in CI.
 
+#[cfg(feature = "test-engine")]
+use dear_imgui_rs::MouseButton;
 use dear_imgui_rs::{Condition, Context, TextureId};
 #[cfg(feature = "test-engine")]
 use dear_imgui_test_engine::{
@@ -60,7 +62,12 @@ enum AppRenderer {
 struct ViewportSmokeState {
     result_path: Option<PathBuf>,
     adapter: wgpu::AdapterInfo,
+    require_secondary_while_held: bool,
+    held_probe_armed: bool,
+    held_probe_pressed: bool,
+    held_probe_complete: bool,
     saw_secondary_viewport: bool,
+    saw_secondary_while_held: bool,
     saw_merged_viewport: bool,
     complete: bool,
 }
@@ -70,6 +77,7 @@ struct CompletedViewportSmoke {
     result_path: Option<PathBuf>,
     adapter: wgpu::AdapterInfo,
     saw_secondary_viewport: bool,
+    saw_secondary_while_held: bool,
     saw_merged_viewport: bool,
 }
 
@@ -80,6 +88,7 @@ impl ViewportSmokeState {
             result_path: self.result_path.clone(),
             adapter: self.adapter.clone(),
             saw_secondary_viewport: self.saw_secondary_viewport,
+            saw_secondary_while_held: self.saw_secondary_while_held,
             saw_merged_viewport: self.saw_merged_viewport,
         })
     }
@@ -92,7 +101,7 @@ impl CompletedViewportSmoke {
             return Ok(());
         };
         let json = format!(
-            "{{\"schema_version\":1,\"outcome\":\"Passed\",\"adapter\":{{\"name\":\"{}\",\"backend\":\"{:?}\",\"device_type\":\"{:?}\",\"driver\":\"{}\",\"driver_info\":\"{}\",\"vendor\":{},\"device\":{}}},\"secondary_viewport_observed\":{},\"merge_observed\":{},\"teardown_complete\":true}}",
+            "{{\"schema_version\":1,\"outcome\":\"Passed\",\"adapter\":{{\"name\":\"{}\",\"backend\":\"{:?}\",\"device_type\":\"{:?}\",\"driver\":\"{}\",\"driver_info\":\"{}\",\"vendor\":{},\"device\":{}}},\"secondary_viewport_observed\":{},\"secondary_viewport_while_held_observed\":{},\"merge_observed\":{},\"teardown_complete\":true}}",
             json_escape(&self.adapter.name),
             self.adapter.backend,
             self.adapter.device_type,
@@ -101,6 +110,7 @@ impl CompletedViewportSmoke {
             self.adapter.vendor,
             self.adapter.device,
             self.saw_secondary_viewport,
+            self.saw_secondary_while_held,
             self.saw_merged_viewport,
         );
         write_json_atomic(&path, &json)
@@ -317,8 +327,11 @@ impl AppWindow {
             target_os = "linux"
         ));
         #[cfg(feature = "test-engine")]
-        let run_viewport_smoke =
-            std::env::var("DEAR_IMGUI_VIEWPORT_SMOKE").is_ok_and(|value| value == "1");
+        let run_viewport_drag_smoke =
+            std::env::var("DEAR_IMGUI_VIEWPORT_DRAG_SMOKE").is_ok_and(|value| value == "1");
+        #[cfg(feature = "test-engine")]
+        let run_viewport_smoke = run_viewport_drag_smoke
+            || std::env::var("DEAR_IMGUI_VIEWPORT_SMOKE").is_ok_and(|value| value == "1");
 
         // Create WGPU instance first (also used by renderer for per-viewport surfaces)
         let instance =
@@ -486,7 +499,7 @@ impl AppWindow {
         let app = {
             let mut app = app;
             if run_viewport_smoke {
-                app.configure_viewport_smoke(adapter_info)?;
+                app.configure_viewport_smoke(adapter_info, run_viewport_drag_smoke)?;
             }
             app
         };
@@ -498,30 +511,76 @@ impl AppWindow {
     fn configure_viewport_smoke(
         &mut self,
         adapter: wgpu::AdapterInfo,
+        drag_while_held: bool,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let scale = self.window.scale_factor();
-        let main_pos = self.window.outer_position()?.to_logical::<f32>(scale);
-        let main_size = self.window.outer_size().to_logical::<f32>(scale);
+        let main_pos = self
+            .window
+            .inner_position()
+            .unwrap_or_else(|_| winit::dpi::PhysicalPosition::new(0, 0));
+        let main_size = self.window.inner_size();
+        #[cfg(target_os = "macos")]
+        let (main_pos, main_size) = {
+            let scale = self.window.scale_factor();
+            (
+                main_pos.to_logical::<f32>(scale),
+                main_size.to_logical::<f32>(scale),
+            )
+        };
+        #[cfg(not(target_os = "macos"))]
+        let (main_pos, main_size) = (
+            main_pos.cast::<f32>(),
+            winit::dpi::PhysicalSize::new(main_size.width as f32, main_size.height as f32),
+        );
         let external_pos = [main_pos.x + main_size.width + 100.0, main_pos.y + 100.0];
-        let merged_pos = [main_pos.x + 100.0, main_pos.y + 100.0];
+        let redock_pos = [
+            main_pos.x + main_size.width * 0.5,
+            main_pos.y + main_size.height * 0.5,
+        ];
+        let test_name = if drag_while_held {
+            "multi_viewport_held_undock_smoke"
+        } else {
+            "multi_viewport_surface_smoke"
+        };
 
         let mut engine = TestEngine::create()?;
         engine.start(&mut self.imgui)?;
         engine.set_capture_enabled(false)?;
-        engine.set_run_speed(RunSpeed::Fast)?;
+        engine.set_run_speed(if drag_while_held {
+            RunSpeed::Normal
+        } else {
+            RunSpeed::Fast
+        })?;
         engine.set_verbose_level(VerboseLevel::Info)?;
-        engine.add_script_test("wgpu", "multi_viewport_surface_smoke", move |test| {
+        engine.set_verbose_level_on_error(VerboseLevel::Debug)?;
+        engine.set_log_to_tty(true)?;
+        engine.add_script_test("wgpu", test_name, move |test| {
             test.wait_for_item("Main/Viewport Count", ScriptCount::new(240)?)?;
-            test.window_move("Game View", external_pos[0], external_pos[1])?;
-            test.yield_frames(ScriptCount::new(30)?)?;
-            test.assert_item_read_int_eq("Main/Viewport Count", 2)?;
-            test.window_move("Game View", merged_pos[0], merged_pos[1])?;
-            test.yield_frames(ScriptCount::new(30)?)?;
-            test.assert_item_read_int_eq("Main/Viewport Count", 1)
+            if drag_while_held {
+                test.dock_into("Game View", "Main")?;
+                test.yield_frames(ScriptCount::new(10)?)?;
+                test.item_click("Main/Begin Held Drag Probe")?;
+                test.mouse_move("Game View/#TAB")?;
+                test.mouse_down(MouseButton::Left)?;
+                test.mouse_lift_drag_threshold(MouseButton::Left)?;
+                test.mouse_move_to_pos(external_pos[0], external_pos[1])?;
+                test.yield_frames(ScriptCount::new(120)?)?;
+                test.mouse_move_to_pos(redock_pos[0], redock_pos[1])?;
+                test.yield_frames(ScriptCount::new(60)?)?;
+                test.mouse_up(MouseButton::Left)?;
+                test.yield_frames(ScriptCount::new(30)?)?;
+                test.assert_item_read_int_eq("Main/Viewport Count", 1)?;
+            } else {
+                test.window_move("Game View", external_pos[0], external_pos[1])?;
+                test.yield_frames(ScriptCount::new(30)?)?;
+                test.assert_item_read_int_eq("Main/Viewport Count", 2)?;
+                test.dock_into("Game View", "Main")?;
+                test.yield_frames(ScriptCount::new(30)?)?;
+            }
+            Ok(())
         })?;
         engine.queue_tests(
             TestGroup::Tests,
-            Some("multi_viewport_surface_smoke"),
+            Some(test_name),
             RunFlags::RUN_FROM_COMMAND_LINE,
         )?;
 
@@ -529,7 +588,12 @@ impl AppWindow {
         self.viewport_smoke = Some(ViewportSmokeState {
             result_path: std::env::var_os("DEAR_IMGUI_VIEWPORT_SMOKE_JSON").map(PathBuf::from),
             adapter,
+            require_secondary_while_held: drag_while_held,
+            held_probe_armed: false,
+            held_probe_pressed: false,
+            held_probe_complete: false,
             saw_secondary_viewport: false,
+            saw_secondary_while_held: false,
             saw_merged_viewport: false,
             complete: false,
         });
@@ -612,6 +676,14 @@ impl AppWindow {
         #[cfg(feature = "test-engine")]
         let mut viewport_count =
             i32::try_from(self.imgui.platform_io().viewports_iter().count()).unwrap_or(i32::MAX);
+        let ui = self.imgui.frame();
+        #[cfg(feature = "test-engine")]
+        let show_held_drag_probe = self
+            .viewport_smoke
+            .as_ref()
+            .is_some_and(|smoke| smoke.require_secondary_while_held);
+        #[cfg(feature = "test-engine")]
+        let mut arm_held_drag_probe = false;
         #[cfg(feature = "test-engine")]
         if let Some(smoke) = self.viewport_smoke.as_mut() {
             if viewport_count > 1 {
@@ -620,7 +692,6 @@ impl AppWindow {
                 smoke.saw_merged_viewport = true;
             }
         }
-        let ui = self.imgui.frame();
 
         // Keep a dockspace in the main viewport so it always has content
         ui.dockspace_over_main_viewport();
@@ -644,6 +715,9 @@ impl AppWindow {
                     ui.input_int_config("Viewport Count")
                         .flags(dear_imgui_rs::InputScalarFlags::READ_ONLY)
                         .build(&mut viewport_count);
+                    if show_held_drag_probe && ui.button("Begin Held Drag Probe") {
+                        arm_held_drag_probe = true;
+                    }
                 }
             });
 
@@ -660,6 +734,25 @@ impl AppWindow {
                 ui.text("Offscreen WGPU texture rendered each frame:");
                 ui.image(self.game_tex_id, size);
             });
+
+        #[cfg(feature = "test-engine")]
+        if let Some(smoke) = self.viewport_smoke.as_mut()
+            && smoke.require_secondary_while_held
+        {
+            if arm_held_drag_probe {
+                smoke.held_probe_armed = true;
+            }
+            if smoke.held_probe_armed && !smoke.held_probe_complete {
+                if ui.is_mouse_down(MouseButton::Left) {
+                    smoke.held_probe_pressed = true;
+                    if viewport_count > 1 {
+                        smoke.saw_secondary_while_held = true;
+                    }
+                } else if smoke.held_probe_pressed {
+                    smoke.held_probe_complete = true;
+                }
+            }
+        }
 
         // Optionally show demo to validate interaction
         // let mut show_demo = true;
@@ -735,10 +828,17 @@ impl AppWindow {
                     .viewport_smoke
                     .as_mut()
                     .expect("a pending viewport smoke state must exist");
-                if !smoke.saw_secondary_viewport || !smoke.saw_merged_viewport {
+                if !smoke.saw_secondary_viewport
+                    || smoke.require_secondary_while_held
+                        && (!smoke.held_probe_complete || !smoke.saw_secondary_while_held)
+                    || !smoke.saw_merged_viewport
+                {
                     return Err(format!(
-                        "viewport smoke did not observe the complete lifecycle: secondary={}, merged={}",
-                        smoke.saw_secondary_viewport, smoke.saw_merged_viewport
+                        "viewport smoke did not observe the complete lifecycle: secondary={}, secondary_while_held={}, held_probe_complete={}, merged={}",
+                        smoke.saw_secondary_viewport,
+                        smoke.saw_secondary_while_held,
+                        smoke.held_probe_complete,
+                        smoke.saw_merged_viewport
                     )
                     .into());
                 }

@@ -628,6 +628,38 @@ ImGuiTestEngineStatus imgui_test_engine_set_verbose_level(
     });
 }
 
+ImGuiTestEngineStatus imgui_test_engine_set_verbose_level_on_error(
+    ImGuiTestEngine* engine,
+    int level
+) {
+    return abi::boundary("imgui_test_engine_set_verbose_level_on_error", [&]() {
+        const ImGuiTestEngineStatus status = abi::require_engine(engine);
+        if (status != ImGuiTestEngineStatus_Success) {
+            return status;
+        }
+        if (level < ImGuiTestEngineVerboseLevel_Silent || level > ImGuiTestEngineVerboseLevel_Trace) {
+            return abi::fail(ImGuiTestEngineStatus_OutOfRange, "error verbose level is out of range");
+        }
+        ImGuiTestEngine_GetIO(engine).ConfigVerboseLevelOnError =
+            static_cast<ImGuiTestVerboseLevel>(level);
+        return ImGuiTestEngineStatus_Success;
+    });
+}
+
+ImGuiTestEngineStatus imgui_test_engine_set_log_to_tty(
+    ImGuiTestEngine* engine,
+    bool enabled
+) {
+    return abi::boundary("imgui_test_engine_set_log_to_tty", [&]() {
+        const ImGuiTestEngineStatus status = abi::require_engine(engine);
+        if (status != ImGuiTestEngineStatus_Success) {
+            return status;
+        }
+        ImGuiTestEngine_GetIO(engine).ConfigLogToTTY = enabled;
+        return ImGuiTestEngineStatus_Success;
+    });
+}
+
 ImGuiTestEngineStatus imgui_test_engine_set_capture_enabled(ImGuiTestEngine* engine, bool enabled) {
     return abi::boundary("imgui_test_engine_set_capture_enabled", [&]() {
         const ImGuiTestEngineStatus status = abi::require_engine(engine);

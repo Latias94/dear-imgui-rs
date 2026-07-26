@@ -92,6 +92,7 @@ struct ImGuiTestEngineScript {
         WindowBringToFront,
         WindowMove,
         WindowResize,
+        DockInto,
         Sleep,
         AssertItemExists,
         AssertItemVisible,
@@ -484,6 +485,14 @@ static void script_test_func_impl(ImGuiTestContext* ctx) {
                 break;
             case ImGuiTestEngineScript::CmdKind::WindowResize:
                 ctx->WindowResize(cmd.A.c_str(), ImVec2(cmd.F, cmd.G));
+                break;
+            case ImGuiTestEngineScript::CmdKind::DockInto:
+                ctx->DockInto(
+                    cmd.A.c_str(),
+                    cmd.B.c_str(),
+                    static_cast<ImGuiDir>(cmd.I),
+                    cmd.J != 0
+                );
                 break;
             case ImGuiTestEngineScript::CmdKind::Sleep:
                 ctx->Sleep(cmd.F);
@@ -910,6 +919,12 @@ static ImGuiTestEngineStatus mouse_button(int value) noexcept {
                : abi::fail(ImGuiTestEngineStatus_OutOfRange, "mouse button is out of range");
 }
 
+static ImGuiTestEngineStatus dock_direction(int value) noexcept {
+    return value >= ImGuiDir_None && value < ImGuiDir_COUNT
+               ? ImGuiTestEngineStatus_Success
+               : abi::fail(ImGuiTestEngineStatus_OutOfRange, "dock direction is out of range");
+}
+
 static ImGuiTestEngineStatus key_chord(int value) noexcept {
     if (value < 0 || (value & ~(ImGuiMod_Mask_ | 0x0fff)) != 0) {
         return abi::fail(ImGuiTestEngineStatus_OutOfRange, "key chord contains unknown bits");
@@ -963,6 +978,7 @@ static bool command_requires_released_mouse(ImGuiTestEngineScript::CmdKind kind)
         case Kind::WindowFocus:
         case Kind::WindowMove:
         case Kind::WindowResize:
+        case Kind::DockInto:
             return true;
         default:
             return false;
@@ -1667,6 +1683,28 @@ ImGuiTestEngineStatus imgui_test_engine_script_window_resize(
         command.Kind = ImGuiTestEngineScript::CmdKind::WindowResize;
         command.F = width;
         command.G = height;
+        return status;
+    });
+}
+
+ImGuiTestEngineStatus imgui_test_engine_script_dock_into(
+    ImGuiTestEngineScript* script,
+    const char* source_ref,
+    const char* destination_ref,
+    int split_direction,
+    bool outer_docking
+) {
+    return append_command("imgui_test_engine_script_dock_into", script, [&](auto& command) {
+        ImGuiTestEngineStatus status = required_ref(command.A, source_ref);
+        if (status == ImGuiTestEngineStatus_Success) {
+            status = required_ref(command.B, destination_ref);
+        }
+        if (status == ImGuiTestEngineStatus_Success) {
+            status = dock_direction(split_direction);
+        }
+        command.Kind = ImGuiTestEngineScript::CmdKind::DockInto;
+        command.I = split_direction;
+        command.J = outer_docking ? 1 : 0;
         return status;
     });
 }

@@ -413,6 +413,7 @@ class RuntimeGateTests(unittest.TestCase):
                 stdout_log=evidence / "build.stdout.log",
                 stderr_log=evidence / "build.stderr.log",
             )
+            viewport_environment = {}
 
             def run_scenario(command, **kwargs):
                 arguments = [os.fspath(argument) for argument in command]
@@ -634,6 +635,7 @@ class RuntimeGateTests(unittest.TestCase):
                 "driver_info": "Mesa 25",
             },
             "secondary_viewport_observed": True,
+            "secondary_viewport_while_held_observed": True,
             "merge_observed": True,
             "teardown_complete": True,
         }
@@ -651,6 +653,7 @@ class RuntimeGateTests(unittest.TestCase):
                 "schema_version": 0,
                 "outcome": "Failed",
                 "secondary_viewport_observed": False,
+                "secondary_viewport_while_held_observed": False,
                 "merge_observed": False,
                 "teardown_complete": False,
             }
@@ -661,6 +664,7 @@ class RuntimeGateTests(unittest.TestCase):
                 "schema_version expected 1, got 0",
                 "outcome expected 'Passed', got 'Failed'",
                 "secondary_viewport_observed expected True, got False",
+                "secondary_viewport_while_held_observed expected True, got False",
                 "merge_observed expected True, got False",
                 "teardown_complete expected True, got False",
                 "adapter must be a JSON object",
@@ -736,6 +740,7 @@ class RuntimeGateTests(unittest.TestCase):
                 stdout_log=evidence / "build.stdout.log",
                 stderr_log=evidence / "build.stderr.log",
             )
+            viewport_environment = {}
 
             def background(command, **kwargs):
                 return FakeBackground(
@@ -759,6 +764,7 @@ class RuntimeGateTests(unittest.TestCase):
                         encoding="utf-8",
                     )
                 elif result.stdout_log.name == "viewport.stdout.log":
+                    viewport_environment.update(kwargs["env"])
                     (evidence / "viewport-result.json").write_text(
                         json.dumps(
                             {
@@ -772,6 +778,7 @@ class RuntimeGateTests(unittest.TestCase):
                                     "driver_info": "Mesa 25",
                                 },
                                 "secondary_viewport_observed": True,
+                                "secondary_viewport_while_held_observed": True,
                                 "merge_observed": True,
                                 "teardown_complete": True,
                             }
@@ -805,6 +812,10 @@ class RuntimeGateTests(unittest.TestCase):
             self.assertFalse(xdg_runtime.exists())
             self.assertIn("adapter.stdout.log", result.evidence)
             self.assertIn("viewport-result.json", result.evidence)
+            self.assertEqual(
+                viewport_environment["DEAR_IMGUI_VIEWPORT_DRAG_SMOKE"],
+                "1",
+            )
 
     def test_sdl3_glow_gate_retains_renderer_and_teardown_evidence(self):
         with TemporaryDirectory() as temporary:

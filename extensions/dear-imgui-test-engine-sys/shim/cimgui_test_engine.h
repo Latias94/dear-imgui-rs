@@ -116,6 +116,14 @@ ImGuiTestEngineStatus imgui_test_engine_set_verbose_level(
     ImGuiTestEngine* engine,
     int level
 );
+ImGuiTestEngineStatus imgui_test_engine_set_verbose_level_on_error(
+    ImGuiTestEngine* engine,
+    int level
+);
+ImGuiTestEngineStatus imgui_test_engine_set_log_to_tty(
+    ImGuiTestEngine* engine,
+    bool enabled
+);
 ImGuiTestEngineStatus imgui_test_engine_set_capture_enabled(
     ImGuiTestEngine* engine,
     bool enabled
@@ -200,6 +208,13 @@ ImGuiTestEngineStatus imgui_test_engine_script_window_focus(ImGuiTestEngineScrip
 ImGuiTestEngineStatus imgui_test_engine_script_window_bring_to_front(ImGuiTestEngineScript* script, const char* window_ref);
 ImGuiTestEngineStatus imgui_test_engine_script_window_move(ImGuiTestEngineScript* script, const char* window_ref, float x, float y);
 ImGuiTestEngineStatus imgui_test_engine_script_window_resize(ImGuiTestEngineScript* script, const char* window_ref, float w, float h);
+ImGuiTestEngineStatus imgui_test_engine_script_dock_into(
+    ImGuiTestEngineScript* script,
+    const char* source_ref,
+    const char* destination_ref,
+    int split_direction,
+    bool outer_docking
+);
 ImGuiTestEngineStatus imgui_test_engine_script_table_open_context_menu(ImGuiTestEngineScript* script, const char* table_ref, int column_n);
 ImGuiTestEngineStatus imgui_test_engine_script_table_set_column_enabled(ImGuiTestEngineScript* script, const char* table_ref, int column_n, bool enabled);
 ImGuiTestEngineStatus imgui_test_engine_script_table_set_column_enabled_by_label(ImGuiTestEngineScript* script, const char* table_ref, const char* label, bool enabled);

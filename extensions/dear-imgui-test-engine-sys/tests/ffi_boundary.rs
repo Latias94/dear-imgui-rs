@@ -168,6 +168,14 @@ fn ffi_boundary_is_total_and_preserves_lifecycle_state() {
             sys::ImGuiTestEngineStatus_OutOfRange
         );
         assert_eq!(
+            sys::imgui_test_engine_set_verbose_level_on_error(engine, 99),
+            sys::ImGuiTestEngineStatus_OutOfRange
+        );
+        assert_eq!(
+            sys::imgui_test_engine_set_log_to_tty(engine, false),
+            sys::ImGuiTestEngineStatus_Success
+        );
+        assert_eq!(
             sys::imgui_test_engine_test_set_exception_injection(99),
             sys::ImGuiTestEngineStatus_OutOfRange
         );
@@ -213,6 +221,36 @@ fn ffi_boundary_is_total_and_preserves_lifecycle_state() {
         );
         assert_eq!(
             sys::imgui_test_engine_script_window_resize(script, c"window".as_ptr(), -1.0, 1.0,),
+            sys::ImGuiTestEngineStatus_OutOfRange
+        );
+        assert_eq!(
+            sys::imgui_test_engine_script_dock_into(
+                script,
+                ptr::null(),
+                c"destination".as_ptr(),
+                -1,
+                false,
+            ),
+            sys::ImGuiTestEngineStatus_InvalidArgument
+        );
+        assert_eq!(
+            sys::imgui_test_engine_script_dock_into(
+                script,
+                c"source".as_ptr(),
+                ptr::null(),
+                -1,
+                false,
+            ),
+            sys::ImGuiTestEngineStatus_InvalidArgument
+        );
+        assert_eq!(
+            sys::imgui_test_engine_script_dock_into(
+                script,
+                c"source".as_ptr(),
+                c"destination".as_ptr(),
+                99,
+                false,
+            ),
             sys::ImGuiTestEngineStatus_OutOfRange
         );
         assert_eq!(
@@ -266,6 +304,16 @@ fn ffi_boundary_is_total_and_preserves_lifecycle_state() {
             sys::imgui_test_engine_script_item_click(script, long_ref.as_ptr()),
             sys::ImGuiTestEngineStatus_OutOfRange
         );
+        assert_eq!(
+            sys::imgui_test_engine_script_dock_into(
+                script,
+                long_ref.as_ptr(),
+                c"destination".as_ptr(),
+                -1,
+                false,
+            ),
+            sys::ImGuiTestEngineStatus_OutOfRange
+        );
 
         assert_eq!(
             sys::imgui_test_engine_test_set_exception_injection(
@@ -307,6 +355,16 @@ fn ffi_boundary_is_total_and_preserves_lifecycle_state() {
         );
         assert_eq!(
             sys::imgui_test_engine_script_item_click(caller_owned_script, c"button".as_ptr(),),
+            sys::ImGuiTestEngineStatus_InvalidState
+        );
+        assert_eq!(
+            sys::imgui_test_engine_script_dock_into(
+                caller_owned_script,
+                c"source".as_ptr(),
+                c"destination".as_ptr(),
+                -1,
+                false,
+            ),
             sys::ImGuiTestEngineStatus_InvalidState
         );
         assert_eq!(

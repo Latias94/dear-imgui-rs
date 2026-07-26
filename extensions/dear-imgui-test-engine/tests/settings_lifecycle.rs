@@ -383,6 +383,20 @@ fn script_inputs_are_rejected_before_native_vector_growth() {
                 script.item_click("contains\0nul"),
                 Err(TestEngineError::InvalidInput { .. })
             ));
+            assert!(matches!(
+                script.dock_into("", "Window"),
+                Err(TestEngineError::InvalidInput {
+                    argument: "source",
+                    ..
+                })
+            ));
+            assert!(matches!(
+                script.dock_into("Window", ""),
+                Err(TestEngineError::InvalidInput {
+                    argument: "destination",
+                    ..
+                })
+            ));
             script.yield_frames(ScriptCount::new(1)?)
         })
         .expect("valid command remains registerable");
@@ -607,6 +621,8 @@ fn public_engine_methods_enforce_the_attachment_and_run_state_matrix() {
     assert_invalid_state(detached.is_requesting_max_app_speed());
     assert_invalid_state(detached.set_run_speed(RunSpeed::Fast));
     assert_invalid_state(detached.set_verbose_level(VerboseLevel::Info));
+    assert_invalid_state(detached.set_verbose_level_on_error(VerboseLevel::Debug));
+    assert_invalid_state(detached.set_log_to_tty(true));
     assert_invalid_state(detached.set_capture_enabled(false));
     assert_invalid_state(detached.install_default_crash_handler());
 
@@ -629,6 +645,10 @@ fn public_engine_methods_enforce_the_attachment_and_run_state_matrix() {
     detached
         .set_verbose_level(VerboseLevel::Debug)
         .expect("Ready config");
+    detached
+        .set_verbose_level_on_error(VerboseLevel::Trace)
+        .expect("Ready config");
+    detached.set_log_to_tty(false).expect("Ready config");
     detached.set_capture_enabled(false).expect("Ready config");
     detached.stop().expect("Ready to Inactive");
     assert_eq!(detached.run_state(), RunState::Inactive);
