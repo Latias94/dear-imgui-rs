@@ -368,6 +368,13 @@ impl ImguiResolvedRenderRoute {
                 viewport.physical_size
             })
     }
+
+    pub(crate) fn host_window(&self) -> Option<Entity> {
+        match &self.target {
+            NormalizedRenderTarget::Window(window) => Some(window.entity()),
+            _ => None,
+        }
+    }
 }
 
 /// One immutable main-world input route for an epoch.
@@ -845,7 +852,7 @@ struct ResolverWorld<'a> {
 /// [`ImguiDiagnostics`] instead of scheduling it directly.
 ///
 pub(crate) fn resolve_imgui_routes(
-    contexts: NonSend<ImguiContexts>,
+    contexts: Option<NonSend<ImguiContexts>>,
     mut resolved: ResMut<ImguiResolvedRoutes>,
     diagnostics: Res<ImguiDiagnostics>,
     primary_windows: Query<Entity, With<PrimaryWindow>>,
@@ -868,7 +875,10 @@ pub(crate) fn resolve_imgui_routes(
     let manual_texture_views = manual_texture_views
         .as_deref()
         .unwrap_or(&empty_manual_texture_views);
-    let registered_contexts = contexts.ids().collect::<HashSet<_>>();
+    let registered_contexts = contexts
+        .as_deref()
+        .map(|contexts| contexts.ids().collect::<HashSet<_>>())
+        .unwrap_or_default();
     let mut cameras = cameras
         .iter()
         .map(|(entity, camera, target, schedule)| CameraRecord {
@@ -900,7 +910,7 @@ pub(crate) fn resolve_imgui_routes(
 
     let route_world = ResolverWorld {
         registered_contexts: &registered_contexts,
-        primary_context: contexts.primary_id(),
+        primary_context: contexts.as_deref().and_then(ImguiContexts::primary_id),
         primary_windows: &primary_windows,
         windows: &windows,
         images,

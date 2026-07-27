@@ -1,5 +1,10 @@
 use std::sync::{Mutex, OnceLock};
 
+#[cfg(feature = "render")]
+use std::{cell::Cell, rc::Rc};
+
+#[cfg(feature = "render")]
+use bevy_app::Main;
 use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::{ScheduleLabel, Schedules};
@@ -43,6 +48,21 @@ struct LifecycleTrace {
     wrong_current_context: bool,
     delta_times: Vec<f32>,
     display_metrics: Vec<([f32; 2], [f32; 2])>,
+}
+
+#[cfg(feature = "render")]
+struct RetirementProbeMarker;
+
+#[cfg(feature = "render")]
+struct RetirementProbe {
+    destroyed: Rc<Cell<bool>>,
+}
+
+#[cfg(feature = "render")]
+impl dear_imgui_rs::ContextAttachment for RetirementProbe {
+    fn context_destroyed(&self, _context: dear_imgui_rs::ContextDestroyed) {
+        self.destroyed.set(true);
+    }
 }
 
 fn app_with_primary_window() -> App {
@@ -367,25 +387,28 @@ fn duplicate_schedule_and_stale_context_errors_are_typed_and_recover_ownership()
 }
 
 #[test]
-fn additional_multi_viewport_admission_fails_without_consuming_the_context() {
+fn additional_multi_viewport_config_can_be_registered_before_backend_attachment() {
     let _guard = imgui_context_guard();
     let mut contexts = ImguiContexts::with_primary(dear_imgui_rs::SuspendedContext::create());
     let additional = dear_imgui_rs::SuspendedContext::create();
     let additional_id = additional.id();
 
-    let error = contexts
+    let admitted = contexts
         .insert_suspended(
             additional,
             ImguiContextConfig::new(ContextPassA).with_multi_viewport(true),
         )
-        .expect_err("additional native viewport state is not Context-namespaced yet");
+        .expect("multi-viewport configuration should be retained until backend attachment");
 
-    assert!(matches!(
-        error.error(),
-        ImguiContextError::AdditionalMultiViewportUnsupported
-    ));
-    assert_eq!(error.into_context().id(), additional_id);
-    assert!(!contexts.contains(additional_id));
+    assert_eq!(admitted, additional_id);
+    assert!(contexts.contains(additional_id));
+    assert_eq!(
+        contexts
+            .remove(additional_id)
+            .expect("an unattached Context should remain removable")
+            .id(),
+        additional_id
+    );
 }
 
 #[test]
@@ -559,7 +582,7 @@ fn removing_the_primary_context_does_not_stop_an_additional_context() {
 
 #[cfg(feature = "render")]
 #[test]
-fn context_local_renderer_release_does_not_pause_another_context() {
+fn context_removal_abandons_unextracted_snapshot_without_pausing_another_context() {
     let _guard = imgui_context_guard();
     let mut app = app_with_primary_window();
     app.add_plugins(ExtractPlugin::default())
@@ -579,7 +602,7 @@ fn context_local_renderer_release_does_not_pause_another_context() {
     };
     app.world_mut().resource_mut::<LifecycleTrace>().expected = vec![context_a, context_b];
 
-    app.update();
+    app.world_mut().run_schedule(Main);
 
     {
         let output = app.world().resource::<ImguiFrameOutput>();
@@ -612,6 +635,16 @@ fn context_local_renderer_release_does_not_pause_another_context() {
             reason: ImguiContextIntoInnerErrorReason::RenderWorldReleasePending,
         } if context_id == context_a
     ));
+    let completion = app
+        .world_mut()
+        .get_non_send_mut::<ImguiContexts>()
+        .unwrap()
+        .configure(context_a, |context| context.poll_snapshot_completions())
+        .expect("a teardown Context must remain configurable")
+        .expect("abandoning the staged snapshot must complete cleanly");
+    assert_eq!(completion.watermark(), 1);
+    assert_eq!(completion.committed(), 0);
+    assert_eq!(completion.abandoned(), 1);
 
     app.update();
 
@@ -678,5 +711,73 @@ fn context_local_renderer_release_does_not_pause_another_context() {
             (context_b, 2),
             (context_b, 3),
         ]
+    );
+}
+
+#[cfg(feature = "render")]
+#[test]
+fn removed_registry_retires_a_context_with_an_unextracted_snapshot() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_primary_window();
+    app.add_plugins(ExtractPlugin::default())
+        .init_resource::<LifecycleTrace>()
+        .add_systems(ImguiPrimaryContextPass, record_ui)
+        .add_plugins(ImguiPlugin::default());
+    app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
+
+    let context_id = app
+        .world()
+        .get_non_send::<ImguiContexts>()
+        .unwrap()
+        .primary_id()
+        .unwrap();
+    let destroyed = Rc::new(Cell::new(false));
+    app.world_mut()
+        .get_non_send_mut::<ImguiContexts>()
+        .unwrap()
+        .configure(context_id, |context| {
+            context
+                .register_attachment::<RetirementProbeMarker>(
+                    dear_imgui_rs::ContextAttachmentRole::Extension,
+                    Rc::new(RetirementProbe {
+                        destroyed: Rc::clone(&destroyed),
+                    }),
+                )
+                .expect("the retirement probe must attach")
+                .defer_to_context();
+        })
+        .unwrap();
+    app.world_mut().resource_mut::<LifecycleTrace>().expected = vec![context_id];
+
+    app.world_mut().run_schedule(Main);
+    assert!(
+        app.world()
+            .resource::<ImguiFrameOutput>()
+            .get(context_id)
+            .and_then(|output| output.snapshot_epoch())
+            .is_some(),
+        "the registry must own a snapshot that has not reached extraction"
+    );
+
+    let contexts = app
+        .world_mut()
+        .remove_non_send::<ImguiContexts>()
+        .expect("the plugin must install its Context registry");
+    drop(contexts);
+    assert!(
+        !destroyed.get(),
+        "dropping the registry must transfer ownership instead of destroying the Context"
+    );
+
+    app.update();
+    assert!(
+        !destroyed.get(),
+        "the Context must remain alive until the render world acknowledges release"
+    );
+
+    app.update();
+    assert!(
+        destroyed.get(),
+        "the next main-world update must finish the acknowledged retirement"
     );
 }

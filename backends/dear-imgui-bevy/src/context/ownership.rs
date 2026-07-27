@@ -35,10 +35,17 @@
 //! routing before advertising full multi-viewport support.
 
 use bevy_app::{App, Plugin};
+use bevy_ecs::prelude::World;
 use bevy_ecs::resource::Resource;
-use std::ffi::c_char;
 #[cfg(feature = "render")]
 use std::ffi::c_void;
+use std::{
+    cell::RefCell,
+    collections::VecDeque,
+    ffi::c_char,
+    mem::ManuallyDrop,
+    rc::{Rc, Weak},
+};
 
 use crate::context::{ImguiContextConfig, ImguiContextError, ImguiContexts};
 #[cfg(feature = "render")]
@@ -149,6 +156,11 @@ fn refresh_backend_status(app: &mut App, render_integration_installed: bool) {
     let attachment = BackendAttachment {
         config: effective_config.clone(),
         render_integration_installed,
+        #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+        viewport_bridge_registration: app
+            .world()
+            .get_non_send::<viewport::ImguiViewportBridge>()
+            .map(viewport::ImguiViewportBridge::registration),
         #[cfg(feature = "render")]
         renderer_releases,
     };
@@ -289,6 +301,8 @@ pub(crate) enum ImguiActiveRendererContextError<E> {
     Operation(E),
     #[cfg(feature = "render")]
     RendererOwnership(ImguiRendererOwnershipError),
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    ViewportBridge(viewport::ImguiViewportBridgeError),
 }
 
 #[cfg(feature = "render")]
@@ -323,13 +337,54 @@ struct ImguiBackendOwnership {
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-enum ImguiViewportBridgeLifecycle {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ImguiViewportBridgePhase {
     Detached,
-    Attached {
-        keepalive: viewport::ImguiViewportBridgeKeepalive,
-        attachment: dear_imgui_rs::ContextAttachmentLease,
-    },
-    EcsReleasePending(viewport::ImguiViewportBridgeKeepalive),
+    Attached,
+    EcsReleasePending,
+    ViewportDrained,
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+struct ImguiViewportBridgeOwner {
+    keepalive: viewport::ImguiViewportBridgeKeepalive,
+    attachment: dear_imgui_rs::ContextAttachmentLease,
+    registration: Option<viewport::ImguiViewportBridgeRegistration>,
+    context_id: dear_imgui_rs::ContextId,
+    capabilities_still_owned: bool,
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+struct ImguiViewportBridgeLifecycle {
+    phase: ImguiViewportBridgePhase,
+    owner: Option<ImguiViewportBridgeOwner>,
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+impl Default for ImguiViewportBridgeLifecycle {
+    fn default() -> Self {
+        Self {
+            phase: ImguiViewportBridgePhase::Detached,
+            owner: None,
+        }
+    }
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+impl ImguiViewportBridgeLifecycle {
+    fn attached_keepalive(&self) -> Option<&viewport::ImguiViewportBridgeKeepalive> {
+        (self.phase == ImguiViewportBridgePhase::Attached).then(|| {
+            &self
+                .owner
+                .as_ref()
+                .expect("an attached bridge must retain its owner")
+                .keepalive
+        })
+    }
+
+    fn is_detached(&self) -> bool {
+        self.phase == ImguiViewportBridgePhase::Detached
+    }
 }
 
 impl Default for ImguiBackendOwnership {
@@ -354,6 +409,8 @@ impl Default for ImguiBackendOwnership {
 pub(crate) struct BackendAttachment {
     pub(crate) config: ImguiBackendConfig,
     pub(crate) render_integration_installed: bool,
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    pub(crate) viewport_bridge_registration: Option<viewport::ImguiViewportBridgeRegistration>,
     #[cfg(feature = "render")]
     pub(crate) renderer_releases: Option<render::ImguiRendererReleases>,
 }
@@ -392,15 +449,169 @@ impl std::fmt::Display for ImguiContextIntoInnerErrorReason {
 
 impl std::error::Error for ImguiContextIntoInnerErrorReason {}
 
+struct ImguiContextRetirementQueue {
+    pending: RefCell<VecDeque<ContextRetirement>>,
+    #[cfg(feature = "render")]
+    snapshot_mailbox: RefCell<Option<super::ImguiFrameMailbox>>,
+}
+
+impl Default for ImguiContextRetirementQueue {
+    fn default() -> Self {
+        Self {
+            pending: RefCell::new(VecDeque::new()),
+            #[cfg(feature = "render")]
+            snapshot_mailbox: RefCell::new(None),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct ImguiContextRetirementSink {
+    queue: Weak<ImguiContextRetirementQueue>,
+}
+
+impl Default for ImguiContextRetirementSink {
+    fn default() -> Self {
+        Self { queue: Weak::new() }
+    }
+}
+
+impl ImguiContextRetirementSink {
+    fn try_enqueue(
+        &self,
+        owner: ManuallyDrop<ContextOwner>,
+    ) -> Result<(), ManuallyDrop<ContextOwner>> {
+        let Some(queue) = self.queue.upgrade() else {
+            return Err(owner);
+        };
+        let Ok(mut pending) = queue.pending.try_borrow_mut() else {
+            return Err(owner);
+        };
+        pending.push_back(ContextRetirement {
+            owner: Some(owner),
+            sink: self.clone(),
+        });
+        Ok(())
+    }
+
+    fn try_pop_front(&self) -> Option<ContextRetirement> {
+        let queue = self.queue.upgrade()?;
+        let mut pending = queue.pending.try_borrow_mut().ok()?;
+        pending.pop_front()
+    }
+
+    fn pending_len(&self) -> usize {
+        let Some(queue) = self.queue.upgrade() else {
+            return 0;
+        };
+        let pending = queue
+            .pending
+            .try_borrow()
+            .map_or(0, |pending| pending.len());
+        pending
+    }
+
+    #[cfg(feature = "render")]
+    fn set_snapshot_mailbox(&self, mailbox: super::ImguiFrameMailbox) {
+        let Some(queue) = self.queue.upgrade() else {
+            return;
+        };
+        if let Ok(mut installed) = queue.snapshot_mailbox.try_borrow_mut() {
+            *installed = Some(mailbox);
+        }
+    }
+
+    #[cfg(feature = "render")]
+    fn snapshot_mailbox(&self) -> Option<super::ImguiFrameMailbox> {
+        let queue = self.queue.upgrade()?;
+        let mailbox = queue.snapshot_mailbox.try_borrow().ok()?.clone();
+        mailbox
+    }
+}
+
+pub(crate) struct ImguiContextRetirements {
+    queue: Rc<ImguiContextRetirementQueue>,
+}
+
+impl Default for ImguiContextRetirements {
+    fn default() -> Self {
+        Self {
+            queue: Rc::new(ImguiContextRetirementQueue::default()),
+        }
+    }
+}
+
+impl ImguiContextRetirements {
+    pub(crate) fn sink(&self) -> ImguiContextRetirementSink {
+        ImguiContextRetirementSink {
+            queue: Rc::downgrade(&self.queue),
+        }
+    }
+}
+
+struct ContextRetirement {
+    owner: Option<ManuallyDrop<ContextOwner>>,
+    sink: ImguiContextRetirementSink,
+}
+
+pub(crate) fn install_context_retirements(app: &mut App) {
+    if app
+        .world()
+        .get_non_send::<ImguiContextRetirements>()
+        .is_none()
+    {
+        app.insert_non_send(ImguiContextRetirements::default());
+    }
+    let sink = app
+        .world()
+        .get_non_send::<ImguiContextRetirements>()
+        .expect("Context retirement storage must be installed")
+        .sink();
+    #[cfg(feature = "render")]
+    sink.set_snapshot_mailbox(app.world().resource::<super::ImguiFrameMailbox>().clone());
+    if let Some(mut contexts) = app.world_mut().get_non_send_mut::<ImguiContexts>() {
+        contexts.set_retirement_sink(sink);
+    }
+}
+
+fn maintain_context_retirements(world: &mut World) {
+    let Some(sink) = world
+        .get_non_send::<ImguiContextRetirements>()
+        .map(ImguiContextRetirements::sink)
+    else {
+        return;
+    };
+    let pending_at_start = sink.pending_len();
+    for _ in 0..pending_at_start {
+        let Some(mut retirement) = sink.try_pop_front() else {
+            break;
+        };
+        if retirement.advance().is_ok() {
+            retirement.finish();
+        }
+    }
+}
+
+pub(crate) fn begin_context_retirements(world: &mut World) {
+    maintain_context_retirements(world);
+}
+
+pub(crate) fn finish_context_retirements(world: &mut World) {
+    maintain_context_retirements(world);
+}
+
 pub(crate) struct ContextOwner {
     context: Option<dear_imgui_rs::SuspendedContext>,
     backend_ownership: ImguiBackendOwnership,
+    #[cfg(feature = "render")]
+    snapshot_mailbox: Option<super::ImguiFrameMailbox>,
     #[cfg(feature = "render")]
     renderer_consumer: Option<dear_imgui_rs::render::RendererConsumer>,
     #[cfg(feature = "render")]
     renderer_release: Option<render::ImguiRendererReleaseLease>,
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     viewport_bridge: ImguiViewportBridgeLifecycle,
+    retirement_sink: Option<ImguiContextRetirementSink>,
 }
 
 impl ContextOwner {
@@ -409,11 +620,67 @@ impl ContextOwner {
             context: Some(context),
             backend_ownership: ImguiBackendOwnership::default(),
             #[cfg(feature = "render")]
+            snapshot_mailbox: None,
+            #[cfg(feature = "render")]
             renderer_consumer: None,
             #[cfg(feature = "render")]
             renderer_release: None,
             #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-            viewport_bridge: ImguiViewportBridgeLifecycle::Detached,
+            viewport_bridge: ImguiViewportBridgeLifecycle::default(),
+            retirement_sink: None,
+        }
+    }
+
+    pub(crate) fn set_retirement_sink(&mut self, sink: ImguiContextRetirementSink) {
+        #[cfg(feature = "render")]
+        {
+            self.snapshot_mailbox = sink.snapshot_mailbox();
+        }
+        self.retirement_sink = Some(sink);
+    }
+
+    fn is_unattached(&self) -> bool {
+        self.backend_ownership.flags_added.is_empty()
+            && self.backend_ownership.platform_name.is_none()
+            && self.backend_ownership.renderer_name.is_none()
+            && !self.backend_ownership.standard_draw_callbacks
+            && !self.backend_ownership.viewport_contract
+            && {
+                #[cfg(feature = "render")]
+                {
+                    self.renderer_consumer.is_none() && self.renderer_release.is_none()
+                }
+                #[cfg(not(feature = "render"))]
+                {
+                    true
+                }
+            }
+            && {
+                #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+                {
+                    self.viewport_bridge.is_detached()
+                }
+                #[cfg(not(all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
+                {
+                    true
+                }
+            }
+    }
+
+    fn take_for_retirement(&mut self) -> ContextOwner {
+        let sink = self.retirement_sink.clone().unwrap_or_default();
+        ContextOwner {
+            context: self.context.take(),
+            backend_ownership: std::mem::take(&mut self.backend_ownership),
+            #[cfg(feature = "render")]
+            snapshot_mailbox: self.snapshot_mailbox.take(),
+            #[cfg(feature = "render")]
+            renderer_consumer: self.renderer_consumer.take(),
+            #[cfg(feature = "render")]
+            renderer_release: self.renderer_release.take(),
+            #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+            viewport_bridge: std::mem::take(&mut self.viewport_bridge),
+            retirement_sink: Some(sink),
         }
     }
 
@@ -442,6 +709,26 @@ impl ContextOwner {
             Err(ImguiActiveRendererContextError::RendererOwnership(error)) => {
                 panic!("dear-imgui-bevy renderer ownership changed: {error}")
             }
+            #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+            Err(ImguiActiveRendererContextError::ViewportBridge(error)) => {
+                panic!("dear-imgui-bevy viewport bridge failed: {error}")
+            }
+        }
+    }
+
+    #[cfg(all(not(feature = "render"), test))]
+    pub(crate) fn try_with_active_renderer_context<T, E>(
+        &mut self,
+        multi_viewport: bool,
+        operation: impl FnOnce(&mut dear_imgui_rs::Context, Option<&()>) -> Result<T, E>,
+    ) -> Result<T, E> {
+        match self.try_with_active_renderer_context_checked(multi_viewport, operation) {
+            Ok(value) => Ok(value),
+            Err(ImguiActiveRendererContextError::Operation(error)) => Err(error),
+            #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+            Err(ImguiActiveRendererContextError::ViewportBridge(error)) => {
+                panic!("dear-imgui-bevy viewport bridge failed: {error}")
+            }
         }
     }
 
@@ -458,11 +745,11 @@ impl ContextOwner {
         let renderer_ownership = &mut self.backend_ownership;
         #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
         let viewport_keepalive = if multi_viewport {
-            let ImguiViewportBridgeLifecycle::Attached { keepalive, .. } = &self.viewport_bridge
-            else {
-                panic!("dear-imgui-bevy viewport bridge is not attached");
-            };
-            Some(keepalive)
+            Some(
+                self.viewport_bridge
+                    .attached_keepalive()
+                    .expect("dear-imgui-bevy viewport bridge is not attached"),
+            )
         } else {
             None
         };
@@ -476,11 +763,8 @@ impl ContextOwner {
                     .map_err(ImguiActiveRendererContextError::RendererOwnership)?;
                 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
                 if let Some(keepalive) = viewport_keepalive {
-                    viewport::platform_callback_ownership(context, keepalive).unwrap_or_else(
-                        |error| {
-                            panic!("dear-imgui-bevy viewport callback ownership changed: {error}")
-                        },
-                    );
+                    validate_viewport_bridge(context, keepalive)
+                        .map_err(ImguiActiveRendererContextError::ViewportBridge)?;
                 }
                 let operation = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     operation(context, consumer)
@@ -489,13 +773,24 @@ impl ContextOwner {
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
                         if let Some(keepalive) = viewport_keepalive {
-                            complete_platform_frame_if_needed(context, keepalive);
+                            return complete_platform_frame_if_needed(context, keepalive);
                         }
+                        Ok::<(), viewport::ImguiViewportBridgeError>(())
                     }));
                 match operation {
                     Ok(result) => {
-                        if let Err(payload) = platform_completion {
-                            std::panic::resume_unwind(payload);
+                        match platform_completion {
+                            Ok(Ok(())) => {}
+                            #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+                            Ok(Err(error)) => {
+                                return Err(ImguiActiveRendererContextError::ViewportBridge(error));
+                            }
+                            #[cfg(not(all(
+                                feature = "multi-viewport",
+                                not(target_arch = "wasm32")
+                            )))]
+                            Ok(Err(_)) => unreachable!("platform completion is disabled"),
+                            Err(payload) => std::panic::resume_unwind(payload),
                         }
                         result.map_err(ImguiActiveRendererContextError::Operation)
                     }
@@ -515,11 +810,11 @@ impl ContextOwner {
     ) -> Result<T, ImguiActiveRendererContextError<E>> {
         #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
         let viewport_keepalive = if multi_viewport {
-            let ImguiViewportBridgeLifecycle::Attached { keepalive, .. } = &self.viewport_bridge
-            else {
-                panic!("dear-imgui-bevy viewport bridge is not attached");
-            };
-            Some(keepalive)
+            Some(
+                self.viewport_bridge
+                    .attached_keepalive()
+                    .expect("dear-imgui-bevy viewport bridge is not attached"),
+            )
         } else {
             None
         };
@@ -531,11 +826,8 @@ impl ContextOwner {
             .try_with_active(|context| {
                 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
                 if let Some(keepalive) = viewport_keepalive {
-                    viewport::platform_callback_ownership(context, keepalive).unwrap_or_else(
-                        |error| {
-                            panic!("dear-imgui-bevy viewport callback ownership changed: {error}")
-                        },
-                    );
+                    validate_viewport_bridge(context, keepalive)
+                        .map_err(ImguiActiveRendererContextError::ViewportBridge)?;
                 }
                 let operation = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     operation(context, None)
@@ -544,13 +836,24 @@ impl ContextOwner {
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
                         if let Some(keepalive) = viewport_keepalive {
-                            complete_platform_frame_if_needed(context, keepalive);
+                            return complete_platform_frame_if_needed(context, keepalive);
                         }
+                        Ok::<(), viewport::ImguiViewportBridgeError>(())
                     }));
                 match operation {
                     Ok(result) => {
-                        if let Err(payload) = platform_completion {
-                            std::panic::resume_unwind(payload);
+                        match platform_completion {
+                            Ok(Ok(())) => {}
+                            #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+                            Ok(Err(error)) => {
+                                return Err(ImguiActiveRendererContextError::ViewportBridge(error));
+                            }
+                            #[cfg(not(all(
+                                feature = "multi-viewport",
+                                not(target_arch = "wasm32")
+                            )))]
+                            Ok(Err(_)) => unreachable!("platform completion is disabled"),
+                            Err(payload) => std::panic::resume_unwind(payload),
                         }
                         result.map_err(ImguiActiveRendererContextError::Operation)
                     }
@@ -565,13 +868,54 @@ impl ContextOwner {
     pub(crate) fn preflight_backend_attachment(
         &mut self,
         backend: &BackendAttachment,
-        _config: &ImguiContextConfig,
+        config: &ImguiContextConfig,
     ) -> Result<(), ImguiContextError> {
+        #[cfg(not(all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
+        let _ = config;
         let context_id = self
             .context
             .as_ref()
             .expect("Context owner must retain its suspended Context")
             .id();
+
+        #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+        if config.multi_viewport() {
+            if backend.viewport_bridge_registration.is_none() {
+                return Err(ImguiContextError::BackendOwnershipConflict {
+                    context_id,
+                    field: "ViewportBridge",
+                });
+            }
+            match self.viewport_bridge.phase {
+                ImguiViewportBridgePhase::Attached => {}
+                ImguiViewportBridgePhase::EcsReleasePending
+                | ImguiViewportBridgePhase::ViewportDrained => {
+                    return Err(ImguiContextError::TeardownInProgress { context_id });
+                }
+                ImguiViewportBridgePhase::Detached => {
+                    let result = self
+                        .context
+                        .as_mut()
+                        .expect("Context owner must retain its suspended Context")
+                        .try_with_active(|context| {
+                            context
+                                .preflight_attachment_registration::<
+                                    viewport::ImguiViewportBridgeAttachmentMarker,
+                                >(dear_imgui_rs::ContextAttachmentRole::Platform)
+                                .map_err(|_| "ContextAttachment")?;
+                            viewport::preflight_owned_platform_callbacks(context)
+                                .map_err(|_| "PlatformIO")
+                        });
+                    if let Err(field) = result {
+                        return Err(ImguiContextError::BackendOwnershipConflict {
+                            context_id,
+                            field,
+                        });
+                    }
+                }
+            }
+        }
+
         let ownership = &self.backend_ownership;
         let result = self
             .context
@@ -660,11 +1004,7 @@ impl ContextOwner {
     ) -> Result<(), ImguiContextError> {
         let ownership = &mut self.backend_ownership;
         #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-        let viewport_keepalive = match &self.viewport_bridge {
-            ImguiViewportBridgeLifecycle::Attached { keepalive, .. } => Some(keepalive),
-            ImguiViewportBridgeLifecycle::Detached
-            | ImguiViewportBridgeLifecycle::EcsReleasePending(_) => None,
-        };
+        let viewport_keepalive = self.viewport_bridge.attached_keepalive();
         self.context
             .as_mut()
             .expect("Context owner must retain its suspended Context")
@@ -687,28 +1027,85 @@ impl ContextOwner {
     ) -> Result<(), ImguiContextError> {
         self.preflight_backend_attachment(backend, config)?;
         self.preflight_renderer_admission(backend)?;
+        #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+        if config.multi_viewport() {
+            let registration = backend
+                .viewport_bridge_registration
+                .as_ref()
+                .ok_or_else(|| ImguiContextError::BackendOwnershipConflict {
+                    context_id: self.context_id(),
+                    field: "ViewportBridge",
+                })?;
+            self.attach_context_viewport_bridge(registration)?;
+        }
         self.commit_renderer_admission(backend);
         self.commit_backend_attachment(backend, config)
+    }
+
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    fn context_id(&self) -> dear_imgui_rs::ContextId {
+        self.context
+            .as_ref()
+            .expect("Context owner must retain its suspended Context")
+            .id()
+    }
+
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    pub(crate) fn attach_context_viewport_bridge(
+        &mut self,
+        registration: &viewport::ImguiViewportBridgeRegistration,
+    ) -> Result<(), ImguiContextError> {
+        let context_id = self.context_id();
+        match self.viewport_bridge.phase {
+            ImguiViewportBridgePhase::Attached => {
+                let installed = &mut self
+                    .viewport_bridge
+                    .owner
+                    .as_mut()
+                    .expect("an attached bridge must retain its owner")
+                    .registration;
+                if installed.is_none() {
+                    *installed = Some(registration.clone());
+                }
+                return Ok(());
+            }
+            ImguiViewportBridgePhase::EcsReleasePending
+            | ImguiViewportBridgePhase::ViewportDrained => {
+                return Err(ImguiContextError::TeardownInProgress { context_id });
+            }
+            ImguiViewportBridgePhase::Detached => {}
+        }
+
+        let keepalive = Rc::new(viewport::ImguiViewportBridgeShared::default());
+        let attachment = self
+            .try_with_active_context(|context| {
+                let attachment = context
+                    .register_attachment::<viewport::ImguiViewportBridgeAttachmentMarker>(
+                        dear_imgui_rs::ContextAttachmentRole::Platform,
+                        viewport::viewport_bridge_teardown_attachment(Rc::clone(&keepalive)),
+                    )
+                    .map_err(|_| "ContextAttachment")?;
+                // SAFETY: the keepalive is retained by both the Context attachment and the owner
+                // lifecycle before callback pointers can be observed by Dear ImGui.
+                unsafe { viewport::install_owned_platform_callbacks(context, &keepalive) }
+                    .map_err(|_| "PlatformIO")?;
+                Ok::<_, &'static str>(attachment)
+            })
+            .map_err(|field| ImguiContextError::BackendOwnershipConflict { context_id, field })?;
+
+        registration.register_context(context_id, Rc::clone(&keepalive));
+        self.attach_viewport_bridge_with_registration(
+            keepalive,
+            attachment,
+            Some(registration.clone()),
+        );
+        Ok(())
     }
 
     pub(crate) fn into_unattached_context(
         mut self,
     ) -> Result<dear_imgui_rs::SuspendedContext, Self> {
-        let clean = self.backend_ownership.flags_added.is_empty()
-            && self.backend_ownership.platform_name.is_none()
-            && self.backend_ownership.renderer_name.is_none()
-            && !self.backend_ownership.standard_draw_callbacks
-            && {
-                #[cfg(feature = "render")]
-                {
-                    self.renderer_consumer.is_none()
-                }
-                #[cfg(not(feature = "render"))]
-                {
-                    true
-                }
-            };
-        if clean {
+        if self.is_unattached() {
             Ok(self
                 .context
                 .take()
@@ -724,24 +1121,39 @@ impl ContextOwner {
             .expect("detached Context owner must retain its suspended Context")
     }
 
-    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    #[cfg(all(test, feature = "multi-viewport", not(target_arch = "wasm32")))]
     pub(crate) fn attach_viewport_bridge(
         &mut self,
         keepalive: viewport::ImguiViewportBridgeKeepalive,
         attachment: dear_imgui_rs::ContextAttachmentLease,
     ) {
+        self.attach_viewport_bridge_with_registration(keepalive, attachment, None);
+    }
+
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    fn attach_viewport_bridge_with_registration(
+        &mut self,
+        keepalive: viewport::ImguiViewportBridgeKeepalive,
+        attachment: dear_imgui_rs::ContextAttachmentLease,
+        registration: Option<viewport::ImguiViewportBridgeRegistration>,
+    ) {
         assert!(
-            matches!(self.viewport_bridge, ImguiViewportBridgeLifecycle::Detached),
+            self.viewport_bridge.is_detached(),
             "dear-imgui-bevy viewport bridge was attached more than once"
         );
         self.backend_ownership.viewport_contract = true;
         self.backend_ownership.flags_added |= dear_imgui_rs::BackendFlags::PLATFORM_HAS_VIEWPORTS
             | dear_imgui_rs::BackendFlags::RENDERER_HAS_VIEWPORTS
             | dear_imgui_rs::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT;
-        self.viewport_bridge = ImguiViewportBridgeLifecycle::Attached {
+        let context_id = self.context_id();
+        self.viewport_bridge.owner = Some(ImguiViewportBridgeOwner {
             keepalive,
             attachment,
-        };
+            registration,
+            context_id,
+            capabilities_still_owned: false,
+        });
+        self.viewport_bridge.phase = ImguiViewportBridgePhase::Attached;
     }
 
     #[cfg(feature = "render")]
@@ -779,6 +1191,15 @@ impl ContextOwner {
             return Ok(());
         }
         #[cfg(feature = "render")]
+        if let Some(snapshot_mailbox) = self.snapshot_mailbox.as_ref() {
+            let context_id = self
+                .context
+                .as_ref()
+                .expect("Context owner must retain its suspended Context")
+                .id();
+            snapshot_mailbox.clear(context_id);
+        }
+        #[cfg(feature = "render")]
         {
             let ownership = &mut self.backend_ownership;
             self.context
@@ -790,11 +1211,21 @@ impl ContextOwner {
                 })?;
         }
         #[cfg(feature = "render")]
-        if self
+        // Request release before ECS despawn establishes a fail-closed extraction barrier.
+        let renderer_release_acknowledged = self
             .renderer_release
             .as_ref()
-            .is_some_and(|release| !release.request_release())
+            .is_none_or(|release| release.request_release());
+        #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
         {
+            let viewport_bridge = &mut self.viewport_bridge;
+            self.context
+                .as_mut()
+                .expect("Context owner must retain its suspended Context")
+                .try_with_active(|context| advance_viewport_drain(context, viewport_bridge))?;
+        }
+        #[cfg(feature = "render")]
+        if !renderer_release_acknowledged {
             return Err(ImguiContextIntoInnerErrorReason::RenderWorldReleasePending);
         }
 
@@ -810,6 +1241,16 @@ impl ContextOwner {
             .as_mut()
             .expect("Context owner must retain its suspended Context")
             .try_with_active(|context| {
+                #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+                {
+                    let viewport_capabilities_still_owned =
+                        finish_viewport_detach(context, viewport_bridge);
+                    clear_viewport_backend_contract(
+                        context,
+                        ownership,
+                        viewport_capabilities_still_owned,
+                    );
+                }
                 #[cfg(feature = "render")]
                 if let Some(renderer_consumer) = consumer.as_ref() {
                     let reset = context
@@ -827,12 +1268,8 @@ impl ContextOwner {
                         .poll_snapshot_completions()
                         .map_err(ImguiContextIntoInnerErrorReason::Renderer)?;
                 }
-                clear_backend_data(
-                    context,
-                    ownership,
-                    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-                    viewport_bridge,
-                )
+                clear_backend_data(context, ownership);
+                Ok(())
             });
         #[cfg(feature = "render")]
         if result.is_ok()
@@ -842,39 +1279,66 @@ impl ContextOwner {
         }
         result
     }
+}
 
-    fn best_effort_shutdown(&mut self) {
-        if self.context.is_none() {
-            return;
+impl ContextRetirement {
+    fn new(owner: ContextOwner, sink: ImguiContextRetirementSink) -> Self {
+        Self {
+            owner: Some(ManuallyDrop::new(owner)),
+            sink,
         }
-        #[cfg(feature = "render")]
-        if let Some(release) = self.renderer_release.as_ref() {
-            let _ = release.request_release();
-        }
-        let ownership = &mut self.backend_ownership;
-        #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-        let viewport_bridge = &mut self.viewport_bridge;
-        let _ = self
-            .context
-            .as_mut()
-            .expect("Context owner must retain its suspended Context")
-            .try_with_active::<_, std::convert::Infallible>(|context| {
-                let _ = clear_backend_data(
-                    context,
-                    ownership,
-                    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-                    viewport_bridge,
-                );
-                Ok(())
-            });
     }
+
+    fn advance(&mut self) -> Result<(), ImguiContextIntoInnerErrorReason> {
+        self.owner
+            .as_deref_mut()
+            .expect("a pending Context retirement must retain its owner")
+            .try_detach_backend()
+    }
+
+    fn finish(mut self) {
+        let owner = self
+            .owner
+            .take()
+            .expect("a completed Context retirement must retain its owner");
+        let mut owner = ManuallyDrop::into_inner(owner);
+        let context = owner
+            .context
+            .take()
+            .expect("a completed Context retirement must retain its Context");
+        drop(owner);
+        drop(context);
+    }
+}
+
+impl Drop for ContextRetirement {
+    fn drop(&mut self) {
+        let Some(owner) = self.owner.take() else {
+            return;
+        };
+        // A failed enqueue intentionally leaks the complete owner. Releasing only part of it
+        // would invalidate renderer or PlatformIO pointers still owned by another Bevy world.
+        let _leaked = self.sink.try_enqueue(owner);
+    }
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn validate_viewport_bridge(
+    context: &mut dear_imgui_rs::Context,
+    keepalive: &viewport::ImguiViewportBridgeKeepalive,
+) -> Result<(), viewport::ImguiViewportBridgeError> {
+    if let Some(error) = viewport::platform_callback_error(keepalive) {
+        return Err(error);
+    }
+    viewport::platform_callback_ownership(context, keepalive)
+        .map_err(viewport::ImguiViewportBridgeError::CallbackOwnership)
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 fn complete_platform_frame_if_needed(
     context: &mut dear_imgui_rs::Context,
     keepalive: &viewport::ImguiViewportBridgeKeepalive,
-) {
+) -> Result<(), viewport::ImguiViewportBridgeError> {
     let _ = context.end_frame();
     // SAFETY: the owner keeps this Context active and current for the whole completion check.
     let platform_frame_pending = unsafe {
@@ -884,17 +1348,24 @@ fn complete_platform_frame_if_needed(
             && raw.FrameCountPlatformEnded < raw.FrameCount
     };
     if !platform_frame_pending {
-        return;
+        return viewport::platform_callback_error(keepalive).map_or(Ok(()), Err);
     }
-    viewport::platform_callback_ownership(context, keepalive).unwrap_or_else(|error| {
-        panic!("dear-imgui-bevy viewport callback ownership changed: {error}")
-    });
+    validate_viewport_bridge(context, keepalive)?;
     context.update_platform_windows();
+    viewport::platform_callback_error(keepalive).map_or(Ok(()), Err)
 }
 
 impl Drop for ContextOwner {
     fn drop(&mut self) {
-        self.best_effort_shutdown();
+        if self.context.is_none() {
+            return;
+        }
+        if self.retirement_sink.is_none() && self.is_unattached() {
+            return;
+        }
+        let sink = self.retirement_sink.clone().unwrap_or_default();
+        let owner = self.take_for_retirement();
+        drop(ContextRetirement::new(owner, sink));
     }
 }
 
@@ -1066,25 +1537,7 @@ fn validate_active_renderer_ownership(
     Err(error)
 }
 
-fn clear_backend_data(
-    context: &mut dear_imgui_rs::Context,
-    ownership: &mut ImguiBackendOwnership,
-    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-    viewport_bridge: &mut ImguiViewportBridgeLifecycle,
-) -> Result<(), ImguiContextIntoInnerErrorReason> {
-    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-    let (viewport_capabilities_still_owned, viewport_result) =
-        advance_viewport_release(context, viewport_bridge);
-    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-    {
-        if ownership.viewport_contract && viewport_capabilities_still_owned {
-            let mut config_flags = context.io().config_flags();
-            config_flags.remove(dear_imgui_rs::ConfigFlags::VIEWPORTS_ENABLE);
-            context.io_mut().set_config_flags(config_flags);
-        }
-        ownership.viewport_contract = false;
-    }
-
+fn clear_backend_data(context: &mut dear_imgui_rs::Context, ownership: &mut ImguiBackendOwnership) {
     #[cfg(feature = "render")]
     let renderer_capabilities_still_owned = ownership.renderer_contract.is_some_and(|expected| {
         expected.retains_any_identity(ImguiRendererRuntimeContract::capture(context))
@@ -1100,29 +1553,15 @@ fn clear_backend_data(
         &mut ownership.flags_added,
         dear_imgui_rs::BackendFlags::empty(),
     );
-    #[cfg(any(
-        feature = "render",
-        all(feature = "multi-viewport", not(target_arch = "wasm32"))
-    ))]
+    #[cfg(feature = "render")]
     let mut flags_to_clear = flags_added;
-    #[cfg(not(any(
-        feature = "render",
-        all(feature = "multi-viewport", not(target_arch = "wasm32"))
-    )))]
+    #[cfg(not(feature = "render"))]
     let flags_to_clear = flags_added;
     #[cfg(feature = "render")]
     if !renderer_capabilities_still_owned {
         flags_to_clear.remove(
             dear_imgui_rs::BackendFlags::RENDERER_HAS_TEXTURES
                 | dear_imgui_rs::BackendFlags::RENDERER_HAS_VTX_OFFSET,
-        );
-    }
-    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-    if !viewport_capabilities_still_owned {
-        flags_to_clear.remove(
-            dear_imgui_rs::BackendFlags::PLATFORM_HAS_VIEWPORTS
-                | dear_imgui_rs::BackendFlags::RENDERER_HAS_VIEWPORTS
-                | dear_imgui_rs::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT,
         );
     }
     let current_flags = context.io().backend_flags();
@@ -1142,64 +1581,115 @@ fn clear_backend_data(
         &mut ownership.renderer_name_ptr,
         BackendNameKind::Renderer,
     );
-
-    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-    viewport_result?;
-    Ok(())
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-fn advance_viewport_release(
+fn clear_viewport_backend_contract(
+    context: &mut dear_imgui_rs::Context,
+    ownership: &mut ImguiBackendOwnership,
+    capabilities_still_owned: bool,
+) {
+    let viewport_flags = dear_imgui_rs::BackendFlags::PLATFORM_HAS_VIEWPORTS
+        | dear_imgui_rs::BackendFlags::RENDERER_HAS_VIEWPORTS
+        | dear_imgui_rs::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT;
+    let added_viewport_flags = ownership.flags_added & viewport_flags;
+    ownership.flags_added.remove(viewport_flags);
+
+    if ownership.viewport_contract && capabilities_still_owned {
+        let mut config_flags = context.io().config_flags();
+        config_flags.remove(dear_imgui_rs::ConfigFlags::VIEWPORTS_ENABLE);
+        context.io_mut().set_config_flags(config_flags);
+    }
+    ownership.viewport_contract = false;
+
+    if capabilities_still_owned {
+        let current_flags = context.io().backend_flags();
+        context
+            .io_mut()
+            .set_backend_flags(current_flags & !added_viewport_flags);
+    }
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn advance_viewport_drain(
     context: &mut dear_imgui_rs::Context,
     lifecycle: &mut ImguiViewportBridgeLifecycle,
-) -> (bool, Result<(), ImguiContextIntoInnerErrorReason>) {
-    let current = std::mem::replace(lifecycle, ImguiViewportBridgeLifecycle::Detached);
-    match current {
-        ImguiViewportBridgeLifecycle::Detached => (false, Ok(())),
-        ImguiViewportBridgeLifecycle::Attached {
-            keepalive,
-            mut attachment,
-        } => {
+) -> Result<(), ImguiContextIntoInnerErrorReason> {
+    match lifecycle.phase {
+        ImguiViewportBridgePhase::Detached | ImguiViewportBridgePhase::ViewportDrained => Ok(()),
+        ImguiViewportBridgePhase::Attached => {
+            let owner = lifecycle
+                .owner
+                .as_ref()
+                .expect("an attached bridge must retain its owner");
             let capabilities_still_owned =
-                viewport::platform_capabilities_still_owned(context, &keepalive);
-            let ownership_error = viewport::detach_owned_bridge(context, &keepalive).err();
-            let _ = attachment.detach();
-            let ecs_release_pending = viewport::viewport_ecs_release_pending(&keepalive);
-            if ownership_error.is_some() || ecs_release_pending {
-                *lifecycle = ImguiViewportBridgeLifecycle::EcsReleasePending(keepalive);
+                viewport::platform_capabilities_still_owned(context, &owner.keepalive);
+            let ownership_error =
+                viewport::begin_owned_bridge_release(context, &owner.keepalive).err();
+            let ecs_release_pending = viewport::viewport_ecs_release_pending(&owner.keepalive);
+            lifecycle
+                .owner
+                .as_mut()
+                .expect("an attached bridge must retain its owner")
+                .capabilities_still_owned = capabilities_still_owned;
+            lifecycle.phase = if ecs_release_pending {
+                ImguiViewportBridgePhase::EcsReleasePending
             } else {
-                viewport::finish_viewport_ecs_release(&keepalive);
-            }
-            if let Some(error) = ownership_error {
-                return (
-                    capabilities_still_owned,
-                    Err(ImguiContextIntoInnerErrorReason::ViewportCallbackOwnership(
-                        error,
-                    )),
-                );
+                ImguiViewportBridgePhase::ViewportDrained
+            };
+            if let Some(error) = ownership_error
+                && capabilities_still_owned
+            {
+                return Err(ImguiContextIntoInnerErrorReason::ViewportCallbackOwnership(
+                    error,
+                ));
             }
             if ecs_release_pending {
-                return (
-                    capabilities_still_owned,
-                    Err(ImguiContextIntoInnerErrorReason::ViewportWorldReleasePending),
-                );
+                return Err(ImguiContextIntoInnerErrorReason::ViewportWorldReleasePending);
             }
-            (capabilities_still_owned, Ok(()))
+            Ok(())
         }
-        ImguiViewportBridgeLifecycle::EcsReleasePending(keepalive) => {
-            let capabilities_still_owned =
-                viewport::platform_capabilities_still_owned(context, &keepalive);
-            if viewport::viewport_ecs_release_pending(&keepalive) {
-                *lifecycle = ImguiViewportBridgeLifecycle::EcsReleasePending(keepalive);
-                return (
-                    capabilities_still_owned,
-                    Err(ImguiContextIntoInnerErrorReason::ViewportWorldReleasePending),
-                );
+        ImguiViewportBridgePhase::EcsReleasePending => {
+            let owner = lifecycle
+                .owner
+                .as_ref()
+                .expect("a draining bridge must retain its owner");
+            if viewport::viewport_ecs_release_pending(&owner.keepalive) {
+                return Err(ImguiContextIntoInnerErrorReason::ViewportWorldReleasePending);
             }
-            viewport::finish_viewport_ecs_release(&keepalive);
-            (capabilities_still_owned, Ok(()))
+            lifecycle.phase = ImguiViewportBridgePhase::ViewportDrained;
+            Ok(())
         }
     }
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn finish_viewport_detach(
+    context: &mut dear_imgui_rs::Context,
+    lifecycle: &mut ImguiViewportBridgeLifecycle,
+) -> bool {
+    if lifecycle.phase == ImguiViewportBridgePhase::Detached {
+        return false;
+    }
+    assert_eq!(
+        lifecycle.phase,
+        ImguiViewportBridgePhase::ViewportDrained,
+        "viewport detach cannot finish before the ECS viewport world drains"
+    );
+    let owner = lifecycle
+        .owner
+        .as_mut()
+        .expect("a drained bridge must retain its owner");
+    viewport::finish_owned_bridge_release(context, &owner.keepalive);
+    let _ = owner.attachment.detach();
+    viewport::finish_viewport_ecs_release(&owner.keepalive);
+    if let Some(registration) = owner.registration.as_ref() {
+        registration.unregister_context(owner.context_id);
+    }
+    let capabilities_still_owned = owner.capabilities_still_owned;
+    drop(lifecycle.owner.take());
+    lifecycle.phase = ImguiViewportBridgePhase::Detached;
+    capabilities_still_owned
 }
 
 #[derive(Clone, Copy)]
@@ -1528,6 +2018,64 @@ mod renderer_contract_tests {
     }
 }
 
+#[cfg(test)]
+mod retirement_tests {
+    use std::{
+        cell::Cell,
+        rc::Rc,
+        sync::{Mutex, OnceLock},
+    };
+
+    use super::*;
+
+    struct RetirementProbeMarker;
+
+    struct RetirementProbe {
+        destroyed: Rc<Cell<bool>>,
+    }
+
+    impl dear_imgui_rs::ContextAttachment for RetirementProbe {
+        fn context_destroyed(&self, _context: dear_imgui_rs::ContextDestroyed) {
+            self.destroyed.set(true);
+        }
+    }
+
+    fn context_guard() -> std::sync::MutexGuard<'static, ()> {
+        static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+        GUARD
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    #[test]
+    fn vanished_retirement_sink_leaks_the_complete_context_without_destroying_it() {
+        let _guard = context_guard();
+        let destroyed = Rc::new(Cell::new(false));
+        let mut context = dear_imgui_rs::Context::create();
+        context
+            .register_attachment::<RetirementProbeMarker>(
+                dear_imgui_rs::ContextAttachmentRole::Extension,
+                Rc::new(RetirementProbe {
+                    destroyed: Rc::clone(&destroyed),
+                }),
+            )
+            .unwrap()
+            .defer_to_context();
+
+        let retirements = ImguiContextRetirements::default();
+        let mut owner = ContextOwner::new(context.suspend());
+        owner.set_retirement_sink(retirements.sink());
+        drop(retirements);
+        drop(owner);
+
+        assert!(
+            !destroyed.get(),
+            "a vanished sink must leak ownership instead of partially destroying the Context"
+        );
+    }
+}
+
 #[cfg(all(test, feature = "multi-viewport", not(target_arch = "wasm32")))]
 mod tests {
     use std::rc::Rc;
@@ -1582,6 +2130,32 @@ mod tests {
                 Ok::<_, std::convert::Infallible>(())
             })
             .unwrap_or_else(|never| match never {});
+    }
+
+    #[test]
+    fn pending_retirement_keeps_the_complete_viewport_owner_alive() {
+        let _guard = context_guard();
+        let retirements = ImguiContextRetirements::default();
+        let mut owner = viewport_owner();
+        owner.set_retirement_sink(retirements.sink());
+        let keepalive = Rc::clone(
+            &owner
+                .viewport_bridge
+                .owner
+                .as_ref()
+                .expect("the viewport fixture must retain its bridge owner")
+                .keepalive,
+        );
+        let strong_count = Rc::strong_count(&keepalive);
+
+        drop(owner);
+
+        assert_eq!(retirements.sink().pending_len(), 1);
+        assert_eq!(
+            Rc::strong_count(&keepalive),
+            strong_count,
+            "queueing retirement must transfer rather than release the viewport payload"
+        );
     }
 
     #[test]

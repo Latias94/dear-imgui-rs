@@ -53,6 +53,7 @@ use std::mem::size_of;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 pub use crate::texture::{ImguiBevyTextures, ImguiTexture, ImguiTextureRegistrationError};
+use crate::viewport::ImguiViewportOwner;
 use crate::{ImguiBackendStatus, ImguiViewportCamera, ImguiViewportWindow};
 
 mod extract;
@@ -91,17 +92,23 @@ type ViewportCameraQuery<'w> = Query<
         &'w RenderTarget,
         &'w bevy_render::camera::CameraRenderGraph,
         &'w ImguiViewportCamera,
+        &'w ImguiViewportOwner,
     ),
 >;
 
-type ViewportWindowQuery<'w> =
-    Query<'w, 'w, (&'w Window, &'w ImguiViewportWindow), With<ImguiViewportWindow>>;
+type ViewportWindowQuery<'w> = Query<
+    'w,
+    'w,
+    (&'w Window, &'w ImguiViewportWindow, &'w ImguiViewportOwner),
+    With<ImguiViewportWindow>,
+>;
 
 const COPY_BYTES_PER_ROW_ALIGNMENT: u32 = 256;
 const MANAGED_TEXTURE_NAMESPACE: u64 = 0x4000_0000_0000_0000;
 
 #[cfg(test)]
 mod tests {
+    use super::pass::backend_owned_viewport_windows;
     use super::plugin::{
         imgui_bevy_draw_callback_linear, imgui_bevy_draw_callback_nearest,
         imgui_bevy_draw_callback_reset,
@@ -317,9 +324,100 @@ mod tests {
         assert!(!releases.release_requested(context_b));
     }
 
+    #[test]
+    fn driver_skips_teardown_during_device_recovery_and_frames_other_context() {
+        #[derive(ScheduleLabel, Clone, Debug, Eq, Hash, PartialEq)]
+        struct RecoveryContextPass;
+
+        let mut app = App::new();
+        app.add_plugins(bevy_render::extract_plugin::ExtractPlugin::default());
+        app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
+        app.init_schedule(RecoveryContextPass);
+        app.add_plugins(crate::ImguiPlugin::default());
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+
+        let (context_a, context_b) = {
+            let mut contexts = app
+                .world_mut()
+                .get_non_send_mut::<crate::ImguiContexts>()
+                .unwrap();
+            let context_a = contexts.primary_id().unwrap();
+            let context_b = contexts
+                .create(crate::ImguiContextConfig::new(RecoveryContextPass))
+                .unwrap();
+            for context_id in [context_a, context_b] {
+                contexts
+                    .configure(context_id, |context| {
+                        assert!(context.font_atlas().build());
+                    })
+                    .unwrap();
+            }
+            (context_a, context_b)
+        };
+        let releases = app.world().resource::<ImguiRendererReleases>().clone();
+
+        assert!(matches!(
+            app.world_mut()
+                .get_non_send_mut::<crate::ImguiContexts>()
+                .unwrap()
+                .remove(context_a),
+            Err(crate::ImguiContextError::RemovalPending {
+                context_id,
+                reason:
+                    crate::context::ownership::ImguiContextIntoInnerErrorReason::RenderWorldReleasePending,
+            }) if context_id == context_a
+        ));
+        assert!(
+            releases.begin_device_recovery(1, HashMap::new()),
+            "the test device generation must detach both renderer leases"
+        );
+        assert!(
+            !releases.recovery_requested(context_a),
+            "teardown must convert Context A's recovery packet into its final release"
+        );
+        assert!(
+            releases.recovery_requested(context_b),
+            "the live Context must enter renderer recovery independently"
+        );
+
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| app.update()))
+            .expect("driver recovery must not panic while another Context is tearing down");
+        {
+            let contexts = app.world().get_non_send::<crate::ImguiContexts>().unwrap();
+            assert_eq!(contexts.frame_index(context_a).unwrap(), 0);
+            assert_eq!(
+                contexts.frame_index(context_b).unwrap(),
+                1,
+                "Context B must recover and frame while Context A remains quarantined"
+            );
+            assert!(contexts.is_tearing_down(context_a));
+        }
+        assert!(!releases.recovery_requested(context_b));
+
+        let removed = app
+            .world_mut()
+            .get_non_send_mut::<crate::ImguiContexts>()
+            .unwrap()
+            .remove(context_a)
+            .expect("Context A must consume the recovery-detached release packet");
+        assert_eq!(removed.id(), context_a);
+        drop(removed);
+
+        app.update();
+        assert_eq!(
+            app.world()
+                .get_non_send::<crate::ImguiContexts>()
+                .unwrap()
+                .frame_index(context_b)
+                .unwrap(),
+            2,
+            "Context B must remain live after Context A finishes removal"
+        );
+    }
+
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     #[test]
-    fn acknowledged_release_freezes_extra_updates_until_viewport_world_teardown_finishes() {
+    fn renderer_release_and_viewport_drain_converge_without_resuming_frames() {
         let mut app = App::new();
         app.add_plugins(bevy_render::extract_plugin::ExtractPlugin::default());
         app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
@@ -344,28 +442,38 @@ mod tests {
             })
             .unwrap();
         let viewport_id = imgui::Id::from(0xA11);
-        app.world_mut()
-            .get_non_send_mut::<crate::ImguiViewportBridge>()
-            .unwrap()
-            .queue(crate::ImguiViewportCommand::Create(
-                crate::ImguiViewportSnapshot {
-                    id: viewport_id,
-                    pos: [10.0, 20.0],
-                    size: [320.0, 180.0],
-                    dpi_scale: 1.0,
-                    flags: imgui::ViewportFlags::IS_PLATFORM_WINDOW,
-                },
-            ));
+        assert!(
+            app.world()
+                .get_non_send::<crate::ImguiViewportBridge>()
+                .unwrap()
+                .queue_for_context(
+                    primary_id,
+                    crate::viewport::ImguiViewportCommand::Create(crate::ImguiViewportSnapshot {
+                        id: viewport_id,
+                        pos: [10.0, 20.0],
+                        size: [320.0, 180.0],
+                        dpi_scale: 1.0,
+                        flags: imgui::ViewportFlags::IS_PLATFORM_WINDOW,
+                    },),
+                ),
+            "the primary Context must own a registered viewport bridge"
+        );
         app.update();
         assert!(
             app.world()
                 .get_non_send::<crate::ImguiViewportBridge>()
                 .unwrap()
-                .viewport_window(viewport_id)
+                .viewport_window(primary_id, viewport_id)
                 .is_some()
         );
 
+        let frame_index = app
+            .world()
+            .get_non_send::<crate::context::ImguiFrameState>()
+            .unwrap()
+            .frame_index();
         let releases = app.world().resource::<ImguiRendererReleases>().clone();
+        app.sub_app_mut(RenderApp).update_schedule = None;
         assert!(matches!(
             app.world_mut()
                 .get_non_send_mut::<crate::ImguiContexts>()
@@ -373,7 +481,7 @@ mod tests {
                 .remove(primary_id),
             Err(crate::ImguiContextError::RemovalPending {
                 context_id,
-                reason: crate::context::ownership::ImguiContextIntoInnerErrorReason::RenderWorldReleasePending,
+                reason: crate::context::ownership::ImguiContextIntoInnerErrorReason::ViewportWorldReleasePending,
             }) if context_id == primary_id
         ));
         assert!(
@@ -388,18 +496,7 @@ mod tests {
             panic!("the primary Context should request renderer release");
         };
         assert_eq!(*requested_context, primary_id);
-        assert!(releases.acknowledge_release(
-            primary_id,
-            *generation,
-            super::resources::ImguiRendererReleasePacket::default(),
-        ));
-        assert!(releases.release_requested(primary_id));
 
-        let frame_index = app
-            .world()
-            .get_non_send::<crate::context::ImguiFrameState>()
-            .unwrap()
-            .frame_index();
         app.update();
         assert_eq!(
             app.world()
@@ -407,7 +504,15 @@ mod tests {
                 .unwrap()
                 .frame_index(),
             frame_index,
-            "an acknowledged release must not resume native frame production"
+            "viewport drain must not resume native frame production"
+        );
+        assert!(
+            app.world()
+                .get_non_send::<crate::ImguiViewportBridge>()
+                .unwrap()
+                .viewport_window(primary_id, viewport_id)
+                .is_none(),
+            "viewport entities must drain without waiting for renderer acknowledgement"
         );
 
         assert!(matches!(
@@ -417,16 +522,22 @@ mod tests {
                 .remove(primary_id),
             Err(crate::ImguiContextError::RemovalPending {
                 context_id,
-                reason: crate::context::ownership::ImguiContextIntoInnerErrorReason::ViewportWorldReleasePending,
+                reason: crate::context::ownership::ImguiContextIntoInnerErrorReason::RenderWorldReleasePending,
             }) if context_id == primary_id
         ));
-        app.update();
+        assert!(releases.acknowledge_release(
+            primary_id,
+            *generation,
+            super::resources::ImguiRendererReleasePacket::default(),
+        ));
+        assert!(releases.release_requested(primary_id));
+
         let context = app
             .world_mut()
             .get_non_send_mut::<crate::ImguiContexts>()
             .unwrap()
             .remove(primary_id)
-            .expect("a frozen extra update must complete ECS release without reopening a frame");
+            .expect("viewport and renderer release acknowledgements must complete removal");
         assert_eq!(context.id(), primary_id);
         assert!(
             !app.world()
@@ -546,6 +657,8 @@ mod tests {
         let backend = crate::context::ownership::BackendAttachment {
             config: crate::ImguiBackendConfig::default(),
             render_integration_installed: true,
+            #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+            viewport_bridge_registration: None,
             renderer_releases: Some(releases.clone()),
         };
         owner.preflight_renderer_admission(&backend).unwrap();
@@ -617,6 +730,8 @@ mod tests {
         let backend = crate::context::ownership::BackendAttachment {
             config: crate::ImguiBackendConfig::default(),
             render_integration_installed: true,
+            #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+            viewport_bridge_registration: None,
             renderer_releases: Some(releases.clone()),
         };
         let make_owner = || {
@@ -2031,6 +2146,21 @@ mod tests {
             viewport_id,
             camera_viewport: None,
         }
+    }
+
+    #[test]
+    fn presentable_output_scope_excludes_application_windows() {
+        let application_window =
+            Entity::from_raw_u32(41).expect("test entity index should be valid");
+        let viewport_window = Entity::from_raw_u32(42).expect("test entity index should be valid");
+        let targets = [
+            camera_target_for_test(application_window, None),
+            camera_target_for_test(viewport_window, Some(imgui::Id::from(7))),
+        ];
+
+        let outputs = backend_owned_viewport_windows(targets.iter());
+
+        assert_eq!(outputs, HashSet::from([viewport_window]));
     }
 
     fn test_context_id() -> imgui::ContextId {

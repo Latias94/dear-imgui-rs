@@ -12,6 +12,7 @@ use super::{INVALID_MOUSE_POS, ImguiInputWindow, ImguiInputWindowState};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ImguiInputFrameMetrics {
+    pub(crate) host_window: Entity,
     pub(crate) display_size: [f32; 2],
     pub(crate) framebuffer_scale: [f32; 2],
 }

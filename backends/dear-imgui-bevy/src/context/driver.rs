@@ -1,3 +1,5 @@
+#[cfg(feature = "render")]
+use std::collections::HashMap;
 use std::{
     collections::HashSet,
     panic::{self, AssertUnwindSafe},
@@ -5,7 +7,7 @@ use std::{
 
 use bevy_app::App;
 use bevy_ecs::{
-    prelude::{With, World},
+    prelude::{Entity, With, World},
     schedule::{InternedScheduleLabel, Schedules},
 };
 use bevy_time::{Real, Time};
@@ -29,9 +31,11 @@ pub(crate) fn install_context_lifecycle(app: &mut App) {
     #[cfg(feature = "render")]
     app.init_resource::<ImguiFrameMailbox>()
         .init_resource::<platform::ImguiPlatformImeFeedback>();
+    super::ownership::install_context_retirements(app);
 }
 
 struct PrimaryFrameMetrics {
+    host_window: Entity,
     display_size: [f32; 2],
     framebuffer_scale: [f32; 2],
     delta_time: f32,
@@ -73,6 +77,27 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
         .get_resource::<ImguiContextInputMetrics>()
         .cloned()
         .unwrap_or_default();
+    #[cfg(feature = "render")]
+    let routed_platform_hosts = world
+        .get_resource::<crate::route::ImguiResolvedRoutes>()
+        .map(|routes| {
+            let mut hosts = routes
+                .render_routes()
+                .iter()
+                .filter_map(|route| {
+                    route
+                        .host_window()
+                        .map(|host_window| (route.context_id(), host_window))
+                })
+                .collect::<HashMap<_, _>>();
+            for route in routes.input_routes() {
+                hosts
+                    .entry(route.context_id())
+                    .or_insert_with(|| route.host_window());
+            }
+            hosts
+        })
+        .unwrap_or_default();
     let active = world
         .get_non_send::<ImguiActiveUi>()
         .expect("ImguiPlugin must install the active UI capability")
@@ -83,9 +108,15 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
     for context_id in order {
         let is_primary = Some(context_id) == primary_id;
         #[cfg(feature = "render")]
-        if world
-            .resource::<crate::render::ImguiRendererReleases>()
-            .recovery_requested(context_id)
+        let context_tearing_down = world
+            .get_non_send::<ImguiContexts>()
+            .is_some_and(|contexts| contexts.is_tearing_down(context_id));
+        #[cfg(feature = "render")]
+        // Teardown owns any recovery-detached renderer state and converts it into release.
+        if !context_tearing_down
+            && world
+                .resource::<crate::render::ImguiRendererReleases>()
+                .recovery_requested(context_id)
         {
             world
                 .get_non_send_mut::<ImguiContexts>()
@@ -102,7 +133,7 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
             .resource::<crate::render::ImguiRendererReleases>()
             .release_requested(context_id)
         {
-            poll_context_completions_fail_closed(world, context_id);
+            poll_context_completions_or_quarantine(world, context_id);
             clear_context_output(world, context_id);
             continue;
         }
@@ -112,7 +143,7 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
         let has_routed_metrics = false;
         if is_primary && primary_metrics.is_none() && !has_routed_metrics {
             #[cfg(feature = "render")]
-            poll_context_completions_fail_closed(world, context_id);
+            poll_context_completions_or_quarantine(world, context_id);
             clear_context_output(world, context_id);
             continue;
         }
@@ -132,28 +163,90 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
         #[cfg(feature = "render")]
         let routed_metrics_for_context = routed_metrics.get(context_id);
         #[cfg(feature = "render")]
+        let platform_host = routed_platform_hosts
+            .get(&context_id)
+            .copied()
+            .or_else(|| routed_metrics_for_context.map(|metrics| metrics.host_window))
+            .or_else(|| primary_metrics_for_context.map(|metrics| metrics.host_window));
+        #[cfg(not(feature = "render"))]
+        let platform_host = primary_metrics_for_context.map(|metrics| metrics.host_window);
+        #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+        let native_platform_metrics = config
+            .multi_viewport()
+            .then(|| {
+                platform_host
+                    .and_then(|host_window| world.get::<Window>(host_window))
+                    .map(crate::viewport::desktop_metrics_for_window)
+            })
+            .flatten();
+        #[cfg(not(all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
+        let native_platform_metrics: Option<([f32; 2], [f32; 2])> = None;
+        #[cfg(feature = "render")]
         let snapshot_mailbox = world.resource::<ImguiFrameMailbox>().clone();
         let result = panic::catch_unwind(AssertUnwindSafe(|| {
             owner.try_with_active_renderer_context_checked(
                 config.multi_viewport(),
                 |context, renderer_consumer| {
-                    if is_primary {
-                        #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-                        platform::prepare_primary_platform_frame(world, context);
+                    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+                    if config.multi_viewport() {
+                        let host_window = platform_host
+                            .ok_or(ImguiContextError::PlatformHostUnavailable { context_id })?;
+                        let prepared = platform::prepare_context_platform_frame(
+                            world,
+                            context_id,
+                            context,
+                            host_window,
+                        )
+                        .map_err(|source| {
+                            ImguiContextError::ViewportBridge { context_id, source }
+                        })?;
+                        if !prepared {
+                            return Err(ImguiContextError::PlatformHostUnavailable { context_id });
+                        }
                     }
 
                     let (display_size, framebuffer_scale, delta_time) = {
-                        #[cfg(feature = "render")]
-                        if let Some(metrics) = routed_metrics_for_context {
+                        if let Some((display_size, framebuffer_scale)) = native_platform_metrics {
                             (
-                                metrics.display_size,
-                                metrics.framebuffer_scale,
+                                finite_display_size(display_size),
+                                finite_framebuffer_scale(framebuffer_scale),
                                 primary_metrics_for_context.map_or_else(
                                     || context.io().delta_time().max(f32::EPSILON),
                                     |metrics| metrics.delta_time,
                                 ),
                             )
                         } else {
+                            #[cfg(feature = "render")]
+                            if let Some(metrics) = routed_metrics_for_context {
+                                (
+                                    metrics.display_size,
+                                    metrics.framebuffer_scale,
+                                    primary_metrics_for_context.map_or_else(
+                                        || context.io().delta_time().max(f32::EPSILON),
+                                        |metrics| metrics.delta_time,
+                                    ),
+                                )
+                            } else {
+                                primary_metrics_for_context.map_or_else(
+                                    || {
+                                        (
+                                            finite_display_size(context.io().display_size()),
+                                            finite_framebuffer_scale(
+                                                context.io().display_framebuffer_scale(),
+                                            ),
+                                            context.io().delta_time().max(f32::EPSILON),
+                                        )
+                                    },
+                                    |metrics| {
+                                        (
+                                            metrics.display_size,
+                                            metrics.framebuffer_scale,
+                                            metrics.delta_time,
+                                        )
+                                    },
+                                )
+                            }
+                            #[cfg(not(feature = "render"))]
                             primary_metrics_for_context.map_or_else(
                                 || {
                                     (
@@ -173,34 +266,13 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
                                 },
                             )
                         }
-                        #[cfg(not(feature = "render"))]
-                        primary_metrics_for_context.map_or_else(
-                            || {
-                                (
-                                    finite_display_size(context.io().display_size()),
-                                    finite_framebuffer_scale(
-                                        context.io().display_framebuffer_scale(),
-                                    ),
-                                    context.io().delta_time().max(f32::EPSILON),
-                                )
-                            },
-                            |metrics| {
-                                (
-                                    metrics.display_size,
-                                    metrics.framebuffer_scale,
-                                    metrics.delta_time,
-                                )
-                            },
-                        )
                     };
 
                     #[cfg(feature = "render")]
                     if renderer_consumer.is_some() {
-                        let progress = context.poll_snapshot_completions().unwrap_or_else(|error| {
-                            panic!(
-                                "Context {context_id:?} rejected Bevy renderer completion: {error}"
-                            )
-                        });
+                        let progress = context.poll_snapshot_completions().map_err(|source| {
+                            ImguiContextError::RendererCompletion { context_id, source }
+                        })?;
                         snapshot_mailbox
                             .update_completion_watermark(context_id, progress.watermark());
                     }
@@ -229,13 +301,20 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
                     platform::record_context_platform_ime_feedback(
                         world,
                         context_id,
-                        is_primary,
+                        platform_host,
                         context_raw,
                     );
+                    #[cfg(feature = "render")]
+                    platform::sync_context_platform_feedback(world, context_id, platform_host, ui);
+                    #[cfg(not(feature = "render"))]
                     if is_primary {
-                        platform::sync_primary_window_platform_feedback(world, ui);
-                        #[cfg(not(feature = "render"))]
-                        platform::sync_primary_window_ime_feedback(world, context_raw);
+                        platform::sync_context_platform_feedback(
+                            world,
+                            context_id,
+                            platform_host,
+                            ui,
+                        );
+                        platform::sync_primary_window_ime_feedback(world, context_id, context_raw);
                     }
                     world
                         .get_non_send_mut::<ImguiFrameState>()
@@ -254,7 +333,9 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
                         if let Some(consumer) = renderer_consumer {
                             #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
                             let snapshot = if config.multi_viewport() {
-                                context.render_platform_viewport_snapshot(consumer)
+                                let snapshot = context.render_platform_viewport_snapshot(consumer);
+                                context.update_platform_windows();
+                                snapshot
                             } else {
                                 context.render_snapshot(consumer)
                             };
@@ -267,7 +348,11 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
                         }
                     }
 
-                    let _ = context.render();
+                    drop(context.render());
+                    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+                    if config.multi_viewport() {
+                        context.update_platform_windows();
+                    }
                     Ok(PendingFrameOutput::Rendered)
                 },
             )
@@ -305,6 +390,15 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
                 (
                     None,
                     Some(ImguiContextError::RendererOwnership { context_id, source }),
+                    None,
+                )
+            }
+            #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+            Ok(Err(ImguiActiveRendererContextError::ViewportBridge(source))) => {
+                clear_context_output(world, context_id);
+                (
+                    None,
+                    Some(ImguiContextError::ViewportBridge { context_id, source }),
                     None,
                 )
             }
@@ -349,7 +443,7 @@ fn try_run_context_schedule(world: &mut World, label: InternedScheduleLabel) -> 
 }
 
 #[cfg(feature = "render")]
-fn poll_context_completions_fail_closed(world: &mut World, context_id: imgui::ContextId) {
+fn poll_context_completions_or_quarantine(world: &mut World, context_id: imgui::ContextId) {
     let result = world
         .get_non_send_mut::<ImguiContexts>()
         .expect("ImguiPlugin must retain the Context registry")
@@ -358,11 +452,10 @@ fn poll_context_completions_fail_closed(world: &mut World, context_id: imgui::Co
         Ok(Ok(progress)) => world
             .resource::<ImguiFrameMailbox>()
             .update_completion_watermark(context_id, progress.watermark()),
-        Ok(Err(error)) => {
-            panic!(
-                "Dear ImGui snapshot completion for Context {context_id:?} failed while frames were paused: {error}"
-            )
-        }
+        Ok(Err(source)) => world
+            .get_non_send_mut::<ImguiContexts>()
+            .expect("ImguiPlugin must retain the Context registry")
+            .record_renderer_completion_error(context_id, source),
         Err(
             ImguiContextError::UnknownContext { .. } | ImguiContextError::TeardownInProgress { .. },
         ) => {}
@@ -429,9 +522,10 @@ fn primary_frame_metrics(world: &mut World) -> Option<PrimaryFrameMetrics> {
         .map(Time::delta_secs)
         .unwrap_or(1.0 / 60.0)
         .max(f32::EPSILON);
-    let mut query = world.query_filtered::<&Window, With<PrimaryWindow>>();
-    let window = query.single(world).ok()?;
+    let mut query = world.query_filtered::<(Entity, &Window), With<PrimaryWindow>>();
+    let (host_window, window) = query.single(world).ok()?;
     Some(PrimaryFrameMetrics {
+        host_window,
         display_size: finite_display_size([window.width(), window.height()]),
         framebuffer_scale: finite_framebuffer_scale([window.scale_factor(), window.scale_factor()]),
         delta_time,

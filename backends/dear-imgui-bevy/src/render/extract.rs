@@ -71,7 +71,10 @@ pub(super) fn extract_imgui_render_frame(
         if frame.include_platform_viewports && backend_status.multi_viewport_supported {
             let primary_window = primary_window.single().ok();
             route_snapshots.extend(viewport_cameras.iter().filter_map(
-                |(camera_entity, camera, target, camera_graph, viewport_camera)| {
+                |(camera_entity, camera, target, camera_graph, viewport_camera, camera_owner)| {
+                    if !camera_owner.matches_camera(viewport_camera) {
+                        return None;
+                    }
                     if !camera.is_active
                         || !matches!(camera.output_mode, CameraOutputMode::Write { .. })
                     {
@@ -85,11 +88,16 @@ pub(super) fn extract_imgui_render_frame(
                     let NormalizedRenderTarget::Window(window) = &target else {
                         return None;
                     };
-                    let Ok((window, viewport_window)) = viewport_windows.get(window.entity())
+                    let Ok((window, viewport_window, window_owner)) =
+                        viewport_windows.get(window.entity())
                     else {
                         return None;
                     };
-                    if viewport_window.viewport_id != viewport_camera.viewport_id {
+                    if !window_owner.matches_window(viewport_window)
+                        || viewport_window.context_id() != context_id
+                        || viewport_camera.context_id() != context_id
+                        || viewport_window.viewport_id() != viewport_camera.viewport_id()
+                    {
                         return None;
                     }
                     let physical_target_size = window.physical_size();
@@ -107,7 +115,7 @@ pub(super) fn extract_imgui_render_frame(
                         camera_schedule,
                         target,
                         physical_target_size: [physical_target_size.x, physical_target_size.y],
-                        viewport_id: Some(viewport_camera.viewport_id),
+                        viewport_id: Some(viewport_camera.viewport_id()),
                         camera_viewport: camera_viewport.as_ref().map(ImguiCameraViewport::from),
                     })
                 },

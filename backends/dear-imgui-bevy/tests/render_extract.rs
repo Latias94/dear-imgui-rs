@@ -39,8 +39,6 @@ use dear_imgui_bevy::{
         ImguiResolvedRoutes,
     },
 };
-#[cfg(not(feature = "multi-viewport"))]
-use dear_imgui_bevy::{ImguiViewportCamera, ImguiViewportWindow};
 use dear_imgui_rs::{self as imgui, render::TextureBinding};
 use std::sync::{Mutex, OnceLock};
 
@@ -1041,73 +1039,8 @@ fn render_extract_reports_a_missing_render_view_without_replaying_an_old_target(
 }
 
 #[test]
-#[cfg(not(feature = "multi-viewport"))]
-fn render_extract_ignores_viewport_window_mapping_until_multi_viewport_is_supported() {
-    let _guard = imgui_context_guard();
-    let (mut app, primary_window, primary_camera, _texture_id) = app_with_primary_window();
-    let context_id = primary_context_id(&app);
-    let secondary_viewport_id = imgui::Id::from(0xC0FFEE);
-    let secondary_window = app
-        .world_mut()
-        .spawn((
-            Window::default(),
-            ImguiViewportWindow {
-                viewport_id: secondary_viewport_id,
-            },
-        ))
-        .id();
-    let secondary_camera = app
-        .world_mut()
-        .spawn((
-            Camera {
-                order: 7,
-                ..Default::default()
-            },
-            RenderTarget::Window(WindowRef::Entity(secondary_window)),
-            CameraRenderGraph::new(Core2d),
-            ImguiViewportCamera {
-                viewport_id: secondary_viewport_id,
-            },
-        ))
-        .id();
-    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
-
-    app.update();
-
-    let extracted = app
-        .sub_app(RenderApp)
-        .world()
-        .resource::<ImguiExtractedRenderFrame>();
-    let targets = extracted.camera_targets(context_id);
-    let expected_primary_target =
-        NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap());
-    assert_eq!(targets.len(), 1);
-    assert_eq!(targets[0].camera, primary_camera);
-    assert_eq!(targets[0].viewport_id, None);
-    assert_eq!(targets[0].target, expected_primary_target);
-
-    let prepared = app
-        .sub_app(RenderApp)
-        .world()
-        .resource::<ImguiPreparedRenderFrame>();
-    assert!(
-        prepared
-            .draws()
-            .iter()
-            .all(|draw| draw.viewport_id.is_none())
-    );
-    assert!(
-        prepared
-            .draws()
-            .iter()
-            .all(|draw| draw.camera != secondary_camera),
-        "a native viewport camera is inert until the complete multi-viewport backend is supported"
-    );
-}
-
-#[test]
 #[cfg(feature = "multi-viewport")]
-fn renderer_prepare_routes_secondary_viewport_draws_only_to_matching_window() {
+fn renderer_prepare_routes_secondary_viewport_and_rejects_relocated_camera_marker() {
     let _guard = imgui_context_guard();
     let mut app = App::new();
     app.add_plugins(ExtractPlugin::default());
@@ -1200,7 +1133,7 @@ fn renderer_prepare_routes_secondary_viewport_draws_only_to_matching_window() {
             let matching = windows
                 .iter(world)
                 .filter_map(|(entity, window, viewport)| {
-                    (viewport.viewport_id == secondary_viewport_id)
+                    (viewport.viewport_id() == secondary_viewport_id)
                         .then_some((entity, window.physical_size()))
                 })
                 .collect::<Vec<_>>();
@@ -1217,7 +1150,7 @@ fn renderer_prepare_routes_secondary_viewport_draws_only_to_matching_window() {
             let matching = cameras
                 .iter(world)
                 .filter_map(|(entity, camera, viewport)| {
-                    (viewport.viewport_id == secondary_viewport_id)
+                    (viewport.viewport_id() == secondary_viewport_id)
                         .then_some((entity, camera.order))
                 })
                 .collect::<Vec<_>>();
@@ -1308,6 +1241,56 @@ fn renderer_prepare_routes_secondary_viewport_draws_only_to_matching_window() {
         second_poll.committed(),
         0,
         "render fanout must produce exactly one terminal completion for its source snapshot"
+    );
+
+    let public_marker = app
+        .world_mut()
+        .entity_mut(secondary_camera)
+        .take::<dear_imgui_bevy::ImguiViewportCamera>()
+        .expect("the callback-created camera should expose a read-only identity marker");
+    let spoof_camera = app
+        .world_mut()
+        .spawn((
+            Camera {
+                order: secondary_camera_order + 1,
+                ..Default::default()
+            },
+            RenderTarget::Window(WindowRef::Entity(secondary_window)),
+            CameraRenderGraph::new(Core2d),
+            public_marker,
+        ))
+        .id();
+    let _ = install_render_view(
+        &mut app,
+        spoof_camera,
+        expected_secondary_target.clone(),
+        secondary_camera_order + 1,
+        secondary_target_size,
+        None,
+        TextureFormat::Rgba8UnormSrgb,
+        CameraMainTextureUsages::default().0,
+        Msaa::Off,
+    );
+
+    app.update();
+
+    let prepared = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<ImguiPreparedRenderFrame>();
+    assert!(
+        prepared
+            .draws()
+            .iter()
+            .all(|draw| draw.camera != spoof_camera),
+        "moving the public marker must not transfer the backend's private render capability"
+    );
+    assert!(
+        prepared
+            .draws()
+            .iter()
+            .any(|draw| draw.camera == secondary_camera),
+        "the backend should restore and continue routing its genuinely owned camera"
     );
 }
 

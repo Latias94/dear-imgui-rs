@@ -431,9 +431,23 @@ fn renderer_ownership_drift_fails_closed_and_removal_can_be_repaired() {
             context.io_mut().set_backend_flags(flags);
         })
         .expect("a pending removal must permit ownership repair");
-    let removed = contexts
+    assert!(matches!(
+        contexts.remove(primary_id),
+        Err(ImguiContextError::RemovalPending {
+            context_id,
+            reason:
+                dear_imgui_bevy::ImguiContextIntoInnerErrorReason::RenderWorldReleasePending,
+        }) if context_id == primary_id
+    ));
+    drop(contexts);
+
+    app.update();
+    let removed = app
+        .world_mut()
+        .get_non_send_mut::<ImguiContexts>()
+        .unwrap()
         .remove(primary_id)
-        .expect("repairing the renderer contract must make teardown retryable");
+        .expect("renderer acknowledgement must complete the repaired teardown");
     assert_eq!(removed.id(), primary_id);
 }
 

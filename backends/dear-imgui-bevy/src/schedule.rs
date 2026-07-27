@@ -16,7 +16,9 @@ pub(crate) struct ImguiContextDriver;
 #[derive(SystemSet, Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum ImguiContextDriverSystems {
     Drive,
+    RetirementBegin,
     Platform,
+    RetirementFinish,
 }
 
 pub(crate) fn install_imgui_schedules(app: &mut App) {
@@ -26,13 +28,21 @@ pub(crate) fn install_imgui_schedules(app: &mut App) {
             ImguiContextDriver,
             (
                 ImguiContextDriverSystems::Drive,
+                ImguiContextDriverSystems::RetirementBegin,
                 ImguiContextDriverSystems::Platform,
+                ImguiContextDriverSystems::RetirementFinish,
             )
                 .chain(),
         )
         .add_systems(
             ImguiContextDriver,
-            crate::context::drive_imgui_contexts.in_set(ImguiContextDriverSystems::Drive),
+            (
+                crate::context::drive_imgui_contexts.in_set(ImguiContextDriverSystems::Drive),
+                crate::context::ownership::begin_context_retirements
+                    .in_set(ImguiContextDriverSystems::RetirementBegin),
+                crate::context::ownership::finish_context_retirements
+                    .in_set(ImguiContextDriverSystems::RetirementFinish),
+            ),
         );
 
     let mut order = app.world_mut().resource_mut::<MainScheduleOrder>();

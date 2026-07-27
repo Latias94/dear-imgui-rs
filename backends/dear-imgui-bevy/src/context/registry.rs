@@ -6,7 +6,7 @@ use dear_imgui_rs::{Context, ContextId, SuspendedContext};
 
 use crate::ImguiPrimaryContextPass;
 
-use super::ownership::ContextOwner;
+use super::ownership::{ContextOwner, ImguiContextRetirementSink};
 
 /// Per-Context lifecycle and UI schedule configuration.
 #[derive(Clone, Debug)]
@@ -35,9 +35,6 @@ impl ImguiContextConfig {
     }
 
     /// Configure native Dear ImGui platform windows for this Context.
-    ///
-    /// The current bridge is primary-Context-only. Admission rejects this option for an
-    /// additional Context until viewport state is namespaced by Context identity.
     #[must_use]
     pub fn with_multi_viewport(mut self, multi_viewport: bool) -> Self {
         self.multi_viewport = multi_viewport;
@@ -117,12 +114,30 @@ pub enum ImguiContextError {
         context_id: ContextId,
         source: super::ownership::ImguiRendererOwnershipError,
     },
+    /// Detached snapshot completion failed for this Context.
+    #[cfg(feature = "render")]
+    RendererCompletion {
+        context_id: ContextId,
+        source: dear_imgui_rs::render::RendererConsumerError,
+    },
+    /// Native viewport callbacks or their deferred command bridge failed for this Context.
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    ViewportBridge {
+        context_id: ContextId,
+        source: crate::viewport::ImguiViewportBridgeError,
+    },
+    /// Native multi-viewport has no live application window to host this Context's main viewport.
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    PlatformHostUnavailable { context_id: ContextId },
     /// A foreign integration already owns a backend field Bevy needs.
     BackendOwnershipConflict {
         context_id: ContextId,
         field: &'static str,
     },
-    /// Native platform windows are not yet namespaced for additional Contexts.
+    /// Legacy admission error retained for source compatibility.
+    ///
+    /// Additional Contexts now receive their own viewport bridge when the native
+    /// multi-viewport backend is available.
     AdditionalMultiViewportUnsupported,
     /// Core Context construction failed.
     ContextCreation(dear_imgui_rs::ImGuiError),
@@ -198,13 +213,27 @@ impl fmt::Display for ImguiContextError {
                     "Context {context_id:?} stopped because renderer ownership changed: {source}"
                 )
             }
+            #[cfg(feature = "render")]
+            Self::RendererCompletion { context_id, source } => write!(
+                formatter,
+                "Context {context_id:?} stopped because snapshot completion failed: {source}"
+            ),
+            #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+            Self::ViewportBridge { context_id, source } => write!(
+                formatter,
+                "Context {context_id:?} stopped because its native viewport bridge failed: {source}"
+            ),
+            #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+            Self::PlatformHostUnavailable { context_id } => write!(
+                formatter,
+                "Context {context_id:?} has no live window route for its native platform main viewport"
+            ),
             Self::BackendOwnershipConflict { context_id, field } => write!(
                 formatter,
                 "Context {context_id:?} backend field `{field}` is owned by another integration"
             ),
-            Self::AdditionalMultiViewportUnsupported => formatter.write_str(
-                "native multi-viewport is currently available only for the primary Context",
-            ),
+            Self::AdditionalMultiViewportUnsupported => formatter
+                .write_str("native multi-viewport admission is unavailable for this Context"),
             Self::ContextCreation(error) => error.fmt(formatter),
             Self::RemovalPending { context_id, reason } => {
                 write!(
@@ -225,6 +254,10 @@ impl std::error::Error for ImguiContextError {
             }
             #[cfg(feature = "render")]
             Self::RendererOwnership { source, .. } => Some(source),
+            #[cfg(feature = "render")]
+            Self::RendererCompletion { source, .. } => Some(source),
+            #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+            Self::ViewportBridge { source, .. } => Some(source),
             Self::ContextCreation(error) => Some(error),
             Self::RemovalPending { reason, .. } => Some(reason),
             _ => None,
@@ -303,6 +336,7 @@ pub struct ImguiContexts {
     order: Vec<ContextId>,
     schedule_owners: HashMap<InternedScheduleLabel, ContextId>,
     backend: Option<super::ownership::BackendAttachment>,
+    retirement_sink: Option<ImguiContextRetirementSink>,
 }
 
 impl ImguiContexts {
@@ -329,6 +363,7 @@ impl ImguiContexts {
             order: vec![primary_id],
             schedule_owners: HashMap::from([(schedule, primary_id)]),
             backend: None,
+            retirement_sink: None,
         }
     }
 
@@ -390,12 +425,6 @@ impl ImguiContexts {
                 context,
             ));
         }
-        if config.multi_viewport {
-            return Err(ImguiContextAdmissionError::new(
-                ImguiContextError::AdditionalMultiViewportUnsupported,
-                context,
-            ));
-        }
         if let Some(owner) = self.schedule_owners.get(&config.schedule).copied() {
             return Err(ImguiContextAdmissionError::new(
                 ImguiContextError::DuplicateSchedule {
@@ -414,6 +443,9 @@ impl ImguiContexts {
         }
 
         let mut owner = ContextOwner::new(context);
+        if let Some(sink) = self.retirement_sink.as_ref() {
+            owner.set_retirement_sink(sink.clone());
+        }
         if let Some(backend) = self.backend.as_ref()
             && let Err(error) = owner.attach_backend(backend, &config)
         {
@@ -581,6 +613,11 @@ impl ImguiContexts {
                 slot.state = ContextSlotState::Teardown;
                 Err(ImguiContextError::RendererOwnership { context_id, source })
             }
+            #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+            Err(super::ownership::ImguiActiveRendererContextError::ViewportBridge(source)) => {
+                slot.state = ContextSlotState::Teardown;
+                Err(ImguiContextError::ViewportBridge { context_id, source })
+            }
         }
     }
 
@@ -601,52 +638,52 @@ impl ImguiContexts {
             slot.frame_index = frame_index;
         }
         #[cfg(feature = "render")]
-        let renderer_ownership_lost = matches!(
+        let renderer_contract_failed = matches!(
             error.as_ref(),
             Some(ImguiContextError::RendererOwnership { .. })
+                | Some(ImguiContextError::RendererCompletion { .. })
         );
         #[cfg(not(feature = "render"))]
-        let renderer_ownership_lost = false;
+        let renderer_contract_failed = false;
+        #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+        let viewport_bridge_failed = matches!(
+            error.as_ref(),
+            Some(ImguiContextError::ViewportBridge { .. })
+        );
+        #[cfg(not(all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
+        let viewport_bridge_failed = false;
+        let backend_ownership_lost = renderer_contract_failed || viewport_bridge_failed;
         slot.last_error = error;
         slot.owner = Some(owner);
-        slot.state = if renderer_ownership_lost {
+        slot.state = if backend_ownership_lost {
             ContextSlotState::Teardown
         } else {
             ContextSlotState::Ready
         };
     }
 
-    #[cfg(any(feature = "render", feature = "multi-viewport"))]
-    pub(crate) fn with_primary_owner<T>(
+    #[cfg(feature = "render")]
+    pub(crate) fn record_renderer_completion_error(
         &mut self,
-        operation: impl FnOnce(&mut ContextOwner) -> T,
-    ) -> Result<T, ImguiContextError> {
-        if let Some(active) = self.driving_context() {
-            return Err(ImguiContextError::RawMutationWhileFrameOpen { context_id: active });
-        }
-        let primary = self.primary.ok_or(ImguiContextError::NoOpenFrame)?;
+        context_id: ContextId,
+        source: dear_imgui_rs::render::RendererConsumerError,
+    ) {
         let slot = self
             .slots
-            .get_mut(&primary)
-            .ok_or(ImguiContextError::UnknownContext {
-                context_id: primary,
-            })?;
-        match slot.state {
-            ContextSlotState::Ready => {}
-            ContextSlotState::Driving => {
-                return Err(ImguiContextError::RawMutationWhileFrameOpen {
-                    context_id: primary,
-                });
-            }
-            ContextSlotState::Teardown => {
-                return Err(ImguiContextError::TeardownInProgress {
-                    context_id: primary,
-                });
+            .get_mut(&context_id)
+            .expect("a polled Context must remain registered");
+        debug_assert_ne!(slot.state, ContextSlotState::Driving);
+        slot.last_error = Some(ImguiContextError::RendererCompletion { context_id, source });
+        slot.state = ContextSlotState::Teardown;
+    }
+
+    pub(crate) fn set_retirement_sink(&mut self, sink: ImguiContextRetirementSink) {
+        for slot in self.slots.values_mut() {
+            if let Some(owner) = slot.owner.as_mut() {
+                owner.set_retirement_sink(sink.clone());
             }
         }
-        Ok(operation(slot.owner.as_mut().expect(
-            "a ready primary Context slot must retain its owner",
-        )))
+        self.retirement_sink = Some(sink);
     }
 
     pub(crate) fn set_primary_contract(&mut self, docking: bool, multi_viewport: bool) {
@@ -685,6 +722,24 @@ impl ImguiContexts {
                 .as_mut()
                 .expect("renderer admission requires idle Context owners");
             owner.preflight_renderer_admission(&backend)?;
+        }
+        #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+        for context_id in self.order.iter().copied() {
+            let slot = self
+                .slots
+                .get_mut(&context_id)
+                .expect("drive order must reference a registered Context");
+            if !slot.config.multi_viewport() {
+                continue;
+            }
+            let registration = backend
+                .viewport_bridge_registration
+                .as_ref()
+                .expect("multi-viewport preflight must provide a bridge registration");
+            slot.owner
+                .as_mut()
+                .expect("backend attachment requires idle Context owners")
+                .attach_context_viewport_bridge(registration)?;
         }
         for context_id in self.order.iter().copied() {
             let slot = self

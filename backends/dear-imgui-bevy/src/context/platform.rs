@@ -7,8 +7,9 @@ use bevy_math::Vec2;
 use bevy_window::{CursorIcon, CursorOptions, PrimaryWindow, Window, WindowPosition};
 use dear_imgui_rs as imgui;
 
-use crate::ImguiViewportWindow;
 use crate::input::{ImguiInputState, map_imgui_mouse_cursor};
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+use crate::{ImguiViewportWindow, viewport::ImguiViewportOwner};
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_window::{Monitor, PrimaryMonitor};
@@ -24,28 +25,85 @@ pub(super) struct ImguiPlatformImeFeedback {
 #[derive(Clone, Copy, Default)]
 struct ImguiPlatformImeRequest {
     wants_text_input: bool,
-    input_position: Option<[f32; 2]>,
+    input_position: Option<ImguiPlatformImePosition>,
+}
+
+#[cfg(feature = "render")]
+#[derive(Clone, Copy)]
+struct ImguiPlatformImePosition {
+    position: [f32; 2],
+    uses_desktop_coordinates: bool,
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-pub(super) fn prepare_primary_platform_frame(world: &mut World, context: &mut imgui::Context) {
-    let Some((primary_entity, primary_window)) = ({
-        let mut query = world.query_filtered::<(Entity, &Window), With<PrimaryWindow>>();
-        query
-            .single(world)
-            .ok()
-            .map(|(entity, window)| (entity, window.clone()))
-    }) else {
-        return;
+pub(super) fn prepare_context_platform_frame(
+    world: &mut World,
+    context_id: imgui::ContextId,
+    context: &mut imgui::Context,
+    host_window: Entity,
+) -> Result<bool, crate::viewport::ImguiViewportBridgeError> {
+    let Some(host_window_state) = world.get::<Window>(host_window).cloned() else {
+        return Ok(false);
     };
-    let viewport_windows = {
-        let mut query = world
-            .query_filtered::<(Entity, &Window, &ImguiViewportWindow), Without<PrimaryWindow>>();
+    let Some(bridge) = world
+        .get_non_send::<crate::ImguiViewportBridge>()
+        .and_then(|bridge| bridge.context(context_id))
+    else {
+        return Ok(false);
+    };
+    if bridge.ecs_release_pending() {
+        return Ok(false);
+    }
+    let (viewport_windows, marker_repairs) = {
+        let mut query = world.query::<(
+            Entity,
+            &Window,
+            Option<&ImguiViewportWindow>,
+            &ImguiViewportOwner,
+        )>();
+        let mut viewport_windows = Vec::new();
+        let mut marker_repairs = Vec::new();
+        for (entity, window, marker, owner) in query.iter(world) {
+            let Some((owner_context_id, viewport_id)) = owner.window_identity() else {
+                continue;
+            };
+            if owner_context_id != context_id || bridge.viewport_window(viewport_id) != Some(entity)
+            {
+                continue;
+            }
+            if marker.is_none_or(|marker| !owner.matches_window(marker)) {
+                marker_repairs.push((entity, viewport_id));
+            }
+            viewport_windows.push((entity, window.clone(), viewport_id));
+        }
+        (viewport_windows, marker_repairs)
+    };
+    let stale_markers = {
+        let mut query =
+            world.query::<(Entity, &ImguiViewportWindow, Option<&ImguiViewportOwner>)>();
         query
             .iter(world)
-            .map(|(entity, window, viewport)| (entity, window.clone(), viewport.viewport_id))
+            .filter_map(|(entity, marker, owner)| {
+                if marker.context_id() != context_id {
+                    return None;
+                }
+                let is_projection_of_owner = owner.is_some_and(|owner| {
+                    owner.matches_window(marker)
+                        && bridge.viewport_window(marker.viewport_id()) == Some(entity)
+                });
+                (!is_projection_of_owner).then_some(entity)
+            })
             .collect::<Vec<_>>()
     };
+    // Public markers project private ownership and never grant it to another entity.
+    for entity in stale_markers {
+        world.entity_mut(entity).remove::<ImguiViewportWindow>();
+    }
+    for (entity, viewport_id) in marker_repairs {
+        world
+            .entity_mut(entity)
+            .insert(ImguiViewportWindow::new(context_id, viewport_id));
+    }
     let monitors = {
         let mut query = world.query::<(&Monitor, Option<&PrimaryMonitor>)>();
         crate::viewport::platform_monitors_from_bevy_monitors(
@@ -54,15 +112,6 @@ pub(super) fn prepare_primary_platform_frame(world: &mut World, context: &mut im
                 .map(|(monitor, primary)| (monitor.clone(), primary.is_some())),
         )
     };
-    let enable_viewports = world
-        .get_resource::<crate::ImguiBackendStatus>()
-        .is_some_and(|status| status.multi_viewport_supported);
-    let Some(mut bridge) = world.get_non_send_mut::<crate::ImguiViewportBridge>() else {
-        return;
-    };
-    if bridge.ecs_release_pending() {
-        return;
-    }
     let viewport_feedback = viewport_windows
         .iter()
         .map(|(entity, window, viewport_id)| {
@@ -79,35 +128,55 @@ pub(super) fn prepare_primary_platform_frame(world: &mut World, context: &mut im
         .collect::<Vec<_>>();
     crate::viewport::prepare_platform_viewports_for_frame(
         context,
-        &mut bridge,
-        primary_entity,
-        &primary_window,
+        &bridge,
+        host_window,
+        &host_window_state,
         &monitors,
         viewport_feedback.into_iter(),
-        enable_viewports,
+        true,
     )
-    .unwrap_or_else(|error| {
-        panic!("dear-imgui-bevy viewport ownership changed before frame preparation: {error}")
-    });
+    .map_err(crate::viewport::ImguiViewportBridgeError::CallbackOwnership)?;
+    Ok(true)
 }
 
-pub(super) fn sync_primary_window_platform_feedback(world: &mut World, ui: &imgui::Ui) {
-    let hovered_window = world
-        .get_resource::<ImguiInputState>()
-        .and_then(ImguiInputState::mouse_hovered_window);
-    let Some((primary_entity, viewport_entities)) = primary_window_and_viewport_entities(world)
+pub(super) fn sync_context_platform_feedback(
+    world: &mut World,
+    context_id: imgui::ContextId,
+    host_window: Option<Entity>,
+    ui: &imgui::Ui,
+) {
+    debug_assert_eq!(ui.context_id(), context_id);
+    let hovered_window = {
+        #[cfg(feature = "render")]
+        {
+            world
+                .get_resource::<ImguiInputState>()
+                .and_then(|state| state.mouse_hovered_window_for_context(context_id))
+        }
+        #[cfg(not(feature = "render"))]
+        {
+            world
+                .get_resource::<ImguiInputState>()
+                .and_then(ImguiInputState::mouse_hovered_window)
+        }
+    };
+    let Some(host_window) = host_window else {
+        return;
+    };
+    let Some((host_entity, viewport_entities)) =
+        host_window_and_viewport_entities(world, host_window, context_id)
     else {
         return;
     };
 
     let cursor_target = hovered_window
         .filter(|candidate| {
-            *candidate == primary_entity
+            host_entity == *candidate
                 || viewport_entities
                     .iter()
                     .any(|(entity, _)| entity == candidate)
         })
-        .unwrap_or(primary_entity);
+        .or(Some(host_entity));
     let hide_os_cursor = ui.io().mouse_draw_cursor() || ui.mouse_cursor().is_none();
     let cursor_icon = (!hide_os_cursor)
         .then(|| ui.mouse_cursor().and_then(map_imgui_mouse_cursor))
@@ -115,21 +184,17 @@ pub(super) fn sync_primary_window_platform_feedback(world: &mut World, ui: &imgu
     let mut cursor_edits = Vec::new();
 
     {
-        let mut query = world.query::<(
-            Entity,
-            &mut CursorOptions,
-            Option<&mut CursorIcon>,
-            Option<&PrimaryWindow>,
-            Option<&ImguiViewportWindow>,
-        )>();
-        for (entity, mut cursor_options, current_cursor_icon, primary_window, viewport_window) in
-            query.iter_mut(world)
-        {
-            if primary_window.is_none() && viewport_window.is_none() {
+        let mut query = world.query::<(Entity, &mut CursorOptions, Option<&mut CursorIcon>)>();
+        for (entity, mut cursor_options, current_cursor_icon) in query.iter_mut(world) {
+            if entity != host_entity
+                && !viewport_entities
+                    .iter()
+                    .any(|(viewport_entity, _)| *viewport_entity == entity)
+            {
                 continue;
             }
 
-            let owns_cursor = entity == cursor_target;
+            let owns_cursor = Some(entity) == cursor_target;
             cursor_options.visible = !owns_cursor || !hide_os_cursor;
             match (
                 owns_cursor.then_some(cursor_icon.clone()).flatten(),
@@ -158,15 +223,18 @@ pub(super) fn sync_primary_window_platform_feedback(world: &mut World, ui: &imgu
 #[cfg(not(feature = "render"))]
 pub(super) fn sync_primary_window_ime_feedback(
     world: &mut World,
+    context_id: imgui::ContextId,
     context_raw: *mut imgui::sys::ImGuiContext,
 ) {
-    let Some((primary_entity, viewport_entities)) = primary_window_and_viewport_entities(world)
+    let Some((primary_entity, viewport_entities)) =
+        primary_window_and_viewport_entities(world, context_id)
     else {
         return;
     };
     // SAFETY: the serial driver retains the owning active Context and keeps its frame open for
     // this call. The raw pointer was captured immediately before `Context::frame()`.
     let ime_data = unsafe { &(*context_raw).PlatformImeData };
+    let uses_desktop_coordinates = native_viewports_enabled_for_frame(context_raw);
     let ime_target = (ime_data.ViewportId != 0)
         .then_some(ime_data.ViewportId)
         .and_then(|viewport_id| {
@@ -177,21 +245,25 @@ pub(super) fn sync_primary_window_ime_feedback(
         .unwrap_or(primary_entity);
     let ime_position = [ime_data.InputPos.x, ime_data.InputPos.y];
 
-    let mut query = world.query::<(
-        Entity,
-        &mut Window,
-        Option<&PrimaryWindow>,
-        Option<&ImguiViewportWindow>,
-    )>();
-    for (entity, mut window, primary_window, viewport_window) in query.iter_mut(world) {
-        if primary_window.is_none() && viewport_window.is_none() {
+    let mut query = world.query::<(Entity, &mut Window, Option<&PrimaryWindow>)>();
+    for (entity, mut window, primary_window) in query.iter_mut(world) {
+        if primary_window.is_none()
+            && !viewport_entities
+                .iter()
+                .any(|(viewport_entity, _)| *viewport_entity == entity)
+        {
             continue;
         }
         let owns_ime = entity == ime_target;
         window.ime_enabled = owns_ime && ime_data.WantTextInput;
         if owns_ime {
-            window.ime_position =
-                ime_position_for_window(entity, &window, ime_position, primary_window.is_some());
+            window.ime_position = ime_position_for_window(
+                entity,
+                &window,
+                ime_position,
+                primary_window.is_some(),
+                uses_desktop_coordinates,
+            );
         }
     }
 }
@@ -208,25 +280,27 @@ pub(super) fn begin_platform_ime_feedback(world: &mut World) {
 pub(super) fn record_context_platform_ime_feedback(
     world: &mut World,
     context_id: imgui::ContextId,
-    is_primary: bool,
+    host_window: Option<Entity>,
     context_raw: *mut imgui::sys::ImGuiContext,
 ) {
     // SAFETY: the serial driver retains the owning active Context and keeps its frame open for
     // this call. The raw pointer was captured immediately before `Context::frame()`.
     let ime_data = unsafe { &(*context_raw).PlatformImeData };
+    let uses_desktop_coordinates = native_viewports_enabled_for_frame(context_raw);
     let mut windows = world
         .get_resource::<ImguiInputState>()
         .map(|state| state.context_window_focus_states(context_id))
         .unwrap_or_default();
-    let primary_and_viewports = primary_window_and_viewport_entities(world);
+    let host_and_viewports = host_window
+        .and_then(|host_window| host_window_and_viewport_entities(world, host_window, context_id));
 
-    if is_primary && !windows.iter().any(|(_, focused)| *focused) {
-        if let Some((primary_window, _)) = primary_and_viewports.as_ref() {
-            windows.push((*primary_window, true));
+    if windows.is_empty() {
+        if let Some((host_window, _)) = host_and_viewports.as_ref() {
+            windows.push((*host_window, true));
         }
     }
     if ime_data.ViewportId != 0
-        && let Some((_, viewport_entities)) = primary_and_viewports.as_ref()
+        && let Some((_, viewport_entities)) = host_and_viewports.as_ref()
         && let Some(viewport_window) = viewport_entities.iter().find_map(|(entity, viewport_id)| {
             (*viewport_id == ime_data.ViewportId).then_some(*entity)
         })
@@ -241,7 +315,10 @@ pub(super) fn record_context_platform_ime_feedback(
         let request = feedback.requests.entry(window).or_default();
         if focused && ime_data.WantTextInput {
             request.wants_text_input = true;
-            request.input_position = Some(ime_position);
+            request.input_position = Some(ImguiPlatformImePosition {
+                position: ime_position,
+                uses_desktop_coordinates,
+            });
         }
     }
 }
@@ -271,25 +348,62 @@ pub(super) fn finish_platform_ime_feedback(world: &mut World) {
         };
         window.ime_enabled = request.wants_text_input;
         if let Some(ime_position) = request.input_position {
-            window.ime_position =
-                ime_position_for_window(entity, &window, ime_position, primary_window.is_some());
+            window.ime_position = ime_position_for_window(
+                entity,
+                &window,
+                ime_position.position,
+                primary_window.is_some(),
+                ime_position.uses_desktop_coordinates,
+            );
         }
     }
 }
 
-fn primary_window_and_viewport_entities(world: &mut World) -> Option<(Entity, Vec<(Entity, u32)>)> {
-    let mut query = world.query::<(Entity, Option<&PrimaryWindow>, Option<&ImguiViewportWindow>)>();
-    let mut primary = None;
-    let mut viewports = Vec::new();
-    for (entity, primary_window, viewport_window) in query.iter(world) {
-        if primary_window.is_some() {
-            primary = Some(entity);
-        }
-        if let Some(viewport_window) = viewport_window {
-            viewports.push((entity, viewport_window.viewport_id.raw()));
-        }
-    }
-    primary.map(|primary| (primary, viewports))
+#[cfg(not(feature = "render"))]
+fn primary_window_and_viewport_entities(
+    world: &mut World,
+    context_id: imgui::ContextId,
+) -> Option<(Entity, Vec<(Entity, u32)>)> {
+    let mut query = world.query_filtered::<Entity, With<PrimaryWindow>>();
+    let primary = query.single(world).ok()?;
+    host_window_and_viewport_entities(world, primary, context_id)
+}
+
+fn host_window_and_viewport_entities(
+    world: &mut World,
+    host_window: Entity,
+    context_id: imgui::ContextId,
+) -> Option<(Entity, Vec<(Entity, u32)>)> {
+    world.get::<Window>(host_window)?;
+    let viewports = {
+        #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+        let viewports = {
+            let mut viewports = Vec::new();
+            let bridge = world
+                .get_non_send::<crate::ImguiViewportBridge>()
+                .and_then(|bridge| bridge.context(context_id));
+            if let Some(bridge) = bridge {
+                let mut query =
+                    world.query_filtered::<(Entity, &ImguiViewportOwner), With<Window>>();
+                for (entity, owner) in query.iter(world) {
+                    if let Some((owner_context_id, viewport_id)) = owner.window_identity()
+                        && owner_context_id == context_id
+                        && bridge.viewport_window(viewport_id) == Some(entity)
+                    {
+                        viewports.push((entity, viewport_id.raw()));
+                    }
+                }
+            }
+            viewports
+        };
+        #[cfg(not(all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
+        let viewports = {
+            let _ = context_id;
+            Vec::new()
+        };
+        viewports
+    };
+    Some((host_window, viewports))
 }
 
 enum CursorEdit {
@@ -302,25 +416,37 @@ fn ime_position_for_window(
     window: &Window,
     ime_position: [f32; 2],
     is_primary: bool,
+    uses_desktop_coordinates: bool,
 ) -> Vec2 {
     let mut position = Vec2::new(ime_position[0], ime_position[1]);
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     {
-        if let Some(origin) = crate::viewport::window_client_origin_logical(
-            _entity,
-            &window.position,
-            window.scale_factor(),
-        ) {
-            position.x -= origin[0];
-            position.y -= origin[1];
-            return position;
+        if uses_desktop_coordinates {
+            if let Some(client_position) = crate::viewport::desktop_to_window_client_logical(
+                _entity,
+                &window.position,
+                window.scale_factor(),
+                ime_position,
+            ) {
+                return Vec2::new(client_position[0], client_position[1]);
+            }
         }
     }
 
-    if !is_primary && let WindowPosition::At(window_position) = window.position {
+    if uses_desktop_coordinates
+        && !is_primary
+        && let WindowPosition::At(window_position) = window.position
+    {
         let scale_factor = crate::input::sanitized_window_framebuffer_scale(window)[0];
         position.x -= window_position.x as f32 / scale_factor;
         position.y -= window_position.y as f32 / scale_factor;
     }
     position
+}
+
+fn native_viewports_enabled_for_frame(context_raw: *mut imgui::sys::ImGuiContext) -> bool {
+    // SAFETY: callers retain the owning active Context while platform feedback is collected.
+    unsafe {
+        (*context_raw).ConfigFlagsCurrFrame & imgui::ConfigFlags::VIEWPORTS_ENABLE.bits() != 0
+    }
 }

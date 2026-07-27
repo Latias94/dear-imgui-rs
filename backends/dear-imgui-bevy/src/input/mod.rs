@@ -22,6 +22,7 @@ use route::{ImguiInputSlot, ImguiRoutedWindowState, RoutedInputState, RoutedInpu
 
 #[cfg(feature = "render")]
 use crate::route::{ImguiInputPolicy, ImguiResolvedInputRoute, ImguiResolvedRoutes};
+use crate::viewport::ImguiViewportOwner;
 use crate::{ContextId, ImguiContextError, ImguiContexts, ImguiViewportWindow};
 use bevy_app::{App, PreUpdate};
 use bevy_ecs::prelude::*;
@@ -148,6 +149,11 @@ impl ImguiInputState {
                 (slot.context_id == context_id).then_some((slot.window, state.focused))
             })
             .collect()
+    }
+
+    #[cfg(feature = "render")]
+    pub(crate) fn mouse_hovered_window_for_context(&self, context_id: ContextId) -> Option<Entity> {
+        self.routed.last_hovered.get(&context_id).copied()
     }
 }
 
@@ -531,23 +537,34 @@ fn routed_window_input_system(
         &Window,
         Option<&PrimaryWindow>,
         Option<&ImguiViewportWindow>,
+        Option<&ImguiViewportOwner>,
     )>,
     resolved_routes: Res<ImguiResolvedRoutes>,
-    mut contexts: NonSendMut<ImguiContexts>,
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))] viewport_bridge: NonSend<
+        crate::ImguiViewportBridge,
+    >,
+    contexts: Option<NonSendMut<ImguiContexts>>,
     mut input_state: ResMut<ImguiInputState>,
     mut capture: ResMut<ImguiInputCapture>,
     mut input_metrics: ResMut<ImguiContextInputMetrics>,
     mut messages: ImguiInputMessageReaders,
 ) {
+    let Some(mut contexts) = contexts else {
+        *input_state = ImguiInputState::default();
+        *capture = ImguiInputCapture::default();
+        *input_metrics = ImguiContextInputMetrics::default();
+        discard_all_unread_messages(&mut messages);
+        return;
+    };
     let primary_context = contexts.primary_id();
     input_state.routed.primary_context = primary_context;
     input_state.routed.primary_window = windows
         .iter()
-        .find_map(|(entity, _, primary_window, _)| primary_window.is_some().then_some(entity));
+        .find_map(|(entity, _, primary_window, _, _)| primary_window.is_some().then_some(entity));
 
     let mut targets = Vec::new();
     for route in resolved_routes.input_routes().iter().copied() {
-        let Ok((_, window, _, _)) = windows.get(route.host_window()) else {
+        let Ok((_, window, _, _, _)) = windows.get(route.host_window()) else {
             continue;
         };
         targets.push(routed_target_for_route(route, &resolved_routes, window));
@@ -557,41 +574,53 @@ fn routed_window_input_system(
         .iter()
         .map(|target| target.slot())
         .collect::<HashSet<_>>();
-    if let Some(primary_context) = primary_context {
-        for (entity, window, primary_window, viewport_window) in &windows {
-            if primary_window.is_some()
-                || viewport_window.is_none()
-                || declared_slots.contains(&ImguiInputSlot {
-                    context_id: primary_context,
-                    window: entity,
-                })
-            {
-                continue;
-            }
-            let viewport_window = viewport_window.expect("the predicate checked this component");
-            targets.push(RoutedInputTarget {
-                context_id: primary_context,
-                host_window: entity,
-                logical_region: Rect::from_corners(
-                    Vec2::ZERO,
-                    Vec2::new(
-                        finite_non_negative_size([window.width(), window.height()])[0],
-                        finite_non_negative_size([window.width(), window.height()])[1],
-                    ),
-                ),
-                policy: ImguiInputPolicy::Exclusive { priority: i32::MAX },
-                display_size: sanitized_window_display_size(window),
-                framebuffer_scale: sanitized_window_framebuffer_scale(window),
-                tracks_host_metrics: false,
-                native_viewport: Some(ImguiInputWindow {
-                    entity,
-                    position: window.position,
-                    scale_factor: window.scale_factor(),
-                    viewport_id: viewport_window.viewport_id,
-                    is_primary: false,
-                }),
-            });
+    for (entity, window, primary_window, viewport_window, viewport_owner) in &windows {
+        let (Some(viewport_window), Some(viewport_owner)) = (viewport_window, viewport_owner)
+        else {
+            continue;
+        };
+        if !viewport_owner.matches_window(viewport_window) {
+            continue;
         }
+        let context_id = viewport_window.context_id();
+        #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+        if viewport_bridge.viewport_window(context_id, viewport_window.viewport_id())
+            != Some(entity)
+        {
+            continue;
+        }
+        if primary_window.is_some()
+            || !contexts.contains(context_id)
+            || declared_slots.contains(&ImguiInputSlot {
+                context_id,
+                window: entity,
+            })
+        {
+            continue;
+        }
+        targets.push(RoutedInputTarget {
+            context_id,
+            host_window: entity,
+            logical_region: Rect::from_corners(
+                Vec2::ZERO,
+                Vec2::new(
+                    finite_non_negative_size([window.width(), window.height()])[0],
+                    finite_non_negative_size([window.width(), window.height()])[1],
+                ),
+            ),
+            policy: ImguiInputPolicy::Exclusive { priority: i32::MAX },
+            display_size: sanitized_window_display_size(window),
+            framebuffer_scale: sanitized_window_framebuffer_scale(window),
+            tracks_host_metrics: false,
+            native_viewport: Some(ImguiInputWindow {
+                entity,
+                position: window.position,
+                scale_factor: window.scale_factor(),
+                viewport_id: viewport_window.viewport_id(),
+                context_id,
+                is_primary: false,
+            }),
+        });
     }
 
     let capture_routes = targets
@@ -617,6 +646,7 @@ fn routed_window_input_system(
         context_metrics.insert(
             target.context_id,
             ImguiInputFrameMetrics {
+                host_window: target.host_window,
                 display_size: target.display_size,
                 framebuffer_scale: target.framebuffer_scale,
             },
@@ -656,7 +686,7 @@ fn routed_window_input_system(
         .iter()
         .map(|(window, _)| *window)
         .collect::<HashSet<_>>();
-    for (window, window_state, primary_window, _) in &windows {
+    for (window, window_state, primary_window, _, _) in &windows {
         if primary_window.is_none() || focus_message_windows.contains(&window) {
             continue;
         }
@@ -1366,6 +1396,7 @@ fn apply_routed_resize(
     }) {
         let display_size = finite_non_negative_size(size);
         let metrics = ImguiInputFrameMetrics {
+            host_window,
             display_size,
             framebuffer_scale: target.framebuffer_scale,
         };
@@ -1398,6 +1429,7 @@ fn apply_routed_scale_factor(
             && !target.is_native_viewport()
     }) {
         let metrics = ImguiInputFrameMetrics {
+            host_window,
             display_size: context_metrics
                 .get(&target.context_id)
                 .map_or(target.display_size, |metrics| metrics.display_size),
@@ -1734,14 +1766,23 @@ impl ImguiInputState {
 
 /// Translate primary-window Bevy messages into Dear ImGui IO events.
 #[allow(clippy::too_many_arguments)]
-pub fn primary_window_input_system(
+pub(crate) fn primary_window_input_system(
     primary_window: Query<(Entity, &Window), With<PrimaryWindow>>,
-    viewport_windows: Query<(Entity, &Window, &ImguiViewportWindow), Without<PrimaryWindow>>,
-    mut contexts: NonSendMut<ImguiContexts>,
+    viewport_windows: Query<
+        (Entity, &Window, &ImguiViewportWindow, &ImguiViewportOwner),
+        Without<PrimaryWindow>,
+    >,
+    contexts: Option<NonSendMut<ImguiContexts>>,
     mut input_state: ResMut<ImguiInputState>,
     mut capture: ResMut<ImguiInputCapture>,
     mut messages: ImguiInputMessageReaders,
 ) {
+    let Some(mut contexts) = contexts else {
+        *input_state = ImguiInputState::default();
+        *capture = ImguiInputCapture::default();
+        discard_all_unread_messages(&mut messages);
+        return;
+    };
     let Some(primary_id) = contexts.primary_id() else {
         *capture = ImguiInputCapture::default();
         discard_all_unread_messages(&mut messages);
@@ -1775,7 +1816,10 @@ pub fn primary_window_input_system(
 
 fn translate_primary_window_input(
     primary_window: &Query<(Entity, &Window), With<PrimaryWindow>>,
-    viewport_windows: &Query<(Entity, &Window, &ImguiViewportWindow), Without<PrimaryWindow>>,
+    viewport_windows: &Query<
+        (Entity, &Window, &ImguiViewportWindow, &ImguiViewportOwner),
+        Without<PrimaryWindow>,
+    >,
     primary_context: ContextId,
     context: &mut imgui::Context,
     input_state: &mut ImguiInputState,
@@ -1796,6 +1840,7 @@ fn translate_primary_window_input(
         position: window.position,
         scale_factor: window.scale_factor(),
         viewport_id: primary_viewport_id,
+        context_id: primary_context,
         is_primary: true,
     };
     prune_stale_window_state(
@@ -1963,26 +2008,36 @@ struct ImguiInputWindow {
     position: WindowPosition,
     scale_factor: f32,
     viewport_id: imgui::Id,
+    context_id: ContextId,
     is_primary: bool,
 }
 
 fn imgui_window_for_event(
     entity: Entity,
     primary_window: ImguiInputWindow,
-    viewport_windows: &Query<(Entity, &Window, &ImguiViewportWindow), Without<PrimaryWindow>>,
+    viewport_windows: &Query<
+        (Entity, &Window, &ImguiViewportWindow, &ImguiViewportOwner),
+        Without<PrimaryWindow>,
+    >,
 ) -> Option<ImguiInputWindow> {
     if entity == primary_window.entity {
         return Some(primary_window);
     }
 
-    let Ok((entity, window, viewport_window)) = viewport_windows.get(entity) else {
+    let Ok((entity, window, viewport_window, viewport_owner)) = viewport_windows.get(entity) else {
         return None;
     };
+    if !viewport_owner.matches_window(viewport_window)
+        || viewport_window.context_id() != primary_window.context_id
+    {
+        return None;
+    }
     Some(ImguiInputWindow {
         entity,
         position: window.position,
         scale_factor: window.scale_factor(),
-        viewport_id: viewport_window.viewport_id,
+        viewport_id: viewport_window.viewport_id(),
+        context_id: viewport_window.context_id(),
         is_primary: false,
     })
 }
@@ -1990,9 +2045,17 @@ fn imgui_window_for_event(
 fn is_mapped_imgui_window(
     entity: Entity,
     primary_window: ImguiInputWindow,
-    viewport_windows: &Query<(Entity, &Window, &ImguiViewportWindow), Without<PrimaryWindow>>,
+    viewport_windows: &Query<
+        (Entity, &Window, &ImguiViewportWindow, &ImguiViewportOwner),
+        Without<PrimaryWindow>,
+    >,
 ) -> bool {
-    entity == primary_window.entity || viewport_windows.get(entity).is_ok()
+    entity == primary_window.entity
+        || viewport_windows
+            .get(entity)
+            .is_ok_and(|(_, _, marker, owner)| {
+                owner.matches_window(marker) && marker.context_id() == primary_window.context_id
+            })
 }
 
 fn add_mouse_viewport_event(io: &mut imgui::Io, viewport_id: Option<imgui::Id>) {
@@ -2011,7 +2074,7 @@ fn mouse_pos_for_window(
     window: ImguiInputWindow,
     local_pos: Vec2,
 ) -> [f32; 2] {
-    let mut pos = [local_pos.x, local_pos.y];
+    let pos = [local_pos.x, local_pos.y];
     if !context
         .io()
         .config_flags()
@@ -2021,23 +2084,27 @@ fn mouse_pos_for_window(
     }
 
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-    if let Some(origin) = crate::viewport::window_client_origin_logical(
-        window.entity,
-        &window.position,
-        window.scale_factor,
-    ) {
-        pos[0] += origin[0];
-        pos[1] += origin[1];
-        return pos;
+    {
+        return crate::viewport::window_client_logical_to_desktop(
+            window.entity,
+            &window.position,
+            window.scale_factor,
+            pos,
+        )
+        .unwrap_or(pos);
     }
 
-    let WindowPosition::At(window_pos) = window.position else {
-        return pos;
-    };
-    let scale_factor = positive_finite_or(window.scale_factor, 1.0);
-    pos[0] += window_pos.x as f32 / scale_factor;
-    pos[1] += window_pos.y as f32 / scale_factor;
-    pos
+    #[cfg(not(all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
+    {
+        let WindowPosition::At(window_pos) = window.position else {
+            return pos;
+        };
+        let scale_factor = positive_finite_or(window.scale_factor, 1.0);
+        [
+            pos[0] + window_pos.x as f32 / scale_factor,
+            pos[1] + window_pos.y as f32 / scale_factor,
+        ]
+    }
 }
 
 fn positive_finite_or(value: f32, fallback: f32) -> f32 {
@@ -2240,7 +2307,10 @@ fn prune_stale_window_state(
     context: &mut imgui::Context,
     state: &mut ImguiInputState,
     primary_window: ImguiInputWindow,
-    viewport_windows: &Query<(Entity, &Window, &ImguiViewportWindow), Without<PrimaryWindow>>,
+    viewport_windows: &Query<
+        (Entity, &Window, &ImguiViewportWindow, &ImguiViewportOwner),
+        Without<PrimaryWindow>,
+    >,
     primary_focused: bool,
 ) {
     let focused_was_stale = state

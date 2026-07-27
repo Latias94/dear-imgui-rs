@@ -1,6 +1,6 @@
 //! Single-sample Dear ImGui overlay and final window-output passes.
 
-use std::collections::hash_map::Entry;
+use std::collections::{HashSet, hash_map::Entry};
 
 use super::prepare::{render_viewport_for_pass, scissor_for_render_pass};
 use super::*;
@@ -203,14 +203,23 @@ fn prepared_draw_matches_view(
 /// swapchain, so this final pass is intentionally attached to the root render graph `Finish` set.
 pub(super) fn ensure_presentable_window_outputs(
     windows: Res<ExtractedWindows>,
+    extracted: Res<ImguiExtractedRenderFrame>,
     views: Query<(&ViewTarget, &ExtractedCamera)>,
     clear_color: Res<ClearColor>,
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
 ) {
     let mut encoder = None;
+    let viewport_outputs = backend_owned_viewport_windows(
+        extracted
+            .context_ids()
+            .flat_map(|context_id| extracted.camera_targets(context_id)),
+    );
 
-    for window in windows.values() {
+    for window in windows
+        .values()
+        .filter(|window| viewport_outputs.contains(&window.entity))
+    {
         let mut view_needs_present = false;
         let mut output_color = None;
 
@@ -267,6 +276,19 @@ pub(super) fn ensure_presentable_window_outputs(
     if let Some(encoder) = encoder {
         render_queue.submit([encoder.finish()]);
     }
+}
+
+pub(super) fn backend_owned_viewport_windows<'a>(
+    targets: impl IntoIterator<Item = &'a ImguiCameraTarget>,
+) -> HashSet<Entity> {
+    targets
+        .into_iter()
+        .filter(|target| target.viewport_id.is_some())
+        .filter_map(|target| match &target.target {
+            NormalizedRenderTarget::Window(window) => Some(window.entity()),
+            _ => None,
+        })
+        .collect()
 }
 
 fn camera_targets_window(camera: &ExtractedCamera, window: Entity) -> bool {

@@ -29,8 +29,8 @@ pub use self::schedule::ImguiPrimaryContextPass;
 #[cfg(feature = "render")]
 pub use self::texture::{ImguiBevyTextures, ImguiTexture, ImguiTextureRegistrationError};
 pub use self::viewport::{
-    ImguiViewportBridge, ImguiViewportCamera, ImguiViewportCommand, ImguiViewportFeedback,
-    ImguiViewportId, ImguiViewportSnapshot, ImguiViewportWindow, ImguiViewportWindowConfig,
+    ImguiViewportBridge, ImguiViewportCamera, ImguiViewportFeedback, ImguiViewportId,
+    ImguiViewportSnapshot, ImguiViewportWindow, ImguiViewportWindowConfig,
 };
 
 /// Current Bevy version targeted by this crate.

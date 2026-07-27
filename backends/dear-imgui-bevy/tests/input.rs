@@ -1,3 +1,7 @@
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+#[path = "support/native_viewport.rs"]
+mod native_viewport;
+
 #[cfg(feature = "render")]
 use bevy_app::PostUpdate;
 #[cfg(feature = "render")]
@@ -44,24 +48,28 @@ use dear_imgui_bevy::input::{
     imgui_primary_wants_keyboard_input, imgui_primary_wants_pointer_input,
     imgui_primary_wants_text_input,
 };
-#[cfg(feature = "render")]
 use dear_imgui_bevy::{
-    ContextId, ImguiContextConfig,
-    input::{
-        imgui_context_wants_keyboard_input, imgui_context_wants_pointer_input,
-        imgui_window_wants_pointer_input,
-    },
-    route::{ImguiInputPolicy, ImguiInputRoute, ImguiRenderRoute},
-};
-use dear_imgui_bevy::{
-    ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, ImguiUi, ImguiViewportWindow,
+    ContextId, ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, ImguiUi,
     input::{
         ImguiInputCapture, ImguiInputState, imgui_wants_any_input, imgui_wants_keyboard_input,
         imgui_wants_pointer_input, imgui_wants_pointer_input_unless_popup_close,
         imgui_wants_text_input, map_bevy_key_code,
     },
 };
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+use dear_imgui_bevy::{ImguiBackendConfig, ImguiViewportBridge, ImguiViewportWindow};
+#[cfg(feature = "render")]
+use dear_imgui_bevy::{
+    ImguiContextConfig,
+    input::{
+        imgui_context_wants_keyboard_input, imgui_context_wants_pointer_input,
+        imgui_window_wants_pointer_input,
+    },
+    route::{ImguiInputPolicy, ImguiInputRoute, ImguiRenderRoute},
+};
 use dear_imgui_rs as imgui;
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+use native_viewport::CallbackViewport;
 use std::sync::{Mutex, OnceLock};
 
 fn imgui_context_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -70,8 +78,12 @@ fn imgui_context_guard() -> std::sync::MutexGuard<'static, ()> {
 }
 
 fn app_with_primary_window() -> (App, Entity) {
+    app_with_primary_window_plugin(ImguiPlugin::default())
+}
+
+fn app_with_primary_window_plugin(plugin: ImguiPlugin) -> (App, Entity) {
     let mut app = App::new();
-    app.add_plugins(ImguiPlugin::default());
+    app.add_plugins(plugin);
 
     let mut window = Window {
         resolution: WindowResolution::new(1600, 1200),
@@ -102,6 +114,28 @@ fn app_with_primary_window() -> (App, Entity) {
     (app, primary)
 }
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn app_with_primary_window_and_native_viewports() -> (App, Entity) {
+    app_with_primary_window_plugin(ImguiPlugin::new(ImguiBackendConfig {
+        name: "input-native-viewport".to_owned(),
+        docking: true,
+        multi_viewport: true,
+        viewport_window: Default::default(),
+    }))
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn create_native_viewport_window(
+    app: &mut App,
+    viewport_id: imgui::Id,
+    window: Window,
+) -> CallbackViewport {
+    let context_id = primary_context_id(app);
+    let fixture = CallbackViewport::create(app, context_id, viewport_id);
+    app.world_mut().entity_mut(fixture.window()).insert(window);
+    fixture
+}
+
 fn prepare_imgui_context(app: &mut App) {
     configure_primary(app, |context| {
         context.io_mut().set_delta_time(1.0 / 60.0);
@@ -122,6 +156,13 @@ fn configure_primary<T>(app: &mut App, configure: impl FnOnce(&mut imgui::Contex
     contexts
         .configure(primary_id, configure)
         .unwrap_or_else(|error| panic!("primary Context should be configurable: {error}"))
+}
+
+fn primary_context_id(app: &App) -> ContextId {
+    app.world()
+        .non_send::<ImguiContexts>()
+        .primary_id()
+        .expect("ImguiPlugin should install a primary Context")
 }
 
 #[cfg(feature = "render")]
@@ -252,9 +293,18 @@ fn current_frame_input_chars() -> Vec<u32> {
 
 fn begin_frame_and_assert(app: &mut App, assert_ui: impl FnOnce(&imgui::Ui)) {
     configure_primary(app, |context| {
+        #[cfg(feature = "multi-viewport")]
+        let update_platform_windows = context.io().backend_flags().contains(
+            imgui::BackendFlags::PLATFORM_HAS_VIEWPORTS
+                | imgui::BackendFlags::RENDERER_HAS_VIEWPORTS,
+        );
         let frame = context.begin_frame();
         assert_ui(frame.ui());
-        let _ = frame.render();
+        drop(frame.render());
+        #[cfg(feature = "multi-viewport")]
+        if update_platform_windows {
+            context.update_platform_windows();
+        }
     });
 }
 
@@ -300,7 +350,14 @@ fn request_text_cursor_and_secondary_viewport_ime(imgui: ImguiUi) {
             let raw_context = imgui::sys::igGetCurrentContext();
             let ime_data = &mut (*raw_context).PlatformImeData;
             ime_data.WantTextInput = true;
-            ime_data.InputPos = imgui::sys::ImVec2_c { x: 144.0, y: 205.0 };
+            #[cfg(not(target_os = "macos"))]
+            let input_pos = [188.0, 260.0];
+            #[cfg(target_os = "macos")]
+            let input_pos = [94.0, 130.0];
+            ime_data.InputPos = imgui::sys::ImVec2_c {
+                x: input_pos[0],
+                y: input_pos[1],
+            };
             ime_data.ViewportId = 0x501;
         }
     });
@@ -597,6 +654,8 @@ fn input_invalid_window_metrics_are_sanitized_before_reaching_imgui_io() {
 fn input_platform_feedback_updates_primary_window_cursor_and_ime_state() {
     let _guard = imgui_context_guard();
     let (mut app, primary) = app_with_primary_window();
+    app.world_mut().get_mut::<Window>(primary).unwrap().position =
+        WindowPosition::At(IVec2::new(100, 150));
     app.add_systems(ImguiPrimaryContextPass, request_text_cursor_and_ime);
 
     app.update();
@@ -615,22 +674,27 @@ fn input_platform_feedback_updates_primary_window_cursor_and_ime_state() {
     assert_eq!(window.ime_position, Vec2::new(222.0, 333.0));
 }
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 #[test]
 fn input_platform_feedback_updates_secondary_viewport_window_cursor_and_ime_state() {
     let _guard = imgui_context_guard();
-    let (mut app, primary) = app_with_primary_window();
+    let (mut app, primary) = app_with_primary_window_and_native_viewports();
     let viewport_id = imgui::Id::from(0x501);
-    let secondary = app
-        .world_mut()
-        .spawn((
-            Window {
-                position: WindowPosition::At(IVec2::new(100, 150)),
-                resolution: WindowResolution::new(640, 480),
-                ..Default::default()
-            },
-            ImguiViewportWindow { viewport_id },
-        ))
-        .id();
+    let fixture = create_native_viewport_window(
+        &mut app,
+        viewport_id,
+        Window {
+            position: WindowPosition::At(IVec2::new(100, 150)),
+            resolution: WindowResolution::new(640, 480),
+            ..Default::default()
+        },
+    );
+    let secondary = fixture.window();
+    app.world_mut()
+        .get_mut::<Window>(secondary)
+        .unwrap()
+        .resolution
+        .set_scale_factor(2.0);
     app.world_mut()
         .resource_mut::<Messages<CursorMoved>>()
         .write(CursorMoved {
@@ -663,23 +727,24 @@ fn input_platform_feedback_updates_secondary_viewport_window_cursor_and_ime_stat
     let window = entity.get::<Window>().unwrap();
     assert!(window.ime_enabled);
     assert_eq!(window.ime_position, Vec2::new(44.0, 55.0));
+    fixture.destroy(&mut app);
 }
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 #[test]
 fn input_platform_feedback_routes_cursor_independently_from_ime_viewport() {
     let _guard = imgui_context_guard();
-    let (mut app, primary) = app_with_primary_window();
+    let (mut app, primary) = app_with_primary_window_and_native_viewports();
     let viewport_id = imgui::Id::from(0x502);
-    let secondary = app
-        .world_mut()
-        .spawn((
-            Window {
-                resolution: WindowResolution::new(640, 480),
-                ..Default::default()
-            },
-            ImguiViewportWindow { viewport_id },
-        ))
-        .id();
+    let fixture = create_native_viewport_window(
+        &mut app,
+        viewport_id,
+        Window {
+            resolution: WindowResolution::new(640, 480),
+            ..Default::default()
+        },
+    );
+    let secondary = fixture.window();
     app.world_mut()
         .resource_mut::<Messages<CursorMoved>>()
         .write(CursorMoved {
@@ -713,6 +778,7 @@ fn input_platform_feedback_routes_cursor_independently_from_ime_viewport() {
     let secondary_window = secondary_entity.get::<Window>().unwrap();
     assert!(secondary_window.ime_enabled);
     assert_eq!(secondary_window.ime_position, Vec2::new(77.0, 88.0));
+    fixture.destroy(&mut app);
 }
 
 #[cfg(feature = "render")]
@@ -825,19 +891,14 @@ fn input_platform_feedback_hides_os_cursor_when_imgui_requests_no_cursor() {
     assert!(entity.get::<CursorIcon>().is_none());
 }
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 #[test]
 fn input_platform_feedback_restores_cursor_on_previous_hovered_window() {
     let _guard = imgui_context_guard();
-    let (mut app, primary) = app_with_primary_window();
-    let secondary = app
-        .world_mut()
-        .spawn((
-            Window::default(),
-            ImguiViewportWindow {
-                viewport_id: imgui::Id::from(0x503),
-            },
-        ))
-        .id();
+    let (mut app, primary) = app_with_primary_window_and_native_viewports();
+    let fixture =
+        create_native_viewport_window(&mut app, imgui::Id::from(0x503), Window::default());
+    let secondary = fixture.window();
     app.add_systems(ImguiPrimaryContextPass, request_software_cursor);
 
     app.world_mut()
@@ -883,6 +944,7 @@ fn input_platform_feedback_restores_cursor_on_previous_hovered_window() {
             .visible,
         "the newly hovered primary window should now inherit Dear ImGui's hidden software-cursor state"
     );
+    fixture.destroy(&mut app);
 }
 
 #[test]
@@ -936,19 +998,14 @@ fn input_focus_loss_releases_tracked_keyboard_and_mouse_state() {
     });
 }
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 #[test]
 fn input_focus_switch_between_viewport_windows_keeps_sticky_input_pressed() {
     let _guard = imgui_context_guard();
-    let (mut app, primary) = app_with_primary_window();
-    let secondary = app
-        .world_mut()
-        .spawn((
-            Window::default(),
-            ImguiViewportWindow {
-                viewport_id: imgui::Id::from(0x560),
-            },
-        ))
-        .id();
+    let (mut app, primary) = app_with_primary_window_and_native_viewports();
+    let fixture =
+        create_native_viewport_window(&mut app, imgui::Id::from(0x560), Window::default());
+    let secondary = fixture.window();
 
     app.world_mut()
         .resource_mut::<Messages<KeyboardInput>>()
@@ -1000,22 +1057,18 @@ fn input_focus_switch_between_viewport_windows_keeps_sticky_input_pressed() {
             "switching focus between mapped ImGui windows must not synthesize a global mouse release"
         );
     });
+    fixture.destroy(&mut app);
 }
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 #[test]
 fn input_primary_focus_sync_does_not_blur_while_secondary_viewport_is_focused() {
     let _guard = imgui_context_guard();
-    let (mut app, primary) = app_with_primary_window();
+    let (mut app, primary) = app_with_primary_window_and_native_viewports();
     app.world_mut().get_mut::<Window>(primary).unwrap().focused = true;
-    let secondary = app
-        .world_mut()
-        .spawn((
-            Window::default(),
-            ImguiViewportWindow {
-                viewport_id: imgui::Id::from(0x561),
-            },
-        ))
-        .id();
+    let fixture =
+        create_native_viewport_window(&mut app, imgui::Id::from(0x561), Window::default());
+    let secondary = fixture.window();
 
     app.world_mut()
         .resource_mut::<Messages<KeyboardInput>>()
@@ -1059,22 +1112,18 @@ fn input_primary_focus_sync_does_not_blur_while_secondary_viewport_is_focused() 
             "primary focus sync must not release mouse buttons while a secondary ImGui viewport is focused"
         );
     });
+    fixture.destroy(&mut app);
 }
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 #[test]
 fn input_stale_focused_viewport_window_releases_sticky_input() {
     let _guard = imgui_context_guard();
-    let (mut app, primary) = app_with_primary_window();
+    let (mut app, primary) = app_with_primary_window_and_native_viewports();
     app.world_mut().get_mut::<Window>(primary).unwrap().focused = true;
-    let secondary = app
-        .world_mut()
-        .spawn((
-            Window::default(),
-            ImguiViewportWindow {
-                viewport_id: imgui::Id::from(0x562),
-            },
-        ))
-        .id();
+    let fixture =
+        create_native_viewport_window(&mut app, imgui::Id::from(0x562), Window::default());
+    let secondary = fixture.window();
 
     app.world_mut()
         .resource_mut::<Messages<KeyboardInput>>()
@@ -1123,6 +1172,7 @@ fn input_stale_focused_viewport_window_releases_sticky_input() {
             "destroying the focused secondary viewport must release sticky mouse buttons"
         );
     });
+    fixture.destroy(&mut app);
 }
 
 #[test]
@@ -1309,22 +1359,22 @@ fn input_touch_events_drive_first_active_finger_as_touchscreen_mouse() {
     });
 }
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 #[test]
 fn input_stale_touched_viewport_window_clears_touch_mouse_state() {
     let _guard = imgui_context_guard();
-    let (mut app, primary) = app_with_primary_window();
+    let (mut app, primary) = app_with_primary_window_and_native_viewports();
     let viewport_id = imgui::Id::from(0x563);
-    let secondary = app
-        .world_mut()
-        .spawn((
-            Window {
-                position: WindowPosition::At(IVec2::new(120, 180)),
-                resolution: WindowResolution::new(640, 480),
-                ..Default::default()
-            },
-            ImguiViewportWindow { viewport_id },
-        ))
-        .id();
+    let fixture = create_native_viewport_window(
+        &mut app,
+        viewport_id,
+        Window {
+            position: WindowPosition::At(IVec2::new(120, 180)),
+            resolution: WindowResolution::new(640, 480),
+            ..Default::default()
+        },
+    );
+    let secondary = fixture.window();
 
     app.world_mut()
         .resource_mut::<Messages<TouchInput>>()
@@ -1337,7 +1387,7 @@ fn input_stale_touched_viewport_window_clears_touch_mouse_state() {
         });
     run_input_systems(&mut app);
     begin_frame_and_assert(&mut app, |ui| {
-        assert_eq!(ui.mouse_pos(), [15.0, 25.0]);
+        assert_eq!(ui.mouse_pos(), [135.0, 205.0]);
         assert_eq!(ui.io().mouse_source(), imgui::MouseSource::TouchScreen);
         assert!(ui.is_mouse_down(imgui::MouseButton::Left));
     });
@@ -1357,6 +1407,7 @@ fn input_stale_touched_viewport_window_clears_touch_mouse_state() {
     });
 
     assert!(app.world().get::<Window>(primary).is_some());
+    fixture.destroy(&mut app);
 }
 
 #[test]
@@ -1390,23 +1441,167 @@ fn input_non_primary_window_messages_are_ignored() {
     });
 }
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+#[test]
+fn input_relocated_public_viewport_marker_cannot_spoof_backend_identity() {
+    let _guard = imgui_context_guard();
+    let (mut app, _primary) = app_with_primary_window_and_native_viewports();
+    let viewport_id = imgui::Id::from(0x564);
+    let fixture = create_native_viewport_window(&mut app, viewport_id, Window::default());
+    let viewport_window = fixture.window();
+    let marker = app
+        .world_mut()
+        .entity_mut(viewport_window)
+        .take::<ImguiViewportWindow>()
+        .expect("the callback-created viewport Window should have a public marker");
+    let ordinary_window = app.world_mut().spawn((Window::default(), marker)).id();
+
+    app.world_mut()
+        .resource_mut::<Messages<CursorMoved>>()
+        .write(CursorMoved {
+            window: ordinary_window,
+            position: Vec2::new(300.0, 400.0),
+            delta: None,
+        });
+    run_input_systems(&mut app);
+
+    assert_ne!(
+        app.world()
+            .resource::<ImguiInputState>()
+            .mouse_hovered_window(),
+        Some(ordinary_window),
+        "moving the public marker must not transfer backend ownership"
+    );
+    begin_frame_and_assert(&mut app, |ui| {
+        assert_ne!(
+            ui.io().mouse_hovered_viewport(),
+            viewport_id,
+            "an ordinary Window carrying only the public marker must remain inert"
+        );
+    });
+
+    app.update();
+    let restored_marker = app
+        .world()
+        .get::<ImguiViewportWindow>(viewport_window)
+        .expect("the backend must restore the marker on its privately owned Window");
+    assert_eq!(restored_marker.viewport_id(), viewport_id);
+    assert!(
+        app.world()
+            .get::<ImguiViewportWindow>(ordinary_window)
+            .is_none(),
+        "the backend must remove a relocated marker from an unowned Window"
+    );
+
+    fixture.destroy(&mut app);
+    app.world_mut().despawn(ordinary_window);
+}
+
+#[cfg(all(
+    feature = "render",
+    feature = "multi-viewport",
+    not(target_arch = "wasm32")
+))]
+#[test]
+fn input_equal_viewport_ids_remain_scoped_to_their_context_windows() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary_host) = app_with_primary_window_and_native_viewports();
+    let primary_context = primary_context_id(&app);
+    app.init_schedule(RoutedInputSecondaryUi);
+    let secondary_context = app
+        .world_mut()
+        .non_send_mut::<ImguiContexts>()
+        .create(ImguiContextConfig::new(RoutedInputSecondaryUi).with_multi_viewport(true))
+        .expect("the secondary Context should receive its own native viewport bridge");
+    prepare_context(&mut app, secondary_context);
+    let secondary_host = app.world_mut().spawn(Window::default()).id();
+    let secondary_region = logical_window_region(&app, secondary_host);
+    app.world_mut().spawn(ImguiInputRoute::logical(
+        secondary_context,
+        secondary_host,
+        secondary_region,
+    ));
+    resolve_routed_input(&mut app);
+
+    let viewport_id = imgui::Id::from(0x565);
+    let primary_viewport = CallbackViewport::create(&mut app, primary_context, viewport_id);
+    let secondary_viewport = CallbackViewport::create(&mut app, secondary_context, viewport_id);
+    assert_ne!(primary_viewport.window(), secondary_viewport.window());
+
+    app.world_mut()
+        .resource_mut::<Messages<CursorMoved>>()
+        .write(CursorMoved {
+            window: primary_viewport.window(),
+            position: Vec2::new(24.0, 32.0),
+            delta: None,
+        });
+    run_routed_input(&mut app);
+    let input_state = app.world().resource::<ImguiInputState>();
+    assert!(
+        input_state
+            .for_context_window(primary_context, primary_viewport.window())
+            .expect("the primary native viewport should own its input slot")
+            .mouse_hovered
+    );
+    assert!(
+        input_state
+            .for_context_window(secondary_context, primary_viewport.window())
+            .is_none(),
+        "an equal viewport ID must not make another Context own this window"
+    );
+    assert!(
+        input_state
+            .for_context_window(secondary_context, secondary_viewport.window())
+            .is_none_or(|state| !state.mouse_hovered)
+    );
+
+    app.world_mut()
+        .resource_mut::<Messages<CursorMoved>>()
+        .write(CursorMoved {
+            window: secondary_viewport.window(),
+            position: Vec2::new(48.0, 56.0),
+            delta: None,
+        });
+    run_routed_input(&mut app);
+    assert!(
+        app.world()
+            .resource::<ImguiInputState>()
+            .for_context_window(secondary_context, secondary_viewport.window())
+            .expect("the secondary native viewport should own its input slot")
+            .mouse_hovered
+    );
+
+    let secondary_window = secondary_viewport.window();
+    primary_viewport.destroy(&mut app);
+    assert_eq!(
+        app.world()
+            .non_send::<ImguiViewportBridge>()
+            .viewport_window(secondary_context, viewport_id),
+        Some(secondary_window),
+        "destroying the primary Context's equal ID must preserve the secondary mapping"
+    );
+    assert!(app.world().get_entity(secondary_window).is_ok());
+    secondary_viewport.destroy(&mut app);
+    assert!(app.world().get_entity(primary_host).is_ok());
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 #[test]
 fn input_secondary_viewport_window_messages_use_imgui_platform_coordinates_when_viewports_are_enabled()
  {
     let _guard = imgui_context_guard();
-    let (mut app, _primary) = app_with_primary_window();
+    let (mut app, _primary) = app_with_primary_window_and_native_viewports();
     let viewport_id = imgui::Id::from(0x500);
-    let secondary = app
-        .world_mut()
-        .spawn((
-            Window {
-                position: WindowPosition::At(IVec2::new(200, 300)),
-                resolution: WindowResolution::new(640, 480),
-                ..Default::default()
-            },
-            ImguiViewportWindow { viewport_id },
-        ))
-        .id();
+    let fixture = create_native_viewport_window(
+        &mut app,
+        viewport_id,
+        Window {
+            position: WindowPosition::At(IVec2::new(200, 300)),
+            resolution: WindowResolution::new(640, 480),
+            ..Default::default()
+        },
+    );
+    let secondary = fixture.window();
     {
         let mut window = app.world_mut().get_mut::<Window>(secondary).unwrap();
         window.resolution.set_scale_factor(2.0);
@@ -1463,6 +1658,9 @@ fn input_secondary_viewport_window_messages_use_imgui_platform_coordinates_when_
     run_input_systems(&mut app);
 
     begin_frame_and_assert(&mut app, |ui| {
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(ui.mouse_pos(), [800.0, 1100.0]);
+        #[cfg(target_os = "macos")]
         assert_eq!(ui.mouse_pos(), [400.0, 550.0]);
         assert_eq!(ui.io().mouse_hovered_viewport(), viewport_id);
         assert!(ui.is_mouse_down(imgui::MouseButton::Right));
@@ -1474,24 +1672,25 @@ fn input_secondary_viewport_window_messages_use_imgui_platform_coordinates_when_
         assert!(chars.contains(&('x' as u32)));
         assert!(chars.contains(&('界' as u32)));
     });
+    fixture.destroy(&mut app);
 }
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 #[test]
 fn input_cursor_left_from_previous_window_does_not_clear_new_hovered_viewport_position() {
     let _guard = imgui_context_guard();
-    let (mut app, primary) = app_with_primary_window();
+    let (mut app, primary) = app_with_primary_window_and_native_viewports();
     let viewport_id = imgui::Id::from(0x550);
-    let secondary = app
-        .world_mut()
-        .spawn((
-            Window {
-                position: WindowPosition::At(IVec2::new(200, 300)),
-                resolution: WindowResolution::new(640, 480),
-                ..Default::default()
-            },
-            ImguiViewportWindow { viewport_id },
-        ))
-        .id();
+    let fixture = create_native_viewport_window(
+        &mut app,
+        viewport_id,
+        Window {
+            position: WindowPosition::At(IVec2::new(200, 300)),
+            resolution: WindowResolution::new(640, 480),
+            ..Default::default()
+        },
+    );
+    let secondary = fixture.window();
     configure_primary(&mut app, |context| {
         let io = context.io_mut();
         io.set_config_flags(io.config_flags() | imgui::ConfigFlags::VIEWPORTS_ENABLE);
@@ -1534,24 +1733,25 @@ fn input_cursor_left_from_previous_window_does_not_clear_new_hovered_viewport_po
         assert_eq!(ui.mouse_pos(), [230.0, 340.0]);
         assert_eq!(ui.io().mouse_hovered_viewport(), viewport_id);
     });
+    fixture.destroy(&mut app);
 }
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 #[test]
 fn input_stale_hovered_viewport_window_clears_imgui_mouse_hover() {
     let _guard = imgui_context_guard();
-    let (mut app, primary) = app_with_primary_window();
+    let (mut app, primary) = app_with_primary_window_and_native_viewports();
     let viewport_id = imgui::Id::from(0x551);
-    let secondary = app
-        .world_mut()
-        .spawn((
-            Window {
-                position: WindowPosition::At(IVec2::new(200, 300)),
-                resolution: WindowResolution::new(640, 480),
-                ..Default::default()
-            },
-            ImguiViewportWindow { viewport_id },
-        ))
-        .id();
+    let fixture = create_native_viewport_window(
+        &mut app,
+        viewport_id,
+        Window {
+            position: WindowPosition::At(IVec2::new(200, 300)),
+            resolution: WindowResolution::new(640, 480),
+            ..Default::default()
+        },
+    );
+    let secondary = fixture.window();
     configure_primary(&mut app, |context| {
         let io = context.io_mut();
         io.set_config_flags(io.config_flags() | imgui::ConfigFlags::VIEWPORTS_ENABLE);
@@ -1592,6 +1792,7 @@ fn input_stale_hovered_viewport_window_clears_imgui_mouse_hover() {
     });
 
     assert!(app.world().get::<Window>(primary).is_some());
+    fixture.destroy(&mut app);
 }
 
 #[test]
