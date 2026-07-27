@@ -1163,6 +1163,53 @@ fn binding_does_not_restore_a_previous_context_destroyed_inside_the_scope() {
 }
 
 #[test]
+fn attachment_registration_preflight_is_non_mutating() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut ctx = Context::create();
+
+    assert_eq!(
+        ctx.preflight_attachment_registration::<RendererMarker>(ContextAttachmentRole::Renderer),
+        Err(ContextAttachmentError::MissingPlatform)
+    );
+    assert_eq!(
+        ctx.preflight_attachment_registration::<PlatformMarker>(ContextAttachmentRole::Platform),
+        Ok(())
+    );
+
+    let platform = Rc::new(RecordingAttachment::new(Rc::new(RefCell::new(Vec::new()))));
+    let mut platform_lease = ctx
+        .register_attachment::<PlatformMarker>(ContextAttachmentRole::Platform, platform)
+        .unwrap();
+
+    assert_eq!(
+        ctx.preflight_attachment_registration::<PlatformMarker>(ContextAttachmentRole::Platform),
+        Err(ContextAttachmentError::DuplicateAttachment)
+    );
+    assert_eq!(
+        ctx.preflight_attachment_registration::<ExtensionMarker>(ContextAttachmentRole::Platform),
+        Err(ContextAttachmentError::RoleOccupied(
+            ContextAttachmentRole::Platform
+        ))
+    );
+    assert_eq!(
+        ctx.preflight_attachment_registration::<RendererMarker>(ContextAttachmentRole::Renderer),
+        Ok(())
+    );
+
+    assert!(platform_lease.detach());
+    let shared_context = &ctx;
+    assert_eq!(
+        shared_context
+            .preflight_attachment_registration::<PlatformMarker>(ContextAttachmentRole::Platform),
+        Ok(())
+    );
+    let replacement = Rc::new(RecordingAttachment::new(Rc::new(RefCell::new(Vec::new()))));
+    let _replacement_lease = ctx
+        .register_attachment::<PlatformMarker>(ContextAttachmentRole::Platform, replacement)
+        .unwrap();
+}
+
+#[test]
 fn attachments_use_phased_teardown_and_reject_ordinary_binding() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();

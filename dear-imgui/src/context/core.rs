@@ -141,6 +141,19 @@ impl Context {
             .register::<Marker>(self.state.lifecycle(), role, attachment)
     }
 
+    /// Validate a typed lifecycle attachment registration without mutating the registry.
+    ///
+    /// Backends use this to preflight a multi-Context transaction before registering any
+    /// attachment. A successful result remains valid until the attachment registry or Context
+    /// lifecycle changes.
+    pub fn preflight_attachment_registration<Marker: 'static>(
+        &self,
+        role: ContextAttachmentRole,
+    ) -> Result<(), ContextAttachmentError> {
+        self.attachments
+            .preflight_register::<Marker>(self.state.lifecycle(), role)
+    }
+
     // removed legacy create_or_panic variants (use create()/try_create())
 
     pub(super) fn io_ptr(&self, caller: &str) -> *mut sys::ImGuiIO {

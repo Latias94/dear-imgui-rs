@@ -308,6 +308,7 @@ impl fmt::Debug for ContextPlatformWindowTeardown<'_> {
 }
 
 impl<'a> ContextPlatformWindowTeardown<'a> {
+    #[cfg(feature = "multi-viewport")]
     pub(super) fn new(state: &'a ContextState) -> Self {
         Self {
             state,
@@ -461,20 +462,19 @@ impl fmt::Debug for AttachmentRegistry {
 }
 
 impl AttachmentRegistry {
-    pub(super) fn register<Marker: 'static>(
-        &mut self,
+    pub(super) fn preflight_register<Marker: 'static>(
+        &self,
         lifecycle: ContextLifecycle,
         role: ContextAttachmentRole,
-        attachment: Rc<dyn ContextAttachment>,
-    ) -> Result<ContextAttachmentLease, ContextAttachmentError> {
+    ) -> Result<(), ContextAttachmentError> {
         if lifecycle != ContextLifecycle::Alive || self.tearing_down {
             return Err(ContextAttachmentError::ContextDropping);
         }
 
-        self.controls
-            .retain(|control| control.state.get() != AttachmentState::Detached);
         let marker = TypeId::of::<Marker>();
-        if self.controls.iter().any(|control| control.marker == marker) {
+        if self.controls.iter().any(|control| {
+            control.marker == marker && control.state.get() != AttachmentState::Detached
+        }) {
             return Err(ContextAttachmentError::DuplicateAttachment);
         }
         if role == ContextAttachmentRole::Renderer
@@ -485,6 +485,19 @@ impl AttachmentRegistry {
         if role != ContextAttachmentRole::Extension && self.role_is_active(role) {
             return Err(ContextAttachmentError::RoleOccupied(role));
         }
+        Ok(())
+    }
+
+    pub(super) fn register<Marker: 'static>(
+        &mut self,
+        lifecycle: ContextLifecycle,
+        role: ContextAttachmentRole,
+        attachment: Rc<dyn ContextAttachment>,
+    ) -> Result<ContextAttachmentLease, ContextAttachmentError> {
+        self.preflight_register::<Marker>(lifecycle, role)?;
+        self.controls
+            .retain(|control| control.state.get() != AttachmentState::Detached);
+        let marker = TypeId::of::<Marker>();
 
         let control = Rc::new(AttachmentControl {
             marker,
@@ -506,6 +519,7 @@ impl AttachmentRegistry {
             .any(|control| control.role == role && control.state.get() == AttachmentState::Active)
     }
 
+    #[cfg(feature = "multi-viewport")]
     pub(super) fn begin_platform_window_teardown(
         &self,
         context: &ContextPlatformWindowTeardown<'_>,
@@ -548,11 +562,13 @@ impl AttachmentRegistry {
     }
 }
 
+#[cfg(feature = "multi-viewport")]
 pub(super) struct PlatformWindowTeardownInvocation<'a> {
     attachment: Option<Rc<dyn ContextAttachment>>,
     active: &'a Cell<bool>,
 }
 
+#[cfg(feature = "multi-viewport")]
 impl PlatformWindowTeardownInvocation<'_> {
     fn begin(
         &self,
@@ -601,6 +617,7 @@ impl PlatformWindowTeardownInvocation<'_> {
     }
 }
 
+#[cfg(feature = "multi-viewport")]
 impl Drop for PlatformWindowTeardownInvocation<'_> {
     fn drop(&mut self) {
         self.active.set(false);
