@@ -30,7 +30,7 @@ mod render {
         kind: ImguiTextureLeaseKind,
         events: ImguiTextureLeaseEvents,
         // Each strong lease retains its own Bevy asset handle. The registry also keeps one guard
-        // until the mapping has retired, so an in-flight extracted frame cannot lose its image.
+        // until render-world extraction publishes the final strong submission.
         strong_asset: Option<Handle<Image>>,
     }
 
@@ -97,8 +97,8 @@ mod render {
         /// Whether this lease adds no Bevy image asset retention.
         ///
         /// If the asset is unavailable to the renderer, ImGui uses its fallback texture until it
-        /// becomes available again. A shared mapping previously registered strongly can retain one
-        /// guard until that mapping safely retires.
+        /// becomes available again. A shared mapping can temporarily retain a guard until the final
+        /// strong lease's submitted frame reaches render-world extraction.
         #[must_use]
         pub const fn is_weak(&self) -> bool {
             matches!(self.kind, ImguiTextureLeaseKind::Weak)
@@ -142,8 +142,8 @@ mod render {
     ///
     /// The registry is initialized by [`crate::ImguiPlugin`]. It is renderer-global: the same
     /// lease can be used from any owned Dear ImGui Context. Strong registration retains one
-    /// slot-level Bevy handle until that shared mapping safely retires, including when weak leases
-    /// remain after the final strong lease drops.
+    /// slot-level Bevy handle until the final strong submission is extracted. Remaining weak
+    /// leases keep the mapping live without retaining the asset afterward.
     #[derive(Resource, Debug)]
     pub struct ImguiBevyTextures {
         by_asset: HashMap<AssetId<Image>, ImguiTextureSlot>,
@@ -172,7 +172,7 @@ mod render {
         ///
         /// Repeated registrations of the same image share one Dear ImGui texture ID while each
         /// returned lease independently keeps the image asset alive. The shared mapping retains
-        /// one handle until its render-world retirement is acknowledged.
+        /// one handle until the final strong submission is extracted or the full mapping retires.
         ///
         /// # Errors
         ///
@@ -193,10 +193,10 @@ mod render {
 
         /// Register an externally owned Bevy image by asset ID.
         ///
-        /// The lease does not introduce asset retention. If no shared registration retains the
-        /// image and Bevy removes or has not yet uploaded it, the renderer safely uses its fallback
-        /// texture and resumes sampling if the image returns. A mapping previously registered
-        /// strongly retains one guard until its shared slot retires.
+        /// The lease does not introduce asset retention. If no strong lease remains and Bevy removes
+        /// or has not yet uploaded the image, the renderer safely uses its fallback texture and
+        /// resumes sampling if the image returns. A guard from the final strong lease is retained
+        /// only until its already-submitted frame reaches render-world extraction.
         #[must_use]
         pub fn register_weak(&mut self, asset_id: AssetId<Image>) -> ImguiTexture {
             self.register(asset_id, ImguiTextureLeaseKind::Weak, None)
@@ -253,6 +253,17 @@ mod render {
                 match slot.state {
                     ImguiTextureSlotState::Live => {
                         textures.push((slot.identity.texture_id, *asset_id));
+                        match slot.asset_retention_state {
+                            ImguiTextureAssetRetentionState::None
+                            | ImguiTextureAssetRetentionState::Live => {}
+                            ImguiTextureAssetRetentionState::AwaitingPublication(generation) => {
+                                self.events
+                                    .push(ImguiTextureLeaseEvent::AssetRetentionPublished {
+                                        identity: slot.identity,
+                                        generation,
+                                    });
+                            }
+                        }
                     }
                     ImguiTextureSlotState::AwaitingPublication => {
                         textures.push((slot.identity.texture_id, *asset_id));
@@ -280,6 +291,7 @@ mod render {
             }
 
             if !render_integration_installed {
+                self.release_zero_strong_asset_guards();
                 self.recycle_zero_lease_slots();
             }
         }
@@ -302,6 +314,14 @@ mod render {
                         && matches!(slot.state, ImguiTextureSlotState::AwaitingPublication)
                     {
                         slot.state = ImguiTextureSlotState::AwaitingAcknowledgement;
+                    }
+                }
+                ImguiTextureLeaseEvent::AssetRetentionPublished {
+                    identity,
+                    generation,
+                } => {
+                    if let Some(slot) = self.slot_mut(identity) {
+                        slot.release_asset_retention_if_published(generation);
                     }
                 }
                 ImguiTextureLeaseEvent::Acknowledged(identity) => {
@@ -334,6 +354,14 @@ mod render {
             }
 
             self.remove_slot(asset_id, identity.texture_id);
+        }
+
+        fn release_zero_strong_asset_guards(&mut self) {
+            for slot in self.by_asset.values_mut() {
+                if slot.strong_leases == 0 {
+                    slot.release_asset_retention_without_render();
+                }
+            }
         }
 
         fn recycle_zero_lease_slots(&mut self) {
@@ -444,6 +472,10 @@ mod render {
             kind: ImguiTextureLeaseKind,
         },
         Published(ImguiTextureLeaseIdentity),
+        AssetRetentionPublished {
+            identity: ImguiTextureLeaseIdentity,
+            generation: u64,
+        },
         Acknowledged(ImguiTextureLeaseIdentity),
     }
 
@@ -477,9 +509,11 @@ mod render {
         identity: ImguiTextureLeaseIdentity,
         strong_leases: usize,
         weak_leases: usize,
-        // Retain one actual Bevy handle until a render-world acknowledgement makes the slot safe
-        // to recycle, including after the last strong lease has dropped.
+        // Retain one actual Bevy handle until the final strong submission or the complete mapping
+        // retirement has received a render-world acknowledgement.
         retained_asset: Option<Handle<Image>>,
+        asset_retention_state: ImguiTextureAssetRetentionState,
+        next_asset_retention_generation: u64,
         state: ImguiTextureSlotState,
     }
 
@@ -490,6 +524,8 @@ mod render {
                 strong_leases: 0,
                 weak_leases: 0,
                 retained_asset: None,
+                asset_retention_state: ImguiTextureAssetRetentionState::None,
+                next_asset_retention_generation: 0,
                 state: ImguiTextureSlotState::Live,
             }
         }
@@ -498,6 +534,7 @@ mod render {
             if self.retained_asset.is_none() {
                 self.retained_asset = Some(asset.clone());
             }
+            self.asset_retention_state = ImguiTextureAssetRetentionState::Live;
         }
 
         fn acquire(&mut self, kind: ImguiTextureLeaseKind) {
@@ -508,6 +545,9 @@ mod render {
             *leases = leases
                 .checked_add(1)
                 .expect("Bevy image texture lease count exhausted");
+            if matches!(kind, ImguiTextureLeaseKind::Strong) && self.retained_asset.is_some() {
+                self.asset_retention_state = ImguiTextureAssetRetentionState::Live;
+            }
             self.state = ImguiTextureSlotState::Live;
         }
 
@@ -524,9 +564,50 @@ mod render {
                 return;
             };
             *leases = next;
+            if matches!(kind, ImguiTextureLeaseKind::Strong) && self.strong_leases == 0 {
+                self.begin_asset_retention();
+            }
             if self.total_leases() == 0 {
                 self.state = ImguiTextureSlotState::AwaitingPublication;
             }
+        }
+
+        fn begin_asset_retention(&mut self) {
+            debug_assert!(
+                self.retained_asset.is_some(),
+                "the final strong lease must leave one registry asset guard"
+            );
+            if self.retained_asset.is_none() {
+                self.asset_retention_state = ImguiTextureAssetRetentionState::None;
+                return;
+            }
+
+            self.next_asset_retention_generation = self
+                .next_asset_retention_generation
+                .checked_add(1)
+                .expect("Bevy image asset retention generation space exhausted");
+            self.asset_retention_state = ImguiTextureAssetRetentionState::AwaitingPublication(
+                self.next_asset_retention_generation,
+            );
+        }
+
+        fn release_asset_retention_if_published(&mut self, generation: u64) {
+            if self.strong_leases == 0
+                && matches!(
+                    self.asset_retention_state,
+                    ImguiTextureAssetRetentionState::AwaitingPublication(current)
+                        if current == generation
+                )
+            {
+                self.retained_asset = None;
+                self.asset_retention_state = ImguiTextureAssetRetentionState::None;
+            }
+        }
+
+        fn release_asset_retention_without_render(&mut self) {
+            debug_assert_eq!(self.strong_leases, 0);
+            self.retained_asset = None;
+            self.asset_retention_state = ImguiTextureAssetRetentionState::None;
         }
 
         fn total_leases(&self) -> usize {
@@ -541,6 +622,13 @@ mod render {
         Live,
         AwaitingPublication,
         AwaitingAcknowledgement,
+    }
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    enum ImguiTextureAssetRetentionState {
+        None,
+        Live,
+        AwaitingPublication(u64),
     }
 
     #[derive(Clone, Debug, Default)]
@@ -722,7 +810,7 @@ mod render {
         }
 
         #[test]
-        fn weak_leases_share_but_do_not_create_strong_retirement_guards() {
+        fn final_strong_guard_retires_while_shared_weak_mapping_stays_live() {
             let mut textures = ImguiBevyTextures::default();
             let mut images = Assets::<Image>::default();
             let handle = images.add(Image::default());
@@ -731,10 +819,14 @@ mod render {
                 .register_strong(handle)
                 .expect("Assets::add should return a retaining Bevy handle");
             let weak = textures.register_weak(asset_id);
+            let identity = strong.identity;
 
             assert!(weak.strong_asset.is_none());
             drop(strong);
             textures.maintain(true);
+            let publication = textures.extract_for_render();
+            assert_eq!(publication.textures, vec![(identity.texture_id, asset_id)]);
+            assert!(publication.retirements.is_empty());
             let slot = textures
                 .by_asset
                 .get(&asset_id)
@@ -746,20 +838,161 @@ mod render {
                 "a pre-existing strong registration must guard mixed-lease snapshots"
             );
 
+            textures.maintain(true);
+            let slot = textures
+                .by_asset
+                .get(&asset_id)
+                .expect("the weak lease should keep the shared slot live");
+            assert_eq!(slot.strong_leases, 0);
+            assert_eq!(slot.weak_leases, 1);
+            assert!(
+                slot.retained_asset.is_none(),
+                "the asset guard must release after its publication reaches the render world"
+            );
+            assert_eq!(
+                slot.asset_retention_state,
+                ImguiTextureAssetRetentionState::None
+            );
+            assert_eq!(slot.state, ImguiTextureSlotState::Live);
+            let weak_extraction = textures.extract_for_render();
+            assert_eq!(
+                weak_extraction.textures,
+                vec![(identity.texture_id, asset_id)]
+            );
+            assert!(weak_extraction.retirements.is_empty());
+
             drop(weak);
             textures.maintain(true);
-            let publication = textures.extract_for_render();
+            let mapping_publication = textures.extract_for_render();
+            assert_eq!(
+                mapping_publication.textures,
+                vec![(identity.texture_id, asset_id)]
+            );
             textures.maintain(true);
             let retirement = textures.extract_for_render();
-            assert_eq!(retirement.retirements.len(), 1);
+            assert_eq!(retirement.retirements, vec![identity]);
 
-            publication
+            retirement
                 .events
                 .as_ref()
-                .expect("publication extraction must retain the acknowledgement queue")
-                .acknowledge(retirement.retirements[0]);
+                .expect("mapping retirement extraction must retain the acknowledgement queue")
+                .acknowledge(identity);
             textures.maintain(true);
             assert!(textures.is_empty());
+        }
+
+        #[test]
+        fn stale_asset_retention_publication_cannot_release_a_new_strong_guard() {
+            let mut textures = ImguiBevyTextures::default();
+            let mut images = Assets::<Image>::default();
+            let handle = images.add(Image::default());
+            let asset_id = handle.id();
+            let first_strong = textures
+                .register_strong(handle.clone())
+                .expect("Assets::add should return a retaining Bevy handle");
+            let weak = textures.register_weak(asset_id);
+            let identity = first_strong.identity;
+
+            drop(first_strong);
+            textures.maintain(true);
+            let _ = textures.extract_for_render();
+            let stale_generation = match textures
+                .by_asset
+                .get(&asset_id)
+                .expect("the weak lease should keep the slot live")
+                .asset_retention_state
+            {
+                ImguiTextureAssetRetentionState::AwaitingPublication(generation) => generation,
+                state => panic!("expected pending asset publication, got {state:?}"),
+            };
+
+            let reactivated = textures
+                .register_strong(handle)
+                .expect("the retaining handle should reactivate strong ownership");
+            textures.maintain(true);
+            let slot = textures
+                .by_asset
+                .get(&asset_id)
+                .expect("the reactivated strong lease should keep the slot live");
+            assert_eq!(slot.strong_leases, 1);
+            assert!(slot.retained_asset.is_some());
+            assert_eq!(
+                slot.asset_retention_state,
+                ImguiTextureAssetRetentionState::Live
+            );
+
+            drop(reactivated);
+            textures.maintain(true);
+            let current_generation = match textures
+                .by_asset
+                .get(&asset_id)
+                .expect("the weak lease should keep the slot live")
+                .asset_retention_state
+            {
+                ImguiTextureAssetRetentionState::AwaitingPublication(generation) => generation,
+                state => panic!("expected renewed asset publication, got {state:?}"),
+            };
+            assert_ne!(current_generation, stale_generation);
+
+            textures
+                .events
+                .push(ImguiTextureLeaseEvent::AssetRetentionPublished {
+                    identity,
+                    generation: stale_generation,
+                });
+            textures.maintain(true);
+            let slot = textures
+                .by_asset
+                .get(&asset_id)
+                .expect("the weak lease should keep the slot live");
+            assert!(slot.retained_asset.is_some());
+            assert_eq!(
+                slot.asset_retention_state,
+                ImguiTextureAssetRetentionState::AwaitingPublication(current_generation)
+            );
+
+            let current_publication = textures.extract_for_render();
+            assert_eq!(
+                current_publication.textures,
+                vec![(identity.texture_id, asset_id)]
+            );
+            assert!(current_publication.retirements.is_empty());
+            textures.maintain(true);
+            assert!(
+                textures
+                    .by_asset
+                    .get(&asset_id)
+                    .is_some_and(|slot| slot.retained_asset.is_none())
+            );
+
+            drop(weak);
+        }
+
+        #[test]
+        fn no_render_integration_releases_the_final_strong_guard_immediately() {
+            let mut textures = ImguiBevyTextures::default();
+            let mut images = Assets::<Image>::default();
+            let handle = images.add(Image::default());
+            let asset_id = handle.id();
+            let strong = textures
+                .register_strong(handle)
+                .expect("Assets::add should return a retaining Bevy handle");
+            let weak = textures.register_weak(asset_id);
+
+            drop(strong);
+            textures.maintain(false);
+            let slot = textures
+                .by_asset
+                .get(&asset_id)
+                .expect("the weak lease should keep the mapping live");
+            assert_eq!(slot.weak_leases, 1);
+            assert!(slot.retained_asset.is_none());
+            assert_eq!(
+                slot.asset_retention_state,
+                ImguiTextureAssetRetentionState::None
+            );
+
+            drop(weak);
         }
 
         #[test]
