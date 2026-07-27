@@ -15,11 +15,11 @@ use bevy::{
 };
 use dear_imgui_bevy::{
     ImguiBackendConfig, ImguiBackendStatus, ImguiBevyTextures, ImguiContexts, ImguiPlugin,
-    ImguiPrimaryContextPass, ImguiUi, configure_example_context,
+    ImguiPrimaryContextPass, ImguiTexture, ImguiUi, configure_example_context,
     render::{ImguiOverlayCamera, ImguiOverlayDisabled},
 };
 use dear_imgui_rs::{
-    Condition, DockLayout, DockLayoutApply, DockSplit, DockspaceTarget, TextureId, WindowFlags,
+    Condition, DockLayout, DockLayoutApply, DockSplit, DockspaceTarget, WindowFlags,
 };
 
 const SCENE_SIZE: [u32; 2] = [960, 540];
@@ -33,7 +33,7 @@ struct SceneObject {
 
 #[derive(Resource)]
 struct ScenePreview {
-    texture_id: TextureId,
+    texture: ImguiTexture,
     size: [u32; 2],
 }
 
@@ -72,7 +72,6 @@ fn main() {
             multi_viewport: cfg!(feature = "multi-viewport"),
             ..Default::default()
         }))
-        .init_resource::<ImguiBevyTextures>()
         .init_resource::<EditorState>()
         .add_systems(Startup, setup)
         .add_systems(Update, (close_on_escape, animate_scene))
@@ -112,7 +111,9 @@ fn setup(
         bevy::render::render_resource::TextureUsages::TEXTURE_BINDING
             | bevy::render::render_resource::TextureUsages::RENDER_ATTACHMENT;
     let scene_image = images.add(scene_image);
-    let texture_id = textures.register(&scene_image);
+    let texture = textures
+        .register_strong(scene_image.clone())
+        .map_err(|error| format!("failed to register the scene preview texture: {error}"))?;
 
     commands.spawn((
         Camera2d,
@@ -125,7 +126,7 @@ fn setup(
         ImguiOverlayDisabled,
     ));
     commands.insert_resource(ScenePreview {
-        texture_id,
+        texture,
         size: SCENE_SIZE,
     });
 
@@ -324,7 +325,7 @@ fn render_scene_window(ui: &dear_imgui_rs::Ui, preview: &ScenePreview, editor: &
         (fit[0] * editor.viewport_zoom).max(96.0),
         (fit[1] * editor.viewport_zoom).max(96.0),
     ];
-    ui.image_config(preview.texture_id, image_size)
+    ui.image_config(&preview.texture, image_size)
         .uv0([0.0, 1.0])
         .uv1([1.0, 0.0])
         .build();

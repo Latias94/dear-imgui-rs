@@ -27,7 +27,7 @@ pub use self::context::{
 pub use self::helpers::configure_example_context;
 pub use self::schedule::ImguiPrimaryContextPass;
 #[cfg(feature = "render")]
-pub use self::texture::ImguiBevyTextures;
+pub use self::texture::{ImguiBevyTextures, ImguiTexture, ImguiTextureRegistrationError};
 pub use self::viewport::{
     ImguiViewportBridge, ImguiViewportCamera, ImguiViewportCommand, ImguiViewportFeedback,
     ImguiViewportId, ImguiViewportSnapshot, ImguiViewportWindow, ImguiViewportWindowConfig,

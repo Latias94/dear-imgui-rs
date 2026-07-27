@@ -9,11 +9,11 @@ pub(super) fn extract_imgui_bevy_textures(
     registry: Extract<Option<Res<crate::ImguiBevyTextures>>>,
     mut extracted: ResMut<ImguiExtractedBevyTextures>,
 ) {
-    let textures = registry
+    let extraction = registry
         .as_ref()
-        .map(|registry| registry.iter().collect::<Vec<_>>())
+        .map(|registry| registry.extract_for_render())
         .unwrap_or_default();
-    extracted.replace(textures);
+    extracted.replace(extraction);
 }
 
 pub(super) fn extract_imgui_render_frame(

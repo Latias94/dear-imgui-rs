@@ -52,7 +52,7 @@ use std::collections::{HashMap, HashSet};
 use std::mem::size_of;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-pub use crate::texture::ImguiBevyTextures;
+pub use crate::texture::{ImguiBevyTextures, ImguiTexture, ImguiTextureRegistrationError};
 use crate::{ImguiBackendStatus, ImguiViewportCamera, ImguiViewportWindow};
 
 mod extract;
@@ -1520,7 +1520,7 @@ mod tests {
 
         texture_bind_groups.bevy_image_bindings.insert(stale);
         texture_bind_groups.bevy_image_bindings.insert(still_active);
-        extracted.replace(vec![(still_active_id, AssetId::<Image>::default())]);
+        extracted.replace_for_test(vec![(still_active_id, AssetId::<Image>::default())]);
 
         retain_extracted_bevy_image_bindings(&extracted, &mut texture_bind_groups);
 
@@ -1774,7 +1774,7 @@ mod tests {
         let image_id = AssetId::<Image>::default();
         let binding = TextureBinding::Legacy(texture_id);
 
-        extracted.replace(vec![(texture_id, image_id)]);
+        extracted.replace_for_test(vec![(texture_id, image_id)]);
         gpu_images.insert(
             image_id,
             gpu_image(&render_device, TextureUsages::TEXTURE_BINDING),
@@ -1815,7 +1815,7 @@ mod tests {
             image_id,
             gpu_image(&render_device, TextureUsages::TEXTURE_BINDING),
         );
-        extracted.replace(vec![(texture_id, image_id)]);
+        extracted.replace_for_test(vec![(texture_id, image_id)]);
         prepare_bevy_image_texture_bind_groups(
             Some(&gpu_images),
             &extracted,
@@ -1826,7 +1826,7 @@ mod tests {
         );
         assert_eq!(texture_bind_groups.len(), 1);
 
-        extracted.replace(Vec::new());
+        extracted.replace_for_test(Vec::new());
         prepare_bevy_image_texture_bind_groups(
             Some(&gpu_images),
             &extracted,
@@ -1861,7 +1861,7 @@ mod tests {
         let image_id = AssetId::<Image>::default();
         let binding = TextureBinding::Legacy(texture_id);
 
-        extracted.replace(vec![(texture_id, image_id)]);
+        extracted.replace_for_test(vec![(texture_id, image_id)]);
         gpu_images.insert(image_id, gpu_image(&render_device, TextureUsages::COPY_DST));
 
         prepare_bevy_image_texture_bind_groups(

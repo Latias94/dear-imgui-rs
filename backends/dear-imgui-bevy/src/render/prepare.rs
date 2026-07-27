@@ -181,6 +181,7 @@ pub(super) fn prepare_imgui_uniform_bind_groups(
 pub(super) struct ImguiTextureBindGroupParams<'w> {
     extracted: ResMut<'w, ImguiExtractedRenderFrame>,
     extracted_bevy_textures: Res<'w, ImguiExtractedBevyTextures>,
+    diagnostics: Res<'w, crate::route::ImguiDiagnostics>,
     gpu_images: Option<Res<'w, RenderAssets<GpuImage>>>,
     render_device: Option<Res<'w, RenderDevice>>,
     render_queue: Option<Res<'w, RenderQueue>>,
@@ -193,11 +194,22 @@ pub(super) fn prepare_imgui_texture_bind_groups(
     mut params: ImguiTextureBindGroupParams,
     mut texture_bind_groups: ResMut<ImguiTextureBindGroups>,
 ) {
+    retain_extracted_bevy_image_bindings(&params.extracted_bevy_textures, &mut texture_bind_groups);
+
     let (Some(render_device), Some(render_queue), Some(pipeline_cache)) = (
         params.render_device,
         params.render_queue,
         params.pipeline_cache,
     ) else {
+        publish_unavailable_bevy_image_texture_diagnostics(
+            &params.diagnostics,
+            &params.extracted_bevy_textures,
+            params
+                .extracted_bevy_textures
+                .textures()
+                .iter()
+                .map(|(_, asset_id)| *asset_id),
+        );
         return;
     };
 
@@ -314,13 +326,18 @@ pub(super) fn prepare_imgui_texture_bind_groups(
             .extend_texture_feedback(context_id, texture_feedback);
     }
 
-    prepare_bevy_image_texture_bind_groups(
+    let unavailable_images = prepare_bevy_image_texture_bind_groups(
         params.gpu_images.as_deref(),
         &params.extracted_bevy_textures,
         &render_device,
         &pipeline_cache,
         &params.pipeline,
         &mut texture_bind_groups,
+    );
+    publish_unavailable_bevy_image_texture_diagnostics(
+        &params.diagnostics,
+        &params.extracted_bevy_textures,
+        unavailable_images,
     );
 }
 
@@ -357,6 +374,29 @@ pub(super) fn commit_imgui_render_frame(
         .collect::<HashMap<_, _>>();
     extracted.commit_all();
     texture_bind_groups.prune_destroyed_managed_textures(&completion_watermarks);
+}
+
+pub(super) fn acknowledge_retired_bevy_image_textures(
+    extracted_bevy_textures: Res<ImguiExtractedBevyTextures>,
+    extracted_frames: Res<ImguiExtractedRenderFrame>,
+    prepared: Res<ImguiPreparedRenderFrame>,
+    texture_bind_groups: Res<ImguiTextureBindGroups>,
+) {
+    if extracted_frames.has_pending_snapshots() {
+        return;
+    }
+
+    let acknowledgements = extracted_bevy_textures
+        .retirement_candidates()
+        .iter()
+        .copied()
+        .filter(|identity| {
+            let binding = TextureBinding::Legacy(identity.texture_id());
+            !texture_bind_groups.contains_binding(&binding)
+                && !prepared.draws().iter().any(|draw| draw.texture == binding)
+        })
+        .collect::<Vec<_>>();
+    extracted_bevy_textures.acknowledge_retirements(acknowledgements);
 }
 
 fn validate_managed_texture_extent(render_device: &RenderDevice, width: u32, height: u32) -> bool {
@@ -549,17 +589,23 @@ pub(super) fn prepare_bevy_image_texture_bind_groups(
     pipeline_cache: &PipelineCache,
     pipeline: &ImguiRenderPipeline,
     texture_bind_groups: &mut ImguiTextureBindGroups,
-) {
+) -> Vec<bevy_asset::AssetId<Image>> {
     retain_extracted_bevy_image_bindings(extracted_bevy_textures, texture_bind_groups);
 
     let Some(gpu_images) = gpu_images else {
-        return;
+        return extracted_bevy_textures
+            .textures()
+            .iter()
+            .map(|(_, asset_id)| *asset_id)
+            .collect();
     };
 
+    let mut unavailable_images = Vec::new();
     for (texture_id, asset_id) in extracted_bevy_textures.textures() {
         let binding = TextureBinding::Legacy(*texture_id);
         let Some(gpu_image) = gpu_images.get(*asset_id) else {
             texture_bind_groups.remove_binding(&binding);
+            unavailable_images.push(*asset_id);
             continue;
         };
         let Some(bind_group) = create_bevy_image_texture_bind_group(
@@ -569,10 +615,28 @@ pub(super) fn prepare_bevy_image_texture_bind_groups(
             gpu_image,
         ) else {
             texture_bind_groups.remove_binding(&binding);
+            unavailable_images.push(*asset_id);
             continue;
         };
         texture_bind_groups.insert_bevy_image(binding, bind_group);
     }
+    unavailable_images
+}
+
+fn publish_unavailable_bevy_image_texture_diagnostics(
+    diagnostics: &crate::route::ImguiDiagnostics,
+    extracted_bevy_textures: &ImguiExtractedBevyTextures,
+    unavailable_images: impl IntoIterator<Item = bevy_asset::AssetId<Image>>,
+) {
+    diagnostics.replace(
+        crate::route::ImguiDiagnosticOrigin::Texture,
+        extracted_bevy_textures.extraction_epoch(),
+        unavailable_images.into_iter().map(|image| {
+            crate::route::ImguiDiagnostic::new(
+                crate::route::ImguiDiagnosticKind::UnavailableBevyImageTexture { image },
+            )
+        }),
+    );
 }
 
 pub(super) fn retain_extracted_bevy_image_bindings(

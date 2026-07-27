@@ -537,6 +537,8 @@ pub enum ImguiDiagnosticKind {
     MissingWindowTarget { window: Entity },
     /// The target image asset is unavailable in the main world.
     MissingImageTarget { image: AssetId<Image> },
+    /// A registered Bevy image is unavailable or cannot be sampled by the ImGui renderer.
+    UnavailableBevyImageTexture { image: AssetId<Image> },
     /// The manual texture view handle is unavailable.
     MissingManualTextureViewTarget {
         texture_view: ManualTextureViewHandle,

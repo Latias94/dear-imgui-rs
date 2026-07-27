@@ -6,9 +6,9 @@ use super::extract::{
 use super::pass::{ensure_presentable_window_outputs, render_imgui_overlay};
 use super::pipeline::queue_imgui_pipelines;
 use super::prepare::{
-    commit_imgui_render_frame, initialize_imgui_gpu_resources, prepare_imgui_render_frame,
-    prepare_imgui_texture_bind_groups, prepare_imgui_uniform_bind_groups,
-    release_imgui_renderer_resources, upload_imgui_buffers,
+    acknowledge_retired_bevy_image_textures, commit_imgui_render_frame,
+    initialize_imgui_gpu_resources, prepare_imgui_render_frame, prepare_imgui_texture_bind_groups,
+    prepare_imgui_uniform_bind_groups, release_imgui_renderer_resources, upload_imgui_buffers,
 };
 use super::resources::{ImguiRenderDeviceState, ImguiRenderExtractionInstalled};
 use super::*;
@@ -120,7 +120,11 @@ pub(crate) fn install_render_extraction(
         )
         .add_systems(
             Render,
-            (prepare_imgui_texture_bind_groups, commit_imgui_render_frame)
+            (
+                prepare_imgui_texture_bind_groups,
+                commit_imgui_render_frame,
+                acknowledge_retired_bevy_image_textures,
+            )
                 .chain()
                 .in_set(RenderSystems::PrepareBindGroups),
         )

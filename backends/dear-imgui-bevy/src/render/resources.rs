@@ -4,6 +4,9 @@ use super::prepare::{
     create_standard_imgui_sampler, create_texture_sampler_bind_group, write_texture_rows,
 };
 use super::*;
+use crate::texture::{
+    ImguiBevyTextureExtraction, ImguiTextureLeaseEvents, ImguiTextureLeaseIdentity,
+};
 
 /// Camera/render-target association for an extracted ImGui overlay frame.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -833,6 +836,10 @@ impl ImguiTextureBindGroups {
             self.remove_binding(&binding);
         }
     }
+
+    pub(super) fn contains_binding(&self, binding: &TextureBinding) -> bool {
+        self.textures.contains_key(binding)
+    }
 }
 
 fn snapshot_texture_context_id(id: SnapshotTextureId) -> imgui::ContextId {
@@ -846,6 +853,9 @@ fn snapshot_texture_context_id(id: SnapshotTextureId) -> imgui::ContextId {
 #[derive(Resource, Clone, Debug, Default)]
 pub struct ImguiExtractedBevyTextures {
     textures: Vec<(imgui::TextureId, bevy_asset::AssetId<Image>)>,
+    retirements: Vec<ImguiTextureLeaseIdentity>,
+    lease_events: Option<ImguiTextureLeaseEvents>,
+    extraction_epoch: u64,
 }
 
 impl ImguiExtractedBevyTextures {
@@ -867,11 +877,42 @@ impl ImguiExtractedBevyTextures {
         self.textures.is_empty()
     }
 
-    pub(super) fn replace(
+    pub(super) fn replace(&mut self, extraction: ImguiBevyTextureExtraction) {
+        self.extraction_epoch = self
+            .extraction_epoch
+            .checked_add(1)
+            .expect("Bevy image texture extraction epoch space exhausted");
+        self.textures = extraction.textures;
+        self.retirements = extraction.retirements;
+        self.lease_events = extraction.events;
+    }
+
+    pub(super) fn retirement_candidates(&self) -> &[ImguiTextureLeaseIdentity] {
+        &self.retirements
+    }
+
+    pub(super) const fn extraction_epoch(&self) -> u64 {
+        self.extraction_epoch
+    }
+
+    pub(super) fn acknowledge_retirements(
+        &self,
+        identities: impl IntoIterator<Item = ImguiTextureLeaseIdentity>,
+    ) {
+        let Some(events) = &self.lease_events else {
+            return;
+        };
+        for identity in identities {
+            events.acknowledge(identity);
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn replace_for_test(
         &mut self,
         textures: Vec<(imgui::TextureId, bevy_asset::AssetId<Image>)>,
     ) {
-        self.textures = textures;
+        self.replace(ImguiBevyTextureExtraction::from_textures(textures));
     }
 }
 
@@ -1034,6 +1075,10 @@ impl ImguiExtractedRenderFrame {
                 let _ = snapshot.commit(feedback);
             }
         }
+    }
+
+    pub(super) fn has_pending_snapshots(&self) -> bool {
+        self.frames.values().any(|frame| frame.snapshot.is_some())
     }
 
     pub(super) fn remove_context(&mut self, context_id: imgui::ContextId) {

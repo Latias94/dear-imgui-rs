@@ -113,6 +113,8 @@ impl Plugin for ImguiPlugin {
         input::install_input_mapping(app);
         crate::context::install_context_lifecycle(app);
         #[cfg(feature = "render")]
+        crate::texture::install_texture_leases(app);
+        #[cfg(feature = "render")]
         let render_integration_available = render::render_integration_available(app);
         #[cfg(not(feature = "render"))]
         let render_integration_available = false;

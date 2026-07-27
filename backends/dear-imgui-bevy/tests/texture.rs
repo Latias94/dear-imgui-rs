@@ -2,7 +2,7 @@
 
 use bevy::prelude::GlobalTransform;
 use bevy_app::App;
-use bevy_asset::{Assets, Handle};
+use bevy_asset::{AssetId, Assets};
 use bevy_camera::{
     Camera, CameraMainTextureUsages, CameraOutputMode, ClearColorConfig, NormalizedRenderTarget,
     RenderTarget,
@@ -23,7 +23,9 @@ use bevy_render::{
 use bevy_window::{PrimaryWindow, Window, WindowRef, WindowResolution};
 use dear_imgui_bevy::{
     ImguiBevyTextures, ImguiContextConfig, ImguiContexts, ImguiFrameOutput, ImguiPlugin,
-    ImguiPrimaryContextPass, ImguiUi, render::ImguiExtractedBevyTextures, route::ImguiRenderRoute,
+    ImguiPrimaryContextPass, ImguiTexture, ImguiUi,
+    render::{ImguiExtractedBevyTextures, ImguiTextureBindGroups},
+    route::{ImguiDiagnosticKind, ImguiDiagnosticOrigin, ImguiDiagnostics, ImguiRenderRoute},
 };
 use dear_imgui_rs::{self as imgui, render::TextureBinding};
 use std::{
@@ -44,10 +46,13 @@ struct ManagedTexture(imgui::ManagedTextureId);
 #[derive(Resource)]
 struct ContextManagedTextures(HashMap<imgui::ContextId, imgui::ManagedTextureId>);
 
-#[derive(Resource, Clone)]
+#[derive(Resource)]
 struct BevyImageTexture {
-    texture_id: imgui::TextureId,
+    texture: ImguiTexture,
 }
+
+#[derive(Resource)]
+struct OneShotBevyImageTexture(Option<ImguiTexture>);
 
 fn app_with_render_world() -> App {
     let mut app = App::new();
@@ -168,13 +173,30 @@ fn draw_bevy_image(imgui: ImguiUi, texture: Res<BevyImageTexture>) {
         .ui()
         .expect("texture test should run inside an open ImGui frame");
     ui.get_foreground_draw_list().add_image(
-        texture.texture_id,
+        &texture.texture,
         [0.0, 0.0],
         [32.0, 24.0],
         [0.0, 0.0],
         [1.0, 1.0],
         [1.0, 1.0, 1.0, 1.0],
     );
+}
+
+fn draw_and_release_bevy_image(imgui: ImguiUi, mut texture: ResMut<OneShotBevyImageTexture>) {
+    let ui = imgui
+        .ui()
+        .expect("texture test should run inside an open ImGui frame");
+    if let Some(texture) = texture.0.as_ref() {
+        ui.get_foreground_draw_list().add_image(
+            texture,
+            [0.0, 0.0],
+            [32.0, 24.0],
+            [0.0, 0.0],
+            [1.0, 1.0],
+            [1.0, 1.0, 1.0, 1.0],
+        );
+    }
+    texture.0.take();
 }
 
 fn draw_context_managed_texture(imgui: ImguiUi, textures: Res<ContextManagedTextures>) {
@@ -456,23 +478,32 @@ fn managed_texture_requests_and_lifecycles_are_isolated_by_context() {
 }
 
 #[test]
-fn bevy_image_handles_register_as_stable_imgui_texture_ids_and_extract() {
+fn bevy_image_leases_register_as_stable_imgui_texture_ids_and_extract() {
     let _guard = imgui_context_guard();
     let mut app = app_with_render_world();
-    app.init_resource::<ImguiBevyTextures>();
+    app.init_resource::<Assets<Image>>();
 
-    let handle = Handle::<Image>::default();
-    let texture_id = app
+    let handle = app
         .world_mut()
-        .resource_mut::<ImguiBevyTextures>()
-        .register(&handle);
-    let registered_again = app
-        .world_mut()
-        .resource_mut::<ImguiBevyTextures>()
-        .register(&handle);
-    assert_eq!(texture_id, registered_again);
+        .resource_mut::<Assets<Image>>()
+        .add(Image::default());
+    let (texture, registered_again) = {
+        let mut textures = app.world_mut().resource_mut::<ImguiBevyTextures>();
+        (
+            textures
+                .register_strong(handle.clone())
+                .expect("Assets::add should return a retaining Bevy handle"),
+            textures
+                .register_strong(handle.clone())
+                .expect("Assets::add should return a retaining Bevy handle"),
+        )
+    };
+    let texture_id = texture.id();
+    assert_eq!(texture_id, registered_again.id());
     assert!(!texture_id.is_null());
-    app.insert_resource(BevyImageTexture { texture_id });
+    assert!(texture.is_strong());
+    drop(registered_again);
+    app.insert_resource(BevyImageTexture { texture });
     app.add_systems(ImguiPrimaryContextPass, draw_bevy_image);
 
     app.update();
@@ -497,24 +528,277 @@ fn bevy_image_handles_register_as_stable_imgui_texture_ids_and_extract() {
 }
 
 #[test]
-fn bevy_image_texture_registry_allocates_distinct_reversible_ids() {
-    let mut images = Assets::<Image>::default();
-    let first = images.add(Image::default());
-    let second = images.add(Image::default());
+fn one_bevy_image_lease_can_draw_from_two_contexts() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_render_world();
+    app.init_schedule(SecondaryUi);
 
-    let mut textures = ImguiBevyTextures::default();
-    let first_texture = textures.register(&first);
-    let second_texture = textures.register(&second);
+    let primary_id = app
+        .world()
+        .get_non_send::<ImguiContexts>()
+        .expect("ImguiPlugin should install the primary Context")
+        .primary_id()
+        .expect("ImguiPlugin should create the primary Context");
+    let secondary_id = app
+        .world_mut()
+        .get_non_send_mut::<ImguiContexts>()
+        .expect("ImguiPlugin should retain its Context registry")
+        .create(ImguiContextConfig::new(SecondaryUi))
+        .expect("secondary Context admission should succeed");
+    app.world_mut()
+        .get_non_send_mut::<ImguiContexts>()
+        .expect("ImguiPlugin should retain its Context registry")
+        .configure(secondary_id, |context| {
+            context.io_mut().set_config_input_trickle_event_queue(false);
+            context.io_mut().set_display_size([1280.0, 720.0]);
+            let _ = context.font_atlas().build();
+            let _ = context.set_ini_filename::<std::path::PathBuf>(None);
+        })
+        .expect("secondary Context configuration should succeed");
 
-    assert_eq!(textures.register(&first), first_texture);
-    assert_ne!(first_texture, second_texture);
-    assert!(!first_texture.is_null());
-    assert!(!second_texture.is_null());
-    assert_eq!(textures.asset_id(first_texture), Some(first.id()));
-    assert_eq!(textures.asset_id(second_texture), Some(second.id()));
-    assert_eq!(textures.unregister(&first), Some(first_texture));
-    assert_eq!(textures.asset_id(first_texture), None);
-    assert_eq!(textures.asset_id(second_texture), Some(second.id()));
+    let texture = app
+        .world_mut()
+        .resource_mut::<ImguiBevyTextures>()
+        .register_weak(AssetId::<Image>::invalid());
+    let texture_id = texture.id();
+    app.insert_resource(BevyImageTexture { texture });
+    app.add_systems(ImguiPrimaryContextPass, draw_bevy_image);
+    app.add_systems(SecondaryUi, draw_bevy_image);
+
+    let camera = {
+        let world = app.world_mut();
+        let mut cameras = world.query_filtered::<Entity, With<Camera>>();
+        cameras
+            .single(world)
+            .expect("texture test should have one render camera")
+    };
+    app.world_mut()
+        .spawn(ImguiRenderRoute::new(primary_id, camera).with_order(0));
+    app.world_mut()
+        .spawn(ImguiRenderRoute::new(secondary_id, camera).with_order(1));
+
+    app.update();
+
+    let extracted = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<ImguiExtractedBevyTextures>();
+    assert_eq!(
+        extracted.len(),
+        1,
+        "one renderer-global registration should serve both Contexts"
+    );
+    let prepared = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<dear_imgui_bevy::render::ImguiPreparedRenderFrame>();
+    for context_id in [primary_id, secondary_id] {
+        assert!(
+            prepared.draws().iter().any(|draw| {
+                draw.context_id == context_id && draw.texture == TextureBinding::Legacy(texture_id)
+            }),
+            "each Context should retain the shared lease's texture binding"
+        );
+    }
+}
+
+#[test]
+fn bevy_image_texture_leases_wait_for_render_acknowledgement_before_slot_reuse() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_render_world();
+    app.init_resource::<Assets<Image>>();
+
+    let (first, second) = {
+        let mut images = app.world_mut().resource_mut::<Assets<Image>>();
+        (images.add(Image::default()), images.add(Image::default()))
+    };
+    let first_asset_id = first.id();
+    let (first_lease, first_clone, second_lease) = {
+        let mut textures = app.world_mut().resource_mut::<ImguiBevyTextures>();
+        let first_lease = textures
+            .register_strong(first.clone())
+            .expect("Assets::add should return a retaining Bevy handle");
+        let first_clone = first_lease.clone();
+        let second_lease = textures
+            .register_strong(second.clone())
+            .expect("Assets::add should return a retaining Bevy handle");
+        (first_lease, first_clone, second_lease)
+    };
+    let first_texture_id = first_lease.id();
+    let second_texture_id = second_lease.id();
+
+    assert_ne!(first_texture_id, second_texture_id);
+    assert!(first_lease.is_strong());
+    assert!(second_lease.is_strong());
+    drop(first);
+    drop(first_lease);
+    drop(first_clone);
+
+    app.update();
+    let extracted = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<ImguiExtractedBevyTextures>();
+    assert!(
+        extracted
+            .textures()
+            .iter()
+            .any(|(id, asset_id)| *id == first_texture_id && *asset_id == first_asset_id),
+        "the last lease release must publish one extraction that still contains the mapping"
+    );
+
+    app.update();
+    let extracted = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<ImguiExtractedBevyTextures>();
+    assert!(
+        !extracted
+            .textures()
+            .iter()
+            .any(|(id, _)| *id == first_texture_id),
+        "the published mapping should withdraw before the renderer acknowledges its cleanup"
+    );
+
+    app.update();
+    assert_eq!(
+        app.world().resource::<ImguiBevyTextures>().len(),
+        1,
+        "the slot should recycle only after the render-world acknowledgement returns"
+    );
+
+    let replacement = app
+        .world_mut()
+        .resource_mut::<ImguiBevyTextures>()
+        .register_weak(first_asset_id);
+    assert_eq!(replacement.id(), first_texture_id);
+    assert!(replacement.is_weak());
+}
+
+#[test]
+fn weak_bevy_image_leases_use_the_fallback_and_publish_a_recoverable_diagnostic() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_render_world();
+    let asset_id = AssetId::<Image>::invalid();
+    let texture = app
+        .world_mut()
+        .resource_mut::<ImguiBevyTextures>()
+        .register_weak(asset_id);
+    let texture_id = texture.id();
+    assert!(texture.is_weak());
+    app.insert_resource(BevyImageTexture { texture });
+    app.add_systems(ImguiPrimaryContextPass, draw_bevy_image);
+
+    app.update();
+
+    let extracted = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<ImguiExtractedBevyTextures>();
+    assert!(
+        extracted
+            .textures()
+            .iter()
+            .any(|(id, image)| *id == texture_id && *image == asset_id)
+    );
+    let prepared = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<dear_imgui_bevy::render::ImguiPreparedRenderFrame>();
+    assert!(
+        prepared
+            .draws()
+            .iter()
+            .any(|draw| draw.texture == TextureBinding::Legacy(texture_id)),
+        "an unavailable weak image must retain its ImGui draw for fallback rendering"
+    );
+    assert!(
+        app.sub_app(RenderApp)
+            .world()
+            .resource::<ImguiTextureBindGroups>()
+            .is_empty(),
+        "an unavailable image must not retain a stale bind group"
+    );
+    assert!(
+        app.world()
+            .resource::<ImguiDiagnostics>()
+            .entries_for(ImguiDiagnosticOrigin::Texture)
+            .any(|diagnostic| {
+                matches!(
+                    diagnostic.kind(),
+                    ImguiDiagnosticKind::UnavailableBevyImageTexture { image }
+                        if *image == asset_id
+                )
+            }),
+        "unavailable weak images should publish a recoverable texture diagnostic"
+    );
+}
+
+#[test]
+fn a_lease_dropped_during_ui_submission_survives_the_in_flight_snapshot() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_render_world();
+    let texture = app
+        .world_mut()
+        .resource_mut::<ImguiBevyTextures>()
+        .register_weak(AssetId::<Image>::invalid());
+    let texture_id = texture.id();
+    app.insert_resource(OneShotBevyImageTexture(Some(texture)));
+    app.add_systems(ImguiPrimaryContextPass, draw_and_release_bevy_image);
+
+    app.update();
+    assert!(
+        app.world()
+            .resource::<OneShotBevyImageTexture>()
+            .0
+            .is_none(),
+        "the UI system should release the lease after submitting its image"
+    );
+    let extracted = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<ImguiExtractedBevyTextures>();
+    assert!(
+        extracted.textures().iter().any(|(id, _)| *id == texture_id),
+        "the frame that captured the image must retain its mapping"
+    );
+    let prepared = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<dear_imgui_bevy::render::ImguiPreparedRenderFrame>();
+    assert!(
+        prepared
+            .draws()
+            .iter()
+            .any(|draw| draw.texture == TextureBinding::Legacy(texture_id))
+    );
+
+    app.update();
+    let extracted = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<ImguiExtractedBevyTextures>();
+    assert!(
+        extracted.textures().iter().any(|(id, _)| *id == texture_id),
+        "the retirement publication frame must still retain the mapping"
+    );
+
+    app.update();
+    let extracted = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<ImguiExtractedBevyTextures>();
+    assert!(
+        !extracted.textures().iter().any(|(id, _)| *id == texture_id),
+        "the mapping may withdraw only after the publication frame"
+    );
+    assert_eq!(app.world().resource::<ImguiBevyTextures>().len(), 1);
+
+    app.update();
+    assert!(
+        app.world().resource::<ImguiBevyTextures>().is_empty(),
+        "the slot should release after prepared draws and stale bind groups are gone"
+    );
 }
 
 #[test]
@@ -522,7 +806,6 @@ fn render_target_texture_images_can_be_registered_and_drawn_as_imgui_viewports()
     let _guard = imgui_context_guard();
     let mut app = app_with_render_world();
     app.init_resource::<Assets<Image>>();
-    app.init_resource::<ImguiBevyTextures>();
 
     let handle = {
         let mut images = app.world_mut().resource_mut::<Assets<Image>>();
@@ -533,11 +816,13 @@ fn render_target_texture_images_can_be_registered_and_drawn_as_imgui_viewports()
             None,
         ))
     };
-    let texture_id = app
+    let texture = app
         .world_mut()
         .resource_mut::<ImguiBevyTextures>()
-        .register(&handle);
-    app.insert_resource(BevyImageTexture { texture_id });
+        .register_strong(handle.clone())
+        .expect("Assets::add should return a retaining Bevy handle");
+    let texture_id = texture.id();
+    app.insert_resource(BevyImageTexture { texture });
     app.add_systems(ImguiPrimaryContextPass, draw_bevy_image);
 
     app.update();
