@@ -159,15 +159,21 @@ All handles must have one device lineage: the instance owns the physical device 
 `VK_KHR_swapchain`; both queues belong to that device and to the declared families. The unsafe
 entry point cannot prove those raw-handle relationships.
 
+Vulkan also requires external host synchronization for queue access. For the lifetime of the
+viewport runtime, serialize its secondary-window `queue_submit`, `queue_present`, and
+`device_wait_idle` work with every application host call that touches the same graphics queue,
+present queue, or logical device. This applies when both configured queue handles are identical as
+well as when presentation uses a separate family.
+
 `validation_surface` is an existing, live application surface, normally the main window surface.
 The runtime never destroys it. Before claiming callback slots, `attach` checks that required
 handles are non-null, queue-family indices are in range and expose queues, the graphics family
 supports graphics, and the present family can present color-attachment swapchains with at least
 one format and present mode on this surface. Winit attachment also verifies the active platform
-backend name. SDL3 attachment verifies both the SDL3 backend name and its
-`Platform_CreateVkSurface` capability. An invalid configuration or adapter therefore fails before
-the renderer is consumed or any renderer callback is published; `AshViewportAttachError` returns
-the unchanged renderer to the caller.
+backend name. SDL3 attachment requires the exact live `Sdl3PlatformBackend` owner initialized by
+`init_for_vulkan` and leases its `Platform_CreateVkSurface` capability. An invalid configuration or
+adapter therefore fails before the renderer is consumed or any renderer callback is published;
+`AshViewportAttachError` returns the unchanged renderer to the caller.
 
 ### Winit integration
 
@@ -201,9 +207,11 @@ let renderer = unsafe { ash_mvp::WinitViewportRuntime::attach(imgui, renderer, c
 # }
 ```
 
-For SDL3, initialize `Sdl3PlatformBackend::init_for_vulkan` first and then call
-`multi_viewport_sdl3::Sdl3ViewportRuntime::attach`. Both adapters use the same
-`VulkanViewportConfig` and backend-local runtime control.
+For SDL3, initialize `Sdl3PlatformBackend::init_for_vulkan` first and pass that owner to
+`multi_viewport_sdl3::Sdl3ViewportRuntime::attach(imgui, &platform, renderer, config)`. The
+renderer retains an exclusive, generation-bound surface-provider lease. SDL shutdown is rejected
+while that lease is live, and every surface creation revalidates the SDL callback owner and the
+specific viewport sidecar immediately before calling native code.
 
 Each frame, render and present the main window first, then render secondary windows:
 
@@ -259,8 +267,8 @@ allows recoverable completion-wait failures to be retried before the Vulkan devi
 main validation surface is dropped.
 
 Secondary viewports negotiate their own surface format and extent. Pipelines are cached by
-`vk::Format`; resize, minimized extents, out-of-date/suboptimal swapchains, and per-image
-synchronization are owned by the shared runtime.
+`vk::Format`; logical resize, DPI-only framebuffer-scale changes, minimized extents,
+out-of-date/suboptimal swapchains, and per-image synchronization are owned by the shared runtime.
 
 ### `NoRendererClear`
 

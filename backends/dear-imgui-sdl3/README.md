@@ -183,6 +183,10 @@ APIs of interest (see `src/lib.rs` for full docs):
   `init_for_sdl_gpu`, or `init_for_sdl_renderer` as appropriate. Every constructor is unsafe
   because the upstream backend retains native window and graphics pointers beyond the call; keep
   those owners alive until explicit shutdown succeeds or the Context finishes attachment teardown.
+  Vulkan renderers should request the typed `acquire_vulkan_surface_provider` capability through
+  their integration instead of caching `Platform_CreateVkSurface`. The exclusive provider is tied
+  to one SDL runtime generation, validates each viewport immediately before native entry, and
+  blocks platform shutdown until all renderer-owned Vulkan surfaces have been destroyed.
 - `shutdown(&mut self, &mut Context)`:
   an idempotent owner method that closes any open frame before reporting actionable teardown and
   callback-ownership errors. Dropping the owner defers native cleanup to the Context attachment,

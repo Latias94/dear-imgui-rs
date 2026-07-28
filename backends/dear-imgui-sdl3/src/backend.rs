@@ -189,6 +189,19 @@ impl Sdl3PlatformBackend {
         self.runtime.control().ensure_entry(imgui)
     }
 
+    /// Lease the Vulkan surface capability owned by this exact SDL3 runtime generation.
+    ///
+    /// Only a backend initialized with [`Self::init_for_vulkan`] can issue this capability. While
+    /// it is alive, SDL platform shutdown is rejected so a cached native callback can never outlive
+    /// the `PlatformUserData` it interprets.
+    #[cfg(feature = "multi-viewport")]
+    pub fn acquire_vulkan_surface_provider(
+        &self,
+        imgui: &Context,
+    ) -> Result<crate::Sdl3VulkanSurfaceProvider, Sdl3BackendError> {
+        self.runtime.acquire_vulkan_surface_provider(imgui)
+    }
+
     fn initialize(
         imgui: &mut Context,
         platform_graphics: PlatformGraphicsKind,
@@ -309,7 +322,7 @@ impl Sdl3PlatformBackend {
     ) -> Result<Self, Sdl3BackendError> {
         Self::initialize(
             imgui,
-            PlatformGraphicsKind::Other,
+            PlatformGraphicsKind::Vulkan,
             Sdl3OpenGlViewportSwapInterval::Immediate,
             |imgui| init_for_vulkan(imgui, window),
         )
@@ -438,7 +451,8 @@ impl Sdl3PlatformBackend {
     /// Shut down the SDL3 platform backend.
     ///
     /// This operation is idempotent. Drop defers native cleanup to Context teardown because it
-    /// cannot safely normalize an open frame without the mutable Context.
+    /// cannot safely normalize an open frame without the mutable Context. A live Vulkan surface
+    /// provider rejects shutdown without detaching the runtime; shut down its renderer and retry.
     pub fn shutdown(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
         self.runtime.shutdown_platform(imgui)
     }

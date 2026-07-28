@@ -41,8 +41,8 @@ pub(super) fn first_renderer_callback_drift(
 #[cfg(feature = "dynamic-rendering")]
 use self::swapchain::transition_swapchain_image;
 use self::swapchain::{
-    desired_extent_from_imvec2, desired_extent_from_viewport, recreate_swapchain,
-    recreate_swapchain_after_device_idle,
+    desired_extent_from_imvec2, desired_extent_from_viewport, extent_request_changed,
+    recreate_swapchain, recreate_swapchain_after_device_idle,
 };
 
 pub(crate) trait SurfaceAdapter: Send + Sync {
@@ -75,8 +75,8 @@ pub enum SurfaceCreateError {
     #[error("Vulkan surface creation failed: {0}")]
     Vulkan(#[from] vk::Result),
     #[cfg(feature = "multi-viewport-sdl3")]
-    #[error("Platform_CreateVkSurface failed with code {code} and surface 0x{surface:X}")]
-    PlatformCallbackFailed { code: i32, surface: u64 },
+    #[error(transparent)]
+    Sdl3(#[from] dear_imgui_sdl3::Sdl3VulkanSurfaceError),
 }
 
 /// Policy used to select a complete surface format and color-space pair for secondary viewports.
@@ -159,6 +159,11 @@ impl Default for ViewportSwapchainPolicy {
 /// `present_queue_family_index`; and the renderer's graphics queue belongs to
 /// `graphics_queue_family_index`. The platform adapter's unsafe `attach` function cannot validate
 /// those raw handle relationships.
+///
+/// Vulkan queue handles are externally synchronized objects. For the complete runtime lifetime,
+/// the caller must serialize this runtime's secondary-viewport submissions, presentation, and
+/// device-idle waits with every application host call that accesses the same graphics queue,
+/// present queue, or logical device. This is required even when both fields name the same queue.
 #[derive(Clone)]
 pub struct VulkanViewportConfig {
     /// Vulkan entry used to create platform surfaces.

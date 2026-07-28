@@ -374,6 +374,16 @@ fn zero_extent_pauses_and_variable_extent_is_clamped() {
 }
 
 #[test]
+fn dpi_only_framebuffer_extent_change_requires_swapchain_rebuild() {
+    let logical_size = [640.0, 480.0];
+    let previous = swapchain::desired_extent_from_size_and_scale(logical_size, [1.0, 1.0]);
+    let scaled = swapchain::desired_extent_from_size_and_scale(logical_size, [1.5, 1.5]);
+
+    assert!(swapchain::extent_request_changed(previous, scaled));
+    assert!(!swapchain::extent_request_changed(scaled, scaled));
+}
+
+#[test]
 fn auto_no_vsync_prefers_immediate_over_fifo() {
     let modes = [vk::PresentModeKHR::FIFO, vk::PresentModeKHR::IMMEDIATE];
 

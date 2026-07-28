@@ -64,9 +64,10 @@ pub enum AshViewportError {
     /// A required platform callback is absent.
     #[error("required ImGuiPlatformIO callback `{callback}` is not installed")]
     PlatformCallbackUnavailable { callback: &'static str },
-    /// SDL3 did not install its Vulkan surface callback.
-    #[error("Platform_CreateVkSurface is not set by the SDL3 platform backend")]
-    PlatformCreateVkSurfaceUnavailable,
+    /// The typed SDL3 platform owner rejected attachment.
+    #[cfg(feature = "multi-viewport-sdl3")]
+    #[error(transparent)]
+    Sdl3Platform(#[from] dear_imgui_sdl3::Sdl3BackendError),
     /// Another renderer owns one renderer callback slot.
     #[error("ImGuiPlatformIO callback `{callback}` is already owned by another renderer")]
     RendererCallbackOccupied { callback: &'static str },

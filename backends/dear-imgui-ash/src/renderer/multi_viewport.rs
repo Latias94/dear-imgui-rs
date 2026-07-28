@@ -97,8 +97,8 @@ impl WinitViewportRuntime {
     /// # Safety
     ///
     /// Every raw Vulkan handle and queue family in `config` must satisfy
-    /// [`VulkanViewportConfig`]'s device-lineage contract. The runtime owns renderer address
-    /// stability; moving this wrapper is safe.
+    /// [`VulkanViewportConfig`]'s device-lineage and external host-synchronization contracts. The
+    /// runtime owns renderer address stability; moving this wrapper is safe.
     pub unsafe fn attach(
         context: &mut Context,
         renderer: AshRenderer,

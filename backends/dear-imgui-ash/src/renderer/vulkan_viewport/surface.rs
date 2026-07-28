@@ -49,6 +49,7 @@ pub(super) struct ViewportAshData {
     pub(super) surface: vk::SurfaceKHR,
     pub(super) swapchain_loader: khr_swapchain::Device,
     pub(super) swapchain: Option<SwapchainResources>,
+    pub(super) requested_extent: Option<vk::Extent2D>,
     pub(super) command_pool: vk::CommandPool,
     pub(super) frames: Vec<FrameSync>,
     pub(super) frame_index: usize,

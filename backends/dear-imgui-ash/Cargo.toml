@@ -19,6 +19,7 @@ thiserror.workspace = true
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ash = { version = "0.38", default-features = false, features = ["debug", "std"] }
 ash-window = { version = "0.13", optional = true }
+dear-imgui-sdl3 = { workspace = true, optional = true }
 winit = { workspace = true, optional = true }
 
 # Optional allocators (native only)
@@ -43,4 +44,8 @@ multi-viewport-winit = ["dear-imgui-rs/multi-viewport", "dep:winit", "dep:ash-wi
 # Requires `dear-imgui-rs/multi-viewport`. Surface creation is delegated to the platform backend via
 # `ImGuiPlatformIO::Platform_CreateVkSurface` (see `imgui_impl_sdl3.cpp`).
 # Mutually exclusive with `multi-viewport-winit`.
-multi-viewport-sdl3 = ["dear-imgui-rs/multi-viewport"]
+multi-viewport-sdl3 = [
+    "dear-imgui-rs/multi-viewport",
+    "dep:dear-imgui-sdl3",
+    "dear-imgui-sdl3/multi-viewport",
+]
