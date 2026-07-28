@@ -1157,6 +1157,11 @@ fn render_extract_reports_a_missing_render_view_without_replaying_an_old_target(
 fn renderer_prepare_routes_secondary_viewport_and_rejects_relocated_camera_marker() {
     let _guard = imgui_context_guard();
     let mut app = App::new();
+    app.insert_resource(
+        crate::viewport::native_window::DesktopPositionSupportOverride(
+            crate::viewport::native_window::DesktopPositionSupport::Available,
+        ),
+    );
     app.add_plugins(ExtractPlugin::default());
     app.add_plugins(ImguiPlugin::new(
         ImguiPluginConfig::default().with_multi_viewport(true),

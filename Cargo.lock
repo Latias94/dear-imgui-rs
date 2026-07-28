@@ -2578,6 +2578,9 @@ dependencies = [
  "dear-imguizmo",
  "dear-imnodes",
  "dear-implot",
+ "raw-window-handle",
+ "winit",
+ "x11-dl",
 ]
 
 [[package]]

@@ -197,6 +197,11 @@ fn app_with_multi_viewport_bridge() -> App {
 #[cfg(feature = "multi-viewport")]
 fn app_with_multi_viewport_window_config(viewport_window: ImguiViewportWindowConfig) -> App {
     let mut app = App::new();
+    app.insert_resource(
+        crate::viewport::native_window::DesktopPositionSupportOverride(
+            crate::viewport::native_window::DesktopPositionSupport::Available,
+        ),
+    );
     #[cfg(feature = "render")]
     {
         app.add_plugins(ExtractPlugin::default());
@@ -936,6 +941,21 @@ fn viewport_platform_io_callbacks_capture_commands_and_bevy_system_applies_them(
 
     app.update();
 
+    with_primary_context(&mut app, |context| unsafe {
+        let platform_io = context.platform_io().as_raw();
+        imgui::Viewport::from_raw_mut(raw_viewport).set_flags(
+            imgui::ViewportFlags::IS_PLATFORM_WINDOW
+                | imgui::ViewportFlags::NO_DECORATION
+                | imgui::ViewportFlags::NO_TASK_BAR_ICON
+                | imgui::ViewportFlags::TOP_MOST
+                | imgui::ViewportFlags::NO_INPUTS,
+        );
+        (*platform_io)
+            .Platform_UpdateWindow
+            .expect("bridge should install Platform_UpdateWindow")(raw_viewport);
+    });
+    app.update();
+
     let bridge = app
         .world()
         .get_non_send::<ImguiViewportBridge>()
@@ -950,6 +970,41 @@ fn viewport_platform_io_callbacks_capture_commands_and_bevy_system_applies_them(
     assert_eq!(
         window.position,
         WindowPosition::At(bevy_math::IVec2::new(88, 99))
+    );
+    assert!(!window.decorations);
+    assert!(window.skip_taskbar);
+    assert_eq!(window.window_level, bevy_window::WindowLevel::AlwaysOnTop);
+    let cursor_options = app
+        .world()
+        .get::<bevy_window::CursorOptions>(entity)
+        .expect("viewport windows must retain their cursor policy");
+    assert_eq!(
+        cursor_options.hit_test,
+        !crate::viewport::native_window::supports_pointer_passthrough()
+    );
+
+    with_primary_context(&mut app, |context| unsafe {
+        let platform_io = context.platform_io().as_raw();
+        imgui::Viewport::from_raw_mut(raw_viewport)
+            .set_flags(imgui::ViewportFlags::IS_PLATFORM_WINDOW);
+        (*platform_io)
+            .Platform_UpdateWindow
+            .expect("bridge should install Platform_UpdateWindow")(raw_viewport);
+    });
+    app.update();
+
+    let window = app
+        .world()
+        .get::<Window>(entity)
+        .expect("updated viewport should retain its Window");
+    assert!(window.decorations);
+    assert!(!window.skip_taskbar);
+    assert_eq!(window.window_level, bevy_window::WindowLevel::Normal);
+    assert!(
+        app.world()
+            .get::<bevy_window::CursorOptions>(entity)
+            .expect("viewport windows must retain their cursor policy")
+            .hit_test
     );
 
     with_primary_context(&mut app, |context| unsafe {
@@ -1431,6 +1486,11 @@ fn context_extraction_releases_secondary_entities_before_returning_context() {
 fn viewport_and_render_release_converge_without_pausing_another_context() {
     let _guard = imgui_context_guard();
     let mut app = App::new();
+    app.insert_resource(
+        crate::viewport::native_window::DesktopPositionSupportOverride(
+            crate::viewport::native_window::DesktopPositionSupport::Available,
+        ),
+    );
     app.add_plugins(ExtractPlugin::default())
         .add_systems(SecondaryViewportPass, || {})
         .add_plugins(ImguiPlugin::new(
@@ -1538,6 +1598,11 @@ fn viewport_and_render_release_converge_without_pausing_another_context() {
 fn registry_drop_drains_native_viewports_while_renderer_release_is_pending() {
     let _guard = imgui_context_guard();
     let mut app = App::new();
+    app.insert_resource(
+        crate::viewport::native_window::DesktopPositionSupportOverride(
+            crate::viewport::native_window::DesktopPositionSupport::Available,
+        ),
+    );
     app.add_plugins(ExtractPlugin::default())
         .add_message::<WindowCloseRequested>()
         .add_plugins(ImguiPlugin::new(
@@ -1988,6 +2053,16 @@ fn viewport_platform_feedback_queries_return_mapped_bevy_window_state() {
         window.resolution.set(300.0, 180.0);
         window.focused = false;
     }
+    let synthetic_feedback = crate::viewport::viewport_feedback_from_window(
+        entity,
+        app.world()
+            .get::<Window>(entity)
+            .expect("the synthetic viewport Window must remain live"),
+        None,
+    );
+    app.world()
+        .non_send::<ImguiViewportBridge>()
+        .set_viewport_feedback_for_test(context_id, id, synthetic_feedback);
     app.update();
 
     let feedback = app
@@ -2082,6 +2157,16 @@ fn viewport_os_move_and_resize_events_request_imgui_platform_sync() {
         window.resolution.set_scale_factor(1.5);
         window.resolution.set(420.0, 240.0);
     }
+    let synthetic_feedback = crate::viewport::viewport_feedback_from_window(
+        entity,
+        app.world()
+            .get::<Window>(entity)
+            .expect("the synthetic viewport Window must remain live"),
+        None,
+    );
+    app.world()
+        .non_send::<ImguiViewportBridge>()
+        .set_viewport_feedback_for_test(context_id, id, synthetic_feedback);
 
     app.world_mut()
         .resource_mut::<Messages<WindowMoved>>()

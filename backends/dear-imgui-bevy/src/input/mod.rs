@@ -27,7 +27,6 @@ use crate::{ContextId, ImguiContextError, ImguiContexts, ImguiViewportWindow};
 use bevy_app::{App, PreUpdate};
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::{IntoScheduleConfigs, SystemSet};
-#[cfg(not(feature = "render"))]
 use bevy_input::ButtonState;
 use bevy_input::keyboard::{KeyCode, KeyboardFocusLost, KeyboardInput};
 use bevy_input::mouse::{
@@ -37,11 +36,14 @@ use bevy_input::touch::{TouchInput, TouchPhase};
 #[cfg(feature = "render")]
 use bevy_math::Rect;
 use bevy_math::Vec2;
+#[cfg(not(feature = "render"))]
+use bevy_window::WindowPosition;
 use bevy_window::{
     CursorEntered, CursorLeft, CursorMoved, Ime, PrimaryWindow, Window,
-    WindowBackendScaleFactorChanged, WindowFocused, WindowPosition, WindowResized,
-    WindowScaleFactorChanged,
+    WindowBackendScaleFactorChanged, WindowFocused, WindowResized, WindowScaleFactorChanged,
 };
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+use bevy_winit::{RawWinitWindowEvent, WINIT_WINDOWS};
 use dear_imgui_rs as imgui;
 #[cfg(feature = "render")]
 use std::collections::HashMap;
@@ -569,6 +571,8 @@ pub fn imgui_primary_wants_text_input(capture: Res<ImguiInputCapture>) -> bool {
 }
 
 pub(crate) fn install_input_mapping(app: &mut App) {
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    app.add_message::<RawWinitWindowEvent>();
     app.add_message::<WindowResized>()
         .add_message::<WindowScaleFactorChanged>()
         .add_message::<WindowBackendScaleFactorChanged>()
@@ -611,6 +615,8 @@ fn routed_window_input_system(
     mut messages: ImguiInputMessageReaders,
 ) {
     let Some(mut contexts) = contexts else {
+        #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+        crate::viewport::native_window::release_pointer_capture();
         *input_state = ImguiInputState::default();
         *capture = ImguiInputCapture::default();
         *input_metrics = ImguiContextInputMetrics::default();
@@ -628,7 +634,28 @@ fn routed_window_input_system(
         let Ok((_, window, _, _, _)) = windows.get(route.host_window()) else {
             continue;
         };
-        targets.push(routed_target_for_route(route, &resolved_routes, window));
+        let target = routed_target_for_route(route, &resolved_routes, window);
+        #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+        {
+            let mut target = target;
+            if route_covers_window(route, window)
+                && let Some(viewport_id) =
+                    viewport_bridge.viewport_for_window(route.context_id(), route.host_window())
+            {
+                target.native_viewport = Some(ImguiInputWindow {
+                    entity: route.host_window(),
+                    scale_factor: window.scale_factor(),
+                    viewport_id,
+                    desktop_origin: viewport_bridge.viewport_desktop_origin_for_window(
+                        route.context_id(),
+                        route.host_window(),
+                    ),
+                });
+            }
+            targets.push(target);
+        }
+        #[cfg(not(all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
+        targets.push(target);
     }
 
     let declared_slots = targets
@@ -682,9 +709,15 @@ fn routed_window_input_system(
             native_viewport: Some(ImguiInputWindow {
                 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
                 entity,
-                position: window.position,
+                #[cfg(any(
+                    not(feature = "render"),
+                    all(feature = "multi-viewport", not(target_arch = "wasm32"))
+                ))]
                 scale_factor: window.scale_factor(),
                 viewport_id: viewport_window.viewport_id(),
+                #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+                desktop_origin: viewport_bridge
+                    .viewport_desktop_origin_for_window(context_id, entity),
             }),
         });
     }
@@ -707,7 +740,7 @@ fn routed_window_input_system(
     for target in targets
         .iter()
         .copied()
-        .filter(|target| !target.is_native_viewport())
+        .filter(|target| target.tracks_host_metrics || !target.is_native_viewport())
     {
         context_metrics.insert(
             target.context_id,
@@ -806,96 +839,60 @@ fn routed_window_input_system(
         );
     }
 
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    let (mut ordered_pointer_events, mut raw_pointer_duplicates) =
+        collect_raw_winit_pointer_events(&mut messages.raw_winit_window, &windows);
+    #[cfg(not(all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
+    let (mut ordered_pointer_events, mut raw_pointer_duplicates) = (Vec::new(), Vec::new());
+
     for event in messages.cursor_entered.read() {
-        let selected =
-            pointer_targets_for_window_without_position(&input_state, &targets, event.window);
-        replace_routed_pointer_targets(
-            &mut contexts,
-            &mut input_state,
-            event.window,
-            selected.iter().map(|target| target.context_id).collect(),
-            &mut unavailable_contexts,
+        append_typed_pointer_event(
+            &mut ordered_pointer_events,
+            &mut raw_pointer_duplicates,
+            OrderedPointerEvent::Entered {
+                window: event.window,
+            },
         );
-        for target in selected {
-            mark_routed_hovered(&mut input_state, target, true);
-            configure_routed_context(
-                &mut contexts,
-                target.context_id,
-                &mut unavailable_contexts,
-                |context| {
-                    let viewport_id = target.viewport_id(context);
-                    let io = context.io_mut();
-                    io.add_mouse_source_event(imgui::MouseSource::Mouse);
-                    add_mouse_viewport_event(io, Some(viewport_id));
-                },
-            );
-        }
     }
-
     for event in messages.cursor_moved.read() {
-        input_state
-            .routed
-            .pointer_positions
-            .insert(event.window, event.position);
-        refresh_routed_pointer_from_cached_position(
-            &mut contexts,
-            &mut input_state,
-            &targets,
-            event.window,
-            &mut unavailable_contexts,
+        append_typed_pointer_event(
+            &mut ordered_pointer_events,
+            &mut raw_pointer_duplicates,
+            OrderedPointerEvent::Moved {
+                window: event.window,
+                position: event.position,
+            },
         );
     }
-
     for event in messages.cursor_left.read() {
-        input_state.routed.pointer_positions.remove(&event.window);
-        replace_routed_pointer_targets(
-            &mut contexts,
-            &mut input_state,
-            event.window,
-            Vec::new(),
-            &mut unavailable_contexts,
+        append_typed_pointer_event(
+            &mut ordered_pointer_events,
+            &mut raw_pointer_duplicates,
+            OrderedPointerEvent::Left {
+                window: event.window,
+            },
+        );
+    }
+    for event in messages.mouse_button_input.read() {
+        append_typed_pointer_event(
+            &mut ordered_pointer_events,
+            &mut raw_pointer_duplicates,
+            OrderedPointerEvent::Button {
+                window: event.window,
+                button: event.button,
+                state: event.state,
+            },
         );
     }
 
-    for event in messages.mouse_button_input.read() {
-        let pointer_targets = refresh_routed_pointer_from_cached_position(
+    for event in ordered_pointer_events {
+        apply_routed_pointer_event(
             &mut contexts,
             &mut input_state,
             &targets,
-            event.window,
+            event,
             &mut unavailable_contexts,
         );
-        let button_targets = if event.state.is_pressed() {
-            pointer_targets
-        } else {
-            pointer_or_sticky_button_targets(&input_state, &targets, event.window, event.button)
-        };
-        if event.state.is_pressed() {
-            replace_routed_focus_targets(
-                &mut contexts,
-                &mut input_state,
-                &[(
-                    event.window,
-                    button_targets
-                        .iter()
-                        .map(|target| target.context_id)
-                        .collect(),
-                )],
-                &mut unavailable_contexts,
-            );
-        }
-        if let Some(button) = map_bevy_mouse_button(event.button) {
-            for target in button_targets {
-                apply_routed_mouse_button(
-                    &mut contexts,
-                    &mut input_state,
-                    target,
-                    button,
-                    event.state.is_pressed(),
-                    &mut unavailable_contexts,
-                );
-            }
-        }
     }
 
     for event in messages.mouse_wheel.read() {
@@ -969,6 +966,10 @@ fn routed_window_input_system(
         );
     }
     prune_unavailable_routed_contexts(&mut input_state, &mut capture, &unavailable_contexts);
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    if !routed_has_pressed_mouse_buttons(&input_state) {
+        crate::viewport::native_window::release_pointer_capture();
+    }
     capture.finish_routes();
     input_metrics.replace(context_metrics);
 }
@@ -1003,6 +1004,121 @@ fn routed_target_for_route(
         framebuffer_scale,
         tracks_host_metrics: route.source().as_camera().is_some() || render_route.is_none(),
         native_viewport: None,
+    }
+}
+
+#[cfg(all(
+    feature = "render",
+    feature = "multi-viewport",
+    not(target_arch = "wasm32")
+))]
+fn route_covers_window(route: ImguiResolvedInputRoute, window: &Window) -> bool {
+    let region = route.logical_region();
+    let size = sanitized_window_display_size(window);
+    region.min == Vec2::ZERO
+        && (region.max.x - size[0]).abs() <= 0.5
+        && (region.max.y - size[1]).abs() <= 0.5
+}
+
+#[cfg(feature = "render")]
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum OrderedPointerEvent {
+    Entered {
+        window: Entity,
+    },
+    Moved {
+        window: Entity,
+        position: Vec2,
+    },
+    Left {
+        window: Entity,
+    },
+    Button {
+        window: Entity,
+        button: BevyMouseButton,
+        state: ButtonState,
+    },
+}
+
+#[cfg(all(
+    feature = "render",
+    feature = "multi-viewport",
+    not(target_arch = "wasm32")
+))]
+fn collect_raw_winit_pointer_events(
+    messages: &mut MessageReader<RawWinitWindowEvent>,
+    windows: &Query<RoutedInputWindowComponents>,
+) -> (Vec<OrderedPointerEvent>, Vec<OrderedPointerEvent>) {
+    let mut ordered = Vec::new();
+    let mut duplicates = Vec::new();
+    for message in messages.read() {
+        let Some(entity) = WINIT_WINDOWS
+            .with_borrow(|winit_windows| winit_windows.get_window_entity(message.window_id))
+        else {
+            continue;
+        };
+        let event = match &message.event {
+            winit::event::WindowEvent::CursorEntered { .. } => {
+                Some(OrderedPointerEvent::Entered { window: entity })
+            }
+            winit::event::WindowEvent::CursorMoved { position, .. } => {
+                let Ok((_, window, _, _, _)) = windows.get(entity) else {
+                    continue;
+                };
+                let scale_factor = positive_finite_or(window.scale_factor(), 1.0) as f64;
+                Some(OrderedPointerEvent::Moved {
+                    window: entity,
+                    position: Vec2::new(
+                        (position.x / scale_factor) as f32,
+                        (position.y / scale_factor) as f32,
+                    ),
+                })
+            }
+            winit::event::WindowEvent::CursorLeft { .. } => {
+                Some(OrderedPointerEvent::Left { window: entity })
+            }
+            winit::event::WindowEvent::MouseInput { state, button, .. } => {
+                Some(OrderedPointerEvent::Button {
+                    window: entity,
+                    button: map_winit_mouse_button(*button),
+                    state: match *state {
+                        winit::event::ElementState::Pressed => ButtonState::Pressed,
+                        winit::event::ElementState::Released => ButtonState::Released,
+                    },
+                })
+            }
+            _ => None,
+        };
+        if let Some(event) = event {
+            ordered.push(event);
+            duplicates.push(event);
+        }
+    }
+    (ordered, duplicates)
+}
+
+#[cfg(feature = "render")]
+fn append_typed_pointer_event(
+    ordered: &mut Vec<OrderedPointerEvent>,
+    raw_duplicates: &mut Vec<OrderedPointerEvent>,
+    event: OrderedPointerEvent,
+) {
+    if let Some(index) = raw_duplicates.iter().position(|raw| *raw == event) {
+        raw_duplicates.swap_remove(index);
+    } else {
+        ordered.push(event);
+    }
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn map_winit_mouse_button(button: winit::event::MouseButton) -> BevyMouseButton {
+    match button {
+        winit::event::MouseButton::Left => BevyMouseButton::Left,
+        winit::event::MouseButton::Right => BevyMouseButton::Right,
+        winit::event::MouseButton::Middle => BevyMouseButton::Middle,
+        winit::event::MouseButton::Back => BevyMouseButton::Back,
+        winit::event::MouseButton::Forward => BevyMouseButton::Forward,
+        winit::event::MouseButton::Other(button) => BevyMouseButton::Other(button),
     }
 }
 
@@ -1151,6 +1267,196 @@ fn refresh_routed_pointer_from_cached_position(
 }
 
 #[cfg(feature = "render")]
+fn apply_routed_pointer_event(
+    contexts: &mut ImguiContexts,
+    state: &mut ImguiInputState,
+    targets: &[RoutedInputTarget],
+    event: OrderedPointerEvent,
+    unavailable_contexts: &mut HashSet<ContextId>,
+) {
+    match event {
+        OrderedPointerEvent::Entered { window } => {
+            state.routed.pointer_outside_windows.remove(&window);
+            clear_other_outside_window_pointers(contexts, state, window, unavailable_contexts);
+            let selected = pointer_targets_for_window_without_position(state, targets, window);
+            replace_routed_pointer_targets(
+                contexts,
+                state,
+                window,
+                selected.iter().map(|target| target.context_id).collect(),
+                unavailable_contexts,
+            );
+            for target in selected {
+                mark_routed_hovered(state, target, true);
+                configure_routed_context(
+                    contexts,
+                    target.context_id,
+                    unavailable_contexts,
+                    |context| {
+                        let viewport_id = target.viewport_id(context);
+                        let io = context.io_mut();
+                        io.add_mouse_source_event(imgui::MouseSource::Mouse);
+                        add_mouse_viewport_event(io, Some(viewport_id));
+                    },
+                );
+            }
+        }
+        OrderedPointerEvent::Moved { window, position } => {
+            if !state.routed.pointer_outside_windows.contains(&window) {
+                clear_other_outside_window_pointers(contexts, state, window, unavailable_contexts);
+            }
+            state.routed.pointer_positions.insert(window, position);
+            let pointer_targets = refresh_routed_pointer_from_cached_position(
+                contexts,
+                state,
+                targets,
+                window,
+                unavailable_contexts,
+            );
+            #[cfg(not(all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
+            let _ = pointer_targets;
+            #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+            if routed_window_has_pressed_mouse_buttons(state, window)
+                && pointer_targets
+                    .iter()
+                    .any(|target| target.is_native_viewport())
+            {
+                crate::viewport::native_window::capture_pointer(window);
+            }
+        }
+        OrderedPointerEvent::Left { window } => {
+            state.routed.pointer_outside_windows.insert(window);
+            if !routed_window_has_pressed_mouse_buttons(state, window) {
+                clear_routed_window_pointer(contexts, state, window, unavailable_contexts);
+            }
+        }
+        OrderedPointerEvent::Button {
+            window,
+            button,
+            state: button_state,
+        } => {
+            let pointer_targets = refresh_routed_pointer_from_cached_position(
+                contexts,
+                state,
+                targets,
+                window,
+                unavailable_contexts,
+            );
+            let button_targets = if button_state.is_pressed() {
+                pointer_targets
+            } else {
+                pointer_or_sticky_button_targets(state, targets, window, button)
+            };
+            if button_state.is_pressed() {
+                replace_routed_focus_targets(
+                    contexts,
+                    state,
+                    &[(
+                        window,
+                        button_targets
+                            .iter()
+                            .map(|target| target.context_id)
+                            .collect(),
+                    )],
+                    unavailable_contexts,
+                );
+            }
+            if let Some(button) = map_bevy_mouse_button(button) {
+                for target in button_targets.iter().copied() {
+                    apply_routed_mouse_button(
+                        contexts,
+                        state,
+                        target,
+                        button,
+                        button_state.is_pressed(),
+                        unavailable_contexts,
+                    );
+                }
+            }
+
+            #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+            {
+                if !routed_has_pressed_mouse_buttons(state) {
+                    crate::viewport::native_window::release_pointer_capture();
+                    clear_all_outside_window_pointers(contexts, state, unavailable_contexts);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(feature = "render")]
+fn routed_window_has_pressed_mouse_buttons(state: &ImguiInputState, window: Entity) -> bool {
+    state.routed.windows.iter().any(|(slot, window_state)| {
+        slot.window == window && !window_state.pressed_mouse_buttons.is_empty()
+    })
+}
+
+#[cfg(all(
+    feature = "render",
+    feature = "multi-viewport",
+    not(target_arch = "wasm32")
+))]
+fn routed_has_pressed_mouse_buttons(state: &ImguiInputState) -> bool {
+    state
+        .routed
+        .windows
+        .values()
+        .any(|window_state| !window_state.pressed_mouse_buttons.is_empty())
+}
+
+#[cfg(feature = "render")]
+fn clear_routed_window_pointer(
+    contexts: &mut ImguiContexts,
+    state: &mut ImguiInputState,
+    window: Entity,
+    unavailable_contexts: &mut HashSet<ContextId>,
+) {
+    state.routed.pointer_positions.remove(&window);
+    replace_routed_pointer_targets(contexts, state, window, Vec::new(), unavailable_contexts);
+}
+
+#[cfg(feature = "render")]
+fn clear_other_outside_window_pointers(
+    contexts: &mut ImguiContexts,
+    state: &mut ImguiInputState,
+    active_window: Entity,
+    unavailable_contexts: &mut HashSet<ContextId>,
+) {
+    let stale_windows = state
+        .routed
+        .pointer_outside_windows
+        .iter()
+        .copied()
+        .filter(|window| *window != active_window)
+        .collect::<Vec<_>>();
+    for window in stale_windows {
+        state.routed.pointer_outside_windows.remove(&window);
+        clear_routed_window_pointer(contexts, state, window, unavailable_contexts);
+    }
+}
+
+#[cfg(all(
+    feature = "render",
+    feature = "multi-viewport",
+    not(target_arch = "wasm32")
+))]
+fn clear_all_outside_window_pointers(
+    contexts: &mut ImguiContexts,
+    state: &mut ImguiInputState,
+    unavailable_contexts: &mut HashSet<ContextId>,
+) {
+    let stale_windows = state
+        .routed
+        .pointer_outside_windows
+        .drain()
+        .collect::<Vec<_>>();
+    for window in stale_windows {
+        clear_routed_window_pointer(contexts, state, window, unavailable_contexts);
+    }
+}
+
+#[cfg(feature = "render")]
 fn default_focus_targets(targets: &[RoutedInputTarget], host_window: Entity) -> Vec<ContextId> {
     default_pointer_targets(targets, host_window)
         .into_iter()
@@ -1206,11 +1512,19 @@ fn replace_routed_pointer_targets(
     unavailable_contexts: &mut HashSet<ContextId>,
 ) {
     let next = unique_contexts(next);
-    let previous = state
-        .routed
-        .pointer_targets
-        .insert(host_window, next.clone())
-        .unwrap_or_default();
+    let previous = if next.is_empty() {
+        state
+            .routed
+            .pointer_targets
+            .remove(&host_window)
+            .unwrap_or_default()
+    } else {
+        state
+            .routed
+            .pointer_targets
+            .insert(host_window, next.clone())
+            .unwrap_or_default()
+    };
     for context_id in previous {
         if next.contains(&context_id) {
             continue;
@@ -1436,6 +1750,10 @@ fn release_stale_routed_input(
         .routed
         .focused_targets
         .retain(|_, contexts| !contexts.is_empty());
+    state
+        .routed
+        .pointer_outside_windows
+        .retain(|window| targets.iter().any(|target| target.host_window == *window));
 
     let after = focused_context_ids(&state.routed);
     for context_id in before.difference(&after).copied() {
@@ -1457,7 +1775,6 @@ fn apply_routed_resize(
     for target in targets.iter().copied().filter(|target| {
         target.host_window == host_window
             && target.tracks_host_metrics
-            && !target.is_native_viewport()
             && target.logical_region.min == Vec2::ZERO
     }) {
         let display_size = finite_non_negative_size(size);
@@ -1489,11 +1806,11 @@ fn apply_routed_scale_factor(
     context_metrics: &mut HashMap<ContextId, ImguiInputFrameMetrics>,
     unavailable_contexts: &mut HashSet<ContextId>,
 ) {
-    for target in targets.iter().copied().filter(|target| {
-        target.host_window == host_window
-            && target.tracks_host_metrics
-            && !target.is_native_viewport()
-    }) {
+    for target in targets
+        .iter()
+        .copied()
+        .filter(|target| target.host_window == host_window && target.tracks_host_metrics)
+    {
         let metrics = ImguiInputFrameMetrics {
             host_window,
             display_size: context_metrics
@@ -1536,12 +1853,23 @@ fn pointer_or_sticky_button_targets(
             .routed
             .windows
             .iter()
-            .filter(|(slot, window_state)| {
-                slot.window == host_window && window_state.pressed_mouse_buttons.contains(&button)
-            })
+            .filter(|(_, window_state)| window_state.pressed_mouse_buttons.contains(&button))
             .map(|(slot, _)| slot.context_id),
     );
-    targets_for_contexts(targets, host_window, &unique_contexts(context_ids))
+    unique_contexts(context_ids)
+        .into_iter()
+        .filter_map(|context_id| {
+            targets
+                .iter()
+                .find(|target| target.context_id == context_id && target.host_window == host_window)
+                .or_else(|| {
+                    targets
+                        .iter()
+                        .find(|target| target.context_id == context_id)
+                })
+                .copied()
+        })
+        .collect()
 }
 
 #[cfg(feature = "render")]
@@ -1553,11 +1881,20 @@ fn apply_routed_mouse_button(
     pressed: bool,
     unavailable_contexts: &mut HashSet<ContextId>,
 ) {
-    let window_state = state.routed.windows.entry(target.slot()).or_default();
     if pressed {
-        window_state.pressed_mouse_buttons.insert(button);
+        state
+            .routed
+            .windows
+            .entry(target.slot())
+            .or_default()
+            .pressed_mouse_buttons
+            .insert(button);
     } else {
-        window_state.pressed_mouse_buttons.remove(&button);
+        for (slot, window_state) in &mut state.routed.windows {
+            if slot.context_id == target.context_id {
+                window_state.pressed_mouse_buttons.remove(&button);
+            }
+        }
     }
     configure_routed_context(
         contexts,
@@ -2064,9 +2401,16 @@ struct ImguiInputWindow {
         all(feature = "multi-viewport", not(target_arch = "wasm32"))
     ))]
     entity: Entity,
+    #[cfg(not(feature = "render"))]
     position: WindowPosition,
+    #[cfg(any(
+        not(feature = "render"),
+        all(feature = "multi-viewport", not(target_arch = "wasm32"))
+    ))]
     scale_factor: f32,
     viewport_id: imgui::Id,
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    desktop_origin: Option<[f32; 2]>,
     #[cfg(not(feature = "render"))]
     context_id: ContextId,
     #[cfg(not(feature = "render"))]
@@ -2099,6 +2443,8 @@ fn imgui_window_for_event(
         position: window.position,
         scale_factor: window.scale_factor(),
         viewport_id: viewport_window.viewport_id(),
+        #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+        desktop_origin: None,
         context_id: viewport_window.context_id(),
         is_primary: false,
     })
@@ -2128,13 +2474,17 @@ fn add_mouse_viewport_event(io: &mut imgui::Io, viewport_id: Option<imgui::Id>) 
     {
         return;
     }
-    io.set_backend_flags(io.backend_flags() | imgui::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT);
-    io.add_mouse_viewport_event(viewport_id.unwrap_or_default());
+    if io
+        .backend_flags()
+        .contains(imgui::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT)
+    {
+        io.add_mouse_viewport_event(viewport_id.unwrap_or_default());
+    }
 }
 
 fn mouse_pos_for_window(
     context: &imgui::Context,
-    window: ImguiInputWindow,
+    _window: ImguiInputWindow,
     local_pos: Vec2,
 ) -> [f32; 2] {
     let pos = [local_pos.x, local_pos.y];
@@ -2149,9 +2499,9 @@ fn mouse_pos_for_window(
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     {
         crate::viewport::window_client_logical_to_desktop(
-            window.entity,
-            &window.position,
-            window.scale_factor,
+            _window.entity,
+            _window.scale_factor,
+            _window.desktop_origin,
             pos,
         )
         .unwrap_or(pos)
@@ -2159,14 +2509,19 @@ fn mouse_pos_for_window(
 
     #[cfg(not(all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
     {
-        let WindowPosition::At(window_pos) = window.position else {
-            return pos;
-        };
-        let scale_factor = positive_finite_or(window.scale_factor, 1.0);
-        [
-            pos[0] + window_pos.x as f32 / scale_factor,
-            pos[1] + window_pos.y as f32 / scale_factor,
-        ]
+        #[cfg(not(feature = "render"))]
+        {
+            let WindowPosition::At(window_pos) = _window.position else {
+                return pos;
+            };
+            let scale_factor = positive_finite_or(_window.scale_factor, 1.0);
+            return [
+                pos[0] + window_pos.x as f32 / scale_factor,
+                pos[1] + window_pos.y as f32 / scale_factor,
+            ];
+        }
+        #[cfg(feature = "render")]
+        pos
     }
 }
 

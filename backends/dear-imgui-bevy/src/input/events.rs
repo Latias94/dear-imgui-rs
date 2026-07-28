@@ -10,9 +10,13 @@ use bevy_window::{
     CursorEntered, CursorLeft, CursorMoved, Ime, WindowBackendScaleFactorChanged, WindowFocused,
     WindowResized, WindowScaleFactorChanged,
 };
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+use bevy_winit::RawWinitWindowEvent;
 
 #[derive(SystemParam)]
 pub(crate) struct ImguiInputMessageReaders<'w, 's> {
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    pub(super) raw_winit_window: MessageReader<'w, 's, RawWinitWindowEvent>,
     pub(super) window_resized: MessageReader<'w, 's, WindowResized>,
     pub(super) window_scale_factor_changed: MessageReader<'w, 's, WindowScaleFactorChanged>,
     pub(super) window_backend_scale_factor_changed:
@@ -30,6 +34,8 @@ pub(crate) struct ImguiInputMessageReaders<'w, 's> {
 }
 
 pub(super) fn discard_all_unread_messages(messages: &mut ImguiInputMessageReaders) {
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    messages.raw_winit_window.clear();
     messages.window_resized.clear();
     messages.window_scale_factor_changed.clear();
     messages.window_backend_scale_factor_changed.clear();

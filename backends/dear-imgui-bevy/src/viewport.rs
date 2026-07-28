@@ -3,6 +3,9 @@
 //! PlatformIO callbacks installed here only capture intent into an engine-owned queue. Bevy systems
 //! drain that queue and mutate ECS-owned [`Window`] entities outside the C ABI callback boundary.
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+pub(crate) mod native_window;
+
 use bevy_app::App;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_app::{Last, PreUpdate};
@@ -44,13 +47,13 @@ use bevy_window::WindowRef;
 use bevy_window::{CompositeAlphaMode, PresentMode, Window, WindowTheme};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_window::{
-    ExitSystems, Monitor, PrimaryWindow, WindowCloseRequested, WindowMoved, WindowOccluded,
-    WindowResized,
+    CursorOptions, ExitSystems, Monitor, PrimaryWindow, WindowCloseRequested, WindowMoved,
+    WindowOccluded, WindowResized,
 };
 #[cfg(any(test, all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
 use bevy_window::{WindowLevel, WindowPosition, WindowResolution};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-use bevy_winit::WINIT_WINDOWS;
+use bevy_winit::{WINIT_WINDOWS, WinitSettings};
 use dear_imgui_rs as imgui;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use dear_imgui_rs::sys;
@@ -64,6 +67,24 @@ use std::ffi::{CStr, c_char, c_void};
 use std::rc::Rc;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use std::rc::Weak;
+
+/// Native desktop-position capability observed for Bevy's current Winit display.
+///
+/// Dear ImGui's native multi-viewport contract needs both global client-area positions and
+/// native window positioning. On Wayland this remains unavailable by protocol design, so the
+/// backend keeps docking in the host window instead of advertising unusable platform viewports.
+#[derive(Resource, Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ImguiNativeViewportSupport {
+    /// This build does not include the native `multi-viewport` integration.
+    #[default]
+    NotCompiled,
+    /// A native host window has not been created yet.
+    PendingNativeWindow,
+    /// Native platform viewports may be enabled.
+    Available,
+    /// The active window system does not provide global desktop coordinates.
+    GlobalDesktopCoordinatesUnavailable,
+}
 
 /// Policy applied to every Bevy window created for a secondary Dear ImGui viewport.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -194,6 +215,10 @@ pub(crate) enum ImguiViewportCommand {
     },
     Show {
         id: ImguiViewportId,
+    },
+    Update {
+        id: ImguiViewportId,
+        flags: imgui::ViewportFlags,
     },
     SetPos {
         id: ImguiViewportId,
@@ -570,6 +595,7 @@ impl ImguiViewportBridgeShared {
         state.viewport_cameras.clear();
         state.viewport_feedback.clear();
         state.viewport_flags.clear();
+        state.pending_client_placements.clear();
         state.commands.clear();
         state.focus_next_frame.clear();
         state.focus_ready.clear();
@@ -611,6 +637,7 @@ impl ImguiViewportBridgeShared {
         );
         state.viewport_feedback.clear();
         state.viewport_flags.clear();
+        state.pending_client_placements.clear();
         state.focus_next_frame.clear();
         state.focus_ready.clear();
         drop(state);
@@ -656,6 +683,7 @@ impl ImguiViewportBridgeShared {
         state.pending_ecs_despawns.extend(mapped);
         state.viewport_windows.clear();
         state.viewport_cameras.clear();
+        state.pending_client_placements.clear();
         state.pending_ecs_despawns.clone()
     }
 
@@ -1039,10 +1067,20 @@ pub(crate) struct ImguiViewportBridgeState {
     pending_ecs_despawns: HashSet<Entity>,
     viewport_feedback: HashMap<ImguiViewportId, ImguiViewportFeedback>,
     viewport_flags: HashMap<ImguiViewportId, imgui::ViewportFlags>,
+    pending_client_placements: HashMap<ImguiViewportId, PendingClientPlacement>,
     viewport_handles: HashMap<ImguiViewportId, Box<ImguiViewportPlatformHandle>>,
     retired_viewport_handles: HashMap<ImguiViewportId, Box<ImguiViewportPlatformHandle>>,
     focus_next_frame: HashSet<ImguiViewportId>,
     focus_ready: HashSet<ImguiViewportId>,
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+#[derive(Clone, Copy, Debug)]
+struct PendingClientPlacement {
+    pos: [f32; 2],
+    dpi_scale: f32,
+    show_requested: bool,
+    focus_requested: bool,
 }
 
 /// Identifies one exact Dear ImGui viewport without retaining a dereferenceable native pointer.
@@ -1213,6 +1251,27 @@ impl ImguiViewportBridge {
             .and_then(|context| context.viewport_window(viewport_id))
     }
 
+    pub(crate) fn viewport_for_window(
+        &self,
+        context_id: imgui::ContextId,
+        entity: Entity,
+    ) -> Option<ImguiViewportId> {
+        self.context(context_id)
+            .and_then(|context| context.viewport_for_window(entity))
+    }
+
+    pub(crate) fn viewport_desktop_origin_for_window(
+        &self,
+        context_id: imgui::ContextId,
+        entity: Entity,
+    ) -> Option<[f32; 2]> {
+        let context = self.context(context_id)?;
+        let viewport_id = context.viewport_for_window(entity)?;
+        context
+            .viewport_feedback(viewport_id)
+            .map(|feedback| feedback.pos)
+    }
+
     /// Return the Bevy camera currently mapped to one native viewport.
     ///
     /// Viewport identifiers are scoped to a Dear ImGui Context.
@@ -1244,6 +1303,18 @@ impl ImguiViewportBridge {
     ) -> Option<ImguiViewportFeedback> {
         self.context(context_id)
             .and_then(|context| context.viewport_feedback(viewport_id))
+    }
+
+    #[cfg(all(test, feature = "multi-viewport", not(target_arch = "wasm32")))]
+    pub(crate) fn set_viewport_feedback_for_test(
+        &self,
+        context_id: imgui::ContextId,
+        viewport_id: ImguiViewportId,
+        feedback: ImguiViewportFeedback,
+    ) {
+        self.context(context_id)
+            .expect("the test viewport Context must remain registered")
+            .set_viewport_feedback(viewport_id, feedback);
     }
 
     /// Returns a deferred callback failure from the native callback boundary.
@@ -1414,6 +1485,15 @@ impl ImguiViewportBridgeContext {
             .copied()
     }
 
+    pub(crate) fn viewport_for_window(&self, entity: Entity) -> Option<ImguiViewportId> {
+        self.inner
+            .state
+            .borrow()
+            .viewport_windows
+            .iter()
+            .find_map(|(&viewport_id, &window)| (window == entity).then_some(viewport_id))
+    }
+
     fn remove_viewport_window(&self, viewport_id: ImguiViewportId) -> Option<Entity> {
         self.inner
             .state
@@ -1460,6 +1540,15 @@ impl ImguiViewportBridgeContext {
             .viewport_feedback
             .get(&viewport_id)
             .copied()
+    }
+
+    fn pending_client_position(&self, viewport_id: ImguiViewportId) -> Option<[f32; 2]> {
+        self.inner
+            .state
+            .borrow()
+            .pending_client_placements
+            .get(&viewport_id)
+            .map(|placement| placement.pos)
     }
 
     fn set_viewport_feedback(&self, viewport_id: ImguiViewportId, feedback: ImguiViewportFeedback) {
@@ -1541,10 +1630,11 @@ impl ImguiViewportBridgeContext {
     }
 }
 
-pub(crate) fn install_viewport_bridge(_app: &mut App) {
+pub(crate) fn install_viewport_bridge(app: &mut App) {
+    app.init_resource::<ImguiNativeViewportSupport>();
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     {
-        let app = _app;
+        app.insert_resource(ImguiNativeViewportSupport::PendingNativeWindow);
         if !sys::HAS_PLATFORM_IO_AGGREGATE_HOOKS {
             missing_platform_io_aggregate_hooks();
         }
@@ -1815,6 +1905,7 @@ pub(crate) unsafe fn install_owned_platform_callbacks(
         platform_io.set_platform_set_window_size_raw(Some(platform_set_window_size_raw_callback));
         platform_io.set_platform_set_window_focus_raw(Some(platform_set_window_focus_raw_callback));
         platform_io.set_platform_set_window_title_raw(Some(platform_set_window_title_raw_callback));
+        platform_io.set_platform_update_window_raw(Some(platform_update_window_raw_callback));
         platform_io.set_platform_get_window_pos_raw(Some(platform_get_window_pos_raw_callback));
         platform_io.set_platform_get_window_size_raw(Some(platform_get_window_size_raw_callback));
         platform_io.set_platform_get_window_framebuffer_scale_raw(Some(
@@ -2254,6 +2345,13 @@ pub(crate) fn clear_owned_platform_callbacks(context: &mut imgui::Context) {
     );
     clear_direct_if_owned!(
         platform_io,
+        Platform_UpdateWindow,
+        platform_update_window_raw_callback,
+        unsafe extern "C" fn(*mut sys::ImGuiViewport),
+        set_platform_update_window_raw
+    );
+    clear_direct_if_owned!(
+        platform_io,
         Platform_GetWindowDpiScale,
         platform_get_window_dpi_scale_raw_callback,
         unsafe extern "C" fn(*mut sys::ImGuiViewport) -> f32,
@@ -2320,6 +2418,11 @@ unsafe extern "C" fn platform_destroy_window_raw_callback(viewport: *mut sys::Im
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 unsafe extern "C" fn platform_show_window_raw_callback(viewport: *mut sys::ImGuiViewport) {
     unsafe { platform_show_window(viewport.cast()) };
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+unsafe extern "C" fn platform_update_window_raw_callback(viewport: *mut sys::ImGuiViewport) {
+    unsafe { platform_update_window(viewport.cast()) };
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -2583,6 +2686,23 @@ unsafe extern "C" fn platform_show_window(viewport: *mut imgui::Viewport) {
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+unsafe extern "C" fn platform_update_window(viewport: *mut imgui::Viewport) {
+    let Some(viewport) = (unsafe { viewport.as_ref() }) else {
+        return;
+    };
+    let _ = unsafe {
+        with_current_bridge_mut(|bridge| {
+            let flags = viewport.flags();
+            bridge.set_viewport_flags(viewport.id(), flags);
+            bridge.queue(ImguiViewportCommand::Update {
+                id: viewport.id(),
+                flags,
+            });
+        })
+    };
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 unsafe fn platform_set_window_pos(viewport: *mut imgui::Viewport, pos: sys::ImVec2) {
     let Some(viewport) = (unsafe { viewport.as_ref() }) else {
         return;
@@ -2784,10 +2904,12 @@ fn sync_os_viewport_window_events(
                     continue;
                 };
                 let previous = context_bridge.viewport_feedback(viewport_id);
-                context_bridge.set_viewport_feedback(
-                    viewport_id,
-                    feedback_from_window_for_entity(event.window, window, previous, None),
-                );
+                let mut feedback =
+                    feedback_from_window_for_entity(event.window, window, previous, None);
+                if let Some(pos) = context_bridge.pending_client_position(viewport_id) {
+                    feedback.pos = pos;
+                }
+                context_bridge.set_viewport_feedback(viewport_id, feedback);
             }
         }
     }
@@ -2803,10 +2925,12 @@ fn sync_os_viewport_window_events(
                     continue;
                 };
                 let previous = context_bridge.viewport_feedback(viewport_id);
-                context_bridge.set_viewport_feedback(
-                    viewport_id,
-                    feedback_from_window_for_entity(event.window, window, previous, None),
-                );
+                let mut feedback =
+                    feedback_from_window_for_entity(event.window, window, previous, None);
+                if let Some(pos) = context_bridge.pending_client_position(viewport_id) {
+                    feedback.pos = pos;
+                }
+                context_bridge.set_viewport_feedback(viewport_id, feedback);
             }
         }
     }
@@ -2940,7 +3064,9 @@ fn apply_viewport_commands_system(
     mut ecs_commands: Commands,
     bridge: NonSend<ImguiViewportBridge>,
     backend_runtime: Res<crate::context::ownership::ImguiBackendRuntime>,
+    winit_settings: Option<Res<WinitSettings>>,
     mut windows: Query<&mut Window>,
+    mut cursor_options: Query<&mut CursorOptions>,
     viewport_windows: Query<
         (Entity, Option<&ImguiViewportWindow>, &ImguiViewportOwner),
         With<Window>,
@@ -2955,7 +3081,9 @@ fn apply_viewport_commands_system(
             &mut ecs_commands,
             &context,
             backend_runtime.config(),
+            winit_settings.is_some(),
             &mut windows,
+            &mut cursor_options,
             &viewport_windows,
             &viewport_cameras,
             &viewport_camera_components,
@@ -2965,7 +3093,9 @@ fn apply_viewport_commands_system(
             &mut ecs_commands,
             &context,
             backend_runtime.config(),
+            winit_settings.is_some(),
             &mut windows,
+            &mut cursor_options,
             &viewport_windows,
             &viewport_cameras,
         );
@@ -2978,7 +3108,9 @@ fn apply_viewport_commands_for_context(
     ecs_commands: &mut Commands,
     context: &ImguiViewportBridgeContext,
     config: &crate::ImguiPluginConfig,
+    uses_winit_window_lifecycle: bool,
     windows: &mut Query<&mut Window>,
+    cursor_options: &mut Query<&mut CursorOptions>,
     viewport_windows: &Query<
         (Entity, Option<&ImguiViewportWindow>, &ImguiViewportOwner),
         With<Window>,
@@ -2991,12 +3123,17 @@ fn apply_viewport_commands_for_context(
     };
     if context.ecs_release_pending() {
         for entity in context.take_all_ecs_entities_for_release() {
+            native_window::release_pointer_capture_for(entity);
             ecs_commands.entity(entity).try_despawn();
         }
         return;
     }
     for entity in context.pending_ecs_despawns() {
+        native_window::release_pointer_capture_for(entity);
         ecs_commands.entity(entity).try_despawn();
+    }
+    if uses_winit_window_lifecycle {
+        settle_pending_client_placements(windows, context, winit_window_decoration_offset_desktop);
     }
 
     let viewport_window_config = config.viewport_window().validate().unwrap_or_else(|error| {
@@ -3043,19 +3180,35 @@ fn apply_viewport_commands_for_context(
     for command in queued {
         match command {
             ImguiViewportCommand::Create(snapshot) => {
-                context
-                    .inner
-                    .state
-                    .borrow_mut()
-                    .viewport_flags
-                    .insert(snapshot.id, snapshot.flags);
+                {
+                    let mut state = context.inner.state.borrow_mut();
+                    state.viewport_flags.insert(snapshot.id, snapshot.flags);
+                    if uses_winit_window_lifecycle
+                        && !snapshot.flags.contains(imgui::ViewportFlags::NO_DECORATION)
+                    {
+                        state.pending_client_placements.insert(
+                            snapshot.id,
+                            PendingClientPlacement {
+                                pos: finite_desktop_pos(snapshot.pos),
+                                dpi_scale: positive_finite_or(snapshot.dpi_scale, 1.0),
+                                show_requested: false,
+                                focus_requested: false,
+                            },
+                        );
+                    } else {
+                        state.pending_client_placements.remove(&snapshot.id);
+                    }
+                }
                 let entity = if let Some(entity) = context.viewport_window(snapshot.id) {
                     entity
                 } else {
+                    let mut cursor_options = CursorOptions::default();
+                    apply_viewport_flags_to_cursor_options(snapshot.flags, &mut cursor_options);
                     let entity = ecs_commands
                         .spawn((
                             window_from_snapshot_with_config(&snapshot, viewport_window_config)
                                 .expect("the viewport window configuration was validated"),
+                            cursor_options,
                             ImguiViewportWindow::new(context.context_id, snapshot.id),
                             ImguiViewportOwner::window(context.context_id, snapshot.id),
                         ))
@@ -3063,6 +3216,7 @@ fn apply_viewport_commands_for_context(
                     context.set_viewport_window(snapshot.id, entity);
                     entity
                 };
+                context.set_viewport_feedback(snapshot.id, feedback_from_snapshot(&snapshot));
                 #[cfg(feature = "render")]
                 ensure_viewport_camera(
                     ecs_commands,
@@ -3091,11 +3245,18 @@ fn apply_viewport_commands_for_context(
             ImguiViewportCommand::Destroy { id } => {
                 pending_windows.remove(&id);
                 if let Some(entity) = context.remove_viewport_window(id) {
+                    native_window::release_pointer_capture_for(entity);
                     context.track_ecs_despawn(entity);
                     ecs_commands.entity(entity).try_despawn();
                 }
                 context.remove_viewport_feedback(id);
                 context.remove_viewport_flags(id);
+                context
+                    .inner
+                    .state
+                    .borrow_mut()
+                    .pending_client_placements
+                    .remove(&id);
                 context.clear_focus_request(id);
                 #[cfg(feature = "render")]
                 {
@@ -3109,25 +3270,102 @@ fn apply_viewport_commands_for_context(
             }
             ImguiViewportCommand::Show { id } => {
                 let should_focus = context.show_should_focus(id);
-                if let Some(window) = pending_windows.get_mut(&id) {
-                    window.visible = true;
-                    if should_focus {
-                        window.focused = false;
-                    }
-                } else {
-                    with_window_mut(windows, context, id, |window| {
+                let show_is_deferred = {
+                    let mut state = context.inner.state.borrow_mut();
+                    state
+                        .pending_client_placements
+                        .get_mut(&id)
+                        .is_some_and(|placement| {
+                            placement.show_requested = true;
+                            placement.focus_requested |= should_focus;
+                            true
+                        })
+                };
+                if !show_is_deferred {
+                    if let Some(window) = pending_windows.get_mut(&id) {
                         window.visible = true;
                         if should_focus {
                             window.focused = false;
                         }
-                    });
-                }
-                if should_focus {
-                    context.request_focus_next_frame(id);
+                    } else {
+                        with_window_mut(windows, context, id, |window| {
+                            window.visible = true;
+                            if should_focus {
+                                window.focused = false;
+                            }
+                        });
+                    }
+                    if should_focus {
+                        context.request_focus_next_frame(id);
+                    }
                 }
                 feedback_candidates.insert(id);
             }
+            ImguiViewportCommand::Update { id, flags } => {
+                let previous_flags = context
+                    .inner
+                    .state
+                    .borrow_mut()
+                    .viewport_flags
+                    .insert(id, flags);
+                let decoration_changed = previous_flags.is_some_and(|previous| {
+                    previous.contains(imgui::ViewportFlags::NO_DECORATION)
+                        != flags.contains(imgui::ViewportFlags::NO_DECORATION)
+                });
+                let mut was_visible = false;
+                if let Some(window) = pending_windows.get_mut(&id) {
+                    was_visible = window.visible;
+                    if decoration_changed && uses_winit_window_lifecycle {
+                        window.visible = false;
+                    }
+                    apply_viewport_flags_to_window(flags, window);
+                } else {
+                    with_window_mut(windows, context, id, |window| {
+                        was_visible = window.visible;
+                        if decoration_changed && uses_winit_window_lifecycle {
+                            window.visible = false;
+                        }
+                        apply_viewport_flags_to_window(flags, window);
+                    });
+                }
+                if decoration_changed
+                    && uses_winit_window_lifecycle
+                    && let Some(feedback) = context.viewport_feedback(id)
+                {
+                    let mut state = context.inner.state.borrow_mut();
+                    let placement = state.pending_client_placements.entry(id).or_insert(
+                        PendingClientPlacement {
+                            pos: feedback.pos,
+                            dpi_scale: feedback.dpi_scale,
+                            show_requested: false,
+                            focus_requested: false,
+                        },
+                    );
+                    placement.pos = feedback.pos;
+                    placement.dpi_scale = feedback.dpi_scale;
+                    placement.show_requested |= was_visible;
+                }
+                if let Some(entity) = context.viewport_window(id)
+                    && let Ok(mut cursor_options) = cursor_options.get_mut(entity)
+                {
+                    apply_viewport_flags_to_cursor_options(flags, &mut cursor_options);
+                } else if let Some(entity) = context.viewport_window(id) {
+                    let mut cursor_options = CursorOptions::default();
+                    apply_viewport_flags_to_cursor_options(flags, &mut cursor_options);
+                    ecs_commands.entity(entity).insert(cursor_options);
+                }
+            }
             ImguiViewportCommand::SetPos { id, pos, dpi_scale } => {
+                if let Some(placement) = context
+                    .inner
+                    .state
+                    .borrow_mut()
+                    .pending_client_placements
+                    .get_mut(&id)
+                {
+                    placement.pos = finite_desktop_pos(pos);
+                    placement.dpi_scale = positive_finite_or(dpi_scale, 1.0);
+                }
                 if let Some(window) = pending_windows.get_mut(&id) {
                     window.position = WindowPosition::At(physical_pos_from_desktop(pos, dpi_scale));
                 } else {
@@ -3139,7 +3377,10 @@ fn apply_viewport_commands_for_context(
                         ));
                     }
                 }
-                feedback_candidates.insert(id);
+                if let Some(mut feedback) = context.viewport_feedback(id) {
+                    feedback.pos = finite_desktop_pos(pos);
+                    context.set_viewport_feedback(id, feedback);
+                }
             }
             ImguiViewportCommand::SetSize {
                 id,
@@ -3153,7 +3394,10 @@ fn apply_viewport_commands_for_context(
                         set_window_desktop_size(window, size, dpi_scale);
                     });
                 }
-                feedback_candidates.insert(id);
+                if let Some(mut feedback) = context.viewport_feedback(id) {
+                    feedback.size = finite_desktop_size(size);
+                    context.set_viewport_feedback(id, feedback);
+                }
             }
             ImguiViewportCommand::SetFocus { id } => {
                 if let Some(window) = pending_windows.get_mut(&id) {
@@ -3163,7 +3407,19 @@ fn apply_viewport_commands_for_context(
                         window.focused = false;
                     });
                 }
-                context.request_focus_next_frame(id);
+                let focus_is_deferred = context
+                    .inner
+                    .state
+                    .borrow_mut()
+                    .pending_client_placements
+                    .get_mut(&id)
+                    .is_some_and(|placement| {
+                        placement.focus_requested = true;
+                        true
+                    });
+                if !focus_is_deferred {
+                    context.request_focus_next_frame(id);
+                }
                 feedback_candidates.insert(id);
             }
             ImguiViewportCommand::SetTitle { id, title } => {
@@ -3192,7 +3448,14 @@ fn apply_viewport_commands_for_context(
     }
 
     for viewport_id in feedback_candidates {
-        if pending_viewport_ids.contains(&viewport_id) {
+        if pending_viewport_ids.contains(&viewport_id)
+            || context
+                .inner
+                .state
+                .borrow()
+                .pending_client_placements
+                .contains_key(&viewport_id)
+        {
             continue;
         }
         if let Some(entity) = context.viewport_window(viewport_id)
@@ -3286,6 +3549,59 @@ fn apply_pending_viewport_focus_requests(
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn settle_pending_client_placements(
+    windows: &mut Query<&mut Window>,
+    bridge: &ImguiViewportBridgeContext,
+    mut decoration_offset: impl FnMut(Entity) -> Option<[f32; 2]>,
+) {
+    let pending = bridge
+        .inner
+        .state
+        .borrow()
+        .pending_client_placements
+        .iter()
+        .map(|(&viewport_id, &placement)| (viewport_id, placement))
+        .collect::<Vec<_>>();
+    let mut settled = Vec::new();
+
+    for (viewport_id, placement) in pending {
+        let Some(entity) = bridge.viewport_window(viewport_id) else {
+            settled.push(viewport_id);
+            continue;
+        };
+        let Some(offset) = decoration_offset(entity) else {
+            continue;
+        };
+        let Ok(mut window) = windows.get_mut(entity) else {
+            continue;
+        };
+        window.position = WindowPosition::At(physical_pos_from_desktop(
+            [placement.pos[0] - offset[0], placement.pos[1] - offset[1]],
+            placement.dpi_scale,
+        ));
+        if placement.show_requested {
+            window.visible = true;
+        }
+        if placement.focus_requested {
+            window.focused = false;
+            bridge.request_focus_next_frame(viewport_id);
+        }
+        if let Some(mut feedback) = bridge.viewport_feedback(viewport_id) {
+            feedback.pos = placement.pos;
+            bridge.set_viewport_feedback(viewport_id, feedback);
+        }
+        settled.push(viewport_id);
+    }
+
+    if !settled.is_empty() {
+        let mut state = bridge.inner.state.borrow_mut();
+        for viewport_id in settled {
+            state.pending_client_placements.remove(&viewport_id);
+        }
+    }
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 #[derive(SystemParam)]
 struct SecondaryViewportHostQueries<'w, 's> {
     primary: Query<'w, 's, Entity, With<PrimaryWindow>>,
@@ -3347,6 +3663,7 @@ fn cleanup_secondary_viewports_when_host_is_unavailable(
         let entities = context_bridge.mapped_ecs_entities();
         context_bridge.track_ecs_despawns(entities.iter().copied());
         for entity in entities {
+            native_window::release_pointer_capture_for(entity);
             ecs_commands.entity(entity).try_despawn();
         }
 
@@ -3498,6 +3815,7 @@ pub(crate) fn prepare_platform_viewports_for_frame(
     monitors: &[sys::ImGuiPlatformMonitor],
     viewport_windows: impl Iterator<Item = (Entity, ImguiViewportId, ImguiViewportFeedback)>,
     enable_viewports: bool,
+    desktop_position_support: native_window::DesktopPositionSupport,
 ) -> Result<(), ImguiViewportCallbackOwnershipError> {
     platform_callback_ownership(context, &bridge.inner)?;
 
@@ -3571,15 +3889,19 @@ pub(crate) fn prepare_platform_viewports_for_frame(
             | imgui::BackendFlags::RENDERER_HAS_VIEWPORTS
             | imgui::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT,
     );
-    if enable_viewports {
+    let native_viewports_available =
+        enable_viewports && desktop_position_support.allows_native_viewports();
+    if native_viewports_available {
         backend_flags |= imgui::BackendFlags::PLATFORM_HAS_VIEWPORTS
-            | imgui::BackendFlags::RENDERER_HAS_VIEWPORTS
-            | imgui::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT;
+            | imgui::BackendFlags::RENDERER_HAS_VIEWPORTS;
+        if desktop_position_support.can_report_hovered_viewport() {
+            backend_flags |= imgui::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT;
+        }
     }
     io.set_backend_flags(backend_flags);
 
     let mut config_flags = io.config_flags();
-    if enable_viewports {
+    if native_viewports_available {
         config_flags.insert(imgui::ConfigFlags::VIEWPORTS_ENABLE);
     } else {
         config_flags.remove(imgui::ConfigFlags::VIEWPORTS_ENABLE);
@@ -3850,8 +4172,9 @@ fn feedback_from_window_for_entity(
     previous: Option<ImguiViewportFeedback>,
     minimized: Option<bool>,
 ) -> ImguiViewportFeedback {
-    let pos = window_client_origin_desktop(entity, &window.position, window.scale_factor())
+    let pos = winit_window_client_origin_desktop(entity)
         .or_else(|| previous.map(|feedback| feedback.pos))
+        .or_else(|| window_position_desktop(&window.position, window.scale_factor()))
         .unwrap_or([0.0, 0.0]);
     let scale_factor = window_client_scale_factor(entity, window);
     let size = winit_window_client_size_desktop(entity).unwrap_or_else(|| {
@@ -3881,6 +4204,11 @@ fn window_client_origin_desktop(
     if let Some(pos) = winit_window_client_origin_desktop(entity) {
         return Some(pos);
     }
+    window_position_desktop(position, scale_factor)
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn window_position_desktop(position: &WindowPosition, scale_factor: f32) -> Option<[f32; 2]> {
     match *position {
         WindowPosition::At(pos) => Some(desktop_position_from_physical(pos, scale_factor)),
         WindowPosition::Automatic | WindowPosition::Centered(_) => None,
@@ -3890,14 +4218,14 @@ fn window_client_origin_desktop(
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(crate) fn window_client_logical_to_desktop(
     entity: Entity,
-    position: &WindowPosition,
     scale_factor: f32,
+    cached_client_origin: Option<[f32; 2]>,
     client_position: [f32; 2],
 ) -> Option<[f32; 2]> {
     if !client_position.into_iter().all(f32::is_finite) {
         return None;
     }
-    let origin = window_client_origin_desktop(entity, position, scale_factor)?;
+    let origin = winit_window_client_origin_desktop(entity).or(cached_client_origin)?;
     let scale_factor =
         winit_window_scale_factor(entity).unwrap_or_else(|| positive_finite_or(scale_factor, 1.0));
     let client_position = match native_desktop_coordinate_space() {
@@ -3952,19 +4280,11 @@ fn winit_window_client_origin_desktop(entity: Entity) -> Option<[f32; 2]> {
     WINIT_WINDOWS.with_borrow(|windows| {
         let window = windows.get_window(entity)?;
         let scale = positive_finite_or(window.scale_factor() as f32, 1.0);
-        if let Ok(pos_phys) = window.inner_position() {
-            Some(desktop_position_from_physical(
-                IVec2::new(pos_phys.x, pos_phys.y),
-                scale,
-            ))
-        } else if let Ok(pos_phys) = window.outer_position() {
-            Some(desktop_position_from_physical(
-                IVec2::new(pos_phys.x, pos_phys.y),
-                scale,
-            ))
-        } else {
-            None
-        }
+        let pos_phys = window.inner_position().ok()?;
+        Some(desktop_position_from_physical(
+            IVec2::new(pos_phys.x, pos_phys.y),
+            scale,
+        ))
     })
 }
 
@@ -4107,10 +4427,42 @@ fn apply_snapshot_to_window(snapshot: &ImguiViewportSnapshot, entity: Entity, wi
         snapshot.dpi_scale,
     ));
     window.resolution = next.resolution;
-    window.decorations = next.decorations;
-    window.skip_taskbar = next.skip_taskbar;
-    window.window_level = next.window_level;
+    apply_viewport_flags_to_window(snapshot.flags, window);
     window.focused = false;
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn apply_viewport_flags_to_window(flags: imgui::ViewportFlags, window: &mut Window) {
+    window.decorations = !flags.contains(imgui::ViewportFlags::NO_DECORATION);
+    window.skip_taskbar = flags.contains(imgui::ViewportFlags::NO_TASK_BAR_ICON);
+    window.window_level = if flags.contains(imgui::ViewportFlags::TOP_MOST) {
+        WindowLevel::AlwaysOnTop
+    } else {
+        WindowLevel::Normal
+    };
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn apply_viewport_flags_to_cursor_options(
+    flags: imgui::ViewportFlags,
+    cursor_options: &mut CursorOptions,
+) {
+    if native_window::supports_pointer_passthrough() {
+        cursor_options.hit_test = !flags.contains(imgui::ViewportFlags::NO_INPUTS);
+    }
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn feedback_from_snapshot(snapshot: &ImguiViewportSnapshot) -> ImguiViewportFeedback {
+    let dpi_scale = positive_finite_or(snapshot.dpi_scale, 1.0);
+    ImguiViewportFeedback {
+        pos: finite_desktop_pos(snapshot.pos),
+        size: finite_desktop_size(snapshot.size),
+        framebuffer_scale: desktop_framebuffer_scale(dpi_scale),
+        dpi_scale,
+        focused: false,
+        minimized: false,
+    }
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -4204,8 +4556,9 @@ mod tests {
         let entity = Entity::from_raw_u32(1).expect("test entity index should be valid");
         let window_position = WindowPosition::At(IVec2::new(1920, -200));
         let client_position = [160.25, 48.0];
+        let cached_origin = window_position_desktop(&window_position, 2.0);
         let desktop_position =
-            window_client_logical_to_desktop(entity, &window_position, 2.0, client_position)
+            window_client_logical_to_desktop(entity, 2.0, cached_origin, client_position)
                 .expect("finite client geometry should map into desktop space");
 
         #[cfg(not(target_os = "macos"))]
@@ -4403,6 +4756,78 @@ mod tests {
                 .chain_ignore_deferred(),
         );
         schedule.run(world);
+    }
+
+    #[test]
+    fn pending_decorated_window_is_positioned_by_client_origin_before_show() {
+        fn settle_with_test_decoration(
+            mut windows: Query<&mut Window>,
+            bridge: NonSend<ImguiViewportBridge>,
+        ) {
+            for context in bridge.contexts() {
+                settle_pending_client_placements(&mut windows, &context, |_| Some([4.0, 15.0]));
+            }
+        }
+
+        let context_id = test_context_id();
+        let viewport_id = imgui::Id::from(0x7AF);
+        let mut bridge = ImguiViewportBridge::default();
+        let keepalive = bridge.keepalive();
+        bridge.register_context(context_id, Rc::clone(&keepalive));
+
+        let mut world = World::new();
+        let entity = world
+            .spawn(Window {
+                visible: false,
+                ..Default::default()
+            })
+            .id();
+        {
+            let mut state = keepalive.state.borrow_mut();
+            state.viewport_windows.insert(viewport_id, entity);
+            state.viewport_feedback.insert(
+                viewport_id,
+                ImguiViewportFeedback {
+                    pos: [100.0, 200.0],
+                    size: [320.0, 180.0],
+                    framebuffer_scale: [1.0, 1.0],
+                    dpi_scale: 1.0,
+                    focused: false,
+                    minimized: false,
+                },
+            );
+            state.pending_client_placements.insert(
+                viewport_id,
+                PendingClientPlacement {
+                    pos: [100.0, 200.0],
+                    dpi_scale: 1.0,
+                    show_requested: true,
+                    focus_requested: true,
+                },
+            );
+        }
+        world.insert_non_send(bridge);
+
+        let mut schedule = Schedule::default();
+        schedule.add_systems(settle_with_test_decoration);
+        schedule.run(&mut world);
+
+        let window = world
+            .get::<Window>(entity)
+            .expect("the pending viewport Window should remain live");
+        assert_eq!(window.position, WindowPosition::At(IVec2::new(96, 185)));
+        assert!(window.visible);
+        let state = keepalive.state.borrow();
+        assert!(!state.pending_client_placements.contains_key(&viewport_id));
+        assert!(state.focus_next_frame.contains(&viewport_id));
+        assert_eq!(
+            state
+                .viewport_feedback
+                .get(&viewport_id)
+                .expect("settlement should preserve platform feedback")
+                .pos,
+            [100.0, 200.0]
+        );
     }
 
     #[test]
@@ -4665,6 +5090,78 @@ mod tests {
             focused: false,
             minimized: false,
         }
+    }
+
+    #[test]
+    fn platform_capabilities_follow_native_desktop_position_support() {
+        let mut context = imgui::Context::create();
+        let bridge = ImguiViewportBridge::default();
+        let keepalive = bridge.keepalive();
+        unsafe { install_owned_platform_callbacks(&mut context, &keepalive).unwrap() };
+        let context_bridge = ImguiViewportBridgeContext {
+            context_id: context.id(),
+            inner: Rc::clone(&keepalive),
+        };
+        let primary_window = Entity::from_raw_u32(1).expect("test entity index should be valid");
+
+        for support in [
+            native_window::DesktopPositionSupport::PendingWindow,
+            native_window::DesktopPositionSupport::Unavailable,
+        ] {
+            prepare_platform_viewports_for_frame(
+                &mut context,
+                &context_bridge,
+                primary_window,
+                &Window::default(),
+                &[],
+                std::iter::empty(),
+                true,
+                support,
+            )
+            .unwrap();
+            assert!(
+                !context
+                    .io()
+                    .config_flags()
+                    .contains(imgui::ConfigFlags::VIEWPORTS_ENABLE)
+            );
+            assert!(!context.io().backend_flags().intersects(
+                imgui::BackendFlags::PLATFORM_HAS_VIEWPORTS
+                    | imgui::BackendFlags::RENDERER_HAS_VIEWPORTS
+                    | imgui::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT
+            ));
+        }
+
+        prepare_platform_viewports_for_frame(
+            &mut context,
+            &context_bridge,
+            primary_window,
+            &Window::default(),
+            &[],
+            std::iter::empty(),
+            true,
+            native_window::DesktopPositionSupport::Available,
+        )
+        .unwrap();
+        assert!(
+            context
+                .io()
+                .config_flags()
+                .contains(imgui::ConfigFlags::VIEWPORTS_ENABLE)
+        );
+        assert!(context.io().backend_flags().contains(
+            imgui::BackendFlags::PLATFORM_HAS_VIEWPORTS
+                | imgui::BackendFlags::RENDERER_HAS_VIEWPORTS
+        ));
+        assert_eq!(
+            context
+                .io()
+                .backend_flags()
+                .contains(imgui::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT),
+            cfg!(target_os = "windows")
+        );
+
+        detach_owned_bridge(&mut context, &keepalive).unwrap();
     }
 
     #[test]
@@ -5015,6 +5512,7 @@ mod tests {
         assert_removed_slot_drift!(Platform_GetWindowFocus);
         assert_removed_slot_drift!(Platform_GetWindowMinimized);
         assert_removed_slot_drift!(Platform_SetWindowTitle);
+        assert_removed_slot_drift!(Platform_UpdateWindow);
         assert_removed_slot_drift!(Platform_GetWindowDpiScale);
 
         macro_rules! assert_installed_slot_drift {
@@ -5056,7 +5554,6 @@ mod tests {
         }
 
         assert_installed_slot_drift!(Platform_SetWindowAlpha, foreign_platform_alpha);
-        assert_installed_slot_drift!(Platform_UpdateWindow, foreign_platform_destroy_window);
         assert_installed_slot_drift!(Platform_RenderWindow, foreign_platform_render);
         assert_installed_slot_drift!(Platform_SwapBuffers, foreign_platform_render);
         assert_installed_slot_drift!(Platform_OnChangedViewport, foreign_platform_destroy_window);
@@ -5363,6 +5860,7 @@ mod tests {
                     &[],
                     std::iter::empty(),
                     true,
+                    native_window::DesktopPositionSupport::Available,
                 )
                 .unwrap();
 
@@ -5379,6 +5877,7 @@ mod tests {
                         &[],
                         std::iter::empty(),
                         true,
+                        native_window::DesktopPositionSupport::Available,
                     ),
                     Err(ImguiViewportCallbackOwnershipError::ViewportFieldReplaced {
                         field: stringify!($field),
@@ -5440,6 +5939,7 @@ mod tests {
             &[],
             std::iter::empty(),
             true,
+            native_window::DesktopPositionSupport::Available,
         )
         .unwrap();
 
@@ -5568,6 +6068,7 @@ mod tests {
             &[],
             std::iter::once((secondary_window, live_viewport, feedback())),
             true,
+            native_window::DesktopPositionSupport::Available,
         )
         .unwrap();
 
@@ -5604,6 +6105,7 @@ mod tests {
             &[],
             std::iter::empty(),
             true,
+            native_window::DesktopPositionSupport::Available,
         )
         .unwrap();
 

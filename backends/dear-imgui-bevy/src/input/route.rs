@@ -71,6 +71,7 @@ pub(super) struct RoutedInputState {
     pub(super) windows: HashMap<ImguiInputSlot, ImguiRoutedWindowState>,
     pub(super) pointer_targets: HashMap<Entity, Vec<ContextId>>,
     pub(super) pointer_positions: HashMap<Entity, Vec2>,
+    pub(super) pointer_outside_windows: HashSet<Entity>,
     pub(super) focused_targets: HashMap<Entity, Vec<ContextId>>,
     pub(super) primary_context: Option<ContextId>,
     pub(super) primary_window: Option<Entity>,

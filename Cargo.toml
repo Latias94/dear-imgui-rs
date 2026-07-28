@@ -104,6 +104,7 @@ glutin-winit = "0.5"
 raw-window-handle = "0.6"
 image = "0.25"
 windows-sys = "0.61.2"
+x11-dl = "2.21"
 
 # Build dependencies
 bindgen = "0.72"

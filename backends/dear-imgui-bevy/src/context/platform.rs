@@ -138,6 +138,20 @@ pub(super) fn prepare_context_platform_frame(
             )
         })
         .collect::<Vec<_>>();
+    let desktop_position_support = {
+        #[cfg(test)]
+        let support = world
+            .get_resource::<crate::viewport::native_window::DesktopPositionSupportOverride>()
+            .map(|support| support.0);
+        #[cfg(not(test))]
+        let support = None;
+        support.unwrap_or_else(|| {
+            crate::viewport::native_window::desktop_position_support(host_window)
+        })
+    };
+    world.insert_resource(crate::ImguiNativeViewportSupport::from(
+        desktop_position_support,
+    ));
     crate::viewport::prepare_platform_viewports_for_frame(
         context,
         &bridge,
@@ -146,6 +160,7 @@ pub(super) fn prepare_context_platform_frame(
         &monitors,
         viewport_feedback.into_iter(),
         render_integration_installed,
+        desktop_position_support,
     )
     .map_err(crate::viewport::ImguiViewportRuntimeError::CallbackOwnership)?;
     Ok(true)

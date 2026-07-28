@@ -42,6 +42,11 @@ bevy_ui_render = { version = "=0.19.0", default-features = false, optional = tru
 bevy_utils = { version = "=0.19.0", default-features = false }
 bevy_winit = { version = "=0.19.0", default-features = false, features = ["x11"], optional = true }
 bytemuck = { workspace = true, features = ["derive"], optional = true }
+raw-window-handle = { workspace = true, optional = true }
+winit = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11-dl = { workspace = true, optional = true }
 
 [dev-dependencies]
 bevy = { version = "=0.19.0", default-features = false, features = ["2d", "default_platform", "ui"] }
@@ -53,7 +58,14 @@ dear-implot.workspace = true
 default = ["render", "bevy-ui"]
 wasm = ["dear-imgui-rs/wasm"]
 # Enables the complete native Dear ImGui PlatformIO lifecycle and renderer bridge.
-multi-viewport = ["render", "dear-imgui-rs/multi-viewport", "dep:bevy_winit"]
+multi-viewport = [
+    "render",
+    "dear-imgui-rs/multi-viewport",
+    "dep:bevy_winit",
+    "dep:raw-window-handle",
+    "dep:winit",
+    "dep:x11-dl",
+]
 # Enables the Bevy render-world extraction and renderer integration slices.
 render = [
     "dep:bevy_asset",
