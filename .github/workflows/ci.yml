@@ -915,14 +915,14 @@ jobs:
           --no-default-features --features wasm,multi-viewport
 
       - name: Run Bevy GPU composition tests
-        run: cargo +stable nextest run -p dear-imgui-bevy --no-default-features --features render,bevy-ui --test render_composition
+        run: cargo +stable nextest run -j 1 -p dear-imgui-bevy --no-default-features --features render,bevy-ui --test render_composition
         env:
           DEAR_IMGUI_BEVY_GPU_TESTS: "1"
           WGPU_BACKEND: vulkan
           WGPU_FORCE_FALLBACK_ADAPTER: "1"
 
       - name: Run Bevy image bind-group GPU contracts
-        run: cargo +stable nextest run -p dear-imgui-bevy --lib --features multi-viewport --run-ignored ignored-only bevy_image_texture_bind_groups
+        run: cargo +stable nextest run -j 1 -p dear-imgui-bevy --lib --features multi-viewport --run-ignored ignored-only bevy_image_texture_bind_groups
         env:
           DEAR_IMGUI_BEVY_GPU_HARNESS: "1"
           WGPU_BACKEND: vulkan

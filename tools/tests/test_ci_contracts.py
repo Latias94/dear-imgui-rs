@@ -1038,6 +1038,15 @@ class WorkflowPortabilityTests(unittest.TestCase):
         self.assertIn("gate_attempt: 2", ci)
         self.assertEqual(ci.count("outputs.retry_eligible == 'true'"), 3)
 
+    def test_bevy_software_gpu_contracts_run_serially(self):
+        job = self._ci_jobs()["bevy-backend"]
+        for step_name in (
+            "Run Bevy GPU composition tests",
+            "Run Bevy image bind-group GPU contracts",
+        ):
+            command = str(named_step(job, step_name).get("run", ""))
+            self.assertIn("nextest run -j 1", command)
+
 
 if __name__ == "__main__":
     unittest.main()
