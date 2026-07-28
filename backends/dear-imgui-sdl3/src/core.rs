@@ -211,6 +211,8 @@ pub enum Sdl3BackendError {
     #[error(transparent)]
     Attachment(#[from] dear_imgui_rs::ContextAttachmentError),
     #[error(transparent)]
+    PlatformAttachmentRelease(#[from] dear_imgui_rs::ContextPlatformAttachmentReleaseError),
+    #[error(transparent)]
     Context(#[from] dear_imgui_rs::ContextBindingError),
     #[error("another platform backend already owns `{callback}`")]
     PlatformCallbackOccupied { callback: &'static str },

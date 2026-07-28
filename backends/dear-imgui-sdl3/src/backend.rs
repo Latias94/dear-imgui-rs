@@ -451,8 +451,9 @@ impl Sdl3PlatformBackend {
     /// Shut down the SDL3 platform backend.
     ///
     /// This operation is idempotent. Drop defers native cleanup to Context teardown because it
-    /// cannot safely normalize an open frame without the mutable Context. A live Vulkan surface
-    /// provider rejects shutdown without detaching the runtime; shut down its renderer and retry.
+    /// cannot safely normalize an open frame without the mutable Context. Any active renderer
+    /// attachment rejects shutdown before the frame or native state changes; shut down that
+    /// renderer and retry.
     pub fn shutdown(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
         self.runtime.shutdown_platform(imgui)
     }

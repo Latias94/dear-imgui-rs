@@ -196,6 +196,10 @@ APIs of interest (see `src/lib.rs` for full docs):
   `destroy_device_objects(...)` first require the Context renderer consumer to be idle: when a
   detached `FrameSnapshot` is outstanding, they return before changing callbacks or destroying
   native resources. Commit or drop those snapshots, then retry the operation.
+  A platform-only owner also rejects explicit shutdown while an external renderer attachment is
+  active. This preflight runs before the current frame or native SDL state changes; shut down the
+  renderer first, then retry platform shutdown. Context-owned teardown preserves the same ordered
+  renderer-before-platform contract automatically.
 - `poll_fault()`:
   returns deferred platform callback failures without unwinding through native code. Ordinary
   owner methods also surface the oldest pending fault before entering SDL.

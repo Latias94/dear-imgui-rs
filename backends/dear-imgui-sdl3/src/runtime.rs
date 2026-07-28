@@ -1728,12 +1728,34 @@ impl RuntimeRegistration {
         &mut self,
         context: &mut Context,
     ) -> Result<(), Sdl3BackendError> {
+        if self.renderer_attachment.is_some() || self.platform_attachment.is_none() {
+            let result = self.shutdown_platform_inner(context);
+            if matches!(self.control.state(), RuntimeState::Detached) {
+                self.detach_attachments();
+            }
+            return result;
+        }
+
+        let attachment = self
+            .platform_attachment
+            .as_ref()
+            .expect("an SDL3 platform-only runtime must retain its attachment")
+            .handle();
+        let mut release = context.prepare_platform_attachment_release(&attachment)?;
+        #[cfg(feature = "multi-viewport")]
+        self.control.ensure_vulkan_surface_provider_released()?;
+        let result = self.shutdown_platform_inner(release.context_mut());
+        if matches!(self.control.state(), RuntimeState::Detached) {
+            release.commit();
+            self.detach_attachments();
+        }
+        result
+    }
+
+    fn shutdown_platform_inner(&mut self, context: &mut Context) -> Result<(), Sdl3BackendError> {
         self.normalize_open_frame_for_shutdown(context)?;
         let pending = self.control.take_pending_fault();
         let shutdown_result = self.control.shutdown_native_explicit();
-        if matches!(self.control.state(), RuntimeState::Detached) {
-            self.detach_attachments();
-        }
         first_error([pending, shutdown_result.err()])
     }
 
@@ -2461,6 +2483,56 @@ mod tests {
             PlatformGraphicsKind::Vulkan,
             callback,
         )
+    }
+
+    struct ActiveExternalRendererMarker;
+    struct ActiveExternalRendererAttachment;
+
+    impl ContextAttachment for ActiveExternalRendererAttachment {}
+
+    #[test]
+    fn platform_only_shutdown_rejects_an_active_renderer_before_closing_the_frame() {
+        let _guard = crate::tests::test_guard();
+        let mut context = Context::create();
+        let platform_count = Rc::new(Cell::new(0));
+        let mut runtime = synthetic_claimed_registration(
+            &mut context,
+            Rc::clone(&platform_count),
+            Rc::new(Cell::new(0)),
+            Rc::new(Cell::new(0)),
+            synthetic_create_window,
+        );
+        let mut renderer = context
+            .register_attachment::<ActiveExternalRendererMarker>(
+                ContextAttachmentRole::Renderer,
+                Rc::new(ActiveExternalRendererAttachment),
+            )
+            .unwrap();
+        assert!(context.font_atlas().build());
+        context.prepare_frame(dear_imgui_rs::FramePrepareOptions::new(
+            [128.0, 128.0],
+            1.0 / 60.0,
+        ));
+        context
+            .frame()
+            .text("platform release must not close this frame");
+
+        assert!(matches!(
+            runtime.shutdown_platform(&mut context),
+            Err(Sdl3BackendError::PlatformAttachmentRelease(
+                dear_imgui_rs::ContextPlatformAttachmentReleaseError::RendererActive
+            ))
+        ));
+        assert_eq!(
+            context.frame_lifecycle_state(),
+            dear_imgui_rs::FrameLifecycleState::InFrame
+        );
+        assert_eq!(runtime.control.state(), RuntimeState::Attached);
+        assert_eq!(platform_count.get(), 0);
+
+        assert!(renderer.detach());
+        runtime.shutdown_platform(&mut context).unwrap();
+        assert_eq!(platform_count.get(), 1);
     }
 
     #[cfg(feature = "multi-viewport")]
