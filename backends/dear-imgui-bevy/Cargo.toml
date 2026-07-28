@@ -75,6 +75,11 @@ path = "examples/basic/simple.rs"
 required-features = ["render"]
 
 [[example]]
+name = "custom_font"
+path = "examples/basic/custom_font.rs"
+required-features = ["render"]
+
+[[example]]
 name = "app_integration"
 path = "examples/app/app_integration.rs"
 required-features = ["render"]

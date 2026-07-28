@@ -5,6 +5,7 @@ imgui.ini
 implot3d_demo.ini
 extensions/target
 *.ttf
+!backends/dear-imgui-bevy/examples/assets/Roboto-Medium.ttf
 repo-ref/
 __pycache__/
 docs/plans/
