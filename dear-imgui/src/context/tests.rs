@@ -543,6 +543,33 @@ fn frame_rejects_missing_required_platform_callbacks_before_entering_native_code
 
 #[cfg(feature = "multi-viewport")]
 #[test]
+fn frame_rejects_transparent_docking_without_window_alpha_before_native_code() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut ctx = Context::create();
+    assert!(ctx.font_atlas().build());
+    ctx.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
+    let platform_attachment = install_complete_test_viewport_backend(&mut ctx);
+
+    let mut config_flags = ctx.io().config_flags();
+    config_flags.insert(crate::ConfigFlags::VIEWPORTS_ENABLE | crate::ConfigFlags::DOCKING_ENABLE);
+    ctx.io_mut().set_config_flags(config_flags);
+    ctx.io_mut().set_config_docking_transparent_payload(true);
+
+    let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = ctx.frame();
+    }));
+
+    assert!(rejected.is_err());
+    assert_eq!(
+        ctx.frame_lifecycle_state(),
+        super::FrameLifecycleState::Idle
+    );
+    drop(ctx);
+    drop(platform_attachment);
+}
+
+#[cfg(feature = "multi-viewport")]
+#[test]
 fn frame_rejects_enabling_multi_viewport_between_the_first_and_second_frames() {
     let _guard = crate::test_support::imgui_context_guard();
     let mut ctx = Context::create();

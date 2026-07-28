@@ -206,7 +206,7 @@ impl Context {
             }
             self.assert_multi_viewport_backend_contract_unlocked(
                 caller,
-                sys::ImGuiConfigFlags_ViewportsEnable,
+                config_flags | config_flags_current_frame,
             );
         }
     }
