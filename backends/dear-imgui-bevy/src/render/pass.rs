@@ -210,7 +210,7 @@ pub(super) fn ensure_presentable_window_outputs(
     render_queue: Res<RenderQueue>,
 ) {
     let mut encoder = None;
-    let viewport_outputs = backend_owned_viewport_windows(
+    let imgui_window_outputs = imgui_target_windows(
         extracted
             .context_ids()
             .flat_map(|context_id| extracted.camera_targets(context_id)),
@@ -218,7 +218,7 @@ pub(super) fn ensure_presentable_window_outputs(
 
     for window in windows
         .values()
-        .filter(|window| viewport_outputs.contains(&window.entity))
+        .filter(|window| imgui_window_outputs.contains(&window.entity))
     {
         let mut view_needs_present = false;
         let mut output_color = None;
@@ -278,12 +278,11 @@ pub(super) fn ensure_presentable_window_outputs(
     }
 }
 
-pub(super) fn backend_owned_viewport_windows<'a>(
+pub(super) fn imgui_target_windows<'a>(
     targets: impl IntoIterator<Item = &'a ImguiCameraTarget>,
 ) -> HashSet<Entity> {
     targets
         .into_iter()
-        .filter(|target| target.viewport_id.is_some())
         .filter_map(|target| match &target.target {
             NormalizedRenderTarget::Window(window) => Some(window.entity()),
             _ => None,
