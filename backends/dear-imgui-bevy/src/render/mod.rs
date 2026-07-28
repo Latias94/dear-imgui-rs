@@ -120,7 +120,7 @@ const MANAGED_TEXTURE_NAMESPACE: u64 = 0x4000_0000_0000_0000;
 
 #[cfg(test)]
 mod tests {
-    use super::pass::backend_owned_viewport_windows;
+    use super::pass::imgui_target_windows;
     use super::plugin::{
         imgui_bevy_draw_callback_linear, imgui_bevy_draw_callback_nearest,
         imgui_bevy_draw_callback_reset,
@@ -2223,7 +2223,7 @@ mod tests {
     }
 
     #[test]
-    fn presentable_output_scope_excludes_application_windows() {
+    fn presentable_output_scope_includes_every_imgui_window_target() {
         let application_window =
             Entity::from_raw_u32(41).expect("test entity index should be valid");
         let viewport_window = Entity::from_raw_u32(42).expect("test entity index should be valid");
@@ -2232,9 +2232,12 @@ mod tests {
             camera_target_for_test(viewport_window, Some(imgui::Id::from(7))),
         ];
 
-        let outputs = backend_owned_viewport_windows(targets.iter());
+        let outputs = imgui_target_windows(targets.iter());
 
-        assert_eq!(outputs, HashSet::from([viewport_window]));
+        assert_eq!(
+            outputs,
+            HashSet::from([application_window, viewport_window])
+        );
     }
 
     fn test_context_id() -> imgui::ContextId {

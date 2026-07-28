@@ -2,6 +2,13 @@ use super::config::FontConfig;
 
 /// A font source with v1.92+ dynamic font support.
 ///
+/// Constructors ending in `_with_size` set the font's reference size. That
+/// size is used by [`crate::Ui::push_font`] and reference-size-dependent font
+/// metrics, but it does not prevent Dear ImGui from baking the font at other
+/// runtime sizes through [`crate::Ui::push_font_with_size`].
+/// For merged fonts, the first source establishes this reference size; later
+/// source sizes control their metrics relative to that destination font.
+///
 /// External font parsers used by Dear ImGui do not receive a reliable input
 /// boundary for every format. Consequently, raw font sources can only be
 /// created through the `unsafe` constructors on this type. The embedded
@@ -32,7 +39,7 @@ impl<'a> FontSource<'a> {
         }
     }
 
-    /// Creates an embedded default font source with a specific size.
+    /// Creates an embedded default font source with a reference size.
     pub fn default_font_with_size(size: f32) -> Self {
         Self {
             size_pixels: Some(size),
@@ -56,7 +63,7 @@ impl<'a> FontSource<'a> {
         }
     }
 
-    /// Creates a TTF/OTF memory source with a specific size.
+    /// Creates a TTF/OTF memory source with a reference size.
     ///
     /// # Safety
     ///
@@ -87,7 +94,7 @@ impl<'a> FontSource<'a> {
         }
     }
 
-    /// Creates an stb-compressed TTF source with a specific size.
+    /// Creates an stb-compressed TTF source with a reference size.
     ///
     /// # Safety
     ///
@@ -118,7 +125,7 @@ impl<'a> FontSource<'a> {
         }
     }
 
-    /// Creates a base85-encoded stb-compressed TTF source with a specific size.
+    /// Creates a base85-encoded stb-compressed TTF source with a reference size.
     ///
     /// # Safety
     ///
@@ -146,7 +153,7 @@ impl<'a> FontSource<'a> {
         }
     }
 
-    /// Creates a font-file source with a specific size.
+    /// Creates a font-file source with a reference size.
     ///
     /// # Safety
     ///
