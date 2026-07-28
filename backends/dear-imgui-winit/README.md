@@ -213,7 +213,10 @@ still passes through the core open-frame normalization path.
 Explicit shutdown returns `WinitPlatformError::RendererShutdownRequired` while a renderer callback
 or viewport renderer state is still installed, preventing Winit-owned viewport data from being
 passed to an unknown renderer callback. Context-owned teardown enforces this renderer-before-platform
-order automatically.
+order automatically. The Context attachment graph also returns
+`WinitPlatformError::PlatformAttachmentRelease(RendererActive)` when platform or
+viewport-runtime shutdown finds an active renderer attachment, before an open frame or native
+state changes. Shut down the owning renderer runtime and retry the same Winit shutdown call.
 
 The runtime only advertises callbacks it can implement. In particular, winit has no portable
 per-window opacity API, so it does not install `Platform_SetWindowAlpha`; enabling transparent

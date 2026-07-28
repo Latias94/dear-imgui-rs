@@ -1,11 +1,16 @@
 use std::cell::Cell;
+use std::collections::HashSet;
 use std::ffi::c_void;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use dear_imgui_rs::{BackendFlags, Context};
+use dear_imgui_rs::{
+    BackendFlags, Context, ContextAttachment, ContextAttachmentRole,
+    ContextPlatformAttachmentReleaseError,
+};
 use winit::event::Event;
 use winit::event_loop::ActiveEventLoop;
+use winit::window::WindowId;
 
 use super::WinitPlatformError;
 use super::callbacks::{
@@ -14,10 +19,15 @@ use super::callbacks::{
 };
 use super::registry::preflight_viewport_ownership;
 use super::runtime::{
-    ConstructionStage, MouseLeaveState, RuntimeState, WinitPlatformRuntime,
+    ConstructionStage, ContextFocusState, MouseLeaveState, RuntimeState, WinitPlatformRuntime,
     apply_raw_io_coordinate_contract_for_test,
 };
 use crate::test_util::test_sync::lock_context;
+
+struct ActiveRendererMarker;
+struct ActiveRendererAttachment;
+
+impl ContextAttachment for ActiveRendererAttachment {}
 
 unsafe extern "C" fn foreign_unary(_viewport: *mut dear_imgui_rs::sys::ImGuiViewport) {}
 
@@ -493,6 +503,62 @@ fn entering_another_viewport_cancels_a_delayed_mouse_leave() {
     state.note_cursor_available();
     state.note_button(dear_imgui_rs::input::MouseButton::Left, false);
 
+    assert!(!state.take_invalidation_due());
+}
+
+#[test]
+fn focus_transfer_between_owned_viewports_does_not_unfocus_the_context() {
+    let first = WindowId::from(41_u64);
+    let second = WindowId::from(42_u64);
+    let mut state = ContextFocusState::default();
+
+    assert!(state.note_window_focus(first, true));
+    assert!(!state.note_window_focus(first, false));
+    assert!(!state.note_window_focus(second, true));
+
+    let owned = HashSet::from([first, second]);
+    assert!(!state.reconcile_owned_windows(&owned));
+}
+
+#[test]
+fn runtime_attached_while_unfocused_reports_loss_at_the_frame_boundary() {
+    let mut state = ContextFocusState::with_focused_window(None);
+
+    assert!(state.reconcile_owned_windows(&HashSet::new()));
+    assert!(!state.reconcile_owned_windows(&HashSet::new()));
+}
+
+#[test]
+fn losing_the_last_owned_viewport_focus_is_reconciled_once() {
+    let window = WindowId::from(41_u64);
+    let mut state = ContextFocusState::default();
+
+    assert!(state.note_window_focus(window, true));
+    assert!(!state.note_window_focus(window, false));
+
+    let owned = HashSet::from([window]);
+    assert!(state.reconcile_owned_windows(&owned));
+    assert!(!state.reconcile_owned_windows(&owned));
+}
+
+#[test]
+fn destroying_the_focused_viewport_reconciles_context_focus_loss() {
+    let window = WindowId::from(41_u64);
+    let mut state = ContextFocusState::default();
+
+    assert!(state.note_window_focus(window, true));
+    assert!(state.reconcile_owned_windows(&HashSet::new()));
+}
+
+#[test]
+fn context_focus_loss_invalidates_mouse_without_release_or_leave_events() {
+    let mut state = MouseLeaveState::default();
+    state.note_button(dear_imgui_rs::input::MouseButton::Left, true);
+    assert!(!state.take_invalidation_due());
+
+    state.note_context_focus_lost();
+
+    assert!(state.take_invalidation_due());
     assert!(!state.take_invalidation_due());
 }
 
@@ -1066,6 +1132,31 @@ fn platform_shutdown_requires_the_renderer_destroy_callback_to_be_released_first
     unsafe {
         (*dear_imgui_rs::sys::igGetMainViewport()).RendererUserData = std::ptr::null_mut();
     }
+    runtime.shutdown(&mut context).unwrap();
+}
+
+#[test]
+fn runtime_shutdown_rejects_an_active_renderer_attachment_before_frame_or_native_mutation() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let mut runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
+    let mut renderer = context
+        .register_attachment::<ActiveRendererMarker>(
+            ContextAttachmentRole::Renderer,
+            Rc::new(ActiveRendererAttachment),
+        )
+        .unwrap();
+
+    assert!(matches!(
+        runtime.shutdown(&mut context),
+        Err(WinitPlatformError::PlatformAttachmentRelease(
+            ContextPlatformAttachmentReleaseError::RendererActive
+        ))
+    ));
+    assert_eq!(runtime.control().state(), RuntimeState::Attached);
+    assert!(runtime.validate_renderer_owner(&context).is_ok());
+
+    assert!(renderer.detach());
     runtime.shutdown(&mut context).unwrap();
 }
 

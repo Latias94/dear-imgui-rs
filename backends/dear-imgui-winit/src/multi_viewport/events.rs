@@ -74,7 +74,8 @@ pub(super) fn route_secondary_event<T>(
                             false
                         }
                         WindowEvent::Focused(focused) => {
-                            crate::events::handle_focused(*focused, context)
+                            control.note_window_focus(*window_id, *focused, context);
+                            false
                         }
                         WindowEvent::Ime(ime) => {
                             crate::events::handle_ime_event(ime, context);

@@ -1,4 +1,5 @@
 use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
@@ -11,7 +12,7 @@ use winit::event::Event;
 use winit::event_loop::ActiveEventLoop;
 #[cfg(target_os = "linux")]
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use winit::window::Window;
+use winit::window::{Window, WindowId};
 
 use super::callbacks::{
     MonitorOwnership, PlatformCallbackContract, PreparedMonitors, claim_platform_callbacks,
@@ -138,6 +139,7 @@ pub(crate) struct RuntimeControl {
     monitor_ownership: RefCell<Option<MonitorOwnership>>,
     main_window: RefCell<Option<Arc<Window>>>,
     mouse_leave: Cell<MouseLeaveState>,
+    focus: RefCell<ContextFocusState>,
     pub(super) viewports: RefCell<Vec<super::registry::ViewportEntry>>,
 }
 
@@ -165,9 +167,76 @@ impl MouseLeaveState {
         self.pending = false;
     }
 
+    pub(super) fn note_context_focus_lost(&mut self) {
+        // Winit may not deliver button releases after the pointer or keyboard focus leaves every
+        // window owned by this Context. Keep the delayed-leave state recoverable in that case.
+        self.buttons_down = 0;
+        self.pending = true;
+    }
+
     pub(super) fn take_invalidation_due(&mut self) -> bool {
         if self.pending && self.buttons_down == 0 {
             self.pending = false;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+#[derive(Debug, Default, Eq, PartialEq)]
+pub(super) struct ContextFocusState {
+    focused_windows: HashSet<WindowId>,
+    context_focused: bool,
+    focus_loss_pending: bool,
+}
+
+impl ContextFocusState {
+    pub(super) fn with_focused_window(window_id: Option<WindowId>) -> Self {
+        // Dear ImGui treats a newly attached platform as focused until it receives an explicit
+        // loss event. Start from that reported state even when Winit says the main window is
+        // already unfocused, then reconcile the empty set at the next platform-frame boundary.
+        let mut state = Self {
+            context_focused: true,
+            ..Self::default()
+        };
+        if let Some(window_id) = window_id {
+            state.focused_windows.insert(window_id);
+        }
+        state
+    }
+
+    /// Records a native focus event and returns whether Dear ImGui needs a focus-gained event.
+    pub(super) fn note_window_focus(&mut self, window_id: WindowId, focused: bool) -> bool {
+        if focused {
+            self.focused_windows.insert(window_id);
+            self.focus_loss_pending = false;
+            if !self.context_focused {
+                self.context_focused = true;
+                return true;
+            }
+        } else if self.focused_windows.remove(&window_id)
+            && self.focused_windows.is_empty()
+            && self.context_focused
+        {
+            // Focus transfers between native viewports commonly report the old window losing
+            // focus before the new one gains it. Defer the Context-level loss until the next
+            // platform-frame boundary so that transfer can cancel it.
+            self.focus_loss_pending = true;
+        }
+        false
+    }
+
+    /// Reconciles destroyed windows and returns whether the Context has now lost focus.
+    pub(super) fn reconcile_owned_windows(&mut self, owned_windows: &HashSet<WindowId>) -> bool {
+        self.focused_windows
+            .retain(|window_id| owned_windows.contains(window_id));
+        if self.context_focused && self.focused_windows.is_empty() {
+            self.focus_loss_pending = true;
+        }
+        if self.focus_loss_pending && self.focused_windows.is_empty() {
+            self.focus_loss_pending = false;
+            self.context_focused = false;
             true
         } else {
             false
@@ -181,6 +250,9 @@ impl RuntimeControl {
         platform: &Rc<WinitPlatformControl>,
         main_window: Arc<Window>,
     ) -> Self {
+        let focus = ContextFocusState::with_focused_window(
+            main_window.has_focus().then_some(main_window.id()),
+        );
         Self {
             context_raw: context.as_raw(),
             binding: context.binding(),
@@ -195,6 +267,7 @@ impl RuntimeControl {
             monitor_ownership: RefCell::new(None),
             main_window: RefCell::new(Some(main_window)),
             mouse_leave: Cell::new(MouseLeaveState::default()),
+            focus: RefCell::new(focus),
             viewports: RefCell::new(Vec::new()),
         }
     }
@@ -215,6 +288,7 @@ impl RuntimeControl {
             monitor_ownership: RefCell::new(None),
             main_window: RefCell::new(None),
             mouse_leave: Cell::new(MouseLeaveState::default()),
+            focus: RefCell::new(ContextFocusState::default()),
             viewports: RefCell::new(Vec::new()),
         }
     }
@@ -579,14 +653,52 @@ impl RuntimeControl {
         self.mouse_leave.set(state);
     }
 
-    pub(crate) fn flush_pending_mouse_leave(&self, context: &mut Context) {
-        let mut state = self.mouse_leave.get();
-        let invalidation_due = state.take_invalidation_due();
-        self.mouse_leave.set(state);
-        if invalidation_due {
+    pub(crate) fn note_window_focus(
+        &self,
+        window_id: WindowId,
+        focused: bool,
+        context: &mut Context,
+    ) {
+        if self
+            .focus
+            .borrow_mut()
+            .note_window_focus(window_id, focused)
+        {
+            context.io_mut().add_focus_event(true);
+        }
+    }
+
+    pub(crate) fn reconcile_input_state(&self, context: &mut Context) {
+        let mut owned_windows = HashSet::new();
+        if let Some(main_window) = self.main_window() {
+            owned_windows.insert(main_window.id());
+        }
+        owned_windows.extend(
+            secondary_viewport_windows(self)
+                .into_iter()
+                .map(|window| window.id()),
+        );
+        let focus_lost = self
+            .focus
+            .borrow_mut()
+            .reconcile_owned_windows(&owned_windows);
+
+        let mut mouse_leave = self.mouse_leave.get();
+        if focus_lost {
+            mouse_leave.note_context_focus_lost();
+        }
+        let invalidation_due = mouse_leave.take_invalidation_due();
+        self.mouse_leave.set(mouse_leave);
+
+        if focus_lost || invalidation_due {
             let io = context.io_mut();
-            io.add_mouse_pos_event([-f32::MAX, -f32::MAX]);
-            io.add_mouse_viewport_event(dear_imgui_rs::Id::default());
+            if focus_lost {
+                io.add_focus_event(false);
+            }
+            if invalidation_due {
+                io.add_mouse_pos_event([-f32::MAX, -f32::MAX]);
+                io.add_mouse_viewport_event(dear_imgui_rs::Id::default());
+            }
         }
     }
 
@@ -1082,15 +1194,28 @@ impl WinitPlatformRuntime {
     ///
     /// The operation is idempotent. The explicit Context lets the core close an open frame before
     /// any platform callback or native window state is released. Dropping the runtime without a
-    /// Context defers native cleanup to the Context attachment instead.
+    /// Context defers native cleanup to the Context attachment instead. An active renderer
+    /// attachment rejects shutdown before the frame or native state changes.
     pub fn shutdown(&mut self, context: &mut Context) -> Result<(), WinitPlatformError> {
         self.ensure_context(context)?;
-        let pending_fault = self.control.poll_fault().err();
-        let result = self.control.shutdown_explicit(context);
-        let released = matches!(
+        if matches!(
             self.control.state(),
             RuntimeState::Detached | RuntimeState::ContextDestroyed
-        );
+        ) {
+            return Ok(());
+        }
+        let attachment = self.platform.attachment_handle()?;
+        let (pending_fault, result, released) = {
+            let mut release = context.prepare_platform_attachment_release(&attachment)?;
+            let context = release.context_mut();
+            let pending_fault = self.control.poll_fault().err();
+            let result = self.control.shutdown_explicit(context);
+            let released = matches!(
+                self.control.state(),
+                RuntimeState::Detached | RuntimeState::ContextDestroyed
+            );
+            (pending_fault, result, released)
+        };
         if released {
             self.platform.clear_runtime(&self.control);
         }
