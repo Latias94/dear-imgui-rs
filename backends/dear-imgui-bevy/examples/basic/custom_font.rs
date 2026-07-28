@@ -72,11 +72,11 @@ fn custom_font_ui(imgui: ImguiUi, fonts: NonSend<CustomFonts>) -> Result {
     ui.window("Custom Font")
         .size([440.0, 190.0], Condition::FirstUseEver)
         .build(|| {
-            ui.text("This line uses Dear ImGui's default font.");
+            ui.text("This line uses Dear ImGui's default font at 16 px.");
             ui.separator();
             {
                 let _font = ui.push_font(roboto_medium);
-                ui.text("This line uses the bundled Roboto Medium font.");
+                ui.text("This line uses the bundled Roboto Medium font at 20 px.");
                 ui.text("Sphinx of black quartz, judge my vow.");
             }
         });

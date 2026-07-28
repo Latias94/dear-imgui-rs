@@ -6,6 +6,19 @@ use super::{FontId, atlas::validate_font_id};
 use crate::sys;
 
 impl FontId {
+    /// Return the compatibility reference size associated with this font.
+    ///
+    /// Dear ImGui 1.92 may bake this font at any runtime size. The reference
+    /// size is the size supplied when the font was added and is used
+    /// automatically by [`crate::Ui::push_font`]. A fully dynamic font source
+    /// without a reference size returns `None`.
+    #[doc(alias = "LegacySize")]
+    pub fn reference_size(self) -> Option<f32> {
+        let raw = validate_font_id(self, "FontId::reference_size()");
+        let size = unsafe { (*raw).LegacySize };
+        (size > 0.0).then_some(size)
+    }
+
     /// Return whether this font has loaded runtime data.
     #[doc(alias = "IsLoaded")]
     pub fn is_loaded(self) -> bool {
@@ -82,6 +95,7 @@ mod tests {
         let font = ui.current_font();
 
         assert!(font.is_loaded());
+        assert!(font.reference_size().is_some_and(|size| size > 0.0));
         assert!(!font.debug_name().is_empty());
     }
 }

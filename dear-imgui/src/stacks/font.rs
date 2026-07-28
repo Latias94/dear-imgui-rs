@@ -3,7 +3,12 @@ use crate::{Ui, sys};
 
 /// # Parameter stacks (shared)
 impl Ui {
-    /// Switches to the given font by pushing it to the font stack.
+    /// Switches to the given font at its configured reference size.
+    ///
+    /// Dear ImGui 1.92 can rasterize a font at multiple sizes. This convenience
+    /// method preserves the pre-1.92 behavior by using the reference size
+    /// supplied when the font was added. Use [`Ui::push_font_with_size`] to
+    /// preserve the current size or select another runtime size explicitly.
     ///
     /// Returns a `FontStackToken` that must be popped by calling `.pop()`
     ///
@@ -32,7 +37,7 @@ impl Ui {
         self.run_with_bound_context(|| unsafe {
             let font_ptr =
                 crate::fonts::validate_font_id_for_current_context(id, "Ui::push_font()");
-            sys::igPushFont(font_ptr, 0.0);
+            sys::igPushFont(font_ptr, (*font_ptr).LegacySize);
         });
         FontStackToken::new(self)
     }
@@ -52,5 +57,37 @@ impl FontStackToken<'_> {
     /// Pops a change from the font stack.
     pub fn pop(self) {
         self.end()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn push_font_uses_the_size_supplied_when_the_font_was_added() {
+        let mut ctx = crate::Context::create();
+        let small = ctx
+            .font_atlas()
+            .add_font(&[crate::FontSource::default_font_with_size(13.0)]);
+        let large = ctx
+            .font_atlas()
+            .add_font(&[crate::FontSource::default_font_with_size(29.0)]);
+        assert_eq!(small.reference_size(), Some(13.0));
+        assert_eq!(large.reference_size(), Some(29.0));
+        let _ = ctx.font_atlas().build();
+        ctx.io_mut().set_display_size([128.0, 128.0]);
+        ctx.io_mut().set_delta_time(1.0 / 60.0);
+
+        let ui = ctx.frame();
+        assert_eq!(ui.current_font(), small);
+        assert_eq!(ui.current_font_size(), 13.0);
+
+        {
+            let _font = ui.push_font(large);
+            assert_eq!(ui.current_font(), large);
+            assert_eq!(ui.current_font_size(), 29.0);
+        }
+
+        assert_eq!(ui.current_font(), small);
+        assert_eq!(ui.current_font_size(), 13.0);
     }
 }

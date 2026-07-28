@@ -50,7 +50,8 @@ impl Ui {
     /// Push a font with dynamic size support (v1.92+ feature).
     ///
     /// This allows changing font size at runtime without pre-loading different sizes.
-    /// Pass None for font to use the current font with the new size.
+    /// Pass `None` to keep the current font. A size of `0.0` keeps the current
+    /// size, so `push_font_with_size(Some(font), 0.0)` changes only the font.
     ///
     /// Returns a `FontStackToken` that pops the font stack when dropped or when
     /// [`crate::FontStackToken::pop`] is called.
@@ -191,5 +192,39 @@ mod tests {
         }
 
         let _ = ctx.render();
+    }
+
+    #[test]
+    fn push_font_with_size_distinguishes_preserved_and_overridden_sizes() {
+        let mut ctx = crate::Context::create();
+        let small = ctx
+            .font_atlas()
+            .add_font(&[crate::FontSource::default_font_with_size(13.0)]);
+        let large = ctx
+            .font_atlas()
+            .add_font(&[crate::FontSource::default_font_with_size(29.0)]);
+        let _ = ctx.font_atlas().build();
+        ctx.io_mut().set_display_size([128.0, 128.0]);
+        ctx.io_mut().set_delta_time(1.0 / 60.0);
+
+        let ui = ctx.frame();
+        assert_eq!(ui.current_font(), small);
+        assert_eq!(ui.current_font_size(), 13.0);
+
+        {
+            let _font = ui.push_font_with_size(Some(large), 0.0);
+            assert_eq!(ui.current_font(), large);
+            assert_eq!(ui.current_font_size(), 13.0);
+        }
+        assert_eq!(ui.current_font(), small);
+        assert_eq!(ui.current_font_size(), 13.0);
+
+        {
+            let _font = ui.push_font_with_size(Some(large), 37.0);
+            assert_eq!(ui.current_font(), large);
+            assert_eq!(ui.current_font_size(), 37.0);
+        }
+        assert_eq!(ui.current_font(), small);
+        assert_eq!(ui.current_font_size(), 13.0);
     }
 }
