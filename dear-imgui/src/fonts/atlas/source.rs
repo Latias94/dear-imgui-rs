@@ -6,6 +6,8 @@ use super::config::FontConfig;
 /// size is used by [`crate::Ui::push_font`] and reference-size-dependent font
 /// metrics, but it does not prevent Dear ImGui from baking the font at other
 /// runtime sizes through [`crate::Ui::push_font_with_size`].
+/// For merged fonts, the first source establishes this reference size; later
+/// source sizes control their metrics relative to that destination font.
 ///
 /// External font parsers used by Dear ImGui do not receive a reliable input
 /// boundary for every format. Consequently, raw font sources can only be

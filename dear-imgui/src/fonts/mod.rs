@@ -52,6 +52,8 @@ impl Ui {
     /// This allows changing font size at runtime without pre-loading different sizes.
     /// Pass `None` to keep the current font. A size of `0.0` keeps the current
     /// size, so `push_font_with_size(Some(font), 0.0)` changes only the font.
+    /// A non-zero size is the base size before Dear ImGui applies global and DPI
+    /// font scaling; [`Ui::current_font_size`] already includes those scales.
     ///
     /// Returns a `FontStackToken` that pops the font stack when dropped or when
     /// [`crate::FontStackToken::pop`] is called.

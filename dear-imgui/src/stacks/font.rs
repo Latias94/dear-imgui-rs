@@ -9,6 +9,7 @@ impl Ui {
     /// method preserves the pre-1.92 behavior by using the reference size
     /// supplied when the font was added. Use [`Ui::push_font_with_size`] to
     /// preserve the current size or select another runtime size explicitly.
+    /// A font without a reference size also preserves the current size.
     ///
     /// Returns a `FontStackToken` that must be popped by calling `.pop()`
     ///
@@ -62,6 +63,11 @@ impl FontStackToken<'_> {
 
 #[cfg(test)]
 mod tests {
+    const ROBOTO_MEDIUM: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../dear-imgui-sys/third-party/cimgui/imgui/misc/fonts/Roboto-Medium.ttf"
+    ));
+
     #[test]
     fn push_font_uses_the_size_supplied_when_the_font_was_added() {
         let mut ctx = crate::Context::create();
@@ -88,6 +94,34 @@ mod tests {
         }
 
         assert_eq!(ui.current_font(), small);
+        assert_eq!(ui.current_font_size(), 13.0);
+    }
+
+    #[test]
+    fn push_font_preserves_current_size_without_a_reference_size() {
+        let mut ctx = crate::Context::create();
+        let _consumer = ctx
+            .create_renderer_consumer()
+            .expect("the managed renderer consumer should attach");
+        let small = ctx
+            .font_atlas()
+            .add_font(&[crate::FontSource::default_font_with_size(13.0)]);
+        // SAFETY: the vendored bytes contain the complete, unmodified Roboto Medium TTF.
+        let dynamic = ctx
+            .font_atlas()
+            .add_font(&[unsafe { crate::FontSource::ttf_data(ROBOTO_MEDIUM) }]);
+        assert_eq!(dynamic.reference_size(), None);
+        ctx.io_mut().set_display_size([128.0, 128.0]);
+        ctx.io_mut().set_delta_time(1.0 / 60.0);
+        ctx.io_mut()
+            .set_backend_flags(crate::BackendFlags::RENDERER_HAS_TEXTURES);
+
+        let ui = ctx.frame();
+        assert_eq!(ui.current_font(), small);
+        assert_eq!(ui.current_font_size(), 13.0);
+
+        let _font = ui.push_font(dynamic);
+        assert_eq!(ui.current_font(), dynamic);
         assert_eq!(ui.current_font_size(), 13.0);
     }
 }

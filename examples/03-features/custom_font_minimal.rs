@@ -33,11 +33,11 @@ impl Application for CustomFontApp {
         ui.window("Custom Font")
             .size([440.0, 190.0], Condition::FirstUseEver)
             .build(|| {
-                ui.text("This line uses Dear ImGui's default font at 16 px.");
+                ui.text("Default font with a 16 px reference size.");
                 ui.separator();
                 {
                     let _font = ui.push_font(roboto);
-                    ui.text("This line uses the bundled Roboto Medium font at 20 px.");
+                    ui.text("Roboto Medium with a 20 px reference size.");
                     ui.text("Sphinx of black quartz, judge my vow.");
                 }
                 ui.separator();

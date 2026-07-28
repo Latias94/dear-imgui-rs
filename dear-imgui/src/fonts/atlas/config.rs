@@ -114,9 +114,10 @@ impl FontConfig {
         );
     }
 
-    /// Set the font size in pixels
+    /// Set the font reference size in pixels.
     ///
-    /// Note: With v1.92+ dynamic fonts, size can be 0.0 to use default sizing
+    /// With v1.92+ dynamic fonts, `0.0` leaves the reference size implicit;
+    /// the font can still be selected at any positive runtime size.
     pub fn size_pixels(mut self, size: f32) -> Self {
         validate_font_size_pixels("FontConfig::size_pixels()", "size", size);
         self.raw.SizePixels = size;
