@@ -1,17 +1,14 @@
 //! Extension ecosystem composition inside one Bevy-managed Dear ImGui frame.
 //!
 //! Run:
-//! `cargo run -p dear-imgui-bevy --features render --example ecosystem`
+//! `cargo run -p dear-imgui-bevy --example ecosystem`
 
 use bevy::{
     app::AppExit,
     prelude::*,
     window::{PresentMode, WindowPlugin, WindowTheme},
 };
-use dear_imgui_bevy::{
-    ImguiContext, ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, configure_example_context,
-    render::ImguiOverlayCamera,
-};
+use dear_imgui_bevy::prelude::*;
 use dear_imgui_rs::{Condition, DockLayout, DockLayoutApply, DockSplit, DockspaceTarget};
 use dear_imguizmo::{DrawListTarget, GuizmoExt, Mat4Like};
 use dear_imnodes::ImNodesExt;
@@ -73,7 +70,7 @@ fn main() {
 }
 
 fn setup_scene(mut commands: Commands) {
-    commands.spawn((Camera2d, ImguiOverlayCamera));
+    commands.spawn(Camera2d);
 }
 
 fn close_on_escape(input: Res<ButtonInput<KeyCode>>, mut exit: MessageWriter<AppExit>) {
@@ -84,34 +81,36 @@ fn close_on_escape(input: Res<ButtonInput<KeyCode>>, mut exit: MessageWriter<App
 
 fn install_ecosystem_contexts(app: &mut App) {
     let contexts = {
-        let mut imgui = app
+        let mut registry = app
             .world_mut()
-            .get_non_send_mut::<ImguiContext>()
-            .expect("ImguiPlugin should install ImguiContext before examples create extensions");
-        configure_example_context(&mut imgui, false);
-        let context = imgui.context_mut();
-
-        let plot = dear_implot::PlotContext::create(context);
-        let nodes = dear_imnodes::Context::create(context);
-        let node_editor = nodes.create_editor_context();
-        EcosystemContexts {
-            plot,
-            nodes,
-            node_editor,
-        }
+            .get_non_send_mut::<ImguiContexts>()
+            .expect("ImguiPlugin should install ImguiContexts before examples create extensions");
+        let primary_id = registry
+            .primary_id()
+            .expect("ImguiPlugin should install a primary Context");
+        registry
+            .configure(primary_id, |context| {
+                let plot = dear_implot::PlotContext::create(context);
+                let nodes = dear_imnodes::Context::create(context);
+                let node_editor = nodes.create_editor_context();
+                EcosystemContexts {
+                    plot,
+                    nodes,
+                    node_editor,
+                }
+            })
+            .expect("the primary Context should be configurable before the app starts")
     };
     app.world_mut().insert_non_send(contexts);
 }
 
 fn ecosystem_ui(
-    mut contexts: ImguiContexts,
+    imgui: ImguiUi,
     extensions: NonSend<EcosystemContexts>,
     mut state: ResMut<EcosystemState>,
-) {
-    let frame_index = contexts.frame_index().unwrap_or_default();
-    let Some(ui) = contexts.primary_ui_mut() else {
-        return;
-    };
+) -> Result {
+    let frame_index = imgui.frame_index()?;
+    let ui = imgui.ui()?;
     state.frame_index = frame_index;
 
     let root_id = ui.get_id("DearImguiBevyEcosystemDockspace");
@@ -120,7 +119,7 @@ fn ecosystem_ui(
         Ok(target) => target,
         Err(error) => {
             error!("invalid ecosystem dockspace target: {error}");
-            return;
+            return Ok(());
         }
     };
     let dockspace_id = match ui.dockspace_over_main_viewport_with_layout(
@@ -131,7 +130,7 @@ fn ecosystem_ui(
         Ok(id) => id,
         Err(error) => {
             error!("failed to apply ecosystem dock layout: {error}");
-            return;
+            return Ok(());
         }
     };
 
@@ -160,6 +159,8 @@ fn ecosystem_ui(
         .build(|| {
             render_gizmo(ui, state.frame_index);
         });
+
+    Ok(())
 }
 
 fn ecosystem_dock_layout() -> DockLayout {

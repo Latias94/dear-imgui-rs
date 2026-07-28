@@ -3,7 +3,7 @@ name = "dear-imgui-bevy"
 version.workspace = true
 edition.workspace = true
 rust-version = "1.95.0"
-description = "Experimental Bevy-native backend for dear-imgui-rs on Bevy 0.19.0"
+description = "Bevy-native backend for dear-imgui-rs on Bevy 0.19.0"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -38,22 +38,22 @@ bevy_render = { version = "=0.19.0", default-features = false, optional = true }
 bevy_shader = { version = "=0.19.0", default-features = false, optional = true }
 bevy_tasks = { version = "=0.19.0", default-features = false }
 bevy_time = { version = "=0.19.0", default-features = false, features = ["std"] }
+bevy_ui_render = { version = "=0.19.0", default-features = false, optional = true }
 bevy_utils = { version = "=0.19.0", default-features = false }
 bevy_winit = { version = "=0.19.0", default-features = false, features = ["x11"], optional = true }
 bytemuck = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
-bevy = { version = "=0.19.0", default-features = false, features = ["2d", "default_platform"] }
+bevy = { version = "=0.19.0", default-features = false, features = ["2d", "default_platform", "ui"] }
 dear-imguizmo.workspace = true
 dear-imnodes.workspace = true
 dear-implot.workspace = true
 
 [features]
-default = []
+default = ["render", "bevy-ui"]
 wasm = ["dear-imgui-rs/wasm"]
-# Enables the first native Dear ImGui PlatformIO lifecycle bridge. This does not by itself
-# advertise full multi-viewport support; render/input routing still gate status.
-multi-viewport = ["dear-imgui-rs/multi-viewport", "dep:bevy_winit"]
+# Enables the complete native Dear ImGui PlatformIO lifecycle and renderer bridge.
+multi-viewport = ["render", "dear-imgui-rs/multi-viewport", "dep:bevy_winit"]
 # Enables the Bevy render-world extraction and renderer integration slices.
 render = [
     "dep:bevy_asset",
@@ -66,6 +66,8 @@ render = [
     "dep:bevy_shader",
     "dep:bytemuck",
 ]
+# Orders Dear ImGui explicitly against Bevy UI on cameras that render both layers.
+bevy-ui = ["render", "dep:bevy_ui_render"]
 
 [[example]]
 name = "simple"
@@ -90,4 +92,19 @@ required-features = ["render"]
 [[example]]
 name = "ecosystem"
 path = "examples/ecosystem/ecosystem.rs"
+required-features = ["render"]
+
+[[example]]
+name = "custom_post_process"
+path = "examples/advanced/custom_post_process.rs"
+required-features = ["render"]
+
+[[example]]
+name = "multiple_contexts"
+path = "examples/advanced/multiple_contexts.rs"
+required-features = ["render"]
+
+[[example]]
+name = "render_to_image"
+path = "examples/advanced/render_to_image.rs"
 required-features = ["render"]

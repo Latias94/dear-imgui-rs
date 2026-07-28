@@ -434,7 +434,7 @@ the renderer:
 - Keep the non-cloneable `RendererConsumer` on the UI thread. One Context permits one active
   consumer generation, and its first frame fixes that generation to synchronous or detached mode.
 
-The Bevy backend is the best workspace example of this split.
+The Bevy backend demonstrates the engine-owned form of this split: a main-thread registry serially binds one Context at a time, a Context-keyed mailbox moves snapshots into the render world, renderer namespaces and completion acknowledgements remain isolated by Context, and routes freeze camera identity for each extraction epoch. Its internal ECS and renderer resources are deliberately private implementation storage rather than a public custom-backend extension API.
 
 One managed renderer must own one Context-local texture namespace. Multiple Contexts may share a
 `SharedFontAtlas` only while they use legacy rendering. Managed atlas rendering requires exactly
@@ -454,6 +454,7 @@ correct. Multi-viewport requires both platform and renderer support:
   are destroyed.
 - Identify the main viewport through `Viewport::is_main()`. Its numeric ID is an upstream-private
   implementation detail and is not a cross-Context identity.
+- Key every engine-side window, camera, surface, command, feedback, callback fault, and teardown acknowledgement by `(ContextId, ViewportId)`. Numeric viewport IDs may repeat across live Contexts.
 
 Install the owning platform runtime first and the owning renderer runtime
 second, before any secondary platform window exists. Treat each backend's
@@ -501,6 +502,8 @@ per-viewport renderer resources while their platform windows are destroyed, but
 must keep those callbacks alive until the whole native window-destruction phase
 completes and release global renderer state before platform-global state.
 Context-first drop invokes the same phases as a fail-stop fallback.
+
+An engine integration must not mutate ECS or a render world from `Drop`. Transfer the complete Context owner, callback backing storage, renderer consumer, in-flight mailbox, and release leases into an app-local retirement queue. The engine schedule then quiesces new frames, waits for render-world and viewport-entity acknowledgements, clears exact native fields, and finally destroys the Context. If the engine executor is already gone, retaining or intentionally leaking the complete owner is safer than releasing callback or GPU state early.
 
 For first-party patterns, compare `dear-imgui-winit`,
 `dear-imgui-sdl3`, `dear-imgui-wgpu`, `dear-imgui-glow`,
@@ -612,6 +615,8 @@ Minimum useful coverage for a new backend:
   exposes
 - a documented smoke path for platform-specific packaging that cannot run in
   regular CI
+- engine integrations should compile and test headless, default, render-only, native multi-viewport, and supported WASM profiles independently
+- engine renderers should include a GPU readback test that composes the UI with custom post-processing, supported MSAA modes, HDR/LDR targets, and the engine's own UI layer
 
 Before publishing a first-party backend crate, document:
 

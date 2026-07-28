@@ -75,7 +75,10 @@ impl SnapshotHub {
         self.completion_watermark
     }
 
-    pub(super) fn attach_consumer(&mut self) -> Result<RendererConsumer, RendererConsumerError> {
+    pub(super) fn validate_consumer_admission(&self) -> Result<NonZeroU64, RendererConsumerError> {
+        if let Some(error) = self.pending_errors.front().copied() {
+            return Err(error);
+        }
         match self.phase {
             ConsumerPhase::Active { .. } => {
                 return Err(RendererConsumerError::ConsumerAlreadyActive);
@@ -83,20 +86,30 @@ impl SnapshotHub {
             ConsumerPhase::Draining(_) => return Err(RendererConsumerError::ConsumerDraining),
             ConsumerPhase::Unbound => {}
         }
-        let generation = self
+        self.next_consumer_generation
+            .ok_or(RendererConsumerError::ConsumerGenerationExhausted)
+    }
+
+    pub(super) fn commit_consumer_admission(&mut self, generation: NonZeroU64) -> RendererConsumer {
+        debug_assert_eq!(
+            self.validate_consumer_admission(),
+            Ok(generation),
+            "renderer consumer admission must be validated before it is committed"
+        );
+        let claimed_generation = self
             .next_consumer_generation
             .take()
-            .ok_or(RendererConsumerError::ConsumerGenerationExhausted)?;
+            .expect("validated renderer consumer generation must remain available");
+        assert_eq!(
+            claimed_generation, generation,
+            "renderer consumer generation changed after admission validation"
+        );
         self.next_consumer_generation = generation.get().checked_add(1).and_then(NonZeroU64::new);
         self.phase = ConsumerPhase::Active {
             generation,
             mode: ConsumerMode::Unclaimed,
         };
-        Ok(RendererConsumer::new(
-            self.context,
-            generation,
-            self.sender.clone(),
-        ))
+        RendererConsumer::new(self.context, generation, self.sender.clone())
     }
 
     pub(super) fn begin_snapshot(
@@ -537,6 +550,22 @@ impl RendererTextureReset<'_, '_> {
 }
 
 impl Context {
+    /// Validate whether this Context can attach a managed renderer consumer.
+    ///
+    /// This check is non-mutating: it neither reserves a consumer generation nor claims the font
+    /// atlas for managed rendering. It is intended for integrations that must validate several
+    /// Contexts before attaching any renderer. A successful preflight is only a snapshot of the
+    /// current state; [`Self::create_renderer_consumer`] repeats the validation when it commits.
+    ///
+    /// Pending detached completions are not polled by this method. Call
+    /// [`Self::poll_snapshot_completions`] first when retrying after a consumer entered its
+    /// draining phase.
+    pub fn preflight_renderer_consumer(&self) -> Result<(), RendererConsumerError> {
+        let _guard = CTX_MUTEX.lock();
+        self.validate_renderer_consumer_admission_unlocked("Context::preflight_renderer_consumer()")
+            .map(|_| ())
+    }
+
     /// Register the sole renderer consumer for this Context.
     ///
     /// A consumer generation is claimed by its first synchronous render or detached snapshot and
@@ -549,11 +578,24 @@ impl Context {
     pub fn create_renderer_consumer(&mut self) -> Result<RendererConsumer, RendererConsumerError> {
         let _guard = CTX_MUTEX.lock();
         self.assert_current_context("Context::create_renderer_consumer()");
-        let io = self.io_ptr("Context::create_renderer_consumer()");
+        let atlas_target = self.font_atlas_snapshot_target();
+        let _ = self.poll_snapshot_completions_with_target(&atlas_target)?;
+        let (atlas, generation) = self
+            .validate_renderer_consumer_admission_unlocked("Context::create_renderer_consumer()")?;
+        let _ = crate::fonts::claim_validated_font_atlas_managed_renderer(atlas, self.raw);
+        Ok(self.snapshot_hub.commit_consumer_admission(generation))
+    }
+
+    fn validate_renderer_consumer_admission_unlocked(
+        &self,
+        caller: &str,
+    ) -> Result<(*mut crate::sys::ImFontAtlas, NonZeroU64), RendererConsumerError> {
+        self.assert_current_context(caller);
+        let io = self.io_ptr(caller);
         let atlas = unsafe { (*io).Fonts };
-        crate::fonts::claim_font_atlas_managed_renderer(atlas, self.raw)?;
-        let _ = self.poll_snapshot_completions()?;
-        self.snapshot_hub.attach_consumer()
+        crate::fonts::validate_font_atlas_managed_renderer(atlas, self.raw)?;
+        let generation = self.snapshot_hub.validate_consumer_admission()?;
+        Ok((atlas, generation))
     }
 
     /// Merge all currently available detached completion messages.
@@ -767,5 +809,53 @@ impl Context {
             })
             .collect();
         FontAtlasSnapshotTarget::new(atlas, self.id(), textures)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn renderer_consumer_preflight_failure_does_not_claim_the_font_atlas() {
+        let _guard = crate::test_support::imgui_context_guard();
+        let atlas = crate::SharedFontAtlas::create();
+        let first = Context::create_with_shared_font_atlas(atlas.clone());
+        let suspended = first.suspend();
+        let second = Context::create_with_shared_font_atlas(atlas.clone());
+
+        assert_eq!(
+            second.preflight_renderer_consumer(),
+            Err(
+                RendererConsumerError::SharedFontAtlasRequiresExclusiveContext {
+                    registered_contexts: 2,
+                }
+            )
+        );
+
+        drop(second);
+        let replacement = Context::try_create_with_shared_font_atlas(atlas.clone())
+            .expect("preflight must not claim the shared font atlas");
+        drop(replacement);
+        drop(suspended);
+    }
+
+    #[test]
+    fn renderer_consumer_hub_failure_does_not_claim_the_font_atlas() {
+        let _guard = crate::test_support::imgui_context_guard();
+        let atlas = crate::SharedFontAtlas::create();
+        let mut context = Context::create_with_shared_font_atlas(atlas.clone());
+        context.snapshot_hub.next_consumer_generation = None;
+
+        assert!(matches!(
+            context.create_renderer_consumer(),
+            Err(RendererConsumerError::ConsumerGenerationExhausted)
+        ));
+
+        let suspended = context.suspend();
+        let second = Context::try_create_with_shared_font_atlas(atlas.clone())
+            .expect("failed consumer admission must not claim the shared font atlas");
+        drop(second);
+        drop(suspended);
     }
 }

@@ -1,10 +1,10 @@
 //! Compact game-engine style editor integration.
 //!
 //! Run:
-//! `cargo run -p dear-imgui-bevy --features render --example game_engine`
+//! `cargo run -p dear-imgui-bevy --example game_engine`
 //!
 //! Native multi-viewport run:
-//! `cargo run -p dear-imgui-bevy --features render,multi-viewport --example game_engine`
+//! `cargo run -p dear-imgui-bevy --features multi-viewport --example game_engine`
 
 use bevy::{
     app::AppExit,
@@ -13,13 +13,9 @@ use bevy::{
     prelude::*,
     window::{PresentMode, WindowPlugin, WindowTheme},
 };
-use dear_imgui_bevy::{
-    ImguiBackendConfig, ImguiBackendStatus, ImguiBevyTextures, ImguiContext, ImguiContexts,
-    ImguiPlugin, ImguiPrimaryContextPass, configure_example_context,
-    render::{ImguiOverlayCamera, ImguiOverlayDisabled},
-};
+use dear_imgui_bevy::prelude::*;
 use dear_imgui_rs::{
-    Condition, DockLayout, DockLayoutApply, DockSplit, DockspaceTarget, TextureId, WindowFlags,
+    Condition, DockLayout, DockLayoutApply, DockSplit, DockspaceTarget, WindowFlags,
 };
 
 const SCENE_SIZE: [u32; 2] = [960, 540];
@@ -33,7 +29,7 @@ struct SceneObject {
 
 #[derive(Resource)]
 struct ScenePreview {
-    texture_id: TextureId,
+    texture: ImguiTexture,
     size: [u32; 2],
 }
 
@@ -68,11 +64,11 @@ fn main() {
             }),
             ..Default::default()
         }))
-        .add_plugins(ImguiPlugin::new(ImguiBackendConfig {
-            multi_viewport: cfg!(feature = "multi-viewport"),
-            ..Default::default()
-        }))
-        .init_resource::<ImguiBevyTextures>()
+        .add_plugins(ImguiPlugin::new(
+            ImguiPluginConfig::default()
+                .with_docking(true)
+                .with_multi_viewport(cfg!(feature = "multi-viewport")),
+        ))
         .init_resource::<EditorState>()
         .add_systems(Startup, setup)
         .add_systems(Update, (close_on_escape, animate_scene))
@@ -86,9 +82,8 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut textures: ResMut<ImguiBevyTextures>,
-    mut imgui: NonSendMut<ImguiContext>,
     mut editor: ResMut<EditorState>,
-) {
+) -> Result {
     // Keep the primary target as an ImGui-only editor surface. The scene is rendered by the
     // offscreen camera below and shown through the docked Scene window.
     commands.spawn((
@@ -98,7 +93,6 @@ fn setup(
             ..Default::default()
         },
         RenderLayers::none(),
-        ImguiOverlayCamera,
     ));
 
     let mut scene_image = Image::new_target_texture(
@@ -112,7 +106,9 @@ fn setup(
         bevy::render::render_resource::TextureUsages::TEXTURE_BINDING
             | bevy::render::render_resource::TextureUsages::RENDER_ATTACHMENT;
     let scene_image = images.add(scene_image);
-    let texture_id = textures.register(&scene_image);
+    let texture = textures
+        .register_strong(scene_image.clone())
+        .map_err(|error| format!("failed to register the scene preview texture: {error}"))?;
 
     commands.spawn((
         Camera2d,
@@ -122,10 +118,9 @@ fn setup(
             ..Default::default()
         },
         RenderTarget::Image(scene_image.into()),
-        ImguiOverlayDisabled,
     ));
     commands.insert_resource(ScenePreview {
-        texture_id,
+        texture,
         size: SCENE_SIZE,
     });
 
@@ -160,7 +155,7 @@ fn setup(
     ));
 
     editor.selected = Some(light_panel);
-    configure_example_context(&mut imgui, true);
+    Ok(())
 }
 
 fn spawn_rect(
@@ -211,17 +206,14 @@ fn animate_scene(
 }
 
 fn editor_ui(
-    mut contexts: ImguiContexts,
+    imgui: ImguiUi,
     preview: Res<ScenePreview>,
     mut editor: ResMut<EditorState>,
     objects: Query<(Entity, &Name, &Transform), With<SceneObject>>,
     frame_count: Res<FrameCount>,
-    backend: Res<ImguiBackendStatus>,
-) {
-    let frame_index = contexts.frame_index().unwrap_or_default();
-    let Some(ui) = contexts.primary_ui_mut() else {
-        return;
-    };
+) -> Result {
+    let frame_index = imgui.frame_index()?;
+    let ui = imgui.ui()?;
 
     let root_id = ui.get_id("DearImguiBevyGameEngineDockspace");
     let viewport = ui.main_viewport();
@@ -229,7 +221,7 @@ fn editor_ui(
         Ok(target) => target,
         Err(error) => {
             error!("invalid game-engine dockspace target: {error}");
-            return;
+            return Ok(());
         }
     };
     let dockspace_id = match ui.dockspace_over_main_viewport_with_layout(
@@ -240,7 +232,7 @@ fn editor_ui(
         Ok(id) => id,
         Err(error) => {
             error!("failed to apply game-engine dock layout: {error}");
-            return;
+            return Ok(());
         }
     };
 
@@ -267,18 +259,16 @@ fn editor_ui(
             ui.text(format!("ImGui frame: {frame_index}"));
             ui.text(format!("Scene hovered: {}", editor.scene_hovered));
             ui.text(format!(
-                "Multi-viewport requested: {}",
-                backend.multi_viewport_requested
-            ));
-            ui.text(format!(
-                "Multi-viewport supported: {}",
-                backend.multi_viewport_supported
+                "Native multi-viewport: {}",
+                cfg!(feature = "multi-viewport")
             ));
         });
 
-    if backend.multi_viewport_supported {
+    if cfg!(feature = "multi-viewport") {
         render_detached_viewport_window(ui, frame_index);
     }
+
+    Ok(())
 }
 
 fn game_engine_dock_layout() -> DockLayout {
@@ -316,7 +306,7 @@ fn render_scene_window(ui: &dear_imgui_rs::Ui, preview: &ScenePreview, editor: &
         (fit[0] * editor.viewport_zoom).max(96.0),
         (fit[1] * editor.viewport_zoom).max(96.0),
     ];
-    ui.image_config(preview.texture_id, image_size)
+    ui.image_config(&preview.texture, image_size)
         .uv0([0.0, 1.0])
         .uv1([1.0, 0.0])
         .build();

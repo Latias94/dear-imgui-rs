@@ -68,19 +68,18 @@ pub(crate) fn validate_font_atlas_context_registration(
     })
 }
 
-pub(crate) fn claim_font_atlas_managed_renderer(
+pub(crate) fn validate_font_atlas_managed_renderer(
     raw: *mut sys::ImFontAtlas,
     context: *mut sys::ImGuiContext,
-) -> Result<u64, RendererConsumerError> {
+) -> Result<(), RendererConsumerError> {
     assert!(!raw.is_null(), "managed renderer requires a font atlas");
     assert!(
         !context.is_null(),
         "managed renderer requires an ImGui context"
     );
     FONT_ATLAS_STATES.with(|states| {
-        let mut states = states.borrow_mut();
+        let states = states.borrow();
         let atlas_key = raw as usize;
-        states.get_or_insert(raw);
         let registered_contexts = states
             .contexts_by_atlas
             .get(&atlas_key)
@@ -104,11 +103,9 @@ pub(crate) fn claim_font_atlas_managed_renderer(
             .copied()
             .unwrap_or(FontAtlasRendererMode::Unclaimed)
         {
-            FontAtlasRendererMode::Managed {
-                context: owner,
-                namespace,
-                ..
-            } if owner == context as usize => return Ok(namespace),
+            FontAtlasRendererMode::Managed { context: owner, .. } if owner == context as usize => {
+                return Ok(());
+            }
             FontAtlasRendererMode::Managed { .. } => {
                 return Err(
                     RendererConsumerError::SharedFontAtlasRequiresExclusiveContext {
@@ -125,7 +122,41 @@ pub(crate) fn claim_font_atlas_managed_renderer(
         if !font_atlas_supports_managed_renderer(raw) {
             return Err(RendererConsumerError::FontAtlasRequiresManagedRebuild);
         }
-        Ok(states.enter_managed_renderer(atlas_key, context as usize))
+        Ok(())
+    })
+}
+
+pub(crate) fn claim_validated_font_atlas_managed_renderer(
+    raw: *mut sys::ImFontAtlas,
+    context: *mut sys::ImGuiContext,
+) -> u64 {
+    debug_assert_eq!(
+        validate_font_atlas_managed_renderer(raw, context),
+        Ok(()),
+        "font atlas renderer admission must be validated before it is committed"
+    );
+    FONT_ATLAS_STATES.with(|states| {
+        let mut states = states.borrow_mut();
+        let atlas_key = raw as usize;
+        match states
+            .renderer_modes
+            .get(&atlas_key)
+            .copied()
+            .unwrap_or(FontAtlasRendererMode::Unclaimed)
+        {
+            FontAtlasRendererMode::Managed {
+                context: owner,
+                namespace,
+                ..
+            } if owner == context as usize => namespace,
+            FontAtlasRendererMode::Unclaimed | FontAtlasRendererMode::Legacy => {
+                states.enter_managed_renderer(atlas_key, context as usize)
+            }
+            FontAtlasRendererMode::Managed { .. }
+            | FontAtlasRendererMode::RendererReleasePending { .. } => {
+                unreachable!("validated font atlas renderer admission became invalid")
+            }
+        }
     })
 }
 

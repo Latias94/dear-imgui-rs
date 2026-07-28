@@ -1,0 +1,2243 @@
+//! Render-world extraction data for the Bevy backend.
+//!
+//! The main world moves one [`FrameSnapshot`](dear_imgui_rs::render::snapshot::FrameSnapshot)
+//! through a bounded mailbox and associates it with the Bevy cameras that should receive ImGui
+//! overlay rendering. The render world owns the snapshot until request-bound texture feedback is
+//! committed, without borrowing raw ImGui draw data across worlds.
+
+use bevy_app::App;
+use bevy_asset::{Assets, Handle, uuid_handle};
+use bevy_camera::{
+    Camera, CameraMainTextureUsages, CameraOutputMode, ClearColor, ClearColorConfig,
+    CompositingSpace, NormalizedRenderTarget, RenderTarget, Viewport,
+};
+use bevy_core_pipeline::{Core2d, Core2dSystems, Core3d, Core3dSystems, upscaling::upscaling};
+use bevy_ecs::entity::ContainsEntity;
+use bevy_ecs::prelude::*;
+use bevy_ecs::schedule::ScheduleLabel;
+use bevy_ecs::system::SystemParam;
+use bevy_image::Image;
+use bevy_math::{UVec2, UVec4};
+use bevy_mesh::VertexBufferLayout;
+use bevy_render::{
+    Extract, ExtractSchedule, Render, RenderApp, RenderStartup, RenderSystems,
+    camera::ExtractedCamera,
+    render_asset::RenderAssets,
+    render_resource::{
+        BindGroup, BindGroupEntry, BindGroupLayout, BindGroupLayoutDescriptor, BindingResource,
+        BindingType, BlendState, Buffer, BufferAddress, BufferBindingType, BufferDescriptor,
+        BufferSize, BufferUsages, COPY_BUFFER_ALIGNMENT, CachedRenderPipelineId, ColorTargetState,
+        ColorWrites, CommandEncoderDescriptor, Extent3d, FilterMode, FragmentState, IndexFormat,
+        LoadOp, MipmapFilterMode, MultisampleState, Operations, Origin3d, PipelineCache,
+        PrimitiveState, PrimitiveTopology, RawBufferVec, RenderPassColorAttachment,
+        RenderPassDescriptor, RenderPipelineDescriptor, Sampler, SamplerBindingType,
+        SamplerDescriptor, ShaderStages, SpecializedRenderPipeline, SpecializedRenderPipelines,
+        StoreOp, TexelCopyBufferLayout, TexelCopyTextureInfo, Texture, TextureAspect,
+        TextureDescriptor, TextureDimension, TextureFormat, TextureSampleType, TextureUsages,
+        TextureView, TextureViewDescriptor, TextureViewDimension, VertexAttribute, VertexFormat,
+        VertexState, VertexStepMode, WgpuFeatures,
+    },
+    renderer::{
+        RenderContext, RenderDevice, RenderGraph, RenderGraphSystems, RenderQueue, ViewQuery,
+    },
+    texture::GpuImage,
+    view::{ExtractedView, ExtractedWindows, Msaa, RetainedViewEntity, ViewTarget},
+};
+use bevy_shader::Shader;
+use bevy_window::{PrimaryWindow, Window};
+use bytemuck::{Pod, Zeroable};
+use dear_imgui_rs as imgui;
+use imgui::render::{DrawCmdSnapshot, DrawIdx, SnapshotTextureId, TextureBinding};
+use std::collections::{HashMap, HashSet};
+use std::mem::size_of;
+use std::sync::{Arc, Mutex, MutexGuard};
+
+use crate::viewport::ImguiViewportOwner;
+use crate::{ImguiViewportCamera, ImguiViewportWindow};
+
+mod extract;
+mod pass;
+mod pipeline;
+mod plugin;
+mod prepare;
+mod resources;
+
+#[cfg(test)]
+pub(crate) use pipeline::{
+    IMGUI_FRAGMENT_ENTRY_POINT, IMGUI_VERTEX_ENTRY_POINT, ImguiPipelineKey,
+    imgui_vertex_buffer_layout,
+};
+pub(crate) use pipeline::{
+    IMGUI_SHADER_HANDLE, IMGUI_SHADER_SOURCE, ImguiGpuVertex, ImguiRenderPipeline, ImguiUniforms,
+};
+pub use plugin::ImguiRenderSystems;
+#[cfg(feature = "bevy-ui")]
+pub use plugin::ImguiUiRenderOrder;
+#[cfg(not(feature = "bevy-ui"))]
+pub(crate) use plugin::ImguiUiRenderOrder;
+pub(crate) use plugin::{
+    clear_standard_draw_callbacks_if_owned, install_render_extraction,
+    install_standard_draw_callbacks_for_context, render_integration_available,
+    standard_draw_callback_conflict, standard_draw_callback_contract,
+    standard_draw_callback_occupied,
+};
+pub(crate) use resources::{
+    ImguiCameraTarget, ImguiCameraViewport, ImguiExtractedBevyTextures, ImguiExtractedRenderFrame,
+    ImguiGpuBuffers, ImguiPipelineGpuResources, ImguiPreparedDraw, ImguiPreparedRenderFrame,
+    ImguiQueuedPipelines, ImguiSampler, ImguiScissorRect, ImguiTextureBindGroups,
+};
+pub(crate) use resources::{ImguiRendererReleaseLease, ImguiRendererReleases};
+
+#[cfg(test)]
+#[path = "tests/render_extract.rs"]
+mod render_extract_tests;
+#[cfg(test)]
+#[path = "tests/texture.rs"]
+mod texture_tests;
+
+type ViewportCameraQuery<'w> = Query<
+    'w,
+    'w,
+    (
+        Entity,
+        &'w Camera,
+        &'w RenderTarget,
+        &'w bevy_render::camera::CameraRenderGraph,
+        &'w ImguiViewportCamera,
+        &'w ImguiViewportOwner,
+    ),
+>;
+
+type ViewportWindowQuery<'w> = Query<
+    'w,
+    'w,
+    (&'w Window, &'w ImguiViewportWindow, &'w ImguiViewportOwner),
+    With<ImguiViewportWindow>,
+>;
+
+const COPY_BYTES_PER_ROW_ALIGNMENT: u32 = 256;
+const MANAGED_TEXTURE_NAMESPACE: u64 = 0x4000_0000_0000_0000;
+
+#[cfg(test)]
+mod tests {
+    use super::pass::backend_owned_viewport_windows;
+    use super::plugin::{
+        imgui_bevy_draw_callback_linear, imgui_bevy_draw_callback_nearest,
+        imgui_bevy_draw_callback_reset,
+    };
+    use super::prepare::{
+        convert_imgui_texture_pixels, convert_imgui_texture_update_rects,
+        draw_indices_reference_out_of_bounds, initialize_imgui_gpu_resources,
+        intersect_scissor_with_camera_viewport, managed_texture_extent_supported,
+        prepare_bevy_image_texture_bind_groups, prepare_draw_data,
+        retain_extracted_bevy_image_bindings, scissor_for_render_pass, scissor_from_clip_rect,
+        validate_texture_update_rect,
+    };
+    use super::resources::{
+        BevyImageBindingSource, ImguiTextureViewCompatibility, pad_index_buffer_for_copy_alignment,
+    };
+    use super::*;
+    use bevy_asset::AssetId;
+    use bevy_ecs::schedule::ScheduleLabel;
+    use bevy_render::render_resource::{SamplerId, TextureViewId};
+    use bevy_render::{renderer::initialize_renderer, settings::WgpuSettings};
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    use bevy_window::Window;
+
+    type RawDrawCallback =
+        unsafe extern "C" fn(*const imgui::sys::ImDrawList, *const imgui::sys::ImDrawCmd);
+
+    fn assert_fn_ptr_eq(actual: imgui::sys::ImDrawCallback, expected: RawDrawCallback) {
+        assert_eq!(
+            actual.map(|callback| std::ptr::fn_addr_eq(callback, expected) as u8),
+            Some(1)
+        );
+    }
+
+    fn managed_context() -> imgui::Context {
+        let mut context = imgui::Context::create();
+        context.io_mut().set_config_input_trickle_event_queue(false);
+        context.prepare_frame(
+            imgui::FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
+        );
+        let _ = context.font_atlas().build();
+        let _ = context.set_ini_filename::<std::path::PathBuf>(None);
+        context
+    }
+
+    fn managed_snapshot(
+        context: &mut imgui::Context,
+        consumer: &imgui::render::RendererConsumer,
+        texture: Option<imgui::ManagedTextureId>,
+    ) -> imgui::render::FrameSnapshot {
+        context.prepare_frame(
+            imgui::FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
+        );
+        let frame = context.begin_frame();
+        if let Some(texture) = texture {
+            frame.ui().image(texture, [16.0, 16.0]);
+        }
+        frame
+            .render_snapshot(consumer)
+            .expect("managed frame should produce a Context-owned snapshot")
+    }
+
+    fn user_texture_request(
+        snapshot: &imgui::render::FrameSnapshot,
+        texture: imgui::ManagedTextureId,
+    ) -> &imgui::render::snapshot::TextureRequest {
+        snapshot
+            .texture_requests()
+            .iter()
+            .find(|request| request.texture() == imgui::render::SnapshotTextureId::User(texture))
+            .expect("snapshot should contain the user texture request")
+    }
+
+    fn register_test_texture(context: &mut imgui::Context) -> imgui::ManagedTextureId {
+        let mut texture = imgui::texture::OwnedTextureData::new();
+        texture.create(imgui::TextureFormat::RGBA32, 1, 1);
+        texture.set_data(&[255, 255, 255, 255]);
+        context.register_texture(texture)
+    }
+
+    fn pending_frame(
+        frame_index: u64,
+        snapshot: imgui::render::FrameSnapshot,
+    ) -> crate::context::PendingFrame {
+        crate::context::PendingFrame {
+            frame_index,
+            include_platform_viewports: false,
+            render_routes: crate::route::ImguiRenderRouteEpoch::default(),
+            snapshot,
+        }
+    }
+
+    #[test]
+    fn renderer_release_rejects_stale_and_cross_context_acknowledgements() {
+        let context_a = test_context_id();
+        let context_b = test_context_id();
+        let releases = ImguiRendererReleases::default();
+        let lease_a = releases.admit(context_a);
+        let lease_b = releases.admit(context_b);
+
+        assert!(!lease_a.request_release());
+        assert!(!lease_b.request_release());
+        let requested = releases.requested_releases();
+        assert_eq!(requested.len(), 2);
+        let generation_a = requested
+            .iter()
+            .find_map(|(context_id, generation)| (*context_id == context_a).then_some(*generation))
+            .expect("Context A should request renderer release");
+        let generation_b = requested
+            .iter()
+            .find_map(|(context_id, generation)| (*context_id == context_b).then_some(*generation))
+            .expect("Context B should request renderer release");
+        assert_ne!(generation_a, generation_b);
+
+        assert!(!releases.acknowledge_release(
+            context_b,
+            generation_a,
+            super::resources::ImguiRendererReleasePacket::default(),
+        ));
+        assert!(!releases.acknowledge_release(
+            context_a,
+            generation_b,
+            super::resources::ImguiRendererReleasePacket::default(),
+        ));
+        assert_eq!(releases.requested_releases(), requested);
+
+        assert!(releases.acknowledge_release(
+            context_a,
+            generation_a,
+            super::resources::ImguiRendererReleasePacket::default(),
+        ));
+        assert!(lease_a.request_release());
+        assert!(
+            releases.release_requested(context_b),
+            "acknowledging Context A must leave Context B's request intact"
+        );
+        assert_eq!(
+            releases.requested_releases(),
+            vec![(context_b, generation_b)]
+        );
+
+        lease_a.release_renderer_resources();
+        lease_a.retire();
+        assert!(releases.acknowledge_release(
+            context_b,
+            generation_b,
+            super::resources::ImguiRendererReleasePacket::default(),
+        ));
+        lease_b.release_renderer_resources();
+        lease_b.retire();
+        assert_eq!(releases.len(), 0);
+    }
+
+    #[test]
+    fn renderer_recovery_coalesces_repeated_device_generations_per_context() {
+        let context_a = test_context_id();
+        let context_b = test_context_id();
+        let releases = ImguiRendererReleases::default();
+        let lease_a = releases.admit(context_a);
+        let lease_b = releases.admit(context_b);
+
+        assert!(releases.begin_device_recovery(1, HashMap::new()));
+        assert!(releases.recovery_requested(context_a));
+        assert!(releases.recovery_requested(context_b));
+        assert!(
+            !releases.begin_device_recovery(1, HashMap::new()),
+            "the same render-device generation must be rejected as stale"
+        );
+        assert!(
+            releases.begin_device_recovery(2, HashMap::new()),
+            "a newer device generation must supersede unfinished recovery work"
+        );
+
+        lease_a.release_renderer_resources();
+        assert!(
+            releases.begin_device_recovery(3, HashMap::new()),
+            "a newer device generation must supersede a Context after its old packet is released"
+        );
+        lease_a.finish_device_recovery();
+        assert!(!releases.release_requested(context_a));
+        assert!(
+            releases.recovery_requested(context_b),
+            "finishing Context A must not resume Context B"
+        );
+
+        lease_b.release_renderer_resources();
+        lease_b.finish_device_recovery();
+        assert!(!releases.release_requested(context_b));
+    }
+
+    #[test]
+    fn renderer_teardown_wins_when_device_recovery_interleaves() {
+        let context_a = test_context_id();
+        let context_b = test_context_id();
+        let releases = ImguiRendererReleases::default();
+        let lease_a = releases.admit(context_a);
+        let lease_b = releases.admit(context_b);
+
+        assert!(!lease_a.request_release());
+        assert!(releases.begin_device_recovery(1, HashMap::new()));
+        assert!(
+            !releases.recovery_requested(context_a),
+            "a Context already being removed must not re-enter renderer recovery"
+        );
+        assert!(releases.recovery_requested(context_b));
+        assert!(
+            lease_a.request_release(),
+            "device recovery must transfer an existing teardown packet without another render ack"
+        );
+
+        lease_a.release_renderer_resources();
+        lease_a.retire();
+        assert_eq!(releases.len(), 1);
+        assert!(releases.recovery_requested(context_b));
+
+        lease_b.release_renderer_resources();
+        lease_b.finish_device_recovery();
+        assert!(!releases.release_requested(context_b));
+    }
+
+    #[test]
+    fn driver_skips_teardown_during_device_recovery_and_frames_other_context() {
+        #[derive(ScheduleLabel, Clone, Debug, Eq, Hash, PartialEq)]
+        struct RecoveryContextPass;
+
+        let mut app = App::new();
+        app.add_plugins(bevy_render::extract_plugin::ExtractPlugin::default());
+        app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
+        app.init_schedule(RecoveryContextPass);
+        app.add_plugins(crate::ImguiPlugin::default());
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+
+        let (context_a, context_b) = {
+            let mut contexts = app
+                .world_mut()
+                .get_non_send_mut::<crate::ImguiContexts>()
+                .unwrap();
+            let context_a = contexts.primary_id().unwrap();
+            let context_b = contexts
+                .create(crate::ImguiContextConfig::new(RecoveryContextPass))
+                .unwrap();
+            for context_id in [context_a, context_b] {
+                contexts
+                    .configure(context_id, |context| {
+                        assert!(context.font_atlas().build());
+                    })
+                    .unwrap();
+            }
+            (context_a, context_b)
+        };
+        let releases = app.world().resource::<ImguiRendererReleases>().clone();
+
+        assert!(matches!(
+            app.world_mut()
+                .get_non_send_mut::<crate::ImguiContexts>()
+                .unwrap()
+                .remove(context_a),
+            Err(crate::ImguiContextError::RemovalPending {
+                context_id,
+                reason:
+                    crate::context::ownership::ImguiContextRemovalPendingReason::RenderWorldReleasePending,
+            }) if context_id == context_a
+        ));
+        assert!(
+            releases.begin_device_recovery(1, HashMap::new()),
+            "the test device generation must detach both renderer leases"
+        );
+        assert!(
+            !releases.recovery_requested(context_a),
+            "teardown must convert Context A's recovery packet into its final release"
+        );
+        assert!(
+            releases.recovery_requested(context_b),
+            "the live Context must enter renderer recovery independently"
+        );
+
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| app.update()))
+            .expect("driver recovery must not panic while another Context is tearing down");
+        {
+            let contexts = app.world().get_non_send::<crate::ImguiContexts>().unwrap();
+            assert_eq!(contexts.frame_index(context_a).unwrap(), 0);
+            assert_eq!(
+                contexts.frame_index(context_b).unwrap(),
+                1,
+                "Context B must recover and frame while Context A remains quarantined"
+            );
+            assert!(contexts.is_tearing_down(context_a));
+        }
+        assert!(!releases.recovery_requested(context_b));
+
+        let removed = app
+            .world_mut()
+            .get_non_send_mut::<crate::ImguiContexts>()
+            .unwrap()
+            .remove(context_a)
+            .expect("Context A must consume the recovery-detached release packet");
+        assert_eq!(removed.id(), context_a);
+        drop(removed);
+
+        app.update();
+        assert_eq!(
+            app.world()
+                .get_non_send::<crate::ImguiContexts>()
+                .unwrap()
+                .frame_index(context_b)
+                .unwrap(),
+            2,
+            "Context B must remain live after Context A finishes removal"
+        );
+    }
+
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    #[test]
+    fn renderer_release_and_viewport_drain_converge_without_resuming_frames() {
+        let mut app = App::new();
+        app.add_plugins(bevy_render::extract_plugin::ExtractPlugin::default());
+        app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
+        app.add_plugins(crate::ImguiPlugin::new(
+            crate::ImguiPluginConfig::default().with_multi_viewport(true),
+        ));
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+        let primary_id = app
+            .world()
+            .get_non_send::<crate::ImguiContexts>()
+            .unwrap()
+            .primary_id()
+            .unwrap();
+        app.world_mut()
+            .get_non_send_mut::<crate::ImguiContexts>()
+            .unwrap()
+            .configure(primary_id, |context| {
+                context.font_atlas().build();
+            })
+            .unwrap();
+        let viewport_id = imgui::Id::from(0xA11);
+        assert!(
+            app.world()
+                .get_non_send::<crate::ImguiViewportBridge>()
+                .unwrap()
+                .queue_for_context(
+                    primary_id,
+                    crate::viewport::ImguiViewportCommand::Create(crate::ImguiViewportSnapshot {
+                        id: viewport_id,
+                        pos: [10.0, 20.0],
+                        size: [320.0, 180.0],
+                        dpi_scale: 1.0,
+                        flags: imgui::ViewportFlags::IS_PLATFORM_WINDOW,
+                    },),
+                ),
+            "the primary Context must own a registered viewport bridge"
+        );
+        app.update();
+        assert!(
+            app.world()
+                .get_non_send::<crate::ImguiViewportBridge>()
+                .unwrap()
+                .viewport_window(primary_id, viewport_id)
+                .is_some()
+        );
+
+        let frame_index = app
+            .world()
+            .get_non_send::<crate::ImguiContexts>()
+            .unwrap()
+            .frame_index(primary_id)
+            .unwrap();
+        let releases = app.world().resource::<ImguiRendererReleases>().clone();
+        app.sub_app_mut(RenderApp).update_schedule = None;
+        assert!(matches!(
+            app.world_mut()
+                .get_non_send_mut::<crate::ImguiContexts>()
+                .unwrap()
+                .remove(primary_id),
+            Err(crate::ImguiContextError::RemovalPending {
+                context_id,
+                reason: crate::context::ownership::ImguiContextRemovalPendingReason::ViewportWorldReleasePending,
+            }) if context_id == primary_id
+        ));
+        assert!(
+            app.world()
+                .get_non_send::<crate::ImguiContexts>()
+                .unwrap()
+                .contains(primary_id),
+            "a pending removal must retain Context ownership for retry"
+        );
+        let requested = releases.requested_releases();
+        let [(requested_context, generation)] = requested.as_slice() else {
+            panic!("the primary Context should request renderer release");
+        };
+        assert_eq!(*requested_context, primary_id);
+
+        app.update();
+        assert_eq!(
+            app.world()
+                .get_non_send::<crate::ImguiContexts>()
+                .unwrap()
+                .frame_index(primary_id)
+                .unwrap(),
+            frame_index,
+            "viewport drain must not resume native frame production"
+        );
+        assert!(
+            app.world()
+                .get_non_send::<crate::ImguiViewportBridge>()
+                .unwrap()
+                .viewport_window(primary_id, viewport_id)
+                .is_none(),
+            "viewport entities must drain without waiting for renderer acknowledgement"
+        );
+
+        assert!(matches!(
+            app.world_mut()
+                .get_non_send_mut::<crate::ImguiContexts>()
+                .unwrap()
+                .remove(primary_id),
+            Err(crate::ImguiContextError::RemovalPending {
+                context_id,
+                reason: crate::context::ownership::ImguiContextRemovalPendingReason::RenderWorldReleasePending,
+            }) if context_id == primary_id
+        ));
+        assert!(releases.acknowledge_release(
+            primary_id,
+            *generation,
+            super::resources::ImguiRendererReleasePacket::default(),
+        ));
+        assert!(releases.release_requested(primary_id));
+
+        let context = app
+            .world_mut()
+            .get_non_send_mut::<crate::ImguiContexts>()
+            .unwrap()
+            .remove(primary_id)
+            .expect("viewport and renderer release acknowledgements must complete removal");
+        assert_eq!(context.id(), primary_id);
+        assert!(
+            !app.world()
+                .get_non_send::<crate::ImguiContexts>()
+                .unwrap()
+                .contains(primary_id),
+            "a completed retry must remove exactly the requested Context"
+        );
+    }
+
+    #[test]
+    fn managed_texture_tombstone_blocks_revival_until_renderer_reset() {
+        let mut context = managed_context();
+        let first = imgui::render::SnapshotTextureId::User(register_test_texture(&mut context));
+        let second = imgui::render::SnapshotTextureId::User(register_test_texture(&mut context));
+        let context_id = context.id();
+        let mut bindings = ImguiTextureBindGroups::default();
+
+        let first_renderer_id = bindings.managed_texture_id(first);
+        bindings.destroy_managed_texture(first, 4);
+        bindings.destroy_managed_texture(first, 5);
+        assert!(bindings.managed_texture_is_destroyed(first));
+        assert!(!bindings.managed_texture_ids.contains_key(&first));
+        assert!(
+            !bindings
+                .managed_texture_aliases
+                .contains_key(&first_renderer_id)
+        );
+
+        let released = bindings.take_managed_renderer_state(context_id);
+        assert!(released.is_empty());
+        assert!(!bindings.managed_texture_is_destroyed(first));
+        let second_renderer_id = bindings.managed_texture_id(second);
+        assert_ne!(second_renderer_id, first_renderer_id);
+    }
+
+    #[test]
+    fn managed_texture_tombstones_prune_after_completed_epochs() {
+        let mut context = managed_context();
+        let context_id = context.id();
+        let mut bindings = ImguiTextureBindGroups::default();
+        let mut ids = Vec::new();
+        for _ in 0..128 {
+            ids.push(imgui::render::SnapshotTextureId::User(
+                register_test_texture(&mut context),
+            ));
+        }
+
+        for (epoch, id) in ids.iter().copied().enumerate() {
+            bindings.destroy_managed_texture(id, epoch as u64 + 1);
+        }
+        assert_eq!(bindings.destroyed_managed_textures.len(), ids.len());
+        assert!(bindings.managed_texture_is_destroyed(ids[0]));
+
+        bindings.prune_destroyed_managed_textures(&HashMap::from([(context_id, 127)]));
+        assert_eq!(bindings.destroyed_managed_textures.len(), 1);
+        assert!(bindings.managed_texture_is_destroyed(ids[127]));
+
+        bindings.prune_destroyed_managed_textures(&HashMap::from([(context_id, 128)]));
+        assert!(bindings.destroyed_managed_textures.is_empty());
+        assert!(
+            !bindings.managed_texture_is_destroyed(ids[0]),
+            "a tombstone is retired only after its destroy epoch is complete"
+        );
+    }
+
+    #[test]
+    fn stale_create_and_update_uploads_cannot_revive_a_destroyed_texture() {
+        let mut context = managed_context();
+        let texture = imgui::render::SnapshotTextureId::User(register_test_texture(&mut context));
+        let context_id = context.id();
+        let mut bindings = ImguiTextureBindGroups::default();
+        let renderer_id = bindings.managed_texture_id(texture);
+        assert!(!renderer_id.is_null());
+        bindings.destroy_managed_texture(texture, 7);
+
+        for operation in ["Create", "Update"] {
+            assert!(
+                !bindings.accepts_managed_texture_upload(texture),
+                "a stale {operation} request must be rejected by the same gate used by the render system"
+            );
+            if bindings.accepts_managed_texture_upload(texture) {
+                let _ = bindings.managed_texture_id(texture);
+            }
+            assert!(
+                !bindings.managed_texture_ids.contains_key(&texture),
+                "a stale {operation} request must not allocate a replacement renderer ID"
+            );
+            assert!(
+                !bindings
+                    .textures
+                    .contains_key(&TextureBinding::Managed(texture)),
+                "a stale {operation} request must not restore a managed GPU binding"
+            );
+        }
+
+        bindings.prune_destroyed_managed_textures(&HashMap::from([(context_id, 6)]));
+        assert!(!bindings.accepts_managed_texture_upload(texture));
+        bindings.prune_destroyed_managed_textures(&HashMap::from([(context_id, 7)]));
+        assert!(bindings.accepts_managed_texture_upload(texture));
+    }
+
+    #[test]
+    fn context_teardown_waits_for_render_world_release_before_native_mutation() {
+        let context = managed_context();
+        let mut owner = crate::context::ownership::ContextOwner::new(context.suspend());
+        let releases = ImguiRendererReleases::default();
+        let backend = crate::context::ownership::BackendAttachment {
+            render_integration_installed: true,
+            #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+            viewport_bridge_registration: None,
+            renderer_releases: Some(releases.clone()),
+        };
+        owner.preflight_renderer_admission(&backend).unwrap();
+        owner.commit_renderer_admission(&backend);
+        let renderer_texture = imgui::TextureId::new(0xCAFE);
+        let texture = owner
+            .try_with_active_renderer_context(false, |context, consumer| {
+                let consumer = consumer.expect("renderer admission must install a consumer");
+                let texture = register_test_texture(context);
+                let snapshot = managed_snapshot(context, consumer, Some(texture));
+                let feedback = user_texture_request(&snapshot, texture)
+                    .uploaded(renderer_texture)
+                    .unwrap();
+                snapshot.commit([feedback]).unwrap();
+                context.poll_snapshot_completions().unwrap();
+                Ok::<_, ()>(texture)
+            })
+            .unwrap();
+
+        let error = owner
+            .try_detach_backend()
+            .expect_err("live render-world resources must prevent Context teardown");
+        assert_eq!(
+            error,
+            crate::context::ownership::ImguiContextRemovalPendingReason::RenderWorldReleasePending
+        );
+        owner
+            .try_with_active_renderer_context(false, |context, _| {
+                context
+                    .with_texture(texture, |texture| {
+                        assert_eq!(texture.status(), imgui::TextureStatus::OK);
+                        assert_eq!(texture.texture_id(), renderer_texture);
+                    })
+                    .unwrap();
+                Ok::<_, ()>(())
+            })
+            .unwrap();
+
+        let requested = releases.requested_releases();
+        let [(requested_context, generation)] = requested.as_slice() else {
+            panic!("the owned Context should request renderer release");
+        };
+        assert!(releases.acknowledge_release(
+            *requested_context,
+            *generation,
+            super::resources::ImguiRendererReleasePacket::default(),
+        ));
+        owner
+            .try_detach_backend()
+            .expect("acknowledged render-world release should allow teardown");
+        assert_eq!(releases.len(), 0);
+        let mut context = owner.into_suspended();
+        context
+            .try_with_active(|context| {
+                context
+                    .with_texture(texture, |texture| {
+                        assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+                        assert!(texture.texture_id().is_null());
+                    })
+                    .unwrap();
+                Ok::<_, ()>(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn device_recovery_resets_each_context_texture_and_resumes_its_consumer() {
+        let releases = ImguiRendererReleases::default();
+        let backend = crate::context::ownership::BackendAttachment {
+            render_integration_installed: true,
+            #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+            viewport_bridge_registration: None,
+            renderer_releases: Some(releases.clone()),
+        };
+        let make_owner = || {
+            let context = managed_context();
+            let context_id = context.id();
+            let mut owner = crate::context::ownership::ContextOwner::new(context.suspend());
+            owner.preflight_renderer_admission(&backend).unwrap();
+            owner.commit_renderer_admission(&backend);
+            let texture = owner
+                .try_with_active_renderer_context(false, |context, consumer| {
+                    let consumer = consumer.expect("renderer admission must install a consumer");
+                    let texture = register_test_texture(context);
+                    let snapshot = managed_snapshot(context, consumer, Some(texture));
+                    let feedback = user_texture_request(&snapshot, texture)
+                        .uploaded(imgui::TextureId::new(0xCAFE))
+                        .unwrap();
+                    snapshot.commit([feedback]).unwrap();
+                    context.poll_snapshot_completions().unwrap();
+                    Ok::<_, std::convert::Infallible>(texture)
+                })
+                .unwrap_or_else(|never| match never {});
+            (context_id, owner, texture)
+        };
+        let (context_a, mut owner_a, texture_a) = make_owner();
+        let (context_b, mut owner_b, texture_b) = make_owner();
+
+        assert!(releases.begin_device_recovery(1, HashMap::new()));
+        assert!(releases.recovery_requested(context_a));
+        assert!(releases.recovery_requested(context_b));
+        assert!(owner_a.try_recover_renderer().is_ok());
+        assert!(owner_b.try_recover_renderer().is_ok());
+
+        for (owner, context_id, texture) in [
+            (&mut owner_a, context_a, texture_a),
+            (&mut owner_b, context_b, texture_b),
+        ] {
+            assert!(!releases.recovery_requested(context_id));
+            owner
+                .try_with_active_renderer_context(false, |context, consumer| {
+                    assert!(
+                        consumer.is_some(),
+                        "device recovery must resume the admitted renderer consumer"
+                    );
+                    context
+                        .with_texture(texture, |texture| {
+                            assert_eq!(texture.status(), imgui::TextureStatus::WantCreate);
+                            assert!(texture.texture_id().is_null());
+                        })
+                        .unwrap();
+                    Ok::<_, std::convert::Infallible>(())
+                })
+                .unwrap_or_else(|never| match never {});
+        }
+
+        for owner in [&mut owner_a, &mut owner_b] {
+            assert_eq!(
+                owner.try_detach_backend(),
+                Err(
+                    crate::context::ownership::ImguiContextRemovalPendingReason::RenderWorldReleasePending
+                )
+            );
+        }
+        for (context_id, generation) in releases.requested_releases() {
+            assert!(releases.acknowledge_release(
+                context_id,
+                generation,
+                super::resources::ImguiRendererReleasePacket::default(),
+            ));
+        }
+        owner_a.try_detach_backend().unwrap();
+        owner_b.try_detach_backend().unwrap();
+        assert_eq!(releases.len(), 0);
+    }
+
+    #[test]
+    fn extracted_frame_commits_request_bound_create_update_and_destroy_feedback() {
+        let mut context = managed_context();
+        let consumer = context.create_renderer_consumer().unwrap();
+
+        let mut texture_data = imgui::texture::OwnedTextureData::new();
+        texture_data.create(imgui::TextureFormat::RGBA32, 1, 1);
+        texture_data.set_data(&[255, 0, 255, 255]);
+        let texture = context.register_texture(texture_data);
+        let renderer_texture = imgui::TextureId::new(0xBEEF);
+        let mut extracted = ImguiExtractedRenderFrame::default();
+
+        let create = managed_snapshot(&mut context, &consumer, Some(texture));
+        assert_eq!(
+            user_texture_request(&create, texture).kind(),
+            imgui::render::snapshot::TextureRequestKind::Create
+        );
+        let feedback = user_texture_request(&create, texture)
+            .uploaded(renderer_texture)
+            .unwrap();
+        let context_id = context.id();
+        extracted.replace(context_id, pending_frame(1, create), Vec::new());
+        extracted.extend_texture_feedback(context_id, [feedback]);
+        extracted.commit_all();
+        let progress = context.poll_snapshot_completions().unwrap();
+        assert_eq!(progress.committed(), 1);
+        assert_eq!(progress.feedback_applied(), 1);
+        context
+            .with_texture(texture, |texture| {
+                assert_eq!(texture.status(), imgui::TextureStatus::OK);
+                assert_eq!(texture.texture_id(), renderer_texture);
+            })
+            .unwrap();
+
+        context
+            .with_texture_mut(texture, |mut texture| {
+                texture.set_data(&[0, 255, 0, 255]);
+            })
+            .unwrap();
+        let update = managed_snapshot(&mut context, &consumer, Some(texture));
+        assert_eq!(
+            user_texture_request(&update, texture).kind(),
+            imgui::render::snapshot::TextureRequestKind::Update
+        );
+        let feedback = user_texture_request(&update, texture)
+            .uploaded(renderer_texture)
+            .unwrap();
+        extracted.replace(context_id, pending_frame(2, update), Vec::new());
+        extracted.extend_texture_feedback(context_id, [feedback]);
+        extracted.commit_all();
+        let progress = context.poll_snapshot_completions().unwrap();
+        assert_eq!(progress.committed(), 1);
+        assert_eq!(progress.feedback_applied(), 1);
+
+        context.remove_texture(texture).unwrap();
+        let destroy = managed_snapshot(&mut context, &consumer, None);
+        assert_eq!(
+            user_texture_request(&destroy, texture).kind(),
+            imgui::render::snapshot::TextureRequestKind::Destroy
+        );
+        let feedback = user_texture_request(&destroy, texture).destroyed().unwrap();
+        extracted.replace(context_id, pending_frame(3, destroy), Vec::new());
+        extracted.extend_texture_feedback(context_id, [feedback]);
+        extracted.commit_all();
+        let progress = context.poll_snapshot_completions().unwrap();
+        assert_eq!(progress.committed(), 1);
+        assert_eq!(progress.feedback_applied(), 1);
+        assert!(context.with_texture(texture, |_| ()).is_err());
+    }
+
+    #[test]
+    fn extracted_render_frame_is_move_only() {
+        trait AmbiguousIfClone<Marker> {
+            fn assert_not_clone() {}
+        }
+        impl<T: ?Sized> AmbiguousIfClone<()> for T {}
+        struct Invalid;
+        impl<T: Clone> AmbiguousIfClone<Invalid> for T {}
+
+        let _ = <ImguiExtractedRenderFrame as AmbiguousIfClone<_>>::assert_not_clone;
+    }
+
+    #[test]
+    fn replacing_an_extracted_frame_abandons_only_the_previous_epoch() {
+        let mut context = managed_context();
+        let consumer = context.create_renderer_consumer().unwrap();
+        let first = managed_snapshot(&mut context, &consumer, None);
+        let second = managed_snapshot(&mut context, &consumer, None);
+        let mut extracted = ImguiExtractedRenderFrame::default();
+        let context_id = context.id();
+
+        extracted.replace(context_id, pending_frame(1, first), Vec::new());
+        extracted.replace(context_id, pending_frame(2, second), Vec::new());
+        extracted.commit_all();
+
+        let progress = context.poll_snapshot_completions().unwrap();
+        assert_eq!(progress.abandoned(), 1);
+        assert_eq!(progress.committed(), 1);
+        assert_eq!(progress.watermark(), 2);
+        extracted.commit_all();
+        let progress = context.poll_snapshot_completions().unwrap();
+        assert_eq!(progress.watermark(), 2);
+        assert_eq!(progress.committed(), 0);
+        assert_eq!(progress.abandoned(), 0);
+        assert_eq!(progress.feedback_applied(), 0);
+    }
+
+    #[test]
+    fn mailbox_epoch_jump_abandons_every_skipped_snapshot_before_committing_the_latest() {
+        let mut context = managed_context();
+        let consumer = context.create_renderer_consumer().unwrap();
+        let first = managed_snapshot(&mut context, &consumer, None);
+        let second = managed_snapshot(&mut context, &consumer, None);
+        let third = managed_snapshot(&mut context, &consumer, None);
+        assert_eq!(first.epoch().sequence(), 1);
+        assert_eq!(second.epoch().sequence(), 2);
+        assert_eq!(third.epoch().sequence(), 3);
+
+        let mailbox = crate::context::ImguiFrameMailbox::default();
+        let mut extracted = ImguiExtractedRenderFrame::default();
+        let context_id = context.id();
+        mailbox.publish(context_id, pending_frame(1, first));
+        mailbox.publish(context_id, pending_frame(2, second));
+        let second = mailbox
+            .take_all()
+            .remove(&context_id)
+            .expect("Context snapshot should remain in the mailbox");
+        extracted.replace(context_id, second, Vec::new());
+        mailbox.publish(context_id, pending_frame(3, third));
+        let third = mailbox
+            .take_all()
+            .remove(&context_id)
+            .expect("Context snapshot should remain in the mailbox");
+        extracted.replace(context_id, third, Vec::new());
+        extracted.commit_all();
+
+        let progress = context.poll_snapshot_completions().unwrap();
+        assert_eq!(progress.abandoned(), 2);
+        assert_eq!(progress.committed(), 1);
+        assert_eq!(progress.watermark(), 3);
+        mailbox.update_completion_watermark(context_id, progress.watermark());
+        extracted.begin_extraction(0, mailbox.completion_watermarks());
+        assert_eq!(extracted.completion_watermark(context_id), 3);
+    }
+
+    #[test]
+    fn replacing_context_a_mailbox_slot_does_not_touch_context_b() {
+        let mut context_a = managed_context();
+        let consumer_a = context_a.create_renderer_consumer().unwrap();
+        let first_a = managed_snapshot(&mut context_a, &consumer_a, None);
+        let second_a = managed_snapshot(&mut context_a, &consumer_a, None);
+        let context_a_id = context_a.id();
+        let mut context_a = context_a.suspend();
+
+        let mut context_b = managed_context();
+        let consumer_b = context_b.create_renderer_consumer().unwrap();
+        let first_b = managed_snapshot(&mut context_b, &consumer_b, None);
+        let context_b_id = context_b.id();
+        let mut context_b = context_b.suspend();
+
+        let mailbox = crate::context::ImguiFrameMailbox::default();
+        mailbox.publish(context_a_id, pending_frame(1, first_a));
+        mailbox.publish(context_b_id, pending_frame(1, first_b));
+        mailbox.publish(context_a_id, pending_frame(2, second_a));
+        assert_eq!(mailbox.len(), 2);
+
+        let pending = mailbox.take_all();
+        assert_eq!(pending.len(), 2);
+        assert_eq!(pending[&context_a_id].frame_index, 2);
+        assert_eq!(pending[&context_b_id].frame_index, 1);
+
+        let mut extracted = ImguiExtractedRenderFrame::default();
+        for (context_id, frame) in pending {
+            extracted.replace(context_id, frame, Vec::new());
+        }
+        extracted.commit_all();
+
+        context_a
+            .try_with_active(|context| {
+                let progress = context.poll_snapshot_completions().unwrap();
+                assert_eq!(progress.abandoned(), 1);
+                assert_eq!(progress.committed(), 1);
+                assert_eq!(progress.watermark(), 2);
+                Ok::<_, std::convert::Infallible>(())
+            })
+            .unwrap_or_else(|never| match never {});
+        context_b
+            .try_with_active(|context| {
+                let progress = context.poll_snapshot_completions().unwrap();
+                assert_eq!(progress.abandoned(), 0);
+                assert_eq!(progress.committed(), 1);
+                assert_eq!(progress.watermark(), 1);
+                Ok::<_, std::convert::Infallible>(())
+            })
+            .unwrap_or_else(|never| match never {});
+    }
+
+    #[test]
+    fn releasing_context_a_resource_packet_does_not_change_context_b() {
+        let mut context_a = managed_context();
+        let texture_a =
+            imgui::render::SnapshotTextureId::User(register_test_texture(&mut context_a));
+        let context_a = context_a.suspend();
+        let context_a_id = context_a.id();
+
+        let mut context_b_owner = managed_context();
+        let texture_b =
+            imgui::render::SnapshotTextureId::User(register_test_texture(&mut context_b_owner));
+        let context_b = context_b_owner.suspend();
+        let context_b_id = context_b.id();
+
+        let mut bindings = ImguiTextureBindGroups::default();
+        let renderer_texture_a = bindings.managed_texture_id(texture_a);
+        let renderer_texture_b = bindings.managed_texture_id(texture_b);
+        assert_ne!(renderer_texture_a, renderer_texture_b);
+
+        let releases = ImguiRendererReleases::default();
+        let lease_a = releases.admit(context_a_id);
+        let lease_b = releases.admit(context_b_id);
+
+        assert!(!lease_a.request_release());
+        let requested = releases.requested_releases();
+        let [(requested_context, generation)] = requested.as_slice() else {
+            panic!("only Context A should request release");
+        };
+        assert_eq!(*requested_context, context_a_id);
+        let packet = super::resources::ImguiRendererReleasePacket::new(
+            bindings.take_managed_renderer_state(context_a_id),
+            Vec::new(),
+        );
+        assert!(packet.is_empty());
+        assert!(!bindings.managed_texture_ids.contains_key(&texture_a));
+        assert_eq!(
+            bindings.managed_texture_ids.get(&texture_b),
+            Some(&renderer_texture_b),
+            "collecting Context A's release packet must retain Context B's renderer mapping"
+        );
+        assert!(releases.acknowledge_release(context_a_id, *generation, packet));
+
+        lease_a.release_renderer_resources();
+        lease_a.retire();
+        assert_eq!(releases.len(), 1);
+        assert!(!releases.release_requested(context_b_id));
+        assert!(releases.requested_releases().is_empty());
+
+        assert!(!lease_b.request_release());
+        let requested = releases.requested_releases();
+        let [(requested_context, generation)] = requested.as_slice() else {
+            panic!("Context B should remain independently releasable");
+        };
+        assert_eq!(*requested_context, context_b_id);
+        assert!(releases.acknowledge_release(
+            context_b_id,
+            *generation,
+            super::resources::ImguiRendererReleasePacket::default(),
+        ));
+        lease_b.release_renderer_resources();
+        lease_b.retire();
+        assert_eq!(releases.len(), 0);
+    }
+
+    #[test]
+    fn dropping_an_extracted_frame_abandons_its_epoch_once() {
+        let mut context = managed_context();
+        let consumer = context.create_renderer_consumer().unwrap();
+        let snapshot = managed_snapshot(&mut context, &consumer, None);
+        let mut extracted = ImguiExtractedRenderFrame::default();
+        let context_id = context.id();
+        extracted.replace(context_id, pending_frame(1, snapshot), Vec::new());
+
+        drop(extracted);
+
+        let progress = context.poll_snapshot_completions().unwrap();
+        assert_eq!(progress.abandoned(), 1);
+        assert_eq!(progress.committed(), 0);
+        assert_eq!(progress.watermark(), 1);
+        let progress = context.poll_snapshot_completions().unwrap();
+        assert_eq!(progress.watermark(), 1);
+        assert_eq!(progress.committed(), 0);
+        assert_eq!(progress.abandoned(), 0);
+        assert_eq!(progress.feedback_applied(), 0);
+    }
+
+    #[test]
+    fn texture_conversion_repackages_padded_rgba_rows() {
+        let pixels = [
+            1, 2, 3, 4, 9, 9, 9, 9, //
+            5, 6, 7, 8, 8, 8, 8, 8,
+        ];
+
+        let (converted, row_pitch) =
+            convert_imgui_texture_pixels(imgui::texture::TextureFormat::RGBA32, 1, 2, 8, &pixels)
+                .expect("valid padded RGBA32 upload should convert");
+
+        assert_eq!(row_pitch, 4);
+        assert_eq!(converted, [1, 2, 3, 4, 5, 6, 7, 8]);
+    }
+
+    #[test]
+    fn texture_conversion_expands_alpha8_to_white_rgba() {
+        let pixels = [0, 128, 255, 64];
+
+        let (converted, row_pitch) =
+            convert_imgui_texture_pixels(imgui::texture::TextureFormat::Alpha8, 2, 2, 2, &pixels)
+                .expect("valid Alpha8 upload should convert");
+
+        assert_eq!(row_pitch, 8);
+        assert_eq!(
+            converted,
+            [
+                255, 255, 255, 0, 255, 255, 255, 128, //
+                255, 255, 255, 255, 255, 255, 255, 64,
+            ]
+        );
+    }
+
+    #[test]
+    fn index_buffer_upload_pads_to_copy_alignment() {
+        let mut indices = RawBufferVec::new(BufferUsages::INDEX);
+        indices.push(1);
+        indices.push(2);
+        indices.push(3);
+
+        pad_index_buffer_for_copy_alignment(&mut indices);
+
+        assert_eq!(indices.len(), 4);
+        assert_eq!(indices.values(), &vec![1, 2, 3, 0]);
+    }
+
+    #[test]
+    fn gamma_helper_uses_srgb_for_srgb_targets_and_compositing_space() {
+        assert_eq!(
+            ImguiUniforms::gamma_for_target(TextureFormat::Rgba8UnormSrgb, None),
+            2.2
+        );
+        assert_eq!(
+            ImguiUniforms::gamma_for_target(
+                TextureFormat::Rgba8Unorm,
+                Some(CompositingSpace::Srgb)
+            ),
+            2.2
+        );
+        assert_eq!(
+            ImguiUniforms::gamma_for_target(TextureFormat::Rgba8Unorm, None),
+            1.0
+        );
+        assert_eq!(
+            ImguiUniforms::gamma_for_target(
+                TextureFormat::Rgba8Unorm,
+                Some(CompositingSpace::Linear)
+            ),
+            1.0
+        );
+    }
+
+    #[test]
+    fn render_installation_exposes_standard_sampler_callbacks() {
+        let mut app = App::new();
+        app.add_plugins(bevy_render::extract_plugin::ExtractPlugin::default());
+        app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
+        app.add_plugins(crate::ImguiPlugin::default());
+
+        let primary_id = app
+            .world()
+            .get_non_send::<crate::ImguiContexts>()
+            .expect("ImguiPlugin should install the Context registry")
+            .primary_id()
+            .expect("ImguiPlugin should install the primary Context");
+        app.world_mut()
+            .get_non_send_mut::<crate::ImguiContexts>()
+            .unwrap()
+            .configure(primary_id, |context| {
+                let platform_io = context.platform_io();
+                assert_fn_ptr_eq(
+                    platform_io.draw_callback_reset_render_state_raw(),
+                    imgui_bevy_draw_callback_reset,
+                );
+                assert_fn_ptr_eq(
+                    platform_io.draw_callback_set_sampler_linear_raw(),
+                    imgui_bevy_draw_callback_linear,
+                );
+                assert_fn_ptr_eq(
+                    platform_io.draw_callback_set_sampler_nearest_raw(),
+                    imgui_bevy_draw_callback_nearest,
+                );
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn standard_draw_callback_markers_keep_distinct_addresses_and_snapshot_classes() {
+        let callbacks = [
+            imgui_bevy_draw_callback_reset as RawDrawCallback,
+            imgui_bevy_draw_callback_linear as RawDrawCallback,
+            imgui_bevy_draw_callback_nearest as RawDrawCallback,
+        ];
+        for left in 0..callbacks.len() {
+            for right in left + 1..callbacks.len() {
+                assert!(
+                    !std::ptr::fn_addr_eq(callbacks[left], callbacks[right]),
+                    "standard callback markers must remain pairwise distinct after optimization"
+                );
+            }
+        }
+
+        let mut context = managed_context();
+        install_standard_draw_callbacks_for_context(&mut context).unwrap();
+        let consumer = context.create_renderer_consumer().unwrap();
+        context.prepare_frame(
+            imgui::FramePrepareOptions::new([64.0, 64.0], 1.0 / 60.0).renderer_has_textures(),
+        );
+        let frame = context.begin_frame();
+        {
+            let draw_list = frame.ui().get_background_draw_list();
+            draw_list.add_draw_cmd();
+            for callback in callbacks {
+                unsafe { draw_list.add_callback(Some(callback), std::ptr::null_mut(), 0) };
+            }
+        }
+        let snapshot = frame.render_snapshot(&consumer).unwrap();
+        let classes = snapshot
+            .draw_data()
+            .draw_lists
+            .iter()
+            .flat_map(|list| list.commands.iter())
+            .filter_map(|command| match command {
+                DrawCmdSnapshot::ResetRenderState => Some("reset"),
+                DrawCmdSnapshot::SetSamplerLinear => Some("linear"),
+                DrawCmdSnapshot::SetSamplerNearest => Some("nearest"),
+                DrawCmdSnapshot::Elements { .. } => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(classes, ["reset", "linear", "nearest"]);
+        drop(snapshot);
+        context.poll_snapshot_completions().unwrap();
+        let _ = context
+            .prepare_renderer_texture_reset(&consumer)
+            .unwrap()
+            .commit();
+    }
+
+    #[test]
+    fn prepared_draws_preserve_standard_sampler_callback_state() {
+        let camera = Entity::from_raw_u32(7).expect("test entity index should be valid");
+        let draw = imgui::render::DrawDataSnapshot {
+            display_pos: [0.0, 0.0],
+            display_size: [32.0, 32.0],
+            framebuffer_scale: [1.0, 1.0],
+            draw_lists: vec![imgui::render::DrawListSnapshot {
+                vtx: vec![
+                    imgui::render::DrawVert::new([0.0, 0.0], [0.0, 0.0], 0xFFFF_FFFF),
+                    imgui::render::DrawVert::new([1.0, 0.0], [1.0, 0.0], 0xFFFF_FFFF),
+                    imgui::render::DrawVert::new([0.0, 1.0], [0.0, 1.0], 0xFFFF_FFFF),
+                ],
+                idx: vec![0, 1, 2],
+                commands: vec![
+                    DrawCmdSnapshot::SetSamplerNearest,
+                    DrawCmdSnapshot::Elements {
+                        count: 3,
+                        clip_rect: [0.0, 0.0, 16.0, 16.0],
+                        texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
+                        vtx_offset: 0,
+                        idx_offset: 0,
+                    },
+                    DrawCmdSnapshot::ResetRenderState,
+                    DrawCmdSnapshot::Elements {
+                        count: 3,
+                        clip_rect: [0.0, 0.0, 16.0, 16.0],
+                        texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
+                        vtx_offset: 0,
+                        idx_offset: 0,
+                    },
+                ],
+            }],
+        };
+        let targets = [camera_target_for_test(camera, None)];
+
+        let (_, _, draws, _) = prepare_draw_data(&draw, &[], &targets);
+
+        assert_eq!(draws.len(), 2);
+        assert_eq!(draws[0].sampler, ImguiSampler::Nearest);
+        assert_eq!(draws[1].sampler, ImguiSampler::Linear);
+    }
+
+    #[test]
+    fn prepared_draws_preserve_sampler_state_across_draw_lists() {
+        let camera = Entity::from_raw_u32(8).expect("test entity index should be valid");
+        let draw = imgui::render::DrawDataSnapshot {
+            display_pos: [0.0, 0.0],
+            display_size: [32.0, 32.0],
+            framebuffer_scale: [1.0, 1.0],
+            draw_lists: vec![
+                imgui::render::DrawListSnapshot {
+                    vtx: vec![
+                        imgui::render::DrawVert::new([0.0, 0.0], [0.0, 0.0], 0xFFFF_FFFF),
+                        imgui::render::DrawVert::new([1.0, 0.0], [1.0, 0.0], 0xFFFF_FFFF),
+                        imgui::render::DrawVert::new([0.0, 1.0], [0.0, 1.0], 0xFFFF_FFFF),
+                    ],
+                    idx: vec![0, 1, 2],
+                    commands: vec![
+                        DrawCmdSnapshot::SetSamplerNearest,
+                        DrawCmdSnapshot::Elements {
+                            count: 3,
+                            clip_rect: [0.0, 0.0, 16.0, 16.0],
+                            texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
+                            vtx_offset: 0,
+                            idx_offset: 0,
+                        },
+                    ],
+                },
+                imgui::render::DrawListSnapshot {
+                    vtx: vec![
+                        imgui::render::DrawVert::new([2.0, 0.0], [0.0, 0.0], 0xFFFF_FFFF),
+                        imgui::render::DrawVert::new([3.0, 0.0], [1.0, 0.0], 0xFFFF_FFFF),
+                        imgui::render::DrawVert::new([2.0, 1.0], [0.0, 1.0], 0xFFFF_FFFF),
+                    ],
+                    idx: vec![0, 1, 2],
+                    commands: vec![DrawCmdSnapshot::Elements {
+                        count: 3,
+                        clip_rect: [0.0, 0.0, 16.0, 16.0],
+                        texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
+                        vtx_offset: 0,
+                        idx_offset: 0,
+                    }],
+                },
+            ],
+        };
+        let targets = [camera_target_for_test(camera, None)];
+
+        let (_, _, draws, _) = prepare_draw_data(&draw, &[], &targets);
+
+        assert_eq!(draws.len(), 2);
+        assert_eq!(draws[0].sampler, ImguiSampler::Nearest);
+        assert_eq!(draws[1].sampler, ImguiSampler::Nearest);
+    }
+
+    #[test]
+    fn prepared_draws_skip_commands_with_out_of_range_index_or_vertex_offsets() {
+        let camera = Entity::from_raw_u32(9).expect("test entity index should be valid");
+        let draw = imgui::render::DrawDataSnapshot {
+            display_pos: [0.0, 0.0],
+            display_size: [32.0, 32.0],
+            framebuffer_scale: [1.0, 1.0],
+            draw_lists: vec![imgui::render::DrawListSnapshot {
+                vtx: vec![
+                    imgui::render::DrawVert::new([0.0, 0.0], [0.0, 0.0], 0xFFFF_FFFF),
+                    imgui::render::DrawVert::new([1.0, 0.0], [1.0, 0.0], 0xFFFF_FFFF),
+                    imgui::render::DrawVert::new([0.0, 1.0], [0.0, 1.0], 0xFFFF_FFFF),
+                ],
+                idx: vec![0, 1, 2, 3, 1, 2],
+                commands: vec![
+                    DrawCmdSnapshot::Elements {
+                        count: 1,
+                        clip_rect: [0.0, 0.0, 16.0, 16.0],
+                        texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
+                        vtx_offset: 0,
+                        idx_offset: 6,
+                    },
+                    DrawCmdSnapshot::Elements {
+                        count: 1,
+                        clip_rect: [0.0, 0.0, 16.0, 16.0],
+                        texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
+                        vtx_offset: 0,
+                        idx_offset: 3,
+                    },
+                    DrawCmdSnapshot::Elements {
+                        count: 3,
+                        clip_rect: [0.0, 0.0, 16.0, 16.0],
+                        texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
+                        vtx_offset: 4,
+                        idx_offset: 3,
+                    },
+                    DrawCmdSnapshot::Elements {
+                        count: 3,
+                        clip_rect: [0.0, 0.0, 16.0, 16.0],
+                        texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
+                        vtx_offset: 0,
+                        idx_offset: 0,
+                    },
+                ],
+            }],
+        };
+        let targets = [camera_target_for_test(camera, None)];
+
+        let (_, _, draws, _) = prepare_draw_data(&draw, &[], &targets);
+
+        assert_eq!(draws.len(), 1);
+        assert_eq!(draws[0].index_range, 0..3);
+        assert_eq!(draws[0].vertex_offset, 0);
+    }
+
+    #[test]
+    fn draw_index_validation_rejects_absolute_indices_outside_uploaded_vertices() {
+        assert!(!draw_indices_reference_out_of_bounds(&[0, 1, 2], 0, 3));
+        assert!(!draw_indices_reference_out_of_bounds(&[0, 1, 2], 3, 6));
+        assert!(draw_indices_reference_out_of_bounds(&[3], 0, 3));
+        assert!(draw_indices_reference_out_of_bounds(&[0], 3, 3));
+    }
+
+    #[test]
+    fn scissor_rejects_non_finite_or_invalid_display_rects() {
+        let mut draw = imgui::render::DrawDataSnapshot {
+            display_pos: [0.0, 0.0],
+            display_size: [32.0, 32.0],
+            framebuffer_scale: [1.0, 1.0],
+            draw_lists: Vec::new(),
+        };
+
+        assert!(scissor_from_clip_rect(&draw, [0.0, 0.0, 16.0, 16.0]).is_some());
+        assert!(scissor_from_clip_rect(&draw, [f32::NAN, 0.0, 16.0, 16.0]).is_none());
+        assert!(scissor_from_clip_rect(&draw, [8.0, 0.0, 8.0, 16.0]).is_none());
+
+        draw.display_size = [0.0, 32.0];
+        assert!(scissor_from_clip_rect(&draw, [0.0, 0.0, 16.0, 16.0]).is_none());
+
+        draw.display_size = [32.0, 32.0];
+        draw.framebuffer_scale = [f32::INFINITY, 1.0];
+        assert!(scissor_from_clip_rect(&draw, [0.0, 0.0, 16.0, 16.0]).is_none());
+
+        draw.framebuffer_scale = [-1.0, 1.0];
+        assert!(scissor_from_clip_rect(&draw, [0.0, 0.0, 16.0, 16.0]).is_none());
+    }
+
+    #[test]
+    fn render_pass_scissor_intersects_draws_with_camera_viewport_without_scaling() {
+        let scissor = intersect_scissor_with_camera_viewport(
+            ImguiScissorRect {
+                x: 320,
+                y: 180,
+                width: 640,
+                height: 360,
+            },
+            ImguiCameraViewport {
+                physical_position: [640, 0],
+                physical_size: [640, 360],
+            },
+        )
+        .expect("valid scissor should map into a valid camera viewport");
+
+        assert_eq!(
+            scissor,
+            ImguiScissorRect {
+                x: 640,
+                y: 180,
+                width: 320,
+                height: 180,
+            }
+        );
+    }
+
+    #[test]
+    fn render_pass_scissor_is_clamped_to_real_render_target_size() {
+        let scissor = scissor_for_render_pass(
+            &ImguiPreparedDraw {
+                context_id: test_context_id(),
+                route_epoch: 0,
+                camera: Entity::from_raw_u32(13).expect("test entity index should be valid"),
+                view: RetainedViewEntity::new(
+                    Entity::from_raw_u32(13)
+                        .expect("test entity index should be valid")
+                        .into(),
+                    None,
+                    0,
+                ),
+                order: 0,
+                camera_order: 0,
+                camera_schedule: Core2d.intern(),
+                target: NormalizedRenderTarget::Window(
+                    bevy_window::WindowRef::Entity(
+                        Entity::from_raw_u32(14).expect("test entity index should be valid"),
+                    )
+                    .normalize(None)
+                    .expect("entity window target should normalize"),
+                ),
+                target_format: TextureFormat::Rgba8UnormSrgb,
+                texture_usages: TextureUsages::RENDER_ATTACHMENT,
+                msaa: Msaa::Off,
+                physical_target_size: [570, 390],
+                viewport_id: Some(imgui::Id::from(0x570)),
+                texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
+                sampler: ImguiSampler::Linear,
+                scissor: ImguiScissorRect {
+                    x: 0,
+                    y: 0,
+                    width: 570,
+                    height: 392,
+                },
+                framebuffer_size: [570, 392],
+                camera_viewport: None,
+                index_range: 0..3,
+                vertex_offset: 0,
+            },
+            Some([570, 390]),
+        )
+        .expect("overlapping scissor should be clipped instead of rejected");
+
+        assert_eq!(
+            scissor,
+            ImguiScissorRect {
+                x: 0,
+                y: 0,
+                width: 570,
+                height: 390,
+            },
+            "render pass scissors must never exceed the real WGPU target extent"
+        );
+    }
+
+    #[test]
+    fn camera_viewport_uniforms_use_logical_viewport_rect_without_scaling_imgui_coordinates() {
+        let camera = Entity::from_raw_u32(12).expect("test entity index should be valid");
+        let draw = imgui::render::DrawDataSnapshot {
+            display_pos: [0.0, 0.0],
+            display_size: [640.0, 360.0],
+            framebuffer_scale: [2.0, 2.0],
+            draw_lists: vec![draw_list_for_test()],
+        };
+        let target = ImguiCameraTarget {
+            camera_viewport: Some(ImguiCameraViewport {
+                physical_position: [640, 0],
+                physical_size: [640, 720],
+            }),
+            ..camera_target_for_test(camera, None)
+        };
+
+        let (_, _, draws, uniforms_by_view) = prepare_draw_data(&draw, &[], &[target]);
+
+        assert_eq!(draws.len(), 1);
+        assert_eq!(
+            draws[0].scissor,
+            ImguiScissorRect {
+                x: 0,
+                y: 0,
+                width: 32,
+                height: 32,
+            },
+            "prepared draw scissors stay in source framebuffer coordinates"
+        );
+        assert_eq!(
+            scissor_for_render_pass(&draws[0], None),
+            None,
+            "commands outside the camera viewport are clipped instead of scaled into it"
+        );
+        assert_eq!(
+            uniforms_by_view
+                .get(&RetainedViewEntity::new(camera.into(), None, 0))
+                .copied(),
+            Some(ImguiUniforms::from_display_rect(
+                [320.0, 0.0],
+                [320.0, 360.0]
+            ))
+        );
+    }
+
+    #[test]
+    fn prepared_draws_skip_only_viewports_with_invalid_display_rects() {
+        let primary_camera = Entity::from_raw_u32(10).expect("test entity index should be valid");
+        let secondary_camera = Entity::from_raw_u32(11).expect("test entity index should be valid");
+        let secondary_viewport = imgui::Id::from(0xBEEF);
+        let draw = imgui::render::DrawDataSnapshot {
+            display_pos: [0.0, 0.0],
+            display_size: [f32::NAN, 32.0],
+            framebuffer_scale: [1.0, 1.0],
+            draw_lists: vec![draw_list_for_test()],
+        };
+        let viewports = [imgui::render::ViewportDrawDataSnapshot::new(
+            secondary_viewport,
+            false,
+            imgui::render::DrawDataSnapshot {
+                display_pos: [0.0, 0.0],
+                display_size: [32.0, 32.0],
+                framebuffer_scale: [1.0, 1.0],
+                draw_lists: vec![draw_list_for_test()],
+            },
+        )];
+        let targets = [
+            camera_target_for_test(primary_camera, None),
+            camera_target_for_test(secondary_camera, Some(secondary_viewport)),
+        ];
+
+        let (_, _, draws, uniforms_by_view) = prepare_draw_data(&draw, &viewports, &targets);
+
+        assert_eq!(draws.len(), 1);
+        assert_eq!(draws[0].camera, secondary_camera);
+        assert!(!uniforms_by_view.contains_key(&RetainedViewEntity::new(
+            primary_camera.into(),
+            None,
+            0
+        )));
+        assert!(uniforms_by_view.contains_key(&RetainedViewEntity::new(
+            secondary_camera.into(),
+            None,
+            0
+        )));
+    }
+
+    #[test]
+    fn bevy_image_binding_tracking_prunes_unregistered_legacy_ids() {
+        let mut texture_bind_groups = ImguiTextureBindGroups::default();
+        let registered = TextureBinding::Legacy(imgui::TextureId::new(42));
+        let still_active = TextureBinding::Legacy(imgui::TextureId::new(43));
+
+        for binding in [registered, still_active] {
+            texture_bind_groups.bevy_image_sources.insert(
+                binding,
+                BevyImageBindingSource {
+                    texture_view: TextureViewId::new(),
+                    sampler: SamplerId::new(),
+                },
+            );
+        }
+
+        texture_bind_groups.retain_bevy_image_bindings(&HashSet::from([still_active]));
+
+        assert!(
+            !texture_bind_groups
+                .bevy_image_sources
+                .contains_key(&registered)
+        );
+        assert!(
+            texture_bind_groups
+                .bevy_image_sources
+                .contains_key(&still_active)
+        );
+    }
+
+    #[test]
+    fn extracted_bevy_image_binding_retention_does_not_require_gpu_images() {
+        let mut extracted = ImguiExtractedBevyTextures::default();
+        let mut texture_bind_groups = ImguiTextureBindGroups::default();
+        let stale = TextureBinding::Legacy(imgui::TextureId::new(42));
+        let still_active_id = imgui::TextureId::new(43);
+        let still_active = TextureBinding::Legacy(still_active_id);
+
+        for binding in [stale, still_active] {
+            texture_bind_groups.bevy_image_sources.insert(
+                binding,
+                BevyImageBindingSource {
+                    texture_view: TextureViewId::new(),
+                    sampler: SamplerId::new(),
+                },
+            );
+        }
+        extracted.replace_for_test(vec![(still_active_id, AssetId::<Image>::default())]);
+
+        retain_extracted_bevy_image_bindings(&extracted, &mut texture_bind_groups);
+
+        assert!(!texture_bind_groups.bevy_image_sources.contains_key(&stale));
+        assert!(
+            texture_bind_groups
+                .bevy_image_sources
+                .contains_key(&still_active)
+        );
+    }
+
+    #[test]
+    fn bevy_image_sampling_compatibility_accepts_filterable_float_2d_views() {
+        assert!(
+            imgui_texture_view_compatibility(TextureFormat::Rgba8Unorm)
+                .supports_imgui_sampling(WgpuFeatures::empty())
+        );
+        assert!(
+            imgui_texture_view_compatibility(TextureFormat::Rgba8UnormSrgb)
+                .supports_imgui_sampling(WgpuFeatures::empty())
+        );
+        assert!(
+            imgui_texture_view_compatibility(TextureFormat::Rgba32Float)
+                .supports_imgui_sampling(WgpuFeatures::FLOAT32_FILTERABLE)
+        );
+    }
+
+    #[test]
+    fn bevy_image_sampling_compatibility_rejects_views_that_cannot_match_imgui_layout() {
+        let unsupported_cases = [
+            imgui_texture_view_compatibility(TextureFormat::Rgba8Uint),
+            imgui_texture_view_compatibility(TextureFormat::Rgba8Sint),
+            imgui_texture_view_compatibility(TextureFormat::Depth32Float),
+            imgui_texture_view_compatibility(TextureFormat::Rgba32Float),
+            ImguiTextureViewCompatibility {
+                texture_usage: TextureUsages::COPY_DST,
+                ..imgui_texture_view_compatibility(TextureFormat::Rgba8Unorm)
+            },
+            ImguiTextureViewCompatibility {
+                view_usage: Some(TextureUsages::COPY_SRC),
+                ..imgui_texture_view_compatibility(TextureFormat::Rgba8Unorm)
+            },
+            ImguiTextureViewCompatibility {
+                sample_count: 4,
+                ..imgui_texture_view_compatibility(TextureFormat::Rgba8Unorm)
+            },
+            ImguiTextureViewCompatibility {
+                texture_dimension: TextureDimension::D3,
+                ..imgui_texture_view_compatibility(TextureFormat::Rgba8Unorm)
+            },
+            ImguiTextureViewCompatibility {
+                depth_or_array_layers: 2,
+                view_dimension: None,
+                ..imgui_texture_view_compatibility(TextureFormat::Rgba8Unorm)
+            },
+            ImguiTextureViewCompatibility {
+                depth_or_array_layers: 2,
+                view_dimension: Some(TextureViewDimension::D2Array),
+                ..imgui_texture_view_compatibility(TextureFormat::Rgba8Unorm)
+            },
+        ];
+
+        for compatibility in unsupported_cases {
+            assert!(
+                !compatibility.supports_imgui_sampling(WgpuFeatures::empty()),
+                "{compatibility:?} should not be bound to the fixed ImGui texture layout"
+            );
+        }
+    }
+
+    #[test]
+    fn managed_texture_extent_validation_rejects_zero_or_device_oversized_textures() {
+        assert!(managed_texture_extent_supported(1, 1, 2048));
+        assert!(managed_texture_extent_supported(2048, 2048, 2048));
+        assert!(!managed_texture_extent_supported(0, 1, 2048));
+        assert!(!managed_texture_extent_supported(1, 0, 2048));
+        assert!(!managed_texture_extent_supported(2049, 1, 2048));
+        assert!(!managed_texture_extent_supported(1, 2049, 2048));
+    }
+
+    #[test]
+    fn texture_update_rect_validation_rejects_empty_or_out_of_bounds_rects() {
+        assert!(validate_texture_update_rect(
+            64,
+            32,
+            imgui::TextureRect {
+                x: 8,
+                y: 4,
+                w: 16,
+                h: 8,
+            },
+        ));
+        assert!(validate_texture_update_rect(
+            64,
+            32,
+            imgui::TextureRect {
+                x: 63,
+                y: 31,
+                w: 1,
+                h: 1,
+            },
+        ));
+        assert!(!validate_texture_update_rect(
+            64,
+            32,
+            imgui::TextureRect {
+                x: 8,
+                y: 4,
+                w: 0,
+                h: 8,
+            },
+        ));
+        assert!(!validate_texture_update_rect(
+            64,
+            32,
+            imgui::TextureRect {
+                x: 8,
+                y: 4,
+                w: 16,
+                h: 0,
+            },
+        ));
+        assert!(!validate_texture_update_rect(
+            64,
+            32,
+            imgui::TextureRect {
+                x: 63,
+                y: 0,
+                w: 2,
+                h: 1,
+            },
+        ));
+        assert!(!validate_texture_update_rect(
+            64,
+            32,
+            imgui::TextureRect {
+                x: 0,
+                y: 31,
+                w: 1,
+                h: 2,
+            },
+        ));
+    }
+
+    #[test]
+    fn texture_update_rect_conversion_requires_every_requested_rect_to_convert() {
+        let valid = imgui::render::snapshot::TextureUploadRect {
+            rect: imgui::TextureRect {
+                x: 0,
+                y: 0,
+                w: 2,
+                h: 1,
+            },
+            row_pitch: 8,
+            data: vec![1, 2, 3, 4, 5, 6, 7, 8],
+        };
+
+        let converted = convert_imgui_texture_update_rects(
+            imgui::texture::TextureFormat::RGBA32,
+            4,
+            4,
+            std::slice::from_ref(&valid),
+        )
+        .expect("valid update rect should convert");
+
+        assert_eq!(converted.len(), 1);
+        assert_eq!(converted[0].origin, Origin3d { x: 0, y: 0, z: 0 });
+        assert_eq!(converted[0].width, 2);
+        assert_eq!(converted[0].height, 1);
+        assert_eq!(converted[0].row_pitch, 8);
+        assert_eq!(converted[0].pixels, valid.data);
+
+        assert!(
+            convert_imgui_texture_update_rects(imgui::texture::TextureFormat::RGBA32, 4, 4, &[],)
+                .is_none(),
+            "empty update lists must not acknowledge a texture update as complete"
+        );
+
+        let out_of_bounds = imgui::render::snapshot::TextureUploadRect {
+            rect: imgui::TextureRect {
+                x: 3,
+                y: 0,
+                w: 2,
+                h: 1,
+            },
+            row_pitch: 8,
+            data: vec![1, 2, 3, 4, 5, 6, 7, 8],
+        };
+        assert!(
+            convert_imgui_texture_update_rects(
+                imgui::texture::TextureFormat::RGBA32,
+                4,
+                4,
+                &[
+                    imgui::render::snapshot::TextureUploadRect {
+                        rect: imgui::TextureRect {
+                            x: 0,
+                            y: 0,
+                            w: 2,
+                            h: 1,
+                        },
+                        row_pitch: 8,
+                        data: vec![1, 2, 3, 4, 5, 6, 7, 8],
+                    },
+                    out_of_bounds,
+                ],
+            )
+            .is_none(),
+            "one invalid rect should keep the whole texture update pending"
+        );
+
+        let short_row = imgui::render::snapshot::TextureUploadRect {
+            rect: imgui::TextureRect {
+                x: 0,
+                y: 0,
+                w: 2,
+                h: 1,
+            },
+            row_pitch: 4,
+            data: vec![1, 2, 3, 4],
+        };
+        assert!(
+            convert_imgui_texture_update_rects(
+                imgui::texture::TextureFormat::RGBA32,
+                4,
+                4,
+                &[valid, short_row],
+            )
+            .is_none(),
+            "one unconvertible rect should keep the whole texture update pending"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires DEAR_IMGUI_BEVY_GPU_HARNESS=1 and a working native wgpu adapter"]
+    fn bevy_image_texture_bind_groups_use_real_render_assets_when_gpu_harness_is_enabled() {
+        if std::env::var_os("DEAR_IMGUI_BEVY_GPU_HARNESS").is_none() {
+            return;
+        }
+
+        let RenderHarnessResources {
+            render_device,
+            pipeline_cache,
+            ..
+        } = initialize_render_harness_resources();
+        let pipeline = ImguiRenderPipeline::default();
+        let mut extracted = ImguiExtractedBevyTextures::default();
+        let mut gpu_images = RenderAssets::<GpuImage>::default();
+        let mut texture_bind_groups = ImguiTextureBindGroups::default();
+        let texture_id = imgui::TextureId::new(42);
+        let image_id = AssetId::<Image>::default();
+        let binding = TextureBinding::Legacy(texture_id);
+
+        extracted.replace_for_test(vec![(texture_id, image_id)]);
+        let mut current_image = gpu_image(&render_device, TextureUsages::TEXTURE_BINDING);
+        gpu_images.insert(image_id, current_image.clone());
+
+        prepare_bevy_image_texture_bind_groups(
+            Some(&gpu_images),
+            &extracted,
+            &render_device,
+            &pipeline_cache,
+            &pipeline,
+            &mut texture_bind_groups,
+        );
+
+        assert_eq!(texture_bind_groups.len(), 1);
+        let first_bind_group = texture_bind_groups
+            .get(&binding, ImguiSampler::Linear)
+            .expect("registered Bevy image handles should resolve to a real bind group")
+            .clone();
+
+        prepare_bevy_image_texture_bind_groups(
+            Some(&gpu_images),
+            &extracted,
+            &render_device,
+            &pipeline_cache,
+            &pipeline,
+            &mut texture_bind_groups,
+        );
+        let reused_bind_group = texture_bind_groups
+            .get(&binding, ImguiSampler::Linear)
+            .expect("an unchanged image should retain its bind group");
+        assert_eq!(
+            reused_bind_group, &first_bind_group,
+            "an unchanged texture view and sampler must reuse the existing bind group"
+        );
+
+        let replacement_view = gpu_image(&render_device, TextureUsages::TEXTURE_BINDING);
+        current_image.texture = replacement_view.texture;
+        current_image.texture_view = replacement_view.texture_view;
+        current_image.texture_descriptor = replacement_view.texture_descriptor;
+        current_image.texture_view_descriptor = replacement_view.texture_view_descriptor;
+        gpu_images.insert(image_id, current_image.clone());
+        prepare_bevy_image_texture_bind_groups(
+            Some(&gpu_images),
+            &extracted,
+            &render_device,
+            &pipeline_cache,
+            &pipeline,
+            &mut texture_bind_groups,
+        );
+        let view_bind_group = texture_bind_groups
+            .get(&binding, ImguiSampler::Linear)
+            .expect("a replacement texture view should produce a bind group")
+            .clone();
+        assert_ne!(
+            view_bind_group, first_bind_group,
+            "changing the texture view must rebuild the bind group"
+        );
+
+        current_image.sampler = render_device.create_sampler(&SamplerDescriptor {
+            label: Some("dear_imgui_bevy_replacement_sampler"),
+            ..Default::default()
+        });
+        gpu_images.insert(image_id, current_image.clone());
+        prepare_bevy_image_texture_bind_groups(
+            Some(&gpu_images),
+            &extracted,
+            &render_device,
+            &pipeline_cache,
+            &pipeline,
+            &mut texture_bind_groups,
+        );
+        assert_ne!(
+            texture_bind_groups
+                .get(&binding, ImguiSampler::Linear)
+                .expect("a replacement sampler should produce a bind group"),
+            &view_bind_group,
+            "changing only the sampler must rebuild the bind group"
+        );
+
+        gpu_images.remove(image_id);
+        prepare_bevy_image_texture_bind_groups(
+            Some(&gpu_images),
+            &extracted,
+            &render_device,
+            &pipeline_cache,
+            &pipeline,
+            &mut texture_bind_groups,
+        );
+        assert!(
+            texture_bind_groups.is_empty(),
+            "missing RenderAssets<GpuImage> entries should remove stale bind groups"
+        );
+
+        gpu_images.insert(
+            image_id,
+            gpu_image(&render_device, TextureUsages::TEXTURE_BINDING),
+        );
+        extracted.replace_for_test(vec![(texture_id, image_id)]);
+        prepare_bevy_image_texture_bind_groups(
+            Some(&gpu_images),
+            &extracted,
+            &render_device,
+            &pipeline_cache,
+            &pipeline,
+            &mut texture_bind_groups,
+        );
+        assert_eq!(texture_bind_groups.len(), 1);
+
+        extracted.replace_for_test(Vec::new());
+        prepare_bevy_image_texture_bind_groups(
+            Some(&gpu_images),
+            &extracted,
+            &render_device,
+            &pipeline_cache,
+            &pipeline,
+            &mut texture_bind_groups,
+        );
+        assert!(
+            texture_bind_groups.is_empty(),
+            "unregistered Bevy image handles should remove stale bind groups"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires DEAR_IMGUI_BEVY_GPU_HARNESS=1 and a working native wgpu adapter"]
+    fn bevy_image_texture_bind_groups_ignore_non_sampled_gpu_images_when_gpu_harness_is_enabled() {
+        if std::env::var_os("DEAR_IMGUI_BEVY_GPU_HARNESS").is_none() {
+            return;
+        }
+
+        let RenderHarnessResources {
+            render_device,
+            pipeline_cache,
+            ..
+        } = initialize_render_harness_resources();
+        let pipeline = ImguiRenderPipeline::default();
+        let mut extracted = ImguiExtractedBevyTextures::default();
+        let mut gpu_images = RenderAssets::<GpuImage>::default();
+        let mut texture_bind_groups = ImguiTextureBindGroups::default();
+        let texture_id = imgui::TextureId::new(99);
+        let image_id = AssetId::<Image>::default();
+        let binding = TextureBinding::Legacy(texture_id);
+
+        extracted.replace_for_test(vec![(texture_id, image_id)]);
+        gpu_images.insert(image_id, gpu_image(&render_device, TextureUsages::COPY_DST));
+
+        prepare_bevy_image_texture_bind_groups(
+            Some(&gpu_images),
+            &extracted,
+            &render_device,
+            &pipeline_cache,
+            &pipeline,
+            &mut texture_bind_groups,
+        );
+
+        assert_eq!(texture_bind_groups.len(), 0);
+        assert!(
+            texture_bind_groups
+                .get(&binding, ImguiSampler::Linear)
+                .is_none()
+        );
+    }
+
+    #[test]
+    #[ignore = "requires DEAR_IMGUI_BEVY_GPU_HARNESS=1 and a working native wgpu adapter"]
+    fn repeated_render_startup_rebuilds_gpu_resources_and_freezes_each_context() {
+        if std::env::var_os("DEAR_IMGUI_BEVY_GPU_HARNESS").is_none() {
+            return;
+        }
+
+        let RenderHarnessResources {
+            render_device,
+            render_queue,
+            pipeline_cache,
+        } = initialize_render_harness_resources();
+        let context_a = test_context_id();
+        let context_b = test_context_id();
+        let releases = ImguiRendererReleases::default();
+        let lease_a = releases.admit(context_a);
+        let lease_b = releases.admit(context_b);
+        let mut world = World::new();
+        world.insert_resource(render_device);
+        world.insert_resource(render_queue);
+        world.insert_resource(pipeline_cache);
+        world.insert_resource(ImguiRenderPipeline::default());
+        world.insert_resource(super::resources::ImguiRenderDeviceState::default());
+        world.insert_resource(releases.clone());
+        world.insert_resource(crate::context::ImguiFrameMailbox::default());
+        world.insert_resource(ImguiExtractedRenderFrame::default());
+        world.insert_resource(ImguiPreparedRenderFrame::default());
+
+        initialize_imgui_gpu_resources(&mut world);
+        assert!(world.contains_resource::<ImguiPipelineGpuResources>());
+        assert!(!releases.recovery_requested(context_a));
+        assert!(!releases.recovery_requested(context_b));
+
+        initialize_imgui_gpu_resources(&mut world);
+        assert!(world.contains_resource::<ImguiPipelineGpuResources>());
+        assert!(releases.recovery_requested(context_a));
+        assert!(releases.recovery_requested(context_b));
+
+        lease_a.release_renderer_resources();
+        lease_a.finish_device_recovery();
+        lease_b.release_renderer_resources();
+        lease_b.finish_device_recovery();
+    }
+
+    struct RenderHarnessResources {
+        render_device: RenderDevice,
+        render_queue: RenderQueue,
+        pipeline_cache: PipelineCache,
+    }
+
+    fn initialize_render_harness_resources() -> RenderHarnessResources {
+        let settings = WgpuSettings::default();
+
+        let resources = bevy_platform::future::block_on(initialize_renderer(
+            settings
+                .backends
+                .expect("render harness should configure an explicit backend"),
+            None,
+            &settings,
+        ));
+        let render_device = resources.0.clone();
+        let render_queue = resources.1.clone();
+        let render_adapter = resources.3.clone();
+        RenderHarnessResources {
+            render_device: render_device.clone(),
+            render_queue,
+            pipeline_cache: PipelineCache::new(render_device, render_adapter, true),
+        }
+    }
+
+    fn imgui_texture_view_compatibility(format: TextureFormat) -> ImguiTextureViewCompatibility {
+        ImguiTextureViewCompatibility {
+            texture_usage: TextureUsages::TEXTURE_BINDING,
+            view_usage: None,
+            sample_count: 1,
+            texture_dimension: TextureDimension::D2,
+            depth_or_array_layers: 1,
+            view_dimension: None,
+            format,
+            aspect: TextureAspect::All,
+        }
+    }
+
+    fn gpu_image(render_device: &RenderDevice, usage: TextureUsages) -> GpuImage {
+        let texture_descriptor = TextureDescriptor {
+            label: Some("dear_imgui_bevy_harness_image"),
+            size: Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8Unorm,
+            usage,
+            view_formats: &[],
+        };
+        let texture = render_device.create_texture(&texture_descriptor);
+        let texture_view = texture.create_view(&TextureViewDescriptor::default());
+        let sampler = render_device.create_sampler(&SamplerDescriptor::default());
+        GpuImage {
+            texture,
+            texture_view,
+            sampler,
+            texture_descriptor,
+            texture_view_descriptor: None,
+            had_data: true,
+        }
+    }
+
+    fn draw_list_for_test() -> imgui::render::DrawListSnapshot {
+        imgui::render::DrawListSnapshot {
+            vtx: vec![
+                imgui::render::DrawVert::new([0.0, 0.0], [0.0, 0.0], 0xFFFF_FFFF),
+                imgui::render::DrawVert::new([1.0, 0.0], [1.0, 0.0], 0xFFFF_FFFF),
+                imgui::render::DrawVert::new([0.0, 1.0], [0.0, 1.0], 0xFFFF_FFFF),
+            ],
+            idx: vec![0, 1, 2],
+            commands: vec![DrawCmdSnapshot::Elements {
+                count: 3,
+                clip_rect: [0.0, 0.0, 16.0, 16.0],
+                texture: TextureBinding::Legacy(imgui::TextureId::new(1)),
+                vtx_offset: 0,
+                idx_offset: 0,
+            }],
+        }
+    }
+
+    fn camera_target_for_test(camera: Entity, viewport_id: Option<imgui::Id>) -> ImguiCameraTarget {
+        ImguiCameraTarget {
+            context_id: test_context_id(),
+            route_epoch: 0,
+            camera,
+            view: RetainedViewEntity::new(camera.into(), None, 0),
+            order: 0,
+            camera_order: 0,
+            camera_schedule: Core2d.intern(),
+            target: NormalizedRenderTarget::Window(
+                bevy_window::WindowRef::Entity(camera)
+                    .normalize(None)
+                    .expect("entity window target should normalize"),
+            ),
+            target_format: TextureFormat::Rgba8UnormSrgb,
+            texture_usages: TextureUsages::RENDER_ATTACHMENT,
+            msaa: Msaa::Off,
+            physical_target_size: [64, 64],
+            viewport_id,
+            camera_viewport: None,
+        }
+    }
+
+    #[test]
+    fn presentable_output_scope_excludes_application_windows() {
+        let application_window =
+            Entity::from_raw_u32(41).expect("test entity index should be valid");
+        let viewport_window = Entity::from_raw_u32(42).expect("test entity index should be valid");
+        let targets = [
+            camera_target_for_test(application_window, None),
+            camera_target_for_test(viewport_window, Some(imgui::Id::from(7))),
+        ];
+
+        let outputs = backend_owned_viewport_windows(targets.iter());
+
+        assert_eq!(outputs, HashSet::from([viewport_window]));
+    }
+
+    fn test_context_id() -> imgui::ContextId {
+        imgui::SuspendedContext::create().id()
+    }
+}

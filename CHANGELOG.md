@@ -20,7 +20,8 @@ See the [compatibility guide](docs/COMPATIBILITY.md), [custom backend guide](doc
 
 - Contexts now own managed textures and renderer work. `RenderedFrame` is a one-use render lease, while move-only `FrameSnapshot` provides a pointer-free render-thread handoff with request-bound texture feedback. [PR #38](https://github.com/Latias94/dear-imgui-rs/pull/38), [PR #43](https://github.com/Latias94/dear-imgui-rs/pull/43), [PR #44](https://github.com/Latias94/dear-imgui-rs/pull/44)
 - Font APIs now follow Dear ImGui 1.92's dynamic atlas model with validated `FontId`, frame-local `BakedFont`, texture leases, managed custom rectangles, and explicit `SharedFontAtlas` ownership. Multiple contexts may share an atlas only with legacy rendering; managed rendering requires one registered Context.
-- Winit, SDL3, Glow, WGPU, Ash, and Bevy now use owning multi-viewport runtimes with fallible setup, recovery, and ordered shutdown. Surface loss, callback replacement, GPU retirement, device loss, and partial teardown fail explicitly instead of leaving stale native state. [PR #50](https://github.com/Latias94/dear-imgui-rs/pull/50), [PR #53](https://github.com/Latias94/dear-imgui-rs/pull/53)
+- Winit, SDL3, Glow, WGPU, and Ash now use owning multi-viewport runtimes with fallible setup, recovery, and ordered shutdown. Surface loss, callback replacement, GPU retirement, device loss, and partial teardown fail explicitly instead of leaving stale native state. [PR #50](https://github.com/Latias94/dear-imgui-rs/pull/50), [PR #53](https://github.com/Latias94/dear-imgui-rs/pull/53)
+- `dear-imgui-bevy` now defaults to its renderer plus explicit Bevy UI ordering. A normal primary-window app needs only `ImguiPlugin`, a camera, and `ImguiPrimaryContextPass`; advanced apps use Context-specific schedules, render/input routes, diagnostics, RAII image leases, and Context-aware native viewports.
 - `dear-app` now offers `run_ui` for small applications and a state-owning `Application` runtime for lifecycle-aware applications; docking is explicit through `DockingConfig`. [PR #46](https://github.com/Latias94/dear-imgui-rs/pull/46)
 - Native, prebuilt, WASM, stack-layout, and Test Engine builds now have deterministic feature and binding profiles. Unsupported or mismatched target, CRT, source, and artifact combinations fail during the build instead of surfacing later as ABI errors.
 
@@ -39,7 +40,8 @@ See the [compatibility guide](docs/COMPATIBILITY.md), [custom backend guide](doc
 | `MAIN_VIEWPORT_ID` or implicit docking from `enable_multi_viewport` | Use `Viewport::is_main` or `ViewportDrawDataSnapshot::is_main`, and enable `DOCKING_ENABLE` separately when docking is required. |
 | Pinned renderer storage, free callback installers, or manual callback clearing | Use the owning platform and renderer runtime for the selected Winit or SDL3 backend and call its ordered, fallible shutdown path. |
 | `dear-app` `AppBuilder`, `RunnerCallbacks`, `RunnerConfig`, `run_simple`, or `run_with_callbacks` | Use `AppConfig` with `run_ui` or implement `Application` and call `dear_app::run`. |
-| Borrowed Bevy viewport command guards | `ImguiViewportBridge::commands()` now returns an owned `Vec`; use `drain_commands()` for consumption and recover the owner from a failed `into_inner()` before retrying. |
+| Bevy backend config/status resources, camera markers, helper setup, public begin/end schedules or viewport queues, manual image IDs, and wrapper extraction | Use `ImguiPluginConfig`, `ImguiUi`, `ImguiContextConfig`, explicit render/input routes, `ImguiTexture` leases, and retryable `ImguiContexts::remove`; renderer and viewport queue storage is private. |
+| Public Bevy input state/systems, writable capture fields, or directly copied viewport markers | Let `ImguiPlugin` own input translation; read `ImguiInputCapture` through scoped queries or `aggregate()`, and query viewport markers by reference through `context_id()` / `viewport_id()`. |
 | Infallible ImPlot3D surface submission | Handle `Plot3DError` through `try_plot`, use `surface_f32_flat` for complete contiguous arrays, and reserve `surface_f32_raw` for unsafe offset/stride layouts. |
 | Global `dear-imgui-reflect` settings or `input_reflect` | Keep a `ReflectSession` beside the UI owner and create a frame-local inspector with `ui.inspector(&session)`. |
 | Passing a borrowed filesystem to each file-dialog draw call | Construct `FileDialogState` with an owned blocking or background filesystem capability, then draw without a filesystem argument. |
@@ -48,6 +50,19 @@ See the [compatibility guide](docs/COMPATIBILITY.md), [custom backend guide](doc
 | Old provisional aliases | Use `frame_with_result`, `selectable_config`, `slider_config`, `OwnedTextureData::new`, `TextureRef::from`, and `Direction`; the old aliases are removed. |
 | `dear_imgui_sys::IMGUI_VERSION` | Use `BINDING_VERSION` for the Rust crate version or `igGetVersion()` for the linked Dear ImGui runtime. |
 | Raw aggregate `PlatformIO` callbacks or a pre-0.16 native prebuilt | Rust callback signatures use pointer/out parameters while C++ owns the by-value ABI; native archives must advertise `platform-io-aggregate-hooks-v2`, and older archives are rejected before linking. |
+
+For the common Bevy path, the setup becomes:
+
+```rust
+// 0.15
+commands.spawn((Camera2d, ImguiOverlayCamera));
+configure_example_context(&mut imgui, false);
+
+// 0.16
+commands.spawn(Camera2d);
+app.add_plugins(ImguiPlugin::default());
+app.add_systems(ImguiPrimaryContextPass, draw_ui);
+```
 
 ### Added and Changed
 
@@ -64,6 +79,8 @@ See the [compatibility guide](docs/COMPATIBILITY.md), [custom backend guide](doc
 - Kept SDL3 applications rendering during native Windows move/resize loops; the SDLGPU multi-viewport example now remains responsive while dragging and shuts down only after GPU work is idle. [PR #53](https://github.com/Latias94/dear-imgui-rs/pull/53)
 - Made WGPU secondary viewport present mode, alpha mode, frame latency, color-space validation, and surface recovery explicit instead of forcing `Fifo`. Fixes [#51](https://github.com/Latias94/dear-imgui-rs/issues/51), reported by [@DrBarnabus](https://github.com/DrBarnabus).
 - Winit multi-viewport now supports mixed-DPI desktop layouts, resolves hovered viewports through native Windows hit testing, and keeps the moving viewport above its docking target without making it globally top-most. Capture handoff and native move/resize feedback keep undocking and redocking continuous.
+- Bevy overlays now compose with ordered custom post-processing, Bevy UI, 1x/4x MSAA, and LDR/HDR cameras without resolving stale scene attachments over the UI. The `custom_post_process` example is the manual validation path. Fixes [#54](https://github.com/Latias94/dear-imgui-rs/issues/54), reported by [@lysenika](https://github.com/lysenika).
+- Bevy frame snapshots now keep the exact render-route epoch and routed viewport metrics used to build them. Multi-Context cursor feedback follows input ownership, render-only Contexts receive the current Bevy frame time, externally removed viewport windows recover automatically, and unchanged Bevy image bindings are reused instead of rebuilt every frame.
 - Statically linked the C++ standard library for Windows GNU builds, removing the downstream `libstdc++-6.dll` runtime requirement. Fixes [#36](https://github.com/Latias94/dear-imgui-rs/issues/36), reported by [@HampusMat](https://github.com/HampusMat).
 - Fixed renderer resource leaks and stale reuse across texture removal, atlas repacks, callback replacement, and WGPU device-object recreation.
 - Fixed tree-node scope/ID handling, combo default focus, backward multi-select ranges, file-browser selection after rescans, and the single-`#` text-measurement out-of-bounds read.

@@ -37,7 +37,7 @@ Backends
 | dear-imgui-ash    | 0.16.0-alpha.1  | ash = 0.38             | Native Vulkan renderer; shared Winit/SDL3 multi-viewport runtime |
 | dear-imgui-winit  | 0.16.0-alpha.1  | winit = 0.30.13        | Winit platform backend |
 | dear-imgui-sdl3   | 0.16.0-alpha.1  | sdl3 = 0.18.4, sdl3-sys 0.6 | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
-| dear-imgui-bevy   | 0.16.0-alpha.1  | Bevy = 0.19.0          | Experimental Bevy-native backend; Rust 1.95 minimum |
+| dear-imgui-bevy   | 0.16.0-alpha.1  | Bevy = 0.19.0          | Bevy-native backend; default renderer and Bevy UI ordering, explicit advanced routes, Rust 1.95 minimum |
 
 Utilities
 
@@ -89,6 +89,11 @@ target.
 | WGPU renderer | WGPU 30 is the default; 29, 28, and 27 are separate mutually exclusive features. Native Winit and SDL3 multi-viewport adapters are also mutually exclusive. |
 | Ash renderer | Native Vulkan via Ash 0.38. Winit and SDL3 multi-viewport surface adapters are mutually exclusive and share one swapchain runtime. |
 | Browser multi-viewport | Unsupported. Browser integrations render one main canvas. |
+| Bevy default | `dear-imgui-bevy` enables `render` and `bevy-ui`; the primary Context automatically targets the unique eligible primary-window camera. |
+| Bevy headless | `default-features = false` retains all Context schedules/lifecycle and primary-Context input/capture without RenderApp extraction; explicit multi-Context input routes require `render`. |
+| Bevy render-only | `default-features = false, features = ["render"]` installs the renderer without Bevy UI ordering. |
+| Bevy native multi-viewport | `multi-viewport` implies `render` and `bevy_winit`; each Context opts in explicitly and secondary state is keyed by `(ContextId, ViewportId)`. |
+| Bevy WASM | `wasm` supports both default and headless builds; combining WASM with native `multi-viewport` is rejected. |
 
 The six native safe extension crates forward build strategy through both the
 core and their corresponding sys crate. Select the route on the safe crate:
@@ -145,6 +150,8 @@ Engine integrations can use idempotent `Context::end_frame()` before their own
 detachment sequence. Main viewport checks use `Viewport::is_main()` rather than
 an exported numeric ID.
 
+The Bevy backend applies the same ownership model across the engine boundary. A main-thread registry serially drives independent Context schedules; frame mailboxes, extracted snapshots, render routes, input capture, renderer generations, managed textures, diagnostics, and native viewport state remain keyed by `ContextId`. Render and input routes are separate declarations, so image targets never acquire window input implicitly. Each frame snapshot carries the immutable route epoch and viewport metrics used to create it, while cursor and IME feedback are arbitrated by Context input ownership. Context retirement waits for both RenderWorld and ECS acknowledgements; `Drop` only transfers complete owners into an app-local retirement queue and never reaches into another Bevy world.
+
 ### PlatformIO callback ABI
 
 Most cimgui functions are ordinary C ABI calls. Seven `ImGuiPlatformIO` slots are different because the underlying Dear ImGui C++ callback type passes or returns `ImVec2`/`ImVec4` aggregates by value: `Platform_SetWindowPos`, `Platform_GetWindowPos`, `Platform_SetWindowSize`, `Platform_GetWindowSize`, `Platform_GetWindowFramebufferScale`, `Platform_GetWindowWorkAreaInsets`, and `Renderer_SetWindowSize`.
@@ -161,8 +168,9 @@ First-party platform and renderer backends now claim an exact Context-bound iden
 | File browser draw methods borrow `&dyn FileSystem` | `FileDialogState` owns a blocking or background filesystem capability | Workers cannot outlive borrowed caller state; `FileSystem::visit_dir` streams entries and cooperates with cancellation through `ScanVisit`. |
 | Incremental/synchronous scan presets | `ScanPolicy::Blocking` or native `ScanPolicy::Background` | Background mode requires `Arc<dyn FileSystem + Send + Sync>` and never silently downgrades; browser/JS adapters stay on the caller thread. |
 | Raw monitor vector access | `PlatformIo::set_monitors` | Dear ImGui's allocator owns the replacement vector storage. |
-| Borrowed Bevy viewport command guards | `ImguiViewportBridge::commands()` returning an owned `Vec` | Native callbacks can enqueue without contending with an application-held observer; `drain_commands()` reports a sticky callback fault instead of consuming partial state. |
-| Best-effort Bevy Context extraction | Retryable `ImguiContext::into_inner()` | The render world destroys managed GPU resources and acknowledges their generation before native bindings reset; failures return the still-owned wrapper. |
+| Public Bevy backend config/status resources, camera markers, helper setup, manual begin/end schedules, or viewport command queues | `ImguiPlugin` / `ImguiPluginConfig`, `ImguiUi`, `ImguiContextConfig`, and explicit `ImguiRenderRoute` / `ImguiInputRoute` declarations | The default single-camera path needs no marker; advanced ownership is declared by Context and camera identity while renderer and callback storage stays private. |
+| Manual Bevy texture IDs or best-effort Context extraction | `ImguiTexture` RAII leases and retryable `ImguiContexts::remove` | Image mappings remain alive through in-flight snapshots, and Context removal waits for render-world plus viewport-ECS acknowledgement while unrelated Contexts continue. |
+| Public Bevy input state/systems, writable capture fields, or directly copied viewport markers | Read-only `ImguiInputCapture` queries/run conditions and borrowed `ImguiViewportWindow` / `ImguiViewportCamera` accessors | The plugin owns input translation and marker creation; `aggregate()` returns a copyable capture snapshot while marker identity is read through `context_id()` / `viewport_id()`. |
 
 ### dear-app migration
 

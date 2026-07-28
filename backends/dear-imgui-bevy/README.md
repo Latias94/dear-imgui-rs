@@ -1,254 +1,218 @@
 # dear-imgui-bevy
 
-Bevy-native backend for `dear-imgui-rs`.
+Bevy-native integration for `dear-imgui-rs`.
 
-This crate integrates Dear ImGui with Bevy's ECS, window/input messages, WGPU render world, camera
-targets, and texture assets. It is intentionally not a wrapper around `dear-imgui-winit` plus
-`dear-imgui-wgpu`: Bevy owns the app loop and render schedules, so this backend follows Bevy's
-ownership model directly.
+The backend owns Dear ImGui Contexts on Bevy's main thread, routes Bevy window input to them, moves one-use frame snapshots into the render world, and renders through Bevy cameras. It does not wrap the Winit or standalone WGPU backends: Bevy remains the owner of the app loop, windows, render schedules, images, and GPU lifetime.
 
-## Quick Facts
+## Requirements
 
-| Item | Status |
+| Component | Version |
 | --- | --- |
 | Rust | `1.95.0` or newer |
-| Bevy | `=0.19.0` |
+| Bevy | exactly `0.19.0` |
 | dear-imgui-rs | `0.16.0-alpha.1` |
-| Primary-window overlay | Supported with the `render` feature |
-| Docking in the primary window | Supported when the ImGui context enables docking |
-| Native multi-viewport OS windows | Preview-grade with `render,multi-viewport` |
-| WASM | Core and `render` feature sets compile for `wasm32-unknown-unknown`; browser runtime integration is still limited |
 
-## Getting Started
+`dear-imgui-bevy` defaults to the renderer plus deterministic Bevy UI ordering. Native multi-viewport is supported through an explicit feature and runtime opt-in. WASM supports the normal and headless feature sets but cannot create native platform windows.
 
-Use the same Bevy version as the backend. Until `0.16.0-alpha.1` is published,
-take both Dear ImGui packages from `main`:
+## Installation
+
+Until `0.16.0-alpha.1` is published:
 
 ```toml
 [dependencies]
 bevy = "=0.19.0"
-dear-imgui-bevy = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", features = ["render"] }
+dear-imgui-bevy = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
 dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main" }
 ```
 
-After publication, use the exact prerelease requirements:
+After publication:
 
 ```toml
 [dependencies]
 bevy = "=0.19.0"
-dear-imgui-bevy = { version = "=0.16.0-alpha.1", features = ["render"] }
+dear-imgui-bevy = "=0.16.0-alpha.1"
 dear-imgui-rs = "=0.16.0-alpha.1"
 ```
 
-A minimal overlay app registers `ImguiPlugin`, marks the camera that should receive the ImGui
-overlay, and draws UI from `ImguiPrimaryContextPass`:
+For a headless integration that drives UI schedules without installing the Bevy renderer:
+
+```toml
+dear-imgui-bevy = { version = "=0.16.0-alpha.1", default-features = false }
+```
+
+## Quick Start
+
+One primary window and one active primary-window camera are routed automatically:
 
 ```rust
 use bevy::prelude::*;
-use dear_imgui_bevy::{
-    configure_example_context, ImguiContext, ImguiContexts, ImguiPlugin,
-    ImguiPrimaryContextPass, render::ImguiOverlayCamera,
-};
+use dear_imgui_bevy::prelude::*;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
-        .add_plugins(ImguiPlugin::default())
-        .add_systems(Startup, setup)
+        .add_plugins((DefaultPlugins, ImguiPlugin::default()))
+        .add_systems(Startup, |mut commands: Commands| {
+            commands.spawn(Camera2d);
+        })
         .add_systems(ImguiPrimaryContextPass, tools_ui)
         .run();
 }
 
-fn setup(mut commands: Commands, mut imgui: NonSendMut<ImguiContext>) {
-    commands.spawn((Camera2d, ImguiOverlayCamera));
-    configure_example_context(&mut imgui, false);
-}
-
-fn tools_ui(mut contexts: ImguiContexts) {
-    let Some(ui) = contexts.primary_ui_mut() else {
-        return;
-    };
-
-    ui.window("Tools").build(|| {
-        ui.text("Dear ImGui is drawing in Bevy.");
-    });
+fn tools_ui(imgui: ImguiUi) -> Result {
+    let ui = imgui.ui()?;
+    ui.window("Tools")
+        .build(|| ui.text("Dear ImGui is drawing in Bevy."));
+    Ok(())
 }
 ```
 
-Application UI systems should draw through the `Ui` returned by `ImguiContexts`. Do not call
-`Context::frame()` or `Context::render()` yourself; the plugin owns the frame lifecycle.
-`ImguiContext::context_mut()` is intentionally unavailable while `ImguiPrimaryContextPass` exposes
-a live `Ui`, so safe systems cannot end or replace the frame behind another UI reference.
+The plugin opens and closes each frame around its Context schedule. UI systems borrow the active frame through `ImguiUi`; they must not call `Context::frame()` or `Context::render()` themselves.
+
+## Feature Modes
+
+| Mode | Cargo selection | Contract |
+| --- | --- | --- |
+| Default | default features | Renderer plus `bevy-ui`; Dear ImGui draws above Bevy UI by default. |
+| Headless | `default-features = false` | All Context schedules and lifecycle; primary-Context input/capture only, without `RenderApp` extraction. |
+| Render only | `default-features = false, features = ["render"]` | Renderer without a dependency on Bevy UI rendering. |
+| Native multi-viewport | `features = ["multi-viewport"]` | Implies `render` and `bevy_winit`; runtime opt-in is still required. |
+| WASM default | `features = ["wasm"]` | Default renderer/UI feature set using the explicit WASM core route. |
+| WASM headless | `default-features = false, features = ["wasm"]` | Headless WASM integration. |
+
+`multi-viewport` is native-only and intentionally fails to compile with `wasm32`. ImPlot, ImNodes, ImGuizmo, and other `Ui`-based extensions are normal application dependencies rather than backend features.
+
+## Migrating from 0.15
+
+| 0.15 shape | 0.16 replacement |
+| --- | --- |
+| `configure_example_context` and `ImguiOverlayCamera` | Spawn a normal camera and add `ImguiPlugin::default()`; the unique primary-window camera is automatic. |
+| `ImguiBackendConfig` / `ImguiBackendStatus` | Configure startup through private-field `ImguiPluginConfig`; observe route and runtime failures through `ImguiDiagnostics` and `ImguiContexts::last_error`. |
+| UI-only `ImguiContexts` system parameter | Use `ImguiUi` inside a Context schedule; use the non-send `ImguiContexts` registry only for creation, configuration, inspection, and removal. |
+| `ImguiBevyTextures::register` / `unregister` and retained raw IDs | Hold a cloneable strong or weak `ImguiTexture` lease from `register_strong` / `register_weak`. |
+| Public `ImguiInputState`, input systems/mappers, or writable `ImguiInputCapture` fields | Let `ImguiPlugin` translate messages; read `ImguiInputCapture` through aggregate/scoped queries or public run conditions. Call `aggregate()` when a copyable snapshot is needed. |
+| `ImguiViewportWindow { viewport_id }`, `ImguiViewportCamera { viewport_id }`, direct field access, or `.copied()` marker queries | Query markers by reference and call `context_id()` / `viewport_id()`. The backend exclusively creates and repairs these identity projections. |
+| Public begin/end schedules, renderer resources, or viewport queue access | Let the plugin drive frames; order custom passes through `ImguiRenderSystems` and observe only public route, diagnostic, capture, texture, and viewport identity/configuration types. |
+| Wrapper extraction through `into_inner()` | Call `ImguiContexts::remove`, continue updating while it returns `RemovalPending`, and take the returned `SuspendedContext` after both worlds acknowledge release. |
+
+## Integration Model
+
+### Contexts and Schedules
+
+`ImguiContexts` owns every Dear ImGui Context in deterministic order. The primary Context runs `ImguiPrimaryContextPass`. Create an independent Context with a unique Bevy schedule:
+
+```rust
+#[derive(ScheduleLabel, Clone, Debug, Eq, PartialEq, Hash)]
+struct InspectorPass;
+
+let inspector = contexts.create(ImguiContextConfig::new(InspectorPass))?;
+```
+
+Register UI systems directly in that schedule. Use `contexts.configure(context_id, |context| ...)` only outside an active frame for font, ini, style, or other Context configuration. A live UI schedule cannot mutate or remove any registered Context through the safe API.
+
+### Render and Input Routes
+
+The primary Context automatically targets the unique eligible primary-window camera. Advanced cases declare route components on ordinary ECS entities:
+
+```rust
+commands.spawn((
+    ImguiRenderRoute::new(context_id, camera),
+    ImguiInputRoute::from_camera(context_id, camera),
+));
+```
+
+Render and input routes are independent. An image or manual-texture render target never receives OS input implicitly; use `ImguiInputRoute::logical(context_id, host_window, region)` when a displayed image should be interactive. Ambiguous, stale, conflicting, or unsupported routes fail closed and publish structured entries through `ImguiDiagnostics` instead of broadcasting one Context to arbitrary cameras or windows.
+
+### Composition Order
+
+`ImguiRenderSystems::{BeforeOverlay, Overlay, AfterOverlay}` are installed in both `Core2d` and `Core3d` after scene post-processing and before upscaling. Custom passes can order themselves against these sets. A pass in `AfterOverlay` must preserve the current single-sample result; resolving an older MSAA attachment would overwrite the UI.
+
+With the default `bevy-ui` feature, Dear ImGui is above Bevy UI. Reverse the order explicitly when needed:
+
+```rust
+ImguiPlugin::default()
+    .with_ui_render_order(ImguiUiRenderOrder::BevyUiAboveImgui)
+```
+
+The renderer writes the final single-sample attachment, so the overlay composes consistently with 1x/4x MSAA, LDR/HDR cameras, Bevy UI, and ordered custom post-processing.
+
+### Input Capture
+
+The backend forwards Bevy messages without consuming them. Treat `ImguiInputCapture` as a gameplay policy hint:
+
+```rust
+fn gameplay_enabled(capture: Res<ImguiInputCapture>) -> bool {
+    !capture.primary().wants_keyboard_input()
+}
+```
+
+Use `primary()`, `context(context_id)`, or `window(entity)` according to the ownership scope. Focus, sticky key/button release, cursor, IME, camera viewports, and native platform windows are tracked per Context and host window.
+
+With `default-features = false`, the primary Context still receives primary-window input and capture updates. Additional headless Context schedules run normally but remain non-interactive; explicit multi-Context input routing requires the `render` feature.
+
+### Bevy Images
+
+Register a Bevy `Image` through `ImguiBevyTextures::register_strong` or `register_weak`. The returned `ImguiTexture` is a cloneable RAII lease and can be passed directly to `ui.image(...)`; do not cache or manually recycle its raw `TextureId`.
+
+A strong lease retains the image asset. The final lease drop withdraws the mapping, waits for render-world acknowledgement, and only then recycles its slot. Snapshots already in flight keep the mapping required by that frame.
+
+### Context Removal
+
+`ImguiContexts::remove` starts Context-local retirement. It returns `ImguiContextError::RemovalPending` while native window entities or render-world resources are still releasing; keep updating the app and retry. Other Contexts continue framing during that wait.
+
+Drop paths never reach into ECS or the render world. Removing the registry queues complete owners for app-local retirement. Long-running hosts that require deterministic cleanup should explicitly remove Contexts and drive updates until removal succeeds before destroying the Bevy `App`.
+
+### Docking and Native Multi-Viewport
+
+Docking is enabled for the primary Context by default and can be changed with `ImguiPluginConfig::with_docking`. Native platform windows require both:
+
+```rust
+ImguiPlugin::new(
+    ImguiPluginConfig::default().with_multi_viewport(true),
+)
+```
+
+and the Cargo feature:
+
+```console
+cargo run -p dear-imgui-bevy --example game_engine --features multi-viewport
+```
+
+Each secondary viewport is scoped by `(ContextId, ViewportId)` and owns a Bevy window/camera pair. The backend handles mixed DPI, focus, cursor/IME feedback, transparent-window policy, callback ownership, renderer recovery, and ordered shutdown. Configure secondary-window presentation with `ImguiPluginConfig::with_viewport_window(ImguiViewportWindowConfig)`. Public viewport components are backend-owned, read-only identity projections: query them by reference and use `context_id()` / `viewport_id()`. The bridge queue and callback storage remain private.
+
+Every Context that calls `ImguiContextConfig::with_multi_viewport(true)` requires the native `multi-viewport` Cargo feature. Admission returns `ImguiContextError::NativeMultiViewportUnavailable` when the selected target or feature set cannot provide native windows.
 
 ## Examples
 
-Start with `simple`, then move to `app_integration` and `game_engine` as your integration needs
-grow.
+Start with the first four examples for copy-runnable integration patterns:
 
-| Category | Example | Source | Run command | Purpose |
-| --- | --- | --- | --- | --- |
-| Basic | [`simple`][bevy-example-simple] | [`examples/basic/simple.rs`][bevy-example-simple] | `cargo run -p dear-imgui-bevy --features render --example simple` | Smallest visible Dear ImGui overlay in a normal Bevy app. |
-| App | [`app_integration`][bevy-example-app-integration] | [`examples/app/app_integration.rs`][bevy-example-app-integration] | `cargo run -p dear-imgui-bevy --features render --example app_integration` | Plugin-style integration into an existing app/game loop with Bevy input policy. |
-| Game engine | [`game_engine`][bevy-example-game-engine] | [`examples/game_engine/game_engine.rs`][bevy-example-game-engine] | `cargo run -p dear-imgui-bevy --features render --example game_engine`<br>`cargo run -p dear-imgui-bevy --features render,multi-viewport --example game_engine` | Docked editor surface with scene render-target texture interop, plus optional native multi-viewport. |
-| Ecosystem | [`ecosystem`][bevy-example-ecosystem] | [`examples/ecosystem/ecosystem.rs`][bevy-example-ecosystem] | `cargo run -p dear-imgui-bevy --features render --example ecosystem` | Shared-frame ImPlot, ImNodes, and ImGuizmo integration. |
-| Ecosystem | [`bevy_plot_controls`][bevy-example-plot-controls] | [`examples/ecosystem/bevy_plot_controls.rs`][bevy-example-plot-controls] | `cargo run -p dear-imgui-bevy --features render --example bevy_plot_controls` | Focused Bevy scene plus ImPlot controls demo. |
+| Example | Run command | Demonstrates |
+| --- | --- | --- |
+| [`simple`](examples/basic/simple.rs) | `cargo run -p dear-imgui-bevy --example simple` | Minimal default overlay with no marker or helper setup. |
+| [`custom_post_process`](examples/advanced/custom_post_process.rs) | `cargo run -p dear-imgui-bevy --example custom_post_process` | Public overlay ordering with post-processing, MSAA, HDR, and Bevy UI composition. |
+| [`multiple_contexts`](examples/advanced/multiple_contexts.rs) | `cargo run -p dear-imgui-bevy --example multiple_contexts` | Independent Context schedules, windows, cameras, input routes, capture, and retryable teardown. |
+| [`render_to_image`](examples/advanced/render_to_image.rs) | `cargo run -p dear-imgui-bevy --example render_to_image` | Offscreen Context, Bevy image lease, and explicit logical input mapping. |
+| [`app_integration`](examples/app/app_integration.rs) | `cargo run -p dear-imgui-bevy --example app_integration` | Gameplay/editor integration using capture policy. |
+| [`game_engine`](examples/game_engine/game_engine.rs) | `cargo run -p dear-imgui-bevy --example game_engine` | Docked editor surface and scene texture interop; add `--features multi-viewport` for native windows. |
+| [`ecosystem`](examples/ecosystem/ecosystem.rs) | `cargo run -p dear-imgui-bevy --example ecosystem` | ImPlot, ImNodes, and ImGuizmo in one Context schedule. |
+| [`bevy_plot_controls`](examples/ecosystem/bevy_plot_controls.rs) | `cargo run -p dear-imgui-bevy --example bevy_plot_controls` | Bevy scene controlled through ImPlot UI. |
 
-[bevy-example-simple]: https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/basic/simple.rs
-[bevy-example-app-integration]: https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/app/app_integration.rs
-[bevy-example-game-engine]: https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/game_engine/game_engine.rs
-[bevy-example-ecosystem]: https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/ecosystem/ecosystem.rs
-[bevy-example-plot-controls]: https://github.com/Latias94/dear-imgui-rs/blob/main/backends/dear-imgui-bevy/examples/ecosystem/bevy_plot_controls.rs
+## Current Boundaries
 
-## Screenshots
-
-<p>
-  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/bevy-game-engine-multi-viewport.png" alt="dear-imgui-bevy game engine multi-viewport example" width="100%"/>
-</p>
-<p>
-  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/bevy-app-integration.png" alt="dear-imgui-bevy app integration example" width="49%"/>
-  <img src="https://raw.githubusercontent.com/Latias94/dear-imgui-rs/main/screenshots/bevy-ecosystem.png" alt="dear-imgui-bevy ecosystem example" width="49%"/>
-</p>
-
-## Cargo Features
-
-| Feature | What it enables |
-| --- | --- |
-| `default` | Core plugin, context lifecycle, schedules, and input translation. No renderer is installed. |
-| `wasm` | Selects the explicit `dear-imgui-rs` WASM provider contract. Required for every `wasm32-unknown-unknown` build. |
-| `render` | Bevy `RenderApp` extraction, WGPU overlay renderer, `ImguiOverlayCamera`, `ImguiOverlayDisabled`, and `ImguiBevyTextures`. |
-| `multi-viewport` | Native Dear ImGui PlatformIO window lifecycle bridge. Use with `render` for full routed rendering. |
-
-ImPlot, ImNodes, ImGuizmo, and other `Ui`-based extension crates compose with this backend through
-the same `ImguiPrimaryContextPass` frame. They are not `dear-imgui-bevy` feature flags; add the
-extension crates you use to your application dependencies directly.
-
-## Integration Guide
-
-### Frame Lifecycle
-
-`ImguiPlugin` installs three main-world schedules:
-
-1. `ImguiBeginFrame` translates Bevy input and opens the Dear ImGui frame.
-2. `ImguiPrimaryContextPass` runs your UI systems against the already-open frame.
-3. `ImguiEndFrame` renders once and moves a one-shot `FrameSnapshot` through a bounded mailbox to
-   the render world. `ImguiFrameOutput` exposes only its epoch and any capture error.
-
-The main user-facing APIs are:
-
-| Need | API |
-| --- | --- |
-| Add the backend | `ImguiPlugin` |
-| Configure requested backend behavior | `ImguiBackendConfig` |
-| Check runtime capability | `ImguiBackendStatus` |
-| Draw UI inside Bevy schedules | `ImguiContexts` and `ImguiPrimaryContextPass` |
-| Route gameplay/editor input | `input::ImguiInputCapture` |
-| Select overlay render targets | `render::ImguiOverlayCamera` |
-| Prevent offscreen scene targets from receiving the global overlay | `render::ImguiOverlayDisabled` |
-| Show Bevy images in ImGui | `ImguiBevyTextures` |
-| Observe queued viewport work | `ImguiViewportBridge::commands()` returns an owned `Vec` |
-
-### Render Targets and Scene Views
-
-With the `render` feature enabled, the backend moves ImGui frame snapshots into Bevy's render world,
-commits request-bound texture feedback exactly once, and draws them through Bevy cameras. Add
-`ImguiOverlayCamera` to the camera that should receive the overlay for a render target.
-
-Editor-style scene views usually render Bevy content into an `Image`, register that image through
-`ImguiBevyTextures`, and show it with `ui.image(...)`. Add `ImguiOverlayDisabled` to the offscreen
-scene camera so the global ImGui overlay is not rendered back into the scene texture.
-
-### Explicit Context Extraction
-
-`ImguiContext::into_inner()` performs ordered, retryable backend shutdown. The error retains the
-complete wrapper; inspect `error()` and recover it with `into_owner()`:
-
-1. For `RenderWorldReleasePending`, insert the owner back into the main `World`, run the Bevy render
-   schedule so it abandons the pending snapshot and releases managed bind groups, remove the owner,
-   and retry `into_inner()`. Native texture bindings are not reset before that acknowledgement.
-2. For `ViewportWorldReleasePending`, insert the owner back into the main `World`, run one
-   `app.update()` so the queued secondary-window/camera despawns pass `ApplyDeferred` and their
-   absence is acknowledged, remove the owner, and retry `into_inner()`.
-3. For `RendererOwnership`, a foreign integration replaced only part of the Bevy renderer
-   contract. The failed preflight leaves the native frame, render-world release state, callbacks,
-   flags, and texture bindings unchanged. Restore the reported field through the integration that
-   replaced it, or complete the external renderer takeover, then retry. A complete takeover is
-   detected automatically and its foreign raw fields are preserved. Bevy-managed texture bindings
-   are reset after the render world releases its GPU map, so the new renderer receives fresh create
-   requests instead of inheriting stale Bevy texture IDs.
-
-Once renderer release is requested or acknowledged, extra updates remain frozen and cannot reopen
-a Dear ImGui frame while either retry path is pending. Backend userdata, exact name allocations,
-capability flags, callback tables, monitor storage, and renderer fields are ownership contracts. A
-replacement is reported as a sticky fail-closed error, the affected capability is revoked, and the
-foreign value is preserved rather than silently reclaimed. Ordinary resource drop requests release
-and revokes Bevy `Ui` access, but deterministic applications should use `into_inner()`: core Context
-teardown does not continue into native destruction after an attachment release phase fails.
-
-### Docking and Multi-Viewport
-
-Docking inside the primary Bevy window works like normal Dear ImGui docking: enable docking on the
-context, create a dockspace, then dock or drag windows inside it.
-
-Native multi-viewport OS windows are experimental. They require a native target, `render`, and
-`multi-viewport`. The backend creates Bevy windows for Dear ImGui platform viewports, maps
-input/focus/cursor/IME feedback, and routes each viewport's draw data to the matching Bevy
-`Window` render target. Detached-window z-order and dock-target edge cases are still preview-grade.
-
-`ImguiViewportBridge::commands()` copies an owned observer snapshot, so retaining it cannot block a
-native callback from enqueueing later Create or Destroy work. ECS integration consumes work through
-`drain_commands()`. If callback reentry contends with the queue, or any callback/name/flag/monitor
-contract drifts, `callback_error()` and `drain_commands()` report the precise sticky Rust-side
-error; the callback never unwinds through C and the partial queue is not consumed.
-
-Configure secondary-window presentation through `ImguiBackendConfig::viewport_window`. The
-`ImguiViewportWindowConfig` value carries present mode, compositor alpha mode, maximum frame
-latency, theme, and transparency as one policy so recreation cannot silently fall back to Bevy's
-defaults. `ImguiViewportWindowConfig::from_window(&primary_window)` copies the primary window's
-complete presentation policy.
-
-Transparent secondary windows require an explicit alpha-preserving compositor mode:
-`CompositeAlphaMode::PreMultiplied` or `CompositeAlphaMode::PostMultiplied`. `Auto`, `Opaque`, and
-`Inherit` are rejected by `ImguiViewportWindowConfig::validate()` and `try_from_window()` because
-they cannot guarantee that the compositor preserves the viewport alpha channel.
-
-Each live secondary window owns a routed overlay camera. `ViewportFlags::NO_RENDERER_CLEAR`
-configures that camera to preserve the existing target contents, and the bridge recreates the
-camera and repairs its mapping if another system despawns it.
-
-| Target / feature set | Lifecycle bridge | Input / feedback | Full rendering |
-| --- | --- | --- | --- |
-| Native without `multi-viewport` | No | No | No |
-| Native with `render,multi-viewport` and Bevy `RenderApp` | Yes | Yes | Yes |
-| Native with `multi-viewport` but no `RenderApp` | Yes | Yes | No |
-| `wasm32-unknown-unknown` | No | No | No |
-
-### Input Policy
-
-The backend forwards Bevy input messages into Dear ImGui IO and does not consume or delete Bevy
-messages. Gameplay and editor systems should use `ImguiInputCapture` as a policy hint after ImGui
-has computed capture intent.
-
-Current boundaries:
-
-- pointer and keyboard capture are policy hints only;
-- clipboard remains application-provided;
-- accessibility nodes are not generated for Dear ImGui widgets;
-- file drop, gamepad navigation, and Bevy picking integration are not part of this backend yet;
-- wasm builds compile, but browser runtime IME and clipboard behavior depend on the host.
+- Clipboard integration remains application-provided.
+- Dear ImGui widgets do not generate Bevy accessibility nodes.
+- File drop, gamepad navigation, and Bevy picking integration are not currently part of the backend.
+- WASM builds are supported, but runtime IME and clipboard behavior depend on the browser host.
 
 ## Development Checks
 
-Recommended checks for this crate:
-
-```bash
-cargo check -p dear-imgui-bevy --no-default-features
-cargo check -p dear-imgui-bevy --features render
-cargo check -p dear-imgui-bevy --target wasm32-unknown-unknown --no-default-features --features wasm
-cargo check -p dear-imgui-bevy --target wasm32-unknown-unknown --no-default-features --features render,wasm
+```console
+cargo nextest run -p dear-imgui-bevy --no-default-features
 cargo nextest run -p dear-imgui-bevy
-cargo nextest run -p dear-imgui-bevy --features render
-cargo nextest run -p dear-imgui-bevy --features render,multi-viewport
-cargo check -p dear-imgui-bevy --features render,multi-viewport --examples
+cargo check -p dear-imgui-bevy --all-targets --no-default-features --features render
+cargo nextest run -p dear-imgui-bevy --features multi-viewport
+cargo clippy -p dear-imgui-bevy --all-targets --features multi-viewport --no-deps -- -D warnings
+cargo check -p dear-imgui-bevy --target wasm32-unknown-unknown --no-default-features --features wasm
+cargo check -p dear-imgui-bevy --target wasm32-unknown-unknown --features wasm
+cargo test --doc -p dear-imgui-bevy --features multi-viewport
+cargo package -p dear-imgui-bevy
 ```
-
-Use `cargo run` commands from the examples table for manual smoke tests.

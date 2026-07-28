@@ -1,17 +1,14 @@
 //! Small Bevy runtime demo with an ImPlot profiler and motion controls.
 //!
 //! Run:
-//! `cargo run -p dear-imgui-bevy --features render --example bevy_plot_controls`
+//! `cargo run -p dear-imgui-bevy --example bevy_plot_controls`
 
 use bevy::{
     app::AppExit,
     prelude::*,
     window::{PresentMode, WindowPlugin, WindowTheme},
 };
-use dear_imgui_bevy::{
-    ImguiContext, ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, configure_example_context,
-    render::ImguiOverlayCamera,
-};
+use dear_imgui_bevy::prelude::*;
 use dear_imgui_rs::Condition;
 use dear_implot::{ImPlotExt, PlotCond};
 
@@ -83,8 +80,8 @@ fn main() {
     app.run();
 }
 
-fn setup_scene(mut commands: Commands, mut imgui: NonSendMut<ImguiContext>) {
-    commands.spawn((Camera2d, ImguiOverlayCamera));
+fn setup_scene(mut commands: Commands) {
+    commands.spawn(Camera2d);
     commands.spawn((
         Sprite::from_color(Color::srgb(0.12, 0.16, 0.22), BACKGROUND_SIZE),
         Transform::from_xyz(0.0, 0.0, -1.0),
@@ -94,18 +91,22 @@ fn setup_scene(mut commands: Commands, mut imgui: NonSendMut<ImguiContext>) {
         Transform::from_xyz(-MOTION_LIMIT, 0.0, 0.0),
         MotionMarker,
     ));
-
-    configure_example_context(&mut imgui, false);
 }
 
 fn install_plot_context(app: &mut App) {
     let contexts = {
-        let mut imgui = app
+        let mut registry = app
             .world_mut()
-            .get_non_send_mut::<ImguiContext>()
-            .expect("ImguiPlugin should install ImguiContext before examples create extensions");
-        let plot = dear_implot::PlotContext::create(imgui.context_mut());
-        PlotDemoContexts { plot }
+            .get_non_send_mut::<ImguiContexts>()
+            .expect("ImguiPlugin should install ImguiContexts before examples create extensions");
+        let primary_id = registry
+            .primary_id()
+            .expect("ImguiPlugin should install a primary Context");
+        registry
+            .configure(primary_id, |context| PlotDemoContexts {
+                plot: dear_implot::PlotContext::create(context),
+            })
+            .expect("the primary Context should be configurable before the app starts")
     };
     app.world_mut().insert_non_send(contexts);
 }
@@ -155,15 +156,13 @@ fn animate_marker(
 }
 
 fn plot_demo_ui(
-    mut contexts: ImguiContexts,
+    imgui: ImguiUi,
     plot_contexts: NonSend<PlotDemoContexts>,
     mut state: ResMut<PlotDemoState>,
     frame_count: Res<bevy::diagnostic::FrameCount>,
-) {
-    let imgui_frame_index = contexts.frame_index().unwrap_or_default();
-    let Some(ui) = contexts.primary_ui_mut() else {
-        return;
-    };
+) -> Result {
+    let imgui_frame_index = imgui.frame_index()?;
+    let ui = imgui.ui()?;
 
     let frame_time_ms = state.current_frame_time_ms;
     let fps = state.current_fps;
@@ -223,6 +222,8 @@ fn plot_demo_ui(
                 plot.end();
             }
         });
+
+    Ok(())
 }
 
 fn push_sample(history: &mut Vec<f64>, value: f64) {

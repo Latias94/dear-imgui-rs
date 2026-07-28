@@ -1,3 +1,4 @@
+use std::panic::{self, AssertUnwindSafe};
 use std::ptr;
 
 use crate::clipboard::ClipboardContext;
@@ -39,6 +40,52 @@ impl Context {
 pub struct SuspendedContext(pub(super) Context);
 
 impl SuspendedContext {
+    /// Returns the process-unique identity of this Context.
+    pub fn id(&self) -> ContextId {
+        self.0.id()
+    }
+
+    /// Runs a closure while this suspended Context is active.
+    ///
+    /// Any previously current Context is restored before this method returns. An open frame left
+    /// behind when the closure returns `Err` or panics is ended before propagating that outcome.
+    ///
+    /// # Panics
+    ///
+    /// Resumes any panic raised by the closure with its original payload. This method also panics
+    /// after ending the frame if the closure returns `Ok` while a Dear ImGui frame is still open.
+    pub fn try_with_active<T, E>(
+        &mut self,
+        f: impl FnOnce(&mut Context) -> Result<T, E>,
+    ) -> Result<T, E> {
+        let binding = self.0.binding();
+        binding.with_bound_context(|| {
+            let result = panic::catch_unwind(AssertUnwindSafe(|| f(&mut self.0)));
+
+            match result {
+                Ok(Ok(value)) => {
+                    if self.0.end_frame_for_teardown_unlocked() {
+                        panic!(
+                            "SuspendedContext::try_with_active(): closure returned Ok while a Dear ImGui frame was still open"
+                        );
+                    }
+                    Ok(value)
+                }
+                Ok(Err(error)) => {
+                    self.0.end_frame_for_teardown_unlocked();
+                    Err(error)
+                }
+                Err(payload) => {
+                    // Cleanup must not replace the closure's panic payload.
+                    let _ = panic::catch_unwind(AssertUnwindSafe(|| {
+                        self.0.end_frame_for_teardown_unlocked();
+                    }));
+                    panic::resume_unwind(payload)
+                }
+            }
+        })
+    }
+
     /// Tries to create a new suspended Dear ImGui context
     pub fn try_create() -> crate::error::ImGuiResult<Self> {
         Self::try_create_internal(None)

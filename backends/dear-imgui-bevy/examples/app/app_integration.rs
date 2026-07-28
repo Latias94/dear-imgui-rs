@@ -1,17 +1,14 @@
 //! Dear ImGui integrated into an existing Bevy game/app loop.
 //!
 //! Run:
-//! `cargo run -p dear-imgui-bevy --features render --example app_integration`
+//! `cargo run -p dear-imgui-bevy --example app_integration`
 
 use bevy::{
     app::AppExit,
     prelude::*,
     window::{PresentMode, WindowPlugin, WindowTheme},
 };
-use dear_imgui_bevy::{
-    ImguiContext, ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, configure_example_context,
-    input::ImguiInputCapture, render::ImguiOverlayCamera,
-};
+use dear_imgui_bevy::prelude::*;
 use dear_imgui_rs::Condition;
 
 const ARENA_SIZE: Vec2 = Vec2::new(820.0, 420.0);
@@ -82,9 +79,8 @@ fn setup_scene(mut commands: Commands) {
     ));
 }
 
-fn setup_imgui(mut commands: Commands, mut imgui: NonSendMut<ImguiContext>) {
-    commands.spawn((Camera2d, ImguiOverlayCamera));
-    configure_example_context(&mut imgui, false);
+fn setup_imgui(mut commands: Commands) {
+    commands.spawn(Camera2d);
 }
 
 fn close_on_escape(input: Res<ButtonInput<KeyCode>>, mut exit: MessageWriter<AppExit>) {
@@ -100,7 +96,7 @@ fn move_player(
     state: Res<AppState>,
     mut player: Query<&mut Transform, With<Player>>,
 ) {
-    if state.paused || capture.wants_keyboard_input() {
+    if state.paused || capture.primary_wants_keyboard_input() {
         return;
     }
 
@@ -142,14 +138,12 @@ fn apply_player_tint(state: Res<AppState>, mut player: Query<&mut Sprite, With<P
 }
 
 fn tools_ui(
-    mut contexts: ImguiContexts,
+    imgui: ImguiUi,
     capture: Res<ImguiInputCapture>,
     mut state: ResMut<AppState>,
     player: Query<&Transform, With<Player>>,
-) {
-    let Some(ui) = contexts.primary_ui_mut() else {
-        return;
-    };
+) -> Result {
+    let ui = imgui.ui()?;
 
     ui.window("App Tools")
         .position([48.0, 48.0], Condition::FirstUseEver)
@@ -174,13 +168,18 @@ fn tools_ui(
                 ui.text("Input Policy");
                 ui.text(format!(
                     "ImGui wants mouse: {}",
-                    capture.wants_pointer_input()
+                    capture.primary_wants_pointer_input()
                 ));
                 ui.text(format!(
                     "ImGui wants keyboard: {}",
-                    capture.wants_keyboard_input()
+                    capture.primary_wants_keyboard_input()
                 ));
-                ui.text(format!("ImGui wants text: {}", capture.wants_text_input()));
+                ui.text(format!(
+                    "ImGui wants text: {}",
+                    capture.primary_wants_text_input()
+                ));
             }
         });
+
+    Ok(())
 }

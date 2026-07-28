@@ -888,6 +888,210 @@ fn with_bound_context_restores_previous_context_after_panic() {
 }
 
 #[test]
+fn suspended_context_identity_and_activation_without_a_foreign_context_are_stable() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut suspended = super::SuspendedContext::create();
+    let expected_id = suspended.id();
+    let expected_raw = suspended.0.as_raw();
+
+    let observed_id = suspended
+        .try_with_active(|context| {
+            assert_eq!(context.id(), expected_id);
+            assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, expected_raw);
+            Ok::<_, ()>(context.id())
+        })
+        .expect("scoped Context activation must succeed");
+
+    assert_eq!(observed_id, expected_id);
+    assert!(unsafe { crate::sys::igGetCurrentContext() }.is_null());
+}
+
+#[test]
+fn suspended_context_activation_restores_a_foreign_context_for_all_outcomes() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let active = Context::create();
+    let active_raw = active.as_raw();
+    let mut suspended = super::SuspendedContext::create();
+    let suspended_raw = suspended.0.as_raw();
+
+    let value = suspended
+        .try_with_active(|context| {
+            assert_eq!(context.as_raw(), suspended_raw);
+            assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, suspended_raw);
+            Ok::<_, &'static str>(17)
+        })
+        .expect("successful scoped activation must return its value");
+    assert_eq!(value, 17);
+    assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, active_raw);
+
+    let error = suspended.try_with_active(|context| {
+        assert_eq!(context.as_raw(), suspended_raw);
+        Err::<(), _>("expected error")
+    });
+    assert_eq!(error, Err("expected error"));
+    assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, active_raw);
+
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = suspended.try_with_active::<(), ()>(|context| {
+            assert_eq!(context.as_raw(), suspended_raw);
+            std::panic::panic_any(0xA11CE_u32);
+        });
+    }))
+    .expect_err("closure panic must propagate");
+    assert_eq!(panic.downcast_ref::<u32>(), Some(&0xA11CE));
+    assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, active_raw);
+
+    drop(suspended);
+    drop(active);
+}
+
+#[test]
+fn suspended_context_error_closes_an_open_frame_and_can_reenter() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut suspended = super::SuspendedContext::create();
+
+    let error = suspended.try_with_active(|context| {
+        assert!(context.font_atlas().build());
+        context.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
+        context.frame().text("frame left open by an error");
+        Err::<(), _>("stop")
+    });
+    assert_eq!(error, Err("stop"));
+
+    suspended
+        .try_with_active(|context| {
+            assert_ne!(
+                context.frame_lifecycle_state(),
+                super::FrameLifecycleState::InFrame
+            );
+            context.frame().text("context remains reusable");
+            assert!(context.end_frame());
+            Ok::<_, ()>(())
+        })
+        .expect("an error-cleaned Context must be reusable");
+}
+
+#[test]
+fn suspended_context_success_rejects_and_closes_an_open_frame() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let active = Context::create();
+    let active_raw = active.as_raw();
+    let mut suspended = super::SuspendedContext::create();
+
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = suspended.try_with_active::<(), ()>(|context| {
+            assert!(context.font_atlas().build());
+            context.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
+            context
+                .frame()
+                .text("successful closure left this frame open");
+            Ok(())
+        });
+    }));
+
+    assert!(panic.is_err());
+    assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, active_raw);
+    suspended
+        .try_with_active(|context| {
+            assert_ne!(
+                context.frame_lifecycle_state(),
+                super::FrameLifecycleState::InFrame
+            );
+            Ok::<_, ()>(())
+        })
+        .expect("a contract-violation cleanup must leave the Context reusable");
+
+    drop(suspended);
+    drop(active);
+}
+
+#[test]
+fn suspended_context_panic_closes_an_open_frame_and_preserves_the_payload() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut suspended = super::SuspendedContext::create();
+
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = suspended.try_with_active::<(), ()>(|context| {
+            assert!(context.font_atlas().build());
+            context.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
+            context.frame().text("panicking frame");
+            std::panic::panic_any(0xC0FFEE_u32);
+        });
+    }))
+    .expect_err("closure panic must propagate");
+
+    assert_eq!(panic.downcast_ref::<u32>(), Some(&0xC0FFEE));
+    suspended
+        .try_with_active(|context| {
+            assert_ne!(
+                context.frame_lifecycle_state(),
+                super::FrameLifecycleState::InFrame
+            );
+            context.frame().text("context recovered after panic");
+            assert!(context.end_frame());
+            Ok::<_, ()>(())
+        })
+        .expect("a panic-cleaned Context must be reusable");
+}
+
+#[test]
+fn nested_suspended_context_activation_restores_each_owner() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let active = Context::create();
+    let active_raw = active.as_raw();
+    let mut suspended_a = super::SuspendedContext::create();
+    let raw_a = suspended_a.0.as_raw();
+    let mut suspended_b = super::SuspendedContext::create();
+    let raw_b = suspended_b.0.as_raw();
+
+    suspended_a
+        .try_with_active(|context_a| {
+            assert_eq!(context_a.as_raw(), raw_a);
+            assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw_a);
+
+            suspended_b
+                .try_with_active(|context_b| {
+                    assert_eq!(context_b.as_raw(), raw_b);
+                    assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw_b);
+                    Ok::<_, ()>(())
+                })
+                .expect("nested Context activation must succeed");
+            assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw_a);
+
+            let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = suspended_b.try_with_active::<(), ()>(|_| {
+                    std::panic::panic_any(0xB_u32);
+                });
+            }))
+            .expect_err("nested panic must propagate");
+            assert_eq!(panic.downcast_ref::<u32>(), Some(&0xB));
+            assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, raw_a);
+            Ok::<_, ()>(())
+        })
+        .expect("outer Context activation must remain valid");
+
+    assert_eq!(unsafe { crate::sys::igGetCurrentContext() }, active_raw);
+    drop(suspended_b);
+    drop(suspended_a);
+    drop(active);
+}
+
+#[test]
+fn suspended_context_can_be_entered_repeatedly() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut suspended = super::SuspendedContext::create();
+    let expected_id = suspended.id();
+
+    for entry in 0..4 {
+        let observed = suspended
+            .try_with_active(|context| Ok::<_, ()>((context.id(), entry)))
+            .expect("repeated scoped activation must succeed");
+        assert_eq!(observed, (expected_id, entry));
+        assert!(unsafe { crate::sys::igGetCurrentContext() }.is_null());
+    }
+}
+
+#[test]
 fn context_binding_rejects_destroyed_context() {
     let _guard = crate::test_support::imgui_context_guard();
     let ctx = Context::create();
@@ -956,6 +1160,53 @@ fn binding_does_not_restore_a_previous_context_destroyed_inside_the_scope() {
     let replacement = Context::create();
     drop(replacement);
     drop(suspended);
+}
+
+#[test]
+fn attachment_registration_preflight_is_non_mutating() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut ctx = Context::create();
+
+    assert_eq!(
+        ctx.preflight_attachment_registration::<RendererMarker>(ContextAttachmentRole::Renderer),
+        Err(ContextAttachmentError::MissingPlatform)
+    );
+    assert_eq!(
+        ctx.preflight_attachment_registration::<PlatformMarker>(ContextAttachmentRole::Platform),
+        Ok(())
+    );
+
+    let platform = Rc::new(RecordingAttachment::new(Rc::new(RefCell::new(Vec::new()))));
+    let mut platform_lease = ctx
+        .register_attachment::<PlatformMarker>(ContextAttachmentRole::Platform, platform)
+        .unwrap();
+
+    assert_eq!(
+        ctx.preflight_attachment_registration::<PlatformMarker>(ContextAttachmentRole::Platform),
+        Err(ContextAttachmentError::DuplicateAttachment)
+    );
+    assert_eq!(
+        ctx.preflight_attachment_registration::<ExtensionMarker>(ContextAttachmentRole::Platform),
+        Err(ContextAttachmentError::RoleOccupied(
+            ContextAttachmentRole::Platform
+        ))
+    );
+    assert_eq!(
+        ctx.preflight_attachment_registration::<RendererMarker>(ContextAttachmentRole::Renderer),
+        Ok(())
+    );
+
+    assert!(platform_lease.detach());
+    let shared_context = &ctx;
+    assert_eq!(
+        shared_context
+            .preflight_attachment_registration::<PlatformMarker>(ContextAttachmentRole::Platform),
+        Ok(())
+    );
+    let replacement = Rc::new(RecordingAttachment::new(Rc::new(RefCell::new(Vec::new()))));
+    let _replacement_lease = ctx
+        .register_attachment::<PlatformMarker>(ContextAttachmentRole::Platform, replacement)
+        .unwrap();
 }
 
 #[test]
