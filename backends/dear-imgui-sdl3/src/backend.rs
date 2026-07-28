@@ -175,6 +175,20 @@ pub struct Sdl3PlatformBackend {
 }
 
 impl Sdl3PlatformBackend {
+    /// Returns the Dear ImGui Context identity owned by this SDL3 platform backend.
+    pub fn context_id(&self) -> ContextId {
+        self.runtime.control().binding().id()
+    }
+
+    /// Validates that this backend still owns the active SDL3 viewport platform contract.
+    ///
+    /// Renderer backends use this before interpreting `PlatformHandle` values as SDL window IDs.
+    /// A backend that has shut down cannot validate even if another platform later attaches to
+    /// the same Context.
+    pub fn validate_renderer_owner(&self, imgui: &Context) -> Result<(), Sdl3BackendError> {
+        self.runtime.control().ensure_entry(imgui)
+    }
+
     fn initialize(
         imgui: &mut Context,
         platform_graphics: PlatformGraphicsKind,

@@ -63,6 +63,18 @@ pub enum WgpuViewportError {
     /// Renderer callbacks require an attached platform backend that supports viewports.
     #[error("WGPU multi-viewport requires an attached multi-viewport platform runtime")]
     PlatformBackendUnavailable,
+    /// The typed platform owner supplied to the renderer belongs to another Context.
+    #[error("WGPU viewport platform owner belongs to Context {expected:?}, not {actual:?}")]
+    PlatformOwnerContextMismatch {
+        expected: ContextId,
+        actual: ContextId,
+    },
+    /// The typed platform owner is no longer attached or no longer owns its callback contract.
+    #[error("{backend} viewport platform owner is unavailable: {reason}")]
+    PlatformOwnerUnavailable {
+        backend: &'static str,
+        reason: String,
+    },
     /// A required platform callback is absent.
     #[error("required ImGuiPlatformIO callback `{callback}` is not installed")]
     PlatformCallbackUnavailable { callback: &'static str },
@@ -137,7 +149,7 @@ pub struct WgpuViewportAttachError {
 }
 
 impl WgpuViewportAttachError {
-    fn new(error: WgpuViewportError, renderer: WgpuRenderer) -> Self {
+    pub(crate) fn new(error: WgpuViewportError, renderer: WgpuRenderer) -> Self {
         Self {
             error,
             renderer: Box::new(renderer),

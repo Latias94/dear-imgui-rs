@@ -2761,6 +2761,8 @@ version = "0.16.0-alpha.1"
 dependencies = [
  "bytemuck",
  "dear-imgui-rs",
+ "dear-imgui-sdl3",
+ "dear-imgui-winit",
  "objc2 0.6.4",
  "pollster",
  "raw-window-handle",

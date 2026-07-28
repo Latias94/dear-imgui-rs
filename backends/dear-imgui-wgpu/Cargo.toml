@@ -13,6 +13,8 @@ keywords.workspace = true
 
 [dependencies]
 dear-imgui-rs.workspace = true
+dear-imgui-sdl3 = { workspace = true, optional = true, features = ["multi-viewport"] }
+dear-imgui-winit = { workspace = true, optional = true, features = ["multi-viewport"] }
 wgpu27 = { package = "wgpu", version = "27.0", optional = true }
 wgpu28 = { package = "wgpu", version = "28.0", optional = true }
 wgpu29 = { package = "wgpu", version = "29.0", optional = true }
@@ -33,9 +35,19 @@ wgpu-28 = ["dep:wgpu28"]
 wgpu-29 = ["dep:wgpu29"]
 wgpu-30 = ["dep:wgpu30"]
 # Enable multi-viewport support with the winit platform backend.
-multi-viewport-winit = ["dear-imgui-rs/multi-viewport", "dep:winit"]
+multi-viewport-winit = [
+    "dear-imgui-rs/multi-viewport",
+    "dep:winit",
+    "dep:dear-imgui-winit",
+]
 # Enable multi-viewport support with SDL3 platform backend (native only)
-multi-viewport-sdl3 = ["dear-imgui-rs/multi-viewport", "dep:sdl3-sys", "dep:raw-window-handle", "dep:objc2"]
+multi-viewport-sdl3 = [
+    "dear-imgui-rs/multi-viewport",
+    "dep:sdl3-sys",
+    "dep:raw-window-handle",
+    "dep:objc2",
+    "dep:dear-imgui-sdl3",
+]
 # Debug logging for multi-viewport paths (see mvlog! macro)
 mv-log = []
 # Enable WebGL support for WASM

@@ -141,7 +141,7 @@ impl WgpuMultiViewportApp {
             &mut imgui,
         )?;
         renderer.set_gamma_mode(GammaMode::Auto);
-        let renderer = Sdl3ViewportRuntime::attach(&mut imgui, renderer)?;
+        let renderer = Sdl3ViewportRuntime::attach(&mut imgui, &sdl3_backend, renderer)?;
 
         Ok(Self {
             events: Sdl3CallbackEventHandoff::default(),

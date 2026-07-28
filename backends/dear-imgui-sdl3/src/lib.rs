@@ -69,7 +69,6 @@ mod viewport;
 use std::ffi::CString;
 use std::ffi::c_void;
 
-use dear_imgui_rs::Context;
 #[cfg(any(
     feature = "opengl3-renderer",
     feature = "sdlrenderer3-renderer",
@@ -82,6 +81,7 @@ use dear_imgui_rs::ContextBinding;
     feature = "sdlgpu3-renderer"
 ))]
 use dear_imgui_rs::render::{DrawData, RenderedFrame};
+use dear_imgui_rs::{Context, ContextId};
 #[cfg(feature = "opengl3-renderer")]
 use dear_imgui_sys::backend_shim::opengl3 as opengl3_backend;
 #[cfg(feature = "sdlgpu3-renderer")]

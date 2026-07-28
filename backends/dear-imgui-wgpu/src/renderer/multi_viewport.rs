@@ -20,6 +20,7 @@ use super::WgpuRenderer;
 use super::multi_viewport_runtime::OwningViewportRuntime;
 pub use super::multi_viewport_runtime::{WgpuViewportAttachError, WgpuViewportError};
 use crate::GammaMode;
+use dear_imgui_winit::multi_viewport::WinitPlatformRuntime;
 
 /// Owning WGPU renderer runtime for the Winit multi-viewport route.
 ///
@@ -38,6 +39,41 @@ impl WinitViewportRuntime {
     /// must have been created for `context` with both `WgpuInitInfo::with_instance` and
     /// `WgpuInitInfo::with_adapter`.
     pub fn attach(
+        context: &mut Context,
+        platform: &WinitPlatformRuntime,
+        renderer: WgpuRenderer,
+    ) -> Result<Self, WgpuViewportAttachError> {
+        if platform.context_id() != context.id() {
+            return Err(WgpuViewportAttachError::new(
+                WgpuViewportError::PlatformOwnerContextMismatch {
+                    expected: context.id(),
+                    actual: platform.context_id(),
+                },
+                renderer,
+            ));
+        }
+        if let Err(error) = platform.validate_renderer_owner(context) {
+            return Err(WgpuViewportAttachError::new(
+                WgpuViewportError::PlatformOwnerUnavailable {
+                    backend: "Winit",
+                    reason: error.to_string(),
+                },
+                renderer,
+            ));
+        }
+        OwningViewportRuntime::attach(context, renderer).map(|inner| Self { inner })
+    }
+
+    /// Attaches a WGPU renderer to a custom platform that follows the Winit viewport handle
+    /// contract.
+    ///
+    /// # Safety
+    ///
+    /// The current Context must have a live Winit-compatible platform runtime. Every viewport's
+    /// `PlatformHandle` must point to its live `winit::Window`, and the platform must keep those
+    /// windows alive until the renderer runtime has released its callbacks and resources. Prefer
+    /// [`Self::attach`] for the built-in [`WinitPlatformRuntime`] owner.
+    pub unsafe fn attach_unchecked(
         context: &mut Context,
         renderer: WgpuRenderer,
     ) -> Result<Self, WgpuViewportAttachError> {

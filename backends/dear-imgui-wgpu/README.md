@@ -67,7 +67,7 @@ let init = WgpuInitInfo::new(device, queue, format)
     .with_adapter(adapter)
     .with_viewport_surface_config(viewport_surface);
 let renderer = WgpuRenderer::new(init, imgui)?;
-let renderer = WinitViewportRuntime::attach(imgui, renderer)?;
+let renderer = WinitViewportRuntime::attach(imgui, &runtime, renderer)?;
 # Ok((platform, runtime, renderer))
 # }
 ```
@@ -85,8 +85,12 @@ main surface in the same sRGB contract; HDR or wide-gamut output needs an applic
 conversion pass rather than a different secondary-surface setting.
 
 For SDL3, initialize `Sdl3PlatformBackend` first and then call
-`dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRuntime::attach`. Both typed constructors
-consume `WgpuRenderer`; no caller-owned stable address or unsafe registration contract remains.
+`dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRuntime::attach(imgui, &platform, renderer)`.
+The safe constructors require the matching live platform owner and reject Context mismatches,
+shutdown owners, and callback ownership drift before interpreting any native handle. Custom
+platforms can use the explicitly unsafe `attach_unchecked` escape hatch only after proving the
+Winit or SDL3 `PlatformHandle` contract. Both typed constructors consume `WgpuRenderer`; no
+caller-owned stable address is required.
 
 The renderer claims only the five `Renderer_*` slots in `ImGuiPlatformIO`. Registration fails
 instead of replacing foreign renderer callbacks or `RendererUserData`, rejects secondary windows
