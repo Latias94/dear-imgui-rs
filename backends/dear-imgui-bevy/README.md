@@ -109,6 +109,36 @@ let inspector = contexts.create(ImguiContextConfig::new(InspectorPass))?;
 
 Register UI systems directly in that schedule. Use `contexts.configure(context_id, |context| ...)` only outside an active frame for font, ini, style, or other Context configuration. A live UI schedule cannot mutate or remove any registered Context through the safe API.
 
+### Fonts
+
+Configure a Context's font atlas through the non-send registry, normally from a `Startup` system:
+
+```rust
+const ROBOTO_MEDIUM: &[u8] = include_bytes!("../assets/Roboto-Medium.ttf");
+
+fn configure_fonts(mut contexts: NonSendMut<ImguiContexts>) -> Result {
+    let primary = contexts
+        .primary_id()
+        .ok_or("ImguiPlugin should install a primary Context before Startup")?;
+
+    contexts.configure(primary, |context| {
+        // SAFETY: the embedded bytes contain a complete, valid TTF and remain
+        // unchanged for the duration of this call.
+        let source = unsafe { FontSource::ttf_data_with_size(ROBOTO_MEDIUM, 18.0) };
+        context.font_atlas().add_font(&[source])
+    })?;
+    Ok(())
+}
+```
+
+External TTF/OTF, compressed TTF, and Base85 font sources use `unsafe` constructors because the native font loaders cannot prove that arbitrary input is complete and valid within the supplied buffer. Keep that boundary next to a trusted application asset whose completeness and loader validity the application guarantees. The renderer handles managed font-atlas texture updates; do not call `FontAtlas::build()` manually. Store returned `FontId` values in a non-send Bevy resource when they are needed by later UI systems.
+
+The complete example embeds a custom font, retains its `FontId`, and selects it with `Ui::push_font`:
+
+```console
+cargo run -p dear-imgui-bevy --example custom_font
+```
+
 ### Render and Input Routes
 
 The primary Context automatically targets the unique eligible primary-window camera. Advanced cases declare route components on ordinary ECS entities:
@@ -183,11 +213,12 @@ Every Context that calls `ImguiContextConfig::with_multi_viewport(true)` require
 
 ## Examples
 
-Start with the first four examples for copy-runnable integration patterns:
+Start with the first five examples for copy-runnable integration patterns:
 
 | Example | Run command | Demonstrates |
 | --- | --- | --- |
 | [`simple`](examples/basic/simple.rs) | `cargo run -p dear-imgui-bevy --example simple` | Minimal default overlay with no marker or helper setup. |
+| [`custom_font`](examples/basic/custom_font.rs) | `cargo run -p dear-imgui-bevy --example custom_font` | Outside-frame atlas configuration and non-send `FontId` storage. |
 | [`custom_post_process`](examples/advanced/custom_post_process.rs) | `cargo run -p dear-imgui-bevy --example custom_post_process` | Public overlay ordering with post-processing, MSAA, HDR, and Bevy UI composition. |
 | [`multiple_contexts`](examples/advanced/multiple_contexts.rs) | `cargo run -p dear-imgui-bevy --example multiple_contexts` | Independent Context schedules, windows, cameras, input routes, capture, and retryable teardown. |
 | [`render_to_image`](examples/advanced/render_to_image.rs) | `cargo run -p dear-imgui-bevy --example render_to_image` | Offscreen Context, Bevy image lease, and explicit logical input mapping. |
