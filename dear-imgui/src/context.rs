@@ -20,8 +20,9 @@ mod tests;
 mod texture_registry;
 
 pub use self::attachment::{
-    ContextAttachment, ContextAttachmentError, ContextAttachmentLease, ContextAttachmentPhase,
-    ContextAttachmentRole, ContextAttachmentTeardownError, ContextDestroyed,
+    ContextAttachment, ContextAttachmentError, ContextAttachmentHandle, ContextAttachmentLease,
+    ContextAttachmentPhase, ContextAttachmentRole, ContextAttachmentTeardownError,
+    ContextDestroyed, ContextPlatformAttachmentRelease, ContextPlatformAttachmentReleaseError,
     ContextPlatformWindowTeardown, ContextPlatformWindowTeardownError, ContextTeardown,
 };
 pub use self::binding::{

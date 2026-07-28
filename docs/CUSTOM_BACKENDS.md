@@ -503,6 +503,17 @@ must keep those callbacks alive until the whole native window-destruction phase
 completes and release global renderer state before platform-global state.
 Context-first drop invokes the same phases as a fail-stop fallback.
 
+Retain `ContextAttachmentLease::handle()` with the platform owner. Before closing
+an open frame, clearing callbacks, or destroying native windows, call
+`Context::prepare_platform_attachment_release(&handle)`. An active renderer
+attachment rejects preparation without mutating the Context; shut down the
+renderer and retry. Perform platform cleanup through the permit's `context_mut()`
+and call `commit()` only after cleanup succeeds. Dropping an uncommitted permit
+keeps the exact platform generation attached for a retry. Do not release native
+platform state first and then rely on `ContextAttachmentLease::detach()` to
+detect a dependency; that check is intentionally too late for transactional
+shutdown. Context-owned teardown already applies renderer-before-platform order.
+
 An engine integration must not mutate ECS or a render world from `Drop`. Transfer the complete Context owner, callback backing storage, renderer consumer, in-flight mailbox, and release leases into an app-local retirement queue. The engine schedule then quiesces new frames, waits for render-world and viewport-entity acknowledgements, clears exact native fields, and finally destroys the Context. If the engine executor is already gone, retaining or intentionally leaking the complete owner is safer than releasing callback or GPU state early.
 
 For first-party patterns, compare `dear-imgui-winit`,

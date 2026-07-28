@@ -8,8 +8,10 @@ use crate::io::Io;
 use crate::sys;
 
 use super::attachment::{
-    AttachmentRegistry, ContextAttachment, ContextAttachmentError, ContextAttachmentLease,
-    ContextAttachmentPhase, ContextAttachmentRole, run_post_destroy, run_pre_destroy_phase,
+    AttachmentRegistry, ContextAttachment, ContextAttachmentError, ContextAttachmentHandle,
+    ContextAttachmentLease, ContextAttachmentPhase, ContextAttachmentRole,
+    ContextPlatformAttachmentRelease, ContextPlatformAttachmentReleaseError, run_post_destroy,
+    run_pre_destroy_phase,
 };
 use super::binding::{
     CTX_MUTEX, ContextAliveToken, ContextBinding, ContextId, ContextState, RawBoundContextGuard,
@@ -152,6 +154,20 @@ impl Context {
     ) -> Result<(), ContextAttachmentError> {
         self.attachments
             .preflight_register::<Marker>(self.state.lifecycle(), role)
+    }
+
+    /// Prepares an explicit release of this Context's exact platform attachment generation.
+    ///
+    /// Preparation fails while a renderer attachment is active. No frame, callback, or native
+    /// state is changed on failure. The returned permit exclusively borrows this Context; perform
+    /// any fallible platform cleanup through [`ContextPlatformAttachmentRelease::context_mut`]
+    /// and call [`ContextPlatformAttachmentRelease::commit`] only after native cleanup succeeds.
+    pub fn prepare_platform_attachment_release(
+        &mut self,
+        handle: &ContextAttachmentHandle,
+    ) -> Result<ContextPlatformAttachmentRelease<'_>, ContextPlatformAttachmentReleaseError> {
+        let control = self.attachments.prepare_platform_release(handle)?;
+        Ok(ContextPlatformAttachmentRelease::new(self, control))
     }
 
     // removed legacy create_or_panic variants (use create()/try_create())

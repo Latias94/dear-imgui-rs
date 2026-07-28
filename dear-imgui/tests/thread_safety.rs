@@ -7,7 +7,9 @@ fn thread_safety_context_and_render_markers() {
     // Context must NOT be Send/Sync
     assert_not_impl_any!(dear_imgui_rs::Context: Send, Sync);
     assert_not_impl_any!(dear_imgui_rs::ContextBinding: Send, Sync);
+    assert_not_impl_any!(dear_imgui_rs::ContextAttachmentHandle: Send, Sync);
     assert_not_impl_any!(dear_imgui_rs::ContextAttachmentLease: Send, Sync);
+    assert_not_impl_any!(dear_imgui_rs::ContextPlatformAttachmentRelease<'static>: Send, Sync);
     assert_impl_all!(dear_imgui_rs::ManagedTextureId: Send, Sync);
 
     // Font handles and FontAtlas must NOT be Send/Sync
