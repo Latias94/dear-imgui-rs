@@ -186,6 +186,7 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
                     (*io).DisplaySize.y
                 );
             }
+            self.assert_docking_config_stable_unlocked("Context::frame()");
             #[cfg(feature = "multi-viewport")]
             self.prepare_multi_viewport_new_frame_contract_unlocked("Context::frame()");
             crate::fonts::assert_no_font_atlas_texture_borrows((*io).Fonts, "Context::frame()");
@@ -202,6 +203,22 @@ dear-imgui-winit::WinitPlatform::prepare_frame().",
             sys::igNewFrame();
         }
         &mut self.ui
+    }
+
+    fn assert_docking_config_stable_unlocked(&self, caller: &str) {
+        let frame_count = unsafe { (*self.raw).FrameCount };
+        if frame_count == 0 {
+            return;
+        }
+
+        let io = self.io_ptr(caller);
+        let requested = unsafe { (*io).ConfigFlags } & sys::ImGuiConfigFlags_DockingEnable as i32;
+        let active = unsafe { (*self.raw).ConfigFlagsCurrFrame }
+            & sys::ImGuiConfigFlags_DockingEnable as i32;
+        assert_eq!(
+            requested, active,
+            "{caller} cannot change ConfigFlags::DOCKING_ENABLE after the first frame; Dear ImGui clears live dock nodes when docking is disabled and cannot restore them safely when it is re-enabled"
+        );
     }
 
     /// Begin a frame, run a UI-building closure, render the frame, and return both values.

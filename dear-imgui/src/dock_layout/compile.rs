@@ -148,64 +148,90 @@ pub(crate) fn submit_and_apply(
     let initial_size = target.initial_size();
 
     ui.run_with_bound_context(|| {
-        // SAFETY: `run_with_bound_context` keeps this Ui's context current, and `root_id` is an
-        // opaque value that Dear ImGui accepts for lookup without dereferencing Rust memory.
-        let existed_before_submission = unsafe { !sys::igDockBuilderGetNode(root_id).is_null() };
-        if apply == DockLayoutApply::IfMissing && existed_before_submission {
-            // Persisted layouts are authoritative. Re-submit the host without mutating its
-            // existing builder tree.
-            return submit_dockspace(
+        let claim = crate::dock_space::claim_dockspace_submission(
+            ui,
+            "Ui dock layout submission",
+            target.root_id(),
+            target.dock_flags(),
+            submission == DockspaceSubmission::CurrentWindow,
+        )
+        .map_err(|_| DockLayoutError::DuplicateDockspaceSubmission {
+            root_id: target.root_id(),
+        })?;
+
+        let result = (|| {
+            // SAFETY: `run_with_bound_context` keeps this Ui's context current, and `root_id` is an
+            // opaque value that Dear ImGui accepts for lookup without dereferencing Rust memory.
+            let existed_before_submission =
+                unsafe { !sys::igDockBuilderGetNode(root_id).is_null() };
+            if apply == DockLayoutApply::IfMissing && existed_before_submission {
+                // Persisted layouts are authoritative. Re-submit the host without mutating its
+                // existing builder tree.
+                return submit_dockspace(
+                    submission,
+                    root_id,
+                    initial_size,
+                    target.dock_flags().bits(),
+                    window_class_ptr,
+                    target.root_id(),
+                );
+            }
+
+            // Dear ImGui requires all DockBuilder mutations to happen before the visible DockSpace
+            // submission. AddNode(DockSpace) creates a keep-alive root without claiming a visible
+            // host, so splits and window assignments are applied against the final tree.
+            let builder_flags =
+                target.dock_flags().bits() | sys::ImGuiDockNodeFlags_DockSpace as i32;
+            // SAFETY: the bound context is current and the validated flags contain only supported
+            // DockNode bits plus the internal DockSpace creation marker.
+            let added_root = unsafe { sys::igDockBuilderAddNode(root_id, builder_flags) };
+            if added_root != root_id {
+                return Err(DockLayoutError::DockspaceSubmissionFailed {
+                    root_id: target.root_id(),
+                });
+            }
+
+            // SAFETY: `root_id` is a live node in the bound context and the validated target owns the
+            // finite position and size values copied into these calls.
+            unsafe {
+                sys::igDockBuilderSetNodePos(
+                    root_id,
+                    sys::ImVec2 {
+                        x: initial_position[0],
+                        y: initial_position[1],
+                    },
+                );
+                sys::igDockBuilderSetNodeSize(
+                    root_id,
+                    sys::ImVec2 {
+                        x: initial_size[0],
+                        y: initial_size[1],
+                    },
+                );
+            }
+
+            let mut executor = ImGuiCommandExecutor;
+            execute_transaction(target.root_id(), &compiled, &mut executor)?;
+            submit_dockspace(
                 submission,
                 root_id,
                 initial_size,
                 target.dock_flags().bits(),
                 window_class_ptr,
                 target.root_id(),
+            )
+        })();
+        let main_viewport_host_skipped = result.is_ok()
+            && submission == DockspaceSubmission::MainViewport
+            && crate::dock_space::window_skips_items(
+                &crate::dock_space::main_viewport_dockspace_host_name("Ui dock layout submission"),
             );
+        if result.is_ok() && !main_viewport_host_skipped {
+            if let Some(claim) = claim {
+                claim.commit();
+            }
         }
-
-        // Dear ImGui requires all DockBuilder mutations to happen before the visible DockSpace
-        // submission. AddNode(DockSpace) creates a keep-alive root without claiming a visible
-        // host, so splits and window assignments are applied against the final tree.
-        let builder_flags = target.dock_flags().bits() | sys::ImGuiDockNodeFlags_DockSpace as i32;
-        // SAFETY: the bound context is current and the validated flags contain only supported
-        // DockNode bits plus the internal DockSpace creation marker.
-        let added_root = unsafe { sys::igDockBuilderAddNode(root_id, builder_flags) };
-        if added_root != root_id {
-            return Err(DockLayoutError::DockspaceSubmissionFailed {
-                root_id: target.root_id(),
-            });
-        }
-
-        // SAFETY: `root_id` is a live node in the bound context and the validated target owns the
-        // finite position and size values copied into these calls.
-        unsafe {
-            sys::igDockBuilderSetNodePos(
-                root_id,
-                sys::ImVec2 {
-                    x: initial_position[0],
-                    y: initial_position[1],
-                },
-            );
-            sys::igDockBuilderSetNodeSize(
-                root_id,
-                sys::ImVec2 {
-                    x: initial_size[0],
-                    y: initial_size[1],
-                },
-            );
-        }
-
-        let mut executor = ImGuiCommandExecutor;
-        execute_transaction(target.root_id(), &compiled, &mut executor)?;
-        submit_dockspace(
-            submission,
-            root_id,
-            initial_size,
-            target.dock_flags().bits(),
-            window_class_ptr,
-            target.root_id(),
-        )
+        result
     })
 }
 

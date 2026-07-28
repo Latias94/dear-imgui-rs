@@ -190,6 +190,8 @@ pub enum DockLayoutError {
     LayoutTooLarge,
     #[error("docking is not enabled in ConfigFlags")]
     DockingDisabled,
+    #[error("dockspace {root_id:?} was already submitted during this frame")]
+    DuplicateDockspaceSubmission { root_id: Id },
     #[error("dockspace submission did not create root {root_id:?}")]
     DockspaceSubmissionFailed { root_id: Id },
     #[error("compiled dock node {index} was unavailable during application")]
