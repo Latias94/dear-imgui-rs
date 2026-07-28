@@ -1,9 +1,19 @@
 //! Main-world route extraction and render-world view resolution.
 
-use std::collections::{HashMap, HashSet};
-
 use super::resources::ImguiRenderRouteSnapshot;
 use super::*;
+
+type ExtractedViewCandidate<'a> = (
+    &'a ExtractedView,
+    &'a ExtractedCamera,
+    &'a CameraMainTextureUsages,
+    &'a Msaa,
+);
+
+struct IndexedExtractedView<'a> {
+    first: ExtractedViewCandidate<'a>,
+    has_duplicates: bool,
+}
 
 pub(super) fn extract_imgui_bevy_textures(
     registry: Extract<Option<Res<crate::ImguiBevyTextures>>>,
@@ -20,31 +30,40 @@ pub(super) fn extract_imgui_render_frame(
     mut extracted: ResMut<ImguiExtractedRenderFrame>,
     snapshot_mailbox: Res<crate::context::ImguiFrameMailbox>,
     renderer_releases: Res<ImguiRendererReleases>,
-    backend_status: Extract<Res<ImguiBackendStatus>>,
     resolved_routes: Extract<Res<crate::route::ImguiResolvedRoutes>>,
     primary_window: Extract<Query<Entity, With<PrimaryWindow>>>,
     viewport_cameras: Extract<ViewportCameraQuery<'_>>,
     viewport_windows: Extract<ViewportWindowQuery<'_>>,
 ) {
-    let route_epoch = resolved_routes.epoch();
-    extracted.begin_extraction(route_epoch, snapshot_mailbox.completion_watermarks());
     let mut pending = snapshot_mailbox.take_all().into_iter().collect::<Vec<_>>();
     pending.sort_by_key(|(context_id, _)| context_id.get().get());
-    let pending_contexts = pending
-        .iter()
-        .map(|(context_id, _)| *context_id)
-        .collect::<HashSet<_>>();
-    let mut main_routes = HashMap::<imgui::ContextId, Vec<_>>::new();
-    for route in resolved_routes.render_routes() {
-        if !pending_contexts.contains(&route.context_id()) {
+    let route_epoch = pending.first().map_or_else(
+        || resolved_routes.epoch(),
+        |(_, frame)| frame.render_routes.epoch(),
+    );
+    debug_assert!(
+        pending
+            .iter()
+            .all(|(_, frame)| frame.render_routes.epoch() == route_epoch),
+        "all Context snapshots from one driver pass must capture the same render-route epoch"
+    );
+    extracted.begin_extraction(route_epoch, snapshot_mailbox.completion_watermarks());
+
+    for (context_id, frame) in pending {
+        if renderer_releases.release_requested(context_id) {
+            drop(frame);
             continue;
         }
-        main_routes
-            .entry(route.context_id())
-            .or_default()
-            .push(ImguiRenderRouteSnapshot {
+
+        let frame_route_epoch = frame.render_routes.epoch();
+        let mut route_snapshots = frame
+            .render_routes
+            .render_routes()
+            .iter()
+            .filter(|route| route.context_id() == context_id)
+            .map(|route| ImguiRenderRouteSnapshot {
                 context_id: route.context_id(),
-                route_epoch,
+                route_epoch: frame_route_epoch,
                 route_entity: route.route_entity(),
                 camera: route.camera(),
                 order: route.order(),
@@ -57,18 +76,10 @@ pub(super) fn extract_imgui_render_frame(
                 ],
                 viewport_id: None,
                 camera_viewport: route.camera_viewport().map(ImguiCameraViewport::from),
-            });
-    }
+            })
+            .collect::<Vec<_>>();
 
-    for (context_id, frame) in pending {
-        if renderer_releases.release_requested(context_id) {
-            drop(frame);
-            continue;
-        }
-
-        let mut route_snapshots = main_routes.remove(&context_id).unwrap_or_default();
-
-        if frame.include_platform_viewports && backend_status.multi_viewport_supported {
+        if frame.include_platform_viewports {
             let primary_window = primary_window.single().ok();
             route_snapshots.extend(viewport_cameras.iter().filter_map(
                 |(camera_entity, camera, target, camera_graph, viewport_camera, camera_owner)| {
@@ -107,7 +118,7 @@ pub(super) fn extract_imgui_render_frame(
                     }
                     Some(ImguiRenderRouteSnapshot {
                         context_id,
-                        route_epoch,
+                        route_epoch: frame_route_epoch,
                         route_entity: None,
                         camera: camera_entity,
                         order: 0,
@@ -142,22 +153,30 @@ pub(super) fn resolve_extracted_imgui_render_routes(
     let mut context_ids = extracted.context_ids().collect::<Vec<_>>();
     context_ids.sort_by_key(|context_id| context_id.get().get());
     let mut route_diagnostics = Vec::new();
+    let mut views_by_main_camera = HashMap::<Entity, IndexedExtractedView<'_>>::new();
+    for candidate @ (view, _, _, _) in &views {
+        views_by_main_camera
+            .entry(view.retained_view_entity.main_entity.id())
+            .and_modify(|indexed| indexed.has_duplicates = true)
+            .or_insert(IndexedExtractedView {
+                first: candidate,
+                has_duplicates: false,
+            });
+    }
 
     for context_id in context_ids {
         let route_snapshots = extracted.route_snapshots(context_id).to_vec();
         let mut camera_targets = Vec::with_capacity(route_snapshots.len());
         for route in route_snapshots {
-            let mut matching_views = views.iter().filter(|(view, _, _, _)| {
-                view.retained_view_entity.main_entity.id() == route.camera
-            });
-            let Some((view, camera, texture_usages, msaa)) = matching_views.next() else {
+            let Some(indexed_view) = views_by_main_camera.get(&route.camera) else {
                 route_diagnostics.push(extraction_diagnostic(
                     &route,
                     crate::route::ImguiDiagnosticKind::MissingExtractedView,
                 ));
                 continue;
             };
-            let diagnostic_kind = if matching_views.next().is_some() {
+            let (view, camera, texture_usages, msaa) = indexed_view.first;
+            let diagnostic_kind = if indexed_view.has_duplicates {
                 Some(crate::route::ImguiDiagnosticKind::StaleExtractedView)
             } else if !matches!(camera.output_mode, CameraOutputMode::Write { .. }) {
                 Some(crate::route::ImguiDiagnosticKind::CameraDoesNotWrite)

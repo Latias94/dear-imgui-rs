@@ -16,9 +16,11 @@ use bevy_window::{Monitor, PrimaryMonitor};
 
 #[cfg(feature = "render")]
 #[derive(Resource, Default)]
-pub(super) struct ImguiPlatformImeFeedback {
-    previous_windows: HashSet<Entity>,
-    requests: HashMap<Entity, ImguiPlatformImeRequest>,
+pub(super) struct ImguiPlatformFeedback {
+    previous_ime_windows: HashSet<Entity>,
+    ime_requests: HashMap<Entity, ImguiPlatformImeRequest>,
+    previous_cursor_windows: HashSet<Entity>,
+    cursor_requests: HashMap<Entity, ImguiPlatformCursorRequest>,
 }
 
 #[cfg(feature = "render")]
@@ -26,6 +28,13 @@ pub(super) struct ImguiPlatformImeFeedback {
 struct ImguiPlatformImeRequest {
     wants_text_input: bool,
     input_position: Option<ImguiPlatformImePosition>,
+}
+
+#[cfg(feature = "render")]
+#[derive(Clone, Default)]
+struct ImguiPlatformCursorRequest {
+    visible: bool,
+    icon: Option<CursorIcon>,
 }
 
 #[cfg(feature = "render")]
@@ -41,10 +50,13 @@ pub(super) fn prepare_context_platform_frame(
     context_id: imgui::ContextId,
     context: &mut imgui::Context,
     host_window: Entity,
-) -> Result<bool, crate::viewport::ImguiViewportBridgeError> {
+) -> Result<bool, crate::viewport::ImguiViewportRuntimeError> {
     let Some(host_window_state) = world.get::<Window>(host_window).cloned() else {
         return Ok(false);
     };
+    let render_integration_installed = world
+        .get_resource::<super::ownership::ImguiBackendRuntime>()
+        .is_some_and(super::ownership::ImguiBackendRuntime::render_integration_installed);
     let Some(bridge) = world
         .get_non_send::<crate::ImguiViewportBridge>()
         .and_then(|bridge| bridge.context(context_id))
@@ -133,9 +145,9 @@ pub(super) fn prepare_context_platform_frame(
         &host_window_state,
         &monitors,
         viewport_feedback.into_iter(),
-        true,
+        render_integration_installed,
     )
-    .map_err(crate::viewport::ImguiViewportBridgeError::CallbackOwnership)?;
+    .map_err(crate::viewport::ImguiViewportRuntimeError::CallbackOwnership)?;
     Ok(true)
 }
 
@@ -146,44 +158,58 @@ pub(super) fn sync_context_platform_feedback(
     ui: &imgui::Ui,
 ) {
     debug_assert_eq!(ui.context_id(), context_id);
-    let hovered_window = {
-        #[cfg(feature = "render")]
-        {
-            world
-                .get_resource::<ImguiInputState>()
-                .and_then(|state| state.mouse_hovered_window_for_context(context_id))
-        }
-        #[cfg(not(feature = "render"))]
-        {
-            world
-                .get_resource::<ImguiInputState>()
-                .and_then(ImguiInputState::mouse_hovered_window)
-        }
-    };
-    let Some(host_window) = host_window else {
-        return;
-    };
-    let Some((host_entity, viewport_entities)) =
-        host_window_and_viewport_entities(world, host_window, context_id)
-    else {
-        return;
-    };
-
-    let cursor_target = hovered_window
-        .filter(|candidate| {
-            host_entity == *candidate
-                || viewport_entities
-                    .iter()
-                    .any(|(entity, _)| entity == candidate)
-        })
-        .or(Some(host_entity));
-    let hide_os_cursor = ui.io().mouse_draw_cursor() || ui.mouse_cursor().is_none();
-    let cursor_icon = (!hide_os_cursor)
-        .then(|| ui.mouse_cursor().and_then(map_imgui_mouse_cursor))
-        .flatten();
-    let mut cursor_edits = Vec::new();
-
+    #[cfg(feature = "render")]
     {
+        let _ = host_window;
+        let default_window = world
+            .get_resource::<crate::input::ImguiContextInputMetrics>()
+            .and_then(|metrics| metrics.get(context_id))
+            .map(|metrics| metrics.host_window);
+        let cursor_target = world
+            .get_resource::<ImguiInputState>()
+            .and_then(|state| state.platform_cursor_window_for_context(context_id, default_window));
+        let Some(cursor_target) = cursor_target else {
+            return;
+        };
+        let hide_os_cursor = ui.io().mouse_draw_cursor() || ui.mouse_cursor().is_none();
+        let cursor_icon = (!hide_os_cursor)
+            .then(|| ui.mouse_cursor().and_then(map_imgui_mouse_cursor))
+            .flatten();
+        world
+            .resource_mut::<ImguiPlatformFeedback>()
+            .cursor_requests
+            .entry(cursor_target)
+            .or_insert_with(|| ImguiPlatformCursorRequest {
+                visible: !hide_os_cursor,
+                icon: cursor_icon,
+            });
+    }
+
+    #[cfg(not(feature = "render"))]
+    {
+        let Some(host_window) = host_window else {
+            return;
+        };
+        let Some((host_entity, viewport_entities)) =
+            host_window_and_viewport_entities(world, host_window, context_id)
+        else {
+            return;
+        };
+        let cursor_target = world
+            .get_resource::<ImguiInputState>()
+            .and_then(ImguiInputState::mouse_hovered_window)
+            .filter(|candidate| {
+                host_entity == *candidate
+                    || viewport_entities
+                        .iter()
+                        .any(|(entity, _)| entity == candidate)
+            })
+            .or(Some(host_entity));
+        let hide_os_cursor = ui.io().mouse_draw_cursor() || ui.mouse_cursor().is_none();
+        let cursor_icon = (!hide_os_cursor)
+            .then(|| ui.mouse_cursor().and_then(map_imgui_mouse_cursor))
+            .flatten();
+        let mut cursor_edits = Vec::new();
         let mut query = world.query::<(Entity, &mut CursorOptions, Option<&mut CursorIcon>)>();
         for (entity, mut cursor_options, current_cursor_icon) in query.iter_mut(world) {
             if entity != host_entity
@@ -206,15 +232,14 @@ pub(super) fn sync_context_platform_feedback(
                 (None, None) => {}
             }
         }
-    }
-
-    for edit in cursor_edits {
-        match edit {
-            CursorEdit::Insert(entity, icon) => {
-                world.entity_mut(entity).insert(icon);
-            }
-            CursorEdit::Remove(entity) => {
-                world.entity_mut(entity).remove::<CursorIcon>();
+        for edit in cursor_edits {
+            match edit {
+                CursorEdit::Insert(entity, icon) => {
+                    world.entity_mut(entity).insert(icon);
+                }
+                CursorEdit::Remove(entity) => {
+                    world.entity_mut(entity).remove::<CursorIcon>();
+                }
             }
         }
     }
@@ -269,11 +294,10 @@ pub(super) fn sync_primary_window_ime_feedback(
 }
 
 #[cfg(feature = "render")]
-pub(super) fn begin_platform_ime_feedback(world: &mut World) {
-    world
-        .resource_mut::<ImguiPlatformImeFeedback>()
-        .requests
-        .clear();
+pub(super) fn begin_platform_feedback(world: &mut World) {
+    let mut feedback = world.resource_mut::<ImguiPlatformFeedback>();
+    feedback.ime_requests.clear();
+    feedback.cursor_requests.clear();
 }
 
 #[cfg(feature = "render")]
@@ -287,6 +311,17 @@ pub(super) fn record_context_platform_ime_feedback(
     // this call. The raw pointer was captured immediately before `Context::frame()`.
     let ime_data = unsafe { &(*context_raw).PlatformImeData };
     let uses_desktop_coordinates = native_viewports_enabled_for_frame(context_raw);
+    let input_enabled = world
+        .get_resource::<crate::route::ImguiResolvedRoutes>()
+        .is_some_and(|routes| {
+            routes.input_routes().iter().any(|route| {
+                route.context_id() == context_id
+                    && !matches!(route.policy(), crate::route::ImguiInputPolicy::Disabled)
+            })
+        });
+    if !input_enabled {
+        return;
+    }
     let mut windows = world
         .get_resource::<ImguiInputState>()
         .map(|state| state.context_window_focus_states(context_id))
@@ -294,55 +329,100 @@ pub(super) fn record_context_platform_ime_feedback(
     let host_and_viewports = host_window
         .and_then(|host_window| host_window_and_viewport_entities(world, host_window, context_id));
 
-    if windows.is_empty() {
-        if let Some((host_window, _)) = host_and_viewports.as_ref() {
-            windows.push((*host_window, true));
-        }
-    }
     if ime_data.ViewportId != 0
-        && let Some((_, viewport_entities)) = host_and_viewports.as_ref()
-        && let Some(viewport_window) = viewport_entities.iter().find_map(|(entity, viewport_id)| {
-            (*viewport_id == ime_data.ViewportId).then_some(*entity)
-        })
+        && let Some(viewport_window) =
+            host_and_viewports
+                .as_ref()
+                .and_then(|(_, viewport_entities)| {
+                    viewport_entities.iter().find_map(|(entity, viewport_id)| {
+                        (*viewport_id == ime_data.ViewportId).then_some(*entity)
+                    })
+                })
     {
         windows.clear();
         windows.push((viewport_window, true));
     }
 
     let ime_position = [ime_data.InputPos.x, ime_data.InputPos.y];
-    let mut feedback = world.resource_mut::<ImguiPlatformImeFeedback>();
+    let mut feedback = world.resource_mut::<ImguiPlatformFeedback>();
     for (window, focused) in windows {
-        let request = feedback.requests.entry(window).or_default();
         if focused && ime_data.WantTextInput {
-            request.wants_text_input = true;
-            request.input_position = Some(ImguiPlatformImePosition {
-                position: ime_position,
-                uses_desktop_coordinates,
-            });
+            feedback
+                .ime_requests
+                .entry(window)
+                .or_insert(ImguiPlatformImeRequest {
+                    wants_text_input: true,
+                    input_position: Some(ImguiPlatformImePosition {
+                        position: ime_position,
+                        uses_desktop_coordinates,
+                    }),
+                });
         }
     }
 }
 
 #[cfg(feature = "render")]
-pub(super) fn finish_platform_ime_feedback(world: &mut World) {
-    let (requests, previous_windows) = {
-        let mut feedback = world.resource_mut::<ImguiPlatformImeFeedback>();
-        let requests = std::mem::take(&mut feedback.requests);
-        let previous_windows = std::mem::replace(
-            &mut feedback.previous_windows,
-            requests.keys().copied().collect(),
+pub(super) fn finish_platform_feedback(world: &mut World) {
+    let (ime_requests, previous_ime_windows, cursor_requests, previous_cursor_windows) = {
+        let mut feedback = world.resource_mut::<ImguiPlatformFeedback>();
+        let ime_requests = std::mem::take(&mut feedback.ime_requests);
+        let previous_ime_windows = std::mem::replace(
+            &mut feedback.previous_ime_windows,
+            ime_requests.keys().copied().collect(),
         );
-        (requests, previous_windows)
+        let cursor_requests = std::mem::take(&mut feedback.cursor_requests);
+        let previous_cursor_windows = std::mem::replace(
+            &mut feedback.previous_cursor_windows,
+            cursor_requests.keys().copied().collect(),
+        );
+        (
+            ime_requests,
+            previous_ime_windows,
+            cursor_requests,
+            previous_cursor_windows,
+        )
     };
-    let mut affected_windows = previous_windows;
-    affected_windows.extend(requests.keys().copied());
+    let mut affected_cursor_windows = previous_cursor_windows;
+    affected_cursor_windows.extend(cursor_requests.keys().copied());
+    let mut cursor_edits = Vec::new();
+    {
+        let mut query = world.query::<(Entity, &mut CursorOptions, Option<&mut CursorIcon>)>();
+        for (entity, mut cursor_options, current_cursor_icon) in query.iter_mut(world) {
+            if !affected_cursor_windows.contains(&entity) {
+                continue;
+            }
+            let request = cursor_requests.get(&entity);
+            cursor_options.visible = request.is_none_or(|request| request.visible);
+            match (
+                request.and_then(|request| request.icon.clone()),
+                current_cursor_icon,
+            ) {
+                (Some(desired), Some(mut current)) => *current = desired,
+                (Some(desired), None) => cursor_edits.push(CursorEdit::Insert(entity, desired)),
+                (None, Some(_)) => cursor_edits.push(CursorEdit::Remove(entity)),
+                (None, None) => {}
+            }
+        }
+    }
+    for edit in cursor_edits {
+        match edit {
+            CursorEdit::Insert(entity, icon) => {
+                world.entity_mut(entity).insert(icon);
+            }
+            CursorEdit::Remove(entity) => {
+                world.entity_mut(entity).remove::<CursorIcon>();
+            }
+        }
+    }
 
+    let mut affected_ime_windows = previous_ime_windows;
+    affected_ime_windows.extend(ime_requests.keys().copied());
     let mut query = world.query::<(Entity, &mut Window, Option<&PrimaryWindow>)>();
     for (entity, mut window, primary_window) in query.iter_mut(world) {
-        if !affected_windows.contains(&entity) {
+        if !affected_ime_windows.contains(&entity) {
             continue;
         }
-        let Some(request) = requests.get(&entity) else {
+        let Some(request) = ime_requests.get(&entity) else {
             window.ime_enabled = false;
             continue;
         };
@@ -421,15 +501,15 @@ fn ime_position_for_window(
     let mut position = Vec2::new(ime_position[0], ime_position[1]);
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     {
-        if uses_desktop_coordinates {
-            if let Some(client_position) = crate::viewport::desktop_to_window_client_logical(
+        if uses_desktop_coordinates
+            && let Some(client_position) = crate::viewport::desktop_to_window_client_logical(
                 _entity,
                 &window.position,
                 window.scale_factor(),
                 ime_position,
-            ) {
-                return Vec2::new(client_position[0], client_position[1]);
-            }
+            )
+        {
+            return Vec2::new(client_position[0], client_position[1]);
         }
     }
 

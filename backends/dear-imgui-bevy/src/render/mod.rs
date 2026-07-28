@@ -52,9 +52,8 @@ use std::collections::{HashMap, HashSet};
 use std::mem::size_of;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-pub use crate::texture::{ImguiBevyTextures, ImguiTexture, ImguiTextureRegistrationError};
 use crate::viewport::ImguiViewportOwner;
-use crate::{ImguiBackendStatus, ImguiViewportCamera, ImguiViewportWindow};
+use crate::{ImguiViewportCamera, ImguiViewportWindow};
 
 mod extract;
 mod pass;
@@ -63,25 +62,38 @@ mod plugin;
 mod prepare;
 mod resources;
 
-pub use pipeline::{
-    IMGUI_FRAGMENT_ENTRY_POINT, IMGUI_SHADER_HANDLE, IMGUI_SHADER_SOURCE, IMGUI_VERTEX_ENTRY_POINT,
-    ImguiGpuVertex, ImguiPipelineKey, ImguiRenderPipeline, ImguiUniforms,
+#[cfg(test)]
+pub(crate) use pipeline::{
+    IMGUI_FRAGMENT_ENTRY_POINT, IMGUI_VERTEX_ENTRY_POINT, ImguiPipelineKey,
     imgui_vertex_buffer_layout,
 };
-pub use plugin::{ImguiRenderSystems, ImguiUiRenderOrder, RenderFeature};
+pub(crate) use pipeline::{
+    IMGUI_SHADER_HANDLE, IMGUI_SHADER_SOURCE, ImguiGpuVertex, ImguiRenderPipeline, ImguiUniforms,
+};
+pub use plugin::ImguiRenderSystems;
+#[cfg(feature = "bevy-ui")]
+pub use plugin::ImguiUiRenderOrder;
+#[cfg(not(feature = "bevy-ui"))]
+pub(crate) use plugin::ImguiUiRenderOrder;
 pub(crate) use plugin::{
     clear_standard_draw_callbacks_if_owned, install_render_extraction,
     install_standard_draw_callbacks_for_context, render_integration_available,
     standard_draw_callback_conflict, standard_draw_callback_contract,
     standard_draw_callback_occupied,
 };
-pub use resources::{
+pub(crate) use resources::{
     ImguiCameraTarget, ImguiCameraViewport, ImguiExtractedBevyTextures, ImguiExtractedRenderFrame,
-    ImguiGpuBuffers, ImguiOverlayCamera, ImguiOverlayDisabled, ImguiPipelineGpuResources,
-    ImguiPreparedDraw, ImguiPreparedRenderFrame, ImguiQueuedPipelines, ImguiSampler,
-    ImguiScissorRect, ImguiTextureBindGroupError, ImguiTextureBindGroups,
+    ImguiGpuBuffers, ImguiPipelineGpuResources, ImguiPreparedDraw, ImguiPreparedRenderFrame,
+    ImguiQueuedPipelines, ImguiSampler, ImguiScissorRect, ImguiTextureBindGroups,
 };
 pub(crate) use resources::{ImguiRendererReleaseLease, ImguiRendererReleases};
+
+#[cfg(test)]
+#[path = "tests/render_extract.rs"]
+mod render_extract_tests;
+#[cfg(test)]
+#[path = "tests/texture.rs"]
+mod texture_tests;
 
 type ViewportCameraQuery<'w> = Query<
     'w,
@@ -121,10 +133,13 @@ mod tests {
         retain_extracted_bevy_image_bindings, scissor_for_render_pass, scissor_from_clip_rect,
         validate_texture_update_rect,
     };
-    use super::resources::{ImguiTextureViewCompatibility, pad_index_buffer_for_copy_alignment};
+    use super::resources::{
+        BevyImageBindingSource, ImguiTextureViewCompatibility, pad_index_buffer_for_copy_alignment,
+    };
     use super::*;
     use bevy_asset::AssetId;
     use bevy_ecs::schedule::ScheduleLabel;
+    use bevy_render::render_resource::{SamplerId, TextureViewId};
     use bevy_render::{renderer::initialize_renderer, settings::WgpuSettings};
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     use bevy_window::Window;
@@ -192,6 +207,7 @@ mod tests {
         crate::context::PendingFrame {
             frame_index,
             include_platform_viewports: false,
+            render_routes: crate::route::ImguiRenderRouteEpoch::default(),
             snapshot,
         }
     }
@@ -364,7 +380,7 @@ mod tests {
             Err(crate::ImguiContextError::RemovalPending {
                 context_id,
                 reason:
-                    crate::context::ownership::ImguiContextIntoInnerErrorReason::RenderWorldReleasePending,
+                    crate::context::ownership::ImguiContextRemovalPendingReason::RenderWorldReleasePending,
             }) if context_id == context_a
         ));
         assert!(
@@ -421,12 +437,9 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(bevy_render::extract_plugin::ExtractPlugin::default());
         app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
-        app.add_plugins(crate::ImguiPlugin::new(crate::ImguiBackendConfig {
-            name: "release-freeze".to_owned(),
-            docking: true,
-            multi_viewport: true,
-            viewport_window: Default::default(),
-        }));
+        app.add_plugins(crate::ImguiPlugin::new(
+            crate::ImguiPluginConfig::default().with_multi_viewport(true),
+        ));
         app.world_mut().spawn((Window::default(), PrimaryWindow));
         let primary_id = app
             .world()
@@ -469,9 +482,10 @@ mod tests {
 
         let frame_index = app
             .world()
-            .get_non_send::<crate::context::ImguiFrameState>()
+            .get_non_send::<crate::ImguiContexts>()
             .unwrap()
-            .frame_index();
+            .frame_index(primary_id)
+            .unwrap();
         let releases = app.world().resource::<ImguiRendererReleases>().clone();
         app.sub_app_mut(RenderApp).update_schedule = None;
         assert!(matches!(
@@ -481,7 +495,7 @@ mod tests {
                 .remove(primary_id),
             Err(crate::ImguiContextError::RemovalPending {
                 context_id,
-                reason: crate::context::ownership::ImguiContextIntoInnerErrorReason::ViewportWorldReleasePending,
+                reason: crate::context::ownership::ImguiContextRemovalPendingReason::ViewportWorldReleasePending,
             }) if context_id == primary_id
         ));
         assert!(
@@ -500,9 +514,10 @@ mod tests {
         app.update();
         assert_eq!(
             app.world()
-                .get_non_send::<crate::context::ImguiFrameState>()
+                .get_non_send::<crate::ImguiContexts>()
                 .unwrap()
-                .frame_index(),
+                .frame_index(primary_id)
+                .unwrap(),
             frame_index,
             "viewport drain must not resume native frame production"
         );
@@ -522,7 +537,7 @@ mod tests {
                 .remove(primary_id),
             Err(crate::ImguiContextError::RemovalPending {
                 context_id,
-                reason: crate::context::ownership::ImguiContextIntoInnerErrorReason::RenderWorldReleasePending,
+                reason: crate::context::ownership::ImguiContextRemovalPendingReason::RenderWorldReleasePending,
             }) if context_id == primary_id
         ));
         assert!(releases.acknowledge_release(
@@ -557,11 +572,6 @@ mod tests {
         let mut bindings = ImguiTextureBindGroups::default();
 
         let first_renderer_id = bindings.managed_texture_id(first);
-        assert!(matches!(
-            bindings.validate_external_texture_id(first_renderer_id),
-            Err(ImguiTextureBindGroupError::ManagedTextureIdInUse { texture })
-                if texture == first_renderer_id
-        ));
         bindings.destroy_managed_texture(first, 4);
         bindings.destroy_managed_texture(first, 5);
         assert!(bindings.managed_texture_is_destroyed(first));
@@ -570,10 +580,6 @@ mod tests {
             !bindings
                 .managed_texture_aliases
                 .contains_key(&first_renderer_id)
-        );
-        assert_eq!(
-            bindings.validate_external_texture_id(first_renderer_id),
-            Ok(())
         );
 
         let released = bindings.take_managed_renderer_state(context_id);
@@ -655,7 +661,6 @@ mod tests {
         let mut owner = crate::context::ownership::ContextOwner::new(context.suspend());
         let releases = ImguiRendererReleases::default();
         let backend = crate::context::ownership::BackendAttachment {
-            config: crate::ImguiBackendConfig::default(),
             render_integration_installed: true,
             #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
             viewport_bridge_registration: None,
@@ -683,7 +688,7 @@ mod tests {
             .expect_err("live render-world resources must prevent Context teardown");
         assert_eq!(
             error,
-            crate::context::ownership::ImguiContextIntoInnerErrorReason::RenderWorldReleasePending
+            crate::context::ownership::ImguiContextRemovalPendingReason::RenderWorldReleasePending
         );
         owner
             .try_with_active_renderer_context(false, |context, _| {
@@ -728,7 +733,6 @@ mod tests {
     fn device_recovery_resets_each_context_texture_and_resumes_its_consumer() {
         let releases = ImguiRendererReleases::default();
         let backend = crate::context::ownership::BackendAttachment {
-            config: crate::ImguiBackendConfig::default(),
             render_integration_installed: true,
             #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
             viewport_bridge_registration: None,
@@ -790,7 +794,7 @@ mod tests {
             assert_eq!(
                 owner.try_detach_backend(),
                 Err(
-                    crate::context::ownership::ImguiContextIntoInnerErrorReason::RenderWorldReleasePending
+                    crate::context::ownership::ImguiContextRemovalPendingReason::RenderWorldReleasePending
                 )
             );
         }
@@ -1608,20 +1612,27 @@ mod tests {
         let registered = TextureBinding::Legacy(imgui::TextureId::new(42));
         let still_active = TextureBinding::Legacy(imgui::TextureId::new(43));
 
-        texture_bind_groups.bevy_image_bindings.insert(registered);
-        texture_bind_groups.bevy_image_bindings.insert(still_active);
+        for binding in [registered, still_active] {
+            texture_bind_groups.bevy_image_sources.insert(
+                binding,
+                BevyImageBindingSource {
+                    texture_view: TextureViewId::new(),
+                    sampler: SamplerId::new(),
+                },
+            );
+        }
 
         texture_bind_groups.retain_bevy_image_bindings(&HashSet::from([still_active]));
 
         assert!(
             !texture_bind_groups
-                .bevy_image_bindings
-                .contains(&registered)
+                .bevy_image_sources
+                .contains_key(&registered)
         );
         assert!(
             texture_bind_groups
-                .bevy_image_bindings
-                .contains(&still_active)
+                .bevy_image_sources
+                .contains_key(&still_active)
         );
     }
 
@@ -1633,17 +1644,24 @@ mod tests {
         let still_active_id = imgui::TextureId::new(43);
         let still_active = TextureBinding::Legacy(still_active_id);
 
-        texture_bind_groups.bevy_image_bindings.insert(stale);
-        texture_bind_groups.bevy_image_bindings.insert(still_active);
+        for binding in [stale, still_active] {
+            texture_bind_groups.bevy_image_sources.insert(
+                binding,
+                BevyImageBindingSource {
+                    texture_view: TextureViewId::new(),
+                    sampler: SamplerId::new(),
+                },
+            );
+        }
         extracted.replace_for_test(vec![(still_active_id, AssetId::<Image>::default())]);
 
         retain_extracted_bevy_image_bindings(&extracted, &mut texture_bind_groups);
 
-        assert!(!texture_bind_groups.bevy_image_bindings.contains(&stale));
+        assert!(!texture_bind_groups.bevy_image_sources.contains_key(&stale));
         assert!(
             texture_bind_groups
-                .bevy_image_bindings
-                .contains(&still_active)
+                .bevy_image_sources
+                .contains_key(&still_active)
         );
     }
 
@@ -1890,10 +1908,8 @@ mod tests {
         let binding = TextureBinding::Legacy(texture_id);
 
         extracted.replace_for_test(vec![(texture_id, image_id)]);
-        gpu_images.insert(
-            image_id,
-            gpu_image(&render_device, TextureUsages::TEXTURE_BINDING),
-        );
+        let mut current_image = gpu_image(&render_device, TextureUsages::TEXTURE_BINDING);
+        gpu_images.insert(image_id, current_image.clone());
 
         prepare_bevy_image_texture_bind_groups(
             Some(&gpu_images),
@@ -1905,11 +1921,69 @@ mod tests {
         );
 
         assert_eq!(texture_bind_groups.len(), 1);
-        assert!(
+        let first_bind_group = texture_bind_groups
+            .get(&binding, ImguiSampler::Linear)
+            .expect("registered Bevy image handles should resolve to a real bind group")
+            .clone();
+
+        prepare_bevy_image_texture_bind_groups(
+            Some(&gpu_images),
+            &extracted,
+            &render_device,
+            &pipeline_cache,
+            &pipeline,
+            &mut texture_bind_groups,
+        );
+        let reused_bind_group = texture_bind_groups
+            .get(&binding, ImguiSampler::Linear)
+            .expect("an unchanged image should retain its bind group");
+        assert_eq!(
+            reused_bind_group, &first_bind_group,
+            "an unchanged texture view and sampler must reuse the existing bind group"
+        );
+
+        let replacement_view = gpu_image(&render_device, TextureUsages::TEXTURE_BINDING);
+        current_image.texture = replacement_view.texture;
+        current_image.texture_view = replacement_view.texture_view;
+        current_image.texture_descriptor = replacement_view.texture_descriptor;
+        current_image.texture_view_descriptor = replacement_view.texture_view_descriptor;
+        gpu_images.insert(image_id, current_image.clone());
+        prepare_bevy_image_texture_bind_groups(
+            Some(&gpu_images),
+            &extracted,
+            &render_device,
+            &pipeline_cache,
+            &pipeline,
+            &mut texture_bind_groups,
+        );
+        let view_bind_group = texture_bind_groups
+            .get(&binding, ImguiSampler::Linear)
+            .expect("a replacement texture view should produce a bind group")
+            .clone();
+        assert_ne!(
+            view_bind_group, first_bind_group,
+            "changing the texture view must rebuild the bind group"
+        );
+
+        current_image.sampler = render_device.create_sampler(&SamplerDescriptor {
+            label: Some("dear_imgui_bevy_replacement_sampler"),
+            ..Default::default()
+        });
+        gpu_images.insert(image_id, current_image.clone());
+        prepare_bevy_image_texture_bind_groups(
+            Some(&gpu_images),
+            &extracted,
+            &render_device,
+            &pipeline_cache,
+            &pipeline,
+            &mut texture_bind_groups,
+        );
+        assert_ne!(
             texture_bind_groups
                 .get(&binding, ImguiSampler::Linear)
-                .is_some(),
-            "registered Bevy image handles should resolve to a real bind group"
+                .expect("a replacement sampler should produce a bind group"),
+            &view_bind_group,
+            "changing only the sampler must rebuild the bind group"
         );
 
         gpu_images.remove(image_id);

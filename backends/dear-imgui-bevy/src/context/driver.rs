@@ -1,9 +1,6 @@
 #[cfg(feature = "render")]
 use std::collections::HashMap;
-use std::{
-    collections::HashSet,
-    panic::{self, AssertUnwindSafe},
-};
+use std::panic::{self, AssertUnwindSafe};
 
 use bevy_app::App;
 use bevy_ecs::{
@@ -19,18 +16,16 @@ use super::ImguiFrameMailbox;
 use super::platform;
 use super::{
     ActiveUiCapability, ImguiActiveRendererContextError, ImguiActiveUi, ImguiContextError,
-    ImguiContexts, ImguiFrameOutput, ImguiFrameState,
+    ImguiContexts,
 };
 #[cfg(feature = "render")]
-use crate::input::ImguiContextInputMetrics;
+use crate::input::{ImguiContextInputMetrics, ImguiInputFrameMetrics};
 
 pub(crate) fn install_context_lifecycle(app: &mut App) {
     app.insert_non_send(ImguiActiveUi::default());
-    app.insert_non_send(ImguiFrameState::default());
-    app.init_resource::<ImguiFrameOutput>();
     #[cfg(feature = "render")]
     app.init_resource::<ImguiFrameMailbox>()
-        .init_resource::<platform::ImguiPlatformImeFeedback>();
+        .init_resource::<platform::ImguiPlatformFeedback>();
     super::ownership::install_context_retirements(app);
 }
 
@@ -38,23 +33,33 @@ struct PrimaryFrameMetrics {
     host_window: Entity,
     display_size: [f32; 2],
     framebuffer_scale: [f32; 2],
-    delta_time: f32,
+}
+
+#[cfg(feature = "render")]
+#[derive(Clone, Copy)]
+struct RoutedFrameMetrics {
+    display_size: [f32; 2],
+    framebuffer_scale: [f32; 2],
+}
+
+#[cfg(feature = "render")]
+impl From<ImguiInputFrameMetrics> for RoutedFrameMetrics {
+    fn from(metrics: ImguiInputFrameMetrics) -> Self {
+        Self {
+            display_size: metrics.display_size,
+            framebuffer_scale: metrics.framebuffer_scale,
+        }
+    }
 }
 
 enum PendingFrameOutput {
     #[cfg(feature = "render")]
-    Snapshot(
-        Result<imgui::render::snapshot::FrameSnapshot, imgui::render::snapshot::SnapshotError>,
-    ),
+    Snapshot(imgui::render::snapshot::FrameSnapshot),
     Rendered,
 }
 
 /// Serially activate, frame, schedule, render, and suspend every registered Context.
 pub(crate) fn drive_imgui_contexts(world: &mut World) {
-    world
-        .get_non_send_mut::<ImguiFrameState>()
-        .expect("primary frame state must be installed")
-        .end();
     world
         .get_non_send::<ImguiActiveUi>()
         .expect("ImguiPlugin must install the active UI capability")
@@ -64,46 +69,71 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
         .get_non_send::<ImguiContexts>()
         .map(ImguiContexts::drive_order)
         .unwrap_or_default();
-    let live_contexts = order.iter().copied().collect::<HashSet<_>>();
-    world
-        .resource_mut::<ImguiFrameOutput>()
-        .retain_contexts(|context_id| live_contexts.contains(&context_id));
     let primary_id = world
         .get_non_send::<ImguiContexts>()
         .and_then(ImguiContexts::primary_id);
+    let delta_time = frame_delta_time(world);
     let primary_metrics = primary_frame_metrics(world);
     #[cfg(feature = "render")]
-    let routed_metrics = world
+    let routed_input_metrics = world
         .get_resource::<ImguiContextInputMetrics>()
         .cloned()
         .unwrap_or_default();
     #[cfg(feature = "render")]
-    let routed_platform_hosts = world
+    let render_route_epoch = world
         .get_resource::<crate::route::ImguiResolvedRoutes>()
-        .map(|routes| {
-            let mut hosts = routes
-                .render_routes()
-                .iter()
-                .filter_map(|route| {
-                    route
-                        .host_window()
-                        .map(|host_window| (route.context_id(), host_window))
-                })
-                .collect::<HashMap<_, _>>();
-            for route in routes.input_routes() {
-                hosts
-                    .entry(route.context_id())
-                    .or_insert_with(|| route.host_window());
-            }
-            hosts
-        })
+        .map(crate::route::ImguiResolvedRoutes::render_epoch)
         .unwrap_or_default();
+    #[cfg(feature = "render")]
+    let (routed_render_metrics, routed_platform_hosts) = {
+        let metrics = render_route_epoch
+            .render_routes()
+            .iter()
+            .filter(|route| {
+                route
+                    .host_window()
+                    .is_none_or(|host_window| world.get::<Window>(host_window).is_some())
+            })
+            .map(|route| {
+                let framebuffer_scale = finite_framebuffer_scale([
+                    route.target_info().scale_factor,
+                    route.target_info().scale_factor,
+                ]);
+                let physical_size = route.physical_output_size();
+                (
+                    route.context_id(),
+                    RoutedFrameMetrics {
+                        display_size: finite_display_size([
+                            physical_size.x as f32 / framebuffer_scale[0],
+                            physical_size.y as f32 / framebuffer_scale[1],
+                        ]),
+                        framebuffer_scale,
+                    },
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let hosts = render_route_epoch
+            .render_routes()
+            .iter()
+            .filter(|route| {
+                route
+                    .host_window()
+                    .is_none_or(|host_window| world.get::<Window>(host_window).is_some())
+            })
+            .filter_map(|route| {
+                route
+                    .host_window()
+                    .map(|host_window| (route.context_id(), host_window))
+            })
+            .collect::<HashMap<_, _>>();
+        (metrics, hosts)
+    };
     let active = world
         .get_non_send::<ImguiActiveUi>()
         .expect("ImguiPlugin must install the active UI capability")
         .capability();
     #[cfg(feature = "render")]
-    platform::begin_platform_ime_feedback(world);
+    platform::begin_platform_feedback(world);
 
     for context_id in order {
         let is_primary = Some(context_id) == primary_id;
@@ -138,7 +168,10 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
             continue;
         }
         #[cfg(feature = "render")]
-        let has_routed_metrics = routed_metrics.get(context_id).is_some();
+        let has_routed_metrics = routed_render_metrics.contains_key(&context_id)
+            || routed_input_metrics
+                .get(context_id)
+                .is_some_and(|metrics| world.get::<Window>(metrics.host_window).is_some());
         #[cfg(not(feature = "render"))]
         let has_routed_metrics = false;
         if is_primary && primary_metrics.is_none() && !has_routed_metrics {
@@ -161,12 +194,19 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
             .then_some(primary_metrics.as_ref())
             .flatten();
         #[cfg(feature = "render")]
-        let routed_metrics_for_context = routed_metrics.get(context_id);
+        let routed_input_metrics_for_context = routed_input_metrics
+            .get(context_id)
+            .filter(|metrics| world.get::<Window>(metrics.host_window).is_some());
+        #[cfg(feature = "render")]
+        let routed_metrics_for_context = routed_render_metrics
+            .get(&context_id)
+            .copied()
+            .or_else(|| routed_input_metrics_for_context.map(RoutedFrameMetrics::from));
         #[cfg(feature = "render")]
         let platform_host = routed_platform_hosts
             .get(&context_id)
             .copied()
-            .or_else(|| routed_metrics_for_context.map(|metrics| metrics.host_window))
+            .or_else(|| routed_input_metrics_for_context.map(|metrics| metrics.host_window))
             .or_else(|| primary_metrics_for_context.map(|metrics| metrics.host_window));
         #[cfg(not(feature = "render"))]
         let platform_host = primary_metrics_for_context.map(|metrics| metrics.host_window);
@@ -210,22 +250,12 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
                             (
                                 finite_display_size(display_size),
                                 finite_framebuffer_scale(framebuffer_scale),
-                                primary_metrics_for_context.map_or_else(
-                                    || context.io().delta_time().max(f32::EPSILON),
-                                    |metrics| metrics.delta_time,
-                                ),
+                                delta_time,
                             )
                         } else {
                             #[cfg(feature = "render")]
                             if let Some(metrics) = routed_metrics_for_context {
-                                (
-                                    metrics.display_size,
-                                    metrics.framebuffer_scale,
-                                    primary_metrics_for_context.map_or_else(
-                                        || context.io().delta_time().max(f32::EPSILON),
-                                        |metrics| metrics.delta_time,
-                                    ),
-                                )
+                                (metrics.display_size, metrics.framebuffer_scale, delta_time)
                             } else {
                                 primary_metrics_for_context.map_or_else(
                                     || {
@@ -234,14 +264,14 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
                                             finite_framebuffer_scale(
                                                 context.io().display_framebuffer_scale(),
                                             ),
-                                            context.io().delta_time().max(f32::EPSILON),
+                                            delta_time,
                                         )
                                     },
                                     |metrics| {
                                         (
                                             metrics.display_size,
                                             metrics.framebuffer_scale,
-                                            metrics.delta_time,
+                                            delta_time,
                                         )
                                     },
                                 )
@@ -254,15 +284,11 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
                                         finite_framebuffer_scale(
                                             context.io().display_framebuffer_scale(),
                                         ),
-                                        context.io().delta_time().max(f32::EPSILON),
+                                        delta_time,
                                     )
                                 },
                                 |metrics| {
-                                    (
-                                        metrics.display_size,
-                                        metrics.framebuffer_scale,
-                                        metrics.delta_time,
-                                    )
+                                    (metrics.display_size, metrics.framebuffer_scale, delta_time)
                                 },
                             )
                         }
@@ -290,10 +316,6 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
 
                     let schedule_capability =
                         active_for_frame(&active, context_id, config.schedule(), frame_index, ui);
-                    world
-                        .get_non_send_mut::<ImguiFrameState>()
-                        .expect("active frame state must be installed")
-                        .begin(context_id, frame_index);
 
                     let schedule_found = try_run_context_schedule(world, config.schedule());
                     drop(schedule_capability);
@@ -316,10 +338,6 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
                         );
                         platform::sync_primary_window_ime_feedback(world, context_id, context_raw);
                     }
-                    world
-                        .get_non_send_mut::<ImguiFrameState>()
-                        .expect("active frame state must be installed")
-                        .end();
                     if !schedule_found {
                         let _ = context.end_frame();
                         return Err(ImguiContextError::MissingSchedule {
@@ -344,6 +362,9 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
                                 not(target_arch = "wasm32")
                             )))]
                             let snapshot = context.render_snapshot(consumer);
+                            let snapshot = snapshot.map_err(|source| {
+                                ImguiContextError::SnapshotCapture { context_id, source }
+                            })?;
                             return Ok(PendingFrameOutput::Snapshot(snapshot));
                         }
                     }
@@ -358,10 +379,6 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
             )
         }));
 
-        world
-            .get_non_send_mut::<ImguiFrameState>()
-            .expect("active frame state must be installed")
-            .end();
         active.revoke();
 
         let (completed_frame, context_error, panic_payload) = match result {
@@ -372,6 +389,8 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
                         context_id,
                         frame_index,
                         config.multi_viewport(),
+                        #[cfg(feature = "render")]
+                        render_route_epoch.clone(),
                         output,
                     );
                 }));
@@ -417,7 +436,7 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
         }
     }
     #[cfg(feature = "render")]
-    platform::finish_platform_ime_feedback(world);
+    platform::finish_platform_feedback(world);
 }
 
 fn try_run_context_schedule(world: &mut World, label: InternedScheduleLabel) -> bool {
@@ -468,39 +487,46 @@ fn poll_context_completions_or_quarantine(world: &mut World, context_id: imgui::
 fn clear_context_output(world: &mut World, context_id: imgui::ContextId) {
     #[cfg(feature = "render")]
     world.resource::<ImguiFrameMailbox>().clear(context_id);
-    world
-        .resource_mut::<ImguiFrameOutput>()
-        .clear_snapshot(context_id);
+    #[cfg(not(feature = "render"))]
+    let _ = (world, context_id);
 }
 
 fn finish_frame_output(
     world: &mut World,
     context_id: imgui::ContextId,
     frame_index: u64,
-    _include_platform_viewports: bool,
+    include_platform_viewports: bool,
+    #[cfg(feature = "render")] render_routes: crate::route::ImguiRenderRouteEpoch,
     output: PendingFrameOutput,
 ) {
+    #[cfg(not(feature = "render"))]
+    let _ = (world, context_id, frame_index, include_platform_viewports);
+    #[cfg(all(feature = "render", not(test)))]
+    let _ = frame_index;
     match output {
         #[cfg(feature = "render")]
         PendingFrameOutput::Snapshot(snapshot) => {
             let mailbox = world.resource::<ImguiFrameMailbox>().clone();
-            let releases = world
+            if world
                 .resource::<crate::render::ImguiRendererReleases>()
-                .clone();
-            world.resource_mut::<ImguiFrameOutput>().set_snapshot(
+                .release_requested(context_id)
+            {
+                mailbox.clear(context_id);
+                return;
+            }
+            debug_assert_eq!(snapshot.epoch().context_id(), context_id);
+            mailbox.publish(
                 context_id,
-                &mailbox,
-                &releases,
-                frame_index,
-                _include_platform_viewports,
-                snapshot,
+                super::PendingFrame {
+                    #[cfg(test)]
+                    frame_index,
+                    include_platform_viewports,
+                    render_routes,
+                    snapshot,
+                },
             );
         }
-        PendingFrameOutput::Rendered => {
-            world
-                .resource_mut::<ImguiFrameOutput>()
-                .complete_without_snapshot(context_id, frame_index);
-        }
+        PendingFrameOutput::Rendered => {}
     }
 }
 
@@ -517,19 +543,21 @@ fn active_for_frame(
 }
 
 fn primary_frame_metrics(world: &mut World) -> Option<PrimaryFrameMetrics> {
-    let delta_time = world
-        .get_resource::<Time<Real>>()
-        .map(Time::delta_secs)
-        .unwrap_or(1.0 / 60.0)
-        .max(f32::EPSILON);
     let mut query = world.query_filtered::<(Entity, &Window), With<PrimaryWindow>>();
     let (host_window, window) = query.single(world).ok()?;
     Some(PrimaryFrameMetrics {
         host_window,
         display_size: finite_display_size([window.width(), window.height()]),
         framebuffer_scale: finite_framebuffer_scale([window.scale_factor(), window.scale_factor()]),
-        delta_time,
     })
+}
+
+fn frame_delta_time(world: &World) -> f32 {
+    world
+        .get_resource::<Time<Real>>()
+        .map(Time::delta_secs)
+        .unwrap_or(1.0 / 60.0)
+        .max(f32::EPSILON)
 }
 
 fn finite_display_size(size: [f32; 2]) -> [f32; 2] {

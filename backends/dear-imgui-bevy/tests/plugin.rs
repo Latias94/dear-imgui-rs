@@ -9,9 +9,8 @@ use bevy_render::{Render, RenderApp, extract_plugin::ExtractPlugin};
 #[cfg(feature = "render")]
 use bevy_window::{PrimaryWindow, Window};
 use dear_imgui_bevy::{
-    BEVY_TARGET_COMMIT, BEVY_TARGET_VERSION, ImguiBackendConfig, ImguiBackendStatus,
-    ImguiContextConfig, ImguiContextError, ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass,
-    RUST_TARGET_VERSION, WGPU_TARGET_VERSION,
+    BEVY_TARGET_COMMIT, BEVY_TARGET_VERSION, ImguiContextConfig, ImguiContextError, ImguiContexts,
+    ImguiPlugin, ImguiPluginConfig, ImguiPrimaryContextPass, WGPU_TARGET_VERSION,
 };
 #[cfg(feature = "render")]
 use dear_imgui_bevy::{ContextId, ImguiUi};
@@ -74,9 +73,6 @@ fn plugin_registers_the_primary_registry_and_private_driver_schedule() {
         "the plugin must install its private serial driver schedule"
     );
 
-    let status = app.world().resource::<ImguiBackendStatus>();
-    assert_eq!(status.bevy_target, BEVY_TARGET_VERSION);
-    assert_eq!(status.rust_target, RUST_TARGET_VERSION);
     assert_eq!(BEVY_TARGET_VERSION, "0.19.0");
     assert_eq!(
         BEVY_TARGET_COMMIT,
@@ -95,16 +91,10 @@ fn plugin_adopts_a_preinserted_registry_without_replacing_its_primary_context() 
         .create(ImguiContextConfig::new(AdditionalPass))
         .unwrap();
 
-    let config = ImguiBackendConfig {
-        name: "custom\0backend".to_owned(),
-        docking: false,
-        multi_viewport: false,
-        viewport_window: Default::default(),
-    };
+    let config = ImguiPluginConfig::default().with_docking(false);
     let mut app = App::new();
     app.insert_non_send(contexts);
-    app.insert_resource(config.clone());
-    app.add_plugins(ImguiPlugin::default());
+    app.add_plugins(ImguiPlugin::new(config));
 
     let contexts = app.world().get_non_send::<ImguiContexts>().unwrap();
     assert_eq!(contexts.primary_id(), Some(primary_id));
@@ -112,15 +102,13 @@ fn plugin_adopts_a_preinserted_registry_without_replacing_its_primary_context() 
         contexts.ids().collect::<Vec<_>>(),
         vec![primary_id, additional_id]
     );
-    assert_eq!(app.world().resource::<ImguiBackendConfig>(), &config);
-
     let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
     for context_id in [primary_id, additional_id] {
         contexts
             .configure(context_id, |context| {
                 assert_eq!(
                     context.io().backend_platform_name().unwrap().to_bytes(),
-                    b"custom?backend"
+                    b"dear-imgui-bevy"
                 );
                 assert_eq!(
                     context
@@ -380,10 +368,10 @@ fn renderer_ownership_drift_fails_closed_and_removal_can_be_repaired() {
     ));
     assert_eq!(
         app.world()
-            .resource::<dear_imgui_bevy::ImguiFrameOutput>()
-            .get(primary_id)
-            .expect("the rejected Context must retain diagnostic frame output")
-            .frame_index(),
+            .get_non_send::<ImguiContexts>()
+            .expect("the plugin must retain its Context registry")
+            .frame_index(primary_id)
+            .expect("the rejected Context must retain its frame index"),
         0,
         "a rejected primary frame must not become the latest completed frame"
     );
@@ -402,7 +390,7 @@ fn renderer_ownership_drift_fails_closed_and_removal_can_be_repaired() {
         ImguiContextError::RemovalPending {
             context_id,
             reason:
-                dear_imgui_bevy::ImguiContextIntoInnerErrorReason::RendererOwnership(
+                dear_imgui_bevy::ImguiContextRemovalPendingReason::RendererOwnership(
                     dear_imgui_bevy::ImguiRendererOwnershipError::FieldReplaced {
                         field: "BackendFlags"
                     }
@@ -424,22 +412,23 @@ fn renderer_ownership_drift_fails_closed_and_removal_can_be_repaired() {
     assert!(trace.saw_teardown);
     assert!(trace.saw_unknown);
 
-    let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
-    contexts
-        .configure(primary_id, |context| {
-            let flags = context.io().backend_flags() | renderer_flags;
-            context.io_mut().set_backend_flags(flags);
-        })
-        .expect("a pending removal must permit ownership repair");
-    assert!(matches!(
-        contexts.remove(primary_id),
-        Err(ImguiContextError::RemovalPending {
-            context_id,
-            reason:
-                dear_imgui_bevy::ImguiContextIntoInnerErrorReason::RenderWorldReleasePending,
-        }) if context_id == primary_id
-    ));
-    drop(contexts);
+    {
+        let mut contexts = app.world_mut().get_non_send_mut::<ImguiContexts>().unwrap();
+        contexts
+            .configure(primary_id, |context| {
+                let flags = context.io().backend_flags() | renderer_flags;
+                context.io_mut().set_backend_flags(flags);
+            })
+            .expect("a pending removal must permit ownership repair");
+        assert!(matches!(
+            contexts.remove(primary_id),
+            Err(ImguiContextError::RemovalPending {
+                context_id,
+                reason:
+                    dear_imgui_bevy::ImguiContextRemovalPendingReason::RenderWorldReleasePending,
+            }) if context_id == primary_id
+        ));
+    }
 
     app.update();
     let removed = app

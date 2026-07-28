@@ -1,5 +1,6 @@
 #![cfg(feature = "render")]
 
+use crate::test_util::imgui_context_guard;
 use bevy::prelude::GlobalTransform;
 use bevy_app::App;
 use bevy_asset::{AssetId, Assets};
@@ -22,24 +23,16 @@ use bevy_render::{
 };
 use bevy_window::{PrimaryWindow, Window, WindowRef, WindowResolution};
 use dear_imgui_bevy::{
-    ImguiBevyTextures, ImguiContextConfig, ImguiContexts, ImguiFrameOutput, ImguiPlugin,
-    ImguiPrimaryContextPass, ImguiTexture, ImguiUi,
+    ImguiBevyTextures, ImguiContextConfig, ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass,
+    ImguiTexture, ImguiUi,
     render::{ImguiExtractedBevyTextures, ImguiTextureBindGroups},
     route::{ImguiDiagnosticKind, ImguiDiagnosticOrigin, ImguiDiagnostics, ImguiRenderRoute},
 };
 use dear_imgui_rs::{self as imgui, render::TextureBinding};
-use std::{
-    collections::HashMap,
-    sync::{Mutex, OnceLock},
-};
+use std::collections::HashMap;
 
 #[derive(ScheduleLabel, Clone, Debug, Eq, Hash, PartialEq)]
 struct SecondaryUi;
-
-fn imgui_context_guard() -> std::sync::MutexGuard<'static, ()> {
-    static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
-    GUARD.get_or_init(|| Mutex::new(())).lock().unwrap()
-}
 
 struct ManagedTexture(imgui::ManagedTextureId);
 
@@ -222,13 +215,14 @@ fn managed_texture_create_request_repeats_without_gpu_feedback() {
 
     app.update();
 
-    let output = app.world().resource::<ImguiFrameOutput>();
-    let context_output = output
-        .get(primary_id)
-        .expect("primary Context should publish frame output");
-    assert_eq!(context_output.frame_index(), 1);
-    assert_eq!(context_output.snapshot_epoch().unwrap().sequence(), 1);
-    assert!(context_output.snapshot_error().is_none());
+    assert_eq!(
+        app.world()
+            .get_non_send::<ImguiContexts>()
+            .expect("the plugin must retain its Context registry")
+            .frame_index(primary_id)
+            .expect("the primary Context must remain registered"),
+        1
+    );
 
     let extracted = app
         .sub_app(RenderApp)
@@ -264,14 +258,12 @@ fn managed_texture_create_request_repeats_without_gpu_feedback() {
     assert_eq!(texture_id, texture.0);
 
     app.update();
-    let output = app.world().resource::<ImguiFrameOutput>();
     assert_eq!(
-        output
-            .get(primary_id)
-            .expect("primary Context should publish its second frame")
-            .snapshot_epoch()
-            .unwrap()
-            .sequence(),
+        app.world()
+            .get_non_send::<ImguiContexts>()
+            .expect("the plugin must retain its Context registry")
+            .frame_index(primary_id)
+            .expect("the primary Context must remain registered"),
         2
     );
     let prepared = app
@@ -349,14 +341,17 @@ fn managed_texture_requests_and_lifecycles_are_isolated_by_context() {
 
     app.update();
 
-    let output = app.world().resource::<ImguiFrameOutput>();
+    let contexts = app
+        .world()
+        .get_non_send::<ImguiContexts>()
+        .expect("the plugin must retain its Context registry");
     for context_id in [primary_id, secondary_id] {
-        let context_output = output
-            .get(context_id)
-            .expect("each Context should publish independent frame output");
-        assert_eq!(context_output.frame_index(), 1);
-        assert_eq!(context_output.snapshot_epoch().unwrap().sequence(), 1);
-        assert!(context_output.snapshot_error().is_none());
+        assert_eq!(
+            contexts
+                .frame_index(context_id)
+                .expect("each Context must remain registered"),
+            1
+        );
     }
 
     let render_world = app.sub_app(RenderApp).world();
@@ -426,15 +421,15 @@ fn managed_texture_requests_and_lifecycles_are_isolated_by_context() {
 
     app.update();
 
-    let output = app.world().resource::<ImguiFrameOutput>();
+    let contexts = app
+        .world()
+        .get_non_send::<ImguiContexts>()
+        .expect("the plugin must retain its Context registry");
     for context_id in [primary_id, secondary_id] {
         assert_eq!(
-            output
-                .get(context_id)
-                .expect("each Context should continue publishing independent output")
-                .snapshot_epoch()
-                .unwrap()
-                .sequence(),
+            contexts
+                .frame_index(context_id)
+                .expect("each Context must remain registered"),
             3
         );
     }

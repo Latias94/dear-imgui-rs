@@ -2,11 +2,12 @@
 
 use bevy::{
     app::App,
-    asset::Assets,
+    asset::{Assets, Handle},
     camera::{Hdr, RenderTarget},
     color::LinearRgba,
     core_pipeline::{Core2d, Core3d, tonemapping::Tonemapping},
     ecs::prelude::*,
+    ecs::schedule::ScheduleLabel,
     image::Image,
     prelude::{Camera2d, Camera3d, DefaultPlugins, PluginGroup, Window},
     render::{
@@ -28,12 +29,16 @@ use bevy::{
     prelude::{BackgroundColor, Node, UiTargetCamera, percent},
 };
 #[cfg(feature = "bevy-ui")]
-use dear_imgui_bevy::render::ImguiUiRenderOrder;
+use dear_imgui_bevy::ImguiUiRenderOrder;
 use dear_imgui_bevy::{
-    ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, ImguiUi, configure_example_context,
-    render::{ImguiOverlayCamera, ImguiRenderSystems},
+    ImguiContextConfig, ImguiContexts, ImguiPlugin, ImguiPluginConfig, ImguiPrimaryContextPass,
+    ImguiRenderSystems, ImguiUi,
+    route::{ImguiInputPolicy, ImguiInputRoute, ImguiInputSource, ImguiRenderRoute},
 };
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{Mutex, MutexGuard, OnceLock},
+};
 
 const WIDTH: u32 = 64;
 const HEIGHT: u32 = 64;
@@ -48,6 +53,15 @@ enum CameraKind {
 #[derive(Component)]
 struct CompositionCase(&'static str);
 
+#[derive(Component)]
+struct CompositionReadbackTarget(Handle<Image>);
+
+#[derive(ScheduleLabel, Clone, Debug, Eq, Hash, PartialEq)]
+struct CompositionPass(&'static str);
+
+#[derive(ScheduleLabel, Clone, Debug, Eq, Hash, PartialEq)]
+struct SameCameraSecondaryPass;
+
 #[derive(Resource, Default)]
 struct CompositionReadbacks(HashMap<&'static str, Vec<u8>>);
 
@@ -59,6 +73,7 @@ fn post_process_and_imgui_pixels_coexist_across_camera_msaa_and_hdr_modes() {
         );
         return;
     }
+    let _guard = gpu_test_guard();
 
     let mut app = App::new();
     app.add_plugins(
@@ -70,10 +85,11 @@ fn post_process_and_imgui_pixels_coexist_across_camera_msaa_and_hdr_modes() {
             })
             .disable::<WinitPlugin>(),
     )
-    .add_plugins(ImguiPlugin::default())
+    .add_plugins(ImguiPlugin::new(
+        ImguiPluginConfig::default().with_docking(false),
+    ))
     .init_resource::<CompositionReadbacks>()
-    .add_observer(collect_readback)
-    .add_systems(ImguiPrimaryContextPass, draw_composition_fixture);
+    .add_observer(collect_readback);
 
     app.world_mut().spawn((
         Window {
@@ -88,7 +104,7 @@ fn post_process_and_imgui_pixels_coexist_across_camera_msaa_and_hdr_modes() {
         let primary = contexts.primary_id().expect("primary Context must exist");
         contexts
             .configure(primary, |context| {
-                configure_example_context(context, false);
+                let _ = context.set_ini_filename::<std::path::PathBuf>(None);
             })
             .expect("primary Context configuration must succeed");
     }
@@ -125,9 +141,13 @@ fn post_process_and_imgui_pixels_coexist_across_camera_msaa_and_hdr_modes() {
     app.finish();
     app.cleanup();
 
-    for frame in 0..120 {
+    for _ in 0..30 {
         app.update();
-        if frame >= 30 && app.world().resource::<CompositionReadbacks>().0.len() == REQUIRED_CASES {
+    }
+    install_composition_readbacks(&mut app);
+    for _ in 0..90 {
+        app.update();
+        if app.world().resource::<CompositionReadbacks>().0.len() == REQUIRED_CASES {
             break;
         }
     }
@@ -138,21 +158,34 @@ fn post_process_and_imgui_pixels_coexist_across_camera_msaa_and_hdr_modes() {
         REQUIRED_CASES,
         "every 2D/3D, MSAA, and HDR case must produce a GPU readback"
     );
-    for (name, pixels) in &readbacks.0 {
+    let mut failures = Vec::new();
+    let mut cases = readbacks.0.iter().collect::<Vec<_>>();
+    cases.sort_unstable_by_key(|(name, _)| **name);
+    for (name, pixels) in cases {
         let post_process_pixel = rgba8_pixel(pixels, 48, 48);
-        assert!(
-            post_process_pixel[2] > post_process_pixel[1].saturating_add(20)
-                && post_process_pixel[1] > post_process_pixel[0].saturating_add(20),
-            "{name}: the custom post-process region was overwritten: {post_process_pixel:?}"
-        );
+        if !(post_process_pixel[2] > post_process_pixel[1].saturating_add(20)
+            && post_process_pixel[1] > post_process_pixel[0].saturating_add(20))
+        {
+            failures.push(format!(
+                "{name}: the custom post-process region was overwritten: {post_process_pixel:?}"
+            ));
+        }
 
         let imgui_pixel = rgba8_pixel(pixels, 12, 12);
-        assert!(
-            imgui_pixel[0] > imgui_pixel[1].saturating_add(80)
-                && imgui_pixel[0] > imgui_pixel[2].saturating_add(80),
-            "{name}: the Dear ImGui region was not preserved: {imgui_pixel:?}"
-        );
+        if !(imgui_pixel[0] > imgui_pixel[1].saturating_add(80)
+            && imgui_pixel[0] > imgui_pixel[2].saturating_add(80))
+        {
+            failures.push(format!(
+                "{name}: the Dear ImGui region was not preserved: {imgui_pixel:?}; red bounds: {:?}",
+                dominant_red_bounds(pixels)
+            ));
+        }
     }
+    assert!(
+        failures.is_empty(),
+        "composition failures:\n{}",
+        failures.join("\n")
+    );
 }
 
 #[cfg(feature = "bevy-ui")]
@@ -164,6 +197,7 @@ fn bevy_ui_order_modes_control_overlap_pixels() {
         );
         return;
     }
+    let _guard = gpu_test_guard();
 
     let imgui_above = render_ui_order(ImguiUiRenderOrder::ImguiAboveBevyUi);
     assert!(
@@ -180,6 +214,127 @@ fn bevy_ui_order_modes_control_overlap_pixels() {
     );
 }
 
+#[test]
+fn multiple_contexts_compose_in_route_order_on_one_camera() {
+    if std::env::var("DEAR_IMGUI_BEVY_GPU_TESTS").as_deref() != Ok("1") {
+        eprintln!(
+            "skipping Bevy multi-Context GPU ordering test; set \
+             DEAR_IMGUI_BEVY_GPU_TESTS=1 to require it"
+        );
+        return;
+    }
+    let _guard = gpu_test_guard();
+
+    let mut app = App::new();
+    app.add_plugins(
+        DefaultPlugins
+            .set(WindowPlugin {
+                primary_window: None,
+                exit_condition: ExitCondition::DontExit,
+                ..Default::default()
+            })
+            .disable::<WinitPlugin>(),
+    )
+    .add_plugins(ImguiPlugin::new(
+        ImguiPluginConfig::default().with_docking(false),
+    ))
+    .init_resource::<CompositionReadbacks>()
+    .add_observer(collect_readback)
+    .add_systems(ImguiPrimaryContextPass, draw_primary_context_fixture)
+    .add_systems(SameCameraSecondaryPass, draw_secondary_context_fixture);
+
+    app.world_mut().spawn((
+        Window {
+            resolution: WindowResolution::new(WIDTH, HEIGHT),
+            ..Default::default()
+        },
+        PrimaryWindow,
+    ));
+
+    let (primary, secondary) = {
+        let mut contexts = app.world_mut().non_send_mut::<ImguiContexts>();
+        let primary = contexts.primary_id().expect("primary Context must exist");
+        contexts
+            .configure(primary, |context| {
+                let _ = context.set_ini_filename::<std::path::PathBuf>(None);
+            })
+            .expect("primary Context configuration must succeed");
+
+        let secondary = contexts
+            .create(ImguiContextConfig::new(SameCameraSecondaryPass).with_docking(false))
+            .expect("secondary Context creation must succeed");
+        contexts
+            .configure(secondary, |context| {
+                let _ = context.set_ini_filename::<std::path::PathBuf>(None);
+            })
+            .expect("secondary Context configuration must succeed");
+        (primary, secondary)
+    };
+
+    let mut image = Image::new_target_texture(WIDTH, HEIGHT, TextureFormat::Rgba8UnormSrgb, None);
+    image.texture_descriptor.usage |= TextureUsages::COPY_SRC;
+    let image = app.world_mut().resource_mut::<Assets<Image>>().add(image);
+    let camera = app
+        .world_mut()
+        .spawn((
+            Camera2d,
+            RenderTarget::Image(image.clone().into()),
+            Msaa::Off,
+        ))
+        .id();
+
+    app.world_mut().spawn((
+        ImguiRenderRoute::new(primary, camera).with_order(0),
+        ImguiInputRoute::new(primary, ImguiInputSource::camera(camera))
+            .with_policy(ImguiInputPolicy::Disabled),
+    ));
+    app.world_mut().spawn((
+        ImguiRenderRoute::new(secondary, camera).with_order(10),
+        ImguiInputRoute::new(secondary, ImguiInputSource::camera(camera))
+            .with_policy(ImguiInputPolicy::Disabled),
+    ));
+    app.world_mut().spawn((
+        CompositionReadbackTarget(image),
+        CompositionCase("same-camera-context-order"),
+    ));
+
+    app.finish();
+    app.cleanup();
+    for _ in 0..20 {
+        app.update();
+    }
+    install_composition_readbacks(&mut app);
+    for _ in 0..40 {
+        app.update();
+        if app
+            .world()
+            .resource::<CompositionReadbacks>()
+            .0
+            .contains_key("same-camera-context-order")
+        {
+            break;
+        }
+    }
+
+    let readbacks = app.world().resource::<CompositionReadbacks>();
+    let pixels = readbacks
+        .0
+        .get("same-camera-context-order")
+        .expect("the same-camera multi-Context fixture must produce a readback");
+    assert_dominant_red(
+        rgba8_pixel(pixels, 12, 12),
+        "the primary Context must render its exclusive region",
+    );
+    assert_dominant_blue(
+        rgba8_pixel(pixels, 40, 40),
+        "the secondary Context must render its exclusive region",
+    );
+    assert_dominant_blue(
+        rgba8_pixel(pixels, 24, 24),
+        "the higher-order secondary Context must win the overlap",
+    );
+}
+
 #[cfg(feature = "bevy-ui")]
 fn render_ui_order(order: ImguiUiRenderOrder) -> [u8; 4] {
     let mut app = App::new();
@@ -192,7 +347,10 @@ fn render_ui_order(order: ImguiUiRenderOrder) -> [u8; 4] {
             })
             .disable::<WinitPlugin>(),
     )
-    .add_plugins(ImguiPlugin::default().with_ui_render_order(order))
+    .add_plugins(
+        ImguiPlugin::new(ImguiPluginConfig::default().with_docking(false))
+            .with_ui_render_order(order),
+    )
     .init_resource::<CompositionReadbacks>()
     .add_observer(collect_readback)
     .add_systems(ImguiPrimaryContextPass, draw_composition_fixture);
@@ -209,7 +367,7 @@ fn render_ui_order(order: ImguiUiRenderOrder) -> [u8; 4] {
         let primary = contexts.primary_id().expect("primary Context must exist");
         contexts
             .configure(primary, |context| {
-                configure_example_context(context, false);
+                let _ = context.set_ini_filename::<std::path::PathBuf>(None);
             })
             .expect("primary Context configuration must succeed");
     }
@@ -223,9 +381,15 @@ fn render_ui_order(order: ImguiUiRenderOrder) -> [u8; 4] {
             Camera2d,
             RenderTarget::Image(image.clone().into()),
             Msaa::Off,
-            ImguiOverlayCamera,
         ))
         .id();
+    let primary = app
+        .world()
+        .non_send::<ImguiContexts>()
+        .primary_id()
+        .expect("primary Context must exist");
+    app.world_mut()
+        .spawn(ImguiRenderRoute::new(primary, camera));
     app.world_mut().spawn((
         Node {
             width: percent(100),
@@ -235,13 +399,27 @@ fn render_ui_order(order: ImguiUiRenderOrder) -> [u8; 4] {
         BackgroundColor(BevyColor::srgb(0.0, 0.0, 1.0)),
         UiTargetCamera(camera),
     ));
-    app.world_mut()
-        .spawn((Readback::texture(image), CompositionCase("ui-order")));
+    app.world_mut().spawn((
+        CompositionReadbackTarget(image),
+        CompositionCase("ui-order"),
+    ));
 
     app.finish();
     app.cleanup();
+    for _ in 0..20 {
+        app.update();
+    }
+    install_composition_readbacks(&mut app);
     for _ in 0..40 {
         app.update();
+        if app
+            .world()
+            .resource::<CompositionReadbacks>()
+            .0
+            .contains_key("ui-order")
+        {
+            break;
+        }
     }
 
     let readbacks = app.world().resource::<CompositionReadbacks>();
@@ -270,23 +448,36 @@ fn spawn_case(app: &mut App, kind: CameraKind, msaa: Msaa, hdr: bool) {
     let image = app.world_mut().resource_mut::<Assets<Image>>().add(image);
     let target = RenderTarget::Image(image.clone().into());
 
-    let mut entity = match kind {
-        CameraKind::Core2d => app
-            .world_mut()
-            .spawn((Camera2d, target, msaa, ImguiOverlayCamera)),
-        CameraKind::Core3d => {
-            app.world_mut()
-                .spawn((Camera3d::default(), target, msaa, ImguiOverlayCamera))
+    let camera = {
+        let mut entity = match kind {
+            CameraKind::Core2d => app.world_mut().spawn((Camera2d, target, msaa)),
+            CameraKind::Core3d => app.world_mut().spawn((Camera3d::default(), target, msaa)),
+        };
+        if hdr {
+            entity.insert((Hdr, Tonemapping::Reinhard));
+        } else {
+            entity.insert(Tonemapping::None);
         }
+        entity.id()
     };
-    if hdr {
-        entity.insert((Hdr, Tonemapping::Reinhard));
-    } else {
-        entity.insert(Tonemapping::None);
-    }
-
+    let pass = CompositionPass(name);
+    app.add_systems(pass.clone(), draw_composition_fixture);
+    let context_id = {
+        let mut contexts = app.world_mut().non_send_mut::<ImguiContexts>();
+        let context_id = contexts
+            .create(ImguiContextConfig::new(pass).with_docking(false))
+            .expect("each composition camera needs an independently routed Context");
+        contexts
+            .configure(context_id, |context| {
+                let _ = context.set_ini_filename::<std::path::PathBuf>(None);
+            })
+            .expect("composition Context configuration must succeed");
+        context_id
+    };
     app.world_mut()
-        .spawn((Readback::texture(image), CompositionCase(name)));
+        .spawn(ImguiRenderRoute::new(context_id, camera));
+    app.world_mut()
+        .spawn((CompositionReadbackTarget(image), CompositionCase(name)));
 }
 
 fn draw_composition_fixture(imgui: ImguiUi) {
@@ -295,6 +486,26 @@ fn draw_composition_fixture(imgui: ImguiUi) {
     };
     ui.get_background_draw_list()
         .add_rect([8.0, 8.0], [24.0, 24.0], [1.0, 0.0, 0.0, 1.0])
+        .filled(true)
+        .build();
+}
+
+fn draw_primary_context_fixture(imgui: ImguiUi) {
+    let Ok(ui) = imgui.ui() else {
+        return;
+    };
+    ui.get_background_draw_list()
+        .add_rect([8.0, 8.0], [32.0, 32.0], [1.0, 0.0, 0.0, 1.0])
+        .filled(true)
+        .build();
+}
+
+fn draw_secondary_context_fixture(imgui: ImguiUi) {
+    let Ok(ui) = imgui.ui() else {
+        return;
+    };
+    ui.get_background_draw_list()
+        .add_rect([20.0, 20.0], [48.0, 48.0], [0.0, 0.0, 1.0, 1.0])
         .filled(true)
         .build();
 }
@@ -347,15 +558,71 @@ fn collect_readback(
     event: On<ReadbackComplete>,
     cases: Query<&CompositionCase>,
     mut readbacks: ResMut<CompositionReadbacks>,
+    mut commands: Commands,
 ) {
     let Ok(case) = cases.get(event.entity) else {
         return;
     };
     readbacks.0.insert(case.0, event.data.clone());
+    commands.entity(event.entity).remove::<Readback>();
+}
+
+fn install_composition_readbacks(app: &mut App) {
+    let targets = app
+        .world_mut()
+        .query::<(Entity, &CompositionReadbackTarget)>()
+        .iter(app.world())
+        .map(|(entity, target)| (entity, target.0.clone()))
+        .collect::<Vec<_>>();
+    for (entity, image) in targets {
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(Readback::texture(image));
+    }
 }
 
 fn rgba8_pixel(data: &[u8], x: u32, y: u32) -> [u8; 4] {
     let row_stride = WIDTH as usize * 4;
     let offset = y as usize * row_stride + x as usize * 4;
     data[offset..offset + 4].try_into().unwrap()
+}
+
+fn assert_dominant_red(pixel: [u8; 4], message: &str) {
+    assert!(
+        pixel[0] > pixel[1].saturating_add(80) && pixel[0] > pixel[2].saturating_add(80),
+        "{message}: {pixel:?}"
+    );
+}
+
+fn assert_dominant_blue(pixel: [u8; 4], message: &str) {
+    assert!(
+        pixel[2] > pixel[0].saturating_add(80) && pixel[2] > pixel[1].saturating_add(80),
+        "{message}: {pixel:?}"
+    );
+}
+
+fn gpu_test_guard() -> MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn dominant_red_bounds(data: &[u8]) -> Option<([u32; 2], [u32; 2])> {
+    let mut min = [WIDTH, HEIGHT];
+    let mut max = [0, 0];
+    let mut found = false;
+    for y in 0..HEIGHT {
+        for x in 0..WIDTH {
+            let pixel = rgba8_pixel(data, x, y);
+            if pixel[0] > pixel[1].saturating_add(80) && pixel[0] > pixel[2].saturating_add(80) {
+                min[0] = min[0].min(x);
+                min[1] = min[1].min(y);
+                max[0] = max[0].max(x);
+                max[1] = max[1].max(y);
+                found = true;
+            }
+        }
+    }
+    found.then_some((min, max))
 }

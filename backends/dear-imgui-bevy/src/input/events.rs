@@ -12,7 +12,7 @@ use bevy_window::{
 };
 
 #[derive(SystemParam)]
-pub struct ImguiInputMessageReaders<'w, 's> {
+pub(crate) struct ImguiInputMessageReaders<'w, 's> {
     pub(super) window_resized: MessageReader<'w, 's, WindowResized>,
     pub(super) window_scale_factor_changed: MessageReader<'w, 's, WindowScaleFactorChanged>,
     pub(super) window_backend_scale_factor_changed:

@@ -1,17 +1,14 @@
 //! Small Bevy runtime demo with an ImPlot profiler and motion controls.
 //!
 //! Run:
-//! `cargo run -p dear-imgui-bevy --features render --example bevy_plot_controls`
+//! `cargo run -p dear-imgui-bevy --example bevy_plot_controls`
 
 use bevy::{
     app::AppExit,
     prelude::*,
     window::{PresentMode, WindowPlugin, WindowTheme},
 };
-use dear_imgui_bevy::{
-    ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, ImguiUi, configure_example_context,
-    render::ImguiOverlayCamera,
-};
+use dear_imgui_bevy::prelude::*;
 use dear_imgui_rs::Condition;
 use dear_implot::{ImPlotExt, PlotCond};
 
@@ -84,7 +81,7 @@ fn main() {
 }
 
 fn setup_scene(mut commands: Commands) {
-    commands.spawn((Camera2d, ImguiOverlayCamera));
+    commands.spawn(Camera2d);
     commands.spawn((
         Sprite::from_color(Color::srgb(0.12, 0.16, 0.22), BACKGROUND_SIZE),
         Transform::from_xyz(0.0, 0.0, -1.0),
@@ -106,11 +103,8 @@ fn install_plot_context(app: &mut App) {
             .primary_id()
             .expect("ImguiPlugin should install a primary Context");
         registry
-            .configure(primary_id, |context| {
-                configure_example_context(context, false);
-                PlotDemoContexts {
-                    plot: dear_implot::PlotContext::create(context),
-                }
+            .configure(primary_id, |context| PlotDemoContexts {
+                plot: dear_implot::PlotContext::create(context),
             })
             .expect("the primary Context should be configurable before the app starts")
     };

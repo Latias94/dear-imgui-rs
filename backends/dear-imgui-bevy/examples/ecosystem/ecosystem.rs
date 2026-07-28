@@ -1,17 +1,14 @@
 //! Extension ecosystem composition inside one Bevy-managed Dear ImGui frame.
 //!
 //! Run:
-//! `cargo run -p dear-imgui-bevy --features render --example ecosystem`
+//! `cargo run -p dear-imgui-bevy --example ecosystem`
 
 use bevy::{
     app::AppExit,
     prelude::*,
     window::{PresentMode, WindowPlugin, WindowTheme},
 };
-use dear_imgui_bevy::{
-    ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, ImguiUi, configure_example_context,
-    render::ImguiOverlayCamera,
-};
+use dear_imgui_bevy::prelude::*;
 use dear_imgui_rs::{Condition, DockLayout, DockLayoutApply, DockSplit, DockspaceTarget};
 use dear_imguizmo::{DrawListTarget, GuizmoExt, Mat4Like};
 use dear_imnodes::ImNodesExt;
@@ -73,7 +70,7 @@ fn main() {
 }
 
 fn setup_scene(mut commands: Commands) {
-    commands.spawn((Camera2d, ImguiOverlayCamera));
+    commands.spawn(Camera2d);
 }
 
 fn close_on_escape(input: Res<ButtonInput<KeyCode>>, mut exit: MessageWriter<AppExit>) {
@@ -93,7 +90,6 @@ fn install_ecosystem_contexts(app: &mut App) {
             .expect("ImguiPlugin should install a primary Context");
         registry
             .configure(primary_id, |context| {
-                configure_example_context(context, false);
                 let plot = dear_implot::PlotContext::create(context);
                 let nodes = dear_imnodes::Context::create(context);
                 let node_editor = nodes.create_editor_context();

@@ -7,6 +7,7 @@ use super::*;
 use crate::texture::{
     ImguiBevyTextureExtraction, ImguiTextureLeaseEvents, ImguiTextureLeaseIdentity,
 };
+use bevy_render::render_resource::{SamplerId, TextureViewId};
 
 /// Camera/render-target association for an extracted ImGui overlay frame.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -55,21 +56,6 @@ pub(super) struct ImguiRenderRouteSnapshot {
     pub(super) viewport_id: Option<imgui::Id>,
     pub(super) camera_viewport: Option<ImguiCameraViewport>,
 }
-
-/// Legacy camera marker retained until the public-surface cleanup.
-///
-/// This marker no longer affects routing. Use [`crate::route::ImguiRenderRoute`] for explicit
-/// routing; the primary Context uses deterministic `AutoPrimary` routing when no declaration
-/// exists.
-#[derive(Component, Debug, Clone, Copy, Default, Eq, PartialEq)]
-pub struct ImguiOverlayCamera;
-
-/// Legacy camera marker retained until the public-surface cleanup.
-///
-/// This marker no longer affects routing. Secondary windows and offscreen targets receive no
-/// automatic route, so they need no opt-out marker.
-#[derive(Component, Debug, Clone, Copy, Default, Eq, PartialEq)]
-pub struct ImguiOverlayDisabled;
 
 /// Physical viewport extracted from a Bevy camera for ImGui overlay rendering.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -161,17 +147,13 @@ pub struct ImguiPreparedRenderFrame {
 
 impl ImguiPreparedRenderFrame {
     /// Frame index copied from one extracted Context frame.
+    #[cfg(test)]
     #[must_use]
     pub fn frame_index(&self, context_id: imgui::ContextId) -> Option<u64> {
         self.data
             .contexts
             .get(&context_id)
             .map(|metadata| metadata.frame_index)
-    }
-
-    /// Contexts represented by the current prepared batch.
-    pub fn context_ids(&self) -> impl Iterator<Item = imgui::ContextId> + '_ {
-        self.data.contexts.keys().copied()
     }
 
     /// Uniforms for one Context routed to one Bevy view.
@@ -206,6 +188,7 @@ impl ImguiPreparedRenderFrame {
     }
 
     /// Number of texture requests carried by one source snapshot.
+    #[cfg(test)]
     #[must_use]
     pub fn texture_request_count(&self, context_id: imgui::ContextId) -> usize {
         self.data
@@ -215,8 +198,9 @@ impl ImguiPreparedRenderFrame {
             .unwrap_or_default()
     }
 
-    pub(super) fn replace(&mut self, frame: PreparedFrameData) {
-        self.data = frame;
+    pub(super) fn begin_prepare(&mut self) -> &mut PreparedFrameData {
+        self.data.clear();
+        &mut self.data
     }
 
     pub(super) fn clear(&mut self) {
@@ -224,6 +208,7 @@ impl ImguiPreparedRenderFrame {
     }
 }
 
+#[cfg(test)]
 #[derive(Clone, Copy, Debug)]
 pub(super) struct PreparedContextMetadata {
     pub(super) frame_index: u64,
@@ -232,6 +217,7 @@ pub(super) struct PreparedContextMetadata {
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct PreparedFrameData {
+    #[cfg(test)]
     pub(super) contexts: HashMap<imgui::ContextId, PreparedContextMetadata>,
     pub(super) uniforms_by_context_view:
         HashMap<(imgui::ContextId, RetainedViewEntity), ImguiUniforms>,
@@ -242,11 +228,66 @@ pub(super) struct PreparedFrameData {
 
 impl PreparedFrameData {
     fn clear(&mut self) {
+        #[cfg(test)]
         self.contexts.clear();
         self.uniforms_by_context_view.clear();
         self.vertices.clear();
         self.indices.clear();
         self.draws.clear();
+    }
+}
+
+#[cfg(test)]
+mod prepared_frame_reuse_tests {
+    use super::*;
+
+    #[test]
+    fn beginning_preparation_clears_contents_without_discarding_capacity() {
+        let context_id = imgui::SuspendedContext::create().id();
+        let mut prepared = ImguiPreparedRenderFrame::default();
+        prepared.data.contexts.reserve(4);
+        prepared.data.uniforms_by_context_view.reserve(4);
+        prepared.data.vertices.reserve(4);
+        prepared.data.indices.reserve(4);
+        prepared.data.draws.reserve(4);
+        prepared.data.contexts.insert(
+            context_id,
+            PreparedContextMetadata {
+                frame_index: 1,
+                texture_request_count: 2,
+            },
+        );
+        prepared.data.vertices.push(ImguiGpuVertex {
+            position: [0.0; 2],
+            uv: [0.0; 2],
+            color: 0,
+        });
+        prepared.data.indices.push(0);
+        let capacities = (
+            prepared.data.contexts.capacity(),
+            prepared.data.uniforms_by_context_view.capacity(),
+            prepared.data.vertices.capacity(),
+            prepared.data.indices.capacity(),
+            prepared.data.draws.capacity(),
+        );
+
+        let frame = prepared.begin_prepare();
+
+        assert!(frame.contexts.is_empty());
+        assert!(frame.uniforms_by_context_view.is_empty());
+        assert!(frame.vertices.is_empty());
+        assert!(frame.indices.is_empty());
+        assert!(frame.draws.is_empty());
+        assert_eq!(
+            capacities,
+            (
+                frame.contexts.capacity(),
+                frame.uniforms_by_context_view.capacity(),
+                frame.vertices.capacity(),
+                frame.indices.capacity(),
+                frame.draws.capacity(),
+            )
+        );
     }
 }
 
@@ -268,18 +309,6 @@ impl Default for ImguiGpuBuffers {
 }
 
 impl ImguiGpuBuffers {
-    /// Number of vertices queued for upload.
-    #[must_use]
-    pub fn vertex_len(&self) -> usize {
-        self.vertices.len()
-    }
-
-    /// Number of indices queued for upload.
-    #[must_use]
-    pub fn index_len(&self) -> usize {
-        self.indices.len()
-    }
-
     /// Whether both GPU buffers have been allocated at least once.
     #[must_use]
     pub fn has_uploaded_buffers(&self) -> bool {
@@ -430,11 +459,6 @@ impl ImguiPipelineGpuResources {
         Some(&resources.bind_group)
     }
 
-    #[must_use]
-    pub fn uniform_bind_group_count(&self) -> usize {
-        self.uniforms_by_context_view.len()
-    }
-
     pub(super) fn fallback_bind_group(&self) -> &BindGroup {
         &self.fallback_bind_group
     }
@@ -565,33 +589,26 @@ impl ImguiTextureViewCompatibility {
     }
 }
 
-/// Error returned when external texture registration conflicts with a live managed alias.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[non_exhaustive]
-pub enum ImguiTextureBindGroupError {
-    /// The renderer currently uses this legacy ID to identify a Context-managed texture.
-    ManagedTextureIdInUse { texture: imgui::TextureId },
+pub(super) struct BevyImageBindingSource {
+    pub(super) texture_view: TextureViewId,
+    pub(super) sampler: SamplerId,
 }
 
-impl std::fmt::Display for ImguiTextureBindGroupError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ManagedTextureIdInUse { texture } => write!(
-                f,
-                "texture ID {} is an active Bevy managed-texture alias",
-                texture.id()
-            ),
+impl From<&GpuImage> for BevyImageBindingSource {
+    fn from(image: &GpuImage) -> Self {
+        Self {
+            texture_view: image.texture_view.id(),
+            sampler: image.sampler.id(),
         }
     }
 }
-
-impl std::error::Error for ImguiTextureBindGroupError {}
 
 /// Texture bind groups currently known to the Bevy-native ImGui renderer.
 #[derive(Resource, Default)]
 pub struct ImguiTextureBindGroups {
     pub(super) textures: HashMap<TextureBinding, ImguiRenderTexture>,
-    pub(super) bevy_image_bindings: HashSet<TextureBinding>,
+    pub(super) bevy_image_sources: HashMap<TextureBinding, BevyImageBindingSource>,
     pub(super) managed_texture_ids: HashMap<SnapshotTextureId, imgui::TextureId>,
     pub(super) managed_texture_aliases: HashMap<imgui::TextureId, SnapshotTextureId>,
     /// Managed texture identities sealed by a Destroy request until the renderer has completed
@@ -602,63 +619,20 @@ pub struct ImguiTextureBindGroups {
 }
 
 impl ImguiTextureBindGroups {
-    /// Register or replace a bind group for an external ImGui texture ID.
-    ///
-    /// Context-managed textures are intentionally excluded: their bind groups may only change
-    /// while processing the matching snapshot request and feedback pair.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ImguiTextureBindGroupError::ManagedTextureIdInUse`] when `texture` is the active
-    /// legacy alias of a Context-managed texture.
-    pub fn insert(
-        &mut self,
-        texture: imgui::TextureId,
-        bind_group: BindGroup,
-    ) -> Result<(), ImguiTextureBindGroupError> {
-        self.validate_external_texture_id(texture)?;
-        self.insert_binding(TextureBinding::Legacy(texture), bind_group);
-        Ok(())
-    }
-
-    pub(super) fn insert_binding(&mut self, texture: TextureBinding, bind_group: BindGroup) {
-        self.bevy_image_bindings.remove(&texture);
-        self.textures.insert(
-            texture,
-            ImguiRenderTexture {
-                texture: None,
-                _view: None,
-                extent: None,
-                linear_bind_group: bind_group.clone(),
-                nearest_bind_group: bind_group,
-            },
-        );
-    }
-
-    /// Remove the bind group for an external ImGui texture ID.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ImguiTextureBindGroupError::ManagedTextureIdInUse`] when `texture` is the active
-    /// legacy alias of a Context-managed texture.
-    pub fn remove(&mut self, texture: imgui::TextureId) -> Result<(), ImguiTextureBindGroupError> {
-        self.validate_external_texture_id(texture)?;
-        self.remove_binding(&TextureBinding::Legacy(texture));
-        Ok(())
-    }
-
     pub(super) fn remove_binding(&mut self, texture: &TextureBinding) {
         self.textures.remove(texture);
-        self.bevy_image_bindings.remove(texture);
+        self.bevy_image_sources.remove(texture);
     }
 
     /// Number of registered texture bind groups.
+    #[cfg(test)]
     #[must_use]
     pub fn len(&self) -> usize {
         self.textures.len()
     }
 
     /// Whether no texture bind groups are currently registered.
+    #[cfg(test)]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.textures.is_empty()
@@ -690,7 +664,7 @@ impl ImguiTextureBindGroups {
         texture: TextureBinding,
         render_texture: ImguiRenderTexture,
     ) {
-        self.bevy_image_bindings.remove(&texture);
+        self.bevy_image_sources.remove(&texture);
         self.textures.insert(texture, render_texture);
     }
 
@@ -719,17 +693,6 @@ impl ImguiTextureBindGroups {
             self.managed_texture_ids.insert(id, texture_id);
             self.managed_texture_aliases.insert(texture_id, id);
             return texture_id;
-        }
-    }
-
-    pub(super) fn validate_external_texture_id(
-        &self,
-        texture: imgui::TextureId,
-    ) -> Result<(), ImguiTextureBindGroupError> {
-        if self.managed_texture_aliases.contains_key(&texture) {
-            Err(ImguiTextureBindGroupError::ManagedTextureIdInUse { texture })
-        } else {
-            Ok(())
         }
     }
 
@@ -785,7 +748,7 @@ impl ImguiTextureBindGroups {
                 .expect("selected managed texture identity must still exist");
             self.managed_texture_aliases.remove(&texture_id);
             let binding = TextureBinding::Managed(id);
-            self.bevy_image_bindings.remove(&binding);
+            self.bevy_image_sources.remove(&binding);
             if let Some(texture) = self.textures.remove(&binding) {
                 released.push(texture);
             }
@@ -803,6 +766,7 @@ impl ImguiTextureBindGroups {
             })
             .collect::<Vec<_>>();
         for binding in orphaned {
+            self.bevy_image_sources.remove(&binding);
             if let Some(texture) = self.textures.remove(&binding) {
                 released.push(texture);
             }
@@ -812,7 +776,29 @@ impl ImguiTextureBindGroups {
         released
     }
 
-    pub(super) fn insert_bevy_image(&mut self, texture: TextureBinding, bind_group: BindGroup) {
+    pub(super) fn contains_current_bevy_image(
+        &self,
+        texture: &TextureBinding,
+        image: &GpuImage,
+    ) -> bool {
+        self.textures.contains_key(texture)
+            && self.bevy_image_source_matches(texture, &BevyImageBindingSource::from(image))
+    }
+
+    fn bevy_image_source_matches(
+        &self,
+        texture: &TextureBinding,
+        source: &BevyImageBindingSource,
+    ) -> bool {
+        self.bevy_image_sources.get(texture) == Some(source)
+    }
+
+    pub(super) fn insert_bevy_image(
+        &mut self,
+        texture: TextureBinding,
+        image: &GpuImage,
+        bind_group: BindGroup,
+    ) {
         self.textures.insert(
             texture,
             ImguiRenderTexture {
@@ -823,13 +809,15 @@ impl ImguiTextureBindGroups {
                 nearest_bind_group: bind_group,
             },
         );
-        self.bevy_image_bindings.insert(texture);
+        self.bevy_image_sources
+            .insert(texture, BevyImageBindingSource::from(image));
     }
 
     pub(super) fn retain_bevy_image_bindings(&mut self, active_bindings: &HashSet<TextureBinding>) {
         let stale_bindings = self
-            .bevy_image_bindings
-            .difference(active_bindings)
+            .bevy_image_sources
+            .keys()
+            .filter(|binding| !active_bindings.contains(binding))
             .copied()
             .collect::<Vec<_>>();
         for binding in stale_bindings {
@@ -839,6 +827,55 @@ impl ImguiTextureBindGroups {
 
     pub(super) fn contains_binding(&self, binding: &TextureBinding) -> bool {
         self.textures.contains_key(binding)
+    }
+}
+
+#[cfg(test)]
+mod bevy_image_binding_source_tests {
+    use super::*;
+
+    fn source(texture_view: TextureViewId, sampler: SamplerId) -> BevyImageBindingSource {
+        BevyImageBindingSource {
+            texture_view,
+            sampler,
+        }
+    }
+
+    #[test]
+    fn source_identity_requires_the_same_texture_view_and_sampler() {
+        let binding = TextureBinding::Legacy(imgui::TextureId::new(1));
+        let texture_view = TextureViewId::new();
+        let sampler = SamplerId::new();
+        let expected = source(texture_view, sampler);
+        let mut bindings = ImguiTextureBindGroups::default();
+
+        assert!(!bindings.bevy_image_source_matches(&binding, &expected));
+        bindings.bevy_image_sources.insert(binding, expected);
+        assert!(bindings.bevy_image_source_matches(&binding, &expected));
+        assert!(
+            !bindings.bevy_image_source_matches(&binding, &source(TextureViewId::new(), sampler))
+        );
+        assert!(
+            !bindings.bevy_image_source_matches(&binding, &source(texture_view, SamplerId::new()))
+        );
+    }
+
+    #[test]
+    fn removing_or_retiring_a_bevy_image_forgets_its_source_identity() {
+        let removed = TextureBinding::Legacy(imgui::TextureId::new(1));
+        let retired = TextureBinding::Legacy(imgui::TextureId::new(2));
+        let mut bindings = ImguiTextureBindGroups::default();
+        for binding in [removed, retired] {
+            bindings
+                .bevy_image_sources
+                .insert(binding, source(TextureViewId::new(), SamplerId::new()));
+        }
+
+        bindings.remove_binding(&removed);
+        bindings.retain_bevy_image_bindings(&HashSet::new());
+
+        assert!(!bindings.bevy_image_sources.contains_key(&removed));
+        assert!(!bindings.bevy_image_sources.contains_key(&retired));
     }
 }
 
@@ -866,15 +903,10 @@ impl ImguiExtractedBevyTextures {
     }
 
     /// Number of extracted Bevy image texture mappings.
+    #[cfg(test)]
     #[must_use]
     pub fn len(&self) -> usize {
         self.textures.len()
-    }
-
-    /// Whether no Bevy image texture mappings are extracted.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.textures.is_empty()
     }
 
     pub(super) fn replace(&mut self, extraction: ImguiBevyTextureExtraction) {
@@ -928,22 +960,11 @@ impl ImguiQueuedPipelines {
     pub fn get(&self, view: RetainedViewEntity) -> Option<CachedRenderPipelineId> {
         self.by_view.get(&view).copied()
     }
-
-    /// Number of queued camera pipelines.
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.by_view.len()
-    }
-
-    /// Whether no camera pipelines are queued.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.by_view.is_empty()
-    }
 }
 
 #[derive(Debug)]
 struct ImguiExtractedContextFrame {
+    #[cfg(test)]
     frame_index: u64,
     snapshot: Option<imgui::render::snapshot::FrameSnapshot>,
     route_snapshots: Vec<ImguiRenderRouteSnapshot>,
@@ -961,6 +982,7 @@ pub struct ImguiExtractedRenderFrame {
 
 impl ImguiExtractedRenderFrame {
     /// Frame index copied from the main-world Context output.
+    #[cfg(test)]
     #[must_use]
     pub fn frame_index(&self, context_id: imgui::ContextId) -> Option<u64> {
         self.frames.get(&context_id).map(|frame| frame.frame_index)
@@ -1029,6 +1051,7 @@ impl ImguiExtractedRenderFrame {
         let previous = self.frames.insert(
             context_id,
             ImguiExtractedContextFrame {
+                #[cfg(test)]
                 frame_index: frame.frame_index,
                 snapshot: Some(frame.snapshot),
                 route_snapshots,

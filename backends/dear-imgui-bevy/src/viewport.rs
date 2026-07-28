@@ -27,6 +27,7 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::{ApplyDeferred, IntoScheduleConfigs};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_ecs::system::SystemParam;
+#[cfg(any(test, all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
 use bevy_math::IVec2;
 #[cfg(all(
     feature = "render",
@@ -40,24 +41,26 @@ use bevy_render::camera::CameraRenderGraph;
     not(target_arch = "wasm32")
 ))]
 use bevy_window::WindowRef;
-use bevy_window::{
-    CompositeAlphaMode, PresentMode, Window, WindowLevel, WindowPosition, WindowResolution,
-    WindowTheme,
-};
+use bevy_window::{CompositeAlphaMode, PresentMode, Window, WindowTheme};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_window::{
     ExitSystems, Monitor, PrimaryWindow, WindowCloseRequested, WindowMoved, WindowOccluded,
     WindowResized,
 };
+#[cfg(any(test, all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
+use bevy_window::{WindowLevel, WindowPosition, WindowResolution};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_winit::WINIT_WINDOWS;
 use dear_imgui_rs as imgui;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use dear_imgui_rs::sys;
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use std::cell::{Cell, RefCell};
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use std::collections::{HashMap, HashSet};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use std::ffi::{CStr, c_char, c_void};
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use std::rc::Rc;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use std::rc::Weak;
@@ -71,6 +74,10 @@ pub struct ImguiViewportWindowConfig {
     pub window_theme: Option<WindowTheme>,
     pub transparent: bool,
 }
+
+#[cfg(test)]
+#[path = "viewport/tests/viewport.rs"]
+mod viewport_tests;
 
 /// Invalid secondary-window presentation policy.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -137,6 +144,7 @@ impl ImguiViewportWindowConfig {
         Ok(self)
     }
 
+    #[cfg(any(test, all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
     fn apply_to(self, window: &mut Window) {
         window.present_mode = self.present_mode;
         window.composite_alpha_mode = self.composite_alpha_mode;
@@ -150,8 +158,9 @@ impl ImguiViewportWindowConfig {
 pub type ImguiViewportId = imgui::Id;
 
 /// Snapshot of Dear ImGui viewport state copied while a PlatformIO callback is running.
+#[cfg(any(test, all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
 #[derive(Clone, Debug, PartialEq)]
-pub struct ImguiViewportSnapshot {
+pub(crate) struct ImguiViewportSnapshot {
     pub id: ImguiViewportId,
     pub pos: [f32; 2],
     pub size: [f32; 2],
@@ -159,6 +168,7 @@ pub struct ImguiViewportSnapshot {
     pub flags: imgui::ViewportFlags,
 }
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 impl ImguiViewportSnapshot {
     #[must_use]
     pub fn from_viewport(viewport: &imgui::Viewport) -> Self {
@@ -175,6 +185,7 @@ impl ImguiViewportSnapshot {
 }
 
 /// Internal intent captured from Dear ImGui PlatformIO callbacks.
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ImguiViewportCommand {
     Create(ImguiViewportSnapshot),
@@ -204,8 +215,9 @@ pub(crate) enum ImguiViewportCommand {
 }
 
 /// Last Bevy-observed platform state for a Dear ImGui viewport window.
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ImguiViewportFeedback {
+pub(crate) struct ImguiViewportFeedback {
     pub pos: [f32; 2],
     pub size: [f32; 2],
     pub framebuffer_scale: [f32; 2],
@@ -214,7 +226,10 @@ pub struct ImguiViewportFeedback {
     pub minimized: bool,
 }
 
-/// Marker on Bevy `Window` entities created for Dear ImGui secondary platform viewports.
+/// Backend-owned identity marker on Bevy `Window` entities created for secondary viewports.
+///
+/// Applications should query this component by reference and use its accessors. Constructing or
+/// moving the marker does not transfer backend ownership.
 #[derive(Component, Debug, Eq, PartialEq, Hash)]
 pub struct ImguiViewportWindow {
     context_id: imgui::ContextId,
@@ -222,6 +237,7 @@ pub struct ImguiViewportWindow {
 }
 
 impl ImguiViewportWindow {
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     #[must_use]
     pub(crate) const fn new(context_id: imgui::ContextId, viewport_id: ImguiViewportId) -> Self {
         Self {
@@ -243,7 +259,10 @@ impl ImguiViewportWindow {
     }
 }
 
-/// Marker on Bevy camera entities created to render Dear ImGui secondary platform viewports.
+/// Backend-owned identity marker on Bevy camera entities created to render secondary viewports.
+///
+/// Applications should query this component by reference and use its accessors. Constructing or
+/// moving the marker does not transfer backend ownership.
 #[derive(Component, Debug, Eq, PartialEq, Hash)]
 pub struct ImguiViewportCamera {
     context_id: imgui::ContextId,
@@ -251,6 +270,7 @@ pub struct ImguiViewportCamera {
 }
 
 impl ImguiViewportCamera {
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     #[must_use]
     pub(crate) const fn new(context_id: imgui::ContextId, viewport_id: ImguiViewportId) -> Self {
         Self {
@@ -285,11 +305,14 @@ pub(crate) struct ImguiViewportOwner {
 
 #[derive(Debug, Eq, PartialEq, Hash)]
 enum ImguiViewportOwnerKind {
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     Window,
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     Camera,
 }
 
 impl ImguiViewportOwner {
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     #[must_use]
     const fn window(context_id: imgui::ContextId, viewport_id: ImguiViewportId) -> Self {
         Self {
@@ -299,6 +322,7 @@ impl ImguiViewportOwner {
         }
     }
 
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     #[must_use]
     const fn camera(context_id: imgui::ContextId, viewport_id: ImguiViewportId) -> Self {
         Self {
@@ -310,18 +334,36 @@ impl ImguiViewportOwner {
 
     #[must_use]
     pub(crate) fn matches_window(&self, marker: &ImguiViewportWindow) -> bool {
-        matches!(&self.kind, ImguiViewportOwnerKind::Window)
-            && self.context_id == marker.context_id
-            && self.viewport_id == marker.viewport_id
+        #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+        {
+            matches!(&self.kind, ImguiViewportOwnerKind::Window)
+                && self.context_id == marker.context_id
+                && self.viewport_id == marker.viewport_id
+        }
+        #[cfg(not(all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
+        {
+            let _ = (self, marker);
+            false
+        }
     }
 
+    #[cfg(feature = "render")]
     #[must_use]
     pub(crate) fn matches_camera(&self, marker: &ImguiViewportCamera) -> bool {
-        matches!(&self.kind, ImguiViewportOwnerKind::Camera)
-            && self.context_id == marker.context_id
-            && self.viewport_id == marker.viewport_id
+        #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+        {
+            matches!(&self.kind, ImguiViewportOwnerKind::Camera)
+                && self.context_id == marker.context_id
+                && self.viewport_id == marker.viewport_id
+        }
+        #[cfg(not(all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
+        {
+            let _ = (self, marker);
+            false
+        }
     }
 
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     #[must_use]
     pub(crate) const fn window_identity(&self) -> Option<(imgui::ContextId, ImguiViewportId)> {
         match &self.kind {
@@ -330,6 +372,7 @@ impl ImguiViewportOwner {
         }
     }
 
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     #[must_use]
     const fn camera_identity(&self) -> Option<(imgui::ContextId, ImguiViewportId)> {
         match &self.kind {
@@ -339,11 +382,13 @@ impl ImguiViewportOwner {
     }
 }
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(crate) type ImguiViewportBridgeKeepalive = Rc<ImguiViewportBridgeShared>;
 
 /// Context-qualified registry and read-only viewport lookup for Dear ImGui platform windows.
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 #[derive(Default)]
-pub struct ImguiViewportBridge {
+pub(crate) struct ImguiViewportBridge {
     #[cfg(all(test, feature = "multi-viewport", not(target_arch = "wasm32")))]
     inner: ImguiViewportBridgeKeepalive,
     /// Every admitted multi-viewport Context gets its own callback state.
@@ -358,11 +403,12 @@ pub(crate) struct ImguiViewportBridgeRegistration {
     contexts: Rc<RefCell<HashMap<imgui::ContextId, ImguiViewportBridgeKeepalive>>>,
 }
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 #[derive(Default)]
 pub(crate) struct ImguiViewportBridgeShared {
     state: RefCell<ImguiViewportBridgeState>,
     context_id: Cell<Option<imgui::ContextId>>,
-    callback_fault: Cell<Option<ImguiViewportBridgeError>>,
+    callback_fault: Cell<Option<ImguiViewportRuntimeError>>,
     ecs_release_pending: Cell<bool>,
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     native_teardown_in_progress: Cell<bool>,
@@ -675,7 +721,7 @@ impl ImguiViewportBridgeShared {
             }));
     }
 
-    fn record_callback_fault(&self, error: ImguiViewportBridgeError) {
+    fn record_callback_fault(&self, error: ImguiViewportRuntimeError) {
         if self.callback_fault.get().is_none() {
             self.callback_fault.set(Some(error));
         }
@@ -757,17 +803,17 @@ impl ImguiViewportBridgeShared {
         {
             return true;
         }
-        if expected_runtime.main_viewport_platform_user_data != std::ptr::null_mut()
+        if !expected_runtime.main_viewport_platform_user_data.is_null()
             && main_viewport.PlatformUserData == expected_runtime.main_viewport_platform_user_data
         {
             return true;
         }
-        if expected_runtime.main_viewport_platform_handle != std::ptr::null_mut()
+        if !expected_runtime.main_viewport_platform_handle.is_null()
             && main_viewport.PlatformHandle == expected_runtime.main_viewport_platform_handle
         {
             return true;
         }
-        if expected_runtime.main_viewport_platform_handle_raw != std::ptr::null_mut()
+        if !expected_runtime.main_viewport_platform_handle_raw.is_null()
             && main_viewport.PlatformHandleRaw == expected_runtime.main_viewport_platform_handle_raw
         {
             return true;
@@ -959,30 +1005,32 @@ impl ImguiViewportCallbackContract {
     }
 }
 
-/// Deferred failure reported by a Dear ImGui PlatformIO callback.
+/// Native viewport runtime failure reported through Context lifecycle operations.
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ImguiViewportBridgeError {
-    /// The callback attempted to re-enter the bridge while its command queue was borrowed.
-    CallbackQueueBusy,
+pub enum ImguiViewportRuntimeError {
+    /// A native callback re-entered the Bevy viewport runtime before its prior call completed.
+    CallbackReentered,
     /// A native backend field changed after the Bevy viewport bridge claimed it.
-    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     CallbackOwnership(ImguiViewportCallbackOwnershipError),
 }
 
-impl std::fmt::Display for ImguiViewportBridgeError {
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+impl std::fmt::Display for ImguiViewportRuntimeError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::CallbackQueueBusy => formatter.write_str(
-                "a Dear ImGui viewport callback could not borrow the Bevy command queue",
-            ),
-            #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+            Self::CallbackReentered => {
+                formatter.write_str("a Dear ImGui viewport callback re-entered the Bevy runtime")
+            }
             Self::CallbackOwnership(error) => error.fmt(formatter),
         }
     }
 }
 
-impl std::error::Error for ImguiViewportBridgeError {}
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+impl std::error::Error for ImguiViewportRuntimeError {}
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 #[derive(Default)]
 pub(crate) struct ImguiViewportBridgeState {
     commands: Vec<ImguiViewportCommand>,
@@ -1002,6 +1050,7 @@ pub(crate) struct ImguiViewportBridgeState {
 /// Dear ImGui may omit a still-live viewport from `PlatformIO.Viewports`, and can later reuse its
 /// numeric ID. Cleanup therefore resolves the ID through Dear ImGui's internal registry and
 /// verifies the address before touching native fields.
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ImguiViewportIdentity {
     id: ImguiViewportId,
@@ -1023,6 +1072,7 @@ impl ImguiViewportIdentity {
     }
 }
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 #[derive(Debug)]
 struct ImguiViewportPlatformHandle {
     identity: ImguiViewportIdentity,
@@ -1033,6 +1083,7 @@ struct ImguiViewportPlatformHandle {
 struct ImguiViewportHandleRef {
     identity: ImguiViewportIdentity,
     pointer: *mut c_void,
+    recreate_platform_window: bool,
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -1054,10 +1105,9 @@ impl ImguiViewportBridgeState {
         }
         if !self.viewport_handles.contains_key(&viewport_id)
             && let Some(handle) = self.retired_viewport_handles.remove(&viewport_id)
+            && handle.identity == identity
         {
-            if handle.identity == identity {
-                self.viewport_handles.insert(viewport_id, handle);
-            }
+            self.viewport_handles.insert(viewport_id, handle);
         }
         let handle = self
             .viewport_handles
@@ -1108,6 +1158,7 @@ impl ImguiViewportBridgeState {
     }
 }
 
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 impl ImguiViewportBridge {
     #[cfg(all(test, feature = "multi-viewport", not(target_arch = "wasm32")))]
     pub(crate) fn commands(&self) -> Vec<ImguiViewportCommand> {
@@ -1135,7 +1186,7 @@ impl ImguiViewportBridge {
     #[cfg(all(test, feature = "multi-viewport", not(target_arch = "wasm32")))]
     pub(crate) fn drain_commands(
         &mut self,
-    ) -> Result<Vec<ImguiViewportCommand>, ImguiViewportBridgeError> {
+    ) -> Result<Vec<ImguiViewportCommand>, ImguiViewportRuntimeError> {
         if let Some(error) = self.inner.callback_fault.get() {
             return Err(error);
         }
@@ -1143,7 +1194,7 @@ impl ImguiViewportBridge {
     }
 
     #[cfg(all(test, feature = "multi-viewport", not(target_arch = "wasm32")))]
-    pub(crate) fn callback_error(&self) -> Option<ImguiViewportBridgeError> {
+    pub(crate) fn callback_error(&self) -> Option<ImguiViewportRuntimeError> {
         self.inner.callback_fault.get()
     }
 
@@ -1166,6 +1217,7 @@ impl ImguiViewportBridge {
     ///
     /// Viewport identifiers are scoped to a Dear ImGui Context.
     #[cfg(all(
+        test,
         feature = "render",
         feature = "multi-viewport",
         not(target_arch = "wasm32")
@@ -1183,7 +1235,7 @@ impl ImguiViewportBridge {
     /// Return the latest Bevy-observed state for one native viewport.
     ///
     /// Viewport identifiers are scoped to a Dear ImGui Context.
-    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    #[cfg(all(test, feature = "multi-viewport", not(target_arch = "wasm32")))]
     #[must_use]
     pub fn viewport_feedback(
         &self,
@@ -1199,12 +1251,12 @@ impl ImguiViewportBridge {
     /// Reading the error does not clear it. The failure remains sticky until the viewport bridge is
     /// torn down and rebuilt, so callers cannot accidentally resume from a partially observed
     /// callback sequence.
-    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    #[cfg(all(test, feature = "multi-viewport", not(target_arch = "wasm32")))]
     #[must_use]
     pub fn callback_error_for(
         &self,
         context_id: imgui::ContextId,
-    ) -> Option<ImguiViewportBridgeError> {
+    ) -> Option<ImguiViewportRuntimeError> {
         self.context(context_id)
             .and_then(|context| context.callback_error())
     }
@@ -1329,7 +1381,7 @@ pub(crate) struct ImguiViewportBridgeContext {
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 impl ImguiViewportBridgeContext {
-    fn drain_commands(&self) -> Result<Vec<ImguiViewportCommand>, ImguiViewportBridgeError> {
+    fn drain_commands(&self) -> Result<Vec<ImguiViewportCommand>, ImguiViewportRuntimeError> {
         if let Some(error) = self.inner.callback_fault.get() {
             return Err(error);
         }
@@ -1340,7 +1392,8 @@ impl ImguiViewportBridgeContext {
         self.inner.ecs_release_pending()
     }
 
-    fn callback_error(&self) -> Option<ImguiViewportBridgeError> {
+    #[cfg(test)]
+    fn callback_error(&self) -> Option<ImguiViewportRuntimeError> {
         self.inner.callback_fault.get()
     }
 
@@ -1492,10 +1545,9 @@ pub(crate) fn install_viewport_bridge(_app: &mut App) {
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     {
         let app = _app;
-        assert!(
-            sys::HAS_PLATFORM_IO_AGGREGATE_HOOKS,
-            "dear-imgui-bevy multi-viewport requires PlatformIO aggregate ABI hooks"
-        );
+        if !sys::HAS_PLATFORM_IO_AGGREGATE_HOOKS {
+            missing_platform_io_aggregate_hooks();
+        }
         if app.world().get_non_send::<ImguiViewportBridge>().is_none() {
             app.insert_non_send(ImguiViewportBridge::default());
         }
@@ -1531,42 +1583,48 @@ pub(crate) fn install_viewport_bridge(_app: &mut App) {
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+#[cold]
+fn missing_platform_io_aggregate_hooks() -> ! {
+    panic!("dear-imgui-bevy multi-viewport requires PlatformIO aggregate ABI hooks")
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ImguiViewportCallbackInstallError {
-    BackendPlatformUserDataOccupied,
-    BackendPlatformNameOccupied,
-    BackendFlagOccupied { flag: &'static str },
-    CallbackSlotOccupied { slot: &'static str },
-    MainViewportFieldOccupied { field: &'static str },
-    PlatformMonitorsOccupied,
+    BackendPlatformUserData,
+    BackendPlatformName,
+    BackendFlag { flag: &'static str },
+    CallbackSlot { slot: &'static str },
+    MainViewportField { field: &'static str },
+    PlatformMonitors,
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 impl std::fmt::Display for ImguiViewportCallbackInstallError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::BackendPlatformUserDataOccupied => {
+            Self::BackendPlatformUserData => {
                 formatter.write_str("Dear ImGui BackendPlatformUserData is already owned")
             }
-            Self::BackendPlatformNameOccupied => {
+            Self::BackendPlatformName => {
                 formatter.write_str("Dear ImGui BackendPlatformName is already owned")
             }
-            Self::BackendFlagOccupied { flag } => {
+            Self::BackendFlag { flag } => {
                 write!(
                     formatter,
                     "Dear ImGui backend flag `{flag}` is already owned"
                 )
             }
-            Self::CallbackSlotOccupied { slot } => {
+            Self::CallbackSlot { slot } => {
                 write!(formatter, "Dear ImGui {slot} callback is already owned")
             }
-            Self::MainViewportFieldOccupied { field } => {
+            Self::MainViewportField { field } => {
                 write!(
                     formatter,
                     "Dear ImGui main viewport {field} is already owned"
                 )
             }
-            Self::PlatformMonitorsOccupied => {
+            Self::PlatformMonitors => {
                 formatter.write_str("Dear ImGui PlatformIO.Monitors is already owned")
             }
         }
@@ -1647,10 +1705,10 @@ fn validate_platform_callback_install(
     context: &mut imgui::Context,
 ) -> Result<(), ImguiViewportCallbackInstallError> {
     if !context.io().backend_platform_user_data().is_null() {
-        return Err(ImguiViewportCallbackInstallError::BackendPlatformUserDataOccupied);
+        return Err(ImguiViewportCallbackInstallError::BackendPlatformUserData);
     }
     if context.io().backend_platform_name().is_some() {
-        return Err(ImguiViewportCallbackInstallError::BackendPlatformNameOccupied);
+        return Err(ImguiViewportCallbackInstallError::BackendPlatformName);
     }
     let flags = context.io().backend_flags();
     for (flag, name) in [
@@ -1668,7 +1726,7 @@ fn validate_platform_callback_install(
         ),
     ] {
         if flags.contains(flag) {
-            return Err(ImguiViewportCallbackInstallError::BackendFlagOccupied { flag: name });
+            return Err(ImguiViewportCallbackInstallError::BackendFlag { flag: name });
         }
     }
 
@@ -1685,18 +1743,18 @@ fn validate_platform_callback_install(
         ),
     ] {
         if occupied {
-            return Err(ImguiViewportCallbackInstallError::MainViewportFieldOccupied { field });
+            return Err(ImguiViewportCallbackInstallError::MainViewportField { field });
         }
     }
     let raw = unsafe { &*context.platform_io().as_raw() };
     if !raw.Monitors.Data.is_null() || raw.Monitors.Size != 0 || raw.Monitors.Capacity != 0 {
-        return Err(ImguiViewportCallbackInstallError::PlatformMonitorsOccupied);
+        return Err(ImguiViewportCallbackInstallError::PlatformMonitors);
     }
     macro_rules! reject_occupied_slots {
         ($($slot:ident),+ $(,)?) => {
             $(
                 if raw.$slot.is_some() {
-                    return Err(ImguiViewportCallbackInstallError::CallbackSlotOccupied {
+                    return Err(ImguiViewportCallbackInstallError::CallbackSlot {
                         slot: stringify!($slot),
                     });
                 }
@@ -1916,7 +1974,7 @@ fn latch_platform_ownership_fault(
     keepalive: &ImguiViewportBridgeKeepalive,
     error: ImguiViewportCallbackOwnershipError,
 ) -> ImguiViewportCallbackOwnershipError {
-    keepalive.record_callback_fault(ImguiViewportBridgeError::CallbackOwnership(error));
+    keepalive.record_callback_fault(ImguiViewportRuntimeError::CallbackOwnership(error));
     revoke_platform_capabilities_if_still_owned_raw(context_raw, main_viewport, keepalive);
     error
 }
@@ -2004,7 +2062,7 @@ pub(crate) fn platform_callback_ownership(
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(crate) fn platform_callback_error(
     keepalive: &ImguiViewportBridgeKeepalive,
-) -> Option<ImguiViewportBridgeError> {
+) -> Option<ImguiViewportRuntimeError> {
     keepalive.callback_fault.get()
 }
 
@@ -2014,7 +2072,8 @@ fn platform_callback_ownership_raw(
     main_viewport: *const sys::ImGuiViewport,
     keepalive: &ImguiViewportBridgeKeepalive,
 ) -> Result<(), ImguiViewportCallbackOwnershipError> {
-    if let Some(ImguiViewportBridgeError::CallbackOwnership(error)) = keepalive.callback_fault.get()
+    if let Some(ImguiViewportRuntimeError::CallbackOwnership(error)) =
+        keepalive.callback_fault.get()
     {
         return Err(error);
     }
@@ -2109,7 +2168,7 @@ pub(crate) fn finish_owned_bridge_release(
     let _ = keepalive.clear_monitors_if_owned(context);
 
     clear_owned_platform_callbacks(context);
-    clear_imgui_viewport_platform_handles_for_keepalive(context, keepalive);
+    clear_imgui_viewport_platform_handles_for_keepalive(context, keepalive, false);
     clear_backend_platform_user_data_if_owned(context, keepalive);
     ImguiViewportBridgeShared::unregister_context_owner(context, keepalive);
 }
@@ -2386,7 +2445,7 @@ unsafe fn with_current_bridge_mut<R>(
     // The fault latch is outside the contested RefCell, so callback reentry records a deferred
     // Rust-side error without aliasing state or unwinding through C.
     let Ok(mut bridge) = shared.state.try_borrow_mut() else {
-        shared.record_callback_fault(ImguiViewportBridgeError::CallbackQueueBusy);
+        shared.record_callback_fault(ImguiViewportRuntimeError::CallbackReentered);
         revoke_platform_capabilities_if_still_owned_raw(
             current_context,
             unsafe { sys::igGetMainViewport().cast_const() },
@@ -2862,24 +2921,32 @@ fn mark_platform_viewport_requests(
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+#[cfg(feature = "render")]
+type ViewportCameraComponentPresence = (
+    Has<Camera2d>,
+    Has<Camera>,
+    Has<RenderTarget>,
+    Has<CameraRenderGraph>,
+    Has<RenderLayers>,
+);
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+#[cfg(feature = "render")]
+type ViewportCameraIdentity = (ImguiViewportId, Entity);
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 #[allow(unused_variables)]
 fn apply_viewport_commands_system(
     mut ecs_commands: Commands,
     bridge: NonSend<ImguiViewportBridge>,
-    config: Res<crate::ImguiBackendConfig>,
+    backend_runtime: Res<crate::context::ownership::ImguiBackendRuntime>,
     mut windows: Query<&mut Window>,
     viewport_windows: Query<
         (Entity, Option<&ImguiViewportWindow>, &ImguiViewportOwner),
         With<Window>,
     >,
     viewport_cameras: Query<(Entity, Option<&ImguiViewportCamera>, &ImguiViewportOwner)>,
-    #[cfg(feature = "render")] viewport_camera_components: Query<(
-        Has<Camera2d>,
-        Has<Camera>,
-        Has<RenderTarget>,
-        Has<CameraRenderGraph>,
-        Has<RenderLayers>,
-    )>,
+    #[cfg(feature = "render")] viewport_camera_components: Query<ViewportCameraComponentPresence>,
 ) {
     let contexts = bridge.contexts();
     for context in contexts {
@@ -2887,7 +2954,7 @@ fn apply_viewport_commands_system(
         apply_viewport_commands_for_context(
             &mut ecs_commands,
             &context,
-            &config,
+            backend_runtime.config(),
             &mut windows,
             &viewport_windows,
             &viewport_cameras,
@@ -2897,7 +2964,7 @@ fn apply_viewport_commands_system(
         apply_viewport_commands_for_context(
             &mut ecs_commands,
             &context,
-            &config,
+            backend_runtime.config(),
             &mut windows,
             &viewport_windows,
             &viewport_cameras,
@@ -2910,20 +2977,14 @@ fn apply_viewport_commands_system(
 fn apply_viewport_commands_for_context(
     ecs_commands: &mut Commands,
     context: &ImguiViewportBridgeContext,
-    config: &crate::ImguiBackendConfig,
+    config: &crate::ImguiPluginConfig,
     windows: &mut Query<&mut Window>,
     viewport_windows: &Query<
         (Entity, Option<&ImguiViewportWindow>, &ImguiViewportOwner),
         With<Window>,
     >,
     viewport_cameras: &Query<(Entity, Option<&ImguiViewportCamera>, &ImguiViewportOwner)>,
-    #[cfg(feature = "render")] viewport_camera_components: &Query<(
-        Has<Camera2d>,
-        Has<Camera>,
-        Has<RenderTarget>,
-        Has<CameraRenderGraph>,
-        Has<RenderLayers>,
-    )>,
+    #[cfg(feature = "render")] viewport_camera_components: &Query<ViewportCameraComponentPresence>,
 ) {
     let Ok(queued) = context.drain_commands() else {
         return;
@@ -2938,7 +2999,7 @@ fn apply_viewport_commands_for_context(
         ecs_commands.entity(entity).try_despawn();
     }
 
-    let viewport_window_config = config.viewport_window.validate().unwrap_or_else(|error| {
+    let viewport_window_config = config.viewport_window().validate().unwrap_or_else(|error| {
         panic!("invalid Dear ImGui viewport window configuration: {error}")
     });
     let mut feedback_candidates = HashSet::new();
@@ -3010,9 +3071,11 @@ fn apply_viewport_commands_for_context(
                     entity,
                     viewport_window_config.transparent,
                     snapshot.flags,
-                    &live_cameras,
-                    &recoverable_cameras,
-                    &mut pending_cameras,
+                    ViewportCameraReconciliation {
+                        live: &live_cameras,
+                        recoverable: &recoverable_cameras,
+                        pending: &mut pending_cameras,
+                    },
                 );
                 if let Ok(mut window) = windows.get_mut(entity) {
                     apply_snapshot_to_window(&snapshot, entity, &mut window);
@@ -3175,9 +3238,11 @@ fn apply_viewport_commands_for_context(
             window_entity,
             viewport_window_config.transparent,
             flags,
-            &live_cameras,
-            &recoverable_cameras,
-            &mut pending_cameras,
+            ViewportCameraReconciliation {
+                live: &live_cameras,
+                recoverable: &recoverable_cameras,
+                pending: &mut pending_cameras,
+            },
         );
     }
 
@@ -3221,11 +3286,17 @@ fn apply_pending_viewport_focus_requests(
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+#[derive(SystemParam)]
+struct SecondaryViewportHostQueries<'w, 's> {
+    primary: Query<'w, 's, Entity, With<PrimaryWindow>>,
+    windows: Query<'w, 's, Entity, With<Window>>,
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 fn cleanup_secondary_viewports_when_host_is_unavailable(
     mut ecs_commands: Commands,
     mut close_requests: MessageReader<WindowCloseRequested>,
-    primary_windows: Query<Entity, With<PrimaryWindow>>,
-    windows: Query<Entity, With<Window>>,
+    host_queries: SecondaryViewportHostQueries,
     contexts: Option<NonSendMut<crate::ImguiContexts>>,
     bridge: NonSend<ImguiViewportBridge>,
     #[cfg(feature = "render")] input_metrics: Res<crate::input::ImguiContextInputMetrics>,
@@ -3235,7 +3306,7 @@ fn cleanup_secondary_viewports_when_host_is_unavailable(
         close_requests.read().for_each(drop);
         return;
     };
-    let primary_window = primary_windows.single().ok();
+    let primary_window = host_queries.primary.single().ok();
     let close_requested = close_requests
         .read()
         .map(|event| event.window)
@@ -3267,7 +3338,7 @@ fn cleanup_secondary_viewports_when_host_is_unavailable(
         #[cfg(not(feature = "render"))]
         let host_window = primary_window;
         let host_is_unavailable = host_window.is_none_or(|host_window| {
-            windows.get(host_window).is_err() || close_requested.contains(&host_window)
+            host_queries.windows.get(host_window).is_err() || close_requested.contains(&host_window)
         });
         if !host_is_unavailable {
             continue;
@@ -3310,13 +3381,18 @@ fn clear_imgui_viewport_platform_handles(
     context: &mut imgui::Context,
     bridge: &ImguiViewportBridgeContext,
 ) {
-    clear_imgui_viewport_platform_handles_for_keepalive(context, &bridge.inner);
+    clear_imgui_viewport_platform_handles_for_keepalive(context, &bridge.inner, true);
+    // Host loss deliberately clears bridge-owned viewport fields. Publish that transition before
+    // the next frame validates ownership, so recovery cannot mistake our cleanup for foreign
+    // mutation and revoke the native viewport capabilities.
+    bridge.inner.record_runtime_contract(context);
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 fn clear_imgui_viewport_platform_handles_for_keepalive(
     context: &mut imgui::Context,
     keepalive: &ImguiViewportBridgeKeepalive,
+    recreate_platform_windows: bool,
 ) {
     let state = keepalive.state.borrow();
     let owned_handles = state
@@ -3328,6 +3404,7 @@ fn clear_imgui_viewport_platform_handles_for_keepalive(
             pointer: (&**handle as *const ImguiViewportPlatformHandle)
                 .cast_mut()
                 .cast::<c_void>(),
+            recreate_platform_window: recreate_platform_windows,
         })
         .collect::<Vec<_>>();
     drop(state);
@@ -3352,6 +3429,7 @@ fn clear_stale_imgui_viewport_platform_handles(
             pointer: (&**handle as *const ImguiViewportPlatformHandle)
                 .cast_mut()
                 .cast::<c_void>(),
+            recreate_platform_window: true,
         })
         .collect::<Vec<_>>();
     clear_imgui_viewport_platform_handles_for_owned_handles(context, &owned_handles);
@@ -3368,6 +3446,7 @@ fn clear_imgui_viewport_platform_handles_for_owned_handles(
 
     let binding = context.binding();
     binding.with_bound_context(|| {
+        let main_viewport = unsafe { sys::igGetMainViewport() };
         for owned_handle in owned_handles {
             // `PlatformIO.Viewports` intentionally omits hidden, inactive, and zero-sized
             // viewports. Resolve through Dear ImGui's full internal list instead, then require
@@ -3378,15 +3457,32 @@ fn clear_imgui_viewport_platform_handles_for_owned_handles(
             // SAFETY: the internal lookup returned the exact still-live viewport for the bound
             // Context. Each field is cleared only when it still contains this bridge's handle.
             let viewport = unsafe { imgui::Viewport::from_raw_mut(viewport) };
+            let platform_handle_is_owned = viewport.platform_handle() == owned_handle.pointer;
+            let platform_user_data_is_owned = viewport.platform_user_data() == owned_handle.pointer;
+            let platform_handle_raw_is_owned =
+                viewport.platform_handle_raw() == owned_handle.pointer;
+            let platform_handle_raw_is_unclaimed = viewport.platform_handle_raw().is_null();
+            let can_recreate_platform_window = platform_handle_is_owned
+                && platform_user_data_is_owned
+                && (platform_handle_raw_is_unclaimed || platform_handle_raw_is_owned);
             unsafe {
-                if viewport.platform_handle() == owned_handle.pointer {
+                if platform_handle_is_owned {
                     viewport.set_platform_handle(std::ptr::null_mut());
                 }
-                if viewport.platform_user_data() == owned_handle.pointer {
+                if platform_user_data_is_owned {
                     viewport.set_platform_user_data(std::ptr::null_mut());
                 }
-                if viewport.platform_handle_raw() == owned_handle.pointer {
+                if platform_handle_raw_is_owned {
                     viewport.set_platform_handle_raw(std::ptr::null_mut());
+                }
+                if can_recreate_platform_window
+                    && owned_handle.recreate_platform_window
+                    && !std::ptr::eq(viewport.as_raw(), main_viewport)
+                {
+                    // The native viewport is still live, but its bridge-owned Bevy window
+                    // disappeared outside the callback contract. Make Dear ImGui issue a fresh
+                    // Platform_CreateWindow callback instead of retaining a handle-less viewport.
+                    viewport.set_platform_window_created(false);
                 }
             }
         }
@@ -3530,6 +3626,17 @@ fn cleanup_orphaned_viewport_cameras(
     feature = "multi-viewport",
     not(target_arch = "wasm32")
 ))]
+struct ViewportCameraReconciliation<'a> {
+    live: &'a HashSet<ViewportCameraIdentity>,
+    recoverable: &'a HashSet<ViewportCameraIdentity>,
+    pending: &'a mut HashSet<ImguiViewportId>,
+}
+
+#[cfg(all(
+    feature = "render",
+    feature = "multi-viewport",
+    not(target_arch = "wasm32")
+))]
 fn ensure_viewport_camera(
     ecs_commands: &mut Commands,
     bridge: &ImguiViewportBridgeContext,
@@ -3537,17 +3644,15 @@ fn ensure_viewport_camera(
     window_entity: Entity,
     transparent: bool,
     flags: imgui::ViewportFlags,
-    live_cameras: &HashSet<(ImguiViewportId, Entity)>,
-    recoverable_cameras: &HashSet<(ImguiViewportId, Entity)>,
-    pending_cameras: &mut HashSet<ImguiViewportId>,
+    cameras: ViewportCameraReconciliation<'_>,
 ) {
     if let Some(camera) = bridge.viewport_camera(viewport_id) {
         let camera_identity = (viewport_id, camera);
-        if live_cameras.contains(&camera_identity) || pending_cameras.contains(&viewport_id) {
+        if cameras.live.contains(&camera_identity) || cameras.pending.contains(&viewport_id) {
             return;
         }
-        if recoverable_cameras.contains(&camera_identity) {
-            pending_cameras.insert(viewport_id);
+        if cameras.recoverable.contains(&camera_identity) {
+            cameras.pending.insert(viewport_id);
             ecs_commands.entity(camera).insert((
                 Camera2d,
                 viewport_camera(transparent, flags),
@@ -3560,7 +3665,7 @@ fn ensure_viewport_camera(
         }
         bridge.remove_viewport_camera(viewport_id);
     }
-    if !pending_cameras.insert(viewport_id) {
+    if !cameras.pending.insert(viewport_id) {
         return;
     }
 
@@ -3599,6 +3704,7 @@ fn viewport_camera(transparent: bool, flags: imgui::ViewportFlags) -> Camera {
     camera
 }
 
+#[cfg(any(test, all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(dead_code)] // Exactly one variant is constructed on each native target.
 enum DesktopCoordinateSpace {
@@ -3606,6 +3712,7 @@ enum DesktopCoordinateSpace {
     Logical,
 }
 
+#[cfg(any(test, all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
 const fn native_desktop_coordinate_space() -> DesktopCoordinateSpace {
     #[cfg(target_os = "macos")]
     {
@@ -3690,7 +3797,7 @@ fn monitor_from_window(window: &Window) -> sys::ImGuiPlatformMonitor {
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-pub fn platform_monitors_from_bevy_monitors(
+pub(crate) fn platform_monitors_from_bevy_monitors(
     monitors: impl IntoIterator<Item = (Monitor, bool)>,
 ) -> Vec<sys::ImGuiPlatformMonitor> {
     let mut monitors = monitors.into_iter().collect::<Vec<_>>();
@@ -3895,6 +4002,7 @@ fn winit_window_scale_factor(entity: Entity) -> Option<f32> {
     })
 }
 
+#[cfg(any(test, all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
 fn positive_finite_or(value: f32, fallback: f32) -> f32 {
     if value.is_finite() && value > 0.0 {
         value
@@ -3919,13 +4027,15 @@ fn with_window_mut(
 }
 
 #[must_use]
-pub fn window_from_snapshot(snapshot: &ImguiViewportSnapshot) -> Window {
+#[cfg(any(test, all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
+pub(crate) fn window_from_snapshot(snapshot: &ImguiViewportSnapshot) -> Window {
     window_from_snapshot_with_config(snapshot, ImguiViewportWindowConfig::default())
         .expect("the default viewport window configuration is valid")
 }
 
 /// Build a secondary Bevy window after validating its presentation policy.
-pub fn window_from_snapshot_with_config(
+#[cfg(any(test, all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
+pub(crate) fn window_from_snapshot_with_config(
     snapshot: &ImguiViewportSnapshot,
     config: ImguiViewportWindowConfig,
 ) -> Result<Window, ImguiViewportWindowConfigError> {
@@ -4013,6 +4123,7 @@ fn physical_outer_pos_for_client_pos(entity: Entity, pos: [f32; 2], dpi_scale: f
     physical_pos_from_desktop(pos, dpi_scale)
 }
 
+#[cfg(any(test, all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
 fn physical_pos_from_desktop(pos: [f32; 2], scale_factor: f32) -> IVec2 {
     let pos = finite_desktop_pos(pos);
     let pos = match native_desktop_coordinate_space() {
@@ -4025,14 +4136,17 @@ fn physical_pos_from_desktop(pos: [f32; 2], scale_factor: f32) -> IVec2 {
     IVec2::new(pos[0].round() as i32, pos[1].round() as i32)
 }
 
+#[cfg(any(test, all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
 fn physical_extent(value: f32) -> u32 {
     value.round().max(1.0) as u32
 }
 
+#[cfg(any(test, all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
 fn finite_desktop_pos(pos: [f32; 2]) -> [f32; 2] {
     [finite_or(pos[0], 0.0), finite_or(pos[1], 0.0)]
 }
 
+#[cfg(any(test, all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
 fn finite_desktop_size(size: [f32; 2]) -> [f32; 2] {
     [
         positive_finite_or(size[0], 1.0),
@@ -4040,10 +4154,12 @@ fn finite_desktop_size(size: [f32; 2]) -> [f32; 2] {
     ]
 }
 
+#[cfg(any(test, all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
 fn finite_or(value: f32, fallback: f32) -> f32 {
     if value.is_finite() { value } else { fallback }
 }
 
+#[cfg(any(test, all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
 fn set_window_desktop_size(window: &mut Window, size: [f32; 2], scale_factor: f32) {
     let size = finite_desktop_size(size);
     let size = match native_desktop_coordinate_space() {
@@ -4194,7 +4310,10 @@ mod tests {
             bridge.queue(ImguiViewportCommand::Destroy { id: viewport_id });
         }
         world.insert_non_send(bridge);
-        world.insert_resource(crate::ImguiBackendConfig::default());
+        world.insert_resource(crate::context::ownership::ImguiBackendRuntime::new(
+            crate::ImguiPluginConfig::default(),
+            true,
+        ));
         world.insert_resource(EcsReleaseBeforeDeferredProbe {
             entity,
             entity_was_live: false,
@@ -4315,7 +4434,10 @@ mod tests {
             )));
 
         let mut world = World::new();
-        world.insert_resource(crate::ImguiBackendConfig::default());
+        world.insert_resource(crate::context::ownership::ImguiBackendRuntime::new(
+            crate::ImguiPluginConfig::default(),
+            true,
+        ));
         world.insert_non_send(bridge);
         run_viewport_command_schedule(&mut world);
 
@@ -4451,10 +4573,10 @@ mod tests {
             Some(window_a),
             "Context A's equal numeric viewport id must remain live"
         );
-        keepalive_b.record_callback_fault(ImguiViewportBridgeError::CallbackQueueBusy);
+        keepalive_b.record_callback_fault(ImguiViewportRuntimeError::CallbackReentered);
         assert_eq!(
             bridge.callback_error_for(context_b_id),
-            Some(ImguiViewportBridgeError::CallbackQueueBusy)
+            Some(ImguiViewportRuntimeError::CallbackReentered)
         );
         assert_eq!(
             bridge.callback_error_for(context_a_id),
@@ -4590,15 +4712,15 @@ mod tests {
 
         assert_eq!(
             bridge.callback_error(),
-            Some(ImguiViewportBridgeError::CallbackQueueBusy)
+            Some(ImguiViewportRuntimeError::CallbackReentered)
         );
         assert_eq!(
             bridge.drain_commands(),
-            Err(ImguiViewportBridgeError::CallbackQueueBusy)
+            Err(ImguiViewportRuntimeError::CallbackReentered)
         );
         assert_eq!(
             bridge.drain_commands(),
-            Err(ImguiViewportBridgeError::CallbackQueueBusy),
+            Err(ImguiViewportRuntimeError::CallbackReentered),
             "the deferred callback fault must remain sticky"
         );
 
@@ -4631,7 +4753,7 @@ mod tests {
         }
         assert_eq!(
             bridge.callback_error(),
-            Some(ImguiViewportBridgeError::CallbackOwnership(
+            Some(ImguiViewportRuntimeError::CallbackOwnership(
                 ImguiViewportCallbackOwnershipError::BackendPlatformUserDataReplaced,
             )),
             "a callback must latch drift before casting foreign userdata"
@@ -4667,7 +4789,7 @@ mod tests {
         assert_eq!(unsafe { (*viewport).PlatformHandle }, owned_handle);
         assert_eq!(
             bridge.callback_error(),
-            Some(ImguiViewportBridgeError::CallbackQueueBusy)
+            Some(ImguiViewportRuntimeError::CallbackReentered)
         );
         drop(state_borrow);
 
@@ -4727,7 +4849,7 @@ mod tests {
 
         assert_eq!(
             unsafe { install_owned_platform_callbacks(&mut context, &bridge.keepalive()) },
-            Err(ImguiViewportCallbackInstallError::CallbackSlotOccupied {
+            Err(ImguiViewportCallbackInstallError::CallbackSlot {
                 slot: "Platform_DestroyWindow",
             })
         );
@@ -4751,7 +4873,7 @@ mod tests {
         }
         assert_eq!(
             unsafe { install_owned_platform_callbacks(&mut context, &bridge.keepalive()) },
-            Err(ImguiViewportCallbackInstallError::BackendPlatformUserDataOccupied)
+            Err(ImguiViewportCallbackInstallError::BackendPlatformUserData)
         );
         assert!(
             unsafe { &*context.platform_io().as_raw() }
@@ -4775,7 +4897,7 @@ mod tests {
 
         assert_eq!(
             unsafe { install_owned_platform_callbacks(&mut context, &bridge.keepalive()) },
-            Err(ImguiViewportCallbackInstallError::PlatformMonitorsOccupied)
+            Err(ImguiViewportCallbackInstallError::PlatformMonitors)
         );
         let actual = unsafe { (*context.platform_io().as_raw()).Monitors };
         assert_eq!(actual, original);
@@ -4798,7 +4920,7 @@ mod tests {
         let foreign_name = context.io().backend_platform_name().unwrap().as_ptr();
         assert_eq!(
             unsafe { install_owned_platform_callbacks(&mut context, &bridge.keepalive()) },
-            Err(ImguiViewportCallbackInstallError::BackendPlatformNameOccupied)
+            Err(ImguiViewportCallbackInstallError::BackendPlatformName)
         );
         assert_eq!(
             context.io().backend_platform_name().unwrap().as_ptr(),
@@ -4821,11 +4943,9 @@ mod tests {
                 unsafe { (*context.main_viewport().as_raw_mut()).$field = marker };
                 assert_eq!(
                     unsafe { install_owned_platform_callbacks(&mut context, &bridge.keepalive()) },
-                    Err(
-                        ImguiViewportCallbackInstallError::MainViewportFieldOccupied {
-                            field: stringify!($field),
-                        }
-                    )
+                    Err(ImguiViewportCallbackInstallError::MainViewportField {
+                        field: stringify!($field),
+                    })
                 );
                 assert_eq!(
                     unsafe { (*context.main_viewport().as_raw()).$field },
@@ -4866,7 +4986,7 @@ mod tests {
                 }
                 assert_eq!(
                     bridge.callback_error(),
-                    Some(ImguiViewportBridgeError::CallbackOwnership(
+                    Some(ImguiViewportRuntimeError::CallbackOwnership(
                         ImguiViewportCallbackOwnershipError::PlatformCallbackReplaced {
                             slot: stringify!($slot),
                         },
@@ -4915,7 +5035,7 @@ mod tests {
                 }
                 assert_eq!(
                     bridge.callback_error(),
-                    Some(ImguiViewportBridgeError::CallbackOwnership(
+                    Some(ImguiViewportRuntimeError::CallbackOwnership(
                         ImguiViewportCallbackOwnershipError::PlatformCallbackInstalled {
                             slot: stringify!($slot),
                         },
@@ -4957,7 +5077,7 @@ mod tests {
                 }
                 assert_eq!(
                     bridge.callback_error(),
-                    Some(ImguiViewportBridgeError::CallbackOwnership(
+                    Some(ImguiViewportRuntimeError::CallbackOwnership(
                         ImguiViewportCallbackOwnershipError::RendererCallbackInstalled {
                             slot: stringify!($slot),
                         },
@@ -4990,7 +5110,7 @@ mod tests {
             unsafe { platform_show_window_raw_callback(viewport) };
             assert_eq!(
                 bridge.callback_error(),
-                Some(ImguiViewportBridgeError::CallbackOwnership(expected))
+                Some(ImguiViewportRuntimeError::CallbackOwnership(expected))
             );
             assert!(bridge.commands().is_empty());
             unsafe { sys::ImGuiViewport_destroy(viewport) };
@@ -5271,7 +5391,7 @@ mod tests {
                 );
                 assert_eq!(
                     bridge.callback_error(),
-                    Some(ImguiViewportBridgeError::CallbackOwnership(
+                    Some(ImguiViewportRuntimeError::CallbackOwnership(
                         ImguiViewportCallbackOwnershipError::ViewportFieldReplaced {
                             field: stringify!($field),
                         }
@@ -5355,7 +5475,7 @@ mod tests {
 
         assert_eq!(
             bridge.callback_error(),
-            Some(ImguiViewportBridgeError::CallbackOwnership(
+            Some(ImguiViewportRuntimeError::CallbackOwnership(
                 ImguiViewportCallbackOwnershipError::BackendPlatformUserDataReplaced,
             ))
         );

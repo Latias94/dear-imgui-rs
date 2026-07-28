@@ -1,8 +1,10 @@
 //! CPU draw preparation, GPU uploads, and texture reconciliation.
 
+#[cfg(test)]
+use super::resources::PreparedContextMetadata;
 use super::resources::{
     ImguiRenderTexture, ImguiRendererReleasePacket, ImguiTextureUpload,
-    ImguiTextureViewCompatibility, PreparedContextMetadata, PreparedFrameData,
+    ImguiTextureViewCompatibility,
 };
 use super::*;
 
@@ -73,33 +75,32 @@ pub(super) fn prepare_imgui_render_frame(
 ) {
     let mut context_ids = extracted.context_ids().collect::<Vec<_>>();
     context_ids.sort_by_key(|context_id| context_id.get().get());
-    let mut contexts = HashMap::new();
-    let mut uniforms_by_context_view = HashMap::new();
-    let mut vertices = Vec::new();
-    let mut indices = Vec::new();
-    let mut draws = Vec::new();
+    let frame = prepared.begin_prepare();
 
     for context_id in context_ids {
         let Some(snapshot) = extracted.snapshot(context_id) else {
             continue;
         };
-        let Some(frame_index) = extracted.frame_index(context_id) else {
-            continue;
-        };
-        contexts.insert(
-            context_id,
-            PreparedContextMetadata {
-                frame_index,
-                texture_request_count: snapshot.texture_requests().len(),
-            },
-        );
+        #[cfg(test)]
+        {
+            let frame_index = extracted
+                .frame_index(context_id)
+                .expect("an extracted snapshot must retain its frame index");
+            frame.contexts.insert(
+                context_id,
+                PreparedContextMetadata {
+                    frame_index,
+                    texture_request_count: snapshot.texture_requests().len(),
+                },
+            );
+        }
 
         let (context_vertices, context_indices, mut context_draws, uniforms_by_view) =
             prepare_snapshot_draw_data(snapshot, extracted.camera_targets(context_id));
-        let Ok(index_base) = u32::try_from(indices.len()) else {
+        let Ok(index_base) = u32::try_from(frame.indices.len()) else {
             continue;
         };
-        let Ok(vertex_base) = i32::try_from(vertices.len()) else {
+        let Ok(vertex_base) = i32::try_from(frame.vertices.len()) else {
             continue;
         };
         context_draws.retain_mut(|draw| {
@@ -116,28 +117,15 @@ pub(super) fn prepare_imgui_render_frame(
             draw.vertex_offset = vertex_offset;
             true
         });
-        uniforms_by_context_view.extend(
+        frame.uniforms_by_context_view.extend(
             uniforms_by_view
                 .into_iter()
                 .map(|(view, uniforms)| ((context_id, view), uniforms)),
         );
-        vertices.extend(context_vertices);
-        indices.extend(context_indices);
-        draws.extend(context_draws);
+        frame.vertices.extend(context_vertices);
+        frame.indices.extend(context_indices);
+        frame.draws.extend(context_draws);
     }
-
-    if contexts.is_empty() {
-        prepared.clear();
-        return;
-    }
-
-    prepared.replace(PreparedFrameData {
-        contexts,
-        uniforms_by_context_view,
-        vertices,
-        indices,
-        draws,
-    });
 }
 
 pub(super) fn upload_imgui_buffers(
@@ -194,13 +182,15 @@ pub(super) fn prepare_imgui_texture_bind_groups(
     mut params: ImguiTextureBindGroupParams,
     mut texture_bind_groups: ResMut<ImguiTextureBindGroups>,
 ) {
-    retain_extracted_bevy_image_bindings(&params.extracted_bevy_textures, &mut texture_bind_groups);
-
     let (Some(render_device), Some(render_queue), Some(pipeline_cache)) = (
         params.render_device,
         params.render_queue,
         params.pipeline_cache,
     ) else {
+        retain_extracted_bevy_image_bindings(
+            &params.extracted_bevy_textures,
+            &mut texture_bind_groups,
+        );
         publish_unavailable_bevy_image_texture_diagnostics(
             &params.diagnostics,
             &params.extracted_bevy_textures,
@@ -608,6 +598,9 @@ pub(super) fn prepare_bevy_image_texture_bind_groups(
             unavailable_images.push(*asset_id);
             continue;
         };
+        if texture_bind_groups.contains_current_bevy_image(&binding, gpu_image) {
+            continue;
+        }
         let Some(bind_group) = create_bevy_image_texture_bind_group(
             render_device,
             pipeline_cache,
@@ -618,7 +611,7 @@ pub(super) fn prepare_bevy_image_texture_bind_groups(
             unavailable_images.push(*asset_id);
             continue;
         };
-        texture_bind_groups.insert_bevy_image(binding, bind_group);
+        texture_bind_groups.insert_bevy_image(binding, gpu_image, bind_group);
     }
     unavailable_images
 }

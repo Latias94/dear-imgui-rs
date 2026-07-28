@@ -1,8 +1,7 @@
-use std::sync::{Mutex, OnceLock};
-
 #[cfg(feature = "render")]
 use std::{cell::Cell, rc::Rc};
 
+use crate::test_util::imgui_context_guard;
 #[cfg(feature = "render")]
 use bevy_app::Main;
 use bevy_app::{App, Update};
@@ -13,20 +12,12 @@ use bevy_render::{Render, RenderApp, extract_plugin::ExtractPlugin};
 use bevy_time::{Real, Time};
 use bevy_window::{PrimaryWindow, Window, WindowResolution};
 #[cfg(feature = "render")]
-use dear_imgui_bevy::ImguiContextIntoInnerErrorReason;
+use dear_imgui_bevy::ImguiContextRemovalPendingReason;
 use dear_imgui_bevy::{
-    ContextId, ImguiContextConfig, ImguiContextError, ImguiContexts, ImguiFrameOutput,
-    ImguiFrameState, ImguiPlugin, ImguiPrimaryContextPass, ImguiUi,
+    ContextId, ImguiContextConfig, ImguiContextError, ImguiContexts, ImguiPlugin,
+    ImguiPrimaryContextPass, ImguiUi,
 };
 use std::time::Duration;
-
-fn imgui_context_guard() -> std::sync::MutexGuard<'static, ()> {
-    static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
-    GUARD
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
 
 #[derive(ScheduleLabel, Clone, Debug, PartialEq, Eq, Hash)]
 struct ContextPassA;
@@ -77,18 +68,11 @@ fn app_with_primary_window() -> App {
     app
 }
 
-fn record_ui(
-    ui: ImguiUi,
-    frame_state: NonSend<ImguiFrameState>,
-    mut trace: ResMut<LifecycleTrace>,
-) {
+fn record_ui(ui: ImguiUi, mut trace: ResMut<LifecycleTrace>) {
     let context_id = ui
         .context_id()
         .expect("UI schedule must expose its Context");
     let frame_index = ui.frame_index().expect("UI schedule must expose its frame");
-    assert_eq!(frame_state.context_id(), Some(context_id));
-    assert_eq!(frame_state.frame_index(), Some(frame_index));
-    assert!(frame_state.is_frame_open());
     let current_ui = ui.ui().expect("UI schedule must expose a live Ui");
     assert_eq!(current_ui.context_id(), context_id);
     let current_raw = unsafe { dear_imgui_rs::sys::igGetCurrentContext() } as usize;
@@ -213,8 +197,10 @@ fn primary_and_two_additional_contexts_run_in_stable_order_with_independent_fram
         trace.expected_raw = expected_raw;
     }
 
-    app.update();
-    app.update();
+    // Drive two frames to verify that Context order stays stable across frame boundaries.
+    for _ in 0..2 {
+        app.update();
+    }
 
     let trace = app.world().resource::<LifecycleTrace>();
     assert_eq!(
@@ -233,22 +219,6 @@ fn primary_and_two_additional_contexts_run_in_stable_order_with_independent_fram
     assert_eq!(contexts.frame_index(primary).unwrap(), 2);
     assert_eq!(contexts.frame_index(context_a).unwrap(), 2);
     assert_eq!(contexts.frame_index(context_b).unwrap(), 2);
-    let output = app.world().resource::<ImguiFrameOutput>();
-    for context_id in [primary, context_a, context_b] {
-        let context_output = output
-            .get(context_id)
-            .expect("every completed Context must retain independent frame output");
-        assert_eq!(context_output.frame_index(), 2);
-        assert!(context_output.snapshot_epoch().is_none());
-        assert!(context_output.snapshot_error().is_none());
-    }
-    let frame_state = app
-        .world()
-        .get_non_send::<ImguiFrameState>()
-        .expect("ImguiPlugin must retain serial frame state");
-    assert!(!frame_state.is_frame_open());
-    assert_eq!(frame_state.context_id(), None);
-    assert_eq!(frame_state.frame_index(), None);
     assert!(
         !trace.wrong_current_context,
         "every UI schedule must run with its own native Context current"
@@ -411,6 +381,37 @@ fn additional_multi_viewport_config_can_be_registered_before_backend_attachment(
     );
 }
 
+#[cfg(not(all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
+#[test]
+fn attached_backend_rejects_unavailable_native_multi_viewport_without_consuming_context() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_primary_window();
+    app.add_plugins(ImguiPlugin::default());
+    let additional = dear_imgui_rs::SuspendedContext::create();
+    let additional_id = additional.id();
+
+    let error = app
+        .world_mut()
+        .non_send_mut::<ImguiContexts>()
+        .insert_suspended(
+            additional,
+            ImguiContextConfig::new(ContextPassA).with_multi_viewport(true),
+        )
+        .expect_err("a build without native viewport support must reject the request");
+
+    assert!(matches!(
+        error.error(),
+        ImguiContextError::NativeMultiViewportUnavailable { context_id }
+            if *context_id == additional_id
+    ));
+    assert_eq!(error.into_context().id(), additional_id);
+    assert!(
+        !app.world()
+            .non_send::<ImguiContexts>()
+            .contains(additional_id)
+    );
+}
+
 #[test]
 fn missing_schedule_is_context_local_and_does_not_stop_later_contexts() {
     let _guard = imgui_context_guard();
@@ -562,18 +563,6 @@ fn removing_the_primary_context_does_not_stop_an_additional_context() {
     let contexts = app.world().get_non_send::<ImguiContexts>().unwrap();
     assert_eq!(contexts.primary_id(), None);
     assert_eq!(contexts.frame_index(additional).unwrap(), 1);
-    let output = app.world().resource::<ImguiFrameOutput>();
-    assert!(
-        output.get(primary).is_none(),
-        "frame output must discard Contexts after removal"
-    );
-    assert_eq!(
-        output
-            .get(additional)
-            .expect("the surviving Context must retain its output")
-            .frame_index(),
-        1
-    );
     assert_eq!(
         app.world().resource::<LifecycleTrace>().visits,
         vec![(additional, 1)]
@@ -605,20 +594,20 @@ fn context_removal_abandons_unextracted_snapshot_without_pausing_another_context
     app.world_mut().run_schedule(Main);
 
     {
-        let output = app.world().resource::<ImguiFrameOutput>();
+        let mailbox = app
+            .world()
+            .resource::<crate::context::ImguiFrameMailbox>()
+            .clone();
+        let pending = mailbox.take_all();
         for context_id in [context_a, context_b] {
-            let context_output = output
-                .get(context_id)
+            let frame = pending
+                .get(&context_id)
                 .expect("both Contexts must publish their first render snapshot");
-            assert_eq!(context_output.frame_index(), 1);
-            assert_eq!(
-                context_output
-                    .snapshot_epoch()
-                    .expect("render integration must publish a snapshot epoch")
-                    .context_id(),
-                context_id
-            );
-            assert!(context_output.snapshot_error().is_none());
+            assert_eq!(frame.frame_index, 1);
+            assert_eq!(frame.snapshot.epoch().context_id(), context_id);
+        }
+        for (context_id, frame) in pending {
+            mailbox.publish(context_id, frame);
         }
     }
 
@@ -632,7 +621,7 @@ fn context_removal_abandons_unextracted_snapshot_without_pausing_another_context
         removal,
         ImguiContextError::RemovalPending {
             context_id,
-            reason: ImguiContextIntoInnerErrorReason::RenderWorldReleasePending,
+            reason: ImguiContextRemovalPendingReason::RenderWorldReleasePending,
         } if context_id == context_a
     ));
     let completion = app
@@ -658,26 +647,12 @@ fn context_removal_abandons_unextracted_snapshot_without_pausing_another_context
         vec![(context_a, 1), (context_b, 1), (context_b, 2)],
         "Context A teardown must not reopen A or interrupt Context B"
     );
-    {
-        let output = app.world().resource::<ImguiFrameOutput>();
-        let context_a_output = output
-            .get(context_a)
-            .expect("teardown output remains observable until Context A is removed");
-        assert_eq!(context_a_output.frame_index(), 1);
-        assert!(context_a_output.snapshot_epoch().is_none());
-        assert!(context_a_output.snapshot_error().is_none());
-
-        let context_b_output = output
-            .get(context_b)
-            .expect("Context B must keep producing snapshots during Context A release");
-        assert_eq!(context_b_output.frame_index(), 2);
-        let context_b_epoch = context_b_output
-            .snapshot_epoch()
-            .expect("Context B must publish its second snapshot");
-        assert_eq!(context_b_epoch.context_id(), context_b);
-        assert_eq!(context_b_epoch.sequence(), 2);
-        assert!(context_b_output.snapshot_error().is_none());
-    }
+    let extracted = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<crate::render::ImguiExtractedRenderFrame>();
+    assert_eq!(extracted.frame_index(context_a), None);
+    assert_eq!(extracted.frame_index(context_b), Some(2));
 
     let removed = app
         .world_mut()
@@ -692,17 +667,12 @@ fn context_removal_abandons_unextracted_snapshot_without_pausing_another_context
     let contexts = app.world().get_non_send::<ImguiContexts>().unwrap();
     assert!(!contexts.contains(context_a));
     assert_eq!(contexts.frame_index(context_b).unwrap(), 3);
-    let output = app.world().resource::<ImguiFrameOutput>();
-    assert!(output.get(context_a).is_none());
-    let context_b_output = output
-        .get(context_b)
-        .expect("Context B output must survive Context A teardown");
-    assert_eq!(context_b_output.frame_index(), 3);
-    let context_b_epoch = context_b_output
-        .snapshot_epoch()
-        .expect("Context B must publish after Context A is removed");
-    assert_eq!(context_b_epoch.context_id(), context_b);
-    assert_eq!(context_b_epoch.sequence(), 3);
+    let extracted = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<crate::render::ImguiExtractedRenderFrame>();
+    assert_eq!(extracted.frame_index(context_a), None);
+    assert_eq!(extracted.frame_index(context_b), Some(3));
     assert_eq!(
         app.world().resource::<LifecycleTrace>().visits,
         vec![
@@ -750,12 +720,11 @@ fn removed_registry_retires_a_context_with_an_unextracted_snapshot() {
     app.world_mut().resource_mut::<LifecycleTrace>().expected = vec![context_id];
 
     app.world_mut().run_schedule(Main);
-    assert!(
+    assert_eq!(
         app.world()
-            .resource::<ImguiFrameOutput>()
-            .get(context_id)
-            .and_then(|output| output.snapshot_epoch())
-            .is_some(),
+            .resource::<crate::context::ImguiFrameMailbox>()
+            .len(),
+        1,
         "the registry must own a snapshot that has not reached extraction"
     );
 

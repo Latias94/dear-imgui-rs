@@ -228,7 +228,7 @@ pub(super) fn ensure_presentable_window_outputs(
                 continue;
             }
             view_needs_present |= view_target.needs_present();
-            output_color.get_or_insert_with(|| output_clear_color(Some(camera), &clear_color));
+            output_color.get_or_insert_with(|| output_clear_color(camera, &clear_color));
         }
 
         if !window.needs_initial_present && !view_needs_present {
@@ -299,19 +299,18 @@ fn camera_targets_window(camera: &ExtractedCamera, window: Entity) -> bool {
 }
 
 fn output_clear_color(
-    camera: Option<&ExtractedCamera>,
+    camera: &ExtractedCamera,
     clear_color: &ClearColor,
 ) -> Option<bevy_color::Color> {
-    match camera.map(|camera| camera.output_mode) {
-        Some(CameraOutputMode::Skip) => None,
-        Some(CameraOutputMode::Write {
+    match camera.output_mode {
+        CameraOutputMode::Skip => None,
+        CameraOutputMode::Write {
             clear_color: ClearColorConfig::Custom(color),
             ..
-        }) => Some(color),
-        Some(CameraOutputMode::Write {
+        } => Some(color),
+        CameraOutputMode::Write {
             clear_color: ClearColorConfig::Default | ClearColorConfig::None,
             ..
-        })
-        | None => Some(clear_color.0),
+        } => Some(clear_color.0),
     }
 }

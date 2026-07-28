@@ -1,7 +1,8 @@
 #![cfg(feature = "render")]
 
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::time::Duration;
 
+use crate::test_util::imgui_context_guard as context_guard;
 use bevy_app::{App, Update};
 use bevy_asset::{Assets, RenderAssetUsages};
 use bevy_camera::{Camera, CameraOutputMode, ManualTextureViewHandle, RenderTarget, Viewport};
@@ -14,6 +15,7 @@ use bevy_render::{
     render_resource::{Extent3d, TextureDimension, TextureFormat},
     texture::ManualTextureViews,
 };
+use bevy_time::{Real, Time};
 use bevy_window::{PrimaryWindow, Window, WindowRef, WindowResolution};
 use dear_imgui_bevy::{
     ImguiContextConfig, ImguiContexts, ImguiPlugin,
@@ -27,14 +29,6 @@ use dear_imgui_rs::SuspendedContext;
 
 #[derive(ScheduleLabel, Clone, Debug, Eq, Hash, PartialEq)]
 struct SecondaryUi;
-
-fn context_guard() -> MutexGuard<'static, ()> {
-    static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
-    GUARD
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
 
 fn routing_app() -> App {
     let mut app = App::new();
@@ -643,6 +637,57 @@ fn image_routes_do_not_derive_input_and_duplicate_input_declarations_fail_closed
             .count(),
         2
     );
+}
+
+#[test]
+fn image_render_route_drives_secondary_context_metrics_without_an_input_route() {
+    let _guard = context_guard();
+    let mut app = routing_app();
+    let mut real_time = Time::<Real>::default();
+    real_time.advance_by(Duration::from_millis(37));
+    app.insert_resource(real_time);
+    let secondary = add_secondary_context(&mut app);
+    let image = Image::new_fill(
+        Extent3d {
+            width: 256,
+            height: 128,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        &[0, 0, 0, 255],
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::MAIN_WORLD,
+    );
+    let image = app.world_mut().resource_mut::<Assets<Image>>().add(image);
+    let camera = spawn_camera(&mut app, RenderTarget::Image(image.into()), 0, true);
+    app.world_mut()
+        .spawn(ImguiRenderRoute::new(secondary, camera));
+
+    // The first update resolves the route; the second drives the Context from that route epoch.
+    for _ in 0..2 {
+        app.update();
+    }
+
+    assert!(
+        app.world()
+            .resource::<ImguiResolvedRoutes>()
+            .input_route(secondary)
+            .is_none()
+    );
+    let metrics = app
+        .world_mut()
+        .non_send_mut::<ImguiContexts>()
+        .configure(secondary, |context| {
+            (
+                context.io().display_size(),
+                context.io().display_framebuffer_scale(),
+                context.io().delta_time(),
+            )
+        })
+        .expect("secondary Context metrics must remain inspectable");
+    assert_eq!(metrics.0, [256.0, 128.0]);
+    assert_eq!(metrics.1, [1.0, 1.0]);
+    assert!((metrics.2 - 0.037).abs() < f32::EPSILON);
 }
 
 #[test]

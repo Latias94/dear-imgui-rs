@@ -38,6 +38,7 @@ impl CaptureScopes {
         self.primary_context
     }
 
+    #[cfg(not(feature = "render"))]
     pub(super) fn update_primary(
         &mut self,
         context_id: ContextId,
@@ -58,7 +59,7 @@ impl CaptureScopes {
         &mut self,
         primary_context: Option<ContextId>,
         routes: &[(ContextId, Entity)],
-    ) -> ImguiInputCaptureState {
+    ) {
         self.primary_context = primary_context;
         self.context_windows.clear();
         for &(context_id, window) in routes {
@@ -69,27 +70,25 @@ impl CaptureScopes {
         }
         self.contexts
             .retain(|context_id, _| self.context_windows.contains_key(context_id));
-        self.rebuild()
     }
 
     #[cfg(feature = "render")]
-    pub(super) fn update_context(
-        &mut self,
-        context_id: ContextId,
-        io: &imgui::Io,
-    ) -> Option<ImguiInputCaptureState> {
+    pub(super) fn update_context(&mut self, context_id: ContextId, io: &imgui::Io) {
         if !self.context_windows.contains_key(&context_id) {
-            return None;
+            return;
         }
         self.contexts
             .insert(context_id, ImguiInputCaptureState::from_io(io));
-        Some(self.rebuild())
     }
 
     #[cfg(feature = "render")]
-    pub(super) fn remove_context(&mut self, context_id: ContextId) -> ImguiInputCaptureState {
+    pub(super) fn remove_context(&mut self, context_id: ContextId) {
         self.contexts.remove(&context_id);
         self.context_windows.remove(&context_id);
+    }
+
+    #[cfg(feature = "render")]
+    pub(super) fn finish_routes(&mut self) -> ImguiInputCaptureState {
         self.rebuild()
     }
 

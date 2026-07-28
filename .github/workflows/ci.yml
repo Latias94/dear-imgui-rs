@@ -869,57 +869,64 @@ jobs:
       - name: Check formatting
         run: cargo +stable fmt --all --check
 
-      - name: Check Bevy backend core example
-        run: cargo +stable check -p dear-imgui-bevy --example simple --features render
+      - name: Run Bevy backend headless tests
+        run: cargo +stable nextest run -p dear-imgui-bevy --no-default-features
 
-      - name: Check Bevy backend examples
-        run: cargo +stable check -p dear-imgui-bevy --examples --features render
+      - name: Run Bevy backend default tests
+        run: cargo +stable nextest run -p dear-imgui-bevy
 
-      - name: Check Bevy backend multi-viewport examples
-        run: cargo +stable check -p dear-imgui-bevy --examples --features render,multi-viewport
+      - name: Check Bevy backend render-only targets
+        run: cargo +stable check -p dear-imgui-bevy --all-targets --no-default-features --features render
 
-      - name: Check Bevy backend ecosystem example
-        run: cargo +stable check -p dear-imgui-bevy --example ecosystem --features render
+      - name: Check Bevy backend native multi-viewport implication
+        run: cargo +stable check -p dear-imgui-bevy --all-targets --no-default-features --features multi-viewport
 
-      - name: Check Bevy backend plot controls example
-        run: cargo +stable check -p dear-imgui-bevy --example bevy_plot_controls --features render
+      - name: Run Bevy backend native multi-viewport tests
+        run: cargo +stable nextest run -p dear-imgui-bevy --features multi-viewport
 
-      - name: Check Bevy backend docs
-        run: cargo +stable doc -p dear-imgui-bevy --no-deps --features render,multi-viewport
-        env:
-          DOCS_RS: "1"
-          RUSTDOCFLAGS: "-D warnings"
+      - name: Lint Bevy backend native targets
+        run: cargo +stable clippy -p dear-imgui-bevy --all-targets --features multi-viewport --no-deps -- -D warnings
 
-      - name: Run Bevy backend core tests
-        run: cargo +stable nextest run -p dear-imgui-bevy --no-default-features --lib --test helpers --test input --test lifecycle --test plugin
+      - name: Check Bevy backend default examples
+        run: cargo +stable check -p dear-imgui-bevy --examples
 
-      - name: Run Bevy backend tests
-        run: cargo +stable nextest run -p dear-imgui-bevy --features render
+      - name: Check Bevy backend native multi-viewport examples
+        run: cargo +stable check -p dear-imgui-bevy --examples --features multi-viewport
+
+      - name: Check Bevy backend rustdoc examples
+        run: cargo +stable test --doc -p dear-imgui-bevy --features multi-viewport
+
+      - name: Inspect Bevy backend package contents
+        # Full packaging becomes valid after dear-imgui-rs 0.16.0-alpha.1 reaches crates.io.
+        run: cargo +stable package -p dear-imgui-bevy --list
+
+      - name: Check Bevy backend wasm (headless)
+        run: cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --no-default-features --features wasm
+
+      - name: Check Bevy backend wasm (default)
+        run: cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --features wasm
+
+      - name: Reject Bevy multi-viewport through the core WASM contract
+        run: >-
+          python3 tools/ci/run_contract.py expect-failure
+          --label bevy-wasm-multi-viewport
+          --contains 'The `multi-viewport` feature is not supported on wasm32 targets yet.'
+          -- cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown
+          --no-default-features --features wasm,multi-viewport
 
       - name: Run Bevy GPU composition tests
-        run: cargo +stable nextest run -p dear-imgui-bevy --features render,bevy-ui --test render_composition
+        run: cargo +stable nextest run -p dear-imgui-bevy --no-default-features --features render,bevy-ui --test render_composition
         env:
           DEAR_IMGUI_BEVY_GPU_TESTS: "1"
           WGPU_BACKEND: vulkan
           WGPU_FORCE_FALLBACK_ADAPTER: "1"
 
-      - name: Check Bevy backend native multi-viewport platform bridge
-        run: cargo +stable check -p dear-imgui-bevy --features multi-viewport
-
-      - name: Run Bevy backend native multi-viewport platform bridge tests
-        run: cargo +stable nextest run -p dear-imgui-bevy --features multi-viewport --test viewport
-
-      - name: Check Bevy backend native multi-viewport
-        run: cargo +stable check -p dear-imgui-bevy --features render,multi-viewport
-
-      - name: Run Bevy backend native multi-viewport tests
-        run: cargo +stable nextest run -p dear-imgui-bevy --features render,multi-viewport
-
-      - name: Check Bevy backend wasm (core)
-        run: cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --no-default-features --features wasm
-
-      - name: Check Bevy backend wasm (render)
-        run: cargo +stable check -p dear-imgui-bevy --target wasm32-unknown-unknown --features render,wasm
+      - name: Run Bevy image bind-group GPU contracts
+        run: cargo +stable nextest run -p dear-imgui-bevy --lib --features multi-viewport --run-ignored ignored-only bevy_image_texture_bind_groups
+        env:
+          DEAR_IMGUI_BEVY_GPU_HARNESS: "1"
+          WGPU_BACKEND: vulkan
+          WGPU_FORCE_FALLBACK_ADAPTER: "1"
 
   windows-platform-io-abi:
     name: PlatformIO C++ ABI (MSVC ${{ matrix.crt }})

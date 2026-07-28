@@ -2,16 +2,17 @@
 //!
 //! Route components are declarations placed on independent ECS entities. They do not own a Dear
 //! ImGui Context or a Bevy camera. The resolver validates every declaration against the current
-//! world and replaces [`ImguiResolvedRoutes`] atomically for the new epoch.
+//! world and atomically replaces an internal immutable snapshot for the new epoch.
 //!
-//! Resolution runs in `PostUpdate` after Bevy's camera update set. Rendering uses that epoch
-//! immediately; input in the next frame uses the same geometry that was actually presented.
+//! Resolution bootstraps in `PostStartup`, then runs in `PostUpdate` after Bevy's camera update
+//! set. Input and Context framing share the published immutable epoch in the next frame, and each
+//! render snapshot carries it through extraction.
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-use bevy_app::{App, PostUpdate};
+use bevy_app::{App, PostStartup, PostUpdate};
 use bevy_asset::{AssetId, Assets};
 use bevy_camera::{
     Camera, CameraOutputMode, CameraUpdateSystems, ManualTextureViewHandle, NormalizedRenderTarget,
@@ -20,6 +21,7 @@ use bevy_camera::{
 use bevy_core_pipeline::{Core2d, Core3d};
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::{InternedScheduleLabel, IntoScheduleConfigs, ScheduleLabel};
+use bevy_ecs::system::SystemParam;
 use bevy_image::Image;
 use bevy_math::{Rect, UVec2, Vec2};
 use bevy_render::{
@@ -31,9 +33,14 @@ use dear_imgui_rs::ContextId;
 
 use crate::context::ImguiContexts;
 
+#[cfg(test)]
+#[path = "route/tests/routing.rs"]
+mod routing_tests;
+
 pub(crate) fn install_route_resolution(app: &mut App) {
     app.init_resource::<ImguiResolvedRoutes>()
         .init_resource::<ImguiDiagnostics>()
+        .add_systems(PostStartup, resolve_imgui_routes)
         .add_systems(PostUpdate, resolve_imgui_routes.after(CameraUpdateSystems));
 }
 
@@ -275,8 +282,9 @@ impl ImguiInputRoute {
 }
 
 /// Whether a resolved render route was selected automatically or explicitly.
+#[cfg(test)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ImguiRenderRouteSource {
+pub(crate) enum ImguiRenderRouteSource {
     /// The primary Context was assigned to the unique eligible primary-window camera.
     AutoPrimary,
     /// A user-owned route entity declared the association.
@@ -285,13 +293,14 @@ pub enum ImguiRenderRouteSource {
 
 /// One immutable main-world render route for an epoch.
 #[derive(Clone, Debug)]
-pub struct ImguiResolvedRenderRoute {
+pub(crate) struct ImguiResolvedRenderRoute {
     context_id: ContextId,
     route_entity: Option<Entity>,
     camera: Entity,
     order: isize,
     camera_order: isize,
     camera_schedule: InternedScheduleLabel,
+    #[cfg(test)]
     source: ImguiRenderRouteSource,
     target: NormalizedRenderTarget,
     target_info: RenderTargetInfo,
@@ -336,6 +345,7 @@ impl ImguiResolvedRenderRoute {
     }
 
     /// Return how this route was selected.
+    #[cfg(test)]
     #[must_use]
     pub const fn source(&self) -> ImguiRenderRouteSource {
         self.source
@@ -377,9 +387,30 @@ impl ImguiResolvedRenderRoute {
     }
 }
 
+/// Immutable render-route topology captured for one driven frame.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ImguiRenderRouteEpoch {
+    epoch: u64,
+    routes: Arc<[ImguiResolvedRenderRoute]>,
+}
+
+impl ImguiRenderRouteEpoch {
+    /// Return the resolver epoch that produced these routes.
+    #[must_use]
+    pub const fn epoch(&self) -> u64 {
+        self.epoch
+    }
+
+    /// Borrow the render routes that were active when the frame was driven.
+    #[must_use]
+    pub fn render_routes(&self) -> &[ImguiResolvedRenderRoute] {
+        &self.routes
+    }
+}
+
 /// One immutable main-world input route for an epoch.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ImguiResolvedInputRoute {
+pub(crate) struct ImguiResolvedInputRoute {
     context_id: ContextId,
     route_entity: Option<Entity>,
     source: ImguiInputSource,
@@ -393,12 +424,6 @@ impl ImguiResolvedInputRoute {
     #[must_use]
     pub const fn context_id(&self) -> ContextId {
         self.context_id
-    }
-
-    /// Return the user-owned declaration entity, or `None` for derived window input.
-    #[must_use]
-    pub const fn route_entity(&self) -> Option<Entity> {
-        self.route_entity
     }
 
     /// Return the source declaration.
@@ -428,10 +453,10 @@ impl ImguiResolvedInputRoute {
 
 /// Atomic main-world route snapshot produced for one resolver epoch.
 #[derive(Resource, Default, Debug)]
-pub struct ImguiResolvedRoutes {
+pub(crate) struct ImguiResolvedRoutes {
     epoch: u64,
-    render_routes: Vec<ImguiResolvedRenderRoute>,
-    input_routes: Vec<ImguiResolvedInputRoute>,
+    render_routes: Arc<[ImguiResolvedRenderRoute]>,
+    input_routes: Arc<[ImguiResolvedInputRoute]>,
 }
 
 impl ImguiResolvedRoutes {
@@ -442,6 +467,7 @@ impl ImguiResolvedRoutes {
     }
 
     /// Borrow resolved render routes in stable camera/overlay order.
+    #[cfg(test)]
     #[must_use]
     pub fn render_routes(&self) -> &[ImguiResolvedRenderRoute] {
         &self.render_routes
@@ -462,11 +488,21 @@ impl ImguiResolvedRoutes {
     }
 
     /// Find the active input route for one Context.
+    #[cfg(any(test, all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
     #[must_use]
     pub fn input_route(&self, context_id: ContextId) -> Option<&ImguiResolvedInputRoute> {
         self.input_routes
             .iter()
             .find(|route| route.context_id == context_id)
+    }
+
+    /// Capture the render topology used by a frame before later schedules can resolve a new epoch.
+    #[must_use]
+    pub(crate) fn render_epoch(&self) -> ImguiRenderRouteEpoch {
+        ImguiRenderRouteEpoch {
+            epoch: self.epoch,
+            routes: Arc::clone(&self.render_routes),
+        }
     }
 
     fn replace(
@@ -475,8 +511,8 @@ impl ImguiResolvedRoutes {
         input_routes: Vec<ImguiResolvedInputRoute>,
     ) -> u64 {
         self.epoch = self.epoch.saturating_add(1);
-        self.render_routes = render_routes;
-        self.input_routes = input_routes;
+        self.render_routes = render_routes.into();
+        self.input_routes = input_routes.into();
         self.epoch
     }
 }
@@ -491,16 +527,8 @@ pub enum ImguiDiagnosticOrigin {
     InputRouting,
     /// Main-to-render-world extraction.
     RenderExtraction,
-    /// Render-world resource preparation.
-    RenderPreparation,
-    /// Render-world overlay execution.
-    RenderExecution,
-    /// Native platform viewport integration.
-    Viewport,
     /// Bevy image and Dear ImGui texture integration.
     Texture,
-    /// Context ownership and lifecycle.
-    Context,
 }
 
 /// Render target category used by route diagnostics.
@@ -693,7 +721,6 @@ pub struct ImguiDiagnostics {
 #[derive(Debug, Default)]
 struct ImguiDiagnosticsState {
     batches: BTreeMap<ImguiDiagnosticOrigin, ImguiDiagnosticBatch>,
-    records: Vec<ImguiDiagnosticRecord>,
 }
 
 impl Default for ImguiDiagnostics {
@@ -725,7 +752,6 @@ impl ImguiDiagnostics {
         state
             .batches
             .insert(origin, ImguiDiagnosticBatch { epoch, diagnostics });
-        state.rebuild_records();
         true
     }
 
@@ -741,7 +767,21 @@ impl ImguiDiagnostics {
     /// Return all diagnostics in stable origin/identity/kind order.
     #[must_use]
     pub fn entries(&self) -> Vec<ImguiDiagnosticRecord> {
-        self.read_state().records.clone()
+        self.read_state()
+            .batches
+            .iter()
+            .flat_map(|(origin, batch)| {
+                batch
+                    .diagnostics
+                    .iter()
+                    .cloned()
+                    .map(|diagnostic| ImguiDiagnosticRecord {
+                        origin: *origin,
+                        epoch: batch.epoch,
+                        diagnostic,
+                    })
+            })
+            .collect()
     }
 
     /// Iterate an owned snapshot of one producer's diagnostics in stable identity/kind order.
@@ -759,7 +799,10 @@ impl ImguiDiagnostics {
     /// Return whether every producer currently reports an empty batch.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.read_state().records.is_empty()
+        self.read_state()
+            .batches
+            .values()
+            .all(|batch| batch.diagnostics.is_empty())
     }
 
     fn read_state(&self) -> RwLockReadGuard<'_, ImguiDiagnosticsState> {
@@ -772,24 +815,6 @@ impl ImguiDiagnostics {
         self.state
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-}
-
-impl ImguiDiagnosticsState {
-    fn rebuild_records(&mut self) {
-        self.records.clear();
-        self.records
-            .extend(self.batches.iter().flat_map(|(origin, batch)| {
-                batch
-                    .diagnostics
-                    .iter()
-                    .cloned()
-                    .map(|diagnostic| ImguiDiagnosticRecord {
-                        origin: *origin,
-                        epoch: batch.epoch,
-                        diagnostic,
-                    })
-            }));
     }
 }
 
@@ -846,40 +871,58 @@ struct ResolverWorld<'a> {
     cameras: &'a [CameraRecord],
 }
 
+#[derive(SystemParam)]
+struct RouteResolverParams<'w, 's> {
+    contexts: Option<NonSend<'w, ImguiContexts>>,
+    primary_windows: Query<'w, 's, Entity, With<PrimaryWindow>>,
+    windows: Query<'w, 's, (Entity, &'static Window)>,
+    images: Option<Res<'w, Assets<Image>>>,
+    manual_texture_views: Option<Res<'w, ManualTextureViews>>,
+    cameras: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static Camera,
+            &'static RenderTarget,
+            Option<&'static CameraRenderGraph>,
+        ),
+    >,
+    render_routes: Query<'w, 's, (Entity, &'static ImguiRenderRoute)>,
+    input_routes: Query<'w, 's, (Entity, &'static ImguiInputRoute)>,
+}
+
 /// Resolve all route declarations against the current main world.
 ///
-/// This is an internal plugin system. Public consumers should inspect [`ImguiResolvedRoutes`] and
-/// [`ImguiDiagnostics`] instead of scheduling it directly.
+/// This is an internal plugin system. Public consumers should inspect [`ImguiDiagnostics`] instead
+/// of scheduling it directly.
 ///
-pub(crate) fn resolve_imgui_routes(
-    contexts: Option<NonSend<ImguiContexts>>,
+fn resolve_imgui_routes(
     mut resolved: ResMut<ImguiResolvedRoutes>,
     diagnostics: Res<ImguiDiagnostics>,
-    primary_windows: Query<Entity, With<PrimaryWindow>>,
-    windows: Query<(Entity, &Window)>,
-    images: Option<Res<Assets<Image>>>,
-    manual_texture_views: Option<Res<ManualTextureViews>>,
-    cameras: Query<(Entity, &Camera, &RenderTarget, Option<&CameraRenderGraph>)>,
-    render_routes: Query<(Entity, &ImguiRenderRoute)>,
-    input_routes: Query<(Entity, &ImguiInputRoute)>,
+    params: RouteResolverParams,
 ) {
-    let mut primary_windows = primary_windows.iter().collect::<Vec<_>>();
+    let mut primary_windows = params.primary_windows.iter().collect::<Vec<_>>();
     primary_windows.sort();
-    let windows = windows
+    let windows = params
+        .windows
         .iter()
         .map(|(entity, window)| (entity, window.clone()))
         .collect::<Vec<_>>();
     let empty_images = Assets::<Image>::default();
-    let images = images.as_deref().unwrap_or(&empty_images);
+    let images = params.images.as_deref().unwrap_or(&empty_images);
     let empty_manual_texture_views = ManualTextureViews::default();
-    let manual_texture_views = manual_texture_views
+    let manual_texture_views = params
+        .manual_texture_views
         .as_deref()
         .unwrap_or(&empty_manual_texture_views);
-    let registered_contexts = contexts
+    let registered_contexts = params
+        .contexts
         .as_deref()
         .map(|contexts| contexts.ids().collect::<HashSet<_>>())
         .unwrap_or_default();
-    let mut cameras = cameras
+    let mut cameras = params
+        .cameras
         .iter()
         .map(|(entity, camera, target, schedule)| CameraRecord {
             entity,
@@ -889,7 +932,8 @@ pub(crate) fn resolve_imgui_routes(
         })
         .collect::<Vec<_>>();
     cameras.sort_by_key(|camera| camera.entity);
-    let mut render_declarations = render_routes
+    let mut render_declarations = params
+        .render_routes
         .iter()
         .map(|(entity, route)| (entity, *route))
         .collect::<Vec<_>>();
@@ -898,7 +942,8 @@ pub(crate) fn resolve_imgui_routes(
             .cmp(&context_key(right.context_id))
             .then_with(|| left_entity.cmp(right_entity))
     });
-    let mut input_declarations = input_routes
+    let mut input_declarations = params
+        .input_routes
         .iter()
         .map(|(entity, route)| (entity, *route))
         .collect::<Vec<_>>();
@@ -910,7 +955,10 @@ pub(crate) fn resolve_imgui_routes(
 
     let route_world = ResolverWorld {
         registered_contexts: &registered_contexts,
-        primary_context: contexts.as_deref().and_then(ImguiContexts::primary_id),
+        primary_context: params
+            .contexts
+            .as_deref()
+            .and_then(ImguiContexts::primary_id),
         primary_windows: &primary_windows,
         windows: &windows,
         images,
@@ -984,6 +1032,7 @@ fn resolve_render_routes(
                     order: declaration.order,
                     camera_order: camera.camera_order,
                     camera_schedule: camera.camera_schedule,
+                    #[cfg(test)]
                     source: ImguiRenderRouteSource::Explicit,
                     target: camera.target,
                     target_info: camera.target_info,
@@ -1099,6 +1148,7 @@ fn resolve_auto_primary(
         order: 0,
         camera_order: winner.camera_order,
         camera_schedule: winner.camera_schedule,
+        #[cfg(test)]
         source: ImguiRenderRouteSource::AutoPrimary,
         target: winner.target,
         target_info: winner.target_info,

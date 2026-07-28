@@ -1,10 +1,10 @@
 //! Compact game-engine style editor integration.
 //!
 //! Run:
-//! `cargo run -p dear-imgui-bevy --features render --example game_engine`
+//! `cargo run -p dear-imgui-bevy --example game_engine`
 //!
 //! Native multi-viewport run:
-//! `cargo run -p dear-imgui-bevy --features render,multi-viewport --example game_engine`
+//! `cargo run -p dear-imgui-bevy --features multi-viewport --example game_engine`
 
 use bevy::{
     app::AppExit,
@@ -13,11 +13,7 @@ use bevy::{
     prelude::*,
     window::{PresentMode, WindowPlugin, WindowTheme},
 };
-use dear_imgui_bevy::{
-    ImguiBackendConfig, ImguiBackendStatus, ImguiBevyTextures, ImguiContexts, ImguiPlugin,
-    ImguiPrimaryContextPass, ImguiTexture, ImguiUi, configure_example_context,
-    render::{ImguiOverlayCamera, ImguiOverlayDisabled},
-};
+use dear_imgui_bevy::prelude::*;
 use dear_imgui_rs::{
     Condition, DockLayout, DockLayoutApply, DockSplit, DockspaceTarget, WindowFlags,
 };
@@ -68,10 +64,11 @@ fn main() {
             }),
             ..Default::default()
         }))
-        .add_plugins(ImguiPlugin::new(ImguiBackendConfig {
-            multi_viewport: cfg!(feature = "multi-viewport"),
-            ..Default::default()
-        }))
+        .add_plugins(ImguiPlugin::new(
+            ImguiPluginConfig::default()
+                .with_docking(true)
+                .with_multi_viewport(cfg!(feature = "multi-viewport")),
+        ))
         .init_resource::<EditorState>()
         .add_systems(Startup, setup)
         .add_systems(Update, (close_on_escape, animate_scene))
@@ -85,7 +82,6 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut textures: ResMut<ImguiBevyTextures>,
-    mut contexts: NonSendMut<ImguiContexts>,
     mut editor: ResMut<EditorState>,
 ) -> Result {
     // Keep the primary target as an ImGui-only editor surface. The scene is rendered by the
@@ -97,7 +93,6 @@ fn setup(
             ..Default::default()
         },
         RenderLayers::none(),
-        ImguiOverlayCamera,
     ));
 
     let mut scene_image = Image::new_target_texture(
@@ -123,7 +118,6 @@ fn setup(
             ..Default::default()
         },
         RenderTarget::Image(scene_image.into()),
-        ImguiOverlayDisabled,
     ));
     commands.insert_resource(ScenePreview {
         texture,
@@ -161,14 +155,6 @@ fn setup(
     ));
 
     editor.selected = Some(light_panel);
-    let primary_id = contexts
-        .primary_id()
-        .ok_or("ImguiPlugin should install a primary Context before Startup")?;
-    contexts
-        .configure(primary_id, |context| {
-            configure_example_context(context, true);
-        })
-        .map_err(|error| format!("failed to configure the primary Dear ImGui Context: {error}"))?;
     Ok(())
 }
 
@@ -225,7 +211,6 @@ fn editor_ui(
     mut editor: ResMut<EditorState>,
     objects: Query<(Entity, &Name, &Transform), With<SceneObject>>,
     frame_count: Res<FrameCount>,
-    backend: Res<ImguiBackendStatus>,
 ) -> Result {
     let frame_index = imgui.frame_index()?;
     let ui = imgui.ui()?;
@@ -274,16 +259,12 @@ fn editor_ui(
             ui.text(format!("ImGui frame: {frame_index}"));
             ui.text(format!("Scene hovered: {}", editor.scene_hovered));
             ui.text(format!(
-                "Multi-viewport requested: {}",
-                backend.multi_viewport_requested
-            ));
-            ui.text(format!(
-                "Multi-viewport supported: {}",
-                backend.multi_viewport_supported
+                "Native multi-viewport: {}",
+                cfg!(feature = "multi-viewport")
             ));
         });
 
-    if backend.multi_viewport_supported {
+    if cfg!(feature = "multi-viewport") {
         render_detached_viewport_window(ui, frame_index);
     }
 

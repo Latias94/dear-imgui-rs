@@ -24,15 +24,9 @@
 //! on `wasm32-unknown-unknown` for both the core and `render` feature sets; mobile targets remain a
 //! platform-specific follow-on if a future Bevy target train needs a dedicated gate.
 //!
-//! The crate also exposes `configure_example_context` for the shared example/editor ImGui setup
-//! pattern so the backend examples do not repeat the same initialization boilerplate.
-//!
-//! # Multi-viewport status
-//!
-//! `ImguiBackendConfig::multi_viewport` records an explicit request for Dear ImGui platform
-//! windows. With the `multi-viewport` and `render` features on native targets, the backend installs
-//! the PlatformIO lifecycle bridge, all-window input/platform feedback, and per-window render
-//! routing before advertising full multi-viewport support.
+//! Native multi-viewport support is a complete native capability. Enabling the `multi-viewport`
+//! feature also enables rendering and installs the PlatformIO lifecycle, input feedback, and
+//! per-window render routing as one contract.
 
 use bevy_app::{App, Plugin};
 use bevy_ecs::prelude::World;
@@ -53,27 +47,27 @@ use crate::render;
 #[cfg(feature = "render")]
 use crate::route;
 use crate::viewport::ImguiViewportWindowConfig;
-use crate::{BEVY_TARGET_VERSION, RUST_TARGET_VERSION};
 use crate::{input, schedule, viewport};
 
-const MULTI_VIEWPORT_FEATURE_ENABLED: bool = cfg!(feature = "multi-viewport");
-const NATIVE_PLATFORM_TARGET: bool = !cfg!(target_arch = "wasm32");
+const BACKEND_NAME: &str = "dear-imgui-bevy";
 
-/// Bevy plugin that installs the minimal Dear ImGui resources.
-///
-/// Later workstream tasks add input collection, frame scheduling, render extraction, and renderer
-/// systems. For now the plugin establishes ownership boundaries and resource locations only.
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+type ImguiPlatformCompletionError = viewport::ImguiViewportRuntimeError;
+#[cfg(not(all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
+type ImguiPlatformCompletionError = std::convert::Infallible;
+
+/// Bevy plugin that owns Dear ImGui Context, input, render, and viewport integration.
 #[derive(Debug, Clone, Default)]
 pub struct ImguiPlugin {
-    config: ImguiBackendConfig,
-    #[cfg(feature = "render")]
+    config: ImguiPluginConfig,
+    #[cfg(feature = "bevy-ui")]
     ui_render_order: render::ImguiUiRenderOrder,
 }
 
 impl ImguiPlugin {
     /// Create a plugin with explicit backend configuration.
     #[must_use]
-    pub fn new(config: ImguiBackendConfig) -> Self {
+    pub fn new(config: ImguiPluginConfig) -> Self {
         Self {
             config,
             ..Self::default()
@@ -82,14 +76,14 @@ impl ImguiPlugin {
 
     /// Borrow the plugin configuration.
     #[must_use]
-    pub fn config(&self) -> &ImguiBackendConfig {
+    pub fn config(&self) -> &ImguiPluginConfig {
         &self.config
     }
 
     /// Configure whether Dear ImGui or Bevy UI is drawn on top for the same camera.
     ///
     /// This setting takes effect when the `bevy-ui` Cargo feature is enabled.
-    #[cfg(feature = "render")]
+    #[cfg(feature = "bevy-ui")]
     #[must_use]
     pub fn with_ui_render_order(mut self, order: render::ImguiUiRenderOrder) -> Self {
         self.ui_render_order = order;
@@ -97,18 +91,35 @@ impl ImguiPlugin {
     }
 
     /// Return the configured Dear ImGui/Bevy UI draw order.
-    #[cfg(feature = "render")]
+    #[cfg(feature = "bevy-ui")]
     #[must_use]
     pub fn ui_render_order(&self) -> render::ImguiUiRenderOrder {
         self.ui_render_order
+    }
+
+    #[cfg(feature = "render")]
+    fn resolved_ui_render_order(&self) -> render::ImguiUiRenderOrder {
+        #[cfg(feature = "bevy-ui")]
+        {
+            self.ui_render_order
+        }
+        #[cfg(not(feature = "bevy-ui"))]
+        {
+            render::ImguiUiRenderOrder::default()
+        }
     }
 }
 
 impl Plugin for ImguiPlugin {
     fn build(&self, app: &mut App) {
-        if !app.world().contains_resource::<ImguiBackendConfig>() {
-            app.insert_resource(self.config.clone());
-        }
+        assert!(
+            !self.config.multi_viewport() || cfg!(feature = "multi-viewport"),
+            "ImguiPluginConfig requested native platform windows; enable the `multi-viewport` Cargo feature"
+        );
+        self.config
+            .viewport_window()
+            .validate()
+            .unwrap_or_else(|error| panic!("invalid Dear ImGui viewport window policy: {error}"));
         if app.world().get_non_send::<ImguiContexts>().is_none() {
             app.insert_non_send(ImguiContexts::with_primary(
                 dear_imgui_rs::SuspendedContext::create(),
@@ -127,26 +138,29 @@ impl Plugin for ImguiPlugin {
         let render_integration_available = false;
         #[cfg(feature = "render")]
         let render_integration_installed =
-            render::install_render_extraction(app, self.ui_render_order);
+            render::install_render_extraction(app, self.resolved_ui_render_order());
         #[cfg(not(feature = "render"))]
         let render_integration_installed = false;
         debug_assert_eq!(render_integration_installed, render_integration_available);
         viewport::install_viewport_bridge(app);
-        refresh_backend_status(app, render_integration_installed);
+        refresh_backend_contract(app, self.config.clone(), render_integration_installed);
     }
 
     fn finish(&self, _app: &mut App) {
         #[cfg(feature = "render")]
         {
             let render_integration_installed =
-                render::install_render_extraction(_app, self.ui_render_order);
-            refresh_backend_status(_app, render_integration_installed);
+                render::install_render_extraction(_app, self.resolved_ui_render_order());
+            refresh_backend_contract(_app, self.config.clone(), render_integration_installed);
         }
     }
 }
 
-fn refresh_backend_status(app: &mut App, render_integration_installed: bool) {
-    let effective_config = app.world().resource::<ImguiBackendConfig>().clone();
+fn refresh_backend_contract(
+    app: &mut App,
+    config: ImguiPluginConfig,
+    render_integration_installed: bool,
+) {
     #[cfg(feature = "render")]
     let renderer_releases = render_integration_installed.then(|| {
         app.world()
@@ -154,7 +168,6 @@ fn refresh_backend_status(app: &mut App, render_integration_installed: bool) {
             .clone()
     });
     let attachment = BackendAttachment {
-        config: effective_config.clone(),
         render_integration_installed,
         #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
         viewport_bridge_registration: app
@@ -168,37 +181,70 @@ fn refresh_backend_status(app: &mut App, render_integration_installed: bool) {
         .world_mut()
         .get_non_send_mut::<ImguiContexts>()
         .expect("ImguiPlugin must retain its Context registry");
-    contexts.set_primary_contract(effective_config.docking, effective_config.multi_viewport);
+    contexts.set_primary_contract(config.docking(), config.multi_viewport());
     contexts.attach_backend(attachment).unwrap_or_else(|error| {
         panic!("ImguiPlugin could not attach the Dear ImGui Context registry: {error}")
     });
-    app.insert_resource(ImguiBackendStatus::from_config(
-        &effective_config,
+    app.insert_resource(ImguiBackendRuntime::new(
+        config,
         render_integration_installed,
     ));
 }
 
-/// Static configuration for the Bevy backend.
-#[derive(Resource, Debug, Clone, PartialEq)]
-pub struct ImguiBackendConfig {
-    /// User-facing label recorded in the Dear ImGui context and diagnostics.
-    pub name: String,
-    /// Whether the backend should request docking support when lifecycle code wires IO flags.
-    pub docking: bool,
-    /// Whether the user requested Dear ImGui docking multi-viewport OS windows.
-    ///
-    /// This is recorded in [`ImguiBackendStatus::multi_viewport_requested`]. Full support is only
-    /// advertised after the native PlatformIO lifecycle bridge, all-window input feedback, and
-    /// secondary viewport render routing are all available.
-    pub multi_viewport: bool,
-    /// Presentation and composition policy copied into every secondary viewport window.
-    pub viewport_window: ImguiViewportWindowConfig,
+/// Configuration applied when [`ImguiPlugin`] attaches the primary Context.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImguiPluginConfig {
+    docking: bool,
+    multi_viewport: bool,
+    viewport_window: ImguiViewportWindowConfig,
 }
 
-impl Default for ImguiBackendConfig {
+impl ImguiPluginConfig {
+    /// Enable or disable docking for the primary Context.
+    #[must_use]
+    pub const fn with_docking(mut self, enabled: bool) -> Self {
+        self.docking = enabled;
+        self
+    }
+
+    /// Return whether docking is enabled for the primary Context.
+    #[must_use]
+    pub const fn docking(&self) -> bool {
+        self.docking
+    }
+
+    /// Enable or disable native platform windows for the primary Context.
+    ///
+    /// This requires the native-only `multi-viewport` Cargo feature.
+    #[must_use]
+    pub const fn with_multi_viewport(mut self, enabled: bool) -> Self {
+        self.multi_viewport = enabled;
+        self
+    }
+
+    /// Return whether native platform windows are enabled for the primary Context.
+    #[must_use]
+    pub const fn multi_viewport(&self) -> bool {
+        self.multi_viewport
+    }
+
+    /// Set the window policy applied to native Dear ImGui platform windows.
+    #[must_use]
+    pub fn with_viewport_window(mut self, config: ImguiViewportWindowConfig) -> Self {
+        self.viewport_window = config;
+        self
+    }
+
+    /// Borrow the native platform-window policy.
+    #[must_use]
+    pub const fn viewport_window(&self) -> &ImguiViewportWindowConfig {
+        &self.viewport_window
+    }
+}
+
+impl Default for ImguiPluginConfig {
     fn default() -> Self {
         Self {
-            name: "dear-imgui-bevy".to_owned(),
             docking: true,
             multi_viewport: false,
             viewport_window: ImguiViewportWindowConfig::default(),
@@ -206,69 +252,36 @@ impl Default for ImguiBackendConfig {
     }
 }
 
-/// Observable backend state installed by [`ImguiPlugin`].
-#[derive(Resource, Debug, Clone, Eq, PartialEq)]
-pub struct ImguiBackendStatus {
-    /// Bevy version currently targeted by this crate.
-    pub bevy_target: &'static str,
-    /// Rust version required by the Bevy target train.
-    pub rust_target: &'static str,
-    /// Whether render integration has been compiled in.
-    pub render_feature_enabled: bool,
-    /// Whether render-world extraction and overlay systems were installed into Bevy's `RenderApp`.
-    pub render_integration_installed: bool,
-    /// Whether the current backend configuration requested Dear ImGui platform windows.
-    pub multi_viewport_requested: bool,
-    /// Whether the Cargo feature needed to compile PlatformIO viewport callbacks is enabled.
-    pub multi_viewport_feature_enabled: bool,
-    /// Whether the current target can use native Bevy OS windows for Dear ImGui platform windows.
-    pub native_platform_target: bool,
-    /// Whether PlatformIO lifecycle callbacks can be connected to Bevy-owned window entities.
-    pub viewport_lifecycle_bridge_enabled: bool,
-    /// Whether input, focus, cursor, DPI, and IME feedback covers all Dear ImGui platform windows.
-    pub viewport_input_feedback_enabled: bool,
-    /// Whether secondary Dear ImGui viewport draw data is routed to matching Bevy window targets.
-    pub viewport_render_routing_enabled: bool,
-    /// Whether the backend currently wires the required Bevy OS-window platform callbacks.
-    ///
-    /// This remains `false` until lifecycle, input feedback, and renderer routing are all wired.
-    /// The `multi-viewport` feature may install an internal lifecycle bridge before the backend is
-    /// ready to advertise full Dear ImGui OS-level viewport support.
-    pub multi_viewport_supported: bool,
+#[derive(Resource, Debug, Clone)]
+pub(crate) struct ImguiBackendRuntime {
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    config: ImguiPluginConfig,
+    #[cfg(feature = "render")]
+    render_integration_installed: bool,
 }
 
-impl ImguiBackendStatus {
-    fn from_config(config: &ImguiBackendConfig, render_integration_installed: bool) -> Self {
-        let viewport_lifecycle_bridge_enabled =
-            config.multi_viewport && MULTI_VIEWPORT_FEATURE_ENABLED && NATIVE_PLATFORM_TARGET;
-        let viewport_input_feedback_enabled =
-            config.multi_viewport && MULTI_VIEWPORT_FEATURE_ENABLED && NATIVE_PLATFORM_TARGET;
-        let viewport_render_routing_enabled = config.multi_viewport
-            && MULTI_VIEWPORT_FEATURE_ENABLED
-            && NATIVE_PLATFORM_TARGET
-            && render_integration_installed;
-
+impl ImguiBackendRuntime {
+    pub(crate) fn new(config: ImguiPluginConfig, render_integration_installed: bool) -> Self {
+        #[cfg(not(all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
+        let _ = config;
+        #[cfg(not(feature = "render"))]
+        let _ = render_integration_installed;
         Self {
-            bevy_target: BEVY_TARGET_VERSION,
-            rust_target: RUST_TARGET_VERSION,
-            render_feature_enabled: cfg!(feature = "render"),
+            #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+            config,
+            #[cfg(feature = "render")]
             render_integration_installed,
-            multi_viewport_requested: config.multi_viewport,
-            multi_viewport_feature_enabled: MULTI_VIEWPORT_FEATURE_ENABLED,
-            native_platform_target: NATIVE_PLATFORM_TARGET,
-            viewport_lifecycle_bridge_enabled,
-            viewport_input_feedback_enabled,
-            viewport_render_routing_enabled,
-            multi_viewport_supported: viewport_lifecycle_bridge_enabled
-                && viewport_input_feedback_enabled
-                && viewport_render_routing_enabled,
         }
     }
-}
 
-impl Default for ImguiBackendStatus {
-    fn default() -> Self {
-        Self::from_config(&ImguiBackendConfig::default(), false)
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    pub(crate) const fn config(&self) -> &ImguiPluginConfig {
+        &self.config
+    }
+
+    #[cfg(feature = "render")]
+    pub(crate) const fn render_integration_installed(&self) -> bool {
+        self.render_integration_installed
     }
 }
 
@@ -302,7 +315,7 @@ pub(crate) enum ImguiActiveRendererContextError<E> {
     #[cfg(feature = "render")]
     RendererOwnership(ImguiRendererOwnershipError),
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-    ViewportBridge(viewport::ImguiViewportBridgeError),
+    ViewportBridge(viewport::ImguiViewportRuntimeError),
 }
 
 #[cfg(feature = "render")]
@@ -407,7 +420,6 @@ impl Default for ImguiBackendOwnership {
 
 #[derive(Clone)]
 pub(crate) struct BackendAttachment {
-    pub(crate) config: ImguiBackendConfig,
     pub(crate) render_integration_installed: bool,
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     pub(crate) viewport_bridge_registration: Option<viewport::ImguiViewportBridgeRegistration>,
@@ -417,7 +429,7 @@ pub(crate) struct BackendAttachment {
 
 /// Reason a registered Context cannot finish Context-local teardown yet.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub enum ImguiContextIntoInnerErrorReason {
+pub enum ImguiContextRemovalPendingReason {
     RenderWorldReleasePending,
     Renderer(dear_imgui_rs::render::RendererConsumerError),
     #[cfg(feature = "render")]
@@ -428,7 +440,7 @@ pub enum ImguiContextIntoInnerErrorReason {
     ViewportWorldReleasePending,
 }
 
-impl std::fmt::Display for ImguiContextIntoInnerErrorReason {
+impl std::fmt::Display for ImguiContextRemovalPendingReason {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::RenderWorldReleasePending => formatter.write_str(
@@ -447,7 +459,7 @@ impl std::fmt::Display for ImguiContextIntoInnerErrorReason {
     }
 }
 
-impl std::error::Error for ImguiContextIntoInnerErrorReason {}
+impl std::error::Error for ImguiContextRemovalPendingReason {}
 
 struct ImguiContextRetirementQueue {
     pending: RefCell<VecDeque<ContextRetirement>>,
@@ -477,21 +489,17 @@ impl Default for ImguiContextRetirementSink {
 }
 
 impl ImguiContextRetirementSink {
-    fn try_enqueue(
-        &self,
-        owner: ManuallyDrop<ContextOwner>,
-    ) -> Result<(), ManuallyDrop<ContextOwner>> {
+    fn enqueue_or_leak(&self, owner: ManuallyDrop<ContextOwner>) {
         let Some(queue) = self.queue.upgrade() else {
-            return Err(owner);
+            return;
         };
         let Ok(mut pending) = queue.pending.try_borrow_mut() else {
-            return Err(owner);
+            return;
         };
         pending.push_back(ContextRetirement {
             owner: Some(owner),
             sink: self.clone(),
         });
-        Ok(())
     }
 
     fn try_pop_front(&self) -> Option<ContextRetirement> {
@@ -504,11 +512,10 @@ impl ImguiContextRetirementSink {
         let Some(queue) = self.queue.upgrade() else {
             return 0;
         };
-        let pending = queue
+        queue
             .pending
             .try_borrow()
-            .map_or(0, |pending| pending.len());
-        pending
+            .map_or(0, |pending| pending.len())
     }
 
     #[cfg(feature = "render")]
@@ -524,8 +531,7 @@ impl ImguiContextRetirementSink {
     #[cfg(feature = "render")]
     fn snapshot_mailbox(&self) -> Option<super::ImguiFrameMailbox> {
         let queue = self.queue.upgrade()?;
-        let mailbox = queue.snapshot_mailbox.try_borrow().ok()?.clone();
-        mailbox
+        queue.snapshot_mailbox.try_borrow().ok()?.clone()
     }
 }
 
@@ -716,22 +722,6 @@ impl ContextOwner {
         }
     }
 
-    #[cfg(all(not(feature = "render"), test))]
-    pub(crate) fn try_with_active_renderer_context<T, E>(
-        &mut self,
-        multi_viewport: bool,
-        operation: impl FnOnce(&mut dear_imgui_rs::Context, Option<&()>) -> Result<T, E>,
-    ) -> Result<T, E> {
-        match self.try_with_active_renderer_context_checked(multi_viewport, operation) {
-            Ok(value) => Ok(value),
-            Err(ImguiActiveRendererContextError::Operation(error)) => Err(error),
-            #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-            Err(ImguiActiveRendererContextError::ViewportBridge(error)) => {
-                panic!("dear-imgui-bevy viewport bridge failed: {error}")
-            }
-        }
-    }
-
     #[cfg(feature = "render")]
     pub(crate) fn try_with_active_renderer_context_checked<T, E>(
         &mut self,
@@ -775,7 +765,7 @@ impl ContextOwner {
                         if let Some(keepalive) = viewport_keepalive {
                             return complete_platform_frame_if_needed(context, keepalive);
                         }
-                        Ok::<(), viewport::ImguiViewportBridgeError>(())
+                        Ok::<(), ImguiPlatformCompletionError>(())
                     }));
                 match operation {
                     Ok(result) => {
@@ -838,7 +828,7 @@ impl ContextOwner {
                         if let Some(keepalive) = viewport_keepalive {
                             return complete_platform_frame_if_needed(context, keepalive);
                         }
-                        Ok::<(), viewport::ImguiViewportBridgeError>(())
+                        Ok::<(), ImguiPlatformCompletionError>(())
                     }));
                 match operation {
                     Ok(result) => {
@@ -870,13 +860,16 @@ impl ContextOwner {
         backend: &BackendAttachment,
         config: &ImguiContextConfig,
     ) -> Result<(), ImguiContextError> {
-        #[cfg(not(all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
-        let _ = config;
         let context_id = self
             .context
             .as_ref()
             .expect("Context owner must retain its suspended Context")
             .id();
+
+        #[cfg(not(all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
+        if config.multi_viewport() {
+            return Err(ImguiContextError::NativeMultiViewportUnavailable { context_id });
+        }
 
         #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
         if config.multi_viewport() {
@@ -1104,14 +1097,14 @@ impl ContextOwner {
 
     pub(crate) fn into_unattached_context(
         mut self,
-    ) -> Result<dear_imgui_rs::SuspendedContext, Self> {
+    ) -> Result<dear_imgui_rs::SuspendedContext, Box<Self>> {
         if self.is_unattached() {
             Ok(self
                 .context
                 .take()
                 .expect("Context owner must retain its suspended Context"))
         } else {
-            Err(self)
+            Err(Box::new(self))
         }
     }
 
@@ -1186,7 +1179,7 @@ impl ContextOwner {
             })
     }
 
-    pub(crate) fn try_detach_backend(&mut self) -> Result<(), ImguiContextIntoInnerErrorReason> {
+    pub(crate) fn try_detach_backend(&mut self) -> Result<(), ImguiContextRemovalPendingReason> {
         if self.context.is_none() {
             return Ok(());
         }
@@ -1207,7 +1200,7 @@ impl ContextOwner {
                 .expect("Context owner must retain its suspended Context")
                 .try_with_active(|context| {
                     preflight_renderer_teardown_ownership(context, ownership)
-                        .map_err(ImguiContextIntoInnerErrorReason::RendererOwnership)
+                        .map_err(ImguiContextRemovalPendingReason::RendererOwnership)
                 })?;
         }
         #[cfg(feature = "render")]
@@ -1226,7 +1219,7 @@ impl ContextOwner {
         }
         #[cfg(feature = "render")]
         if !renderer_release_acknowledged {
-            return Err(ImguiContextIntoInnerErrorReason::RenderWorldReleasePending);
+            return Err(ImguiContextRemovalPendingReason::RenderWorldReleasePending);
         }
 
         let ownership = &mut self.backend_ownership;
@@ -1255,7 +1248,7 @@ impl ContextOwner {
                 if let Some(renderer_consumer) = consumer.as_ref() {
                     let reset = context
                         .prepare_renderer_texture_reset(renderer_consumer)
-                        .map_err(ImguiContextIntoInnerErrorReason::Renderer)?;
+                        .map_err(ImguiContextRemovalPendingReason::Renderer)?;
                     renderer_release
                         .expect("an admitted Bevy renderer consumer must retain its release lease")
                         .release_renderer_resources();
@@ -1266,7 +1259,7 @@ impl ContextOwner {
                     drop(consumer.take());
                     let _ = context
                         .poll_snapshot_completions()
-                        .map_err(ImguiContextIntoInnerErrorReason::Renderer)?;
+                        .map_err(ImguiContextRemovalPendingReason::Renderer)?;
                 }
                 clear_backend_data(context, ownership);
                 Ok(())
@@ -1289,7 +1282,7 @@ impl ContextRetirement {
         }
     }
 
-    fn advance(&mut self) -> Result<(), ImguiContextIntoInnerErrorReason> {
+    fn advance(&mut self) -> Result<(), ImguiContextRemovalPendingReason> {
         self.owner
             .as_deref_mut()
             .expect("a pending Context retirement must retain its owner")
@@ -1318,7 +1311,7 @@ impl Drop for ContextRetirement {
         };
         // A failed enqueue intentionally leaks the complete owner. Releasing only part of it
         // would invalidate renderer or PlatformIO pointers still owned by another Bevy world.
-        let _leaked = self.sink.try_enqueue(owner);
+        self.sink.enqueue_or_leak(owner);
     }
 }
 
@@ -1326,19 +1319,19 @@ impl Drop for ContextRetirement {
 fn validate_viewport_bridge(
     context: &mut dear_imgui_rs::Context,
     keepalive: &viewport::ImguiViewportBridgeKeepalive,
-) -> Result<(), viewport::ImguiViewportBridgeError> {
+) -> Result<(), viewport::ImguiViewportRuntimeError> {
     if let Some(error) = viewport::platform_callback_error(keepalive) {
         return Err(error);
     }
     viewport::platform_callback_ownership(context, keepalive)
-        .map_err(viewport::ImguiViewportBridgeError::CallbackOwnership)
+        .map_err(viewport::ImguiViewportRuntimeError::CallbackOwnership)
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 fn complete_platform_frame_if_needed(
     context: &mut dear_imgui_rs::Context,
     keepalive: &viewport::ImguiViewportBridgeKeepalive,
-) -> Result<(), viewport::ImguiViewportBridgeError> {
+) -> Result<(), viewport::ImguiViewportRuntimeError> {
     let _ = context.end_frame();
     // SAFETY: the owner keeps this Context active and current for the whole completion check.
     let platform_frame_pending = unsafe {
@@ -1432,7 +1425,7 @@ fn sync_backend_context_config(
     }
     context.io_mut().set_config_flags(config_flags);
 
-    let imgui_name = backend.config.name.replace('\0', "?");
+    let imgui_name = BACKEND_NAME.to_owned();
     let claim_platform_name = match ownership.platform_name.as_deref() {
         Some(expected) => context.io().backend_platform_name().is_some_and(|actual| {
             actual.as_ptr() == ownership.platform_name_ptr
@@ -1485,10 +1478,6 @@ fn sync_backend_context_config(
 
     #[cfg(not(feature = "render"))]
     let _ = backend.render_integration_installed;
-    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-    if let Some(_requested) = config.multi_viewport().then_some(()) {
-        let _ = _requested;
-    }
 }
 
 #[cfg(feature = "render")]
@@ -1614,7 +1603,7 @@ fn clear_viewport_backend_contract(
 fn advance_viewport_drain(
     context: &mut dear_imgui_rs::Context,
     lifecycle: &mut ImguiViewportBridgeLifecycle,
-) -> Result<(), ImguiContextIntoInnerErrorReason> {
+) -> Result<(), ImguiContextRemovalPendingReason> {
     match lifecycle.phase {
         ImguiViewportBridgePhase::Detached | ImguiViewportBridgePhase::ViewportDrained => Ok(()),
         ImguiViewportBridgePhase::Attached => {
@@ -1640,12 +1629,12 @@ fn advance_viewport_drain(
             if let Some(error) = ownership_error
                 && capabilities_still_owned
             {
-                return Err(ImguiContextIntoInnerErrorReason::ViewportCallbackOwnership(
+                return Err(ImguiContextRemovalPendingReason::ViewportCallbackOwnership(
                     error,
                 ));
             }
             if ecs_release_pending {
-                return Err(ImguiContextIntoInnerErrorReason::ViewportWorldReleasePending);
+                return Err(ImguiContextRemovalPendingReason::ViewportWorldReleasePending);
             }
             Ok(())
         }
@@ -1655,7 +1644,7 @@ fn advance_viewport_drain(
                 .as_ref()
                 .expect("a draining bridge must retain its owner");
             if viewport::viewport_ecs_release_pending(&owner.keepalive) {
-                return Err(ImguiContextIntoInnerErrorReason::ViewportWorldReleasePending);
+                return Err(ImguiContextRemovalPendingReason::ViewportWorldReleasePending);
             }
             lifecycle.phase = ImguiViewportBridgePhase::ViewportDrained;
             Ok(())
@@ -2020,13 +2009,10 @@ mod renderer_contract_tests {
 
 #[cfg(test)]
 mod retirement_tests {
-    use std::{
-        cell::Cell,
-        rc::Rc,
-        sync::{Mutex, OnceLock},
-    };
+    use std::{cell::Cell, rc::Rc};
 
     use super::*;
+    use crate::test_util::imgui_context_guard as context_guard;
 
     struct RetirementProbeMarker;
 
@@ -2038,14 +2024,6 @@ mod retirement_tests {
         fn context_destroyed(&self, _context: dear_imgui_rs::ContextDestroyed) {
             self.destroyed.set(true);
         }
-    }
-
-    fn context_guard() -> std::sync::MutexGuard<'static, ()> {
-        static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
-        GUARD
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     #[test]
@@ -2079,17 +2057,9 @@ mod retirement_tests {
 #[cfg(all(test, feature = "multi-viewport", not(target_arch = "wasm32")))]
 mod tests {
     use std::rc::Rc;
-    use std::sync::{Mutex, OnceLock};
 
     use super::*;
-
-    fn context_guard() -> std::sync::MutexGuard<'static, ()> {
-        static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
-        GUARD
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
+    use crate::test_util::imgui_context_guard as context_guard;
 
     fn viewport_owner() -> ContextOwner {
         let mut context = dear_imgui_rs::Context::create();

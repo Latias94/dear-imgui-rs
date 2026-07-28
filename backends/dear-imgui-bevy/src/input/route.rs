@@ -8,7 +8,9 @@ use dear_imgui_rs::{self as imgui, ContextId};
 
 use crate::route::ImguiInputPolicy;
 
-use super::{INVALID_MOUSE_POS, ImguiInputWindow, ImguiInputWindowState};
+#[cfg(test)]
+use super::ImguiInputWindowState;
+use super::{INVALID_MOUSE_POS, ImguiInputWindow};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ImguiInputFrameMetrics {
@@ -49,6 +51,7 @@ pub(super) struct ImguiRoutedWindowState {
 }
 
 impl ImguiRoutedWindowState {
+    #[cfg(test)]
     pub(super) fn snapshot(&self) -> ImguiInputWindowState {
         ImguiInputWindowState {
             active_touch_id: self.active_touch_id,
@@ -58,24 +61,8 @@ impl ImguiRoutedWindowState {
         }
     }
 
-    pub(super) fn any_ctrl_down(&self) -> bool {
-        self.pressed_keys.contains(&imgui::Key::LeftCtrl)
-            || self.pressed_keys.contains(&imgui::Key::RightCtrl)
-    }
-
-    pub(super) fn any_shift_down(&self) -> bool {
-        self.pressed_keys.contains(&imgui::Key::LeftShift)
-            || self.pressed_keys.contains(&imgui::Key::RightShift)
-    }
-
-    pub(super) fn any_alt_down(&self) -> bool {
-        self.pressed_keys.contains(&imgui::Key::LeftAlt)
-            || self.pressed_keys.contains(&imgui::Key::RightAlt)
-    }
-
-    pub(super) fn any_super_down(&self) -> bool {
-        self.pressed_keys.contains(&imgui::Key::LeftSuper)
-            || self.pressed_keys.contains(&imgui::Key::RightSuper)
+    pub(super) fn modifiers(&self) -> (bool, bool, bool, bool) {
+        super::modifier_state(&self.pressed_keys)
     }
 }
 
@@ -118,9 +105,9 @@ impl RoutedInputTarget {
     pub(super) fn contains(self, position: Vec2) -> bool {
         self.native_viewport.is_some()
             || (position.x >= self.logical_region.min.x
-                && position.x <= self.logical_region.max.x
+                && position.x < self.logical_region.max.x
                 && position.y >= self.logical_region.min.y
-                && position.y <= self.logical_region.max.y)
+                && position.y < self.logical_region.max.y)
     }
 
     pub(super) fn map_position(self, context: &imgui::Context, position: Vec2) -> [f32; 2] {

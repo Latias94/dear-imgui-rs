@@ -1,17 +1,14 @@
 //! Smallest visible Dear ImGui overlay in a normal Bevy app.
 //!
 //! Run:
-//! `cargo run -p dear-imgui-bevy --features render --example simple`
+//! `cargo run -p dear-imgui-bevy --example simple`
 
 use bevy::{
     app::AppExit,
     prelude::*,
     window::{PresentMode, WindowPlugin, WindowTheme},
 };
-use dear_imgui_bevy::{
-    ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, ImguiUi, configure_example_context,
-    render::ImguiOverlayCamera,
-};
+use dear_imgui_bevy::prelude::*;
 use dear_imgui_rs::Condition;
 
 #[derive(Resource, Default)]
@@ -40,17 +37,8 @@ fn main() {
         .run();
 }
 
-fn setup(mut commands: Commands, mut contexts: NonSendMut<ImguiContexts>) -> Result {
-    commands.spawn((Camera2d, ImguiOverlayCamera));
-    let primary_id = contexts
-        .primary_id()
-        .ok_or("ImguiPlugin should install a primary Context before Startup")?;
-    contexts
-        .configure(primary_id, |context| {
-            configure_example_context(context, false);
-        })
-        .map_err(|error| format!("failed to configure the primary Dear ImGui Context: {error}"))?;
-    Ok(())
+fn setup(mut commands: Commands) {
+    commands.spawn(Camera2d);
 }
 
 fn close_on_escape(input: Res<ButtonInput<KeyCode>>, mut exit: MessageWriter<AppExit>) {

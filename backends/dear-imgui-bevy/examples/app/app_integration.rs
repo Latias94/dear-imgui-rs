@@ -1,17 +1,14 @@
 //! Dear ImGui integrated into an existing Bevy game/app loop.
 //!
 //! Run:
-//! `cargo run -p dear-imgui-bevy --features render --example app_integration`
+//! `cargo run -p dear-imgui-bevy --example app_integration`
 
 use bevy::{
     app::AppExit,
     prelude::*,
     window::{PresentMode, WindowPlugin, WindowTheme},
 };
-use dear_imgui_bevy::{
-    ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, ImguiUi, configure_example_context,
-    input::ImguiInputCapture, render::ImguiOverlayCamera,
-};
+use dear_imgui_bevy::prelude::*;
 use dear_imgui_rs::Condition;
 
 const ARENA_SIZE: Vec2 = Vec2::new(820.0, 420.0);
@@ -82,17 +79,8 @@ fn setup_scene(mut commands: Commands) {
     ));
 }
 
-fn setup_imgui(mut commands: Commands, mut contexts: NonSendMut<ImguiContexts>) -> Result {
-    commands.spawn((Camera2d, ImguiOverlayCamera));
-    let primary_id = contexts
-        .primary_id()
-        .ok_or("ImguiPlugin should install a primary Context before Startup")?;
-    contexts
-        .configure(primary_id, |context| {
-            configure_example_context(context, false);
-        })
-        .map_err(|error| format!("failed to configure the primary Dear ImGui Context: {error}"))?;
-    Ok(())
+fn setup_imgui(mut commands: Commands) {
+    commands.spawn(Camera2d);
 }
 
 fn close_on_escape(input: Res<ButtonInput<KeyCode>>, mut exit: MessageWriter<AppExit>) {

@@ -13,10 +13,6 @@ use super::prepare::{
 use super::resources::{ImguiRenderDeviceState, ImguiRenderExtractionInstalled};
 use super::*;
 
-/// Marker proving the render feature is compiled in.
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
-pub struct RenderFeature;
-
 /// Stable render-world ordering points for passes that compose with Dear ImGui.
 ///
 /// The sets are installed in both the [`Core2d`] and [`Core3d`] schedules after Bevy scene
@@ -41,6 +37,7 @@ pub enum ImguiUiRenderOrder {
     #[default]
     ImguiAboveBevyUi,
     /// Draw Dear ImGui first and Bevy UI above it.
+    #[cfg(feature = "bevy-ui")]
     BevyUiAboveImgui,
 }
 

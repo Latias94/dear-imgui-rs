@@ -182,12 +182,6 @@ pub struct ImguiRenderPipeline {
 }
 
 impl ImguiRenderPipeline {
-    /// Shader handle used by the pipeline.
-    #[must_use]
-    pub fn shader(&self) -> &Handle<Shader> {
-        &self.shader
-    }
-
     /// Bind group layout for camera uniforms.
     #[must_use]
     pub fn common_layout(&self) -> &BindGroupLayoutDescriptor {
@@ -296,20 +290,22 @@ pub(super) fn queue_imgui_pipelines(
         return;
     };
 
+    let targets = prepared
+        .draws()
+        .iter()
+        .map(|draw| (draw.view, draw.target_format))
+        .collect::<HashSet<_>>();
+
     for view in &views {
         let view_id = view.retained_view_entity;
-        let Some(draw) = prepared
-            .draws()
-            .iter()
-            .find(|draw| draw.view == view_id && draw.target_format == view.target_format)
-        else {
+        if !targets.contains(&(view_id, view.target_format)) {
             continue;
-        };
+        }
         let pipeline_id = pipelines.specialize(
             &pipeline_cache,
             &pipeline,
             ImguiPipelineKey {
-                target_format: draw.target_format,
+                target_format: view.target_format,
             },
         );
         queued.by_view.insert(view_id, pipeline_id);

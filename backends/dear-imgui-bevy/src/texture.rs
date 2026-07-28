@@ -179,7 +179,6 @@ mod render {
         /// Returns [`ImguiTextureRegistrationError::HandleDoesNotRetainAsset`] when `image` is a
         /// Bevy UUID handle. UUID handles are stable identifiers but cannot keep an asset alive;
         /// use [`Self::register_weak`] for that explicit non-retaining behavior.
-        #[must_use]
         pub fn register_strong(
             &mut self,
             image: Handle<Image>,
@@ -197,7 +196,6 @@ mod render {
         /// or has not yet uploaded the image, the renderer safely uses its fallback texture and
         /// resumes sampling if the image returns. A guard from the final strong lease is retained
         /// only until its already-submitted frame reaches render-world extraction.
-        #[must_use]
         pub fn register_weak(&mut self, asset_id: AssetId<Image>) -> ImguiTexture {
             self.register(asset_id, ImguiTextureLeaseKind::Weak, None)
         }
@@ -435,10 +433,10 @@ mod render {
 
     fn maintain_imgui_texture_leases(
         mut textures: ResMut<ImguiBevyTextures>,
-        backend_status: Option<Res<crate::ImguiBackendStatus>>,
+        backend_runtime: Option<Res<crate::context::ownership::ImguiBackendRuntime>>,
     ) {
         let render_integration_installed =
-            backend_status.is_some_and(|status| status.render_integration_installed);
+            backend_runtime.is_some_and(|runtime| runtime.render_integration_installed());
         textures.maintain(render_integration_installed);
     }
 

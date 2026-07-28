@@ -12,7 +12,7 @@ mod feedback;
 mod route;
 
 use capture::CaptureScopes;
-pub use events::ImguiInputMessageReaders;
+pub(crate) use events::ImguiInputMessageReaders;
 use events::discard_all_unread_messages;
 pub(crate) use feedback::map_imgui_mouse_cursor;
 #[cfg(feature = "render")]
@@ -27,6 +27,7 @@ use crate::{ContextId, ImguiContextError, ImguiContexts, ImguiViewportWindow};
 use bevy_app::{App, PreUpdate};
 use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::{IntoScheduleConfigs, SystemSet};
+#[cfg(not(feature = "render"))]
 use bevy_input::ButtonState;
 use bevy_input::keyboard::{KeyCode, KeyboardFocusLost, KeyboardInput};
 use bevy_input::mouse::{
@@ -48,20 +49,37 @@ use std::collections::HashSet;
 
 const INVALID_MOUSE_POS: [f32; 2] = [-f32::MAX, -f32::MAX];
 
+#[cfg(feature = "render")]
+type RoutedInputWindowComponents = (
+    Entity,
+    &'static Window,
+    Option<&'static PrimaryWindow>,
+    Option<&'static ImguiViewportWindow>,
+    Option<&'static ImguiViewportOwner>,
+);
+
 /// System set that injects Bevy window input into Dear ImGui IO.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ImguiInputSystems;
 
 /// Runtime state needed to map Bevy input streams into Dear ImGui events.
 #[derive(Resource, Debug, Default)]
-pub struct ImguiInputState {
+pub(crate) struct ImguiInputState {
+    #[cfg(not(feature = "render"))]
     active_touch_id: Option<u64>,
+    #[cfg(not(feature = "render"))]
     active_touch_window: Option<Entity>,
+    #[cfg(not(feature = "render"))]
     ime_enabled: bool,
+    #[cfg(not(feature = "render"))]
     primary_window_focused: Option<bool>,
+    #[cfg(not(feature = "render"))]
     focused_window: Option<Entity>,
+    #[cfg(not(feature = "render"))]
     mouse_hovered_window: Option<Entity>,
+    #[cfg(not(feature = "render"))]
     pressed_keys: HashSet<imgui::Key>,
+    #[cfg(not(feature = "render"))]
     pressed_mouse_buttons: HashSet<imgui::MouseButton>,
     #[cfg(feature = "render")]
     routed: RoutedInputState,
@@ -69,75 +87,113 @@ pub struct ImguiInputState {
 
 impl ImguiInputState {
     /// Currently selected touch id for touch-to-mouse translation.
+    #[cfg(test)]
     #[must_use]
     pub fn active_touch_id(&self) -> Option<u64> {
-        self.active_touch_id
+        #[cfg(feature = "render")]
+        {
+            let primary_context = self.routed.primary_context?;
+            self.routed.windows.iter().find_map(|(slot, state)| {
+                (slot.context_id == primary_context)
+                    .then_some(state.active_touch_id)
+                    .flatten()
+            })
+        }
+        #[cfg(not(feature = "render"))]
+        {
+            self.active_touch_id
+        }
     }
 
     /// Whether the last mapped-window IME message left IME enabled.
+    #[cfg(test)]
     #[must_use]
     pub fn ime_enabled(&self) -> bool {
-        self.ime_enabled
+        #[cfg(feature = "render")]
+        {
+            self.routed.primary_context.is_some_and(|primary_context| {
+                self.routed
+                    .windows
+                    .iter()
+                    .any(|(slot, state)| slot.context_id == primary_context && state.ime_enabled)
+            })
+        }
+        #[cfg(not(feature = "render"))]
+        {
+            self.ime_enabled
+        }
     }
 
     /// Last focus state observed for the primary window.
+    #[cfg(test)]
     #[must_use]
     pub fn primary_window_focused(&self) -> Option<bool> {
-        self.primary_window_focused
+        #[cfg(feature = "render")]
+        {
+            let primary_context = self.routed.primary_context?;
+            Some(self.routed.primary_window.is_some_and(|window| {
+                self.routed
+                    .windows
+                    .get(&ImguiInputSlot {
+                        context_id: primary_context,
+                        window,
+                    })
+                    .is_some_and(|state| state.focused)
+            }))
+        }
+        #[cfg(not(feature = "render"))]
+        {
+            self.primary_window_focused
+        }
     }
 
     /// Last Bevy window entity reported as focused by the backend.
+    #[cfg(test)]
     #[must_use]
     pub fn focused_window(&self) -> Option<Entity> {
-        self.focused_window
+        #[cfg(feature = "render")]
+        {
+            self.routed
+                .primary_context
+                .and_then(|context_id| self.routed.last_focused.get(&context_id).copied())
+        }
+        #[cfg(not(feature = "render"))]
+        {
+            self.focused_window
+        }
     }
 
     /// Last Bevy window entity reported as hovered by the OS mouse.
+    #[cfg(any(test, not(feature = "render")))]
     #[must_use]
-    pub fn mouse_hovered_window(&self) -> Option<Entity> {
-        self.mouse_hovered_window
+    pub(crate) fn mouse_hovered_window(&self) -> Option<Entity> {
+        #[cfg(feature = "render")]
+        {
+            self.routed
+                .primary_context
+                .and_then(|context_id| self.routed.last_hovered.get(&context_id).copied())
+        }
+        #[cfg(not(feature = "render"))]
+        {
+            self.mouse_hovered_window
+        }
     }
 
     /// Return the state owned by one Context and host window.
     ///
-    /// The legacy aggregate accessors above remain available for applications that own a single
-    /// Context. Multi-Context applications should use this scoped query instead.
+    /// The aggregate test accessors above project the primary Context from the same routed state.
+    /// Multi-Context assertions should use this scoped query instead.
+    #[cfg(all(test, feature = "render"))]
     #[must_use]
     pub fn for_context_window(
         &self,
         context_id: ContextId,
         window: Entity,
     ) -> Option<ImguiInputWindowState> {
-        #[cfg(feature = "render")]
-        {
-            self.routed
-                .windows
-                .get(&ImguiInputSlot { context_id, window })
-                .map(ImguiRoutedWindowState::snapshot)
-        }
-        #[cfg(not(feature = "render"))]
-        {
-            let _ = (context_id, window);
-            None
-        }
-    }
-
-    /// Return Contexts that currently own keyboard and IME focus in `window`.
-    #[must_use]
-    pub fn focused_contexts_for_window(&self, window: Entity) -> Vec<ContextId> {
-        #[cfg(feature = "render")]
-        {
-            self.routed
-                .focused_targets
-                .get(&window)
-                .cloned()
-                .unwrap_or_default()
-        }
-        #[cfg(not(feature = "render"))]
-        {
-            let _ = window;
-            Vec::new()
-        }
+        self.routed
+            .windows
+            .get(&ImguiInputSlot { context_id, window })
+            .map(ImguiRoutedWindowState::snapshot)
     }
 
     #[cfg(feature = "render")]
@@ -152,14 +208,36 @@ impl ImguiInputState {
     }
 
     #[cfg(feature = "render")]
-    pub(crate) fn mouse_hovered_window_for_context(&self, context_id: ContextId) -> Option<Entity> {
-        self.routed.last_hovered.get(&context_id).copied()
+    pub(crate) fn platform_cursor_window_for_context(
+        &self,
+        context_id: ContextId,
+        default_window: Option<Entity>,
+    ) -> Option<Entity> {
+        if let Some(window) = self.routed.last_hovered.get(&context_id).copied() {
+            return self
+                .routed
+                .pointer_targets
+                .get(&window)
+                .and_then(|contexts| contexts.first())
+                .is_some_and(|owner| *owner == context_id)
+                .then_some(window);
+        }
+
+        let window = default_window?;
+        match self.routed.pointer_targets.get(&window) {
+            None => Some(window),
+            Some(contexts) => contexts
+                .first()
+                .is_some_and(|owner| *owner == context_id)
+                .then_some(window),
+        }
     }
 }
 
 /// Read-only scoped input state for one Dear ImGui Context and host window.
+#[cfg(all(test, feature = "render"))]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct ImguiInputWindowState {
+pub(crate) struct ImguiInputWindowState {
     /// Currently selected touch id for touch-to-mouse translation.
     pub active_touch_id: Option<u64>,
     /// Whether the platform IME is enabled for this Context/window pair.
@@ -241,18 +319,12 @@ impl ImguiInputCaptureState {
 /// seen in IO; game/editor systems can use them to decide whether to act on Bevy input, but the
 /// backend itself does not remove or stop Bevy messages.
 ///
-/// The public fields and unscoped queries are the aggregate across routed Contexts. Use the scoped
-/// helpers when a game system belongs to one Context or host window.
+/// The unscoped queries are the aggregate across routed Contexts. Use the scoped helpers when a
+/// game system belongs to one Context or host window. The backend owns this resource's state;
+/// consumers receive a copy through [`Self::aggregate`] when they need a stable snapshot.
 #[derive(Resource, Debug, Clone, Default, Eq, PartialEq)]
 pub struct ImguiInputCapture {
-    /// Dear ImGui wants mouse input.
-    pub want_capture_mouse: bool,
-    /// Dear ImGui wants mouse input, except when a popup close should be allowed through.
-    pub want_capture_mouse_unless_popup_close: bool,
-    /// Dear ImGui wants keyboard input.
-    pub want_capture_keyboard: bool,
-    /// Dear ImGui wants text input / IME.
-    pub want_text_input: bool,
+    aggregate: ImguiInputCaptureState,
     scopes: CaptureScopes,
 }
 
@@ -260,25 +332,25 @@ impl ImguiInputCapture {
     /// Whether Dear ImGui wants pointer input.
     #[must_use]
     pub fn wants_pointer_input(&self) -> bool {
-        self.want_capture_mouse
+        self.aggregate.want_capture_mouse
     }
 
     /// Whether Dear ImGui wants pointer input after allowing popup-close clicks through.
     #[must_use]
     pub fn wants_pointer_input_unless_popup_close(&self) -> bool {
-        self.want_capture_mouse_unless_popup_close
+        self.aggregate.want_capture_mouse_unless_popup_close
     }
 
     /// Whether Dear ImGui wants keyboard input.
     #[must_use]
     pub fn wants_keyboard_input(&self) -> bool {
-        self.want_capture_keyboard
+        self.aggregate.want_capture_keyboard
     }
 
     /// Whether Dear ImGui wants text input / IME.
     #[must_use]
     pub fn wants_text_input(&self) -> bool {
-        self.want_text_input
+        self.aggregate.want_text_input
     }
 
     /// Whether Dear ImGui wants any pointer, keyboard, or text input.
@@ -324,12 +396,7 @@ impl ImguiInputCapture {
     /// Return the aggregate capture state across all routed Contexts.
     #[must_use]
     pub const fn aggregate(&self) -> ImguiInputCaptureState {
-        ImguiInputCaptureState {
-            want_capture_mouse: self.want_capture_mouse,
-            want_capture_mouse_unless_popup_close: self.want_capture_mouse_unless_popup_close,
-            want_capture_keyboard: self.want_capture_keyboard,
-            want_text_input: self.want_text_input,
-        }
+        self.aggregate
     }
 
     /// Whether one Context wants pointer input.
@@ -386,6 +453,7 @@ impl ImguiInputCapture {
         self.primary().wants_text_input()
     }
 
+    #[cfg(not(feature = "render"))]
     fn update_from_io(&mut self, context_id: ContextId, window: Entity, io: &imgui::Io) {
         let state = ImguiInputCaptureState::from_io(io);
         self.scopes.update_primary(context_id, window, state);
@@ -393,28 +461,27 @@ impl ImguiInputCapture {
     }
 
     fn set_aggregate(&mut self, state: ImguiInputCaptureState) {
-        self.want_capture_mouse = state.want_capture_mouse;
-        self.want_capture_mouse_unless_popup_close = state.want_capture_mouse_unless_popup_close;
-        self.want_capture_keyboard = state.want_capture_keyboard;
-        self.want_text_input = state.want_text_input;
+        self.aggregate = state;
     }
 
     #[cfg(feature = "render")]
     fn begin_routes(&mut self, primary_context: Option<ContextId>, routes: &[(ContextId, Entity)]) {
-        let aggregate = self.scopes.begin_routes(primary_context, routes);
-        self.set_aggregate(aggregate);
+        self.scopes.begin_routes(primary_context, routes);
     }
 
     #[cfg(feature = "render")]
     fn update_context(&mut self, context_id: ContextId, io: &imgui::Io) {
-        if let Some(aggregate) = self.scopes.update_context(context_id, io) {
-            self.set_aggregate(aggregate);
-        }
+        self.scopes.update_context(context_id, io);
     }
 
     #[cfg(feature = "render")]
     fn remove_context(&mut self, context_id: ContextId) {
-        let aggregate = self.scopes.remove_context(context_id);
+        self.scopes.remove_context(context_id);
+    }
+
+    #[cfg(feature = "render")]
+    fn finish_routes(&mut self) {
+        let aggregate = self.scopes.finish_routes();
         self.set_aggregate(aggregate);
     }
 }
@@ -532,13 +599,7 @@ pub(crate) fn install_input_mapping(app: &mut App) {
 #[cfg(feature = "render")]
 #[allow(clippy::too_many_arguments)]
 fn routed_window_input_system(
-    windows: Query<(
-        Entity,
-        &Window,
-        Option<&PrimaryWindow>,
-        Option<&ImguiViewportWindow>,
-        Option<&ImguiViewportOwner>,
-    )>,
+    windows: Query<RoutedInputWindowComponents>,
     resolved_routes: Res<ImguiResolvedRoutes>,
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))] viewport_bridge: NonSend<
         crate::ImguiViewportBridge,
@@ -574,6 +635,11 @@ fn routed_window_input_system(
         .iter()
         .map(|target| target.slot())
         .collect::<HashSet<_>>();
+    let input_enabled_contexts = targets
+        .iter()
+        .filter(|target| !matches!(target.policy, ImguiInputPolicy::Disabled))
+        .map(|target| target.context_id)
+        .collect::<HashSet<_>>();
     for (entity, window, primary_window, viewport_window, viewport_owner) in &windows {
         let (Some(viewport_window), Some(viewport_owner)) = (viewport_window, viewport_owner)
         else {
@@ -591,6 +657,7 @@ fn routed_window_input_system(
         }
         if primary_window.is_some()
             || !contexts.contains(context_id)
+            || !input_enabled_contexts.contains(&context_id)
             || declared_slots.contains(&ImguiInputSlot {
                 context_id,
                 window: entity,
@@ -613,12 +680,11 @@ fn routed_window_input_system(
             framebuffer_scale: sanitized_window_framebuffer_scale(window),
             tracks_host_metrics: false,
             native_viewport: Some(ImguiInputWindow {
+                #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
                 entity,
                 position: window.position,
                 scale_factor: window.scale_factor(),
                 viewport_id: viewport_window.viewport_id(),
-                context_id,
-                is_primary: false,
             }),
         });
     }
@@ -903,7 +969,7 @@ fn routed_window_input_system(
         );
     }
     prune_unavailable_routed_contexts(&mut input_state, &mut capture, &unavailable_contexts);
-    input_state.refresh_routed_compatibility_state();
+    capture.finish_routes();
     input_metrics.replace(context_metrics);
 }
 
@@ -1612,21 +1678,25 @@ fn apply_routed_keyboard_input(
     unavailable_contexts: &mut HashSet<ContextId>,
 ) {
     let pressed = event.state.is_pressed();
-    let window_state = state.routed.windows.entry(target.slot()).or_default();
     let key = map_bevy_key_code(event.key_code);
     if let Some(key) = key {
         if pressed {
-            window_state.pressed_keys.insert(key);
+            state
+                .routed
+                .windows
+                .entry(target.slot())
+                .or_default()
+                .pressed_keys
+                .insert(key);
         } else {
-            window_state.pressed_keys.remove(&key);
+            for (slot, window_state) in &mut state.routed.windows {
+                if slot.context_id == target.context_id {
+                    window_state.pressed_keys.remove(&key);
+                }
+            }
         }
     }
-    let modifiers = (
-        window_state.any_ctrl_down(),
-        window_state.any_shift_down(),
-        window_state.any_alt_down(),
-        window_state.any_super_down(),
-    );
+    let modifiers = routed_context_modifiers(&state.routed, target.context_id);
     configure_routed_context(
         contexts,
         target.context_id,
@@ -1642,6 +1712,26 @@ fn apply_routed_keyboard_input(
             }
         },
     );
+}
+
+#[cfg(feature = "render")]
+fn routed_context_modifiers(
+    state: &RoutedInputState,
+    context_id: ContextId,
+) -> (bool, bool, bool, bool) {
+    state
+        .windows
+        .iter()
+        .filter(|(slot, _)| slot.context_id == context_id)
+        .fold((false, false, false, false), |aggregate, (_, window)| {
+            let modifiers = window.modifiers();
+            (
+                aggregate.0 || modifiers.0,
+                aggregate.1 || modifiers.1,
+                aggregate.2 || modifiers.2,
+                aggregate.3 || modifiers.3,
+            )
+        })
 }
 
 #[cfg(feature = "render")]
@@ -1727,45 +1817,9 @@ fn prune_unavailable_routed_contexts(
     }
 }
 
-#[cfg(feature = "render")]
-impl ImguiInputState {
-    fn refresh_routed_compatibility_state(&mut self) {
-        let Some(primary_context) = self.routed.primary_context else {
-            self.active_touch_id = None;
-            self.active_touch_window = None;
-            self.ime_enabled = false;
-            self.primary_window_focused = None;
-            self.focused_window = None;
-            self.mouse_hovered_window = None;
-            return;
-        };
-
-        let active_touch = self.routed.windows.iter().find(|(slot, state)| {
-            slot.context_id == primary_context && state.active_touch_id.is_some()
-        });
-        self.active_touch_id = active_touch.and_then(|(_, state)| state.active_touch_id);
-        self.active_touch_window = active_touch.map(|(slot, _)| slot.window);
-        self.ime_enabled = self
-            .routed
-            .windows
-            .iter()
-            .any(|(slot, state)| slot.context_id == primary_context && state.ime_enabled);
-        self.focused_window = self.routed.last_focused.get(&primary_context).copied();
-        self.mouse_hovered_window = self.routed.last_hovered.get(&primary_context).copied();
-        self.primary_window_focused = Some(self.routed.primary_window.is_some_and(|window| {
-            self.routed
-                .windows
-                .get(&ImguiInputSlot {
-                    context_id: primary_context,
-                    window,
-                })
-                .is_some_and(|state| state.focused)
-        }));
-    }
-}
-
 /// Translate primary-window Bevy messages into Dear ImGui IO events.
 #[allow(clippy::too_many_arguments)]
+#[cfg(not(feature = "render"))]
 pub(crate) fn primary_window_input_system(
     primary_window: Query<(Entity, &Window), With<PrimaryWindow>>,
     viewport_windows: Query<
@@ -1814,6 +1868,7 @@ pub(crate) fn primary_window_input_system(
     }
 }
 
+#[cfg(not(feature = "render"))]
 fn translate_primary_window_input(
     primary_window: &Query<(Entity, &Window), With<PrimaryWindow>>,
     viewport_windows: &Query<
@@ -2004,14 +2059,21 @@ fn translate_primary_window_input(
 
 #[derive(Clone, Copy)]
 struct ImguiInputWindow {
+    #[cfg(any(
+        not(feature = "render"),
+        all(feature = "multi-viewport", not(target_arch = "wasm32"))
+    ))]
     entity: Entity,
     position: WindowPosition,
     scale_factor: f32,
     viewport_id: imgui::Id,
+    #[cfg(not(feature = "render"))]
     context_id: ContextId,
+    #[cfg(not(feature = "render"))]
     is_primary: bool,
 }
 
+#[cfg(not(feature = "render"))]
 fn imgui_window_for_event(
     entity: Entity,
     primary_window: ImguiInputWindow,
@@ -2042,6 +2104,7 @@ fn imgui_window_for_event(
     })
 }
 
+#[cfg(not(feature = "render"))]
 fn is_mapped_imgui_window(
     entity: Entity,
     primary_window: ImguiInputWindow,
@@ -2085,13 +2148,13 @@ fn mouse_pos_for_window(
 
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     {
-        return crate::viewport::window_client_logical_to_desktop(
+        crate::viewport::window_client_logical_to_desktop(
             window.entity,
             &window.position,
             window.scale_factor,
             pos,
         )
-        .unwrap_or(pos);
+        .unwrap_or(pos)
     }
 
     #[cfg(not(all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
@@ -2117,7 +2180,7 @@ fn positive_finite_or(value: f32, fallback: f32) -> f32 {
 
 /// Convert a Bevy mouse button into Dear ImGui's button space.
 #[must_use]
-pub fn map_bevy_mouse_button(button: BevyMouseButton) -> Option<imgui::MouseButton> {
+pub(crate) fn map_bevy_mouse_button(button: BevyMouseButton) -> Option<imgui::MouseButton> {
     match button {
         BevyMouseButton::Left => Some(imgui::MouseButton::Left),
         BevyMouseButton::Right => Some(imgui::MouseButton::Right),
@@ -2130,7 +2193,7 @@ pub fn map_bevy_mouse_button(button: BevyMouseButton) -> Option<imgui::MouseButt
 
 /// Convert a Bevy physical key code into Dear ImGui's key space.
 #[must_use]
-pub fn map_bevy_key_code(key_code: KeyCode) -> Option<imgui::Key> {
+pub(crate) fn map_bevy_key_code(key_code: KeyCode) -> Option<imgui::Key> {
     use KeyCode as B;
     use imgui::Key as I;
 
@@ -2245,12 +2308,14 @@ pub fn map_bevy_key_code(key_code: KeyCode) -> Option<imgui::Key> {
     }
 }
 
+#[cfg(not(feature = "render"))]
 fn sync_window_metrics(context: &mut imgui::Context, window: &Window) {
     let io = context.io_mut();
     io.set_display_size(sanitized_window_display_size(window));
     io.set_display_framebuffer_scale(sanitized_window_framebuffer_scale(window));
 }
 
+#[cfg(not(feature = "render"))]
 fn set_framebuffer_scale(context: &mut imgui::Context, scale_factor: f32) {
     context
         .io_mut()
@@ -2281,6 +2346,7 @@ fn finite_non_negative_size(size: [f32; 2]) -> [f32; 2] {
     ]
 }
 
+#[cfg(not(feature = "render"))]
 fn sync_initial_focus(
     context: &mut imgui::Context,
     state: &mut ImguiInputState,
@@ -2303,6 +2369,7 @@ fn sync_initial_focus(
     apply_focus_event(context, state, window, focused);
 }
 
+#[cfg(not(feature = "render"))]
 fn prune_stale_window_state(
     context: &mut imgui::Context,
     state: &mut ImguiInputState,
@@ -2352,6 +2419,7 @@ fn prune_stale_window_state(
     }
 }
 
+#[cfg(not(feature = "render"))]
 fn release_input_for_missing_primary_window(
     context: &mut imgui::Context,
     state: &mut ImguiInputState,
@@ -2387,6 +2455,7 @@ fn clear_mouse_hovered_viewport(io: &mut imgui::Io) {
     io.set_mouse_hovered_viewport(imgui::Id::from(0));
 }
 
+#[cfg(not(feature = "render"))]
 fn apply_focus_event(
     context: &mut imgui::Context,
     state: &mut ImguiInputState,
@@ -2403,6 +2472,7 @@ fn apply_focus_event(
     }
 }
 
+#[cfg(not(feature = "render"))]
 fn apply_focus_events(
     context: &mut imgui::Context,
     state: &mut ImguiInputState,
@@ -2438,6 +2508,7 @@ fn apply_focus_events(
     state.focused_window = focused_window;
 }
 
+#[cfg(not(feature = "render"))]
 fn apply_keyboard_input(
     context: &mut imgui::Context,
     state: &mut ImguiInputState,
@@ -2461,46 +2532,21 @@ fn apply_keyboard_input(
     }
 }
 
+#[cfg(not(feature = "render"))]
 fn sync_modifier_events(io: &mut imgui::Io, state: &ImguiInputState) {
-    apply_modifier_events(
-        io,
-        (
-            state.any_ctrl_down(),
-            state.any_shift_down(),
-            state.any_alt_down(),
-            state.any_super_down(),
-        ),
-    );
+    apply_modifier_events(io, modifier_state(&state.pressed_keys));
 }
 
+#[cfg(not(feature = "render"))]
 impl ImguiInputState {
     fn has_sticky_input(&self) -> bool {
         !self.pressed_keys.is_empty()
             || !self.pressed_mouse_buttons.is_empty()
             || self.active_touch_id.is_some()
     }
-
-    fn any_ctrl_down(&self) -> bool {
-        self.pressed_keys.contains(&imgui::Key::LeftCtrl)
-            || self.pressed_keys.contains(&imgui::Key::RightCtrl)
-    }
-
-    fn any_shift_down(&self) -> bool {
-        self.pressed_keys.contains(&imgui::Key::LeftShift)
-            || self.pressed_keys.contains(&imgui::Key::RightShift)
-    }
-
-    fn any_alt_down(&self) -> bool {
-        self.pressed_keys.contains(&imgui::Key::LeftAlt)
-            || self.pressed_keys.contains(&imgui::Key::RightAlt)
-    }
-
-    fn any_super_down(&self) -> bool {
-        self.pressed_keys.contains(&imgui::Key::LeftSuper)
-            || self.pressed_keys.contains(&imgui::Key::RightSuper)
-    }
 }
 
+#[cfg(not(feature = "render"))]
 fn apply_touch_input(
     context: &mut imgui::Context,
     state: &mut ImguiInputState,
@@ -2545,6 +2591,7 @@ fn apply_touch_input(
     }
 }
 
+#[cfg(not(feature = "render"))]
 fn apply_ime_event(context: &mut imgui::Context, state: &mut ImguiInputState, event: &Ime) {
     match event {
         Ime::Commit { value, .. } => {
@@ -2587,6 +2634,15 @@ fn add_ime_text(io: &mut imgui::Io, text: &str) {
     }
 }
 
+fn modifier_state(keys: &HashSet<imgui::Key>) -> (bool, bool, bool, bool) {
+    (
+        keys.contains(&imgui::Key::LeftCtrl) || keys.contains(&imgui::Key::RightCtrl),
+        keys.contains(&imgui::Key::LeftShift) || keys.contains(&imgui::Key::RightShift),
+        keys.contains(&imgui::Key::LeftAlt) || keys.contains(&imgui::Key::RightAlt),
+        keys.contains(&imgui::Key::LeftSuper) || keys.contains(&imgui::Key::RightSuper),
+    )
+}
+
 fn apply_modifier_events(io: &mut imgui::Io, modifiers: (bool, bool, bool, bool)) {
     io.add_key_event(imgui::Key::ModCtrl, modifiers.0);
     io.add_key_event(imgui::Key::ModShift, modifiers.1);
@@ -2608,6 +2664,7 @@ fn release_sticky_keys_and_buttons(
     }
 }
 
+#[cfg(not(feature = "render"))]
 fn release_sticky_input(context: &mut imgui::Context, state: &mut ImguiInputState) {
     let io = context.io_mut();
     release_sticky_keys_and_buttons(
@@ -2622,3 +2679,7 @@ fn release_sticky_input(context: &mut imgui::Context, state: &mut ImguiInputStat
         io.add_mouse_button_event(imgui::MouseButton::Left, false);
     }
 }
+
+#[cfg(test)]
+#[path = "tests/input.rs"]
+mod input_tests;

@@ -9,6 +9,10 @@ use crate::ImguiPrimaryContextPass;
 use super::ownership::{ContextOwner, ImguiContextRetirementSink};
 
 /// Per-Context lifecycle and UI schedule configuration.
+///
+/// In headless builds without the `render` feature, every configured Context schedule is driven,
+/// but only the primary Context receives implicit primary-window input and capture updates.
+/// Explicit input routing for additional Contexts requires `render`.
 #[derive(Clone, Debug)]
 pub struct ImguiContextConfig {
     schedule: InternedScheduleLabel,
@@ -120,11 +124,17 @@ pub enum ImguiContextError {
         context_id: ContextId,
         source: dear_imgui_rs::render::RendererConsumerError,
     },
+    /// The completed Dear ImGui frame could not be captured for the render world.
+    #[cfg(feature = "render")]
+    SnapshotCapture {
+        context_id: ContextId,
+        source: dear_imgui_rs::render::snapshot::SnapshotError,
+    },
     /// Native viewport callbacks or their deferred command bridge failed for this Context.
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     ViewportBridge {
         context_id: ContextId,
-        source: crate::viewport::ImguiViewportBridgeError,
+        source: crate::viewport::ImguiViewportRuntimeError,
     },
     /// Native multi-viewport has no live application window to host this Context's main viewport.
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -134,17 +144,14 @@ pub enum ImguiContextError {
         context_id: ContextId,
         field: &'static str,
     },
-    /// Legacy admission error retained for source compatibility.
-    ///
-    /// Additional Contexts now receive their own viewport bridge when the native
-    /// multi-viewport backend is available.
-    AdditionalMultiViewportUnsupported,
+    /// Native multi-viewport was requested, but this build cannot provide native windows.
+    NativeMultiViewportUnavailable { context_id: ContextId },
     /// Core Context construction failed.
     ContextCreation(dear_imgui_rs::ImGuiError),
     /// Context removal has begun but backend-owned work is still live.
     RemovalPending {
         context_id: ContextId,
-        reason: super::ownership::ImguiContextIntoInnerErrorReason,
+        reason: super::ownership::ImguiContextRemovalPendingReason,
     },
 }
 
@@ -218,6 +225,11 @@ impl fmt::Display for ImguiContextError {
                 formatter,
                 "Context {context_id:?} stopped because snapshot completion failed: {source}"
             ),
+            #[cfg(feature = "render")]
+            Self::SnapshotCapture { context_id, source } => write!(
+                formatter,
+                "Context {context_id:?} stopped because its frame snapshot could not be captured: {source}"
+            ),
             #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
             Self::ViewportBridge { context_id, source } => write!(
                 formatter,
@@ -232,8 +244,10 @@ impl fmt::Display for ImguiContextError {
                 formatter,
                 "Context {context_id:?} backend field `{field}` is owned by another integration"
             ),
-            Self::AdditionalMultiViewportUnsupported => formatter
-                .write_str("native multi-viewport admission is unavailable for this Context"),
+            Self::NativeMultiViewportUnavailable { context_id } => write!(
+                formatter,
+                "Context {context_id:?} requests native multi-viewport, but this build cannot provide native windows"
+            ),
             Self::ContextCreation(error) => error.fmt(formatter),
             Self::RemovalPending { context_id, reason } => {
                 write!(
@@ -256,6 +270,8 @@ impl std::error::Error for ImguiContextError {
             Self::RendererOwnership { source, .. } => Some(source),
             #[cfg(feature = "render")]
             Self::RendererCompletion { source, .. } => Some(source),
+            #[cfg(feature = "render")]
+            Self::SnapshotCapture { source, .. } => Some(source),
             #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
             Self::ViewportBridge { source, .. } => Some(source),
             Self::ContextCreation(error) => Some(error),
@@ -267,6 +283,10 @@ impl std::error::Error for ImguiContextError {
 
 /// Admission failure that returns ownership of the rejected suspended Context.
 pub struct ImguiContextAdmissionError {
+    inner: Box<ImguiContextAdmissionFailure>,
+}
+
+struct ImguiContextAdmissionFailure {
     error: ImguiContextError,
     context: SuspendedContext,
 }
@@ -275,17 +295,25 @@ impl ImguiContextAdmissionError {
     /// Borrow the typed admission error.
     #[must_use]
     pub fn error(&self) -> &ImguiContextError {
-        &self.error
+        &self.inner.error
     }
 
     /// Recover the rejected suspended Context.
     #[must_use]
     pub fn into_context(self) -> SuspendedContext {
-        self.context
+        let ImguiContextAdmissionFailure { context, .. } = *self.inner;
+        context
     }
 
     pub(crate) fn new(error: ImguiContextError, context: SuspendedContext) -> Self {
-        Self { error, context }
+        Self {
+            inner: Box::new(ImguiContextAdmissionFailure { error, context }),
+        }
+    }
+
+    fn into_error(self) -> ImguiContextError {
+        let ImguiContextAdmissionFailure { error, .. } = *self.inner;
+        error
     }
 }
 
@@ -293,20 +321,20 @@ impl fmt::Debug for ImguiContextAdmissionError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("ImguiContextAdmissionError")
-            .field("error", &self.error)
+            .field("error", &self.inner.error)
             .finish_non_exhaustive()
     }
 }
 
 impl fmt::Display for ImguiContextAdmissionError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.error.fmt(formatter)
+        self.inner.error.fmt(formatter)
     }
 }
 
 impl std::error::Error for ImguiContextAdmissionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(&self.error)
+        Some(&self.inner.error)
     }
 }
 
@@ -410,7 +438,7 @@ impl ImguiContexts {
         }
         let context = SuspendedContext::try_create().map_err(ImguiContextError::ContextCreation)?;
         self.insert_suspended(context, config)
-            .map_err(|error| error.error)
+            .map_err(ImguiContextAdmissionError::into_error)
     }
 
     /// Insert an existing suspended Context without sharing a managed font atlas implicitly.
@@ -702,20 +730,20 @@ impl ImguiContexts {
         if let Some(active) = self.driving_context() {
             return Err(ImguiContextError::RawMutationWhileFrameOpen { context_id: active });
         }
-        for context_id in self.order.iter().copied() {
+        for context_id in &self.order {
             let slot = self
                 .slots
-                .get_mut(&context_id)
+                .get_mut(context_id)
                 .expect("drive order must reference a registered Context");
             slot.owner
                 .as_mut()
                 .expect("backend attachment requires idle Context owners")
                 .preflight_backend_attachment(&backend, &slot.config)?;
         }
-        for context_id in self.order.iter().copied() {
+        for context_id in &self.order {
             let slot = self
                 .slots
-                .get_mut(&context_id)
+                .get_mut(context_id)
                 .expect("drive order must reference a registered Context");
             let owner = slot
                 .owner
@@ -724,10 +752,10 @@ impl ImguiContexts {
             owner.preflight_renderer_admission(&backend)?;
         }
         #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-        for context_id in self.order.iter().copied() {
+        for context_id in &self.order {
             let slot = self
                 .slots
-                .get_mut(&context_id)
+                .get_mut(context_id)
                 .expect("drive order must reference a registered Context");
             if !slot.config.multi_viewport() {
                 continue;
@@ -741,20 +769,20 @@ impl ImguiContexts {
                 .expect("backend attachment requires idle Context owners")
                 .attach_context_viewport_bridge(registration)?;
         }
-        for context_id in self.order.iter().copied() {
+        for context_id in &self.order {
             let slot = self
                 .slots
-                .get_mut(&context_id)
+                .get_mut(context_id)
                 .expect("drive order must reference a registered Context");
             slot.owner
                 .as_mut()
                 .expect("renderer admission requires idle Context owners")
                 .commit_renderer_admission(&backend);
         }
-        for context_id in self.order.iter().copied() {
+        for context_id in &self.order {
             let slot = self
                 .slots
-                .get_mut(&context_id)
+                .get_mut(context_id)
                 .expect("drive order must reference a registered Context");
             slot.owner
                 .as_mut()

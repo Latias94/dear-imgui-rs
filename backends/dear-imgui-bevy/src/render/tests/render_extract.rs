@@ -1,5 +1,6 @@
 #![cfg(feature = "render")]
 
+use crate::test_util::imgui_context_guard;
 use bevy::prelude::GlobalTransform;
 use bevy_app::{App, Update};
 use bevy_asset::Assets;
@@ -24,10 +25,9 @@ use bevy_render::{
 use bevy_shader::Shader;
 use bevy_window::{PrimaryWindow, Window, WindowRef, WindowResolution};
 #[cfg(feature = "multi-viewport")]
-use dear_imgui_bevy::ImguiBackendConfig;
+use dear_imgui_bevy::ImguiPluginConfig;
 use dear_imgui_bevy::{
-    ImguiContextConfig, ImguiContexts, ImguiFrameOutput, ImguiPlugin, ImguiPrimaryContextPass,
-    ImguiUi,
+    ImguiContextConfig, ImguiContexts, ImguiPlugin, ImguiPrimaryContextPass, ImguiUi,
     render::{
         IMGUI_FRAGMENT_ENTRY_POINT, IMGUI_SHADER_HANDLE, IMGUI_SHADER_SOURCE,
         IMGUI_VERTEX_ENTRY_POINT, ImguiExtractedRenderFrame, ImguiPipelineKey,
@@ -40,15 +40,6 @@ use dear_imgui_bevy::{
     },
 };
 use dear_imgui_rs::{self as imgui, render::TextureBinding};
-use std::sync::{Mutex, OnceLock};
-
-fn imgui_context_guard() -> std::sync::MutexGuard<'static, ()> {
-    static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
-    GUARD
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
 
 struct ManagedTexture(imgui::ManagedTextureId);
 
@@ -296,16 +287,14 @@ fn render_extract_moves_context_owned_managed_frame_and_commits_once() {
 
     app.update();
 
-    let output = app.world().resource::<ImguiFrameOutput>();
-    let output = output
-        .get(context_id)
-        .expect("the primary Context should publish frame output");
-    assert_eq!(output.frame_index(), 1);
-    let epoch = output
-        .snapshot_epoch()
-        .expect("main world should publish a Context-owned snapshot epoch");
-    assert_eq!(epoch.sequence(), 1);
-    assert!(output.snapshot_error().is_none());
+    assert_eq!(
+        app.world()
+            .get_non_send::<ImguiContexts>()
+            .expect("the plugin must retain its Context registry")
+            .frame_index(context_id)
+            .expect("the primary Context must remain registered"),
+        1
+    );
 
     let extracted = app
         .sub_app(RenderApp)
@@ -348,18 +337,17 @@ fn render_extract_batches_independent_contexts_without_aliasing_shared_resources
 
     app.update();
 
-    let output = app.world().resource::<ImguiFrameOutput>();
+    let contexts = app
+        .world()
+        .get_non_send::<ImguiContexts>()
+        .expect("the plugin must retain its Context registry");
     for context_id in [primary_id, secondary_id] {
-        let context_output = output
-            .get(context_id)
-            .expect("every driven Context should publish independent frame output");
-        assert_eq!(context_output.frame_index(), 1);
-        let epoch = context_output
-            .snapshot_epoch()
-            .expect("every rendered Context should publish a snapshot epoch");
-        assert_eq!(epoch.context_id(), context_id);
-        assert_eq!(epoch.sequence(), 1);
-        assert!(context_output.snapshot_error().is_none());
+        assert_eq!(
+            contexts
+                .frame_index(context_id)
+                .expect("each Context must remain registered"),
+            1
+        );
     }
 
     let render_world = app.sub_app(RenderApp).world();
@@ -468,12 +456,14 @@ fn render_extract_clears_stale_snapshot_after_primary_window_is_removed() {
     app.world_mut().despawn(primary_window);
     app.update();
 
-    let output = app.world().resource::<ImguiFrameOutput>();
-    let context_output = output
-        .get(context_id)
-        .expect("the primary Context should retain its last completed output");
-    assert_eq!(context_output.frame_index(), 1);
-    assert!(context_output.snapshot_epoch().is_none());
+    assert_eq!(
+        app.world()
+            .get_non_send::<ImguiContexts>()
+            .expect("the plugin must retain its Context registry")
+            .frame_index(context_id)
+            .expect("the primary Context must remain registered"),
+        1
+    );
 
     let render_world = app.sub_app(RenderApp).world();
     let extracted = render_world.resource::<ImguiExtractedRenderFrame>();
@@ -540,11 +530,17 @@ fn render_extract_materializes_the_unique_auto_primary_camera() {
 }
 
 #[test]
-fn render_route_freezes_after_same_frame_camera_updates() {
+fn render_route_epoch_rejects_same_frame_camera_changes_until_the_next_snapshot() {
     let _guard = imgui_context_guard();
     let (mut app, _primary_window, camera, _texture_id) = app_with_primary_window();
     let context_id = primary_context_id(&app);
     let render_entity = render_entity_for_camera(&mut app, camera);
+    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
+
+    // Resolve the initial camera topology. The next frame must keep using this epoch even when
+    // Update and extraction publish a newer camera configuration later in that same frame.
+    app.update();
+
     app.add_systems(Update, move |mut cameras: Query<&mut Camera>| {
         cameras
             .get_mut(camera)
@@ -560,7 +556,23 @@ fn render_route_freezes_after_same_frame_camera_updates() {
                 .order = 13;
         },
     );
-    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
+
+    app.update();
+
+    let extracted = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<ImguiExtractedRenderFrame>();
+    assert!(
+        extracted.camera_targets(context_id).is_empty(),
+        "a snapshot must fail closed instead of borrowing a camera configuration from a newer route epoch"
+    );
+    assert!(
+        app.world()
+            .resource::<ImguiDiagnostics>()
+            .entries_for(ImguiDiagnosticOrigin::RenderExtraction)
+            .any(|diagnostic| diagnostic.kind() == &ImguiDiagnosticKind::StaleExtractedView)
+    );
 
     app.update();
 
@@ -585,6 +597,103 @@ fn render_route_freezes_after_same_frame_camera_updates() {
             .resource::<ImguiDiagnostics>()
             .entries_for(ImguiDiagnosticOrigin::RenderExtraction)
             .all(|diagnostic| diagnostic.kind() != &ImguiDiagnosticKind::StaleExtractedView)
+    );
+}
+
+#[test]
+fn render_route_epoch_keeps_same_frame_context_route_swaps_with_their_snapshots() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary_window, primary_camera, _texture_id) = app_with_primary_window();
+    let primary_context = primary_context_id(&app);
+    let secondary_context = add_secondary_context(&mut app);
+    let target =
+        NormalizedRenderTarget::Window(WindowRef::Entity(primary_window).normalize(None).unwrap());
+    let secondary_camera = app
+        .world_mut()
+        .spawn((
+            Camera {
+                order: 4,
+                ..Default::default()
+            },
+            RenderTarget::Window(WindowRef::Entity(primary_window)),
+            CameraRenderGraph::new(Core2d),
+        ))
+        .id();
+    install_render_view(
+        &mut app,
+        secondary_camera,
+        target,
+        4,
+        [1280, 720],
+        None,
+        TextureFormat::Rgba8UnormSrgb,
+        CameraMainTextureUsages::default().0,
+        Msaa::Off,
+    );
+    let primary_route = app
+        .world_mut()
+        .spawn(ImguiRenderRoute::new(primary_context, primary_camera))
+        .id();
+    let secondary_route = app
+        .world_mut()
+        .spawn(ImguiRenderRoute::new(secondary_context, secondary_camera))
+        .id();
+    app.add_systems(ImguiPrimaryContextPass, draw_legacy_texture);
+
+    app.update();
+
+    app.add_systems(
+        Update,
+        move |mut swapped: Local<bool>, mut routes: Query<&mut ImguiRenderRoute>| {
+            if *swapped {
+                return;
+            }
+            *swapped = true;
+            *routes
+                .get_mut(primary_route)
+                .expect("the primary route must remain live") =
+                ImguiRenderRoute::new(secondary_context, primary_camera);
+            *routes
+                .get_mut(secondary_route)
+                .expect("the secondary route must remain live") =
+                ImguiRenderRoute::new(primary_context, secondary_camera);
+        },
+    );
+
+    app.update();
+
+    {
+        let extracted = app
+            .sub_app(RenderApp)
+            .world()
+            .resource::<ImguiExtractedRenderFrame>();
+        assert_eq!(
+            extracted.camera_targets(primary_context)[0].camera,
+            primary_camera
+        );
+        assert_eq!(
+            extracted.camera_targets(secondary_context)[0].camera,
+            secondary_camera
+        );
+        assert!(
+            extracted.route_epoch() < app.world().resource::<ImguiResolvedRoutes>().epoch(),
+            "the extracted snapshots must retain the route epoch captured before Update"
+        );
+    }
+
+    app.update();
+
+    let extracted = app
+        .sub_app(RenderApp)
+        .world()
+        .resource::<ImguiExtractedRenderFrame>();
+    assert_eq!(
+        extracted.camera_targets(primary_context)[0].camera,
+        secondary_camera
+    );
+    assert_eq!(
+        extracted.camera_targets(secondary_context)[0].camera,
+        primary_camera
     );
 }
 
@@ -650,9 +759,10 @@ fn render_extract_prefers_an_explicit_route_over_auto_primary() {
     assert_eq!(targets[0].order, 0);
     assert_eq!(targets[0].camera_order, -100);
     assert_eq!(targets[0].target, primary_target);
-    assert_eq!(
-        targets[0].route_epoch,
-        app.world().resource::<ImguiResolvedRoutes>().epoch()
+    assert_eq!(targets[0].route_epoch, extracted.route_epoch());
+    assert!(
+        targets[0].route_epoch < app.world().resource::<ImguiResolvedRoutes>().epoch(),
+        "PostUpdate may publish the next route epoch only after the frame captured its topology"
     );
 }
 
@@ -731,7 +841,11 @@ fn render_extract_preserves_explicit_route_viewport_for_render_pass() {
             .map(|viewport| { (viewport.physical_position, viewport.physical_size) }),
         Some(([320, 0], [640, 360]))
     );
-    assert_eq!(draw.framebuffer_size, [1280, 720]);
+    assert_eq!(
+        draw.framebuffer_size,
+        [640, 360],
+        "Context metrics must match the routed camera viewport instead of the full target"
+    );
 }
 
 #[test]
@@ -1044,12 +1158,9 @@ fn renderer_prepare_routes_secondary_viewport_and_rejects_relocated_camera_marke
     let _guard = imgui_context_guard();
     let mut app = App::new();
     app.add_plugins(ExtractPlugin::default());
-    app.add_plugins(ImguiPlugin::new(ImguiBackendConfig {
-        name: "render-routing".to_owned(),
-        docking: true,
-        multi_viewport: true,
-        viewport_window: Default::default(),
-    }));
+    app.add_plugins(ImguiPlugin::new(
+        ImguiPluginConfig::default().with_multi_viewport(true),
+    ));
     app.sub_app_mut(RenderApp).update_schedule = Some(Render.intern());
     let context_id = primary_context_id(&app);
 
