@@ -460,7 +460,7 @@ pub(super) unsafe fn renderer_destroy_window(control: &RuntimeControl, viewport:
 pub(super) unsafe fn renderer_set_window_size(
     control: &RuntimeControl,
     viewport: *mut Viewport,
-    size: dear_imgui_rs::sys::ImVec2,
+    _size: dear_imgui_rs::sys::ImVec2,
 ) {
     if viewport.is_null() {
         control.record_fault(WgpuViewportError::InvalidViewport {
@@ -477,9 +477,15 @@ pub(super) unsafe fn renderer_set_window_size(
             return;
         }
     };
-    let pixels = super::logical_size_to_framebuffer([size.x, size.y], viewport.framebuffer_scale());
+    let pixels = match unsafe { platform_adapter::framebuffer_size(viewport) } {
+        Ok(pixels) => pixels,
+        Err(error) => {
+            control.record_fault(error);
+            return;
+        }
+    };
     let data = unsafe { &mut *pointer };
-    if data.config.width != pixels[0] || data.config.height != pixels[1] {
+    if data.size != pixels {
         let Some(globals) = control.globals() else {
             control.record_fault(WgpuViewportError::RuntimeDetached);
             return;
@@ -516,15 +522,30 @@ pub(super) unsafe fn renderer_render_window(control: &RuntimeControl, viewport: 
             .ok_or(WgpuViewportError::RendererNotInitialized)?;
         let device = backend.device.clone();
         let queue = backend.queue.clone();
+        let data = unsafe { &mut *data_pointer };
+        let framebuffer_size = unsafe { platform_adapter::framebuffer_size(viewport) }?;
+        if framebuffer_size != data.size {
+            reconfigure_surface(data, globals, framebuffer_size)?;
+        }
+        if data.targets.is_none() {
+            return Ok(());
+        }
         let raw_draw_data = viewport.draw_data();
         if raw_draw_data.is_null() {
             return Ok(());
         }
-        let data = unsafe { &mut *data_pointer };
         let draw_data = unsafe { dear_imgui_rs::render::DrawData::from_raw(&*raw_draw_data) };
 
         #[cfg(any(feature = "wgpu-29", feature = "wgpu-30"))]
-        let (frame, reconfigure_after_present) = match data.surface.get_current_texture() {
+        let acquisition = data
+            .surface
+            .as_ref()
+            .ok_or(WgpuViewportError::SurfaceOperationFailed {
+                operation: "acquire a released viewport surface",
+            })?
+            .get_current_texture();
+        #[cfg(any(feature = "wgpu-29", feature = "wgpu-30"))]
+        let (frame, reconfigure_after_present) = match acquisition {
             wgpu::CurrentSurfaceTexture::Success(frame) => (
                 frame,
                 surface_action(SurfaceEvent::Success) == SurfaceAction::RenderThenReconfigure,
@@ -586,7 +607,15 @@ pub(super) unsafe fn renderer_render_window(control: &RuntimeControl, viewport: 
         };
 
         #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
-        let (frame, reconfigure_after_present) = match data.surface.get_current_texture() {
+        let acquisition = data
+            .surface
+            .as_ref()
+            .ok_or(WgpuViewportError::SurfaceOperationFailed {
+                operation: "acquire a released viewport surface",
+            })?
+            .get_current_texture();
+        #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
+        let (frame, reconfigure_after_present) = match acquisition {
             Ok(frame) => {
                 let event = if frame.suboptimal {
                     SurfaceEvent::Suboptimal
@@ -650,9 +679,37 @@ pub(super) unsafe fn renderer_render_window(control: &RuntimeControl, viewport: 
             }
         };
 
+        let Some(targets) = data.targets.as_ref() else {
+            return Err(WgpuViewportError::SurfaceOperationFailed {
+                operation: "use released viewport render attachments",
+            });
+        };
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
+        let (color_view, resolve_target) = targets
+            .multisampled_color
+            .as_ref()
+            .map_or((&view, None), |multisampled| {
+                (&multisampled.view, Some(&view))
+            });
+        let depth_stencil_attachment = targets
+            .depth_stencil
+            .as_ref()
+            .zip(globals.depth_stencil_format)
+            .map(
+                |(attachment, format)| wgpu::RenderPassDepthStencilAttachment {
+                    view: &attachment.view,
+                    depth_ops: format.has_depth_aspect().then_some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: format.has_stencil_aspect().then_some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                },
+            );
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("dear-imgui-wgpu::viewport-encoder"),
         });
@@ -665,15 +722,15 @@ pub(super) unsafe fn renderer_render_window(control: &RuntimeControl, viewport: 
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("dear-imgui-wgpu::viewport-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
+                    view: color_view,
+                    resolve_target,
                     ops: wgpu::Operations {
                         load,
                         store: wgpu::StoreOp::Store,
                     },
                     depth_slice: None,
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment,
                 occlusion_query_set: None,
                 #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
                 multiview_mask: None,
@@ -682,8 +739,8 @@ pub(super) unsafe fn renderer_render_window(control: &RuntimeControl, viewport: 
             renderer.render_read_only_draw_data_with_fb_size(
                 draw_data,
                 &mut render_pass,
-                data.config.width,
-                data.config.height,
+                targets.config.width,
+                targets.config.height,
                 false,
                 unsafe { dear_imgui_rs::sys::igGetPlatformIO_Nil() },
             )?;

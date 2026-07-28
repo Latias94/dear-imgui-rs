@@ -134,6 +134,18 @@ pub enum WgpuViewportError {
         format: wgpu::TextureFormat,
         color_space: &'static str,
     },
+    /// The renderer's multisample count cannot describe a WGPU render attachment.
+    #[error("WGPU viewport attachments require a non-zero multisample count, received {count}")]
+    InvalidMultisampleCount { count: u32 },
+    /// A renderer attachment format does not support the configured sample count.
+    #[error(
+        "WGPU {attachment} format {format:?} does not support RENDER_ATTACHMENT at sample count {sample_count}"
+    )]
+    UnsupportedViewportAttachment {
+        attachment: &'static str,
+        format: wgpu::TextureFormat,
+        sample_count: u32,
+    },
     /// Surface acquisition returned a terminal result.
     #[error("WGPU viewport surface acquisition was rejected: {event}")]
     SurfaceRejected { event: &'static str },

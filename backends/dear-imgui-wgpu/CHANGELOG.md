@@ -31,6 +31,7 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 - Winit and SDL3 multi-viewport renderer callbacks now verify `RendererUserData` ownership before reading or freeing per-viewport WGPU data, ignoring foreign backend pointers instead of treating them as `dear-imgui-wgpu` state.
 - Surface acquisition now handles lost, outdated, suboptimal, timeout, occluded, validation, and out-of-memory outcomes without presenting an invalid frame.
+- Secondary viewports now create MSAA resolve and depth-stencil attachments that match the renderer pipeline, use authoritative physical framebuffer sizes, suspend at zero size, and release the old surface bundle before loss recovery.
 - Shutdown is a no-op for contexts owned by another renderer backend and fails transactionally if an active runtime no longer owns its complete callback table.
 - Device-object invalidation now recreates render resources, shaders, the fallback texture, and the pipeline before the next render, then uploads managed textures again.
 - Replayed create requests upload their current pixels instead of accepting stale GPU contents, and successful destroy reconciliation releases renderer tombstones instead of accumulating them for the lifetime of the device.

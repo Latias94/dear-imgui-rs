@@ -84,6 +84,12 @@ explicitly and reject a render-target format that the surface cannot present in 
 main surface in the same sRGB contract; HDR or wide-gamut output needs an application-owned color
 conversion pass rather than a different secondary-surface setting.
 
+Secondary viewports inherit the renderer pipeline's multisample and depth-stencil contract. The
+runtime owns matching per-window MSAA resolve and depth-stencil attachments, suspends acquisition
+while a native framebuffer has a zero dimension, and rebuilds the complete surface bundle from
+the platform owner's current physical size after resize, DPI changes, or surface loss. Attachment
+fails transactionally when the adapter cannot support the configured formats and sample count.
+
 For SDL3, initialize `Sdl3PlatformBackend` first and then call
 `dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRuntime::attach(imgui, &platform, renderer)`.
 The safe constructors require the matching live platform owner and reject Context mismatches,
