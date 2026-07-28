@@ -3,7 +3,7 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use dear_imgui_rs::{ContextId, ContextLifecycle};
-use winit::window::Window;
+use winit::window::{Window, WindowId};
 
 use super::WinitPlatformError;
 use super::runtime::RuntimeControl;
@@ -225,6 +225,27 @@ pub(super) fn with_viewport_data<R>(
             && unsafe { entry.native_fields_are_owned() }
     })?;
     Some(callback(&entry.data))
+}
+
+/// Resolves a native Winit window through the authoritative runtime registry.
+///
+/// Dear ImGui's public `PlatformIO.Viewports` vector is a per-frame visible snapshot and may omit
+/// hidden or transitional viewports. Event routing must therefore resolve by the Winit window ID
+/// first, then validate the retained native ownership before exposing the viewport pointer.
+pub(super) fn with_viewport_data_for_window<R>(
+    control: &RuntimeControl,
+    window_id: WindowId,
+    callback: impl FnOnce(*mut dear_imgui_rs::sys::ImGuiViewport, &ViewportData) -> R,
+) -> Option<R> {
+    let viewports = control.viewports.borrow();
+    let entry = viewports
+        .iter()
+        .find(|entry| !entry.data.is_main() && entry.data.window().id() == window_id)?;
+    let viewport = unsafe { entry.resolve_viewport()? };
+    if unsafe { entry.native_ownership_loss(viewport).is_some() } {
+        return None;
+    }
+    Some(callback(viewport, &entry.data))
 }
 
 pub(super) fn window_for_viewport(

@@ -641,6 +641,34 @@ impl WinitPlatformControl {
     }
 
     #[cfg(feature = "multi-viewport")]
+    fn note_runtime_mouse_button(
+        &self,
+        button: winit::event::MouseButton,
+        state: winit::event::ElementState,
+    ) {
+        let Some(button) = crate::input::to_imgui_mouse_button(button) else {
+            return;
+        };
+        if let Some(runtime) = self.runtime.borrow().as_ref() {
+            runtime.note_mouse_button(button, state.is_pressed());
+        }
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    fn note_runtime_cursor_left(&self) {
+        if let Some(runtime) = self.runtime.borrow().as_ref() {
+            runtime.note_cursor_left();
+        }
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    fn note_runtime_cursor_available(&self) {
+        if let Some(runtime) = self.runtime.borrow().as_ref() {
+            runtime.note_cursor_available();
+        }
+    }
+
+    #[cfg(feature = "multi-viewport")]
     pub(crate) fn refresh_runtime_state(
         &self,
         context: &mut Context,
@@ -654,6 +682,7 @@ impl WinitPlatformControl {
         let Some(runtime) = runtime else {
             return Ok(());
         };
+        runtime.flush_pending_mouse_leave(context);
         let result = runtime.refresh_monitors(context);
         #[cfg(target_os = "windows")]
         let result = result.and_then(|()| runtime.refresh_native_mouse(context));
@@ -1279,6 +1308,7 @@ impl WinitPlatform {
                 #[cfg(feature = "multi-viewport")]
                 {
                     if self.control.has_live_runtime() {
+                        self.control.note_runtime_cursor_available();
                         let Some(position) = crate::multi_viewport::client_physical_to_screen_pos(
                             window,
                             [position.x, position.y],
@@ -1298,15 +1328,31 @@ impl WinitPlatform {
                 events::handle_cursor_moved([position.x, position.y], imgui_ctx)
             }
             WindowEvent::MouseInput { button, state, .. } => {
+                #[cfg(feature = "multi-viewport")]
+                if self.control.has_live_runtime() {
+                    self.control.note_runtime_mouse_button(*button, *state);
+                }
                 events::handle_mouse_button(*button, *state, imgui_ctx)
             }
             WindowEvent::MouseWheel { delta, .. } => events::handle_mouse_wheel(*delta, imgui_ctx),
-            // When cursor leaves the window, tell ImGui the mouse is unavailable so
-            // software cursor (if enabled) won’t be drawn at the last position.
+            // Single-window mode invalidates immediately. Multi-viewport mode delays the leave
+            // so an in-flight drag can enter another owned native window without losing position.
             WindowEvent::CursorLeft { .. } => {
+                #[cfg(feature = "multi-viewport")]
+                if self.control.has_live_runtime() {
+                    self.control.note_runtime_cursor_left();
+                    return false;
+                }
                 {
                     let io = imgui_ctx.io_mut();
                     io.add_mouse_pos_event([-f32::MAX, -f32::MAX]);
+                }
+                false
+            }
+            WindowEvent::CursorEntered { .. } => {
+                #[cfg(feature = "multi-viewport")]
+                if self.control.has_live_runtime() {
+                    self.control.note_runtime_cursor_available();
                 }
                 false
             }

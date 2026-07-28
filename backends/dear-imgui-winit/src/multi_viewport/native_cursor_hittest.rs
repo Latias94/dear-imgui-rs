@@ -10,6 +10,12 @@ pub(super) struct NativeMouseState {
     pub(super) focused_window: Option<usize>,
 }
 
+#[cfg(target_os = "windows")]
+struct WindowsCursorHitTestState {
+    input_enabled: std::sync::atomic::AtomicBool,
+    no_focus_on_click: std::sync::atomic::AtomicBool,
+}
+
 pub(super) struct NativeCursorHitTest {
     #[cfg(target_os = "windows")]
     windows: windows::WindowsCursorHitTest,
@@ -51,6 +57,25 @@ impl NativeCursorHitTest {
                     message: error.to_string(),
                 }
             })
+        }
+    }
+
+    pub(super) fn set_no_focus_on_click(
+        &self,
+        window: &Window,
+        enabled: bool,
+    ) -> Result<(), WinitPlatformError> {
+        #[cfg(target_os = "windows")]
+        {
+            let _ = window;
+            self.windows.set_no_focus_on_click(enabled);
+            Ok(())
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (window, enabled);
+            Ok(())
         }
     }
 
@@ -119,8 +144,8 @@ mod windows {
     use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         BringWindowToTop, GetCursorPos, GetForegroundWindow, HTTRANSPARENT, HWND_TOP,
-        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetForegroundWindow, SetWindowPos, WM_NCDESTROY,
-        WM_NCHITTEST, WindowFromPoint,
+        MA_NOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetForegroundWindow, SetWindowPos,
+        WM_MOUSEACTIVATE, WM_NCDESTROY, WM_NCHITTEST, WindowFromPoint,
     };
     use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use winit::window::Window;
@@ -129,15 +154,18 @@ mod windows {
 
     pub(super) struct WindowsCursorHitTest {
         hwnd: HWND,
-        state: Box<AtomicBool>,
+        state: Box<super::WindowsCursorHitTestState>,
         subclass_id: usize,
     }
 
     impl WindowsCursorHitTest {
         pub(super) fn install(window: &Window) -> Result<Self, WinitPlatformError> {
             let hwnd = window_handle(window)?;
-            let state = Box::new(AtomicBool::new(true));
-            let subclass_id = state.as_ref() as *const AtomicBool as usize;
+            let state = Box::new(super::WindowsCursorHitTestState {
+                input_enabled: AtomicBool::new(true),
+                no_focus_on_click: AtomicBool::new(false),
+            });
+            let subclass_id = state.as_ref() as *const super::WindowsCursorHitTestState as usize;
             let installed = unsafe {
                 SetWindowSubclass(
                     hwnd,
@@ -168,7 +196,13 @@ mod windows {
         }
 
         pub(super) fn set_enabled(&self, enabled: bool) {
-            self.state.store(enabled, Ordering::Release);
+            self.state.input_enabled.store(enabled, Ordering::Release);
+        }
+
+        pub(super) fn set_no_focus_on_click(&self, enabled: bool) {
+            self.state
+                .no_focus_on_click
+                .store(enabled, Ordering::Release);
         }
     }
 
@@ -188,10 +222,15 @@ mod windows {
         subclass_id: usize,
         reference_data: usize,
     ) -> LRESULT {
-        let input_enabled = unsafe { (reference_data as *const AtomicBool).as_ref() }
-            .is_none_or(|state| state.load(Ordering::Acquire));
+        let state = unsafe { (reference_data as *const super::WindowsCursorHitTestState).as_ref() };
+        let input_enabled = state.is_none_or(|state| state.input_enabled.load(Ordering::Acquire));
         if message == WM_NCHITTEST && !input_enabled {
             return HTTRANSPARENT as LRESULT;
+        }
+        if message == WM_MOUSEACTIVATE
+            && state.is_some_and(|state| state.no_focus_on_click.load(Ordering::Acquire))
+        {
+            return MA_NOACTIVATE as LRESULT;
         }
         if message == WM_NCDESTROY {
             unsafe {
@@ -303,8 +342,11 @@ mod windows {
 
         #[test]
         fn no_inputs_maps_only_hit_testing_to_transparent() {
-            let enabled = AtomicBool::new(false);
-            let reference_data = &enabled as *const AtomicBool as usize;
+            let state = super::super::WindowsCursorHitTestState {
+                input_enabled: AtomicBool::new(false),
+                no_focus_on_click: AtomicBool::new(false),
+            };
+            let reference_data = &state as *const super::super::WindowsCursorHitTestState as usize;
 
             assert_eq!(
                 unsafe {
@@ -318,6 +360,29 @@ mod windows {
                     )
                 },
                 HTTRANSPARENT as LRESULT
+            );
+        }
+
+        #[test]
+        fn no_focus_on_click_returns_no_activate() {
+            let state = super::super::WindowsCursorHitTestState {
+                input_enabled: AtomicBool::new(true),
+                no_focus_on_click: AtomicBool::new(true),
+            };
+            let reference_data = &state as *const super::super::WindowsCursorHitTestState as usize;
+
+            assert_eq!(
+                unsafe {
+                    cursor_hittest_subclass(
+                        std::ptr::null_mut(),
+                        WM_MOUSEACTIVATE,
+                        0,
+                        0,
+                        1,
+                        reference_data,
+                    )
+                },
+                MA_NOACTIVATE as LRESULT
             );
         }
     }

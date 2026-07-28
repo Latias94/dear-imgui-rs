@@ -248,13 +248,12 @@ required by Dear ImGui. Runtime construction likewise rejects non-desktop target
 window systems are Windows, macOS, and Linux/X11. Windows and macOS honor
 `NO_FOCUS_ON_APPEARING` by creating secondary windows inactive and deciding focus from the final
 flags at show time. Linux/X11 accepts that flag without rejecting the viewport, but its window
-manager controls the final focus behavior. Winit has no API that can guarantee
-`NO_FOCUS_ON_CLICK`, so that request fails closed with
-`WinitPlatformError::UnsupportedViewportFlag` and closes the affected viewport instead of silently
-changing click-focus behavior. Live decoration and top-most changes are synchronized; Windows also
-updates taskbar visibility live, while X11 rejects a live `NO_TASK_BAR_ICON` transition because its
-window type can only be selected at creation. Platforms without a Winit taskbar API reject
-`NO_TASK_BAR_ICON` at creation instead of silently ignoring it.
+manager controls the final focus behavior. `NO_FOCUS_ON_CLICK` is accepted as a platform policy:
+Windows installs a native `WM_MOUSEACTIVATE` hook that returns `MA_NOACTIVATE`, while platforms
+without an equivalent Winit hook treat it as best effort. Live decoration and top-most changes are
+synchronized; Windows also updates taskbar visibility live, while X11 rejects a live
+`NO_TASK_BAR_ICON` transition because its window type can only be selected at creation. Platforms
+without a Winit taskbar API reject `NO_TASK_BAR_ICON` at creation instead of silently ignoring it.
 
 Current support matrix:
 

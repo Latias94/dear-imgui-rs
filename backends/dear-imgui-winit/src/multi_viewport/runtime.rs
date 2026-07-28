@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use dear_imgui_rs::{
     Context, ContextAttachmentTeardownError, ContextBinding, ContextBindingError, ContextDestroyed,
-    ContextTeardown,
+    ContextId, ContextTeardown,
 };
 use winit::event::Event;
 use winit::event_loop::ActiveEventLoop;
@@ -137,7 +137,42 @@ pub(crate) struct RuntimeControl {
     fault: RefCell<Option<WinitPlatformError>>,
     monitor_ownership: RefCell<Option<MonitorOwnership>>,
     main_window: RefCell<Option<Arc<Window>>>,
+    mouse_leave: Cell<MouseLeaveState>,
     pub(super) viewports: RefCell<Vec<super::registry::ViewportEntry>>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) struct MouseLeaveState {
+    buttons_down: u8,
+    pending: bool,
+}
+
+impl MouseLeaveState {
+    pub(super) fn note_button(&mut self, button: dear_imgui_rs::input::MouseButton, pressed: bool) {
+        let mask = 1_u8 << (button as u8);
+        if pressed {
+            self.buttons_down |= mask;
+        } else {
+            self.buttons_down &= !mask;
+        }
+    }
+
+    pub(super) fn note_cursor_left(&mut self) {
+        self.pending = true;
+    }
+
+    pub(super) fn note_cursor_available(&mut self) {
+        self.pending = false;
+    }
+
+    pub(super) fn take_invalidation_due(&mut self) -> bool {
+        if self.pending && self.buttons_down == 0 {
+            self.pending = false;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 impl RuntimeControl {
@@ -159,6 +194,7 @@ impl RuntimeControl {
             fault: RefCell::new(None),
             monitor_ownership: RefCell::new(None),
             main_window: RefCell::new(Some(main_window)),
+            mouse_leave: Cell::new(MouseLeaveState::default()),
             viewports: RefCell::new(Vec::new()),
         }
     }
@@ -178,6 +214,7 @@ impl RuntimeControl {
             fault: RefCell::new(None),
             monitor_ownership: RefCell::new(None),
             main_window: RefCell::new(None),
+            mouse_leave: Cell::new(MouseLeaveState::default()),
             viewports: RefCell::new(Vec::new()),
         }
     }
@@ -518,6 +555,39 @@ impl RuntimeControl {
 
     pub(super) fn main_window(&self) -> Option<Arc<Window>> {
         self.main_window.borrow().clone()
+    }
+
+    pub(crate) fn note_mouse_button(
+        &self,
+        button: dear_imgui_rs::input::MouseButton,
+        pressed: bool,
+    ) {
+        let mut state = self.mouse_leave.get();
+        state.note_button(button, pressed);
+        self.mouse_leave.set(state);
+    }
+
+    pub(crate) fn note_cursor_left(&self) {
+        let mut state = self.mouse_leave.get();
+        state.note_cursor_left();
+        self.mouse_leave.set(state);
+    }
+
+    pub(crate) fn note_cursor_available(&self) {
+        let mut state = self.mouse_leave.get();
+        state.note_cursor_available();
+        self.mouse_leave.set(state);
+    }
+
+    pub(crate) fn flush_pending_mouse_leave(&self, context: &mut Context) {
+        let mut state = self.mouse_leave.get();
+        let invalidation_due = state.take_invalidation_due();
+        self.mouse_leave.set(state);
+        if invalidation_due {
+            let io = context.io_mut();
+            io.add_mouse_pos_event([-f32::MAX, -f32::MAX]);
+            io.add_mouse_viewport_event(dear_imgui_rs::Id::default());
+        }
     }
 
     pub(crate) fn apply_cursor_settings(&self, settings: CursorSettings) {
@@ -916,6 +986,22 @@ impl WinitPlatformRuntime {
         self.control
             .main_window()
             .ok_or(WinitPlatformError::RuntimeDetached)
+    }
+
+    /// Returns the Dear ImGui Context identity owned by this platform runtime.
+    pub fn context_id(&self) -> ContextId {
+        self.control.binding.id()
+    }
+
+    /// Validates that this runtime still owns the active Winit viewport platform contract.
+    ///
+    /// Renderer backends use this before interpreting `PlatformHandle` values as Winit windows.
+    /// A runtime that has shut down cannot validate even if another platform later attaches to
+    /// the same Context.
+    pub fn validate_renderer_owner(&self, context: &Context) -> Result<(), WinitPlatformError> {
+        self.ensure_context(context)?;
+        self.poll_fault()?;
+        self.ensure_attached()
     }
 
     #[cfg(test)]

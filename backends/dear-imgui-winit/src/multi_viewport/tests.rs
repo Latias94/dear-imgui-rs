@@ -14,7 +14,7 @@ use super::callbacks::{
 };
 use super::registry::preflight_viewport_ownership;
 use super::runtime::{
-    ConstructionStage, RuntimeState, WinitPlatformRuntime,
+    ConstructionStage, MouseLeaveState, RuntimeState, WinitPlatformRuntime,
     apply_raw_io_coordinate_contract_for_test,
 };
 use crate::test_util::test_sync::lock_context;
@@ -470,6 +470,33 @@ fn coordinate_contract_transition_restores_metrics_and_invalidates_pointer_cache
 }
 
 #[test]
+fn delayed_mouse_leave_invalidates_only_after_buttons_are_released() {
+    let mut state = MouseLeaveState::default();
+
+    state.note_cursor_left();
+    assert!(state.take_invalidation_due());
+    assert!(!state.take_invalidation_due());
+
+    state.note_button(dear_imgui_rs::input::MouseButton::Left, true);
+    state.note_cursor_left();
+    assert!(!state.take_invalidation_due());
+    state.note_button(dear_imgui_rs::input::MouseButton::Left, false);
+    assert!(state.take_invalidation_due());
+}
+
+#[test]
+fn entering_another_viewport_cancels_a_delayed_mouse_leave() {
+    let mut state = MouseLeaveState::default();
+    state.note_button(dear_imgui_rs::input::MouseButton::Left, true);
+    state.note_cursor_left();
+
+    state.note_cursor_available();
+    state.note_button(dear_imgui_rs::input::MouseButton::Left, false);
+
+    assert!(!state.take_invalidation_due());
+}
+
+#[test]
 fn monitor_refresh_replaces_owned_storage_and_restores_the_prior_publication() {
     let _guard = lock_context();
     let mut context = Context::create();
@@ -742,7 +769,7 @@ fn unsupported_viewport_policy_fault_requests_close() {
     let runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
     let mut viewport = dear_imgui_rs::sys::ImGuiViewport::default();
     let error = WinitPlatformError::UnsupportedViewportFlag {
-        flag: "NoFocusOnClick",
+        flag: "NoTaskBarIcon",
         operation: "window creation",
     };
 
@@ -862,6 +889,21 @@ fn direct_context_platform_teardown_releases_the_runtime_slot_after_postflight_e
         .expect("a postflight failure must not retain the detached runtime slot");
     reopened.shutdown(&mut context).unwrap();
     platform.shutdown(&mut context).unwrap();
+}
+
+#[test]
+fn renderer_owner_validation_rejects_a_shutdown_runtime_with_the_same_context_id() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let mut runtime = WinitPlatformRuntime::new_for_test(&mut context).unwrap();
+
+    assert_eq!(runtime.validate_renderer_owner(&context), Ok(()));
+    runtime.shutdown(&mut context).unwrap();
+
+    assert_eq!(
+        runtime.validate_renderer_owner(&context),
+        Err(WinitPlatformError::RuntimeDetached)
+    );
 }
 
 #[test]
