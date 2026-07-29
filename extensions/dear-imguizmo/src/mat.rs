@@ -1,5 +1,14 @@
 use dear_imguizmo_sys as sys;
 
+/// A world-space picking ray computed from a mouse position.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MouseRay {
+    /// World-space point on the camera near plane.
+    pub origin: [f32; 3],
+    /// Normalized world-space direction.
+    pub direction: [f32; 3],
+}
+
 /// Trait to abstract over 4x4 column-major matrices used by ImGuizmo.
 pub trait Mat4Like: Sized {
     fn to_cols_array(&self) -> [f32; 16];
@@ -130,4 +139,105 @@ pub fn recompose_matrix<T: Mat4Like>(
         );
     }
     T::from_cols_array(out)
+}
+
+/// Compute a world-space picking ray without reading ImGui frame state.
+///
+/// Returns `None` when the rectangle is empty, an input is not finite, or the
+/// matrices cannot produce a finite ray.
+#[must_use]
+pub fn compute_mouse_ray<V: Mat4Like, P: Mat4Like>(
+    view: &V,
+    projection: &P,
+    mouse_position: impl Into<[f32; 2]>,
+    rect_position: impl Into<[f32; 2]>,
+    rect_size: impl Into<[f32; 2]>,
+) -> Option<MouseRay> {
+    let mouse_position = mouse_position.into();
+    let rect_position = rect_position.into();
+    let rect_size = rect_size.into();
+    let inputs_are_finite = mouse_position
+        .iter()
+        .chain(&rect_position)
+        .chain(&rect_size)
+        .all(|value| value.is_finite());
+    if !inputs_are_finite || rect_size[0] <= 0.0 || rect_size[1] <= 0.0 {
+        return None;
+    }
+
+    let view = view.to_cols_array();
+    let projection = projection.to_cols_array();
+    let mut origin = [0.0; 3];
+    let mut direction = [0.0; 3];
+    unsafe {
+        sys::ImGuizmo_ComputeMouseRay(
+            view.as_ptr(),
+            projection.as_ptr(),
+            sys::ImVec2_c {
+                x: mouse_position[0],
+                y: mouse_position[1],
+            },
+            sys::ImVec2_c {
+                x: rect_position[0],
+                y: rect_position[1],
+            },
+            sys::ImVec2_c {
+                x: rect_size[0],
+                y: rect_size[1],
+            },
+            origin.as_mut_ptr(),
+            direction.as_mut_ptr(),
+        );
+    }
+
+    origin
+        .iter()
+        .chain(&direction)
+        .all(|value| value.is_finite())
+        .then_some(MouseRay { origin, direction })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MouseRay, compute_mouse_ray};
+
+    #[test]
+    fn computes_center_ray_from_identity_matrices() {
+        let identity = <[f32; 16] as super::Mat4Like>::identity();
+        let ray = compute_mouse_ray(
+            &identity,
+            &identity,
+            [60.0, 45.0],
+            [10.0, 20.0],
+            [100.0, 50.0],
+        );
+
+        let MouseRay { origin, direction } = ray.expect("identity matrices produce a ray");
+        for (actual, expected) in origin.into_iter().zip([0.0, 0.0, 0.0]) {
+            assert!((actual - expected).abs() < 1.0e-6);
+        }
+        for (actual, expected) in direction.into_iter().zip([0.0, 0.0, 1.0]) {
+            assert!((actual - expected).abs() < 1.0e-6);
+        }
+    }
+
+    #[test]
+    fn rejects_empty_or_non_finite_rectangles() {
+        let identity = <[f32; 16] as super::Mat4Like>::identity();
+
+        assert_eq!(
+            compute_mouse_ray(&identity, &identity, [0.0, 0.0], [0.0, 0.0], [0.0, 1.0]),
+            None
+        );
+        assert_eq!(
+            compute_mouse_ray(
+                &identity,
+                &identity,
+                [0.0, 0.0],
+                [0.0, 0.0],
+                [f32::NAN, 1.0],
+            ),
+            None
+        );
+    }
 }
