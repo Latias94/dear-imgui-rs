@@ -8,7 +8,7 @@ dependencies are published before their dependents.
 Publishing Order:
 1. Tooling: dear-imgui-build-support
 2. Core: dear-imgui-sys -> dear-imgui-rs
-3. Backends: dear-imgui-winit, dear-imgui-wgpu, dear-imgui-glow, dear-imgui-ash, dear-imgui-sdl3
+3. Backends: dear-imgui-winit, dear-imgui-sdl3, dear-imgui-wgpu, dear-imgui-glow, dear-imgui-ash
 4. Extensions (sys): dear-implot-sys, dear-imnodes-sys, dear-node-editor-sys,
                      dear-imguizmo-sys, dear-implot3d-sys, dear-imguizmo-quat-sys,
                      dear-imgui-test-engine-sys
