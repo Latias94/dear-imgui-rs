@@ -30,22 +30,24 @@ Use primary sources only when determining what changed upstream.
 ### Refresh submodules and pregenerated bindings
 
 ```powershell
+$env:CARGO_BUILD_JOBS = '1'
+$env:LIBCLANG_PATH = '<canonical LLVM 14 bin directory>'
 python tools/update_submodule_and_bindings.py `
-  --crates all `
-  --submodules update `
+  --crates dear-imgui-sys,dear-imgui-test-engine-sys `
+  --submodules auto `
   --profile release `
   --cimgui-branch docking_inter `
-  --cimplot-branch master `
-  --cimplot3d-branch main `
-  --cimnodes-branch master `
-  --cimnodes-editor-branch main `
-  --cimguizmo-branch master `
   --imgui-test-engine-branch main `
-  --wasm `
-  --wasm-ext implot,implot3d,imnodes,imguizmo,imguizmo-quat
+  --wasm
 ```
 
-Narrow `--crates` / `--wasm-ext` if only part of the stack changed.
+Use the libclang major version selected by repository CI or binding-generation documentation; do not substitute a newer local install just because it is available. Expand `--crates` and the upstream branch arguments only when those independent libraries are part of the requested upgrade. Core WASM regeneration covers the supported ImGui-dependent extension profiles, so the legacy `--wasm-ext` compatibility argument is normally unnecessary.
+
+Verify that every generated file carries the expected source revision and deterministic hash before editing the safe layer:
+
+```powershell
+cargo run -p xtask -- verify-bindings --allow-dirty
+```
 
 ### Bump unified release version
 
@@ -76,6 +78,9 @@ Run that in each standalone example workspace that carries its own `Cargo.lock`.
    - Compare new sys symbols against `dear-imgui-rs`, `dear-implot`, `dear-implot3d`, `dear-imnodes`, and `dear-imgui-test-engine`.
    - For `dear-node-editor`, audit the local `dne_*` C ABI shim first; do not expose upstream `NodeId*` / `PinId*` / `LinkId*` helper-pointer APIs directly.
    - Audit new enums, flags, struct fields, style/spec arrays, callback setters, and renamed upstream items.
+   - Audit removed functions and changed return types as source-breaking changes; generated code compiling does not prove the old safe wrapper still models upstream behavior.
+   - Prefer transparent wrappers over handwritten native structure mirrors. If a mirror is required, validate field offsets and a semantic sentinel that distinguishes count, frame, ID, and pointer fields; size/alignment assertions alone cannot catch same-sized substitutions.
+   - Trace hidden queue, ownership, and lifecycle fields through upstream implementation code. Check native auto-transitions against Rust sidecars, renderer feedback, abandoned work, retries, and teardown.
    - If the new sys surface makes the old safe shape awkward, refactor the safe layer instead of layering compatibility hacks.
 
 2. Backend and platform impact
@@ -88,6 +93,7 @@ Run that in each standalone example workspace that carries its own `Cargo.lock`.
    - Update `extensions/dear-imgui-test-engine-sys/third-party/imgui_test_engine`.
    - Check `dear-imgui-sys` `test-engine` feature integration and hook files.
    - Validate `dear-imgui-test-engine` still links and its bindings remain pregenerated.
+   - Compare the complete presentation lifecycle with upstream: render, `pre_swap`, present/swap, then `post_swap`. Exercise both the bounded runner and at least one real presentation integration when those hooks change.
 
 4. Deprecated removals
    - Search `CHANGELOG.md` for deprecations that promised removal in the target release.
@@ -111,8 +117,11 @@ Run the smallest set that fully covers the upgraded surface.
 ### Baseline
 
 ```powershell
-cargo fmt --all
+$env:CARGO_BUILD_JOBS = '1'
+cargo run -p xtask -- verify-bindings --allow-dirty
+cargo fmt --all -- --check
 cargo check --workspace
+python tools/api_surface_report.py --check
 python tools/pre_publish_check.py
 python tools/publish.py --dry-run
 ```
@@ -120,8 +129,8 @@ python tools/publish.py --dry-run
 ### Recommended targeted tests
 
 ```powershell
-cargo nextest run -p dear-imgui-rs -p dear-implot -p dear-implot3d -p dear-imnodes
-cargo test -p dear-imgui-test-engine --lib
+cargo nextest run -p dear-imgui-rs -p dear-implot -p dear-implot3d -p dear-imnodes -p dear-imgui-test-engine -p dear-imgui-test-engine-sys --test-threads=1
+cargo check -p dear-imgui-rs --features wasm --target wasm32-unknown-unknown
 ```
 
 ### Package/publish smoke checks

@@ -12,8 +12,9 @@ Read `references/workspace-upgrade-checklist.md` before making changes.
 ## Quick start
 
 1. Confirm the requested upstream targets and whether this is just an integration bump or a release cut.
-2. Use primary sources for upstream changes: Dear ImGui release notes / changelog, `cimgui`, `cimplot`, `cimplot3d`, and `imgui_test_engine` commits or changelogs.
-3. Prefer the repository scripts for submodule refresh, bindings generation, version bumps, pre-publish checks, and publishing.
+2. Confirm the repository's canonical binding generator, libclang major version, target profiles, and current clean verification hashes before moving any submodule. A different libclang version may produce a valid but non-canonical binding diff.
+3. Use primary sources for upstream changes: Dear ImGui release notes / changelog, `cimgui`, `cimplot`, `cimplot3d`, and `imgui_test_engine` commits or changelogs.
+4. Prefer the repository scripts for submodule refresh, bindings generation, version bumps, pre-publish checks, and publishing.
 
 ## Workflow
 
@@ -30,7 +31,9 @@ Read `references/workspace-upgrade-checklist.md` before making changes.
 
 3. Audit the sys layer and safe layer together.
    - Compare upstream release notes and generated binding diffs against current safe wrappers.
-   - Look for new functions, enums, flags, struct fields, renamed APIs, callback ABI changes, backend/platform hooks, and new style/spec fields.
+   - Look for added or removed functions, changed return types, enums, flags, struct fields, renamed APIs, callback ABI changes, backend/platform hooks, and new style/spec fields.
+   - Never treat equal structure size and alignment as proof that a handwritten FFI mirror is compatible. Audit field order, offsets, types, names, and semantics. Prefer a `repr(transparent)` wrapper around the generated type; if a mirror is unavoidable, add offset checks and behavior sentinels in addition to size checks.
+   - Audit lifecycle and ownership fields even when they should remain hidden from the safe API. A new queue pointer, status transition, or native auto-completion rule can change Rust-side ownership without changing the public ABI size.
    - For Dear ImGui core bumps, re-audit the local stack layout compatibility patch: the `imgui.cpp` `ItemSize()` / `ItemAdd()` hook markers, `dear-imgui-sys/src/stack_layout_shim.cpp`, the `stack_layout_imgui_*.cpp.inc` snippets, native prebuilt manifest feature detection, and the `node_editor_showcase` blueprints layout.
    - Do not stop at raw compatibility. If upstream semantics changed, prefer a coherent safe API refactor over thin shims.
    - When Dear ImGui backends move, audit `dear-imgui-sys::backend_shim`, backend crates, and any examples that expose the changed integration path.
@@ -47,7 +50,8 @@ Read `references/workspace-upgrade-checklist.md` before making changes.
    - Re-check publish order and packaging assumptions whenever a new published helper crate is introduced or repriced.
 
 6. Validate.
-   - Run formatting and workspace checks.
+   - Serialize Cargo builds and nextest execution on shared development machines, reusing the workspace target directory.
+   - Verify regenerated binding hashes before formatting and workspace checks.
    - Run the repository pre-publish checks.
    - Run targeted tests and example checks for the upgraded surface.
    - Dry-run the publish flow before considering the work done.

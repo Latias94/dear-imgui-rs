@@ -18,6 +18,7 @@ See the [compatibility guide](docs/COMPATIBILITY.md), [custom backend guide](doc
 
 ### Highlights
 
+- Upgraded the native baseline to Dear ImGui v1.92.9 docking via cimgui and aligned Dear ImGui Test Engine with v1.92.9. Generated native and WASM bindings remain reproducible from pinned source revisions.
 - Contexts now own managed textures and renderer work. `RenderedFrame` is a one-use render lease, while move-only `FrameSnapshot` provides a pointer-free render-thread handoff with request-bound texture feedback. [PR #38](https://github.com/Latias94/dear-imgui-rs/pull/38), [PR #43](https://github.com/Latias94/dear-imgui-rs/pull/43), [PR #44](https://github.com/Latias94/dear-imgui-rs/pull/44)
 - Font APIs now follow Dear ImGui 1.92's dynamic atlas model with validated `FontId`, frame-local `BakedFont`, texture leases, managed custom rectangles, and explicit `SharedFontAtlas` ownership. Multiple contexts may share an atlas only with legacy rendering; managed rendering requires one registered Context.
 - Winit, SDL3, Glow, WGPU, and Ash now use owning multi-viewport runtimes with fallible setup, recovery, and ordered shutdown. Surface loss, callback replacement, GPU retirement, device loss, and partial teardown fail explicitly instead of leaving stale native state. [PR #50](https://github.com/Latias94/dear-imgui-rs/pull/50), [PR #53](https://github.com/Latias94/dear-imgui-rs/pull/53)
@@ -53,6 +54,9 @@ See the [compatibility guide](docs/COMPATIBILITY.md), [custom backend guide](doc
 | `dear_imgui_sys::IMGUI_VERSION` | Use `BINDING_VERSION` for the Rust crate version or `igGetVersion()` for the linked Dear ImGui runtime. |
 | Raw aggregate `PlatformIO` callbacks or a pre-0.16 native prebuilt | Rust callback signatures use pointer/out parameters while C++ owns the by-value ABI; native archives must advertise `platform-io-aggregate-hooks-v2`, and older archives are rejected before linking. |
 | Exact matches on `DockLayoutError::RootResetFailed`, `AshViewportError::PlatformBackendMismatch`, `AshViewportError::PlatformCreateVkSurfaceUnavailable`, or `Sdl3BackendError` | Match current typed ownership/callback errors and retain a wildcard arm. `Sdl3BackendError` is now `non_exhaustive`; the removed provisional variants have no compatibility alias. |
+| Direct `DrawData` field access in a custom renderer | Use `display_pos()`, `display_size()`, `framebuffer_scale()`, `draw_lists_count()`, `total_idx_count()`, `total_vtx_count()`, `owner_viewport()`, and `frame_count()`; the wrapper now delegates to the generated native layout instead of mirroring it by hand. |
+| `ui.set_color_edit_options(...)` | Use `ctx.io_mut().set_color_edit_options(...)`; the setting is Context IO state in Dear ImGui v1.92.9. |
+| A custom Test Engine presentation loop that called only `post_swap` | Call `pre_swap` after rendering and immediately before presentation, then `post_swap` immediately after presentation. `dear-app::Application` integrations can use `before_present` and `after_present`. |
 
 For the common Bevy path, the setup becomes:
 
@@ -69,15 +73,17 @@ app.add_systems(ImguiPrimaryContextPass, draw_ui);
 
 ### Added and Changed
 
+- Dear ImGui v1.92.9 scalar inputs commit validated keyboard edits on validation or focus loss by default; opt into per-edit updates with `ItemFlags::LIVE_EDIT_ON_INPUT_SCALAR`. The safe layer also exposes delayed single-click configuration, ID-based popup opening, new color/style options, and ini/session retention settings.
 - Added `Ui::{calc_text_size,calc_text_size_with_opts}` and direct `u32` table column user IDs. Fixes [#39](https://github.com/Latias94/dear-imgui-rs/issues/39) and [#40](https://github.com/Latias94/dear-imgui-rs/issues/40), reported by [@TheDaChicken](https://github.com/TheDaChicken).
 - Added typed item-flag and style-variable scopes, broader safe keyboard/gamepad/text IO coverage, effective managed texture lookup, and checked `TextureId` conversions for integers, non-zero integers, and pointers. [PR #41](https://github.com/Latias94/dear-imgui-rs/pull/41)
-- Added a checked unknown-count list-clipper protocol, bounded `TestRunner::{run_headless,run_with_renderer}`, and typed Test Engine lifecycle/results, docking automation, and terminal/error logging.
+- Added a checked unknown-count list-clipper protocol, bounded `TestRunner::{run_headless,run_with_renderer}`, and typed Test Engine lifecycle/results, presentation boundaries, label-based table resizing, docking automation, and terminal/error logging.
 - Reorganized examples by learning path and added copy-runnable examples for `dear-app`, fonts, managed textures, multi-viewport backends, and render-thread snapshots.
 - Replaced repository-maintained release and submodule shell helpers with cross-platform Python tooling; safe extension crates now forward their complete source, prebuilt, and supported WASM routes.
 - Updated WGPU integrations to WGPU 30 while retaining compile coverage for supported older WGPU backend versions.
 
 ### Fixed
 
+- Preserved Rust-managed texture create, update, and destroy requests across detached or abandoned render work under Dear ImGui v1.92.9 instead of allowing the native queue to complete them before renderer feedback arrives.
 - Fixed dynamic font-size atlas replacement, stale managed texture feedback, SDL3 callback lifetime, the Windows MSVC aggregate callback ABI, and close-time viewport teardown. This resolves [#49](https://github.com/Latias94/dear-imgui-rs/issues/49), reported by [@TheDaChicken](https://github.com/TheDaChicken).
 - Kept SDL3 applications rendering during native Windows move/resize loops; the SDLGPU multi-viewport example now remains responsive while dragging and shuts down only after GPU work is idle. [PR #53](https://github.com/Latias94/dear-imgui-rs/pull/53)
 - WGPU secondary viewports now honor the renderer's surface, MSAA, and depth-stencil configuration, suspend at zero size, and rebuild cleanly after surface loss instead of forcing `Fifo` or reusing incompatible attachments. Fixes [#51](https://github.com/Latias94/dear-imgui-rs/issues/51), reported by [@DrBarnabus](https://github.com/DrBarnabus).

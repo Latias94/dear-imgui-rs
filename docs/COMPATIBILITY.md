@@ -26,7 +26,7 @@ Core
 | Crate           | Version | Upstream        | Notes                                     |
 |-----------------|---------|-----------------|-------------------------------------------|
 | dear-imgui-rs   | 0.16.0-alpha.1  | —               | Safe Rust API over dear-imgui-sys         |
-| dear-imgui-sys  | 0.16.0-alpha.1  | ImGui v1.92.8   | Docking branch via cimgui; three binding profiles |
+| dear-imgui-sys  | 0.16.0-alpha.1  | ImGui v1.92.9   | Docking branch via cimgui; three binding profiles |
 
 Backends
 
@@ -67,7 +67,7 @@ Extensions
 
 ## 0.16 Architecture Contracts
 
-Release 0.16.0-alpha.1 is not source-compatible with 0.15.x. The baseline is Dear ImGui v1.92.8 docking via cimgui, Rust 1.92 for the workspace, Rust 1.95 for the Bevy backend, WGPU 30 by default with explicit 29/28/27 routes, and Bevy 0.19. Migration details and before/after examples live in the `0.16.0-alpha.1` section of `CHANGELOG.md`.
+Release 0.16.0-alpha.1 is not source-compatible with 0.15.x. The baseline is Dear ImGui v1.92.9 docking via cimgui, Rust 1.92 for the workspace, Rust 1.95 for the Bevy backend, WGPU 30 by default with explicit 29/28/27 routes, and Bevy 0.19. Migration details and before/after examples live in the `0.16.0-alpha.1` section of `CHANGELOG.md`.
 
 The safe Rust layer intentionally breaks APIs that expose C++ lifecycle
 protocols, wrong-context state, stale GPU handles, or platform-specific ABI

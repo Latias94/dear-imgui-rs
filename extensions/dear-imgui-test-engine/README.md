@@ -113,7 +113,8 @@ texture request is an infrastructure error rather than an ignored request.
   one-shot native failures on a best-effort basis.
 - A queued/running run rejects another queue request. Consume a terminal summary with
   `take_terminal_summary()` before queuing again.
-- `TestRunner` owns queueing, application UI, frame rendering, renderer invocation, `post_swap`,
+- `TestRunner` owns queueing, application UI, frame rendering, renderer invocation, `pre_swap`,
+  `post_swap`,
   timeout/abort draining, and terminal-summary validation as one bounded operation. Use the lower-
   level queue methods only when an integration must own that complete pump itself.
 - `show_windows()` accepts only a `Ui` from the attached Context during an active native frame.

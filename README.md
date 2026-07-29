@@ -31,7 +31,7 @@
 ## What’s in this repo
 
 - Core
-  - `dear-imgui-sys` — low-level FFI via cimgui (docking branch), with pregenerated bindings for Dear ImGui v1.92.8
+  - `dear-imgui-sys` — low-level FFI via cimgui (docking branch), with pregenerated bindings for Dear ImGui v1.92.9
   - `dear-imgui-rs` — safe, idiomatic Rust API (RAII + builder style similar to imgui-rs)
   - Backends: `dear-imgui-wgpu`, `dear-imgui-glow`, `dear-imgui-ash`, `dear-imgui-winit`, `dear-imgui-sdl3`, `dear-imgui-bevy`
     - `dear-imgui-bevy` is an experimental Bevy-native backend on Bevy `0.19.0`, with docking,
@@ -380,7 +380,7 @@ Core
 | Crate           | Version | Notes                                     |
 |-----------------|---------|-------------------------------------------|
 | dear-imgui-rs   | 0.16.0-alpha.1 | Safe Rust API over dear-imgui-sys     |
-| dear-imgui-sys  | 0.16.0-alpha.1 | Dear ImGui v1.92.8 docking via cimgui |
+| dear-imgui-sys  | 0.16.0-alpha.1 | Dear ImGui v1.92.9 docking via cimgui |
 
 Backends
 
@@ -443,7 +443,7 @@ Maintenance rules
 
 ## Version & FFI
 
-- FFI layer is generated from the cimgui `docking_inter` branch matching Dear ImGui v1.92.8.
+- FFI layer is generated from the cimgui `docking_inter` branch matching Dear ImGui v1.92.9.
 - Core cimgui calls cross a C ABI boundary, but callback-bearing `ImGuiPlatformIO` fields still have C++ compiler ABI-sensitive signatures. The repository-owned aggregate callback shims translate the seven `ImVec2`/`ImVec4` by-value slots to pointer/out-parameter C callbacks and are exercised on MSVC `/MD` and `/MT`.
 - Checked-in bindings are target profiles, not one universal header snapshot: Windows 64-bit, supported non-Windows native targets, and the fixed browser import ABI each have a separate reproducible artifact.
 - `BINDING_VERSION` is the Rust binding crate release version. It is the direct replacement for the old `IMGUI_VERSION` constant; use `igGetVersion()` to inspect the linked Dear ImGui runtime.
@@ -453,7 +453,7 @@ Maintenance rules
 
 ```text
 dear-imgui-rs/         # Safe Rust bindings (renamed from dear-imgui)
-dear-imgui-sys/        # cimgui FFI (docking; ImGui v1.92.8)
+dear-imgui-sys/        # cimgui FFI (docking; ImGui v1.92.9)
 backends/
   dear-imgui-wgpu/     # WGPU renderer
   dear-imgui-glow/     # OpenGL renderer
