@@ -115,8 +115,10 @@ impl WgpuRenderer {
         })?;
 
         // Avoid rendering when minimized
-        let fb_width = (draw_data.display_size[0] * draw_data.framebuffer_scale[0]) as i32;
-        let fb_height = (draw_data.display_size[1] * draw_data.framebuffer_scale[1]) as i32;
+        let display_size = draw_data.display_size();
+        let framebuffer_scale = draw_data.framebuffer_scale();
+        let fb_width = (display_size[0] * framebuffer_scale[0]) as i32;
+        let fb_height = (display_size[1] * framebuffer_scale[1]) as i32;
         if fb_width <= 0 || fb_height <= 0 || !draw_data.valid() {
             return Ok(());
         }

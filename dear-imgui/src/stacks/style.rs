@@ -240,6 +240,12 @@ unsafe fn push_style_var(style_var: StyleVar) {
         TreeLinesRounding(v) => unsafe {
             sys::igPushStyleVar_Float(sys::ImGuiStyleVar_TreeLinesRounding as i32, v)
         },
+        MenuItemRounding(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_MenuItemRounding as i32, v)
+        },
+        SelectableRounding(v) => unsafe {
+            sys::igPushStyleVar_Float(sys::ImGuiStyleVar_SelectableRounding as i32, v)
+        },
         DragDropTargetRounding(v) => unsafe {
             sys::igPushStyleVar_Float(sys::ImGuiStyleVar_DragDropTargetRounding as i32, v)
         },

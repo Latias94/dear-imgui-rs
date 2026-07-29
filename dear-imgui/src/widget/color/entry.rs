@@ -1,25 +1,11 @@
 use super::button::ColorButton;
 use super::edit::{ColorEdit3, ColorEdit4};
-use super::flags::ColorEditOptions;
 use super::picker::{ColorPicker3, ColorPicker4};
-use crate::sys;
 use crate::ui::Ui;
 use std::borrow::Cow;
 
 /// # Color Edit Widgets
 impl Ui {
-    /// Initializes default color editing/picking options.
-    ///
-    /// This configures the defaults used by the various `Color*` widgets (unless
-    /// overridden per-call via flags). Users can still change many options via
-    /// the right-click context menu unless `_NO_OPTIONS` is passed.
-    #[doc(alias = "SetColorEditOptions")]
-    pub fn set_color_edit_options(&self, options: impl Into<ColorEditOptions>) {
-        let options = options.into();
-        options.validate("Ui::set_color_edit_options()");
-        self.run_with_bound_context(|| unsafe { sys::igSetColorEditOptions(options.bits() as i32) })
-    }
-
     /// Creates a color edit widget for 3 components (RGB)
     #[doc(alias = "ColorEdit3")]
     pub fn color_edit3(&self, label: impl AsRef<str>, color: &mut [f32; 3]) -> bool {

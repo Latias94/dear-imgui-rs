@@ -15,18 +15,17 @@ fn tab_and_color_options_helpers_no_panic() {
         let io = ctx.io_mut();
         io.set_display_size([800.0, 600.0]);
         io.set_delta_time(1.0 / 60.0);
+        io.set_color_edit_options(
+            imgui::ColorEditOptions::new()
+                .data_type(imgui::ColorDataType::Uint8)
+                .display_mode(imgui::ColorDisplayMode::Hsv)
+                .picker_mode(imgui::ColorPickerMode::HueBar),
+        );
     }
     let _ = ctx.font_atlas().build();
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 
     let ui = ctx.frame();
-
-    ui.set_color_edit_options(
-        imgui::ColorEditOptions::new()
-            .data_type(imgui::ColorDataType::Uint8)
-            .display_mode(imgui::ColorDisplayMode::Hsv)
-            .picker_mode(imgui::ColorPickerMode::HueBar),
-    );
 
     let _ = ui.tab_bar("Tabs").map(|_tab| {
         let _ = ui.tab_item("A");

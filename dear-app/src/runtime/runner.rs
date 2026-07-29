@@ -484,7 +484,13 @@ impl Runtime {
                 .map_err(RunError::Render)?;
         }
         generation.gpu.queue.submit(Some(encoder.finish()));
+        let mut present = crate::PresentContext {
+            imgui: context,
+            window: &window.window,
+        };
+        application.before_present(&mut present)?;
         generation.gpu.queue.present(frame);
+        application.after_present(&mut present)?;
         if reconfigure_after_present {
             window.reconfigure(&generation.gpu.device);
         }

@@ -198,7 +198,15 @@ impl TestEngine {
         Ok(())
     }
 
-    /// Notifies the Test Engine that the application presented a frame.
+    /// Notifies the Test Engine immediately before presenting a frame.
+    pub fn pre_swap(&mut self) -> TestEngineResult<()> {
+        self.require_started("TestEngine::pre_swap")?;
+        self.call_attached("imgui_test_engine_pre_swap", |raw| unsafe {
+            sys::imgui_test_engine_pre_swap(raw)
+        })
+    }
+
+    /// Notifies the Test Engine immediately after presenting a frame.
     pub fn post_swap(&mut self) -> TestEngineResult<()> {
         self.require_started("TestEngine::post_swap")?;
         self.call_attached("imgui_test_engine_post_swap", |raw| unsafe {

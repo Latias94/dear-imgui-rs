@@ -145,9 +145,11 @@ impl GlowRenderer {
         }
 
         let framebuffer_size = draw_data.map(|draw_data| {
+            let display_size = draw_data.display_size();
+            let framebuffer_scale = draw_data.framebuffer_scale();
             (
-                draw_data.display_size[0] * draw_data.framebuffer_scale[0],
-                draw_data.display_size[1] * draw_data.framebuffer_scale[1],
+                display_size[0] * framebuffer_scale[0],
+                display_size[1] * framebuffer_scale[1],
             )
         });
         let drawable = framebuffer_size.is_some_and(|(width, height)| width > 0.0 && height > 0.0);
@@ -229,10 +231,12 @@ impl GlowRenderer {
             gl.viewport(0, 0, fb_width as i32, fb_height as i32);
 
             // Calculate projection matrix like the original implementation
-            let l = draw_data.display_pos[0];
-            let r = draw_data.display_pos[0] + draw_data.display_size[0];
-            let t = draw_data.display_pos[1];
-            let b = draw_data.display_pos[1] + draw_data.display_size[1];
+            let display_pos = draw_data.display_pos();
+            let display_size = draw_data.display_size();
+            let l = display_pos[0];
+            let r = display_pos[0] + display_size[0];
+            let t = display_pos[1];
+            let b = display_pos[1] + display_size[1];
 
             // Support for GL 4.5 rarely used glClipControl(GL_UPPER_LEFT)
             #[cfg(feature = "clip_origin_support")]
@@ -356,11 +360,13 @@ impl GlowRenderer {
                         )?;
                     }
                     DrawCmd::ResetRenderState => {
+                        let display_size = draw_data.display_size();
+                        let framebuffer_scale = draw_data.framebuffer_scale();
                         self.set_up_render_state(
                             gl,
                             draw_data,
-                            draw_data.display_size[0] * draw_data.framebuffer_scale[0],
-                            draw_data.display_size[1] * draw_data.framebuffer_scale[1],
+                            display_size[0] * framebuffer_scale[0],
+                            display_size[1] * framebuffer_scale[1],
                         )?;
                         sampler_filter = glow::LINEAR;
                     }
@@ -464,21 +470,20 @@ impl GlowRenderer {
 
             // Set scissor rectangle
             let clip_rect = cmd_params.clip_rect;
-            let clip_min_x =
-                (clip_rect[0] - draw_data.display_pos[0]) * draw_data.framebuffer_scale[0];
-            let clip_min_y =
-                (clip_rect[1] - draw_data.display_pos[1]) * draw_data.framebuffer_scale[1];
-            let clip_max_x =
-                (clip_rect[2] - draw_data.display_pos[0]) * draw_data.framebuffer_scale[0];
-            let clip_max_y =
-                (clip_rect[3] - draw_data.display_pos[1]) * draw_data.framebuffer_scale[1];
+            let display_pos = draw_data.display_pos();
+            let display_size = draw_data.display_size();
+            let framebuffer_scale = draw_data.framebuffer_scale();
+            let clip_min_x = (clip_rect[0] - display_pos[0]) * framebuffer_scale[0];
+            let clip_min_y = (clip_rect[1] - display_pos[1]) * framebuffer_scale[1];
+            let clip_max_x = (clip_rect[2] - display_pos[0]) * framebuffer_scale[0];
+            let clip_max_y = (clip_rect[3] - display_pos[1]) * framebuffer_scale[1];
 
             if clip_max_x <= clip_min_x || clip_max_y <= clip_min_y {
                 return Ok(());
             }
 
             // Apply scissor/clipping rectangle (Y is inverted in OpenGL)
-            let fb_height = draw_data.display_size[1] * draw_data.framebuffer_scale[1];
+            let fb_height = display_size[1] * framebuffer_scale[1];
             gl.scissor(
                 clip_min_x as i32,
                 (fb_height - clip_max_y) as i32,

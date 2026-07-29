@@ -72,6 +72,10 @@ pub enum StyleVar {
     TreeLinesSize(f32),
     /// Rounding radius of tree hierarchy outlines
     TreeLinesRounding(f32),
+    /// Rounding radius of menu items and menus
+    MenuItemRounding(f32),
+    /// Rounding radius of selectable items
+    SelectableRounding(f32),
     /// Rounding radius of drag and drop target highlights; negative values use frame rounding
     DragDropTargetRounding(f32),
     /// Alignment of button text when button is larger than text

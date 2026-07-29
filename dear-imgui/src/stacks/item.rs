@@ -21,6 +21,12 @@ bitflags! {
         const AUTO_CLOSE_POPUPS = sys::ImGuiItemFlags_AutoClosePopups as i32;
         /// Allow duplicate item IDs without a debug conflict warning.
         const ALLOW_DUPLICATE_ID = sys::ImGuiItemFlags_AllowDuplicateId as i32;
+        /// Apply `InputText` keyboard edits to the backing value while typing.
+        const LIVE_EDIT_ON_INPUT_TEXT = sys::ImGuiItemFlags_LiveEditOnInputText as i32;
+        /// Apply scalar keyboard edits to the backing value while typing.
+        const LIVE_EDIT_ON_INPUT_SCALAR = sys::ImGuiItemFlags_LiveEditOnInputScalar as i32;
+        /// Apply text and scalar keyboard edits to backing values while typing.
+        const LIVE_EDIT_ON_INPUT = sys::ImGuiItemFlags_LiveEditOnInput as i32;
     }
 }
 
@@ -47,6 +53,12 @@ bitflags! {
         const AUTO_CLOSE_POPUPS = sys::ImGuiItemFlags_AutoClosePopups as i32;
         /// Duplicate IDs were allowed for the item.
         const ALLOW_DUPLICATE_ID = sys::ImGuiItemFlags_AllowDuplicateId as i32;
+        /// `InputText` keyboard edits were applied while typing.
+        const LIVE_EDIT_ON_INPUT_TEXT = sys::ImGuiItemFlags_LiveEditOnInputText as i32;
+        /// Scalar keyboard edits were applied while typing.
+        const LIVE_EDIT_ON_INPUT_SCALAR = sys::ImGuiItemFlags_LiveEditOnInputScalar as i32;
+        /// Text and scalar keyboard edits were applied while typing.
+        const LIVE_EDIT_ON_INPUT = sys::ImGuiItemFlags_LiveEditOnInput as i32;
         /// The last item was disabled.
         const DISABLED = sys::ImGuiItemFlags_Disabled as i32;
     }
@@ -135,13 +147,16 @@ mod tests {
 
         ui.window("item_flags").build(|| {
             ui.with_item_flag(
-                ItemFlags::NO_NAV | ItemFlags::ALLOW_DUPLICATE_ID,
+                ItemFlags::NO_NAV
+                    | ItemFlags::ALLOW_DUPLICATE_ID
+                    | ItemFlags::LIVE_EDIT_ON_INPUT_SCALAR,
                 true,
                 || {
                     ui.button("scoped");
                     let flags = ui.item_flags();
                     assert!(flags.contains(ItemStateFlags::NO_NAV));
                     assert!(flags.contains(ItemStateFlags::ALLOW_DUPLICATE_ID));
+                    assert!(flags.contains(ItemStateFlags::LIVE_EDIT_ON_INPUT_SCALAR));
                 },
             );
 
@@ -149,6 +164,7 @@ mod tests {
             let flags = ui.item_flags();
             assert!(!flags.contains(ItemStateFlags::NO_NAV));
             assert!(!flags.contains(ItemStateFlags::ALLOW_DUPLICATE_ID));
+            assert!(!flags.contains(ItemStateFlags::LIVE_EDIT_ON_INPUT_SCALAR));
         });
     }
 

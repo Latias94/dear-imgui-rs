@@ -65,6 +65,12 @@ impl FontAtlasSnapshotTarget {
     }
 
     fn track_operation(&self, id: SnapshotTextureId, operation: &mut Arc<TextureOp>) -> u64 {
+        let target = self
+            .find(id)
+            .expect("font atlas operation must target the current texture list");
+        unsafe {
+            TextureData::from_raw(target.texture).claim_managed_queue();
+        }
         crate::fonts::track_font_atlas_texture_operation(self.atlas, id, operation)
     }
 
@@ -419,6 +425,7 @@ impl ManagedTextureRegistry {
                         TextureSlot::Active(entry) | TextureSlot::Retiring(entry) => entry,
                         _ => unreachable!("validated texture slot changed without mutation"),
                     };
+                    entry.texture.claim_managed_queue();
                     if entry
                         .operation
                         .as_deref()

@@ -25,6 +25,17 @@ fn more_coverage_queries_no_panic() {
     let _ = ui.is_mouse_released_with_delay(imgui::MouseButton::Left, 0.0);
     let _ = ui.calc_item_width();
 
+    ui.button("delayed click query");
+    let _ = ui.item_clicked_count_with_single_click_delay();
+    let _ = ui.item_clicked_count_with_single_click_delay_for(imgui::MouseButton::Right);
+    let _ = ui.item_clicked_count_with_delay(imgui::MouseButton::Left, 0.4);
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = ui.item_clicked_count_with_delay(imgui::MouseButton::Left, f32::NAN);
+        }))
+        .is_err()
+    );
+
     let main_id = ui.main_viewport().id();
     let _ = ui.find_viewport_by_id(main_id);
     let _ = ui.find_viewport_by_platform_handle(std::ptr::null_mut());

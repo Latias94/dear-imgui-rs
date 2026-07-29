@@ -804,6 +804,10 @@ impl AppWindow {
 
         // Submit and present main frame first to avoid cross-surface validation hazards
         self.queue.submit(Some(encoder.finish()));
+        #[cfg(feature = "test-engine")]
+        if let Some(engine) = self.test_engine.as_mut() {
+            engine.pre_swap()?;
+        }
         self.queue.present(frame);
         if reconfigure_after_present {
             self.surface.configure(&self.device, &self.surface_config);

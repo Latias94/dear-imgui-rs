@@ -69,16 +69,18 @@ impl WgpuRenderer {
             .ok_or_else(|| RendererError::InvalidRenderState("Pipeline not created".to_string()))?;
 
         // Setup viewport
-        let fb_width = draw_data.display_size[0] * draw_data.framebuffer_scale[0];
-        let fb_height = draw_data.display_size[1] * draw_data.framebuffer_scale[1];
+        let display_pos = draw_data.display_pos();
+        let display_size = draw_data.display_size();
+        let framebuffer_scale = draw_data.framebuffer_scale();
+        let fb_width = display_size[0] * framebuffer_scale[0];
+        let fb_height = display_size[1] * framebuffer_scale[1];
         render_pass.set_viewport(0.0, 0.0, fb_width, fb_height, 0.0, 1.0);
 
         // Set pipeline
         render_pass.set_pipeline(pipeline);
 
         // Update uniforms
-        let mvp =
-            Uniforms::create_orthographic_matrix(draw_data.display_pos, draw_data.display_size);
+        let mvp = Uniforms::create_orthographic_matrix(display_pos, display_size);
         let mut uniforms = Uniforms::new();
         uniforms.update(mvp, gamma);
 
@@ -113,10 +115,11 @@ impl WgpuRenderer {
     ) -> RendererResult<()> {
         let mut global_vtx_offset = 0i32;
         let mut global_idx_offset = 0u32;
-        let clip_scale = draw_data.framebuffer_scale;
-        let clip_off = draw_data.display_pos;
-        let fb_width = draw_data.display_size[0] * draw_data.framebuffer_scale[0];
-        let fb_height = draw_data.display_size[1] * draw_data.framebuffer_scale[1];
+        let clip_scale = draw_data.framebuffer_scale();
+        let clip_off = draw_data.display_pos();
+        let display_size = draw_data.display_size();
+        let fb_width = display_size[0] * clip_scale[0];
+        let fb_height = display_size[1] * clip_scale[1];
 
         // Extract common bind group handles up front to avoid borrowing conflicts with render_resources.
         let device = backend_data.device.clone();

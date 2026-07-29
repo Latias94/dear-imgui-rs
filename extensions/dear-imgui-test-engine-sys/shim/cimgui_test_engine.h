@@ -85,6 +85,7 @@ ImGuiTestEngineStatus imgui_test_engine_is_started(ImGuiTestEngine* engine, bool
 ImGuiTestEngineStatus imgui_test_engine_unbind(ImGuiTestEngine* engine);
 ImGuiTestEngineStatus imgui_test_engine_start(ImGuiTestEngine* engine, ImGuiContext* ui_ctx);
 ImGuiTestEngineStatus imgui_test_engine_stop(ImGuiTestEngine* engine);
+ImGuiTestEngineStatus imgui_test_engine_pre_swap(ImGuiTestEngine* engine);
 ImGuiTestEngineStatus imgui_test_engine_post_swap(ImGuiTestEngine* engine);
 ImGuiTestEngineStatus imgui_test_engine_show_windows(ImGuiTestEngine* engine, bool* p_open);
 // Enum-domain inputs use int so foreign callers can pass arbitrary values for
@@ -219,6 +220,7 @@ ImGuiTestEngineStatus imgui_test_engine_script_table_open_context_menu(ImGuiTest
 ImGuiTestEngineStatus imgui_test_engine_script_table_set_column_enabled(ImGuiTestEngineScript* script, const char* table_ref, int column_n, bool enabled);
 ImGuiTestEngineStatus imgui_test_engine_script_table_set_column_enabled_by_label(ImGuiTestEngineScript* script, const char* table_ref, const char* label, bool enabled);
 ImGuiTestEngineStatus imgui_test_engine_script_table_resize_column(ImGuiTestEngineScript* script, const char* table_ref, int column_n, float width);
+ImGuiTestEngineStatus imgui_test_engine_script_table_resize_column_by_label(ImGuiTestEngineScript* script, const char* table_ref, const char* label, float width);
 ImGuiTestEngineStatus imgui_test_engine_script_assert_item_exists(ImGuiTestEngineScript* script, const char* ref);
 ImGuiTestEngineStatus imgui_test_engine_script_assert_item_visible(ImGuiTestEngineScript* script, const char* ref);
 ImGuiTestEngineStatus imgui_test_engine_script_assert_item_read_int_eq(ImGuiTestEngineScript* script, const char* ref, int expected);

@@ -8,7 +8,7 @@ use crate::sys;
 
 bitflags::bitflags! {
     /// Independently composable flags accepted by `ColorEdit3()`,
-    /// `ColorEdit4()`, and `SetColorEditOptions()`.
+    /// `ColorEdit4()`, and `Io::set_color_edit_options()`.
     #[repr(transparent)]
     #[derive(Copy, Clone, Debug, Default, Hash, Eq, PartialEq)]
     pub struct ColorEditFlags: u32 {
@@ -44,6 +44,8 @@ bitflags::bitflags! {
         const ALPHA_PREVIEW_HALF = sys::ImGuiColorEditFlags_AlphaPreviewHalf as u32;
         /// Disable 0.0f..1.0f limits in RGBA edition.
         const HDR = sys::ImGuiColorEditFlags_HDR as u32;
+        /// Disable rotation of the saturation/value triangle in the color picker.
+        const PICKER_NO_ROTATE = sys::ImGuiColorEditFlags_PickerNoRotate as u32;
     }
 }
 
@@ -81,6 +83,8 @@ bitflags::bitflags! {
         const ALPHA_PREVIEW_HALF = sys::ImGuiColorEditFlags_AlphaPreviewHalf as u32;
         /// Disable 0.0f..1.0f limits in RGBA edition.
         const HDR = sys::ImGuiColorEditFlags_HDR as u32;
+        /// Disable rotation of the saturation/value triangle.
+        const PICKER_NO_ROTATE = sys::ImGuiColorEditFlags_PickerNoRotate as u32;
     }
 }
 
@@ -188,7 +192,7 @@ bitflags::bitflags! {
 }
 
 /// Options accepted by `ColorEdit3()`, `ColorEdit4()`, and
-/// `SetColorEditOptions()`.
+/// `Io::set_color_edit_options()`.
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 pub struct ColorEditOptions {
     pub flags: ColorEditFlags,
@@ -240,6 +244,57 @@ impl ColorEditOptions {
             | self.data_type.map_or(0, ColorDataType::raw)
             | self.picker_mode.map_or(0, ColorPickerMode::raw)
             | self.input_mode.map_or(0, ColorInputMode::raw)
+    }
+
+    pub(crate) fn from_bits(bits: u32, caller: &str) -> Self {
+        let options = Self {
+            flags: ColorEditFlags::from_bits_retain(bits & ColorEditFlags::all().bits()),
+            display_mode: match bits & color_display_mask() {
+                0 => None,
+                value if value == ColorDisplayMode::Rgb.raw() => Some(ColorDisplayMode::Rgb),
+                value if value == ColorDisplayMode::Hsv.raw() => Some(ColorDisplayMode::Hsv),
+                value if value == ColorDisplayMode::Hex.raw() => Some(ColorDisplayMode::Hex),
+                _ => panic!("{caller} contains an invalid color display mode"),
+            },
+            data_type: match bits & color_data_type_mask() {
+                0 => None,
+                value if value == ColorDataType::Uint8.raw() => Some(ColorDataType::Uint8),
+                value if value == ColorDataType::Float.raw() => Some(ColorDataType::Float),
+                _ => panic!("{caller} contains an invalid color data type"),
+            },
+            picker_mode: match bits & color_picker_mask() {
+                0 => None,
+                value if value == ColorPickerMode::HueBar.raw() => Some(ColorPickerMode::HueBar),
+                value if value == ColorPickerMode::HueWheel.raw() => {
+                    Some(ColorPickerMode::HueWheel)
+                }
+                _ => panic!("{caller} contains an invalid color picker mode"),
+            },
+            input_mode: match bits & color_input_mask() {
+                0 => None,
+                value if value == ColorInputMode::Rgb.raw() => Some(ColorInputMode::Rgb),
+                value if value == ColorInputMode::Hsv.raw() => Some(ColorInputMode::Hsv),
+                _ => panic!("{caller} contains an invalid color input mode"),
+            },
+        };
+        options.validate(caller);
+        options
+    }
+
+    pub(crate) fn with_default_choices(self) -> Self {
+        let mut bits = self.bits();
+        let defaults = sys::ImGuiColorEditFlags_DefaultOptions_ as u32;
+        for mask in [
+            color_display_mask(),
+            color_data_type_mask(),
+            color_picker_mask(),
+            color_input_mask(),
+        ] {
+            if bits & mask == 0 {
+                bits |= defaults & mask;
+            }
+        }
+        Self::from_bits(bits, "ColorEditOptions::with_default_choices()")
     }
 
     pub(crate) fn validate(self, caller: &str) {

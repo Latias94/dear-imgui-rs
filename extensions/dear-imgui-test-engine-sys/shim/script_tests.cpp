@@ -77,6 +77,7 @@ struct ImGuiTestEngineScript {
         TableSetColumnEnabled,
         TableSetColumnEnabledByLabel,
         TableResizeColumn,
+        TableResizeColumnByLabel,
         MenuClick,
         MenuCheck,
         MenuUncheck,
@@ -225,6 +226,7 @@ static bool validate_table_command(
     switch (cmd.Kind) {
         case ImGuiTestEngineScript::CmdKind::TableClickHeader:
         case ImGuiTestEngineScript::CmdKind::TableSetColumnEnabledByLabel:
+        case ImGuiTestEngineScript::CmdKind::TableResizeColumnByLabel:
             for (int column = 0; column < table->ColumnsCount; ++column) {
                 const char* name = ImGui::TableGetColumnName(table, column);
                 if (name != nullptr && cmd.B == name) {
@@ -440,6 +442,9 @@ static void script_test_func_impl(ImGuiTestContext* ctx) {
                 break;
             case ImGuiTestEngineScript::CmdKind::TableResizeColumn:
                 ctx->TableResizeColumn(cmd.A.c_str(), cmd.I, cmd.F);
+                break;
+            case ImGuiTestEngineScript::CmdKind::TableResizeColumnByLabel:
+                ctx->TableResizeColumn(cmd.A.c_str(), cmd.B.c_str(), cmd.F);
                 break;
             case ImGuiTestEngineScript::CmdKind::MenuClick:
                 ctx->MenuClick(cmd.A.c_str());
@@ -968,6 +973,7 @@ static bool command_requires_released_mouse(ImGuiTestEngineScript::CmdKind kind)
         case Kind::TableSetColumnEnabled:
         case Kind::TableSetColumnEnabledByLabel:
         case Kind::TableResizeColumn:
+        case Kind::TableResizeColumnByLabel:
         case Kind::MenuClick:
         case Kind::MenuCheck:
         case Kind::MenuUncheck:
@@ -1009,7 +1015,8 @@ static bool validate_runtime_command(
          cmd.Kind == Kind::TableOpenContextMenu ||
          cmd.Kind == Kind::TableSetColumnEnabled ||
          cmd.Kind == Kind::TableSetColumnEnabledByLabel ||
-         cmd.Kind == Kind::TableResizeColumn) &&
+         cmd.Kind == Kind::TableResizeColumn ||
+         cmd.Kind == Kind::TableResizeColumnByLabel) &&
         !validate_table_command(ctx, cmd)) {
         return false;
     }
@@ -1625,6 +1632,26 @@ ImGuiTestEngineStatus imgui_test_engine_script_table_resize_column(
         command.F = width;
         return status;
     });
+}
+
+ImGuiTestEngineStatus imgui_test_engine_script_table_resize_column_by_label(
+    ImGuiTestEngineScript* script,
+    const char* table_ref,
+    const char* label,
+    float width
+) {
+    return append_command(
+        "imgui_test_engine_script_table_resize_column_by_label",
+        script,
+        [&](auto& command) {
+            ImGuiTestEngineStatus status = required_ref(command.A, table_ref, false);
+            if (status == ImGuiTestEngineStatus_Success) status = required_string(command.B, label, false);
+            if (status == ImGuiTestEngineStatus_Success) status = nonnegative_value(width);
+            command.Kind = ImGuiTestEngineScript::CmdKind::TableResizeColumnByLabel;
+            command.F = width;
+            return status;
+        }
+    );
 }
 
 ImGuiTestEngineStatus imgui_test_engine_script_set_input_mode(

@@ -169,6 +169,16 @@ pub trait Application {
     /// Builds one Dear ImGui frame.
     fn frame(&mut self, context: &mut FrameContext<'_>) -> Result<(), RunError>;
 
+    /// Runs after GPU commands are submitted and immediately before the main surface is presented.
+    fn before_present(&mut self, _context: &mut PresentContext<'_>) -> Result<(), RunError> {
+        Ok(())
+    }
+
+    /// Runs immediately after the main surface is presented.
+    fn after_present(&mut self, _context: &mut PresentContext<'_>) -> Result<(), RunError> {
+        Ok(())
+    }
+
     /// Runs exactly once before add-ons and the Dear ImGui context are torn down.
     fn shutdown(&mut self, _context: &mut ShutdownContext<'_>) -> Result<(), RunError> {
         Ok(())
@@ -234,6 +244,23 @@ pub struct ShutdownContext<'a> {
 pub struct PrepareFrameContext<'a> {
     pub(crate) imgui: &'a mut imgui::Context,
     pub(crate) window: &'a Window,
+}
+
+/// Access available at the main-surface presentation boundary.
+pub struct PresentContext<'a> {
+    pub(crate) imgui: &'a mut imgui::Context,
+    pub(crate) window: &'a Window,
+}
+
+impl PresentContext<'_> {
+    pub fn imgui(&mut self) -> &mut imgui::Context {
+        self.imgui
+    }
+
+    #[must_use]
+    pub fn window(&self) -> &Window {
+        self.window
+    }
 }
 
 impl PrepareFrameContext<'_> {

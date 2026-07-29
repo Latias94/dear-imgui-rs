@@ -425,6 +425,22 @@ ImGuiTestEngineStatus imgui_test_engine_stop(ImGuiTestEngine* engine) {
     });
 }
 
+ImGuiTestEngineStatus imgui_test_engine_pre_swap(ImGuiTestEngine* engine) {
+    return abi::boundary("imgui_test_engine_pre_swap", [&]() {
+        const ImGuiTestEngineStatus status = abi::require_engine(engine);
+        if (status != ImGuiTestEngineStatus_Success) {
+            return status;
+        }
+        if (!engine->Started || engine->UiContextTarget == nullptr) {
+            return abi::fail(ImGuiTestEngineStatus_InvalidState, "engine is not started and bound");
+        }
+        abi::maybe_inject(ImGuiTestEngineExceptionPoint_UpstreamCall);
+        abi::ScopedCurrentContext current(engine->UiContextTarget);
+        ImGuiTestEngine_PreSwap(engine);
+        return ImGuiTestEngineStatus_Success;
+    });
+}
+
 ImGuiTestEngineStatus imgui_test_engine_post_swap(ImGuiTestEngine* engine) {
     return abi::boundary("imgui_test_engine_post_swap", [&]() {
         const ImGuiTestEngineStatus status = abi::require_engine(engine);

@@ -267,6 +267,24 @@ fn ffi_boundary_is_total_and_preserves_lifecycle_state() {
             sys::ImGuiTestEngineStatus_OutOfRange
         );
         assert_eq!(
+            sys::imgui_test_engine_script_table_resize_column_by_label(
+                script,
+                c"table".as_ptr(),
+                ptr::null(),
+                10.0,
+            ),
+            sys::ImGuiTestEngineStatus_InvalidArgument
+        );
+        assert_eq!(
+            sys::imgui_test_engine_script_table_resize_column_by_label(
+                script,
+                c"table".as_ptr(),
+                c"column".as_ptr(),
+                f32::INFINITY,
+            ),
+            sys::ImGuiTestEngineStatus_OutOfRange
+        );
+        assert_eq!(
             sys::imgui_test_engine_script_table_open_context_menu(script, c"table".as_ptr(), -2,),
             sys::ImGuiTestEngineStatus_OutOfRange
         );
@@ -404,11 +422,11 @@ fn ffi_boundary_is_total_and_preserves_lifecycle_state() {
             sys::ImGuiTestEngineStatus_Success
         );
         assert_eq!(
-            sys::imgui_test_engine_script_table_set_column_enabled_by_label(
+            sys::imgui_test_engine_script_table_resize_column_by_label(
                 missing_label_script,
                 c"BoundaryTable".as_ptr(),
                 c"missing label".as_ptr(),
-                true,
+                10.0,
             ),
             sys::ImGuiTestEngineStatus_Success
         );
@@ -512,6 +530,10 @@ fn ffi_boundary_is_total_and_preserves_lifecycle_state() {
             }
             dear_imgui_sys::igEnd();
             dear_imgui_sys::igRender();
+            assert_eq!(
+                sys::imgui_test_engine_pre_swap(engine),
+                sys::ImGuiTestEngineStatus_Success
+            );
             assert_eq!(
                 sys::imgui_test_engine_post_swap(engine),
                 sys::ImGuiTestEngineStatus_Success

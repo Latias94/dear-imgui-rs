@@ -268,7 +268,7 @@ fn ffi_and_callback_failures_remain_infrastructure_errors() {
 }
 
 #[test]
-fn runner_pumps_ui_render_and_post_swap_once_per_frame_in_order() {
+fn runner_pumps_ui_render_and_swap_boundaries_once_per_frame_in_order() {
     let _guard = test_lock();
     let mut context = context();
     let mut engine = attached_engine(&mut context);
@@ -313,15 +313,15 @@ fn runner_pumps_ui_render_and_post_swap_once_per_frame_in_order() {
         assert_eq!(pair, [(frame, "ui"), (frame, "render")]);
     }
 
-    let mut arm_post_swap_failure = true;
-    let post_swap_error = TestRunner::new(&mut engine)
+    let mut arm_pre_swap_failure = true;
+    let pre_swap_error = TestRunner::new(&mut engine)
         .filter("order")
         .frame_budget(nonzero(64))
         .run_with_renderer(&mut context, no_error, move |mut frame| {
             frame
                 .reconcile_texture_feedback([])
                 .expect("empty feedback");
-            if std::mem::take(&mut arm_post_swap_failure) {
+            if std::mem::take(&mut arm_pre_swap_failure) {
                 assert_eq!(
                     unsafe {
                         raw::imgui_test_engine_test_set_exception_injection(
@@ -333,11 +333,11 @@ fn runner_pumps_ui_render_and_post_swap_once_per_frame_in_order() {
             }
             Ok::<_, Infallible>(())
         })
-        .expect_err("post-swap must execute after the renderer callback");
+        .expect_err("pre-swap must execute after the renderer callback");
     assert!(matches!(
-        post_swap_error,
+        pre_swap_error,
         RunnerError::TestEngine(TestEngineError::Ffi {
-            operation: "imgui_test_engine_post_swap",
+            operation: "imgui_test_engine_pre_swap",
             status: TestEngineStatus::Exception,
             ..
         })

@@ -136,6 +136,8 @@ pub(crate) fn validate_style_var(caller: &str, style_var: StyleVar) {
         }
         TreeLinesSize(value) => assert_non_negative_f32(caller, "TreeLinesSize", value),
         TreeLinesRounding(value) => assert_non_negative_f32(caller, "TreeLinesRounding", value),
+        MenuItemRounding(value) => assert_non_negative_f32(caller, "MenuItemRounding", value),
+        SelectableRounding(value) => assert_non_negative_f32(caller, "SelectableRounding", value),
         DragDropTargetRounding(value) => assert_finite_f32(caller, "DragDropTargetRounding", value),
         ButtonTextAlign(value) => assert_unit_vec2(caller, "ButtonTextAlign", value),
         SelectableTextAlign(value) => assert_unit_vec2(caller, "SelectableTextAlign", value),

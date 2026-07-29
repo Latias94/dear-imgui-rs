@@ -48,7 +48,9 @@ fn table_user_id_builders_accept_integer_ids() {
                 None,
                 Some(setup_id.into()),
             );
-            assert_eq!(unsafe { current_table_column_user_id(0) }, setup_id);
+            // New tables apply column metadata during the first layout reconciliation.
+            ui.table_next_row();
+            assert_eq!(unsafe { current_table_column_user_data(0) }, setup_id);
         }
 
         ui.table("table")
@@ -56,12 +58,14 @@ fn table_user_id_builders_accept_integer_ids() {
             .user_id(builder_id)
             .done()
             .build(|_| {
-                assert_eq!(unsafe { current_table_column_user_id(0) }, builder_id);
+                // New tables apply column metadata during the first layout reconciliation.
+                ui.table_next_row();
+                assert_eq!(unsafe { current_table_column_user_data(0) }, builder_id);
             });
     });
 }
 
-unsafe fn current_table_column_user_id(column: usize) -> u32 {
+unsafe fn current_table_column_user_data(column: usize) -> u32 {
     let table = unsafe { sys::igGetCurrentTable() };
     assert!(!table.is_null());
     let columns = unsafe { (*table).Columns.Data };
@@ -70,7 +74,7 @@ unsafe fn current_table_column_user_id(column: usize) -> u32 {
     assert!(!columns_end.is_null());
     let column_count = unsafe { columns_end.offset_from(columns) as usize };
     assert!(column < column_count);
-    unsafe { (*columns.add(column)).UserID }
+    unsafe { (*columns.add(column)).UserData }
 }
 
 unsafe fn current_table_draw_channel() -> i32 {

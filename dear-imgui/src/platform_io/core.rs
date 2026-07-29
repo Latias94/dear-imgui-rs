@@ -97,6 +97,29 @@ pub(super) fn assert_platform_io_aggregate_hooks_available(callback_name: &str) 
     );
 }
 
+fn validate_session_date(caller: &str, date: u32) {
+    let year = date / 10_000;
+    let month = (date / 100) % 100;
+    let day = date % 100;
+    assert!(
+        (1000..=9999).contains(&year),
+        "{caller} date must contain a four-digit year"
+    );
+    let days_in_month = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if year.is_multiple_of(400) || (year.is_multiple_of(4) && !year.is_multiple_of(100)) => {
+            29
+        }
+        2 => 28,
+        _ => panic!("{caller} date contains an invalid month"),
+    };
+    assert!(
+        (1..=days_in_month).contains(&day),
+        "{caller} date contains an invalid day"
+    );
+}
+
 impl PlatformIo {
     #[inline]
     pub(super) fn inner(&self) -> &sys::ImGuiPlatformIO {
@@ -110,6 +133,36 @@ impl PlatformIo {
     pub(super) fn inner_mut(&mut self) -> &mut sys::ImGuiPlatformIO {
         // Safety: caller has `&mut PlatformIo`, so this is a unique Rust borrow for this wrapper.
         unsafe { &mut *self.raw.get() }
+    }
+
+    /// Returns the application session date as `YYYYMMDD`, when available.
+    ///
+    /// Dear ImGui initializes this from the platform clock and uses it for dated `.ini` entries.
+    #[doc(alias = "Platform_SessionDate")]
+    pub fn session_date(&self) -> Option<u32> {
+        let raw = self.inner().Platform_SessionDate;
+        let date = u32::try_from(raw)
+            .expect("PlatformIo::session_date() found a negative raw session date");
+        if date == 0 {
+            return None;
+        }
+        validate_session_date("PlatformIo::session_date()", date);
+        Some(date)
+    }
+
+    /// Overrides the application session date stored as `YYYYMMDD`.
+    ///
+    /// Custom platform integrations can set this when Dear ImGui is built without its time
+    /// functions. `None` disables date-based settings retention for the session.
+    #[doc(alias = "Platform_SessionDate")]
+    pub fn set_session_date(&mut self, date: Option<u32>) {
+        self.inner_mut().Platform_SessionDate = match date {
+            Some(date) => {
+                validate_session_date("PlatformIo::set_session_date()", date);
+                i32::try_from(date).expect("PlatformIo::set_session_date() date must fit in an i32")
+            }
+            None => 0,
+        };
     }
 
     /// Get a reference to the platform IO from a raw pointer

@@ -9,14 +9,14 @@ impl DrawData {
     /// This crate-internal view is used only while collecting Context-owned renderer requests.
     pub(crate) fn textures(&self) -> TextureIterator<'_> {
         unsafe {
-            if self.textures.is_null() {
+            if self.0.Textures.is_null() {
                 TextureIterator::new(std::ptr::null(), std::ptr::null())
             } else {
-                let vector = &*self.textures;
-                if vector.size <= 0 || vector.data.is_null() {
+                let vector = &*self.0.Textures;
+                if vector.Size <= 0 || vector.Data.is_null() {
                     TextureIterator::new(std::ptr::null(), std::ptr::null())
                 } else {
-                    TextureIterator::new(vector.data, vector.data.add(vector.size as usize))
+                    TextureIterator::new(vector.Data, vector.Data.add(vector.Size as usize))
                 }
             }
         }

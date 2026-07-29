@@ -236,8 +236,11 @@ pub(super) fn record_draw_commands(
     gamma: f32,
     mesh: &mut Mesh,
 ) -> RendererResult<()> {
-    let fb_width = (draw_data.display_size[0] * draw_data.framebuffer_scale[0]).round();
-    let fb_height = (draw_data.display_size[1] * draw_data.framebuffer_scale[1]).round();
+    let display_pos = draw_data.display_pos();
+    let display_size = draw_data.display_size();
+    let framebuffer_scale = draw_data.framebuffer_scale();
+    let fb_width = (display_size[0] * framebuffer_scale[0]).round();
+    let fb_height = (display_size[1] * framebuffer_scale[1]).round();
     if fb_width <= 0.0 || fb_height <= 0.0 {
         return Ok(());
     }
@@ -255,7 +258,7 @@ pub(super) fn record_draw_commands(
         max_depth: 1.0,
     };
 
-    let ortho = ortho_matrix_vk(draw_data.display_pos, draw_data.display_size);
+    let ortho = ortho_matrix_vk(display_pos, display_size);
     let push_constants = PushConstants {
         ortho,
         gamma_pad: [gamma, 0.0, 0.0, 0.0],
@@ -275,8 +278,8 @@ pub(super) fn record_draw_commands(
         device.cmd_bind_index_buffer(command_buffer, mesh.indices, 0, vk::IndexType::UINT16);
     }
 
-    let clip_off = draw_data.display_pos;
-    let clip_scale = draw_data.framebuffer_scale;
+    let clip_off = display_pos;
+    let clip_scale = framebuffer_scale;
 
     let mut global_vtx_offset: i32 = 0;
     let mut global_idx_offset: u32 = 0;

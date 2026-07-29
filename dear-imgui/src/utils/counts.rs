@@ -1,4 +1,4 @@
-pub(super) fn non_negative_count_from_i32(caller: &str, raw: i32) -> usize {
+pub(crate) fn non_negative_count_from_i32(caller: &str, raw: i32) -> usize {
     usize::try_from(raw).unwrap_or_else(|_| panic!("{caller} returned a negative count"))
 }
 

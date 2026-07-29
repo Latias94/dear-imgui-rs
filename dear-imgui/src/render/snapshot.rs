@@ -273,6 +273,7 @@ impl ViewportDrawDataSnapshot {
     /// };
     ///
     /// let draw = DrawDataSnapshot {
+    ///     frame_count: 1,
     ///     display_pos: [0.0, 0.0],
     ///     display_size: [640.0, 480.0],
     ///     framebuffer_scale: [1.0, 1.0],
@@ -300,6 +301,8 @@ impl ViewportDrawDataSnapshot {
 /// Thread-safe draw data snapshot.
 #[derive(Debug)]
 pub struct DrawDataSnapshot {
+    /// Frame counter of the Context that emitted this draw data.
+    pub frame_count: usize,
     pub display_pos: [f32; 2],
     pub display_size: [f32; 2],
     pub framebuffer_scale: [f32; 2],
@@ -887,6 +890,7 @@ pub(crate) fn capture_platform_io(
 #[cfg(feature = "multi-viewport")]
 fn empty_draw_data_snapshot() -> DrawDataSnapshot {
     DrawDataSnapshot {
+        frame_count: 0,
         display_pos: [0.0, 0.0],
         display_size: [0.0, 0.0],
         framebuffer_scale: [1.0, 1.0],
@@ -922,6 +926,7 @@ fn snapshot_draw_data(
         draw_lists.push(snapshot_draw_list(draw_list, resolve)?);
     }
     Ok(DrawDataSnapshot {
+        frame_count: draw_data.frame_count(),
         display_pos: draw_data.display_pos(),
         display_size: draw_data.display_size(),
         framebuffer_scale: draw_data.framebuffer_scale(),

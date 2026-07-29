@@ -149,8 +149,8 @@ where
 /// One-shot bounded Test Engine pump.
 ///
 /// The runner owns the complete frame sequence: application UI, frame render, renderer callback,
-/// and `post_swap`. This prevents callers from accidentally reporting a terminal result while
-/// omitting a required phase.
+/// `pre_swap`, and `post_swap`. This prevents callers from accidentally reporting a terminal
+/// result while omitting a required phase.
 pub struct TestRunner<'engine> {
     engine: &'engine mut TestEngine,
     group: TestGroup,
@@ -367,6 +367,7 @@ impl<'engine> TestRunner<'engine> {
             })?;
         self.engine.show_windows(frame.ui(), None)?;
         render(frame.render(), frame_index)?;
+        self.engine.pre_swap()?;
         self.engine.post_swap()?;
         Ok(control)
     }

@@ -1255,6 +1255,7 @@ mod tests {
     fn prepared_draws_preserve_standard_sampler_callback_state() {
         let camera = Entity::from_raw_u32(7).expect("test entity index should be valid");
         let draw = imgui::render::DrawDataSnapshot {
+            frame_count: 0,
             display_pos: [0.0, 0.0],
             display_size: [32.0, 32.0],
             framebuffer_scale: [1.0, 1.0],
@@ -1298,6 +1299,7 @@ mod tests {
     fn prepared_draws_preserve_sampler_state_across_draw_lists() {
         let camera = Entity::from_raw_u32(8).expect("test entity index should be valid");
         let draw = imgui::render::DrawDataSnapshot {
+            frame_count: 0,
             display_pos: [0.0, 0.0],
             display_size: [32.0, 32.0],
             framebuffer_scale: [1.0, 1.0],
@@ -1350,6 +1352,7 @@ mod tests {
     fn prepared_draws_skip_commands_with_out_of_range_index_or_vertex_offsets() {
         let camera = Entity::from_raw_u32(9).expect("test entity index should be valid");
         let draw = imgui::render::DrawDataSnapshot {
+            frame_count: 0,
             display_pos: [0.0, 0.0],
             display_size: [32.0, 32.0],
             framebuffer_scale: [1.0, 1.0],
@@ -1412,6 +1415,7 @@ mod tests {
     #[test]
     fn scissor_rejects_non_finite_or_invalid_display_rects() {
         let mut draw = imgui::render::DrawDataSnapshot {
+            frame_count: 0,
             display_pos: [0.0, 0.0],
             display_size: [32.0, 32.0],
             framebuffer_scale: [1.0, 1.0],
@@ -1522,6 +1526,7 @@ mod tests {
     fn camera_viewport_uniforms_use_logical_viewport_rect_without_scaling_imgui_coordinates() {
         let camera = Entity::from_raw_u32(12).expect("test entity index should be valid");
         let draw = imgui::render::DrawDataSnapshot {
+            frame_count: 0,
             display_pos: [0.0, 0.0],
             display_size: [640.0, 360.0],
             framebuffer_scale: [2.0, 2.0],
@@ -1570,6 +1575,7 @@ mod tests {
         let secondary_camera = Entity::from_raw_u32(11).expect("test entity index should be valid");
         let secondary_viewport = imgui::Id::from(0xBEEF);
         let draw = imgui::render::DrawDataSnapshot {
+            frame_count: 0,
             display_pos: [0.0, 0.0],
             display_size: [f32::NAN, 32.0],
             framebuffer_scale: [1.0, 1.0],
@@ -1579,6 +1585,7 @@ mod tests {
             secondary_viewport,
             false,
             imgui::render::DrawDataSnapshot {
+                frame_count: 0,
                 display_pos: [0.0, 0.0],
                 display_size: [32.0, 32.0],
                 framebuffer_scale: [1.0, 1.0],

@@ -474,6 +474,11 @@ impl MainData {
             smoke.rendered_secondary_viewport = true;
         }
 
+        #[cfg(feature = "test-engine")]
+        if let Some(engine) = self.test_engine.as_mut() {
+            engine.pre_swap()?;
+        }
+
         self.window.gl_swap_window();
 
         #[cfg(feature = "test-engine")]

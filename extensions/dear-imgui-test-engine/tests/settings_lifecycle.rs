@@ -366,6 +366,20 @@ fn script_inputs_are_rejected_before_native_vector_growth() {
                 })
             ));
             assert!(matches!(
+                script.table_resize_column_by_label("Table", "", 10.0),
+                Err(TestEngineError::InvalidInput {
+                    argument: "label",
+                    ..
+                })
+            ));
+            assert!(matches!(
+                script.table_resize_column_by_label("Table", "Column", f32::INFINITY),
+                Err(TestEngineError::InvalidInput {
+                    argument: "width",
+                    ..
+                })
+            ));
+            assert!(matches!(
                 script.window_resize("Window", -1.0, 1.0),
                 Err(TestEngineError::InvalidInput {
                     argument: "width",
@@ -489,6 +503,7 @@ fn queued_and_running_runs_reject_requeue_until_terminal_summary_is_consumed() {
             ));
         }
         drop(context.render());
+        engine.pre_swap().expect("pre swap");
         engine.post_swap().expect("post swap");
         if engine.run_state() == RunState::Terminal {
             break;
@@ -612,6 +627,7 @@ fn public_engine_methods_enforce_the_attachment_and_run_state_matrix() {
     assert_invalid_state(detached.register_default_tests());
     assert_invalid_state(detached.add_script_test("state", "detached", |_| Ok(())));
     assert_invalid_state(detached.queue_all_tests());
+    assert_invalid_state(detached.pre_swap());
     assert_invalid_state(detached.post_swap());
     assert_invalid_state(detached.stop());
     assert_invalid_state(detached.try_abort_engine());
@@ -657,6 +673,7 @@ fn public_engine_methods_enforce_the_attachment_and_run_state_matrix() {
         .expect("summary remains queryable");
     assert_invalid_state(detached.take_terminal_summary());
     assert_invalid_state(detached.queue_all_tests());
+    assert_invalid_state(detached.pre_swap());
     assert_invalid_state(detached.post_swap());
     assert_invalid_state(detached.stop());
     assert_invalid_state(detached.is_test_queue_empty());
@@ -691,6 +708,7 @@ fn public_engine_methods_enforce_the_attachment_and_run_state_matrix() {
     );
     assert_invalid_state(terminal.result_summary());
     assert_invalid_state(terminal.take_terminal_summary());
+    assert_invalid_state(terminal.pre_swap());
     assert_invalid_state(terminal.post_swap());
     terminal.shutdown().expect("ContextDestroyed shutdown");
 }
@@ -705,7 +723,7 @@ fn missing_table_lookup_is_a_failed_test_not_an_infrastructure_error() {
     engine
         .add_script_test("table", "missing", |script| {
             script.set_ref("Table Host")?;
-            script.table_set_column_enabled_by_label("Missing Table", "Column", true)
+            script.table_resize_column_by_label("Missing Table", "Column", 100.0)
         })
         .expect("table lookup command is valid infrastructure");
     engine
@@ -717,6 +735,9 @@ fn missing_table_lookup_is_a_failed_test_not_an_infrastructure_error() {
         ui.window("Table Host")
             .build(|| ui.text("No table is intentionally created"));
         drop(context.render());
+        engine
+            .pre_swap()
+            .expect("pre swap remains infrastructure-successful");
         engine
             .post_swap()
             .expect("post swap remains infrastructure-successful");

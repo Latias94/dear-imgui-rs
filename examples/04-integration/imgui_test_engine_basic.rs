@@ -5,8 +5,8 @@ use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 
 use dear_app::{
-    AppConfig, Application, FrameContext, InitContext, PrepareFrameContext, RunError,
-    ShutdownContext, Theme, run,
+    AppConfig, Application, FrameContext, InitContext, PresentContext, RunError, ShutdownContext,
+    Theme, run,
 };
 use dear_imgui_test_engine::{
     RunFlags, RunOutcome, RunReport, RunSpeed, RunnerControl, RunnerError, ScriptCount, TestEngine,
@@ -419,7 +419,6 @@ struct TestEngineApp {
     cli: Cli,
     engine: Option<TestEngine>,
     script_target_state: ScriptTargetState,
-    pending_post_swap: bool,
 }
 
 impl Application for TestEngineApp {
@@ -459,19 +458,6 @@ impl Application for TestEngineApp {
             .install_default_crash_handler()
             .map_err(|error| RunError::application("configure_imgui", error.to_string()))?;
         self.engine = Some(engine);
-        Ok(())
-    }
-
-    fn prepare_frame(&mut self, _context: &mut PrepareFrameContext<'_>) -> Result<(), RunError> {
-        if self.pending_post_swap {
-            let engine = self.engine.as_mut().ok_or_else(|| {
-                RunError::application("prepare_frame", "Test Engine is not initialized")
-            })?;
-            engine
-                .post_swap()
-                .map_err(|error| RunError::application("prepare_frame", error.to_string()))?;
-            self.pending_post_swap = false;
-        }
         Ok(())
     }
 
@@ -540,18 +526,29 @@ impl Application for TestEngineApp {
         let _ = engine
             .take_terminal_summary()
             .map_err(|error| RunError::application("frame", error.to_string()))?;
-        self.pending_post_swap = true;
         Ok(())
+    }
+
+    fn before_present(&mut self, _context: &mut PresentContext<'_>) -> Result<(), RunError> {
+        let engine = self.engine.as_mut().ok_or_else(|| {
+            RunError::application("before_present", "Test Engine is not initialized")
+        })?;
+        engine
+            .pre_swap()
+            .map_err(|error| RunError::application("before_present", error.to_string()))
+    }
+
+    fn after_present(&mut self, _context: &mut PresentContext<'_>) -> Result<(), RunError> {
+        let engine = self.engine.as_mut().ok_or_else(|| {
+            RunError::application("after_present", "Test Engine is not initialized")
+        })?;
+        engine
+            .post_swap()
+            .map_err(|error| RunError::application("after_present", error.to_string()))
     }
 
     fn shutdown(&mut self, _context: &mut ShutdownContext<'_>) -> Result<(), RunError> {
         if let Some(engine) = self.engine.as_mut() {
-            if self.pending_post_swap {
-                engine
-                    .post_swap()
-                    .map_err(|error| RunError::application("shutdown", error.to_string()))?;
-                self.pending_post_swap = false;
-            }
             engine
                 .shutdown()
                 .map_err(|error| RunError::application("shutdown", error.to_string()))?;
@@ -595,7 +592,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             input: String::new(),
             my_int: 42,
         },
-        pending_post_swap: false,
     };
     let config = AppConfig {
         theme: Some(Theme::Dark),

@@ -560,6 +560,29 @@ impl ScriptTest<'_> {
         ffi_status("imgui_test_engine_script_table_resize_column", status)
     }
 
+    pub fn table_resize_column_by_label(
+        &mut self,
+        table: &str,
+        label: &str,
+        width: f32,
+    ) -> TestEngineResult<()> {
+        validate_table_text("table_resize_column_by_label", "table", table)?;
+        validate_table_text("table_resize_column_by_label", "label", label)?;
+        validate_nonnegative("table_resize_column_by_label", "width", width)?;
+        let status = with_scratch_txt_two(table, label, |table_ptr, label_ptr| unsafe {
+            sys::imgui_test_engine_script_table_resize_column_by_label(
+                self.script.raw(),
+                table_ptr,
+                label_ptr,
+                width,
+            )
+        });
+        ffi_status(
+            "imgui_test_engine_script_table_resize_column_by_label",
+            status,
+        )
+    }
+
     pub fn set_input_mode(&mut self, mode: InputMode) -> TestEngineResult<()> {
         ffi_status("imgui_test_engine_script_set_input_mode", unsafe {
             sys::imgui_test_engine_script_set_input_mode(self.script.raw(), mode as i32)
