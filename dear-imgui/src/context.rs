@@ -20,10 +20,11 @@ mod tests;
 mod texture_registry;
 
 pub use self::attachment::{
-    ContextAttachment, ContextAttachmentError, ContextAttachmentHandle, ContextAttachmentLease,
-    ContextAttachmentPhase, ContextAttachmentRole, ContextAttachmentTeardownError,
-    ContextDestroyed, ContextPlatformAttachmentRelease, ContextPlatformAttachmentReleaseError,
-    ContextPlatformWindowTeardown, ContextPlatformWindowTeardownError, ContextTeardown,
+    ContextAttachment, ContextAttachmentDetachError, ContextAttachmentError,
+    ContextAttachmentHandle, ContextAttachmentLease, ContextAttachmentPhase, ContextAttachmentRole,
+    ContextAttachmentTeardownError, ContextDestroyed, ContextPlatformAttachmentRelease,
+    ContextPlatformAttachmentReleaseError, ContextPlatformWindowTeardown,
+    ContextPlatformWindowTeardownError, ContextTeardown,
 };
 pub use self::binding::{
     ContextAliveToken, ContextBinding, ContextBindingError, ContextId, ContextLifecycle,

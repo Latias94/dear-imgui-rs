@@ -582,6 +582,19 @@ impl ImguiContexts {
         self.order.clone()
     }
 
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    pub(crate) fn native_viewport_context_ids(&self) -> Vec<ContextId> {
+        self.order
+            .iter()
+            .copied()
+            .filter(|context_id| {
+                self.slots.get(context_id).is_some_and(|slot| {
+                    slot.state == ContextSlotState::Ready && slot.config.multi_viewport()
+                })
+            })
+            .collect()
+    }
+
     fn driving_context(&self) -> Option<ContextId> {
         self.order.iter().copied().find(|context_id| {
             self.slots

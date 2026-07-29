@@ -54,10 +54,7 @@ impl Sdl3ViewportRuntime {
         }
         if let Err(error) = platform.validate_renderer_owner(context) {
             return Err(WgpuViewportAttachError::new(
-                WgpuViewportError::PlatformOwnerUnavailable {
-                    backend: "SDL3",
-                    reason: error.to_string(),
-                },
+                WgpuViewportError::Sdl3PlatformOwner(error),
                 renderer,
             ));
         }

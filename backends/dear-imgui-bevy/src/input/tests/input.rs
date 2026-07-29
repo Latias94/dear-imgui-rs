@@ -4,6 +4,12 @@ mod native_viewport;
 
 #[cfg(feature = "render")]
 use super::{OrderedPointerEvent, append_typed_pointer_event};
+#[cfg(all(
+    feature = "render",
+    feature = "multi-viewport",
+    not(target_arch = "wasm32")
+))]
+use super::{RawWindowPointerEvent, order_raw_pointer_events};
 use crate::test_util::imgui_context_guard;
 #[cfg(feature = "render")]
 use bevy_app::PostUpdate;
@@ -48,6 +54,8 @@ use bevy_window::{
     SystemCursorIcon, Window, WindowFocused, WindowPosition, WindowResized, WindowResolution,
     WindowScaleFactorChanged,
 };
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+use bevy_winit::{RawWinitWindowEvent, WINIT_WINDOWS};
 #[cfg(feature = "render")]
 use dear_imgui_bevy::ContextId;
 #[cfg(not(feature = "render"))]
@@ -77,6 +85,46 @@ use dear_imgui_bevy::{ImguiPluginConfig, ImguiViewportBridge, ImguiViewportWindo
 use dear_imgui_rs as imgui;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use native_viewport::CallbackViewport;
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+use winit::{
+    dpi::PhysicalPosition,
+    event::{DeviceId, ElementState, MouseButton as WinitMouseButton, WindowEvent},
+    window::WindowId,
+};
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+struct TestWinitWindowMapping {
+    window_id: WindowId,
+    entity: Entity,
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+impl TestWinitWindowMapping {
+    fn install(entity: Entity) -> Self {
+        let window_id = WindowId::dummy();
+        WINIT_WINDOWS.with_borrow_mut(|windows| {
+            assert!(!windows.winit_to_entity.contains_key(&window_id));
+            assert!(!windows.entity_to_winit.contains_key(&entity));
+            windows.winit_to_entity.insert(window_id, entity);
+            windows.entity_to_winit.insert(entity, window_id);
+        });
+        Self { window_id, entity }
+    }
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+impl Drop for TestWinitWindowMapping {
+    fn drop(&mut self) {
+        WINIT_WINDOWS.with_borrow_mut(|windows| {
+            if windows.winit_to_entity.get(&self.window_id) == Some(&self.entity) {
+                windows.winit_to_entity.remove(&self.window_id);
+            }
+            if windows.entity_to_winit.get(&self.entity) == Some(&self.window_id) {
+                windows.entity_to_winit.remove(&self.entity);
+            }
+        });
+    }
+}
 
 fn app_with_primary_window() -> (App, Entity) {
     app_with_primary_window_plugin(ImguiPlugin::default())
@@ -2217,6 +2265,8 @@ fn raw_pointer_dedup_preserves_nonmatching_typed_events() {
     let raw_move = OrderedPointerEvent::Moved {
         window,
         position: Vec2::new(10.0, 20.0),
+        #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+        native_position: Some(Vec2::new(5.0, 10.0)),
     };
     let raw_leave = OrderedPointerEvent::Left { window };
     let synthetic_button = OrderedPointerEvent::Button {
@@ -2225,7 +2275,8 @@ fn raw_pointer_dedup_preserves_nonmatching_typed_events() {
         state: ButtonState::Pressed,
     };
     let mut ordered = vec![raw_move, raw_leave];
-    let mut duplicates = vec![raw_move, raw_leave];
+    let mut duplicates =
+        std::collections::HashMap::from([(raw_move.identity(), 1), (raw_leave.identity(), 1)]);
 
     append_typed_pointer_event(&mut ordered, &mut duplicates, raw_move);
     append_typed_pointer_event(&mut ordered, &mut duplicates, synthetic_button);
@@ -2233,6 +2284,77 @@ fn raw_pointer_dedup_preserves_nonmatching_typed_events() {
 
     assert!(duplicates.is_empty());
     assert_eq!(ordered, vec![raw_move, raw_leave, synthetic_button]);
+}
+
+#[cfg(all(
+    feature = "render",
+    feature = "multi-viewport",
+    not(target_arch = "wasm32")
+))]
+#[test]
+fn raw_pointer_order_uses_the_scale_active_at_each_event() {
+    let window = Entity::from_raw_u32(23).expect("test entity index should be valid");
+    let mut scale_factors = std::collections::HashMap::from([(window, 1.0)]);
+    let (mut ordered, mut duplicates) = order_raw_pointer_events(
+        [
+            RawWindowPointerEvent::Moved {
+                window,
+                physical_position: Vec2::new(300.0, 120.0),
+                current_native_scale_factor: 2.0,
+                typed_logical_position: None,
+            },
+            RawWindowPointerEvent::Button {
+                window,
+                button: BevyMouseButton::Left,
+                state: ButtonState::Pressed,
+            },
+            RawWindowPointerEvent::ScaleFactorChanged {
+                window,
+                scale_factor: 2.0,
+            },
+            RawWindowPointerEvent::Moved {
+                window,
+                physical_position: Vec2::new(300.0, 120.0),
+                current_native_scale_factor: 2.0,
+                typed_logical_position: None,
+            },
+        ],
+        &mut scale_factors,
+    );
+
+    let typed_move_before_scale = OrderedPointerEvent::Moved {
+        window,
+        position: Vec2::new(300.0, 120.0),
+        native_position: None,
+    };
+    let typed_move_after_scale = OrderedPointerEvent::Moved {
+        window,
+        position: Vec2::new(150.0, 60.0),
+        native_position: None,
+    };
+    let typed_button = OrderedPointerEvent::Button {
+        window,
+        button: BevyMouseButton::Left,
+        state: ButtonState::Pressed,
+    };
+    append_typed_pointer_event(&mut ordered, &mut duplicates, typed_move_before_scale);
+    append_typed_pointer_event(&mut ordered, &mut duplicates, typed_move_after_scale);
+    append_typed_pointer_event(&mut ordered, &mut duplicates, typed_button);
+
+    assert_eq!(scale_factors.get(&window), Some(&2.0));
+    assert!(duplicates.is_empty());
+    assert_eq!(ordered.len(), 3);
+    assert!(matches!(
+        ordered[0],
+        OrderedPointerEvent::Moved { position, .. }
+            if position == Vec2::new(300.0, 120.0)
+    ));
+    assert_eq!(ordered[1], typed_button);
+    assert!(matches!(
+        ordered[2],
+        OrderedPointerEvent::Moved { position, .. }
+            if position == Vec2::new(150.0, 60.0)
+    ));
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -2723,6 +2845,104 @@ fn adjacent_exclusive_input_regions_assign_the_shared_edge_once() {
             "the minimum edge is inclusive for the right region"
         );
     });
+}
+
+#[cfg(all(
+    feature = "render",
+    feature = "multi-viewport",
+    not(target_arch = "wasm32")
+))]
+#[test]
+fn raw_pointer_before_same_batch_dpi_change_keeps_the_button_on_its_original_route() {
+    let _guard = imgui_context_guard();
+    let (mut app, primary_context, primary_window, _) = routed_input_app();
+    let secondary_context = add_routed_input_context(&mut app);
+    app.world_mut()
+        .get_mut::<Window>(primary_window)
+        .expect("primary Window must exist")
+        .resolution
+        .set_scale_factor(2.0);
+    app.world_mut().spawn(ImguiInputRoute::logical(
+        primary_context,
+        primary_window,
+        bevy_math::Rect::from_corners(Vec2::ZERO, Vec2::new(200.0, 480.0)),
+    ));
+    app.world_mut().spawn(ImguiInputRoute::logical(
+        secondary_context,
+        primary_window,
+        bevy_math::Rect::from_corners(Vec2::new(200.0, 0.0), Vec2::new(640.0, 480.0)),
+    ));
+    resolve_routed_input(&mut app);
+
+    let mapping = TestWinitWindowMapping::install(primary_window);
+    let device_id = DeviceId::dummy();
+    {
+        let mut raw_events = app
+            .world_mut()
+            .resource_mut::<Messages<RawWinitWindowEvent>>();
+        raw_events.write(RawWinitWindowEvent {
+            window_id: mapping.window_id,
+            event: WindowEvent::CursorMoved {
+                device_id,
+                position: PhysicalPosition::new(300.0, 120.0),
+            },
+        });
+        raw_events.write(RawWinitWindowEvent {
+            window_id: mapping.window_id,
+            event: WindowEvent::MouseInput {
+                device_id,
+                state: ElementState::Pressed,
+                button: WinitMouseButton::Left,
+            },
+        });
+    }
+    app.world_mut()
+        .resource_mut::<Messages<CursorMoved>>()
+        .write(CursorMoved {
+            window: primary_window,
+            position: Vec2::new(300.0, 120.0),
+            delta: None,
+        });
+    app.world_mut()
+        .resource_mut::<Messages<MouseButtonInput>>()
+        .write(MouseButtonInput {
+            button: BevyMouseButton::Left,
+            state: ButtonState::Pressed,
+            window: primary_window,
+        });
+
+    run_routed_input(&mut app);
+
+    assert_eq!(
+        app.world()
+            .resource::<ImguiInputState>()
+            .routed
+            .pointer_positions
+            .get(&primary_window),
+        Some(&Vec2::new(300.0, 120.0)),
+        "the raw cursor move must use the scale that was active before the DPI change"
+    );
+    begin_frame_for_context(&mut app, primary_context, |ui| {
+        assert!(
+            !ui.is_mouse_down(imgui::MouseButton::Left),
+            "the button must not stick to the route selected by the later DPI scale"
+        );
+    });
+    begin_frame_for_context(&mut app, secondary_context, |ui| {
+        assert!(
+            ui.is_mouse_down(imgui::MouseButton::Left),
+            "the button must follow the raw cursor position that preceded it"
+        );
+    });
+    assert_eq!(
+        app.world()
+            .resource::<ImguiInputState>()
+            .routed
+            .raw_window_scale_factors
+            .get(&primary_window),
+        Some(&2.0),
+        "the next raw batch must start from the Window's final effective scale"
+    );
 }
 
 #[cfg(feature = "render")]

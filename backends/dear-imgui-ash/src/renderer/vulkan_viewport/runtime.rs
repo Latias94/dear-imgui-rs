@@ -49,18 +49,23 @@ pub enum AshViewportError {
         expected: ContextId,
         actual: ContextId,
     },
+    /// The typed platform owner belongs to another Dear ImGui Context.
+    #[error("{backend} platform runtime belongs to Context {actual:?}, not {expected:?}")]
+    PlatformOwnerContextMismatch {
+        backend: &'static str,
+        expected: ContextId,
+        actual: ContextId,
+    },
+    /// The typed Winit platform owner rejected renderer attachment.
+    #[cfg(feature = "multi-viewport-winit")]
+    #[error(transparent)]
+    WinitPlatform(#[from] dear_imgui_winit::WinitPlatformError),
     /// A callback entry was not running under this runtime's Context.
     #[error("the current Dear ImGui Context does not match Ash runtime Context {expected:?}")]
     BoundContextMismatch { expected: ContextId },
     /// Renderer callbacks require an attached platform runtime.
     #[error("Ash multi-viewport requires an attached multi-viewport platform runtime")]
     PlatformBackendUnavailable,
-    /// The selected surface adapter does not match the attached platform runtime.
-    #[error("Ash viewport adapter requires `{expected}`, but Context reports `{actual}`")]
-    PlatformBackendMismatch {
-        expected: &'static str,
-        actual: String,
-    },
     /// A required platform callback is absent.
     #[error("required ImGuiPlatformIO callback `{callback}` is not installed")]
     PlatformCallbackUnavailable { callback: &'static str },
@@ -897,7 +902,9 @@ impl RuntimeControl {
 
     fn detach_attachment(&self) {
         if let Some(mut attachment) = self.attachment.borrow_mut().take() {
-            attachment.detach();
+            let _ = attachment
+                .detach()
+                .expect("a renderer attachment cannot have a platform release dependency");
         }
     }
 

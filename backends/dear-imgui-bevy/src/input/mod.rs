@@ -48,6 +48,12 @@ use dear_imgui_rs as imgui;
 #[cfg(feature = "render")]
 use std::collections::HashMap;
 use std::collections::HashSet;
+#[cfg(all(
+    feature = "render",
+    feature = "multi-viewport",
+    not(target_arch = "wasm32")
+))]
+use std::collections::VecDeque;
 
 const INVALID_MOUSE_POS: [f32; 2] = [-f32::MAX, -f32::MAX];
 
@@ -840,10 +846,19 @@ fn routed_window_input_system(
     }
 
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-    let (mut ordered_pointer_events, mut raw_pointer_duplicates) =
-        collect_raw_winit_pointer_events(&mut messages.raw_winit_window, &windows);
+    // Bevy captures each logical position while handling the Winit event, before later events in
+    // the same batch can change the Window's effective scale factor.
+    let typed_cursor_moved = messages.cursor_moved.read().cloned().collect::<Vec<_>>();
+
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    let (mut ordered_pointer_events, mut raw_pointer_duplicates) = collect_raw_winit_pointer_events(
+        &mut messages.raw_winit_window,
+        &windows,
+        &mut input_state.routed.raw_window_scale_factors,
+        &typed_cursor_moved,
+    );
     #[cfg(not(all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
-    let (mut ordered_pointer_events, mut raw_pointer_duplicates) = (Vec::new(), Vec::new());
+    let (mut ordered_pointer_events, mut raw_pointer_duplicates) = (Vec::new(), HashMap::new());
 
     for event in messages.cursor_entered.read() {
         append_typed_pointer_event(
@@ -854,13 +869,19 @@ fn routed_window_input_system(
             },
         );
     }
-    for event in messages.cursor_moved.read() {
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    let cursor_moved = typed_cursor_moved.iter();
+    #[cfg(not(all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
+    let cursor_moved = messages.cursor_moved.read();
+    for event in cursor_moved {
         append_typed_pointer_event(
             &mut ordered_pointer_events,
             &mut raw_pointer_duplicates,
             OrderedPointerEvent::Moved {
                 window: event.window,
                 position: event.position,
+                #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+                native_position: None,
             },
         );
     }
@@ -1029,6 +1050,79 @@ enum OrderedPointerEvent {
     Moved {
         window: Entity,
         position: Vec2,
+        #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+        native_position: Option<Vec2>,
+    },
+    Left {
+        window: Entity,
+    },
+    Button {
+        window: Entity,
+        button: BevyMouseButton,
+        state: ButtonState,
+    },
+}
+
+#[cfg(feature = "render")]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum PointerEventIdentity {
+    Entered {
+        window: Entity,
+    },
+    Moved {
+        window: Entity,
+    },
+    Left {
+        window: Entity,
+    },
+    Button {
+        window: Entity,
+        button: BevyMouseButton,
+        state: ButtonState,
+    },
+}
+
+#[cfg(feature = "render")]
+impl OrderedPointerEvent {
+    // Raw and typed messages are two views of the same Winit occurrence. Coordinates cannot be
+    // part of this identity because a later same-batch DPI change mutates the Window first.
+    const fn identity(self) -> PointerEventIdentity {
+        match self {
+            Self::Entered { window } => PointerEventIdentity::Entered { window },
+            Self::Moved { window, .. } => PointerEventIdentity::Moved { window },
+            Self::Left { window } => PointerEventIdentity::Left { window },
+            Self::Button {
+                window,
+                button,
+                state,
+            } => PointerEventIdentity::Button {
+                window,
+                button,
+                state,
+            },
+        }
+    }
+}
+
+#[cfg(all(
+    feature = "render",
+    feature = "multi-viewport",
+    not(target_arch = "wasm32")
+))]
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum RawWindowPointerEvent {
+    ScaleFactorChanged {
+        window: Entity,
+        scale_factor: f32,
+    },
+    Entered {
+        window: Entity,
+    },
+    Moved {
+        window: Entity,
+        physical_position: Vec2,
+        current_native_scale_factor: f32,
+        typed_logical_position: Option<Vec2>,
     },
     Left {
         window: Entity,
@@ -1048,37 +1142,72 @@ enum OrderedPointerEvent {
 fn collect_raw_winit_pointer_events(
     messages: &mut MessageReader<RawWinitWindowEvent>,
     windows: &Query<RoutedInputWindowComponents>,
-) -> (Vec<OrderedPointerEvent>, Vec<OrderedPointerEvent>) {
-    let mut ordered = Vec::new();
-    let mut duplicates = Vec::new();
+    scale_factors: &mut HashMap<Entity, f32>,
+    typed_cursor_moved: &[CursorMoved],
+) -> (
+    Vec<OrderedPointerEvent>,
+    HashMap<PointerEventIdentity, usize>,
+) {
+    let live_windows = windows
+        .iter()
+        .map(|(entity, _, _, _, _)| entity)
+        .collect::<HashSet<_>>();
+    scale_factors.retain(|window, _| live_windows.contains(window));
+    // Existing entries are the effective scales from the end of the previous raw batch. The
+    // current Window value is only a first-batch fallback because Bevy has already applied every
+    // raw event before this system runs.
+    for (entity, window, _, _, _) in windows.iter() {
+        scale_factors
+            .entry(entity)
+            .or_insert_with(|| positive_finite_or(window.scale_factor(), 1.0));
+    }
+
+    let mut typed_cursor_positions = HashMap::<Entity, VecDeque<Vec2>>::new();
+    for event in typed_cursor_moved {
+        typed_cursor_positions
+            .entry(event.window)
+            .or_default()
+            .push_back(event.position);
+    }
+
+    let mut raw_events = Vec::new();
     for message in messages.read() {
         let Some(entity) = WINIT_WINDOWS
             .with_borrow(|winit_windows| winit_windows.get_window_entity(message.window_id))
         else {
             continue;
         };
+        let Ok((_, window, _, _, _)) = windows.get(entity) else {
+            continue;
+        };
         let event = match &message.event {
+            winit::event::WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                Some(RawWindowPointerEvent::ScaleFactorChanged {
+                    window: entity,
+                    scale_factor: window
+                        .resolution
+                        .scale_factor_override()
+                        .unwrap_or_else(|| positive_finite_or(*scale_factor as f32, 1.0)),
+                })
+            }
             winit::event::WindowEvent::CursorEntered { .. } => {
-                Some(OrderedPointerEvent::Entered { window: entity })
+                Some(RawWindowPointerEvent::Entered { window: entity })
             }
             winit::event::WindowEvent::CursorMoved { position, .. } => {
-                let Ok((_, window, _, _, _)) = windows.get(entity) else {
-                    continue;
-                };
-                let scale_factor = positive_finite_or(window.scale_factor(), 1.0) as f64;
-                Some(OrderedPointerEvent::Moved {
+                Some(RawWindowPointerEvent::Moved {
                     window: entity,
-                    position: Vec2::new(
-                        (position.x / scale_factor) as f32,
-                        (position.y / scale_factor) as f32,
-                    ),
+                    physical_position: Vec2::new(position.x as f32, position.y as f32),
+                    current_native_scale_factor: current_native_scale_factor(entity, window),
+                    typed_logical_position: typed_cursor_positions
+                        .get_mut(&entity)
+                        .and_then(VecDeque::pop_front),
                 })
             }
             winit::event::WindowEvent::CursorLeft { .. } => {
-                Some(OrderedPointerEvent::Left { window: entity })
+                Some(RawWindowPointerEvent::Left { window: entity })
             }
             winit::event::WindowEvent::MouseInput { state, button, .. } => {
-                Some(OrderedPointerEvent::Button {
+                Some(RawWindowPointerEvent::Button {
                     window: entity,
                     button: map_winit_mouse_button(*button),
                     state: match *state {
@@ -1090,23 +1219,135 @@ fn collect_raw_winit_pointer_events(
             _ => None,
         };
         if let Some(event) = event {
-            ordered.push(event);
-            duplicates.push(event);
+            raw_events.push(event);
         }
     }
+
+    let result = order_raw_pointer_events(raw_events, scale_factors);
+    for (entity, window, _, _, _) in windows.iter() {
+        scale_factors.insert(entity, positive_finite_or(window.scale_factor(), 1.0));
+    }
+    result
+}
+
+#[cfg(all(
+    feature = "render",
+    feature = "multi-viewport",
+    not(target_arch = "wasm32")
+))]
+fn order_raw_pointer_events(
+    events: impl IntoIterator<Item = RawWindowPointerEvent>,
+    scale_factors: &mut HashMap<Entity, f32>,
+) -> (
+    Vec<OrderedPointerEvent>,
+    HashMap<PointerEventIdentity, usize>,
+) {
+    let mut ordered = Vec::new();
+    let mut duplicates = HashMap::new();
+    for event in events {
+        let event = match event {
+            RawWindowPointerEvent::ScaleFactorChanged {
+                window,
+                scale_factor,
+            } => {
+                scale_factors.insert(window, positive_finite_or(scale_factor, 1.0));
+                continue;
+            }
+            RawWindowPointerEvent::Entered { window } => OrderedPointerEvent::Entered { window },
+            RawWindowPointerEvent::Moved {
+                window,
+                physical_position,
+                current_native_scale_factor,
+                typed_logical_position,
+            } => {
+                let event_scale_factor = scale_factors
+                    .get(&window)
+                    .copied()
+                    .map_or(1.0, |scale_factor| positive_finite_or(scale_factor, 1.0));
+                let position = typed_logical_position
+                    .unwrap_or_else(|| physical_position / event_scale_factor);
+                OrderedPointerEvent::Moved {
+                    window,
+                    position,
+                    native_position: Some(raw_native_pointer_position(
+                        physical_position,
+                        position,
+                        current_native_scale_factor,
+                    )),
+                }
+            }
+            RawWindowPointerEvent::Left { window } => OrderedPointerEvent::Left { window },
+            RawWindowPointerEvent::Button {
+                window,
+                button,
+                state,
+            } => OrderedPointerEvent::Button {
+                window,
+                button,
+                state,
+            },
+        };
+        ordered.push(event);
+        *duplicates.entry(event.identity()).or_insert(0) += 1;
+    }
     (ordered, duplicates)
+}
+
+#[cfg(all(
+    feature = "render",
+    feature = "multi-viewport",
+    not(target_arch = "wasm32")
+))]
+fn current_native_scale_factor(entity: Entity, window: &Window) -> f32 {
+    WINIT_WINDOWS
+        .with_borrow(|windows| {
+            windows
+                .get_window(entity)
+                .map(|window| window.scale_factor() as f32)
+        })
+        .map_or_else(
+            || positive_finite_or(window.scale_factor(), 1.0),
+            |scale_factor| positive_finite_or(scale_factor, 1.0),
+        )
+}
+
+#[cfg(all(
+    feature = "render",
+    feature = "multi-viewport",
+    not(target_arch = "wasm32")
+))]
+fn raw_native_pointer_position(
+    physical_position: Vec2,
+    logical_position: Vec2,
+    current_native_scale_factor: f32,
+) -> Vec2 {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = (physical_position, current_native_scale_factor);
+        logical_position
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = logical_position;
+        physical_position / positive_finite_or(current_native_scale_factor, 1.0)
+    }
 }
 
 #[cfg(feature = "render")]
 fn append_typed_pointer_event(
     ordered: &mut Vec<OrderedPointerEvent>,
-    raw_duplicates: &mut Vec<OrderedPointerEvent>,
+    raw_duplicates: &mut HashMap<PointerEventIdentity, usize>,
     event: OrderedPointerEvent,
 ) {
-    if let Some(index) = raw_duplicates.iter().position(|raw| *raw == event) {
-        raw_duplicates.swap_remove(index);
-    } else {
-        ordered.push(event);
+    match raw_duplicates.entry(event.identity()) {
+        std::collections::hash_map::Entry::Occupied(mut entry) => {
+            if *entry.get() > 1 {
+                *entry.get_mut() -= 1;
+            } else {
+                entry.remove();
+            }
+        }
+        std::collections::hash_map::Entry::Vacant(_) => ordered.push(event),
     }
 }
 
@@ -1244,6 +1485,12 @@ fn refresh_routed_pointer_from_cached_position(
     let Some(position) = state.routed.pointer_positions.get(&host_window).copied() else {
         return pointer_targets_for_window_without_position(state, targets, host_window);
     };
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    let native_position = state
+        .routed
+        .raw_native_pointer_positions
+        .get(&host_window)
+        .copied();
     let selected = pointer_targets_for_position(targets, host_window, position);
     replace_routed_pointer_targets(
         contexts,
@@ -1259,6 +1506,12 @@ fn refresh_routed_pointer_from_cached_position(
             target.context_id,
             unavailable_contexts,
             |context| {
+                #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+                let position = if target.is_native_viewport() {
+                    native_position.unwrap_or(position)
+                } else {
+                    position
+                };
                 add_routed_pointer_position(context, target, position, imgui::MouseSource::Mouse)
             },
         );
@@ -1301,11 +1554,25 @@ fn apply_routed_pointer_event(
                 );
             }
         }
-        OrderedPointerEvent::Moved { window, position } => {
+        OrderedPointerEvent::Moved {
+            window,
+            position,
+            #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+            native_position,
+        } => {
             if !state.routed.pointer_outside_windows.contains(&window) {
                 clear_other_outside_window_pointers(contexts, state, window, unavailable_contexts);
             }
             state.routed.pointer_positions.insert(window, position);
+            #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+            if let Some(native_position) = native_position {
+                state
+                    .routed
+                    .raw_native_pointer_positions
+                    .insert(window, native_position);
+            } else {
+                state.routed.raw_native_pointer_positions.remove(&window);
+            }
             let pointer_targets = refresh_routed_pointer_from_cached_position(
                 contexts,
                 state,
@@ -1413,6 +1680,8 @@ fn clear_routed_window_pointer(
     unavailable_contexts: &mut HashSet<ContextId>,
 ) {
     state.routed.pointer_positions.remove(&window);
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    state.routed.raw_native_pointer_positions.remove(&window);
     replace_routed_pointer_targets(contexts, state, window, Vec::new(), unavailable_contexts);
 }
 

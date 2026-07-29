@@ -2539,6 +2539,7 @@ dependencies = [
  "ash-window",
  "dear-imgui-rs",
  "dear-imgui-sdl3",
+ "dear-imgui-winit",
  "gpu-allocator 0.28.0",
  "thiserror 2.0.18",
  "vk-mem",

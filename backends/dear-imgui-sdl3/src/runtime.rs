@@ -1578,7 +1578,9 @@ impl RuntimeRegistration {
             ) {
                 Ok(attachment) => Some(attachment),
                 Err(error) => {
-                    platform_attachment.detach();
+                    let _ = platform_attachment.detach().expect(
+                        "SDL3 renderer registration failed before a renderer dependency existed",
+                    );
                     return Err(error.into());
                 }
             }
@@ -1814,10 +1816,14 @@ impl RuntimeRegistration {
 
     fn detach_attachments(&mut self) {
         if let Some(mut renderer) = self.renderer_attachment.take() {
-            renderer.detach();
+            let _ = renderer
+                .detach()
+                .expect("a renderer attachment cannot have a platform release dependency");
         }
         if let Some(mut platform) = self.platform_attachment.take() {
-            platform.detach();
+            let _ = platform
+                .detach()
+                .expect("SDL3 detaches its renderer attachment before its platform attachment");
         }
     }
 
@@ -2530,7 +2536,7 @@ mod tests {
         assert_eq!(runtime.control.state(), RuntimeState::Attached);
         assert_eq!(platform_count.get(), 0);
 
-        assert!(renderer.detach());
+        assert_eq!(renderer.detach(), Ok(true));
         runtime.shutdown_platform(&mut context).unwrap();
         assert_eq!(platform_count.get(), 1);
     }

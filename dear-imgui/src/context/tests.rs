@@ -7,9 +7,9 @@ use std::ffi::{c_char, c_void};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::{
-    Context, ContextAttachment, ContextAttachmentError, ContextAttachmentRole, ContextBindingError,
-    ContextDestroyed, ContextPlatformAttachmentReleaseError, ContextTeardown,
-    binding::with_bound_context,
+    Context, ContextAttachment, ContextAttachmentDetachError, ContextAttachmentError,
+    ContextAttachmentRole, ContextBindingError, ContextDestroyed,
+    ContextPlatformAttachmentReleaseError, ContextTeardown, binding::with_bound_context,
 };
 
 struct PlatformMarker;
@@ -1224,7 +1224,7 @@ fn attachment_registration_preflight_is_non_mutating() {
         Ok(())
     );
 
-    assert!(platform_lease.detach());
+    assert_eq!(platform_lease.detach(), Ok(true));
     let shared_context = &ctx;
     assert_eq!(
         shared_context
@@ -1261,15 +1261,22 @@ fn platform_release_is_generation_bound_and_rejects_active_renderer_dependencies
         Err(ContextPlatformAttachmentReleaseError::RendererActive)
     ));
     assert!(platform.is_attached());
-    assert!(!platform_lease.detach());
+    assert_eq!(
+        platform_lease.detach(),
+        Err(ContextAttachmentDetachError::RendererActive)
+    );
     assert!(platform_lease.is_attached());
 
-    assert!(renderer_lease.detach());
+    assert_eq!(renderer_lease.detach(), Ok(true));
     {
         let mut permit = ctx
             .prepare_platform_attachment_release(&platform)
             .expect("renderer release must make platform shutdown retryable");
         assert!(platform.is_attached());
+        assert_eq!(
+            platform_lease.detach(),
+            Err(ContextAttachmentDetachError::ReleaseInProgress)
+        );
         assert!(matches!(
             permit.context_mut().register_attachment::<RendererMarker>(
                 ContextAttachmentRole::Renderer,
@@ -1514,8 +1521,8 @@ fn attachment_registration_enforces_roles_and_detach_is_idempotent() {
         ))
     ));
 
-    assert!(platform_lease.detach());
-    assert!(!platform_lease.detach());
+    assert_eq!(platform_lease.detach(), Ok(true));
+    assert_eq!(platform_lease.detach(), Ok(false));
     drop(ctx);
     assert!(log.borrow().is_empty());
 }
@@ -1534,7 +1541,7 @@ fn detaching_attachment_releases_context_ownership_immediately() {
         .unwrap();
 
     assert_eq!(Rc::strong_count(&attachment), 2);
-    assert!(lease.detach());
+    assert_eq!(lease.detach(), Ok(true));
     assert_eq!(Rc::strong_count(&attachment), 1);
     drop(ctx);
 }

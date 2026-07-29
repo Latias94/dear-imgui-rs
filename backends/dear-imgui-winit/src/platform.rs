@@ -1651,7 +1651,9 @@ impl Drop for WinitPlatform {
             unregister_platform_control(self.control.binding.id());
             self.control.state.set(PlatformState::Detached);
             if let Some(mut attachment) = self.attachment.take() {
-                attachment.detach();
+                let _ = attachment
+                    .detach()
+                    .expect("Winit verified that no renderer attachment blocks platform detach");
             }
             return;
         }
@@ -1743,7 +1745,7 @@ mod tests {
         );
         assert!(platform.control.attachment_handle().unwrap().is_attached());
 
-        assert!(renderer.detach());
+        assert_eq!(renderer.detach(), Ok(true));
         platform.shutdown(&mut context).unwrap();
     }
 
@@ -1768,7 +1770,7 @@ mod tests {
             control.token_ptr()
         );
         assert!(control.attachment_handle().unwrap().is_attached());
-        assert!(renderer.detach());
+        assert_eq!(renderer.detach(), Ok(true));
         drop(context);
         assert_eq!(control.state.get(), PlatformState::ContextDestroyed);
     }

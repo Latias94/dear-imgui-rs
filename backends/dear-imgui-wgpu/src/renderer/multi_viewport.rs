@@ -54,10 +54,7 @@ impl WinitViewportRuntime {
         }
         if let Err(error) = platform.validate_renderer_owner(context) {
             return Err(WgpuViewportAttachError::new(
-                WgpuViewportError::PlatformOwnerUnavailable {
-                    backend: "Winit",
-                    reason: error.to_string(),
-                },
+                WgpuViewportError::WinitPlatformOwner(error),
                 renderer,
             ));
         }

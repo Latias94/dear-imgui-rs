@@ -59,8 +59,9 @@ use dear_imgui_rs as imgui;
 use dear_imgui_rs::sys;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use std::ffi::{CStr, c_char, c_void};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
@@ -68,22 +69,67 @@ use std::rc::Rc;
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use std::rc::Weak;
 
-/// Native desktop-position capability observed for Bevy's current Winit display.
+/// Native desktop-position capability observed for one Bevy-managed Dear ImGui Context.
 ///
 /// Dear ImGui's native multi-viewport contract needs both global client-area positions and
 /// native window positioning. On Wayland this remains unavailable by protocol design, so the
 /// backend keeps docking in the host window instead of advertising unusable platform viewports.
-#[derive(Resource, Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum ImguiNativeViewportSupport {
-    /// This build does not include the native `multi-viewport` integration.
-    #[default]
-    NotCompiled,
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum ImguiNativeViewportStatus {
     /// A native host window has not been created yet.
     PendingNativeWindow,
     /// Native platform viewports may be enabled.
     Available,
     /// The active window system does not provide global desktop coordinates.
     GlobalDesktopCoordinatesUnavailable,
+}
+
+/// Per-Context native multi-viewport capability observed during the latest frame.
+///
+/// A Context is absent until it opts into native multi-viewport and enters the private Context
+/// driver. Removed, disabled, and not-yet-driven Contexts are not retained.
+#[derive(Resource, Clone, Debug, Default, Eq, PartialEq)]
+pub struct ImguiNativeViewportSupport {
+    contexts: HashMap<imgui::ContextId, ImguiNativeViewportStatus>,
+}
+
+impl ImguiNativeViewportSupport {
+    /// Return the latest native multi-viewport status for `context_id`.
+    #[must_use]
+    pub fn get(&self, context_id: imgui::ContextId) -> Option<ImguiNativeViewportStatus> {
+        self.contexts.get(&context_id).copied()
+    }
+
+    /// Iterate the Contexts which currently request native multi-viewport support.
+    pub fn iter(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (imgui::ContextId, ImguiNativeViewportStatus)> + '_ {
+        self.contexts
+            .iter()
+            .map(|(context_id, status)| (*context_id, *status))
+    }
+
+    /// Return whether native platform windows are available for `context_id`.
+    #[must_use]
+    pub fn is_available(&self, context_id: imgui::ContextId) -> bool {
+        self.get(context_id) == Some(ImguiNativeViewportStatus::Available)
+    }
+
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    pub(crate) fn begin_frame(&mut self, contexts: impl IntoIterator<Item = imgui::ContextId>) {
+        self.contexts.clear();
+        self.contexts.extend(
+            contexts
+                .into_iter()
+                .map(|context_id| (context_id, ImguiNativeViewportStatus::PendingNativeWindow)),
+        );
+    }
+
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    pub(crate) fn set(&mut self, context_id: imgui::ContextId, status: ImguiNativeViewportStatus) {
+        self.contexts.insert(context_id, status);
+    }
 }
 
 /// Policy applied to every Bevy window created for a secondary Dear ImGui viewport.
@@ -218,6 +264,7 @@ pub(crate) enum ImguiViewportCommand {
     },
     Update {
         id: ImguiViewportId,
+        previous_flags: Option<imgui::ViewportFlags>,
         flags: imgui::ViewportFlags,
     },
     SetPos {
@@ -1191,8 +1238,12 @@ impl ImguiViewportBridgeState {
         }
     }
 
-    fn set_viewport_flags(&mut self, viewport_id: ImguiViewportId, flags: imgui::ViewportFlags) {
-        self.viewport_flags.insert(viewport_id, flags);
+    fn set_viewport_flags(
+        &mut self,
+        viewport_id: ImguiViewportId,
+        flags: imgui::ViewportFlags,
+    ) -> Option<imgui::ViewportFlags> {
+        self.viewport_flags.insert(viewport_id, flags)
     }
 }
 
@@ -1634,7 +1685,6 @@ pub(crate) fn install_viewport_bridge(app: &mut App) {
     app.init_resource::<ImguiNativeViewportSupport>();
     #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
     {
-        app.insert_resource(ImguiNativeViewportSupport::PendingNativeWindow);
         if !sys::HAS_PLATFORM_IO_AGGREGATE_HOOKS {
             missing_platform_io_aggregate_hooks();
         }
@@ -2582,7 +2632,7 @@ unsafe extern "C" fn platform_create_window(viewport: *mut imgui::Viewport) {
                 }
             }
             let handle = bridge.platform_handle(identity);
-            bridge.set_viewport_flags(viewport.id(), viewport.flags());
+            let _ = bridge.set_viewport_flags(viewport.id(), viewport.flags());
             bridge.queue(ImguiViewportCommand::Create(
                 ImguiViewportSnapshot::from_viewport(viewport),
             ));
@@ -2679,7 +2729,7 @@ unsafe extern "C" fn platform_show_window(viewport: *mut imgui::Viewport) {
     };
     let _ = unsafe {
         with_current_bridge_mut(|bridge| {
-            bridge.set_viewport_flags(viewport.id(), viewport.flags());
+            let _ = bridge.set_viewport_flags(viewport.id(), viewport.flags());
             bridge.queue(ImguiViewportCommand::Show { id: viewport.id() });
         })
     };
@@ -2693,9 +2743,10 @@ unsafe extern "C" fn platform_update_window(viewport: *mut imgui::Viewport) {
     let _ = unsafe {
         with_current_bridge_mut(|bridge| {
             let flags = viewport.flags();
-            bridge.set_viewport_flags(viewport.id(), flags);
+            let previous_flags = bridge.set_viewport_flags(viewport.id(), flags);
             bridge.queue(ImguiViewportCommand::Update {
                 id: viewport.id(),
+                previous_flags,
                 flags,
             });
         })
@@ -3301,8 +3352,12 @@ fn apply_viewport_commands_for_context(
                 }
                 feedback_candidates.insert(id);
             }
-            ImguiViewportCommand::Update { id, flags } => {
-                let previous_flags = context
+            ImguiViewportCommand::Update {
+                id,
+                previous_flags,
+                flags,
+            } => {
+                context
                     .inner
                     .state
                     .borrow_mut()
@@ -3311,6 +3366,11 @@ fn apply_viewport_commands_for_context(
                 let decoration_changed = previous_flags.is_some_and(|previous| {
                     previous.contains(imgui::ViewportFlags::NO_DECORATION)
                         != flags.contains(imgui::ViewportFlags::NO_DECORATION)
+                });
+                #[cfg(feature = "render")]
+                let renderer_clear_changed = previous_flags.is_some_and(|previous| {
+                    previous.contains(imgui::ViewportFlags::NO_RENDERER_CLEAR)
+                        != flags.contains(imgui::ViewportFlags::NO_RENDERER_CLEAR)
                 });
                 let mut was_visible = false;
                 if let Some(window) = pending_windows.get_mut(&id) {
@@ -3353,6 +3413,17 @@ fn apply_viewport_commands_for_context(
                     let mut cursor_options = CursorOptions::default();
                     apply_viewport_flags_to_cursor_options(flags, &mut cursor_options);
                     ecs_commands.entity(entity).insert(cursor_options);
+                }
+                #[cfg(feature = "render")]
+                if renderer_clear_changed
+                    && let Some(camera) = context.viewport_camera(id)
+                    && (live_cameras.contains(&(id, camera))
+                        || recoverable_cameras.contains(&(id, camera))
+                        || pending_cameras.contains(&id))
+                {
+                    ecs_commands
+                        .entity(camera)
+                        .insert(viewport_camera(viewport_window_config.transparent, flags));
                 }
             }
             ImguiViewportCommand::SetPos { id, pos, dpi_scale } => {

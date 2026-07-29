@@ -169,8 +169,9 @@ well as when presentation uses a separate family.
 The runtime never destroys it. Before claiming callback slots, `attach` checks that required
 handles are non-null, queue-family indices are in range and expose queues, the graphics family
 supports graphics, and the present family can present color-attachment swapchains with at least
-one format and present mode on this surface. Winit attachment also verifies the active platform
-backend name. SDL3 attachment requires the exact live `Sdl3PlatformBackend` owner initialized by
+one format and present mode on this surface. Winit attachment requires the exact live
+`WinitPlatformRuntime` owner and validates its Context and callback ownership. SDL3 attachment
+requires the exact live `Sdl3PlatformBackend` owner initialized by
 `init_for_vulkan` and leases its `Platform_CreateVkSurface` capability. An invalid configuration or
 adapter therefore fails before the renderer is consumed or any renderer callback is published;
 `AshViewportAttachError` returns the unchanged renderer to the caller.
@@ -202,10 +203,13 @@ let runtime = winit_mvp::WinitPlatformRuntime::new(imgui, &platform)?;
 
 // SAFETY: all raw handles and queue-family indices in config belong to the
 // renderer's logical-device lineage. The wrapper owns renderer address stability.
-let renderer = unsafe { ash_mvp::WinitViewportRuntime::attach(imgui, renderer, config)? };
+let renderer = unsafe { ash_mvp::WinitViewportRuntime::attach(imgui, &runtime, renderer, config)? };
 # Ok((platform, runtime, renderer))
 # }
 ```
+
+Custom Winit-compatible platform implementations may use `unsafe attach_unchecked` only when every
+viewport `PlatformHandle` points to a live `winit::Window` that outlives the renderer runtime.
 
 For SDL3, initialize `Sdl3PlatformBackend::init_for_vulkan` first and pass that owner to
 `multi_viewport_sdl3::Sdl3ViewportRuntime::attach(imgui, &platform, renderer, config)`. The

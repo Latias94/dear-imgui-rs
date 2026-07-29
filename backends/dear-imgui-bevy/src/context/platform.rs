@@ -149,9 +149,9 @@ pub(super) fn prepare_context_platform_frame(
             crate::viewport::native_window::desktop_position_support(host_window)
         })
     };
-    world.insert_resource(crate::ImguiNativeViewportSupport::from(
-        desktop_position_support,
-    ));
+    world
+        .resource_mut::<crate::ImguiNativeViewportSupport>()
+        .set(context_id, desktop_position_support.into());
     crate::viewport::prepare_platform_viewports_for_frame(
         context,
         &bridge,
@@ -163,7 +163,8 @@ pub(super) fn prepare_context_platform_frame(
         desktop_position_support,
     )
     .map_err(crate::viewport::ImguiViewportRuntimeError::CallbackOwnership)?;
-    Ok(true)
+    Ok(desktop_position_support
+        != crate::viewport::native_window::DesktopPositionSupport::PendingWindow)
 }
 
 pub(super) fn sync_context_platform_feedback(

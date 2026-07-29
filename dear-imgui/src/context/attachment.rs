@@ -162,6 +162,22 @@ pub enum ContextAttachmentError {
     ContextDropping,
 }
 
+/// Failure to explicitly detach a live Context attachment lease.
+///
+/// A failed detach leaves both the attachment and lease active. Platform backends must release
+/// renderer dependencies first and use [`Context::prepare_platform_attachment_release`] for
+/// transactional native teardown.
+#[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
+#[non_exhaustive]
+pub enum ContextAttachmentDetachError {
+    /// Another transaction has reserved this platform attachment generation for release.
+    #[error("platform attachment release is already in progress")]
+    ReleaseInProgress,
+    /// Renderer resources still depend on platform-owned native handles.
+    #[error("the platform attachment cannot be detached while a renderer attachment is active")]
+    RendererActive,
+}
+
 /// Failure to prepare an explicit platform attachment release.
 ///
 /// Platform backends must complete this preflight before closing a frame, destroying native
@@ -415,19 +431,25 @@ pub(super) struct AttachmentControl {
 }
 
 impl AttachmentControl {
-    fn detach(&self) -> bool {
-        if self.state.get() != AttachmentState::Active {
-            return false;
+    fn detach(&self) -> Result<bool, ContextAttachmentDetachError> {
+        match self.state.get() {
+            AttachmentState::Active => {}
+            AttachmentState::ReleasePrepared => {
+                return Err(ContextAttachmentDetachError::ReleaseInProgress);
+            }
+            AttachmentState::Teardown | AttachmentState::Complete | AttachmentState::Detached => {
+                return Ok(false);
+            }
         }
         if self.role == ContextAttachmentRole::Platform && self.roles.renderer_active.get() {
-            return false;
+            return Err(ContextAttachmentDetachError::RendererActive);
         }
         self.state.set(AttachmentState::Detached);
         self.attachment.borrow_mut().take();
         if self.role == ContextAttachmentRole::Renderer {
             self.roles.renderer_active.set(false);
         }
-        true
+        Ok(true)
     }
 
     fn prepare_platform_release(&self) {
@@ -484,15 +506,17 @@ impl ContextAttachmentLease {
         }
     }
 
-    /// Detaches the attachment if teardown has not started.
+    /// Detaches the attachment if it is still active and has no dependency blocking release.
     ///
-    /// Returns `true` only for the transition from attached to detached. A platform lease remains
-    /// attached while the Context has an active renderer dependency; explicit platform shutdown
-    /// must use [`Context::prepare_platform_attachment_release`] before changing native state.
-    pub fn detach(&mut self) -> bool {
+    /// `Ok(true)` reports the transition from attached to detached. `Ok(false)` means Context
+    /// teardown or an earlier release already claimed the attachment. An error leaves the lease
+    /// attached: platform backends must not destroy native state after such a failure. Explicit
+    /// platform shutdown should use [`Context::prepare_platform_attachment_release`] so native
+    /// teardown and lease release share one transaction.
+    pub fn detach(&mut self) -> Result<bool, ContextAttachmentDetachError> {
         self.control
             .upgrade()
-            .is_some_and(|control| control.detach())
+            .map_or(Ok(false), |control| control.detach())
     }
 
     /// Returns whether the attachment is still active.

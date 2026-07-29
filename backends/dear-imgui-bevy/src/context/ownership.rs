@@ -1670,7 +1670,10 @@ fn finish_viewport_detach(
         .as_mut()
         .expect("a drained bridge must retain its owner");
     viewport::finish_owned_bridge_release(context, &owner.keepalive);
-    let _ = owner.attachment.detach();
+    let _ = owner
+        .attachment
+        .detach()
+        .expect("the drained Bevy viewport bridge has no renderer attachment dependency");
     viewport::finish_viewport_ecs_release(&owner.keepalive);
     if let Some(registration) = owner.registration.as_ref() {
         registration.unregister_context(owner.context_id);

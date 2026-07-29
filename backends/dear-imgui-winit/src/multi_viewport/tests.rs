@@ -1156,7 +1156,7 @@ fn runtime_shutdown_rejects_an_active_renderer_attachment_before_frame_or_native
     assert_eq!(runtime.control().state(), RuntimeState::Attached);
     assert!(runtime.validate_renderer_owner(&context).is_ok());
 
-    assert!(renderer.detach());
+    assert_eq!(renderer.detach(), Ok(true));
     runtime.shutdown(&mut context).unwrap();
 }
 

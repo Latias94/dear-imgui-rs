@@ -192,6 +192,7 @@ impl Sdl3OpenGlViewportSwapInterval {
 
 /// Errors reported by the SDL3 platform and optional renderer runtimes.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum Sdl3BackendError {
     #[error("ImGui_ImplSDL3_InitForOpenGL returned false")]
     Sdl3InitFailed,

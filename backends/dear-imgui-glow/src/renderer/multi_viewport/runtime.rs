@@ -524,7 +524,9 @@ impl RuntimeControl {
 
     fn detach_attachment(&self) {
         if let Some(mut attachment) = self.attachment.borrow_mut().take() {
-            attachment.detach();
+            let _ = attachment
+                .detach()
+                .expect("a renderer attachment cannot have a platform release dependency");
         }
     }
 

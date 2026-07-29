@@ -7,7 +7,9 @@ use bevy_app::App;
 #[cfg(all(feature = "multi-viewport", feature = "render"))]
 use bevy_app::Main;
 #[cfg(all(feature = "multi-viewport", feature = "render"))]
-use bevy_camera::{Camera, Camera2d, RenderTarget, visibility::RenderLayers};
+use bevy_camera::{
+    Camera, Camera2d, CameraOutputMode, ClearColorConfig, RenderTarget, visibility::RenderLayers,
+};
 #[cfg(feature = "multi-viewport")]
 use bevy_ecs::message::Messages;
 #[cfg(feature = "multi-viewport")]
@@ -49,9 +51,9 @@ use dear_imgui_bevy::ImguiViewportSnapshot;
 use dear_imgui_bevy::route::ImguiInputRoute;
 #[cfg(feature = "multi-viewport")]
 use dear_imgui_bevy::{
-    ImguiContextError, ImguiContexts, ImguiPlugin, ImguiPluginConfig, ImguiPrimaryContextPass,
-    ImguiUi, ImguiViewportBridge, ImguiViewportFeedback, ImguiViewportWindow,
-    ImguiViewportWindowConfig,
+    ImguiContextError, ImguiContexts, ImguiNativeViewportStatus, ImguiNativeViewportSupport,
+    ImguiPlugin, ImguiPluginConfig, ImguiPrimaryContextPass, ImguiUi, ImguiViewportBridge,
+    ImguiViewportFeedback, ImguiViewportWindow, ImguiViewportWindowConfig,
 };
 use dear_imgui_rs as imgui;
 #[cfg(feature = "multi-viewport")]
@@ -267,6 +269,105 @@ fn additional_context_can_enable_native_viewports_when_primary_does_not() {
         .remove(secondary_id)
         .expect("an unused Context-local viewport bridge should detach immediately");
     assert_eq!(removed.id(), secondary_id);
+}
+
+#[cfg(all(feature = "multi-viewport", feature = "render"))]
+#[test]
+fn native_viewport_support_is_scoped_by_context_and_drive_state() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_multi_viewport_bridge();
+    app.add_systems(SecondaryViewportPass, || {});
+    let primary_id = primary_context_id(&app);
+    let secondary_id = app
+        .world_mut()
+        .get_non_send_mut::<ImguiContexts>()
+        .unwrap()
+        .create(ImguiContextConfig::new(SecondaryViewportPass).with_multi_viewport(true))
+        .expect("the secondary Context should accept native viewport infrastructure");
+    ensure_primary_window(&mut app);
+
+    app.update();
+
+    let support = app.world().resource::<ImguiNativeViewportSupport>();
+    assert_eq!(
+        support.get(primary_id),
+        Some(ImguiNativeViewportStatus::Available)
+    );
+    assert_eq!(
+        support.get(secondary_id),
+        Some(ImguiNativeViewportStatus::PendingNativeWindow),
+        "a Context without its own routed host must not overwrite another Context's capability"
+    );
+    assert_eq!(support.iter().len(), 2);
+}
+
+#[cfg(all(feature = "multi-viewport", feature = "render"))]
+#[test]
+fn pending_native_window_defers_the_first_context_frame_until_viewports_are_available() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_multi_viewport_bridge();
+    let primary_id = primary_context_id(&app);
+    ensure_primary_window(&mut app);
+    app.insert_resource(
+        crate::viewport::native_window::DesktopPositionSupportOverride(
+            crate::viewport::native_window::DesktopPositionSupport::PendingWindow,
+        ),
+    );
+
+    app.update();
+
+    {
+        let contexts = app.world().non_send::<ImguiContexts>();
+        assert_eq!(contexts.frame_index(primary_id).unwrap(), 0);
+        assert!(matches!(
+            contexts.last_error(primary_id).unwrap(),
+            Some(ImguiContextError::PlatformHostUnavailable { context_id })
+                if *context_id == primary_id
+        ));
+    }
+    assert_eq!(
+        app.world()
+            .resource::<ImguiNativeViewportSupport>()
+            .get(primary_id),
+        Some(ImguiNativeViewportStatus::PendingNativeWindow)
+    );
+    with_primary_context(&mut app, |context| {
+        assert_eq!(unsafe { (*context.as_raw()).FrameCount }, 0);
+        assert!(
+            !context
+                .io()
+                .config_flags()
+                .contains(imgui::ConfigFlags::VIEWPORTS_ENABLE)
+        );
+    });
+
+    app.insert_resource(
+        crate::viewport::native_window::DesktopPositionSupportOverride(
+            crate::viewport::native_window::DesktopPositionSupport::Available,
+        ),
+    );
+    app.update();
+
+    {
+        let contexts = app.world().non_send::<ImguiContexts>();
+        assert_eq!(contexts.frame_index(primary_id).unwrap(), 1);
+        assert!(contexts.last_error(primary_id).unwrap().is_none());
+    }
+    assert_eq!(
+        app.world()
+            .resource::<ImguiNativeViewportSupport>()
+            .get(primary_id),
+        Some(ImguiNativeViewportStatus::Available)
+    );
+    with_primary_context(&mut app, |context| {
+        assert_eq!(unsafe { (*context.as_raw()).FrameCount }, 1);
+        assert!(
+            context
+                .io()
+                .config_flags()
+                .contains(imgui::ConfigFlags::VIEWPORTS_ENABLE)
+        );
+    });
 }
 
 #[cfg(feature = "multi-viewport")]
@@ -2409,6 +2510,65 @@ fn viewport_commands_spawn_and_destroy_secondary_overlay_camera() {
         app.world().get_entity(camera_entity).is_err(),
         "destroy command should despawn the secondary viewport camera entity"
     );
+}
+
+#[cfg(all(feature = "multi-viewport", feature = "render"))]
+#[test]
+fn viewport_update_synchronizes_existing_camera_clear_policy() {
+    let _guard = imgui_context_guard();
+    let mut app = app_with_multi_viewport_bridge();
+    ensure_primary_window(&mut app);
+    let context_id = primary_context_id(&app);
+    let snapshot = viewport_snapshot(0x251);
+    let raw_viewport = create_callback_viewport(&mut app, context_id, &snapshot);
+    app.update();
+    let camera = app
+        .world()
+        .get_non_send::<ImguiViewportBridge>()
+        .and_then(|bridge| bridge.viewport_camera(context_id, snapshot.id))
+        .expect("the callback-created viewport should own a camera");
+
+    with_primary_context(&mut app, |context| unsafe {
+        imgui::Viewport::from_raw_mut(raw_viewport).set_flags(
+            imgui::ViewportFlags::IS_PLATFORM_WINDOW | imgui::ViewportFlags::NO_RENDERER_CLEAR,
+        );
+        (*context.platform_io().as_raw())
+            .Platform_UpdateWindow
+            .expect("the Context should own Platform_UpdateWindow")(raw_viewport);
+    });
+    app.update();
+    assert!(matches!(
+        app.world()
+            .get::<Camera>(camera)
+            .expect("the viewport camera should remain live")
+            .output_mode,
+        CameraOutputMode::Write {
+            clear_color: ClearColorConfig::None,
+            ..
+        }
+    ));
+
+    with_primary_context(&mut app, |context| unsafe {
+        imgui::Viewport::from_raw_mut(raw_viewport)
+            .set_flags(imgui::ViewportFlags::IS_PLATFORM_WINDOW);
+        (*context.platform_io().as_raw())
+            .Platform_UpdateWindow
+            .expect("the Context should own Platform_UpdateWindow")(raw_viewport);
+    });
+    app.update();
+    assert!(matches!(
+        app.world()
+            .get::<Camera>(camera)
+            .expect("the viewport camera should remain live")
+            .output_mode,
+        CameraOutputMode::Write {
+            clear_color: ClearColorConfig::Default,
+            ..
+        }
+    ));
+
+    destroy_callback_viewport(&mut app, context_id, raw_viewport);
+    app.update();
 }
 
 #[cfg(all(feature = "multi-viewport", feature = "render"))]

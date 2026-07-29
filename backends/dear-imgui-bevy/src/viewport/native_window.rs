@@ -28,7 +28,7 @@ impl DesktopPositionSupport {
     }
 }
 
-impl From<DesktopPositionSupport> for super::ImguiNativeViewportSupport {
+impl From<DesktopPositionSupport> for super::ImguiNativeViewportStatus {
     fn from(value: DesktopPositionSupport) -> Self {
         match value {
             DesktopPositionSupport::Available => Self::Available,

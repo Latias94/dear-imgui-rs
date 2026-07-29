@@ -64,17 +64,19 @@ pub enum WgpuViewportError {
     #[error("WGPU multi-viewport requires an attached multi-viewport platform runtime")]
     PlatformBackendUnavailable,
     /// The typed platform owner supplied to the renderer belongs to another Context.
-    #[error("WGPU viewport platform owner belongs to Context {expected:?}, not {actual:?}")]
+    #[error("WGPU viewport platform owner belongs to Context {actual:?}, not {expected:?}")]
     PlatformOwnerContextMismatch {
         expected: ContextId,
         actual: ContextId,
     },
-    /// The typed platform owner is no longer attached or no longer owns its callback contract.
-    #[error("{backend} viewport platform owner is unavailable: {reason}")]
-    PlatformOwnerUnavailable {
-        backend: &'static str,
-        reason: String,
-    },
+    /// The typed Winit platform owner rejected renderer attachment.
+    #[cfg(feature = "multi-viewport-winit")]
+    #[error(transparent)]
+    WinitPlatformOwner(#[from] dear_imgui_winit::WinitPlatformError),
+    /// The typed SDL3 platform owner rejected renderer attachment.
+    #[cfg(feature = "multi-viewport-sdl3")]
+    #[error(transparent)]
+    Sdl3PlatformOwner(#[from] dear_imgui_sdl3::Sdl3BackendError),
     /// A required platform callback is absent.
     #[error("required ImGuiPlatformIO callback `{callback}` is not installed")]
     PlatformCallbackUnavailable { callback: &'static str },
@@ -695,7 +697,9 @@ impl RuntimeControl {
 
     fn detach_attachment(&self) {
         if let Some(mut attachment) = self.attachment.borrow_mut().take() {
-            attachment.detach();
+            let _ = attachment
+                .detach()
+                .expect("a renderer attachment cannot have a platform release dependency");
         }
     }
 
