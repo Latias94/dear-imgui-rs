@@ -3110,45 +3110,50 @@ type ViewportCameraComponentPresence = (
 type ViewportCameraIdentity = (ImguiViewportId, Entity);
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+#[derive(SystemParam)]
+struct ViewportCommandQueries<'w, 's> {
+    windows: Query<'w, 's, &'static mut Window>,
+    cursor_options: Query<'w, 's, &'static mut CursorOptions>,
+    viewport_windows: Query<
+        'w,
+        's,
+        (
+            Entity,
+            Option<&'static ImguiViewportWindow>,
+            &'static ImguiViewportOwner,
+        ),
+        With<Window>,
+    >,
+    viewport_cameras: Query<
+        'w,
+        's,
+        (
+            Entity,
+            Option<&'static ImguiViewportCamera>,
+            &'static ImguiViewportOwner,
+        ),
+    >,
+    #[cfg(feature = "render")]
+    viewport_camera_components: Query<'w, 's, ViewportCameraComponentPresence>,
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 #[allow(unused_variables)]
 fn apply_viewport_commands_system(
     mut ecs_commands: Commands,
     bridge: NonSend<ImguiViewportBridge>,
     backend_runtime: Res<crate::context::ownership::ImguiBackendRuntime>,
     winit_settings: Option<Res<WinitSettings>>,
-    mut windows: Query<&mut Window>,
-    mut cursor_options: Query<&mut CursorOptions>,
-    viewport_windows: Query<
-        (Entity, Option<&ImguiViewportWindow>, &ImguiViewportOwner),
-        With<Window>,
-    >,
-    viewport_cameras: Query<(Entity, Option<&ImguiViewportCamera>, &ImguiViewportOwner)>,
-    #[cfg(feature = "render")] viewport_camera_components: Query<ViewportCameraComponentPresence>,
+    mut queries: ViewportCommandQueries,
 ) {
     let contexts = bridge.contexts();
     for context in contexts {
-        #[cfg(feature = "render")]
         apply_viewport_commands_for_context(
             &mut ecs_commands,
             &context,
             backend_runtime.config(),
             winit_settings.is_some(),
-            &mut windows,
-            &mut cursor_options,
-            &viewport_windows,
-            &viewport_cameras,
-            &viewport_camera_components,
-        );
-        #[cfg(not(feature = "render"))]
-        apply_viewport_commands_for_context(
-            &mut ecs_commands,
-            &context,
-            backend_runtime.config(),
-            winit_settings.is_some(),
-            &mut windows,
-            &mut cursor_options,
-            &viewport_windows,
-            &viewport_cameras,
+            &mut queries,
         );
     }
 }
@@ -3160,15 +3165,16 @@ fn apply_viewport_commands_for_context(
     context: &ImguiViewportBridgeContext,
     config: &crate::ImguiPluginConfig,
     uses_winit_window_lifecycle: bool,
-    windows: &mut Query<&mut Window>,
-    cursor_options: &mut Query<&mut CursorOptions>,
-    viewport_windows: &Query<
-        (Entity, Option<&ImguiViewportWindow>, &ImguiViewportOwner),
-        With<Window>,
-    >,
-    viewport_cameras: &Query<(Entity, Option<&ImguiViewportCamera>, &ImguiViewportOwner)>,
-    #[cfg(feature = "render")] viewport_camera_components: &Query<ViewportCameraComponentPresence>,
+    queries: &mut ViewportCommandQueries,
 ) {
+    let ViewportCommandQueries {
+        windows,
+        cursor_options,
+        viewport_windows,
+        viewport_cameras,
+        #[cfg(feature = "render")]
+        viewport_camera_components,
+    } = queries;
     let Ok(queued) = context.drain_commands() else {
         return;
     };
@@ -3878,6 +3884,34 @@ fn clear_imgui_viewport_platform_handles_for_owned_handles(
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+#[derive(Clone, Copy)]
+pub(crate) struct NativeViewportFrameSupport {
+    renderer_available: bool,
+    desktop_position: native_window::DesktopPositionSupport,
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+impl NativeViewportFrameSupport {
+    pub(crate) const fn new(
+        renderer_available: bool,
+        desktop_position: native_window::DesktopPositionSupport,
+    ) -> Self {
+        Self {
+            renderer_available,
+            desktop_position,
+        }
+    }
+
+    const fn allows_native_viewports(self) -> bool {
+        self.renderer_available && self.desktop_position.allows_native_viewports()
+    }
+
+    const fn can_report_hovered_viewport(self) -> bool {
+        self.allows_native_viewports() && self.desktop_position.can_report_hovered_viewport()
+    }
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(crate) fn prepare_platform_viewports_for_frame(
     context: &mut imgui::Context,
     bridge: &ImguiViewportBridgeContext,
@@ -3885,8 +3919,7 @@ pub(crate) fn prepare_platform_viewports_for_frame(
     window: &Window,
     monitors: &[sys::ImGuiPlatformMonitor],
     viewport_windows: impl Iterator<Item = (Entity, ImguiViewportId, ImguiViewportFeedback)>,
-    enable_viewports: bool,
-    desktop_position_support: native_window::DesktopPositionSupport,
+    support: NativeViewportFrameSupport,
 ) -> Result<(), ImguiViewportCallbackOwnershipError> {
     platform_callback_ownership(context, &bridge.inner)?;
 
@@ -3960,12 +3993,11 @@ pub(crate) fn prepare_platform_viewports_for_frame(
             | imgui::BackendFlags::RENDERER_HAS_VIEWPORTS
             | imgui::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT,
     );
-    let native_viewports_available =
-        enable_viewports && desktop_position_support.allows_native_viewports();
+    let native_viewports_available = support.allows_native_viewports();
     if native_viewports_available {
         backend_flags |= imgui::BackendFlags::PLATFORM_HAS_VIEWPORTS
             | imgui::BackendFlags::RENDERER_HAS_VIEWPORTS;
-        if desktop_position_support.can_report_hovered_viewport() {
+        if support.can_report_hovered_viewport() {
             backend_flags |= imgui::BackendFlags::HAS_MOUSE_HOVERED_VIEWPORT;
         }
     }
@@ -5174,6 +5206,10 @@ mod tests {
             inner: Rc::clone(&keepalive),
         };
         let primary_window = Entity::from_raw_u32(1).expect("test entity index should be valid");
+        let requested_flags = context.io().config_flags()
+            | imgui::ConfigFlags::DOCKING_ENABLE
+            | imgui::ConfigFlags::VIEWPORTS_ENABLE;
+        context.io_mut().set_config_flags(requested_flags);
 
         for support in [
             native_window::DesktopPositionSupport::PendingWindow,
@@ -5186,8 +5222,7 @@ mod tests {
                 &Window::default(),
                 &[],
                 std::iter::empty(),
-                true,
-                support,
+                NativeViewportFrameSupport::new(true, support),
             )
             .unwrap();
             assert!(
@@ -5195,6 +5230,13 @@ mod tests {
                     .io()
                     .config_flags()
                     .contains(imgui::ConfigFlags::VIEWPORTS_ENABLE)
+            );
+            assert!(
+                context
+                    .io()
+                    .config_flags()
+                    .contains(imgui::ConfigFlags::DOCKING_ENABLE),
+                "native viewport fallback must preserve in-window docking",
             );
             assert!(!context.io().backend_flags().intersects(
                 imgui::BackendFlags::PLATFORM_HAS_VIEWPORTS
@@ -5210,8 +5252,7 @@ mod tests {
             &Window::default(),
             &[],
             std::iter::empty(),
-            true,
-            native_window::DesktopPositionSupport::Available,
+            NativeViewportFrameSupport::new(true, native_window::DesktopPositionSupport::Available),
         )
         .unwrap();
         assert!(
@@ -5930,8 +5971,10 @@ mod tests {
                     &Window::default(),
                     &[],
                     std::iter::empty(),
-                    true,
-                    native_window::DesktopPositionSupport::Available,
+                    NativeViewportFrameSupport::new(
+                        true,
+                        native_window::DesktopPositionSupport::Available,
+                    ),
                 )
                 .unwrap();
 
@@ -5947,8 +5990,10 @@ mod tests {
                         &Window::default(),
                         &[],
                         std::iter::empty(),
-                        true,
-                        native_window::DesktopPositionSupport::Available,
+                        NativeViewportFrameSupport::new(
+                            true,
+                            native_window::DesktopPositionSupport::Available,
+                        ),
                     ),
                     Err(ImguiViewportCallbackOwnershipError::ViewportFieldReplaced {
                         field: stringify!($field),
@@ -6009,8 +6054,7 @@ mod tests {
             &Window::default(),
             &[],
             std::iter::empty(),
-            true,
-            native_window::DesktopPositionSupport::Available,
+            NativeViewportFrameSupport::new(true, native_window::DesktopPositionSupport::Available),
         )
         .unwrap();
 
@@ -6138,8 +6182,7 @@ mod tests {
             &Window::default(),
             &[],
             std::iter::once((secondary_window, live_viewport, feedback())),
-            true,
-            native_window::DesktopPositionSupport::Available,
+            NativeViewportFrameSupport::new(true, native_window::DesktopPositionSupport::Available),
         )
         .unwrap();
 
@@ -6175,8 +6218,7 @@ mod tests {
             &Window::default(),
             &[],
             std::iter::empty(),
-            true,
-            native_window::DesktopPositionSupport::Available,
+            NativeViewportFrameSupport::new(true, native_window::DesktopPositionSupport::Available),
         )
         .unwrap();
 
