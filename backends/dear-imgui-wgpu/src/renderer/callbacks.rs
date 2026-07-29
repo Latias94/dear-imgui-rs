@@ -92,21 +92,9 @@ mod tests {
             let draw_list = ui.get_background_draw_list();
             draw_list.add_draw_cmd();
             unsafe {
-                draw_list.add_callback(
-                    Some(draw_callback_reset_render_state),
-                    std::ptr::null_mut(),
-                    0,
-                );
-                draw_list.add_callback(
-                    Some(draw_callback_set_sampler_linear),
-                    std::ptr::null_mut(),
-                    0,
-                );
-                draw_list.add_callback(
-                    Some(draw_callback_set_sampler_nearest),
-                    std::ptr::null_mut(),
-                    0,
-                );
+                draw_list.add_callback(draw_callback_reset_render_state, std::ptr::null_mut(), 0);
+                draw_list.add_callback(draw_callback_set_sampler_linear, std::ptr::null_mut(), 0);
+                draw_list.add_callback(draw_callback_set_sampler_nearest, std::ptr::null_mut(), 0);
             }
         }
         let frame = context.render();

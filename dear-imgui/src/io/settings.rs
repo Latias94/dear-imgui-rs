@@ -1,6 +1,5 @@
 use crate::io::{Io, assert_display_size, assert_non_negative_f32};
 use std::ffi::{CStr, c_void};
-use std::num::NonZeroU32;
 
 impl Io {
     /// Main display size in pixels
@@ -37,50 +36,6 @@ impl Io {
     pub fn set_ini_saving_rate(&mut self, seconds: f32) {
         assert_non_negative_f32("Io::set_ini_saving_rate()", "seconds", seconds);
         self.inner_mut().IniSavingRate = seconds;
-    }
-
-    /// Returns whether supported `.ini` entries store their last-used date.
-    #[doc(alias = "ConfigIniSettingsSaveLastUsedDate")]
-    pub fn ini_settings_save_last_used_date(&self) -> bool {
-        self.inner().ConfigIniSettingsSaveLastUsedDate
-    }
-
-    /// Sets whether supported `.ini` entries store their last-used date.
-    ///
-    /// Automatic discard must be disabled before date storage can be disabled, because entries
-    /// without a saved date are discarded when that mode is active.
-    #[doc(alias = "ConfigIniSettingsSaveLastUsedDate")]
-    pub fn set_ini_settings_save_last_used_date(&mut self, enabled: bool) {
-        assert!(
-            enabled || self.inner().ConfigIniSettingsAutoDiscardMonths == 0,
-            "Io::set_ini_settings_save_last_used_date() cannot disable dates while automatic discard is enabled"
-        );
-        self.inner_mut().ConfigIniSettingsSaveLastUsedDate = enabled;
-    }
-
-    /// Returns the age after which unused `.ini` entries are discarded on load.
-    ///
-    /// `None` disables automatic discard.
-    #[doc(alias = "ConfigIniSettingsAutoDiscardMonths")]
-    pub fn ini_settings_auto_discard_months(&self) -> Option<NonZeroU32> {
-        let months = self.inner().ConfigIniSettingsAutoDiscardMonths;
-        let months = u32::try_from(months)
-            .expect("Io::ini_settings_auto_discard_months() found a negative raw month count");
-        NonZeroU32::new(months)
-    }
-
-    /// Sets the age after which unused `.ini` entries are discarded on load.
-    ///
-    /// `None` disables automatic discard. Enabling this also enables saving last-used dates.
-    #[doc(alias = "ConfigIniSettingsAutoDiscardMonths")]
-    pub fn set_ini_settings_auto_discard_months(&mut self, months: Option<NonZeroU32>) {
-        let months = months.map_or(0, NonZeroU32::get);
-        let months = i32::try_from(months)
-            .expect("Io::set_ini_settings_auto_discard_months() supports at most i32::MAX months");
-        if months != 0 {
-            self.inner_mut().ConfigIniSettingsSaveLastUsedDate = true;
-        }
-        self.inner_mut().ConfigIniSettingsAutoDiscardMonths = months;
     }
 
     /// Returns the current `.ini` filename, or `None` if disabled.

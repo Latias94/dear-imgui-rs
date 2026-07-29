@@ -254,10 +254,6 @@
 //!     helpers unless you need exact control.
 //!
 //! - Callbacks during draw:
-//!   - Safe builder: `DrawListMut::add_callback_safe(|| { ... }).build()` registers an `FnOnce()`
-//!     that runs when the draw list is rendered. Resources captured by the closure are freed when
-//!     the callback runs. If the draw list is never rendered, the callback will not run and its
-//!     resources won't be reclaimed.
 //!   - Raw: `unsafe DrawListMut::add_callback` allows passing a C callback and raw userdata; see
 //!     method docs for safety requirements.
 
@@ -375,6 +371,7 @@ mod dock_space;
 mod draw;
 mod error;
 pub mod fonts;
+mod ini_settings;
 pub mod input;
 pub mod internal;
 mod io;
@@ -425,9 +422,10 @@ pub use dock_space::*;
 // Export draw-list helpers for extensions and downstream custom drawing.
 pub use draw::{
     DrawCornerFlags, DrawListFlags, DrawListMut, DrawListTextNoPixelSnapToken,
-    DrawListTextureToken, DrawNgonSegmentCount, DrawSegmentCount, PolylineFlags,
+    DrawListTextureToken, DrawNgonSegmentCount, DrawSegmentCount, PolylineFlags, RawDrawCallback,
 };
 pub use error::*;
+pub use ini_settings::*;
 // Note: draw types are now in render module, no need to export draw::*
 pub use render::*;
 pub use texture::*;

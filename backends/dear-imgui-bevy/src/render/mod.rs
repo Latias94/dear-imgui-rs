@@ -1226,7 +1226,7 @@ mod tests {
             let draw_list = frame.ui().get_background_draw_list();
             draw_list.add_draw_cmd();
             for callback in callbacks {
-                unsafe { draw_list.add_callback(Some(callback), std::ptr::null_mut(), 0) };
+                unsafe { draw_list.add_callback(callback, std::ptr::null_mut(), 0) };
             }
         }
         let snapshot = frame.render_snapshot(&consumer).unwrap();

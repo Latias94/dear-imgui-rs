@@ -19,10 +19,6 @@ unsafe extern "C" fn draw_callback_marker(
 ) {
 }
 
-const fn encode_session_date(year: u32, month: u32, day: u32) -> u32 {
-    year * 10_000 + month * 100 + day
-}
-
 #[test]
 fn platform_io_from_raw_matches_mut_wrapper() {
     let mut raw: sys::ImGuiPlatformIO = new_platform_io();
@@ -32,33 +28,6 @@ fn platform_io_from_raw_matches_mut_wrapper() {
     let mutable = unsafe { PlatformIo::from_raw_mut(raw_ptr) };
 
     assert_eq!(shared.as_raw(), mutable.as_raw());
-}
-
-#[test]
-fn platform_session_date_validates_calendar_dates() {
-    let mut raw: sys::ImGuiPlatformIO = new_platform_io();
-    let pio = unsafe { PlatformIo::from_raw_mut((&mut raw) as *mut sys::ImGuiPlatformIO) };
-
-    let leap_day = encode_session_date(2024, 2, 29);
-    pio.set_session_date(Some(leap_day));
-    assert_eq!(pio.session_date(), Some(leap_day));
-    pio.set_session_date(None);
-    assert_eq!(pio.session_date(), None);
-
-    for invalid in [
-        0,
-        encode_session_date(2023, 2, 29),
-        encode_session_date(2026, 13, 1),
-        encode_session_date(2026, 12, 32),
-    ] {
-        assert!(
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                pio.set_session_date(Some(invalid));
-            }))
-            .is_err()
-        );
-        assert_eq!(pio.session_date(), None);
-    }
 }
 
 #[test]

@@ -126,8 +126,8 @@ fn snapshot_preserves_standard_sampler_callbacks() {
     let frame = ctx.begin_frame();
     let draw_list = frame.ui().get_foreground_draw_list();
     unsafe {
-        draw_list.add_callback(Some(linear), std::ptr::null_mut(), 0);
-        draw_list.add_callback(Some(nearest), std::ptr::null_mut(), 0);
+        draw_list.add_callback(linear, std::ptr::null_mut(), 0);
+        draw_list.add_callback(nearest, std::ptr::null_mut(), 0);
     }
     drop(draw_list);
     let snapshot = frame.render_snapshot(&consumer).unwrap();
@@ -157,11 +157,10 @@ fn unsupported_user_callback_is_an_explicit_capture_error() {
     let consumer = ctx.create_renderer_consumer().unwrap();
     let frame = ctx.begin_frame();
     unsafe {
-        frame.ui().get_foreground_draw_list().add_callback(
-            Some(user_callback),
-            std::ptr::null_mut(),
-            0,
-        );
+        frame
+            .ui()
+            .get_foreground_draw_list()
+            .add_callback(user_callback, std::ptr::null_mut(), 0);
     }
     assert!(matches!(
         frame.render_snapshot(&consumer),

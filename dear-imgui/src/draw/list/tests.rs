@@ -247,6 +247,64 @@ fn primitive_reserve_counts_reject_overflow_before_ffi() {
 }
 
 #[test]
+fn raw_callback_copy_inputs_validate_before_ffi() {
+    unsafe extern "C" fn callback(
+        _parent_list: *const sys::ImDrawList,
+        _command: *const sys::ImDrawCmd,
+    ) {
+    }
+
+    let fixture = TestDrawList::new();
+    assert_panics_without_buffer_change(&fixture, |draw_list| unsafe {
+        draw_list.add_callback(callback, std::ptr::null_mut(), 1);
+    });
+    assert_panics_without_buffer_change(&fixture, |draw_list| unsafe {
+        draw_list.add_callback(callback, std::ptr::dangling_mut(), 1usize << 31);
+    });
+}
+
+#[test]
+fn raw_callback_data_modes_preserve_borrow_or_copy_semantics() {
+    unsafe extern "C" fn callback(
+        _parent_list: *const sys::ImDrawList,
+        _command: *const sys::ImDrawCmd,
+    ) {
+    }
+
+    let fixture = TestDrawList::new();
+    let draw_list = fixture.draw_list();
+    draw_list.add_draw_cmd();
+
+    let mut borrowed = 41_u8;
+    let borrowed_ptr = std::ptr::from_mut(&mut borrowed).cast();
+    unsafe {
+        draw_list.add_callback(callback, borrowed_ptr, 0);
+    }
+
+    let mut copied = [3_u8, 1, 4, 1, 5];
+    unsafe {
+        draw_list.add_callback(callback, copied.as_mut_ptr().cast(), copied.len());
+
+        let commands = std::slice::from_raw_parts(
+            (*fixture.raw).CmdBuffer.Data,
+            usize::try_from((*fixture.raw).CmdBuffer.Size).unwrap(),
+        );
+        assert_eq!(commands[0].UserCallbackData, borrowed_ptr);
+        assert_eq!(commands[0].UserCallbackDataSize, 0);
+        assert_eq!(commands[0].UserCallbackDataOffset, -1);
+
+        assert!(commands[1].UserCallbackData.is_null());
+        assert_eq!(commands[1].UserCallbackDataSize, copied.len() as i32);
+        assert_eq!(commands[1].UserCallbackDataOffset, 0);
+        let copied_storage = std::slice::from_raw_parts(
+            (*fixture.raw)._CallbacksDataBuf.Data,
+            usize::try_from((*fixture.raw)._CallbacksDataBuf.Size).unwrap(),
+        );
+        assert_eq!(copied_storage, copied);
+    }
+}
+
+#[test]
 fn text_and_clip_inputs_validate_before_ffi() {
     let mut ctx = crate::Context::create();
     {

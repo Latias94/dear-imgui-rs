@@ -122,6 +122,7 @@ REMOVED_SOURCE_RULES = (
     RemovedSourceRule("into-imgui-error", "identifier", ("IntoImGuiError",)),
     RemovedSourceRule("into-imgui-error-method", "identifier", ("into_imgui_error",)),
     RemovedSourceRule("safe-compat-ffi", "identifier", ("compat_ffi",)),
+    RemovedSourceRule("safe-draw-callback-builder", "identifier", ("add_callback_safe",)),
     RemovedSourceRule(
         "implot3d-validation-helpers",
         "public-item",

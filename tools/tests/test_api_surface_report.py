@@ -348,6 +348,11 @@ create_token!(
                 "",
             ),
             "safe-compat-ffi": ("mod compat_ffi {}\n", "fixture-safe", ""),
+            "safe-draw-callback-builder": (
+                "pub fn f() { add_callback_safe(); }\n",
+                "fixture-safe",
+                "",
+            ),
             "implot3d-validation-helpers": (
                 "pub fn validate_nonempty() {}\n",
                 "dear-implot3d",
@@ -389,6 +394,10 @@ create_token!(
             ),
             "context-frame-with": (
                 "pub fn r#frame_with() {}\n",
+                "fixture-safe",
+            ),
+            "safe-draw-callback-builder": (
+                "pub fn f() { r#add_callback_safe(); }\n",
                 "fixture-safe",
             ),
         }
