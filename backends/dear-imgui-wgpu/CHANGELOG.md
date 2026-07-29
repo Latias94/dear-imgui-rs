@@ -10,7 +10,7 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 ### Breaking
 
-- Replace the unsafe Winit/SDL3 `enable` and free `shutdown_multi_viewport_support` functions with `WinitViewportRuntime::attach` and `Sdl3ViewportRuntime::attach`. The typed owning runtime consumes `WgpuRenderer`, keeps callback-visible storage stable across moves, participates in ordered Context teardown, and exposes idempotent explicit shutdown.
+- Replace the unsafe Winit/SDL3 `enable` and free `shutdown_multi_viewport_support` functions with `WinitViewportRuntime::attach(context, &platform, renderer)` and `Sdl3ViewportRuntime::attach(context, &platform, renderer)`. Initialize and pass the exact live platform owner before renderer attachment; custom compatible platforms must use `unsafe attach_unchecked` and uphold the documented handle-lifetime contract. The typed owning runtime consumes `WgpuRenderer`, keeps callback-visible storage stable across moves, participates in ordered Context teardown, and exposes idempotent explicit shutdown.
 - WGPU renderer shutdown no longer enters the platform-window phase. Shut down the renderer runtime before its Winit or SDL3 platform owner; Context-first teardown enforces the same renderer-resources-before-platform-windows order.
 - Each `WgpuRenderer` now owns the renderer state of exactly one `Context` and stays on that context's UI thread. Render entry points consume a Context-borrowed `RenderedFrame`; the bare `render_draw_data*`, manual managed-texture update, and mutable texture-manager APIs were removed. Create one renderer per context, use `shutdown` with its matching context when releasing ownership before Context teardown or creating a replacement renderer, and reinitialize through `init_with_context`. The contextless `init` and manual `configure_imgui_context`/`prepare_font_atlas` entry points were also removed.
 
@@ -31,6 +31,7 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 - Winit and SDL3 multi-viewport renderer callbacks now verify `RendererUserData` ownership before reading or freeing per-viewport WGPU data, ignoring foreign backend pointers instead of treating them as `dear-imgui-wgpu` state.
 - Surface acquisition now handles lost, outdated, suboptimal, timeout, occluded, validation, and out-of-memory outcomes without presenting an invalid frame.
+- Secondary viewports now create MSAA resolve and depth-stencil attachments that match the renderer pipeline, use authoritative physical framebuffer sizes, suspend at zero size, and release the old surface bundle before loss recovery.
 - Shutdown is a no-op for contexts owned by another renderer backend and fails transactionally if an active runtime no longer owns its complete callback table.
 - Device-object invalidation now recreates render resources, shaders, the fallback texture, and the pipeline before the next render, then uploads managed textures again.
 - Replayed create requests upload their current pixels instead of accepting stale GPU contents, and successful destroy reconciliation releases renderer tombstones instead of accumulating them for the lifetime of the device.

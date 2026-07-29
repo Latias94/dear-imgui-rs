@@ -3,8 +3,31 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::rc::{Rc, Weak};
+#[cfg(feature = "multi-viewport")]
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
+#[cfg(feature = "multi-viewport")]
+use crate::callback_ownership::validate_platform_viewport_state;
+use crate::callback_ownership::{
+    PlatformCallbackOwnership, PlatformClaimBaseline, RendererCallbackOwnership,
+    RendererShutdownRestore, SDL_PLATFORM_RESERVED_FLAGS, SDL_RENDERER_RESERVED_FLAGS,
+    ViewportPlatformState, preflight_platform_claim, restore_baseline_after_failed_initialization,
+};
+#[cfg(feature = "multi-viewport")]
+use crate::core::Sdl3VulkanSurfaceError;
+use crate::core::{Sdl3BackendError, Sdl3OpenGlViewportSwapInterval, shutdown_platform_impl};
+#[cfg(any(
+    feature = "opengl3-renderer",
+    feature = "sdlrenderer3-renderer",
+    feature = "sdlgpu3-renderer"
+))]
+use crate::renderer_textures::RendererTextureStore;
 use dear_imgui_rs::RendererConsumer;
+#[cfg(feature = "multi-viewport")]
+use dear_imgui_rs::platform_io::Viewport;
 #[cfg(any(
     feature = "opengl3-renderer",
     feature = "sdlrenderer3-renderer",
@@ -16,19 +39,6 @@ use dear_imgui_rs::{
     ContextAttachmentTeardownError, ContextBinding, ContextDestroyed, ContextLifecycle,
     ContextTeardown, TextureData, sys,
 };
-
-use crate::callback_ownership::{
-    PlatformCallbackOwnership, PlatformClaimBaseline, RendererCallbackOwnership,
-    RendererShutdownRestore, SDL_PLATFORM_RESERVED_FLAGS, SDL_RENDERER_RESERVED_FLAGS,
-    ViewportPlatformState, preflight_platform_claim, restore_baseline_after_failed_initialization,
-};
-use crate::core::{Sdl3BackendError, Sdl3OpenGlViewportSwapInterval, shutdown_platform_impl};
-#[cfg(any(
-    feature = "opengl3-renderer",
-    feature = "sdlrenderer3-renderer",
-    feature = "sdlgpu3-renderer"
-))]
-use crate::renderer_textures::RendererTextureStore;
 
 struct Sdl3PlatformAttachmentMarker;
 struct Sdl3RendererAttachmentMarker;
@@ -45,6 +55,94 @@ pub(super) enum RuntimeState {
 pub(super) enum PlatformGraphicsKind {
     Other,
     OpenGl,
+    Vulkan,
+}
+
+#[cfg(feature = "multi-viewport")]
+#[derive(Debug, Default)]
+struct VulkanSurfaceProviderState {
+    leased: AtomicBool,
+}
+
+/// Exclusive capability for creating secondary Vulkan surfaces through one live SDL3 runtime.
+///
+/// The provider is intentionally neither `Clone` nor constructible by users. Its lifetime blocks
+/// SDL platform shutdown, and each invocation validates the current Context, SDL callback owner,
+/// and viewport sidecar immediately before entering the native callback.
+#[cfg(feature = "multi-viewport")]
+#[must_use = "keep the provider alive until the renderer has destroyed every SDL3 Vulkan surface"]
+pub struct Sdl3VulkanSurfaceProvider {
+    state: Arc<VulkanSurfaceProviderState>,
+}
+
+#[cfg(feature = "multi-viewport")]
+impl fmt::Debug for Sdl3VulkanSurfaceProvider {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Sdl3VulkanSurfaceProvider")
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(feature = "multi-viewport")]
+impl Sdl3VulkanSurfaceProvider {
+    /// Create a Vulkan surface for one SDL3-owned viewport.
+    ///
+    /// # Safety
+    ///
+    /// `vulkan_instance` must be a live `VkInstance` compatible with SDL3 and must outlive the
+    /// returned surface. The caller must destroy the returned surface before dropping this
+    /// provider. The viewport must belong to the provider's Dear ImGui Context, and that Context
+    /// must be current on the calling thread.
+    pub unsafe fn create_surface(
+        &self,
+        viewport: &mut Viewport,
+        vulkan_instance: u64,
+    ) -> Result<u64, Sdl3VulkanSurfaceError> {
+        with_current_runtime(|control| {
+            if !Arc::ptr_eq(&self.state, &control.vulkan_surface_provider)
+                || !control.expects_vulkan()
+            {
+                return Err(Sdl3VulkanSurfaceError::OwnerUnavailable);
+            }
+            control.ensure_bound_entry()?;
+            if !control.validate_platform_ownership_bound()
+                || !unsafe { validate_platform_viewport_state(control, viewport.as_raw_mut()) }
+            {
+                control.finish_entry()?;
+                return Err(Sdl3VulkanSurfaceError::OwnerUnavailable);
+            }
+
+            let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
+            let callback = if platform_io.is_null() {
+                None
+            } else {
+                unsafe { (*platform_io).Platform_CreateVkSurface }
+            }
+            .ok_or(Sdl3VulkanSurfaceError::CallbackUnavailable)?;
+            let mut surface = 0;
+            let code = unsafe {
+                callback(
+                    viewport.as_raw_mut(),
+                    vulkan_instance,
+                    std::ptr::null(),
+                    &mut surface,
+                )
+            };
+            if code != 0 || surface == 0 {
+                return Err(Sdl3VulkanSurfaceError::CallbackFailed { code, surface });
+            }
+            Ok(surface)
+        })
+        .unwrap_or(Err(Sdl3VulkanSurfaceError::OwnerUnavailable))
+    }
+}
+
+#[cfg(feature = "multi-viewport")]
+impl Drop for Sdl3VulkanSurfaceProvider {
+    fn drop(&mut self) {
+        self.state.leased.store(false, Ordering::Release);
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -202,6 +300,8 @@ pub(super) struct RuntimeControl {
     callback_teardown_active: Cell<bool>,
     platform_io_key: Cell<usize>,
     platform_graphics: PlatformGraphicsKind,
+    #[cfg(feature = "multi-viewport")]
+    vulkan_surface_provider: Arc<VulkanSurfaceProviderState>,
     gl_viewport_swap_interval: Cell<Sdl3OpenGlViewportSwapInterval>,
     native_renderer: NativeRendererKind,
     lifecycle: NativeLifecycle,
@@ -266,6 +366,8 @@ impl RuntimeControl {
             callback_teardown_active: Cell::new(false),
             platform_io_key: Cell::new(0),
             platform_graphics,
+            #[cfg(feature = "multi-viewport")]
+            vulkan_surface_provider: Arc::new(VulkanSurfaceProviderState::default()),
             gl_viewport_swap_interval: Cell::new(Sdl3OpenGlViewportSwapInterval::Immediate),
             native_renderer,
             lifecycle: NativeLifecycle {
@@ -320,6 +422,54 @@ impl RuntimeControl {
 
     pub(super) fn expects_opengl(&self) -> bool {
         self.platform_graphics == PlatformGraphicsKind::OpenGl
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    pub(super) fn expects_vulkan(&self) -> bool {
+        self.platform_graphics == PlatformGraphicsKind::Vulkan
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    fn acquire_vulkan_surface_provider(
+        &self,
+        context: &Context,
+    ) -> Result<Sdl3VulkanSurfaceProvider, Sdl3BackendError> {
+        self.ensure_entry(context)?;
+        if !self.expects_vulkan() {
+            return Err(Sdl3BackendError::VulkanSurfaceProviderRequiresVulkan);
+        }
+        let callback_available = self.binding.try_with_bound_context(|| {
+            self.validate_platform_ownership_bound()
+                && unsafe {
+                    let platform_io = sys::igGetPlatformIO_Nil();
+                    !platform_io.is_null() && (*platform_io).Platform_CreateVkSurface.is_some()
+                }
+        })?;
+        if !callback_available {
+            self.finish_entry()?;
+            return Err(Sdl3BackendError::VulkanSurfaceCallbackUnavailable);
+        }
+        self.vulkan_surface_provider
+            .leased
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| Sdl3BackendError::VulkanSurfaceProviderAlreadyLeased)?;
+        let provider = Sdl3VulkanSurfaceProvider {
+            state: Arc::clone(&self.vulkan_surface_provider),
+        };
+        if let Err(error) = self.finish_entry() {
+            drop(provider);
+            return Err(error);
+        }
+        Ok(provider)
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    fn ensure_vulkan_surface_provider_released(&self) -> Result<(), Sdl3BackendError> {
+        if self.vulkan_surface_provider.leased.load(Ordering::Acquire) {
+            Err(Sdl3BackendError::VulkanSurfaceProviderActive)
+        } else {
+            Ok(())
+        }
     }
 
     pub(super) fn native_renderer(&self) -> NativeRendererKind {
@@ -459,6 +609,8 @@ impl RuntimeControl {
             self.finish_shutdown();
             return Ok(());
         }
+        #[cfg(feature = "multi-viewport")]
+        self.ensure_vulkan_surface_provider_released()?;
         let Some(release) = ReleaseGuard::begin(&self.platform_release) else {
             return Ok(());
         };
@@ -600,6 +752,8 @@ impl RuntimeControl {
     }
 
     fn shutdown_native_explicit(&self) -> Result<(), Sdl3BackendError> {
+        #[cfg(feature = "multi-viewport")]
+        self.ensure_vulkan_surface_provider_released()?;
         self.begin_shutdown();
         let platform_result = self.release_platform_explicit();
         let platform_retry_result = if self.platform_released() {
@@ -1424,7 +1578,9 @@ impl RuntimeRegistration {
             ) {
                 Ok(attachment) => Some(attachment),
                 Err(error) => {
-                    platform_attachment.detach();
+                    let _ = platform_attachment.detach().expect(
+                        "SDL3 renderer registration failed before a renderer dependency existed",
+                    );
                     return Err(error.into());
                 }
             }
@@ -1521,6 +1677,14 @@ impl RuntimeRegistration {
         self.control.poll_fault()
     }
 
+    #[cfg(feature = "multi-viewport")]
+    pub(super) fn acquire_vulkan_surface_provider(
+        &self,
+        context: &Context,
+    ) -> Result<Sdl3VulkanSurfaceProvider, Sdl3BackendError> {
+        self.control.acquire_vulkan_surface_provider(context)
+    }
+
     pub(super) fn normalize_open_frame_for_shutdown(
         &self,
         context: &mut Context,
@@ -1566,12 +1730,34 @@ impl RuntimeRegistration {
         &mut self,
         context: &mut Context,
     ) -> Result<(), Sdl3BackendError> {
+        if self.renderer_attachment.is_some() || self.platform_attachment.is_none() {
+            let result = self.shutdown_platform_inner(context);
+            if matches!(self.control.state(), RuntimeState::Detached) {
+                self.detach_attachments();
+            }
+            return result;
+        }
+
+        let attachment = self
+            .platform_attachment
+            .as_ref()
+            .expect("an SDL3 platform-only runtime must retain its attachment")
+            .handle();
+        let mut release = context.prepare_platform_attachment_release(&attachment)?;
+        #[cfg(feature = "multi-viewport")]
+        self.control.ensure_vulkan_surface_provider_released()?;
+        let result = self.shutdown_platform_inner(release.context_mut());
+        if matches!(self.control.state(), RuntimeState::Detached) {
+            release.commit();
+            self.detach_attachments();
+        }
+        result
+    }
+
+    fn shutdown_platform_inner(&mut self, context: &mut Context) -> Result<(), Sdl3BackendError> {
         self.normalize_open_frame_for_shutdown(context)?;
         let pending = self.control.take_pending_fault();
         let shutdown_result = self.control.shutdown_native_explicit();
-        if matches!(self.control.state(), RuntimeState::Detached) {
-            self.detach_attachments();
-        }
         first_error([pending, shutdown_result.err()])
     }
 
@@ -1630,10 +1816,14 @@ impl RuntimeRegistration {
 
     fn detach_attachments(&mut self) {
         if let Some(mut renderer) = self.renderer_attachment.take() {
-            renderer.detach();
+            let _ = renderer
+                .detach()
+                .expect("a renderer attachment cannot have a platform release dependency");
         }
         if let Some(mut platform) = self.platform_attachment.take() {
-            platform.detach();
+            let _ = platform
+                .detach()
+                .expect("SDL3 detaches its renderer attachment before its platform attachment");
         }
     }
 
@@ -1732,6 +1922,10 @@ mod tests {
         static OWNED_RENDERER_DESTROY_COUNT: Cell<usize> = const { Cell::new(0) };
         static FOREIGN_RENDERER_DESTROY_COUNT: Cell<usize> = const { Cell::new(0) };
         static RENDERER_DESTROY_OBSERVED_USER_DATA: Cell<usize> = const { Cell::new(0) };
+        #[cfg(feature = "multi-viewport")]
+        static VULKAN_SURFACE_CREATE_COUNT: Cell<usize> = const { Cell::new(0) };
+        #[cfg(feature = "multi-viewport")]
+        static FOREIGN_VULKAN_SURFACE_CREATE_COUNT: Cell<usize> = const { Cell::new(0) };
     }
 
     unsafe extern "C" fn synthetic_create_window(viewport: *mut sys::ImGuiViewport) {
@@ -2019,7 +2213,68 @@ mod tests {
         observed_main_viewport_data: Rc<Cell<usize>>,
         create_window: unsafe extern "C" fn(*mut sys::ImGuiViewport),
     ) -> RuntimeRegistration {
-        let mut registration = registration_with_lifecycle(
+        synthetic_claimed_registration_with_graphics(
+            context,
+            renderer_shutdown,
+            platform_shutdown_hook,
+            platform_count,
+            observed_backend_data,
+            observed_main_viewport_data,
+            create_window,
+            PlatformGraphicsKind::Other,
+            #[cfg(feature = "multi-viewport")]
+            None,
+        )
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    unsafe extern "C" fn synthetic_create_vk_surface(
+        _viewport: *mut sys::ImGuiViewport,
+        _instance: sys::ImU64,
+        _allocators: *const std::ffi::c_void,
+        surface: *mut sys::ImU64,
+    ) -> std::os::raw::c_int {
+        VULKAN_SURFACE_CREATE_COUNT.with(|count| count.set(count.get() + 1));
+        if let Some(surface) = unsafe { surface.as_mut() } {
+            *surface = 0x5151;
+        }
+        0
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    unsafe extern "C" fn foreign_create_vk_surface(
+        _viewport: *mut sys::ImGuiViewport,
+        _instance: sys::ImU64,
+        _allocators: *const std::ffi::c_void,
+        surface: *mut sys::ImU64,
+    ) -> std::os::raw::c_int {
+        FOREIGN_VULKAN_SURFACE_CREATE_COUNT.with(|count| count.set(count.get() + 1));
+        if let Some(surface) = unsafe { surface.as_mut() } {
+            *surface = 0x6161;
+        }
+        0
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    type CreateVkSurfaceFn = unsafe extern "C" fn(
+        *mut sys::ImGuiViewport,
+        sys::ImU64,
+        *const std::ffi::c_void,
+        *mut sys::ImU64,
+    ) -> std::os::raw::c_int;
+
+    fn synthetic_claimed_registration_with_graphics(
+        context: &mut Context,
+        renderer_shutdown: Option<Rc<dyn Fn()>>,
+        platform_shutdown_hook: Option<Rc<dyn Fn()>>,
+        platform_count: Rc<Cell<usize>>,
+        observed_backend_data: Rc<Cell<usize>>,
+        observed_main_viewport_data: Rc<Cell<usize>>,
+        create_window: unsafe extern "C" fn(*mut sys::ImGuiViewport),
+        platform_graphics: PlatformGraphicsKind,
+        #[cfg(feature = "multi-viewport")] create_vk_surface: Option<CreateVkSurfaceFn>,
+    ) -> RuntimeRegistration {
+        let mut registration = registration_with_backend_lifecycle(
             context,
             renderer_shutdown,
             Rc::new({
@@ -2047,6 +2302,8 @@ mod tests {
                     (*main_viewport).PlatformHandleRaw = std::ptr::null_mut();
                 }
             }),
+            platform_graphics,
+            NativeRendererKind::None,
         );
 
         context.binding().with_bound_context(|| unsafe {
@@ -2063,6 +2320,10 @@ mod tests {
             (*platform_io).Platform_DestroyWindow = Some(synthetic_destroy_window);
             (*platform_io).Platform_RenderWindow = Some(synthetic_platform_render_window);
             (*platform_io).Platform_SwapBuffers = Some(synthetic_platform_swap_buffers);
+            #[cfg(feature = "multi-viewport")]
+            {
+                (*platform_io).Platform_CreateVkSurface = create_vk_surface;
+            }
             (*platform_io).Platform_ClipboardUserData = OWNED_PLATFORM_DATA as *mut _;
             (*main_viewport).PlatformUserData = OWNED_VIEWPORT_DATA as *mut _;
             (*main_viewport).PlatformHandle = OWNED_VIEWPORT_HANDLE as *mut _;
@@ -2197,6 +2458,230 @@ mod tests {
 
     fn registry_contains(key: usize) -> bool {
         RUNTIMES.with(|runtimes| runtimes.borrow().contains_key(&key))
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    fn synthetic_vulkan_registration(
+        context: &mut Context,
+        platform_count: Rc<Cell<usize>>,
+    ) -> RuntimeRegistration {
+        synthetic_vulkan_registration_with_callback(
+            context,
+            platform_count,
+            Some(synthetic_create_vk_surface),
+        )
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    fn synthetic_vulkan_registration_with_callback(
+        context: &mut Context,
+        platform_count: Rc<Cell<usize>>,
+        callback: Option<CreateVkSurfaceFn>,
+    ) -> RuntimeRegistration {
+        synthetic_claimed_registration_with_graphics(
+            context,
+            None,
+            None,
+            platform_count,
+            Rc::new(Cell::new(0)),
+            Rc::new(Cell::new(0)),
+            synthetic_create_window,
+            PlatformGraphicsKind::Vulkan,
+            callback,
+        )
+    }
+
+    struct ActiveExternalRendererMarker;
+    struct ActiveExternalRendererAttachment;
+
+    impl ContextAttachment for ActiveExternalRendererAttachment {}
+
+    #[test]
+    fn platform_only_shutdown_rejects_an_active_renderer_before_closing_the_frame() {
+        let _guard = crate::tests::test_guard();
+        let mut context = Context::create();
+        let platform_count = Rc::new(Cell::new(0));
+        let mut runtime = synthetic_claimed_registration(
+            &mut context,
+            Rc::clone(&platform_count),
+            Rc::new(Cell::new(0)),
+            Rc::new(Cell::new(0)),
+            synthetic_create_window,
+        );
+        let mut renderer = context
+            .register_attachment::<ActiveExternalRendererMarker>(
+                ContextAttachmentRole::Renderer,
+                Rc::new(ActiveExternalRendererAttachment),
+            )
+            .unwrap();
+        assert!(context.font_atlas().build());
+        context.prepare_frame(dear_imgui_rs::FramePrepareOptions::new(
+            [128.0, 128.0],
+            1.0 / 60.0,
+        ));
+        context
+            .frame()
+            .text("platform release must not close this frame");
+
+        assert!(matches!(
+            runtime.shutdown_platform(&mut context),
+            Err(Sdl3BackendError::PlatformAttachmentRelease(
+                dear_imgui_rs::ContextPlatformAttachmentReleaseError::RendererActive
+            ))
+        ));
+        assert_eq!(
+            context.frame_lifecycle_state(),
+            dear_imgui_rs::FrameLifecycleState::InFrame
+        );
+        assert_eq!(runtime.control.state(), RuntimeState::Attached);
+        assert_eq!(platform_count.get(), 0);
+
+        assert_eq!(renderer.detach(), Ok(true));
+        runtime.shutdown_platform(&mut context).unwrap();
+        assert_eq!(platform_count.get(), 1);
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    #[test]
+    fn vulkan_provider_requires_matching_initialization_mode_and_callback() {
+        let _guard = crate::tests::test_guard();
+        let mut context = Context::create();
+        let mut other = synthetic_claimed_registration(
+            &mut context,
+            Rc::new(Cell::new(0)),
+            Rc::new(Cell::new(0)),
+            Rc::new(Cell::new(0)),
+            synthetic_create_window,
+        );
+        assert!(matches!(
+            other.acquire_vulkan_surface_provider(&context),
+            Err(Sdl3BackendError::VulkanSurfaceProviderRequiresVulkan)
+        ));
+        other.shutdown_platform(&mut context).unwrap();
+        drop(context);
+
+        let mut context = Context::create();
+        let mut vulkan =
+            synthetic_vulkan_registration_with_callback(&mut context, Rc::new(Cell::new(0)), None);
+        assert!(matches!(
+            vulkan.acquire_vulkan_surface_provider(&context),
+            Err(Sdl3BackendError::VulkanSurfaceCallbackUnavailable)
+        ));
+        vulkan.shutdown_platform(&mut context).unwrap();
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    #[test]
+    fn vulkan_provider_is_exclusive_and_blocks_retryable_platform_shutdown() {
+        let _guard = crate::tests::test_guard();
+        let mut context = Context::create();
+        let platform_count = Rc::new(Cell::new(0));
+        let mut runtime = synthetic_vulkan_registration(&mut context, Rc::clone(&platform_count));
+
+        let provider = runtime
+            .acquire_vulkan_surface_provider(&context)
+            .expect("Vulkan SDL runtime must issue one provider");
+        assert!(matches!(
+            runtime.acquire_vulkan_surface_provider(&context),
+            Err(Sdl3BackendError::VulkanSurfaceProviderAlreadyLeased)
+        ));
+        assert!(matches!(
+            runtime.shutdown_platform(&mut context),
+            Err(Sdl3BackendError::VulkanSurfaceProviderActive)
+        ));
+        assert_eq!(runtime.control.state(), RuntimeState::Attached);
+        assert_eq!(platform_count.get(), 0);
+
+        drop(provider);
+        runtime.shutdown_platform(&mut context).unwrap();
+        assert_eq!(platform_count.get(), 1);
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    #[test]
+    fn vulkan_provider_validates_callback_and_viewport_immediately_before_invocation() {
+        let _guard = crate::tests::test_guard();
+        VULKAN_SURFACE_CREATE_COUNT.with(|count| count.set(0));
+        FOREIGN_VULKAN_SURFACE_CREATE_COUNT.with(|count| count.set(0));
+        let mut context = Context::create();
+        let mut runtime = synthetic_vulkan_registration(&mut context, Rc::new(Cell::new(0)));
+        let provider = runtime
+            .acquire_vulkan_surface_provider(&context)
+            .expect("Vulkan SDL runtime must issue a provider");
+        let mut viewport = sys::ImGuiViewport::default();
+        viewport.PlatformUserData = OWNED_VIEWPORT_DATA as *mut _;
+        viewport.PlatformHandle = OWNED_VIEWPORT_HANDLE as *mut _;
+        runtime
+            .control
+            .remember_owned_viewport(&mut viewport, unsafe {
+                ViewportPlatformState::capture(&viewport)
+            });
+
+        let surface = context.binding().with_bound_context(|| unsafe {
+            provider.create_surface(Viewport::from_raw_mut(&mut viewport), 0x4141)
+        });
+        assert_eq!(surface.unwrap(), 0x5151);
+        assert_eq!(VULKAN_SURFACE_CREATE_COUNT.with(Cell::get), 1);
+
+        context.binding().with_bound_context(|| unsafe {
+            (*sys::igGetPlatformIO_Nil()).Platform_CreateVkSurface =
+                Some(foreign_create_vk_surface);
+        });
+        let error = context.binding().with_bound_context(|| unsafe {
+            provider
+                .create_surface(Viewport::from_raw_mut(&mut viewport), 0x4141)
+                .unwrap_err()
+        });
+        assert!(matches!(
+            error,
+            Sdl3VulkanSurfaceError::Backend(Sdl3BackendError::PlatformCallbackReplaced {
+                callback: "Platform_CreateVkSurface"
+            })
+        ));
+        assert_eq!(FOREIGN_VULKAN_SURFACE_CREATE_COUNT.with(Cell::get), 0);
+
+        context.binding().with_bound_context(|| unsafe {
+            (*sys::igGetPlatformIO_Nil()).Platform_CreateVkSurface =
+                Some(synthetic_create_vk_surface);
+        });
+        drop(provider);
+        runtime.shutdown_platform(&mut context).unwrap();
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    #[test]
+    fn context_renderer_phase_releases_provider_before_sdl_platform_phase() {
+        struct ProviderAttachment(RefCell<Option<Sdl3VulkanSurfaceProvider>>);
+        impl ContextAttachment for ProviderAttachment {
+            fn release_renderer_resources(
+                &self,
+                _context: &ContextTeardown<'_>,
+            ) -> Result<(), ContextAttachmentTeardownError> {
+                self.0.borrow_mut().take();
+                Ok(())
+            }
+        }
+        struct ProviderAttachmentMarker;
+
+        let _guard = crate::tests::test_guard();
+        let mut context = Context::create();
+        let platform_count = Rc::new(Cell::new(0));
+        let runtime = synthetic_vulkan_registration(&mut context, Rc::clone(&platform_count));
+        let provider = runtime
+            .acquire_vulkan_surface_provider(&context)
+            .expect("Vulkan SDL runtime must issue a provider");
+        let renderer_attachment = context
+            .register_attachment::<ProviderAttachmentMarker>(
+                ContextAttachmentRole::Renderer,
+                Rc::new(ProviderAttachment(RefCell::new(Some(provider)))),
+            )
+            .unwrap();
+        renderer_attachment.defer_to_context();
+        drop(runtime);
+
+        drop(context);
+
+        assert_eq!(platform_count.get(), 1);
     }
 
     #[test]

@@ -16,6 +16,16 @@ fn prepare_context(ctx: &mut imgui::Context) {
     let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
 }
 
+fn prepare_context_without_docking(ctx: &mut imgui::Context) {
+    let io = ctx.io_mut();
+    io.set_display_size([800.0, 600.0]);
+    io.set_delta_time(1.0 / 60.0);
+    io.set_config_flags(io.config_flags() & !imgui::ConfigFlags::DOCKING_ENABLE);
+
+    let _ = ctx.font_atlas().build();
+    let _ = ctx.set_ini_filename::<std::path::PathBuf>(None);
+}
+
 #[test]
 fn dockspace_rejects_private_flags_and_invalid_id_or_size_before_ffi() {
     let _guard = test_guard();
@@ -73,6 +83,220 @@ fn dockspace_over_viewport_keeps_zero_id_auto_generation_but_rejects_private_fla
 
     let id = ui.dockspace_over_main_viewport_with_flags(0.into(), imgui::DockNodeFlags::NONE);
     assert_ne!(id.raw(), 0);
+}
+
+#[test]
+fn ordinary_docking_submission_rejects_disabled_docking_before_ffi() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    prepare_context_without_docking(&mut ctx);
+    let ui = ctx.frame();
+    let root_id = ui.get_id("Disabled docking");
+    let target = imgui::DockspaceTarget::new(root_id, [0.0, 0.0], [800.0, 600.0]).unwrap();
+
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = ui.dockspace_over_main_viewport();
+        }))
+        .is_err()
+    );
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = ui.dock_space(root_id, [100.0, 100.0]);
+        }))
+        .is_err()
+    );
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ui.set_next_window_dock_id(root_id);
+        }))
+        .is_err()
+    );
+    assert_eq!(
+        ui.dockspace_over_main_viewport_with_layout(
+            &target,
+            &imgui::DockLayout::tabs([] as [&str; 0]),
+            imgui::DockLayoutApply::IfMissing,
+        ),
+        Err(imgui::DockLayoutError::DockingDisabled)
+    );
+
+    let _ = ctx.render();
+}
+
+#[test]
+fn duplicate_dockspace_ids_are_rejected_before_native_submission() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+
+    let explicit_id;
+    {
+        let ui = ctx.frame();
+        explicit_id = ui.get_id("Explicit duplicate dockspace");
+        assert_eq!(
+            ui.dockspace_over_main_viewport_with_flags(explicit_id, imgui::DockNodeFlags::NONE,),
+            explicit_id
+        );
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = ui.dockspace_over_main_viewport_with_flags(
+                    explicit_id,
+                    imgui::DockNodeFlags::NONE,
+                );
+            }))
+            .is_err()
+        );
+    }
+    let _ = ctx.render();
+
+    {
+        let ui = ctx.frame();
+        assert_eq!(
+            ui.dockspace_over_main_viewport_with_flags(explicit_id, imgui::DockNodeFlags::NONE,),
+            explicit_id
+        );
+    }
+    let _ = ctx.render();
+
+    let generated;
+    {
+        let ui = ctx.frame();
+        generated = ui.dockspace_over_main_viewport();
+        assert_ne!(generated.raw(), 0);
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = ui.dockspace_over_main_viewport();
+            }))
+            .is_err()
+        );
+    }
+    let _ = ctx.render();
+
+    {
+        let ui = ctx.frame();
+        assert_eq!(
+            ui.dockspace_over_main_viewport_with_flags(generated, imgui::DockNodeFlags::NONE),
+            generated
+        );
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = ui.dockspace_over_main_viewport();
+            }))
+            .is_err()
+        );
+    }
+    let _ = ctx.render();
+}
+
+#[test]
+fn keep_alive_only_may_repeat_without_claiming_a_visible_dockspace() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let ui = ctx.frame();
+    let root_id = ui.get_id("Repeated keep-alive dockspace");
+
+    assert_eq!(
+        ui.dock_space_with_class(
+            root_id,
+            [100.0, 100.0],
+            imgui::DockNodeFlags::KEEP_ALIVE_ONLY,
+            None,
+        ),
+        root_id
+    );
+    assert_eq!(
+        ui.dock_space_with_class(
+            root_id,
+            [100.0, 100.0],
+            imgui::DockNodeFlags::KEEP_ALIVE_ONLY,
+            None,
+        ),
+        root_id
+    );
+
+    let _ = ctx.render();
+}
+
+#[test]
+fn duplicate_declarative_submission_preserves_the_first_layout() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let ui = ctx.frame();
+    let viewport = ui.main_viewport();
+    let root_id = ui.get_id("Duplicate declarative dockspace");
+    let target =
+        imgui::DockspaceTarget::new(root_id, viewport.work_pos(), viewport.work_size()).unwrap();
+    let first = imgui::DockLayout::split(
+        imgui::DockSplit::Left,
+        0.4,
+        imgui::DockLayout::tabs(["Left"]),
+        imgui::DockLayout::tabs(["Right"]),
+    );
+
+    ui.dockspace_over_main_viewport_with_layout(&target, &first, imgui::DockLayoutApply::Replace)
+        .unwrap();
+    assert_eq!(
+        ui.dockspace_over_main_viewport_with_layout(
+            &target,
+            &imgui::DockLayout::tabs(["Replacement"]),
+            imgui::DockLayoutApply::Replace,
+        ),
+        Err(imgui::DockLayoutError::DuplicateDockspaceSubmission { root_id })
+    );
+
+    let root = unsafe { imgui::sys::igDockBuilderGetNode(root_id.raw()) };
+    assert!(!root.is_null());
+    assert!(unsafe { imgui::sys::ImGuiDockNode_IsSplitNode(root) });
+    let _ = ctx.render();
+}
+
+#[test]
+fn docking_enable_is_frozen_after_the_first_frame() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    prepare_context_without_docking(&mut ctx);
+    ctx.frame().text("first frame without docking");
+    let _ = ctx.render();
+
+    let flags = ctx.io().config_flags() | imgui::ConfigFlags::DOCKING_ENABLE;
+    ctx.io_mut().set_config_flags(flags);
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = ctx.frame();
+        }))
+        .is_err()
+    );
+    assert_eq!(
+        ctx.frame_lifecycle_state(),
+        imgui::FrameLifecycleState::Rendered
+    );
+    drop(ctx);
+
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    ctx.frame().text("first frame with docking");
+    let _ = ctx.render();
+
+    let flags = ctx.io().config_flags() & !imgui::ConfigFlags::DOCKING_ENABLE;
+    ctx.io_mut().set_config_flags(flags);
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = ctx.frame();
+        }))
+        .is_err()
+    );
+    assert_eq!(
+        ctx.frame_lifecycle_state(),
+        imgui::FrameLifecycleState::Rendered
+    );
 }
 
 #[test]

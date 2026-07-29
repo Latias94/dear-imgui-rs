@@ -452,7 +452,13 @@ impl AppWindow {
         let game_tex_id = renderer.register_external_texture(&game_tex, &game_tex_view);
 
         let renderer = if enable_viewports {
-            match wgpu_mvp::WinitViewportRuntime::attach(&mut imgui, renderer) {
+            match wgpu_mvp::WinitViewportRuntime::attach(
+                &mut imgui,
+                viewport_runtime
+                    .as_ref()
+                    .expect("Winit viewport runtime must exist when viewports are enabled"),
+                renderer,
+            ) {
                 Ok(runtime) => AppRenderer::Multi(runtime),
                 Err(failure) => {
                     let (attach_error, mut renderer) = failure.into_parts();

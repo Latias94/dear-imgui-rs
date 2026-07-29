@@ -27,7 +27,7 @@ use super::surface::{
     SurfaceAction, SurfaceEvent, ViewportWgpuData, resolve_alpha_mode, resolve_present_mode,
     should_clear_viewport, surface_action, surface_config_from_capabilities,
 };
-use super::{OwningViewportRuntime, WgpuViewportError, logical_size_to_framebuffer};
+use super::{OwningViewportRuntime, WgpuViewportError};
 use crate::{WgpuViewportSurfaceConfig, renderer::WgpuRenderer};
 
 struct TestPlatformMarker;
@@ -221,6 +221,25 @@ fn lock_context() -> MutexGuard<'static, ()> {
         .get_or_init(|| Mutex::new(()))
         .lock()
         .unwrap_or_else(|poison| poison.into_inner())
+}
+
+#[test]
+fn platform_owner_context_mismatch_reports_actual_then_expected() {
+    let _guard = lock_context();
+    let actual_context = Context::create();
+    let actual = actual_context.id();
+    let suspended_actual = actual_context.suspend();
+    let expected_context = Context::create();
+    let expected = expected_context.id();
+
+    let error = WgpuViewportError::PlatformOwnerContextMismatch { expected, actual };
+
+    assert_eq!(
+        error.to_string(),
+        format!("WGPU viewport platform owner belongs to Context {actual:?}, not {expected:?}")
+    );
+    drop(expected_context);
+    drop(suspended_actual);
 }
 
 fn viewport_identity(viewport: &mut sys::ImGuiViewport) -> ViewportIdentity {
@@ -480,18 +499,6 @@ fn clear_complete_renderer_takeover(context: &mut Context) {
 }
 
 #[test]
-fn logical_size_conversion_clamps_invalid_dimensions_and_scale() {
-    assert_eq!(
-        logical_size_to_framebuffer([320.0, 200.0], [1.5, 2.0]),
-        [480, 400]
-    );
-    assert_eq!(
-        logical_size_to_framebuffer([0.0, f32::NAN], [0.0, f32::INFINITY]),
-        [1, 1]
-    );
-}
-
-#[test]
 fn auto_no_vsync_is_preserved_for_secondary_viewports() {
     assert_eq!(
         resolve_present_mode(wgpu::PresentMode::AutoNoVsync, &[wgpu::PresentMode::Fifo]),
@@ -513,8 +520,9 @@ fn secondary_surface_configuration_does_not_force_fifo() {
         vec![wgpu::CompositeAlphaMode::Opaque],
     );
 
-    let config =
-        surface_config_from_capabilities(format, requested, &capabilities, [320, 200]).unwrap();
+    let config = surface_config_from_capabilities(format, requested, &capabilities, [320, 200])
+        .unwrap()
+        .expect("non-zero surfaces should be configured");
     assert_eq!(config.present_mode, wgpu::PresentMode::AutoNoVsync);
     assert_eq!(config.alpha_mode, wgpu::CompositeAlphaMode::Opaque);
     assert_eq!(config.desired_maximum_frame_latency, 1);
@@ -581,8 +589,9 @@ fn surface_config_is_renegotiated_from_current_capabilities() {
         vec![wgpu::PresentMode::Immediate, wgpu::PresentMode::Fifo],
         vec![wgpu::CompositeAlphaMode::PreMultiplied],
     );
-    let initial_config =
-        surface_config_from_capabilities(format, requested, &initial, [640, 480]).unwrap();
+    let initial_config = surface_config_from_capabilities(format, requested, &initial, [640, 480])
+        .unwrap()
+        .expect("non-zero surfaces should be configured");
     assert_eq!(initial_config.present_mode, wgpu::PresentMode::Immediate);
     assert_eq!(
         initial_config.alpha_mode,
@@ -594,14 +603,46 @@ fn surface_config_is_renegotiated_from_current_capabilities() {
         vec![wgpu::PresentMode::Fifo],
         vec![wgpu::CompositeAlphaMode::Opaque],
     );
-    let renegotiated =
-        surface_config_from_capabilities(format, requested, &changed, [800, 600]).unwrap();
+    let renegotiated = surface_config_from_capabilities(format, requested, &changed, [800, 600])
+        .unwrap()
+        .expect("non-zero surfaces should be configured");
     assert_eq!(renegotiated.present_mode, wgpu::PresentMode::AutoNoVsync);
     assert_eq!(renegotiated.alpha_mode, wgpu::CompositeAlphaMode::Auto);
     assert_eq!([renegotiated.width, renegotiated.height], [800, 600]);
     assert_eq!(renegotiated.desired_maximum_frame_latency, 3);
     #[cfg(feature = "wgpu-30")]
     assert_eq!(renegotiated.color_space, wgpu::SurfaceColorSpace::Srgb);
+}
+
+#[test]
+fn zero_sized_secondary_surfaces_are_suspended_instead_of_fabricated() {
+    let format = wgpu::TextureFormat::Bgra8UnormSrgb;
+    let capabilities = capabilities_for_policy(
+        format,
+        vec![wgpu::PresentMode::Fifo],
+        vec![wgpu::CompositeAlphaMode::Opaque],
+    );
+
+    assert!(
+        surface_config_from_capabilities(
+            format,
+            WgpuViewportSurfaceConfig::default(),
+            &capabilities,
+            [0, 480],
+        )
+        .unwrap()
+        .is_none()
+    );
+    assert!(
+        surface_config_from_capabilities(
+            format,
+            WgpuViewportSurfaceConfig::default(),
+            &capabilities,
+            [640, 0],
+        )
+        .unwrap()
+        .is_none()
+    );
 }
 
 #[cfg(feature = "wgpu-30")]

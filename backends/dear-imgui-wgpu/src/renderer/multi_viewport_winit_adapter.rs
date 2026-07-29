@@ -35,7 +35,7 @@ pub(super) unsafe fn create_surface(
         }
     })?;
     let size = window.inner_size();
-    Ok((surface, [size.width.max(1), size.height.max(1)]))
+    Ok((surface, [size.width, size.height]))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -56,7 +56,7 @@ pub(super) unsafe fn framebuffer_size(viewport: &Viewport) -> Result<[u32; 2], W
     }
     let window = unsafe { &*(window_ptr.cast::<winit::window::Window>()) };
     let size = window.inner_size();
-    Ok([size.width.max(1), size.height.max(1)])
+    Ok([size.width, size.height])
 }
 
 #[cfg(target_arch = "wasm32")]

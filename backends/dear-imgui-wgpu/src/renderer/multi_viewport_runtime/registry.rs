@@ -99,7 +99,30 @@ pub(super) struct GlobalHandles {
     #[cfg(feature = "wgpu-30")]
     pub(super) queue: wgpu::Queue,
     pub(super) render_target_format: wgpu::TextureFormat,
+    pub(super) depth_stencil_format: Option<wgpu::TextureFormat>,
+    pub(super) multisample_state: wgpu::MultisampleState,
     pub(super) viewport_surface_config: WgpuViewportSurfaceConfig,
+}
+
+fn validate_viewport_attachment(
+    adapter: &wgpu::Adapter,
+    attachment: &'static str,
+    format: wgpu::TextureFormat,
+    sample_count: u32,
+) -> Result<(), WgpuViewportError> {
+    let features = adapter.get_texture_format_features(format);
+    if !features
+        .allowed_usages
+        .contains(wgpu::TextureUsages::RENDER_ATTACHMENT)
+        || !features.flags.sample_count_supported(sample_count)
+    {
+        return Err(WgpuViewportError::UnsupportedViewportAttachment {
+            attachment,
+            format,
+            sample_count,
+        });
+    }
+    Ok(())
 }
 
 thread_local! {
@@ -126,19 +149,50 @@ pub(super) fn renderer_globals(
             .backend_data
             .as_ref()
             .ok_or(WgpuViewportError::RendererNotInitialized)?;
+        let instance = backend
+            .instance
+            .clone()
+            .ok_or(WgpuViewportError::MissingInstance)?;
+        let adapter = backend
+            .adapter
+            .clone()
+            .ok_or(WgpuViewportError::MissingAdapter)?;
+        let multisample_state = backend.init_info.pipeline_multisample_state;
+        if multisample_state.count == 0 {
+            return Err(WgpuViewportError::InvalidMultisampleCount {
+                count: multisample_state.count,
+            });
+        }
+        validate_viewport_attachment(
+            &adapter,
+            "color attachment",
+            backend.render_target_format,
+            multisample_state.count,
+        )?;
+        if let Some(format) = backend.depth_stencil_format {
+            if !format.is_depth_stencil_format() {
+                return Err(WgpuViewportError::UnsupportedViewportAttachment {
+                    attachment: "depth-stencil attachment",
+                    format,
+                    sample_count: multisample_state.count,
+                });
+            }
+            validate_viewport_attachment(
+                &adapter,
+                "depth-stencil attachment",
+                format,
+                multisample_state.count,
+            )?;
+        }
         Ok(GlobalHandles {
-            instance: backend
-                .instance
-                .clone()
-                .ok_or(WgpuViewportError::MissingInstance)?,
-            adapter: backend
-                .adapter
-                .clone()
-                .ok_or(WgpuViewportError::MissingAdapter)?,
+            instance,
+            adapter,
             device: backend.device.clone(),
             #[cfg(feature = "wgpu-30")]
             queue: backend.queue.clone(),
             render_target_format: backend.render_target_format,
+            depth_stencil_format: backend.depth_stencil_format,
+            multisample_state,
             viewport_surface_config: backend.init_info.viewport_surface_config,
         })
     }

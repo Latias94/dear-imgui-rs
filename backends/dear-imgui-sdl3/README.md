@@ -183,6 +183,10 @@ APIs of interest (see `src/lib.rs` for full docs):
   `init_for_sdl_gpu`, or `init_for_sdl_renderer` as appropriate. Every constructor is unsafe
   because the upstream backend retains native window and graphics pointers beyond the call; keep
   those owners alive until explicit shutdown succeeds or the Context finishes attachment teardown.
+  Vulkan renderers should request the typed `acquire_vulkan_surface_provider` capability through
+  their integration instead of caching `Platform_CreateVkSurface`. The exclusive provider is tied
+  to one SDL runtime generation, validates each viewport immediately before native entry, and
+  blocks platform shutdown until all renderer-owned Vulkan surfaces have been destroyed.
 - `shutdown(&mut self, &mut Context)`:
   an idempotent owner method that closes any open frame before reporting actionable teardown and
   callback-ownership errors. Dropping the owner defers native cleanup to the Context attachment,
@@ -192,6 +196,10 @@ APIs of interest (see `src/lib.rs` for full docs):
   `destroy_device_objects(...)` first require the Context renderer consumer to be idle: when a
   detached `FrameSnapshot` is outstanding, they return before changing callbacks or destroying
   native resources. Commit or drop those snapshots, then retry the operation.
+  A platform-only owner also rejects explicit shutdown while an external renderer attachment is
+  active. This preflight runs before the current frame or native SDL state changes; shut down the
+  renderer first, then retry platform shutdown. Context-owned teardown preserves the same ordered
+  renderer-before-platform contract automatically.
 - `poll_fault()`:
   returns deferred platform callback failures without unwinding through native code. Ordinary
   owner methods also surface the oldest pending fault before entering SDL.

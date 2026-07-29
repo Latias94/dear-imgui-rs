@@ -18,6 +18,7 @@ use super::vulkan_viewport::{self, OwningViewportRuntime, SurfaceAdapter, Surfac
 use ash::vk;
 use dear_imgui_rs::render::RenderedFrame;
 use dear_imgui_rs::{Context, TextureData, TextureId, platform_io::Viewport};
+use dear_imgui_winit::multi_viewport::WinitPlatformRuntime as WinitPlatformOwner;
 use std::sync::Arc;
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::window::Window;
@@ -27,8 +28,6 @@ pub use super::vulkan_viewport::{
     SurfaceSupportError, ViewportSwapchainPolicy, VulkanViewportConfig,
 };
 use crate::{Options, TextureRetirementBatch, TextureUpdateResult};
-
-const PLATFORM_NAME_PREFIX: &str = "dear-imgui-winit ";
 
 struct WinitSurfaceAdapter;
 
@@ -64,22 +63,6 @@ impl SurfaceAdapter for WinitSurfaceAdapter {
     }
 }
 
-fn validate_platform(context: &Context) -> Result<(), AshViewportError> {
-    let actual = context
-        .io()
-        .backend_platform_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "<unset>".to_string());
-    if actual.starts_with(PLATFORM_NAME_PREFIX) {
-        Ok(())
-    } else {
-        Err(AshViewportError::PlatformBackendMismatch {
-            expected: "dear-imgui-winit",
-            actual,
-        })
-    }
-}
-
 /// Owning Ash renderer runtime for the Winit multi-viewport route.
 ///
 /// The runtime consumes the renderer into stable boxed storage and owns the renderer attachment,
@@ -97,16 +80,50 @@ impl WinitViewportRuntime {
     /// # Safety
     ///
     /// Every raw Vulkan handle and queue family in `config` must satisfy
-    /// [`VulkanViewportConfig`]'s device-lineage contract. The runtime owns renderer address
-    /// stability; moving this wrapper is safe.
+    /// [`VulkanViewportConfig`]'s device-lineage and external host-synchronization contracts. The
+    /// runtime owns renderer address stability; moving this wrapper is safe.
     pub unsafe fn attach(
+        context: &mut Context,
+        platform: &WinitPlatformOwner,
+        renderer: AshRenderer,
+        config: VulkanViewportConfig,
+    ) -> Result<Self, AshViewportAttachError> {
+        if platform.context_id() != context.id() {
+            return Err(AshViewportAttachError::new(
+                AshViewportError::PlatformOwnerContextMismatch {
+                    backend: "Winit",
+                    expected: context.id(),
+                    actual: platform.context_id(),
+                },
+                renderer,
+            ));
+        }
+        if let Err(error) = platform.validate_renderer_owner(context) {
+            return Err(AshViewportAttachError::new(
+                AshViewportError::WinitPlatform(error),
+                renderer,
+            ));
+        }
+        unsafe { Self::attach_unchecked(context, renderer, config) }
+    }
+
+    /// Attaches an Ash renderer to a custom platform that follows the Winit viewport-handle
+    /// contract.
+    ///
+    /// # Safety
+    ///
+    /// Every raw Vulkan handle and queue family in `config` must satisfy
+    /// [`VulkanViewportConfig`]'s device-lineage and external host-synchronization contracts. The
+    /// current Context must also have a live Winit-compatible platform runtime. Every viewport's
+    /// `PlatformHandle` must point to its live `winit::Window`, and the platform must keep those
+    /// windows alive until this renderer runtime has released its callbacks and resources. Prefer
+    /// [`Self::attach`] for the built-in
+    /// [`WinitPlatformRuntime`](dear_imgui_winit::multi_viewport::WinitPlatformRuntime).
+    pub unsafe fn attach_unchecked(
         context: &mut Context,
         renderer: AshRenderer,
         config: VulkanViewportConfig,
     ) -> Result<Self, AshViewportAttachError> {
-        if let Err(error) = validate_platform(context) {
-            return Err(AshViewportAttachError::new(error, renderer));
-        }
         unsafe {
             vulkan_viewport::attach_with_adapter(
                 renderer,
@@ -303,25 +320,5 @@ impl WinitViewportRuntime {
     /// Retry cleanup retained after Context-first teardown returned a recoverable wait error.
     pub fn retry_retained_cleanup(&mut self) -> Result<(), AshViewportError> {
         self.inner.retry_retained_cleanup()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn wrong_platform_name_is_rejected_before_callback_claim() {
-        let _guard = vulkan_viewport::test_context_guard();
-        let mut context = Context::create();
-        context
-            .set_platform_name(Some("imgui_impl_sdl3 (3.2.0; 3.2.0)".to_string()))
-            .unwrap();
-
-        assert!(matches!(
-            validate_platform(&context),
-            Err(AshViewportError::PlatformBackendMismatch { .. })
-        ));
-        assert!(context.platform_io().renderer_callbacks_are_empty());
     }
 }

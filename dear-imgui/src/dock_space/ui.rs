@@ -1,5 +1,8 @@
 use super::flags::{DockNodeFlags, validate_dock_node_flags};
-use super::validation::{assert_finite_vec2, assert_nonzero_id};
+use super::validation::{
+    assert_docking_available, assert_finite_vec2, assert_nonzero_id, claim_dockspace_submission,
+    main_viewport_dockspace_host_name, window_skips_items,
+};
 use super::window_class::WindowClass;
 use crate::ui::Ui;
 use crate::{
@@ -8,6 +11,21 @@ use crate::{
     sys,
 };
 use std::ptr;
+
+fn resolve_main_viewport_dockspace_id(requested: Id, host_name: &std::ffi::CStr) -> Id {
+    if requested.raw() != 0 {
+        return requested;
+    }
+
+    unsafe {
+        let host_id = sys::igGetIDWithSeed_Str(host_name.as_ptr(), ptr::null(), 0);
+        Id::from(sys::igGetIDWithSeed_Str(
+            c"DockSpace".as_ptr(),
+            ptr::null(),
+            host_id,
+        ))
+    }
+}
 
 /// Docking-related functionality
 impl Ui {
@@ -61,6 +79,11 @@ impl Ui {
     ///
     /// The ID of the created dockspace
     ///
+    /// # Panics
+    ///
+    /// Panics when docking was not enabled before the first frame, or when the effective
+    /// dockspace ID was already submitted without `KEEP_ALIVE_ONLY` during this frame.
+    ///
     /// # Example
     ///
     /// ```no_run
@@ -78,14 +101,36 @@ impl Ui {
         dockspace_id: Id,
         flags: DockNodeFlags,
     ) -> Id {
-        validate_dock_node_flags("Ui::dockspace_over_main_viewport_with_flags()", flags);
-        self.run_with_bound_context(|| unsafe {
-            Id::from(sys::igDockSpaceOverViewport(
-                dockspace_id.into(),
-                sys::igGetMainViewport(),
-                flags.bits(),
-                ptr::null(),
-            ))
+        const CALLER: &str = "Ui::dockspace_over_main_viewport_with_flags()";
+        validate_dock_node_flags(CALLER, flags);
+        self.run_with_bound_context(|| {
+            assert_docking_available(CALLER);
+            let host_name = main_viewport_dockspace_host_name(CALLER);
+            let effective_id = resolve_main_viewport_dockspace_id(dockspace_id, &host_name);
+            let claim = claim_dockspace_submission(self, CALLER, effective_id, flags, false)
+                .unwrap_or_else(|_| {
+                    panic!("{CALLER} cannot submit dockspace {effective_id:?} twice in one frame")
+                });
+            let submitted = unsafe {
+                Id::from(sys::igDockSpaceOverViewport(
+                    dockspace_id.into(),
+                    sys::igGetMainViewport(),
+                    flags.bits(),
+                    ptr::null(),
+                ))
+            };
+            if let Some(claim) = claim {
+                if window_skips_items(&host_name) {
+                    drop(claim);
+                } else {
+                    claim.commit();
+                }
+            }
+            assert_eq!(
+                submitted, effective_id,
+                "{CALLER} native auto-generated dockspace ID changed unexpectedly"
+            );
+            submitted
         })
     }
 
@@ -97,6 +142,11 @@ impl Ui {
     /// # Returns
     ///
     /// The ID of the created dockspace
+    ///
+    /// # Panics
+    ///
+    /// Panics when docking was not enabled before the first frame, or when the effective
+    /// dockspace ID was already submitted during this frame.
     ///
     /// # Example
     ///
@@ -127,6 +177,11 @@ impl Ui {
     ///
     /// The ID of the created dockspace
     ///
+    /// # Panics
+    ///
+    /// Panics when docking was not enabled before the first frame, or when `id` was already
+    /// submitted without `KEEP_ALIVE_ONLY` during this frame.
+    ///
     /// # Example
     ///
     /// ```no_run
@@ -149,25 +204,39 @@ impl Ui {
         flags: DockNodeFlags,
         window_class: Option<&WindowClass>,
     ) -> Id {
-        validate_dock_node_flags("Ui::dock_space_with_class()", flags);
-        assert_nonzero_id("Ui::dock_space_with_class()", "id", id);
-        assert_finite_vec2("Ui::dock_space_with_class()", "size", size);
+        const CALLER: &str = "Ui::dock_space_with_class()";
+        validate_dock_node_flags(CALLER, flags);
+        assert_nonzero_id(CALLER, "id", id);
+        assert_finite_vec2(CALLER, "size", size);
         let size_vec = sys::ImVec2 {
             x: size[0],
             y: size[1],
         };
-        let imgui_window_class =
-            window_class.map(|class| class.to_imgui("Ui::dock_space_with_class()"));
+        let imgui_window_class = window_class.map(|class| class.to_imgui(CALLER));
         let window_class_ptr = imgui_window_class
             .as_ref()
             .map_or(ptr::null(), |wc| wc as *const _);
-        self.run_with_bound_context(|| unsafe {
-            Id::from(sys::igDockSpace(
-                id.into(),
-                size_vec,
-                flags.bits(),
-                window_class_ptr,
-            ))
+        self.run_with_bound_context(|| {
+            let claim =
+                claim_dockspace_submission(self, CALLER, id, flags, true).unwrap_or_else(|_| {
+                    panic!("{CALLER} cannot submit dockspace {id:?} twice in one frame")
+                });
+            let submitted = unsafe {
+                Id::from(sys::igDockSpace(
+                    id.into(),
+                    size_vec,
+                    flags.bits(),
+                    window_class_ptr,
+                ))
+            };
+            if let Some(claim) = claim {
+                claim.commit();
+            }
+            assert_eq!(
+                submitted, id,
+                "{CALLER} native submission returned an unexpected dockspace ID"
+            );
+            submitted
         })
     }
 
@@ -200,6 +269,10 @@ impl Ui {
     ///
     /// This function must be called before creating a window to dock it to a specific dock node.
     ///
+    /// # Panics
+    ///
+    /// Panics when docking was not enabled before the first frame.
+    ///
     /// # Parameters
     ///
     /// * `dock_id` - The ID of the dock node to dock the next window to
@@ -219,8 +292,12 @@ impl Ui {
     /// ```
     #[doc(alias = "SetNextWindowDockID")]
     pub fn set_next_window_dock_id_with_cond(&self, dock_id: Id, cond: crate::Condition) {
-        self.run_with_bound_context(|| unsafe {
-            sys::igSetNextWindowDockID(dock_id.into(), cond as i32);
+        const CALLER: &str = "Ui::set_next_window_dock_id_with_cond()";
+        self.run_with_bound_context(|| {
+            assert_docking_available(CALLER);
+            unsafe {
+                sys::igSetNextWindowDockID(dock_id.into(), cond as i32);
+            }
         });
     }
 
@@ -228,6 +305,10 @@ impl Ui {
     ///
     /// This function must be called before creating a window to dock it to a specific dock node.
     /// Uses `Condition::Always` by default.
+    ///
+    /// # Panics
+    ///
+    /// Panics when docking was not enabled before the first frame.
     ///
     /// # Parameters
     ///

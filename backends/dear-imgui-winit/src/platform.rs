@@ -12,8 +12,9 @@ use std::sync::Arc;
 use dear_imgui_rs::ContextPlatformWindowTeardown;
 use dear_imgui_rs::{
     BackendFlags, ConfigFlags, Context, ContextAttachment, ContextAttachmentError,
-    ContextAttachmentLease, ContextAttachmentRole, ContextAttachmentTeardownError, ContextBinding,
-    ContextBindingError, ContextDestroyed, ContextPlatformWindowTeardownError, ContextTeardown,
+    ContextAttachmentHandle, ContextAttachmentLease, ContextAttachmentRole,
+    ContextAttachmentTeardownError, ContextBinding, ContextBindingError, ContextDestroyed,
+    ContextPlatformAttachmentReleaseError, ContextPlatformWindowTeardownError, ContextTeardown,
 };
 use thiserror::Error;
 use winit::dpi::{LogicalPosition, LogicalSize};
@@ -47,6 +48,9 @@ pub enum WinitPlatformError {
     /// The Dear ImGui Context rejected the platform attachment.
     #[error(transparent)]
     Attachment(#[from] ContextAttachmentError),
+    /// The Context rejected release of the active platform attachment generation.
+    #[error(transparent)]
+    PlatformAttachmentRelease(#[from] ContextPlatformAttachmentReleaseError),
     /// The originating Dear ImGui Context can no longer be entered normally.
     #[error(transparent)]
     Context(#[from] ContextBindingError),
@@ -338,6 +342,7 @@ pub(crate) struct WinitPlatformControl {
     attached_window: RefCell<Option<Arc<Window>>>,
     ime_allowed: Cell<bool>,
     terminal_fault: RefCell<Option<WinitPlatformError>>,
+    attachment_handle: RefCell<Option<ContextAttachmentHandle>>,
     #[cfg(feature = "multi-viewport")]
     runtime: RefCell<Option<Rc<crate::multi_viewport::RuntimeControl>>>,
     #[cfg(feature = "multi-viewport")]
@@ -398,6 +403,7 @@ impl WinitPlatformControl {
             attached_window: RefCell::new(None),
             ime_allowed: Cell::new(false),
             terminal_fault: RefCell::new(None),
+            attachment_handle: RefCell::new(None),
             #[cfg(feature = "multi-viewport")]
             runtime: RefCell::new(None),
             #[cfg(feature = "multi-viewport")]
@@ -407,6 +413,10 @@ impl WinitPlatformControl {
             ContextAttachmentRole::Platform,
             Rc::clone(&control) as Rc<dyn ContextAttachment>,
         )?;
+        control
+            .attachment_handle
+            .borrow_mut()
+            .replace(attachment.handle());
 
         context.binding().with_bound_context(|| unsafe {
             let io = dear_imgui_rs::sys::igGetIO_Nil();
@@ -640,6 +650,62 @@ impl WinitPlatformControl {
             .is_some_and(|runtime| !runtime.is_released())
     }
 
+    pub(crate) fn attachment_handle(&self) -> Result<ContextAttachmentHandle, WinitPlatformError> {
+        self.attachment_handle
+            .borrow()
+            .clone()
+            .filter(ContextAttachmentHandle::is_attached)
+            .ok_or(WinitPlatformError::RuntimeDetached)
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    fn note_runtime_mouse_button(
+        &self,
+        button: winit::event::MouseButton,
+        state: winit::event::ElementState,
+    ) {
+        let Some(button) = crate::input::to_imgui_mouse_button(button) else {
+            return;
+        };
+        if let Some(runtime) = self.runtime.borrow().as_ref() {
+            runtime.note_mouse_button(button, state.is_pressed());
+        }
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    fn note_runtime_cursor_left(&self) {
+        if let Some(runtime) = self.runtime.borrow().as_ref() {
+            runtime.note_cursor_left();
+        }
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    fn note_runtime_cursor_available(&self) {
+        if let Some(runtime) = self.runtime.borrow().as_ref() {
+            runtime.note_cursor_available();
+        }
+    }
+
+    #[cfg(feature = "multi-viewport")]
+    fn note_runtime_window_focus(
+        &self,
+        window_id: winit::window::WindowId,
+        focused: bool,
+        context: &mut Context,
+    ) -> bool {
+        let runtime = self
+            .runtime
+            .borrow()
+            .as_ref()
+            .filter(|runtime| !runtime.is_released())
+            .cloned();
+        let Some(runtime) = runtime else {
+            return false;
+        };
+        runtime.note_window_focus(window_id, focused, context);
+        true
+    }
+
     #[cfg(feature = "multi-viewport")]
     pub(crate) fn refresh_runtime_state(
         &self,
@@ -654,6 +720,7 @@ impl WinitPlatformControl {
         let Some(runtime) = runtime else {
             return Ok(());
         };
+        runtime.reconcile_input_state(context);
         let result = runtime.refresh_monitors(context);
         #[cfg(target_os = "windows")]
         let result = result.and_then(|()| runtime.refresh_native_mouse(context));
@@ -936,6 +1003,7 @@ impl ContextAttachment for WinitPlatformControl {
         }
         self.attached_window.borrow_mut().take();
         unregister_platform_control(self.binding.id());
+        self.attachment_handle.borrow_mut().take();
         self.state.set(PlatformState::ContextDestroyed);
     }
 }
@@ -1101,7 +1169,8 @@ impl WinitPlatform {
     ///
     /// Multi-viewport state, when present, is released first. The operation preserves foreign
     /// replacements and reports the first ownership violation after clearing fields that still
-    /// have Winit's exact pointer identity.
+    /// have Winit's exact pointer identity. An active renderer attachment rejects shutdown before
+    /// any frame or native state changes; shut down that renderer and retry.
     pub fn shutdown(&mut self, imgui_ctx: &mut Context) -> Result<(), WinitPlatformError> {
         self.control.ensure_context(imgui_ctx)?;
         if matches!(
@@ -1110,12 +1179,15 @@ impl WinitPlatform {
         ) {
             return Ok(());
         }
+        let attachment = self.control.attachment_handle()?;
+        let mut release = imgui_ctx.prepare_platform_attachment_release(&attachment)?;
+        let _imgui_ctx = release.context_mut();
         let terminal_fault = self.control.terminal_fault();
         #[cfg(feature = "multi-viewport")]
         let pending_error = {
             let mut pending_error = None;
             if let Some(runtime) = self.control.runtime.borrow().clone() {
-                if let Err(error) = runtime.shutdown_from_platform(imgui_ctx) {
+                if let Err(error) = runtime.shutdown_from_platform(_imgui_ctx) {
                     if !runtime.is_released() {
                         return Err(error);
                     }
@@ -1134,9 +1206,9 @@ impl WinitPlatform {
             .try_with_bound_context(|| self.control.release_base_in_current_context())?;
         unregister_platform_control(self.control.binding.id());
         self.control.state.set(PlatformState::Detached);
-        if let Some(mut attachment) = self.attachment.take() {
-            attachment.detach();
-        }
+        self.control.attachment_handle.borrow_mut().take();
+        release.commit();
+        self.attachment.take();
         match (terminal_fault.or(pending_error), result) {
             (Some(error), _) => Err(error),
             (None, result) => result,
@@ -1279,6 +1351,7 @@ impl WinitPlatform {
                 #[cfg(feature = "multi-viewport")]
                 {
                     if self.control.has_live_runtime() {
+                        self.control.note_runtime_cursor_available();
                         let Some(position) = crate::multi_viewport::client_physical_to_screen_pos(
                             window,
                             [position.x, position.y],
@@ -1298,15 +1371,31 @@ impl WinitPlatform {
                 events::handle_cursor_moved([position.x, position.y], imgui_ctx)
             }
             WindowEvent::MouseInput { button, state, .. } => {
+                #[cfg(feature = "multi-viewport")]
+                if self.control.has_live_runtime() {
+                    self.control.note_runtime_mouse_button(*button, *state);
+                }
                 events::handle_mouse_button(*button, *state, imgui_ctx)
             }
             WindowEvent::MouseWheel { delta, .. } => events::handle_mouse_wheel(*delta, imgui_ctx),
-            // When cursor leaves the window, tell ImGui the mouse is unavailable so
-            // software cursor (if enabled) won’t be drawn at the last position.
+            // Single-window mode invalidates immediately. Multi-viewport mode delays the leave
+            // so an in-flight drag can enter another owned native window without losing position.
             WindowEvent::CursorLeft { .. } => {
+                #[cfg(feature = "multi-viewport")]
+                if self.control.has_live_runtime() {
+                    self.control.note_runtime_cursor_left();
+                    return false;
+                }
                 {
                     let io = imgui_ctx.io_mut();
                     io.add_mouse_pos_event([-f32::MAX, -f32::MAX]);
+                }
+                false
+            }
+            WindowEvent::CursorEntered { .. } => {
+                #[cfg(feature = "multi-viewport")]
+                if self.control.has_live_runtime() {
+                    self.control.note_runtime_cursor_available();
                 }
                 false
             }
@@ -1338,7 +1427,16 @@ impl WinitPlatform {
                 events::handle_touch_event(touch, window, imgui_ctx);
                 imgui_ctx.io().want_capture_mouse()
             }
-            WindowEvent::Focused(focused) => events::handle_focused(*focused, imgui_ctx),
+            WindowEvent::Focused(focused) => {
+                #[cfg(feature = "multi-viewport")]
+                if self
+                    .control
+                    .note_runtime_window_focus(window.id(), *focused, imgui_ctx)
+                {
+                    return false;
+                }
+                events::handle_focused(*focused, imgui_ctx)
+            }
             _ => false,
         }
     }
@@ -1538,7 +1636,12 @@ impl Drop for WinitPlatform {
         let runtime_attached = self.control.runtime.borrow().is_some();
         #[cfg(not(feature = "multi-viewport"))]
         let runtime_attached = false;
+        let renderer_attached = self
+            .attachment
+            .as_ref()
+            .is_some_and(|attachment| attachment.handle().has_active_renderer_dependency());
         if !runtime_attached
+            && !renderer_attached
             && self
                 .control
                 .binding
@@ -1548,7 +1651,9 @@ impl Drop for WinitPlatform {
             unregister_platform_control(self.control.binding.id());
             self.control.state.set(PlatformState::Detached);
             if let Some(mut attachment) = self.attachment.take() {
-                attachment.detach();
+                let _ = attachment
+                    .detach()
+                    .expect("Winit verified that no renderer attachment blocks platform detach");
             }
             return;
         }
@@ -1586,6 +1691,11 @@ mod tests {
     use super::*;
     use crate::test_util::test_sync::lock_context;
 
+    struct ActiveRendererMarker;
+    struct ActiveRendererAttachment;
+
+    impl ContextAttachment for ActiveRendererAttachment {}
+
     unsafe extern "C" fn foreign_ime_callback(
         _context: *mut dear_imgui_rs::sys::ImGuiContext,
         _viewport: *mut dear_imgui_rs::sys::ImGuiViewport,
@@ -1608,6 +1718,61 @@ mod tests {
         assert_eq!(platform.hidpi_factor, 1.0);
         assert_eq!(platform.cursor_cache, None);
         assert!(!platform.ime_enabled);
+    }
+
+    #[test]
+    fn platform_shutdown_rejects_an_active_renderer_before_releasing_base_state() {
+        let _guard = lock_context();
+        let mut context = Context::create();
+        let mut platform = WinitPlatform::new(&mut context).unwrap();
+        let mut renderer = context
+            .register_attachment::<ActiveRendererMarker>(
+                ContextAttachmentRole::Renderer,
+                Rc::new(ActiveRendererAttachment),
+            )
+            .unwrap();
+        let io = unsafe { dear_imgui_rs::sys::igGetIO_ContextPtr(context.as_raw()) };
+
+        assert!(matches!(
+            platform.shutdown(&mut context),
+            Err(WinitPlatformError::PlatformAttachmentRelease(
+                ContextPlatformAttachmentReleaseError::RendererActive
+            ))
+        ));
+        assert_eq!(
+            unsafe { (*io).BackendPlatformUserData },
+            platform.control.token_ptr()
+        );
+        assert!(platform.control.attachment_handle().unwrap().is_attached());
+
+        assert_eq!(renderer.detach(), Ok(true));
+        platform.shutdown(&mut context).unwrap();
+    }
+
+    #[test]
+    fn platform_drop_defers_base_release_while_a_renderer_attachment_is_active() {
+        let _guard = lock_context();
+        let mut context = Context::create();
+        let platform = WinitPlatform::new(&mut context).unwrap();
+        let control = platform.control();
+        let mut renderer = context
+            .register_attachment::<ActiveRendererMarker>(
+                ContextAttachmentRole::Renderer,
+                Rc::new(ActiveRendererAttachment),
+            )
+            .unwrap();
+        let io = unsafe { dear_imgui_rs::sys::igGetIO_ContextPtr(context.as_raw()) };
+
+        drop(platform);
+
+        assert_eq!(
+            unsafe { (*io).BackendPlatformUserData },
+            control.token_ptr()
+        );
+        assert!(control.attachment_handle().unwrap().is_attached());
+        assert_eq!(renderer.detach(), Ok(true));
+        drop(context);
+        assert_eq!(control.state.get(), PlatformState::ContextDestroyed);
     }
 
     #[test]

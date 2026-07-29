@@ -63,6 +63,20 @@ pub enum WgpuViewportError {
     /// Renderer callbacks require an attached platform backend that supports viewports.
     #[error("WGPU multi-viewport requires an attached multi-viewport platform runtime")]
     PlatformBackendUnavailable,
+    /// The typed platform owner supplied to the renderer belongs to another Context.
+    #[error("WGPU viewport platform owner belongs to Context {actual:?}, not {expected:?}")]
+    PlatformOwnerContextMismatch {
+        expected: ContextId,
+        actual: ContextId,
+    },
+    /// The typed Winit platform owner rejected renderer attachment.
+    #[cfg(feature = "multi-viewport-winit")]
+    #[error(transparent)]
+    WinitPlatformOwner(#[from] dear_imgui_winit::WinitPlatformError),
+    /// The typed SDL3 platform owner rejected renderer attachment.
+    #[cfg(feature = "multi-viewport-sdl3")]
+    #[error(transparent)]
+    Sdl3PlatformOwner(#[from] dear_imgui_sdl3::Sdl3BackendError),
     /// A required platform callback is absent.
     #[error("required ImGuiPlatformIO callback `{callback}` is not installed")]
     PlatformCallbackUnavailable { callback: &'static str },
@@ -122,6 +136,18 @@ pub enum WgpuViewportError {
         format: wgpu::TextureFormat,
         color_space: &'static str,
     },
+    /// The renderer's multisample count cannot describe a WGPU render attachment.
+    #[error("WGPU viewport attachments require a non-zero multisample count, received {count}")]
+    InvalidMultisampleCount { count: u32 },
+    /// A renderer attachment format does not support the configured sample count.
+    #[error(
+        "WGPU {attachment} format {format:?} does not support RENDER_ATTACHMENT at sample count {sample_count}"
+    )]
+    UnsupportedViewportAttachment {
+        attachment: &'static str,
+        format: wgpu::TextureFormat,
+        sample_count: u32,
+    },
     /// Surface acquisition returned a terminal result.
     #[error("WGPU viewport surface acquisition was rejected: {event}")]
     SurfaceRejected { event: &'static str },
@@ -137,7 +163,7 @@ pub struct WgpuViewportAttachError {
 }
 
 impl WgpuViewportAttachError {
-    fn new(error: WgpuViewportError, renderer: WgpuRenderer) -> Self {
+    pub(crate) fn new(error: WgpuViewportError, renderer: WgpuRenderer) -> Self {
         Self {
             error,
             renderer: Box::new(renderer),
@@ -671,7 +697,9 @@ impl RuntimeControl {
 
     fn detach_attachment(&self) {
         if let Some(mut attachment) = self.attachment.borrow_mut().take() {
-            attachment.detach();
+            let _ = attachment
+                .detach()
+                .expect("a renderer attachment cannot have a platform release dependency");
         }
     }
 

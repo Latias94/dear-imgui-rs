@@ -7,8 +7,9 @@ use std::ffi::{c_char, c_void};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::{
-    Context, ContextAttachment, ContextAttachmentError, ContextAttachmentRole, ContextBindingError,
-    ContextDestroyed, ContextTeardown, binding::with_bound_context,
+    Context, ContextAttachment, ContextAttachmentDetachError, ContextAttachmentError,
+    ContextAttachmentRole, ContextBindingError, ContextDestroyed,
+    ContextPlatformAttachmentReleaseError, ContextTeardown, binding::with_bound_context,
 };
 
 struct PlatformMarker;
@@ -539,6 +540,33 @@ fn frame_rejects_missing_required_platform_callbacks_before_entering_native_code
         ctx.frame_lifecycle_state(),
         super::FrameLifecycleState::Idle
     );
+}
+
+#[cfg(feature = "multi-viewport")]
+#[test]
+fn frame_rejects_transparent_docking_without_window_alpha_before_native_code() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut ctx = Context::create();
+    assert!(ctx.font_atlas().build());
+    ctx.prepare_frame(super::FramePrepareOptions::new([128.0, 128.0], 1.0 / 60.0));
+    let platform_attachment = install_complete_test_viewport_backend(&mut ctx);
+
+    let mut config_flags = ctx.io().config_flags();
+    config_flags.insert(crate::ConfigFlags::VIEWPORTS_ENABLE | crate::ConfigFlags::DOCKING_ENABLE);
+    ctx.io_mut().set_config_flags(config_flags);
+    ctx.io_mut().set_config_docking_transparent_payload(true);
+
+    let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = ctx.frame();
+    }));
+
+    assert!(rejected.is_err());
+    assert_eq!(
+        ctx.frame_lifecycle_state(),
+        super::FrameLifecycleState::Idle
+    );
+    drop(ctx);
+    drop(platform_attachment);
 }
 
 #[cfg(feature = "multi-viewport")]
@@ -1196,7 +1224,7 @@ fn attachment_registration_preflight_is_non_mutating() {
         Ok(())
     );
 
-    assert!(platform_lease.detach());
+    assert_eq!(platform_lease.detach(), Ok(true));
     let shared_context = &ctx;
     assert_eq!(
         shared_context
@@ -1207,6 +1235,104 @@ fn attachment_registration_preflight_is_non_mutating() {
     let _replacement_lease = ctx
         .register_attachment::<PlatformMarker>(ContextAttachmentRole::Platform, replacement)
         .unwrap();
+}
+
+#[test]
+fn platform_release_is_generation_bound_and_rejects_active_renderer_dependencies() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut ctx = Context::create();
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let mut platform_lease = ctx
+        .register_attachment::<PlatformMarker>(
+            ContextAttachmentRole::Platform,
+            Rc::new(RecordingAttachment::new(Rc::clone(&log))),
+        )
+        .unwrap();
+    let platform = platform_lease.handle();
+    let mut renderer_lease = ctx
+        .register_attachment::<RendererMarker>(
+            ContextAttachmentRole::Renderer,
+            Rc::new(RecordingAttachment::new(Rc::clone(&log))),
+        )
+        .unwrap();
+
+    assert!(matches!(
+        ctx.prepare_platform_attachment_release(&platform),
+        Err(ContextPlatformAttachmentReleaseError::RendererActive)
+    ));
+    assert!(platform.is_attached());
+    assert_eq!(
+        platform_lease.detach(),
+        Err(ContextAttachmentDetachError::RendererActive)
+    );
+    assert!(platform_lease.is_attached());
+
+    assert_eq!(renderer_lease.detach(), Ok(true));
+    {
+        let mut permit = ctx
+            .prepare_platform_attachment_release(&platform)
+            .expect("renderer release must make platform shutdown retryable");
+        assert!(platform.is_attached());
+        assert_eq!(
+            platform_lease.detach(),
+            Err(ContextAttachmentDetachError::ReleaseInProgress)
+        );
+        assert!(matches!(
+            permit.context_mut().register_attachment::<RendererMarker>(
+                ContextAttachmentRole::Renderer,
+                Rc::new(RecordingAttachment::new(Rc::clone(&log))),
+            ),
+            Err(ContextAttachmentError::MissingPlatform)
+        ));
+        drop(permit);
+    }
+    assert!(platform.is_attached());
+
+    ctx.prepare_platform_attachment_release(&platform)
+        .unwrap()
+        .commit();
+    assert!(!platform.is_attached());
+    assert!(!platform_lease.is_attached());
+    assert!(log.borrow().is_empty());
+}
+
+#[test]
+fn platform_release_rejects_a_foreign_context_generation_without_mutation() {
+    let _guard = crate::test_support::imgui_context_guard();
+    let mut owner = Context::create();
+    let owner_lease = owner
+        .register_attachment::<PlatformMarker>(
+            ContextAttachmentRole::Platform,
+            Rc::new(RecordingAttachment::new(Rc::new(RefCell::new(Vec::new())))),
+        )
+        .unwrap();
+    let owner_handle = owner_lease.handle();
+    let suspended_owner = owner.suspend();
+
+    let mut foreign = Context::create();
+    let foreign_lease = foreign
+        .register_attachment::<PlatformMarker>(
+            ContextAttachmentRole::Platform,
+            Rc::new(RecordingAttachment::new(Rc::new(RefCell::new(Vec::new())))),
+        )
+        .unwrap();
+    assert!(matches!(
+        foreign.prepare_platform_attachment_release(&owner_handle),
+        Err(ContextPlatformAttachmentReleaseError::PlatformGenerationMismatch)
+    ));
+    assert!(owner_handle.is_attached());
+    assert!(foreign_lease.is_attached());
+
+    drop(foreign);
+    let mut owner = suspended_owner
+        .activate()
+        .expect("the owner Context should reactivate");
+    owner
+        .prepare_platform_attachment_release(&owner_handle)
+        .unwrap()
+        .commit();
+    assert!(!owner_handle.is_attached());
+    drop(owner_lease);
 }
 
 #[test]
@@ -1395,8 +1521,8 @@ fn attachment_registration_enforces_roles_and_detach_is_idempotent() {
         ))
     ));
 
-    assert!(platform_lease.detach());
-    assert!(!platform_lease.detach());
+    assert_eq!(platform_lease.detach(), Ok(true));
+    assert_eq!(platform_lease.detach(), Ok(false));
     drop(ctx);
     assert!(log.borrow().is_empty());
 }
@@ -1415,7 +1541,7 @@ fn detaching_attachment_releases_context_ownership_immediately() {
         .unwrap();
 
     assert_eq!(Rc::strong_count(&attachment), 2);
-    assert!(lease.detach());
+    assert_eq!(lease.detach(), Ok(true));
     assert_eq!(Rc::strong_count(&attachment), 1);
     drop(ctx);
 }

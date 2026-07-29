@@ -1,5 +1,5 @@
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::num::NonZeroU64;
 use std::ptr;
@@ -71,6 +71,13 @@ pub(crate) struct ContextState {
     address: usize,
     raw: Cell<*mut sys::ImGuiContext>,
     lifecycle: Cell<ContextLifecycle>,
+    dockspace_submissions: RefCell<DockspaceSubmissions>,
+}
+
+#[derive(Default)]
+struct DockspaceSubmissions {
+    frame: Option<i32>,
+    ids: HashSet<sys::ImGuiID>,
 }
 
 impl fmt::Debug for ContextState {
@@ -90,6 +97,7 @@ impl ContextState {
             address: raw as usize,
             raw: Cell::new(raw),
             lifecycle: Cell::new(ContextLifecycle::Alive),
+            dockspace_submissions: RefCell::new(DockspaceSubmissions::default()),
         });
         MANAGED_CONTEXTS.with(|contexts| {
             contexts.borrow_mut().insert(
@@ -199,6 +207,33 @@ impl ContextBinding {
         self.lifecycle() == ContextLifecycle::Alive
     }
 
+    pub(crate) fn claim_dockspace_submission(
+        &self,
+        frame: i32,
+        id: sys::ImGuiID,
+    ) -> Option<DockspaceSubmissionClaim> {
+        let state = self.state.upgrade()?;
+        if state.lifecycle() != ContextLifecycle::Alive {
+            return None;
+        }
+
+        let mut submissions = state.dockspace_submissions.borrow_mut();
+        if submissions.frame != Some(frame) {
+            submissions.frame = Some(frame);
+            submissions.ids.clear();
+        }
+        if !submissions.ids.insert(id) {
+            return None;
+        }
+
+        Some(DockspaceSubmissionClaim {
+            state: Rc::downgrade(&state),
+            frame,
+            id,
+            committed: false,
+        })
+    }
+
     /// Runs a closure while the originating Context is current.
     pub fn try_with_bound_context<R>(
         &self,
@@ -242,6 +277,34 @@ impl ContextBinding {
     pub fn with_bound_context<R>(&self, f: impl FnOnce() -> R) -> R {
         self.try_with_bound_context(f)
             .unwrap_or_else(|error| panic!("ContextBinding::with_bound_context(): {error}"))
+    }
+}
+
+pub(crate) struct DockspaceSubmissionClaim {
+    state: Weak<ContextState>,
+    frame: i32,
+    id: sys::ImGuiID,
+    committed: bool,
+}
+
+impl DockspaceSubmissionClaim {
+    pub(crate) fn commit(mut self) {
+        self.committed = true;
+    }
+}
+
+impl Drop for DockspaceSubmissionClaim {
+    fn drop(&mut self) {
+        if self.committed {
+            return;
+        }
+        let Some(state) = self.state.upgrade() else {
+            return;
+        };
+        let mut submissions = state.dockspace_submissions.borrow_mut();
+        if submissions.frame == Some(self.frame) {
+            submissions.ids.remove(&self.id);
+        }
     }
 }
 

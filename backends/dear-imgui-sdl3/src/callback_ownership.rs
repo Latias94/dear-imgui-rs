@@ -1744,7 +1744,7 @@ impl Drop for NativeTransaction<'_> {
     }
 }
 
-unsafe fn validate_platform_viewport_state(
+pub(super) unsafe fn validate_platform_viewport_state(
     control: &RuntimeControl,
     viewport: *mut sys::ImGuiViewport,
 ) -> bool {

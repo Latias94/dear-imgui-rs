@@ -14,6 +14,7 @@ use bevy::{
     window::{PresentMode, WindowPlugin, WindowTheme},
 };
 use dear_imgui_bevy::prelude::*;
+use dear_imgui_bevy::{ImguiNativeViewportStatus, ImguiNativeViewportSupport};
 use dear_imgui_rs::{
     Condition, DockLayout, DockLayoutApply, DockSplit, DockspaceTarget, WindowFlags,
 };
@@ -207,13 +208,16 @@ fn animate_scene(
 
 fn editor_ui(
     imgui: ImguiUi,
+    native_viewports: Res<ImguiNativeViewportSupport>,
     preview: Res<ScenePreview>,
     mut editor: ResMut<EditorState>,
     objects: Query<(Entity, &Name, &Transform), With<SceneObject>>,
     frame_count: Res<FrameCount>,
 ) -> Result {
+    let context_id = imgui.context_id()?;
     let frame_index = imgui.frame_index()?;
     let ui = imgui.ui()?;
+    let native_viewport_status = native_viewports.get(context_id);
 
     let root_id = ui.get_id("DearImguiBevyGameEngineDockspace");
     let viewport = ui.main_viewport();
@@ -258,13 +262,13 @@ fn editor_ui(
             ui.text(format!("Bevy frame: {}", frame_count.0));
             ui.text(format!("ImGui frame: {frame_index}"));
             ui.text(format!("Scene hovered: {}", editor.scene_hovered));
-            ui.text(format!(
-                "Native multi-viewport: {}",
-                cfg!(feature = "multi-viewport")
-            ));
+            ui.text(format!("Native multi-viewport: {native_viewport_status:?}"));
         });
 
-    if cfg!(feature = "multi-viewport") {
+    if matches!(
+        native_viewport_status,
+        Some(ImguiNativeViewportStatus::Available)
+    ) {
         render_detached_viewport_window(ui, frame_index);
     }
 

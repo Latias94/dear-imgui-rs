@@ -79,6 +79,11 @@ impl ViewportData {
         self.cursor_hittest.set_enabled(&self.window, enabled)
     }
 
+    pub(super) fn set_no_focus_on_click(&self, enabled: bool) -> Result<(), WinitPlatformError> {
+        self.cursor_hittest
+            .set_no_focus_on_click(&self.window, enabled)
+    }
+
     #[cfg(target_os = "windows")]
     pub(super) fn native_window_id(&self) -> usize {
         self.cursor_hittest.native_window_id()

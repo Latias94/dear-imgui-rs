@@ -17,8 +17,9 @@ use super::AshRenderer;
 use super::vulkan_viewport::{self, OwningViewportRuntime, SurfaceAdapter, SurfaceCreateError};
 use ash::vk::{self, Handle};
 use dear_imgui_rs::render::RenderedFrame;
-use dear_imgui_rs::{Context, TextureData, TextureId, platform_io::Viewport, sys};
-use std::{ffi::c_void, sync::Arc};
+use dear_imgui_rs::{Context, TextureData, TextureId, platform_io::Viewport};
+use dear_imgui_sdl3::{Sdl3PlatformBackend, Sdl3VulkanSurfaceProvider};
+use std::sync::Arc;
 
 pub use super::vulkan_viewport::{
     AshViewportAttachError, AshViewportError, PresentModePolicy, SurfaceFormatPolicy,
@@ -26,35 +27,8 @@ pub use super::vulkan_viewport::{
 };
 use crate::{Options, TextureRetirementBatch, TextureUpdateResult};
 
-type PlatformCreateVkSurfaceFn = unsafe extern "C" fn(
-    vp: *mut sys::ImGuiViewport,
-    vk_inst: sys::ImU64,
-    vk_allocators: *const c_void,
-    out_vk_surface: *mut sys::ImU64,
-) -> std::os::raw::c_int;
-
-const PLATFORM_NAME_PREFIX: &str = "imgui_impl_sdl3 (";
-
 struct Sdl3SurfaceAdapter {
-    create_surface: PlatformCreateVkSurfaceFn,
-}
-
-fn validate_platform(context: &Context) -> Result<PlatformCreateVkSurfaceFn, AshViewportError> {
-    let actual = context
-        .io()
-        .backend_platform_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "<unset>".to_string());
-    if !actual.starts_with(PLATFORM_NAME_PREFIX) {
-        return Err(AshViewportError::PlatformBackendMismatch {
-            expected: "imgui_impl_sdl3",
-            actual,
-        });
-    }
-    context
-        .platform_io()
-        .platform_create_vk_surface_raw()
-        .ok_or(AshViewportError::PlatformCreateVkSurfaceUnavailable)
+    provider: Sdl3VulkanSurfaceProvider,
 }
 
 impl SurfaceAdapter for Sdl3SurfaceAdapter {
@@ -64,22 +38,11 @@ impl SurfaceAdapter for Sdl3SurfaceAdapter {
         instance: &ash::Instance,
         viewport: &mut Viewport,
     ) -> Result<vk::SurfaceKHR, SurfaceCreateError> {
-        let mut out_surface: sys::ImU64 = 0;
-        let code = unsafe {
-            (self.create_surface)(
-                viewport.as_raw_mut(),
-                instance.handle().as_raw(),
-                std::ptr::null(),
-                &mut out_surface,
-            )
-        };
-        if code != 0 || out_surface == 0 {
-            return Err(SurfaceCreateError::PlatformCallbackFailed {
-                code,
-                surface: out_surface,
-            });
-        }
-        Ok(vk::SurfaceKHR::from_raw(out_surface))
+        let surface = unsafe {
+            self.provider
+                .create_surface(viewport, instance.handle().as_raw())
+        }?;
+        Ok(vk::SurfaceKHR::from_raw(surface))
     }
 }
 
@@ -95,23 +58,24 @@ impl Sdl3ViewportRuntime {
     /// # Safety
     ///
     /// Every raw Vulkan handle and queue family in `config` must satisfy
-    /// [`VulkanViewportConfig`]'s device-lineage contract. The runtime owns renderer address
-    /// stability; moving this wrapper is safe.
+    /// [`VulkanViewportConfig`]'s device-lineage and external host-synchronization contracts. The
+    /// runtime owns renderer address stability; moving this wrapper is safe.
     pub unsafe fn attach(
         context: &mut Context,
+        platform: &Sdl3PlatformBackend,
         renderer: AshRenderer,
         config: VulkanViewportConfig,
     ) -> Result<Self, AshViewportAttachError> {
-        let create_surface = match validate_platform(context) {
-            Ok(callback) => callback,
-            Err(error) => return Err(AshViewportAttachError::new(error, renderer)),
+        let provider = match platform.acquire_vulkan_surface_provider(context) {
+            Ok(provider) => provider,
+            Err(error) => return Err(AshViewportAttachError::new(error.into(), renderer)),
         };
         unsafe {
             vulkan_viewport::attach_with_adapter(
                 renderer,
                 context,
                 config,
-                Arc::new(Sdl3SurfaceAdapter { create_surface }),
+                Arc::new(Sdl3SurfaceAdapter { provider }),
             )
         }
         .map(|inner| Self { inner })
@@ -298,40 +262,5 @@ impl Sdl3ViewportRuntime {
 
     pub fn retry_retained_cleanup(&mut self) -> Result<(), AshViewportError> {
         self.inner.retry_retained_cleanup()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn wrong_platform_name_fails_without_claiming_renderer_slots() {
-        let _guard = vulkan_viewport::test_context_guard();
-        let mut context = Context::create();
-        context
-            .set_platform_name(Some("dear-imgui-winit 0.16.0".to_string()))
-            .unwrap();
-
-        assert!(matches!(
-            validate_platform(&context),
-            Err(AshViewportError::PlatformBackendMismatch { .. })
-        ));
-        assert!(context.platform_io().renderer_callbacks_are_empty());
-    }
-
-    #[test]
-    fn missing_platform_surface_callback_is_transactional() {
-        let _guard = vulkan_viewport::test_context_guard();
-        let mut context = Context::create();
-        context
-            .set_platform_name(Some("imgui_impl_sdl3 (3.2.0; 3.2.0)".to_string()))
-            .unwrap();
-
-        assert!(matches!(
-            validate_platform(&context),
-            Err(AshViewportError::PlatformCreateVkSurfaceUnavailable)
-        ));
-        assert!(context.platform_io().renderer_callbacks_are_empty());
     }
 }

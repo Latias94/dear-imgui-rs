@@ -522,6 +522,9 @@ impl AppWindow {
             RendererRuntime::Viewports(unsafe {
                 ash_mvp::WinitViewportRuntime::attach(
                     &mut imgui,
+                    viewport_runtime
+                        .as_ref()
+                        .expect("Winit viewport owner must be initialized before Ash"),
                     renderer,
                     ash_mvp::VulkanViewportConfig {
                         entry: ctx.entry.clone(),

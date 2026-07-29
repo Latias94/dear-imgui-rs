@@ -69,6 +69,16 @@ pub(crate) fn drive_imgui_contexts(world: &mut World) {
         .get_non_send::<ImguiContexts>()
         .map(ImguiContexts::drive_order)
         .unwrap_or_default();
+    #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+    {
+        let native_viewport_contexts = world
+            .get_non_send::<ImguiContexts>()
+            .map(ImguiContexts::native_viewport_context_ids)
+            .unwrap_or_default();
+        world
+            .resource_mut::<crate::ImguiNativeViewportSupport>()
+            .begin_frame(native_viewport_contexts);
+    }
     let primary_id = world
         .get_non_send::<ImguiContexts>()
         .and_then(ImguiContexts::primary_id);

@@ -130,12 +130,6 @@ fn validate_policy_for_creation(
     policy: ViewportWindowPolicy,
     supports_skip_taskbar: bool,
 ) -> Result<(), WinitPlatformError> {
-    if policy.no_focus_on_click {
-        return Err(unsupported_viewport_flag(
-            "NoFocusOnClick",
-            "window creation",
-        ));
-    }
     if policy.skip_taskbar && !supports_skip_taskbar {
         return Err(unsupported_viewport_flag(
             "NoTaskBarIcon",
@@ -150,9 +144,6 @@ fn validate_policy_transition(
     next: ViewportWindowPolicy,
     supports_dynamic_taskbar: bool,
 ) -> Result<(), WinitPlatformError> {
-    if next.no_focus_on_click {
-        return Err(unsupported_viewport_flag("NoFocusOnClick", "window update"));
-    }
     if current.skip_taskbar != next.skip_taskbar && !supports_dynamic_taskbar {
         return Err(unsupported_viewport_flag("NoTaskBarIcon", "window update"));
     }
@@ -187,6 +178,9 @@ fn sync_window_policy(
             raise_window_without_activation(window)?;
         }
         data.set_cursor_hittest(next.cursor_hittest)?;
+    }
+    if current.no_focus_on_click != next.no_focus_on_click {
+        data.set_no_focus_on_click(next.no_focus_on_click)?;
     }
     if current.decorations != next.decorations {
         window.set_decorations(next.decorations);
@@ -1185,6 +1179,11 @@ pub(super) unsafe extern "C" fn winit_create_window(vp: *mut dear_imgui_rs::sys:
                         record_viewport_failure(control, vp, error);
                         return;
                     }
+                    if let Err(error) = data.set_no_focus_on_click(window_policy.no_focus_on_click)
+                    {
+                        record_viewport_failure(control, vp, error);
+                        return;
+                    }
                     if let Ok(platform) = control.platform_control() {
                         platform.apply_current_window_state(&window);
                     }
@@ -1623,18 +1622,12 @@ mod policy_tests {
     use super::*;
 
     #[test]
-    fn focus_click_and_taskbar_require_capability_but_appearance_is_best_effort() {
+    fn focus_click_and_appearance_are_best_effort_but_taskbar_requires_capability() {
         let no_focus_on_click = ViewportWindowPolicy {
             no_focus_on_click: true,
             ..ViewportWindowPolicy::default()
         };
-        assert!(matches!(
-            validate_policy_for_creation(no_focus_on_click, true),
-            Err(WinitPlatformError::UnsupportedViewportFlag {
-                flag: "NoFocusOnClick",
-                ..
-            })
-        ));
+        assert!(validate_policy_for_creation(no_focus_on_click, true).is_ok());
 
         let no_focus_on_appearing = ViewportWindowPolicy {
             no_focus_on_appearing: true,
@@ -1659,7 +1652,7 @@ mod policy_tests {
     fn late_focus_and_unsupported_taskbar_changes_fail_closed() {
         let current = ViewportWindowPolicy::default();
         let late_no_focus = ViewportWindowPolicy {
-            no_focus_on_appearing: true,
+            no_focus_on_click: true,
             ..current
         };
         assert!(validate_policy_transition(current, late_no_focus, true).is_ok());

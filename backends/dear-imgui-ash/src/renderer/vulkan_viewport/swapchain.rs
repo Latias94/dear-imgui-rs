@@ -134,6 +134,13 @@ pub(super) fn desired_extent_from_imvec2(
     desired_extent_from_size_and_scale([size.x, size.y], framebuffer_scale)
 }
 
+pub(super) fn extent_request_changed(
+    previous: Option<vk::Extent2D>,
+    current: Option<vk::Extent2D>,
+) -> bool {
+    previous != current
+}
+
 pub(super) fn select_swapchain_extent(
     capabilities: &vk::SurfaceCapabilitiesKHR,
     desired: Option<vk::Extent2D>,
@@ -272,6 +279,7 @@ pub(super) fn recreate_swapchain_after_device_idle(
     data.pending_present = None;
     data.rebuild_after_present = false;
     data.state = ViewportRuntimeState::RebuildRequired;
+    data.requested_extent = desired_extent;
 
     let support = query_surface_support(global, data.surface)?;
     let Some(extent) = select_swapchain_extent(&support.capabilities, desired_extent) else {

@@ -72,16 +72,16 @@ fn window_size(target: &Sdl3SurfaceTarget) -> Option<[u32; 2]> {
     let ok = unsafe {
         sdl3_sys::video::SDL_GetWindowSizeInPixels(target.raw_window(), &mut width, &mut height)
     };
-    ok.then(|| [clamp_pixels(width), clamp_pixels(height)])
+    ok.then(|| [physical_pixels(width), physical_pixels(height)])
 }
 
-fn clamp_pixels(pixels: i32) -> u32 {
-    pixels.max(1) as u32
+fn physical_pixels(pixels: i32) -> u32 {
+    pixels.max(0) as u32
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{clamp_pixels, framebuffer_size, window_id_from_platform_handle};
+    use super::{framebuffer_size, physical_pixels, window_id_from_platform_handle};
     use crate::renderer::multi_viewport_runtime::WgpuViewportError;
 
     #[test]
@@ -112,9 +112,9 @@ mod tests {
     }
 
     #[test]
-    fn clamps_sdl_pixel_dimensions() {
-        assert_eq!(clamp_pixels(-5), 1);
-        assert_eq!(clamp_pixels(0), 1);
-        assert_eq!(clamp_pixels(17), 17);
+    fn preserves_zero_sized_sdl_framebuffers() {
+        assert_eq!(physical_pixels(-5), 0);
+        assert_eq!(physical_pixels(0), 0);
+        assert_eq!(physical_pixels(17), 17);
     }
 }

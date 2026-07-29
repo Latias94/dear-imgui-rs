@@ -190,8 +190,9 @@ impl Sdl3OpenGlViewportSwapInterval {
     }
 }
 
-/// Errors that can occur when setting up the SDL3 + OpenGL backend.
+/// Errors reported by the SDL3 platform and optional renderer runtimes.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum Sdl3BackendError {
     #[error("ImGui_ImplSDL3_InitForOpenGL returned false")]
     Sdl3InitFailed,
@@ -210,6 +211,8 @@ pub enum Sdl3BackendError {
     },
     #[error(transparent)]
     Attachment(#[from] dear_imgui_rs::ContextAttachmentError),
+    #[error(transparent)]
+    PlatformAttachmentRelease(#[from] dear_imgui_rs::ContextPlatformAttachmentReleaseError),
     #[error(transparent)]
     Context(#[from] dear_imgui_rs::ContextBindingError),
     #[error("another platform backend already owns `{callback}`")]
@@ -274,6 +277,20 @@ pub enum Sdl3BackendError {
     PlatformStateUnavailable,
     #[error("the SDL3 runtime is no longer attached")]
     RuntimeDetached,
+    #[cfg(feature = "multi-viewport")]
+    #[error("the SDL3 platform backend was not initialized with init_for_vulkan")]
+    VulkanSurfaceProviderRequiresVulkan,
+    #[cfg(feature = "multi-viewport")]
+    #[error("the SDL3 Vulkan surface provider is already leased by a renderer")]
+    VulkanSurfaceProviderAlreadyLeased,
+    #[cfg(feature = "multi-viewport")]
+    #[error("the SDL3 Vulkan platform runtime has no Platform_CreateVkSurface callback")]
+    VulkanSurfaceCallbackUnavailable,
+    #[cfg(feature = "multi-viewport")]
+    #[error(
+        "the SDL3 platform backend cannot shut down while its Vulkan surface provider is leased"
+    )]
+    VulkanSurfaceProviderActive,
     #[error("SDL3 shutdown panicked while releasing {phase}")]
     ShutdownPanicked { phase: &'static str },
     #[error("SDL3 shutdown is already releasing {phase}")]
@@ -301,6 +318,25 @@ pub enum Sdl3BackendError {
         texture: dear_imgui_rs::render::SnapshotTextureId,
         operation: &'static str,
     },
+}
+
+/// Failure to create a Vulkan surface through an SDL3 platform-owner lease.
+#[cfg(feature = "multi-viewport")]
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum Sdl3VulkanSurfaceError {
+    /// The provider no longer identifies the active SDL3 platform runtime.
+    #[error("the SDL3 Vulkan surface provider no longer owns the active platform runtime")]
+    OwnerUnavailable,
+    /// The SDL3 runtime rejected entry or observed platform-contract drift.
+    #[error(transparent)]
+    Backend(#[from] Sdl3BackendError),
+    /// The Vulkan platform callback is absent from the validated SDL3 callback table.
+    #[error("the SDL3 platform runtime has no Platform_CreateVkSurface callback")]
+    CallbackUnavailable,
+    /// SDL3 failed to create a non-null surface.
+    #[error("Platform_CreateVkSurface failed with code {code} and surface 0x{surface:X}")]
+    CallbackFailed { code: i32, surface: u64 },
 }
 
 #[cfg(feature = "opengl3-renderer")]

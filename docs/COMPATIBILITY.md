@@ -92,7 +92,7 @@ target.
 | Bevy default | `dear-imgui-bevy` enables `render` and `bevy-ui`; the primary Context automatically targets the unique eligible primary-window camera. |
 | Bevy headless | `default-features = false` retains all Context schedules/lifecycle and primary-Context input/capture without RenderApp extraction; explicit multi-Context input routes require `render`. |
 | Bevy render-only | `default-features = false, features = ["render"]` installs the renderer without Bevy UI ordering. |
-| Bevy native multi-viewport | `multi-viewport` implies `render` and `bevy_winit`; each Context opts in explicitly and secondary state is keyed by `(ContextId, ViewportId)`. |
+| Bevy native multi-viewport | `multi-viewport` implies `render` and `bevy_winit`; each Context opts in explicitly and secondary state is keyed by `(ContextId, ViewportId)`. Wayland falls back to host-window docking because global desktop client coordinates are unavailable; call `ImguiNativeViewportSupport::get(context_id)` for the per-Context runtime status. |
 | Bevy WASM | `wasm` supports both default and headless builds; combining WASM with native `multi-viewport` is rejected. |
 
 The six native safe extension crates forward build strategy through both the

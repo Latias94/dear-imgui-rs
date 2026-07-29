@@ -2,7 +2,9 @@ use std::error::Error;
 use std::ffi::CStr;
 use std::fmt;
 
-use dear_imgui_rs::{ContextAttachmentError, ContextBindingError, ContextId};
+use dear_imgui_rs::{
+    ContextAttachmentDetachError, ContextAttachmentError, ContextBindingError, ContextId,
+};
 use dear_imgui_test_engine_sys as sys;
 
 use crate::{AttachmentState, RunState};
@@ -77,6 +79,11 @@ pub enum TestEngineError {
     Attachment {
         operation: &'static str,
         source: ContextAttachmentError,
+    },
+    /// The Context rejected an explicit Test Engine attachment detach.
+    AttachmentDetach {
+        operation: &'static str,
+        source: ContextAttachmentDetachError,
     },
     /// A core attachment lease contradicted the synchronized Test Engine state.
     AttachmentInvariant {
@@ -177,6 +184,9 @@ impl fmt::Display for TestEngineError {
                     "{operation} could not reserve the Context attachment: {source}"
                 )
             }
+            Self::AttachmentDetach { operation, source } => {
+                write!(f, "{operation} could not detach from the Context: {source}")
+            }
             Self::AttachmentInvariant { operation, detail } => {
                 write!(
                     f,
@@ -192,6 +202,7 @@ impl Error for TestEngineError {
         match self {
             Self::ContextBinding { source, .. } => Some(source),
             Self::Attachment { source, .. } => Some(source),
+            Self::AttachmentDetach { source, .. } => Some(source),
             _ => None,
         }
     }

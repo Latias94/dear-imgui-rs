@@ -175,6 +175,33 @@ pub struct Sdl3PlatformBackend {
 }
 
 impl Sdl3PlatformBackend {
+    /// Returns the Dear ImGui Context identity owned by this SDL3 platform backend.
+    pub fn context_id(&self) -> ContextId {
+        self.runtime.control().binding().id()
+    }
+
+    /// Validates that this backend still owns the active SDL3 viewport platform contract.
+    ///
+    /// Renderer backends use this before interpreting `PlatformHandle` values as SDL window IDs.
+    /// A backend that has shut down cannot validate even if another platform later attaches to
+    /// the same Context.
+    pub fn validate_renderer_owner(&self, imgui: &Context) -> Result<(), Sdl3BackendError> {
+        self.runtime.control().ensure_entry(imgui)
+    }
+
+    /// Lease the Vulkan surface capability owned by this exact SDL3 runtime generation.
+    ///
+    /// Only a backend initialized with [`Self::init_for_vulkan`] can issue this capability. While
+    /// it is alive, SDL platform shutdown is rejected so a cached native callback can never outlive
+    /// the `PlatformUserData` it interprets.
+    #[cfg(feature = "multi-viewport")]
+    pub fn acquire_vulkan_surface_provider(
+        &self,
+        imgui: &Context,
+    ) -> Result<crate::Sdl3VulkanSurfaceProvider, Sdl3BackendError> {
+        self.runtime.acquire_vulkan_surface_provider(imgui)
+    }
+
     fn initialize(
         imgui: &mut Context,
         platform_graphics: PlatformGraphicsKind,
@@ -295,7 +322,7 @@ impl Sdl3PlatformBackend {
     ) -> Result<Self, Sdl3BackendError> {
         Self::initialize(
             imgui,
-            PlatformGraphicsKind::Other,
+            PlatformGraphicsKind::Vulkan,
             Sdl3OpenGlViewportSwapInterval::Immediate,
             |imgui| init_for_vulkan(imgui, window),
         )
@@ -424,7 +451,9 @@ impl Sdl3PlatformBackend {
     /// Shut down the SDL3 platform backend.
     ///
     /// This operation is idempotent. Drop defers native cleanup to Context teardown because it
-    /// cannot safely normalize an open frame without the mutable Context.
+    /// cannot safely normalize an open frame without the mutable Context. Any active renderer
+    /// attachment rejects shutdown before the frame or native state changes; shut down that
+    /// renderer and retry.
     pub fn shutdown(&mut self, imgui: &mut Context) -> Result<(), Sdl3BackendError> {
         self.runtime.shutdown_platform(imgui)
     }

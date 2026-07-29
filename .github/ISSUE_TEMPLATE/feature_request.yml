@@ -10,7 +10,7 @@ body:
       options:
         - label: dear-imgui-rs
         - label: dear-imgui-sys
-        - label: backends (wgpu/glow/winit/sdl3)
+        - label: backends (wgpu/glow/winit/sdl3/bevy)
         - label: dear-app
         - label: extensions (implot/implot3d/imnodes/node-editor/imguizmo/imguizmo-quat/file-browser/reflect)
         - label: CI / packaging / prebuilt

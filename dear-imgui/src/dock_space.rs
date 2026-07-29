@@ -11,7 +11,10 @@
 //!
 //! # Notes
 //!
-//! Docking is always enabled in this crate; no feature flag required.
+//! Docking support is always compiled into this crate; no Cargo feature is required. Set
+//! [`ConfigFlags::DOCKING_ENABLE`](crate::ConfigFlags::DOCKING_ENABLE) before the first frame when
+//! the Context will use docking. The setting is intentionally stable for that Context's lifetime
+//! because Dear ImGui destroys live dock nodes when it is disabled at runtime.
 //!
 //! # Basic Usage
 //!
@@ -35,4 +38,7 @@ mod validation;
 mod window_class;
 
 pub use flags::{DockFlags, DockNodeFlags};
+pub(crate) use validation::{
+    claim_dockspace_submission, main_viewport_dockspace_host_name, window_skips_items,
+};
 pub use window_class::{WindowClass, WindowClassParentViewport};

@@ -19,6 +19,8 @@ thiserror.workspace = true
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ash = { version = "0.38", default-features = false, features = ["debug", "std"] }
 ash-window = { version = "0.13", optional = true }
+dear-imgui-sdl3 = { workspace = true, optional = true }
+dear-imgui-winit = { workspace = true, optional = true, features = ["multi-viewport"] }
 winit = { workspace = true, optional = true }
 
 # Optional allocators (native only)
@@ -37,10 +39,19 @@ dynamic-rendering = []
 # Experimental multi-viewport rendering via winit platform backend.
 # Requires `dear-imgui-rs/multi-viewport` (PlatformIO callbacks) and `ash-window` (surface creation).
 # Mutually exclusive with `multi-viewport-sdl3`.
-multi-viewport-winit = ["dear-imgui-rs/multi-viewport", "dep:winit", "dep:ash-window"]
+multi-viewport-winit = [
+    "dear-imgui-rs/multi-viewport",
+    "dep:dear-imgui-winit",
+    "dep:winit",
+    "dep:ash-window",
+]
 
 # Experimental multi-viewport rendering via the SDL3 platform backend.
 # Requires `dear-imgui-rs/multi-viewport`. Surface creation is delegated to the platform backend via
 # `ImGuiPlatformIO::Platform_CreateVkSurface` (see `imgui_impl_sdl3.cpp`).
 # Mutually exclusive with `multi-viewport-winit`.
-multi-viewport-sdl3 = ["dear-imgui-rs/multi-viewport"]
+multi-viewport-sdl3 = [
+    "dear-imgui-rs/multi-viewport",
+    "dep:dear-imgui-sdl3",
+    "dear-imgui-sdl3/multi-viewport",
+]

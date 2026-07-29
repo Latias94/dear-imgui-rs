@@ -33,32 +33,41 @@ impl WindowClassParentViewport {
     }
 }
 
-/// Window class for docking configuration
+/// Window class for docking configuration.
+///
+/// Native pointer fields are intentionally private so safe code cannot bypass their lifetime
+/// contracts.
+///
+/// ```compile_fail
+/// # use dear_imgui_rs::WindowClass;
+/// let mut class = WindowClass::default();
+/// class.platform_icon_data = None;
+/// ```
 #[derive(Debug, Clone)]
 pub struct WindowClass {
     /// User class ID. `None` means the default unclassed window class.
-    pub class_id: Option<Id>,
+    class_id: Option<Id>,
     /// Hint for the platform backend parent viewport behavior.
-    pub parent_viewport: WindowClassParentViewport,
+    parent_viewport: WindowClassParentViewport,
     /// ID of parent window for shortcut focus route evaluation
-    pub focus_route_parent_window_id: Option<Id>,
+    focus_route_parent_window_id: Option<Id>,
     /// Viewport flags to set when a window of this class owns a viewport.
-    pub viewport_flags_override_set: crate::ViewportFlags,
+    viewport_flags_override_set: crate::ViewportFlags,
     /// Viewport flags to clear when a window of this class owns a viewport.
-    pub viewport_flags_override_clear: crate::ViewportFlags,
+    viewport_flags_override_clear: crate::ViewportFlags,
     /// Tab item flags to set when a window of this class is submitted into a dock node tab bar.
-    pub tab_item_flags_override_set: crate::widget::TabItemOptions,
+    tab_item_flags_override_set: crate::widget::TabItemOptions,
     /// Dock node flags to set when a window of this class is hosted by a dock node.
-    pub dock_node_flags_override_set: DockNodeFlags,
+    dock_node_flags_override_set: DockNodeFlags,
     /// Set to true to enforce single floating windows of this class always having their own docking node
-    pub docking_always_tab_bar: bool,
+    docking_always_tab_bar: bool,
     /// Set to true to allow windows of this class to be docked/merged with an unclassed window
-    pub docking_allow_unclassed: bool,
+    docking_allow_unclassed: bool,
     /// Opaque platform-backend icon payload.
     ///
     /// Dear ImGui treats this as backend-owned data. Keep the pointed-to allocation valid for as
     /// long as the platform backend may inspect this window class.
-    pub platform_icon_data: Option<ptr::NonNull<std::ffi::c_void>>,
+    platform_icon_data: Option<ptr::NonNull<std::ffi::c_void>>,
 }
 
 impl Default for WindowClass {
@@ -88,6 +97,51 @@ impl WindowClass {
         }
     }
 
+    /// Returns the user class ID, or `None` for the default unclassed class.
+    pub fn class_id(&self) -> Option<Id> {
+        self.class_id
+    }
+
+    /// Returns the platform parent viewport policy.
+    pub fn parent_viewport_policy(&self) -> WindowClassParentViewport {
+        self.parent_viewport
+    }
+
+    /// Returns the raw focus-route parent window ID, when configured.
+    pub fn focus_route_parent_window_id_raw(&self) -> Option<Id> {
+        self.focus_route_parent_window_id
+    }
+
+    /// Returns the viewport flags this class sets.
+    pub fn viewport_flags_to_set(&self) -> crate::ViewportFlags {
+        self.viewport_flags_override_set
+    }
+
+    /// Returns the viewport flags this class clears.
+    pub fn viewport_flags_to_clear(&self) -> crate::ViewportFlags {
+        self.viewport_flags_override_clear
+    }
+
+    /// Returns the tab item options this class applies.
+    pub fn tab_item_options(&self) -> crate::widget::TabItemOptions {
+        self.tab_item_flags_override_set
+    }
+
+    /// Returns the dock node flags this class applies.
+    pub fn dock_node_flags(&self) -> DockNodeFlags {
+        self.dock_node_flags_override_set
+    }
+
+    /// Returns whether single floating windows always receive a tab bar.
+    pub fn always_tab_bar(&self) -> bool {
+        self.docking_always_tab_bar
+    }
+
+    /// Returns whether this class may dock with unclassed windows.
+    pub fn allows_unclassed(&self) -> bool {
+        self.docking_allow_unclassed
+    }
+
     /// Sets the parent viewport policy.
     pub fn parent_viewport(mut self, parent: WindowClassParentViewport) -> Self {
         self.parent_viewport = parent;
@@ -107,8 +161,21 @@ impl WindowClass {
         self
     }
 
-    /// Sets the focus route parent window ID
-    pub fn focus_route_parent_window_id(mut self, id: Id) -> Self {
+    /// Sets the raw focus-route parent window ID.
+    ///
+    /// # Safety
+    ///
+    /// A window with `id` must already exist when a window using this class begins. The resulting
+    /// focus route must not contain a cycle and the class must not be applied to the parent window
+    /// itself. Dear ImGui assumes these conditions and may dereference the resolved parent without
+    /// checking it in non-assert builds.
+    ///
+    /// ```compile_fail
+    /// # use dear_imgui_rs::{Id, WindowClass};
+    /// let class = WindowClass::default().focus_route_parent_window_id(Id::from(1u32));
+    /// # let _ = class;
+    /// ```
+    pub unsafe fn focus_route_parent_window_id(mut self, id: Id) -> Self {
         assert_nonzero_id("WindowClass::focus_route_parent_window_id()", "id", id);
         self.focus_route_parent_window_id = Some(id);
         self

@@ -1,9 +1,8 @@
 use dear_imgui_rs::Context;
 use winit::event::{Event, WindowEvent};
 
-use super::registry::with_viewport_data;
+use super::registry::with_viewport_data_for_window;
 use super::runtime::{RuntimeControl, WinitPlatformRuntime};
-use crate::sanitize;
 
 pub(super) fn route_secondary_event<T>(
     control: &RuntimeControl,
@@ -12,51 +11,31 @@ pub(super) fn route_secondary_event<T>(
 ) -> bool {
     let binding = context.binding();
     binding.with_bound_context(|| match event {
-        Event::WindowEvent { window_id, event } => unsafe {
-            let platform_io = dear_imgui_rs::sys::igGetPlatformIO_ContextPtr(context.as_raw());
-            if platform_io.is_null() {
-                return false;
-            }
-            let viewports = &(*platform_io).Viewports;
-            if viewports.Data.is_null() || viewports.Size <= 0 {
-                return false;
-            }
-
-            for index in 0..viewports.Size {
-                let viewport = *viewports.Data.add(index as usize);
-                if viewport.is_null() {
-                    continue;
-                }
-                let Some(consumed) = with_viewport_data(control, viewport, |data| {
-                    if data.is_main() || data.window().id() != *window_id {
-                        return None;
-                    }
-
+        Event::WindowEvent { window_id, event } => {
+            let Some(consumed) =
+                with_viewport_data_for_window(control, *window_id, |viewport, data| {
                     let window = data.window();
+                    // Keep DPI and framebuffer values owned by Dear ImGui's platform update state
+                    // machine. The event only invalidates geometry so the registered callbacks query
+                    // the new values at the next update boundary.
                     match event {
-                        WindowEvent::Moved(_) => {
+                        WindowEvent::Moved(_) => unsafe {
                             (*viewport).PlatformRequestMove = true;
-                        }
-                        WindowEvent::Resized(_) => {
+                        },
+                        WindowEvent::Resized(_) => unsafe {
                             (*viewport).PlatformRequestResize = true;
-                        }
-                        WindowEvent::ScaleFactorChanged { .. } => {
-                            let scale =
-                                sanitize::positive_finite_f32_or(window.scale_factor() as f32, 1.0);
-                            (*viewport).DpiScale = scale;
-                            let framebuffer_scale = super::framebuffer_scale_for_window(window);
-                            (*viewport).FramebufferScale.x = framebuffer_scale[0];
-                            (*viewport).FramebufferScale.y = framebuffer_scale[1];
+                        },
+                        WindowEvent::ScaleFactorChanged { .. } => unsafe {
                             (*viewport).PlatformRequestMove = true;
                             (*viewport).PlatformRequestResize = true;
-                        }
-                        WindowEvent::CloseRequested => {
+                        },
+                        WindowEvent::CloseRequested => unsafe {
                             (*viewport).PlatformRequestClose = true;
-                        }
+                        },
                         _ => {}
                     }
 
-                    let consumed = match event {
+                    match event {
                         WindowEvent::KeyboardInput { event, .. } => {
                             crate::events::handle_keyboard_input(event, context)
                         }
@@ -68,14 +47,18 @@ pub(super) fn route_secondary_event<T>(
                             crate::events::handle_mouse_wheel(*delta, context)
                         }
                         WindowEvent::MouseInput { state, button, .. } => {
+                            if let Some(button) = crate::input::to_imgui_mouse_button(*button) {
+                                control.note_mouse_button(button, state.is_pressed());
+                            }
                             crate::events::handle_mouse_button(*button, *state, context)
                         }
                         WindowEvent::CursorMoved { position, .. } => {
+                            control.note_cursor_available();
                             let Some(position) = super::client_physical_to_screen_pos(
                                 window,
                                 [position.x, position.y],
                             ) else {
-                                return Some(context.io().want_capture_mouse());
+                                return context.io().want_capture_mouse();
                             };
                             crate::events::handle_cursor_moved(
                                 [position[0] as f64, position[1] as f64],
@@ -83,11 +66,16 @@ pub(super) fn route_secondary_event<T>(
                             )
                         }
                         WindowEvent::CursorLeft { .. } => {
-                            context.io_mut().add_mouse_pos_event([-f32::MAX, -f32::MAX]);
+                            control.note_cursor_left();
+                            false
+                        }
+                        WindowEvent::CursorEntered { .. } => {
+                            control.note_cursor_available();
                             false
                         }
                         WindowEvent::Focused(focused) => {
-                            crate::events::handle_focused(*focused, context)
+                            control.note_window_focus(*window_id, *focused, context);
+                            false
                         }
                         WindowEvent::Ime(ime) => {
                             crate::events::handle_ime_event(ime, context);
@@ -101,24 +89,19 @@ pub(super) fn route_secondary_event<T>(
                             let _ = crate::events::handle_touch_event_at(
                                 touch,
                                 position,
-                                Some(dear_imgui_rs::Id::from((*viewport).ID)),
+                                Some(dear_imgui_rs::Id::from(unsafe { (*viewport).ID })),
                                 context,
                             );
                             context.io().want_capture_mouse()
                         }
                         _ => false,
-                    };
-                    Some(consumed)
-                }) else {
-                    continue;
-                };
-
-                if let Some(consumed) = consumed {
-                    return consumed;
-                }
-            }
-            false
-        },
+                    }
+                })
+            else {
+                return false;
+            };
+            consumed
+        }
         _ => false,
     })
 }

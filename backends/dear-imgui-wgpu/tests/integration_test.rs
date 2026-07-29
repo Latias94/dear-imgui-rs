@@ -344,10 +344,12 @@ fn device_objects_rebind_after_invalidation_and_shutdown() -> RendererResult<()>
     ));
     #[cfg(feature = "multi-viewport-winit")]
     {
-        let failure = dear_imgui_wgpu::multi_viewport::WinitViewportRuntime::attach(
-            &mut foreign_context,
-            renderer,
-        )
+        let failure = unsafe {
+            dear_imgui_wgpu::multi_viewport::WinitViewportRuntime::attach_unchecked(
+                &mut foreign_context,
+                renderer,
+            )
+        }
         .unwrap_err();
         assert!(matches!(
             failure.error(),
@@ -357,10 +359,12 @@ fn device_objects_rebind_after_invalidation_and_shutdown() -> RendererResult<()>
     }
     #[cfg(feature = "multi-viewport-sdl3")]
     {
-        let failure = dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRuntime::attach(
-            &mut foreign_context,
-            renderer,
-        )
+        let failure = unsafe {
+            dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRuntime::attach_unchecked(
+                &mut foreign_context,
+                renderer,
+            )
+        }
         .unwrap_err();
         assert!(matches!(
             failure.error(),

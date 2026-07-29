@@ -452,6 +452,7 @@ unsafe fn renderer_create_window(
             surface,
             swapchain_loader,
             swapchain: None,
+            requested_extent: None,
             command_pool,
             frames,
             frame_index: 0,
@@ -643,8 +644,10 @@ unsafe fn renderer_render_window(
         if data.pending_present.is_some() || data.frames.is_empty() {
             return Ok(());
         }
-        if desired_extent.is_none() && data.state == ViewportRuntimeState::Active {
-            rebuild_viewport(renderer, globals, data, None)?;
+        if data.state != ViewportRuntimeState::Failed
+            && extent_request_changed(data.requested_extent, desired_extent)
+        {
+            rebuild_viewport(renderer, globals, data, desired_extent)?;
         }
         if data.state == ViewportRuntimeState::Paused && desired_extent.is_none() {
             return Ok(());

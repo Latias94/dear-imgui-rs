@@ -190,10 +190,10 @@ pub enum DockLayoutError {
     LayoutTooLarge,
     #[error("docking is not enabled in ConfigFlags")]
     DockingDisabled,
+    #[error("dockspace {root_id:?} was already submitted during this frame")]
+    DuplicateDockspaceSubmission { root_id: Id },
     #[error("dockspace submission did not create root {root_id:?}")]
     DockspaceSubmissionFailed { root_id: Id },
-    #[error("dockspace root disappeared while resetting layout {root_id:?}")]
-    RootResetFailed { root_id: Id },
     #[error("compiled dock node {index} was unavailable during application")]
     CompiledNodeUnavailable { index: usize },
     #[error("Dear ImGui failed to split a docking node {direction:?} at ratio {ratio}")]

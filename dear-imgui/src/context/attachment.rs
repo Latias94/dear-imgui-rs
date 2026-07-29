@@ -162,6 +162,50 @@ pub enum ContextAttachmentError {
     ContextDropping,
 }
 
+/// Failure to explicitly detach a live Context attachment lease.
+///
+/// A failed detach leaves both the attachment and lease active. Platform backends must release
+/// renderer dependencies first and use [`Context::prepare_platform_attachment_release`] for
+/// transactional native teardown.
+#[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
+#[non_exhaustive]
+pub enum ContextAttachmentDetachError {
+    /// Another transaction has reserved this platform attachment generation for release.
+    #[error("platform attachment release is already in progress")]
+    ReleaseInProgress,
+    /// Renderer resources still depend on platform-owned native handles.
+    #[error("the platform attachment cannot be detached while a renderer attachment is active")]
+    RendererActive,
+}
+
+/// Failure to prepare an explicit platform attachment release.
+///
+/// Platform backends must complete this preflight before closing a frame, destroying native
+/// windows, or clearing callback state. The returned permit keeps the exact attachment generation
+/// reserved until the backend either commits detachment or abandons the transaction.
+#[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
+#[non_exhaustive]
+pub enum ContextPlatformAttachmentReleaseError {
+    /// Context-owned teardown has already started.
+    #[error("Dear ImGui context teardown is in progress")]
+    ContextDropping,
+    /// The supplied attachment generation has already detached.
+    #[error("the platform attachment generation is no longer active")]
+    AttachmentInactive,
+    /// The supplied attachment does not own the platform role.
+    #[error("the supplied attachment does not own the platform role")]
+    NotPlatform,
+    /// The supplied attachment is not this Context's active platform generation.
+    #[error("the supplied attachment is not the active platform generation for this Context")]
+    PlatformGenerationMismatch,
+    /// Another release transaction already reserves this platform generation.
+    #[error("platform attachment release is already in progress")]
+    ReleaseInProgress,
+    /// Renderer resources still depend on platform-owned native handles.
+    #[error("the platform attachment cannot be released while a renderer attachment is active")]
+    RendererActive,
+}
+
 /// Phase-limited access passed to pre-destroy attachment hooks.
 pub struct ContextTeardown<'a> {
     owner: NonNull<Context>,
@@ -367,9 +411,15 @@ impl ContextDestroyed {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum AttachmentState {
     Active,
+    ReleasePrepared,
     Teardown,
     Complete,
     Detached,
+}
+
+#[derive(Default)]
+struct AttachmentRoleState {
+    renderer_active: Cell<bool>,
 }
 
 pub(super) struct AttachmentControl {
@@ -377,16 +427,49 @@ pub(super) struct AttachmentControl {
     role: ContextAttachmentRole,
     state: Cell<AttachmentState>,
     attachment: RefCell<Option<Rc<dyn ContextAttachment>>>,
+    roles: Rc<AttachmentRoleState>,
 }
 
 impl AttachmentControl {
-    fn detach(&self) -> bool {
-        if self.state.get() != AttachmentState::Active {
-            return false;
+    fn detach(&self) -> Result<bool, ContextAttachmentDetachError> {
+        match self.state.get() {
+            AttachmentState::Active => {}
+            AttachmentState::ReleasePrepared => {
+                return Err(ContextAttachmentDetachError::ReleaseInProgress);
+            }
+            AttachmentState::Teardown | AttachmentState::Complete | AttachmentState::Detached => {
+                return Ok(false);
+            }
+        }
+        if self.role == ContextAttachmentRole::Platform && self.roles.renderer_active.get() {
+            return Err(ContextAttachmentDetachError::RendererActive);
         }
         self.state.set(AttachmentState::Detached);
         self.attachment.borrow_mut().take();
-        true
+        if self.role == ContextAttachmentRole::Renderer {
+            self.roles.renderer_active.set(false);
+        }
+        Ok(true)
+    }
+
+    fn prepare_platform_release(&self) {
+        debug_assert_eq!(self.role, ContextAttachmentRole::Platform);
+        debug_assert_eq!(self.state.get(), AttachmentState::Active);
+        self.state.set(AttachmentState::ReleasePrepared);
+    }
+
+    fn abandon_platform_release(&self) {
+        if self.state.get() == AttachmentState::ReleasePrepared {
+            self.state.set(AttachmentState::Active);
+        }
+    }
+
+    fn commit_platform_release(&self) {
+        debug_assert_eq!(self.role, ContextAttachmentRole::Platform);
+        debug_assert_eq!(self.state.get(), AttachmentState::ReleasePrepared);
+        debug_assert!(!self.roles.renderer_active.get());
+        self.state.set(AttachmentState::Detached);
+        self.attachment.borrow_mut().take();
     }
 }
 
@@ -401,28 +484,49 @@ impl fmt::Debug for AttachmentControl {
 }
 
 /// Lease that unregisters an attachment when explicitly detached or dropped.
+///
+/// A platform attachment with an active renderer dependency remains Context-owned instead of
+/// detaching out of order.
 #[derive(Debug)]
-#[must_use = "dropping the lease immediately detaches the Context attachment"]
+#[must_use = "retain the lease for explicit detach, or defer cleanup to Context teardown"]
 pub struct ContextAttachmentLease {
     control: Weak<AttachmentControl>,
     _not_send_or_sync: PhantomData<Rc<()>>,
 }
 
 impl ContextAttachmentLease {
-    /// Detaches the attachment if teardown has not started.
+    /// Returns a non-owning identity for this exact attachment generation.
     ///
-    /// Returns `true` only for the transition from attached to detached.
-    pub fn detach(&mut self) -> bool {
+    /// Backends may retain the handle in shared runtime state. Unlike the lease, dropping a handle
+    /// never detaches the attachment.
+    pub fn handle(&self) -> ContextAttachmentHandle {
+        ContextAttachmentHandle {
+            control: self.control.clone(),
+            _not_send_or_sync: PhantomData,
+        }
+    }
+
+    /// Detaches the attachment if it is still active and has no dependency blocking release.
+    ///
+    /// `Ok(true)` reports the transition from attached to detached. `Ok(false)` means Context
+    /// teardown or an earlier release already claimed the attachment. An error leaves the lease
+    /// attached: platform backends must not destroy native state after such a failure. Explicit
+    /// platform shutdown should use [`Context::prepare_platform_attachment_release`] so native
+    /// teardown and lease release share one transaction.
+    pub fn detach(&mut self) -> Result<bool, ContextAttachmentDetachError> {
         self.control
             .upgrade()
-            .is_some_and(|control| control.detach())
+            .map_or(Ok(false), |control| control.detach())
     }
 
     /// Returns whether the attachment is still active.
     pub fn is_attached(&self) -> bool {
-        self.control
-            .upgrade()
-            .is_some_and(|control| control.state.get() == AttachmentState::Active)
+        self.control.upgrade().is_some_and(|control| {
+            matches!(
+                control.state.get(),
+                AttachmentState::Active | AttachmentState::ReleasePrepared
+            )
+        })
     }
 
     /// Leave the attachment under Context ownership until Context teardown.
@@ -441,9 +545,104 @@ impl Drop for ContextAttachmentLease {
     }
 }
 
+/// Non-owning identity for one exact Context attachment generation.
+///
+/// Handles are cloneable so related runtime objects can prove which platform attachment they use.
+/// They cannot detach the attachment and do not keep it alive after the Context releases it.
+#[derive(Clone, Debug)]
+pub struct ContextAttachmentHandle {
+    control: Weak<AttachmentControl>,
+    _not_send_or_sync: PhantomData<Rc<()>>,
+}
+
+impl ContextAttachmentHandle {
+    /// Returns whether this attachment generation remains active or reserved by a release permit.
+    pub fn is_attached(&self) -> bool {
+        self.control.upgrade().is_some_and(|control| {
+            matches!(
+                control.state.get(),
+                AttachmentState::Active | AttachmentState::ReleasePrepared
+            )
+        })
+    }
+
+    /// Returns whether an active renderer attachment still depends on this platform generation.
+    ///
+    /// This is a conservative Drop-path diagnostic. Explicit platform shutdown must use
+    /// [`Context::prepare_platform_attachment_release`] so the check and native cleanup share one
+    /// exclusive transaction.
+    pub fn has_active_renderer_dependency(&self) -> bool {
+        self.control.upgrade().is_some_and(|control| {
+            control.role == ContextAttachmentRole::Platform
+                && matches!(
+                    control.state.get(),
+                    AttachmentState::Active | AttachmentState::ReleasePrepared
+                )
+                && control.roles.renderer_active.get()
+        })
+    }
+}
+
+/// Exclusive permit for an explicit platform attachment release transaction.
+///
+/// Preparing the permit proves that no renderer attachment still depends on the exact platform
+/// generation. Use [`Self::context_mut`] for any frame normalization or native cleanup, then call
+/// [`Self::commit`] only after the platform attachment has been fully released. Dropping an
+/// uncommitted permit restores the attachment to its active state so shutdown can be retried.
+/// Renderer registration remains unavailable while the permit reserves the platform generation.
+#[must_use = "dropping the permit abandons platform detachment and keeps the attachment active"]
+pub struct ContextPlatformAttachmentRelease<'a> {
+    context: &'a mut Context,
+    control: Rc<AttachmentControl>,
+    committed: bool,
+}
+
+impl fmt::Debug for ContextPlatformAttachmentRelease<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ContextPlatformAttachmentRelease")
+            .field("attachment", &self.control)
+            .field("committed", &self.committed)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<'a> ContextPlatformAttachmentRelease<'a> {
+    pub(super) fn new(context: &'a mut Context, control: Rc<AttachmentControl>) -> Self {
+        Self {
+            context,
+            control,
+            committed: false,
+        }
+    }
+
+    /// Returns the exclusively borrowed Context after platform-release preflight succeeded.
+    pub fn context_mut(&mut self) -> &mut Context {
+        self.context
+    }
+
+    /// Commits detachment of the exact platform attachment generation.
+    ///
+    /// This operation is infallible because the permit exclusively borrows the Context and keeps
+    /// the attachment control reserved against ordinary lease detachment.
+    pub fn commit(mut self) {
+        self.control.commit_platform_release();
+        self.committed = true;
+    }
+}
+
+impl Drop for ContextPlatformAttachmentRelease<'_> {
+    fn drop(&mut self) {
+        if !self.committed {
+            self.control.abandon_platform_release();
+        }
+    }
+}
+
 #[derive(Default)]
 pub(super) struct AttachmentRegistry {
     controls: Vec<Rc<AttachmentControl>>,
+    roles: Rc<AttachmentRoleState>,
     tearing_down: bool,
     platform_window_teardown_active: Cell<bool>,
 }
@@ -478,7 +677,7 @@ impl AttachmentRegistry {
             return Err(ContextAttachmentError::DuplicateAttachment);
         }
         if role == ContextAttachmentRole::Renderer
-            && !self.role_is_active(ContextAttachmentRole::Platform)
+            && !self.role_is_operational(ContextAttachmentRole::Platform)
         {
             return Err(ContextAttachmentError::MissingPlatform);
         }
@@ -504,7 +703,11 @@ impl AttachmentRegistry {
             role,
             state: Cell::new(AttachmentState::Active),
             attachment: RefCell::new(Some(attachment)),
+            roles: Rc::clone(&self.roles),
         });
+        if role == ContextAttachmentRole::Renderer {
+            self.roles.renderer_active.set(true);
+        }
         let lease = ContextAttachmentLease {
             control: Rc::downgrade(&control),
             _not_send_or_sync: PhantomData,
@@ -514,9 +717,57 @@ impl AttachmentRegistry {
     }
 
     fn role_is_active(&self, role: ContextAttachmentRole) -> bool {
+        self.controls.iter().any(|control| {
+            control.role == role
+                && matches!(
+                    control.state.get(),
+                    AttachmentState::Active | AttachmentState::ReleasePrepared
+                )
+        })
+    }
+
+    fn role_is_operational(&self, role: ContextAttachmentRole) -> bool {
         self.controls
             .iter()
             .any(|control| control.role == role && control.state.get() == AttachmentState::Active)
+    }
+
+    pub(super) fn prepare_platform_release(
+        &self,
+        handle: &ContextAttachmentHandle,
+    ) -> Result<Rc<AttachmentControl>, ContextPlatformAttachmentReleaseError> {
+        if self.tearing_down {
+            return Err(ContextPlatformAttachmentReleaseError::ContextDropping);
+        }
+        let control = handle
+            .control
+            .upgrade()
+            .ok_or(ContextPlatformAttachmentReleaseError::AttachmentInactive)?;
+        if control.role != ContextAttachmentRole::Platform {
+            return Err(ContextPlatformAttachmentReleaseError::NotPlatform);
+        }
+        match control.state.get() {
+            AttachmentState::Active => {}
+            AttachmentState::ReleasePrepared => {
+                return Err(ContextPlatformAttachmentReleaseError::ReleaseInProgress);
+            }
+            AttachmentState::Teardown | AttachmentState::Complete | AttachmentState::Detached => {
+                return Err(ContextPlatformAttachmentReleaseError::AttachmentInactive);
+            }
+        }
+        let owns_active_generation = self.controls.iter().any(|candidate| {
+            Rc::ptr_eq(candidate, &control)
+                && candidate.role == ContextAttachmentRole::Platform
+                && candidate.state.get() == AttachmentState::Active
+        });
+        if !owns_active_generation {
+            return Err(ContextPlatformAttachmentReleaseError::PlatformGenerationMismatch);
+        }
+        if self.roles.renderer_active.get() {
+            return Err(ContextPlatformAttachmentReleaseError::RendererActive);
+        }
+        control.prepare_platform_release();
+        Ok(control)
     }
 
     #[cfg(feature = "multi-viewport")]
@@ -537,7 +788,10 @@ impl AttachmentRegistry {
                 .iter()
                 .find(|control| {
                     control.role == ContextAttachmentRole::Platform
-                        && control.state.get() == AttachmentState::Active
+                        && matches!(
+                            control.state.get(),
+                            AttachmentState::Active | AttachmentState::ReleasePrepared
+                        )
                 })
                 .and_then(|control| control.attachment.borrow().clone()),
             active: &self.platform_window_teardown_active,

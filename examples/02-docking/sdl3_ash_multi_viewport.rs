@@ -1202,9 +1202,12 @@ impl App {
         )?;
         renderer.set_viewport_clear_color([0.1, 0.12, 0.15, 1.0]);
         let renderer = if ENABLE_VIEWPORTS {
+            // SAFETY: the application serializes all host access to ctx.queue and ctx.device while
+            // this runtime can submit, present, rebuild swapchains, or wait for device idle.
             RendererRuntime::Viewports(unsafe {
                 Sdl3ViewportRuntime::attach(
                     &mut context,
+                    &sdl3_backend,
                     renderer,
                     VulkanViewportConfig {
                         entry: ctx.entry.clone(),

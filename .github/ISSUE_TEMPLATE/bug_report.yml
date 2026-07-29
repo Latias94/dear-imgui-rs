@@ -14,6 +14,7 @@ body:
         - label: backends/dear-imgui-glow
         - label: backends/dear-imgui-winit
         - label: backends/dear-imgui-sdl3
+        - label: backends/dear-imgui-bevy
         - label: dear-app
         - label: extensions/dear-implot
         - label: extensions/dear-implot-sys

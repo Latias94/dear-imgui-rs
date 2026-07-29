@@ -1097,8 +1097,14 @@ impl AppWindow {
         #[cfg(feature = "multi-viewport")]
         let renderer = if enable_viewports {
             ImguiRenderer::Multi(
-                wgpu_mvp::WinitViewportRuntime::attach(&mut context, renderer)
-                    .expect("Failed to initialize WGPU multi-viewport runtime"),
+                wgpu_mvp::WinitViewportRuntime::attach(
+                    &mut context,
+                    viewport_runtime
+                        .as_ref()
+                        .expect("Winit viewport runtime must exist when viewports are enabled"),
+                    renderer,
+                )
+                .expect("Failed to initialize WGPU multi-viewport runtime"),
             )
         } else {
             ImguiRenderer::Single(renderer)

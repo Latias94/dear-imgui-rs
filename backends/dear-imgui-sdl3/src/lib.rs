@@ -69,7 +69,6 @@ mod viewport;
 use std::ffi::CString;
 use std::ffi::c_void;
 
-use dear_imgui_rs::Context;
 #[cfg(any(
     feature = "opengl3-renderer",
     feature = "sdlrenderer3-renderer",
@@ -82,6 +81,7 @@ use dear_imgui_rs::ContextBinding;
     feature = "sdlgpu3-renderer"
 ))]
 use dear_imgui_rs::render::{DrawData, RenderedFrame};
+use dear_imgui_rs::{Context, ContextId};
 #[cfg(feature = "opengl3-renderer")]
 use dear_imgui_sys::backend_shim::opengl3 as opengl3_backend;
 #[cfg(feature = "sdlgpu3-renderer")]
@@ -109,6 +109,8 @@ pub use self::backend::Sdl3PlatformBackend;
 pub use self::backend::Sdl3RendererBackend;
 #[cfg(feature = "sdlgpu3-renderer")]
 pub use self::backend::{SdlGpu3PreparedFrame, SdlGpu3RendererBackend};
+#[cfg(feature = "multi-viewport")]
+pub use self::core::Sdl3VulkanSurfaceError;
 pub use self::core::{Sdl3BackendError, Sdl3OpenGlViewportSwapInterval};
 use self::core::{ffi, sdl3_new_frame_impl, with_context};
 #[cfg(feature = "opengl3-renderer")]
@@ -119,6 +121,8 @@ use self::events::process_sys_event;
 pub use self::events::sdl3_poll_event_ll;
 pub use self::gamepad::GamepadMode;
 use self::gamepad::{set_gamepad_mode, set_gamepad_mode_manual};
+#[cfg(feature = "multi-viewport")]
+pub use self::runtime::Sdl3VulkanSurfaceProvider;
 #[cfg(feature = "sdlgpu3-renderer")]
 pub use self::viewport::SdlGpu3InitInfo;
 pub use self::viewport::enable_native_ime_ui;

@@ -67,7 +67,7 @@ let init = WgpuInitInfo::new(device, queue, format)
     .with_adapter(adapter)
     .with_viewport_surface_config(viewport_surface);
 let renderer = WgpuRenderer::new(init, imgui)?;
-let renderer = WinitViewportRuntime::attach(imgui, renderer)?;
+let renderer = WinitViewportRuntime::attach(imgui, &runtime, renderer)?;
 # Ok((platform, runtime, renderer))
 # }
 ```
@@ -84,9 +84,19 @@ explicitly and reject a render-target format that the surface cannot present in 
 main surface in the same sRGB contract; HDR or wide-gamut output needs an application-owned color
 conversion pass rather than a different secondary-surface setting.
 
+Secondary viewports inherit the renderer pipeline's multisample and depth-stencil contract. The
+runtime owns matching per-window MSAA resolve and depth-stencil attachments, suspends acquisition
+while a native framebuffer has a zero dimension, and rebuilds the complete surface bundle from
+the platform owner's current physical size after resize, DPI changes, or surface loss. Attachment
+fails transactionally when the adapter cannot support the configured formats and sample count.
+
 For SDL3, initialize `Sdl3PlatformBackend` first and then call
-`dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRuntime::attach`. Both typed constructors
-consume `WgpuRenderer`; no caller-owned stable address or unsafe registration contract remains.
+`dear_imgui_wgpu::multi_viewport_sdl3::Sdl3ViewportRuntime::attach(imgui, &platform, renderer)`.
+The safe constructors require the matching live platform owner and reject Context mismatches,
+shutdown owners, and callback ownership drift before interpreting any native handle. Custom
+platforms can use the explicitly unsafe `attach_unchecked` escape hatch only after proving the
+Winit or SDL3 `PlatformHandle` contract. Both typed constructors consume `WgpuRenderer`; no
+caller-owned stable address is required.
 
 The renderer claims only the five `Renderer_*` slots in `ImGuiPlatformIO`. Registration fails
 instead of replacing foreign renderer callbacks or `RendererUserData`, rejects secondary windows

@@ -98,12 +98,22 @@ impl TestEngine {
             .and_then(|status| ffi_status("imgui_test_engine_start", status));
 
         if let Err(error) = start_result {
-            if !lease.detach() {
-                self.lease = Some(lease);
-                return Err(TestEngineError::AttachmentInvariant {
-                    operation: OPERATION,
-                    detail: "start rollback could not release a lease while Context was exclusively borrowed",
-                });
+            match lease.detach() {
+                Ok(true) => {}
+                Ok(false) => {
+                    self.lease = Some(lease);
+                    return Err(TestEngineError::AttachmentInvariant {
+                        operation: OPERATION,
+                        detail: "start rollback found an inactive lease while Context was exclusively borrowed",
+                    });
+                }
+                Err(source) => {
+                    self.lease = Some(lease);
+                    return Err(TestEngineError::AttachmentDetach {
+                        operation: OPERATION,
+                        source,
+                    });
+                }
             }
             self.control.rollback_start();
             return Err(error);
@@ -123,15 +133,20 @@ impl TestEngine {
         match self.control.attachment_state() {
             AttachmentState::Destroyed => return Ok(()),
             AttachmentState::Reserved => {
-                let detached = self
-                    .lease
-                    .as_mut()
-                    .is_some_and(ContextAttachmentLease::detach);
-                if !detached {
-                    return Err(TestEngineError::AttachmentInvariant {
-                        operation: "TestEngine::shutdown",
-                        detail: "reserved attachment lease was not active; Context teardown must synchronize state first",
-                    });
+                match self.lease.as_mut().map(ContextAttachmentLease::detach) {
+                    Some(Ok(true)) => {}
+                    Some(Err(source)) => {
+                        return Err(TestEngineError::AttachmentDetach {
+                            operation: "TestEngine::shutdown",
+                            source,
+                        });
+                    }
+                    None | Some(Ok(false)) => {
+                        return Err(TestEngineError::AttachmentInvariant {
+                            operation: "TestEngine::shutdown",
+                            detail: "reserved attachment lease was not active; Context teardown must synchronize state first",
+                        });
+                    }
                 }
                 self.lease = None;
                 self.control.rollback_start();
@@ -484,15 +499,20 @@ impl TestEngine {
         }
 
         // A live ContextBinding excludes teardown, so the core lease must still be Active here.
-        let detached = self
-            .lease
-            .as_mut()
-            .is_some_and(ContextAttachmentLease::detach);
-        if !detached {
-            return Err(TestEngineError::AttachmentInvariant {
-                operation: "TestEngine::shutdown",
-                detail: "live attachment lease was not active; Context teardown must synchronize state first",
-            });
+        match self.lease.as_mut().map(ContextAttachmentLease::detach) {
+            Some(Ok(true)) => {}
+            Some(Err(source)) => {
+                return Err(TestEngineError::AttachmentDetach {
+                    operation: "TestEngine::shutdown",
+                    source,
+                });
+            }
+            None | Some(Ok(false)) => {
+                return Err(TestEngineError::AttachmentInvariant {
+                    operation: "TestEngine::shutdown",
+                    detail: "live attachment lease was not active; Context teardown must synchronize state first",
+                });
+            }
         }
         self.lease = None;
         self.control.mark_detached();
