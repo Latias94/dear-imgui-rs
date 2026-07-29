@@ -170,6 +170,15 @@ class RepositoryScriptContractTests(unittest.TestCase):
         self.assertNotIn("find_bindings", content)
         self.assertNotIn("st_mtime", content)
 
+    def test_binding_updater_selects_imguizmo_repositories_independently(self):
+        content = (
+            REPO_ROOT / "tools" / "update_submodule_and_bindings.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('"--cimguizmo-branch"', content)
+        self.assertIn('"--cimguizmo-quat-branch"', content)
+        self.assertIn("args.cimguizmo_quat_branch", content)
+
     def test_repository_has_no_tracked_non_python_script_entry_points(self):
         result = subprocess.run(
             [

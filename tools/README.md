@@ -388,6 +388,7 @@ python3 tools/update_submodule_and_bindings.py \
   --cimnodes-branch master \
   --cimnodes-editor-branch main \
   --cimguizmo-branch master \
+  --cimguizmo-quat-branch master \
   --imgui-test-engine-branch main
 ```
 

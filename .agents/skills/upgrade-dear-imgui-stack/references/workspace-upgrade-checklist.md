@@ -12,7 +12,7 @@ Use this file for the repository-specific parts of an ImGui-stack upgrade.
 | `dear-imnodes-sys` | `cimnodes` + ImNodes | `master` | Usually independent, but scan for compatibility if core types changed. |
 | `dear-node-editor-sys` | `cimnodes_editor` + imgui-node-editor | `main` | Native only. Keep the local `dne_*` uintptr ID shim in sync with upstream ID and callback APIs. |
 | `dear-imguizmo-sys` | `cimguizmo` + ImGuizmo | `master` | Usually independent, but scan if cimgui/imgui integration changed. |
-| `dear-imguizmo-quat-sys` | `cimguizmo_quat` + ImGuIZMO.quat | script currently shares `cimguizmo` branch arg | Verify upstream default branch before changing tooling. |
+| `dear-imguizmo-quat-sys` | `cimguizmo_quat` + ImGuIZMO.quat | `master` | Independent from `cimguizmo`; select it with `--cimguizmo-quat-branch`. |
 | `dear-imgui-test-engine-sys` | `imgui_test_engine` | `main` | Re-audit whenever Dear ImGui internals or hooks changed. Native only, no wasm support. |
 
 ## Primary sources to inspect

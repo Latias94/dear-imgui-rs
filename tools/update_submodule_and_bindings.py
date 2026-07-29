@@ -30,6 +30,7 @@ Usage examples:
         --cimgui-branch docking_inter --cimplot-branch master \
         --cimplot3d-branch main \
         --cimnodes-branch master --cimguizmo-branch master \
+        --cimguizmo-quat-branch master \
         --cimnodes-editor-branch main --imgui-test-engine-branch main
 
   - Only regenerate pregenerated bindings without touching submodules:
@@ -95,6 +96,11 @@ def main() -> int:
     parser.add_argument("--cimnodes-editor-branch", default="main", help="Branch for cimnodes_editor submodule (dear-node-editor-sys)")
     parser.add_argument("--cimguizmo-branch", default="master", help="Branch for cimguizmo submodule (dear-imguizmo-sys)")
     parser.add_argument(
+        "--cimguizmo-quat-branch",
+        default="master",
+        help="Branch for cimguizmo_quat submodule (dear-imguizmo-quat-sys)",
+    )
+    parser.add_argument(
         "--imgui-test-engine-branch",
         default="main",
         help="Branch for imgui_test_engine submodule (dear-imgui-test-engine-sys)",
@@ -139,7 +145,10 @@ def main() -> int:
             args.cimnodes_editor_branch,
         ),
         "dear-imguizmo-sys": (crate_roots["dear-imguizmo-sys"] / "third-party/cimguizmo", args.cimguizmo_branch),
-        "dear-imguizmo-quat-sys": (crate_roots["dear-imguizmo-quat-sys"] / "third-party/cimguizmo_quat", args.cimguizmo_branch),
+        "dear-imguizmo-quat-sys": (
+            crate_roots["dear-imguizmo-quat-sys"] / "third-party/cimguizmo_quat",
+            args.cimguizmo_quat_branch,
+        ),
         "dear-imgui-test-engine-sys": (
             crate_roots["dear-imgui-test-engine-sys"] / "third-party/imgui_test_engine",
             args.imgui_test_engine_branch,
