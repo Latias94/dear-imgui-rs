@@ -278,7 +278,6 @@ where
                             "",
                             imgui::TableColumnFlags::NONE,
                             min_width,
-                            None,
                         );
                     }
                 }

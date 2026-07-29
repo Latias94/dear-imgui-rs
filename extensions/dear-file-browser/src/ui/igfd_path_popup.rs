@@ -91,7 +91,6 @@ fn draw_igfd_path_table_popup(
             "File name",
             dear_imgui_rs::TableColumnFlags::NONE,
             1.0,
-            None,
         );
         ui.table_headers_row();
 

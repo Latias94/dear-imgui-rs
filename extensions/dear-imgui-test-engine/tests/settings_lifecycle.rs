@@ -3,7 +3,9 @@ use std::ffi::c_void;
 use std::fs;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
-use dear_imgui_rs::{Context, ContextLifecycle, SuspendedContext, TableColumnIndex};
+use dear_imgui_rs::{
+    Condition, Context, ContextLifecycle, SuspendedContext, TableColumnIndex, TableFlags,
+};
 use dear_imgui_test_engine::{
     AttachmentState, RunFlags, RunSpeed, RunState, ScriptCount, TestEngine, TestEngineError,
     TestEngineResult, TestEngineStatus, TestGroup, VerboseLevel, raw,
@@ -752,6 +754,68 @@ fn missing_table_lookup_is_a_failed_test_not_an_infrastructure_error() {
         .expect("terminal report");
     assert_eq!(summary.count_tested, 1);
     assert_eq!(summary.count_success, 0);
+
+    engine.shutdown().expect("shutdown");
+    drop(context);
+}
+
+#[test]
+fn table_resize_by_label_succeeds_for_a_resizable_table() {
+    let _guard = test_lock();
+    reset_counters();
+    let mut context = context();
+    context.io_mut().set_display_size([640.0, 480.0]);
+    let mut engine = TestEngine::create().expect("engine");
+    engine.start(&mut context).expect("start");
+    engine
+        .add_script_test("table", "resize_by_label", |script| {
+            script.set_ref("Table Host")?;
+            script.yield_frames(ScriptCount::new(2)?)?;
+            script.table_resize_column_by_label("Resize Table", "Name", 96.0)?;
+            script.yield_frames(ScriptCount::new(2)?)
+        })
+        .expect("table resize script registration");
+    engine
+        .queue_tests(TestGroup::Tests, Some("resize_by_label"), RunFlags::NONE)
+        .expect("queue table resize test");
+
+    for _ in 0..64 {
+        let ui = context.frame();
+        ui.window("Table Host")
+            .size([420.0, 240.0], Condition::Always)
+            .build(|| {
+                ui.table("Resize Table")
+                    .flags(TableFlags::RESIZABLE | TableFlags::BORDERS)
+                    .column("Name")
+                    .width(64.0)
+                    .done()
+                    .column("Value")
+                    .width(64.0)
+                    .done()
+                    .headers(true)
+                    .build(|ui| {
+                        ui.table_next_row();
+                        ui.table_next_column();
+                        ui.text("row");
+                        ui.table_next_column();
+                        ui.text("value");
+                    });
+            });
+        drop(context.render());
+        engine.pre_swap().expect("pre swap");
+        engine.post_swap().expect("post swap");
+        if engine.run_state() == RunState::Terminal {
+            break;
+        }
+    }
+
+    assert_eq!(engine.run_state(), RunState::Terminal);
+    let summary = engine
+        .take_terminal_summary()
+        .expect("terminal summary")
+        .expect("terminal report");
+    assert_eq!(summary.count_tested, 1);
+    assert_eq!(summary.count_success, 1);
 
     engine.shutdown().expect("shutdown");
     drop(context);

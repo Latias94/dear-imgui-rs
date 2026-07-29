@@ -96,31 +96,25 @@ fn table_column_options_reject_non_independent_bits_before_ffi() {
 
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                ui.table_setup_column("width in flags", width_in_flags, None, None);
+                ui.table_setup_column("width in flags", width_in_flags, None);
             }))
             .is_err()
         );
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                ui.table_setup_column_with_indent(
-                    "indent in flags",
-                    indent_in_flags,
-                    None,
-                    None,
-                    None,
-                );
+                ui.table_setup_column_with_indent("indent in flags", indent_in_flags, None, None);
             }))
             .is_err()
         );
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                ui.table_setup_column("status in flags", status_in_flags, None, None);
+                ui.table_setup_column("status in flags", status_in_flags, None);
             }))
             .is_err()
         );
         assert!(
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                ui.table_setup_column("private in flags", private_in_flags, None, None);
+                ui.table_setup_column("private in flags", private_in_flags, None);
             }))
             .is_err()
         );
@@ -130,7 +124,6 @@ fn table_column_options_reject_non_independent_bits_before_ffi() {
                     "nan width",
                     imgui::TableColumnFlags::NONE,
                     f32::NAN,
-                    None,
                 );
             }))
             .is_err()
@@ -143,7 +136,6 @@ fn table_column_options_reject_non_independent_bits_before_ffi() {
                 | imgui::TableColumnFlags::DEFAULT_SORT,
             Some(imgui::TableColumnWidth::Fixed(48.0)),
             Some(imgui::TableColumnIndent::Disable),
-            None,
         );
     });
 }
@@ -173,7 +165,7 @@ fn table_column_flag_getter_preserves_unknown_raw_bits() {
             return;
         };
 
-        ui.table_setup_column("raw", imgui::TableColumnFlags::DEFAULT_SORT, None, None);
+        ui.table_setup_column("raw", imgui::TableColumnFlags::DEFAULT_SORT, None);
         ui.table_next_row();
         ui.table_set_column_index(imgui::TableColumnIndex::ZERO);
 

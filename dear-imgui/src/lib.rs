@@ -424,8 +424,8 @@ pub use dock_layout::*;
 pub use dock_space::*;
 // Export draw-list helpers for extensions and downstream custom drawing.
 pub use draw::{
-    DrawCornerFlags, DrawListFlags, DrawListMut, DrawListTextureToken, DrawNgonSegmentCount,
-    DrawSegmentCount, PolylineFlags,
+    DrawCornerFlags, DrawListFlags, DrawListMut, DrawListTextNoPixelSnapToken,
+    DrawListTextureToken, DrawNgonSegmentCount, DrawSegmentCount, PolylineFlags,
 };
 pub use error::*;
 // Note: draw types are now in render module, no need to export draw::*

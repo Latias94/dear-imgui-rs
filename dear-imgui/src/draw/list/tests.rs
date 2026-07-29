@@ -1,6 +1,6 @@
 use super::super::color::ImColor32;
 use super::super::counts::{
-    DrawCornerFlags, DrawNgonSegmentCount, DrawSegmentCount, PolylineFlags,
+    DrawCornerFlags, DrawListFlags, DrawNgonSegmentCount, DrawSegmentCount, PolylineFlags,
 };
 use super::super::util::draw_list_counts;
 use super::DrawListMut;
@@ -298,4 +298,62 @@ fn raw_draw_list_clip_helper_reads_stack_without_mutation() {
 
     assert!(result.is_err());
     assert_eq!(fixture.clip_stack_size(), before);
+}
+
+#[test]
+fn text_no_pixel_snap_scope_restores_only_its_flag() {
+    let fixture = TestDrawList::new();
+    let draw_list = fixture.draw_list();
+    unsafe {
+        (*fixture.raw).Flags = DrawListFlags::ANTI_ALIASED_FILL.bits();
+    }
+
+    draw_list.with_text_no_pixel_snap(|| {
+        let flags = DrawListFlags::from_bits_retain(unsafe { (*fixture.raw).Flags });
+        assert!(flags.contains(DrawListFlags::TEXT_NO_PIXEL_SNAP));
+        assert!(flags.contains(DrawListFlags::ANTI_ALIASED_FILL));
+
+        unsafe {
+            (*fixture.raw).Flags |= DrawListFlags::ALLOW_VTX_OFFSET.bits();
+        }
+    });
+
+    let flags = DrawListFlags::from_bits_retain(unsafe { (*fixture.raw).Flags });
+    assert!(!flags.contains(DrawListFlags::TEXT_NO_PIXEL_SNAP));
+    assert!(flags.contains(DrawListFlags::ANTI_ALIASED_FILL));
+    assert!(flags.contains(DrawListFlags::ALLOW_VTX_OFFSET));
+}
+
+#[test]
+fn text_no_pixel_snap_scope_is_nested_and_panic_safe() {
+    let fixture = TestDrawList::new();
+    let draw_list = fixture.draw_list();
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _outer = draw_list.push_text_no_pixel_snap();
+        assert!(
+            DrawListFlags::from_bits_retain(unsafe { (*fixture.raw).Flags })
+                .contains(DrawListFlags::TEXT_NO_PIXEL_SNAP)
+        );
+
+        {
+            let _inner = draw_list.push_text_no_pixel_snap();
+            assert!(
+                DrawListFlags::from_bits_retain(unsafe { (*fixture.raw).Flags })
+                    .contains(DrawListFlags::TEXT_NO_PIXEL_SNAP)
+            );
+        }
+
+        assert!(
+            DrawListFlags::from_bits_retain(unsafe { (*fixture.raw).Flags })
+                .contains(DrawListFlags::TEXT_NO_PIXEL_SNAP)
+        );
+        panic!("forced panic inside text flag scope");
+    }));
+
+    assert!(result.is_err());
+    assert!(
+        !DrawListFlags::from_bits_retain(unsafe { (*fixture.raw).Flags })
+            .contains(DrawListFlags::TEXT_NO_PIXEL_SNAP)
+    );
 }

@@ -61,16 +61,15 @@ pub use options::{
     TableColumnFlags, TableColumnIndent, TableColumnStateFlags, TableColumnWidth, TableFlags,
     TableOptions, TableSizingPolicy,
 };
-pub use setup::TableColumnSetup;
+pub use setup::{TableColumnSetup, TableColumnUserData};
 pub use sort::{SortDirection, TableColumnSortSpec, TableSortSpecs, TableSortSpecsIter};
 pub use tokens::{TableBackgroundChannelToken, TableColumnChannelToken, TableToken};
 
 pub(crate) use indices::TABLE_MAX_COLUMNS;
 pub(crate) use validation::{
     assert_current_table, assert_current_table_cell, assert_current_table_has_flags,
-    assert_current_table_row, assert_explicit_user_id, assert_non_negative_finite_f32,
-    assert_table_column_width_phase, assert_table_setup_phase, assert_valid_table_column,
-    assert_valid_table_column_in, assert_valid_table_column_raw_in, current_table_if_any,
-    optional_user_id_from_raw, optional_user_id_raw, resolve_table_column,
+    assert_current_table_row, assert_non_negative_finite_f32, assert_table_column_width_phase,
+    assert_table_setup_phase, assert_valid_table_column, assert_valid_table_column_in,
+    assert_valid_table_column_raw_in, current_table_if_any, resolve_table_column,
     table_column_count_to_i32, table_freeze_count_to_i32,
 };

@@ -40,6 +40,6 @@ pub use counts::{
 };
 #[allow(unused_imports)]
 pub use list::DrawListClipRectToken;
-pub use list::{DrawListMut, DrawListTextureToken};
+pub use list::{DrawListMut, DrawListTextNoPixelSnapToken, DrawListTextureToken};
 #[allow(unused_imports)]
 pub use primitives::{BezierCurve, Circle, Line, Polyline, Rect, Triangle};

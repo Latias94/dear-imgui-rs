@@ -13,6 +13,7 @@ mod text;
 mod texture;
 
 pub use clip::DrawListClipRectToken;
+pub use text::DrawListTextNoPixelSnapToken;
 pub use texture::DrawListTextureToken;
 
 thread_local! {

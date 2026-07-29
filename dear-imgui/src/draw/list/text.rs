@@ -1,10 +1,60 @@
+use std::marker::PhantomData;
+
 use crate::sys;
 
 use super::super::color::ImColor32;
 use super::super::util::{assert_non_negative_f32, finite_vec2, finite_vec4};
 use super::DrawListMut;
 
+/// Restores a draw list's text pixel-snap flag when dropped.
+#[must_use]
+pub struct DrawListTextNoPixelSnapToken<'draw_list> {
+    draw_list: *mut sys::ImDrawList,
+    was_enabled: bool,
+    _marker: PhantomData<&'draw_list sys::ImDrawList>,
+}
+
+impl DrawListTextNoPixelSnapToken<'_> {
+    /// Restores the previous flag state immediately instead of waiting for drop.
+    pub fn end(self) {}
+}
+
+impl Drop for DrawListTextNoPixelSnapToken<'_> {
+    fn drop(&mut self) {
+        let flag = sys::ImDrawListFlags_TextNoPixelSnap as sys::ImDrawListFlags;
+        unsafe {
+            if self.was_enabled {
+                (*self.draw_list).Flags |= flag;
+            } else {
+                (*self.draw_list).Flags &= !flag;
+            }
+        }
+    }
+}
+
 impl<'ui> DrawListMut<'ui> {
+    /// Disables pixel-boundary snapping for text added until the returned token is dropped.
+    pub fn push_text_no_pixel_snap(&self) -> DrawListTextNoPixelSnapToken<'_> {
+        let flag = sys::ImDrawListFlags_TextNoPixelSnap as sys::ImDrawListFlags;
+        let was_enabled = unsafe { (*self.draw_list).Flags & flag != 0 };
+        unsafe {
+            (*self.draw_list).Flags |= flag;
+        }
+        DrawListTextNoPixelSnapToken {
+            draw_list: self.draw_list,
+            was_enabled,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Disables text pixel snapping while `f` runs and restores the prior state afterwards.
+    ///
+    /// Restoration also occurs if `f` panics. Changes to unrelated draw-list flags are preserved.
+    pub fn with_text_no_pixel_snap<R>(&self, f: impl FnOnce() -> R) -> R {
+        let _text_flags = self.push_text_no_pixel_snap();
+        f()
+    }
+
     /// Draw a text whose upper-left corner is at point `pos`.
     pub fn add_text(
         &self,

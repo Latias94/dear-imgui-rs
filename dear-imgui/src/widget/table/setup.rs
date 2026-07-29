@@ -1,6 +1,40 @@
-use crate::Id;
+use super::{TableColumnFlags, TableColumnIndent, TableColumnWidth};
 
-use super::{TableColumnFlags, TableColumnIndent, TableColumnWidth, assert_explicit_user_id};
+/// Opaque application data associated with a table column.
+///
+/// Dear ImGui copies this value unchanged into table sort specifications. Zero is a valid value;
+/// it is not treated as an absent ID or hashed through Dear ImGui's widget ID stack.
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct TableColumnUserData(u32);
+
+impl TableColumnUserData {
+    /// Creates opaque table column user data.
+    #[inline]
+    pub const fn new(value: u32) -> Self {
+        Self(value)
+    }
+
+    /// Returns the unchanged opaque value.
+    #[inline]
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+}
+
+impl From<u32> for TableColumnUserData {
+    #[inline]
+    fn from(value: u32) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<TableColumnUserData> for u32 {
+    #[inline]
+    fn from(value: TableColumnUserData) -> Self {
+        value.get()
+    }
+}
 
 /// Table column setup information
 #[derive(Clone, Debug)]
@@ -9,7 +43,7 @@ pub struct TableColumnSetup<Name> {
     pub flags: TableColumnFlags,
     pub width: Option<TableColumnWidth>,
     pub indent: Option<TableColumnIndent>,
-    pub user_id: Option<Id>,
+    pub user_data: TableColumnUserData,
 }
 
 impl<Name> TableColumnSetup<Name> {
@@ -20,7 +54,7 @@ impl<Name> TableColumnSetup<Name> {
             flags: TableColumnFlags::NONE,
             width: None,
             indent: None,
-            user_id: None,
+            user_data: TableColumnUserData::default(),
         }
     }
 
@@ -58,14 +92,20 @@ impl<Name> TableColumnSetup<Name> {
         self
     }
 
-    /// Sets the non-zero user ID associated with this column.
+    /// Sets the opaque user data associated with this column.
     ///
-    /// Accepts an [`Id`] or a `u32` value. Dear ImGui returns the value unchanged
-    /// in table sort specifications; unlike [`Ui::push_id`](crate::Ui::push_id),
-    /// it is not hashed through the ID stack. Omit this method to leave the user
-    /// ID unspecified.
-    pub fn user_id(mut self, id: impl Into<Id>) -> Self {
-        self.user_id = Some(assert_explicit_user_id(id, "TableColumnSetup::user_id()"));
+    /// Dear ImGui returns the value unchanged in table sort specifications. The default is zero,
+    /// which remains ordinary application data rather than an absence sentinel.
+    ///
+    /// The old `user_id` API intentionally has no compatibility alias because widget IDs and
+    /// opaque column data have different semantics.
+    ///
+    /// ```compile_fail
+    /// # use dear_imgui_rs::TableColumnSetup;
+    /// let _ = TableColumnSetup::new("column").user_id(1_u32);
+    /// ```
+    pub fn user_data(mut self, user_data: impl Into<TableColumnUserData>) -> Self {
+        self.user_data = user_data.into();
         self
     }
 
@@ -75,7 +115,7 @@ impl<Name> TableColumnSetup<Name> {
             flags: self.flags,
             width: self.width,
             indent: self.indent,
-            user_id: self.user_id,
+            user_data: self.user_data,
         }
     }
 }

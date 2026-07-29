@@ -1,15 +1,15 @@
+use crate::sys;
 use crate::ui::Ui;
 use crate::widget::table::{
     SortDirection, TABLE_MAX_COLUMNS, TableBgTarget, TableBuilder, TableColumnFlags,
     TableColumnIndent, TableColumnIndex, TableColumnRef, TableColumnSetup, TableColumnStateFlags,
-    TableColumnWidth, TableFlags, TableHoveredColumn, TableHoveredRow, TableOptions, TableRowFlags,
-    TableRowIndex, TableSortSpecs, TableToken, assert_current_table, assert_current_table_cell,
-    assert_current_table_has_flags, assert_current_table_row, assert_non_negative_finite_f32,
-    assert_table_column_width_phase, assert_table_setup_phase, assert_valid_table_column,
-    assert_valid_table_column_raw_in, current_table_if_any, optional_user_id_raw,
+    TableColumnUserData, TableColumnWidth, TableFlags, TableHoveredColumn, TableHoveredRow,
+    TableOptions, TableRowFlags, TableRowIndex, TableSortSpecs, TableToken, assert_current_table,
+    assert_current_table_cell, assert_current_table_has_flags, assert_current_table_row,
+    assert_non_negative_finite_f32, assert_table_column_width_phase, assert_table_setup_phase,
+    assert_valid_table_column, assert_valid_table_column_raw_in, current_table_if_any,
     resolve_table_column, table_column_count_to_i32, table_freeze_count_to_i32,
 };
-use crate::{Id, sys};
 use std::borrow::Cow;
 use std::ffi::CStr;
 
@@ -138,12 +138,12 @@ impl Ui {
         if let Some(token) = self.begin_table_with_flags(str_id, N, flags) {
             // Setup columns
             for column in &column_data {
-                self.table_setup_column_with_indent(
+                self.table_setup_column_with_indent_and_user_data(
                     &column.name,
                     column.flags,
                     column.width,
                     column.indent,
-                    column.user_id,
+                    column.user_data,
                 );
             }
             self.table_headers_row();
@@ -160,9 +160,19 @@ impl Ui {
         label: impl AsRef<str>,
         flags: TableColumnFlags,
         width: Option<TableColumnWidth>,
-        user_id: Option<Id>,
     ) {
-        self.table_setup_column_with_indent(label, flags, width, None, user_id);
+        self.table_setup_column_with_indent(label, flags, width, None);
+    }
+
+    /// Setup a column for the current table with opaque application data.
+    pub fn table_setup_column_with_user_data(
+        &self,
+        label: impl AsRef<str>,
+        flags: TableColumnFlags,
+        width: Option<TableColumnWidth>,
+        user_data: impl Into<TableColumnUserData>,
+    ) {
+        self.table_setup_column_with_indent_and_user_data(label, flags, width, None, user_data);
     }
 
     /// Setup a column for the current table, including explicit indent policy.
@@ -172,28 +182,43 @@ impl Ui {
         flags: TableColumnFlags,
         width: Option<TableColumnWidth>,
         indent: Option<TableColumnIndent>,
-        user_id: Option<Id>,
     ) {
-        flags.validate_for_setup("Ui::table_setup_column_with_indent()", width, indent);
+        self.table_setup_column_with_indent_and_user_data(label, flags, width, indent, 0);
+    }
+
+    /// Setup a column with explicit indent policy and opaque application data.
+    pub fn table_setup_column_with_indent_and_user_data(
+        &self,
+        label: impl AsRef<str>,
+        flags: TableColumnFlags,
+        width: Option<TableColumnWidth>,
+        indent: Option<TableColumnIndent>,
+        user_data: impl Into<TableColumnUserData>,
+    ) {
+        flags.validate_for_setup(
+            "Ui::table_setup_column_with_indent_and_user_data()",
+            width,
+            indent,
+        );
         let init_width_or_weight = width.map_or(0.0, TableColumnWidth::value);
         assert!(
             init_width_or_weight.is_finite(),
-            "Ui::table_setup_column_with_indent() width or weight must be finite"
+            "Ui::table_setup_column_with_indent_and_user_data() width or weight must be finite"
         );
         let label_ptr = self.scratch_txt(label);
         let raw_flags = flags.bits()
             | width.map_or(0, TableColumnWidth::raw_flags)
             | indent.map_or(0, TableColumnIndent::raw_flags);
-        let user_id = optional_user_id_raw(user_id, "Ui::table_setup_column_with_indent()");
+        let user_data = user_data.into().get();
         self.run_with_bound_context(|| {
-            let table = assert_current_table("Ui::table_setup_column_with_indent()");
+            let table = assert_current_table("Ui::table_setup_column_with_indent_and_user_data()");
             assert!(
                 unsafe { i32::from((*table).DeclColumnsCount) < (*table).ColumnsCount },
-                "Ui::table_setup_column_with_indent() called more times than the table column count"
+                "Ui::table_setup_column_with_indent_and_user_data() called more times than the table column count"
             );
-            assert_table_setup_phase("Ui::table_setup_column_with_indent()");
+            assert_table_setup_phase("Ui::table_setup_column_with_indent_and_user_data()");
             unsafe {
-                sys::igTableSetupColumn(label_ptr, raw_flags, init_width_or_weight, user_id);
+                sys::igTableSetupColumn(label_ptr, raw_flags, init_width_or_weight, user_data);
             }
         });
     }
@@ -204,9 +229,8 @@ impl Ui {
         label: impl AsRef<str>,
         flags: TableColumnFlags,
         width: f32,
-        user_id: Option<Id>,
     ) {
-        self.table_setup_column(label, flags, Some(TableColumnWidth::Fixed(width)), user_id);
+        self.table_setup_column(label, flags, Some(TableColumnWidth::Fixed(width)));
     }
 
     /// Setup a column with a stretch weight.
@@ -215,14 +239,8 @@ impl Ui {
         label: impl AsRef<str>,
         flags: TableColumnFlags,
         weight: f32,
-        user_id: Option<Id>,
     ) {
-        self.table_setup_column(
-            label,
-            flags,
-            Some(TableColumnWidth::Stretch(weight)),
-            user_id,
-        );
+        self.table_setup_column(label, flags, Some(TableColumnWidth::Stretch(weight)));
     }
 
     /// Submit all headers cells based on data provided to TableSetupColumn() + submit context menu
