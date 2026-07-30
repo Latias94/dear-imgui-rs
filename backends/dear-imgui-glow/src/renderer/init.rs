@@ -19,10 +19,10 @@ use crate::{
 };
 
 const RENDERER_NAME: &str = concat!("dear-imgui-glow ", env!("CARGO_PKG_VERSION"));
-const CORE_RENDERER_FLAGS: i32 = sys::ImGuiBackendFlags_RendererHasVtxOffset as i32
-    | sys::ImGuiBackendFlags_RendererHasTextures as i32;
+const CORE_RENDERER_FLAGS: i32 =
+    sys::ImGuiBackendFlags_RendererHasVtxOffset | sys::ImGuiBackendFlags_RendererHasTextures;
 const RENDERER_RESERVED_FLAGS: i32 =
-    CORE_RENDERER_FLAGS | sys::ImGuiBackendFlags_RendererHasViewports as i32;
+    CORE_RENDERER_FLAGS | sys::ImGuiBackendFlags_RendererHasViewports;
 
 impl GlowRenderer {
     /// Create a new Glow renderer with owned OpenGL context (recommended)
@@ -285,10 +285,10 @@ impl GlowRenderer {
         if io.BackendRendererName != self.renderer_name_ptr {
             return Some(RendererStateFault::State("BackendRendererName"));
         }
-        if io.BackendFlags & sys::ImGuiBackendFlags_RendererHasVtxOffset as i32 == 0 {
+        if io.BackendFlags & sys::ImGuiBackendFlags_RendererHasVtxOffset == 0 {
             return Some(RendererStateFault::Capability("RENDERER_HAS_VTX_OFFSET"));
         }
-        if io.BackendFlags & sys::ImGuiBackendFlags_RendererHasTextures as i32 == 0 {
+        if io.BackendFlags & sys::ImGuiBackendFlags_RendererHasTextures == 0 {
             return Some(RendererStateFault::Capability("RENDERER_HAS_TEXTURES"));
         }
 
@@ -337,8 +337,7 @@ impl GlowRenderer {
             return Some(RendererStateFault::Callback(callback));
         }
 
-        let viewport_flag =
-            io.BackendFlags & sys::ImGuiBackendFlags_RendererHasViewports as i32 != 0;
+        let viewport_flag = io.BackendFlags & sys::ImGuiBackendFlags_RendererHasViewports != 0;
         let viewport_callback = renderer_render_callback_is_glow(platform_io.Renderer_RenderWindow);
         if viewport_flag != viewport_callback {
             return Some(RendererStateFault::Capability("RENDERER_HAS_VIEWPORTS"));
@@ -405,7 +404,7 @@ impl GlowRenderer {
             io.BackendFlags &= !CORE_RENDERER_FLAGS;
         }
         if owns_viewport_callback {
-            io.BackendFlags &= !(sys::ImGuiBackendFlags_RendererHasViewports as i32);
+            io.BackendFlags &= !sys::ImGuiBackendFlags_RendererHasViewports;
         }
         if still_owns_core_publication {
             if platform_io.Renderer_TextureMaxWidth == self.renderer_texture_max[0] {

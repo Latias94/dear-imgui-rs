@@ -21,7 +21,7 @@ implot3d = ["dep:dear-implot3d", "dear-app/implot3d"]
 freetype = ["dear-imgui-rs/freetype"]
 file-browser = ["dep:dear-file-browser", "dear-file-browser/thumbnails-image"]
 reflect = ["dep:dear-imgui-reflect", "dear-imgui-reflect/glam"]
-test-engine = ["dep:dear-imgui-test-engine"]
+test-engine = ["dep:dear-imgui-test-engine", "dear-app/test-engine"]
 multi-viewport = [
     "glow-multi-viewport",
     "dear-imgui-winit/multi-viewport",

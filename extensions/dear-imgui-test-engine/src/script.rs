@@ -118,6 +118,24 @@ macro_rules! wait_commands {
 }
 
 impl ScriptTest<'_> {
+    /// Captures one window through the run-scoped graphical capture provider.
+    #[cfg(feature = "capture")]
+    pub fn capture_screenshot_window(
+        &mut self,
+        reference: &str,
+        flags: crate::CaptureFlags,
+    ) -> TestEngineResult<()> {
+        validate_reference("capture_screenshot_window", "reference", reference, false)?;
+        let status = with_scratch_txt(reference, |pointer| unsafe {
+            sys::imgui_test_engine_script_capture_screenshot_window(
+                self.script.raw(),
+                pointer,
+                flags.bits() as i32,
+            )
+        });
+        ffi_status("imgui_test_engine_script_capture_screenshot_window", status)
+    }
+
     simple_ref_commands! {
         set_ref => imgui_test_engine_script_set_ref;
         item_click => imgui_test_engine_script_item_click;

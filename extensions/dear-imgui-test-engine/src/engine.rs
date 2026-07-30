@@ -1,6 +1,9 @@
+#[cfg(feature = "capture")]
+use std::ffi::c_void;
 use std::marker::PhantomData;
 use std::rc::Rc;
 
+use dear_imgui_rs::render::RenderedFrame;
 use dear_imgui_rs::{
     Context, ContextAttachment, ContextAttachmentLease, ContextAttachmentRole, ContextBinding,
     ContextId, Ui, with_scratch_txt, with_scratch_txt_two,
@@ -10,8 +13,9 @@ use dear_imgui_test_engine_sys as sys;
 use crate::attachment::{AttachmentControl, TestEngineAttachmentMarker};
 use crate::error::ffi_status;
 use crate::{
-    AttachmentState, ResultSummary, RunFlags, RunSpeed, RunState, Script, ScriptTest,
-    TestEngineError, TestEngineResult, TestGroup, VerboseLevel,
+    AttachmentState, CaptureOutput, FrameDriverError, ResultSummary, RunFlags, RunSpeed, RunState,
+    Script, ScriptTest, TestEngineError, TestEngineResult, TestFrameDriver, TestGroup,
+    VerboseLevel,
 };
 
 /// Dear ImGui Test Engine context with one transactional Context attachment.
@@ -21,6 +25,108 @@ pub struct TestEngine {
     control: Rc<AttachmentControl>,
     lease: Option<ContextAttachmentLease>,
     _not_send_sync: PhantomData<Rc<()>>,
+}
+
+struct ActivePresentation<'engine> {
+    engine: &'engine mut TestEngine,
+    active: bool,
+}
+
+struct PostSwapFailure {
+    source: TestEngineError,
+    presentation_completed: bool,
+}
+
+#[cfg(feature = "capture")]
+pub(crate) struct CaptureProviderGuard {
+    engine: *mut sys::ImGuiTestEngine,
+    user_data: *mut c_void,
+    active: bool,
+}
+
+#[cfg(feature = "capture")]
+impl CaptureProviderGuard {
+    pub(crate) fn clear(&mut self) -> TestEngineResult<()> {
+        if !self.active {
+            return Ok(());
+        }
+        let status =
+            unsafe { sys::imgui_test_engine_clear_capture_provider(self.engine, self.user_data) };
+        ffi_status("imgui_test_engine_clear_capture_provider", status)?;
+        self.active = false;
+        Ok(())
+    }
+}
+
+#[cfg(feature = "capture")]
+impl Drop for CaptureProviderGuard {
+    fn drop(&mut self) {
+        let _ = self.clear();
+    }
+}
+
+impl<'engine> ActivePresentation<'engine> {
+    fn begin(engine: &'engine mut TestEngine) -> TestEngineResult<Self> {
+        engine.pre_swap_internal()?;
+        Ok(Self {
+            engine,
+            active: true,
+        })
+    }
+
+    fn abort_once(&mut self) -> TestEngineResult<()> {
+        if !self.active {
+            return Ok(());
+        }
+        self.engine.abort_presentation_internal()?;
+        self.active = false;
+        Ok(())
+    }
+
+    fn abort(mut self) -> Option<TestEngineError> {
+        match self.abort_once() {
+            Ok(()) => None,
+            Err(_) => match self.abort_once() {
+                Ok(()) => None,
+                Err(_) => match self.engine.stop() {
+                    Ok(()) => {
+                        self.active = false;
+                        None
+                    }
+                    Err(source) => Some(source),
+                },
+            },
+        }
+    }
+
+    fn complete(mut self) -> Result<(), (TestEngineError, Option<TestEngineError>)> {
+        match self.engine.post_swap_hook_internal() {
+            Ok(()) => {
+                self.active = false;
+                self.engine
+                    .refresh_run_state()
+                    .map_err(|source| (source, None))
+            }
+            Err(failure) => {
+                if failure.presentation_completed {
+                    self.active = false;
+                    Err((failure.source, None))
+                } else {
+                    let abort_error = self.abort();
+                    Err((failure.source, abort_error))
+                }
+            }
+        }
+    }
+}
+
+impl Drop for ActivePresentation<'_> {
+    fn drop(&mut self) {
+        if self.abort_once().is_err() {
+            let _ = self.engine.stop();
+            self.active = false;
+        }
+    }
 }
 
 impl TestEngine {
@@ -198,21 +304,115 @@ impl TestEngine {
         Ok(())
     }
 
-    /// Notifies the Test Engine immediately before presenting a frame.
-    pub fn pre_swap(&mut self) -> TestEngineResult<()> {
+    /// Renders and presents one frame through a single ordered backend driver.
+    ///
+    /// Consuming [`RenderedFrame`] proves Dear ImGui rendering has completed and prevents the same
+    /// render lease from being driven twice. The attached Context is checked before the driver sees
+    /// the frame. Presentation is then bracketed as `pre-swap -> present -> post-swap`.
+    ///
+    /// If presentation fails or panics, an abort path releases native capture state without
+    /// pretending that the surface was presented.
+    pub fn drive_frame<Driver>(
+        &mut self,
+        frame: RenderedFrame<'_>,
+        frame_index: u64,
+        driver: &mut Driver,
+    ) -> Result<(), FrameDriverError<Driver::RenderError, Driver::PresentError>>
+    where
+        Driver: TestFrameDriver,
+    {
+        self.require_started("TestEngine::drive_frame")
+            .map_err(FrameDriverError::Context)?;
+        let expected = self.attached_context_id().ok_or_else(|| {
+            FrameDriverError::Context(self.state_error(
+                "TestEngine::drive_frame",
+                "frame driving requires a live Test Engine attachment",
+            ))
+        })?;
+        let actual = frame.context_id();
+        if actual != expected {
+            return Err(FrameDriverError::Context(
+                TestEngineError::ContextMismatch {
+                    operation: "TestEngine::drive_frame",
+                    expected,
+                    actual,
+                },
+            ));
+        }
+
+        let reconciled = driver
+            .render(frame, frame_index)
+            .map_err(FrameDriverError::Render)?;
+        if reconciled.context_id() != expected {
+            return Err(FrameDriverError::Context(
+                TestEngineError::ContextMismatch {
+                    operation: "TestEngine::drive_frame render completion",
+                    expected,
+                    actual: reconciled.context_id(),
+                },
+            ));
+        }
+        drop(reconciled);
+        let presentation = ActivePresentation::begin(self).map_err(FrameDriverError::PreSwap)?;
+        if let Err(source) = driver.present(frame_index) {
+            return Err(FrameDriverError::Present {
+                source,
+                abort_error: presentation.abort(),
+            });
+        }
+        presentation
+            .complete()
+            .map_err(|(source, abort_error)| FrameDriverError::PostSwap {
+                source,
+                abort_error,
+            })
+    }
+
+    fn pre_swap_internal(&mut self) -> TestEngineResult<()> {
         self.require_started("TestEngine::pre_swap")?;
         self.call_attached("imgui_test_engine_pre_swap", |raw| unsafe {
             sys::imgui_test_engine_pre_swap(raw)
         })
     }
 
-    /// Notifies the Test Engine immediately after presenting a frame.
-    pub fn post_swap(&mut self) -> TestEngineResult<()> {
-        self.require_started("TestEngine::post_swap")?;
+    fn post_swap_hook_internal(&mut self) -> Result<(), PostSwapFailure> {
+        self.require_started("TestEngine::post_swap")
+            .map_err(|source| PostSwapFailure {
+                source,
+                presentation_completed: false,
+            })?;
+        let mut presentation_completed = false;
         self.call_attached("imgui_test_engine_post_swap", |raw| unsafe {
-            sys::imgui_test_engine_post_swap(raw)
+            sys::imgui_test_engine_post_swap(raw, &mut presentation_completed)
+        })
+        .map_err(|source| PostSwapFailure {
+            source,
+            presentation_completed,
+        })
+    }
+
+    fn abort_presentation_internal(&mut self) -> TestEngineResult<()> {
+        self.require_started("TestEngine::abort_presentation")?;
+        self.call_attached("imgui_test_engine_abort_presentation", |raw| unsafe {
+            sys::imgui_test_engine_abort_presentation(raw)
+        })
+    }
+
+    #[cfg(feature = "capture")]
+    pub(crate) fn install_capture_provider(
+        &mut self,
+        callback: sys::ImGuiTestEngineCaptureCallback_c,
+        user_data: *mut c_void,
+    ) -> TestEngineResult<CaptureProviderGuard> {
+        self.require_started("TestEngine::install_capture_provider")?;
+        self.call_attached("imgui_test_engine_install_capture_provider", |raw| unsafe {
+            sys::imgui_test_engine_install_capture_provider(raw, callback, user_data)
         })?;
-        self.refresh_run_state()
+        Ok(CaptureProviderGuard {
+            engine: self.control.raw(),
+            user_data,
+            active: true,
+        })
     }
 
     /// Shows Test Engine windows for a `Ui` from the attached Context and current frame.
@@ -470,11 +670,17 @@ impl TestEngine {
         })
     }
 
-    pub fn set_capture_enabled(&mut self, enabled: bool) -> TestEngineResult<()> {
-        self.require_ready("TestEngine::set_capture_enabled")?;
-        self.call_attached("imgui_test_engine_set_capture_enabled", |raw| unsafe {
-            sys::imgui_test_engine_set_capture_enabled(raw, enabled)
-        })
+    /// Selects whether a successful capture is saved or discarded.
+    ///
+    /// This does not install a framebuffer provider. Use
+    /// [`crate::TestRunner::run_graphical_with_capture`] when capture support is required.
+    pub fn set_capture_output(&mut self, output: CaptureOutput) -> TestEngineResult<()> {
+        self.require_ready("TestEngine::set_capture_output")?;
+        let enabled = matches!(output, CaptureOutput::Save);
+        self.call_attached(
+            "imgui_test_engine_set_capture_output_enabled",
+            |raw| unsafe { sys::imgui_test_engine_set_capture_output_enabled(raw, enabled) },
+        )
     }
 
     pub fn install_default_crash_handler(&self) -> TestEngineResult<()> {

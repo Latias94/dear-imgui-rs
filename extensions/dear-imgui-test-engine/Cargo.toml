@@ -18,7 +18,7 @@ dear-imgui-test-engine-sys.workspace = true
 bitflags.workspace = true
 
 [features]
-default = ["capture"]
+default = []
 freetype = [
     "dear-imgui-rs/freetype",
     "dear-imgui-test-engine-sys/freetype",

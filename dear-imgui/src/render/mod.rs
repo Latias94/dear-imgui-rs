@@ -27,5 +27,5 @@ pub mod snapshot;
 
 // Re-export commonly used types
 pub use draw_data::*;
-pub use frame::RenderedFrame;
+pub use frame::{ReconciledFrame, RenderedFrame};
 pub use snapshot::*;

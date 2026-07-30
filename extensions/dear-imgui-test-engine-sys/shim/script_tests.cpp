@@ -94,6 +94,7 @@ struct ImGuiTestEngineScript {
         WindowMove,
         WindowResize,
         DockInto,
+        CaptureScreenshotWindow,
         Sleep,
         AssertItemExists,
         AssertItemVisible,
@@ -498,6 +499,20 @@ static void script_test_func_impl(ImGuiTestContext* ctx) {
                     static_cast<ImGuiDir>(cmd.I),
                     cmd.J != 0
                 );
+                break;
+            case ImGuiTestEngineScript::CmdKind::CaptureScreenshotWindow:
+                ctx->CaptureReset();
+                if (!ctx->CaptureAddWindow(cmd.A.c_str()) || !ctx->CaptureScreenshot(cmd.I)) {
+                    ImGuiTestEngine_Error(
+                        __FILE__,
+                        __func__,
+                        __LINE__,
+                        ImGuiTestCheckFlags_None,
+                        "Script screenshot capture failed for '%s'",
+                        cmd.A.c_str()
+                    );
+                    return;
+                }
                 break;
             case ImGuiTestEngineScript::CmdKind::Sleep:
                 ctx->Sleep(cmd.F);
@@ -1745,6 +1760,35 @@ ImGuiTestEngineStatus imgui_test_engine_script_sleep(
         command.F = seconds;
         return nonnegative_value(seconds);
     });
+}
+
+ImGuiTestEngineStatus imgui_test_engine_script_capture_screenshot_window(
+    ImGuiTestEngineScript* script,
+    const char* ref,
+    int capture_flags
+) {
+    constexpr int kCaptureFlagsMask =
+        ImGuiTestEngineCaptureFlags_StitchAll |
+        ImGuiTestEngineCaptureFlags_IncludeOtherWindows |
+        ImGuiTestEngineCaptureFlags_IncludePopups |
+        ImGuiTestEngineCaptureFlags_HideMouseCursor;
+    return append_command(
+        "imgui_test_engine_script_capture_screenshot_window",
+        script,
+        [&](auto& command) {
+            ImGuiTestEngineStatus status = required_ref(command.A, ref, false);
+            if (status == ImGuiTestEngineStatus_Success &&
+                (capture_flags < 0 || (capture_flags & ~kCaptureFlagsMask) != 0)) {
+                status = abi::fail(
+                    ImGuiTestEngineStatus_OutOfRange,
+                    "capture flags contain unknown bits"
+                );
+            }
+            command.Kind = ImGuiTestEngineScript::CmdKind::CaptureScreenshotWindow;
+            command.I = capture_flags;
+            return status;
+        }
+    );
 }
 
 ImGuiTestEngineStatus imgui_test_engine_script_assert_item_read_int_eq(

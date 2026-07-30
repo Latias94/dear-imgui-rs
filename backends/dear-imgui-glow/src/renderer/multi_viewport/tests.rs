@@ -337,6 +337,37 @@ fn attach_exposes_the_platform_gl_context_contract_as_unsafe() {
 }
 
 #[test]
+fn frame_trace_is_instance_bound_non_nested_and_drop_abortable() {
+    let _guard = test_guard();
+    let mut context = Context::create();
+    let _platform = attach_test_platform(&mut context);
+    let gl = fake_gl();
+    let renderer = test_renderer(&mut context, Some(Rc::clone(&gl)), false);
+    let mut runtime = unsafe { GlowViewportRuntime::attach(&mut context, renderer) }.unwrap();
+    let control = runtime.control_for_test();
+
+    let trace = runtime.begin_frame_trace().unwrap();
+    assert!(matches!(
+        runtime.begin_frame_trace(),
+        Err(GlowViewportError::FrameTraceAlreadyActive)
+    ));
+    control.record_rendered_viewport(17);
+    control.record_rendered_viewport(17);
+    control.record_rendered_viewport(9);
+    let report = trace.finish();
+    assert_eq!(
+        report.rendered_viewports(),
+        &[dear_imgui_rs::Id::from(9), dear_imgui_rs::Id::from(17)]
+    );
+
+    drop(runtime.begin_frame_trace().unwrap());
+    let report = runtime.begin_frame_trace().unwrap().finish();
+    assert!(report.rendered_viewports().is_empty());
+
+    runtime.shutdown(&mut context).unwrap();
+}
+
+#[test]
 fn attach_rejects_core_drift_before_publishing_viewport_state() {
     let _guard = test_guard();
     let mut context = Context::create();

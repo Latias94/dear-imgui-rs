@@ -18,13 +18,15 @@ mod runtime;
 
 pub use application::{
     AddOns, Application, DockingApi, EventContext, ExternalTextureError, ExternalTextureHandle,
-    FrameContext, GpuApi, GpuContext, GpuGeneration, InitContext, PrepareFrameContext,
-    PresentContext, RunError, ShutdownContext,
+    FrameContext, GpuApi, GpuContext, GpuGeneration, InitContext, PrepareFrameContext, RunError,
+    ShutdownContext,
 };
 pub use config::{
     AddOnsConfig, AppConfig, DockingConfig, RedrawMode, Theme, WgpuConfig, WgpuPreset,
 };
 pub use dear_imgui_rs as imgui;
+#[cfg(feature = "test-engine")]
+pub use dear_imgui_test_engine as test_engine;
 pub use wgpu;
 
 /// Runs one persistent application until the event loop exits.

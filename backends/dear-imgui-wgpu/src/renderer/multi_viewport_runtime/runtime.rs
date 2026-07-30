@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::fmt;
 use std::rc::Rc;
 
-use dear_imgui_rs::render::RenderedFrame;
+use dear_imgui_rs::render::{ReconciledFrame, RenderedFrame};
 use dear_imgui_rs::{
     Context, ContextAttachment, ContextAttachmentError, ContextAttachmentLease,
     ContextAttachmentRole, ContextAttachmentTeardownError, ContextBinding, ContextBindingError,
@@ -19,6 +19,7 @@ use super::registry::{
     GlobalHandles, drop_orphaned_viewport_data, preflight_runtime, register_runtime,
     renderer_globals, unregister_runtime,
 };
+use super::trace::{FrameTraceState, WgpuViewportFrameTraceReport};
 use crate::{GammaMode, RendererError, WgpuRenderer};
 
 struct WgpuRendererAttachmentMarker;
@@ -154,6 +155,9 @@ pub enum WgpuViewportError {
     /// Native multi-viewport surfaces are unavailable on this target.
     #[error("WGPU native multi-viewport rendering is unavailable on this target")]
     UnsupportedTarget,
+    /// A frame trace is already active for this runtime.
+    #[error("a WGPU secondary-viewport frame trace is already active")]
+    FrameTraceAlreadyActive,
 }
 
 /// Transactional attachment failure that returns the renderer unchanged.
@@ -238,6 +242,7 @@ pub(super) struct RuntimeControl {
     attachment: RefCell<Option<ContextAttachmentLease>>,
     callback_state: Cell<CallbackState>,
     faults: RefCell<Option<WgpuViewportError>>,
+    frame_trace: RefCell<FrameTraceState>,
     #[cfg(test)]
     panic_next_callback: Cell<bool>,
     #[cfg(test)]
@@ -269,6 +274,7 @@ impl RuntimeControl {
             attachment: RefCell::new(None),
             callback_state: Cell::new(CallbackState::Unclaimed),
             faults: RefCell::new(None),
+            frame_trace: RefCell::new(FrameTraceState::default()),
             #[cfg(test)]
             panic_next_callback: Cell::new(false),
             #[cfg(test)]
@@ -362,6 +368,35 @@ impl RuntimeControl {
         if faults.is_none() {
             *faults = Some(fault);
         }
+    }
+
+    fn begin_frame_trace(&self) -> Result<(), WgpuViewportError> {
+        self.ensure_entry()?;
+        if self.frame_trace.borrow_mut().begin() {
+            Ok(())
+        } else {
+            Err(WgpuViewportError::FrameTraceAlreadyActive)
+        }
+    }
+
+    fn finish_frame_trace(&self) -> WgpuViewportFrameTraceReport {
+        self.frame_trace.borrow_mut().finish()
+    }
+
+    fn abort_frame_trace(&self) {
+        self.frame_trace.borrow_mut().abort();
+    }
+
+    pub(super) fn record_viewport_render_submitted(&self, viewport_id: dear_imgui_rs::Id) {
+        self.frame_trace
+            .borrow_mut()
+            .record_render_submitted(viewport_id);
+    }
+
+    pub(super) fn record_viewport_present_submitted(&self, viewport_id: dear_imgui_rs::Id) {
+        self.frame_trace
+            .borrow_mut()
+            .record_present_submitted(viewport_id);
     }
 
     pub(super) fn record_runtime_contract_fault(&self, fault: WgpuViewportError) {
@@ -636,7 +671,7 @@ impl RuntimeControl {
         // prevents the renderer reset before mutating viewport sidecars, surfaces, callbacks, or
         // runtime state.
         if let ShutdownAction::Explicit(context) = &mut action {
-            self.preflight_renderer_shutdown(&mut **context)?;
+            self.preflight_renderer_shutdown(context)?;
         }
 
         // A foreign write to one sidecar makes the active DestroyWindow callback the only safe
@@ -818,6 +853,34 @@ pub(crate) struct OwningViewportRuntime {
     control: Rc<RuntimeControl>,
 }
 
+/// A non-nestable trace scope for one secondary-viewport rendering pass.
+///
+/// Call [`Self::finish`] before acquiring or presenting the application's main surface to obtain
+/// a report that proves which secondary surfaces completed renderer submission and presentation
+/// within this scope. Dropping the guard discards the partial trace.
+#[must_use = "finish the frame trace to obtain its report"]
+pub struct WgpuViewportFrameTraceGuard<'runtime> {
+    control: &'runtime RuntimeControl,
+    active: bool,
+}
+
+impl WgpuViewportFrameTraceGuard<'_> {
+    /// Ends the trace and returns its normalized, same-scope submission evidence.
+    pub fn finish(mut self) -> WgpuViewportFrameTraceReport {
+        let report = self.control.finish_frame_trace();
+        self.active = false;
+        report
+    }
+}
+
+impl Drop for WgpuViewportFrameTraceGuard<'_> {
+    fn drop(&mut self) {
+        if self.active {
+            self.control.abort_frame_trace();
+        }
+    }
+}
+
 impl fmt::Debug for OwningViewportRuntime {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -828,6 +891,16 @@ impl fmt::Debug for OwningViewportRuntime {
 }
 
 impl OwningViewportRuntime {
+    pub(crate) fn begin_frame_trace(
+        &self,
+    ) -> Result<WgpuViewportFrameTraceGuard<'_>, WgpuViewportError> {
+        self.control.begin_frame_trace()?;
+        Ok(WgpuViewportFrameTraceGuard {
+            control: self.control.as_ref(),
+            active: true,
+        })
+    }
+
     pub(crate) fn attach(
         context: &mut Context,
         renderer: WgpuRenderer,
@@ -930,6 +1003,14 @@ impl OwningViewportRuntime {
             .with_renderer_mut(|renderer| renderer.new_frame().map_err(Into::into))
     }
 
+    pub(crate) fn reconcile_frame(
+        &self,
+        frame: &mut RenderedFrame<'_>,
+    ) -> Result<(), WgpuViewportError> {
+        self.control
+            .with_renderer_mut(|renderer| renderer.reconcile_frame(frame).map_err(Into::into))
+    }
+
     pub(crate) fn render(
         &self,
         frame: RenderedFrame<'_>,
@@ -937,6 +1018,18 @@ impl OwningViewportRuntime {
     ) -> Result<(), WgpuViewportError> {
         self.control
             .with_renderer_mut(|renderer| renderer.render(frame, render_pass).map_err(Into::into))
+    }
+
+    pub(crate) fn render_reconciled<'frame>(
+        &self,
+        frame: RenderedFrame<'frame>,
+        render_pass: &mut wgpu::RenderPass<'_>,
+    ) -> Result<ReconciledFrame<'frame>, WgpuViewportError> {
+        self.control.with_renderer_mut(|renderer| {
+            renderer
+                .render_reconciled(frame, render_pass)
+                .map_err(Into::into)
+        })
     }
 
     pub(crate) fn render_context(
@@ -961,6 +1054,20 @@ impl OwningViewportRuntime {
         self.control.with_renderer_mut(|renderer| {
             renderer
                 .render_with_fb_size(frame, render_pass, width, height)
+                .map_err(Into::into)
+        })
+    }
+
+    pub(crate) fn render_with_fb_size_reconciled<'frame>(
+        &self,
+        frame: RenderedFrame<'frame>,
+        render_pass: &mut wgpu::RenderPass<'_>,
+        width: u32,
+        height: u32,
+    ) -> Result<ReconciledFrame<'frame>, WgpuViewportError> {
+        self.control.with_renderer_mut(|renderer| {
+            renderer
+                .render_with_fb_size_reconciled(frame, render_pass, width, height)
                 .map_err(Into::into)
         })
     }

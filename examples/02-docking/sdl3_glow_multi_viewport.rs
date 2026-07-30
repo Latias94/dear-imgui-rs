@@ -27,18 +27,23 @@ use dear_imgui_examples::sdl3_callbacks::{
     Sdl3CallbackEventHandoff, configure_main_callback_rate, requests_exit,
 };
 use dear_imgui_glow::{GlowRenderer, SimpleTextureMap, multi_viewport::GlowViewportRuntime};
-use dear_imgui_rs::{Condition, ConfigFlags, Context};
+#[cfg(feature = "test-engine")]
+use dear_imgui_rs::Id;
+use dear_imgui_rs::{
+    Condition, ConfigFlags, Context,
+    render::{ReconciledFrame, RenderedFrame},
+};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, Sdl3PlatformBackend};
 #[cfg(feature = "test-engine")]
 use dear_imgui_test_engine::{
-    RunFlags, RunSpeed, ScriptCount, TestEngine, TestGroup, VerboseLevel,
+    RunFlags, RunSpeed, ScriptCount, TestEngine, TestFrameDriver, TestGroup, VerboseLevel,
 };
 use glow::HasContext;
 use sdl3::video::{GLProfile, SwapInterval, WindowPos};
 use sdl3_main::{AppResult, AppResultWithState, MainThreadData, app_impl};
+use std::fmt;
 #[cfg(feature = "test-engine")]
 use std::{
-    fmt,
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
@@ -57,8 +62,9 @@ struct ViewportSmokeState {
     result_path: Option<PathBuf>,
     renderer: OpenGlRendererInfo,
     saw_secondary_viewport: bool,
-    rendered_secondary_viewport: bool,
+    completed_frame_evidence: Option<SecondaryViewportFrameEvidence>,
     saw_merged_viewport: bool,
+    main_present_bracketed_by_test_engine: bool,
     complete: bool,
 }
 
@@ -66,20 +72,28 @@ struct ViewportSmokeState {
 struct CompletedViewportSmoke {
     result_path: Option<PathBuf>,
     renderer: OpenGlRendererInfo,
-    saw_secondary_viewport: bool,
-    rendered_secondary_viewport: bool,
+    context_ready_viewports: Vec<Id>,
+    glow_draw_issued_viewports: Vec<Id>,
+    swap_succeeded_viewports: Vec<Id>,
     saw_merged_viewport: bool,
+    main_present_bracketed_by_test_engine: bool,
 }
 
 #[cfg(feature = "test-engine")]
 impl ViewportSmokeState {
     fn completed_result(&self) -> Option<CompletedViewportSmoke> {
-        self.complete.then(|| CompletedViewportSmoke {
+        if !self.complete {
+            return None;
+        }
+        let evidence = self.completed_frame_evidence.as_ref()?;
+        Some(CompletedViewportSmoke {
             result_path: self.result_path.clone(),
             renderer: self.renderer.clone(),
-            saw_secondary_viewport: self.saw_secondary_viewport,
-            rendered_secondary_viewport: self.rendered_secondary_viewport,
+            context_ready_viewports: evidence.context_activated_viewports.clone(),
+            glow_draw_issued_viewports: evidence.glow_rendered_viewports.clone(),
+            swap_succeeded_viewports: evidence.swapped_viewports.clone(),
             saw_merged_viewport: self.saw_merged_viewport,
+            main_present_bracketed_by_test_engine: self.main_present_bracketed_by_test_engine,
         })
     }
 }
@@ -91,16 +105,28 @@ impl CompletedViewportSmoke {
             return Ok(());
         };
         let json = format!(
-            "{{\"schema_version\":1,\"outcome\":\"Passed\",\"renderer\":{{\"backend\":\"OpenGL\",\"vendor\":\"{}\",\"name\":\"{}\",\"version\":\"{}\"}},\"secondary_viewport_observed\":{},\"secondary_viewport_rendered\":{},\"merge_observed\":{},\"teardown_complete\":true}}",
+            "{{\"schema_version\":3,\"renderer\":{{\"backend\":\"OpenGL\",\"vendor\":\"{}\",\"name\":\"{}\",\"version\":\"{}\"}},\"secondary_context_ready_before_main_present_viewport_ids\":{},\"secondary_draw_issued_before_main_present_viewport_ids\":{},\"secondary_swap_succeeded_before_main_present_viewport_ids\":{},\"merge_observed\":{},\"main_present_bracketed_by_test_engine\":{}}}",
             json_escape(&self.renderer.vendor),
             json_escape(&self.renderer.renderer),
             json_escape(&self.renderer.version),
-            self.saw_secondary_viewport,
-            self.rendered_secondary_viewport,
+            viewport_ids_json(&self.context_ready_viewports),
+            viewport_ids_json(&self.glow_draw_issued_viewports),
+            viewport_ids_json(&self.swap_succeeded_viewports),
             self.saw_merged_viewport,
+            self.main_present_bracketed_by_test_engine,
         );
         write_json_atomic(&path, &json)
     }
+}
+
+#[cfg(feature = "test-engine")]
+fn viewport_ids_json(ids: &[Id]) -> String {
+    let ids = ids
+        .iter()
+        .map(|id| id.raw().to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("[{ids}]")
 }
 
 #[cfg(feature = "test-engine")]
@@ -200,6 +226,187 @@ struct MainData {
     test_engine: Option<TestEngine>,
     #[cfg(feature = "test-engine")]
     viewport_smoke: Option<ViewportSmokeState>,
+    #[cfg(feature = "test-engine")]
+    test_engine_frame_index: u64,
+}
+
+#[derive(Debug)]
+struct SdlGlowFrameError {
+    source: Box<dyn Error>,
+}
+
+impl SdlGlowFrameError {
+    fn new(source: impl Error + 'static) -> Self {
+        Self {
+            source: Box::new(source),
+        }
+    }
+
+    fn message(message: impl Into<String>) -> Self {
+        Self::new(std::io::Error::other(message.into()))
+    }
+}
+
+impl fmt::Display for SdlGlowFrameError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.source.fmt(formatter)
+    }
+}
+
+impl Error for SdlGlowFrameError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(self.source.as_ref())
+    }
+}
+
+#[cfg(feature = "test-engine")]
+#[derive(Debug, Default)]
+struct SecondaryViewportFrameEvidence {
+    context_activated_viewports: Vec<Id>,
+    glow_rendered_viewports: Vec<Id>,
+    swapped_viewports: Vec<Id>,
+    completed_viewports: Vec<Id>,
+}
+
+#[cfg(feature = "test-engine")]
+impl SecondaryViewportFrameEvidence {
+    fn from_reports(
+        glow: &dear_imgui_glow::multi_viewport::GlowViewportFrameReport,
+        sdl3: &dear_imgui_sdl3::Sdl3OpenGlViewportFrameReport,
+    ) -> Self {
+        let context_activated_viewports = sdl3.context_activated_viewports().to_vec();
+        let glow_rendered_viewports = glow.rendered_viewports().to_vec();
+        let swapped_viewports = sdl3.swapped_viewports().to_vec();
+        let completed_viewports = glow_rendered_viewports
+            .iter()
+            .copied()
+            .filter(|id| context_activated_viewports.contains(id) && swapped_viewports.contains(id))
+            .collect();
+        Self {
+            context_activated_viewports,
+            glow_rendered_viewports,
+            swapped_viewports,
+            completed_viewports,
+        }
+    }
+}
+
+struct SdlGlowFrameDriver<'a> {
+    sdl3_backend: &'a Sdl3PlatformBackend,
+    renderer: &'a GlowViewportRuntime,
+    gl: &'a glow::Context,
+    window: &'a sdl3::video::Window,
+    gl_context: &'a sdl3::video::GLContext,
+    rendered: bool,
+    #[cfg(feature = "test-engine")]
+    secondary_viewport_evidence: Option<SecondaryViewportFrameEvidence>,
+    presented: bool,
+}
+
+impl SdlGlowFrameDriver<'_> {
+    fn render_frame<'frame>(
+        &mut self,
+        frame: RenderedFrame<'frame>,
+    ) -> Result<ReconciledFrame<'frame>, SdlGlowFrameError> {
+        if self.rendered {
+            return Err(SdlGlowFrameError::message(
+                "main OpenGL frame was rendered more than once",
+            ));
+        }
+        unsafe {
+            let (width, height) = self.window.size_in_pixels();
+            self.gl.viewport(0, 0, width as i32, height as i32);
+            self.gl.clear_color(0.1, 0.12, 0.15, 1.0);
+            self.gl.clear(glow::COLOR_BUFFER_BIT);
+        }
+
+        self.renderer.new_frame().map_err(SdlGlowFrameError::new)?;
+        #[cfg(feature = "test-engine")]
+        let sdl3_trace = self
+            .sdl3_backend
+            .begin_opengl_viewport_frame_trace()
+            .map_err(SdlGlowFrameError::new)?;
+        #[cfg(feature = "test-engine")]
+        let glow_trace = self
+            .renderer
+            .begin_frame_trace()
+            .map_err(SdlGlowFrameError::new)?;
+        let render_result = self
+            .renderer
+            .render_with_platform_windows_reconciled(frame)
+            .map_err(SdlGlowFrameError::new);
+        let restore_result = self
+            .window
+            .gl_make_current(self.gl_context)
+            .map_err(|error| {
+                SdlGlowFrameError::message(format!(
+                    "failed to restore the main OpenGL context: {error}"
+                ))
+            });
+        #[cfg(feature = "test-engine")]
+        let glow_report = glow_trace.finish();
+        #[cfg(feature = "test-engine")]
+        let sdl3_report = sdl3_trace.finish();
+        let glow_fault = self.renderer.poll_fault().map_err(SdlGlowFrameError::new);
+        let sdl3_fault = self
+            .sdl3_backend
+            .poll_fault()
+            .map_err(SdlGlowFrameError::new);
+
+        restore_result?;
+        glow_fault?;
+        sdl3_fault?;
+        let reconciled = render_result?;
+        #[cfg(feature = "test-engine")]
+        {
+            self.secondary_viewport_evidence = Some(SecondaryViewportFrameEvidence::from_reports(
+                &glow_report,
+                &sdl3_report,
+            ));
+        }
+        self.rendered = true;
+        Ok(reconciled)
+    }
+
+    fn present_frame(&mut self) -> Result<(), SdlGlowFrameError> {
+        if !self.rendered {
+            return Err(SdlGlowFrameError::message(
+                "main OpenGL window was presented before frame and platform rendering completed",
+            ));
+        }
+        #[cfg(feature = "test-engine")]
+        if self.secondary_viewport_evidence.is_none() {
+            return Err(SdlGlowFrameError::message(
+                "main OpenGL window was presented before viewport evidence was collected",
+            ));
+        }
+        if self.presented {
+            return Err(SdlGlowFrameError::message(
+                "main OpenGL window was presented more than once",
+            ));
+        }
+        self.window.gl_swap_window();
+        self.presented = true;
+        Ok(())
+    }
+}
+
+#[cfg(feature = "test-engine")]
+impl TestFrameDriver for SdlGlowFrameDriver<'_> {
+    type RenderError = SdlGlowFrameError;
+    type PresentError = SdlGlowFrameError;
+
+    fn render<'frame>(
+        &mut self,
+        frame: RenderedFrame<'frame>,
+        _frame_index: u64,
+    ) -> Result<ReconciledFrame<'frame>, Self::RenderError> {
+        self.render_frame(frame)
+    }
+
+    fn present(&mut self, _frame_index: u64) -> Result<(), Self::PresentError> {
+        self.present_frame()
+    }
 }
 
 impl GlowApp {
@@ -350,9 +557,9 @@ impl MainData {
             &mut imgui,
             Box::new(SimpleTextureMap::default()),
         )?;
-        // SAFETY: SDL3's OpenGL viewport backend sets SDL_GL_SHARE_WITH_CURRENT_CONTEXT before
-        // creating each secondary context, makes that viewport context current for render callbacks,
-        // and restores the previous context after the callback transaction.
+        // SAFETY: SDL3's OpenGL viewport backend creates every secondary context in the main
+        // context's share group and makes the matching context current for renderer callbacks. The
+        // frame driver explicitly restores `gl_context` after the platform-window pump.
         let renderer = unsafe { GlowViewportRuntime::attach(&mut imgui, renderer)? };
 
         #[cfg(feature = "test-engine")]
@@ -367,7 +574,6 @@ impl MainData {
 
             let mut engine = TestEngine::create()?;
             engine.start(&mut imgui)?;
-            engine.set_capture_enabled(false)?;
             engine.set_run_speed(RunSpeed::Fast)?;
             engine.set_verbose_level(VerboseLevel::Info)?;
             engine.add_script_test("sdl3-glow", "multi_viewport_surface_smoke", move |test| {
@@ -394,8 +600,9 @@ impl MainData {
             result_path: std::env::var_os("DEAR_IMGUI_VIEWPORT_SMOKE_JSON").map(PathBuf::from),
             renderer: renderer_info,
             saw_secondary_viewport: false,
-            rendered_secondary_viewport: false,
+            completed_frame_evidence: None,
             saw_merged_viewport: false,
+            main_present_bracketed_by_test_engine: false,
             complete: false,
         });
 
@@ -413,6 +620,8 @@ impl MainData {
             test_engine,
             #[cfg(feature = "test-engine")]
             viewport_smoke,
+            #[cfg(feature = "test-engine")]
+            test_engine_frame_index: 0,
         })
     }
 
@@ -453,37 +662,71 @@ impl MainData {
             });
 
         let frame = self.imgui.render();
-        unsafe {
-            let (width, height) = self.window.size_in_pixels();
-            self.gl.viewport(0, 0, width as i32, height as i32);
-            self.gl.clear_color(0.1, 0.12, 0.15, 1.0);
-            self.gl.clear(glow::COLOR_BUFFER_BIT);
-        }
+        #[cfg(feature = "test-engine")]
+        let frame_index = {
+            self.test_engine_frame_index = self
+                .test_engine_frame_index
+                .checked_add(1)
+                .ok_or("Test Engine frame index exhausted")?;
+            self.test_engine_frame_index
+        };
+        #[cfg(feature = "test-engine")]
+        let used_test_engine = self.test_engine.is_some();
 
-        self.renderer.new_frame()?;
-        self.renderer.render(frame)?;
-        self.imgui.update_platform_windows();
-        self.imgui.render_platform_windows_default();
-        self.window.gl_make_current(&self.gl_context)?;
-        self.renderer.poll_fault()?;
+        let mut driver = SdlGlowFrameDriver {
+            sdl3_backend: &self.sdl3_backend,
+            renderer: &self.renderer,
+            gl: self.gl.as_ref(),
+            window: &self.window,
+            gl_context: &self.gl_context,
+            rendered: false,
+            #[cfg(feature = "test-engine")]
+            secondary_viewport_evidence: None,
+            presented: false,
+        };
+        #[cfg(feature = "test-engine")]
+        let presentation_result: Result<(), Box<dyn Error>> =
+            if let Some(engine) = self.test_engine.as_mut() {
+                engine
+                    .drive_frame(frame, frame_index, &mut driver)
+                    .map_err(|error| Box::new(error) as Box<dyn Error>)
+            } else {
+                let reconciled = driver.render_frame(frame)?;
+                drop(reconciled);
+                driver
+                    .present_frame()
+                    .map_err(|error| Box::new(error) as Box<dyn Error>)
+            };
+        #[cfg(not(feature = "test-engine"))]
+        let presentation_result: Result<(), Box<dyn Error>> = {
+            let reconciled = driver.render_frame(frame)?;
+            drop(reconciled);
+            driver
+                .present_frame()
+                .map_err(|error| Box::new(error) as Box<dyn Error>)
+        };
 
         #[cfg(feature = "test-engine")]
-        if viewport_count > 1
-            && let Some(smoke) = self.viewport_smoke.as_mut()
+        let secondary_viewport_evidence = driver
+            .secondary_viewport_evidence
+            .take()
+            .unwrap_or_default();
+        #[cfg(feature = "test-engine")]
+        let was_presented = driver.presented;
+        drop(driver);
+        presentation_result?;
+
+        #[cfg(feature = "test-engine")]
+        if let Some(smoke) = self.viewport_smoke.as_mut()
+            && smoke.completed_frame_evidence.is_none()
+            && !secondary_viewport_evidence.completed_viewports.is_empty()
         {
-            smoke.rendered_secondary_viewport = true;
+            smoke.completed_frame_evidence = Some(secondary_viewport_evidence);
+            smoke.main_present_bracketed_by_test_engine = used_test_engine && was_presented;
         }
 
         #[cfg(feature = "test-engine")]
         if let Some(engine) = self.test_engine.as_mut() {
-            engine.pre_swap()?;
-        }
-
-        self.window.gl_swap_window();
-
-        #[cfg(feature = "test-engine")]
-        if let Some(engine) = self.test_engine.as_mut() {
-            engine.post_swap()?;
             let smoke_pending = self
                 .viewport_smoke
                 .as_ref()
@@ -501,14 +744,20 @@ impl MainData {
                     .as_mut()
                     .expect("a pending viewport smoke state must exist");
                 if !smoke.saw_secondary_viewport
-                    || !smoke.rendered_secondary_viewport
+                    || smoke.completed_frame_evidence.is_none()
                     || !smoke.saw_merged_viewport
+                    || !smoke.main_present_bracketed_by_test_engine
                 {
+                    let evidence = smoke.completed_frame_evidence.as_ref();
                     return Err(format!(
-                        "viewport smoke did not observe the complete lifecycle: secondary={}, rendered={}, merged={}",
+                        "viewport smoke did not observe one secondary viewport completing the native-context, Glow-draw, and native-swap stages in the same frame before the main present: secondary={}, context_ready={:?}, glow_drawn={:?}, swapped={:?}, completed={:?}, merged={}, main_present_bracketed={}",
                         smoke.saw_secondary_viewport,
-                        smoke.rendered_secondary_viewport,
-                        smoke.saw_merged_viewport
+                        evidence.map(|evidence| &evidence.context_activated_viewports),
+                        evidence.map(|evidence| &evidence.glow_rendered_viewports),
+                        evidence.map(|evidence| &evidence.swapped_viewports),
+                        evidence.map(|evidence| &evidence.completed_viewports),
+                        smoke.saw_merged_viewport,
+                        smoke.main_present_bracketed_by_test_engine,
                     )
                     .into());
                 }

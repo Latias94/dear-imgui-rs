@@ -29,22 +29,22 @@
 
 #[cfg(feature = "test-engine")]
 use dear_imgui_rs::MouseButton;
+use dear_imgui_rs::render::{ReconciledFrame, RenderedFrame};
 use dear_imgui_rs::{Condition, Context, TextureId};
 #[cfg(feature = "test-engine")]
 use dear_imgui_test_engine::{
-    RunFlags, RunSpeed, ScriptCount, TestEngine, TestGroup, VerboseLevel,
+    RunFlags, RunSpeed, ScriptCount, TestEngine, TestFrameDriver, TestGroup, VerboseLevel,
 };
 use dear_imgui_wgpu::{GammaMode, WgpuInitInfo, WgpuRenderer, multi_viewport as wgpu_mvp};
 use dear_imgui_winit::{HiDpiMode, WinitPlatform, multi_viewport as winit_mvp};
 use pollster::block_on;
+use std::{fmt, sync::Arc, time::Instant};
 #[cfg(feature = "test-engine")]
 use std::{
-    fmt,
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
 };
-use std::{sync::Arc, time::Instant};
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
@@ -54,8 +54,70 @@ use winit::{
 };
 
 enum AppRenderer {
-    Single(WgpuRenderer),
+    Single(Box<WgpuRenderer>),
     Multi(wgpu_mvp::WinitViewportRuntime),
+}
+
+#[derive(Debug)]
+struct MainSurfaceFrameError {
+    source: Box<dyn std::error::Error>,
+}
+
+impl MainSurfaceFrameError {
+    fn message(message: &'static str) -> Self {
+        Self {
+            source: Box::new(std::io::Error::other(message)),
+        }
+    }
+}
+
+impl fmt::Display for MainSurfaceFrameError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.source.fmt(formatter)
+    }
+}
+
+impl std::error::Error for MainSurfaceFrameError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.source.as_ref())
+    }
+}
+
+impl From<Box<dyn std::error::Error>> for MainSurfaceFrameError {
+    fn from(source: Box<dyn std::error::Error>) -> Self {
+        Self { source }
+    }
+}
+
+#[cfg(feature = "test-engine")]
+#[derive(Clone, Debug)]
+struct SecondarySubmissionEvidence {
+    render_submitted_viewport_ids: Vec<u32>,
+    present_submitted_viewport_ids: Vec<u32>,
+}
+
+#[cfg(feature = "test-engine")]
+impl SecondarySubmissionEvidence {
+    fn from_report(report: &wgpu_mvp::WgpuViewportFrameTraceReport) -> Option<Self> {
+        let render_submitted_viewport_ids = report
+            .render_submitted_viewport_ids()
+            .iter()
+            .map(|id| id.raw())
+            .collect::<Vec<_>>();
+        let present_submitted_viewport_ids = report
+            .present_submitted_viewport_ids()
+            .iter()
+            .map(|id| id.raw())
+            .collect::<Vec<_>>();
+
+        render_submitted_viewport_ids
+            .iter()
+            .any(|id| present_submitted_viewport_ids.contains(id))
+            .then_some(Self {
+                render_submitted_viewport_ids,
+                present_submitted_viewport_ids,
+            })
+    }
 }
 
 #[cfg(feature = "test-engine")]
@@ -69,6 +131,8 @@ struct ViewportSmokeState {
     saw_secondary_viewport: bool,
     saw_secondary_while_held: bool,
     saw_merged_viewport: bool,
+    secondary_submission_before_main_acquire: Option<SecondarySubmissionEvidence>,
+    main_present_bracketed_by_test_engine: bool,
     complete: bool,
 }
 
@@ -76,20 +140,26 @@ struct ViewportSmokeState {
 struct CompletedViewportSmoke {
     result_path: Option<PathBuf>,
     adapter: wgpu::AdapterInfo,
-    saw_secondary_viewport: bool,
     saw_secondary_while_held: bool,
     saw_merged_viewport: bool,
+    secondary_submission_before_main_acquire: SecondarySubmissionEvidence,
+    main_present_bracketed_by_test_engine: bool,
 }
 
 #[cfg(feature = "test-engine")]
 impl ViewportSmokeState {
     fn completed_result(&self) -> Option<CompletedViewportSmoke> {
+        let secondary_submission_before_main_acquire = self
+            .secondary_submission_before_main_acquire
+            .as_ref()?
+            .clone();
         self.complete.then(|| CompletedViewportSmoke {
             result_path: self.result_path.clone(),
             adapter: self.adapter.clone(),
-            saw_secondary_viewport: self.saw_secondary_viewport,
             saw_secondary_while_held: self.saw_secondary_while_held,
             saw_merged_viewport: self.saw_merged_viewport,
+            secondary_submission_before_main_acquire,
+            main_present_bracketed_by_test_engine: self.main_present_bracketed_by_test_engine,
         })
     }
 }
@@ -100,8 +170,18 @@ impl CompletedViewportSmoke {
         let Some(path) = self.result_path else {
             return Ok(());
         };
+        let render_submitted_viewport_ids = json_u32_array(
+            &self
+                .secondary_submission_before_main_acquire
+                .render_submitted_viewport_ids,
+        );
+        let present_submitted_viewport_ids = json_u32_array(
+            &self
+                .secondary_submission_before_main_acquire
+                .present_submitted_viewport_ids,
+        );
         let json = format!(
-            "{{\"schema_version\":1,\"outcome\":\"Passed\",\"adapter\":{{\"name\":\"{}\",\"backend\":\"{:?}\",\"device_type\":\"{:?}\",\"driver\":\"{}\",\"driver_info\":\"{}\",\"vendor\":{},\"device\":{}}},\"secondary_viewport_observed\":{},\"secondary_viewport_while_held_observed\":{},\"merge_observed\":{},\"teardown_complete\":true}}",
+            "{{\"schema_version\":3,\"adapter\":{{\"name\":\"{}\",\"backend\":\"{:?}\",\"device_type\":\"{:?}\",\"driver\":\"{}\",\"driver_info\":\"{}\",\"vendor\":{},\"device\":{}}},\"secondary_viewport_while_held_observed\":{},\"merge_observed\":{},\"secondary_render_submitted_before_main_acquire_viewport_ids\":{},\"secondary_present_submitted_before_main_acquire_viewport_ids\":{},\"main_present_bracketed_by_test_engine\":{}}}",
             json_escape(&self.adapter.name),
             self.adapter.backend,
             self.adapter.device_type,
@@ -109,9 +189,11 @@ impl CompletedViewportSmoke {
             json_escape(&self.adapter.driver_info),
             self.adapter.vendor,
             self.adapter.device,
-            self.saw_secondary_viewport,
             self.saw_secondary_while_held,
             self.saw_merged_viewport,
+            render_submitted_viewport_ids,
+            present_submitted_viewport_ids,
+            self.main_present_bracketed_by_test_engine,
         );
         write_json_atomic(&path, &json)
     }
@@ -162,6 +244,16 @@ fn json_escape(value: &str) -> String {
 }
 
 #[cfg(feature = "test-engine")]
+fn json_u32_array(values: &[u32]) -> String {
+    let values = values
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("[{values}]")
+}
+
+#[cfg(feature = "test-engine")]
 fn write_json_atomic(path: &Path, contents: &str) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(parent) = path
         .parent()
@@ -200,20 +292,37 @@ impl AppRenderer {
         Ok(())
     }
 
-    fn render_context_with_fb_size(
+    fn reconcile_frame(
         &mut self,
-        context: &mut Context,
+        frame: &mut RenderedFrame<'_>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        match self {
+            Self::Single(renderer) => renderer.reconcile_frame(frame)?,
+            Self::Multi(runtime) => runtime.reconcile_frame(frame)?,
+        }
+        Ok(())
+    }
+
+    fn render_with_fb_size_reconciled<'frame>(
+        &mut self,
+        frame: RenderedFrame<'frame>,
         render_pass: &mut wgpu::RenderPass<'_>,
         width: u32,
         height: u32,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<ReconciledFrame<'frame>, Box<dyn std::error::Error>> {
         match self {
             Self::Single(renderer) => {
-                renderer.render_context_with_fb_size(context, render_pass, width, height)?
+                Ok(renderer.render_with_fb_size_reconciled(frame, render_pass, width, height)?)
             }
             Self::Multi(runtime) => {
-                runtime.render_context_with_fb_size(context, render_pass, width, height)?
+                Ok(runtime.render_with_fb_size_reconciled(frame, render_pass, width, height)?)
             }
+        }
+    }
+
+    fn poll_fault(&self) -> Result<(), Box<dyn std::error::Error>> {
+        if let Self::Multi(runtime) = self {
+            runtime.poll_fault()?;
         }
         Ok(())
     }
@@ -224,6 +333,106 @@ impl AppRenderer {
             Self::Multi(runtime) => runtime.shutdown(context)?,
         }
         Ok(())
+    }
+}
+
+struct MainSurfaceFrameDriver<'a> {
+    renderer: &'a mut AppRenderer,
+    device: &'a wgpu::Device,
+    queue: &'a wgpu::Queue,
+    surface_frame: Option<wgpu::SurfaceTexture>,
+    framebuffer_size: [u32; 2],
+    rendered: bool,
+    presented: bool,
+}
+
+impl MainSurfaceFrameDriver<'_> {
+    fn render_frame<'frame>(
+        &mut self,
+        frame: RenderedFrame<'frame>,
+    ) -> Result<ReconciledFrame<'frame>, MainSurfaceFrameError> {
+        if self.rendered {
+            return Err(MainSurfaceFrameError::message(
+                "main surface frame was rendered more than once",
+            ));
+        }
+        let surface_frame = self.surface_frame.as_ref().ok_or_else(|| {
+            MainSurfaceFrameError::message("main surface frame was consumed before rendering")
+        })?;
+        let view = surface_frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("imgui-main-encoder"),
+            });
+        let reconciled = {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("imgui-main-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.1,
+                            g: 0.12,
+                            b: 0.15,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            self.renderer
+                .render_with_fb_size_reconciled(
+                    frame,
+                    &mut render_pass,
+                    self.framebuffer_size[0],
+                    self.framebuffer_size[1],
+                )
+                .map_err(MainSurfaceFrameError::from)?
+        };
+        self.queue.submit(Some(encoder.finish()));
+        self.rendered = true;
+        Ok(reconciled)
+    }
+
+    fn present_frame(&mut self) -> Result<(), MainSurfaceFrameError> {
+        if !self.rendered {
+            return Err(MainSurfaceFrameError::message(
+                "main surface frame was presented before rendering",
+            ));
+        }
+        let surface_frame = self.surface_frame.take().ok_or_else(|| {
+            MainSurfaceFrameError::message("main surface frame was presented more than once")
+        })?;
+        self.queue.present(surface_frame);
+        self.presented = true;
+        Ok(())
+    }
+}
+
+#[cfg(feature = "test-engine")]
+impl TestFrameDriver for MainSurfaceFrameDriver<'_> {
+    type RenderError = MainSurfaceFrameError;
+    type PresentError = MainSurfaceFrameError;
+
+    fn render<'frame>(
+        &mut self,
+        frame: RenderedFrame<'frame>,
+        _frame_index: u64,
+    ) -> Result<ReconciledFrame<'frame>, Self::RenderError> {
+        self.render_frame(frame)
+    }
+
+    fn present(&mut self, _frame_index: u64) -> Result<(), Self::PresentError> {
+        self.present_frame()
     }
 }
 
@@ -249,6 +458,8 @@ struct AppWindow {
     viewport_smoke: Option<ViewportSmokeState>,
     #[cfg(feature = "test-engine")]
     test_engine_shutdown_complete: bool,
+    #[cfg(feature = "test-engine")]
+    test_engine_frame_index: u64,
     renderer_shutdown_complete: bool,
     viewport_runtime_shutdown_complete: bool,
     platform_shutdown_complete: bool,
@@ -338,13 +549,11 @@ impl AppWindow {
             wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
 
         let window: Arc<Window> = Arc::new(
-            event_loop
-                .create_window(
-                    Window::default_attributes()
-                        .with_title("Dear ImGui Multi-Viewport (wgpu)")
-                        .with_inner_size(LogicalSize::new(1200.0, 720.0)),
-                )?
-                .into(),
+            event_loop.create_window(
+                Window::default_attributes()
+                    .with_title("Dear ImGui Multi-Viewport (wgpu)")
+                    .with_inner_size(LogicalSize::new(1200.0, 720.0)),
+            )?,
         );
 
         let surface = instance.create_surface(window.clone())?;
@@ -472,7 +681,7 @@ impl AppWindow {
                 }
             }
         } else {
-            AppRenderer::Single(renderer)
+            AppRenderer::Single(Box::new(renderer))
         };
 
         let app = Self {
@@ -495,6 +704,8 @@ impl AppWindow {
             viewport_smoke: None,
             #[cfg(feature = "test-engine")]
             test_engine_shutdown_complete: false,
+            #[cfg(feature = "test-engine")]
+            test_engine_frame_index: 0,
             renderer_shutdown_complete: false,
             viewport_runtime_shutdown_complete: false,
             platform_shutdown_complete: false,
@@ -550,7 +761,6 @@ impl AppWindow {
 
         let mut engine = TestEngine::create()?;
         engine.start(&mut self.imgui)?;
-        engine.set_capture_enabled(false)?;
         engine.set_run_speed(if drag_while_held {
             RunSpeed::Normal
         } else {
@@ -601,6 +811,8 @@ impl AppWindow {
             saw_secondary_viewport: false,
             saw_secondary_while_held: false,
             saw_merged_viewport: false,
+            secondary_submission_before_main_acquire: None,
+            main_present_bracketed_by_test_engine: false,
             complete: false,
         });
         Ok(())
@@ -624,24 +836,6 @@ impl AppWindow {
 
     fn redraw(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         // Delta time is set by the platform backend in `prepare_frame()`.
-
-        let (frame, reconfigure_after_present) = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
-            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
-            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
-                self.surface.configure(&self.device, &self.surface_config);
-                return Ok(());
-            }
-            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
-                return Ok(());
-            }
-            wgpu::CurrentSurfaceTexture::Validation => {
-                return Err("surface acquisition failed with a WGPU validation error".into());
-            }
-        };
-        let view = frame
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
 
         // First render a simple "game view" into the offscreen texture.
         {
@@ -764,64 +958,112 @@ impl AppWindow {
         // let mut show_demo = true;
         // ui.show_demo_window(&mut show_demo);
 
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("imgui-main-encoder"),
-            });
+        self.platform.prepare_render_with_ui(ui, &self.window)?;
 
+        let mut rendered = self.imgui.render();
+        self.renderer.new_frame()?;
+        self.renderer.reconcile_frame(&mut rendered)?;
+
+        // Secondary surfaces must be acquired, rendered, and presented before the main surface is
+        // acquired. This avoids overlapping WSI acquisition semaphores across viewport surfaces.
         {
-            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("imgui-main-pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.12,
-                            b: 0.15,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-
-            self.renderer.new_frame()?;
-            self.renderer.render_context_with_fb_size(
-                &mut self.imgui,
-                &mut rpass,
-                self.surface_config.width,
-                self.surface_config.height,
-            )?;
+            #[cfg(feature = "test-engine")]
+            let secondary_trace = if self
+                .viewport_smoke
+                .as_ref()
+                .is_some_and(|smoke| !smoke.complete)
+            {
+                match &self.renderer {
+                    AppRenderer::Multi(runtime) => Some(runtime.begin_frame_trace()?),
+                    AppRenderer::Single(_) => None,
+                }
+            } else {
+                None
+            };
+            if self.enable_viewports {
+                rendered.update_and_render_platform_windows_default();
+            }
+            #[cfg(feature = "test-engine")]
+            if let Some(trace) = secondary_trace {
+                let report = trace.finish();
+                if let Some(smoke) = self.viewport_smoke.as_mut()
+                    && smoke.secondary_submission_before_main_acquire.is_none()
+                {
+                    smoke.secondary_submission_before_main_acquire =
+                        SecondarySubmissionEvidence::from_report(&report);
+                }
+            }
         }
+        self.renderer.poll_fault()?;
 
-        // Submit and present main frame first to avoid cross-surface validation hazards
-        self.queue.submit(Some(encoder.finish()));
+        let (surface_frame, reconfigure_after_present) = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame) => (frame, false),
+            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => (frame, true),
+            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
+                self.surface.configure(&self.device, &self.surface_config);
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Validation => {
+                return Err("surface acquisition failed with a WGPU validation error".into());
+            }
+        };
+
         #[cfg(feature = "test-engine")]
-        if let Some(engine) = self.test_engine.as_mut() {
-            engine.pre_swap()?;
-        }
-        self.queue.present(frame);
-        if reconfigure_after_present {
+        let frame_index = {
+            self.test_engine_frame_index = self
+                .test_engine_frame_index
+                .checked_add(1)
+                .ok_or("Test Engine frame index exhausted")?;
+            self.test_engine_frame_index
+        };
+
+        let mut driver = MainSurfaceFrameDriver {
+            renderer: &mut self.renderer,
+            device: &self.device,
+            queue: &self.queue,
+            surface_frame: Some(surface_frame),
+            framebuffer_size: [self.surface_config.width, self.surface_config.height],
+            rendered: false,
+            presented: false,
+        };
+
+        #[cfg(feature = "test-engine")]
+        let presentation_result: Result<(), Box<dyn std::error::Error>> =
+            if let Some(engine) = self.test_engine.as_mut() {
+                engine
+                    .drive_frame(rendered, frame_index, &mut driver)
+                    .map_err(|error| Box::new(error) as Box<dyn std::error::Error>)
+            } else {
+                let reconciled = driver.render_frame(rendered)?;
+                drop(reconciled);
+                driver
+                    .present_frame()
+                    .map_err(|error| Box::new(error) as Box<dyn std::error::Error>)
+            };
+        #[cfg(not(feature = "test-engine"))]
+        let presentation_result: Result<(), Box<dyn std::error::Error>> = {
+            let reconciled = driver.render_frame(rendered)?;
+            drop(reconciled);
+            driver
+                .present_frame()
+                .map_err(|error| Box::new(error) as Box<dyn std::error::Error>)
+        };
+
+        let was_presented = driver.presented;
+        drop(driver);
+        if was_presented && reconfigure_after_present {
             self.surface.configure(&self.device, &self.surface_config);
         }
-
-        // Update + render all platform windows (secondary viewports)
-        if self.enable_viewports {
-            self.imgui.update_platform_windows();
-            self.imgui.render_platform_windows_default();
-        }
+        presentation_result?;
 
         #[cfg(feature = "test-engine")]
         if let Some(engine) = self.test_engine.as_mut() {
-            engine.post_swap()?;
+            if let Some(smoke) = self.viewport_smoke.as_mut() {
+                smoke.main_present_bracketed_by_test_engine = was_presented;
+            }
             let smoke_pending = self
                 .viewport_smoke
                 .as_ref()
@@ -842,13 +1084,17 @@ impl AppWindow {
                     || smoke.require_secondary_while_held
                         && (!smoke.held_probe_complete || !smoke.saw_secondary_while_held)
                     || !smoke.saw_merged_viewport
+                    || smoke.secondary_submission_before_main_acquire.is_none()
+                    || !smoke.main_present_bracketed_by_test_engine
                 {
                     return Err(format!(
-                        "viewport smoke did not observe the complete lifecycle: secondary={}, secondary_while_held={}, held_probe_complete={}, merged={}",
+                        "viewport smoke did not observe the complete lifecycle and presentation order: secondary={}, secondary_while_held={}, held_probe_complete={}, merged={}, secondary_submission_before_main_acquire={:?}, main_present_bracketed={}",
                         smoke.saw_secondary_viewport,
                         smoke.saw_secondary_while_held,
                         smoke.held_probe_complete,
-                        smoke.saw_merged_viewport
+                        smoke.saw_merged_viewport,
+                        smoke.secondary_submission_before_main_acquire,
+                        smoke.main_present_bracketed_by_test_engine,
                     )
                     .into());
                 }
@@ -935,44 +1181,36 @@ impl ApplicationHandler for App {
         }
 
         match event {
-            WindowEvent::CloseRequested => {
-                // Only exit when the main application window is closed.
-                if is_main_window {
-                    event_loop.exit();
-                }
+            // Only exit when the main application window is closed.
+            WindowEvent::CloseRequested if is_main_window => {
+                event_loop.exit();
             }
-            WindowEvent::Resized(size) => {
-                // Only reconfigure the main WGPU surface for the main window.
-                if is_main_window {
-                    app.resize(size);
-                }
+            // Only reconfigure the main WGPU surface for the main window.
+            WindowEvent::Resized(size) if is_main_window => {
+                app.resize(size);
             }
-            WindowEvent::ScaleFactorChanged { .. } => {
-                if is_main_window {
-                    app.resize(app.window.inner_size());
-                }
+            WindowEvent::ScaleFactorChanged { .. } if is_main_window => {
+                app.resize(app.window.inner_size());
             }
-            WindowEvent::RedrawRequested => {
+            WindowEvent::RedrawRequested if is_main_window => {
                 // We drive rendering from the main window. Secondary viewport windows are
                 // rendered via ImGui's platform callbacks during `app.redraw()`.
-                if is_main_window {
-                    match app.redraw_with_event_loop(event_loop) {
-                        Ok(()) => {
-                            #[cfg(feature = "test-engine")]
-                            if app
-                                .viewport_smoke
-                                .as_ref()
-                                .is_some_and(|smoke| smoke.complete)
-                            {
-                                event_loop.exit();
-                                return;
-                            }
-                            app.window.request_redraw();
-                        }
-                        Err(error) => {
-                            self.error = Some(error.to_string());
+                match app.redraw_with_event_loop(event_loop) {
+                    Ok(()) => {
+                        #[cfg(feature = "test-engine")]
+                        if app
+                            .viewport_smoke
+                            .as_ref()
+                            .is_some_and(|smoke| smoke.complete)
+                        {
                             event_loop.exit();
+                            return;
                         }
+                        app.window.request_redraw();
+                    }
+                    Err(error) => {
+                        self.error = Some(error.to_string());
+                        event_loop.exit();
                     }
                 }
             }

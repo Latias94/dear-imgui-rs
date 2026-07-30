@@ -109,22 +109,21 @@ macro_rules! for_each_renderer_value {
     };
 }
 
-pub(super) const SDL_PLATFORM_RESERVED_FLAGS: i32 = sys::ImGuiBackendFlags_HasMouseCursors as i32
-    | sys::ImGuiBackendFlags_HasSetMousePos as i32
-    | sys::ImGuiBackendFlags_HasGamepad as i32
-    | sys::ImGuiBackendFlags_PlatformHasViewports as i32
-    | sys::ImGuiBackendFlags_HasMouseHoveredViewport as i32
-    | sys::ImGuiBackendFlags_HasParentViewport as i32;
+pub(super) const SDL_PLATFORM_RESERVED_FLAGS: i32 = sys::ImGuiBackendFlags_HasMouseCursors
+    | sys::ImGuiBackendFlags_HasSetMousePos
+    | sys::ImGuiBackendFlags_HasGamepad
+    | sys::ImGuiBackendFlags_PlatformHasViewports
+    | sys::ImGuiBackendFlags_HasMouseHoveredViewport
+    | sys::ImGuiBackendFlags_HasParentViewport;
 
 pub(super) const SDL_RENDERER_RESERVED_FLAGS: i32 = sys::ImGuiBackendFlags_RendererHasVtxOffset
-    as i32
-    | sys::ImGuiBackendFlags_RendererHasTextures as i32
-    | sys::ImGuiBackendFlags_RendererHasViewports as i32;
+    | sys::ImGuiBackendFlags_RendererHasTextures
+    | sys::ImGuiBackendFlags_RendererHasViewports;
 
-const SDL_PLATFORM_STABLE_FLAGS: i32 = sys::ImGuiBackendFlags_HasMouseCursors as i32
-    | sys::ImGuiBackendFlags_HasSetMousePos as i32
-    | sys::ImGuiBackendFlags_PlatformHasViewports as i32
-    | sys::ImGuiBackendFlags_HasParentViewport as i32;
+const SDL_PLATFORM_STABLE_FLAGS: i32 = sys::ImGuiBackendFlags_HasMouseCursors
+    | sys::ImGuiBackendFlags_HasSetMousePos
+    | sys::ImGuiBackendFlags_PlatformHasViewports
+    | sys::ImGuiBackendFlags_HasParentViewport;
 
 macro_rules! callback_eq {
     ($left:expr, $right:expr) => {
@@ -1465,6 +1464,8 @@ unsafe extern "C" fn sdl3_render_window(
         callback(viewport, render_argument);
         if transaction.finish() != 0 {
             control.mark_viewport_failed(viewport);
+        } else if is_secondary_viewport(viewport) {
+            control.record_opengl_viewport_context_activated((*viewport).ID);
         }
     });
 }
@@ -1492,8 +1493,15 @@ unsafe extern "C" fn sdl3_swap_buffers(
         callback(viewport, render_argument);
         if transaction.finish() != 0 {
             control.mark_viewport_failed(viewport);
+        } else if is_secondary_viewport(viewport) {
+            control.record_opengl_viewport_swapped((*viewport).ID);
         }
     });
+}
+
+unsafe fn is_secondary_viewport(viewport: *mut sys::ImGuiViewport) -> bool {
+    let main_viewport = unsafe { sys::igGetMainViewport() };
+    !main_viewport.is_null() && main_viewport != viewport
 }
 
 unsafe extern "C" fn sdl3_renderer_create_window(viewport: *mut sys::ImGuiViewport) {

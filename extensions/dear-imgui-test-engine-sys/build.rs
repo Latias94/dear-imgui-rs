@@ -194,9 +194,47 @@ fn build_with_cc(cfg: &BuildConfig, test_engine_root: &Path, imgui_src: &Path, c
     build.include(cfg.manifest_dir.join("shim"));
 
     build.file(test_engine_root.join("imgui_capture_tool.cpp"));
-    build.file(test_engine_root.join("imgui_te_context.cpp"));
+    let context_source = test_engine_root.join("imgui_te_context.cpp");
+    println!("cargo:rerun-if-changed={}", context_source.display());
+    let patched_context_source = cfg.out_dir.join("imgui_te_context_presentation_abort.cpp");
+    let source = std::fs::read_to_string(&context_source).unwrap_or_else(|error| {
+        panic!(
+            "failed to read Test Engine source {}: {error}",
+            context_source.display()
+        )
+    });
+    let patched = build_support::patch_test_engine_context_cpp_for_presentation_abort(&source)
+        .unwrap_or_else(|error| {
+            panic!("failed to apply Test Engine Context presentation overlay: {error}")
+        });
+    std::fs::write(&patched_context_source, patched).unwrap_or_else(|error| {
+        panic!(
+            "failed to write Test Engine Context presentation overlay {}: {error}",
+            patched_context_source.display()
+        )
+    });
+    build.file(patched_context_source);
     build.file(test_engine_root.join("imgui_te_coroutine.cpp"));
-    build.file(test_engine_root.join("imgui_te_engine.cpp"));
+    let engine_source = test_engine_root.join("imgui_te_engine.cpp");
+    println!("cargo:rerun-if-changed={}", engine_source.display());
+    let patched_engine_source = cfg.out_dir.join("imgui_te_engine_presentation_abort.cpp");
+    let source = std::fs::read_to_string(&engine_source).unwrap_or_else(|error| {
+        panic!(
+            "failed to read Test Engine source {}: {error}",
+            engine_source.display()
+        )
+    });
+    let patched = build_support::patch_test_engine_cpp_for_presentation_abort(&source)
+        .unwrap_or_else(|error| {
+            panic!("failed to apply Test Engine presentation overlay: {error}")
+        });
+    std::fs::write(&patched_engine_source, patched).unwrap_or_else(|error| {
+        panic!(
+            "failed to write Test Engine presentation overlay {}: {error}",
+            patched_engine_source.display()
+        )
+    });
+    build.file(patched_engine_source);
     build.file(test_engine_root.join("imgui_te_exporters.cpp"));
     build.file(test_engine_root.join("imgui_te_perftool.cpp"));
     build.file(test_engine_root.join("imgui_te_ui.cpp"));
@@ -299,6 +337,7 @@ fn main() {
     println!("cargo:rerun-if-changed=src/bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=shim/cimgui_test_engine.h");
     println!("cargo:rerun-if-changed=shim/cimgui_test_engine_internal.h");
+    println!("cargo:rerun-if-changed=shim/cimgui_test_engine_capture_bridge.h");
     println!("cargo:rerun-if-changed=shim/cimgui_test_engine.cpp");
     println!("cargo:rerun-if-changed=shim/default_tests.cpp");
     println!("cargo:rerun-if-changed=shim/imgui_test_engine_hooks_register.cpp");

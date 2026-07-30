@@ -1,14 +1,17 @@
 use std::alloc::{Layout, alloc, dealloc};
+use std::convert::Infallible;
 use std::ffi::c_void;
 use std::fs;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use dear_imgui_rs::{
     Condition, Context, ContextLifecycle, SuspendedContext, TableColumnIndex, TableFlags,
+    render::{ReconciledFrame, RenderedFrame},
 };
 use dear_imgui_test_engine::{
-    AttachmentState, RunFlags, RunSpeed, RunState, ScriptCount, TestEngine, TestEngineError,
-    TestEngineResult, TestEngineStatus, TestGroup, VerboseLevel, raw,
+    AttachmentState, CaptureOutput, FrameDriverError, RunFlags, RunSpeed, RunState, ScriptCount,
+    TestEngine, TestEngineError, TestEngineResult, TestEngineStatus, TestFrameDriver, TestGroup,
+    VerboseLevel, raw,
 };
 
 static TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -16,6 +19,28 @@ static REUSE_ALLOCATOR: OnceLock<Mutex<Option<ReuseAllocatorState>>> = OnceLock:
 
 const ALLOCATION_HEADER_SIZE: usize = 16;
 const ALLOCATION_ALIGNMENT: usize = 16;
+
+struct VirtualFrameDriver;
+
+impl TestFrameDriver for VirtualFrameDriver {
+    type RenderError = Infallible;
+    type PresentError = Infallible;
+
+    fn render<'frame>(
+        &mut self,
+        mut frame: RenderedFrame<'frame>,
+        _frame_index: u64,
+    ) -> Result<ReconciledFrame<'frame>, Self::RenderError> {
+        frame
+            .reconcile_texture_feedback([])
+            .expect("empty texture feedback");
+        Ok(frame.into_reconciled().expect("reconciled virtual frame"))
+    }
+
+    fn present(&mut self, _frame_index: u64) -> Result<(), Self::PresentError> {
+        Ok(())
+    }
+}
 
 #[derive(Default)]
 struct ReuseAllocatorState {
@@ -218,6 +243,19 @@ fn inject(point: raw::ImGuiTestEngineExceptionPoint) {
 
 fn assert_invalid_state<T: std::fmt::Debug>(result: TestEngineResult<T>) {
     assert!(matches!(result, Err(TestEngineError::InvalidState { .. })));
+}
+
+fn assert_frame_driver_invalid_state(
+    engine: &mut TestEngine,
+    frame: dear_imgui_rs::render::RenderedFrame<'_>,
+) {
+    let error = engine
+        .drive_frame(frame, 0, &mut VirtualFrameDriver)
+        .expect_err("frame driver state must be rejected");
+    assert!(matches!(
+        error,
+        FrameDriverError::Context(TestEngineError::InvalidState { .. })
+    ));
 }
 
 #[test]
@@ -504,9 +542,9 @@ fn queued_and_running_runs_reject_requeue_until_terminal_summary_is_consumed() {
                 })
             ));
         }
-        drop(context.render());
-        engine.pre_swap().expect("pre swap");
-        engine.post_swap().expect("post swap");
+        engine
+            .drive_frame(context.render(), 0, &mut VirtualFrameDriver)
+            .expect("virtual frame");
         if engine.run_state() == RunState::Terminal {
             break;
         }
@@ -552,7 +590,7 @@ fn context_first_teardown_saves_test_engine_settings_once_before_tombstoning() {
     let mut engine = TestEngine::create().expect("engine");
     engine.start(&mut context).expect("start");
     engine
-        .set_capture_enabled(false)
+        .set_capture_output(CaptureOutput::Discard)
         .expect("mutate saved Test Engine setting");
     let ui = context.frame();
     ui.text("load and dirty settings");
@@ -629,8 +667,10 @@ fn public_engine_methods_enforce_the_attachment_and_run_state_matrix() {
     assert_invalid_state(detached.register_default_tests());
     assert_invalid_state(detached.add_script_test("state", "detached", |_| Ok(())));
     assert_invalid_state(detached.queue_all_tests());
-    assert_invalid_state(detached.pre_swap());
-    assert_invalid_state(detached.post_swap());
+    let mut detached_probe = context();
+    detached_probe.frame().text("detached driver state probe");
+    assert_frame_driver_invalid_state(&mut detached, detached_probe.render());
+    drop(detached_probe);
     assert_invalid_state(detached.stop());
     assert_invalid_state(detached.try_abort_engine());
     assert_invalid_state(detached.abort_current_test());
@@ -641,7 +681,7 @@ fn public_engine_methods_enforce_the_attachment_and_run_state_matrix() {
     assert_invalid_state(detached.set_verbose_level(VerboseLevel::Info));
     assert_invalid_state(detached.set_verbose_level_on_error(VerboseLevel::Debug));
     assert_invalid_state(detached.set_log_to_tty(true));
-    assert_invalid_state(detached.set_capture_enabled(false));
+    assert_invalid_state(detached.set_capture_output(CaptureOutput::Discard));
     assert_invalid_state(detached.install_default_crash_handler());
 
     let mut stopped_context = context();
@@ -667,7 +707,11 @@ fn public_engine_methods_enforce_the_attachment_and_run_state_matrix() {
         .set_verbose_level_on_error(VerboseLevel::Trace)
         .expect("Ready config");
     detached.set_log_to_tty(false).expect("Ready config");
-    detached.set_capture_enabled(false).expect("Ready config");
+    detached
+        .set_capture_output(CaptureOutput::Discard)
+        .expect("Ready config");
+    stopped_context.frame().text("inactive driver state probe");
+    let stopped_frame = stopped_context.render();
     detached.stop().expect("Ready to Inactive");
     assert_eq!(detached.run_state(), RunState::Inactive);
     detached
@@ -675,8 +719,7 @@ fn public_engine_methods_enforce_the_attachment_and_run_state_matrix() {
         .expect("summary remains queryable");
     assert_invalid_state(detached.take_terminal_summary());
     assert_invalid_state(detached.queue_all_tests());
-    assert_invalid_state(detached.pre_swap());
-    assert_invalid_state(detached.post_swap());
+    assert_frame_driver_invalid_state(&mut detached, stopped_frame);
     assert_invalid_state(detached.stop());
     assert_invalid_state(detached.is_test_queue_empty());
     assert_invalid_state(detached.is_running_tests());
@@ -697,7 +740,7 @@ fn public_engine_methods_enforce_the_attachment_and_run_state_matrix() {
     terminal.queue_all_tests().expect("no-match queue");
     assert_eq!(terminal.run_state(), RunState::Terminal);
     assert_invalid_state(terminal.queue_all_tests());
-    assert_invalid_state(terminal.set_capture_enabled(true));
+    assert_invalid_state(terminal.set_capture_output(CaptureOutput::Save));
     terminal
         .take_terminal_summary()
         .expect("terminal consume")
@@ -710,8 +753,12 @@ fn public_engine_methods_enforce_the_attachment_and_run_state_matrix() {
     );
     assert_invalid_state(terminal.result_summary());
     assert_invalid_state(terminal.take_terminal_summary());
-    assert_invalid_state(terminal.pre_swap());
-    assert_invalid_state(terminal.post_swap());
+    let mut destroyed_probe = context();
+    destroyed_probe
+        .frame()
+        .text("context-destroyed driver state probe");
+    assert_frame_driver_invalid_state(&mut terminal, destroyed_probe.render());
+    drop(destroyed_probe);
     terminal.shutdown().expect("ContextDestroyed shutdown");
 }
 
@@ -736,13 +783,9 @@ fn missing_table_lookup_is_a_failed_test_not_an_infrastructure_error() {
         let ui = context.frame();
         ui.window("Table Host")
             .build(|| ui.text("No table is intentionally created"));
-        drop(context.render());
         engine
-            .pre_swap()
-            .expect("pre swap remains infrastructure-successful");
-        engine
-            .post_swap()
-            .expect("post swap remains infrastructure-successful");
+            .drive_frame(context.render(), 0, &mut VirtualFrameDriver)
+            .expect("virtual frame remains infrastructure-successful");
         if engine.run_state() == RunState::Terminal {
             break;
         }
@@ -801,9 +844,9 @@ fn table_resize_by_label_succeeds_for_a_resizable_table() {
                         ui.text("value");
                     });
             });
-        drop(context.render());
-        engine.pre_swap().expect("pre swap");
-        engine.post_swap().expect("post swap");
+        engine
+            .drive_frame(context.render(), 0, &mut VirtualFrameDriver)
+            .expect("virtual frame");
         if engine.run_state() == RunState::Terminal {
             break;
         }

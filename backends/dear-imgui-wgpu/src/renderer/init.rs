@@ -233,7 +233,7 @@ impl WgpuRenderer {
         let reserved_flags = BackendFlags::RENDERER_HAS_VTX_OFFSET
             | BackendFlags::RENDERER_HAS_TEXTURES
             | BackendFlags::from_bits_retain(
-                dear_imgui_rs::sys::ImGuiBackendFlags_RendererHasViewports as i32,
+                dear_imgui_rs::sys::ImGuiBackendFlags_RendererHasViewports,
             );
         if !(imgui_context.io().backend_flags() & reserved_flags).is_empty() {
             return Err(RendererError::ContextAlreadyHasRenderer);

@@ -6,7 +6,7 @@ use crate::wgpu;
 use crate::{GammaMode, RendererError, RendererResult, Uniforms};
 use dear_imgui_rs::{
     Context, ContextBinding, TextureId,
-    render::{DrawData, RenderedFrame},
+    render::{DrawData, ReconciledFrame, RenderedFrame},
     sys,
 };
 use wgpu::RenderPass;
@@ -47,17 +47,30 @@ impl WgpuRenderer {
     /// owning Context borrow.
     pub fn render(
         &mut self,
-        mut frame: RenderedFrame<'_>,
+        frame: RenderedFrame<'_>,
         render_pass: &mut RenderPass,
     ) -> RendererResult<()> {
+        self.render_reconciled(frame, render_pass).map(drop)
+    }
+
+    /// Renders one frame and returns its texture-reconciliation proof to a presentation owner.
+    ///
+    /// This is the linear render half of integrations that must bracket a later surface present.
+    /// The returned proof does not claim that command submission or presentation completed.
+    pub fn render_reconciled<'frame>(
+        &mut self,
+        mut frame: RenderedFrame<'frame>,
+        render_pass: &mut RenderPass,
+    ) -> RendererResult<ReconciledFrame<'frame>> {
         self.ensure_renderer_contract()?;
         self.ensure_frame_matches(&frame)?;
         let binding = self.bound_context()?;
         with_bound_context(&binding, || {
             let platform_io = platform_io_for_current_context()?;
-            self.reconcile_frame_textures(&mut frame)?;
+            self.reconcile_frame(&mut frame)?;
             self.render_read_only_draw_data(frame.draw_data(), render_pass, platform_io)
-        })
+        })?;
+        frame.into_reconciled().map_err(Into::into)
     }
 
     /// Finalize and render the frame for this renderer's bound ImGui context.
@@ -74,7 +87,17 @@ impl WgpuRenderer {
         self.render(frame, render_pass)
     }
 
-    fn reconcile_frame_textures(&mut self, frame: &mut RenderedFrame<'_>) -> RendererResult<()> {
+    /// Applies managed-texture requests without drawing or acquiring a presentation surface.
+    ///
+    /// Multi-surface integrations can call this before rendering platform windows, then pass the
+    /// same frame to [`Self::render_reconciled`]. Repeated calls after successful reconciliation
+    /// are no-ops.
+    pub fn reconcile_frame(&mut self, frame: &mut RenderedFrame<'_>) -> RendererResult<()> {
+        self.ensure_renderer_contract()?;
+        self.ensure_frame_matches(frame)?;
+        if frame.is_texture_feedback_reconciled() {
+            return Ok(());
+        }
         let request_epoch = frame.epoch().map_or(0, |epoch| epoch.sequence());
         let backend_data = self.backend_data.as_mut().ok_or_else(|| {
             RendererError::InvalidRenderState("Renderer not initialized".to_owned())
@@ -169,17 +192,29 @@ impl WgpuRenderer {
     /// Render one Context-borrowed frame with explicit framebuffer dimensions.
     pub fn render_with_fb_size(
         &mut self,
-        mut frame: RenderedFrame<'_>,
+        frame: RenderedFrame<'_>,
         render_pass: &mut RenderPass,
         fb_width: u32,
         fb_height: u32,
     ) -> RendererResult<()> {
+        self.render_with_fb_size_reconciled(frame, render_pass, fb_width, fb_height)
+            .map(drop)
+    }
+
+    /// Renders one frame at explicit framebuffer dimensions and returns its reconciliation proof.
+    pub fn render_with_fb_size_reconciled<'frame>(
+        &mut self,
+        mut frame: RenderedFrame<'frame>,
+        render_pass: &mut RenderPass,
+        fb_width: u32,
+        fb_height: u32,
+    ) -> RendererResult<ReconciledFrame<'frame>> {
         self.ensure_renderer_contract()?;
         self.ensure_frame_matches(&frame)?;
         let binding = self.bound_context()?;
         with_bound_context(&binding, || {
             let platform_io = platform_io_for_current_context()?;
-            self.reconcile_frame_textures(&mut frame)?;
+            self.reconcile_frame(&mut frame)?;
             self.render_read_only_draw_data_with_fb_size(
                 frame.draw_data(),
                 render_pass,
@@ -188,7 +223,8 @@ impl WgpuRenderer {
                 true,
                 platform_io,
             )
-        })
+        })?;
+        frame.into_reconciled().map_err(Into::into)
     }
 
     /// Finalize and render the frame for the bound ImGui context and framebuffer size.

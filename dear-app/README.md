@@ -84,7 +84,13 @@ The feature-free lifecycle example implements every hook and displays real hook 
 cargo run -p dear-imgui-examples --bin application_lifecycle
 ```
 
-Surface loss and resize do not recreate the application or Dear ImGui context. Only WGPU device loss starts GPU recovery, and that callback communicates with the UI thread through the Winit event loop.
+Surface loss and resize do not recreate the application or Dear ImGui context. `dear-app` acquires and, when necessary, recovers the main surface before calling any per-frame application hook. Timeout and occlusion skip the frame without advancing application or test state. Only WGPU device loss starts GPU recovery, and that callback communicates with the UI thread through the Winit event loop.
+
+## Test Engine
+
+Enable the optional `test-engine` feature when the application owns an interactive Dear ImGui Test Engine. The matching crate is available as `dear_app::test_engine`; return its `TestEngine` from `Application::test_engine`. The runtime then owns the complete `render -> pre-swap -> present -> post-swap` transaction for every admitted frame. Applications must not call presentation hooks themselves.
+
+Standalone test programs that own their whole frame loop should use `TestRunner::run_graphical` instead. Headless runs use the explicitly virtual presentation path and do not claim graphical swap coverage.
 
 ## Configuration
 

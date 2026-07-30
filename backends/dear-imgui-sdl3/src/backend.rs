@@ -448,6 +448,18 @@ impl Sdl3PlatformBackend {
         self.runtime.poll_fault()
     }
 
+    /// Begins a scoped trace for one OpenGL secondary-platform-window pass.
+    ///
+    /// Start the trace before Dear ImGui invokes its platform render callbacks. Restore the main
+    /// OpenGL context before finishing the returned guard, then call [`Self::poll_fault`] before
+    /// swapping the main window. The report contains only native context and swap transactions
+    /// that completed without bridge faults.
+    pub fn begin_opengl_viewport_frame_trace(
+        &self,
+    ) -> Result<Sdl3OpenGlViewportFrameTrace<'_>, Sdl3OpenGlViewportFrameTraceError> {
+        self.runtime.begin_opengl_viewport_frame_trace()
+    }
+
     /// Shut down the SDL3 platform backend.
     ///
     /// This operation is idempotent. Drop defers native cleanup to Context teardown because it

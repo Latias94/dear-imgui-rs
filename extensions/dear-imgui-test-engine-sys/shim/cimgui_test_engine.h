@@ -22,7 +22,19 @@ typedef enum ImGuiTestEngineStatus {
     ImGuiTestEngineStatus_NotFound = 3,
     ImGuiTestEngineStatus_OutOfRange = 4,
     ImGuiTestEngineStatus_Exception = 5,
+    ImGuiTestEngineStatus_Unsupported = 6,
+    ImGuiTestEngineStatus_CaptureFailed = 7,
 } ImGuiTestEngineStatus;
+
+typedef bool (*ImGuiTestEngineCaptureCallback_c)(
+    uint32_t viewport_id,
+    int x,
+    int y,
+    int width,
+    int height,
+    uint32_t* pixels,
+    void* user_data
+);
 
 typedef enum ImGuiTestEngineRunSpeed {
     ImGuiTestEngineRunSpeed_Fast = 0,
@@ -58,6 +70,14 @@ typedef enum ImGuiTestEngineRunFlags {
     ImGuiTestEngineRunFlags_ShareTestContext = 1 << 12,
 } ImGuiTestEngineRunFlags;
 
+typedef enum ImGuiTestEngineCaptureFlags {
+    ImGuiTestEngineCaptureFlags_None = 0,
+    ImGuiTestEngineCaptureFlags_StitchAll = 1 << 0,
+    ImGuiTestEngineCaptureFlags_IncludeOtherWindows = 1 << 1,
+    ImGuiTestEngineCaptureFlags_IncludePopups = 1 << 2,
+    ImGuiTestEngineCaptureFlags_HideMouseCursor = 1 << 3,
+} ImGuiTestEngineCaptureFlags;
+
 typedef struct ImGuiTestEngineResultSummary_c {
     int CountTested;
     int CountSuccess;
@@ -86,7 +106,24 @@ ImGuiTestEngineStatus imgui_test_engine_unbind(ImGuiTestEngine* engine);
 ImGuiTestEngineStatus imgui_test_engine_start(ImGuiTestEngine* engine, ImGuiContext* ui_ctx);
 ImGuiTestEngineStatus imgui_test_engine_stop(ImGuiTestEngine* engine);
 ImGuiTestEngineStatus imgui_test_engine_pre_swap(ImGuiTestEngine* engine);
-ImGuiTestEngineStatus imgui_test_engine_post_swap(ImGuiTestEngine* engine);
+ImGuiTestEngineStatus imgui_test_engine_post_swap(
+    ImGuiTestEngine* engine,
+    bool* out_presentation_completed
+);
+ImGuiTestEngineStatus imgui_test_engine_abort_presentation(ImGuiTestEngine* engine);
+ImGuiTestEngineStatus imgui_test_engine_install_capture_provider(
+    ImGuiTestEngine* engine,
+    ImGuiTestEngineCaptureCallback_c callback,
+    void* user_data
+);
+ImGuiTestEngineStatus imgui_test_engine_clear_capture_provider(
+    ImGuiTestEngine* engine,
+    void* user_data
+);
+ImGuiTestEngineStatus imgui_test_engine_has_capture_provider(
+    ImGuiTestEngine* engine,
+    bool* out_installed
+);
 ImGuiTestEngineStatus imgui_test_engine_show_windows(ImGuiTestEngine* engine, bool* p_open);
 // Enum-domain inputs use int so foreign callers can pass arbitrary values for
 // validation without constructing invalid C++ enum objects.
@@ -125,7 +162,7 @@ ImGuiTestEngineStatus imgui_test_engine_set_log_to_tty(
     ImGuiTestEngine* engine,
     bool enabled
 );
-ImGuiTestEngineStatus imgui_test_engine_set_capture_enabled(
+ImGuiTestEngineStatus imgui_test_engine_set_capture_output_enabled(
     ImGuiTestEngine* engine,
     bool enabled
 );
@@ -170,6 +207,11 @@ ImGuiTestEngineStatus imgui_test_engine_script_key_up(ImGuiTestEngineScript* scr
 ImGuiTestEngineStatus imgui_test_engine_script_key_press(ImGuiTestEngineScript* script, int key_chord, int count);
 ImGuiTestEngineStatus imgui_test_engine_script_key_hold(ImGuiTestEngineScript* script, int key_chord, float time_in_seconds);
 ImGuiTestEngineStatus imgui_test_engine_script_sleep(ImGuiTestEngineScript* script, float time_in_seconds);
+ImGuiTestEngineStatus imgui_test_engine_script_capture_screenshot_window(
+    ImGuiTestEngineScript* script,
+    const char* ref,
+    int capture_flags
+);
 ImGuiTestEngineStatus imgui_test_engine_script_key_chars(ImGuiTestEngineScript* script, const char* chars);
 ImGuiTestEngineStatus imgui_test_engine_script_key_chars_append(ImGuiTestEngineScript* script, const char* chars);
 ImGuiTestEngineStatus imgui_test_engine_script_key_chars_append_enter(ImGuiTestEngineScript* script, const char* chars);
@@ -261,6 +303,33 @@ typedef struct ImGuiTestEngineLifecycleCounters_c {
     uint64_t ScriptsRegistered;
 } ImGuiTestEngineLifecycleCounters_c;
 
+typedef struct ImGuiTestEngineCaptureState_c {
+    bool PresentationPending;
+    bool CaptureAbortRequested;
+    bool CaptureWaitPending;
+    bool ProviderInstalled;
+    bool ContextCapturing;
+    bool ToolCapturing;
+    bool ToolPicking;
+    bool IoCapturing;
+    bool EngineAbort;
+    bool CaptureRollbackValid;
+    bool HiddenWindowBackupValid;
+    bool ScreenshotConfigActive;
+    bool WindowMoveConfigActive;
+    bool VideoConfigActive;
+} ImGuiTestEngineCaptureState_c;
+
+typedef enum ImGuiTestEnginePresentationEvent {
+    ImGuiTestEnginePresentationEvent_PreSwap = 1,
+    ImGuiTestEnginePresentationEvent_PostSwap = 2,
+} ImGuiTestEnginePresentationEvent;
+
+typedef void (*ImGuiTestEnginePresentationTraceCallback_c)(
+    ImGuiTestEnginePresentationEvent event,
+    void* user_data
+);
+
 ImGuiTestEngineStatus imgui_test_engine_test_set_exception_injection(
     int point
 );
@@ -268,6 +337,20 @@ ImGuiTestEngineStatus imgui_test_engine_test_get_lifecycle_counters(
     ImGuiTestEngineLifecycleCounters_c* out_counters
 );
 ImGuiTestEngineStatus imgui_test_engine_test_reset_lifecycle_counters(void);
+ImGuiTestEngineStatus imgui_test_engine_test_set_presentation_trace(
+    ImGuiTestEngine* engine,
+    ImGuiTestEnginePresentationTraceCallback_c callback,
+    void* user_data
+);
+ImGuiTestEngineStatus imgui_test_engine_test_get_capture_state(
+    ImGuiTestEngine* engine,
+    ImGuiTestEngineCaptureState_c* out_state
+);
+ImGuiTestEngineStatus imgui_test_engine_test_set_interactive_capture_state(
+    ImGuiTestEngine* engine,
+    bool capturing,
+    bool picking
+);
 
 #ifdef __cplusplus
 }

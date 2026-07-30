@@ -36,6 +36,46 @@ void begin_destroy_engine(ImGuiTestEngine* engine) noexcept;
 void cancel_destroy_engine(ImGuiTestEngine* engine) noexcept;
 void finish_destroy_engine(ImGuiTestEngine* engine) noexcept;
 bool has_live_engines() noexcept;
+bool begin_presentation(ImGuiTestEngine* engine) noexcept;
+bool presentation_pending(ImGuiTestEngine* engine) noexcept;
+void finish_presentation(ImGuiTestEngine* engine) noexcept;
+void trace_presentation(
+    ImGuiTestEngine* engine,
+    ImGuiTestEnginePresentationEvent event
+);
+bool set_presentation_trace(
+    ImGuiTestEngine* engine,
+    ImGuiTestEnginePresentationTraceCallback_c callback,
+    void* user_data
+) noexcept;
+bool get_capture_state(
+    ImGuiTestEngine* engine,
+    ImGuiTestEngineCaptureState_c* out_state
+) noexcept;
+bool set_interactive_capture_state(
+    ImGuiTestEngine* engine,
+    bool capturing,
+    bool picking
+) noexcept;
+void finish_capture_rollback(ImGuiTestEngine* engine) noexcept;
+void record_capture_rollback(ImGuiTestEngine* engine);
+void record_capture_wait(ImGuiTestEngine* engine);
+void commit_capture_rollback(ImGuiTestEngine* engine) noexcept;
+bool capture_provider_failed(ImGuiTestEngine* engine) noexcept;
+bool take_capture_provider_failure(ImGuiTestEngine* engine) noexcept;
+void clear_capture_provider(ImGuiTestEngine* engine) noexcept;
+bool capture_abort_requested(ImGuiTestEngine* engine) noexcept;
+bool capture_wait_pending(ImGuiTestEngine* engine) noexcept;
+void clear_capture_abort(ImGuiTestEngine* engine) noexcept;
+void begin_screenshot_config(ImGuiTestEngine* engine, ImGuiTestRunSpeed run_speed) noexcept;
+void restore_screenshot_config(ImGuiTestEngine* engine) noexcept;
+void begin_window_move_config(ImGuiTestEngine* engine, bool value) noexcept;
+void restore_window_move_config(ImGuiTestEngine* engine) noexcept;
+void begin_video_config(ImGuiTestEngine* engine) noexcept;
+void restore_video_config(ImGuiTestEngine* engine) noexcept;
+void request_capture_abort(ImGuiTestEngine* engine) noexcept;
+void cancel_capture(ImGuiTestEngine* engine) noexcept;
+void finish_capture_wait(ImGuiTestEngine* engine) noexcept;
 
 enum class Counter {
     EngineCreated,

@@ -4,12 +4,14 @@ mod callbacks;
 mod registry;
 mod runtime;
 mod surface;
+mod trace;
 
 #[cfg(test)]
 mod tests;
 
 pub(crate) use runtime::OwningViewportRuntime;
-pub use runtime::{WgpuViewportAttachError, WgpuViewportError};
+pub use runtime::{WgpuViewportAttachError, WgpuViewportError, WgpuViewportFrameTraceGuard};
+pub use trace::WgpuViewportFrameTraceReport;
 
 #[cfg(all(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
 compile_error!(

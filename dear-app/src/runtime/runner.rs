@@ -1,6 +1,9 @@
 use std::time::{Duration, Instant};
 
+use dear_imgui_rs::render::{ReconciledFrame, RenderedFrame};
 use dear_imgui_rs::{DockFlags, Id, WindowFlags};
+#[cfg(feature = "test-engine")]
+use dear_imgui_test_engine::TestFrameDriver;
 use tracing::{error, info, warn};
 use winit::{
     application::ApplicationHandler,
@@ -10,11 +13,17 @@ use winit::{
 };
 
 use super::{
+    admission::{
+        SurfaceAcquisition, SurfaceAdmissionBackend, admit_surface_frame, dispatch_surface_frame,
+        settle_surface_presentation,
+    },
     lifecycle::{LifecycleAction, SurfaceEvent},
     recovery::{
         GenerationRelease, RecoveryEffects, RecoveryOutcome, RuntimeFactory, RuntimeGenerations,
     },
-    state::{RuntimeEvent, RuntimeGeneration, UiState, WgpuRuntimeFactory, WindowState},
+    state::{
+        GpuFaultKind, RuntimeEvent, RuntimeGeneration, UiState, WgpuRuntimeFactory, WindowState,
+    },
 };
 use crate::{
     AddOns, AppConfig, Application, DockingApi, FrameContext, GpuGeneration, InitContext,
@@ -67,6 +76,7 @@ fn frame_duration(fps: f32) -> Duration {
 struct Runtime {
     ownership: OrderedRuntimeOwner<RuntimeOwnership>,
     clear_color: wgpu::Color,
+    admitted_frame_count: u64,
 }
 
 struct RuntimeOwnership {
@@ -162,16 +172,12 @@ fn release_then_teardown_or_quarantine<T: RuntimeOwnershipLifecycle>(
     ownership: T,
 ) -> Result<(), RunError> {
     let mut transaction = BackendReleaseTransaction::new(ownership);
-    if let Err(error) = transaction.ownership_mut().release_renderer() {
-        // The transaction quarantines the complete graph because renderer resources still borrow
-        // the Context, window, and GPU generation.
-        return Err(error);
-    }
-    if let Err(error) = transaction.ownership_mut().release_platform() {
-        // A platform ownership conflict leaves Context attachment state uncertain. Context drop
-        // must not run its fallback teardown after an explicit release failure.
-        return Err(error);
-    }
+    // The transaction quarantines the complete graph if renderer resources still borrow the
+    // Context, window, or GPU generation.
+    transaction.ownership_mut().release_renderer()?;
+    // A platform ownership conflict leaves Context attachment state uncertain. Context drop must
+    // not run its fallback teardown after an explicit release failure.
+    transaction.ownership_mut().release_platform()?;
     let ownership = transaction.commit();
     ownership.teardown_after_backend_release();
     Ok(())
@@ -197,6 +203,197 @@ impl RuntimeOwnershipLifecycle for RuntimeOwnership {
         ui.teardown_after_platform_release();
         drop(window);
     }
+}
+
+struct RuntimeSurfaceAdmission<'a> {
+    window: &'a mut WindowState,
+    generations: &'a mut RuntimeGenerations<RuntimeGeneration>,
+    config: &'a AppConfig,
+}
+
+impl SurfaceAdmissionBackend for RuntimeSurfaceAdmission<'_> {
+    type Frame = wgpu::SurfaceTexture;
+
+    fn acquire(&mut self) -> SurfaceAcquisition<Self::Frame> {
+        match self.window.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(frame) => SurfaceAcquisition::Success(frame),
+            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => SurfaceAcquisition::Suboptimal(frame),
+            wgpu::CurrentSurfaceTexture::Lost => SurfaceAcquisition::Lost,
+            wgpu::CurrentSurfaceTexture::Outdated => SurfaceAcquisition::Outdated,
+            wgpu::CurrentSurfaceTexture::Timeout => SurfaceAcquisition::Timeout,
+            wgpu::CurrentSurfaceTexture::Occluded => SurfaceAcquisition::Occluded,
+            wgpu::CurrentSurfaceTexture::Validation => SurfaceAcquisition::Validation,
+        }
+    }
+
+    fn record_event(&mut self, event: SurfaceEvent) -> LifecycleAction {
+        self.generations.surface_event(event)
+    }
+
+    fn recover(&mut self, action: LifecycleAction) -> Result<(), RunError> {
+        let generation = self
+            .generations
+            .current()
+            .ok_or_else(|| RunError::Recovery {
+                message: "surface recovery requested without an active GPU generation".to_owned(),
+            })?;
+        match action {
+            LifecycleAction::RecreateSurface => self.window.recreate_surface(
+                &generation.gpu.adapter,
+                &generation.gpu.device,
+                self.config,
+            ),
+            LifecycleAction::ReconfigureSurface => {
+                self.window.reconfigure(&generation.gpu.device);
+                Ok(())
+            }
+            _ => Err(RunError::Recovery {
+                message: format!("surface admission requested invalid recovery action {action:?}"),
+            }),
+        }
+    }
+}
+
+struct AdmittedWgpuFrameDriver<'a> {
+    renderer: &'a mut dear_imgui_wgpu::WgpuRenderer,
+    device: &'a wgpu::Device,
+    queue: &'a wgpu::Queue,
+    surface_frame: Option<wgpu::SurfaceTexture>,
+    clear_color: wgpu::Color,
+    rendered: bool,
+    presented: bool,
+}
+
+impl<'a> AdmittedWgpuFrameDriver<'a> {
+    fn new(
+        renderer: &'a mut dear_imgui_wgpu::WgpuRenderer,
+        device: &'a wgpu::Device,
+        queue: &'a wgpu::Queue,
+        surface_frame: wgpu::SurfaceTexture,
+        clear_color: wgpu::Color,
+    ) -> Self {
+        Self {
+            renderer,
+            device,
+            queue,
+            surface_frame: Some(surface_frame),
+            clear_color,
+            rendered: false,
+            presented: false,
+        }
+    }
+
+    fn render_frame<'frame>(
+        &mut self,
+        frame: RenderedFrame<'frame>,
+    ) -> Result<ReconciledFrame<'frame>, RunError> {
+        if self.rendered {
+            return Err(RunError::Recovery {
+                message: "admitted surface frame was rendered more than once".to_owned(),
+            });
+        }
+        let surface_frame = self
+            .surface_frame
+            .as_ref()
+            .ok_or_else(|| RunError::Recovery {
+                message: "admitted surface frame was consumed before rendering".to_owned(),
+            })?;
+        let view = surface_frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Dear App render encoder"),
+            });
+        let reconciled = {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Dear App render pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(self.clear_color),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            self.renderer.new_frame().map_err(RunError::FramePrepare)?;
+            self.renderer
+                .render_reconciled(frame, &mut render_pass)
+                .map_err(RunError::Render)?
+        };
+        self.queue.submit(Some(encoder.finish()));
+        self.rendered = true;
+        Ok(reconciled)
+    }
+
+    fn present_frame(&mut self) -> Result<(), RunError> {
+        if !self.rendered {
+            return Err(RunError::Recovery {
+                message: "admitted surface frame was presented before rendering".to_owned(),
+            });
+        }
+        let surface_frame = self
+            .surface_frame
+            .take()
+            .ok_or_else(|| RunError::Recovery {
+                message: "admitted surface frame was presented more than once".to_owned(),
+            })?;
+        self.queue.present(surface_frame);
+        self.presented = true;
+        Ok(())
+    }
+
+    const fn was_presented(&self) -> bool {
+        self.presented
+    }
+}
+
+#[cfg(feature = "test-engine")]
+impl TestFrameDriver for AdmittedWgpuFrameDriver<'_> {
+    type RenderError = RunError;
+    type PresentError = RunError;
+
+    fn render<'frame>(
+        &mut self,
+        frame: RenderedFrame<'frame>,
+        _frame_index: u64,
+    ) -> Result<ReconciledFrame<'frame>, Self::RenderError> {
+        self.render_frame(frame)
+    }
+
+    fn present(&mut self, _frame_index: u64) -> Result<(), Self::PresentError> {
+        self.present_frame()
+    }
+}
+
+fn drive_admitted_frame<A: Application>(
+    application: &mut A,
+    rendered: RenderedFrame<'_>,
+    frame_index: u64,
+    driver: &mut AdmittedWgpuFrameDriver<'_>,
+) -> Result<(), RunError> {
+    #[cfg(feature = "test-engine")]
+    if let Some(engine) = application.test_engine() {
+        return engine
+            .drive_frame(rendered, frame_index, driver)
+            .map_err(|source| RunError::TestEngineFrame {
+                frame: frame_index,
+                source: Box::new(source),
+            });
+    }
+
+    #[cfg(not(feature = "test-engine"))]
+    let _ = (application, frame_index);
+    let reconciled = driver.render_frame(rendered)?;
+    drop(reconciled);
+    driver.present_frame()
 }
 
 impl Runtime {
@@ -242,6 +439,7 @@ impl Runtime {
                 b: config.clear_color[2] as f64,
                 a: config.clear_color[3] as f64,
             },
+            admitted_frame_count: 0,
         };
 
         if let Err(error) = runtime.notify_initialized(application, config) {
@@ -334,167 +532,114 @@ impl Runtime {
         config: &AppConfig,
     ) -> Result<bool, RunError> {
         let clear_color = self.clear_color;
-        let RuntimeOwnership {
-            window,
-            ui,
-            generations,
-        } = self.ownership.get_mut();
-        let generation = generations
-            .current_mut()
-            .ok_or_else(|| RunError::Recovery {
-                message: "render requested without an active GPU generation".to_owned(),
-            })?;
-        let UiState {
-            context,
-            platform,
-            #[cfg(feature = "implot")]
-            implot,
-            #[cfg(feature = "imnodes")]
-            imnodes,
-            #[cfg(feature = "implot3d")]
-            implot3d,
-            docking,
-        } = ui;
-
-        let mut prepare_frame = PrepareFrameContext {
-            imgui: context,
-            window: &window.window,
-        };
-        application.prepare_frame(&mut prepare_frame)?;
-        super::state::validate_supported_imgui_config(context)?;
-        platform
-            .prepare_frame(&window.window, context)
-            .map_err(|error| super::state::platform_error("Winit frame preparation", error))?;
-        let mut exit_requested = false;
-        let draw_data = build_and_render_frame(context, |ui| {
-            draw_dockspace(ui, docking.flags, config);
-            let addons = AddOns {
-                #[cfg(feature = "implot")]
-                implot: implot.as_ref(),
-                #[cfg(feature = "imnodes")]
-                imnodes: imnodes.as_ref(),
-                #[cfg(feature = "implot3d")]
-                implot3d: implot3d.as_ref(),
-                docking: DockingApi {
-                    controller: docking,
-                },
+        let admitted = {
+            let RuntimeOwnership {
+                window,
+                generations,
+                ..
+            } = self.ownership.get_mut();
+            let mut backend = RuntimeSurfaceAdmission {
+                window,
+                generations,
+                config,
             };
-            let mut frame = FrameContext {
-                ui,
-                addons,
-                gpu: generation.api(),
-                exit_requested: &mut exit_requested,
-            };
-            application.frame(&mut frame)?;
-            platform
-                .prepare_render_with_ui(ui, &window.window)
-                .map_err(|error| super::state::platform_error("Winit render preparation", error))?;
-            Ok(())
-        })?;
-
-        let (frame, reconfigure_after_present) = match window.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(frame) => {
-                let action = generations.surface_event(SurfaceEvent::Success);
-                debug_assert_eq!(action, LifecycleAction::Render);
-                (frame, false)
-            }
-            wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
-                let action = generations.surface_event(SurfaceEvent::Suboptimal);
-                debug_assert_eq!(action, LifecycleAction::RenderAndReconfigure);
-                (frame, true)
-            }
-            wgpu::CurrentSurfaceTexture::Lost => {
-                let action = generations.surface_event(SurfaceEvent::Lost);
-                debug_assert_eq!(action, LifecycleAction::RecreateSurface);
-                let generation = generations.current().ok_or_else(|| RunError::Recovery {
-                    message: "surface recreation requested without an active GPU generation"
-                        .to_owned(),
-                })?;
-                window.recreate_surface(&generation.gpu.adapter, &generation.gpu.device, config)?;
-                return Ok(exit_requested);
-            }
-            wgpu::CurrentSurfaceTexture::Outdated => {
-                let action = generations.surface_event(SurfaceEvent::Outdated);
-                debug_assert_eq!(action, LifecycleAction::ReconfigureSurface);
-                let generation = generations.current().ok_or_else(|| RunError::Recovery {
-                    message: "surface reconfiguration requested without an active GPU generation"
-                        .to_owned(),
-                })?;
-                window.reconfigure(&generation.gpu.device);
-                return Ok(exit_requested);
-            }
-            wgpu::CurrentSurfaceTexture::Timeout => {
-                let action = generations.surface_event(SurfaceEvent::Timeout);
-                debug_assert_eq!(action, LifecycleAction::SkipFrame);
-                return Ok(exit_requested);
-            }
-            wgpu::CurrentSurfaceTexture::Occluded => {
-                let action = generations.surface_event(SurfaceEvent::Occluded);
-                debug_assert_eq!(action, LifecycleAction::SkipFrame);
-                return Ok(exit_requested);
-            }
-            wgpu::CurrentSurfaceTexture::Validation => {
-                let action = generations.surface_event(SurfaceEvent::Validation);
-                debug_assert_eq!(action, LifecycleAction::Exit);
-                return Err(RunError::SurfaceValidation);
-            }
+            admit_surface_frame(&mut backend)?
         };
+        let ownership = self.ownership.get_mut();
+        let dispatch = dispatch_surface_frame(
+            admitted,
+            &mut self.admitted_frame_count,
+            |admitted, frame_index| {
+                let RuntimeOwnership {
+                    window,
+                    ui,
+                    generations,
+                } = ownership;
+                let generation = generations
+                    .current_mut()
+                    .ok_or_else(|| RunError::Recovery {
+                        message: "render requested without an active GPU generation".to_owned(),
+                    })?;
+                let UiState {
+                    context,
+                    platform,
+                    #[cfg(feature = "implot")]
+                    implot,
+                    #[cfg(feature = "imnodes")]
+                    imnodes,
+                    #[cfg(feature = "implot3d")]
+                    implot3d,
+                    docking,
+                } = ui;
 
-        let generation = generations
-            .current_mut()
-            .ok_or_else(|| RunError::Recovery {
-                message: "render submission requested without an active GPU generation".to_owned(),
-            })?;
-        let view = frame
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor::default());
-        let mut encoder =
-            generation
-                .gpu
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Dear App render encoder"),
-                });
-        {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Dear App render pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(clear_color),
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-            generation
-                .gpu
-                .renderer
-                .new_frame()
-                .map_err(RunError::FramePrepare)?;
-            generation
-                .gpu
-                .renderer
-                .render(draw_data, &mut render_pass)
-                .map_err(RunError::Render)?;
-        }
-        generation.gpu.queue.submit(Some(encoder.finish()));
-        let mut present = crate::PresentContext {
-            imgui: context,
-            window: &window.window,
-        };
-        application.before_present(&mut present)?;
-        generation.gpu.queue.present(frame);
-        application.after_present(&mut present)?;
-        if reconfigure_after_present {
-            window.reconfigure(&generation.gpu.device);
-        }
-        Ok(exit_requested)
+                let mut prepare_frame = PrepareFrameContext {
+                    imgui: context,
+                    window: &window.window,
+                };
+                application.prepare_frame(&mut prepare_frame)?;
+                super::state::validate_supported_imgui_config(context)?;
+                platform
+                    .prepare_frame(&window.window, context)
+                    .map_err(|error| {
+                        super::state::platform_error("Winit frame preparation", error)
+                    })?;
+                let mut exit_requested = false;
+                let draw_data = build_and_render_frame(context, |ui| {
+                    draw_dockspace(ui, docking.flags, config);
+                    let addons = AddOns {
+                        #[cfg(feature = "implot")]
+                        implot: implot.as_ref(),
+                        #[cfg(feature = "imnodes")]
+                        imnodes: imnodes.as_ref(),
+                        #[cfg(feature = "implot3d")]
+                        implot3d: implot3d.as_ref(),
+                        docking: DockingApi {
+                            controller: docking,
+                        },
+                    };
+                    let mut frame = FrameContext {
+                        ui,
+                        addons,
+                        gpu: generation.api(),
+                        exit_requested: &mut exit_requested,
+                    };
+                    application.frame(&mut frame)?;
+                    platform
+                        .prepare_render_with_ui(ui, &window.window)
+                        .map_err(|error| {
+                            super::state::platform_error("Winit render preparation", error)
+                        })?;
+                    Ok(())
+                })?;
+
+                let generation = generations
+                    .current_mut()
+                    .ok_or_else(|| RunError::Recovery {
+                        message: "render submission requested without an active GPU generation"
+                            .to_owned(),
+                    })?;
+                let reconfigure_after_present = admitted.reconfigure_after_present;
+                let gpu = &mut generation.gpu;
+                let mut driver = AdmittedWgpuFrameDriver::new(
+                    &mut gpu.renderer,
+                    &gpu.device,
+                    &gpu.queue,
+                    admitted.frame,
+                    clear_color,
+                );
+                let result = drive_admitted_frame(application, draw_data, frame_index, &mut driver);
+                let was_presented = driver.was_presented();
+                drop(driver);
+                settle_surface_presentation(
+                    result,
+                    was_presented,
+                    reconfigure_after_present,
+                    || window.reconfigure(&generation.gpu.device),
+                )?;
+                Ok(exit_requested)
+            },
+        )?;
+        Ok(dispatch.unwrap_or(false))
     }
 
     fn recover<A: Application>(
@@ -527,6 +672,10 @@ impl Runtime {
             .terminal_error()
             .map(ToString::to_string)
             .unwrap_or_else(|| "GPU recovery failed without a terminal error".to_owned())
+    }
+
+    fn current_generation(&self) -> Option<GpuGeneration> {
+        self.ownership.get().generations.current_generation()
     }
 
     fn shutdown_application<A: Application>(&mut self, application: &mut A) -> Option<RunError> {
@@ -809,6 +958,34 @@ fn should_process_runtime_event(shutdown_called: bool, event_loop_exiting: bool)
     !shutdown_called && !event_loop_exiting
 }
 
+fn uncaptured_gpu_fault(kind: GpuFaultKind, message: String) -> RunError {
+    match kind {
+        GpuFaultKind::OutOfMemory => RunError::GpuOutOfMemory { message },
+        GpuFaultKind::Validation => RunError::GpuValidation { message },
+        GpuFaultKind::Internal => RunError::GpuInternal { message },
+    }
+}
+
+enum GpuFaultDisposition {
+    IgnoreStale,
+    Terminate(RunError),
+}
+
+fn classify_uncaptured_gpu_fault(
+    current_generation: Option<GpuGeneration>,
+    signal_generation: GpuGeneration,
+    kind: GpuFaultKind,
+    message: String,
+) -> GpuFaultDisposition {
+    match current_generation {
+        None => GpuFaultDisposition::Terminate(RunError::Recovery {
+            message: "GPU fault received before runtime initialization".to_owned(),
+        }),
+        Some(current) if current != signal_generation => GpuFaultDisposition::IgnoreStale,
+        Some(_) => GpuFaultDisposition::Terminate(uncaptured_gpu_fault(kind, message)),
+    }
+}
+
 fn resolve_run_result(
     terminal_before_shutdown: Option<RunError>,
     event_loop_result: Result<(), winit::error::EventLoopError>,
@@ -876,18 +1053,46 @@ impl<A: Application + 'static> ApplicationHandler<RuntimeEvent> for Runner<A> {
     }
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: RuntimeEvent) {
-        let RuntimeEvent::DeviceLost {
-            generation,
-            message,
-        } = event;
+        let generation = match &event {
+            RuntimeEvent::DeviceLost { generation, .. }
+            | RuntimeEvent::GpuFault { generation, .. } => *generation,
+        };
 
         if !should_process_runtime_event(self.shutdown.started(), event_loop.exiting()) {
             warn!(
                 generation = generation.get(),
-                "Ignoring device-loss signal after runtime shutdown"
+                "Ignoring GPU signal after runtime shutdown"
             );
             return;
         }
+
+        let (generation, message) = match event {
+            RuntimeEvent::DeviceLost {
+                generation,
+                message,
+            } => (generation, message),
+            RuntimeEvent::GpuFault {
+                generation,
+                kind,
+                message,
+            } => {
+                let current_generation = self
+                    .ownership
+                    .runtime
+                    .as_ref()
+                    .and_then(Runtime::current_generation);
+                match classify_uncaptured_gpu_fault(current_generation, generation, kind, message) {
+                    GpuFaultDisposition::IgnoreStale => {
+                        warn!(
+                            generation = generation.get(),
+                            "Ignoring stale uncaptured GPU fault"
+                        );
+                    }
+                    GpuFaultDisposition::Terminate(error) => self.terminate(event_loop, error),
+                }
+                return;
+            }
+        };
 
         let Some(runtime) = self.ownership.runtime.as_mut() else {
             self.terminate(
@@ -1016,17 +1221,69 @@ mod tests {
     use winit::window::WindowId;
 
     use super::{
-        OrderedRuntimeOwner, RunnerOwnership, RuntimeOwnershipLifecycle, RuntimeShutdownErrors,
-        ShutdownCoordinator, build_and_render_frame, dispatch_live_window_event,
-        finish_runtime_shutdown, initialize_runtime_once, resolve_run_result,
-        should_process_runtime_event, validate_config,
+        GpuFaultDisposition, OrderedRuntimeOwner, RunnerOwnership, RuntimeOwnershipLifecycle,
+        RuntimeShutdownErrors, ShutdownCoordinator, build_and_render_frame,
+        classify_uncaptured_gpu_fault, dispatch_live_window_event, finish_runtime_shutdown,
+        initialize_runtime_once, resolve_run_result, should_process_runtime_event,
+        uncaptured_gpu_fault, validate_config,
     };
-    use crate::{AppConfig, RunError};
+    use crate::runtime::state::GpuFaultKind;
+    use crate::{AppConfig, GpuGeneration, RunError};
     use dear_imgui_rs::ConfigFlags;
 
     struct DropProbe {
         event: &'static str,
         events: Rc<RefCell<Vec<&'static str>>>,
+    }
+
+    #[test]
+    fn uncaptured_gpu_faults_preserve_their_terminal_classification() {
+        assert!(matches!(
+            uncaptured_gpu_fault(GpuFaultKind::OutOfMemory, "oom".to_owned()),
+            RunError::GpuOutOfMemory { message } if message == "oom"
+        ));
+        assert!(matches!(
+            uncaptured_gpu_fault(GpuFaultKind::Validation, "invalid".to_owned()),
+            RunError::GpuValidation { message } if message == "invalid"
+        ));
+        assert!(matches!(
+            uncaptured_gpu_fault(GpuFaultKind::Internal, "driver".to_owned()),
+            RunError::GpuInternal { message } if message == "driver"
+        ));
+    }
+
+    #[test]
+    fn uncaptured_gpu_fault_dispatch_is_generation_bound() {
+        let current = GpuGeneration(8);
+        assert!(matches!(
+            classify_uncaptured_gpu_fault(
+                Some(current),
+                GpuGeneration(7),
+                GpuFaultKind::Validation,
+                "stale".to_owned(),
+            ),
+            GpuFaultDisposition::IgnoreStale
+        ));
+        assert!(matches!(
+            classify_uncaptured_gpu_fault(
+                Some(current),
+                current,
+                GpuFaultKind::OutOfMemory,
+                "live oom".to_owned(),
+            ),
+            GpuFaultDisposition::Terminate(RunError::GpuOutOfMemory { message })
+                if message == "live oom"
+        ));
+        assert!(matches!(
+            classify_uncaptured_gpu_fault(
+                None,
+                current,
+                GpuFaultKind::Internal,
+                "early".to_owned(),
+            ),
+            GpuFaultDisposition::Terminate(RunError::Recovery { message })
+                if message.contains("before runtime initialization")
+        ));
     }
 
     impl Drop for DropProbe {

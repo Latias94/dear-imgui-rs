@@ -216,6 +216,12 @@ jobs:
       - name: Check test-engine (no capture)
         run: cargo check -p dear-imgui-test-engine --no-default-features
 
+      - name: Test safe Test Engine runner contracts
+        run: cargo nextest run -j 1 -p dear-imgui-test-engine --no-default-features
+
+      - name: Test safe Test Engine capture contracts
+        run: cargo nextest run -j 1 -p dear-imgui-test-engine --no-default-features --features capture
+
       - name: Check native stack-layout unified with the WASM feature
         env:
           IMGUI_SYS_FORCE_BUILD: "1"
@@ -284,7 +290,9 @@ jobs:
             -Clink-arg=-fsanitize=undefined
             -Clink-arg=-lstdc++
           IMGUI_SYS_FORCE_BUILD: "1"
-        run: cargo nextest run -p dear-imgui-test-engine-sys --test ffi_boundary
+        run: |
+          cargo nextest run -p dear-imgui-test-engine-sys --features capture --test ffi_boundary
+          cargo nextest run -p dear-imgui-test-engine --features capture --test runner
 
   test-engine-runtime:
     name: Test Engine native runtime

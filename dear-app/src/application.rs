@@ -111,6 +111,19 @@ pub enum RunError {
     MultiViewportUnsupported,
     #[error("WGPU surface validation failed while acquiring the next frame")]
     SurfaceValidation,
+    #[error("WGPU exhausted GPU memory: {message}")]
+    GpuOutOfMemory { message: String },
+    #[error("WGPU reported an uncaptured validation error: {message}")]
+    GpuValidation { message: String },
+    #[error("WGPU reported an uncaptured internal error: {message}")]
+    GpuInternal { message: String },
+    #[cfg(feature = "test-engine")]
+    #[error("Test Engine frame {frame} failed: {source}")]
+    TestEngineFrame {
+        frame: u64,
+        #[source]
+        source: Box<dear_imgui_test_engine::FrameDriverError<RunError, RunError>>,
+    },
     #[error("application callback failed during {stage}: {message}")]
     Application {
         stage: &'static str,
@@ -169,14 +182,14 @@ pub trait Application {
     /// Builds one Dear ImGui frame.
     fn frame(&mut self, context: &mut FrameContext<'_>) -> Result<(), RunError>;
 
-    /// Runs after GPU commands are submitted and immediately before the main surface is presented.
-    fn before_present(&mut self, _context: &mut PresentContext<'_>) -> Result<(), RunError> {
-        Ok(())
-    }
-
-    /// Runs immediately after the main surface is presented.
-    fn after_present(&mut self, _context: &mut PresentContext<'_>) -> Result<(), RunError> {
-        Ok(())
+    /// Returns the Test Engine attached to this application's Context, when enabled.
+    ///
+    /// The runtime drives this engine only for admitted surface frames and owns the complete
+    /// `render -> pre-swap -> present -> post-swap` protocol. Applications may use the engine from
+    /// [`Self::frame`] for UI and queue controls, but must not drive presentation independently.
+    #[cfg(feature = "test-engine")]
+    fn test_engine(&mut self) -> Option<&mut crate::test_engine::TestEngine> {
+        None
     }
 
     /// Runs exactly once before add-ons and the Dear ImGui context are torn down.
@@ -244,23 +257,6 @@ pub struct ShutdownContext<'a> {
 pub struct PrepareFrameContext<'a> {
     pub(crate) imgui: &'a mut imgui::Context,
     pub(crate) window: &'a Window,
-}
-
-/// Access available at the main-surface presentation boundary.
-pub struct PresentContext<'a> {
-    pub(crate) imgui: &'a mut imgui::Context,
-    pub(crate) window: &'a Window,
-}
-
-impl PresentContext<'_> {
-    pub fn imgui(&mut self) -> &mut imgui::Context {
-        self.imgui
-    }
-
-    #[must_use]
-    pub fn window(&self) -> &Window {
-        self.window
-    }
 }
 
 impl PrepareFrameContext<'_> {

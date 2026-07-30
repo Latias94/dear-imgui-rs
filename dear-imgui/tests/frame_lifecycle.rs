@@ -70,6 +70,44 @@ fn frame_token_allows_engine_owned_begin_ui_end_flow() {
 }
 
 #[test]
+fn reconciled_frame_proof_requires_consuming_a_completed_render_lease() {
+    let _guard = test_guard();
+
+    let mut ctx = imgui::Context::create();
+    prepare_context(&mut ctx);
+    let context_id = ctx.id();
+    let _consumer = ctx.create_renderer_consumer().unwrap();
+
+    let unreconciled = ctx.begin_frame().render();
+    assert!(matches!(
+        unreconciled.into_reconciled(),
+        Err(imgui::render::RendererConsumerError::FrameNotReconciled {
+            pending_requests,
+        }) if pending_requests > 0
+    ));
+
+    prepare_context(&mut ctx);
+    let mut rendered = ctx.begin_frame().render();
+    let feedback = rendered
+        .texture_requests()
+        .iter()
+        .map(|request| match request.kind() {
+            imgui::render::TextureRequestKind::Create
+            | imgui::render::TextureRequestKind::Update => {
+                request.uploaded(imgui::TextureId::new(91))
+            }
+            imgui::render::TextureRequestKind::Destroy => request.destroyed(),
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    rendered.reconcile_texture_feedback(feedback).unwrap();
+    let reconciled = rendered.into_reconciled().unwrap();
+    assert_eq!(reconciled.context_id(), context_id);
+    assert!(reconciled.epoch().is_some());
+    drop(reconciled);
+}
+
+#[test]
 fn context_can_snapshot_an_engine_owned_main_viewport_frame() {
     let _guard = test_guard();
 

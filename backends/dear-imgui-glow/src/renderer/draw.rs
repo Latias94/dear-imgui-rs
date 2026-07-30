@@ -1,6 +1,6 @@
 use dear_imgui_rs::{
     internal::RawWrapper,
-    render::{DrawCmd, DrawCmdParams, DrawData, DrawVert, RenderedFrame},
+    render::{DrawCmd, DrawCmdParams, DrawData, DrawVert, ReconciledFrame, RenderedFrame},
 };
 use glow::{Context, HasContext};
 use std::mem::size_of;
@@ -51,9 +51,22 @@ fn clear_viewport_framebuffer(gl: &Context, color: [f32; 4]) {
 
 impl GlowRenderer {
     /// Consume and render one Context-borrowed Dear ImGui frame.
-    pub fn render(&mut self, mut frame: RenderedFrame<'_>) -> RenderResult<()> {
+    pub fn render(&mut self, frame: RenderedFrame<'_>) -> RenderResult<()> {
+        self.render_reconciled(frame).map(drop)
+    }
+
+    /// Renders one frame and returns its texture-reconciliation proof to a presentation owner.
+    pub fn render_reconciled<'frame>(
+        &mut self,
+        mut frame: RenderedFrame<'frame>,
+    ) -> RenderResult<ReconciledFrame<'frame>> {
+        self.render_borrowed(&mut frame)?;
+        frame.into_reconciled().map_err(Into::into)
+    }
+
+    pub(super) fn render_borrowed(&mut self, frame: &mut RenderedFrame<'_>) -> RenderResult<()> {
         self.ensure_operational()?;
-        self.validate_rendered_frame(&frame)?;
+        self.validate_rendered_frame(frame)?;
         if self.is_destroyed {
             return Err(RenderError::RendererDestroyed);
         }
@@ -61,7 +74,7 @@ impl GlowRenderer {
             .gl_context
             .clone()
             .ok_or(RenderError::MissingGlContext)?;
-        self.prepare_rendered_frame(&gl, &mut frame)?;
+        self.prepare_rendered_frame(&gl, frame)?;
         self.render_draw_data(&gl, frame.draw_data())
     }
 
@@ -69,15 +82,25 @@ impl GlowRenderer {
     pub fn render_with_context(
         &mut self,
         gl: &Context,
-        mut frame: RenderedFrame<'_>,
+        frame: RenderedFrame<'_>,
     ) -> RenderResult<()> {
+        self.render_with_context_reconciled(gl, frame).map(drop)
+    }
+
+    /// Renders with an external OpenGL context and returns texture-reconciliation proof.
+    pub fn render_with_context_reconciled<'frame>(
+        &mut self,
+        gl: &Context,
+        mut frame: RenderedFrame<'frame>,
+    ) -> RenderResult<ReconciledFrame<'frame>> {
         self.ensure_operational()?;
         self.validate_rendered_frame(&frame)?;
         if self.is_destroyed {
             return Err(RenderError::RendererDestroyed);
         }
         self.prepare_rendered_frame(gl, &mut frame)?;
-        self.render_draw_data(gl, frame.draw_data())
+        self.render_draw_data(gl, frame.draw_data())?;
+        frame.into_reconciled().map_err(Into::into)
     }
 
     fn prepare_rendered_frame(
@@ -85,6 +108,9 @@ impl GlowRenderer {
         gl: &Context,
         frame: &mut RenderedFrame<'_>,
     ) -> RenderResult<()> {
+        if frame.is_texture_feedback_reconciled() {
+            return Ok(());
+        }
         let request_epoch = frame.epoch().map_or(0, |epoch| epoch.sequence());
         let feedback =
             self.process_texture_requests(gl, frame.texture_requests(), request_epoch)?;

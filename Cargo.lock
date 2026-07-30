@@ -2504,6 +2504,7 @@ name = "dear-app"
 version = "0.16.0-alpha.1"
 dependencies = [
  "dear-imgui-rs",
+ "dear-imgui-test-engine",
  "dear-imgui-wgpu",
  "dear-imgui-winit",
  "dear-imnodes",

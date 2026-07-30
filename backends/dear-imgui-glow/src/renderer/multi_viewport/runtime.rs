@@ -1,12 +1,13 @@
 use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
 use std::fmt;
 use std::rc::Rc;
 
-use dear_imgui_rs::render::RenderedFrame;
+use dear_imgui_rs::render::{ReconciledFrame, RenderedFrame};
 use dear_imgui_rs::{
     Context, ContextAttachment, ContextAttachmentError, ContextAttachmentLease,
     ContextAttachmentRole, ContextAttachmentTeardownError, ContextBinding, ContextBindingError,
-    ContextDestroyed, ContextId, ContextTeardown, TextureFormat, TextureId,
+    ContextDestroyed, ContextId, ContextTeardown, Id, TextureFormat, TextureId,
 };
 use thiserror::Error;
 
@@ -84,6 +85,70 @@ pub enum GlowViewportError {
     /// Dear ImGui passed an invalid viewport to the renderer callback.
     #[error("Glow renderer callback received a null viewport")]
     InvalidViewport,
+    /// A frame trace is already collecting events for this runtime.
+    #[error("a Glow viewport frame trace is already active")]
+    FrameTraceAlreadyActive,
+}
+
+/// Renderer callbacks that completed successfully during one platform-window pump.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct GlowViewportFrameReport {
+    rendered_viewports: Vec<Id>,
+}
+
+impl GlowViewportFrameReport {
+    /// Returns the secondary viewport IDs whose draw data completed Glow rendering.
+    pub fn rendered_viewports(&self) -> &[Id] {
+        &self.rendered_viewports
+    }
+}
+
+#[derive(Debug)]
+struct ActiveFrameTrace {
+    rendered_viewports: HashSet<Id>,
+}
+
+#[derive(Debug, Default)]
+struct FrameTraceState {
+    active: Option<ActiveFrameTrace>,
+}
+
+/// Scoped collector for one Glow secondary-viewport render pass.
+///
+/// Dropping this guard without calling [`Self::finish`] aborts the report and releases the runtime
+/// for the next frame. A runtime accepts at most one live trace, so callback events cannot be
+/// assigned to overlapping frames.
+#[must_use = "keep the trace alive through the platform-window pump, then call finish"]
+pub struct GlowViewportFrameTrace<'runtime> {
+    control: &'runtime RuntimeControl,
+    finished: bool,
+}
+
+impl fmt::Debug for GlowViewportFrameTrace<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("GlowViewportFrameTrace")
+            .field("context", &self.control.binding.id())
+            .field("finished", &self.finished)
+            .finish()
+    }
+}
+
+impl GlowViewportFrameTrace<'_> {
+    /// Finishes this frame trace and returns only callbacks that completed successfully.
+    pub fn finish(mut self) -> GlowViewportFrameReport {
+        let report = self.control.finish_frame_trace();
+        self.finished = true;
+        report
+    }
+}
+
+impl Drop for GlowViewportFrameTrace<'_> {
+    fn drop(&mut self) {
+        if !self.finished {
+            self.control.abort_frame_trace();
+        }
+    }
 }
 
 /// Transactional attachment failure that returns the renderer unchanged.
@@ -168,6 +233,7 @@ pub(super) struct RuntimeControl {
     attachment: RefCell<Option<ContextAttachmentLease>>,
     callback_state: Cell<CallbackState>,
     faults: RefCell<Option<GlowViewportError>>,
+    frame_trace: RefCell<FrameTraceState>,
     #[cfg(test)]
     panic_next_callback: Cell<bool>,
     #[cfg(test)]
@@ -197,6 +263,7 @@ impl RuntimeControl {
             attachment: RefCell::new(None),
             callback_state: Cell::new(CallbackState::Unclaimed),
             faults: RefCell::new(None),
+            frame_trace: RefCell::new(FrameTraceState::default()),
             #[cfg(test)]
             panic_next_callback: Cell::new(false),
             #[cfg(test)]
@@ -287,6 +354,49 @@ impl RuntimeControl {
     pub(super) fn record_dependency_fault(&self, fault: GlowViewportError) {
         self.record_fault(fault);
         self.begin_shutdown();
+    }
+
+    fn begin_frame_trace(&self) -> Result<GlowViewportFrameTrace<'_>, GlowViewportError> {
+        if self.frame_trace.borrow().active.is_some() {
+            return Err(GlowViewportError::FrameTraceAlreadyActive);
+        }
+        self.ensure_entry()?;
+        {
+            let mut trace = self.frame_trace.borrow_mut();
+            if trace.active.is_some() {
+                return Err(GlowViewportError::FrameTraceAlreadyActive);
+            }
+            trace.active = Some(ActiveFrameTrace {
+                rendered_viewports: HashSet::new(),
+            });
+        }
+        Ok(GlowViewportFrameTrace {
+            control: self,
+            finished: false,
+        })
+    }
+
+    fn finish_frame_trace(&self) -> GlowViewportFrameReport {
+        let active = {
+            let mut trace = self.frame_trace.borrow_mut();
+            trace
+                .active
+                .take()
+                .expect("a live Glow frame-trace guard owns the active trace")
+        };
+        let mut rendered_viewports = active.rendered_viewports.into_iter().collect::<Vec<_>>();
+        rendered_viewports.sort_unstable_by_key(|id| id.raw());
+        GlowViewportFrameReport { rendered_viewports }
+    }
+
+    fn abort_frame_trace(&self) {
+        self.frame_trace.borrow_mut().active = None;
+    }
+
+    pub(super) fn record_rendered_viewport(&self, viewport_id: dear_imgui_rs::sys::ImGuiID) {
+        if let Some(active) = self.frame_trace.borrow_mut().active.as_mut() {
+            active.rendered_viewports.insert(Id::from(viewport_id));
+        }
     }
 
     fn record_renderer_operational_fault(&self, error: RenderError) {
@@ -717,6 +827,17 @@ impl GlowViewportRuntime {
         self.control.detect_and_take_fault().map_or(Ok(()), Err)
     }
 
+    /// Begins an instance-bound trace for one secondary platform-window render pass.
+    ///
+    /// Keep the returned guard alive while calling
+    /// [`Self::render_with_platform_windows_reconciled`], restore the main native GL context, and
+    /// then call [`GlowViewportFrameTrace::finish`]. The report contains only renderer callbacks
+    /// whose Glow draw completed successfully. This diagnostic trace does not replace
+    /// [`Self::poll_fault`].
+    pub fn begin_frame_trace(&self) -> Result<GlowViewportFrameTrace<'_>, GlowViewportError> {
+        self.control.begin_frame_trace()
+    }
+
     /// Prepares renderer device objects for a new frame.
     pub fn new_frame(&self) -> Result<(), GlowViewportError> {
         self.control
@@ -725,8 +846,37 @@ impl GlowViewportRuntime {
 
     /// Consumes and renders one Context-owned frame.
     pub fn render(&self, frame: RenderedFrame<'_>) -> Result<(), GlowViewportError> {
+        self.render_reconciled(frame).map(drop)
+    }
+
+    /// Renders one main-viewport frame and returns texture-reconciliation proof.
+    pub fn render_reconciled<'frame>(
+        &self,
+        frame: RenderedFrame<'frame>,
+    ) -> Result<ReconciledFrame<'frame>, GlowViewportError> {
         self.control
-            .with_renderer_mut(|renderer| renderer.render(frame).map_err(Into::into))
+            .with_renderer_mut(|renderer| renderer.render_reconciled(frame).map_err(Into::into))
+    }
+
+    /// Renders the main viewport, then completes every secondary platform viewport.
+    ///
+    /// This follows Dear ImGui's OpenGL multi-viewport ordering while retaining the Context render
+    /// lease across the native platform-window callbacks. The caller remains responsible for
+    /// restoring its main native GL context and calling [`Self::poll_fault`] before presenting the
+    /// main window. Delaying fault propagation until after context restoration keeps teardown on a
+    /// known GL capability even when a native callback fails.
+    pub fn render_with_platform_windows_reconciled<'frame>(
+        &self,
+        mut frame: RenderedFrame<'frame>,
+    ) -> Result<ReconciledFrame<'frame>, GlowViewportError> {
+        self.control.with_renderer_mut(|renderer| {
+            renderer.render_borrowed(&mut frame).map_err(Into::into)
+        })?;
+        frame.update_and_render_platform_windows_default();
+        frame
+            .into_reconciled()
+            .map_err(RenderError::from)
+            .map_err(Into::into)
     }
 
     /// Runs a read-only, non-escaping renderer inspection.

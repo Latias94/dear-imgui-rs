@@ -8,6 +8,7 @@ mod config;
 mod counts;
 mod engine;
 mod error;
+mod frame_driver;
 mod results;
 mod runner;
 mod script;
@@ -16,12 +17,23 @@ mod state;
 #[cfg(test)]
 mod tests;
 
-pub use config::{InputMode, RunFlags, RunSpeed, TestGroup, VerboseLevel};
+#[cfg(feature = "capture")]
+pub use config::CaptureFlags;
+pub use config::{CaptureOutput, InputMode, RunFlags, RunSpeed, TestGroup, VerboseLevel};
 pub use counts::{ScriptCount, ScriptLimit};
 pub use engine::TestEngine;
 pub use error::{TestEngineError, TestEngineResult, TestEngineStatus};
+pub use frame_driver::{
+    CaptureProviderError, FrameDriverError, FrameDriverPhase, RunMode, TestFrameDriver,
+};
+#[cfg(feature = "capture")]
+pub use frame_driver::{CaptureRequest, CapturingTestFrameDriver, Rgba8};
 pub use results::{ResultSummary, RunOutcome, RunReport};
-pub use runner::{RunnerCallbackStage, RunnerControl, RunnerError, TestRunner};
+#[cfg(feature = "capture")]
+pub use runner::{CapturingDriverRunResult, CapturingRunnerError};
+pub use runner::{
+    HeadlessRenderError, HeadlessRunnerError, RunnerControl, RunnerError, TestRunner,
+};
 pub use script::ScriptTest;
 pub use state::{AttachmentState, RunState};
 

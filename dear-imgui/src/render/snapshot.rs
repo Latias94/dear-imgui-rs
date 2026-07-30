@@ -585,6 +585,10 @@ pub enum RendererConsumerError {
     UnknownEpoch { epoch: u64 },
     #[error("snapshot epoch {epoch} was completed more than once")]
     EpochAlreadyCompleted { epoch: u64 },
+    #[error(
+        "the synchronous render lease still has {pending_requests} unreconciled texture request(s)"
+    )]
+    FrameNotReconciled { pending_requests: usize },
     #[error("renderer consumer still owns {count} outstanding epoch(s)")]
     OutstandingEpochs { count: usize },
     #[error("snapshot epoch {epoch} contains duplicate feedback for {texture:?}")]

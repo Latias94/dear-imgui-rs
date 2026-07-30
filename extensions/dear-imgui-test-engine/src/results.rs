@@ -33,15 +33,61 @@ impl RunOutcome {
 
 /// Structured terminal report produced by [`crate::TestRunner`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RunReport {
     /// Terminal product outcome.
-    pub outcome: RunOutcome,
+    outcome: RunOutcome,
     /// Native counters captured after the queue reached terminal state.
-    pub summary: ResultSummary,
+    summary: ResultSummary,
     /// Total number of complete frames pumped by the runner.
-    pub frames: u64,
+    frames: u64,
     /// Number of `frames` used to drain an abort or timeout.
-    pub cleanup_frames: u64,
+    cleanup_frames: u64,
+    mode: crate::RunMode,
+}
+
+impl RunReport {
+    pub(crate) const fn new(
+        outcome: RunOutcome,
+        summary: ResultSummary,
+        frames: u64,
+        cleanup_frames: u64,
+        mode: crate::RunMode,
+    ) -> Self {
+        Self {
+            outcome,
+            summary,
+            frames,
+            cleanup_frames,
+            mode,
+        }
+    }
+
+    #[must_use]
+    pub const fn outcome(&self) -> RunOutcome {
+        self.outcome
+    }
+
+    #[must_use]
+    pub const fn summary(&self) -> ResultSummary {
+        self.summary
+    }
+
+    #[must_use]
+    pub const fn frames(&self) -> u64 {
+        self.frames
+    }
+
+    #[must_use]
+    pub const fn cleanup_frames(&self) -> u64 {
+        self.cleanup_frames
+    }
+
+    /// Returns the selected presentation mode.
+    #[must_use]
+    pub const fn mode(&self) -> crate::RunMode {
+        self.mode
+    }
 }
 
 impl ResultSummary {

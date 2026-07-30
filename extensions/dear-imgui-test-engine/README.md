@@ -9,7 +9,7 @@ Safe, idiomatic Rust integration for [Dear ImGui Test Engine](https://github.com
 - Typed lifecycle and FFI errors with copied native diagnostics.
 - Test queue helpers with explicit Ready/Queued/Running/Terminal state.
 - A bounded `TestRunner` that reports five product outcomes separately from infrastructure errors.
-- Runtime controls: speed, verbosity, capture, abort.
+- Runtime controls: speed, verbosity, capture output, abort.
 - UI integration: show built-in test engine windows in an active ImGui frame.
 
 For native build/link options, see `extensions/dear-imgui-test-engine-sys/README.md`.
@@ -75,14 +75,19 @@ let report = test_engine::TestRunner::new(&mut engine)
         Ok::<_, Infallible>(test_engine::RunnerControl::Continue)
     })?;
 
-println!("outcome: {:?}, frames: {}", report.outcome, report.frames);
+println!(
+    "outcome: {:?}, frames: {}, mode: {:?}",
+    report.outcome(),
+    report.frames(),
+    report.mode(),
+);
 
 // Explicit shutdown reports cleanup failures and is idempotent.
 engine.shutdown()?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-`RunReport::outcome` is one of:
+`RunReport::outcome()` is one of:
 
 | Outcome | Meaning |
 | --- | --- |
@@ -92,16 +97,32 @@ engine.shutdown()?;
 | `TimedOut` | The primary frame budget expired and the runner drained the queue. |
 | `Aborted` | The application requested abort and the runner drained the queue. |
 
-All five are product outcomes returned in `Ok(RunReport)`. `RunnerError<E>` is reserved for
-infrastructure failures such as FFI/status errors, a wrong or dead Context, an already-open frame,
-application/renderer callback failures, managed texture requests in headless mode, or a cleanup
-queue that cannot settle. A CI gate should therefore require `RunOutcome::Passed`; it must not
-interpret every `Ok` report as success.
+All five are product outcomes returned in `Ok(RunReport)`. `HeadlessRunnerError<E>` and
+`RunnerError<ApplicationError, RenderError, PresentError>` are reserved for infrastructure failures
+such as FFI/status errors, a wrong or dead Context, an already-open frame, application/backend
+failures, managed texture requests without a renderer, or a cleanup queue that cannot settle. A CI
+gate should therefore require `RunOutcome::Passed`; it must not interpret every `Ok` report as
+success.
 
-Use `run_with_renderer` for graphical or texture-using tests. Its renderer callback receives each
-`RenderedFrame` by value and must reconcile the frame's managed texture requests before returning.
-`run_headless` is intentionally stricter: because no backend exists to upload textures, any managed
-texture request is an infrastructure error rather than an ignored request.
+Use `run_graphical` for graphical or texture-using tests. Implement `TestFrameDriver` on the object
+that owns both backend rendering and surface presentation. Its `render` method receives a borrowed
+`RenderedFrame` and must reconcile managed texture requests before returning; its `present` method
+performs exactly one surface presentation. The runner enforces this order:
+
+```text
+application UI -> render -> Test Engine pre-swap -> present -> Test Engine post-swap
+```
+
+A failed present never calls post-swap. `RunMode::Graphical` records the selected integration path;
+it is not independent proof that the operating system displayed the swapchain image.
+`run_headless` uses `RunMode::Headless` and is intentionally stricter: because no
+backend exists to upload textures, any managed texture request is an infrastructure error rather
+than an ignored request.
+
+With the optional `capture` feature, implement `CapturingTestFrameDriver` and call
+`run_graphical_with_capture`. The framebuffer provider is installed only for that run, and callback
+errors or panics are returned without crossing the C ABI. Enabling the feature alone does not make a
+headless run capable of screenshots.
 
 ## Notes
 
@@ -113,16 +134,17 @@ texture request is an infrastructure error rather than an ignored request.
   one-shot native failures on a best-effort basis.
 - A queued/running run rejects another queue request. Consume a terminal summary with
   `take_terminal_summary()` before queuing again.
-- `TestRunner` owns queueing, application UI, frame rendering, renderer invocation, `pre_swap`,
-  `post_swap`,
-  timeout/abort draining, and terminal-summary validation as one bounded operation. Use the lower-
-  level queue methods only when an integration must own that complete pump itself.
+- `TestRunner` owns queueing, application UI, frame rendering, renderer invocation, presentation
+  boundaries, timeout/abort draining, and terminal-summary validation as one bounded operation.
+  Integrations that already own the queue can use `TestEngine::drive_frame`; the raw swap hooks are
+  intentionally not public.
 - `show_windows()` accepts only a `Ui` from the attached Context during an active native frame.
 - Upstream Dear ImGui Test Engine has its own license terms; review `extensions/dear-imgui-test-engine-sys/third-party/imgui_test_engine/imgui_test_engine/LICENSE.txt` before shipping commercial products.
 
 ## Features
 
-- `capture` (default): enable screenshot/video capture helpers.
+- `capture`: opt into screenshot/video helpers and the run-scoped framebuffer-provider API. It is
+  disabled by default and requires `run_graphical_with_capture` plus a capturing frame driver.
 - `freetype`: passthrough to `dear-imgui-rs/freetype` and `dear-imgui-test-engine-sys/freetype`.
 
 ## Demo Tests

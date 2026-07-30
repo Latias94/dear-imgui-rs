@@ -40,7 +40,7 @@ build-support = { workspace = true, features = ["binding-spec"] }
 cc.workspace = true
 
 [features]
-default = ["capture"]
+default = []
 bindgen = ["dep:bindgen", "dear-imgui-sys/bindgen"]
 freetype = ["dear-imgui-sys/freetype"]
 capture = []

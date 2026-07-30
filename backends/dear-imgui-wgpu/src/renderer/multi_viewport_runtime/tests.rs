@@ -1870,6 +1870,43 @@ fn callback_match_helpers_do_not_confuse_foreign_functions() {
 }
 
 #[test]
+fn frame_trace_guard_rejects_nesting_and_drop_reopens_the_scope() {
+    let _guard = lock_context();
+    let mut context = Context::create();
+    let _platform = attach_test_platform(&mut context);
+    let (mut runtime, _) = attach_configured_test_runtime(&mut context);
+
+    let trace = runtime.begin_frame_trace().unwrap();
+    assert!(matches!(
+        runtime.begin_frame_trace(),
+        Err(WgpuViewportError::FrameTraceAlreadyActive)
+    ));
+    drop(trace);
+
+    let trace = runtime.begin_frame_trace().unwrap();
+    let viewport_id = dear_imgui_rs::Id::from(17_u32);
+    let earlier_viewport_id = dear_imgui_rs::Id::from(5_u32);
+    let control = runtime.control_for_test();
+    control.record_viewport_render_submitted(viewport_id);
+    control.record_viewport_render_submitted(earlier_viewport_id);
+    control.record_viewport_render_submitted(viewport_id);
+    control.record_viewport_present_submitted(viewport_id);
+    control.record_viewport_present_submitted(earlier_viewport_id);
+    control.record_viewport_present_submitted(earlier_viewport_id);
+    let report = trace.finish();
+    assert_eq!(
+        report.render_submitted_viewport_ids(),
+        &[earlier_viewport_id, viewport_id]
+    );
+    assert_eq!(
+        report.present_submitted_viewport_ids(),
+        &[earlier_viewport_id, viewport_id]
+    );
+
+    runtime.shutdown(&mut context).unwrap();
+}
+
+#[test]
 fn surface_events_have_explicit_recovery_actions() {
     assert_eq!(surface_action(SurfaceEvent::Success), SurfaceAction::Render);
     assert_eq!(

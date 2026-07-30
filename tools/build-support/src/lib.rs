@@ -15,6 +15,343 @@ pub const SAFE_DEMO_FONT_BOUNDARY_WASM_EXPORTS: &[&str] = &[
     "dear_imgui_rs_show_style_editor_without_font_atlas",
 ];
 
+/// Patch Dear ImGui Test Engine capture waits so an aborted presentation can stop safely.
+pub fn patch_test_engine_cpp_for_presentation_abort(source: &str) -> Result<String, String> {
+    let (mut patched, newline) = normalize_cpp_source(source);
+
+    patched = replace_cpp_source_once(
+        &patched,
+        "#include \"imgui_te_internal.h\"",
+        concat!(
+            "#include \"imgui_te_internal.h\"\n",
+            "#include \"cimgui_test_engine_capture_bridge.h\""
+        ),
+        "Test Engine capture bridge include",
+    )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        concat!(
+            "    engine->TestQueueCoroutineShouldExit = false;\n",
+            "    engine->Started = true;"
+        ),
+        concat!(
+            "    engine->TestQueueCoroutineShouldExit = false;\n",
+            "    dear_imgui_rs_test_engine_clear_capture_abort(engine);\n",
+            "    engine->Started = true;"
+        ),
+        "Test Engine start cancellation reset",
+    )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        concat!(
+            "    if (engine->TestQueueCoroutine != nullptr)\n",
+            "    {\n",
+            "        // Run until the coroutine exits\n",
+            "        engine->TestQueueCoroutineShouldExit = true;"
+        ),
+        concat!(
+            "    if (engine->TestQueueCoroutine != nullptr)\n",
+            "    {\n",
+            "        // Release capture waits before repeatedly resuming the coroutine.\n",
+            "        dear_imgui_rs_test_engine_request_capture_abort(engine);\n",
+            "        // Run until the coroutine exits\n",
+            "        engine->TestQueueCoroutineShouldExit = true;"
+        ),
+        "Test Engine stop capture cancellation",
+    )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        "bool ImGuiTestEngine_CaptureScreenshot(ImGuiTestEngine* engine, ImGuiCaptureArgs* args)\n{",
+        concat!(
+            "bool ImGuiTestEngine_CaptureScreenshot(ImGuiTestEngine* engine, ImGuiCaptureArgs* args)\n",
+            "{\n",
+            "    if (dear_imgui_rs_test_engine_capture_should_abort(engine))\n",
+            "        return false;"
+        ),
+        "CaptureScreenshot cancellation entry",
+    )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        concat!(
+            "bool ImGuiTestEngine_CaptureScreenshot(ImGuiTestEngine* engine, ImGuiCaptureArgs* args)\n",
+            "{\n",
+            "    if (dear_imgui_rs_test_engine_capture_should_abort(engine))\n",
+            "        return false;\n",
+            "    if (engine->IO.ScreenCaptureFunc == nullptr)\n",
+            "    {\n",
+            "        IM_ASSERT(0);\n",
+            "        return false;\n",
+            "    }\n\n",
+            "    IM_ASSERT(engine->CaptureCurrentArgs == nullptr && \"Nested captures are not supported.\");"
+        ),
+        concat!(
+            "bool ImGuiTestEngine_CaptureScreenshot(ImGuiTestEngine* engine, ImGuiCaptureArgs* args)\n",
+            "{\n",
+            "    if (dear_imgui_rs_test_engine_capture_should_abort(engine))\n",
+            "        return false;\n",
+            "    if (engine->IO.ScreenCaptureFunc == nullptr)\n",
+            "        return false;\n\n",
+            "    IM_ASSERT(engine->CaptureCurrentArgs == nullptr && \"Nested captures are not supported.\");"
+        ),
+        "CaptureScreenshot missing-provider rejection",
+    )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        concat!(
+            "bool ImGuiTestEngine_CaptureScreenshot(ImGuiTestEngine* engine, ImGuiCaptureArgs* args)\n",
+            "{\n",
+            "    if (dear_imgui_rs_test_engine_capture_should_abort(engine))\n",
+            "        return false;\n",
+            "    if (engine->IO.ScreenCaptureFunc == nullptr)\n",
+            "        return false;\n\n",
+            "    IM_ASSERT(engine->CaptureCurrentArgs == nullptr && \"Nested captures are not supported.\");"
+        ),
+        concat!(
+            "bool ImGuiTestEngine_CaptureScreenshot(ImGuiTestEngine* engine, ImGuiCaptureArgs* args)\n",
+            "{\n",
+            "    if (dear_imgui_rs_test_engine_capture_should_abort(engine))\n",
+            "        return false;\n",
+            "    if (engine->IO.ScreenCaptureFunc == nullptr)\n",
+            "        return false;\n\n",
+            "    DearImGuiRsCaptureWaitGuard capture_wait(engine);\n",
+            "    IM_ASSERT(engine->CaptureCurrentArgs == nullptr && \"Nested captures are not supported.\");"
+        ),
+        "CaptureScreenshot initial-yield rollback",
+    )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        concat!(
+            "    // Can only yield in the test func!\n",
+            "    if (ctx)\n",
+            "    {"
+        ),
+        concat!(
+            "    // Can only yield in the test func!\n",
+            "    if (ctx && !dear_imgui_rs_test_engine_capture_should_abort(engine))\n",
+            "    {"
+        ),
+        "Yield cancellation window visibility",
+    )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        concat!(
+            "    const ImGuiTestRunSpeed backup_run_speed = engine->IO.ConfigRunSpeed;\n",
+            "    engine->IO.ConfigRunSpeed = ImGuiTestRunSpeed_Fast;"
+        ),
+        concat!(
+            "    const ImGuiTestRunSpeed backup_run_speed = engine->IO.ConfigRunSpeed;\n",
+            "    dear_imgui_rs_test_engine_begin_screenshot_config(engine, backup_run_speed);\n",
+            "    engine->IO.ConfigRunSpeed = ImGuiTestRunSpeed_Fast;"
+        ),
+        "CaptureScreenshot configuration backup",
+    )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        concat!(
+            "    if ((args->InFlags & ImGuiCaptureFlags_Instant) == 0)\n",
+            "        ImGuiTestEngine_Yield(engine);"
+        ),
+        concat!(
+            "    if ((args->InFlags & ImGuiCaptureFlags_Instant) == 0)\n",
+            "    {\n",
+            "        ImGuiTestEngine_Yield(engine);\n",
+            "        if (dear_imgui_rs_test_engine_capture_should_abort(engine))\n",
+            "        {\n",
+            "            dear_imgui_rs_test_engine_restore_screenshot_config(engine);\n",
+            "            return false;\n",
+            "        }\n",
+            "    }"
+        ),
+        "CaptureScreenshot initial-yield cancellation",
+    )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        "    while (engine->CaptureCurrentArgs != nullptr)\n    {",
+        concat!(
+            "    while (engine->CaptureCurrentArgs != nullptr &&\n",
+            "           !dear_imgui_rs_test_engine_capture_should_abort(engine))\n",
+            "    {"
+        ),
+        "CaptureScreenshot wait cancellation",
+    )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        concat!(
+            "        ImGuiTestEngine_Yield(engine);\n",
+            "        frames_yielded++;\n",
+            "        if (frames_yielded > 4)\n",
+            "            IM_ASSERT(engine->PostSwapCalled && \"ImGuiTestEngine_PostSwap() is not being called by application! Must be called in order.\");"
+        ),
+        concat!(
+            "        ImGuiTestEngine_Yield(engine);\n",
+            "        frames_yielded++;\n",
+            "        if (dear_imgui_rs_test_engine_capture_should_abort(engine))\n",
+            "            break;\n",
+            "        if (frames_yielded > 4)\n",
+            "            IM_ASSERT(engine->PostSwapCalled && \"ImGuiTestEngine_PostSwap() is not being called by application! Must be called in order.\");"
+        ),
+        "CaptureScreenshot post-yield cancellation",
+    )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        concat!(
+            "    // Verify that the ImGuiCaptureFlags_Instant flag got honored\n",
+            "    if (args->InFlags & ImGuiCaptureFlags_Instant)"
+        ),
+        concat!(
+            "    if (dear_imgui_rs_test_engine_capture_should_abort(engine))\n",
+            "    {\n",
+            "        engine->CaptureCurrentArgs = nullptr;\n",
+            "        dear_imgui_rs_test_engine_restore_screenshot_config(engine);\n",
+            "        return false;\n",
+            "    }\n\n",
+            "    // Verify that the ImGuiCaptureFlags_Instant flag got honored\n",
+            "    if (args->InFlags & ImGuiCaptureFlags_Instant)"
+        ),
+        "CaptureScreenshot cancelled return",
+    )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        concat!(
+            "    engine->IO.ConfigRunSpeed = backup_run_speed;\n",
+            "    return true;"
+        ),
+        concat!(
+            "    const bool capture_completed =\n",
+            "        !dear_imgui_rs_test_engine_take_capture_provider_failure(engine);\n",
+            "    dear_imgui_rs_test_engine_restore_screenshot_config(engine);\n",
+            "    return capture_completed;"
+        ),
+        "CaptureScreenshot provider result propagation",
+    )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        "bool ImGuiTestEngine_CaptureBeginVideo(ImGuiTestEngine* engine, ImGuiCaptureArgs* args)\n{",
+        concat!(
+            "bool ImGuiTestEngine_CaptureBeginVideo(ImGuiTestEngine* engine, ImGuiCaptureArgs* args)\n",
+            "{\n",
+            "    if (dear_imgui_rs_test_engine_capture_should_abort(engine))\n",
+            "        return false;"
+        ),
+        "CaptureBeginVideo cancellation entry",
+    )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        concat!(
+            "bool ImGuiTestEngine_CaptureBeginVideo(ImGuiTestEngine* engine, ImGuiCaptureArgs* args)\n",
+            "{\n",
+            "    if (dear_imgui_rs_test_engine_capture_should_abort(engine))\n",
+            "        return false;\n",
+            "    if (engine->IO.ScreenCaptureFunc == nullptr)\n",
+            "    {\n",
+            "        IM_ASSERT(0);\n",
+            "        return false;\n",
+            "    }\n\n",
+            "    IM_ASSERT(engine->CaptureCurrentArgs == nullptr && \"Nested captures are not supported.\");"
+        ),
+        concat!(
+            "bool ImGuiTestEngine_CaptureBeginVideo(ImGuiTestEngine* engine, ImGuiCaptureArgs* args)\n",
+            "{\n",
+            "    if (dear_imgui_rs_test_engine_capture_should_abort(engine))\n",
+            "        return false;\n",
+            "    if (engine->IO.ScreenCaptureFunc == nullptr)\n",
+            "        return false;\n\n",
+            "    IM_ASSERT(engine->CaptureCurrentArgs == nullptr && \"Nested captures are not supported.\");"
+        ),
+        "CaptureBeginVideo missing-provider rejection",
+    )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        concat!(
+            "    engine->BackupConfigRunSpeed = engine->IO.ConfigRunSpeed;\n",
+            "    engine->BackupConfigNoThrottle = engine->IO.ConfigNoThrottle;"
+        ),
+        concat!(
+            "    dear_imgui_rs_test_engine_begin_video_config(engine);\n",
+            "    engine->BackupConfigRunSpeed = engine->IO.ConfigRunSpeed;\n",
+            "    engine->BackupConfigNoThrottle = engine->IO.ConfigNoThrottle;"
+        ),
+        "CaptureBeginVideo configuration backup",
+    )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        "    while (engine->CaptureCurrentArgs != nullptr)   // Wait until last frame is captured and gif is saved.\n        ImGuiTestEngine_Yield(engine);",
+        concat!(
+            "    while (engine->CaptureCurrentArgs != nullptr &&\n",
+            "           !dear_imgui_rs_test_engine_capture_should_abort(engine))\n",
+            "        ImGuiTestEngine_Yield(engine);"
+        ),
+        "CaptureEndVideo wait cancellation",
+    )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        concat!(
+            "    engine->IO.ConfigRunSpeed = engine->BackupConfigRunSpeed;\n",
+            "    engine->IO.ConfigNoThrottle = engine->BackupConfigNoThrottle;\n",
+            "    engine->IO.ConfigFixedDeltaTime = 0;\n",
+            "    engine->CaptureCurrentArgs = nullptr;\n",
+            "    return true;"
+        ),
+        concat!(
+            "    const bool capture_completed =\n",
+            "        !dear_imgui_rs_test_engine_capture_should_abort(engine) &&\n",
+            "        !dear_imgui_rs_test_engine_take_capture_provider_failure(engine);\n",
+            "    dear_imgui_rs_test_engine_restore_video_config(engine);\n",
+            "    engine->CaptureCurrentArgs = nullptr;\n",
+            "    return capture_completed;"
+        ),
+        "CaptureEndVideo configuration restore",
+    )?;
+
+    Ok(restore_cpp_newlines(patched, newline))
+}
+
+/// Patch Test Engine Context capture configuration so cancellation restores it synchronously.
+pub fn patch_test_engine_context_cpp_for_presentation_abort(
+    source: &str,
+) -> Result<String, String> {
+    let (mut patched, newline) = normalize_cpp_source(source);
+
+    patched = replace_cpp_source_once(
+        &patched,
+        "#include \"imgui_te_internal.h\"",
+        concat!(
+            "#include \"imgui_te_internal.h\"\n",
+            "#include \"cimgui_test_engine_capture_bridge.h\""
+        ),
+        "Test Engine Context capture bridge include",
+    )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        concat!(
+            "    bool backup_io_config_move_window_from_title_bar_only = io.ConfigWindowsMoveFromTitleBarOnly;\n",
+            "    if (capture_flags & ImGuiCaptureFlags_StitchAll)"
+        ),
+        concat!(
+            "    bool backup_io_config_move_window_from_title_bar_only = io.ConfigWindowsMoveFromTitleBarOnly;\n",
+            "    dear_imgui_rs_test_engine_begin_window_move_config(\n",
+            "        Engine, backup_io_config_move_window_from_title_bar_only);\n",
+            "    if (capture_flags & ImGuiCaptureFlags_StitchAll)"
+        ),
+        "CaptureScreenshot window-move configuration backup",
+    )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        concat!(
+            "    if (capture_flags & ImGuiCaptureFlags_StitchAll)\n",
+            "        io.ConfigWindowsMoveFromTitleBarOnly = backup_io_config_move_window_from_title_bar_only;\n\n",
+            "    return ret;"
+        ),
+        concat!(
+            "    dear_imgui_rs_test_engine_restore_window_move_config(Engine);\n\n",
+            "    return ret;"
+        ),
+        "CaptureScreenshot window-move configuration restore",
+    )?;
+
+    Ok(restore_cpp_newlines(patched, newline))
+}
+
 /// Patch `imgui.cpp` so the metrics window can omit the destructive font-atlas panel.
 pub fn patch_imgui_cpp_for_safe_demo(source: &str) -> Result<String, String> {
     let (mut patched, newline) = normalize_cpp_source(source);
@@ -6227,6 +6564,35 @@ mod tests {
         assert!(patched.contains("void DearImGuiRsShowDemoWindowWithoutFontAtlas(bool* p_open)"));
         assert!(
             patched.contains("void DearImGuiRsShowStyleEditorWithoutFontAtlas(ImGuiStyle* ref)")
+        );
+    }
+
+    #[test]
+    fn test_engine_patch_cancels_every_capture_wait_and_restores_video_config() {
+        let source = include_str!(concat!(
+            "../../../extensions/dear-imgui-test-engine-sys/third-party/",
+            "imgui_test_engine/imgui_test_engine/imgui_te_engine.cpp"
+        ));
+        let patched = patch_test_engine_cpp_for_presentation_abort(source).unwrap();
+
+        assert!(patched.contains("cimgui_test_engine_capture_bridge.h"));
+        assert_eq!(
+            patched
+                .matches("dear_imgui_rs_test_engine_request_capture_abort(engine)")
+                .count(),
+            1
+        );
+        assert!(
+            patched
+                .matches("dear_imgui_rs_test_engine_capture_should_abort(engine)")
+                .count()
+                >= 6
+        );
+        assert!(patched.contains("dear_imgui_rs_test_engine_begin_video_config(engine)"));
+        assert!(patched.contains("dear_imgui_rs_test_engine_restore_video_config(engine)"));
+        assert!(patched.contains("DearImGuiRsCaptureWaitGuard capture_wait(engine)"));
+        assert!(
+            patched.contains("if (ctx && !dear_imgui_rs_test_engine_capture_should_abort(engine))")
         );
     }
 

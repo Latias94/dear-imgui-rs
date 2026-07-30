@@ -9,6 +9,7 @@ pub(crate) enum SurfaceEvent {
     Timeout,
     Occluded,
     Validation,
+    OutOfMemory,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -73,7 +74,7 @@ impl LifecycleMachine {
             SurfaceEvent::Lost => LifecycleAction::RecreateSurface,
             SurfaceEvent::Outdated => LifecycleAction::ReconfigureSurface,
             SurfaceEvent::Timeout | SurfaceEvent::Occluded => LifecycleAction::SkipFrame,
-            SurfaceEvent::Validation => {
+            SurfaceEvent::Validation | SurfaceEvent::OutOfMemory => {
                 self.state = RuntimeState::Failed;
                 LifecycleAction::Exit
             }
@@ -177,6 +178,13 @@ mod tests {
             LifecycleAction::Exit
         );
         assert_eq!(lifecycle.state(), RuntimeState::Failed);
+
+        let mut out_of_memory = LifecycleMachine::new();
+        assert_eq!(
+            out_of_memory.surface_event(SurfaceEvent::OutOfMemory),
+            LifecycleAction::Exit
+        );
+        assert_eq!(out_of_memory.state(), RuntimeState::Failed);
     }
 
     #[test]
