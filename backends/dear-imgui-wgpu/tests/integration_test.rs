@@ -8,10 +8,14 @@ use dear_imgui_rs::{
 };
 use dear_imgui_wgpu::wgpu::*;
 use dear_imgui_wgpu::{
-    RenderResources, RendererError, RendererResult, Uniforms, WgpuInitInfo, WgpuRenderer,
-    WgpuTexture, WgpuTextureManager,
+    RenderResources, RendererError, RendererResult, Uniforms, WgpuInitInfo, WgpuRenderState,
+    WgpuRenderStateAccessError, WgpuRenderer, WgpuTexture, WgpuTextureManager,
 };
 use static_assertions::assert_not_impl_any;
+use std::sync::{
+    Mutex, OnceLock,
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+};
 
 fn request_test_device() -> Option<(Device, Queue)> {
     #[cfg(any(feature = "wgpu-27", feature = "wgpu-28"))]
@@ -34,6 +38,206 @@ fn request_test_device() -> Option<(Device, Queue)> {
 #[test]
 fn renderer_is_bound_to_the_context_ui_thread() {
     assert_not_impl_any!(WgpuRenderer: Send, Sync);
+    assert_not_impl_any!(WgpuRenderState<'static>: Send, Sync);
+}
+
+static CALLBACK_STEP: AtomicUsize = AtomicUsize::new(0);
+static CALLBACK_STATE_LIVE: AtomicBool = AtomicBool::new(false);
+static CALLBACK_NESTED_BORROW_REJECTED: AtomicBool = AtomicBool::new(false);
+
+fn callback_test_guard() -> std::sync::MutexGuard<'static, ()> {
+    static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+    GUARD.get_or_init(|| Mutex::new(())).lock().unwrap()
+}
+
+unsafe extern "C" fn observe_callback_a(
+    _draw_list: *const dear_imgui_rs::sys::ImDrawList,
+    _command: *const dear_imgui_rs::sys::ImDrawCmd,
+) {
+    if CALLBACK_STEP
+        .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        CALLBACK_STEP.store(usize::MAX, Ordering::SeqCst);
+    }
+    let access = unsafe {
+        WgpuRenderState::with_current(|mut state| {
+            let nested = WgpuRenderState::with_current(|_| ());
+            CALLBACK_NESTED_BORROW_REJECTED.store(
+                matches!(nested, Err(WgpuRenderStateAccessError::AlreadyBorrowed)),
+                Ordering::SeqCst,
+            );
+            let (device, render_pass) = state.resources();
+            let _ = device.features();
+            render_pass.set_viewport(0.0, 0.0, 1.0, 1.0, 0.0, 1.0);
+        })
+    };
+    CALLBACK_STATE_LIVE.store(access.is_ok(), Ordering::SeqCst);
+}
+
+unsafe extern "C" fn observe_callback_b(
+    _draw_list: *const dear_imgui_rs::sys::ImDrawList,
+    _command: *const dear_imgui_rs::sys::ImDrawCmd,
+) {
+    if CALLBACK_STEP
+        .compare_exchange(1, 2, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        CALLBACK_STEP.store(usize::MAX, Ordering::SeqCst);
+    }
+    let access = unsafe {
+        WgpuRenderState::with_current(|mut state| {
+            let _ = state.device().limits();
+            state
+                .render_pass()
+                .set_viewport(0.0, 0.0, 64.0, 64.0, 0.0, 1.0);
+        })
+    };
+    CALLBACK_STATE_LIVE.fetch_and(access.is_ok(), Ordering::SeqCst);
+}
+
+fn render_callback_contract_frame(
+    renderer: &mut WgpuRenderer,
+    context: &mut Context,
+    device: &Device,
+    queue: &Queue,
+    explicit_extent: bool,
+    include_geometry: bool,
+) -> RendererResult<()> {
+    CALLBACK_STEP.store(0, Ordering::SeqCst);
+    CALLBACK_STATE_LIVE.store(false, Ordering::SeqCst);
+    CALLBACK_NESTED_BORROW_REJECTED.store(false, Ordering::SeqCst);
+
+    context.io_mut().set_display_size([64.0, 64.0]);
+    context.io_mut().set_delta_time(1.0 / 60.0);
+    renderer.new_frame()?;
+    let reset = context
+        .platform_io()
+        .draw_callback_reset_render_state_raw()
+        .expect("WGPU must publish its reset callback");
+    let nearest = context
+        .platform_io()
+        .draw_callback_set_sampler_nearest_raw()
+        .expect("WGPU must publish its nearest-sampler callback");
+    let linear = context
+        .platform_io()
+        .draw_callback_set_sampler_linear_raw()
+        .expect("WGPU must publish its linear-sampler callback");
+    {
+        let ui = context.frame();
+        let draw_list = ui.get_foreground_draw_list();
+        unsafe {
+            draw_list.add_callback(observe_callback_a, std::ptr::null_mut(), 0);
+            draw_list.add_callback(reset, std::ptr::null_mut(), 0);
+            draw_list.add_callback(nearest, std::ptr::null_mut(), 0);
+        }
+        if include_geometry {
+            draw_list
+                .add_rect([8.0, 8.0], [48.0, 48.0], dear_imgui_rs::Color::WHITE)
+                .filled(true)
+                .build();
+        }
+        unsafe {
+            draw_list.add_callback(linear, std::ptr::null_mut(), 0);
+            draw_list.add_callback(observe_callback_b, std::ptr::null_mut(), 0);
+        }
+    }
+
+    let target = device.create_texture(&TextureDescriptor {
+        label: Some("dear-imgui-wgpu callback contract target"),
+        size: Extent3d {
+            width: 64,
+            height: 64,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: TextureDimension::D2,
+        format: TextureFormat::Rgba8Unorm,
+        usage: TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    let view = target.create_view(&TextureViewDescriptor::default());
+    let mut encoder = device.create_command_encoder(&CommandEncoderDescriptor {
+        label: Some("dear-imgui-wgpu callback contract encoder"),
+    });
+    {
+        let color_attachments = [Some(RenderPassColorAttachment {
+            view: &view,
+            resolve_target: None,
+            ops: Operations {
+                load: LoadOp::Clear(Color::BLACK),
+                store: StoreOp::Store,
+            },
+            depth_slice: None,
+        })];
+        let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
+            label: Some("dear-imgui-wgpu callback contract pass"),
+            color_attachments: &color_attachments,
+            depth_stencil_attachment: None,
+            occlusion_query_set: None,
+            #[cfg(any(feature = "wgpu-28", feature = "wgpu-29", feature = "wgpu-30"))]
+            multiview_mask: None,
+            timestamp_writes: None,
+        });
+        let frame = context.render();
+        if !include_geometry {
+            assert_eq!(frame.draw_data().total_vtx_count(), 0);
+            assert_eq!(frame.draw_data().total_idx_count(), 0);
+            assert_eq!(
+                frame
+                    .draw_data()
+                    .draw_lists()
+                    .flat_map(|list| list.commands())
+                    .filter(|command| {
+                        matches!(command, dear_imgui_rs::render::DrawCmd::RawCallback(_))
+                    })
+                    .count(),
+                2
+            );
+        }
+        if explicit_extent {
+            renderer.render_with_fb_size(frame, &mut render_pass, 64, 64)?;
+        } else {
+            renderer.render(frame, &mut render_pass)?;
+        }
+    }
+    queue.submit([encoder.finish()]);
+
+    assert_eq!(CALLBACK_STEP.load(Ordering::SeqCst), 2);
+    assert!(CALLBACK_STATE_LIVE.load(Ordering::SeqCst));
+    assert!(CALLBACK_NESTED_BORROW_REJECTED.load(Ordering::SeqCst));
+    assert!(unsafe { context.platform_io().renderer_render_state() }.is_null());
+    assert!(matches!(
+        unsafe { WgpuRenderState::with_current(|_| ()) },
+        Err(WgpuRenderStateAccessError::Inactive)
+    ));
+    Ok(())
+}
+
+#[test]
+fn direct_and_explicit_render_paths_execute_raw_callbacks_with_scoped_state() -> RendererResult<()>
+{
+    let _guard = callback_test_guard();
+    let Some((device, queue)) = request_test_device() else {
+        assert!(
+            std::env::var_os("DEAR_IMGUI_REQUIRE_WGPU_ADAPTER").is_none(),
+            "the WGPU callback contract gate requires a working headless adapter"
+        );
+        eprintln!("skipping WGPU callback test because no headless adapter is available");
+        return Ok(());
+    };
+    let mut context = Context::create();
+    let mut renderer = WgpuRenderer::new(
+        WgpuInitInfo::new(device.clone(), queue.clone(), TextureFormat::Rgba8Unorm),
+        &mut context,
+    )?;
+
+    render_callback_contract_frame(&mut renderer, &mut context, &device, &queue, false, false)?;
+    render_callback_contract_frame(&mut renderer, &mut context, &device, &queue, true, false)?;
+    render_callback_contract_frame(&mut renderer, &mut context, &device, &queue, false, true)?;
+    render_callback_contract_frame(&mut renderer, &mut context, &device, &queue, true, true)?;
+    renderer.shutdown(&mut context)
 }
 
 fn render_test_frame(

@@ -36,4 +36,4 @@ mod sdl3_raw_window_handle;
 
 use crate::{RendererError, RendererResult, Uniforms, WgpuBackendData, WgpuTextureManager};
 pub use core::WgpuRenderer;
-use state::{ActiveSampler, RendererRenderStateGuard};
+use state::RendererRenderStateGuard;

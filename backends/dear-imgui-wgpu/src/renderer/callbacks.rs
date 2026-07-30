@@ -1,7 +1,4 @@
-use dear_imgui_rs::sys;
-
-pub(super) type RawDrawCallback =
-    unsafe extern "C" fn(*const sys::ImDrawList, *const sys::ImDrawCmd);
+use dear_imgui_rs::{RawDrawCallback, sys};
 
 pub(super) fn draw_callback_matches(
     actual: sys::ImDrawCallback,

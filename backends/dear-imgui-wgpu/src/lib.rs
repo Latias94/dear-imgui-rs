@@ -213,16 +213,6 @@ macro_rules! backend_debug {
     ($($arg:tt)*) => {};
 }
 
-#[cfg(feature = "tracing")]
-macro_rules! backend_warn {
-    ($($arg:tt)*) => { tracing::warn!($($arg)*); };
-}
-
-#[cfg(not(feature = "tracing"))]
-macro_rules! backend_warn {
-    ($($arg:tt)*) => {};
-}
-
 // Module declarations
 mod data;
 mod error;

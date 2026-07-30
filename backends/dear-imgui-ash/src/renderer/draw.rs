@@ -287,11 +287,7 @@ pub(super) fn record_draw_commands(
     for draw_list in draw_data.draw_lists() {
         for cmd in draw_list.commands() {
             match cmd {
-                dear_imgui_rs::render::DrawCmd::Elements {
-                    count,
-                    cmd_params,
-                    raw_cmd: _,
-                } => {
+                dear_imgui_rs::render::DrawCmd::Elements { count, cmd_params } => {
                     let tex_id = cmd_params.texture_id;
                     let ds = textures
                         .get_descriptor_set(tex_id.id())
@@ -381,7 +377,7 @@ pub(super) fn record_draw_commands(
                     // Standard sampler callbacks are only installed by backends that can
                     // switch sampler state without rebuilding Vulkan descriptor bindings.
                 }
-                dear_imgui_rs::render::DrawCmd::RawCallback { .. } => {
+                dear_imgui_rs::render::DrawCmd::RawCallback(_) => {
                     // Skip raw callbacks.
                 }
             }

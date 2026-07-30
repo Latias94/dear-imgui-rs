@@ -53,6 +53,24 @@ pub enum RendererError {
     #[error("{buffer} draw buffer offset overflow")]
     DrawBufferOffsetOverflow { buffer: &'static str },
 
+    /// A draw command addresses indices outside its parent draw list.
+    #[error("draw command index range {start}..{end} exceeds its parent index buffer length {len}")]
+    DrawCommandIndexRangeOutOfBounds {
+        start: usize,
+        end: usize,
+        len: usize,
+    },
+
+    /// A draw command references a vertex outside its parent draw list.
+    #[error(
+        "draw command references vertex {index}, but its parent vertex buffer has length {len}"
+    )]
+    DrawCommandVertexOutOfBounds { index: usize, len: usize },
+
+    /// Native raw draw callbacks cannot be invoked by this target.
+    #[error("raw draw callbacks are not supported by the WGPU renderer on this target")]
+    RawDrawCallbackUnsupported,
+
     /// Buffer creation failed
     #[error("Buffer creation failed: {0}")]
     BufferCreationFailed(String),

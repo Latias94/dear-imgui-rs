@@ -290,9 +290,29 @@ jobs:
             -Clink-arg=-fsanitize=undefined
             -Clink-arg=-lstdc++
           IMGUI_SYS_FORCE_BUILD: "1"
-        run: |
-          cargo nextest run -p dear-imgui-test-engine-sys --features capture --test ffi_boundary
-          cargo nextest run -p dear-imgui-test-engine --features capture --test runner
+        run: >-
+          cargo nextest run -p dear-imgui-test-engine-sys
+          --features capture --test ffi_boundary
+
+      - name: Run Test Engine runner tests with ASan and UBSan
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+          CC: clang
+          CXX: clang++
+          CFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer
+          CXXFLAGS: -fsanitize=address,undefined -fno-omit-frame-pointer
+          RUSTFLAGS: >-
+            -Cdebuginfo=1
+            -Cforce-frame-pointers=yes
+            -Clinker=clang++
+            -Clink-arg=-fsanitize=address
+            -Clink-arg=-fsanitize=undefined
+            -Clink-arg=-lstdc++
+          IMGUI_SYS_FORCE_BUILD: "1"
+        run: >-
+          cargo nextest run -p dear-imgui-test-engine
+          --features capture --test runner
 
   test-engine-runtime:
     name: Test Engine native runtime
@@ -476,7 +496,7 @@ jobs:
           libasound2-dev
           libx11-dev libxext-dev libxrandr-dev libxinerama-dev libxi-dev libxcursor-dev libxfixes-dev libxss-dev libxxf86vm-dev libxtst-dev
           libxkbcommon-dev libwayland-dev libudev-dev
-          mesa-common-dev libgl1-mesa-dev
+          mesa-common-dev libgl1-mesa-dev mesa-vulkan-drivers
 
       - name: Check exact WGPU route
         run: cargo check -p dear-imgui-wgpu --lib --no-default-features --features "${{ matrix.features }}"
@@ -492,6 +512,16 @@ jobs:
       - name: Test exact WGPU route
         run: cargo nextest run -p dear-imgui-wgpu --lib --no-default-features --features "${{ matrix.features }}"
         env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+
+      - name: Test WGPU raw callback render contract
+        if: matrix.wgpu == '30' && matrix.platform == 'Winit'
+        run: >-
+          cargo nextest run -p dear-imgui-wgpu --test integration_test
+          --no-default-features --features "${{ matrix.features }}"
+          direct_and_explicit_render_paths_execute_raw_callbacks_with_scoped_state
+        env:
+          DEAR_IMGUI_REQUIRE_WGPU_ADAPTER: "1"
           IMGUI_SYS_FORCE_BUILD: "1"
 
       - name: Lint exact WGPU release route

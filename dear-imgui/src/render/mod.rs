@@ -20,6 +20,13 @@
 //! ```compile_fail
 //! use dear_imgui_rs::render::renderer;
 //! ```
+//!
+//! Live draw commands are linear and cannot be detached or cloned:
+//!
+//! ```compile_fail
+//! fn require_clone<T: Clone>() {}
+//! require_clone::<dear_imgui_rs::render::DrawCmd<'static>>();
+//! ```
 
 pub mod draw_data;
 mod frame;

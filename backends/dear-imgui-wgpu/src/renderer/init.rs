@@ -103,7 +103,7 @@ impl WgpuRenderer {
         // The ImGui pipeline always uses alpha blending; non-blendable formats will
         // fail validation later with less actionable errors.
         let fmt = backend_data.render_target_format;
-        if let Some(adapter) = backend_data.adapter.as_ref() {
+        if let Some(adapter) = backend_data.init_info.adapter.as_ref() {
             let fmt_features = adapter.get_texture_format_features(fmt);
             if !fmt_features
                 .allowed_usages

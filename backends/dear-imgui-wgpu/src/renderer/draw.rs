@@ -1,9 +1,13 @@
-// Renderer draw helpers: frame resources, setup state, draw lists traversal
+// Renderer draw helpers: preflight, resource preparation, and one command executor.
+
+use std::ops::Range;
 
 use super::*;
 use crate::wgpu;
-use dear_imgui_rs::TextureId;
-use dear_imgui_rs::render::{DrawData, DrawIdx};
+use dear_imgui_rs::{
+    TextureId,
+    render::{DrawData, DrawIdx, RawCallbackCommand},
+};
 
 // ImGui index type is currently u16 in dear-imgui-rs, but keep this derived so
 // future upgrades to u32 require fewer backend changes.
@@ -13,320 +17,617 @@ const IMGUI_INDEX_FORMAT: wgpu::IndexFormat = if std::mem::size_of::<DrawIdx>() 
     wgpu::IndexFormat::Uint32
 };
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub(super) struct FramebufferExtent {
+    width: u32,
+    height: u32,
+}
+
+impl FramebufferExtent {
+    pub(super) fn from_draw_data(draw_data: &DrawData) -> RendererResult<Option<Self>> {
+        let size = draw_data.display_size();
+        let scale = draw_data.framebuffer_scale();
+        let width = size[0] * scale[0];
+        let height = size[1] * scale[1];
+        if !width.is_finite() || !height.is_finite() {
+            return Err(RendererError::InvalidRenderState(
+                "draw data produced a non-finite framebuffer extent".to_owned(),
+            ));
+        }
+        if width <= 0.0 || height <= 0.0 {
+            return Ok(None);
+        }
+        if width > u32::MAX as f32 || height > u32::MAX as f32 {
+            return Err(RendererError::InvalidRenderState(
+                "draw data framebuffer extent exceeds WGPU limits".to_owned(),
+            ));
+        }
+        Ok(Some(Self {
+            width: width as u32,
+            height: height as u32,
+        }))
+    }
+
+    pub(super) const fn explicit(width: u32, height: u32) -> Option<Self> {
+        if width == 0 || height == 0 {
+            None
+        } else {
+            Some(Self { width, height })
+        }
+    }
+
+    fn width_f32(self) -> f32 {
+        self.width as f32
+    }
+
+    fn height_f32(self) -> f32 {
+        self.height as f32
+    }
+}
+
+fn project_scissor_rect(
+    clip_rect: [f32; 4],
+    clip_off: [f32; 2],
+    clip_scale: [f32; 2],
+    extent: FramebufferExtent,
+) -> RendererResult<Option<[u32; 4]>> {
+    let transformed = [
+        (clip_rect[0] - clip_off[0]) * clip_scale[0],
+        (clip_rect[1] - clip_off[1]) * clip_scale[1],
+        (clip_rect[2] - clip_off[0]) * clip_scale[0],
+        (clip_rect[3] - clip_off[1]) * clip_scale[1],
+    ];
+    if transformed.iter().any(|value| !value.is_finite()) {
+        return Err(RendererError::InvalidRenderState(
+            "draw command contains a non-finite clip rectangle".to_owned(),
+        ));
+    }
+
+    let clip_min_x = transformed[0].max(0.0);
+    let clip_min_y = transformed[1].max(0.0);
+    let clip_max_x = transformed[2].min(extent.width_f32());
+    let clip_max_y = transformed[3].min(extent.height_f32());
+    if clip_max_x <= clip_min_x || clip_max_y <= clip_min_y {
+        return Ok(None);
+    }
+    let scissor = [
+        clip_min_x as u32,
+        clip_min_y as u32,
+        (clip_max_x - clip_min_x) as u32,
+        (clip_max_y - clip_min_y) as u32,
+    ];
+    if scissor[2] == 0 || scissor[3] == 0 {
+        Ok(None)
+    } else {
+        Ok(Some(scissor))
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum SamplerBinding {
+    Linear,
+    Nearest,
+    Custom(u64),
+    CallbackOwned,
+}
+
+impl SamplerBinding {
+    fn select_for_elements(&mut self, desired: Self) -> bool {
+        if *self == Self::CallbackOwned && !matches!(desired, Self::Custom(_)) {
+            return false;
+        }
+        if *self == desired {
+            return false;
+        }
+        *self = desired;
+        true
+    }
+}
+
+pub(super) enum PreparedDrawCommand<'draw> {
+    Elements {
+        common_bind_group: Option<wgpu::BindGroup>,
+        image_bind_group: wgpu::BindGroup,
+        scissor: [u32; 4],
+        indices: Range<u32>,
+        base_vertex: i32,
+    },
+    ResetRenderState,
+    SetSampler(wgpu::BindGroup),
+    RawCallback(RawCallbackCommand<'draw>),
+}
+
+pub(super) struct PreparedDrawData<'draw> {
+    commands: Vec<PreparedDrawCommand<'draw>>,
+    linear_common_bind_group: wgpu::BindGroup,
+    has_elements: bool,
+}
+
+impl PreparedDrawData<'_> {
+    pub(super) fn is_empty(&self) -> bool {
+        self.commands.is_empty()
+    }
+
+    pub(super) fn has_elements(&self) -> bool {
+        self.has_elements
+    }
+}
+
+pub(super) struct PreparedRenderState {
+    pipeline: wgpu::RenderPipeline,
+    vertex_buffer: Option<wgpu::Buffer>,
+    index_buffer: Option<wgpu::Buffer>,
+}
+
 impl WgpuRenderer {
-    /// Prepare frame resources (buffers)
+    pub(super) fn preflight_draw_callback_support(draw_data: &DrawData) -> RendererResult<()> {
+        #[cfg(target_arch = "wasm32")]
+        for draw_list in draw_data.draw_lists() {
+            for command in draw_list.commands() {
+                if matches!(command, dear_imgui_rs::render::DrawCmd::RawCallback(_)) {
+                    return Err(RendererError::RawDrawCallbackUnsupported);
+                }
+            }
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = draw_data;
+
+        Ok(())
+    }
+
+    /// Uploads the frame's vertex and index buffers after command preflight succeeds.
     pub(super) fn prepare_frame_resources_static(
         draw_data: &DrawData,
         backend_data: &mut WgpuBackendData,
     ) -> RendererResult<()> {
-        // Calculate total vertex and index counts
-        let mut total_vtx_count = 0;
-        let mut total_idx_count = 0;
+        let mut total_vtx_count = 0usize;
+        let mut total_idx_count = 0usize;
         for draw_list in draw_data.draw_lists() {
-            total_vtx_count += draw_list.vtx_buffer().len();
-            total_idx_count += draw_list.idx_buffer().len();
+            total_vtx_count = total_vtx_count
+                .checked_add(draw_list.vtx_buffer().len())
+                .ok_or(RendererError::DrawBufferOffsetOverflow { buffer: "vertex" })?;
+            total_idx_count = total_idx_count
+                .checked_add(draw_list.idx_buffer().len())
+                .ok_or(RendererError::DrawBufferOffsetOverflow { buffer: "index" })?;
         }
 
-        if total_vtx_count == 0 || total_idx_count == 0 {
+        if total_vtx_count == 0 && total_idx_count == 0 {
             return Ok(());
         }
-
-        // Collect all vertices and indices first
         let mut vertices = Vec::with_capacity(total_vtx_count);
         let mut indices = Vec::with_capacity(total_idx_count);
-
         for draw_list in draw_data.draw_lists() {
             vertices.extend_from_slice(draw_list.vtx_buffer());
             indices.extend_from_slice(draw_list.idx_buffer());
         }
 
-        // Get current frame resources and update buffers
-        let frame_index = backend_data.frame_index % backend_data.num_frames_in_flight;
-        let frame_resources = &mut backend_data.frame_resources[frame_index as usize];
+        let frame_index = backend_data.frame_index % backend_data.num_frames_in_flight.get();
+        let frame_resources = backend_data
+            .frame_resources
+            .get_mut(frame_index as usize)
+            .ok_or_else(|| {
+                RendererError::InvalidRenderState(
+                    "WGPU frame resource index is out of bounds".to_owned(),
+                )
+            })?;
 
-        // Ensure buffer capacity and upload data
-        frame_resources.ensure_vertex_buffer_capacity(&backend_data.device, total_vtx_count)?;
-        frame_resources.ensure_index_buffer_capacity(&backend_data.device, total_idx_count)?;
-
-        frame_resources.upload_vertex_data(&backend_data.queue, &vertices)?;
-        frame_resources.upload_index_data(&backend_data.queue, &indices)?;
-
+        if total_vtx_count != 0 {
+            frame_resources.ensure_vertex_buffer_capacity(&backend_data.device, total_vtx_count)?;
+            frame_resources.upload_vertex_data(&backend_data.queue, &vertices)?;
+        }
+        if total_idx_count != 0 {
+            frame_resources.ensure_index_buffer_capacity(&backend_data.device, total_idx_count)?;
+            frame_resources.upload_index_data(&backend_data.queue, &indices)?;
+        }
         Ok(())
     }
 
-    /// Setup render state
-    ///
-    /// This corresponds to ImGui_ImplWGPU_SetupRenderState in the C++ implementation
-    pub(super) fn setup_render_state_static(
-        draw_data: &DrawData,
-        render_pass: &mut wgpu::RenderPass,
-        backend_data: &WgpuBackendData,
-        gamma: f32,
-    ) -> RendererResult<()> {
-        let pipeline = backend_data
-            .pipeline_state
-            .as_ref()
-            .ok_or_else(|| RendererError::InvalidRenderState("Pipeline not created".to_string()))?;
-
-        // Setup viewport
-        let display_pos = draw_data.display_pos();
-        let display_size = draw_data.display_size();
-        let framebuffer_scale = draw_data.framebuffer_scale();
-        let fb_width = display_size[0] * framebuffer_scale[0];
-        let fb_height = display_size[1] * framebuffer_scale[1];
-        render_pass.set_viewport(0.0, 0.0, fb_width, fb_height, 0.0, 1.0);
-
-        // Set pipeline
-        render_pass.set_pipeline(pipeline);
-
-        // Update uniforms
-        let mvp = Uniforms::create_orthographic_matrix(display_pos, display_size);
-        let mut uniforms = Uniforms::new();
-        uniforms.update(mvp, gamma);
-
-        // Update uniform buffer
-        if let Some(uniform_buffer) = backend_data.render_resources.uniform_buffer() {
-            uniform_buffer.update(&backend_data.queue, &uniforms);
-            render_pass.set_bind_group(0, uniform_buffer.bind_group(), &[]);
-        }
-
-        // Set vertex and index buffers
-        let frame_resources = &backend_data.frame_resources
-            [(backend_data.frame_index % backend_data.num_frames_in_flight) as usize];
-        if let (Some(vertex_buffer), Some(index_buffer)) = (
-            frame_resources.vertex_buffer(),
-            frame_resources.index_buffer(),
-        ) {
-            render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-            render_pass.set_index_buffer(index_buffer.slice(..), IMGUI_INDEX_FORMAT);
-        }
-
-        Ok(())
-    }
-
-    /// Render all draw lists
-    pub(super) fn render_draw_lists_static(
+    pub(super) fn prepare_draw_data<'draw>(
         texture_manager: &mut WgpuTextureManager,
         default_texture: &Option<wgpu::TextureView>,
-        draw_data: &DrawData,
-        render_pass: &mut wgpu::RenderPass,
+        draw_data: &'draw DrawData,
+        extent: FramebufferExtent,
         backend_data: &mut WgpuBackendData,
-        gamma: f32,
-    ) -> RendererResult<()> {
-        let mut global_vtx_offset = 0i32;
-        let mut global_idx_offset = 0u32;
-        let clip_scale = draw_data.framebuffer_scale();
-        let clip_off = draw_data.display_pos();
-        let display_size = draw_data.display_size();
-        let fb_width = display_size[0] * clip_scale[0];
-        let fb_height = display_size[1] * clip_scale[1];
+    ) -> RendererResult<PreparedDrawData<'draw>> {
+        Self::preflight_draw_callback_support(draw_data)?;
 
-        // Extract common bind group handles up front to avoid borrowing conflicts with render_resources.
         let device = backend_data.device.clone();
-        let (common_layout, uniform_buffer, default_common_bg, nearest_common_bg) = {
-            let ub = backend_data
+        let (common_layout, uniform_buffer, linear_common_bind_group, nearest_common_bind_group) = {
+            let uniform = backend_data
                 .render_resources
                 .uniform_buffer()
                 .ok_or_else(|| {
-                    RendererError::InvalidRenderState("Uniform buffer not initialized".to_string())
+                    RendererError::InvalidRenderState("Uniform buffer not initialized".to_owned())
                 })?;
-            let nearest_bg = backend_data
+            let nearest = backend_data
                 .render_resources
                 .nearest_common_bind_group()
                 .ok_or_else(|| {
                     RendererError::InvalidRenderState(
-                        "Nearest sampler bind group not initialized".to_string(),
+                        "Nearest sampler bind group not initialized".to_owned(),
                     )
                 })?;
             (
-                ub.bind_group_layout().clone(),
-                ub.buffer().clone(),
-                ub.bind_group().clone(),
-                nearest_bg.clone(),
+                uniform.bind_group_layout().clone(),
+                uniform.buffer().clone(),
+                uniform.bind_group().clone(),
+                nearest.clone(),
             )
         };
-        let mut standard_sampler = ActiveSampler::Linear;
-        let mut current_sampler = ActiveSampler::Linear;
+
+        let mut commands = Vec::new();
+        let mut standard_sampler = SamplerBinding::Linear;
+        let mut active_sampler = SamplerBinding::Linear;
+        let mut global_idx_offset = 0u32;
+        let mut global_vtx_offset = 0i32;
+        let clip_off = draw_data.display_pos();
+        let clip_scale = draw_data.framebuffer_scale();
+        let mut has_elements = false;
 
         for draw_list in draw_data.draw_lists() {
-            for cmd in draw_list.commands() {
-                match cmd {
-                    dear_imgui_rs::render::DrawCmd::Elements {
-                        count,
-                        cmd_params,
-                        raw_cmd: _,
-                    } => {
-                        let tex_id = cmd_params.texture_id;
+            let vertices = draw_list.vtx_buffer();
+            let indices = draw_list.idx_buffer();
+            for command in draw_list.commands() {
+                match command {
+                    dear_imgui_rs::render::DrawCmd::Elements { count, cmd_params } => {
+                        if count == 0 {
+                            continue;
+                        }
 
-                        // Switch common bind group (sampler) if this texture uses a custom sampler
-                        // or a standard sampler callback changed the default.
-                        let desired_sampler = if tex_id.is_null() {
-                            standard_sampler
+                        let local_end = cmd_params.idx_offset.checked_add(count).ok_or(
+                            RendererError::DrawBufferOffsetOverflow {
+                                buffer: "command index",
+                            },
+                        )?;
+                        if local_end > indices.len() {
+                            return Err(RendererError::DrawCommandIndexRangeOutOfBounds {
+                                start: cmd_params.idx_offset,
+                                end: local_end,
+                                len: indices.len(),
+                            });
+                        }
+                        let max_index = indices[cmd_params.idx_offset..local_end]
+                            .iter()
+                            .map(|index| *index as usize)
+                            .max()
+                            .unwrap_or(0);
+                        let referenced_vertex = cmd_params
+                            .vtx_offset
+                            .checked_add(max_index)
+                            .ok_or(RendererError::DrawBufferOffsetOverflow {
+                                buffer: "command vertex",
+                            })?;
+                        if referenced_vertex >= vertices.len() {
+                            return Err(RendererError::DrawCommandVertexOutOfBounds {
+                                index: referenced_vertex,
+                                len: vertices.len(),
+                            });
+                        }
+
+                        let count = u32::try_from(count).map_err(|_| {
+                            RendererError::DrawBufferTooLarge {
+                                buffer: "command index",
+                            }
+                        })?;
+                        let local_index = u32::try_from(cmd_params.idx_offset).map_err(|_| {
+                            RendererError::DrawBufferTooLarge {
+                                buffer: "command index",
+                            }
+                        })?;
+                        let start = global_idx_offset.checked_add(local_index).ok_or(
+                            RendererError::DrawBufferOffsetOverflow {
+                                buffer: "command index",
+                            },
+                        )?;
+                        let end = start.checked_add(count).ok_or(
+                            RendererError::DrawBufferOffsetOverflow {
+                                buffer: "command index",
+                            },
+                        )?;
+                        let local_vertex = i32::try_from(cmd_params.vtx_offset).map_err(|_| {
+                            RendererError::DrawBufferTooLarge {
+                                buffer: "command vertex",
+                            }
+                        })?;
+                        let base_vertex = global_vtx_offset.checked_add(local_vertex).ok_or(
+                            RendererError::DrawBufferOffsetOverflow {
+                                buffer: "command vertex",
+                            },
+                        )?;
+
+                        let Some(scissor) = project_scissor_rect(
+                            cmd_params.clip_rect,
+                            clip_off,
+                            clip_scale,
+                            extent,
+                        )?
+                        else {
+                            continue;
+                        };
+
+                        let texture_id = cmd_params.texture_id;
+                        let standard_bind_group = match standard_sampler {
+                            SamplerBinding::Linear => &linear_common_bind_group,
+                            SamplerBinding::Nearest => &nearest_common_bind_group,
+                            SamplerBinding::Custom(_) | SamplerBinding::CallbackOwned => {
+                                unreachable!("the standard sampler is always linear or nearest")
+                            }
+                        };
+                        let (desired_sampler, desired_bind_group) = if let Some(sampler_id) =
+                            texture_manager.custom_sampler_id_for_texture(texture_id)
+                        {
+                            let bind_group = texture_manager
+                                .get_or_create_common_bind_group_for_sampler(
+                                    &device,
+                                    &common_layout,
+                                    &uniform_buffer,
+                                    sampler_id,
+                                )
+                                .ok_or_else(|| {
+                                    RendererError::InvalidRenderState(
+                                        "external texture references a missing custom sampler"
+                                            .to_owned(),
+                                    )
+                                })?;
+                            (SamplerBinding::Custom(sampler_id), bind_group)
+                        } else {
+                            (standard_sampler, standard_bind_group.clone())
+                        };
+                        let common_bind_group = active_sampler
+                            .select_for_elements(desired_sampler)
+                            .then_some(desired_bind_group);
+
+                        let texture_view = if texture_id.is_null() {
+                            default_texture.as_ref()
                         } else {
                             texture_manager
-                                .custom_sampler_id_for_texture(tex_id)
-                                .map(ActiveSampler::Custom)
-                                .unwrap_or(standard_sampler)
-                        };
-                        if desired_sampler != current_sampler {
-                            match desired_sampler {
-                                ActiveSampler::Linear => {
-                                    render_pass.set_bind_group(0, &default_common_bg, &[]);
-                                }
-                                ActiveSampler::Nearest => {
-                                    render_pass.set_bind_group(0, &nearest_common_bg, &[]);
-                                }
-                                ActiveSampler::Custom(sampler_id) => {
-                                    if let Some(bg0) = texture_manager
-                                        .get_or_create_common_bind_group_for_sampler(
-                                            &device,
-                                            &common_layout,
-                                            &uniform_buffer,
-                                            sampler_id,
-                                        )
-                                    {
-                                        render_pass.set_bind_group(0, &bg0, &[]);
-                                    } else {
-                                        render_pass.set_bind_group(0, &default_common_bg, &[]);
-                                    }
-                                }
-                            }
-                            current_sampler = desired_sampler;
+                                .get_texture(texture_id)
+                                .map(|texture| texture.view())
+                                .or(default_texture.as_ref())
                         }
-
-                        let texture_bind_group = if tex_id.is_null() {
-                            if let Some(default_tex) = default_texture {
-                                backend_data
-                                    .render_resources
-                                    .get_or_create_image_bind_group(
-                                        &backend_data.device,
-                                        TextureId::null(),
-                                        default_tex,
-                                    )?
-                                    .clone()
-                            } else {
-                                return Err(RendererError::InvalidRenderState(
-                                    "Default texture not available".to_string(),
-                                ));
-                            }
-                        } else if let Some(wgpu_texture) = texture_manager.get_texture(tex_id) {
-                            backend_data
-                                .render_resources
-                                .get_or_create_image_bind_group(
-                                    &backend_data.device,
-                                    tex_id,
-                                    wgpu_texture.view(),
-                                )?
-                                .clone()
-                        } else if let Some(default_tex) = default_texture {
-                            backend_data
-                                .render_resources
-                                .get_or_create_image_bind_group(
-                                    &backend_data.device,
-                                    TextureId::null(),
-                                    default_tex,
-                                )?
-                                .clone()
+                        .ok_or_else(|| {
+                            RendererError::InvalidRenderState(
+                                "texture not found and no default texture is available".to_owned(),
+                            )
+                        })?;
+                        let cache_id = if texture_id.is_null()
+                            || texture_manager.get_texture(texture_id).is_none()
+                        {
+                            TextureId::null()
                         } else {
-                            return Err(RendererError::InvalidRenderState(
-                                "Texture not found and no default texture".to_string(),
-                            ));
+                            texture_id
                         };
+                        let image_bind_group = backend_data
+                            .render_resources
+                            .get_or_create_image_bind_group(
+                                &backend_data.device,
+                                cache_id,
+                                texture_view,
+                            )?
+                            .clone();
 
-                        render_pass.set_bind_group(1, &texture_bind_group, &[]);
-
-                        // Project scissor/clipping rectangles
-                        let clip_min_x = (cmd_params.clip_rect[0] - clip_off[0]) * clip_scale[0];
-                        let clip_min_y = (cmd_params.clip_rect[1] - clip_off[1]) * clip_scale[1];
-                        let clip_max_x = (cmd_params.clip_rect[2] - clip_off[0]) * clip_scale[0];
-                        let clip_max_y = (cmd_params.clip_rect[3] - clip_off[1]) * clip_scale[1];
-
-                        // Clamp to viewport
-                        let clip_min_x = clip_min_x.max(0.0);
-                        let clip_min_y = clip_min_y.max(0.0);
-                        let clip_max_x = clip_max_x.min(fb_width);
-                        let clip_max_y = clip_max_y.min(fb_height);
-
-                        if clip_max_x <= clip_min_x || clip_max_y <= clip_min_y {
-                            continue;
-                        }
-
-                        render_pass.set_scissor_rect(
-                            clip_min_x as u32,
-                            clip_min_y as u32,
-                            (clip_max_x - clip_min_x) as u32,
-                            (clip_max_y - clip_min_y) as u32,
-                        );
-
-                        // Draw
-                        let Ok(count_u32) = u32::try_from(count) else {
-                            continue;
-                        };
-                        let Ok(idx_offset_u32) = u32::try_from(cmd_params.idx_offset) else {
-                            continue;
-                        };
-                        let Some(start_index) = idx_offset_u32.checked_add(global_idx_offset)
-                        else {
-                            continue;
-                        };
-                        let Some(end_index) = start_index.checked_add(count_u32) else {
-                            continue;
-                        };
-                        let Ok(vtx_offset_i32) = i32::try_from(cmd_params.vtx_offset) else {
-                            continue;
-                        };
-                        let Some(vertex_offset) = vtx_offset_i32.checked_add(global_vtx_offset)
-                        else {
-                            continue;
-                        };
-                        render_pass.draw_indexed(start_index..end_index, vertex_offset, 0..1);
+                        commands.push(PreparedDrawCommand::Elements {
+                            common_bind_group,
+                            image_bind_group,
+                            scissor,
+                            indices: start..end,
+                            base_vertex,
+                        });
+                        has_elements = true;
                     }
                     dear_imgui_rs::render::DrawCmd::ResetRenderState => {
-                        Self::setup_render_state_static(
-                            draw_data,
-                            render_pass,
-                            backend_data,
-                            gamma,
-                        )?;
-                        standard_sampler = ActiveSampler::Linear;
-                        current_sampler = ActiveSampler::Linear;
+                        standard_sampler = SamplerBinding::Linear;
+                        active_sampler = SamplerBinding::Linear;
+                        commands.push(PreparedDrawCommand::ResetRenderState);
                     }
                     dear_imgui_rs::render::DrawCmd::SetSamplerLinear => {
-                        standard_sampler = ActiveSampler::Linear;
-                        if current_sampler != ActiveSampler::Linear {
-                            render_pass.set_bind_group(0, &default_common_bg, &[]);
-                            current_sampler = ActiveSampler::Linear;
-                        }
+                        standard_sampler = SamplerBinding::Linear;
+                        active_sampler = SamplerBinding::Linear;
+                        commands.push(PreparedDrawCommand::SetSampler(
+                            linear_common_bind_group.clone(),
+                        ));
                     }
                     dear_imgui_rs::render::DrawCmd::SetSamplerNearest => {
-                        standard_sampler = ActiveSampler::Nearest;
-                        if current_sampler != ActiveSampler::Nearest {
-                            render_pass.set_bind_group(0, &nearest_common_bg, &[]);
-                            current_sampler = ActiveSampler::Nearest;
-                        }
+                        standard_sampler = SamplerBinding::Nearest;
+                        active_sampler = SamplerBinding::Nearest;
+                        commands.push(PreparedDrawCommand::SetSampler(
+                            nearest_common_bind_group.clone(),
+                        ));
                     }
-                    dear_imgui_rs::render::DrawCmd::RawCallback { .. } => {
-                        backend_warn!(
-                            target: "dear_imgui_wgpu",
-                            "Warning: Raw callbacks are not supported in WGPU renderer",
-                        );
+                    dear_imgui_rs::render::DrawCmd::RawCallback(callback) => {
+                        active_sampler = SamplerBinding::CallbackOwned;
+                        commands.push(PreparedDrawCommand::RawCallback(callback));
                     }
                 }
             }
 
-            let idx_len_u32 = u32::try_from(draw_list.idx_buffer().len())
+            let index_count = u32::try_from(indices.len())
                 .map_err(|_| RendererError::DrawBufferTooLarge { buffer: "index" })?;
             global_idx_offset = global_idx_offset
-                .checked_add(idx_len_u32)
-                .ok_or_else(|| RendererError::DrawBufferOffsetOverflow { buffer: "index" })?;
-
-            let vtx_len_i32 = i32::try_from(draw_list.vtx_buffer().len())
+                .checked_add(index_count)
+                .ok_or(RendererError::DrawBufferOffsetOverflow { buffer: "index" })?;
+            let vertex_count = i32::try_from(vertices.len())
                 .map_err(|_| RendererError::DrawBufferTooLarge { buffer: "vertex" })?;
             global_vtx_offset = global_vtx_offset
-                .checked_add(vtx_len_i32)
-                .ok_or_else(|| RendererError::DrawBufferOffsetOverflow { buffer: "vertex" })?;
+                .checked_add(vertex_count)
+                .ok_or(RendererError::DrawBufferOffsetOverflow { buffer: "vertex" })?;
         }
 
-        Ok(())
+        Ok(PreparedDrawData {
+            commands,
+            linear_common_bind_group,
+            has_elements,
+        })
+    }
+
+    pub(super) fn prepare_render_state_static(
+        draw_data: &DrawData,
+        backend_data: &WgpuBackendData,
+        gamma: f32,
+        has_elements: bool,
+    ) -> RendererResult<PreparedRenderState> {
+        let pipeline = backend_data
+            .pipeline_state
+            .as_ref()
+            .ok_or_else(|| RendererError::InvalidRenderState("Pipeline not created".to_owned()))?
+            .clone();
+        let uniform = backend_data
+            .render_resources
+            .uniform_buffer()
+            .ok_or_else(|| {
+                RendererError::InvalidRenderState("Uniform buffer not initialized".to_owned())
+            })?;
+
+        let frame_resources = backend_data
+            .frame_resources
+            .get((backend_data.frame_index % backend_data.num_frames_in_flight.get()) as usize)
+            .ok_or_else(|| {
+                RendererError::InvalidRenderState(
+                    "WGPU frame resource index is out of bounds".to_owned(),
+                )
+            })?;
+        let vertex_buffer = frame_resources.vertex_buffer().cloned();
+        let index_buffer = frame_resources.index_buffer().cloned();
+        if has_elements && (vertex_buffer.is_none() || index_buffer.is_none()) {
+            return Err(RendererError::InvalidRenderState(
+                "draw elements require initialized vertex and index buffers".to_owned(),
+            ));
+        }
+
+        let matrix =
+            Uniforms::create_orthographic_matrix(draw_data.display_pos(), draw_data.display_size());
+        let mut uniforms = Uniforms::new();
+        uniforms.update(matrix, gamma);
+        uniform.update(&backend_data.queue, &uniforms);
+
+        Ok(PreparedRenderState {
+            pipeline,
+            vertex_buffer,
+            index_buffer,
+        })
+    }
+
+    fn setup_prepared_render_state(
+        render_pass: &mut wgpu::RenderPass<'_>,
+        extent: FramebufferExtent,
+        state: &PreparedRenderState,
+        linear_common_bind_group: &wgpu::BindGroup,
+    ) {
+        render_pass.set_viewport(0.0, 0.0, extent.width_f32(), extent.height_f32(), 0.0, 1.0);
+        render_pass.set_pipeline(&state.pipeline);
+        render_pass.set_bind_group(0, linear_common_bind_group, &[]);
+        if let (Some(vertex_buffer), Some(index_buffer)) =
+            (&state.vertex_buffer, &state.index_buffer)
+        {
+            render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+            render_pass.set_index_buffer(index_buffer.slice(..), IMGUI_INDEX_FORMAT);
+        }
+    }
+
+    pub(super) fn execute_prepared_draw_data(
+        prepared: PreparedDrawData<'_>,
+        state: &PreparedRenderState,
+        extent: FramebufferExtent,
+        render_pass: &mut wgpu::RenderPass<'_>,
+        platform_io: *mut dear_imgui_rs::sys::ImGuiPlatformIO,
+        device: &wgpu::Device,
+    ) -> RendererResult<()> {
+        RendererRenderStateGuard::preflight(platform_io)?;
+        Self::setup_prepared_render_state(
+            render_pass,
+            extent,
+            state,
+            &prepared.linear_common_bind_group,
+        );
+
+        let mut callback_state = crate::WgpuRenderStateStorage::new(device, render_pass);
+        let guard = unsafe {
+            RendererRenderStateGuard::install(
+                platform_io,
+                std::ptr::from_mut(&mut callback_state).cast(),
+            )?
+        };
+
+        for command in prepared.commands {
+            match command {
+                PreparedDrawCommand::Elements {
+                    common_bind_group,
+                    image_bind_group,
+                    scissor,
+                    indices,
+                    base_vertex,
+                } => {
+                    if let Some(common_bind_group) = common_bind_group {
+                        render_pass.set_bind_group(0, &common_bind_group, &[]);
+                    }
+                    render_pass.set_bind_group(1, &image_bind_group, &[]);
+                    render_pass.set_scissor_rect(scissor[0], scissor[1], scissor[2], scissor[3]);
+                    render_pass.draw_indexed(indices, base_vertex, 0..1);
+                }
+                PreparedDrawCommand::ResetRenderState => Self::setup_prepared_render_state(
+                    render_pass,
+                    extent,
+                    state,
+                    &prepared.linear_common_bind_group,
+                ),
+                PreparedDrawCommand::SetSampler(bind_group) => {
+                    render_pass.set_bind_group(0, &bind_group, &[]);
+                }
+                PreparedDrawCommand::RawCallback(callback) => {
+                    unsafe { callback.invoke() };
+                    guard.validate()?;
+                }
+            }
+        }
+
+        guard.finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FramebufferExtent, SamplerBinding, project_scissor_rect};
+
+    #[test]
+    fn raw_callback_sampler_state_survives_until_an_explicit_renderer_binding() {
+        let mut active = SamplerBinding::CallbackOwned;
+
+        assert!(!active.select_for_elements(SamplerBinding::Linear));
+        assert_eq!(active, SamplerBinding::CallbackOwned);
+
+        assert!(active.select_for_elements(SamplerBinding::Custom(7)));
+        assert_eq!(active, SamplerBinding::Custom(7));
+
+        assert!(active.select_for_elements(SamplerBinding::Linear));
+        assert_eq!(active, SamplerBinding::Linear);
+        assert!(!active.select_for_elements(SamplerBinding::Linear));
+    }
+
+    #[test]
+    fn scissor_projection_rejects_non_finite_values_before_clamping() {
+        let extent = FramebufferExtent {
+            width: 64,
+            height: 64,
+        };
+        for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let error =
+                project_scissor_rect([invalid, 0.0, 32.0, 32.0], [0.0, 0.0], [1.0, 1.0], extent)
+                    .unwrap_err();
+            assert!(matches!(error, crate::RendererError::InvalidRenderState(_)));
+        }
+    }
+
+    #[test]
+    fn scissor_projection_clamps_only_finite_rectangles() {
+        let extent = FramebufferExtent {
+            width: 64,
+            height: 64,
+        };
+        assert_eq!(
+            project_scissor_rect([-8.0, -4.0, 72.0, 68.0], [0.0, 0.0], [1.0, 1.0], extent,)
+                .unwrap(),
+            Some([0, 0, 64, 64])
+        );
     }
 }

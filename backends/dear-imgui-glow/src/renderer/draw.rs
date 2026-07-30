@@ -1,6 +1,5 @@
-use dear_imgui_rs::{
-    internal::RawWrapper,
-    render::{DrawCmd, DrawCmdParams, DrawData, DrawVert, ReconciledFrame, RenderedFrame},
+use dear_imgui_rs::render::{
+    DrawCmd, DrawCmdParams, DrawData, DrawVert, ReconciledFrame, RenderedFrame,
 };
 use glow::{Context, HasContext};
 use std::mem::size_of;
@@ -371,11 +370,7 @@ impl GlowRenderer {
             gl_debug_message(gl, "start loop over commands");
             for command in draw_list.commands() {
                 match command {
-                    DrawCmd::Elements {
-                        count,
-                        cmd_params,
-                        raw_cmd: _,
-                    } => {
+                    DrawCmd::Elements { count, cmd_params } => {
                         self.render_elements(
                             gl,
                             texture_map,
@@ -402,10 +397,10 @@ impl GlowRenderer {
                     DrawCmd::SetSamplerNearest => {
                         sampler_filter = glow::NEAREST;
                     }
-                    DrawCmd::RawCallback { callback, raw_cmd } => {
+                    DrawCmd::RawCallback(callback) => {
                         let res =
                             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
-                                callback(draw_list.raw(), raw_cmd)
+                                callback.invoke()
                             }));
                         if res.is_err() {
                             eprintln!("dear-imgui-glow: panic in DrawCmd raw callback");
