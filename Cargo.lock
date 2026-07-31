@@ -2593,7 +2593,10 @@ dependencies = [
  "cc",
  "flate2",
  "pkg-config",
+ "serde",
+ "serde_json",
  "tar",
+ "tempfile",
  "ureq",
  "vcpkg",
 ]

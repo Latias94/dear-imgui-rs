@@ -1244,6 +1244,58 @@ class PrebuiltWorkflowTests(unittest.TestCase):
 
 
 class PackageWorkspaceTests(unittest.TestCase):
+    def test_packaged_provider_sources_follow_inventory_crate_roots(self):
+        inventory_source = REPO_ROOT / "tools/build-support/maintained_sources.json"
+        inventory_data = json.loads(inventory_source.read_text(encoding="utf-8"))
+        provider_sources = [
+            source for source in inventory_data["sources"] if source["provider"] is not None
+        ]
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive_dir = root / "archives"
+            helper_path = root / "helper"
+            destination = root / "provider-sources"
+            archive_dir.mkdir()
+            helper_path.mkdir()
+            (helper_path / "maintained_sources.json").write_text(
+                inventory_source.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            packages = []
+            for source in provider_sources:
+                version = "0.16.0-alpha.1"
+                package = ARCHIVE.PackageRecord(
+                    source["crate_name"], Path(source["crate_root"]), version
+                )
+                packages.append(package)
+                archive_root = f"{package.name}-{version}"
+                write_archive(
+                    archive_dir / f"{package.name}-{version}.crate",
+                    {
+                        f"{archive_root}/Cargo.toml": b"[package]\n",
+                        f"{archive_root}/provider-marker": source["id"].encode(),
+                    },
+                )
+
+            staged_root, staged_inventory = (
+                SOURCE_PACKAGES.stage_packaged_wasm_provider_sources(
+                    archive_dir,
+                    packages,
+                    helper_path,
+                    destination,
+                )
+            )
+
+            self.assertEqual(staged_root, destination)
+            self.assertEqual(
+                staged_inventory,
+                helper_path / "maintained_sources.json",
+            )
+            for source in provider_sources:
+                marker = destination / source["crate_root"] / "provider-marker"
+                self.assertEqual(marker.read_text(encoding="utf-8"), source["id"])
+
     def test_lock_commit_keeps_commit_message_and_dirty_error_distinct(self):
         command_results = (
             subprocess.CompletedProcess(("git", "add"), 0),

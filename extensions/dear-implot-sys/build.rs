@@ -98,6 +98,16 @@ fn native_binding_spec() -> &'static build_support::binding::CrateBindingSpec {
         .expect("missing dear-implot-sys native binding spec")
 }
 
+fn maintained_source_paths(
+    cfg: &BuildConfig,
+) -> build_support::source_inventory::MaintainedSourcePaths {
+    build_support::source_inventory::MaintainedSourcePaths::for_crate(
+        env!("CARGO_PKG_NAME"),
+        cfg.manifest_dir.clone(),
+    )
+    .unwrap_or_else(|error| panic!("dear-implot-sys: {error}"))
+}
+
 #[cfg(feature = "bindgen")]
 fn apply_bindgen_defines(mut builder: bindgen::Builder) -> bindgen::Builder {
     for define in native_binding_spec().binding_defines() {
@@ -250,8 +260,17 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
     false
 }
 
-fn build_with_cc(cfg: &BuildConfig, cimplot_root: &Path, imgui_src: &Path, cimgui_root: &Path) {
-    let cimplot_cpp = patched_cimplot_cpp(cfg, cimplot_root);
+fn build_with_cc(
+    cfg: &BuildConfig,
+    sources: &build_support::source_inventory::MaintainedSourcePaths,
+    cimplot_root: &Path,
+    imgui_src: &Path,
+    cimgui_root: &Path,
+) {
+    let wrapper = sources
+        .file("wrapper")
+        .unwrap_or_else(|error| panic!("dear-implot-sys: {error}"));
+    let cimplot_cpp = patched_cimplot_cpp(cfg, &wrapper);
 
     let mut build = cc::Build::new();
     build.cpp(true).std("c++17");
@@ -287,28 +306,31 @@ fn build_with_cc(cfg: &BuildConfig, cimplot_root: &Path, imgui_src: &Path, cimgu
 
     // Sources
     build.file(cimplot_cpp);
-    build.file(cimplot_root.join("implot/implot.cpp"));
-    build.file(cimplot_root.join("implot/implot_items.cpp"));
-    build.file(cimplot_root.join("implot/implot_demo.cpp"));
+    for file_id in ["core", "items", "demo"] {
+        build.file(
+            sources
+                .file(file_id)
+                .unwrap_or_else(|error| panic!("dear-implot-sys: {error}")),
+        );
+    }
 
     build.compile("dear_implot");
 }
 
-fn patched_cimplot_cpp(cfg: &BuildConfig, cimplot_root: &Path) -> PathBuf {
+fn patched_cimplot_cpp(cfg: &BuildConfig, src: &Path) -> PathBuf {
     // NOTE: This intentionally does not modify the git submodule on disk.
     //
     // cimplot's generated C++ wrapper currently contains an out-of-bounds array access:
     // `dest.FormatSpec[16] = src.FormatSpec[16];` for `char FormatSpec[16]`.
     // We compile a patched copy from OUT_DIR to avoid shipping C++ UB, while keeping the submodule
     // clean for upstream updates.
-    let src = cimplot_root.join("cimplot.cpp");
-    let Ok(mut text) = std::fs::read_to_string(&src) else {
-        return src;
+    let Ok(mut text) = std::fs::read_to_string(src) else {
+        return src.to_path_buf();
     };
 
     let needle = "dest.FormatSpec[16] = src.FormatSpec[16];";
     if !text.contains(needle) {
-        return src;
+        return src.to_path_buf();
     }
 
     if !text.contains("#include <string.h>") {
@@ -339,12 +361,13 @@ fn patched_cimplot_cpp(cfg: &BuildConfig, cimplot_root: &Path) -> PathBuf {
         );
         out
     } else {
-        src
+        src.to_path_buf()
     }
 }
 
 fn main() {
     let cfg = BuildConfig::new();
+    let sources = maintained_source_paths(&cfg);
 
     // Rerun hints
     println!("cargo:rerun-if-changed=build.rs");
@@ -352,10 +375,10 @@ fn main() {
     println!("cargo:rerun-if-changed=src/bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=src/wasm_bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=third-party/cimplot/cimplot.h");
-    println!("cargo:rerun-if-changed=third-party/cimplot/cimplot.cpp");
     println!("cargo:rerun-if-changed=third-party/cimplot/implot/implot.h");
-    println!("cargo:rerun-if-changed=third-party/cimplot/implot/implot.cpp");
-    println!("cargo:rerun-if-changed=third-party/cimplot/implot/implot_items.cpp");
+    for path in sources.native_candidate_paths() {
+        println!("cargo:rerun-if-changed={}", path.display());
+    }
     println!("cargo:rerun-if-changed=../../dear-imgui-sys");
     println!("cargo:rerun-if-env-changed=IMPLOT_SYS_LIB_DIR");
     println!("cargo:rerun-if-env-changed=IMPLOT_SYS_SKIP_CC");
@@ -386,7 +409,9 @@ fn main() {
     }
 
     let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
-    let cimplot_root = cfg.manifest_dir.join("third-party/cimplot");
+    let cimplot_root = sources
+        .source_root()
+        .unwrap_or_else(|error| panic!("dear-implot-sys: {error}"));
 
     // docs.rs: generate or use pregenerated bindings, skip native/source checks
     if cfg.docs_rs {
@@ -474,10 +499,13 @@ fn main() {
         if !cfg.docs_rs
             && (force_build || (!linked_prebuilt && env::var("IMPLOT_SYS_SKIP_CC").is_err()))
         {
+            sources
+                .validate_native()
+                .unwrap_or_else(|error| panic!("dear-implot-sys: {error}"));
             if use_cmake_requested() && build_with_cmake(&cfg, &cimplot_root) {
                 // built via CMake
             } else {
-                build_with_cc(&cfg, &cimplot_root, &imgui_src, &cimgui_root);
+                build_with_cc(&cfg, &sources, &cimplot_root, &imgui_src, &cimgui_root);
             }
         }
     } else {

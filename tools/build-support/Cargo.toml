@@ -21,11 +21,13 @@ flate2 = { workspace = true, optional = true }
 tar = { workspace = true, optional = true }
 pkg-config = { workspace = true, optional = true }
 vcpkg = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 
 [features]
 default = []
 # Pure-data binding generation and native artifact identity contracts.
-binding-spec = []
+binding-spec = ["dep:serde", "dep:serde_json"]
 # Enable HTTP(S) download support for build scripts.
 download = ["dep:ureq", "archive"]
 # Enable `.tar.gz` extraction support.
@@ -36,3 +38,8 @@ pkg-config = ["dep:pkg-config"]
 vcpkg = ["dep:vcpkg"]
 # Enable native dependency discovery helpers for build scripts.
 native-deps = ["pkg-config", "vcpkg"]
+
+[dev-dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }

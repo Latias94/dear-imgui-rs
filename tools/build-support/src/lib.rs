@@ -4,6 +4,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 static STATIC_CPP_STDLIB_LINK_EMITTED: AtomicBool = AtomicBool::new(false);
 
+#[cfg(any(feature = "binding-spec", test))]
+pub mod source_inventory;
+
 /// Native artifact capability for the repository-owned safe demo-window ABI.
 pub const SAFE_DEMO_FONT_BOUNDARY_ARTIFACT_FEATURE: &str = "safe-demo-font-boundary-v1";
 
@@ -1626,8 +1629,6 @@ typedef __builtin_va_list va_list;
     pub struct CrateBindingSpec {
         pub owner: BindingOwner,
         pub crate_name: &'static str,
-        pub crate_root: &'static str,
-        pub source_root: &'static str,
         pub input_paths: &'static [&'static str],
         pub header_shims: &'static [HeaderShim],
         pub clang_args: &'static [&'static str],
@@ -1734,6 +1735,25 @@ typedef __builtin_va_list va_list;
                 .find(|spec| spec.crate_name == crate_name && spec.target.id() == target_id)
         }
 
+        pub fn maintained_source(&self) -> &'static crate::source_inventory::MaintainedSource {
+            crate::source_inventory::SourceInventory::embedded()
+                .source_by_crate(self.crate_name)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "binding spec crate {:?} is absent from the maintained-source inventory",
+                        self.crate_name
+                    )
+                })
+        }
+
+        pub fn crate_root(&self) -> &'static str {
+            &self.maintained_source().crate_root
+        }
+
+        pub fn source_root(&self) -> &'static str {
+            &self.maintained_source().source_root
+        }
+
         pub fn deterministic_hash(&self) -> String {
             let mut hash = StableHash::new();
             hash.field("schema", "crate-binding-spec-v2");
@@ -1748,8 +1768,8 @@ typedef __builtin_va_list va_list;
             hash.field("rustc_version", CANONICAL_BINDING_RUSTC_VERSION);
             hash.field("rustfmt_version", CANONICAL_BINDING_RUSTFMT_VERSION);
             hash.field("crate_name", self.crate_name);
-            hash.field("crate_root", self.crate_root);
-            hash.field("source_root", self.source_root);
+            hash.field("crate_root", self.crate_root());
+            hash.field("source_root", self.source_root());
             hash.fields("input_paths", self.input_paths);
             hash.begin_list("header_shims", self.header_shims.len());
             for (index, shim) in self.header_shims.iter().enumerate() {
@@ -2761,8 +2781,6 @@ struct tm {
     struct CrateBindingSourceSpec {
         owner: BindingOwner,
         crate_name: &'static str,
-        crate_root: &'static str,
-        source_root: &'static str,
         input_paths: &'static [&'static str],
         profile: CrateBindgenProfile,
         required_symbols: &'static [&'static str],
@@ -2771,8 +2789,6 @@ struct tm {
     const fn source_spec(
         owner: BindingOwner,
         crate_name: &'static str,
-        crate_root: &'static str,
-        source_root: &'static str,
         input_paths: &'static [&'static str],
         profile: CrateBindgenProfile,
         required_symbols: &'static [&'static str],
@@ -2780,8 +2796,6 @@ struct tm {
         CrateBindingSourceSpec {
             owner,
             crate_name,
-            crate_root,
-            source_root,
             input_paths,
             profile,
             required_symbols,
@@ -2800,8 +2814,6 @@ struct tm {
         CrateBindingSpec {
             owner: source.owner,
             crate_name: source.crate_name,
-            crate_root: source.crate_root,
-            source_root: source.source_root,
             input_paths: source.input_paths,
             header_shims: CRATE_HEADER_SHIMS,
             clang_args,
@@ -2815,8 +2827,6 @@ struct tm {
     const TEST_ENGINE_SOURCE: CrateBindingSourceSpec = source_spec(
         BindingOwner::TestEngine,
         "dear-imgui-test-engine-sys",
-        "extensions/dear-imgui-test-engine-sys",
-        "third-party/imgui_test_engine",
         TEST_ENGINE_INPUTS,
         TEST_ENGINE_PROFILE,
         TEST_ENGINE_SYMBOLS,
@@ -2824,8 +2834,6 @@ struct tm {
     const IMPLOT_SOURCE: CrateBindingSourceSpec = source_spec(
         BindingOwner::Extension(ExtensionBinding::ImPlot),
         "dear-implot-sys",
-        "extensions/dear-implot-sys",
-        "third-party/cimplot",
         IMPLOT_INPUTS,
         IMPLOT_PROFILE,
         IMPLOT_SYMBOLS,
@@ -2833,8 +2841,6 @@ struct tm {
     const IMPLOT3D_SOURCE: CrateBindingSourceSpec = source_spec(
         BindingOwner::Extension(ExtensionBinding::ImPlot3d),
         "dear-implot3d-sys",
-        "extensions/dear-implot3d-sys",
-        "third-party/cimplot3d",
         IMPLOT3D_INPUTS,
         IMPLOT3D_PROFILE,
         IMPLOT3D_SYMBOLS,
@@ -2842,8 +2848,6 @@ struct tm {
     const IMNODES_SOURCE: CrateBindingSourceSpec = source_spec(
         BindingOwner::Extension(ExtensionBinding::ImNodes),
         "dear-imnodes-sys",
-        "extensions/dear-imnodes-sys",
-        "third-party/cimnodes",
         IMNODES_INPUTS,
         IMNODES_PROFILE,
         IMNODES_SYMBOLS,
@@ -2851,8 +2855,6 @@ struct tm {
     const NODE_EDITOR_SOURCE: CrateBindingSourceSpec = source_spec(
         BindingOwner::Extension(ExtensionBinding::NodeEditor),
         "dear-node-editor-sys",
-        "extensions/dear-node-editor-sys",
-        "third-party/cimnodes_editor",
         NODE_EDITOR_INPUTS,
         NODE_EDITOR_PROFILE,
         NODE_EDITOR_SYMBOLS,
@@ -2860,8 +2862,6 @@ struct tm {
     const IMGUIZMO_SOURCE: CrateBindingSourceSpec = source_spec(
         BindingOwner::Extension(ExtensionBinding::ImGuizmo),
         "dear-imguizmo-sys",
-        "extensions/dear-imguizmo-sys",
-        "third-party/cimguizmo",
         IMGUIZMO_INPUTS,
         IMGUIZMO_PROFILE,
         IMGUIZMO_SYMBOLS,
@@ -2869,8 +2869,6 @@ struct tm {
     const IMGUIZMO_QUAT_SOURCE: CrateBindingSourceSpec = source_spec(
         BindingOwner::Extension(ExtensionBinding::ImGuizmoQuat),
         "dear-imguizmo-quat-sys",
-        "extensions/dear-imguizmo-quat-sys",
-        "third-party/cimguizmo_quat",
         IMGUIZMO_QUAT_INPUTS,
         IMGUIZMO_QUAT_PROFILE,
         IMGUIZMO_QUAT_SYMBOLS,

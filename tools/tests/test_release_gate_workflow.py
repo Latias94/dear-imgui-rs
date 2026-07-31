@@ -168,6 +168,24 @@ class ReleaseGateWorkflowTests(unittest.TestCase):
         self.assertIn("if: always()", gate)
         self.assertIn("retention-days: 30", gate)
 
+    def test_linux_wasm_cell_builds_and_verifies_the_actual_provider(self):
+        jobs = workflow_jobs(parsed_workflow("release-gate.yml"))
+        job = jobs["standard-cells"]
+        setup = named_step(job, "Set up pinned Emscripten provider toolchain")
+        setup_inputs = require_mapping(
+            setup.get("with"), "jobs.standard-cells.emsdk.with"
+        )
+        self.assertEqual(setup.get("if"), "matrix.cell_id == 'linux-wasm'")
+        self.assertEqual(setup.get("uses"), "emscripten-core/setup-emsdk@v16")
+        self.assertEqual(str(setup_inputs.get("version")), "5.0.1")
+        self.assertEqual(str(setup_inputs.get("emsdk-version")), "5.0.5")
+
+        capture = named_step(job, "Capture WASM route and provider contract")
+        self.assertEqual(capture.get("if"), "matrix.cell_id == 'linux-wasm'")
+        command = tuple(shlex.split(capture.get("run", "")))
+        self.assertIn("tools/ci/verify_wasm_provider.py", command)
+        self.assertIn("--check-rust-route", command)
+
     def test_aggregate_output_is_relative_to_the_evidence_root(self):
         jobs = workflow_jobs(parsed_workflow("release-gate.yml"))
         aggregate = jobs["aggregate"]

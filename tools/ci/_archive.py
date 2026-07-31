@@ -9,6 +9,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
+from _source_inventory import load_inventory
 from _verification import VerificationError
 
 
@@ -26,44 +27,8 @@ REQUIRED_CORE_BINDINGS = (
     "src/bindings_pregenerated_windows.rs",
     "src/wasm_bindings_pregenerated.rs",
 )
-SYS_SENTINELS = {
-    "dear-imgui-sys": (
-        "src/demo_window_shim.cpp",
-        "src/platform_io_hooks.cpp",
-        "third-party/cimgui/cimgui.cpp",
-        "third-party/cimgui/imgui/imgui.cpp",
-    ),
-    "dear-implot-sys": (
-        "third-party/cimplot/cimplot.cpp",
-        "third-party/cimplot/implot/implot.cpp",
-    ),
-    "dear-imnodes-sys": (
-        "shim/imnodes_extra.cpp",
-        "third-party/cimnodes/cimnodes.cpp",
-        "third-party/cimnodes/imnodes/imnodes.cpp",
-    ),
-    "dear-node-editor-sys": (
-        "shim/node_editor_extra.cpp",
-        "third-party/cimnodes_editor/cimnodes_editor.cpp",
-        "third-party/cimnodes_editor/imgui-node-editor/imgui_node_editor.cpp",
-    ),
-    "dear-imguizmo-sys": (
-        "third-party/cimguizmo/cimguizmo.cpp",
-        "third-party/cimguizmo/ImGuizmo/src/ImGuizmo.cpp",
-    ),
-    "dear-implot3d-sys": (
-        "third-party/cimplot3d/cimplot3d.cpp",
-        "third-party/cimplot3d/implot3d/implot3d.cpp",
-    ),
-    "dear-imguizmo-quat-sys": (
-        "third-party/cimguizmo_quat/cimguizmo_quat.cpp",
-        "third-party/cimguizmo_quat/imGuIZMO.quat/imguizmo_quat/imguizmo_quat.cpp",
-    ),
-    "dear-imgui-test-engine-sys": (
-        "shim/cimgui_test_engine.cpp",
-        "third-party/imgui_test_engine/imgui_test_engine/imgui_te_engine.cpp",
-    ),
-}
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SYS_SENTINELS = load_inventory(REPO_ROOT).archive_sentinels(REPO_ROOT)
 
 
 def _normalized_archive_path(name: str, archive: Path) -> PurePosixPath:

@@ -405,6 +405,14 @@ jobs:
         if: matrix.cell_id == 'linux-wasm'
         run: rustup target add wasm32-unknown-unknown
 
+      - name: Set up pinned Emscripten provider toolchain
+        if: matrix.cell_id == 'linux-wasm'
+        uses: emscripten-core/setup-emsdk@v16
+        with:
+          version: 5.0.1
+          emsdk-version: 5.0.5
+          actions-cache-folder: emsdk-cache
+
       - name: Install macOS dependencies
         if: matrix.cell_id == 'macos-build'
         run: brew install cmake freetype pkg-config sdl3
@@ -449,7 +457,7 @@ jobs:
         if: matrix.cell_id == 'windows-gnu'
         run: rustup target add x86_64-pc-windows-gnu
 
-      - name: Capture WASM route
+      - name: Capture WASM route and provider contract
         if: matrix.cell_id == 'linux-wasm'
         continue-on-error: true
         run: >-
@@ -460,16 +468,8 @@ jobs:
           --stderr-log logs/stderr.log
           --timeout 2400
           --
-          cargo check
-          --target wasm32-unknown-unknown
-          --no-default-features
-          -p dear-imgui-rs
-          -p dear-implot
-          -p dear-implot3d
-          -p dear-imnodes
-          -p dear-imguizmo
-          -p dear-imguizmo-quat
-          --features dear-imgui-rs/wasm,dear-implot/wasm,dear-implot3d/wasm,dear-imnodes/wasm,dear-imguizmo/wasm,dear-imguizmo-quat/wasm
+          python3 -B tools/ci/verify_wasm_provider.py
+          --check-rust-route
 
       - name: Capture vcpkg consumer
         if: matrix.cell_id == 'windows-vcpkg'

@@ -27,6 +27,7 @@ if str(CI_DIR) not in sys.path:
 CONTRACTS = importlib.import_module("run_contract")
 RUNTIME = importlib.import_module("_runtime_gate")
 PROCESS = importlib.import_module("_process")
+BUILD_GLSLANG = importlib.import_module("build_glslang")
 
 
 def bounded_result(
@@ -1373,6 +1374,33 @@ class WorkflowPortabilityTests(unittest.TestCase):
             "WASM uses pregenerated bindings and must not install libclang",
         )
 
+    def test_checkout_and_packaged_wasm_providers_use_the_pinned_emsdk(self):
+        jobs = self._ci_jobs()
+        for job_id in ("publish-check", "wasm-check"):
+            setup = named_step(
+                jobs[job_id], "Set up pinned Emscripten provider toolchain"
+            )
+            inputs = require_mapping(setup.get("with"), f"jobs.{job_id}.emsdk.with")
+            with self.subTest(job=job_id):
+                self.assertEqual(setup.get("uses"), "emscripten-core/setup-emsdk@v16")
+                self.assertEqual(str(inputs.get("version")), "5.0.1")
+                self.assertEqual(str(inputs.get("emsdk-version")), "5.0.5")
+                self.assertEqual(inputs.get("actions-cache-folder"), "emsdk-cache")
+
+        checkout_provider = str(
+            named_step(
+                jobs["wasm-check"],
+                "Build and structurally verify the Emscripten provider",
+            ).get("run", "")
+        )
+        packaged_provider = str(
+            named_step(
+                jobs["publish-check"], "Package, unpack, and consume core crates"
+            ).get("run", "")
+        )
+        self.assertIn("verify_wasm_provider.py", checkout_provider)
+        self.assertIn("verify_packaged_core.py", packaged_provider)
+
     def test_ash_shader_contract_rebuilds_with_pinned_glslang(self):
         job = self._ci_jobs()["ash-routes"]
         install = named_step(job, "Build pinned glslangValidator")
@@ -1381,10 +1409,14 @@ class WorkflowPortabilityTests(unittest.TestCase):
             install.get("if"),
             "matrix.platform == 'Winit' && matrix.rendering == 'classic'",
         )
-        self.assertIn("1062752a891c95b2bfeed9e356562d88f9df84ac", install_command)
-        self.assertIn("cmake --build", install_command)
-        self.assertIn("--target glslang-standalone", install_command)
-        self.assertIn("GLSLANG_VALIDATOR=", install_command)
+        self.assertNotIn("shell", install)
+        self.assertIn("tools/ci/build_glslang.py", install_command)
+        self.assertIn("--work-root", install_command)
+        self.assertIn("--github-env", install_command)
+        self.assertEqual(
+            BUILD_GLSLANG.GLSLANG_COMMIT,
+            "1062752a891c95b2bfeed9e356562d88f9df84ac",
+        )
 
         verify = named_step(job, "Verify checked-in Ash shaders")
         verify_command = str(verify.get("run", ""))

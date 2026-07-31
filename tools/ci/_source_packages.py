@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import sys
 from collections.abc import Sequence
 from pathlib import Path, PurePosixPath
 
@@ -17,6 +19,7 @@ from _archive import (
 from _prebuilt import build_host_prebuilt_packages, verify_prebuilt_packages
 from _process import environment, github_group, run
 from _submodules import PACKAGE_NESTED_SUBMODULES
+from _source_inventory import load_inventory_file
 from _verification import VerificationError, temporary_workspace
 from release_metadata import (
     PUBLISH_ORDER,
@@ -199,6 +202,39 @@ def _package_by_name(packages: Sequence[PackageRecord], name: str) -> PackageRec
         if package.name == name:
             return package
     raise VerificationError(f"release package is missing from publish order: {name}")
+
+
+def stage_packaged_wasm_provider_sources(
+    package_archive_dir: Path,
+    packages: Sequence[PackageRecord],
+    helper_path: Path,
+    destination: Path,
+) -> tuple[Path, Path]:
+    """Stage only packaged provider inputs under the canonical crate paths."""
+    inventory_path = helper_path / "maintained_sources.json"
+    require_file(inventory_path, "packaged maintained-source inventory")
+    inventory = load_inventory_file(inventory_path)
+    extraction_root = destination.parent / "packaged-provider-extracted"
+
+    for source in inventory.sources:
+        if source.provider is None:
+            continue
+        package = _package_by_name(packages, source.crate_name)
+        archive = package_archive_dir / f"{package.name}-{package.version}.crate"
+        require_file(archive, f"provider source archive for {package.name}")
+        extracted = extraction_root / source.id
+        safe_extract_tar(archive, extracted)
+        package_root = extracted / f"{package.name}-{package.version}"
+        require_file(package_root / "Cargo.toml", f"unpacked {package.name} manifest")
+        crate_root = destination.joinpath(*source.crate_root.parts)
+        if crate_root.exists():
+            raise VerificationError(
+                f"packaged provider crate root already exists: {crate_root}"
+            )
+        crate_root.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(package_root, crate_root)
+
+    return destination, inventory_path
 
 
 def cargo_path_patch(package_name: str, path: Path) -> str:
@@ -424,6 +460,30 @@ def verify_packaged_core(workspace_root: Path = WORKSPACE_ROOT) -> None:
                 sys_archive: sys_members,
             },
         )
+        provider_source_root, provider_inventory = stage_packaged_wasm_provider_sources(
+            package_archive_dir,
+            packages,
+            helper_path,
+            work_dir / "packaged-provider-sources",
+        )
+        with github_group("Build the Emscripten provider from packaged sources"):
+            run(
+                (
+                    sys.executable,
+                    "-B",
+                    package_workspace / "tools/ci/verify_wasm_provider.py",
+                    "--repo-root",
+                    package_workspace,
+                    "--provider-source-root",
+                    provider_source_root,
+                    "--inventory",
+                    provider_inventory,
+                    "--out-dir",
+                    work_dir / "packaged-provider-output",
+                ),
+                cwd=package_workspace,
+                env=environment({"CARGO_TARGET_DIR": target_dir}),
+            )
         native_package_dir = work_dir / "native-packages"
         native_package_dir.mkdir()
         native_crt = build_host_prebuilt_packages(

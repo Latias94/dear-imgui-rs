@@ -1,0 +1,191 @@
+{
+  "schema": "dear-imgui-maintained-sources-v1",
+  "wasm_import_module": "imgui-sys-v0",
+  "sources": [
+    {
+      "id": "core",
+      "crate_name": "dear-imgui-sys",
+      "crate_root": "dear-imgui-sys",
+      "source_root": "third-party/cimgui",
+      "files": [
+        { "id": "cimgui-wrapper", "canonical": "third-party/cimgui/cimgui.cpp", "alternates": [], "provider_transform": "direct" },
+        { "id": "imgui-core", "canonical": "third-party/cimgui/imgui/imgui.cpp", "alternates": [], "provider_transform": "patch-imgui-core" },
+        { "id": "imgui-draw", "canonical": "third-party/cimgui/imgui/imgui_draw.cpp", "alternates": [], "provider_transform": "direct" },
+        { "id": "imgui-widgets", "canonical": "third-party/cimgui/imgui/imgui_widgets.cpp", "alternates": [], "provider_transform": "direct" },
+        { "id": "imgui-tables", "canonical": "third-party/cimgui/imgui/imgui_tables.cpp", "alternates": [], "provider_transform": "direct" },
+        { "id": "imgui-demo", "canonical": "third-party/cimgui/imgui/imgui_demo.cpp", "alternates": [], "provider_transform": "patch-imgui-demo" },
+        { "id": "demo-window-shim", "canonical": "src/demo_window_shim.cpp", "alternates": [], "provider_transform": "direct" },
+        { "id": "platform-io-hooks", "canonical": "src/platform_io_hooks.cpp", "alternates": [], "provider_transform": null },
+        { "id": "test-engine-hooks", "canonical": "src/imgui_test_engine_hooks.cpp", "alternates": [], "provider_transform": null },
+        { "id": "stack-layout-shim", "canonical": "src/stack_layout_shim.cpp", "alternates": [], "provider_transform": null },
+        { "id": "freetype", "canonical": "third-party/cimgui/imgui/misc/freetype/imgui_freetype.cpp", "alternates": [], "provider_transform": null }
+      ],
+      "native_required_files": ["cimgui-wrapper", "imgui-core", "imgui-draw", "imgui-widgets", "imgui-tables", "imgui-demo", "demo-window-shim", "platform-io-hooks"],
+      "archive_sentinels": ["cimgui-wrapper", "imgui-core", "demo-window-shim", "platform-io-hooks"],
+      "provider": {
+        "wasm_bindings": "src/wasm_bindings_pregenerated.rs",
+        "symbol_prefixes": ["ig", "Im"],
+        "required_exports": [
+          "dear_imgui_rs_show_demo_window_without_font_atlas",
+          "dear_imgui_rs_show_font_atlas_debug_panel",
+          "dear_imgui_rs_show_metrics_window_without_font_atlas",
+          "dear_imgui_rs_show_style_editor_without_font_atlas"
+        ],
+        "include_dirs": ["third-party/cimgui", "third-party/cimgui/imgui"],
+        "source_files": ["cimgui-wrapper", "imgui-core", "imgui-draw", "imgui-widgets", "imgui-tables", "imgui-demo", "demo-window-shim"]
+      }
+    },
+    {
+      "id": "test-engine",
+      "crate_name": "dear-imgui-test-engine-sys",
+      "crate_root": "extensions/dear-imgui-test-engine-sys",
+      "source_root": "third-party/imgui_test_engine",
+      "files": [
+        { "id": "capture-tool", "canonical": "third-party/imgui_test_engine/imgui_test_engine/imgui_capture_tool.cpp", "alternates": [], "provider_transform": null },
+        { "id": "context", "canonical": "third-party/imgui_test_engine/imgui_test_engine/imgui_te_context.cpp", "alternates": [], "provider_transform": null },
+        { "id": "coroutine", "canonical": "third-party/imgui_test_engine/imgui_test_engine/imgui_te_coroutine.cpp", "alternates": [], "provider_transform": null },
+        { "id": "engine", "canonical": "third-party/imgui_test_engine/imgui_test_engine/imgui_te_engine.cpp", "alternates": [], "provider_transform": null },
+        { "id": "exporters", "canonical": "third-party/imgui_test_engine/imgui_test_engine/imgui_te_exporters.cpp", "alternates": [], "provider_transform": null },
+        { "id": "perftool", "canonical": "third-party/imgui_test_engine/imgui_test_engine/imgui_te_perftool.cpp", "alternates": [], "provider_transform": null },
+        { "id": "ui", "canonical": "third-party/imgui_test_engine/imgui_test_engine/imgui_te_ui.cpp", "alternates": [], "provider_transform": null },
+        { "id": "utils", "canonical": "third-party/imgui_test_engine/imgui_test_engine/imgui_te_utils.cpp", "alternates": [], "provider_transform": null },
+        { "id": "shim", "canonical": "shim/cimgui_test_engine.cpp", "alternates": [], "provider_transform": null },
+        { "id": "default-tests", "canonical": "shim/default_tests.cpp", "alternates": [], "provider_transform": null },
+        { "id": "hooks-register", "canonical": "shim/imgui_test_engine_hooks_register.cpp", "alternates": [], "provider_transform": null },
+        { "id": "script-tests", "canonical": "shim/script_tests.cpp", "alternates": [], "provider_transform": null }
+      ],
+      "native_required_files": ["capture-tool", "context", "coroutine", "engine", "exporters", "perftool", "ui", "utils", "shim", "default-tests", "hooks-register", "script-tests"],
+      "archive_sentinels": ["engine", "shim"],
+      "provider": null
+    },
+    {
+      "id": "implot",
+      "crate_name": "dear-implot-sys",
+      "crate_root": "extensions/dear-implot-sys",
+      "source_root": "third-party/cimplot",
+      "files": [
+        { "id": "wrapper", "canonical": "third-party/cimplot/cimplot.cpp", "alternates": [], "provider_transform": "direct" },
+        { "id": "core", "canonical": "third-party/cimplot/implot/implot.cpp", "alternates": [], "provider_transform": "direct" },
+        { "id": "items", "canonical": "third-party/cimplot/implot/implot_items.cpp", "alternates": [], "provider_transform": "direct" },
+        { "id": "demo", "canonical": "third-party/cimplot/implot/implot_demo.cpp", "alternates": [], "provider_transform": "direct" }
+      ],
+      "native_required_files": ["wrapper", "core", "items", "demo"],
+      "archive_sentinels": ["wrapper", "core"],
+      "provider": {
+        "wasm_bindings": "src/wasm_bindings_pregenerated.rs",
+        "symbol_prefixes": ["ImPlot"],
+        "required_exports": [],
+        "include_dirs": ["third-party/cimplot", "third-party/cimplot/implot"],
+        "source_files": ["wrapper", "core", "items", "demo"]
+      }
+    },
+    {
+      "id": "implot3d",
+      "crate_name": "dear-implot3d-sys",
+      "crate_root": "extensions/dear-implot3d-sys",
+      "source_root": "third-party/cimplot3d",
+      "files": [
+        { "id": "wrapper", "canonical": "third-party/cimplot3d/cimplot3d.cpp", "alternates": [], "provider_transform": "direct" },
+        { "id": "core", "canonical": "third-party/cimplot3d/implot3d/implot3d.cpp", "alternates": [], "provider_transform": "direct" },
+        { "id": "items", "canonical": "third-party/cimplot3d/implot3d/implot3d_items.cpp", "alternates": [], "provider_transform": "direct" },
+        { "id": "meshes", "canonical": "third-party/cimplot3d/implot3d/implot3d_meshes.cpp", "alternates": [], "provider_transform": "direct" },
+        { "id": "demo", "canonical": "third-party/cimplot3d/implot3d/implot3d_demo.cpp", "alternates": [], "provider_transform": "direct" }
+      ],
+      "native_required_files": ["wrapper", "core", "items", "meshes", "demo"],
+      "archive_sentinels": ["wrapper", "core"],
+      "provider": {
+        "wasm_bindings": "src/wasm_bindings_pregenerated.rs",
+        "symbol_prefixes": ["ImPlot3D_"],
+        "required_exports": [],
+        "include_dirs": ["third-party/cimplot3d", "third-party/cimplot3d/implot3d"],
+        "source_files": ["wrapper", "core", "items", "meshes", "demo"]
+      }
+    },
+    {
+      "id": "imnodes",
+      "crate_name": "dear-imnodes-sys",
+      "crate_root": "extensions/dear-imnodes-sys",
+      "source_root": "third-party/cimnodes",
+      "files": [
+        { "id": "wrapper", "canonical": "third-party/cimnodes/cimnodes.cpp", "alternates": [], "provider_transform": "direct" },
+        { "id": "core", "canonical": "third-party/cimnodes/imnodes/imnodes.cpp", "alternates": [], "provider_transform": "direct" },
+        { "id": "shim", "canonical": "shim/imnodes_extra.cpp", "alternates": [], "provider_transform": "direct" }
+      ],
+      "native_required_files": ["wrapper", "core", "shim"],
+      "archive_sentinels": ["wrapper", "core", "shim"],
+      "provider": {
+        "wasm_bindings": "src/wasm_bindings_pregenerated.rs",
+        "symbol_prefixes": ["imnodes_", "EmulateThreeButtonMouse_", "getIOKeyCtrlPtr", "LinkDetachWithModifierClick_", "MultipleSelectModifier_"],
+        "required_exports": [],
+        "include_dirs": ["third-party/cimnodes", "third-party/cimnodes/imnodes", "shim"],
+        "source_files": ["wrapper", "core", "shim"]
+      }
+    },
+    {
+      "id": "node-editor",
+      "crate_name": "dear-node-editor-sys",
+      "crate_root": "extensions/dear-node-editor-sys",
+      "source_root": "third-party/cimnodes_editor",
+      "files": [
+        { "id": "wrapper", "canonical": "third-party/cimnodes_editor/cimnodes_editor.cpp", "alternates": [], "provider_transform": null },
+        { "id": "core", "canonical": "third-party/cimnodes_editor/imgui-node-editor/imgui_node_editor.cpp", "alternates": [], "provider_transform": null },
+        { "id": "api", "canonical": "third-party/cimnodes_editor/imgui-node-editor/imgui_node_editor_api.cpp", "alternates": [], "provider_transform": null },
+        { "id": "canvas", "canonical": "third-party/cimnodes_editor/imgui-node-editor/imgui_canvas.cpp", "alternates": [], "provider_transform": null },
+        { "id": "json", "canonical": "third-party/cimnodes_editor/imgui-node-editor/crude_json.cpp", "alternates": [], "provider_transform": null },
+        { "id": "shim", "canonical": "shim/node_editor_extra.cpp", "alternates": [], "provider_transform": null }
+      ],
+      "native_required_files": ["wrapper", "core", "api", "canvas", "json", "shim"],
+      "archive_sentinels": ["wrapper", "core", "shim"],
+      "provider": null
+    },
+    {
+      "id": "imguizmo",
+      "crate_name": "dear-imguizmo-sys",
+      "crate_root": "extensions/dear-imguizmo-sys",
+      "source_root": "third-party/cimguizmo",
+      "files": [
+        { "id": "wrapper", "canonical": "third-party/cimguizmo/cimguizmo.cpp", "alternates": [], "provider_transform": "direct" },
+        { "id": "implementation", "canonical": "third-party/cimguizmo/ImGuizmo/src/ImGuizmo.cpp", "alternates": ["third-party/cimguizmo/ImGuizmo/ImGuizmo.cpp"], "provider_transform": "direct" }
+      ],
+      "native_required_files": ["wrapper", "implementation"],
+      "archive_sentinels": ["wrapper", "implementation"],
+      "provider": {
+        "wasm_bindings": "src/wasm_bindings_pregenerated.rs",
+        "symbol_prefixes": ["ImGuizmo_", "Style_"],
+        "required_exports": ["ImGuizmo_ComputeMouseRay"],
+        "include_dirs": ["third-party/cimguizmo", "third-party/cimguizmo/ImGuizmo", "third-party/cimguizmo/ImGuizmo/src"],
+        "source_files": ["wrapper", "implementation"]
+      }
+    },
+    {
+      "id": "imguizmo-quat",
+      "crate_name": "dear-imguizmo-quat-sys",
+      "crate_root": "extensions/dear-imguizmo-quat-sys",
+      "source_root": "third-party/cimguizmo_quat",
+      "files": [
+        { "id": "wrapper", "canonical": "third-party/cimguizmo_quat/cimguizmo_quat.cpp", "alternates": [], "provider_transform": "direct" },
+        { "id": "core", "canonical": "third-party/cimguizmo_quat/imGuIZMO.quat/imguizmo_quat/imguizmo_quat.cpp", "alternates": [], "provider_transform": "direct" },
+        { "id": "quat", "canonical": "third-party/cimguizmo_quat/imGuIZMO.quat/imguizmo_quat/imGuIZMOquat.cpp", "alternates": [], "provider_transform": "direct" }
+      ],
+      "native_required_files": ["wrapper", "core", "quat"],
+      "archive_sentinels": ["wrapper", "core"],
+      "provider": {
+        "wasm_bindings": "src/wasm_bindings_pregenerated.rs",
+        "symbol_prefixes": ["imguiGizmo_", "iggizmo3D_", "mat4_", "quat_"],
+        "required_exports": [],
+        "include_dirs": ["third-party/cimguizmo_quat", "third-party/cimguizmo_quat/imGuIZMO.quat/imguizmo_quat"],
+        "source_files": ["wrapper", "core", "quat"]
+      }
+    }
+  ],
+  "nested_submodules": [
+    { "parent": "dear-imgui-sys/third-party/cimgui", "path": "imgui", "shallow": true, "package": true, "package_order": 0 },
+    { "parent": "extensions/dear-implot-sys/third-party/cimplot", "path": "implot", "shallow": false, "package": true, "package_order": 1 },
+    { "parent": "extensions/dear-implot3d-sys/third-party/cimplot3d", "path": "implot3d", "shallow": false, "package": true, "package_order": 5 },
+    { "parent": "extensions/dear-imguizmo-sys/third-party/cimguizmo", "path": "ImGuizmo", "shallow": true, "package": true, "package_order": 4 },
+    { "parent": "extensions/dear-imguizmo-quat-sys/third-party/cimguizmo_quat", "path": "imGuIZMO.quat", "shallow": true, "package": true, "package_order": 6 },
+    { "parent": "extensions/dear-imguizmo-quat-sys/third-party/cimguizmo_quat/imGuIZMO.quat", "path": "libs/imgui", "shallow": true, "package": false, "package_order": null },
+    { "parent": "extensions/dear-imnodes-sys/third-party/cimnodes", "path": "imnodes", "shallow": true, "package": true, "package_order": 2 },
+    { "parent": "extensions/dear-node-editor-sys/third-party/cimnodes_editor", "path": "imgui-node-editor", "shallow": true, "package": true, "package_order": 3 }
+  ]
+}

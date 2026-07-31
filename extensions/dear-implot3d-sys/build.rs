@@ -92,6 +92,16 @@ fn native_binding_spec() -> &'static build_support::binding::CrateBindingSpec {
         .expect("missing dear-implot3d-sys native binding spec")
 }
 
+fn maintained_source_paths(
+    cfg: &BuildConfig,
+) -> build_support::source_inventory::MaintainedSourcePaths {
+    build_support::source_inventory::MaintainedSourcePaths::for_crate(
+        env!("CARGO_PKG_NAME"),
+        cfg.manifest_dir.clone(),
+    )
+    .unwrap_or_else(|error| panic!("dear-implot3d-sys: {error}"))
+}
+
 #[cfg(feature = "bindgen")]
 fn apply_bindgen_defines(mut builder: bindgen::Builder) -> bindgen::Builder {
     for define in native_binding_spec().binding_defines() {
@@ -380,9 +390,13 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
     false
 }
 
-fn build_with_cc(cfg: &BuildConfig, cimplot3d_root: &Path, imgui_src: &Path, cimgui_root: &Path) {
-    let cimplot3d_cpp = cimplot3d_root.join("cimplot3d.cpp");
-
+fn build_with_cc(
+    cfg: &BuildConfig,
+    sources: &build_support::source_inventory::MaintainedSourcePaths,
+    cimplot3d_root: &Path,
+    imgui_src: &Path,
+    cimgui_root: &Path,
+) {
     let mut build = cc::Build::new();
     if cfg.target_arch == "wasm32" {
         build.define("IMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS", "1");
@@ -417,11 +431,13 @@ fn build_with_cc(cfg: &BuildConfig, cimplot3d_root: &Path, imgui_src: &Path, cim
     build.include(cimplot3d_root);
     build.include(cimplot3d_root.join("implot3d"));
 
-    build.file(cimplot3d_cpp);
-    build.file(cimplot3d_root.join("implot3d/implot3d.cpp"));
-    build.file(cimplot3d_root.join("implot3d/implot3d_items.cpp"));
-    build.file(cimplot3d_root.join("implot3d/implot3d_meshes.cpp"));
-    build.file(cimplot3d_root.join("implot3d/implot3d_demo.cpp"));
+    for file_id in ["wrapper", "core", "items", "meshes", "demo"] {
+        build.file(
+            sources
+                .file(file_id)
+                .unwrap_or_else(|error| panic!("dear-implot3d-sys: {error}")),
+        );
+    }
 
     build.compile("dear_implot3d");
 }
@@ -469,18 +485,17 @@ fn docsrs_build(cfg: &BuildConfig, cimplot3d_root: &Path, imgui_src: &Path, cimg
 
 fn main() {
     let cfg = BuildConfig::new();
+    let sources = maintained_source_paths(&cfg);
     println!("cargo:rerun-if-changed=build.rs");
     // Pregenerated bindings are copied into OUT_DIR when native toolchains are disabled.
     println!("cargo:rerun-if-changed=src/bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=src/wasm_bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=src/surface_test_probe.cpp");
     println!("cargo:rerun-if-changed=third-party/cimplot3d/cimplot3d.h");
-    println!("cargo:rerun-if-changed=third-party/cimplot3d/cimplot3d.cpp");
     println!("cargo:rerun-if-changed=third-party/cimplot3d/implot3d/implot3d.h");
-    println!("cargo:rerun-if-changed=third-party/cimplot3d/implot3d/implot3d.cpp");
-    println!("cargo:rerun-if-changed=third-party/cimplot3d/implot3d/implot3d_items.cpp");
-    println!("cargo:rerun-if-changed=third-party/cimplot3d/implot3d/implot3d_meshes.cpp");
-    println!("cargo:rerun-if-changed=third-party/cimplot3d/implot3d/implot3d_demo.cpp");
+    for path in sources.native_candidate_paths() {
+        println!("cargo:rerun-if-changed={}", path.display());
+    }
     println!("cargo:rerun-if-changed=../../dear-imgui-sys");
     println!("cargo:rerun-if-env-changed=IMPLOT3D_SYS_LIB_DIR");
     println!("cargo:rerun-if-env-changed=IMPLOT3D_SYS_SKIP_CC");
@@ -510,7 +525,9 @@ fn main() {
     }
 
     let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
-    let cimplot3d_root = cfg.manifest_dir.join("third-party/cimplot3d");
+    let cimplot3d_root = sources
+        .source_root()
+        .unwrap_or_else(|error| panic!("dear-implot3d-sys: {error}"));
 
     if cfg.docs_rs {
         docsrs_build(&cfg, &cimplot3d_root, &imgui_src, &cimgui_root);
@@ -586,7 +603,10 @@ fn main() {
     };
     if cfg.target_arch != "wasm32" {
         if !cfg.docs_rs && !linked_prebuilt && env::var("IMPLOT3D_SYS_SKIP_CC").is_err() {
-            build_with_cc(&cfg, &cimplot3d_root, &imgui_src, &cimgui_root);
+            sources
+                .validate_native()
+                .unwrap_or_else(|error| panic!("dear-implot3d-sys: {error}"));
+            build_with_cc(&cfg, &sources, &cimplot3d_root, &imgui_src, &cimgui_root);
         }
     } else {
         println!(

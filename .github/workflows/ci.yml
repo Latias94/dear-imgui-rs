@@ -614,27 +614,10 @@ jobs:
       - name: Build pinned glslangValidator
         if: matrix.platform == 'Winit' && matrix.rendering == 'classic'
         timeout-minutes: 15
-        shell: bash
-        run: |
-          set -euo pipefail
-          readonly glslang_commit=1062752a891c95b2bfeed9e356562d88f9df84ac
-          readonly glslang_source="${RUNNER_TEMP}/glslang-${glslang_commit}"
-          readonly glslang_build="${RUNNER_TEMP}/glslang-build-${glslang_commit}"
-          git init "${glslang_source}"
-          git -C "${glslang_source}" remote add origin https://github.com/KhronosGroup/glslang.git
-          git -C "${glslang_source}" fetch --depth 1 origin "${glslang_commit}"
-          git -C "${glslang_source}" checkout --detach FETCH_HEAD
-          cmake -S "${glslang_source}" -B "${glslang_build}" -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_EXTERNAL=OFF \
-            -DENABLE_OPT=OFF \
-            -DENABLE_SPVREMAPPER=OFF \
-            -DGLSLANG_ENABLE_INSTALL=OFF \
-            -DGLSLANG_TESTS=OFF
-          cmake --build "${glslang_build}" --target glslang-standalone --parallel 2
-          readonly compiler="${glslang_build}/StandAlone/glslangValidator"
-          test -x "${compiler}"
-          echo "GLSLANG_VALIDATOR=${compiler}" >> "${GITHUB_ENV}"
+        run: >-
+          python3 -B tools/ci/build_glslang.py
+          --work-root "$RUNNER_TEMP"
+          --github-env "$GITHUB_ENV"
 
       - name: Verify checked-in Ash shaders
         if: matrix.platform == 'Winit' && matrix.rendering == 'classic'
@@ -1378,6 +1361,13 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Set up pinned Emscripten provider toolchain
+        uses: emscripten-core/setup-emsdk@v16
+        with:
+          version: 5.0.1
+          emsdk-version: 5.0.5
+          actions-cache-folder: emsdk-cache
+
       - name: Refresh Linux package metadata
         run: sudo apt-get update
 
@@ -1440,6 +1430,13 @@ jobs:
       - name: Add wasm32 target
         run: rustup target add wasm32-unknown-unknown
 
+      - name: Set up pinned Emscripten provider toolchain
+        uses: emscripten-core/setup-emsdk@v16
+        with:
+          version: 5.0.1
+          emsdk-version: 5.0.5
+          actions-cache-folder: emsdk-cache
+
       - name: Reject WASI and Emscripten in the pure target resolver
         run: cargo nextest run -p dear-imgui-build-support --features binding-spec wasm_target_requires_the_explicit_provider_feature
 
@@ -1499,3 +1496,6 @@ jobs:
 
       - name: Build web demo crate for wasm32-unknown-unknown (core + extensions)
         run: cargo build -p dear-imgui-web-demo --target wasm32-unknown-unknown --no-default-features --features "web-backends,implot,implot3d,imnodes,imguizmo,imguizmo-quat"
+
+      - name: Build and structurally verify the Emscripten provider
+        run: python3 -B tools/ci/verify_wasm_provider.py

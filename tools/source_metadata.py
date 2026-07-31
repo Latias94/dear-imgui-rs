@@ -15,13 +15,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
+CI_DIR = Path(__file__).resolve().parent / "ci"
+if str(CI_DIR) not in sys.path:
+    sys.path.insert(0, str(CI_DIR))
+
+from _source_inventory import load_inventory  # noqa: E402
+
 
 SOURCE_METADATA_SECTION = "package.metadata.dear-imgui-sources"
 SOURCE_METADATA_KEYS = frozenset({"cimgui-revision", "imgui-revision"})
 BINDING_SOURCE_METADATA_SECTION = "package.metadata.dear-imgui-binding"
 BINDING_SOURCE_METADATA_KEY = "source-revision"
 GIT_REVISION_RE = re.compile(r"^[0-9a-fA-F]{40}$")
-CORE_MANIFEST_PATH = Path("dear-imgui-sys/Cargo.toml")
 
 
 @dataclass(frozen=True)
@@ -43,69 +48,51 @@ class BindingSourceSpec:
     relative_path: Path
 
 
+SOURCE_INVENTORY = load_inventory(Path(__file__).resolve().parents[1])
+CORE_SOURCE = SOURCE_INVENTORY.source_by_id("core")
+CORE_ROOT = Path(CORE_SOURCE.crate_root.as_posix())
+CORE_VENDORED_ROOT = CORE_ROOT / Path(CORE_SOURCE.source_root.as_posix())
+CORE_MANIFEST_PATH = CORE_ROOT / "Cargo.toml"
+CORE_IMGUI_SUBMODULE = next(
+    submodule
+    for submodule in SOURCE_INVENTORY.nested_submodules
+    if Path(submodule.parent.as_posix()) == CORE_VENDORED_ROOT
+    and submodule.path.as_posix() == "imgui"
+)
+
 CORE_SOURCE_SPECS = (
     SourceSpec(
         label="cimgui",
-        relative_path=Path("dear-imgui-sys/third-party/cimgui"),
+        relative_path=CORE_VENDORED_ROOT,
         metadata_key="cimgui-revision",
     ),
     SourceSpec(
         label="Dear ImGui",
-        relative_path=Path("dear-imgui-sys/third-party/cimgui/imgui"),
+        relative_path=CORE_VENDORED_ROOT / Path(CORE_IMGUI_SUBMODULE.path.as_posix()),
         metadata_key="imgui-revision",
     ),
 )
 
-
-BINDING_SOURCE_SPECS = (
+BINDING_SOURCE_LABELS = {
+    "test-engine": "Dear ImGui Test Engine",
+    "implot": "cimplot",
+    "implot3d": "cimplot3d",
+    "imnodes": "cimnodes",
+    "node-editor": "cimnodes_editor",
+    "imguizmo": "cimguizmo",
+    "imguizmo-quat": "cimguizmo_quat",
+}
+BINDING_SOURCE_SPECS = tuple(
     BindingSourceSpec(
-        crate_name="dear-imgui-test-engine-sys",
-        label="Dear ImGui Test Engine",
-        manifest_path=Path("extensions/dear-imgui-test-engine-sys/Cargo.toml"),
-        relative_path=Path(
-            "extensions/dear-imgui-test-engine-sys/third-party/imgui_test_engine"
+        crate_name=source.crate_name,
+        label=BINDING_SOURCE_LABELS[source.id],
+        manifest_path=Path(source.crate_root.as_posix()) / "Cargo.toml",
+        relative_path=(
+            Path(source.crate_root.as_posix()) / Path(source.source_root.as_posix())
         ),
-    ),
-    BindingSourceSpec(
-        crate_name="dear-implot-sys",
-        label="cimplot",
-        manifest_path=Path("extensions/dear-implot-sys/Cargo.toml"),
-        relative_path=Path("extensions/dear-implot-sys/third-party/cimplot"),
-    ),
-    BindingSourceSpec(
-        crate_name="dear-implot3d-sys",
-        label="cimplot3d",
-        manifest_path=Path("extensions/dear-implot3d-sys/Cargo.toml"),
-        relative_path=Path("extensions/dear-implot3d-sys/third-party/cimplot3d"),
-    ),
-    BindingSourceSpec(
-        crate_name="dear-imnodes-sys",
-        label="cimnodes",
-        manifest_path=Path("extensions/dear-imnodes-sys/Cargo.toml"),
-        relative_path=Path("extensions/dear-imnodes-sys/third-party/cimnodes"),
-    ),
-    BindingSourceSpec(
-        crate_name="dear-node-editor-sys",
-        label="cimnodes_editor",
-        manifest_path=Path("extensions/dear-node-editor-sys/Cargo.toml"),
-        relative_path=Path(
-            "extensions/dear-node-editor-sys/third-party/cimnodes_editor"
-        ),
-    ),
-    BindingSourceSpec(
-        crate_name="dear-imguizmo-sys",
-        label="cimguizmo",
-        manifest_path=Path("extensions/dear-imguizmo-sys/Cargo.toml"),
-        relative_path=Path("extensions/dear-imguizmo-sys/third-party/cimguizmo"),
-    ),
-    BindingSourceSpec(
-        crate_name="dear-imguizmo-quat-sys",
-        label="cimguizmo_quat",
-        manifest_path=Path("extensions/dear-imguizmo-quat-sys/Cargo.toml"),
-        relative_path=Path(
-            "extensions/dear-imguizmo-quat-sys/third-party/cimguizmo_quat"
-        ),
-    ),
+    )
+    for source in SOURCE_INVENTORY.sources
+    if source.id != "core"
 )
 
 

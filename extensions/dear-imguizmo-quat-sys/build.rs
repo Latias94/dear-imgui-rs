@@ -94,6 +94,16 @@ fn native_binding_spec() -> &'static build_support::binding::CrateBindingSpec {
         .expect("missing dear-imguizmo-quat-sys native binding spec")
 }
 
+fn maintained_source_paths(
+    cfg: &BuildConfig,
+) -> build_support::source_inventory::MaintainedSourcePaths {
+    build_support::source_inventory::MaintainedSourcePaths::for_crate(
+        env!("CARGO_PKG_NAME"),
+        cfg.manifest_dir.clone(),
+    )
+    .unwrap_or_else(|error| panic!("dear-imguizmo-quat-sys: {error}"))
+}
+
 #[cfg(feature = "bindgen")]
 fn apply_bindgen_defines(mut builder: bindgen::Builder) -> bindgen::Builder {
     for define in native_binding_spec().binding_defines() {
@@ -401,7 +411,13 @@ fn try_link_prebuilt_all(cfg: &BuildConfig) -> bool {
     false
 }
 
-fn build_with_cc(cfg: &BuildConfig, quat_root: &Path, imgui_src: &Path, cimgui_root: &Path) {
+fn build_with_cc(
+    cfg: &BuildConfig,
+    sources: &build_support::source_inventory::MaintainedSourcePaths,
+    quat_root: &Path,
+    imgui_src: &Path,
+    cimgui_root: &Path,
+) {
     let imguizmo_quat_inc = quat_root.join("imGuIZMO.quat").join("imguizmo_quat");
 
     let mut build = cc::Build::new();
@@ -414,10 +430,22 @@ fn build_with_cc(cfg: &BuildConfig, quat_root: &Path, imgui_src: &Path, cimgui_r
     build.include(&imguizmo_quat_inc);
 
     // cimguizmo_quat wrapper
-    build.file(quat_root.join("cimguizmo_quat.cpp"));
+    build.file(
+        sources
+            .file("wrapper")
+            .unwrap_or_else(|error| panic!("dear-imguizmo-quat-sys: {error}")),
+    );
     // upstream core sources
-    build.file(imguizmo_quat_inc.join("imguizmo_quat.cpp"));
-    build.file(imguizmo_quat_inc.join("imGuIZMOquat.cpp"));
+    build.file(
+        sources
+            .file("core")
+            .unwrap_or_else(|error| panic!("dear-imguizmo-quat-sys: {error}")),
+    );
+    build.file(
+        sources
+            .file("quat")
+            .unwrap_or_else(|error| panic!("dear-imguizmo-quat-sys: {error}")),
+    );
 
     if cfg.is_msvc() && cfg.is_windows() {
         build.flag("/EHsc");
@@ -441,19 +469,16 @@ fn build_with_cc(cfg: &BuildConfig, quat_root: &Path, imgui_src: &Path, cimgui_r
 
 fn main() {
     let cfg = BuildConfig::new();
+    let sources = maintained_source_paths(&cfg);
 
     // Rerun hints
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=src/wasm_bindings_pregenerated.rs");
     println!("cargo:rerun-if-changed=third-party/cimguizmo_quat/cimguizmo_quat.h");
-    println!("cargo:rerun-if-changed=third-party/cimguizmo_quat/cimguizmo_quat.cpp");
-    println!(
-        "cargo:rerun-if-changed=third-party/cimguizmo_quat/imGuIZMO.quat/imguizmo_quat/imguizmo_quat.cpp"
-    );
-    println!(
-        "cargo:rerun-if-changed=third-party/cimguizmo_quat/imGuIZMO.quat/imguizmo_quat/imGuIZMOquat.cpp"
-    );
+    for path in sources.native_candidate_paths() {
+        println!("cargo:rerun-if-changed={}", path.display());
+    }
     println!("cargo:rerun-if-changed=../../dear-imgui-sys");
     println!("cargo:rerun-if-env-changed=IMGUIZMO_QUAT_SYS_LIB_DIR");
     println!("cargo:rerun-if-env-changed=IMGUIZMO_QUAT_SYS_SKIP_CC");
@@ -483,7 +508,9 @@ fn main() {
     }
 
     let (imgui_src, cimgui_root) = resolve_imgui_includes(&cfg);
-    let quat_root = cfg.manifest_dir.join("third-party/cimguizmo_quat");
+    let quat_root = sources
+        .source_root()
+        .unwrap_or_else(|error| panic!("dear-imguizmo-quat-sys: {error}"));
     if cfg.docs_rs {
         docsrs_build(&cfg, &quat_root, &imgui_src, &cimgui_root);
         return;
@@ -561,7 +588,10 @@ fn main() {
     };
     if cfg.target_arch != "wasm32" {
         if !cfg.docs_rs && !linked_prebuilt && env::var("IMGUIZMO_QUAT_SYS_SKIP_CC").is_err() {
-            build_with_cc(&cfg, &quat_root, &imgui_src, &cimgui_root);
+            sources
+                .validate_native()
+                .unwrap_or_else(|error| panic!("dear-imguizmo-quat-sys: {error}"));
+            build_with_cc(&cfg, &sources, &quat_root, &imgui_src, &cimgui_root);
         }
     } else {
         println!(
