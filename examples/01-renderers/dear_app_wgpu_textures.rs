@@ -210,7 +210,9 @@ impl Application for TexDemoState {
                 view_formats: &[],
             });
             let view = texture.create_view(&wgpu_rs::TextureViewDescriptor::default());
-            let tex_id = gpu.register_external_texture(&texture, &view);
+            let tex_id = gpu.register_external_texture(&view).map_err(|error| {
+                RunError::application("external texture registration", error.to_string())
+            })?;
             state.ext_tex = Some(texture);
             state.ext_view = Some(view);
             state.ext_tex_id = Some(tex_id);

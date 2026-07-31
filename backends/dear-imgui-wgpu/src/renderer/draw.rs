@@ -103,30 +103,8 @@ fn project_scissor_rect(
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-enum SamplerBinding {
-    Linear,
-    Nearest,
-    Custom(u64),
-    CallbackOwned,
-}
-
-impl SamplerBinding {
-    fn select_for_elements(&mut self, desired: Self) -> bool {
-        if *self == Self::CallbackOwned && !matches!(desired, Self::Custom(_)) {
-            return false;
-        }
-        if *self == desired {
-            return false;
-        }
-        *self = desired;
-        true
-    }
-}
-
 pub(super) enum PreparedDrawCommand<'draw> {
     Elements {
-        common_bind_group: Option<wgpu::BindGroup>,
         image_bind_group: wgpu::BindGroup,
         scissor: [u32; 4],
         indices: Range<u32>,
@@ -224,7 +202,7 @@ impl WgpuRenderer {
     }
 
     pub(super) fn prepare_draw_data<'draw>(
-        texture_manager: &mut WgpuTextureManager,
+        texture_manager: &WgpuTextureManager,
         default_texture: &Option<wgpu::TextureView>,
         draw_data: &'draw DrawData,
         extent: FramebufferExtent,
@@ -232,8 +210,7 @@ impl WgpuRenderer {
     ) -> RendererResult<PreparedDrawData<'draw>> {
         Self::preflight_draw_callback_support(draw_data)?;
 
-        let device = backend_data.device.clone();
-        let (common_layout, uniform_buffer, linear_common_bind_group, nearest_common_bind_group) = {
+        let (linear_common_bind_group, nearest_common_bind_group) = {
             let uniform = backend_data
                 .render_resources
                 .uniform_buffer()
@@ -248,17 +225,10 @@ impl WgpuRenderer {
                         "Nearest sampler bind group not initialized".to_owned(),
                     )
                 })?;
-            (
-                uniform.bind_group_layout().clone(),
-                uniform.buffer().clone(),
-                uniform.bind_group().clone(),
-                nearest.clone(),
-            )
+            (uniform.bind_group().clone(), nearest.clone())
         };
 
         let mut commands = Vec::new();
-        let mut standard_sampler = SamplerBinding::Linear;
-        let mut active_sampler = SamplerBinding::Linear;
         let mut global_idx_offset = 0u32;
         let mut global_vtx_offset = 0i32;
         let clip_off = draw_data.display_pos();
@@ -347,56 +317,22 @@ impl WgpuRenderer {
                         };
 
                         let texture_id = cmd_params.texture_id;
-                        let standard_bind_group = match standard_sampler {
-                            SamplerBinding::Linear => &linear_common_bind_group,
-                            SamplerBinding::Nearest => &nearest_common_bind_group,
-                            SamplerBinding::Custom(_) | SamplerBinding::CallbackOwned => {
-                                unreachable!("the standard sampler is always linear or nearest")
-                            }
-                        };
-                        let (desired_sampler, desired_bind_group) = if let Some(sampler_id) =
-                            texture_manager.custom_sampler_id_for_texture(texture_id)
-                        {
-                            let bind_group = texture_manager
-                                .get_or_create_common_bind_group_for_sampler(
-                                    &device,
-                                    &common_layout,
-                                    &uniform_buffer,
-                                    sampler_id,
-                                )
-                                .ok_or_else(|| {
+                        let (cache_id, texture_view) = if texture_id.is_null() {
+                            (
+                                TextureId::null(),
+                                default_texture.as_ref().ok_or_else(|| {
                                     RendererError::InvalidRenderState(
-                                        "external texture references a missing custom sampler"
-                                            .to_owned(),
+                                        "default WGPU texture is not available".to_owned(),
                                     )
-                                })?;
-                            (SamplerBinding::Custom(sampler_id), bind_group)
-                        } else {
-                            (standard_sampler, standard_bind_group.clone())
-                        };
-                        let common_bind_group = active_sampler
-                            .select_for_elements(desired_sampler)
-                            .then_some(desired_bind_group);
-
-                        let texture_view = if texture_id.is_null() {
-                            default_texture.as_ref()
-                        } else {
-                            texture_manager
-                                .get_texture(texture_id)
-                                .map(|texture| texture.view())
-                                .or(default_texture.as_ref())
-                        }
-                        .ok_or_else(|| {
-                            RendererError::InvalidRenderState(
-                                "texture not found and no default texture is available".to_owned(),
+                                })?,
                             )
-                        })?;
-                        let cache_id = if texture_id.is_null()
-                            || texture_manager.get_texture(texture_id).is_none()
-                        {
-                            TextureId::null()
                         } else {
-                            texture_id
+                            (
+                                texture_id,
+                                texture_manager
+                                    .texture_view(texture_id)
+                                    .ok_or(RendererError::InvalidTextureId(texture_id))?,
+                            )
                         };
                         let image_bind_group = backend_data
                             .render_resources
@@ -408,7 +344,6 @@ impl WgpuRenderer {
                             .clone();
 
                         commands.push(PreparedDrawCommand::Elements {
-                            common_bind_group,
                             image_bind_group,
                             scissor,
                             indices: start..end,
@@ -417,26 +352,19 @@ impl WgpuRenderer {
                         has_elements = true;
                     }
                     dear_imgui_rs::render::DrawCmd::ResetRenderState => {
-                        standard_sampler = SamplerBinding::Linear;
-                        active_sampler = SamplerBinding::Linear;
                         commands.push(PreparedDrawCommand::ResetRenderState);
                     }
                     dear_imgui_rs::render::DrawCmd::SetSamplerLinear => {
-                        standard_sampler = SamplerBinding::Linear;
-                        active_sampler = SamplerBinding::Linear;
                         commands.push(PreparedDrawCommand::SetSampler(
                             linear_common_bind_group.clone(),
                         ));
                     }
                     dear_imgui_rs::render::DrawCmd::SetSamplerNearest => {
-                        standard_sampler = SamplerBinding::Nearest;
-                        active_sampler = SamplerBinding::Nearest;
                         commands.push(PreparedDrawCommand::SetSampler(
                             nearest_common_bind_group.clone(),
                         ));
                     }
                     dear_imgui_rs::render::DrawCmd::RawCallback(callback) => {
-                        active_sampler = SamplerBinding::CallbackOwned;
                         commands.push(PreparedDrawCommand::RawCallback(callback));
                     }
                 }
@@ -551,15 +479,11 @@ impl WgpuRenderer {
         for command in prepared.commands {
             match command {
                 PreparedDrawCommand::Elements {
-                    common_bind_group,
                     image_bind_group,
                     scissor,
                     indices,
                     base_vertex,
                 } => {
-                    if let Some(common_bind_group) = common_bind_group {
-                        render_pass.set_bind_group(0, &common_bind_group, &[]);
-                    }
                     render_pass.set_bind_group(1, &image_bind_group, &[]);
                     render_pass.set_scissor_rect(scissor[0], scissor[1], scissor[2], scissor[3]);
                     render_pass.draw_indexed(indices, base_vertex, 0..1);
@@ -590,22 +514,7 @@ impl WgpuRenderer {
 
 #[cfg(test)]
 mod tests {
-    use super::{FramebufferExtent, SamplerBinding, project_scissor_rect};
-
-    #[test]
-    fn raw_callback_sampler_state_survives_until_an_explicit_renderer_binding() {
-        let mut active = SamplerBinding::CallbackOwned;
-
-        assert!(!active.select_for_elements(SamplerBinding::Linear));
-        assert_eq!(active, SamplerBinding::CallbackOwned);
-
-        assert!(active.select_for_elements(SamplerBinding::Custom(7)));
-        assert_eq!(active, SamplerBinding::Custom(7));
-
-        assert!(active.select_for_elements(SamplerBinding::Linear));
-        assert_eq!(active, SamplerBinding::Linear);
-        assert!(!active.select_for_elements(SamplerBinding::Linear));
-    }
+    use super::{FramebufferExtent, project_scissor_rect};
 
     #[test]
     fn scissor_projection_rejects_non_finite_values_before_clamping() {

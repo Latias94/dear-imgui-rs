@@ -227,7 +227,7 @@ impl WgpuRenderer {
             RendererError::InvalidRenderState("Renderer not initialized".to_owned())
         })?;
         let prepared = Self::prepare_draw_data(
-            &mut self.texture_manager,
+            &self.texture_manager,
             &self.default_texture,
             draw_data,
             extent,

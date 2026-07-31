@@ -37,44 +37,16 @@ impl WgpuRenderer {
     /// # Ok(()) }
     /// ```
     pub fn new(init_info: WgpuInitInfo, imgui_ctx: &mut Context) -> RendererResult<Self> {
-        // Native and wasm experimental path: fully configure context, including font atlas.
-        #[cfg(any(
+        let prepare_font_atlas = cfg!(any(
             not(target_arch = "wasm32"),
-            all(target_arch = "wasm32", feature = "wasm-font-atlas-experimental")
-        ))]
-        {
-            let mut renderer = Self::empty();
-            renderer.init_with_context(init_info, imgui_ctx)?;
-            Ok(renderer)
-        }
-
-        // Default wasm path: skip font atlas manipulation for safety.
-        #[cfg(all(target_arch = "wasm32", not(feature = "wasm-font-atlas-experimental")))]
-        {
-            Self::new_without_font_atlas(init_info, imgui_ctx)
-        }
+            feature = "wasm-font-atlas-experimental"
+        ));
+        let mut renderer = Self::empty();
+        renderer.initialize_for_context(init_info, imgui_ctx, prepare_font_atlas)?;
+        Ok(renderer)
     }
 
-    /// Create an empty, unbound WGPU renderer for advanced usage
-    ///
-    /// This creates an uninitialized renderer that must be initialized later
-    /// using `init_with_context()`. Most users should use `new()` instead.
-    ///
-    /// # Example
-    /// ```rust,no_run
-    /// use dear_imgui_rs::Context;
-    /// use dear_imgui_wgpu::{WgpuRenderer, WgpuInitInfo, wgpu};
-    ///
-    /// # fn main() -> Result<(), dear_imgui_wgpu::RendererError> {
-    /// # let (device, queue) = todo!("initialize a WGPU Device/Queue");
-    /// # let surface_format = wgpu::TextureFormat::Bgra8UnormSrgb;
-    /// # let mut imgui_context = Context::create();
-    /// let mut renderer = WgpuRenderer::empty();
-    /// let init_info = WgpuInitInfo::new(device, queue, surface_format);
-    /// renderer.init_with_context(init_info, &mut imgui_context)?;
-    /// # Ok(()) }
-    /// ```
-    pub fn empty() -> Self {
+    pub(super) fn empty() -> Self {
         Self {
             context_state: None,
             backend_data: None,
@@ -91,8 +63,8 @@ impl WgpuRenderer {
 
     /// Initialize renderer-owned GPU state.
     ///
-    /// Public initialization always goes through [`Self::init_with_context`] so renderer resources
-    /// and Dear ImGui texture bindings cannot be replaced independently.
+    /// Initialization is private so renderer resources and Dear ImGui bindings cannot be replaced
+    /// independently.
     fn initialize_device(&mut self, init_info: WgpuInitInfo) -> RendererResult<()> {
         self.ensure_uninitialized()?;
 
@@ -264,31 +236,6 @@ impl WgpuRenderer {
         } else {
             Ok(())
         }
-    }
-
-    /// Initialize the renderer with ImGui context configuration (without font atlas for WASM)
-    ///
-    /// This is a variant of init_with_context that skips font atlas preparation,
-    /// useful for WASM builds where font atlas memory sharing is problematic.
-    pub fn new_without_font_atlas(
-        init_info: WgpuInitInfo,
-        imgui_ctx: &mut Context,
-    ) -> RendererResult<Self> {
-        let mut renderer = Self::empty();
-        renderer.initialize_for_context(init_info, imgui_ctx, false)?;
-        Ok(renderer)
-    }
-
-    /// Initialize the renderer and bind it to one ImGui context
-    ///
-    /// This is a convenience method that combines init() and configure_imgui_context()
-    /// to ensure proper initialization order, similar to the glow backend approach.
-    pub fn init_with_context(
-        &mut self,
-        init_info: WgpuInitInfo,
-        imgui_ctx: &mut Context,
-    ) -> RendererResult<()> {
-        self.initialize_for_context(init_info, imgui_ctx, true)
     }
 
     /// Set gamma mode
@@ -485,12 +432,6 @@ impl WgpuRenderer {
     }
 }
 
-impl Default for WgpuRenderer {
-    fn default() -> Self {
-        Self::empty()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -526,7 +467,7 @@ mod tests {
     fn context_preflight_always_rejects_the_viewport_renderer_capability() {
         let context = Context::create();
         let viewport_flag = BackendFlags::from_bits_retain(
-            dear_imgui_rs::sys::ImGuiBackendFlags_RendererHasViewports as i32,
+            dear_imgui_rs::sys::ImGuiBackendFlags_RendererHasViewports,
         );
         let raw_io = unsafe { dear_imgui_rs::sys::igGetIO_ContextPtr(context.as_raw()) };
         unsafe { (*raw_io).BackendFlags = viewport_flag.bits() };

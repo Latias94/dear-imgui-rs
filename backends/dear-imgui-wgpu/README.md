@@ -20,7 +20,45 @@ let frame = imgui.render();
 renderer.render(frame, &mut render_pass)?;
 ```
 
-Each `WgpuRenderer` is bound to the `Context` passed to `new` or `init_with_context` and owns its sole renderer consumer generation. Create one renderer per context in multi-context applications. `render()` consumes the Context-borrowed frame, processes pointer-free managed texture requests, reconciles feedback, and only then reads draw commands. `render_context()` and `render_context_with_fb_size()` are convenience methods that finalize only the bound context and return `RendererError::ContextMismatch` for another context.
+Each `WgpuRenderer` is fully initialized and bound to the `Context` passed to `new`; there is no public empty or two-phase state. Create one renderer per context in multi-context applications. After `shutdown`, create a replacement renderer instead of reinitializing the old value. `render()` consumes the Context-borrowed frame, processes pointer-free managed texture requests, reconciles feedback, and only then reads draw commands. `render_context()` and `render_context_with_fb_size()` are convenience methods that finalize only the bound context and return `RendererError::ContextMismatch` for another context.
+
+## External texture views
+
+Register an application-owned texture view. The renderer clones the view handle, but the application must not explicitly destroy the underlying GPU resource until the handle is unregistered:
+
+```rust,no_run
+# use dear_imgui_rs::Ui;
+# use dear_imgui_wgpu::{RendererResult, WgpuRenderer, wgpu};
+# fn external_texture(
+#     renderer: &mut WgpuRenderer,
+#     ui: &Ui,
+#     view: &wgpu::TextureView,
+#     replacement_view: &wgpu::TextureView,
+# ) -> RendererResult<()> {
+let texture = renderer.register_external_texture(view)?;
+
+ui.image(texture.texture_id(), [320.0, 180.0]);
+
+renderer.update_external_texture(texture, replacement_view)?;
+renderer.unregister_external_texture(texture)?;
+# Ok(())
+# }
+```
+
+Sampling is renderer state rather than texture ownership. The renderer owns the standard linear and nearest samplers; enqueue an explicit draw-list command around images that need nearest sampling:
+
+```rust,no_run
+# use dear_imgui_rs::Ui;
+# use dear_imgui_wgpu::ExternalTextureId;
+# fn sampling(ui: &Ui, texture: ExternalTextureId) {
+let draw_list = ui.get_window_draw_list();
+draw_list.set_sampler_nearest();
+ui.image(texture.texture_id(), [320.0, 180.0]);
+draw_list.set_sampler_linear();
+# }
+```
+
+See `wgpu_rtt_gameview` for a runnable linear/nearest switching example.
 
 ## Native multi-viewport
 

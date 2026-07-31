@@ -31,6 +31,8 @@ See the [compatibility guide](docs/COMPATIBILITY.md), [custom backend guide](doc
 | If you used | Migrate to |
 | --- | --- |
 | `Context::{draw_data,draw_data_mut}`, `OwnedDrawData`, `OwnedDrawList`, or cloned draw lists | Pass the one-use `RenderedFrame` directly to a renderer, or send a move-only `FrameSnapshot` created with the Context's `RendererConsumer`. |
+| `WgpuRenderer::{empty,default,init_with_context,new_without_font_atlas}` or public WGPU renderer internals | Construct a complete renderer with `WgpuRenderer::new`; after `shutdown`, create a replacement renderer. Renderer resource managers, uniforms, shaders, and frame resources are private implementation details. |
+| WGPU external texture registration with `(Texture, TextureView)`, raw `TextureId`, or a per-texture custom sampler | Register `&TextureView` and retain `ExternalTextureId`; call `texture_id()` for ImGui widgets, update/unregister through the typed handle, and use `DrawListMut::{set_sampler_linear,set_sampler_nearest}` for explicit sampling changes. |
 | `register_user_texture*`, registration tokens, or explicit unregister | Transfer `OwnedTextureData` with `Context::register_texture`, edit it through `with_texture_mut`, and retire it with `remove_texture`. |
 | `ctx.fonts()`, `FontAtlas::new`, borrowed `Font`, or frame-outside font scopes | Use `ctx.font_atlas()`, retain `FontId`, scope fonts through `Ui`, and inspect runtime glyph data through `BakedFont`. |
 | Safe constructors over arbitrary external font bytes | Use the corresponding `unsafe FontSource` or direct atlas constructor only after validating that the complete input is supported by the native loader; glyph ranges are structured `(start, end)` pairs. |

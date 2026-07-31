@@ -305,6 +305,96 @@ fn raw_callback_data_modes_preserve_borrow_or_copy_semantics() {
 }
 
 #[test]
+fn standard_sampler_commands_are_safe_and_preserve_order() {
+    unsafe extern "C" fn linear(
+        _parent_list: *const sys::ImDrawList,
+        _command: *const sys::ImDrawCmd,
+    ) {
+    }
+    unsafe extern "C" fn nearest(
+        _parent_list: *const sys::ImDrawList,
+        _command: *const sys::ImDrawCmd,
+    ) {
+    }
+
+    let mut context = crate::Context::create();
+    let binding = context.binding();
+    context.io_mut().set_display_size([128.0, 128.0]);
+    context.io_mut().set_delta_time(1.0 / 60.0);
+    let _ = context.font_atlas().build();
+    unsafe {
+        context
+            .platform_io_mut()
+            .set_draw_callback_set_sampler_linear_raw(Some(linear));
+        context
+            .platform_io_mut()
+            .set_draw_callback_set_sampler_nearest_raw(Some(nearest));
+    }
+
+    {
+        let ui = context.frame();
+        ui.window("standard sampler commands")
+            .size([96.0, 96.0], crate::Condition::Always)
+            .build(|| {
+                let draw_list = ui.get_window_draw_list();
+                draw_list.set_sampler_nearest();
+                draw_list
+                    .add_rect([8.0, 8.0], [24.0, 24.0], ImColor32::WHITE)
+                    .filled(true)
+                    .build();
+                draw_list.set_sampler_linear();
+                draw_list
+                    .add_rect([32.0, 8.0], [48.0, 24.0], ImColor32::WHITE)
+                    .filled(true)
+                    .build();
+            });
+    }
+    let frame = context.render();
+    let commands = binding.with_bound_context(|| {
+        frame
+            .draw_data()
+            .draw_lists()
+            .flat_map(|list| list.commands())
+            .filter(|command| {
+                matches!(
+                    command,
+                    crate::render::DrawCmd::SetSamplerLinear
+                        | crate::render::DrawCmd::SetSamplerNearest
+                )
+            })
+            .collect::<Vec<_>>()
+    });
+
+    assert_eq!(commands.len(), 2);
+    assert!(matches!(
+        commands[0],
+        crate::render::DrawCmd::SetSamplerNearest
+    ));
+    assert!(matches!(
+        commands[1],
+        crate::render::DrawCmd::SetSamplerLinear
+    ));
+}
+
+#[test]
+fn standard_sampler_commands_validate_backend_support_before_ffi() {
+    let mut context = crate::Context::create();
+    context.io_mut().set_display_size([128.0, 128.0]);
+    context.io_mut().set_delta_time(1.0 / 60.0);
+    let _ = context.font_atlas().build();
+
+    let ui = context.frame();
+    let draw_list = ui.get_window_draw_list();
+    let before = draw_list_counts(draw_list.draw_list);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        draw_list.set_sampler_nearest();
+    }));
+
+    assert!(result.is_err());
+    assert_eq!(draw_list_counts(draw_list.draw_list), before);
+}
+
+#[test]
 fn text_and_clip_inputs_validate_before_ffi() {
     let mut ctx = crate::Context::create();
     {

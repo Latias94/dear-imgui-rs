@@ -165,7 +165,7 @@ impl WgpuRenderer {
             // Register texture and set IDs so draw commands can bind it
             let tex_id = self
                 .texture_manager
-                .register_texture(crate::WgpuTexture::new(texture, view));
+                .register_owned_texture(crate::OwnedWgpuTexture::new(texture, view))?;
 
             // Set atlas texture id + status OK (updates TexRef and TexData)
             {

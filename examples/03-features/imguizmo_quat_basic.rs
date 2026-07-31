@@ -372,7 +372,7 @@ struct OffscreenRtt {
     #[allow(dead_code)] // Keep the depth texture alive for the depth view.
     depth: wgpu::Texture,
     depth_view: wgpu::TextureView,
-    texture_id: dear_imgui_rs::TextureId,
+    texture_id: dear_imgui_wgpu::ExternalTextureId,
 }
 
 impl OffscreenRtt {
@@ -381,7 +381,7 @@ impl OffscreenRtt {
         renderer: &mut WgpuRenderer,
         size: (u32, u32),
         format: wgpu::TextureFormat,
-    ) -> Self {
+    ) -> dear_imgui_wgpu::RendererResult<Self> {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("quat-rtt"),
             size: wgpu::Extent3d {
@@ -414,16 +414,16 @@ impl OffscreenRtt {
         });
         let depth_view = depth.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let texture_id = renderer.register_external_texture(&texture, &view);
+        let texture_id = renderer.register_external_texture(&view)?;
 
-        Self {
+        Ok(Self {
             size,
             texture,
             view,
             depth,
             depth_view,
             texture_id,
-        }
+        })
     }
 
     fn recreate(
@@ -432,9 +432,14 @@ impl OffscreenRtt {
         renderer: &mut WgpuRenderer,
         size: (u32, u32),
         format: wgpu::TextureFormat,
-    ) {
-        renderer.unregister_texture(self.texture_id);
-        *self = Self::create(device, renderer, size, format);
+    ) -> dear_imgui_wgpu::RendererResult<()> {
+        let replacement = Self::create(device, renderer, size, format)?;
+        if let Err(error) = renderer.unregister_external_texture(self.texture_id) {
+            let _ = renderer.unregister_external_texture(replacement.texture_id);
+            return Err(error);
+        }
+        *self = replacement;
+        Ok(())
     }
 }
 
@@ -666,7 +671,7 @@ impl AppWindow {
         renderer.set_gamma_mode(dear_imgui_wgpu::GammaMode::Auto);
 
         // Offscreen scene resources
-        let rtt = OffscreenRtt::create(&device, &mut renderer, (960, 540), surface_desc.format);
+        let rtt = OffscreenRtt::create(&device, &mut renderer, (960, 540), surface_desc.format)?;
         let scene = create_scene_pipeline(&device, surface_desc.format);
 
         let imgui = ImguiState {
@@ -718,12 +723,14 @@ impl AppWindow {
                 (new_size.width as f32 * 0.75) as u32,
                 (new_size.height as f32 * 0.75) as u32,
             );
-            self.rtt.recreate(
+            if let Err(error) = self.rtt.recreate(
                 &self.device,
                 &mut self.imgui.renderer,
                 tgt,
                 self.surface_desc.format,
-            );
+            ) {
+                eprintln!("failed to resize ImGuIZMO preview texture: {error}");
+            }
         }
     }
 
@@ -804,7 +811,7 @@ impl AppWindow {
                 let w = avail[0].max(100.0);
                 let h = (w / (self.rtt.size.0 as f32 / self.rtt.size.1 as f32))
                     .min(avail[1].max(100.0));
-                ui.image(self.rtt.texture_id, [w, h]);
+                ui.image(self.rtt.texture_id.texture_id(), [w, h]);
             });
 
         let view = frame

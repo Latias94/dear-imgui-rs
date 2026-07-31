@@ -1,32 +1,25 @@
 use super::*;
 
-/// WGPU texture resource
-///
-/// This corresponds to ImGui_ImplWGPU_Texture in the C++ implementation
+/// Renderer-owned WGPU texture resource.
 #[derive(Debug)]
-pub struct WgpuTexture {
-    /// WGPU texture object
-    pub texture: Texture,
-    /// Texture view for binding
-    pub texture_view: TextureView,
+pub(crate) struct OwnedWgpuTexture {
+    pub(super) texture: Texture,
+    pub(super) texture_view: TextureView,
 }
 
-impl WgpuTexture {
-    /// Create a new WGPU texture
-    pub fn new(texture: Texture, texture_view: TextureView) -> Self {
+impl OwnedWgpuTexture {
+    pub(crate) fn new(texture: Texture, texture_view: TextureView) -> Self {
         Self {
             texture,
             texture_view,
         }
     }
 
-    /// Get the texture view for binding
-    pub fn view(&self) -> &TextureView {
+    pub(crate) fn view(&self) -> &TextureView {
         &self.texture_view
     }
 
-    /// Get the texture object
-    pub fn texture(&self) -> &Texture {
+    pub(crate) fn texture(&self) -> &Texture {
         &self.texture
     }
 }
@@ -36,5 +29,5 @@ pub(super) struct ManagedWgpuTexture {
     pub(super) texture_id: TextureId,
     pub(super) width: u32,
     pub(super) height: u32,
-    pub(super) resource: WgpuTexture,
+    pub(super) resource: OwnedWgpuTexture,
 }

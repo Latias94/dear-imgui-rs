@@ -95,6 +95,14 @@ pub enum RendererError {
     #[error("Invalid texture ID: {0:?}")]
     InvalidTextureId(dear_imgui_rs::TextureId),
 
+    /// The process-wide renderer texture identifier space is exhausted.
+    #[error("WGPU texture identifier space is exhausted")]
+    TextureIdExhausted,
+
+    /// An external texture handle does not belong to this renderer or was already removed.
+    #[error("external WGPU texture is not registered: {0:?}")]
+    ExternalTextureNotFound(dear_imgui_rs::TextureId),
+
     /// A managed update arrived after the renderer lost its matching GPU resource.
     #[error(
         "managed texture {0:?} has no WGPU resource; reset renderer bindings to request a full create"

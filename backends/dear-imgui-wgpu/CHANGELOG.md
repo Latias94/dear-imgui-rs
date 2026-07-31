@@ -12,7 +12,10 @@ The format follows Keep a Changelog and Semantic Versioning.
 
 - Replace the unsafe Winit/SDL3 `enable` and free `shutdown_multi_viewport_support` functions with `WinitViewportRuntime::attach(context, &platform, renderer)` and `Sdl3ViewportRuntime::attach(context, &platform, renderer)`. Initialize and pass the exact live platform owner before renderer attachment; custom compatible platforms must use `unsafe attach_unchecked` and uphold the documented handle-lifetime contract. The typed owning runtime consumes `WgpuRenderer`, keeps callback-visible storage stable across moves, participates in ordered Context teardown, and exposes idempotent explicit shutdown.
 - WGPU renderer shutdown no longer enters the platform-window phase. Shut down the renderer runtime before its Winit or SDL3 platform owner; Context-first teardown enforces the same renderer-resources-before-platform-windows order.
-- Each `WgpuRenderer` now owns the renderer state of exactly one `Context` and stays on that context's UI thread. Render entry points consume a Context-borrowed `RenderedFrame`; the bare `render_draw_data*`, manual managed-texture update, and mutable texture-manager APIs were removed. Create one renderer per context, use `shutdown` with its matching context when releasing ownership before Context teardown or creating a replacement renderer, and reinitialize through `init_with_context`. The contextless `init` and manual `configure_imgui_context`/`prepare_font_atlas` entry points were also removed.
+- Each `WgpuRenderer` now owns the renderer state of exactly one `Context` and stays on that context's UI thread. `WgpuRenderer::new` is the only public constructor; `empty`, `Default`, `init_with_context`, and `new_without_font_atlas` were removed. After `shutdown`, construct a replacement renderer rather than reinitializing the old value.
+- External textures now register only an application-owned `TextureView` and return an opaque `ExternalTextureId`. Use `texture_id()` for ImGui drawing, `update_external_texture` to replace the view, and `unregister_external_texture` to release the registration. Stale and foreign handles return typed errors instead of aliasing another renderer's texture.
+- Per-texture custom samplers were removed. Use `DrawListMut::set_sampler_linear` and `set_sampler_nearest` to enqueue Dear ImGui's standard renderer commands. The WGPU renderer owns the two compatible samplers and preserves raw-callback state until an explicit sampler or reset command.
+- Renderer implementation types such as `WgpuTextureManager`, `WgpuTexture`, `RenderResources`, `FrameResources`, `ShaderManager`, and `Uniforms` are no longer exported.
 
 ### Changed
 
@@ -24,7 +27,8 @@ The format follows Keep a Changelog and Semantic Versioning.
 - Multi-viewport registration now claims only the five `Renderer_*` callback slots and fails instead of replacing foreign callbacks, foreign `RendererUserData`, an active renderer registration, or already-created secondary platform windows.
 - Secondary viewports now honor `ViewportFlags::NO_RENDERER_CLEAR` with a load operation instead of clearing the target.
 - Secondary viewport surfaces now use `WgpuViewportSurfaceConfig` rather than forcing `Fifo`; copy a main `SurfaceConfiguration` with `WgpuViewportSurfaceConfig::from(&main_surface_config)` or select another presentation policy explicitly.
-- Managed GPU resources are keyed by pointer-free snapshot texture identities. Create, update, and destroy results are reconciled through request-bound feedback before draw commands are read; application-owned `TextureId` values retain their external-texture path.
+- Managed GPU resources are keyed by pointer-free snapshot texture identities. Create, update, and destroy results are reconciled through request-bound feedback before draw commands are read; application-owned views use renderer-issued `ExternalTextureId` handles.
+- Device-object invalidation preserves external texture handles and views while rebuilding renderer-owned pipelines, buffers, samplers, and managed textures. After actual device loss, update each retained handle with its replacement view before drawing it again.
 - WebGL and WebGPU features for WGPU 27 through 30 now enable the required `dear-imgui-rs/wasm` import route automatically.
 
 ### Fixed

@@ -9,16 +9,6 @@ pub(super) enum ManagedRequestOutcome {
 }
 
 impl WgpuTextureManager {
-    /// Destroy a texture by its renderer-facing ID.
-    pub fn destroy_texture_by_id(&mut self, id: TextureId) {
-        self.remove_texture(id);
-    }
-
-    /// Destroy a texture by its renderer-facing ID.
-    pub fn destroy_texture(&mut self, texture_id: TextureId) {
-        self.remove_texture(texture_id);
-    }
-
     pub(crate) fn handle_texture_requests(
         &mut self,
         requests: &[TextureRequest],
@@ -83,7 +73,7 @@ impl WgpuTextureManager {
                     let resource = Self::create_managed_texture_resource(
                         device, queue, *format, *width, *height, *row_pitch, pixels,
                     )?;
-                    let texture_id = self.allocate_texture_id();
+                    let texture_id = self.allocate_managed_texture_id()?;
                     self.managed_textures.insert(
                         id,
                         ManagedWgpuTexture {
@@ -122,7 +112,6 @@ impl WgpuTextureManager {
                     .or_insert(request_epoch);
                 if let Some(entry) = self.managed_textures.remove(&id) {
                     self.managed_by_texture_id.remove(&entry.texture_id);
-                    self.clear_custom_sampler_for_texture(entry.texture_id);
                     render_resources.remove_image_bind_group(entry.texture_id);
                 }
                 // Repeated destroy requests are intentionally acknowledged even after the GPU

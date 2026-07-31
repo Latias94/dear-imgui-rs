@@ -168,13 +168,14 @@ fn managed_requests_are_idempotent_and_retired_work_cannot_resurrect() -> Render
 }
 
 #[test]
-fn managed_destroy_does_not_remove_legacy_texture_ids() -> RendererResult<()> {
+fn managed_destroy_and_renderer_invalidation_preserve_external_texture_handles()
+-> RendererResult<()> {
     let Some((device, queue)) = request_test_device() else {
-        eprintln!("skipping WGPU legacy texture test because no headless adapter is available");
+        eprintln!("skipping WGPU external texture test because no headless adapter is available");
         return Ok(());
     };
-    let legacy_texture = device.create_texture(&TextureDescriptor {
-        label: Some("legacy texture test"),
+    let external_texture = device.create_texture(&TextureDescriptor {
+        label: Some("external texture test"),
         size: Extent3d {
             width: 1,
             height: 1,
@@ -187,12 +188,12 @@ fn managed_destroy_does_not_remove_legacy_texture_ids() -> RendererResult<()> {
         usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
         view_formats: &[],
     });
-    let legacy_view = legacy_texture.create_view(&TextureViewDescriptor::default());
+    let external_view = external_texture.create_view(&TextureViewDescriptor::default());
 
     let mut context = Context::create();
     let managed = managed_texture_id(&mut context);
     let mut manager = WgpuTextureManager::new();
-    let legacy = manager.register_texture(WgpuTexture::new(legacy_texture, legacy_view));
+    let external = manager.register_external_view(&external_view)?;
     let mut render_resources = RenderResources::new();
     manager.apply_managed_request(
         managed,
@@ -209,8 +210,57 @@ fn managed_destroy_does_not_remove_legacy_texture_ids() -> RendererResult<()> {
         &mut render_resources,
     )?;
 
-    assert!(manager.contains_texture(legacy));
-    assert!(manager.get_texture(legacy).is_some());
+    assert!(manager.contains_texture(external.texture_id()));
+    assert!(manager.texture_view(external.texture_id()).is_some());
     assert_eq!(manager.texture_count(), 1);
+
+    manager.clear_renderer_owned_textures();
+    assert!(manager.contains_texture(external.texture_id()));
+    assert_eq!(manager.texture_count(), 1);
+
+    manager.clear_external_views();
+    assert!(!manager.contains_texture(external.texture_id()));
+    assert_eq!(manager.texture_count(), 0);
+    Ok(())
+}
+
+#[test]
+fn external_texture_handles_are_unique_and_renderer_scoped() -> RendererResult<()> {
+    let Some((device, _queue)) = request_test_device() else {
+        eprintln!("skipping WGPU external texture test because no headless adapter is available");
+        return Ok(());
+    };
+    let texture = device.create_texture(&TextureDescriptor {
+        label: Some("external handle scope test"),
+        size: Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let first_view = texture.create_view(&TextureViewDescriptor::default());
+    let second_view = texture.create_view(&TextureViewDescriptor::default());
+    let mut first = WgpuTextureManager::new();
+    let mut second = WgpuTextureManager::new();
+
+    let first_handle = first.register_external_view(&first_view)?;
+    let second_handle = second.register_external_view(&second_view)?;
+
+    assert_ne!(first_handle, second_handle);
+    assert!(matches!(
+        second.update_external_view(first_handle, &second_view),
+        Err(RendererError::ExternalTextureNotFound(id)) if id == first_handle.texture_id()
+    ));
+    first.remove_external_view(first_handle)?;
+    assert!(matches!(
+        first.remove_external_view(first_handle),
+        Err(RendererError::ExternalTextureNotFound(id)) if id == first_handle.texture_id()
+    ));
     Ok(())
 }

@@ -30,12 +30,23 @@ impl GpuGeneration {
             None => None,
         }
     }
+
+    fn ensure_current(self, current: Self) -> Result<(), ExternalTextureError> {
+        if self == current {
+            Ok(())
+        } else {
+            Err(ExternalTextureError::StaleGeneration {
+                handle_generation: self.get(),
+                current_generation: current.get(),
+            })
+        }
+    }
 }
 
 /// Opaque external texture identity bound to one GPU generation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ExternalTextureHandle {
-    id: TextureId,
+    id: dear_imgui_wgpu::ExternalTextureId,
     generation: GpuGeneration,
 }
 
@@ -48,19 +59,14 @@ impl ExternalTextureHandle {
     fn resolve_for_generation(
         self,
         current: GpuGeneration,
-    ) -> Result<TextureId, ExternalTextureError> {
-        if self.generation == current {
-            Ok(self.id)
-        } else {
-            Err(ExternalTextureError::StaleGeneration {
-                handle_generation: self.generation.get(),
-                current_generation: current.get(),
-            })
-        }
+    ) -> Result<dear_imgui_wgpu::ExternalTextureId, ExternalTextureError> {
+        self.generation.ensure_current(current)?;
+        Ok(self.id)
     }
 }
 
-#[derive(Debug, Error, PartialEq, Eq)]
+#[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ExternalTextureError {
     #[error(
         "external texture belongs to GPU generation {handle_generation}, current generation is {current_generation}"
@@ -69,6 +75,8 @@ pub enum ExternalTextureError {
         handle_generation: u64,
         current_generation: u64,
     },
+    #[error(transparent)]
+    Renderer(#[from] dear_imgui_wgpu::RendererError),
 }
 
 #[derive(Debug, Error)]
@@ -365,42 +373,40 @@ impl GpuApi<'_> {
 
     pub fn register_external_texture(
         &mut self,
-        texture: &wgpu::Texture,
         view: &wgpu::TextureView,
-    ) -> ExternalTextureHandle {
-        ExternalTextureHandle {
-            id: self.renderer.register_external_texture(texture, view),
+    ) -> Result<ExternalTextureHandle, ExternalTextureError> {
+        Ok(ExternalTextureHandle {
+            id: self.renderer.register_external_texture(view)?,
             generation: self.generation,
-        }
+        })
     }
 
     pub fn resolve_external_texture(
         &self,
         handle: ExternalTextureHandle,
     ) -> Result<TextureId, ExternalTextureError> {
-        handle.resolve_for_generation(self.generation)
+        handle
+            .resolve_for_generation(self.generation)
+            .map(dear_imgui_wgpu::ExternalTextureId::texture_id)
     }
 
-    pub fn update_external_texture_view(
+    pub fn update_external_texture(
         &mut self,
         handle: ExternalTextureHandle,
         view: &wgpu::TextureView,
-    ) -> Result<bool, ExternalTextureError> {
-        self.assert_generation(handle)?;
-        Ok(self.renderer.update_external_texture_view(handle.id, view))
+    ) -> Result<(), ExternalTextureError> {
+        let texture = handle.resolve_for_generation(self.generation)?;
+        self.renderer.update_external_texture(texture, view)?;
+        Ok(())
     }
 
     pub fn unregister_external_texture(
         &mut self,
         handle: ExternalTextureHandle,
     ) -> Result<(), ExternalTextureError> {
-        self.assert_generation(handle)?;
-        self.renderer.unregister_texture(handle.id);
+        let texture = handle.resolve_for_generation(self.generation)?;
+        self.renderer.unregister_external_texture(texture)?;
         Ok(())
-    }
-
-    fn assert_generation(&self, handle: ExternalTextureHandle) -> Result<(), ExternalTextureError> {
-        handle.resolve_for_generation(self.generation).map(|_| ())
     }
 }
 
@@ -459,19 +465,7 @@ impl<'a> FrameContext<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ExternalTextureError, ExternalTextureHandle, GpuGeneration};
-    use dear_imgui_rs::TextureId;
-
-    #[test]
-    fn external_texture_handle_carries_a_non_convertible_generation() {
-        let handle = ExternalTextureHandle {
-            id: TextureId::new(42),
-            generation: GpuGeneration(7),
-        };
-
-        assert_eq!(handle.generation(), GpuGeneration(7));
-        assert_eq!(handle.id.id(), 42);
-    }
+    use super::{ExternalTextureError, GpuGeneration};
 
     #[test]
     fn stale_generation_error_names_both_epochs() {
@@ -487,18 +481,14 @@ mod tests {
     }
 
     #[test]
-    fn stale_external_texture_handle_cannot_resolve_after_recovery() {
-        let handle = ExternalTextureHandle {
-            id: TextureId::new(42),
-            generation: GpuGeneration(2),
-        };
-
-        assert_eq!(
-            handle.resolve_for_generation(GpuGeneration(3)),
+    fn stale_gpu_generation_is_rejected_after_recovery() {
+        assert!(matches!(
+            GpuGeneration(2).ensure_current(GpuGeneration(3)),
             Err(ExternalTextureError::StaleGeneration {
                 handle_generation: 2,
                 current_generation: 3,
             })
-        );
+        ));
+        assert!(GpuGeneration(3).ensure_current(GpuGeneration(3)).is_ok());
     }
 }

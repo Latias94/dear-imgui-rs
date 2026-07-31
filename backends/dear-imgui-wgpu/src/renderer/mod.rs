@@ -14,7 +14,6 @@ mod core;
 mod init;
 mod lifecycle;
 mod render;
-mod texture_api;
 
 mod draw;
 mod external_textures;

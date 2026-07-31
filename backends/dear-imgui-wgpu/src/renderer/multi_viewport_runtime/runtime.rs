@@ -6,7 +6,7 @@ use dear_imgui_rs::render::{ReconciledFrame, RenderedFrame};
 use dear_imgui_rs::{
     Context, ContextAttachment, ContextAttachmentError, ContextAttachmentLease,
     ContextAttachmentRole, ContextAttachmentTeardownError, ContextBinding, ContextBindingError,
-    ContextDestroyed, ContextId, ContextLifecycle, ContextTeardown, TextureId,
+    ContextDestroyed, ContextId, ContextLifecycle, ContextTeardown,
 };
 use thiserror::Error;
 
@@ -20,7 +20,7 @@ use super::registry::{
     renderer_globals, unregister_runtime,
 };
 use super::trace::{FrameTraceState, WgpuViewportFrameTraceReport};
-use crate::{GammaMode, RendererError, WgpuRenderer};
+use crate::{ExternalTextureId, GammaMode, RendererError, WgpuRenderer};
 
 struct WgpuRendererAttachmentMarker;
 
@@ -1123,47 +1123,33 @@ impl OwningViewportRuntime {
 
     pub(crate) fn register_external_texture(
         &self,
-        texture: &wgpu::Texture,
         view: &wgpu::TextureView,
-    ) -> Result<TextureId, WgpuViewportError> {
-        self.control
-            .with_renderer_mut(|renderer| Ok(renderer.register_external_texture(texture, view)))
-    }
-
-    pub(crate) fn unregister_texture(&self, texture: TextureId) -> Result<(), WgpuViewportError> {
+    ) -> Result<ExternalTextureId, WgpuViewportError> {
         self.control.with_renderer_mut(|renderer| {
-            renderer.unregister_texture(texture);
-            Ok(())
+            renderer.register_external_texture(view).map_err(Into::into)
         })
     }
 
-    pub(crate) fn register_external_texture_with_sampler(
+    pub(crate) fn update_external_texture(
         &self,
-        texture: &wgpu::Texture,
+        texture: ExternalTextureId,
         view: &wgpu::TextureView,
-        sampler: &wgpu::Sampler,
-    ) -> Result<TextureId, WgpuViewportError> {
+    ) -> Result<(), WgpuViewportError> {
         self.control.with_renderer_mut(|renderer| {
-            Ok(renderer.register_external_texture_with_sampler(texture, view, sampler))
+            renderer
+                .update_external_texture(texture, view)
+                .map_err(Into::into)
         })
     }
 
-    pub(crate) fn update_external_texture_view(
+    pub(crate) fn unregister_external_texture(
         &self,
-        texture: TextureId,
-        view: &wgpu::TextureView,
-    ) -> Result<bool, WgpuViewportError> {
-        self.control
-            .with_renderer_mut(|renderer| Ok(renderer.update_external_texture_view(texture, view)))
-    }
-
-    pub(crate) fn update_external_texture_sampler(
-        &self,
-        texture: TextureId,
-        sampler: &wgpu::Sampler,
-    ) -> Result<bool, WgpuViewportError> {
+        texture: ExternalTextureId,
+    ) -> Result<(), WgpuViewportError> {
         self.control.with_renderer_mut(|renderer| {
-            Ok(renderer.update_external_texture_sampler(texture, sampler))
+            renderer
+                .unregister_external_texture(texture)
+                .map_err(Into::into)
         })
     }
 

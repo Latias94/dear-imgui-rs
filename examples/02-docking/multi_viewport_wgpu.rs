@@ -658,7 +658,9 @@ impl AppWindow {
         renderer.set_gamma_mode(GammaMode::Auto);
 
         // Register the offscreen texture as an external ImGui texture.
-        let game_tex_id = renderer.register_external_texture(&game_tex, &game_tex_view);
+        let game_tex_id = renderer
+            .register_external_texture(&game_tex_view)?
+            .texture_id();
 
         let renderer = if enable_viewports {
             match wgpu_mvp::WinitViewportRuntime::attach(

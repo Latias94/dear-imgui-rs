@@ -6,6 +6,7 @@ mod clip;
 mod geometry;
 mod image;
 mod raw;
+mod sampler;
 mod split;
 #[cfg(test)]
 mod tests;
@@ -111,6 +112,6 @@ impl<'ui> DrawListMut<'ui> {
 
     pub(super) fn ui(&self) -> &crate::Ui {
         self.ui
-            .expect("texture draw operations require a DrawListMut borrowed from Ui")
+            .expect("this draw-list operation requires a DrawListMut borrowed from Ui")
     }
 }
