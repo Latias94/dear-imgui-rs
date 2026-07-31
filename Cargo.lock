@@ -2633,6 +2633,7 @@ dependencies = [
  "raw-window-handle",
  "sdl3",
  "sdl3-main",
+ "serde_json",
  "tracing",
  "tracing-subscriber",
  "ttf-parser",

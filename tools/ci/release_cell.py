@@ -69,6 +69,7 @@ _RUNTIME_CATEGORIES = frozenset(
 _RUNTIME_CELLS = {
     "linux-test-engine-runtime": "test-engine-runtime",
     "linux-multi-viewport-smoke": "multi-viewport-smoke",
+    "linux-ash-vulkan-validation-smoke": "ash-vulkan-validation-smoke",
     "linux-sdl3-glow-multi-viewport-smoke": "sdl3-glow-multi-viewport-smoke",
 }
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")

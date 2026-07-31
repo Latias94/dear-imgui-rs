@@ -22,6 +22,7 @@ if str(CI_DIR) not in sys.path:
 from _process import CommandError, environment, github_group, run  # noqa: E402
 from _runtime_gate import (  # noqa: E402
     GateResult,
+    run_ash_vulkan_validation_smoke,
     run_multi_viewport_smoke,
     run_sdl3_glow_viewport_smoke,
     run_test_engine_runtime,
@@ -496,6 +497,19 @@ def _build_parser() -> argparse.ArgumentParser:
         evidence_dir=Path("target/ci-runtime/sdl3-glow-multi-viewport-smoke"),
         child_timeout=180.0,
     )
+
+    ash_vulkan_viewport_runtime = commands.add_parser(
+        "ash-vulkan-validation-smoke",
+        help=(
+            "Execute the Ash dynamic-rendering multi-viewport lifecycle under "
+            "Vulkan validation"
+        ),
+    )
+    _add_runtime_arguments(
+        ash_vulkan_viewport_runtime,
+        evidence_dir=Path("target/ci-runtime/ash-vulkan-validation-smoke"),
+        child_timeout=180.0,
+    )
     return parser
 
 
@@ -576,6 +590,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         elif args.contract == "sdl3-glow-multi-viewport-smoke":
             result = run_sdl3_glow_viewport_smoke(
+                workspace_root=WORKSPACE_ROOT,
+                evidence_dir=args.evidence_dir,
+                child_timeout=args.child_timeout,
+                build_timeout=args.build_timeout,
+                attempt=args.attempt,
+            )
+            exit_code = _runtime_exit_code(
+                result,
+                defer_infrastructure_retry=args.defer_infrastructure_retry,
+            )
+        elif args.contract == "ash-vulkan-validation-smoke":
+            result = run_ash_vulkan_validation_smoke(
                 workspace_root=WORKSPACE_ROOT,
                 evidence_dir=args.evidence_dir,
                 child_timeout=args.child_timeout,

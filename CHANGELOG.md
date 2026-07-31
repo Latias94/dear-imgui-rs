@@ -61,6 +61,7 @@ See the [compatibility guide](docs/COMPATIBILITY.md), [custom backend guide](doc
 | Public `RunReport` fields | Use `outcome()`, `frames()`, `mode()`, and `summary()` accessors. `RunMode` distinguishes graphical, graphical-with-capture, and headless runs without invalid mode combinations. |
 | `TestEngine::set_capture_enabled(bool)` | Enable the `capture` feature and select `CaptureOutput::Save` or `CaptureOutput::Discard`; builds without capture support report it explicitly. |
 | Glow capability Cargo features, mutable renderer GPU handles, or permissive GL 2/ES 2/WebGL 1 setup | Remove the old Glow capability features, use OpenGL 3.0+/ES 3.0+/WebGL 2, and query live support with `supports_sampler_objects()` / `supports_framebuffer_srgb_control()`. Standard linear/nearest callbacks now preserve application texture filters; `set_framebuffer_srgb_enabled(true)` returns `RenderResult<()>` and is unsupported on ES/WebGL. |
+| Safe Ash construction/recording, positional renderer constructor arguments, raw descriptor sets, combined image/sampler registration, application sampler mutation, or `Options::texture_format` | Build an `AshRendererConfig` with `with_render_pass` or `with_dynamic_rendering`, then establish its raw Vulkan lineage and recording invariants at unsafe renderer construction and `cmd_draw` calls. Register an application-owned image view and layout with unsafe `register_external_texture`, then select linear or nearest sampling with the standard Context draw callbacks. Managed textures are fixed RGBA8; use an external image view for other compatible formats. |
 
 For the common Bevy path, the setup becomes:
 
@@ -84,6 +85,7 @@ app.add_systems(ImguiPrimaryContextPass, draw_ui);
 - Reorganized examples by learning path and added copy-runnable examples for `dear-app`, fonts, managed textures, multi-viewport backends, and render-thread snapshots.
 - Replaced repository-maintained release and submodule shell helpers with cross-platform Python tooling; safe extension crates now forward their complete source, prebuilt, and supported WASM routes.
 - Updated WGPU integrations to WGPU 30 while retaining compile coverage for supported older WGPU backend versions.
+- Ash now uses separate sampled-image and renderer-owned sampler descriptor sets, executes standard and raw callbacks in command order, validates requested secondary-swapchain usage, and uses per-image presentation synchronization with transactional acquire recovery.
 
 ### Fixed
 

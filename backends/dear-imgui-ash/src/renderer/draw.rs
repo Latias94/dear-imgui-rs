@@ -1,6 +1,38 @@
 use super::*;
 
 impl AshRenderer {
+    /// Reconcile managed textures before recording any viewport from this frame.
+    ///
+    /// Multi-viewport integrations must call this before renderer callbacks can draw secondary
+    /// viewports. The method is idempotent for an already reconciled frame; [`Self::cmd_draw`]
+    /// invokes it automatically for single-viewport integrations.
+    pub fn prepare_frame(
+        &mut self,
+        frame: &mut RenderedFrame<'_>,
+    ) -> RendererResult<Option<TextureRetirementBatch>> {
+        self.ensure_frame_matches(frame)?;
+        let binding = self.context_state.binding();
+        binding
+            .try_with_bound_context(|| self.prepare_frame_bound(frame))
+            .map_err(|error| RendererError::InvalidRenderState(error.to_string()))?
+    }
+
+    fn prepare_frame_bound(
+        &mut self,
+        frame: &mut RenderedFrame<'_>,
+    ) -> RendererResult<Option<TextureRetirementBatch>> {
+        self.reap_completed_uploads()?;
+        if !frame.is_texture_feedback_reconciled() {
+            let request_epoch = frame.epoch().map_or(0, |epoch| epoch.sequence());
+            let feedback =
+                self.process_texture_requests(frame.texture_requests(), request_epoch)?;
+            let progress = frame.reconcile_texture_feedback(feedback)?;
+            self.textures
+                .prune_destroyed_managed_textures(progress.watermark());
+        }
+        self.pending_texture_retirement()
+    }
+
     /// Reconcile managed textures and record one Context-borrowed frame.
     ///
     /// The returned batch represents every pending managed-texture retirement. Recording this
@@ -8,21 +40,41 @@ impl AshRenderer {
     /// every queue that can still use its textures has signaled. With multi-viewport enabled, that
     /// includes secondary viewport work recorded after this method returns. See
     /// [`Self::complete_texture_retirements_with_fences`].
-    pub fn cmd_draw(
+    ///
+    /// # Safety
+    ///
+    /// `command_buffer` must be a live, recording primary command buffer from this renderer's
+    /// device, externally synchronized, and inside a compatible render pass or dynamic-rendering
+    /// scope. It must not be reset or submitted concurrently. The caller must ensure that no
+    /// recorded command buffer is submitted after renderer resources it references are updated,
+    /// unregistered, retired, or destroyed. Submission must use the renderer's configured queue,
+    /// or provide synchronization equivalent to that queue's upload ordering. Before each call,
+    /// the GPU must have completed every earlier draw which can reference the internal mesh slot
+    /// selected by this call; normally the application waits the corresponding in-flight fence
+    /// before reusing a frame slot.
+    pub unsafe fn cmd_draw(
+        &mut self,
+        command_buffer: vk::CommandBuffer,
+        frame: RenderedFrame<'_>,
+    ) -> RendererResult<Option<TextureRetirementBatch>> {
+        self.ensure_frame_matches(&frame)?;
+        let binding = self.context_state.binding();
+        binding
+            .try_with_bound_context(|| self.cmd_draw_bound(command_buffer, frame))
+            .map_err(|error| RendererError::InvalidRenderState(error.to_string()))?
+    }
+
+    fn cmd_draw_bound(
         &mut self,
         command_buffer: vk::CommandBuffer,
         mut frame: RenderedFrame<'_>,
     ) -> RendererResult<Option<TextureRetirementBatch>> {
-        self.ensure_frame_matches(&frame)?;
-        self.reap_completed_uploads()?;
-        let request_epoch = frame.epoch().map_or(0, |epoch| epoch.sequence());
-        let feedback = self.process_texture_requests(frame.texture_requests(), request_epoch)?;
-        let progress = frame.reconcile_texture_feedback(feedback)?;
-        self.textures
-            .prune_destroyed_managed_textures(progress.watermark());
-        let pending_retirement = self.pending_texture_retirement()?;
+        let platform_io = platform_io_for_current_context()?;
+        unsafe { RendererRenderStateGuard::<AshRenderStateStorage>::preflight(platform_io) }
+            .map_err(map_renderer_render_state_error)?;
+        let pending_retirement = self.prepare_frame_bound(&mut frame)?;
         let draw_data = frame.draw_data();
-        if !draw_data.valid() || draw_data.total_vtx_count() == 0 {
+        if !draw_data.valid() {
             return Ok(pending_retirement);
         }
 
@@ -31,16 +83,23 @@ impl AshRenderer {
             return Err(RendererError::FrameResourcesUnavailable);
         };
         record_draw_commands(
-            &self.device,
-            &mut self.allocator,
-            &self.textures,
-            self.default_texture_id,
-            self.pipeline_layout,
-            command_buffer,
-            draw_data,
-            self.pipeline,
-            gamma,
-            mesh,
+            DrawCommandContext {
+                device: &self.device,
+                allocator: &mut self.allocator,
+                textures: &self.textures,
+                default_texture_id: self.default_texture_id,
+                pipeline_layout: self.resources.pipeline_layout,
+                linear_sampler_set: self.resources.linear_sampler_set,
+                nearest_sampler_set: self.resources.nearest_sampler_set,
+            },
+            DrawCommandInput {
+                command_buffer,
+                draw_data,
+                pipeline: self.resources.pipeline,
+                gamma,
+                mesh,
+                platform_io,
+            },
         )?;
         Ok(pending_retirement)
     }
@@ -55,22 +114,34 @@ impl AshRenderer {
         mesh: &mut Mesh,
     ) -> RendererResult<()> {
         self.ensure_operational()?;
-        if !draw_data.valid() || draw_data.total_vtx_count() == 0 {
+        if !draw_data.valid() {
             return Ok(());
         }
-
-        record_draw_commands(
-            &self.device,
-            &mut self.allocator,
-            &self.textures,
-            self.default_texture_id,
-            self.pipeline_layout,
-            command_buffer,
-            draw_data,
-            pipeline,
-            gamma,
-            mesh,
-        )
+        let binding = self.context_state.binding();
+        binding
+            .try_with_bound_context(|| {
+                let platform_io = platform_io_for_current_context()?;
+                record_draw_commands(
+                    DrawCommandContext {
+                        device: &self.device,
+                        allocator: &mut self.allocator,
+                        textures: &self.textures,
+                        default_texture_id: self.default_texture_id,
+                        pipeline_layout: self.resources.pipeline_layout,
+                        linear_sampler_set: self.resources.linear_sampler_set,
+                        nearest_sampler_set: self.resources.nearest_sampler_set,
+                    },
+                    DrawCommandInput {
+                        command_buffer,
+                        draw_data,
+                        pipeline,
+                        gamma,
+                        mesh,
+                        platform_io,
+                    },
+                )
+            })
+            .map_err(|error| RendererError::InvalidRenderState(error.to_string()))?
     }
 }
 
@@ -106,12 +177,8 @@ impl Frames {
 
 #[derive(Default)]
 pub(super) struct Mesh {
-    pub(super) vertices: vk::Buffer,
-    pub(super) vertices_mem: Option<Memory>,
-    pub(super) vertex_capacity: usize,
-    pub(super) indices: vk::Buffer,
-    pub(super) indices_mem: Option<Memory>,
-    pub(super) index_capacity: usize,
+    vertices: GpuBuffer,
+    indices: GpuBuffer,
 }
 
 impl Mesh {
@@ -122,24 +189,18 @@ impl Mesh {
         draw_data: &dear_imgui_rs::render::DrawData,
     ) -> RendererResult<()> {
         let vertices = create_vertices(draw_data);
-        Self::update_gpu_buffer(
+        self.vertices.update(
             device,
             allocator,
-            &mut self.vertices,
-            &mut self.vertices_mem,
-            &mut self.vertex_capacity,
             &vertices,
             vk::BufferUsageFlags::VERTEX_BUFFER,
             "vertex buffer size overflow",
         )?;
 
         let indices = create_indices(draw_data);
-        Self::update_gpu_buffer(
+        self.indices.update(
             device,
             allocator,
-            &mut self.indices,
-            &mut self.indices_mem,
-            &mut self.index_capacity,
             &indices,
             vk::BufferUsageFlags::INDEX_BUFFER,
             "index buffer size overflow",
@@ -147,18 +208,33 @@ impl Mesh {
 
         Ok(())
     }
+    pub(super) fn destroy(self, device: &Device, allocator: &mut Allocator) -> RendererResult<()> {
+        self.vertices.destroy(device, allocator)?;
+        self.indices.destroy(device, allocator)
+    }
+}
 
-    fn update_gpu_buffer<T: Copy>(
+#[derive(Default)]
+struct GpuBuffer {
+    buffer: vk::Buffer,
+    memory: Option<Memory>,
+    capacity: usize,
+}
+
+impl GpuBuffer {
+    fn update<T: Copy>(
+        &mut self,
         device: &Device,
         allocator: &mut Allocator,
-        buffer: &mut vk::Buffer,
-        memory: &mut Option<Memory>,
-        capacity: &mut usize,
         data: &[T],
         usage: vk::BufferUsageFlags,
         overflow_message: &'static str,
     ) -> RendererResult<()> {
-        if data.len() > *capacity {
+        if data.is_empty() {
+            return Ok(());
+        }
+
+        if data.len() > self.capacity {
             let size = data
                 .len()
                 .checked_mul(std::mem::size_of::<T>())
@@ -169,9 +245,9 @@ impl Mesh {
                 return Err(err);
             }
 
-            let old_buffer = std::mem::replace(buffer, new_buffer);
-            let old_mem = memory.replace(new_mem);
-            *capacity = data.len();
+            let old_buffer = std::mem::replace(&mut self.buffer, new_buffer);
+            let old_mem = self.memory.replace(new_mem);
+            self.capacity = data.len();
 
             if old_buffer != vk::Buffer::null()
                 && let Some(old_mem) = old_mem
@@ -181,22 +257,17 @@ impl Mesh {
             return Ok(());
         }
 
-        if let Some(mem) = memory.as_mut() {
+        if let Some(mem) = self.memory.as_mut() {
             allocator.update_buffer(device, mem, data)?;
         }
         Ok(())
     }
 
-    pub(super) fn destroy(self, device: &Device, allocator: &mut Allocator) -> RendererResult<()> {
-        if self.vertices != vk::Buffer::null() {
-            if let Some(mem) = self.vertices_mem {
-                allocator.destroy_buffer(device, self.vertices, mem)?;
-            }
-        }
-        if self.indices != vk::Buffer::null() {
-            if let Some(mem) = self.indices_mem {
-                allocator.destroy_buffer(device, self.indices, mem)?;
-            }
+    fn destroy(self, device: &Device, allocator: &mut Allocator) -> RendererResult<()> {
+        if self.buffer != vk::Buffer::null()
+            && let Some(memory) = self.memory
+        {
+            allocator.destroy_buffer(device, self.buffer, memory)?;
         }
         Ok(())
     }
@@ -224,18 +295,57 @@ fn create_indices(
     indices
 }
 
-pub(super) fn record_draw_commands(
-    device: &Device,
-    allocator: &mut Allocator,
-    textures: &TextureManager,
-    default_texture_id: u64,
-    pipeline_layout: vk::PipelineLayout,
+pub(super) struct DrawCommandContext<'renderer> {
+    pub(super) device: &'renderer Device,
+    pub(super) allocator: &'renderer mut Allocator,
+    pub(super) textures: &'renderer TextureManager,
+    pub(super) default_texture_id: u64,
+    pub(super) pipeline_layout: vk::PipelineLayout,
+    pub(super) linear_sampler_set: vk::DescriptorSet,
+    pub(super) nearest_sampler_set: vk::DescriptorSet,
+}
+
+pub(super) struct DrawCommandInput<'draw> {
+    pub(super) command_buffer: vk::CommandBuffer,
+    pub(super) draw_data: &'draw dear_imgui_rs::render::DrawData,
+    pub(super) pipeline: vk::Pipeline,
+    pub(super) gamma: f32,
+    pub(super) mesh: &'draw mut Mesh,
+    pub(super) platform_io: *mut dear_imgui_rs::sys::ImGuiPlatformIO,
+}
+
+struct RenderState<'draw> {
     command_buffer: vk::CommandBuffer,
-    draw_data: &dear_imgui_rs::render::DrawData,
     pipeline: vk::Pipeline,
-    gamma: f32,
-    mesh: &mut Mesh,
+    pipeline_layout: vk::PipelineLayout,
+    linear_sampler_set: vk::DescriptorSet,
+    viewport: vk::Viewport,
+    push_constants: PushConstants,
+    mesh: &'draw Mesh,
+    has_geometry: bool,
+}
+
+pub(super) fn record_draw_commands(
+    context: DrawCommandContext<'_>,
+    input: DrawCommandInput<'_>,
 ) -> RendererResult<()> {
+    let DrawCommandContext {
+        device,
+        allocator,
+        textures,
+        default_texture_id,
+        pipeline_layout,
+        linear_sampler_set,
+        nearest_sampler_set,
+    } = context;
+    let DrawCommandInput {
+        command_buffer,
+        draw_data,
+        pipeline,
+        gamma,
+        mesh,
+        platform_io,
+    } = input;
     let display_pos = draw_data.display_pos();
     let display_size = draw_data.display_size();
     let framebuffer_scale = draw_data.framebuffer_scale();
@@ -247,7 +357,19 @@ pub(super) fn record_draw_commands(
     let fb_width_u32 = fb_width as u32;
     let fb_height_u32 = fb_height as u32;
 
+    unsafe { RendererRenderStateGuard::<AshRenderStateStorage>::preflight(platform_io) }
+        .map_err(map_renderer_render_state_error)?;
+    let prepared = prepare_draw_commands(
+        textures,
+        default_texture_id,
+        linear_sampler_set,
+        nearest_sampler_set,
+        draw_data,
+        fb_width_u32,
+        fb_height_u32,
+    )?;
     mesh.update(device, allocator, draw_data)?;
+    let has_geometry = draw_data.total_vtx_count() > 0 && draw_data.total_idx_count() > 0;
 
     let viewport = vk::Viewport {
         x: 0.0,
@@ -259,133 +381,394 @@ pub(super) fn record_draw_commands(
     };
 
     let ortho = ortho_matrix_vk(display_pos, display_size);
-    let push_constants = PushConstants {
-        ortho,
-        gamma_pad: [gamma, 0.0, 0.0, 0.0],
+    let render_state = RenderState {
+        command_buffer,
+        pipeline,
+        pipeline_layout,
+        linear_sampler_set,
+        viewport,
+        push_constants: PushConstants {
+            ortho,
+            gamma_pad: [gamma, 0.0, 0.0, 0.0],
+        },
+        mesh,
+        has_geometry,
     };
 
-    unsafe {
-        device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::GRAPHICS, pipeline);
-        device.cmd_set_viewport(command_buffer, 0, &[viewport]);
-        device.cmd_push_constants(
-            command_buffer,
-            pipeline_layout,
-            vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
-            0,
-            any_as_u8_slice(&push_constants),
-        );
-        device.cmd_bind_vertex_buffers(command_buffer, 0, &[mesh.vertices], &[0]);
-        device.cmd_bind_index_buffer(command_buffer, mesh.indices, 0, vk::IndexType::UINT16);
+    setup_render_state(device, &render_state);
+
+    let mut callback_state = AshRenderStateStorage::new(
+        device,
+        command_buffer,
+        pipeline,
+        pipeline_layout,
+        linear_sampler_set,
+    );
+    let mut guard = unsafe { RendererRenderStateGuard::install(platform_io, &mut callback_state) }
+        .map_err(map_renderer_render_state_error)?;
+
+    let recording_result: RendererResult<()> = (|| {
+        for command in prepared {
+            match command {
+                PreparedDrawCommand::Elements {
+                    descriptor_set,
+                    scissor,
+                    count,
+                    first_index,
+                    vertex_offset,
+                } => unsafe {
+                    device.cmd_set_scissor(command_buffer, 0, &[scissor]);
+                    device.cmd_bind_descriptor_sets(
+                        command_buffer,
+                        vk::PipelineBindPoint::GRAPHICS,
+                        pipeline_layout,
+                        0,
+                        &[descriptor_set],
+                        &[],
+                    );
+                    device.cmd_draw_indexed(
+                        command_buffer,
+                        count,
+                        1,
+                        first_index,
+                        vertex_offset,
+                        0,
+                    );
+                    guard.state_mut().record_draw_command();
+                },
+                PreparedDrawCommand::ResetRenderState => {
+                    setup_render_state(device, &render_state);
+                    guard.state_mut().record_reset(linear_sampler_set);
+                }
+                PreparedDrawCommand::SetSampler(descriptor_set) => unsafe {
+                    device.cmd_bind_descriptor_sets(
+                        command_buffer,
+                        vk::PipelineBindPoint::GRAPHICS,
+                        pipeline_layout,
+                        1,
+                        &[descriptor_set],
+                        &[],
+                    );
+                    guard.state_mut().set_sampler_descriptor_set(descriptor_set);
+                },
+                PreparedDrawCommand::RawCallback(callback) => {
+                    unsafe { callback.invoke() };
+                    guard.validate().map_err(map_renderer_render_state_error)?;
+                }
+            }
+        }
+        Ok(())
+    })();
+
+    let guard_result = guard.finish().map_err(map_renderer_render_state_error);
+    let full_scissor = vk::Rect2D {
+        offset: vk::Offset2D { x: 0, y: 0 },
+        extent: vk::Extent2D {
+            width: fb_width_u32,
+            height: fb_height_u32,
+        },
+    };
+    unsafe { device.cmd_set_scissor(command_buffer, 0, &[full_scissor]) };
+
+    recording_result?;
+    guard_result
+}
+
+enum PreparedDrawCommand<'draw> {
+    Elements {
+        descriptor_set: vk::DescriptorSet,
+        scissor: vk::Rect2D,
+        count: u32,
+        first_index: u32,
+        vertex_offset: i32,
+    },
+    ResetRenderState,
+    SetSampler(vk::DescriptorSet),
+    RawCallback(dear_imgui_rs::render::RawCallbackCommand<'draw>),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ValidatedElementRange {
+    count: u32,
+    first_index: u32,
+    vertex_offset: i32,
+}
+
+fn validate_element_range(
+    indices: &[dear_imgui_rs::render::DrawIdx],
+    vertex_count: usize,
+    count: usize,
+    index_offset: usize,
+    vertex_offset: usize,
+    global_index_offset: u32,
+    global_vertex_offset: i32,
+) -> RendererResult<ValidatedElementRange> {
+    let local_end =
+        index_offset
+            .checked_add(count)
+            .ok_or(RendererError::DrawBufferOffsetOverflow {
+                buffer: "command index",
+            })?;
+    if local_end > indices.len() {
+        return Err(RendererError::DrawCommandIndexRangeOutOfBounds {
+            start: index_offset,
+            end: local_end,
+            len: indices.len(),
+        });
+    }
+    let max_index = indices[index_offset..local_end]
+        .iter()
+        .map(|index| *index as usize)
+        .max()
+        .unwrap_or(0);
+    let referenced_vertex =
+        vertex_offset
+            .checked_add(max_index)
+            .ok_or(RendererError::DrawBufferOffsetOverflow {
+                buffer: "command vertex",
+            })?;
+    if referenced_vertex >= vertex_count {
+        return Err(RendererError::DrawCommandVertexOutOfBounds {
+            index: referenced_vertex,
+            len: vertex_count,
+        });
     }
 
-    let clip_off = display_pos;
-    let clip_scale = framebuffer_scale;
+    let count = u32::try_from(count).map_err(|_| RendererError::DrawBufferTooLarge {
+        buffer: "command index",
+    })?;
+    let local_index =
+        u32::try_from(index_offset).map_err(|_| RendererError::DrawBufferTooLarge {
+            buffer: "command index",
+        })?;
+    let first_index = global_index_offset.checked_add(local_index).ok_or(
+        RendererError::DrawBufferOffsetOverflow {
+            buffer: "command index",
+        },
+    )?;
+    let local_vertex =
+        i32::try_from(vertex_offset).map_err(|_| RendererError::DrawBufferTooLarge {
+            buffer: "command vertex",
+        })?;
+    let vertex_offset = global_vertex_offset.checked_add(local_vertex).ok_or(
+        RendererError::DrawBufferOffsetOverflow {
+            buffer: "command vertex",
+        },
+    )?;
+    Ok(ValidatedElementRange {
+        count,
+        first_index,
+        vertex_offset,
+    })
+}
 
-    let mut global_vtx_offset: i32 = 0;
-    let mut global_idx_offset: u32 = 0;
+fn texture_descriptor_set(
+    textures: &TextureManager,
+    default_texture_id: u64,
+    texture_id: TextureId,
+) -> RendererResult<vk::DescriptorSet> {
+    textures
+        .get_descriptor_set(texture_id.id())
+        .or_else(|| {
+            texture_id
+                .is_null()
+                .then(|| textures.get_descriptor_set(default_texture_id))
+                .flatten()
+        })
+        .ok_or_else(|| RendererError::BadTextureId(texture_id.id()))
+}
+
+fn prepare_draw_commands<'draw>(
+    textures: &TextureManager,
+    default_texture_id: u64,
+    linear_sampler_set: vk::DescriptorSet,
+    nearest_sampler_set: vk::DescriptorSet,
+    draw_data: &'draw dear_imgui_rs::render::DrawData,
+    fb_width: u32,
+    fb_height: u32,
+) -> RendererResult<Vec<PreparedDrawCommand<'draw>>> {
+    let mut commands = Vec::new();
+    let mut global_idx_offset = 0_u32;
+    let mut global_vtx_offset = 0_i32;
+    let clip_off = draw_data.display_pos();
+    let clip_scale = draw_data.framebuffer_scale();
 
     for draw_list in draw_data.draw_lists() {
-        for cmd in draw_list.commands() {
-            match cmd {
+        let vertices = draw_list.vtx_buffer();
+        let indices = draw_list.idx_buffer();
+        for command in draw_list.commands() {
+            match command {
                 dear_imgui_rs::render::DrawCmd::Elements { count, cmd_params } => {
-                    let tex_id = cmd_params.texture_id;
-                    let ds = textures
-                        .get_descriptor_set(tex_id.id())
-                        .or_else(|| {
-                            if tex_id.is_null() {
-                                textures.get_descriptor_set(default_texture_id)
-                            } else {
-                                None
-                            }
-                        })
-                        .ok_or_else(|| RendererError::BadTextureId(tex_id.id()))?;
-
-                    let scissor = clip_rect_to_scissor(
+                    if count == 0 {
+                        continue;
+                    }
+                    let range = validate_element_range(
+                        indices,
+                        vertices.len(),
+                        count,
+                        cmd_params.idx_offset,
+                        cmd_params.vtx_offset,
+                        global_idx_offset,
+                        global_vtx_offset,
+                    )?;
+                    let Some(scissor) = clip_rect_to_scissor(
                         cmd_params.clip_rect,
                         clip_off,
                         clip_scale,
-                        fb_width_u32,
-                        fb_height_u32,
-                    );
-                    let Some(scissor) = scissor else {
+                        fb_width,
+                        fb_height,
+                    ) else {
                         continue;
                     };
-
-                    unsafe {
-                        device.cmd_set_scissor(command_buffer, 0, &[scissor]);
-                        device.cmd_bind_descriptor_sets(
-                            command_buffer,
-                            vk::PipelineBindPoint::GRAPHICS,
-                            pipeline_layout,
-                            0,
-                            &[ds],
-                            &[],
-                        );
-                    }
-
-                    let Some(count_u32) = u32::try_from(count).ok() else {
-                        continue;
-                    };
-                    let Some(idx_offset_u32) = u32::try_from(cmd_params.idx_offset).ok() else {
-                        continue;
-                    };
-                    let Some(first_index) = idx_offset_u32.checked_add(global_idx_offset) else {
-                        continue;
-                    };
-                    let Ok(vtx_offset_i32) = i32::try_from(cmd_params.vtx_offset) else {
-                        continue;
-                    };
-                    let Some(vertex_offset) = vtx_offset_i32.checked_add(global_vtx_offset) else {
-                        continue;
-                    };
-
-                    unsafe {
-                        device.cmd_draw_indexed(
-                            command_buffer,
-                            count_u32,
-                            1,
-                            first_index,
-                            vertex_offset,
-                            0,
-                        );
-                    }
+                    let texture_id = cmd_params.texture_id;
+                    let descriptor_set =
+                        texture_descriptor_set(textures, default_texture_id, texture_id)?;
+                    commands.push(PreparedDrawCommand::Elements {
+                        descriptor_set,
+                        scissor,
+                        count: range.count,
+                        first_index: range.first_index,
+                        vertex_offset: range.vertex_offset,
+                    });
                 }
-                dear_imgui_rs::render::DrawCmd::ResetRenderState => unsafe {
-                    device.cmd_bind_pipeline(
-                        command_buffer,
-                        vk::PipelineBindPoint::GRAPHICS,
-                        pipeline,
-                    );
-                    device.cmd_set_viewport(command_buffer, 0, &[viewport]);
-                    device.cmd_push_constants(
-                        command_buffer,
-                        pipeline_layout,
-                        vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
-                        0,
-                        any_as_u8_slice(&push_constants),
-                    );
-                    device.cmd_bind_vertex_buffers(command_buffer, 0, &[mesh.vertices], &[0]);
-                    device.cmd_bind_index_buffer(
-                        command_buffer,
-                        mesh.indices,
-                        0,
-                        vk::IndexType::UINT16,
-                    );
-                },
-                dear_imgui_rs::render::DrawCmd::SetSamplerLinear
-                | dear_imgui_rs::render::DrawCmd::SetSamplerNearest => {
-                    // Standard sampler callbacks are only installed by backends that can
-                    // switch sampler state without rebuilding Vulkan descriptor bindings.
+                dear_imgui_rs::render::DrawCmd::ResetRenderState => {
+                    commands.push(PreparedDrawCommand::ResetRenderState);
                 }
-                dear_imgui_rs::render::DrawCmd::RawCallback(_) => {
-                    // Skip raw callbacks.
+                dear_imgui_rs::render::DrawCmd::SetSamplerLinear => {
+                    commands.push(PreparedDrawCommand::SetSampler(linear_sampler_set));
+                }
+                dear_imgui_rs::render::DrawCmd::SetSamplerNearest => {
+                    commands.push(PreparedDrawCommand::SetSampler(nearest_sampler_set));
+                }
+                dear_imgui_rs::render::DrawCmd::RawCallback(callback) => {
+                    commands.push(PreparedDrawCommand::RawCallback(callback));
                 }
             }
         }
 
-        global_idx_offset = global_idx_offset.saturating_add(draw_list.idx_buffer().len() as u32);
-        global_vtx_offset = global_vtx_offset.saturating_add(draw_list.vtx_buffer().len() as i32);
+        let index_count = u32::try_from(indices.len())
+            .map_err(|_| RendererError::DrawBufferTooLarge { buffer: "index" })?;
+        global_idx_offset = global_idx_offset
+            .checked_add(index_count)
+            .ok_or(RendererError::DrawBufferOffsetOverflow { buffer: "index" })?;
+        let vertex_count = i32::try_from(vertices.len())
+            .map_err(|_| RendererError::DrawBufferTooLarge { buffer: "vertex" })?;
+        global_vtx_offset = global_vtx_offset
+            .checked_add(vertex_count)
+            .ok_or(RendererError::DrawBufferOffsetOverflow { buffer: "vertex" })?;
     }
 
-    Ok(())
+    Ok(commands)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn element_range_rejects_index_and_vertex_violations() {
+        let index_error = validate_element_range(&[0, 1], 2, 2, 1, 0, 0, 0).unwrap_err();
+        assert!(matches!(
+            index_error,
+            RendererError::DrawCommandIndexRangeOutOfBounds {
+                start: 1,
+                end: 3,
+                len: 2,
+            }
+        ));
+
+        let vertex_error = validate_element_range(&[0, 2], 2, 2, 0, 0, 0, 0).unwrap_err();
+        assert!(matches!(
+            vertex_error,
+            RendererError::DrawCommandVertexOutOfBounds { index: 2, len: 2 }
+        ));
+    }
+
+    #[test]
+    fn element_range_rejects_arithmetic_and_vulkan_offset_overflow() {
+        let command_vertex =
+            validate_element_range(&[1], usize::MAX, 1, 0, usize::MAX, 0, 0).unwrap_err();
+        assert!(matches!(
+            command_vertex,
+            RendererError::DrawBufferOffsetOverflow {
+                buffer: "command vertex"
+            }
+        ));
+
+        let first_index = validate_element_range(&[0, 0], 1, 1, 1, 0, u32::MAX, 0).unwrap_err();
+        assert!(matches!(
+            first_index,
+            RendererError::DrawBufferOffsetOverflow {
+                buffer: "command index"
+            }
+        ));
+
+        let vertex_offset =
+            validate_element_range(&[0], usize::MAX, 1, 0, 1, 0, i32::MAX).unwrap_err();
+        assert!(matches!(
+            vertex_offset,
+            RendererError::DrawBufferOffsetOverflow {
+                buffer: "command vertex"
+            }
+        ));
+
+        let oversized_vertex =
+            validate_element_range(&[0], usize::MAX, 1, 0, i32::MAX as usize + 1, 0, 0)
+                .unwrap_err();
+        assert!(matches!(
+            oversized_vertex,
+            RendererError::DrawBufferTooLarge {
+                buffer: "command vertex"
+            }
+        ));
+    }
+
+    #[test]
+    fn unknown_texture_id_is_rejected_before_recording() {
+        let textures = TextureManager::new();
+        assert!(matches!(
+            texture_descriptor_set(&textures, 0, TextureId::from(41_u64)),
+            Err(RendererError::BadTextureId(41))
+        ));
+    }
+}
+
+fn setup_render_state(device: &Device, state: &RenderState<'_>) {
+    unsafe {
+        device.cmd_bind_pipeline(
+            state.command_buffer,
+            vk::PipelineBindPoint::GRAPHICS,
+            state.pipeline,
+        );
+        device.cmd_set_viewport(state.command_buffer, 0, &[state.viewport]);
+        device.cmd_push_constants(
+            state.command_buffer,
+            state.pipeline_layout,
+            vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT,
+            0,
+            any_as_u8_slice(&state.push_constants),
+        );
+        if state.has_geometry {
+            device.cmd_bind_vertex_buffers(
+                state.command_buffer,
+                0,
+                &[state.mesh.vertices.buffer],
+                &[0],
+            );
+            device.cmd_bind_index_buffer(
+                state.command_buffer,
+                state.mesh.indices.buffer,
+                0,
+                vk::IndexType::UINT16,
+            );
+        }
+        device.cmd_bind_descriptor_sets(
+            state.command_buffer,
+            vk::PipelineBindPoint::GRAPHICS,
+            state.pipeline_layout,
+            1,
+            &[state.linear_sampler_set],
+            &[],
+        );
+    }
 }

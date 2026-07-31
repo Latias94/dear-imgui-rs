@@ -1,4 +1,6 @@
-use super::texture::{apply_rgba_rect, texture_data_to_rgba_subrect, texture_upload_to_rgba};
+use super::texture::{
+    RgbaExtent, RgbaRect, apply_rgba_rect, texture_data_to_rgba_subrect, texture_upload_to_rgba,
+};
 use dear_imgui_rs::texture::{OwnedTextureData, TextureFormat as ImFormat};
 
 #[test]
@@ -71,7 +73,20 @@ fn managed_update_composes_a_complete_replacement_image() {
     ];
     let update = [101, 102, 103, 104, 105, 106, 107, 108];
 
-    assert!(apply_rgba_rect(&mut rgba, 3, 2, 1, 0, 1, 2, &update));
+    assert!(apply_rgba_rect(
+        &mut rgba,
+        RgbaExtent {
+            width: 3,
+            height: 2,
+        },
+        RgbaRect {
+            x: 1,
+            y: 0,
+            width: 1,
+            height: 2,
+        },
+        &update,
+    ));
     assert_eq!(
         rgba,
         vec![
@@ -88,12 +103,16 @@ fn managed_update_rejects_out_of_bounds_without_mutating_shadow() {
 
     assert!(!apply_rgba_rect(
         &mut rgba,
-        3,
-        2,
-        2,
-        1,
-        2,
-        1,
+        RgbaExtent {
+            width: 3,
+            height: 2,
+        },
+        RgbaRect {
+            x: 2,
+            y: 1,
+            width: 2,
+            height: 1,
+        },
         &[2_u8; 2 * 4]
     ));
     assert_eq!(rgba, original);

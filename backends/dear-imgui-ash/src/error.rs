@@ -38,6 +38,32 @@ pub enum RendererError {
     #[error("Dear ImGui renderer state `{field}` was replaced while Ash was attached")]
     RendererStateReplaced { field: &'static str },
 
+    /// Callback-scoped renderer state changed while Ash was recording a draw.
+    #[error("Ash renderer lost ownership of Dear ImGui field `{field}`")]
+    RendererStateDrift { field: &'static str },
+
+    /// Draw buffer length exceeds Vulkan index ranges.
+    #[error("{buffer} draw buffer length exceeds renderer limits")]
+    DrawBufferTooLarge { buffer: &'static str },
+
+    /// Draw buffer offset overflowed while accumulating draw lists.
+    #[error("{buffer} draw buffer offset overflow")]
+    DrawBufferOffsetOverflow { buffer: &'static str },
+
+    /// A draw command addresses indices outside its parent draw list.
+    #[error("draw command index range {start}..{end} exceeds its parent index buffer length {len}")]
+    DrawCommandIndexRangeOutOfBounds {
+        start: usize,
+        end: usize,
+        len: usize,
+    },
+
+    /// A draw command references a vertex outside its parent draw list.
+    #[error(
+        "draw command references vertex {index}, but its parent vertex buffer has length {len}"
+    )]
+    DrawCommandVertexOutOfBounds { index: usize, len: usize },
+
     /// Draw frame resources are unavailable.
     #[error("Frame resources are not initialized")]
     FrameResourcesUnavailable,

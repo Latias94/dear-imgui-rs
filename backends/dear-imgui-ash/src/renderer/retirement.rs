@@ -12,7 +12,9 @@ static NEXT_QUEUE_ID: AtomicU64 = AtomicU64::new(1);
 /// as secondary viewport draws from the same Dear ImGui frame. Pass the completed batch to
 /// [`AshRenderer::wait_for_texture_retirements`](super::AshRenderer::wait_for_texture_retirements)
 /// before expecting Dear ImGui destroy requests to be acknowledged. A batch can also contain old
-/// Vulkan images superseded by copy-on-write managed texture updates.
+/// Vulkan images superseded by copy-on-write managed texture updates. Completing a batch
+/// invalidates recorded but unsubmitted command buffers that reference its resources; such
+/// command buffers must not be submitted afterwards.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[must_use]
 pub struct TextureRetirementBatch {
@@ -313,9 +315,10 @@ mod tests {
     #[test]
     fn abandoned_reservation_does_not_block_later_retirement() {
         let mut queue = RetirementQueue::new();
-        let abandoned = queue.reserve().unwrap();
-        let abandoned_sequence = abandoned.batch.sequence();
-        drop(abandoned);
+        let abandoned_sequence = {
+            let abandoned = queue.reserve().unwrap();
+            abandoned.batch.sequence()
+        };
 
         let batch = queue.enqueue(1_u32, "texture").unwrap();
         assert_eq!(batch.sequence(), abandoned_sequence + 1);

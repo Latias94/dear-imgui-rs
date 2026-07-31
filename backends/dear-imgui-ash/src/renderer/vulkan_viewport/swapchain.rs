@@ -1,3 +1,4 @@
+use super::registry::required_swapchain_image_usage;
 use super::*;
 
 const DEFAULT_SRGB_SURFACE_FORMAT: vk::SurfaceFormatKHR = vk::SurfaceFormatKHR {
@@ -253,12 +254,18 @@ pub(super) fn recreate_swapchain(
         )
         .into());
     }
+    if data.state.recovery_frame_index().is_some() {
+        return Err(RendererError::InvalidRenderState(
+            "cannot rebuild a viewport before its acquired frame is recovered".into(),
+        )
+        .into());
+    }
 
-    if data.swapchain.is_some() {
-        if let Err(error) = unsafe { renderer.device.device_wait_idle() } {
-            data.mark_failed();
-            return Err(RendererError::from(error).into());
-        }
+    if data.swapchain.is_some()
+        && let Err(error) = unsafe { renderer.device.device_wait_idle() }
+    {
+        data.mark_failed();
+        return Err(RendererError::from(error).into());
     }
     recreate_swapchain_after_device_idle(renderer, global, data, desired_extent)
 }
@@ -272,6 +279,12 @@ pub(super) fn recreate_swapchain_after_device_idle(
     if data.state == ViewportRuntimeState::Failed {
         return Err(RendererError::InvalidRenderState(
             "cannot rebuild a failed viewport runtime".into(),
+        )
+        .into());
+    }
+    if data.state.recovery_frame_index().is_some() {
+        return Err(RendererError::InvalidRenderState(
+            "cannot rebuild a viewport before its acquired frame is recovered".into(),
         )
         .into());
     }
@@ -333,7 +346,7 @@ pub(super) fn recreate_swapchain_after_device_idle(
         .image_color_space(surface_format.color_space)
         .image_extent(extent)
         .image_array_layers(1)
-        .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT)
+        .image_usage(required_swapchain_image_usage(global.swapchain_image_usage))
         .pre_transform(capabilities.current_transform)
         .composite_alpha(composite_alpha)
         .present_mode(present_mode)

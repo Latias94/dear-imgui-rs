@@ -6,7 +6,6 @@ pub(super) struct VulkanTexture {
     pub(super) image: vk::Image,
     pub(super) image_mem: Memory,
     pub(super) image_view: vk::ImageView,
-    pub(super) sampler: vk::Sampler,
     pub(super) descriptor_set: vk::DescriptorSet,
     pub(super) width: u32,
     pub(super) height: u32,
@@ -20,9 +19,8 @@ impl VulkanTexture {
         pool: vk::DescriptorPool,
     ) {
         unsafe {
-            device.destroy_sampler(self.sampler, None);
-            device.destroy_image_view(self.image_view, None);
             let _ = device.free_descriptor_sets(pool, &[self.descriptor_set]);
+            device.destroy_image_view(self.image_view, None);
         }
         let _ = allocator.destroy_image(device, self.image, self.image_mem);
     }
@@ -31,31 +29,20 @@ impl VulkanTexture {
 #[derive(Debug, Copy, Clone)]
 pub(super) struct ExternalTextureBinding {
     pub(super) descriptor_set: vk::DescriptorSet,
-    pub(super) image_view: Option<vk::ImageView>,
-    pub(super) sampler: Option<vk::Sampler>,
-    pub(super) free_descriptor_set: bool,
+    pub(super) image_view: vk::ImageView,
+    pub(super) image_layout: vk::ImageLayout,
 }
 
 impl ExternalTextureBinding {
-    fn borrowed_descriptor_set(descriptor_set: vk::DescriptorSet) -> Self {
-        Self {
-            descriptor_set,
-            image_view: None,
-            sampler: None,
-            free_descriptor_set: false,
-        }
-    }
-
-    fn owned_descriptor_set(
+    fn new(
         descriptor_set: vk::DescriptorSet,
         image_view: vk::ImageView,
-        sampler: vk::Sampler,
+        image_layout: vk::ImageLayout,
     ) -> Self {
         Self {
             descriptor_set,
-            image_view: Some(image_view),
-            sampler: Some(sampler),
-            free_descriptor_set: true,
+            image_view,
+            image_layout,
         }
     }
 }
@@ -141,23 +128,16 @@ impl TextureManager {
         }
     }
 
-    pub(super) fn register_external_descriptor_set(&mut self, set: vk::DescriptorSet) -> u64 {
-        let id = self.allocate_id();
-        self.external_textures
-            .insert(id, ExternalTextureBinding::borrowed_descriptor_set(set));
-        id
-    }
-
     pub(super) fn register_external_texture(
         &mut self,
         set: vk::DescriptorSet,
         image_view: vk::ImageView,
-        sampler: vk::Sampler,
+        image_layout: vk::ImageLayout,
     ) -> u64 {
         let id = self.allocate_id();
         self.external_textures.insert(
             id,
-            ExternalTextureBinding::owned_descriptor_set(set, image_view, sampler),
+            ExternalTextureBinding::new(set, image_view, image_layout),
         );
         id
     }
@@ -264,6 +244,8 @@ impl AshRenderer {
     /// actually released the corresponding Vulkan resources. Device loss is terminal: resources
     /// are reclaimed, then `ERROR_DEVICE_LOST` is returned. The returned count includes old Vulkan
     /// images superseded by managed updates as well as resources pending a Dear ImGui destroy.
+    /// Any recorded but unsubmitted command buffer that references released resources becomes
+    /// invalid and must never be submitted; this is part of [`Self::cmd_draw`]'s safety contract.
     pub fn wait_for_texture_retirements(
         &mut self,
         completed: TextureRetirementBatch,
@@ -290,7 +272,9 @@ impl AshRenderer {
     ///
     /// Every fence must belong to this renderer's logical device and, together, cover every queue
     /// operation that can reference textures through `completed`, including uploads, main viewport
-    /// draws, and secondary viewport draws. Vulkan cannot validate foreign-device handles.
+    /// draws, and secondary viewport draws. No recorded command buffer which references released
+    /// resources may be submitted afterwards. Vulkan cannot validate foreign-device handles or
+    /// future submissions.
     pub unsafe fn complete_texture_retirements_with_fences(
         &mut self,
         completed: TextureRetirementBatch,
@@ -327,170 +311,125 @@ impl AshRenderer {
             })?;
         let count = retired.len();
         for managed in retired {
-            managed
-                .texture
-                .destroy(&self.device, &mut self.allocator, self.descriptor_pool);
+            managed.texture.destroy(
+                &self.device,
+                &mut self.allocator,
+                self.resources.descriptor_pool,
+            );
         }
         Ok(count)
     }
 
-    pub fn register_texture_descriptor_set(
-        &mut self,
-        set: vk::DescriptorSet,
-    ) -> RendererResult<TextureId> {
-        self.ensure_operational()?;
-        Ok(TextureId::from(
-            self.textures.register_external_descriptor_set(set),
-        ))
-    }
-
-    /// Remove a previously registered external texture descriptor set.
-    pub fn remove_texture_descriptor_set(&mut self, id: TextureId) -> RendererResult<()> {
-        self.unregister_texture(id)
-    }
-
-    /// Register an external `vk::ImageView` + `vk::Sampler` as a legacy `TextureId`.
+    /// Register an application-owned sampled image as a `TextureId`.
     ///
-    /// This is the Vulkan equivalent of `dear-imgui-wgpu::WgpuRenderer::register_external_texture_with_sampler()`.
-    /// The returned `TextureId` can be passed to `ui.image(tex_id, size)`.
+    /// Ash allocates and owns the set-0 sampled-image descriptor. Sampling is selected separately
+    /// by Dear ImGui's standard linear/nearest callbacks and never mutates application sampler
+    /// state.
     ///
-    /// Note: this only allocates a descriptor set; the image and sampler are owned by the caller
-    /// and must outlive rendering that references the returned id.
-    pub fn register_external_texture_with_sampler(
+    /// # Safety
+    ///
+    /// `image_view` must be a live sampled image view created from this renderer's logical device.
+    /// It must remain alive, and its subresources must use `image_layout`, until the returned id is
+    /// unregistered and all command buffers that referenced it have completed.
+    pub unsafe fn register_external_texture(
         &mut self,
         image_view: vk::ImageView,
-        sampler: vk::Sampler,
+        image_layout: vk::ImageLayout,
     ) -> RendererResult<TextureId> {
         self.ensure_operational()?;
-        let set = create_vulkan_descriptor_set(
+        let set = create_vulkan_sampled_image_descriptor_set(
             &self.device,
-            self.descriptor_set_layout,
-            self.descriptor_pool,
+            self.resources.sampled_image_set_layout,
+            self.resources.descriptor_pool,
             image_view,
-            sampler,
+            image_layout,
         )?;
-        Ok(TextureId::from(
-            self.textures
-                .register_external_texture(set, image_view, sampler),
-        ))
+        Ok(TextureId::from(self.textures.register_external_texture(
+            set,
+            image_view,
+            image_layout,
+        )))
     }
 
-    /// Update the view for an already-registered external texture.
+    /// Update an external sampled image after waiting for the logical device to become idle.
     ///
-    /// Returns false if the texture id is not an external texture registered via
-    /// `register_external_texture_with_sampler()`.
-    pub fn update_external_texture_view(
-        &mut self,
-        texture_id: TextureId,
-        image_view: vk::ImageView,
-    ) -> RendererResult<bool> {
-        self.ensure_operational()?;
-        unsafe { self.device.device_wait_idle()? };
-        unsafe { self.update_external_texture_view_unchecked(texture_id, image_view) }
-    }
-
-    /// Update an external texture view without waiting for earlier descriptor users.
+    /// Returns `false` if the texture id is not an external texture registered by this renderer.
     ///
     /// # Safety
     ///
-    /// The caller must prove that no submitted or recorded command can still access this texture's
-    /// descriptor set. The renderer descriptor layout does not enable update-after-bind.
-    pub unsafe fn update_external_texture_view_unchecked(
+    /// The new view has the same device, lifetime, usage, and layout obligations as
+    /// [`Self::register_external_texture`].
+    pub unsafe fn update_external_texture(
         &mut self,
         texture_id: TextureId,
         image_view: vk::ImageView,
+        image_layout: vk::ImageLayout,
+    ) -> RendererResult<bool> {
+        self.ensure_operational()?;
+        if !self
+            .textures
+            .external_textures
+            .contains_key(&texture_id.id())
+        {
+            return Ok(false);
+        }
+        unsafe { self.device.device_wait_idle()? };
+        unsafe { self.update_external_texture_unchecked(texture_id, image_view, image_layout) }
+    }
+
+    /// Update an external sampled image without waiting for earlier descriptor users.
+    ///
+    /// # Safety
+    ///
+    /// The caller must satisfy [`Self::update_external_texture`] and additionally prove that no
+    /// submitted or recorded command can still access this texture's descriptor set. The renderer
+    /// descriptor layout does not enable update-after-bind.
+    pub unsafe fn update_external_texture_unchecked(
+        &mut self,
+        texture_id: TextureId,
+        image_view: vk::ImageView,
+        image_layout: vk::ImageLayout,
     ) -> RendererResult<bool> {
         self.ensure_operational()?;
         let id = texture_id.id();
         let Some(binding) = self.textures.external_textures.get_mut(&id) else {
             return Ok(false);
         };
-        if !binding.free_descriptor_set {
-            return Ok(false);
-        }
-        let Some(sampler) = binding.sampler else {
-            return Ok(false);
-        };
 
-        binding.image_view = Some(image_view);
+        binding.image_view = image_view;
+        binding.image_layout = image_layout;
         unsafe {
             let image_info = [vk::DescriptorImageInfo {
-                sampler,
+                sampler: vk::Sampler::null(),
                 image_view,
-                image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+                image_layout,
             }];
             let write_desc_sets = [vk::WriteDescriptorSet::default()
                 .dst_set(binding.descriptor_set)
                 .dst_binding(0)
-                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
+                .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
                 .image_info(&image_info)];
             self.device.update_descriptor_sets(&write_desc_sets, &[]);
         }
         Ok(true)
     }
 
-    /// Update (or set) a custom sampler for an already-registered external texture.
-    ///
-    /// Returns false if the texture id is not an external texture registered via
-    /// `register_external_texture_with_sampler()`.
-    pub fn update_external_texture_sampler(
-        &mut self,
-        texture_id: TextureId,
-        sampler: vk::Sampler,
-    ) -> RendererResult<bool> {
-        self.ensure_operational()?;
-        unsafe { self.device.device_wait_idle()? };
-        unsafe { self.update_external_texture_sampler_unchecked(texture_id, sampler) }
-    }
-
-    /// Update an external sampler without waiting for earlier descriptor users.
+    /// Unregister a texture id after waiting for submitted device work.
     ///
     /// # Safety
     ///
-    /// The caller must prove that no submitted or recorded command can still access this texture's
-    /// descriptor set. The renderer descriptor layout does not enable update-after-bind.
-    pub unsafe fn update_external_texture_sampler_unchecked(
-        &mut self,
-        texture_id: TextureId,
-        sampler: vk::Sampler,
-    ) -> RendererResult<bool> {
+    /// No recorded command buffer that references this texture may be submitted after this call.
+    /// `device_wait_idle` covers submitted work only; it cannot discover application-owned command
+    /// buffers that have been recorded but not submitted.
+    pub unsafe fn unregister_texture(&mut self, texture_id: TextureId) -> RendererResult<()> {
         self.ensure_operational()?;
-        let id = texture_id.id();
-        let Some(binding) = self.textures.external_textures.get_mut(&id) else {
-            return Ok(false);
-        };
-        if !binding.free_descriptor_set {
-            return Ok(false);
+        if !self
+            .textures
+            .external_textures
+            .contains_key(&texture_id.id())
+        {
+            return Ok(());
         }
-        let Some(image_view) = binding.image_view else {
-            return Ok(false);
-        };
-
-        binding.sampler = Some(sampler);
-        unsafe {
-            let image_info = [vk::DescriptorImageInfo {
-                sampler,
-                image_view,
-                image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-            }];
-            let write_desc_sets = [vk::WriteDescriptorSet::default()
-                .dst_set(binding.descriptor_set)
-                .dst_binding(0)
-                .descriptor_type(vk::DescriptorType::COMBINED_IMAGE_SAMPLER)
-                .image_info(&image_info)];
-            self.device.update_descriptor_sets(&write_desc_sets, &[]);
-        }
-        Ok(true)
-    }
-
-    /// Unregister a texture id.
-    ///
-    /// For external textures registered via `register_external_texture_with_sampler()`, this also
-    /// frees the underlying descriptor set from the pool. For descriptor sets registered via
-    /// `register_texture_descriptor_set()`, this simply forgets the id (the descriptor set remains
-    /// owned by the caller).
-    pub fn unregister_texture(&mut self, texture_id: TextureId) -> RendererResult<()> {
-        self.ensure_operational()?;
         unsafe { self.device.device_wait_idle()? };
         unsafe { self.unregister_texture_unchecked(texture_id) }
     }
@@ -507,15 +446,14 @@ impl AshRenderer {
     ) -> RendererResult<()> {
         self.ensure_operational()?;
         let id = texture_id.id();
-        if let Some(binding) = self.textures.external_textures.remove(&id) {
-            if binding.free_descriptor_set {
-                unsafe {
-                    let _ = self
-                        .device
-                        .free_descriptor_sets(self.descriptor_pool, &[binding.descriptor_set]);
-                }
-            }
+        let Some(binding) = self.textures.external_textures.get(&id).copied() else {
+            return Ok(());
+        };
+        unsafe {
+            self.device
+                .free_descriptor_sets(self.resources.descriptor_pool, &[binding.descriptor_set])?;
         }
+        self.textures.external_textures.remove(&id);
         Ok(())
     }
 
@@ -527,6 +465,10 @@ impl AshRenderer {
     ///
     /// Call this before rendering if you pass `&mut TextureData` to widgets (e.g. `ui.image()`),
     /// otherwise `ImDrawCmd_GetTexID()` may assert if `TexID` is still invalid.
+    ///
+    /// This operation may replace or destroy Vulkan resources. Any recorded but unsubmitted
+    /// command buffer that references those resources becomes invalid and must never be submitted;
+    /// this is part of [`Self::cmd_draw`]'s safety contract.
     pub fn update_texture(
         &mut self,
         texture_data: &TextureData,
@@ -574,21 +516,15 @@ impl AshRenderer {
                     return Ok(TextureUpdateResult::Failed);
                 };
 
-                let (texture, staging_buffer, staging_mem) = Texture::create(
-                    &self.device,
-                    &mut self.allocator,
-                    w,
-                    h,
-                    self.options.texture_format,
-                    &pixels,
-                )?;
+                let (texture, staging_buffer, staging_mem) =
+                    Texture::create(&self.device, &mut self.allocator, w, h, &pixels)?;
 
-                let descriptor_set = match create_vulkan_descriptor_set(
+                let descriptor_set = match create_vulkan_sampled_image_descriptor_set(
                     &self.device,
-                    self.descriptor_set_layout,
-                    self.descriptor_pool,
+                    self.resources.sampled_image_set_layout,
+                    self.resources.descriptor_pool,
                     texture.image_view,
-                    texture.sampler,
+                    vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
                 ) {
                     Ok(descriptor_set) => descriptor_set,
                     Err(err) => {
@@ -608,9 +544,10 @@ impl AshRenderer {
                     Ok(upload) => upload,
                     Err(err) => {
                         unsafe {
-                            let _ = self
-                                .device
-                                .free_descriptor_sets(self.descriptor_pool, &[descriptor_set]);
+                            let _ = self.device.free_descriptor_sets(
+                                self.resources.descriptor_pool,
+                                &[descriptor_set],
+                            );
                         }
                         let _ = self.allocator.destroy_buffer(
                             &self.device,
@@ -630,7 +567,11 @@ impl AshRenderer {
                 });
 
                 if let Some(old) = self.textures.textures.remove(&id) {
-                    old.destroy(&self.device, &mut self.allocator, self.descriptor_pool);
+                    old.destroy(
+                        &self.device,
+                        &mut self.allocator,
+                        self.resources.descriptor_pool,
+                    );
                 }
                 self.textures.textures.insert(
                     id,
@@ -638,7 +579,6 @@ impl AshRenderer {
                         image: texture.image,
                         image_mem: texture.image_mem,
                         image_view: texture.image_view,
-                        sampler: texture.sampler,
                         descriptor_set,
                         width: w,
                         height: h,
@@ -683,10 +623,12 @@ impl AshRenderer {
                         cmd,
                         staging_buffer,
                         existing.image,
-                        x,
-                        y,
-                        w,
-                        h,
+                        ImageUploadRegion {
+                            x,
+                            y,
+                            width: w,
+                            height: h,
+                        },
                     );
                 }) {
                     Ok(upload) => upload,
@@ -715,7 +657,11 @@ impl AshRenderer {
                     self.wait_for_pending_uploads()?;
                 }
                 if let Some(tex) = self.textures.textures.remove(&id) {
-                    tex.destroy(&self.device, &mut self.allocator, self.descriptor_pool);
+                    tex.destroy(
+                        &self.device,
+                        &mut self.allocator,
+                        self.resources.descriptor_pool,
+                    );
                 }
                 Ok(TextureUpdateResult::Destroyed)
             }
@@ -748,21 +694,15 @@ impl AshRenderer {
             return Ok(TextureUpdateResult::Failed);
         };
 
-        let (texture, staging_buffer, staging_mem) = Texture::create(
-            &self.device,
-            &mut self.allocator,
-            w,
-            h,
-            self.options.texture_format,
-            &pixels,
-        )?;
+        let (texture, staging_buffer, staging_mem) =
+            Texture::create(&self.device, &mut self.allocator, w, h, &pixels)?;
 
-        let descriptor_set = match create_vulkan_descriptor_set(
+        let descriptor_set = match create_vulkan_sampled_image_descriptor_set(
             &self.device,
-            self.descriptor_set_layout,
-            self.descriptor_pool,
+            self.resources.sampled_image_set_layout,
+            self.resources.descriptor_pool,
             texture.image_view,
-            texture.sampler,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
         ) {
             Ok(descriptor_set) => descriptor_set,
             Err(err) => {
@@ -782,7 +722,7 @@ impl AshRenderer {
                 unsafe {
                     let _ = self
                         .device
-                        .free_descriptor_sets(self.descriptor_pool, &[descriptor_set]);
+                        .free_descriptor_sets(self.resources.descriptor_pool, &[descriptor_set]);
                 }
                 let _ = self
                     .allocator
@@ -800,7 +740,11 @@ impl AshRenderer {
         });
 
         if let Some(old) = self.textures.textures.remove(&id) {
-            old.destroy(&self.device, &mut self.allocator, self.descriptor_pool);
+            old.destroy(
+                &self.device,
+                &mut self.allocator,
+                self.resources.descriptor_pool,
+            );
         }
         self.textures.textures.insert(
             id,
@@ -808,7 +752,6 @@ impl AshRenderer {
                 image: texture.image,
                 image_mem: texture.image_mem,
                 image_view: texture.image_view,
-                sampler: texture.sampler,
                 descriptor_set,
                 width: w,
                 height: h,
@@ -827,48 +770,49 @@ impl AshRenderer {
         let pixels = [255u8, 255u8, 255u8, 255u8];
         let texture_id = self.textures.allocate_id();
 
-        let (texture, staging_buffer, staging_mem) = Texture::create(
+        let (texture, staging_buffer, staging_mem) =
+            Texture::create(&self.device, &mut self.allocator, 1, 1, &pixels)?;
+
+        let descriptor_set = match create_vulkan_sampled_image_descriptor_set(
             &self.device,
-            &mut self.allocator,
-            1,
-            1,
-            self.options.texture_format,
-            &pixels,
-        )?;
-
-        if let Err(err) =
-            execute_one_time_commands(&self.device, self.queue, self.command_pool, |cmd| {
-                texture.upload(&self.device, cmd, staging_buffer, 1, 1);
-            })
-        {
-            let _ = self
-                .allocator
-                .destroy_buffer(&self.device, staging_buffer, staging_mem);
-            let _ = texture.destroy(&self.device, &mut self.allocator);
-            return Err(err);
-        }
-
-        if let Err(err) = self
-            .allocator
-            .destroy_buffer(&self.device, staging_buffer, staging_mem)
-        {
-            let _ = texture.destroy(&self.device, &mut self.allocator);
-            return Err(err);
-        }
-
-        let descriptor_set = match create_vulkan_descriptor_set(
-            &self.device,
-            self.descriptor_set_layout,
-            self.descriptor_pool,
+            self.resources.sampled_image_set_layout,
+            self.resources.descriptor_pool,
             texture.image_view,
-            texture.sampler,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
         ) {
             Ok(descriptor_set) => descriptor_set,
             Err(err) => {
+                let _ = self
+                    .allocator
+                    .destroy_buffer(&self.device, staging_buffer, staging_mem);
                 let _ = texture.destroy(&self.device, &mut self.allocator);
                 return Err(err);
             }
         };
+
+        let (command_buffer, fence) = match self.submit_upload_commands(|command_buffer| {
+            texture.upload(&self.device, command_buffer, staging_buffer, 1, 1);
+        }) {
+            Ok(upload) => upload,
+            Err(error) => {
+                unsafe {
+                    let _ = self
+                        .device
+                        .free_descriptor_sets(self.resources.descriptor_pool, &[descriptor_set]);
+                }
+                let _ = self
+                    .allocator
+                    .destroy_buffer(&self.device, staging_buffer, staging_mem);
+                let _ = texture.destroy(&self.device, &mut self.allocator);
+                return Err(error);
+            }
+        };
+        self.in_flight_uploads.push_back(InFlightUpload {
+            fence,
+            command_buffer,
+            staging: vec![(staging_buffer, staging_mem)],
+            managed_texture: None,
+        });
 
         self.textures.textures.insert(
             texture_id,
@@ -876,7 +820,6 @@ impl AshRenderer {
                 image: texture.image,
                 image_mem: texture.image_mem,
                 image_view: texture.image_view,
-                sampler: texture.sampler,
                 descriptor_set,
                 width: 1,
                 height: 1,
@@ -1069,20 +1012,14 @@ impl AshRenderer {
         height: u32,
         rgba: Vec<u8>,
     ) -> RendererResult<ManagedVulkanTexture> {
-        let (texture, staging_buffer, staging_mem) = Texture::create(
+        let (texture, staging_buffer, staging_mem) =
+            Texture::create(&self.device, &mut self.allocator, width, height, &rgba)?;
+        let descriptor_set = match create_vulkan_sampled_image_descriptor_set(
             &self.device,
-            &mut self.allocator,
-            width,
-            height,
-            self.options.texture_format,
-            &rgba,
-        )?;
-        let descriptor_set = match create_vulkan_descriptor_set(
-            &self.device,
-            self.descriptor_set_layout,
-            self.descriptor_pool,
+            self.resources.sampled_image_set_layout,
+            self.resources.descriptor_pool,
             texture.image_view,
-            texture.sampler,
+            vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
         ) {
             Ok(descriptor_set) => descriptor_set,
             Err(error) => {
@@ -1101,7 +1038,7 @@ impl AshRenderer {
                 unsafe {
                     let _ = self
                         .device
-                        .free_descriptor_sets(self.descriptor_pool, &[descriptor_set]);
+                        .free_descriptor_sets(self.resources.descriptor_pool, &[descriptor_set]);
                 }
                 let _ = self
                     .allocator
@@ -1122,7 +1059,6 @@ impl AshRenderer {
                 image: texture.image,
                 image_mem: texture.image_mem,
                 image_view: texture.image_view,
-                sampler: texture.sampler,
                 descriptor_set,
                 width,
                 height,
@@ -1208,7 +1144,17 @@ impl AshRenderer {
                     "managed texture {snapshot_id:?} has an invalid update upload layout"
                 )));
             };
-            if !apply_rgba_rect(&mut replacement_rgba, width, height, x, y, w, h, &rgba) {
+            if !apply_rgba_rect(
+                &mut replacement_rgba,
+                RgbaExtent { width, height },
+                RgbaRect {
+                    x,
+                    y,
+                    width: w,
+                    height: h,
+                },
+                &rgba,
+            ) {
                 return Err(RendererError::InvalidRenderState(format!(
                     "managed texture {snapshot_id:?} has an invalid CPU shadow layout"
                 )));
@@ -1221,27 +1167,37 @@ impl AshRenderer {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct RgbaExtent {
+    pub(super) width: u32,
+    pub(super) height: u32,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct RgbaRect {
+    pub(super) x: u32,
+    pub(super) y: u32,
+    pub(super) width: u32,
+    pub(super) height: u32,
+}
+
 pub(super) fn apply_rgba_rect(
     destination: &mut [u8],
-    destination_width: u32,
-    destination_height: u32,
-    x: u32,
-    y: u32,
-    width: u32,
-    height: u32,
+    destination_extent: RgbaExtent,
+    source_rect: RgbaRect,
     source: &[u8],
 ) -> bool {
-    let Ok(destination_width) = usize::try_from(destination_width) else {
+    let Ok(destination_width) = usize::try_from(destination_extent.width) else {
         return false;
     };
-    let Ok(destination_height) = usize::try_from(destination_height) else {
+    let Ok(destination_height) = usize::try_from(destination_extent.height) else {
         return false;
     };
     let (Ok(x), Ok(y), Ok(width), Ok(height)) = (
-        usize::try_from(x),
-        usize::try_from(y),
-        usize::try_from(width),
-        usize::try_from(height),
+        usize::try_from(source_rect.x),
+        usize::try_from(source_rect.y),
+        usize::try_from(source_rect.width),
+        usize::try_from(source_rect.height),
     ) else {
         return false;
     };
@@ -1402,10 +1358,7 @@ mod operational_gate_tests {
             allocator: Allocator::new(vk::PhysicalDeviceMemoryProperties::default()),
             queue: vk::Queue::null(),
             command_pool: vk::CommandPool::null(),
-            pipeline: vk::Pipeline::null(),
-            pipeline_layout: vk::PipelineLayout::null(),
-            descriptor_set_layout: vk::DescriptorSetLayout::null(),
-            descriptor_pool: vk::DescriptorPool::null(),
+            resources: VulkanRendererResources::empty(),
             textures: TextureManager::new(),
             consumer: None,
             context_state: RendererContextState::prepare(context).unwrap(),
@@ -1444,21 +1397,27 @@ mod operational_gate_tests {
         assert_destroyed(unsafe {
             renderer.complete_texture_retirements_with_fences(batch, &[vk::Fence::null()])
         });
-        assert_destroyed(renderer.register_texture_descriptor_set(vk::DescriptorSet::null()));
-        assert_destroyed(renderer.remove_texture_descriptor_set(texture));
-        assert_destroyed(
-            renderer
-                .register_external_texture_with_sampler(vk::ImageView::null(), vk::Sampler::null()),
-        );
-        assert_destroyed(renderer.update_external_texture_view(texture, vk::ImageView::null()));
         assert_destroyed(unsafe {
-            renderer.update_external_texture_view_unchecked(texture, vk::ImageView::null())
+            renderer.register_external_texture(
+                vk::ImageView::null(),
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            )
         });
-        assert_destroyed(renderer.update_external_texture_sampler(texture, vk::Sampler::null()));
         assert_destroyed(unsafe {
-            renderer.update_external_texture_sampler_unchecked(texture, vk::Sampler::null())
+            renderer.update_external_texture(
+                texture,
+                vk::ImageView::null(),
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            )
         });
-        assert_destroyed(renderer.unregister_texture(texture));
+        assert_destroyed(unsafe {
+            renderer.update_external_texture_unchecked(
+                texture,
+                vk::ImageView::null(),
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            )
+        });
+        assert_destroyed(unsafe { renderer.unregister_texture(texture) });
         assert_destroyed(unsafe { renderer.unregister_texture_unchecked(texture) });
         assert_destroyed(renderer.update_texture(&texture_data));
         assert_destroyed(unsafe { renderer.update_texture_unchecked(&texture_data) });
@@ -1467,7 +1426,7 @@ mod operational_gate_tests {
         assert!(context.font_atlas().build());
         context.frame();
         let frame = context.render();
-        assert_destroyed(renderer.cmd_draw(vk::CommandBuffer::null(), frame));
+        assert_destroyed(unsafe { renderer.cmd_draw(vk::CommandBuffer::null(), frame) });
         assert_destroyed(renderer.shutdown(&mut context));
 
         #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
@@ -1492,7 +1451,6 @@ mod managed_lifecycle_tests {
                 image: vk::Image::from_raw(image),
                 image_mem: vk::DeviceMemory::from_raw(image + 100),
                 image_view: vk::ImageView::from_raw(image + 200),
-                sampler: vk::Sampler::from_raw(image + 300),
                 descriptor_set: vk::DescriptorSet::from_raw(descriptor_set),
                 width: 1,
                 height: 1,

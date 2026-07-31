@@ -4,7 +4,10 @@ use std::ffi::{c_char, c_void};
 use dear_imgui_rs::platform_io::PlatformIo;
 use dear_imgui_rs::{BackendFlags, Context, ContextBinding, ContextLifecycle, sys};
 
-use super::{RendererError, RendererResult, draw_callback_reset_render_state};
+use super::{
+    RendererError, RendererResult, draw_callback_reset_render_state,
+    draw_callback_set_sampler_linear, draw_callback_set_sampler_nearest,
+};
 
 const RENDERER_NAME: &str = concat!("dear-imgui-ash ", env!("CARGO_PKG_VERSION"));
 
@@ -13,7 +16,7 @@ fn core_renderer_flags() -> BackendFlags {
 }
 
 fn renderer_viewport_flag_bits() -> i32 {
-    sys::ImGuiBackendFlags_RendererHasViewports as i32
+    sys::ImGuiBackendFlags_RendererHasViewports
 }
 
 fn first_renderer_window_slot(raw: &sys::ImGuiPlatformIO) -> Option<&'static str> {
@@ -58,6 +61,10 @@ pub(super) struct RendererContextState {
 }
 
 impl RendererContextState {
+    pub(super) fn binding(&self) -> ContextBinding {
+        self.binding.clone()
+    }
+
     pub(super) fn prepare(context: &Context) -> RendererResult<Self> {
         Self::preflight(context)?;
         Ok(Self {
@@ -130,9 +137,13 @@ impl RendererContextState {
         let io = context.io_mut();
         io.set_backend_flags(io.backend_flags() | core_renderer_flags());
         unsafe {
-            context
-                .platform_io_mut()
+            let platform_io = context.platform_io_mut();
+            platform_io
                 .set_draw_callback_reset_render_state_raw(Some(draw_callback_reset_render_state));
+            platform_io
+                .set_draw_callback_set_sampler_linear_raw(Some(draw_callback_set_sampler_linear));
+            platform_io
+                .set_draw_callback_set_sampler_nearest_raw(Some(draw_callback_set_sampler_nearest));
         }
         self.name_ptr.set(name_ptr);
         self.fault.set(None);
@@ -169,10 +180,16 @@ impl RendererContextState {
         ) {
             return Err(replaced("DrawCallback_ResetRenderState"));
         }
-        if raw.DrawCallback_SetSamplerLinear.is_some() {
+        if !draw_callback_matches(
+            raw.DrawCallback_SetSamplerLinear,
+            draw_callback_set_sampler_linear,
+        ) {
             return Err(replaced("DrawCallback_SetSamplerLinear"));
         }
-        if raw.DrawCallback_SetSamplerNearest.is_some() {
+        if !draw_callback_matches(
+            raw.DrawCallback_SetSamplerNearest,
+            draw_callback_set_sampler_nearest,
+        ) {
             return Err(replaced("DrawCallback_SetSamplerNearest"));
         }
         if !raw.Renderer_RenderState.is_null() {
@@ -218,6 +235,14 @@ impl RendererContextState {
             || draw_callback_matches(
                 platform_io.draw_callback_reset_render_state_raw(),
                 draw_callback_reset_render_state,
+            )
+            || draw_callback_matches(
+                platform_io.draw_callback_set_sampler_linear_raw(),
+                draw_callback_set_sampler_linear,
+            )
+            || draw_callback_matches(
+                platform_io.draw_callback_set_sampler_nearest_raw(),
+                draw_callback_set_sampler_nearest,
             )
     }
 
@@ -308,6 +333,14 @@ impl RendererContextState {
             || draw_callback_matches(
                 platform_io.draw_callback_reset_render_state_raw(),
                 draw_callback_reset_render_state,
+            )
+            || draw_callback_matches(
+                platform_io.draw_callback_set_sampler_linear_raw(),
+                draw_callback_set_sampler_linear,
+            )
+            || draw_callback_matches(
+                platform_io.draw_callback_set_sampler_nearest_raw(),
+                draw_callback_set_sampler_nearest,
             );
         if still_owns_core_publication {
             io.BackendFlags &= !core_renderer_flags().bits();
@@ -317,6 +350,18 @@ impl RendererContextState {
             draw_callback_reset_render_state,
         ) {
             unsafe { platform_io.set_draw_callback_reset_render_state_raw(None) };
+        }
+        if draw_callback_matches(
+            platform_io.draw_callback_set_sampler_linear_raw(),
+            draw_callback_set_sampler_linear,
+        ) {
+            unsafe { platform_io.set_draw_callback_set_sampler_linear_raw(None) };
+        }
+        if draw_callback_matches(
+            platform_io.draw_callback_set_sampler_nearest_raw(),
+            draw_callback_set_sampler_nearest,
+        ) {
+            unsafe { platform_io.set_draw_callback_set_sampler_nearest_raw(None) };
         }
         name_is_ours
     }
@@ -478,6 +523,12 @@ mod tests {
             first
                 .platform_io_mut()
                 .set_draw_callback_reset_render_state_raw(None);
+            first
+                .platform_io_mut()
+                .set_draw_callback_set_sampler_linear_raw(None);
+            first
+                .platform_io_mut()
+                .set_draw_callback_set_sampler_nearest_raw(None);
         }
         first
             .set_renderer_name(None::<String>)
@@ -498,6 +549,12 @@ mod tests {
             later
                 .platform_io_mut()
                 .set_draw_callback_reset_render_state_raw(Some(draw_callback_reset_render_state));
+            later
+                .platform_io_mut()
+                .set_draw_callback_set_sampler_linear_raw(Some(draw_callback_set_sampler_linear));
+            later
+                .platform_io_mut()
+                .set_draw_callback_set_sampler_nearest_raw(Some(draw_callback_set_sampler_nearest));
         }
 
         state.forget_destroyed_context();
@@ -515,6 +572,12 @@ mod tests {
             later
                 .platform_io_mut()
                 .set_draw_callback_reset_render_state_raw(None);
+            later
+                .platform_io_mut()
+                .set_draw_callback_set_sampler_linear_raw(None);
+            later
+                .platform_io_mut()
+                .set_draw_callback_set_sampler_nearest_raw(None);
         }
     }
 }

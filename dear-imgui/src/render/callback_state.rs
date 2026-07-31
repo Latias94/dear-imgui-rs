@@ -27,8 +27,7 @@ pub enum RendererRenderStateGuardError {
 #[doc(hidden)]
 pub struct RendererRenderStateGuard<'state, State> {
     platform_io: NonNull<sys::ImGuiPlatformIO>,
-    expected: NonNull<c_void>,
-    finished: bool,
+    expected: NonNull<State>,
     _state: PhantomData<&'state mut State>,
 }
 
@@ -65,44 +64,53 @@ impl<'state, State> RendererRenderStateGuard<'state, State> {
         let platform_io =
             NonNull::new(platform_io).ok_or(RendererRenderStateGuardError::MissingPlatformIo)?;
         unsafe { Self::preflight(platform_io.as_ptr()) }?;
-        let expected = NonNull::from(state).cast::<c_void>();
+        let expected = NonNull::from(state);
         unsafe {
-            (*platform_io.as_ptr()).Renderer_RenderState = expected.as_ptr();
+            (*platform_io.as_ptr()).Renderer_RenderState = expected.cast::<c_void>().as_ptr();
         }
         Ok(Self {
             platform_io,
             expected,
-            finished: false,
             _state: PhantomData,
         })
     }
 
     /// Confirms that no callback replaced the state owned by this renderer.
     pub fn validate(&self) -> Result<(), RendererRenderStateGuardError> {
-        if unsafe { self.platform_io.as_ref().Renderer_RenderState } == self.expected.as_ptr() {
+        if unsafe { self.platform_io.as_ref().Renderer_RenderState }
+            == self.expected.cast::<c_void>().as_ptr()
+        {
             Ok(())
         } else {
             Err(RendererRenderStateGuardError::Drift)
         }
     }
 
+    /// Mutably borrows the renderer state published by this guard.
+    ///
+    /// Renderers use this between raw callback invocations to keep transient state observations in
+    /// sync with the commands they record. The guard's exclusive lifetime prevents another Rust
+    /// owner from mutating the value concurrently.
+    pub fn state_mut(&mut self) -> &mut State {
+        unsafe { self.expected.as_mut() }
+    }
+
     /// Clears the state slot after validating its ownership.
-    pub fn finish(mut self) -> Result<(), RendererRenderStateGuardError> {
+    pub fn finish(self) -> Result<(), RendererRenderStateGuardError> {
         let result = self.validate();
         if result.is_ok() {
             unsafe {
                 (*self.platform_io.as_ptr()).Renderer_RenderState = std::ptr::null_mut();
             }
         }
-        self.finished = true;
         result
     }
 }
 
 impl<State> Drop for RendererRenderStateGuard<'_, State> {
     fn drop(&mut self) {
-        if !self.finished
-            && unsafe { self.platform_io.as_ref().Renderer_RenderState } == self.expected.as_ptr()
+        if unsafe { self.platform_io.as_ref().Renderer_RenderState }
+            == self.expected.cast::<c_void>().as_ptr()
         {
             unsafe {
                 (*self.platform_io.as_ptr()).Renderer_RenderState = std::ptr::null_mut();
@@ -166,6 +174,22 @@ mod tests {
                 std::ptr::from_mut(&mut foreign).cast()
             );
             (*platform_io).Renderer_RenderState = std::ptr::null_mut();
+            sys::ImGuiPlatformIO_destroy(platform_io);
+        }
+    }
+
+    #[test]
+    fn guard_can_update_its_published_state_between_callbacks() {
+        unsafe {
+            let platform_io = sys::ImGuiPlatformIO_ImGuiPlatformIO();
+            let mut state = 1_u8;
+            let mut guard = RendererRenderStateGuard::install(platform_io, &mut state).unwrap();
+
+            *guard.state_mut() = 7;
+            assert_eq!(*((*platform_io).Renderer_RenderState.cast::<u8>()), 7);
+
+            guard.finish().unwrap();
+            assert_eq!(state, 7);
             sys::ImGuiPlatformIO_destroy(platform_io);
         }
     }

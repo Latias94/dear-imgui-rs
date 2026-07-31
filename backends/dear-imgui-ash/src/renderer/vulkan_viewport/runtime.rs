@@ -24,6 +24,7 @@ use super::registry::{
     GlobalHandles, preflight_runtime, query_surface_support, register_runtime, take_viewport_data,
     unregister_runtime, validate_vulkan_config,
 };
+use super::trace::{AshViewportFrameReport, FrameTraceState};
 use super::{SurfaceAdapter, SurfaceCreateError, SurfaceSupportError, VulkanViewportConfig};
 use crate::renderer::lifecycle::{DeviceIdleOutcome, classify_device_idle};
 use crate::{AshRenderer, Options, RendererError, TextureRetirementBatch, TextureUpdateResult};
@@ -103,6 +104,9 @@ pub enum AshViewportError {
     /// The runtime has shut down or Context-owned teardown has started.
     #[error("the Ash viewport runtime is no longer attached")]
     RuntimeDetached,
+    /// A secondary-viewport frame trace is already active for this runtime.
+    #[error("an Ash viewport frame trace is already active")]
+    FrameTraceAlreadyActive,
     /// The renderer is already mutably borrowed by another runtime entry.
     #[error("Ash renderer runtime is already active in `{callback}`")]
     CallbackReentered { callback: &'static str },
@@ -277,8 +281,15 @@ pub(super) struct RuntimeControl {
     // ImGui clears PlatformRequestClose at the end of UpdatePlatformWindows, including failures
     // raised by Renderer_CreateWindow in that same call.
     failed_viewports: RefCell<HashSet<Id>>,
+    // Native RendererUserData stores addresses into these boxes, so vector relocation must not
+    // relocate the sidecar allocations themselves.
+    #[allow(
+        clippy::vec_box,
+        reason = "native viewport callbacks retain sidecar addresses"
+    )]
     retained_viewports: RefCell<Vec<Box<super::ViewportAshData>>>,
     faults: RefCell<Option<AshViewportError>>,
+    frame_trace: RefCell<FrameTraceState>,
     #[cfg(test)]
     panic_next_callback: Cell<bool>,
     #[cfg(test)]
@@ -326,6 +337,7 @@ impl RuntimeControl {
             failed_viewports: RefCell::new(HashSet::new()),
             retained_viewports: RefCell::new(Vec::new()),
             faults: RefCell::new(None),
+            frame_trace: RefCell::new(FrameTraceState::default()),
             #[cfg(test)]
             panic_next_callback: Cell::new(false),
             #[cfg(test)]
@@ -343,10 +355,6 @@ impl RuntimeControl {
 
     pub(super) fn binding(&self) -> &ContextBinding {
         &self.binding
-    }
-
-    pub(super) fn globals(&self) -> Option<GlobalHandles> {
-        self.globals.borrow().clone()
     }
 
     pub(super) fn is_callback_accessible(&self) -> bool {
@@ -422,6 +430,35 @@ impl RuntimeControl {
         if faults.is_none() {
             *faults = Some(fault);
         }
+    }
+
+    fn begin_frame_trace(&self) -> Result<(), AshViewportError> {
+        self.ensure_entry()?;
+        if self.frame_trace.borrow_mut().begin() {
+            Ok(())
+        } else {
+            Err(AshViewportError::FrameTraceAlreadyActive)
+        }
+    }
+
+    fn finish_frame_trace(&self) -> AshViewportFrameReport {
+        self.frame_trace.borrow_mut().finish()
+    }
+
+    fn abort_frame_trace(&self) {
+        self.frame_trace.borrow_mut().abort();
+    }
+
+    pub(super) fn record_viewport_render_submitted(&self, viewport_id: Id) {
+        self.frame_trace
+            .borrow_mut()
+            .record_render_submitted(viewport_id);
+    }
+
+    pub(super) fn record_viewport_present_submitted(&self, viewport_id: Id) {
+        self.frame_trace
+            .borrow_mut()
+            .record_present_submitted(viewport_id);
     }
 
     pub(super) fn record_runtime_contract_fault(&self, fault: AshViewportError) {
@@ -598,8 +635,14 @@ impl RuntimeControl {
             .and_then(RendererStorage::real_mut)
             .ok_or(AshViewportError::RuntimeDetached)?;
         renderer.ensure_operational()?;
-        let globals = self.globals().ok_or(AshViewportError::RuntimeDetached)?;
-        callback(renderer, &globals)
+        let globals =
+            self.globals
+                .try_borrow()
+                .map_err(|_| AshViewportError::CallbackReentered {
+                    callback: callback_name,
+                })?;
+        let globals = globals.as_ref().ok_or(AshViewportError::RuntimeDetached)?;
+        callback(renderer, globals)
     }
 
     pub(super) fn with_renderer_teardown<R>(
@@ -622,8 +665,14 @@ impl RuntimeControl {
         let renderer = storage
             .real_mut()
             .ok_or(AshViewportError::RuntimeDetached)?;
-        let globals = self.globals().ok_or(AshViewportError::RuntimeDetached)?;
-        callback(renderer, &globals).map(Some)
+        let globals =
+            self.globals
+                .try_borrow()
+                .map_err(|_| AshViewportError::CallbackReentered {
+                    callback: "Ash viewport runtime shutdown",
+                })?;
+        let globals = globals.as_ref().ok_or(AshViewportError::RuntimeDetached)?;
+        callback(renderer, globals).map(Some)
     }
 
     pub(super) fn wait_device_idle(
@@ -631,11 +680,20 @@ impl RuntimeControl {
         renderer: &AshRenderer,
         operation: &'static str,
     ) -> Result<(), AshViewportError> {
+        self.wait_device_idle_outcome(renderer, operation)
+            .map(|_| ())
+    }
+
+    pub(super) fn wait_device_idle_outcome(
+        &self,
+        renderer: &AshRenderer,
+        operation: &'static str,
+    ) -> Result<DeviceIdleOutcome, AshViewportError> {
         match classify_device_idle(unsafe { renderer.device.device_wait_idle() }) {
-            Ok(DeviceIdleOutcome::Complete) => Ok(()),
+            Ok(DeviceIdleOutcome::Complete) => Ok(DeviceIdleOutcome::Complete),
             Ok(DeviceIdleOutcome::DeviceLost) => {
                 self.record_fault(AshViewportError::DeviceLost { operation });
-                Ok(())
+                Ok(DeviceIdleOutcome::DeviceLost)
             }
             Err(source) => Err(AshViewportError::DeviceCompletionFailed { operation, source }),
         }
@@ -1108,6 +1166,33 @@ pub(crate) struct OwningViewportRuntime {
     control: Rc<RuntimeControl>,
 }
 
+/// A non-nestable trace scope for one secondary-viewport Vulkan rendering pass.
+///
+/// Call [`Self::finish`] after `render_platform_windows_default` to obtain same-scope evidence of
+/// successful render submission and presentation. Dropping the guard discards partial evidence.
+#[must_use = "finish the frame trace to obtain its report"]
+pub struct AshViewportFrameTrace<'runtime> {
+    control: &'runtime RuntimeControl,
+    active: bool,
+}
+
+impl AshViewportFrameTrace<'_> {
+    /// Ends the trace and returns normalized secondary-viewport submission evidence.
+    pub fn finish(mut self) -> AshViewportFrameReport {
+        let report = self.control.finish_frame_trace();
+        self.active = false;
+        report
+    }
+}
+
+impl Drop for AshViewportFrameTrace<'_> {
+    fn drop(&mut self) {
+        if self.active {
+            self.control.abort_frame_trace();
+        }
+    }
+}
+
 impl fmt::Debug for OwningViewportRuntime {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -1118,6 +1203,14 @@ impl fmt::Debug for OwningViewportRuntime {
 }
 
 impl OwningViewportRuntime {
+    pub(crate) fn begin_frame_trace(&self) -> Result<AshViewportFrameTrace<'_>, AshViewportError> {
+        self.control.begin_frame_trace()?;
+        Ok(AshViewportFrameTrace {
+            control: self.control.as_ref(),
+            active: true,
+        })
+    }
+
     pub(crate) unsafe fn attach(
         context: &mut Context,
         renderer: AshRenderer,
@@ -1142,6 +1235,7 @@ impl OwningViewportRuntime {
             present_queue_family_index: config.present_queue_family_index,
             in_flight_frames: renderer.options.in_flight_frames.max(1),
             swapchain_policy: config.swapchain_policy,
+            swapchain_image_usage: config.swapchain_image_usage,
             surface_adapter,
         };
         let validation = validate_vulkan_config(&globals).and_then(|()| {
@@ -1221,13 +1315,23 @@ impl OwningViewportRuntime {
         }
     }
 
-    pub(crate) fn cmd_draw(
+    pub(crate) unsafe fn cmd_draw(
         &self,
         command_buffer: ash::vk::CommandBuffer,
         frame: RenderedFrame<'_>,
     ) -> Result<Option<TextureRetirementBatch>, AshViewportError> {
-        self.control.with_renderer_mut("cmd_draw", |renderer| {
-            renderer.cmd_draw(command_buffer, frame).map_err(Into::into)
+        self.control
+            .with_renderer_mut("cmd_draw", |renderer| unsafe {
+                renderer.cmd_draw(command_buffer, frame).map_err(Into::into)
+            })
+    }
+
+    pub(crate) fn prepare_frame(
+        &self,
+        frame: &mut RenderedFrame<'_>,
+    ) -> Result<Option<TextureRetirementBatch>, AshViewportError> {
+        self.control.with_renderer_mut("prepare_frame", |renderer| {
+            renderer.prepare_frame(frame).map_err(Into::into)
         })
     }
 
@@ -1290,102 +1394,53 @@ impl OwningViewportRuntime {
         self.control.with_renderer(callback)
     }
 
-    pub(crate) fn register_texture_descriptor_set(
-        &self,
-        set: ash::vk::DescriptorSet,
-    ) -> Result<TextureId, AshViewportError> {
-        self.control
-            .with_renderer_mut("register_texture_descriptor_set", |renderer| {
-                renderer
-                    .register_texture_descriptor_set(set)
-                    .map_err(Into::into)
-            })
-    }
-
-    pub(crate) fn register_external_texture_with_sampler(
+    pub(crate) unsafe fn register_external_texture(
         &self,
         image_view: ash::vk::ImageView,
-        sampler: ash::vk::Sampler,
+        image_layout: ash::vk::ImageLayout,
     ) -> Result<TextureId, AshViewportError> {
         self.control
-            .with_renderer_mut("register_external_texture_with_sampler", |renderer| {
+            .with_renderer_mut("register_external_texture", |renderer| unsafe {
                 renderer
-                    .register_external_texture_with_sampler(image_view, sampler)
+                    .register_external_texture(image_view, image_layout)
                     .map_err(Into::into)
             })
     }
 
-    pub(crate) fn remove_texture_descriptor_set(
+    pub(crate) unsafe fn update_external_texture(
+        &self,
+        texture: TextureId,
+        image_view: ash::vk::ImageView,
+        image_layout: ash::vk::ImageLayout,
+    ) -> Result<bool, AshViewportError> {
+        self.control
+            .with_renderer_mut("update_external_texture", |renderer| unsafe {
+                renderer
+                    .update_external_texture(texture, image_view, image_layout)
+                    .map_err(Into::into)
+            })
+    }
+
+    pub(crate) unsafe fn update_external_texture_unchecked(
+        &self,
+        texture: TextureId,
+        image_view: ash::vk::ImageView,
+        image_layout: ash::vk::ImageLayout,
+    ) -> Result<bool, AshViewportError> {
+        self.control
+            .with_renderer_mut("update_external_texture_unchecked", |renderer| unsafe {
+                renderer
+                    .update_external_texture_unchecked(texture, image_view, image_layout)
+                    .map_err(Into::into)
+            })
+    }
+
+    pub(crate) unsafe fn unregister_texture(
         &self,
         texture: TextureId,
     ) -> Result<(), AshViewportError> {
         self.control
-            .with_renderer_mut("remove_texture_descriptor_set", |renderer| {
-                renderer
-                    .remove_texture_descriptor_set(texture)
-                    .map_err(Into::into)
-            })
-    }
-
-    pub(crate) fn update_external_texture_view(
-        &self,
-        texture: TextureId,
-        image_view: ash::vk::ImageView,
-    ) -> Result<bool, AshViewportError> {
-        self.control
-            .with_renderer_mut("update_external_texture_view", |renderer| {
-                renderer
-                    .update_external_texture_view(texture, image_view)
-                    .map_err(Into::into)
-            })
-    }
-
-    pub(crate) unsafe fn update_external_texture_view_unchecked(
-        &self,
-        texture: TextureId,
-        image_view: ash::vk::ImageView,
-    ) -> Result<bool, AshViewportError> {
-        self.control.with_renderer_mut(
-            "update_external_texture_view_unchecked",
-            |renderer| unsafe {
-                renderer
-                    .update_external_texture_view_unchecked(texture, image_view)
-                    .map_err(Into::into)
-            },
-        )
-    }
-
-    pub(crate) fn update_external_texture_sampler(
-        &self,
-        texture: TextureId,
-        sampler: ash::vk::Sampler,
-    ) -> Result<bool, AshViewportError> {
-        self.control
-            .with_renderer_mut("update_external_texture_sampler", |renderer| {
-                renderer
-                    .update_external_texture_sampler(texture, sampler)
-                    .map_err(Into::into)
-            })
-    }
-
-    pub(crate) unsafe fn update_external_texture_sampler_unchecked(
-        &self,
-        texture: TextureId,
-        sampler: ash::vk::Sampler,
-    ) -> Result<bool, AshViewportError> {
-        self.control.with_renderer_mut(
-            "update_external_texture_sampler_unchecked",
-            |renderer| unsafe {
-                renderer
-                    .update_external_texture_sampler_unchecked(texture, sampler)
-                    .map_err(Into::into)
-            },
-        )
-    }
-
-    pub(crate) fn unregister_texture(&self, texture: TextureId) -> Result<(), AshViewportError> {
-        self.control
-            .with_renderer_mut("unregister_texture", |renderer| {
+            .with_renderer_mut("unregister_texture", |renderer| unsafe {
                 renderer.unregister_texture(texture).map_err(Into::into)
             })
     }

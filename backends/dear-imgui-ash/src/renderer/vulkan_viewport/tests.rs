@@ -3,14 +3,15 @@ use std::ffi::c_void;
 use std::rc::Rc;
 
 use super::callbacks::{
-    publish_registered_box, publish_registered_box_transactionally, recover_acquired_step,
-    validate_secondary_viewports,
+    advance_acquired_frame_recovery, publish_registered_box,
+    publish_registered_box_transactionally, recover_acquired_step, validate_secondary_viewports,
 };
 use super::registry::{
     ViewportIdentity, fail_next_viewport_registration, preflight_registered_viewport_data,
     register_viewport_data, resolve_viewport, resolve_viewport_by_id,
     take_viewport_data_from_viewport, unregister_viewport_data, validate_queue_family_selection,
-    validate_vulkan_handles, viewport_data_count, viewport_user_data_mut,
+    validate_swapchain_image_usage, validate_vulkan_handles, viewport_data_count,
+    viewport_user_data_mut,
 };
 use super::*;
 use ash::vk::Handle;
@@ -67,6 +68,28 @@ fn invalid_vulkan_handles_and_queue_families_are_rejected() {
             queue_family_index: 1,
             queue_family_count: 1
         })
+    ));
+}
+
+#[test]
+fn swapchain_image_usage_always_requires_color_attachment_and_validates_extras() {
+    let supported = vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC;
+
+    assert_eq!(
+        validate_swapchain_image_usage(supported, vk::ImageUsageFlags::empty()),
+        Ok(vk::ImageUsageFlags::COLOR_ATTACHMENT)
+    );
+    assert_eq!(
+        validate_swapchain_image_usage(supported, vk::ImageUsageFlags::TRANSFER_SRC),
+        Ok(supported)
+    );
+    assert!(matches!(
+        validate_swapchain_image_usage(supported, vk::ImageUsageFlags::STORAGE),
+        Err(SurfaceSupportError::ImageUsageUnsupported {
+            required,
+            supported: actual,
+        }) if required == vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::STORAGE
+            && actual == supported
     ));
 }
 
@@ -304,10 +327,118 @@ fn acquired_frame_error_preserves_recovery_failure() {
 }
 
 #[test]
+fn failed_idle_keeps_acquired_frame_poisoned_until_sync_replacement() {
+    use crate::renderer::lifecycle::DeviceIdleOutcome;
+
+    let mut state = ViewportRuntimeState::Active;
+    assert!(state.begin_acquire(2));
+
+    let replacement_count = Cell::new(0);
+    let first = advance_acquired_frame_recovery(
+        &mut state,
+        || {
+            Err(AshViewportError::DeviceCompletionFailed {
+                operation: "injected acquire recovery",
+                source: vk::Result::ERROR_OUT_OF_HOST_MEMORY,
+            })
+        },
+        |_| {
+            replacement_count.set(replacement_count.get() + 1);
+            Ok(())
+        },
+    );
+
+    assert!(matches!(
+        first,
+        Err(AshViewportError::DeviceCompletionFailed {
+            operation: "injected acquire recovery",
+            source: vk::Result::ERROR_OUT_OF_HOST_MEMORY,
+        })
+    ));
+    assert_eq!(
+        state,
+        ViewportRuntimeState::AcquireRecoveryRequired { frame_index: 2 }
+    );
+    assert!(!state.can_acquire());
+    assert_eq!(replacement_count.get(), 0);
+
+    // Observing the callback fault must not make the poisoned frame reusable. The next renderer
+    // entry retries recovery before another acquire and only then permits a swapchain rebuild.
+    let second = advance_acquired_frame_recovery(
+        &mut state,
+        || Ok(DeviceIdleOutcome::Complete),
+        |frame_index| {
+            assert_eq!(frame_index, 2);
+            replacement_count.set(replacement_count.get() + 1);
+            Ok(())
+        },
+    );
+
+    assert_eq!(second.unwrap(), DeviceIdleOutcome::Complete);
+    assert_eq!(state, ViewportRuntimeState::RebuildRequired);
+    assert!(!state.can_acquire());
+    assert_eq!(replacement_count.get(), 1);
+}
+
+#[test]
+fn failed_sync_replacement_keeps_acquired_frame_poisoned() {
+    use crate::renderer::lifecycle::DeviceIdleOutcome;
+
+    let mut state = ViewportRuntimeState::Active;
+    assert!(state.begin_acquire(1));
+
+    let result = advance_acquired_frame_recovery(
+        &mut state,
+        || Ok(DeviceIdleOutcome::Complete),
+        |_| {
+            Err(AshViewportError::InvalidCallbackArgument {
+                callback: "injected frame-sync replacement",
+            })
+        },
+    );
+
+    assert!(matches!(
+        result,
+        Err(AshViewportError::InvalidCallbackArgument {
+            callback: "injected frame-sync replacement"
+        })
+    ));
+    assert_eq!(
+        state,
+        ViewportRuntimeState::AcquireRecoveryRequired { frame_index: 1 }
+    );
+    assert!(!state.can_acquire());
+}
+
+#[test]
+fn device_loss_terminally_fails_acquired_frame_recovery() {
+    use crate::renderer::lifecycle::DeviceIdleOutcome;
+
+    let mut state = ViewportRuntimeState::Active;
+    assert!(state.begin_acquire(0));
+    let replacement_count = Cell::new(0);
+
+    let result = advance_acquired_frame_recovery(
+        &mut state,
+        || Ok(DeviceIdleOutcome::DeviceLost),
+        |_| {
+            replacement_count.set(replacement_count.get() + 1);
+            Ok(())
+        },
+    );
+
+    assert_eq!(result.unwrap(), DeviceIdleOutcome::DeviceLost);
+    assert_eq!(state, ViewportRuntimeState::Failed);
+    assert!(!state.can_acquire());
+    assert_eq!(replacement_count.get(), 0);
+}
+
+#[test]
 fn only_active_viewport_state_can_acquire() {
     assert!(ViewportRuntimeState::Active.can_acquire());
     assert!(!ViewportRuntimeState::Paused.can_acquire());
     assert!(!ViewportRuntimeState::RebuildRequired.can_acquire());
+    assert!(!ViewportRuntimeState::AcquireRecoveryRequired { frame_index: 0 }.can_acquire());
     assert!(!ViewportRuntimeState::Failed.can_acquire());
 }
 

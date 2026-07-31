@@ -35,6 +35,14 @@ class GateCategory(str, Enum):
     PRODUCT_FAILURE = "ProductFailure"
 
 
+class ViewportSmokeProfile(str, Enum):
+    """Runtime routing profile for one viewport smoke contract."""
+
+    WGPU_VULKAN = "WgpuVulkan"
+    SDL3_GLOW = "Sdl3Glow"
+    ASH_VULKAN = "AshVulkan"
+
+
 @dataclass(frozen=True)
 class GateResult:
     """Stable, machine-readable result for one native runtime gate."""
@@ -98,6 +106,7 @@ class ScenarioExpectation:
 class ViewportSmokeSpec:
     """Backend-specific contract layered over the shared real-window harness."""
 
+    profile: ViewportSmokeProfile
     gate: str
     binary: str
     features: str
@@ -108,6 +117,7 @@ class ViewportSmokeSpec:
     probe_label: str
     probe_identities: tuple[str, ...]
     probe_identity_error: str
+    probe_required_fragments: tuple[str, ...]
     build_label: str
     child_label: str
     success_summary: str
@@ -935,6 +945,27 @@ def _viewport_id_set(
     return viewport_ids
 
 
+def _validate_software_vulkan_adapter(
+    payload: Mapping[str, object], errors: list[str]
+) -> None:
+    adapter = payload.get("adapter")
+    if not isinstance(adapter, dict):
+        errors.append("adapter must be a JSON object")
+        return
+    if adapter.get("backend") != "Vulkan":
+        errors.append(f"adapter backend must be Vulkan, got {adapter.get('backend')!r}")
+    if adapter.get("device_type") != "Cpu":
+        errors.append(
+            f"adapter device_type must be Cpu, got {adapter.get('device_type')!r}"
+        )
+    identity = " ".join(
+        str(adapter.get(field_name, "")).lower()
+        for field_name in ("name", "driver", "driver_info")
+    )
+    if "lavapipe" not in identity and "llvmpipe" not in identity:
+        errors.append("adapter identity does not report Lavapipe/llvmpipe")
+
+
 def _validate_viewport_payload(payload: Mapping[str, object]) -> list[str]:
     errors = _validate_viewport_lifecycle(
         payload,
@@ -959,22 +990,7 @@ def _validate_viewport_payload(payload: Mapping[str, object]) -> list[str]:
             "secondary render and present submissions before main acquisition "
             "must share a viewport ID"
         )
-    adapter = payload.get("adapter")
-    if not isinstance(adapter, dict):
-        errors.append("adapter must be a JSON object")
-        return errors
-    if adapter.get("backend") != "Vulkan":
-        errors.append(f"adapter backend must be Vulkan, got {adapter.get('backend')!r}")
-    if adapter.get("device_type") != "Cpu":
-        errors.append(
-            f"adapter device_type must be Cpu, got {adapter.get('device_type')!r}"
-        )
-    identity = " ".join(
-        str(adapter.get(field_name, "")).lower()
-        for field_name in ("name", "driver", "driver_info")
-    )
-    if "lavapipe" not in identity and "llvmpipe" not in identity:
-        errors.append("adapter identity does not report Lavapipe/llvmpipe")
+    _validate_software_vulkan_adapter(payload, errors)
     return errors
 
 
@@ -1043,7 +1059,75 @@ def _validate_sdl3_glow_viewport_payload(
     return errors
 
 
+def _validate_ash_vulkan_viewport_payload(
+    payload: Mapping[str, object],
+) -> list[str]:
+    errors = _validate_viewport_lifecycle(
+        payload,
+        (
+            "dynamic_rendering_enabled",
+            "validation_layer_enabled",
+            "secondary_viewport_created",
+            "secondary_viewport_resized",
+            "merge_observed",
+            "callback_only_frame_executed",
+            "raw_callback_typed_state_observed",
+            "nearest_sampler_descriptor_set_observed",
+            "linear_sampler_descriptor_set_observed",
+            "sampler_descriptor_sets_distinct",
+            "reset_render_state_recovered",
+            "render_state_cleared_after_callback",
+            "managed_texture_updated",
+            "managed_texture_removed",
+            "texture_retirement_null_fence_rejected",
+            "texture_retirement_queue_drained",
+            "main_present_completed",
+            "renderer_shutdown_complete",
+            "viewport_runtime_shutdown_complete",
+            "platform_shutdown_complete",
+            "gpu_idle_before_teardown",
+            "vulkan_resources_dropped",
+        ),
+        schema_version=2,
+    )
+    rendered_ids = _viewport_id_set(
+        payload,
+        "secondary_render_submitted_viewport_ids",
+        errors,
+    )
+    presented_ids = _viewport_id_set(
+        payload,
+        "secondary_present_submitted_viewport_ids",
+        errors,
+    )
+    if rendered_ids and presented_ids and rendered_ids.isdisjoint(presented_ids):
+        errors.append(
+            "secondary render and present submissions must share a viewport ID"
+        )
+    validation_error_count = payload.get("validation_error_count")
+    if type(validation_error_count) is not int or validation_error_count != 0:
+        errors.append(
+            "validation_error_count expected 0, "
+            f"got {validation_error_count!r}"
+        )
+    validation_warning_count = payload.get("validation_warning_count")
+    if type(validation_warning_count) is not int or validation_warning_count != 0:
+        errors.append(
+            "validation_warning_count expected 0, "
+            f"got {validation_warning_count!r}"
+        )
+    retirement_count = payload.get("texture_retirement_fence_completion_count")
+    if type(retirement_count) is not int or retirement_count < 2:
+        errors.append(
+            "texture_retirement_fence_completion_count must be at least 2, "
+            f"got {retirement_count!r}"
+        )
+    _validate_software_vulkan_adapter(payload, errors)
+    return errors
+
+
 _WGPU_VIEWPORT_SMOKE = ViewportSmokeSpec(
+    profile=ViewportSmokeProfile.WGPU_VULKAN,
     gate="multi-viewport-smoke",
     binary="multi_viewport_wgpu",
     features="multi-viewport,test-engine",
@@ -1060,6 +1144,7 @@ _WGPU_VIEWPORT_SMOKE = ViewportSmokeSpec(
     probe_label="Lavapipe adapter probe",
     probe_identities=("lavapipe", "llvmpipe"),
     probe_identity_error="vulkaninfo did not expose a Lavapipe/llvmpipe adapter",
+    probe_required_fragments=(),
     build_label="WGPU multi-viewport example build",
     child_label="WGPU multi-viewport child",
     success_summary="secondary Winit/WGPU viewport create, render, merge, and teardown passed",
@@ -1067,6 +1152,7 @@ _WGPU_VIEWPORT_SMOKE = ViewportSmokeSpec(
 )
 
 _SDL3_GLOW_VIEWPORT_SMOKE = ViewportSmokeSpec(
+    profile=ViewportSmokeProfile.SDL3_GLOW,
     gate="sdl3-glow-multi-viewport-smoke",
     binary="sdl3_glow_multi_viewport",
     features="sdl3-glow-multi-viewport,test-engine",
@@ -1083,10 +1169,40 @@ _SDL3_GLOW_VIEWPORT_SMOKE = ViewportSmokeSpec(
     probe_label="Mesa llvmpipe OpenGL probe",
     probe_identities=("llvmpipe", "lavapipe"),
     probe_identity_error="glxinfo did not expose a Mesa llvmpipe renderer",
+    probe_required_fragments=(),
     build_label="SDL3/Glow multi-viewport example build",
     child_label="SDL3/Glow multi-viewport child",
     success_summary="secondary SDL3/Glow viewport create, render, merge, and teardown passed",
     payload_validator=_validate_sdl3_glow_viewport_payload,
+)
+
+_ASH_VULKAN_VIEWPORT_SMOKE = ViewportSmokeSpec(
+    profile=ViewportSmokeProfile.ASH_VULKAN,
+    gate="ash-vulkan-validation-smoke",
+    binary="multi_viewport_ash",
+    features="ash-winit-multi-viewport,ash-dynamic-rendering",
+    package_names=(
+        "xvfb",
+        "openbox",
+        "mesa-vulkan-drivers",
+        "vulkan-tools",
+        "vulkan-validationlayers",
+        "libxkbcommon-x11-0",
+    ),
+    probe_tool="vulkaninfo",
+    probe_arguments=("--summary",),
+    probe_log_stem="adapter",
+    probe_label="Lavapipe and Vulkan validation-layer probe",
+    probe_identities=("lavapipe", "llvmpipe"),
+    probe_identity_error="vulkaninfo did not expose a Lavapipe/llvmpipe adapter",
+    probe_required_fragments=("vk_layer_khronos_validation",),
+    build_label="Ash dynamic-rendering multi-viewport example build",
+    child_label="Ash Vulkan validation multi-viewport child",
+    success_summary=(
+        "Ash dynamic-rendering secondary viewport create, resize, callbacks, "
+        "present, merge, validation, and teardown passed"
+    ),
+    payload_validator=_validate_ash_vulkan_viewport_payload,
 )
 
 
@@ -1374,19 +1490,29 @@ def _run_viewport_smoke(
     openbox = None
     xdg_runtime_owner = None
     try:
-        if spec.gate == _WGPU_VIEWPORT_SMOKE.gate:
+        if spec.profile in (
+            ViewportSmokeProfile.WGPU_VULKAN,
+            ViewportSmokeProfile.ASH_VULKAN,
+        ):
             tools = _require_linux_runtime_tools()
             lavapipe_icd = _find_lavapipe_icd()
             route_diagnostics = {"lavapipe_icd": str(lavapipe_icd)}
             route_environment: dict[str, str | Path] = {
                 "WINIT_UNIX_BACKEND": "x11",
-                "WGPU_BACKEND": "vulkan",
                 "VK_DRIVER_FILES": lavapipe_icd,
                 "VK_ICD_FILENAMES": lavapipe_icd,
                 "DEAR_IMGUI_REQUIRE_SOFTWARE_VULKAN": "1",
-                "DEAR_IMGUI_VIEWPORT_DRAG_SMOKE": "1",
             }
-        elif spec.gate == _SDL3_GLOW_VIEWPORT_SMOKE.gate:
+            if spec.profile is ViewportSmokeProfile.WGPU_VULKAN:
+                route_environment.update(
+                    {
+                        "WGPU_BACKEND": "vulkan",
+                        "DEAR_IMGUI_VIEWPORT_DRAG_SMOKE": "1",
+                    }
+                )
+            else:
+                route_environment["DEAR_IMGUI_REQUIRE_VULKAN_VALIDATION"] = "1"
+        elif spec.profile is ViewportSmokeProfile.SDL3_GLOW:
             tools = _require_linux_sdl3_glow_tools()
             route_diagnostics = {"required_opengl_renderer": "Mesa llvmpipe"}
             route_environment = {
@@ -1396,7 +1522,7 @@ def _run_viewport_smoke(
         else:  # pragma: no cover - specs are module-owned constants.
             raise RuntimeContractError(
                 GateCategory.PRODUCT_FAILURE,
-                f"unknown viewport smoke profile: {spec.gate}",
+                f"unknown viewport smoke profile: {spec.profile.value}",
             )
         display = os.environ.get("DEAR_IMGUI_XVFB_DISPLAY", ":99")
         # Keep Wayland's AF_UNIX socket path below Linux's 108-byte limit.
@@ -1472,7 +1598,7 @@ def _run_viewport_smoke(
                 GateCategory.INFRASTRUCTURE_UNAVAILABLE,
                 f"cargo succeeded without producing {binary}",
             )
-        if spec.gate == _SDL3_GLOW_VIEWPORT_SMOKE.gate:
+        if spec.profile is ViewportSmokeProfile.SDL3_GLOW:
             sdl3_library_dirs = _sdl3_runtime_library_directories(workspace_root)
             inherited_library_path = child_environment.get("LD_LIBRARY_PATH", "")
             child_environment["LD_LIBRARY_PATH"] = os.pathsep.join(
@@ -1569,8 +1695,19 @@ def _run_viewport_smoke(
                                 GateCategory.INFRASTRUCTURE_UNAVAILABLE,
                                 spec.probe_identity_error,
                             )
+                        missing_probe_fragments = tuple(
+                            fragment
+                            for fragment in spec.probe_required_fragments
+                            if fragment.lower() not in renderer_output
+                        )
+                        if missing_probe_fragments:
+                            raise RuntimeContractError(
+                                GateCategory.INFRASTRUCTURE_UNAVAILABLE,
+                                "runtime probe is missing required capabilities: "
+                                + ", ".join(missing_probe_fragments),
+                            )
 
-                        if spec.gate == _SDL3_GLOW_VIEWPORT_SMOKE.gate:
+                        if spec.profile is ViewportSmokeProfile.SDL3_GLOW:
                             profiles = (
                                 (
                                     "texture-parameters",
@@ -1647,7 +1784,7 @@ def _run_viewport_smoke(
             details["xvfb"] = _background_json(xvfb, evidence_dir)
             _check_background(xvfb, "Xvfb")
 
-        if spec.gate == _SDL3_GLOW_VIEWPORT_SMOKE.gate:
+        if spec.profile is ViewportSmokeProfile.SDL3_GLOW:
             results: dict[str, object] = {}
             for slug, expected_strategy in (
                 ("texture-parameters", "texture_parameters"),
@@ -1740,6 +1877,25 @@ def run_sdl3_glow_viewport_smoke(
     """Run a real SDL3/Glow secondary-window lifecycle under Mesa llvmpipe."""
     return _run_viewport_smoke(
         spec=_SDL3_GLOW_VIEWPORT_SMOKE,
+        workspace_root=workspace_root,
+        evidence_dir=evidence_dir,
+        child_timeout=child_timeout,
+        build_timeout=build_timeout,
+        attempt=attempt,
+    )
+
+
+def run_ash_vulkan_validation_smoke(
+    *,
+    workspace_root: Path,
+    evidence_dir: Path,
+    child_timeout: float = 180.0,
+    build_timeout: float = 900.0,
+    attempt: int = 1,
+) -> GateResult:
+    """Run Ash dynamic-rendering multi-viewport under Lavapipe validation."""
+    return _run_viewport_smoke(
+        spec=_ASH_VULKAN_VIEWPORT_SMOKE,
         workspace_root=workspace_root,
         evidence_dir=evidence_dir,
         child_timeout=child_timeout,

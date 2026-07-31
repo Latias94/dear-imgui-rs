@@ -62,7 +62,7 @@ class ReleaseGateWorkflowTests(unittest.TestCase):
             if job.get("uses") == "./.github/workflows/native-runtime.yml"
         }
 
-        self.assertEqual(len(callsites), 6)
+        self.assertEqual(len(callsites), 8)
         for job_id, job in callsites.items():
             inputs = require_mapping(job.get("with"), f"ci.yml:{job_id}.with")
             with self.subTest(job=job_id):
@@ -102,6 +102,9 @@ class ReleaseGateWorkflowTests(unittest.TestCase):
             "viewport-attempt-1",
             "viewport-attempt-2",
             "viewport-cell",
+            "ash-vulkan-validation-attempt-1",
+            "ash-vulkan-validation-attempt-2",
+            "ash-vulkan-validation-cell",
             "sdl3-glow-viewport-attempt-1",
             "sdl3-glow-viewport-attempt-2",
             "sdl3-glow-viewport-cell",
@@ -119,6 +122,8 @@ class ReleaseGateWorkflowTests(unittest.TestCase):
             "test-engine-cell",
             "viewport-attempt-2",
             "viewport-cell",
+            "ash-vulkan-validation-attempt-2",
+            "ash-vulkan-validation-cell",
             "sdl3-glow-viewport-attempt-2",
             "sdl3-glow-viewport-cell",
             "aggregate",
@@ -133,13 +138,14 @@ class ReleaseGateWorkflowTests(unittest.TestCase):
                 self.assertIn("always()", terms)
                 self.assertIn(guard_success, terms)
 
-    def test_release_gate_owns_the_authoritative_fourteen_cell_inventory(self):
+    def test_release_gate_owns_the_authoritative_fifteen_cell_inventory(self):
         gate = workflow("release-gate.yml")
         prebuilt = workflow("prebuilt-binaries.yml")
         source = f"{gate}\n{prebuilt}"
         required_cells = (
             "linux-test-engine-runtime",
             "linux-multi-viewport-smoke",
+            "linux-ash-vulkan-validation-smoke",
             "linux-sdl3-glow-multi-viewport-smoke",
             "linux-wasm",
             "windows-vcpkg",

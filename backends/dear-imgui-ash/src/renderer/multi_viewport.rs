@@ -24,8 +24,9 @@ use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::window::Window;
 
 pub use super::vulkan_viewport::{
-    AshViewportAttachError, AshViewportError, PresentModePolicy, SurfaceFormatPolicy,
-    SurfaceSupportError, ViewportSwapchainPolicy, VulkanViewportConfig,
+    AshViewportAttachError, AshViewportError, AshViewportFrameReport, AshViewportFrameTrace,
+    PresentModePolicy, SurfaceFormatPolicy, SurfaceSupportError, ViewportSwapchainPolicy,
+    VulkanViewportConfig,
 };
 use crate::{Options, TextureRetirementBatch, TextureUpdateResult};
 
@@ -140,13 +141,30 @@ impl WinitViewportRuntime {
         self.inner.poll_fault()
     }
 
+    /// Starts a non-nestable trace of secondary-viewport Vulkan submissions.
+    pub fn begin_frame_trace(&self) -> Result<AshViewportFrameTrace<'_>, AshViewportError> {
+        self.inner.begin_frame_trace()
+    }
+
+    /// Reconcile managed texture requests before any secondary viewport can draw this frame.
+    pub fn prepare_frame(
+        &self,
+        frame: &mut RenderedFrame<'_>,
+    ) -> Result<Option<TextureRetirementBatch>, AshViewportError> {
+        self.inner.prepare_frame(frame)
+    }
+
     /// Reconcile textures and record one Context-owned frame.
-    pub fn cmd_draw(
+    ///
+    /// # Safety
+    ///
+    /// `command_buffer` must satisfy [`AshRenderer::cmd_draw`].
+    pub unsafe fn cmd_draw(
         &self,
         command_buffer: vk::CommandBuffer,
         frame: RenderedFrame<'_>,
     ) -> Result<Option<TextureRetirementBatch>, AshViewportError> {
-        self.inner.cmd_draw(command_buffer, frame)
+        unsafe { self.inner.cmd_draw(command_buffer, frame) }
     }
 
     /// Return the highest managed-texture resource retirement batch still pending.
@@ -159,6 +177,8 @@ impl WinitViewportRuntime {
     /// Block for device idle and complete managed-texture resource retirement.
     ///
     /// The count includes superseded update images and resources pending a logical destroy.
+    /// Recorded but unsubmitted command buffers that reference released resources must not be
+    /// submitted afterwards; see [`AshRenderer::cmd_draw`].
     pub fn wait_for_texture_retirements(
         &self,
         batch: TextureRetirementBatch,
@@ -173,7 +193,8 @@ impl WinitViewportRuntime {
     /// # Safety
     ///
     /// Every fence must belong to this renderer's device and together cover all uploads and draws
-    /// on every queue which can reference textures through `batch`.
+    /// on every queue which can reference textures through `batch`. No recorded command buffer
+    /// which references released resources may be submitted afterwards.
     pub unsafe fn complete_texture_retirements_with_fences(
         &self,
         batch: TextureRetirementBatch,
@@ -205,79 +226,64 @@ impl WinitViewportRuntime {
         self.inner.with_renderer(callback)
     }
 
-    pub fn register_texture_descriptor_set(
-        &self,
-        set: vk::DescriptorSet,
-    ) -> Result<TextureId, AshViewportError> {
-        self.inner.register_texture_descriptor_set(set)
-    }
-
-    pub fn remove_texture_descriptor_set(
-        &self,
-        texture: TextureId,
-    ) -> Result<(), AshViewportError> {
-        self.inner.remove_texture_descriptor_set(texture)
-    }
-
-    pub fn register_external_texture_with_sampler(
+    /// Register an application-owned sampled image with the shared viewport renderer.
+    ///
+    /// # Safety
+    ///
+    /// The image view must belong to this renderer's device and satisfy the lifetime and layout
+    /// contract documented by [`AshRenderer::register_external_texture`].
+    pub unsafe fn register_external_texture(
         &self,
         image_view: vk::ImageView,
-        sampler: vk::Sampler,
+        image_layout: vk::ImageLayout,
     ) -> Result<TextureId, AshViewportError> {
-        self.inner
-            .register_external_texture_with_sampler(image_view, sampler)
+        unsafe {
+            self.inner
+                .register_external_texture(image_view, image_layout)
+        }
     }
 
-    pub fn update_external_texture_view(
+    /// Update an application-owned sampled image after waiting for device idle.
+    ///
+    /// # Safety
+    ///
+    /// The new image view must satisfy [`AshRenderer::update_external_texture`].
+    pub unsafe fn update_external_texture(
         &self,
         texture: TextureId,
         image_view: vk::ImageView,
+        image_layout: vk::ImageLayout,
     ) -> Result<bool, AshViewportError> {
-        self.inner.update_external_texture_view(texture, image_view)
+        unsafe {
+            self.inner
+                .update_external_texture(texture, image_view, image_layout)
+        }
     }
 
-    /// Update an external texture view without blocking for device idle.
+    /// Update an external sampled image without blocking for device idle.
     ///
     /// # Safety
     ///
     /// No submitted or recorded command may still access this texture's descriptor set.
-    pub unsafe fn update_external_texture_view_unchecked(
+    pub unsafe fn update_external_texture_unchecked(
         &self,
         texture: TextureId,
         image_view: vk::ImageView,
+        image_layout: vk::ImageLayout,
     ) -> Result<bool, AshViewportError> {
         unsafe {
             self.inner
-                .update_external_texture_view_unchecked(texture, image_view)
+                .update_external_texture_unchecked(texture, image_view, image_layout)
         }
     }
 
-    pub fn update_external_texture_sampler(
-        &self,
-        texture: TextureId,
-        sampler: vk::Sampler,
-    ) -> Result<bool, AshViewportError> {
-        self.inner.update_external_texture_sampler(texture, sampler)
-    }
-
-    /// Update an external sampler without blocking for device idle.
+    /// Unregister a texture after waiting for submitted device work.
     ///
     /// # Safety
     ///
-    /// No submitted or recorded command may still access this texture's descriptor set.
-    pub unsafe fn update_external_texture_sampler_unchecked(
-        &self,
-        texture: TextureId,
-        sampler: vk::Sampler,
-    ) -> Result<bool, AshViewportError> {
-        unsafe {
-            self.inner
-                .update_external_texture_sampler_unchecked(texture, sampler)
-        }
-    }
-
-    pub fn unregister_texture(&self, texture: TextureId) -> Result<(), AshViewportError> {
-        self.inner.unregister_texture(texture)
+    /// No recorded command buffer that references this texture may be submitted after this call.
+    pub unsafe fn unregister_texture(&self, texture: TextureId) -> Result<(), AshViewportError> {
+        unsafe { self.inner.unregister_texture(texture) }
     }
 
     /// Unregister a texture without blocking for device idle.
@@ -292,6 +298,10 @@ impl WinitViewportRuntime {
         unsafe { self.inner.unregister_texture_unchecked(texture) }
     }
 
+    /// Synchronize and apply one legacy texture transition.
+    ///
+    /// Recorded but unsubmitted command buffers that reference replaced resources must not be
+    /// submitted afterwards; see [`AshRenderer::cmd_draw`].
     pub fn update_texture(
         &self,
         texture: &TextureData,
@@ -313,6 +323,9 @@ impl WinitViewportRuntime {
     }
 
     /// Explicitly release renderer callbacks, secondary resources, and the Ash renderer.
+    ///
+    /// Recorded but unsubmitted command buffers from this renderer must not be submitted after
+    /// shutdown; see [`AshRenderer::cmd_draw`].
     pub fn shutdown(&mut self, context: &mut Context) -> Result<(), AshViewportError> {
         self.inner.shutdown(context)
     }

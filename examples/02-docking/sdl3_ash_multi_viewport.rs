@@ -20,15 +20,26 @@ use std::time::Instant;
 
 use ash::khr::{surface as khr_surface, swapchain as khr_swapchain};
 use ash::{Device, Entry, Instance, vk};
+#[cfg(feature = "ash-dynamic-rendering")]
+use dear_imgui_ash::DynamicRendering;
 use dear_imgui_ash::multi_viewport_sdl3::{Sdl3ViewportRuntime, VulkanViewportConfig};
-use dear_imgui_ash::{AshRenderer, Options as AshOptions, TextureRetirementBatch};
+use dear_imgui_ash::{
+    AshRenderer, AshRendererConfig, Options as AshOptions, TextureRetirementBatch,
+};
 use dear_imgui_examples::sdl3_callbacks::{
     Sdl3CallbackEventHandoff, configure_main_callback_rate, requests_exit,
 };
-use dear_imgui_rs::{Condition, ConfigFlags, Context, render::RenderedFrame};
+use dear_imgui_rs::{Condition, ConfigFlags, Context, RawDrawCallback, render::RenderedFrame};
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, GamepadMode, Sdl3PlatformBackend};
 use sdl3::video::{SwapInterval, WindowPos};
 use sdl3_main::{AppResult, AppResultWithState, MainThreadData, app_impl};
+
+#[path = "../support/ash_frame_sync.rs"]
+mod ash_frame_sync;
+use ash_frame_sync::{
+    FrameSync, clear_fence_references, create_frame_syncs, create_present_semaphores,
+    destroy_frame_syncs, destroy_present_semaphores, replace_frame_sync,
+};
 
 const FRAMES_IN_FLIGHT: usize = 2;
 
@@ -51,10 +62,14 @@ impl VulkanContext {
 
         let app_name = CString::new(title)?;
         let engine_name = CString::new("dear-imgui-examples")?;
+        #[cfg(feature = "ash-dynamic-rendering")]
+        let api_version = vk::API_VERSION_1_3;
+        #[cfg(not(feature = "ash-dynamic-rendering"))]
+        let api_version = vk::API_VERSION_1_0;
         let app_info = vk::ApplicationInfo::default()
             .application_name(app_name.as_c_str())
             .engine_name(engine_name.as_c_str())
-            .api_version(vk::make_api_version(0, 1, 0, 0));
+            .api_version(api_version);
 
         let extension_names = window.vulkan_instance_extensions()?;
         let extensions_cstr: Vec<CString> = extension_names
@@ -110,6 +125,32 @@ impl Drop for VulkanContext {
     }
 }
 
+#[derive(Clone, Copy)]
+struct MainRenderTarget {
+    #[cfg(feature = "ash-dynamic-rendering")]
+    format: vk::Format,
+    #[cfg(not(feature = "ash-dynamic-rendering"))]
+    render_pass: vk::RenderPass,
+}
+
+impl MainRenderTarget {
+    fn new(_device: &Device, format: vk::Format) -> Result<Self, vk::Result> {
+        Ok(Self {
+            #[cfg(feature = "ash-dynamic-rendering")]
+            format,
+            #[cfg(not(feature = "ash-dynamic-rendering"))]
+            render_pass: create_render_pass(_device, format)?,
+        })
+    }
+
+    fn destroy(self, _device: &Device) {
+        #[cfg(not(feature = "ash-dynamic-rendering"))]
+        unsafe {
+            _device.destroy_render_pass(self.render_pass, None);
+        }
+    }
+}
+
 struct SwapchainState {
     loader: khr_swapchain::Device,
     swapchain: vk::SwapchainKHR,
@@ -117,6 +158,9 @@ struct SwapchainState {
     extent: vk::Extent2D,
     images: Vec<vk::Image>,
     image_views: Vec<vk::ImageView>,
+    #[cfg(feature = "ash-dynamic-rendering")]
+    image_layouts: Vec<vk::ImageLayout>,
+    #[cfg(not(feature = "ash-dynamic-rendering"))]
     framebuffers: Vec<vk::Framebuffer>,
     present_semaphores: Vec<vk::Semaphore>,
     present_mode: vk::PresentModeKHR,
@@ -126,13 +170,13 @@ impl SwapchainState {
     fn new(
         ctx: &VulkanContext,
         window: &sdl3::video::Window,
-        render_pass: vk::RenderPass,
+        render_target: MainRenderTarget,
         surface_format: vk::SurfaceFormatKHR,
     ) -> Result<Self, Box<dyn Error>> {
         Self::new_with_old(
             ctx,
             window,
-            render_pass,
+            render_target,
             surface_format,
             vk::SwapchainKHR::null(),
         )
@@ -141,7 +185,7 @@ impl SwapchainState {
     fn new_with_old(
         ctx: &VulkanContext,
         window: &sdl3::video::Window,
-        render_pass: vk::RenderPass,
+        _render_target: MainRenderTarget,
         surface_format: vk::SurfaceFormatKHR,
         old_swapchain: vk::SwapchainKHR,
     ) -> Result<Self, Box<dyn Error>> {
@@ -208,8 +252,13 @@ impl SwapchainState {
                 return Err(Box::new(error));
             }
         };
-        let framebuffers = match create_framebuffers(&ctx.device, render_pass, extent, &image_views)
-        {
+        #[cfg(not(feature = "ash-dynamic-rendering"))]
+        let framebuffers = match create_framebuffers(
+            &ctx.device,
+            _render_target.render_pass,
+            extent,
+            &image_views,
+        ) {
             Ok(framebuffers) => framebuffers,
             Err(error) => {
                 destroy_image_views(&ctx.device, image_views);
@@ -220,6 +269,7 @@ impl SwapchainState {
         let present_semaphores = match create_present_semaphores(&ctx.device, images.len()) {
             Ok(semaphores) => semaphores,
             Err(error) => {
+                #[cfg(not(feature = "ash-dynamic-rendering"))]
                 destroy_framebuffers(&ctx.device, framebuffers);
                 destroy_image_views(&ctx.device, image_views);
                 unsafe { loader.destroy_swapchain(swapchain, None) };
@@ -227,6 +277,8 @@ impl SwapchainState {
             }
         };
 
+        #[cfg(feature = "ash-dynamic-rendering")]
+        let image_count = images.len();
         Ok(Self {
             loader,
             swapchain,
@@ -234,6 +286,9 @@ impl SwapchainState {
             extent,
             images,
             image_views,
+            #[cfg(feature = "ash-dynamic-rendering")]
+            image_layouts: vec![vk::ImageLayout::UNDEFINED; image_count],
+            #[cfg(not(feature = "ash-dynamic-rendering"))]
             framebuffers,
             present_semaphores,
             present_mode,
@@ -242,15 +297,14 @@ impl SwapchainState {
 
     fn destroy_resources(&mut self, device: &Device) {
         unsafe {
+            #[cfg(not(feature = "ash-dynamic-rendering"))]
             for framebuffer in self.framebuffers.drain(..) {
                 device.destroy_framebuffer(framebuffer, None);
             }
             for image_view in self.image_views.drain(..) {
                 device.destroy_image_view(image_view, None);
             }
-            for semaphore in self.present_semaphores.drain(..) {
-                device.destroy_semaphore(semaphore, None);
-            }
+            destroy_present_semaphores(device, &mut self.present_semaphores);
             if self.swapchain != vk::SwapchainKHR::null() {
                 self.loader.destroy_swapchain(self.swapchain, None);
                 self.swapchain = vk::SwapchainKHR::null();
@@ -262,9 +316,18 @@ impl SwapchainState {
         &mut self,
         ctx: &VulkanContext,
         window: &sdl3::video::Window,
-        render_pass: vk::RenderPass,
+        render_target: MainRenderTarget,
     ) -> Result<(), Box<dyn Error>> {
         unsafe { ctx.device.device_wait_idle()? };
+        self.recreate_after_device_idle(ctx, window, render_target)
+    }
+
+    fn recreate_after_device_idle(
+        &mut self,
+        ctx: &VulkanContext,
+        window: &sdl3::video::Window,
+        render_target: MainRenderTarget,
+    ) -> Result<(), Box<dyn Error>> {
         if !surface_supports_format(ctx, self.surface_format)? {
             return Err(format!(
                 "main surface no longer supports the renderer pair {:?}; rebuilding the renderer is required",
@@ -275,7 +338,7 @@ impl SwapchainState {
         let replacement = match Self::new_with_old(
             ctx,
             window,
-            render_pass,
+            render_target,
             self.surface_format,
             self.swapchain,
         ) {
@@ -291,90 +354,14 @@ impl SwapchainState {
     }
 }
 
-struct FrameSync {
-    image_available: vk::Semaphore,
-    fence: vk::Fence,
-    command_buffer: vk::CommandBuffer,
-}
-
-fn create_frame_sync(
-    device: &Device,
-    command_pool: vk::CommandPool,
-) -> Result<FrameSync, vk::Result> {
-    let semaphore_info = vk::SemaphoreCreateInfo::default();
-    let fence_info = vk::FenceCreateInfo::default().flags(vk::FenceCreateFlags::SIGNALED);
-
-    let image_available = unsafe { device.create_semaphore(&semaphore_info, None)? };
-    let fence = match unsafe { device.create_fence(&fence_info, None) } {
-        Ok(fence) => fence,
-        Err(error) => {
-            unsafe { device.destroy_semaphore(image_available, None) };
-            return Err(error);
-        }
-    };
-
-    let command_buffer = match unsafe {
-        device.allocate_command_buffers(
-            &vk::CommandBufferAllocateInfo::default()
-                .command_pool(command_pool)
-                .level(vk::CommandBufferLevel::PRIMARY)
-                .command_buffer_count(1),
-        )
-    } {
-        Ok(command_buffers) => command_buffers[0],
-        Err(error) => {
-            unsafe {
-                device.destroy_fence(fence, None);
-                device.destroy_semaphore(image_available, None);
-            }
-            return Err(error);
-        }
-    };
-
-    Ok(FrameSync {
-        image_available,
-        fence,
-        command_buffer,
-    })
-}
-
-fn create_frame_syncs(
-    device: &Device,
-    command_pool: vk::CommandPool,
-    count: usize,
-) -> Result<Vec<FrameSync>, vk::Result> {
-    let mut frames = Vec::with_capacity(count);
-    for _ in 0..count {
-        match create_frame_sync(device, command_pool) {
-            Ok(frame) => frames.push(frame),
-            Err(error) => {
-                destroy_frame_syncs(device, command_pool, &mut frames);
-                return Err(error);
-            }
-        }
-    }
-    Ok(frames)
-}
-
-fn destroy_frame_syncs(
-    device: &Device,
-    command_pool: vk::CommandPool,
-    frames: &mut Vec<FrameSync>,
-) {
-    unsafe {
-        for frame in frames.drain(..) {
-            device.destroy_semaphore(frame.image_available, None);
-            device.destroy_fence(frame.fence, None);
-            device.free_command_buffers(command_pool, &[frame.command_buffer]);
-        }
-    }
-}
-
 fn record_command_buffer<F>(
     device: &Device,
     command_buffer: vk::CommandBuffer,
-    render_pass: vk::RenderPass,
-    framebuffer: vk::Framebuffer,
+    _render_target: MainRenderTarget,
+    #[cfg(not(feature = "ash-dynamic-rendering"))] framebuffer: vk::Framebuffer,
+    #[cfg(feature = "ash-dynamic-rendering")] image: vk::Image,
+    #[cfg(feature = "ash-dynamic-rendering")] image_view: vk::ImageView,
+    #[cfg(feature = "ash-dynamic-rendering")] old_layout: vk::ImageLayout,
     extent: vk::Extent2D,
     clear_color: [f32; 4],
     record: F,
@@ -390,33 +377,74 @@ where
                 .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
         )?;
 
-        let clear_values = [vk::ClearValue {
+        let clear_value = vk::ClearValue {
             color: vk::ClearColorValue {
                 float32: clear_color,
             },
-        }];
+        };
 
+        #[cfg(not(feature = "ash-dynamic-rendering"))]
         device.cmd_begin_render_pass(
             command_buffer,
             &vk::RenderPassBeginInfo::default()
-                .render_pass(render_pass)
+                .render_pass(_render_target.render_pass)
                 .framebuffer(framebuffer)
                 .render_area(vk::Rect2D {
                     offset: vk::Offset2D { x: 0, y: 0 },
                     extent,
                 })
-                .clear_values(&clear_values),
+                .clear_values(std::slice::from_ref(&clear_value)),
             vk::SubpassContents::INLINE,
         );
 
+        #[cfg(feature = "ash-dynamic-rendering")]
+        {
+            ash_frame_sync::transition_swapchain_image(
+                device,
+                command_buffer,
+                image,
+                old_layout,
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+            );
+            let color_attachment = vk::RenderingAttachmentInfo::default()
+                .image_view(image_view)
+                .image_layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)
+                .load_op(vk::AttachmentLoadOp::CLEAR)
+                .store_op(vk::AttachmentStoreOp::STORE)
+                .clear_value(clear_value);
+            device.cmd_begin_rendering(
+                command_buffer,
+                &vk::RenderingInfo::default()
+                    .render_area(vk::Rect2D {
+                        offset: vk::Offset2D { x: 0, y: 0 },
+                        extent,
+                    })
+                    .layer_count(1)
+                    .color_attachments(std::slice::from_ref(&color_attachment)),
+            );
+        }
+
         texture_retirement = record(command_buffer)?;
 
+        #[cfg(not(feature = "ash-dynamic-rendering"))]
         device.cmd_end_render_pass(command_buffer);
+        #[cfg(feature = "ash-dynamic-rendering")]
+        {
+            device.cmd_end_rendering(command_buffer);
+            ash_frame_sync::transition_swapchain_image(
+                device,
+                command_buffer,
+                image,
+                vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+                vk::ImageLayout::PRESENT_SRC_KHR,
+            );
+        }
         device.end_command_buffer(command_buffer)?;
     }
     Ok(texture_retirement)
 }
 
+#[cfg(not(feature = "ash-dynamic-rendering"))]
 fn create_render_pass(device: &Device, format: vk::Format) -> Result<vk::RenderPass, vk::Result> {
     let attachments = [vk::AttachmentDescription::default()
         .format(format)
@@ -490,6 +518,7 @@ fn destroy_image_views(device: &Device, image_views: Vec<vk::ImageView>) {
     }
 }
 
+#[cfg(not(feature = "ash-dynamic-rendering"))]
 fn create_framebuffers(
     device: &Device,
     render_pass: vk::RenderPass,
@@ -520,33 +549,13 @@ fn create_framebuffers(
     Ok(framebuffers)
 }
 
+#[cfg(not(feature = "ash-dynamic-rendering"))]
 fn destroy_framebuffers(device: &Device, framebuffers: Vec<vk::Framebuffer>) {
     unsafe {
         for framebuffer in framebuffers {
             device.destroy_framebuffer(framebuffer, None);
         }
     }
-}
-
-fn create_present_semaphores(
-    device: &Device,
-    count: usize,
-) -> Result<Vec<vk::Semaphore>, vk::Result> {
-    let mut semaphores = Vec::with_capacity(count);
-    for _ in 0..count {
-        match unsafe { device.create_semaphore(&vk::SemaphoreCreateInfo::default(), None) } {
-            Ok(semaphore) => semaphores.push(semaphore),
-            Err(error) => {
-                unsafe {
-                    for semaphore in semaphores {
-                        device.destroy_semaphore(semaphore, None);
-                    }
-                }
-                return Err(error);
-            }
-        }
-    }
-    Ok(semaphores)
 }
 
 fn pick_surface_format(ctx: &VulkanContext) -> Result<vk::SurfaceFormatKHR, vk::Result> {
@@ -629,6 +638,20 @@ fn pick_physical_device(
 ) -> Result<(vk::PhysicalDevice, u32), Box<dyn Error>> {
     let pds = unsafe { instance.enumerate_physical_devices()? };
     for pd in pds {
+        #[cfg(feature = "ash-dynamic-rendering")]
+        {
+            let properties = unsafe { instance.get_physical_device_properties(pd) };
+            if properties.api_version < vk::API_VERSION_1_3 {
+                continue;
+            }
+            let mut dynamic_rendering = vk::PhysicalDeviceDynamicRenderingFeatures::default();
+            let mut features =
+                vk::PhysicalDeviceFeatures2::default().push_next(&mut dynamic_rendering);
+            unsafe { instance.get_physical_device_features2(pd, &mut features) };
+            if dynamic_rendering.dynamic_rendering != vk::TRUE {
+                continue;
+            }
+        }
         let qfs = unsafe { instance.get_physical_device_queue_family_properties(pd) };
         for (i, qf) in qfs.iter().enumerate() {
             if !qf.queue_flags.contains(vk::QueueFlags::GRAPHICS) {
@@ -659,6 +682,11 @@ fn create_device(
     let device_create_info = vk::DeviceCreateInfo::default()
         .queue_create_infos(&queue_info)
         .enabled_extension_names(&device_extensions);
+    #[cfg(feature = "ash-dynamic-rendering")]
+    let mut dynamic_rendering =
+        vk::PhysicalDeviceDynamicRenderingFeatures::default().dynamic_rendering(true);
+    #[cfg(feature = "ash-dynamic-rendering")]
+    let device_create_info = device_create_info.push_next(&mut dynamic_rendering);
 
     let device = unsafe { instance.create_device(physical_device, &device_create_info, None)? };
     let queue = unsafe { device.get_device_queue(queue_family_index, 0) };
@@ -696,22 +724,6 @@ fn create_external_rgba_texture(
             }
         }
         None
-    }
-
-    fn create_sampler(
-        device: &Device,
-        mag: vk::Filter,
-        min: vk::Filter,
-    ) -> Result<vk::Sampler, vk::Result> {
-        let info = vk::SamplerCreateInfo::default()
-            .mag_filter(mag)
-            .min_filter(min)
-            .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
-            .address_mode_u(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-            .address_mode_v(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-            .address_mode_w(vk::SamplerAddressMode::CLAMP_TO_EDGE)
-            .max_lod(0.0);
-        unsafe { device.create_sampler(&info, None) }
     }
 
     let memory_props = unsafe { instance.get_physical_device_memory_properties(physical_device) };
@@ -922,18 +934,17 @@ fn create_external_rgba_texture(
         )?
     };
 
-    let sampler_nearest = create_sampler(device, vk::Filter::NEAREST, vk::Filter::NEAREST)?;
-    let sampler_linear = create_sampler(device, vk::Filter::LINEAR, vk::Filter::LINEAR)?;
-
-    let tex_id = renderer.register_external_texture_with_sampler(image_view, sampler_nearest)?;
+    // SAFETY: the image view belongs to the renderer's device, remains alive until explicit
+    // unregistration, and the upload above leaves it in the declared shader-read-only layout.
+    let tex_id = unsafe {
+        renderer.register_external_texture(image_view, vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL)?
+    };
 
     Ok(ExternalTexture {
         tex_id,
         image,
         image_mem,
         image_view,
-        sampler_nearest,
-        sampler_linear,
         use_linear_sampler: false,
     })
 }
@@ -944,14 +955,31 @@ enum RendererRuntime {
 }
 
 impl RendererRuntime {
-    fn cmd_draw(
+    fn poll_fault(&self) -> Result<(), Box<dyn Error>> {
+        if let Self::Viewports(runtime) = self {
+            runtime.poll_fault()?;
+        }
+        Ok(())
+    }
+
+    unsafe fn cmd_draw(
         &mut self,
         command_buffer: vk::CommandBuffer,
         frame: RenderedFrame<'_>,
     ) -> Result<Option<TextureRetirementBatch>, Box<dyn Error>> {
         Ok(match self {
-            Self::Single(renderer) => renderer.cmd_draw(command_buffer, frame)?,
-            Self::Viewports(runtime) => runtime.cmd_draw(command_buffer, frame)?,
+            Self::Single(renderer) => unsafe { renderer.cmd_draw(command_buffer, frame)? },
+            Self::Viewports(runtime) => unsafe { runtime.cmd_draw(command_buffer, frame)? },
+        })
+    }
+
+    fn prepare_frame(
+        &mut self,
+        frame: &mut RenderedFrame<'_>,
+    ) -> Result<Option<TextureRetirementBatch>, Box<dyn Error>> {
+        Ok(match self {
+            Self::Single(renderer) => renderer.prepare_frame(frame)?,
+            Self::Viewports(runtime) => runtime.prepare_frame(frame)?,
         })
     }
 
@@ -985,41 +1013,28 @@ impl RendererRuntime {
         Ok(())
     }
 
-    fn register_external_texture_with_sampler(
+    unsafe fn register_external_texture(
         &mut self,
         image_view: vk::ImageView,
-        sampler: vk::Sampler,
+        image_layout: vk::ImageLayout,
     ) -> Result<dear_imgui_rs::TextureId, Box<dyn Error>> {
         Ok(match self {
-            Self::Single(renderer) => {
-                renderer.register_external_texture_with_sampler(image_view, sampler)?
-            }
-            Self::Viewports(runtime) => {
-                runtime.register_external_texture_with_sampler(image_view, sampler)?
-            }
+            Self::Single(renderer) => unsafe {
+                renderer.register_external_texture(image_view, image_layout)?
+            },
+            Self::Viewports(runtime) => unsafe {
+                runtime.register_external_texture(image_view, image_layout)?
+            },
         })
     }
 
-    fn update_external_texture_sampler(
-        &mut self,
-        texture: dear_imgui_rs::TextureId,
-        sampler: vk::Sampler,
-    ) -> Result<bool, Box<dyn Error>> {
-        Ok(match self {
-            Self::Single(renderer) => renderer.update_external_texture_sampler(texture, sampler)?,
-            Self::Viewports(runtime) => {
-                runtime.update_external_texture_sampler(texture, sampler)?
-            }
-        })
-    }
-
-    fn unregister_texture(
+    unsafe fn unregister_texture(
         &mut self,
         texture: dear_imgui_rs::TextureId,
     ) -> Result<(), Box<dyn Error>> {
         match self {
-            Self::Single(renderer) => renderer.unregister_texture(texture)?,
-            Self::Viewports(runtime) => runtime.unregister_texture(texture)?,
+            Self::Single(renderer) => unsafe { renderer.unregister_texture(texture)? },
+            Self::Viewports(runtime) => unsafe { runtime.unregister_texture(texture)? },
         }
         Ok(())
     }
@@ -1043,11 +1058,13 @@ struct ImguiState {
     frame: u32,
     show_demo: bool,
     external: Option<ExternalTexture>,
+    sampler_linear_callback: RawDrawCallback,
+    sampler_nearest_callback: RawDrawCallback,
 }
 
 struct VulkanState {
     ctx: VulkanContext,
-    render_pass: vk::RenderPass,
+    render_target: MainRenderTarget,
     swapchain: SwapchainState,
     frames: Vec<FrameSync>,
     images_in_flight: Vec<vk::Fence>,
@@ -1060,8 +1077,6 @@ struct ExternalTexture {
     image: vk::Image,
     image_mem: vk::DeviceMemory,
     image_view: vk::ImageView,
-    sampler_nearest: vk::Sampler,
-    sampler_linear: vk::Sampler,
     use_linear_sampler: bool,
 }
 
@@ -1071,8 +1086,8 @@ impl Drop for VulkanState {
             let _ = self.ctx.device.device_wait_idle();
             destroy_frame_syncs(&self.ctx.device, self.ctx.command_pool, &mut self.frames);
             self.swapchain.destroy_resources(&self.ctx.device);
-            self.ctx.device.destroy_render_pass(self.render_pass, None);
         }
+        self.render_target.destroy(&self.ctx.device);
     }
 }
 
@@ -1138,8 +1153,8 @@ impl App {
         // Vulkan instance/device/surface/swapchain.
         let ctx = VulkanContext::new(&window, "dear-imgui-sdl3-ash-multi-viewport")?;
         let surface_format = pick_surface_format(&ctx)?;
-        let render_pass = create_render_pass(&ctx.device, surface_format.format)?;
-        let swapchain = SwapchainState::new(&ctx, &window, render_pass, surface_format)?;
+        let render_target = MainRenderTarget::new(&ctx.device, surface_format.format)?;
+        let swapchain = SwapchainState::new(&ctx, &window, render_target, surface_format)?;
 
         // Dear ImGui context.
         let mut context = Context::create();
@@ -1186,21 +1201,47 @@ impl App {
 
         // Renderer.
         let framebuffer_srgb = is_srgb_format(swapchain.surface_format.format);
-        let mut renderer = AshRenderer::with_default_allocator(
-            &ctx.instance,
-            ctx.physical_device,
+        #[cfg(not(feature = "ash-dynamic-rendering"))]
+        let renderer_config = AshRendererConfig::with_render_pass(
             ctx.device.clone(),
             ctx.queue,
             ctx.command_pool,
-            render_pass,
-            &mut context,
-            Some(AshOptions {
-                in_flight_frames: FRAMES_IN_FLIGHT,
-                framebuffer_srgb,
-                ..Default::default()
-            }),
-        )?;
+            render_target.render_pass,
+        );
+        #[cfg(feature = "ash-dynamic-rendering")]
+        let renderer_config = AshRendererConfig::with_dynamic_rendering(
+            ctx.device.clone(),
+            ctx.queue,
+            ctx.command_pool,
+            DynamicRendering {
+                color_attachment_format: render_target.format,
+                depth_attachment_format: None,
+            },
+        );
+        let renderer_config = renderer_config.with_options(AshOptions {
+            in_flight_frames: FRAMES_IN_FLIGHT,
+            framebuffer_srgb,
+            ..Default::default()
+        });
+        // SAFETY: all handles share ctx's device lineage; the queue and command pool support the
+        // upload/graphics work, and the render target matches the swapchain and viewport targets.
+        let mut renderer = unsafe {
+            AshRenderer::with_default_allocator(
+                &ctx.instance,
+                ctx.physical_device,
+                renderer_config,
+                &mut context,
+            )?
+        };
         renderer.set_viewport_clear_color([0.1, 0.12, 0.15, 1.0]);
+        let sampler_linear_callback = context
+            .platform_io()
+            .draw_callback_set_sampler_linear_raw()
+            .ok_or("Ash did not publish its linear sampler callback")?;
+        let sampler_nearest_callback = context
+            .platform_io()
+            .draw_callback_set_sampler_nearest_raw()
+            .ok_or("Ash did not publish its nearest sampler callback")?;
         let renderer = if ENABLE_VIEWPORTS {
             // SAFETY: the application serializes all host access to ctx.queue and ctx.device while
             // this runtime can submit, present, rebuild swapchains, or wait for device idle.
@@ -1222,6 +1263,7 @@ impl App {
                                 swapchain.surface_format,
                                 swapchain.present_mode,
                             ),
+                        swapchain_image_usage: vk::ImageUsageFlags::empty(),
                     },
                 )?
             })
@@ -1247,10 +1289,12 @@ impl App {
                 frame: 0,
                 show_demo: true,
                 external: None,
+                sampler_linear_callback,
+                sampler_nearest_callback,
             },
             vk: VulkanState {
                 ctx,
-                render_pass,
+                render_target,
                 swapchain,
                 frames,
                 images_in_flight,
@@ -1307,20 +1351,14 @@ impl App {
             return Ok(());
         };
 
-        if let Err(error) = self.imgui.renderer.unregister_texture(external.tex_id) {
+        // SAFETY: shutdown has waited for device idle and no recorded frame command buffer will be
+        // submitted again, so the external descriptor has no remaining submitted or future users.
+        if let Err(error) = unsafe { self.imgui.renderer.unregister_texture(external.tex_id) } {
             self.imgui.external = Some(external);
             return Err(error);
         }
 
         unsafe {
-            self.vk
-                .ctx
-                .device
-                .destroy_sampler(external.sampler_nearest, None);
-            self.vk
-                .ctx
-                .device
-                .destroy_sampler(external.sampler_linear, None);
             self.vk
                 .ctx
                 .device
@@ -1409,7 +1447,8 @@ impl App {
 
         ui.dockspace_over_main_viewport();
 
-        let mut external_sampler_update = None;
+        let sampler_linear_callback = self.imgui.sampler_linear_callback;
+        let sampler_nearest_callback = self.imgui.sampler_nearest_callback;
         ui.window("SDL3 + Ash (multi-viewport)")
             .size([460.0, 280.0], Condition::FirstUseEver)
             .build(|| {
@@ -1427,17 +1466,22 @@ impl App {
 
                     let mut use_linear = external.use_linear_sampler;
                     ui.checkbox("Use linear sampler", &mut use_linear);
-                    if use_linear != external.use_linear_sampler {
-                        external.use_linear_sampler = use_linear;
-                        let sampler = if use_linear {
-                            external.sampler_linear
-                        } else {
-                            external.sampler_nearest
-                        };
-                        external_sampler_update = Some((external.tex_id, sampler));
-                    }
+                    external.use_linear_sampler = use_linear;
 
+                    let selected_callback = if use_linear {
+                        sampler_linear_callback
+                    } else {
+                        sampler_nearest_callback
+                    };
+                    let draw_list = ui.get_window_draw_list();
+                    unsafe {
+                        draw_list.add_callback(selected_callback, std::ptr::null_mut(), 0);
+                    }
                     ui.image(external.tex_id, [256.0, 256.0]);
+                    let draw_list = ui.get_window_draw_list();
+                    unsafe {
+                        draw_list.add_callback(sampler_linear_callback, std::ptr::null_mut(), 0);
+                    }
                 } else {
                     ui.separator();
                     ui.text("External texture not available.");
@@ -1453,38 +1497,32 @@ impl App {
             ui.show_demo_window(&mut self.imgui.show_demo);
         }
 
-        if let Some((texture, sampler)) = external_sampler_update {
-            if !self
-                .imgui
-                .renderer
-                .update_external_texture_sampler(texture, sampler)?
-            {
-                return Err("external texture registration disappeared".into());
-            }
-        }
         self.imgui
             .renderer
             .set_viewport_clear_color(self.imgui.clear_color)?;
 
-        let texture_retirement = {
-            let frame = self.imgui.context.render();
-            let clear_color = self.imgui.clear_color;
-            render_main_window(
-                &mut self.vk,
-                &mut self.imgui.renderer,
-                &self.window,
-                clear_color,
-                frame,
-            )?
-        };
+        let mut frame = self.imgui.context.render();
+        let prepared_texture_retirement = self.imgui.renderer.prepare_frame(&mut frame)?;
 
+        // Reconcile managed textures before any viewport records commands, then submit secondary
+        // swapchains before acquiring the main surface to avoid overlapping WSI ownership.
         if self.enable_viewports {
-            let io_flags = self.imgui.context.io().config_flags();
-            if io_flags.contains(ConfigFlags::VIEWPORTS_ENABLE) {
-                self.imgui.context.update_platform_windows();
-                self.imgui.context.render_platform_windows_default();
-            }
+            frame.update_and_render_platform_windows_default();
         }
+        self.imgui.renderer.poll_fault()?;
+
+        let clear_color = self.imgui.clear_color;
+        let recorded_texture_retirement = render_main_window(
+            &mut self.vk,
+            &mut self.imgui.renderer,
+            &self.window,
+            clear_color,
+            frame,
+        )?;
+        let texture_retirement = ash_frame_sync::merge_texture_retirement_batches(
+            prepared_texture_retirement,
+            recorded_texture_retirement,
+        )?;
 
         if let Some(retirement) = texture_retirement {
             self.imgui
@@ -1493,6 +1531,39 @@ impl App {
         }
         Ok(())
     }
+}
+
+fn recover_aborted_main_acquire(
+    vk_state: &mut VulkanState,
+    renderer: &mut RendererRuntime,
+    window: &sdl3::video::Window,
+    frame_index: usize,
+) -> Result<(), Box<dyn Error>> {
+    vk_state.swapchain_dirty = true;
+    unsafe { vk_state.ctx.device.device_wait_idle()? };
+
+    let frame = vk_state
+        .frames
+        .get_mut(frame_index)
+        .ok_or("Ash main frame disappeared during acquire recovery")?;
+    let abandoned_fence = frame.fence;
+    clear_fence_references(&mut vk_state.images_in_flight, abandoned_fence);
+    let abandoned_retirement =
+        replace_frame_sync(&vk_state.ctx.device, vk_state.ctx.command_pool, frame)?;
+
+    vk_state
+        .swapchain
+        .recreate_after_device_idle(&vk_state.ctx, window, vk_state.render_target)?;
+    vk_state.images_in_flight = vec![vk::Fence::null(); vk_state.swapchain.images.len()];
+    vk_state.swapchain_dirty = false;
+
+    if let Some(retirement) = abandoned_retirement {
+        renderer.wait_for_texture_retirements(retirement)?;
+    }
+    if let Some(retirement) = renderer.pending_texture_retirement()? {
+        renderer.wait_for_texture_retirements(retirement)?;
+    }
+    Ok(())
 }
 
 fn render_main_window(
@@ -1509,24 +1580,27 @@ fn render_main_window(
     if vk_state.swapchain_dirty {
         vk_state
             .swapchain
-            .recreate(&vk_state.ctx, window, vk_state.render_pass)?;
+            .recreate(&vk_state.ctx, window, vk_state.render_target)?;
         vk_state.images_in_flight = vec![vk::Fence::null(); vk_state.swapchain.images.len()];
         vk_state.swapchain_dirty = false;
     }
 
-    let frame = &vk_state.frames[vk_state.frame_index % vk_state.frames.len()];
+    let frame_index = vk_state.frame_index % vk_state.frames.len();
+    let frame_fence = vk_state.frames[frame_index].fence;
+    let image_available = vk_state.frames[frame_index].image_available;
+    let command_buffer = vk_state.frames[frame_index].command_buffer;
     unsafe {
         vk_state
             .ctx
             .device
-            .wait_for_fences(&[frame.fence], true, u64::MAX)?;
+            .wait_for_fences(&[frame_fence], true, u64::MAX)?;
     }
 
     let acquire = unsafe {
         vk_state.swapchain.loader.acquire_next_image(
             vk_state.swapchain.swapchain,
             u64::MAX,
-            frame.image_available,
+            image_available,
             vk::Fence::null(),
         )
     };
@@ -1539,51 +1613,120 @@ fn render_main_window(
         }
         Err(e) => return Err(Box::new(e)),
     };
-    vk_state.swapchain_dirty |= suboptimal;
-    let present_semaphore = vk_state.swapchain.present_semaphores[image_index as usize];
+    let image_index_usize = image_index as usize;
+    let submission =
+        (|| -> Result<(Option<TextureRetirementBatch>, vk::Semaphore), Box<dyn Error>> {
+            let image_fence = vk_state
+                .images_in_flight
+                .get(image_index_usize)
+                .copied()
+                .ok_or("acquired Ash main image has no in-flight fence slot")?;
+            let present_semaphore = vk_state
+                .swapchain
+                .present_semaphores
+                .get(image_index_usize)
+                .copied()
+                .ok_or("acquired Ash main image has no present semaphore")?;
+            #[cfg(not(feature = "ash-dynamic-rendering"))]
+            let framebuffer = vk_state
+                .swapchain
+                .framebuffers
+                .get(image_index_usize)
+                .copied()
+                .ok_or("acquired Ash main image has no framebuffer")?;
+            #[cfg(feature = "ash-dynamic-rendering")]
+            let image = vk_state
+                .swapchain
+                .images
+                .get(image_index_usize)
+                .copied()
+                .ok_or("acquired Ash main image is missing")?;
+            #[cfg(feature = "ash-dynamic-rendering")]
+            let image_view = vk_state
+                .swapchain
+                .image_views
+                .get(image_index_usize)
+                .copied()
+                .ok_or("acquired Ash main image has no image view")?;
+            #[cfg(feature = "ash-dynamic-rendering")]
+            let old_layout = vk_state
+                .swapchain
+                .image_layouts
+                .get(image_index_usize)
+                .copied()
+                .ok_or("acquired Ash main image has no tracked layout")?;
 
-    if vk_state.images_in_flight[image_index as usize] != vk::Fence::null() {
-        unsafe {
-            vk_state.ctx.device.wait_for_fences(
-                &[vk_state.images_in_flight[image_index as usize]],
-                true,
-                u64::MAX,
+            if image_fence != vk::Fence::null() {
+                unsafe {
+                    vk_state
+                        .ctx
+                        .device
+                        .wait_for_fences(&[image_fence], true, u64::MAX)?;
+                }
+            }
+            unsafe {
+                vk_state
+                    .ctx
+                    .device
+                    .reset_command_buffer(command_buffer, vk::CommandBufferResetFlags::empty())?;
+            }
+
+            let texture_retirement = record_command_buffer(
+                &vk_state.ctx.device,
+                command_buffer,
+                vk_state.render_target,
+                #[cfg(not(feature = "ash-dynamic-rendering"))]
+                framebuffer,
+                #[cfg(feature = "ash-dynamic-rendering")]
+                image,
+                #[cfg(feature = "ash-dynamic-rendering")]
+                image_view,
+                #[cfg(feature = "ash-dynamic-rendering")]
+                old_layout,
+                vk_state.swapchain.extent,
+                clear_color,
+                // SAFETY: cmd is recording inside the compatible render pass and is submitted before
+                // any renderer resource can be retired or destroyed.
+                |cmd| unsafe { renderer.cmd_draw(cmd, rendered_frame) },
             )?;
+
+            let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
+            let submit_info = vk::SubmitInfo::default()
+                .wait_semaphores(std::slice::from_ref(&image_available))
+                .wait_dst_stage_mask(&wait_stages)
+                .command_buffers(std::slice::from_ref(&command_buffer))
+                .signal_semaphores(std::slice::from_ref(&present_semaphore));
+            unsafe {
+                vk_state.ctx.device.reset_fences(&[frame_fence])?;
+                vk_state.ctx.device.queue_submit(
+                    vk_state.ctx.queue,
+                    std::slice::from_ref(&submit_info),
+                    frame_fence,
+                )?;
+            }
+            Ok((texture_retirement, present_semaphore))
+        })();
+    let (texture_retirement, present_semaphore) = match submission {
+        Ok(submission) => submission,
+        Err(error) => {
+            if let Err(recovery_error) =
+                recover_aborted_main_acquire(vk_state, renderer, window, frame_index)
+            {
+                return Err(format!(
+                    "Ash main acquire failed before submit: {error}; recovery also failed: {recovery_error}"
+                )
+                .into());
+            }
+            return Err(error);
         }
-    }
-    unsafe {
-        vk_state
-            .ctx
-            .device
-            .reset_command_buffer(frame.command_buffer, vk::CommandBufferResetFlags::empty())?;
-    }
+    };
 
-    let texture_retirement = record_command_buffer(
-        &vk_state.ctx.device,
-        frame.command_buffer,
-        vk_state.render_pass,
-        vk_state.swapchain.framebuffers[image_index as usize],
-        vk_state.swapchain.extent,
-        clear_color,
-        |cmd| renderer.cmd_draw(cmd, rendered_frame),
-    )?;
-
-    let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
-    let submit_info = vk::SubmitInfo::default()
-        .wait_semaphores(std::slice::from_ref(&frame.image_available))
-        .wait_dst_stage_mask(&wait_stages)
-        .command_buffers(std::slice::from_ref(&frame.command_buffer))
-        .signal_semaphores(std::slice::from_ref(&present_semaphore));
-
-    unsafe {
-        vk_state.ctx.device.reset_fences(&[frame.fence])?;
-        vk_state.ctx.device.queue_submit(
-            vk_state.ctx.queue,
-            std::slice::from_ref(&submit_info),
-            frame.fence,
-        )?;
+    #[cfg(feature = "ash-dynamic-rendering")]
+    {
+        vk_state.swapchain.image_layouts[image_index_usize] = vk::ImageLayout::PRESENT_SRC_KHR;
     }
-    vk_state.images_in_flight[image_index as usize] = frame.fence;
+    vk_state.images_in_flight[image_index_usize] = frame_fence;
+    vk_state.swapchain_dirty |= suboptimal;
 
     let present_info = vk::PresentInfoKHR::default()
         .wait_semaphores(std::slice::from_ref(&present_semaphore))
@@ -1601,7 +1744,10 @@ fn render_main_window(
         Err(vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR) => {
             vk_state.swapchain_dirty = true;
         }
-        Err(e) => return Err(Box::new(e)),
+        Err(error) => {
+            vk_state.swapchain_dirty = true;
+            return Err(Box::new(error));
+        }
     }
 
     vk_state.frame_index = (vk_state.frame_index + 1) % vk_state.frames.len();

@@ -20,107 +20,83 @@ impl AshRenderer {
     /// Create a new renderer using the internal default allocator.
     ///
     /// The provided `command_pool` is used for short-lived upload command buffers.
+    ///
+    /// # Safety
+    ///
+    /// `physical_device`, `device`, `queue`, `command_pool`, and the render target configuration
+    /// must share one live Vulkan device lineage. The queue must support graphics and transfer
+    /// from command buffers allocated by `command_pool`, and every command buffer recorded by
+    /// this renderer must be submitted to that queue unless the application supplies equivalent
+    /// cross-queue synchronization. A render pass or dynamic rendering format must remain
+    /// compatible with every target used by this renderer. The queue and command pool must remain
+    /// live for the renderer lifetime, and all host access to them must be externally synchronized.
     #[cfg(not(any(feature = "gpu-allocator", feature = "vk-mem")))]
-    pub fn with_default_allocator(
+    pub unsafe fn with_default_allocator(
         instance: &Instance,
         physical_device: vk::PhysicalDevice,
-        device: Device,
-        queue: vk::Queue,
-        command_pool: vk::CommandPool,
-        #[cfg(not(feature = "dynamic-rendering"))] render_pass: vk::RenderPass,
-        #[cfg(feature = "dynamic-rendering")] dynamic_rendering: DynamicRendering,
+        config: AshRendererConfig,
         imgui: &mut Context,
-        options: Option<Options>,
     ) -> RendererResult<Self> {
         let memory_properties =
             unsafe { instance.get_physical_device_memory_properties(physical_device) };
         let allocator = Allocator::new(memory_properties);
 
-        Self::init_renderer(
-            device,
-            allocator,
-            queue,
-            command_pool,
-            #[cfg(not(feature = "dynamic-rendering"))]
-            render_pass,
-            #[cfg(feature = "dynamic-rendering")]
-            dynamic_rendering,
-            imgui,
-            options,
-        )
+        Self::init_renderer(allocator, config, imgui)
     }
 
     /// Create a new renderer using a shared `gpu-allocator` allocator.
+    ///
+    /// # Safety
+    ///
+    /// The allocator, device, queue, command pool, and render target configuration must satisfy
+    /// the same device-lineage and capability contract as [`Self::with_default_allocator`].
     #[cfg(feature = "gpu-allocator")]
-    pub fn with_gpu_allocator(
+    pub unsafe fn with_gpu_allocator(
         allocator: std::sync::Arc<std::sync::Mutex<gpu_allocator::vulkan::Allocator>>,
-        device: Device,
-        queue: vk::Queue,
-        command_pool: vk::CommandPool,
-        #[cfg(not(feature = "dynamic-rendering"))] render_pass: vk::RenderPass,
-        #[cfg(feature = "dynamic-rendering")] dynamic_rendering: DynamicRendering,
+        config: AshRendererConfig,
         imgui: &mut Context,
-        options: Option<Options>,
     ) -> RendererResult<Self> {
         #[cfg(all(feature = "gpu-allocator", not(feature = "vk-mem")))]
         let allocator = Allocator::new(allocator);
         #[cfg(all(feature = "gpu-allocator", feature = "vk-mem"))]
         let allocator = Allocator::new_gpu(allocator);
-        Self::init_renderer(
-            device,
-            allocator,
-            queue,
-            command_pool,
-            #[cfg(not(feature = "dynamic-rendering"))]
-            render_pass,
-            #[cfg(feature = "dynamic-rendering")]
-            dynamic_rendering,
-            imgui,
-            options,
-        )
+        Self::init_renderer(allocator, config, imgui)
     }
 
     /// Create a new renderer using a shared `vk-mem` allocator.
+    ///
+    /// # Safety
+    ///
+    /// The allocator, device, queue, command pool, and render target configuration must satisfy
+    /// the same device-lineage and capability contract as [`Self::with_default_allocator`].
     #[cfg(feature = "vk-mem")]
-    pub fn with_vk_mem_allocator(
+    pub unsafe fn with_vk_mem_allocator(
         allocator: std::sync::Arc<std::sync::Mutex<vk_mem::Allocator>>,
-        device: Device,
-        queue: vk::Queue,
-        command_pool: vk::CommandPool,
-        #[cfg(not(feature = "dynamic-rendering"))] render_pass: vk::RenderPass,
-        #[cfg(feature = "dynamic-rendering")] dynamic_rendering: DynamicRendering,
+        config: AshRendererConfig,
         imgui: &mut Context,
-        options: Option<Options>,
     ) -> RendererResult<Self> {
         #[cfg(all(feature = "vk-mem", not(feature = "gpu-allocator")))]
         let allocator = Allocator::new(allocator);
         #[cfg(all(feature = "vk-mem", feature = "gpu-allocator"))]
         let allocator = Allocator::new_vk_mem(allocator);
-        Self::init_renderer(
+        Self::init_renderer(allocator, config, imgui)
+    }
+
+    fn init_renderer(
+        allocator: Allocator,
+        config: AshRendererConfig,
+        imgui: &mut Context,
+    ) -> RendererResult<Self> {
+        let AshRendererConfig {
             device,
-            allocator,
             queue,
             command_pool,
             #[cfg(not(feature = "dynamic-rendering"))]
             render_pass,
             #[cfg(feature = "dynamic-rendering")]
             dynamic_rendering,
-            imgui,
             options,
-        )
-    }
-
-    fn init_renderer(
-        device: Device,
-        allocator: Allocator,
-        queue: vk::Queue,
-        command_pool: vk::CommandPool,
-        #[cfg(not(feature = "dynamic-rendering"))] render_pass: vk::RenderPass,
-        #[cfg(feature = "dynamic-rendering")] dynamic_rendering: DynamicRendering,
-        imgui: &mut Context,
-        options: Option<Options>,
-    ) -> RendererResult<Self> {
-        let options = options.unwrap_or_default();
+        } = config;
         if options.in_flight_frames == 0 {
             return Err(RendererError::InvalidRenderState(
                 "Options::in_flight_frames must be >= 1".to_string(),
@@ -128,53 +104,21 @@ impl AshRenderer {
         }
         let context_state = RendererContextState::prepare(imgui)?;
 
-        let descriptor_set_layout = create_vulkan_descriptor_set_layout(&device)?;
-        let pipeline_layout = match create_vulkan_pipeline_layout(&device, descriptor_set_layout) {
-            Ok(pipeline_layout) => pipeline_layout,
-            Err(err) => {
-                unsafe { device.destroy_descriptor_set_layout(descriptor_set_layout, None) };
-                return Err(err);
-            }
-        };
-        let pipeline = match create_vulkan_pipeline(
+        let resources = VulkanRendererResources::create(
             &device,
-            pipeline_layout,
             #[cfg(not(feature = "dynamic-rendering"))]
             render_pass,
             #[cfg(feature = "dynamic-rendering")]
             dynamic_rendering,
             options,
-        ) {
-            Ok(pipeline) => pipeline,
-            Err(err) => {
-                unsafe {
-                    device.destroy_pipeline_layout(pipeline_layout, None);
-                    device.destroy_descriptor_set_layout(descriptor_set_layout, None);
-                }
-                return Err(err);
-            }
-        };
-        let descriptor_pool = match create_vulkan_descriptor_pool(&device, options.max_textures) {
-            Ok(descriptor_pool) => descriptor_pool,
-            Err(err) => {
-                unsafe {
-                    device.destroy_pipeline(pipeline, None);
-                    device.destroy_pipeline_layout(pipeline_layout, None);
-                    device.destroy_descriptor_set_layout(descriptor_set_layout, None);
-                }
-                return Err(err);
-            }
-        };
+        )?;
 
         let mut renderer = Self {
             device,
             allocator,
             queue,
             command_pool,
-            pipeline,
-            pipeline_layout,
-            descriptor_set_layout,
-            descriptor_pool,
+            resources,
             textures: TextureManager::new(),
             consumer: None,
             context_state,
@@ -190,11 +134,10 @@ impl AshRenderer {
             viewport_clear_color: [0.0, 0.0, 0.0, 1.0],
         };
 
-        renderer.default_texture_id = renderer.create_default_texture()?;
         let consumer = match imgui.create_renderer_consumer() {
             Ok(consumer) => consumer,
             Err(error) => {
-                let _ = renderer.destroy_internal();
+                renderer.destroy_unsubmitted_internal()?;
                 return Err(error.into());
             }
         };
@@ -207,7 +150,7 @@ impl AshRenderer {
         ) {
             Ok(reset) => reset,
             Err(error) => {
-                let _ = renderer.destroy_internal();
+                renderer.destroy_unsubmitted_internal()?;
                 renderer.consumer.take();
                 return Err(error.into());
             }
@@ -217,10 +160,23 @@ impl AshRenderer {
         // transaction that completes before renderer state is published.
         let _ = reset.commit();
         if let Err(error) = renderer.context_state.publish(imgui) {
-            let _ = renderer.destroy_internal();
+            renderer.destroy_unsubmitted_internal()?;
             renderer.consumer.take();
             return Err(error);
         }
+
+        renderer.default_texture_id = match renderer.create_default_texture() {
+            Ok(texture_id) => texture_id,
+            Err(error) => {
+                let rollback = renderer.shutdown_with_destroy(imgui, |renderer| {
+                    renderer.destroy_unsubmitted_internal()
+                });
+                return match rollback {
+                    Ok(()) => Err(error),
+                    Err(rollback_error) => Err(rollback_error),
+                };
+            }
+        };
         Ok(renderer)
     }
 }
@@ -314,13 +270,10 @@ impl AshRenderer {
     pub(super) fn viewport_pipeline(
         &mut self,
         format: vk::Format,
-    ) -> RendererResult<&ViewportPipeline> {
+    ) -> RendererResult<ViewportPipeline> {
         self.ensure_operational()?;
-        if self.viewport_pipelines.contains_key(&format) {
-            return Ok(self
-                .viewport_pipelines
-                .get(&format)
-                .expect("checked contains_key"));
+        if let Some(pipeline) = self.viewport_pipelines.get(&format).copied() {
+            return Ok(pipeline);
         }
 
         let options = Options {
@@ -333,7 +286,6 @@ impl AshRenderer {
             max_textures: self.options.max_textures,
             framebuffer_srgb: false,
             color_gamma_override: self.options.color_gamma_override,
-            texture_format: self.options.texture_format,
         };
 
         #[cfg(not(feature = "dynamic-rendering"))]
@@ -356,7 +308,7 @@ impl AshRenderer {
 
         let pipeline = match create_vulkan_pipeline(
             &self.device,
-            self.pipeline_layout,
+            self.resources.pipeline_layout,
             #[cfg(not(feature = "dynamic-rendering"))]
             clear_render_pass,
             #[cfg(feature = "dynamic-rendering")]
@@ -386,7 +338,7 @@ impl AshRenderer {
         };
 
         self.viewport_pipelines.insert(format, vp);
-        Ok(self.viewport_pipelines.get(&format).expect("just inserted"))
+        Ok(vp)
     }
 }
 
@@ -394,6 +346,8 @@ impl AshRenderer {
     /// Wait for the device, release all renderer-owned Vulkan resources, and detach from ImGui.
     ///
     /// Unlike `Drop`, this method can reset Context-owned texture bindings after GPU destruction.
+    /// Any recorded but unsubmitted command buffer that references this renderer becomes invalid
+    /// and must never be submitted; this is part of [`Self::cmd_draw`]'s safety contract.
     pub fn shutdown(&mut self, imgui_context: &mut Context) -> RendererResult<()> {
         self.shutdown_with_destroy(imgui_context, |renderer| renderer.destroy_internal())
     }
@@ -496,29 +450,58 @@ impl AshRenderer {
                 }
                 Err(error) => return Err(error.into()),
             };
+        self.destroy_resources_after_gpu_completion(completion_result)
+    }
+
+    fn destroy_unsubmitted_internal(&mut self) -> RendererResult<()> {
+        if self.destroyed {
+            return Ok(());
+        }
+        if !self.in_flight_uploads.is_empty() {
+            return Err(RendererError::InvalidRenderState(
+                "cannot use unsubmitted Ash initialization rollback after queue submission"
+                    .to_owned(),
+            ));
+        }
+        self.destroy_resources_after_gpu_completion(Ok(()))
+    }
+
+    fn destroy_resources_after_gpu_completion(
+        &mut self,
+        completion_result: RendererResult<()>,
+    ) -> RendererResult<()> {
         let _ = self.reap_all_uploads();
 
         let textures = std::mem::take(&mut self.textures.textures);
         for (_, tex) in textures {
-            tex.destroy(&self.device, &mut self.allocator, self.descriptor_pool);
+            tex.destroy(
+                &self.device,
+                &mut self.allocator,
+                self.resources.descriptor_pool,
+            );
         }
         let managed_textures = std::mem::take(&mut self.textures.managed_textures);
         for (_, managed) in managed_textures {
-            managed
-                .texture
-                .destroy(&self.device, &mut self.allocator, self.descriptor_pool);
+            managed.texture.destroy(
+                &self.device,
+                &mut self.allocator,
+                self.resources.descriptor_pool,
+            );
         }
         let retiring_textures = self.textures.retiring_textures.drain().collect::<Vec<_>>();
         for (_, managed) in retiring_textures {
-            managed
-                .texture
-                .destroy(&self.device, &mut self.allocator, self.descriptor_pool);
+            managed.texture.destroy(
+                &self.device,
+                &mut self.allocator,
+                self.resources.descriptor_pool,
+            );
         }
         self.textures.managed_ids.clear();
+        self.textures.external_textures.clear();
 
-        unsafe {
-            #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
-            {
+        #[cfg(any(feature = "multi-viewport-winit", feature = "multi-viewport-sdl3"))]
+        {
+            unsafe {
                 let viewport_pipelines = std::mem::take(&mut self.viewport_pipelines);
                 for (_, vp) in viewport_pipelines {
                     self.device.destroy_pipeline(vp.pipeline, None);
@@ -530,15 +513,10 @@ impl AshRenderer {
                     }
                 }
             }
-
-            self.device
-                .destroy_descriptor_pool(self.descriptor_pool, None);
-            self.device
-                .destroy_descriptor_set_layout(self.descriptor_set_layout, None);
-            self.device.destroy_pipeline(self.pipeline, None);
-            self.device
-                .destroy_pipeline_layout(self.pipeline_layout, None);
         }
+
+        let resources = std::mem::replace(&mut self.resources, VulkanRendererResources::empty());
+        resources.destroy(&self.device);
 
         let frames = std::mem::replace(&mut self.frames, Frames::new(0));
         let _ = frames.destroy(&self.device, &mut self.allocator);
@@ -551,6 +529,20 @@ impl AshRenderer {
             return;
         }
         cleanup(self);
+    }
+}
+
+impl Drop for AshRenderer {
+    fn drop(&mut self) {
+        // Dropping a live renderer has no mutable Context with which to validate and commit the
+        // renderer-texture reset transaction. Keep its Vulkan resources intact instead of leaving
+        // Context-managed texture bindings pointing at deleted GPU objects. Once native Context
+        // teardown has completed, no such binding can be observed and best-effort cleanup is safe.
+        self.run_drop_cleanup_if_context_destroyed(|renderer| {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = renderer.destroy_internal();
+            }));
+        });
     }
 }
 
@@ -595,10 +587,7 @@ mod shutdown_transaction_tests {
             allocator: Allocator::new(vk::PhysicalDeviceMemoryProperties::default()),
             queue: vk::Queue::null(),
             command_pool: vk::CommandPool::null(),
-            pipeline: vk::Pipeline::null(),
-            pipeline_layout: vk::PipelineLayout::null(),
-            descriptor_set_layout: vk::DescriptorSetLayout::null(),
-            descriptor_pool: vk::DescriptorPool::null(),
+            resources: VulkanRendererResources::empty(),
             textures: TextureManager::new(),
             consumer: Some(consumer),
             context_state,
@@ -618,7 +607,11 @@ mod shutdown_transaction_tests {
     fn seed_external_texture(renderer: &mut AshRenderer) -> TextureId {
         renderer
             .textures
-            .register_external_descriptor_set(vk::DescriptorSet::null())
+            .register_external_texture(
+                vk::DescriptorSet::null(),
+                vk::ImageView::null(),
+                vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            )
             .into()
     }
 
@@ -726,6 +719,25 @@ mod shutdown_transaction_tests {
     }
 
     #[test]
+    fn terminal_resource_destruction_clears_external_descriptor_bookkeeping() {
+        let mut context = Context::create();
+        let mut renderer = renderer_for_test(&mut context);
+        let texture = seed_external_texture(&mut renderer);
+
+        renderer.destroy_unsubmitted_internal().unwrap();
+
+        assert!(renderer.destroyed);
+        assert!(
+            !renderer
+                .textures
+                .external_textures
+                .contains_key(&texture.id())
+        );
+        renderer.context_state.unpublish(&mut context);
+        renderer.consumer.take();
+    }
+
+    #[test]
     fn drop_cleanup_never_runs_while_the_context_is_alive() {
         let mut context = Context::create();
         let mut renderer = renderer_for_test(&mut context);
@@ -756,19 +768,5 @@ mod shutdown_transaction_tests {
         });
 
         assert_eq!(cleanup_calls.get(), 1);
-    }
-}
-
-impl Drop for AshRenderer {
-    fn drop(&mut self) {
-        // Dropping a live renderer has no mutable Context with which to validate and commit the
-        // renderer-texture reset transaction. Keep its Vulkan resources intact instead of leaving
-        // Context-managed texture bindings pointing at deleted GPU objects. Once native Context
-        // teardown has completed, no such binding can be observed and best-effort cleanup is safe.
-        self.run_drop_cleanup_if_context_destroyed(|renderer| {
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let _ = renderer.destroy_internal();
-            }));
-        });
     }
 }

@@ -6,6 +6,7 @@ mod registry;
 mod runtime;
 mod surface;
 mod swapchain;
+mod trace;
 
 #[cfg(test)]
 mod runtime_contract_tests;
@@ -28,10 +29,12 @@ use self::frame_sync::{
 };
 pub use self::registry::SurfaceSupportError;
 use self::registry::{GlobalHandles, query_surface_support};
+pub use self::runtime::AshViewportFrameTrace;
 pub(crate) use self::runtime::OwningViewportRuntime;
 pub(crate) use self::runtime::attach_with_adapter;
 pub use self::runtime::{AshViewportAttachError, AshViewportError};
 use self::surface::{SwapchainResources, ViewportAshData, ViewportRuntimeState};
+pub use self::trace::AshViewportFrameReport;
 
 pub(super) fn first_renderer_callback_drift(
     platform_io: &dear_imgui_rs::platform_io::PlatformIo,
@@ -183,6 +186,11 @@ pub struct VulkanViewportConfig {
     pub present_queue_family_index: u32,
     /// Surface pair and presentation policy used by every secondary viewport swapchain.
     pub swapchain_policy: ViewportSwapchainPolicy,
+    /// Extra usage flags for secondary viewport swapchain images.
+    ///
+    /// [`vk::ImageUsageFlags::COLOR_ATTACHMENT`] is always added. Use this for capabilities such
+    /// as [`vk::ImageUsageFlags::TRANSFER_SRC`] when viewport images need to be captured.
+    pub swapchain_image_usage: vk::ImageUsageFlags,
 }
 
 #[cfg(test)]
