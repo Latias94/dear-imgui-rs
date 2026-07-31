@@ -1,7 +1,10 @@
 #[cfg(feature = "mv-log")]
 use std::sync::{Mutex, OnceLock};
 
-use super::{RendererRenderStateGuard, WgpuRenderer, draw::FramebufferExtent};
+use super::{
+    RendererRenderStateGuard, WgpuRenderer, draw::FramebufferExtent,
+    map_renderer_render_state_error,
+};
 use crate::wgpu;
 use crate::{GammaMode, RendererError, RendererResult, Uniforms};
 use dear_imgui_rs::{
@@ -215,7 +218,10 @@ impl WgpuRenderer {
             return Ok(());
         }
         Self::preflight_draw_callback_support(draw_data)?;
-        RendererRenderStateGuard::preflight(platform_io)?;
+        unsafe {
+            RendererRenderStateGuard::<crate::WgpuRenderStateStorage>::preflight(platform_io)
+        }
+        .map_err(map_renderer_render_state_error)?;
 
         let backend_data = self.backend_data.as_mut().ok_or_else(|| {
             RendererError::InvalidRenderState("Renderer not initialized".to_owned())

@@ -21,16 +21,26 @@
 use std::cell::RefCell;
 use std::error::Error;
 use std::rc::Rc;
+#[cfg(feature = "test-engine")]
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Instant;
 
 use dear_imgui_examples::sdl3_callbacks::{
     Sdl3CallbackEventHandoff, configure_main_callback_rate, requests_exit,
 };
-use dear_imgui_glow::{GlowRenderer, SimpleTextureMap, multi_viewport::GlowViewportRuntime};
+#[cfg(feature = "test-engine")]
+use dear_imgui_glow::{
+    GlBuffer, GlProgram, GlSampler, GlVersion, GlVertexArray, GlowRenderState,
+    GlowRenderStateAccessError, GlowSamplerStrategy,
+};
+use dear_imgui_glow::{
+    GlTexture, GlowRenderer, SimpleTextureMap, TextureMap, create_texture_from_rgba,
+    multi_viewport::GlowViewportRuntime,
+};
 #[cfg(feature = "test-engine")]
 use dear_imgui_rs::Id;
 use dear_imgui_rs::{
-    Condition, ConfigFlags, Context,
+    Condition, ConfigFlags, Context, RawDrawCallback, TextureId,
     render::{ReconciledFrame, RenderedFrame},
 };
 use dear_imgui_sdl3::{self as imgui_sdl3_backend, Sdl3PlatformBackend};
@@ -50,6 +60,545 @@ use std::{
 };
 
 #[cfg(feature = "test-engine")]
+static RAW_CALLBACK_COUNT: AtomicUsize = AtomicUsize::new(0);
+#[cfg(feature = "test-engine")]
+static RAW_CALLBACK_MUTATOR_TYPED_STATE: AtomicBool = AtomicBool::new(false);
+#[cfg(feature = "test-engine")]
+static RAW_CALLBACK_PROBE_TYPED_STATE: AtomicBool = AtomicBool::new(false);
+#[cfg(feature = "test-engine")]
+static RAW_CALLBACK_NESTED_BORROW_REJECTED: AtomicBool = AtomicBool::new(false);
+#[cfg(feature = "test-engine")]
+static RAW_CALLBACK_RESET_STATE_OBSERVED: AtomicBool = AtomicBool::new(false);
+#[cfg(feature = "test-engine")]
+static RAW_CALLBACK_SAMPLER_STRATEGY: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(feature = "test-engine")]
+fn sampler_strategy_code(strategy: GlowSamplerStrategy) -> usize {
+    match strategy {
+        GlowSamplerStrategy::SamplerObjects => 1,
+        GlowSamplerStrategy::TextureParameters => 2,
+        _ => 0,
+    }
+}
+
+#[cfg(feature = "test-engine")]
+unsafe extern "C" fn glow_render_state_mutator(
+    _draw_list: *const dear_imgui_rs::sys::ImDrawList,
+    _draw_command: *const dear_imgui_rs::sys::ImDrawCmd,
+) {
+    RAW_CALLBACK_COUNT.fetch_add(1, Ordering::SeqCst);
+    let observed = unsafe {
+        GlowRenderState::with_current(|state| {
+            RAW_CALLBACK_SAMPLER_STRATEGY.store(
+                sampler_strategy_code(state.sampler_strategy()),
+                Ordering::SeqCst,
+            );
+            let gl = state.gl();
+            gl.bind_vertex_array(None);
+            gl.disable(glow::FRAMEBUFFER_SRGB);
+            true
+        })
+    }
+    .unwrap_or(false);
+    RAW_CALLBACK_MUTATOR_TYPED_STATE.store(observed, Ordering::SeqCst);
+}
+
+#[cfg(feature = "test-engine")]
+unsafe extern "C" fn glow_render_state_probe(
+    _draw_list: *const dear_imgui_rs::sys::ImDrawList,
+    _draw_command: *const dear_imgui_rs::sys::ImDrawCmd,
+) {
+    RAW_CALLBACK_COUNT.fetch_add(1, Ordering::SeqCst);
+    let observed = unsafe {
+        GlowRenderState::with_current(|state| {
+            let strategy_code = sampler_strategy_code(state.sampler_strategy());
+            let strategy_matches = RAW_CALLBACK_SAMPLER_STRATEGY.load(Ordering::SeqCst)
+                == strategy_code
+                && strategy_code != 0;
+            let nested_rejected = matches!(
+                GlowRenderState::with_current(|_| ()),
+                Err(GlowRenderStateAccessError::AlreadyBorrowed)
+            );
+            RAW_CALLBACK_NESTED_BORROW_REJECTED.store(nested_rejected, Ordering::SeqCst);
+            let gl = state.gl();
+            let reset_state_observed = gl
+                .get_parameter_vertex_array(glow::VERTEX_ARRAY_BINDING)
+                .is_some()
+                && gl.is_enabled(glow::FRAMEBUFFER_SRGB);
+            RAW_CALLBACK_RESET_STATE_OBSERVED.store(reset_state_observed, Ordering::SeqCst);
+            strategy_matches
+        })
+    }
+    .unwrap_or(false);
+    RAW_CALLBACK_PROBE_TYPED_STATE.store(observed, Ordering::SeqCst);
+}
+
+#[cfg(feature = "test-engine")]
+fn reset_raw_callback_probe() {
+    RAW_CALLBACK_COUNT.store(0, Ordering::SeqCst);
+    RAW_CALLBACK_MUTATOR_TYPED_STATE.store(false, Ordering::SeqCst);
+    RAW_CALLBACK_PROBE_TYPED_STATE.store(false, Ordering::SeqCst);
+    RAW_CALLBACK_NESTED_BORROW_REJECTED.store(false, Ordering::SeqCst);
+    RAW_CALLBACK_RESET_STATE_OBSERVED.store(false, Ordering::SeqCst);
+    RAW_CALLBACK_SAMPLER_STRATEGY.store(0, Ordering::SeqCst);
+}
+
+#[cfg(feature = "test-engine")]
+fn raw_callback_probe_passed(expected_strategy: GlowSamplerStrategy) -> bool {
+    RAW_CALLBACK_COUNT.load(Ordering::SeqCst) == 2
+        && RAW_CALLBACK_MUTATOR_TYPED_STATE.load(Ordering::SeqCst)
+        && RAW_CALLBACK_PROBE_TYPED_STATE.load(Ordering::SeqCst)
+        && RAW_CALLBACK_NESTED_BORROW_REJECTED.load(Ordering::SeqCst)
+        && RAW_CALLBACK_SAMPLER_STRATEGY.load(Ordering::SeqCst)
+            == sampler_strategy_code(expected_strategy)
+}
+
+#[cfg(feature = "test-engine")]
+fn reset_render_state_probe_passed() -> bool {
+    RAW_CALLBACK_RESET_STATE_OBSERVED.load(Ordering::SeqCst)
+}
+
+struct TextureUnitZeroGuard<'a> {
+    gl: &'a glow::Context,
+    active_texture: u32,
+    texture: Option<GlTexture>,
+}
+
+impl<'a> TextureUnitZeroGuard<'a> {
+    fn bind(gl: &'a glow::Context, texture: GlTexture) -> Self {
+        unsafe {
+            let active_texture =
+                u32::try_from(gl.get_parameter_i32(glow::ACTIVE_TEXTURE)).unwrap_or(glow::TEXTURE0);
+            gl.active_texture(glow::TEXTURE0);
+            let previous = gl.get_parameter_texture(glow::TEXTURE_BINDING_2D);
+            gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+            Self {
+                gl,
+                active_texture,
+                texture: previous,
+            }
+        }
+    }
+}
+
+impl Drop for TextureUnitZeroGuard<'_> {
+    fn drop(&mut self) {
+        unsafe {
+            self.gl.bind_texture(glow::TEXTURE_2D, self.texture);
+            self.gl.active_texture(self.active_texture);
+        }
+    }
+}
+
+struct ExternalTexture {
+    id: TextureId,
+    handle: GlTexture,
+    #[cfg(feature = "test-engine")]
+    expected_filters: [i32; 2],
+}
+
+impl ExternalTexture {
+    fn create(gl: &glow::Context) -> Result<Self, Box<dyn Error>> {
+        let pixels = [
+            255, 255, 255, 255, 255, 0, 255, 255, 0, 255, 255, 255, 0, 0, 0, 255,
+        ];
+        let handle = create_texture_from_rgba(gl, 2, 2, &pixels)?;
+        let expected_filters = [glow::LINEAR_MIPMAP_NEAREST as i32, glow::NEAREST as i32];
+        {
+            let _binding = TextureUnitZeroGuard::bind(gl, handle);
+            unsafe {
+                gl.generate_mipmap(glow::TEXTURE_2D);
+                gl.tex_parameter_i32(
+                    glow::TEXTURE_2D,
+                    glow::TEXTURE_MIN_FILTER,
+                    expected_filters[0],
+                );
+                gl.tex_parameter_i32(
+                    glow::TEXTURE_2D,
+                    glow::TEXTURE_MAG_FILTER,
+                    expected_filters[1],
+                );
+            }
+        }
+        Ok(Self {
+            id: TextureId::new(u64::MAX - 1),
+            handle,
+            #[cfg(feature = "test-engine")]
+            expected_filters,
+        })
+    }
+
+    #[cfg(feature = "test-engine")]
+    fn filters(&self, gl: &glow::Context) -> [i32; 2] {
+        let _binding = TextureUnitZeroGuard::bind(gl, self.handle);
+        unsafe {
+            [
+                gl.get_tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER),
+                gl.get_tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER),
+            ]
+        }
+    }
+
+    #[cfg(feature = "test-engine")]
+    fn filters_are_preserved(&self, gl: &glow::Context) -> bool {
+        self.filters(gl) == self.expected_filters
+    }
+}
+
+#[cfg(feature = "test-engine")]
+#[derive(Clone, Debug, PartialEq)]
+struct ApplicationGlStateSnapshot {
+    blend_enabled: bool,
+    blend_func: [i32; 4],
+    blend_equation: [i32; 2],
+    viewport: [i32; 4],
+    scissor_enabled: bool,
+    scissor_box: [i32; 4],
+    clear_color: [f32; 4],
+    color_write_mask: [bool; 4],
+    array_buffer: Option<GlBuffer>,
+    pixel_pack_buffer: Option<GlBuffer>,
+    pack_alignment: i32,
+    vertex_array: Option<GlVertexArray>,
+    active_texture: i32,
+    texture_unit_zero: Option<GlTexture>,
+    sampler_unit_zero: Option<GlSampler>,
+    program: Option<GlProgram>,
+    cull_enabled: bool,
+    depth_enabled: bool,
+    stencil_enabled: bool,
+    polygon_mode: Option<[i32; 2]>,
+    primitive_restart_enabled: Option<bool>,
+    framebuffer_srgb_enabled: bool,
+}
+
+#[cfg(feature = "test-engine")]
+impl ApplicationGlStateSnapshot {
+    fn prepare(
+        gl: &glow::Context,
+        external_texture: GlTexture,
+        gl_version: GlVersion,
+        supports_sampler_objects: bool,
+    ) -> Self {
+        unsafe {
+            gl.active_texture(glow::TEXTURE0);
+            gl.bind_texture(glow::TEXTURE_2D, Some(external_texture));
+            if supports_sampler_objects {
+                gl.bind_sampler(0, None);
+            }
+            gl.active_texture(glow::TEXTURE0 + 3);
+            gl.bind_buffer(glow::ARRAY_BUFFER, None);
+            gl.bind_buffer(glow::PIXEL_PACK_BUFFER, None);
+            gl.pixel_store_i32(glow::PACK_ALIGNMENT, 8);
+            gl.bind_vertex_array(None);
+            gl.use_program(None);
+            gl.disable(glow::BLEND);
+            gl.blend_func_separate(
+                glow::ONE,
+                glow::ZERO,
+                glow::SRC_ALPHA,
+                glow::ONE_MINUS_SRC_ALPHA,
+            );
+            gl.blend_equation_separate(glow::FUNC_SUBTRACT, glow::FUNC_REVERSE_SUBTRACT);
+            gl.viewport(3, 5, 211, 197);
+            gl.disable(glow::SCISSOR_TEST);
+            gl.scissor(7, 11, 173, 149);
+            gl.clear_color(0.03, 0.07, 0.11, 0.13);
+            gl.color_mask(true, true, true, true);
+            gl.enable(glow::CULL_FACE);
+            gl.enable(glow::DEPTH_TEST);
+            gl.enable(glow::STENCIL_TEST);
+            if gl_version.supports_polygon_mode() {
+                gl.polygon_mode(glow::FRONT_AND_BACK, glow::LINE);
+            }
+            if gl_version.supports_primitive_restart() {
+                gl.enable(glow::PRIMITIVE_RESTART);
+            }
+            gl.disable(glow::FRAMEBUFFER_SRGB);
+        }
+        Self::capture(gl, gl_version, supports_sampler_objects)
+    }
+
+    fn capture(gl: &glow::Context, gl_version: GlVersion, supports_sampler_objects: bool) -> Self {
+        unsafe {
+            let mut viewport = [0; 4];
+            gl.get_parameter_i32_slice(glow::VIEWPORT, &mut viewport);
+            let mut scissor_box = [0; 4];
+            gl.get_parameter_i32_slice(glow::SCISSOR_BOX, &mut scissor_box);
+            let mut clear_color = [0.0; 4];
+            gl.get_parameter_f32_slice(glow::COLOR_CLEAR_VALUE, &mut clear_color);
+            let active_texture = gl.get_parameter_i32(glow::ACTIVE_TEXTURE);
+            gl.active_texture(glow::TEXTURE0);
+            let texture_unit_zero = gl.get_parameter_texture(glow::TEXTURE_BINDING_2D);
+            let sampler_unit_zero = supports_sampler_objects
+                .then(|| gl.get_parameter_sampler(glow::SAMPLER_BINDING))
+                .flatten();
+            gl.active_texture(u32::try_from(active_texture).unwrap_or(glow::TEXTURE0));
+            let polygon_mode = gl_version.supports_polygon_mode().then(|| {
+                let mut modes = [0; 2];
+                gl.get_parameter_i32_slice(glow::POLYGON_MODE, &mut modes);
+                modes
+            });
+            Self {
+                blend_enabled: gl.is_enabled(glow::BLEND),
+                blend_func: [
+                    gl.get_parameter_i32(glow::BLEND_SRC_RGB),
+                    gl.get_parameter_i32(glow::BLEND_DST_RGB),
+                    gl.get_parameter_i32(glow::BLEND_SRC_ALPHA),
+                    gl.get_parameter_i32(glow::BLEND_DST_ALPHA),
+                ],
+                blend_equation: [
+                    gl.get_parameter_i32(glow::BLEND_EQUATION_RGB),
+                    gl.get_parameter_i32(glow::BLEND_EQUATION_ALPHA),
+                ],
+                viewport,
+                scissor_enabled: gl.is_enabled(glow::SCISSOR_TEST),
+                scissor_box,
+                clear_color,
+                color_write_mask: gl.get_parameter_bool_array(glow::COLOR_WRITEMASK),
+                array_buffer: gl.get_parameter_buffer(glow::ARRAY_BUFFER_BINDING),
+                pixel_pack_buffer: gl.get_parameter_buffer(glow::PIXEL_PACK_BUFFER_BINDING),
+                pack_alignment: gl.get_parameter_i32(glow::PACK_ALIGNMENT),
+                vertex_array: gl.get_parameter_vertex_array(glow::VERTEX_ARRAY_BINDING),
+                active_texture,
+                texture_unit_zero,
+                sampler_unit_zero,
+                program: gl.get_parameter_program(glow::CURRENT_PROGRAM),
+                cull_enabled: gl.is_enabled(glow::CULL_FACE),
+                depth_enabled: gl.is_enabled(glow::DEPTH_TEST),
+                stencil_enabled: gl.is_enabled(glow::STENCIL_TEST),
+                polygon_mode,
+                primitive_restart_enabled: gl_version
+                    .supports_primitive_restart()
+                    .then(|| gl.is_enabled(glow::PRIMITIVE_RESTART)),
+                framebuffer_srgb_enabled: gl.is_enabled(glow::FRAMEBUFFER_SRGB),
+            }
+        }
+    }
+}
+
+#[cfg(feature = "test-engine")]
+#[derive(Clone, Copy)]
+struct SamplerProbeScreenPoints {
+    nearest: [f32; 2],
+    linear: [f32; 2],
+    reset_linear: [f32; 2],
+}
+
+#[cfg(feature = "test-engine")]
+impl SamplerProbeScreenPoints {
+    fn submit(
+        ui: &dear_imgui_rs::Ui,
+        texture: TextureId,
+        nearest_callback: RawDrawCallback,
+        linear_callback: RawDrawCallback,
+        reset_callback: RawDrawCallback,
+    ) -> Self {
+        const SIZE: f32 = 32.0;
+        const GAP: f32 = 12.0;
+        let [viewport_x, viewport_y] = ui.main_viewport().pos();
+        let y = viewport_y + 32.0;
+        let nearest_min = [viewport_x + 32.0, y];
+        let linear_min = [nearest_min[0] + SIZE + GAP, y];
+        let reset_linear_min = [linear_min[0] + SIZE + GAP, y];
+        let draw_list = ui.get_foreground_draw_list();
+        let add_constant_uv_image = |min: [f32; 2]| {
+            draw_list.add_image(
+                texture,
+                min,
+                [min[0] + SIZE, min[1] + SIZE],
+                [0.5, 0.5],
+                [0.5, 0.5],
+                [1.0, 1.0, 1.0, 1.0],
+            );
+        };
+        unsafe {
+            draw_list.add_callback(nearest_callback, std::ptr::null_mut(), 0);
+        }
+        add_constant_uv_image(nearest_min);
+        unsafe {
+            draw_list.add_callback(linear_callback, std::ptr::null_mut(), 0);
+        }
+        add_constant_uv_image(linear_min);
+        unsafe {
+            draw_list.add_callback(glow_render_state_mutator, std::ptr::null_mut(), 0);
+            draw_list.add_callback(reset_callback, std::ptr::null_mut(), 0);
+            draw_list.add_callback(glow_render_state_probe, std::ptr::null_mut(), 0);
+            draw_list.add_callback(linear_callback, std::ptr::null_mut(), 0);
+        }
+        add_constant_uv_image(reset_linear_min);
+
+        let center = |min: [f32; 2]| [min[0] + SIZE / 2.0, min[1] + SIZE / 2.0];
+        Self {
+            nearest: center(nearest_min),
+            linear: center(linear_min),
+            reset_linear: center(reset_linear_min),
+        }
+    }
+
+    fn map_to_framebuffer(
+        self,
+        draw_data: &dear_imgui_rs::render::DrawData,
+    ) -> Result<SamplerReadbackTargets, Box<dyn Error>> {
+        let display_pos = draw_data.display_pos();
+        let scale = draw_data.framebuffer_scale();
+        let map = |point: [f32; 2]| -> Result<[i32; 2], Box<dyn Error>> {
+            let mapped = [
+                (point[0] - display_pos[0]) * scale[0],
+                (point[1] - display_pos[1]) * scale[1],
+            ];
+            if mapped
+                .iter()
+                .any(|value| !value.is_finite() || *value < 0.0)
+                || mapped.iter().any(|value| *value > i32::MAX as f32)
+            {
+                return Err(format!("invalid sampler readback coordinate: {mapped:?}").into());
+            }
+            Ok([mapped[0].floor() as i32, mapped[1].floor() as i32])
+        };
+        Ok(SamplerReadbackTargets {
+            nearest: map(self.nearest)?,
+            linear: map(self.linear)?,
+            reset_linear: map(self.reset_linear)?,
+        })
+    }
+}
+
+#[cfg(feature = "test-engine")]
+#[derive(Clone, Copy)]
+struct SamplerReadbackTargets {
+    nearest: [i32; 2],
+    linear: [i32; 2],
+    reset_linear: [i32; 2],
+}
+
+#[cfg(feature = "test-engine")]
+struct PixelReadbackStateGuard<'gl> {
+    gl: &'gl glow::Context,
+    pack_buffer: Option<GlBuffer>,
+    pack_alignment: i32,
+}
+
+#[cfg(feature = "test-engine")]
+impl<'gl> PixelReadbackStateGuard<'gl> {
+    fn enter(gl: &'gl glow::Context) -> Self {
+        let pack_buffer = unsafe { gl.get_parameter_buffer(glow::PIXEL_PACK_BUFFER_BINDING) };
+        let pack_alignment = unsafe { gl.get_parameter_i32(glow::PACK_ALIGNMENT) };
+        unsafe {
+            gl.bind_buffer(glow::PIXEL_PACK_BUFFER, None);
+            gl.pixel_store_i32(glow::PACK_ALIGNMENT, 1);
+        }
+        Self {
+            gl,
+            pack_buffer,
+            pack_alignment,
+        }
+    }
+}
+
+#[cfg(feature = "test-engine")]
+impl Drop for PixelReadbackStateGuard<'_> {
+    fn drop(&mut self) {
+        unsafe {
+            self.gl
+                .pixel_store_i32(glow::PACK_ALIGNMENT, self.pack_alignment);
+            self.gl
+                .bind_buffer(glow::PIXEL_PACK_BUFFER, self.pack_buffer);
+        }
+    }
+}
+
+#[cfg(feature = "test-engine")]
+impl SamplerReadbackTargets {
+    fn read(
+        self,
+        gl: &glow::Context,
+        framebuffer_size: (u32, u32),
+    ) -> Result<SamplerPixelReadback, Box<dyn Error>> {
+        let width = i32::try_from(framebuffer_size.0)?;
+        let height = i32::try_from(framebuffer_size.1)?;
+        let _state = PixelReadbackStateGuard::enter(gl);
+        let read = |point: [i32; 2]| -> Result<[u8; 4], Box<dyn Error>> {
+            if point[0] < 0 || point[0] >= width || point[1] < 0 || point[1] >= height {
+                return Err(format!(
+                    "sampler readback point {point:?} is outside {width}x{height}"
+                )
+                .into());
+            }
+            let mut pixel = [0; 4];
+            unsafe {
+                gl.read_pixels(
+                    point[0],
+                    height - point[1] - 1,
+                    1,
+                    1,
+                    glow::RGBA,
+                    glow::UNSIGNED_BYTE,
+                    glow::PixelPackData::Slice(Some(&mut pixel)),
+                );
+            }
+            Ok(pixel)
+        };
+        Ok(SamplerPixelReadback {
+            nearest: read(self.nearest)?,
+            linear: read(self.linear)?,
+            reset_linear: read(self.reset_linear)?,
+        })
+    }
+}
+
+#[cfg(feature = "test-engine")]
+#[derive(Clone, Copy, Debug)]
+struct SamplerPixelReadback {
+    nearest: [u8; 4],
+    linear: [u8; 4],
+    reset_linear: [u8; 4],
+}
+
+#[cfg(feature = "test-engine")]
+impl SamplerPixelReadback {
+    fn proves_sampler_isolation(self) -> bool {
+        let texel_is_extreme = self.nearest[..3]
+            .iter()
+            .all(|channel| *channel <= 16 || *channel >= 239);
+        let linear_has_interpolation = self.linear[..3]
+            .iter()
+            .filter(|channel| **channel > 32 && **channel < 239)
+            .count()
+            >= 2;
+        let reset_matches_linear = self
+            .linear
+            .iter()
+            .zip(self.reset_linear)
+            .all(|(expected, actual)| expected.abs_diff(actual) <= 3);
+        texel_is_extreme && linear_has_interpolation && reset_matches_linear
+    }
+}
+
+#[cfg(feature = "test-engine")]
+#[derive(Clone, Copy, Debug, Default)]
+struct GlowContractEvidence {
+    external_texture_filters_preserved: bool,
+    sampler_pixels_prove_isolation: bool,
+    raw_callback_typed_state_observed: bool,
+    reset_render_state_recovered: bool,
+    render_state_cleared_after_callback: bool,
+    application_gl_state_restored: bool,
+}
+
+#[cfg(feature = "test-engine")]
+impl GlowContractEvidence {
+    fn is_complete(self) -> bool {
+        self.external_texture_filters_preserved
+            && self.sampler_pixels_prove_isolation
+            && self.raw_callback_typed_state_observed
+            && self.reset_render_state_recovered
+            && self.render_state_cleared_after_callback
+            && self.application_gl_state_restored
+    }
+}
+
+#[cfg(feature = "test-engine")]
 #[derive(Clone)]
 struct OpenGlRendererInfo {
     vendor: String,
@@ -61,10 +610,12 @@ struct OpenGlRendererInfo {
 struct ViewportSmokeState {
     result_path: Option<PathBuf>,
     renderer: OpenGlRendererInfo,
+    sampler_strategy: GlowSamplerStrategy,
     saw_secondary_viewport: bool,
     completed_frame_evidence: Option<SecondaryViewportFrameEvidence>,
     saw_merged_viewport: bool,
     main_present_bracketed_by_test_engine: bool,
+    contract: GlowContractEvidence,
     complete: bool,
 }
 
@@ -72,11 +623,13 @@ struct ViewportSmokeState {
 struct CompletedViewportSmoke {
     result_path: Option<PathBuf>,
     renderer: OpenGlRendererInfo,
+    sampler_strategy: GlowSamplerStrategy,
     context_ready_viewports: Vec<Id>,
     glow_draw_issued_viewports: Vec<Id>,
     swap_succeeded_viewports: Vec<Id>,
     saw_merged_viewport: bool,
     main_present_bracketed_by_test_engine: bool,
+    contract: GlowContractEvidence,
 }
 
 #[cfg(feature = "test-engine")]
@@ -89,11 +642,13 @@ impl ViewportSmokeState {
         Some(CompletedViewportSmoke {
             result_path: self.result_path.clone(),
             renderer: self.renderer.clone(),
+            sampler_strategy: self.sampler_strategy,
             context_ready_viewports: evidence.context_activated_viewports.clone(),
             glow_draw_issued_viewports: evidence.glow_rendered_viewports.clone(),
             swap_succeeded_viewports: evidence.swapped_viewports.clone(),
             saw_merged_viewport: self.saw_merged_viewport,
             main_present_bracketed_by_test_engine: self.main_present_bracketed_by_test_engine,
+            contract: self.contract,
         })
     }
 }
@@ -105,17 +660,33 @@ impl CompletedViewportSmoke {
             return Ok(());
         };
         let json = format!(
-            "{{\"schema_version\":3,\"renderer\":{{\"backend\":\"OpenGL\",\"vendor\":\"{}\",\"name\":\"{}\",\"version\":\"{}\"}},\"secondary_context_ready_before_main_present_viewport_ids\":{},\"secondary_draw_issued_before_main_present_viewport_ids\":{},\"secondary_swap_succeeded_before_main_present_viewport_ids\":{},\"merge_observed\":{},\"main_present_bracketed_by_test_engine\":{}}}",
+            "{{\"schema_version\":5,\"renderer\":{{\"backend\":\"OpenGL\",\"vendor\":\"{}\",\"name\":\"{}\",\"version\":\"{}\"}},\"sampler_strategy\":\"{}\",\"secondary_context_ready_before_main_present_viewport_ids\":{},\"secondary_draw_issued_before_main_present_viewport_ids\":{},\"secondary_swap_succeeded_before_main_present_viewport_ids\":{},\"merge_observed\":{},\"main_present_bracketed_by_test_engine\":{},\"external_texture_filters_preserved\":{},\"sampler_pixels_prove_isolation\":{},\"raw_callback_typed_state_observed\":{},\"reset_render_state_recovered\":{},\"render_state_cleared_after_callback\":{},\"application_gl_state_restored\":{}}}",
             json_escape(&self.renderer.vendor),
             json_escape(&self.renderer.renderer),
             json_escape(&self.renderer.version),
+            sampler_strategy_name(self.sampler_strategy),
             viewport_ids_json(&self.context_ready_viewports),
             viewport_ids_json(&self.glow_draw_issued_viewports),
             viewport_ids_json(&self.swap_succeeded_viewports),
             self.saw_merged_viewport,
             self.main_present_bracketed_by_test_engine,
+            self.contract.external_texture_filters_preserved,
+            self.contract.sampler_pixels_prove_isolation,
+            self.contract.raw_callback_typed_state_observed,
+            self.contract.reset_render_state_recovered,
+            self.contract.render_state_cleared_after_callback,
+            self.contract.application_gl_state_restored,
         );
         write_json_atomic(&path, &json)
+    }
+}
+
+#[cfg(feature = "test-engine")]
+fn sampler_strategy_name(strategy: GlowSamplerStrategy) -> &'static str {
+    match strategy {
+        GlowSamplerStrategy::SamplerObjects => "sampler_objects",
+        GlowSamplerStrategy::TextureParameters => "texture_parameters",
+        _ => "unknown",
     }
 }
 
@@ -219,6 +790,11 @@ struct MainData {
     gl: Rc<glow::Context>,
     gl_context: sdl3::video::GLContext,
     window: sdl3::video::Window,
+    external_texture: ExternalTexture,
+    #[cfg(feature = "test-engine")]
+    reset_render_state_callback: RawDrawCallback,
+    sampler_linear_callback: RawDrawCallback,
+    sampler_nearest_callback: RawDrawCallback,
     _video: sdl3::VideoSubsystem,
     _sdl: sdl3::Sdl,
     last_frame: Instant,
@@ -291,6 +867,22 @@ impl SecondaryViewportFrameEvidence {
     }
 }
 
+#[cfg(feature = "test-engine")]
+#[derive(Clone, Copy)]
+struct GlowFrameContractProbe {
+    readback_targets: SamplerReadbackTargets,
+    external_texture: GlTexture,
+    gl_version: GlVersion,
+    supports_sampler_objects: bool,
+}
+
+#[cfg(feature = "test-engine")]
+#[derive(Debug)]
+struct GlowFrameContractResult {
+    readback: SamplerPixelReadback,
+    application_gl_state_restored: bool,
+}
+
 struct SdlGlowFrameDriver<'a> {
     sdl3_backend: &'a Sdl3PlatformBackend,
     renderer: &'a GlowViewportRuntime,
@@ -300,6 +892,10 @@ struct SdlGlowFrameDriver<'a> {
     rendered: bool,
     #[cfg(feature = "test-engine")]
     secondary_viewport_evidence: Option<SecondaryViewportFrameEvidence>,
+    #[cfg(feature = "test-engine")]
+    contract_probe: Option<GlowFrameContractProbe>,
+    #[cfg(feature = "test-engine")]
+    contract_result: Option<GlowFrameContractResult>,
     presented: bool,
 }
 
@@ -319,6 +915,16 @@ impl SdlGlowFrameDriver<'_> {
             self.gl.clear_color(0.1, 0.12, 0.15, 1.0);
             self.gl.clear(glow::COLOR_BUFFER_BIT);
         }
+
+        #[cfg(feature = "test-engine")]
+        let application_state_before = self.contract_probe.map(|probe| {
+            ApplicationGlStateSnapshot::prepare(
+                self.gl,
+                probe.external_texture,
+                probe.gl_version,
+                probe.supports_sampler_objects,
+            )
+        });
 
         self.renderer.new_frame().map_err(SdlGlowFrameError::new)?;
         #[cfg(feature = "test-engine")]
@@ -357,6 +963,28 @@ impl SdlGlowFrameDriver<'_> {
         glow_fault?;
         sdl3_fault?;
         let reconciled = render_result?;
+        #[cfg(feature = "test-engine")]
+        if let (Some(probe), Some(before)) = (self.contract_probe, application_state_before) {
+            let after_renderer = ApplicationGlStateSnapshot::capture(
+                self.gl,
+                probe.gl_version,
+                probe.supports_sampler_objects,
+            );
+            let readback = probe
+                .readback_targets
+                .read(self.gl, self.window.size_in_pixels())
+                .map_err(|error| SdlGlowFrameError { source: error })?;
+            let after_readback = ApplicationGlStateSnapshot::capture(
+                self.gl,
+                probe.gl_version,
+                probe.supports_sampler_objects,
+            );
+            self.contract_result = Some(GlowFrameContractResult {
+                readback,
+                application_gl_state_restored: before == after_renderer
+                    && after_renderer == after_readback,
+            });
+        }
         #[cfg(feature = "test-engine")]
         {
             self.secondary_viewport_evidence = Some(SecondaryViewportFrameEvidence::from_reports(
@@ -552,11 +1180,38 @@ impl MainData {
         let window_scale = window.display_scale();
         imgui.style_mut().set_font_scale_dpi(window_scale);
 
-        let renderer = GlowRenderer::with_shared_context(
-            Rc::clone(&gl),
-            &mut imgui,
-            Box::new(SimpleTextureMap::default()),
-        )?;
+        let external_texture = ExternalTexture::create(&gl)?;
+        let mut texture_map = SimpleTextureMap::default();
+        texture_map.set(external_texture.id, external_texture.handle);
+        let renderer =
+            GlowRenderer::with_shared_context(Rc::clone(&gl), &mut imgui, Box::new(texture_map))?;
+        #[cfg(feature = "test-engine")]
+        let sampler_strategy = if renderer.supports_sampler_objects() {
+            GlowSamplerStrategy::SamplerObjects
+        } else {
+            GlowSamplerStrategy::TextureParameters
+        };
+        #[cfg(feature = "test-engine")]
+        let renderer = {
+            let mut renderer = renderer;
+            if run_viewport_smoke {
+                renderer.set_framebuffer_srgb_enabled(true)?;
+            }
+            renderer
+        };
+        #[cfg(feature = "test-engine")]
+        let reset_render_state_callback = imgui
+            .platform_io()
+            .draw_callback_reset_render_state_raw()
+            .ok_or("Glow did not publish its reset-render-state callback")?;
+        let sampler_linear_callback = imgui
+            .platform_io()
+            .draw_callback_set_sampler_linear_raw()
+            .ok_or("Glow did not publish its linear sampler callback")?;
+        let sampler_nearest_callback = imgui
+            .platform_io()
+            .draw_callback_set_sampler_nearest_raw()
+            .ok_or("Glow did not publish its nearest sampler callback")?;
         // SAFETY: SDL3's OpenGL viewport backend creates every secondary context in the main
         // context's share group and makes the matching context current for renderer callbacks. The
         // frame driver explicitly restores `gl_context` after the platform-window pump.
@@ -599,10 +1254,12 @@ impl MainData {
         let viewport_smoke = run_viewport_smoke.then(|| ViewportSmokeState {
             result_path: std::env::var_os("DEAR_IMGUI_VIEWPORT_SMOKE_JSON").map(PathBuf::from),
             renderer: renderer_info,
+            sampler_strategy,
             saw_secondary_viewport: false,
             completed_frame_evidence: None,
             saw_merged_viewport: false,
             main_present_bracketed_by_test_engine: false,
+            contract: GlowContractEvidence::default(),
             complete: false,
         });
 
@@ -613,6 +1270,11 @@ impl MainData {
             gl,
             gl_context,
             window,
+            external_texture,
+            #[cfg(feature = "test-engine")]
+            reset_render_state_callback,
+            sampler_linear_callback,
+            sampler_nearest_callback,
             _video: video,
             _sdl: sdl,
             last_frame: Instant::now(),
@@ -645,8 +1307,19 @@ impl MainData {
             }
         }
 
+        #[cfg(feature = "test-engine")]
+        reset_raw_callback_probe();
         let ui = self.imgui.frame();
         ui.dockspace_over_main_viewport();
+        let external_texture_id = self.external_texture.id;
+        #[cfg(feature = "test-engine")]
+        let reset_render_state_callback = self.reset_render_state_callback;
+        let sampler_linear_callback = self.sampler_linear_callback;
+        let sampler_nearest_callback = self.sampler_nearest_callback;
+        #[cfg(feature = "test-engine")]
+        let run_contract_probe = self.test_engine.is_some();
+        #[cfg(not(feature = "test-engine"))]
+        let run_contract_probe = false;
         ui.window("Main")
             .size([420.0, 260.0], Condition::FirstUseEver)
             .build(|| {
@@ -659,9 +1332,50 @@ impl MainData {
                         .flags(dear_imgui_rs::InputScalarFlags::READ_ONLY)
                         .build(&mut viewport_count);
                 }
+                if !run_contract_probe {
+                    let draw_list = ui.get_window_draw_list();
+                    unsafe {
+                        draw_list.add_callback(sampler_nearest_callback, std::ptr::null_mut(), 0);
+                    }
+                    ui.image(external_texture_id, [64.0, 64.0]);
+                    let draw_list = ui.get_window_draw_list();
+                    unsafe {
+                        draw_list.add_callback(sampler_linear_callback, std::ptr::null_mut(), 0);
+                    }
+                }
             });
 
+        #[cfg(feature = "test-engine")]
+        let sampler_probe = run_contract_probe.then(|| {
+            SamplerProbeScreenPoints::submit(
+                ui,
+                external_texture_id,
+                sampler_nearest_callback,
+                sampler_linear_callback,
+                reset_render_state_callback,
+            )
+        });
+
         let frame = self.imgui.render();
+        #[cfg(feature = "test-engine")]
+        let contract_probe = if let Some(sampler_probe) = sampler_probe {
+            let sampler_strategy = self
+                .viewport_smoke
+                .as_ref()
+                .ok_or("contract probe requires viewport smoke state")?
+                .sampler_strategy;
+            Some(GlowFrameContractProbe {
+                readback_targets: sampler_probe.map_to_framebuffer(frame.draw_data())?,
+                external_texture: self.external_texture.handle,
+                gl_version: GlVersion::read(&self.gl),
+                supports_sampler_objects: matches!(
+                    sampler_strategy,
+                    GlowSamplerStrategy::SamplerObjects
+                ),
+            })
+        } else {
+            None
+        };
         #[cfg(feature = "test-engine")]
         let frame_index = {
             self.test_engine_frame_index = self
@@ -682,6 +1396,10 @@ impl MainData {
             rendered: false,
             #[cfg(feature = "test-engine")]
             secondary_viewport_evidence: None,
+            #[cfg(feature = "test-engine")]
+            contract_probe,
+            #[cfg(feature = "test-engine")]
+            contract_result: None,
             presented: false,
         };
         #[cfg(feature = "test-engine")]
@@ -712,9 +1430,67 @@ impl MainData {
             .take()
             .unwrap_or_default();
         #[cfg(feature = "test-engine")]
+        let contract_result = driver.contract_result.take();
+        #[cfg(feature = "test-engine")]
         let was_presented = driver.presented;
         drop(driver);
         presentation_result?;
+
+        #[cfg(feature = "test-engine")]
+        let external_texture_filters_preserved =
+            self.external_texture.filters_are_preserved(&self.gl);
+        #[cfg(feature = "test-engine")]
+        let render_state_cleared_after_callback = self.imgui.binding().with_bound_context(|| {
+            matches!(
+                unsafe { GlowRenderState::with_current(|_| ()) },
+                Err(GlowRenderStateAccessError::Inactive)
+            )
+        });
+
+        #[cfg(feature = "test-engine")]
+        if let Some(smoke) = self.viewport_smoke.as_mut() {
+            let contract_result = contract_result
+                .as_ref()
+                .ok_or("Glow contract probe did not produce framebuffer evidence")?;
+            let contract = GlowContractEvidence {
+                external_texture_filters_preserved,
+                sampler_pixels_prove_isolation: contract_result.readback.proves_sampler_isolation(),
+                raw_callback_typed_state_observed: raw_callback_probe_passed(
+                    smoke.sampler_strategy,
+                ),
+                reset_render_state_recovered: reset_render_state_probe_passed(),
+                render_state_cleared_after_callback,
+                application_gl_state_restored: contract_result.application_gl_state_restored,
+            };
+            if !contract.external_texture_filters_preserved {
+                return Err(format!(
+                    "Glow changed application-owned texture filters: expected {:?}, got {:?}",
+                    self.external_texture.expected_filters,
+                    self.external_texture.filters(&self.gl)
+                )
+                .into());
+            }
+            if !contract.sampler_pixels_prove_isolation {
+                return Err(format!(
+                    "Glow sampler readback did not distinguish nearest, linear, and reset-linear draws: {:?}",
+                    contract_result.readback
+                )
+                .into());
+            }
+            if !contract.raw_callback_typed_state_observed {
+                return Err("Glow raw callbacks did not observe scoped typed render state".into());
+            }
+            if !contract.reset_render_state_recovered {
+                return Err("Glow reset did not recover its VAO and framebuffer sRGB state".into());
+            }
+            if !contract.render_state_cleared_after_callback {
+                return Err("Glow Renderer_RenderState remained published after rendering".into());
+            }
+            if !contract.application_gl_state_restored {
+                return Err("Glow did not restore the application OpenGL state snapshot".into());
+            }
+            smoke.contract = contract;
+        }
 
         #[cfg(feature = "test-engine")]
         if let Some(smoke) = self.viewport_smoke.as_mut()
@@ -747,10 +1523,11 @@ impl MainData {
                     || smoke.completed_frame_evidence.is_none()
                     || !smoke.saw_merged_viewport
                     || !smoke.main_present_bracketed_by_test_engine
+                    || !smoke.contract.is_complete()
                 {
                     let evidence = smoke.completed_frame_evidence.as_ref();
                     return Err(format!(
-                        "viewport smoke did not observe one secondary viewport completing the native-context, Glow-draw, and native-swap stages in the same frame before the main present: secondary={}, context_ready={:?}, glow_drawn={:?}, swapped={:?}, completed={:?}, merged={}, main_present_bracketed={}",
+                        "viewport smoke did not observe the complete viewport, sampler, and callback contract: secondary={}, context_ready={:?}, glow_drawn={:?}, swapped={:?}, completed={:?}, merged={}, main_present_bracketed={}, contract={:?}",
                         smoke.saw_secondary_viewport,
                         evidence.map(|evidence| &evidence.context_activated_viewports),
                         evidence.map(|evidence| &evidence.glow_rendered_viewports),
@@ -758,6 +1535,7 @@ impl MainData {
                         evidence.map(|evidence| &evidence.completed_viewports),
                         smoke.saw_merged_viewport,
                         smoke.main_present_bracketed_by_test_engine,
+                        smoke.contract,
                     )
                     .into());
                 }
@@ -785,8 +1563,11 @@ impl MainData {
         if let Some(engine) = self.test_engine.as_mut() {
             engine.shutdown()?;
         }
+        self.window.gl_make_current(&self.gl_context)?;
         self.renderer.shutdown(&mut self.imgui)?;
         self.sdl3_backend.shutdown(&mut self.imgui)?;
+        self.window.gl_make_current(&self.gl_context)?;
+        unsafe { self.gl.delete_texture(self.external_texture.handle) };
 
         #[cfg(feature = "test-engine")]
         return Ok(completed_result);

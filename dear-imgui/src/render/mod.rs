@@ -28,11 +28,14 @@
 //! require_clone::<dear_imgui_rs::render::DrawCmd<'static>>();
 //! ```
 
+mod callback_state;
 pub mod draw_data;
 mod frame;
 pub mod snapshot;
 
 // Re-export commonly used types
+#[doc(hidden)]
+pub use callback_state::{RendererRenderStateGuard, RendererRenderStateGuardError};
 pub use draw_data::*;
 pub use frame::{ReconciledFrame, RenderedFrame};
 pub use snapshot::*;

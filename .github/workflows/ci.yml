@@ -139,6 +139,9 @@ jobs:
       - name: Run dear-imgui-rs multi-viewport acceptance tests
         run: cargo nextest run -p dear-imgui-rs --features multi-viewport
 
+      - name: Run Glow renderer acceptance tests
+        run: cargo nextest run -p dear-imgui-glow --features multi-viewport
+
       - name: Run reflection acceptance tests
         run: cargo nextest run -p dear-imgui-reflect --features glam,mint
 
@@ -1371,6 +1374,9 @@ jobs:
 
       - name: Check explicit core WASM feature
         run: cargo check -p dear-imgui-rs --target wasm32-unknown-unknown --no-default-features --features wasm
+
+      - name: Check Glow renderer WASM provider
+        run: cargo check -p dear-imgui-glow --target wasm32-unknown-unknown --no-default-features --features wasm
 
       - name: Check file browser WASM scan policy branches
         run: cargo check -p dear-file-browser --target wasm32-unknown-unknown --tests --no-default-features --features "imgui,dear-imgui-rs/wasm"

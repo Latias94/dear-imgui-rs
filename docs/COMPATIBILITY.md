@@ -33,7 +33,7 @@ Backends
 | Crate             | Version | External deps           | Notes |
 |-------------------|---------|-------------------------|-------|
 | dear-imgui-wgpu   | 0.16.0-alpha.1  | wgpu = 30/29/28/27     | WGPU 30 default; native Winit/SDL3 multi-viewport; browser single-window |
-| dear-imgui-glow   | 0.16.0-alpha.1  | glow = 0.17            | OpenGL renderer (winit/glutin) |
+| dear-imgui-glow   | 0.16.0-alpha.1  | glow = 0.17            | OpenGL 3.0+/ES 3.0+/WebGL 2 renderer; live sampler capability with restorative fallback |
 | dear-imgui-ash    | 0.16.0-alpha.1  | ash = 0.38             | Native Vulkan renderer; shared Winit/SDL3 multi-viewport runtime |
 | dear-imgui-winit  | 0.16.0-alpha.1  | winit = 0.30.13        | Winit platform backend |
 | dear-imgui-sdl3   | 0.16.0-alpha.1  | sdl3 = 0.18.4, sdl3-sys 0.6 | SDL3 platform backend with optional official OpenGL3, SDLRenderer3, and SDLGPU3 renderers |
@@ -87,6 +87,7 @@ target.
 | WASM stack layout / blueprints | Unsupported; `stack-layout` and `wasm` are rejected together. Use `dear-imnodes` for the WASM node-editor route. |
 | WASM test engine / prebuilt | Unsupported; `test-engine` needs native source hooks and `prebuilt` contains native static libraries. |
 | WGPU renderer | WGPU 30 is the default; 29, 28, and 27 are separate mutually exclusive features. Native Winit and SDL3 multi-viewport adapters are also mutually exclusive. |
+| Glow renderer | Requires OpenGL 3.0+, OpenGL ES 3.0+, or WebGL 2. Sampler objects are selected from the live context; older desktop contexts use a temporary filter override that restores application texture parameters before the draw scope ends. |
 | Ash renderer | Native Vulkan via Ash 0.38. Winit and SDL3 multi-viewport surface adapters are mutually exclusive and share one swapchain runtime. |
 | Browser multi-viewport | Unsupported. Browser integrations render one main canvas. |
 | Bevy default | `dear-imgui-bevy` enables `render` and `bevy-ui`; the primary Context automatically targets the unique eligible primary-window camera. |

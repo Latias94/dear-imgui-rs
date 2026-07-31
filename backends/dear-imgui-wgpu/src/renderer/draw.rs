@@ -533,7 +533,10 @@ impl WgpuRenderer {
         platform_io: *mut dear_imgui_rs::sys::ImGuiPlatformIO,
         device: &wgpu::Device,
     ) -> RendererResult<()> {
-        RendererRenderStateGuard::preflight(platform_io)?;
+        unsafe {
+            RendererRenderStateGuard::<crate::WgpuRenderStateStorage>::preflight(platform_io)
+        }
+        .map_err(super::map_renderer_render_state_error)?;
         Self::setup_prepared_render_state(
             render_pass,
             extent,
@@ -542,12 +545,8 @@ impl WgpuRenderer {
         );
 
         let mut callback_state = crate::WgpuRenderStateStorage::new(device, render_pass);
-        let guard = unsafe {
-            RendererRenderStateGuard::install(
-                platform_io,
-                std::ptr::from_mut(&mut callback_state).cast(),
-            )?
-        };
+        let guard = unsafe { RendererRenderStateGuard::install(platform_io, &mut callback_state) }
+            .map_err(super::map_renderer_render_state_error)?;
 
         for command in prepared.commands {
             match command {
@@ -576,12 +575,16 @@ impl WgpuRenderer {
                 }
                 PreparedDrawCommand::RawCallback(callback) => {
                     unsafe { callback.invoke() };
-                    guard.validate()?;
+                    guard
+                        .validate()
+                        .map_err(super::map_renderer_render_state_error)?;
                 }
             }
         }
 
-        guard.finish()
+        guard
+            .finish()
+            .map_err(super::map_renderer_render_state_error)
     }
 }
 

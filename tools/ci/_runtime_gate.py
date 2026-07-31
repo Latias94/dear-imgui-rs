@@ -901,11 +901,15 @@ def _wait_for_window_manager(
 def _validate_viewport_lifecycle(
     payload: Mapping[str, object],
     lifecycle_fields: Sequence[str],
+    *,
+    schema_version: int = 3,
 ) -> list[str]:
     errors: list[str] = []
-    schema_version = payload.get("schema_version")
-    if type(schema_version) is not int or schema_version != 3:
-        errors.append(f"schema_version expected 3, got {schema_version!r}")
+    actual_schema_version = payload.get("schema_version")
+    if type(actual_schema_version) is not int or actual_schema_version != schema_version:
+        errors.append(
+            f"schema_version expected {schema_version}, got {actual_schema_version!r}"
+        )
     for field_name in lifecycle_fields:
         if payload.get(field_name) is not True:
             errors.append(f"{field_name} expected True, got {payload.get(field_name)!r}")
@@ -982,8 +986,21 @@ def _validate_sdl3_glow_viewport_payload(
         (
             "merge_observed",
             "main_present_bracketed_by_test_engine",
+            "external_texture_filters_preserved",
+            "sampler_pixels_prove_isolation",
+            "raw_callback_typed_state_observed",
+            "reset_render_state_recovered",
+            "render_state_cleared_after_callback",
+            "application_gl_state_restored",
         ),
+        schema_version=5,
     )
+    sampler_strategy = payload.get("sampler_strategy")
+    if sampler_strategy not in ("sampler_objects", "texture_parameters"):
+        errors.append(
+            "sampler_strategy must be sampler_objects or texture_parameters, "
+            f"got {sampler_strategy!r}"
+        )
     context_ids = _viewport_id_set(
         payload,
         "secondary_context_ready_before_main_present_viewport_ids",
@@ -1338,6 +1355,12 @@ def _run_viewport_smoke(
             "viewport.stdout.log",
             "viewport.stderr.log",
             "viewport-result.json",
+            "viewport-texture-parameters.stdout.log",
+            "viewport-texture-parameters.stderr.log",
+            "viewport-texture-parameters-result.json",
+            "viewport-sampler-objects.stdout.log",
+            "viewport-sampler-objects.stderr.log",
+            "viewport-sampler-objects-result.json",
         ),
     )
     if rejected := _reject_excess_attempt(
@@ -1547,22 +1570,65 @@ def _run_viewport_smoke(
                                 spec.probe_identity_error,
                             )
 
-                        viewport_result = evidence_dir / "viewport-result.json"
-                        viewport_result.unlink(missing_ok=True)
-                        child = run_bounded(
-                            (binary,),
-                            cwd=workspace_root,
-                            env=child_environment,
-                            timeout=child_timeout,
-                            stdout_log=evidence_dir / "viewport.stdout.log",
-                            stderr_log=evidence_dir / "viewport.stderr.log",
-                        )
-                        details["viewport"] = _process_json(child, evidence_dir)
-                        _check_stage(
-                            child,
-                            label=spec.child_label,
-                            nonzero_category=GateCategory.PRODUCT_FAILURE,
-                        )
+                        if spec.gate == _SDL3_GLOW_VIEWPORT_SMOKE.gate:
+                            profiles = (
+                                (
+                                    "texture-parameters",
+                                    "3.2",
+                                    "-GL_ARB_sampler_objects",
+                                    "texture_parameters",
+                                ),
+                                ("sampler-objects", "3.3", None, "sampler_objects"),
+                            )
+                            profile_details: dict[str, object] = {}
+                            for slug, version_override, extension_override, _ in profiles:
+                                profile_environment = dict(child_environment)
+                                profile_environment["MESA_GL_VERSION_OVERRIDE"] = version_override
+                                if extension_override is None:
+                                    profile_environment.pop("MESA_EXTENSION_OVERRIDE", None)
+                                else:
+                                    profile_environment["MESA_EXTENSION_OVERRIDE"] = (
+                                        extension_override
+                                    )
+                                profile_result = (
+                                    evidence_dir / f"viewport-{slug}-result.json"
+                                )
+                                profile_result.unlink(missing_ok=True)
+                                profile_environment[
+                                    "DEAR_IMGUI_VIEWPORT_SMOKE_JSON"
+                                ] = str(profile_result)
+                                child = run_bounded(
+                                    (binary,),
+                                    cwd=workspace_root,
+                                    env=profile_environment,
+                                    timeout=child_timeout,
+                                    stdout_log=evidence_dir / f"viewport-{slug}.stdout.log",
+                                    stderr_log=evidence_dir / f"viewport-{slug}.stderr.log",
+                                )
+                                profile_details[slug] = _process_json(child, evidence_dir)
+                                _check_stage(
+                                    child,
+                                    label=f"{spec.child_label} ({slug})",
+                                    nonzero_category=GateCategory.PRODUCT_FAILURE,
+                                )
+                            details["viewport_profiles"] = profile_details
+                        else:
+                            viewport_result = evidence_dir / "viewport-result.json"
+                            viewport_result.unlink(missing_ok=True)
+                            child = run_bounded(
+                                (binary,),
+                                cwd=workspace_root,
+                                env=child_environment,
+                                timeout=child_timeout,
+                                stdout_log=evidence_dir / "viewport.stdout.log",
+                                stderr_log=evidence_dir / "viewport.stderr.log",
+                            )
+                            details["viewport"] = _process_json(child, evidence_dir)
+                            _check_stage(
+                                child,
+                                label=spec.child_label,
+                                nonzero_category=GateCategory.PRODUCT_FAILURE,
+                            )
                         if xvfb.poll() is not None:
                             raise RuntimeContractError(
                                 GateCategory.INFRASTRUCTURE_UNAVAILABLE,
@@ -1581,14 +1647,35 @@ def _run_viewport_smoke(
             details["xvfb"] = _background_json(xvfb, evidence_dir)
             _check_background(xvfb, "Xvfb")
 
-        payload = _read_object(evidence_dir / "viewport-result.json")
-        errors = spec.payload_validator(payload)
-        details["result"] = payload
-        if errors:
-            raise RuntimeContractError(
-                GateCategory.PRODUCT_FAILURE,
-                "; ".join(errors),
-            )
+        if spec.gate == _SDL3_GLOW_VIEWPORT_SMOKE.gate:
+            results: dict[str, object] = {}
+            for slug, expected_strategy in (
+                ("texture-parameters", "texture_parameters"),
+                ("sampler-objects", "sampler_objects"),
+            ):
+                payload = _read_object(evidence_dir / f"viewport-{slug}-result.json")
+                errors = spec.payload_validator(payload)
+                if payload.get("sampler_strategy") != expected_strategy:
+                    errors.append(
+                        f"sampler_strategy expected {expected_strategy!r}, "
+                        f"got {payload.get('sampler_strategy')!r}"
+                    )
+                results[slug] = payload
+                if errors:
+                    raise RuntimeContractError(
+                        GateCategory.PRODUCT_FAILURE,
+                        f"{slug}: " + "; ".join(errors),
+                    )
+            details["results"] = results
+        else:
+            payload = _read_object(evidence_dir / "viewport-result.json")
+            errors = spec.payload_validator(payload)
+            details["result"] = payload
+            if errors:
+                raise RuntimeContractError(
+                    GateCategory.PRODUCT_FAILURE,
+                    "; ".join(errors),
+                )
         result = GateResult(
             gate,
             True,

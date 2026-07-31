@@ -1,57 +1,185 @@
 //! OpenGL state backup and restoration
 
-#[cfg(feature = "bind_vertex_array_support")]
-use crate::GlVertexArray;
-use crate::{GlBuffer, GlProgram, GlTexture, GlVersion};
-use glow::{Context, HasContext};
+use std::{cell::Cell, marker::PhantomData, ptr::NonNull, rc::Rc};
 
+use crate::GlVertexArray;
+use crate::{GlBuffer, GlProgram, GlSampler, GlTexture, GlVersion, RenderError};
+use dear_imgui_rs::{render::RendererRenderStateGuardError, sys};
+use glow::{Context, HasContext};
+use thiserror::Error;
+
+/// Sampling mechanism selected from the live OpenGL context.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct FramebufferSrgbTransition {
-    enable_on_enter: bool,
-    disable_on_exit: bool,
+#[non_exhaustive]
+pub enum GlowSamplerStrategy {
+    /// OpenGL sampler objects override texture-owned filtering without mutating textures.
+    SamplerObjects,
+    /// Explicit sampler commands temporarily override and then restore texture parameters.
+    TextureParameters,
 }
 
-impl FramebufferSrgbTransition {
-    fn new(requested: bool, was_enabled: bool) -> Self {
-        let changed = requested && !was_enabled;
+/// Error returned while borrowing transient Glow draw-callback state.
+#[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
+#[non_exhaustive]
+pub enum GlowRenderStateAccessError {
+    /// No Glow render state is active on the current Dear ImGui Context.
+    #[error("no Glow render state is active on the current Dear ImGui context")]
+    Inactive,
+    /// The active callback state is already borrowed by an outer scoped access.
+    #[error("the active Glow render state is already borrowed")]
+    AlreadyBorrowed,
+}
+
+pub(crate) struct GlowRenderStateStorage<'gl> {
+    gl: &'gl Context,
+    sampler_strategy: GlowSamplerStrategy,
+    borrowed: Cell<bool>,
+}
+
+impl<'gl> GlowRenderStateStorage<'gl> {
+    pub(crate) fn new(gl: &'gl Context, sampler_strategy: GlowSamplerStrategy) -> Self {
         Self {
-            enable_on_enter: changed,
-            disable_on_exit: changed,
+            gl,
+            sampler_strategy,
+            borrowed: Cell::new(false),
         }
     }
 }
 
-/// Temporarily enables framebuffer sRGB without changing pre-existing state.
+struct GlowRenderStateBorrow<'storage>(&'storage Cell<bool>);
+
+impl Drop for GlowRenderStateBorrow<'_> {
+    fn drop(&mut self) {
+        self.0.set(false);
+    }
+}
+
+/// Scoped access to the OpenGL context selected for a raw draw callback.
+///
+/// This corresponds to `ImGui_ImplOpenGL3_RenderState` in the official backend. The value can
+/// only be obtained through [`Self::with_current`] while `dear-imgui-glow` is invoking a raw
+/// callback, and cannot outlive that callback scope.
+///
+/// The returned [`Context`] is the live OpenGL function table, not a safe rendering facade.
+/// Calling its methods remains subject to each `glow` method's `unsafe` OpenGL preconditions.
+///
+/// ```compile_fail
+/// use dear_imgui_glow::GlowRenderState;
+///
+/// let _escaped = unsafe { GlowRenderState::with_current(|state| state.gl()) };
+/// ```
+#[derive(Debug)]
+pub struct GlowRenderState<'callback> {
+    storage: NonNull<GlowRenderStateStorage<'callback>>,
+    _callback: PhantomData<&'callback mut GlowRenderStateStorage<'callback>>,
+    _ui_thread: PhantomData<Rc<()>>,
+}
+
+impl GlowRenderState<'_> {
+    /// Borrows the state published for the current raw draw callback.
+    ///
+    /// # Safety
+    ///
+    /// This function may only be called from a raw draw callback currently invoked by
+    /// `dear-imgui-glow`. The current Dear ImGui Context must be the renderer owner and its
+    /// `Renderer_RenderState` slot must still contain the Glow state installed for this callback.
+    /// The callback must not replace that slot while `callback` is running.
+    ///
+    /// The higher-ranked closure prevents the OpenGL context reference from escaping. Recursive
+    /// access is rejected at runtime.
+    pub unsafe fn with_current<R>(
+        callback: impl for<'callback> FnOnce(GlowRenderState<'callback>) -> R,
+    ) -> Result<R, GlowRenderStateAccessError> {
+        let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
+        let raw_state = if platform_io.is_null() {
+            None
+        } else {
+            NonNull::new(unsafe { (*platform_io).Renderer_RenderState })
+        }
+        .ok_or(GlowRenderStateAccessError::Inactive)?;
+        let storage = raw_state.cast::<GlowRenderStateStorage<'_>>();
+        let borrowed = unsafe { &storage.as_ref().borrowed };
+        if borrowed.replace(true) {
+            return Err(GlowRenderStateAccessError::AlreadyBorrowed);
+        }
+        let _borrow = GlowRenderStateBorrow(borrowed);
+        Ok(callback(GlowRenderState {
+            storage,
+            _callback: PhantomData,
+            _ui_thread: PhantomData,
+        }))
+    }
+
+    /// Returns the current OpenGL function table for the callback duration.
+    pub fn gl(&self) -> &Context {
+        unsafe { self.storage.as_ref().gl }
+    }
+
+    /// Returns the renderer's sampling mechanism for this draw scope.
+    pub fn sampler_strategy(&self) -> GlowSamplerStrategy {
+        unsafe { self.storage.as_ref().sampler_strategy }
+    }
+}
+
+pub(crate) fn map_renderer_render_state_error(error: RendererRenderStateGuardError) -> RenderError {
+    match error {
+        RendererRenderStateGuardError::MissingPlatformIo => RenderError::MissingPlatformIo,
+        RendererRenderStateGuardError::AlreadyOccupied | RendererRenderStateGuardError::Drift => {
+            RenderError::RendererStateDrift {
+                field: "Renderer_RenderState",
+            }
+        }
+    }
+}
+
+/// Applies the configured desktop framebuffer sRGB state and restores the prior state on drop.
 pub(crate) struct FramebufferSrgbScope<'a> {
     gl: &'a Context,
-    disable_on_drop: bool,
+    requested: bool,
+    restore_enabled: bool,
 }
 
 impl<'a> FramebufferSrgbScope<'a> {
     pub(crate) fn enter(gl: &'a Context, requested: bool) -> Self {
-        let was_enabled = requested && unsafe { gl.is_enabled(glow::FRAMEBUFFER_SRGB) };
-        let transition = FramebufferSrgbTransition::new(requested, was_enabled);
-        if transition.enable_on_enter {
-            unsafe { gl.enable(glow::FRAMEBUFFER_SRGB) };
+        let restore_enabled = unsafe { gl.is_enabled(glow::FRAMEBUFFER_SRGB) };
+        if restore_enabled != requested {
+            set_framebuffer_srgb(gl, requested);
         }
         Self {
             gl,
-            disable_on_drop: transition.disable_on_exit,
+            requested,
+            restore_enabled,
+        }
+    }
+
+    pub(crate) fn reapply(&self) {
+        if unsafe { self.gl.is_enabled(glow::FRAMEBUFFER_SRGB) } != self.requested {
+            set_framebuffer_srgb(self.gl, self.requested);
         }
     }
 }
 
 impl Drop for FramebufferSrgbScope<'_> {
     fn drop(&mut self) {
-        if self.disable_on_drop {
-            unsafe { self.gl.disable(glow::FRAMEBUFFER_SRGB) };
+        if unsafe { self.gl.is_enabled(glow::FRAMEBUFFER_SRGB) } != self.restore_enabled {
+            set_framebuffer_srgb(self.gl, self.restore_enabled);
+        }
+    }
+}
+
+fn set_framebuffer_srgb(gl: &Context, enabled: bool) {
+    unsafe {
+        if enabled {
+            gl.enable(glow::FRAMEBUFFER_SRGB);
+        } else {
+            gl.disable(glow::FRAMEBUFFER_SRGB);
         }
     }
 }
 
 /// OpenGL state backup for proper state restoration
 #[derive(Clone, Default)]
-pub struct GlStateBackup {
+struct GlStateBackup {
     // Blend state
     blend_enabled: bool,
     blend_src_rgb: u32,
@@ -70,10 +198,8 @@ pub struct GlStateBackup {
 
     // Buffers
     array_buffer_binding: Option<GlBuffer>,
-    element_array_buffer_binding: Option<GlBuffer>,
 
     // Vertex array
-    #[cfg(feature = "bind_vertex_array_support")]
     vertex_array_binding: Option<GlVertexArray>,
 
     // Textures
@@ -89,22 +215,24 @@ pub struct GlStateBackup {
     stencil_test_enabled: bool,
 
     // Polygon mode (desktop OpenGL only)
-    #[cfg(feature = "polygon_mode_support")]
     polygon_mode: [i32; 2],
 
     // Primitive restart (OpenGL 3.1+)
-    #[cfg(feature = "primitive_restart_support")]
     primitive_restart_enabled: bool,
 
     // Sampler binding (OpenGL 3.3+/ES 3.0+)
-    #[cfg(feature = "bind_sampler_support")]
-    sampler_binding: u32,
+    sampler_binding: Option<GlSampler>,
 }
 
 impl GlStateBackup {
     /// Backup OpenGL state before rendering
-    pub fn backup(&mut self, gl: &Context, gl_version: GlVersion) {
-        let _ = gl_version;
+    fn backup(
+        &mut self,
+        gl: &Context,
+        gl_version: GlVersion,
+        separate_polygon_modes: bool,
+        supports_sampler_objects: bool,
+    ) {
         unsafe {
             // Blend state
             self.blend_enabled = gl.is_enabled(glow::BLEND);
@@ -127,53 +255,26 @@ impl GlStateBackup {
             self.color_write_mask = gl.get_parameter_bool_array(glow::COLOR_WRITEMASK);
 
             // Buffers
-            let buffer_binding = gl.get_parameter_i32(glow::ARRAY_BUFFER_BINDING);
-            self.array_buffer_binding = u32::try_from(buffer_binding)
-                .ok()
-                .and_then(std::num::NonZeroU32::new)
-                .map(glow::NativeBuffer);
-            let element_buffer_binding = gl.get_parameter_i32(glow::ELEMENT_ARRAY_BUFFER_BINDING);
-            self.element_array_buffer_binding = u32::try_from(element_buffer_binding)
-                .ok()
-                .and_then(std::num::NonZeroU32::new)
-                .map(glow::NativeBuffer);
+            self.array_buffer_binding = gl.get_parameter_buffer(glow::ARRAY_BUFFER_BINDING);
 
             // Vertex array
-            #[cfg(feature = "bind_vertex_array_support")]
-            if gl_version.bind_vertex_array_support() {
-                let vao_binding = gl.get_parameter_i32(glow::VERTEX_ARRAY_BINDING);
-                self.vertex_array_binding = u32::try_from(vao_binding)
-                    .ok()
-                    .and_then(std::num::NonZeroU32::new)
-                    .map(glow::NativeVertexArray);
-            }
+            self.vertex_array_binding = gl.get_parameter_vertex_array(glow::VERTEX_ARRAY_BINDING);
 
             // Textures
             self.active_texture = u32::try_from(gl.get_parameter_i32(glow::ACTIVE_TEXTURE))
                 .ok()
                 .unwrap_or(glow::TEXTURE0);
             gl.active_texture(glow::TEXTURE0);
-            let texture_binding = gl.get_parameter_i32(glow::TEXTURE_BINDING_2D);
-            self.texture_2d_binding_unit_0 = u32::try_from(texture_binding)
-                .ok()
-                .and_then(std::num::NonZeroU32::new)
-                .map(glow::NativeTexture);
+            self.texture_2d_binding_unit_0 = gl.get_parameter_texture(glow::TEXTURE_BINDING_2D);
 
             // Sampler binding
-            #[cfg(feature = "bind_sampler_support")]
-            if gl_version.bind_sampler_support() {
-                self.sampler_binding = u32::try_from(gl.get_parameter_i32(glow::SAMPLER_BINDING))
-                    .ok()
-                    .unwrap_or(0);
+            if supports_sampler_objects {
+                self.sampler_binding = gl.get_parameter_sampler(glow::SAMPLER_BINDING);
             }
             gl.active_texture(self.active_texture);
 
             // Shader program
-            let program_binding = gl.get_parameter_i32(glow::CURRENT_PROGRAM);
-            self.current_program = u32::try_from(program_binding)
-                .ok()
-                .and_then(std::num::NonZeroU32::new)
-                .map(glow::NativeProgram);
+            self.current_program = gl.get_parameter_program(glow::CURRENT_PROGRAM);
 
             // Other state
             self.cull_face_enabled = gl.is_enabled(glow::CULL_FACE);
@@ -181,24 +282,30 @@ impl GlStateBackup {
             self.stencil_test_enabled = gl.is_enabled(glow::STENCIL_TEST);
 
             // Polygon mode (desktop OpenGL only)
-            #[cfg(feature = "polygon_mode_support")]
-            if gl_version.polygon_mode_support() {
+            if gl_version.supports_polygon_mode() {
                 let mut polygon_mode = [0i32; 2];
                 gl.get_parameter_i32_slice(glow::POLYGON_MODE, &mut polygon_mode);
                 self.polygon_mode.copy_from_slice(&polygon_mode);
+                if !separate_polygon_modes {
+                    self.polygon_mode[1] = self.polygon_mode[0];
+                }
             }
 
             // Primitive restart
-            #[cfg(feature = "primitive_restart_support")]
-            if gl_version.primitive_restart_support() {
+            if gl_version.supports_primitive_restart() {
                 self.primitive_restart_enabled = gl.is_enabled(glow::PRIMITIVE_RESTART);
             }
         }
     }
 
     /// Restore OpenGL state after rendering
-    pub fn restore(&self, gl: &Context, gl_version: GlVersion) {
-        let _ = gl_version;
+    fn restore(
+        &self,
+        gl: &Context,
+        gl_version: GlVersion,
+        separate_polygon_modes: bool,
+        supports_sampler_objects: bool,
+    ) {
         unsafe {
             // Restore blend state
             if self.blend_enabled {
@@ -245,33 +352,27 @@ impl GlStateBackup {
                 self.color_write_mask[3],
             );
 
-            // Restore buffers
+            // The element-array binding is restored with its owning VAO.
+            gl.bind_vertex_array(self.vertex_array_binding);
             gl.bind_buffer(glow::ARRAY_BUFFER, self.array_buffer_binding);
-            gl.bind_buffer(
-                glow::ELEMENT_ARRAY_BUFFER,
-                self.element_array_buffer_binding,
-            );
-
-            // Restore vertex array
-            #[cfg(feature = "bind_vertex_array_support")]
-            if gl_version.bind_vertex_array_support() {
-                gl.bind_vertex_array(self.vertex_array_binding);
-            }
 
             // Restore textures
             gl.active_texture(glow::TEXTURE0);
             gl.bind_texture(glow::TEXTURE_2D, self.texture_2d_binding_unit_0);
 
-            #[cfg(feature = "bind_sampler_support")]
-            if gl_version.bind_sampler_support() {
-                let sampler =
-                    std::num::NonZeroU32::new(self.sampler_binding).map(glow::NativeSampler);
-                gl.bind_sampler(0, sampler);
+            if supports_sampler_objects {
+                gl.bind_sampler(0, self.sampler_binding);
             }
             gl.active_texture(self.active_texture);
 
-            // Restore shader program
-            gl.use_program(self.current_program);
+            // A program pending deletion may have disappeared while callbacks were running.
+            if self.current_program.is_none()
+                || self
+                    .current_program
+                    .is_some_and(|program| gl.is_program(program))
+            {
+                gl.use_program(self.current_program);
+            }
 
             // Restore other state
             if self.cull_face_enabled {
@@ -291,14 +392,17 @@ impl GlStateBackup {
             }
 
             // Restore polygon mode
-            #[cfg(feature = "polygon_mode_support")]
-            if gl_version.polygon_mode_support() {
-                gl.polygon_mode(glow::FRONT_AND_BACK, self.polygon_mode[0] as u32);
+            if gl_version.supports_polygon_mode() {
+                if separate_polygon_modes {
+                    gl.polygon_mode(glow::FRONT, self.polygon_mode[0] as u32);
+                    gl.polygon_mode(glow::BACK, self.polygon_mode[1] as u32);
+                } else {
+                    gl.polygon_mode(glow::FRONT_AND_BACK, self.polygon_mode[0] as u32);
+                }
             }
 
             // Restore primitive restart
-            #[cfg(feature = "primitive_restart_support")]
-            if gl_version.primitive_restart_support() {
+            if gl_version.supports_primitive_restart() {
                 if self.primitive_restart_enabled {
                     gl.enable(glow::PRIMITIVE_RESTART);
                 } else {
@@ -313,16 +417,30 @@ impl GlStateBackup {
 pub(crate) struct GlStateGuard<'a> {
     gl: &'a Context,
     gl_version: GlVersion,
+    separate_polygon_modes: bool,
+    supports_sampler_objects: bool,
     backup: GlStateBackup,
 }
 
 impl<'a> GlStateGuard<'a> {
-    pub(crate) fn capture(gl: &'a Context, gl_version: GlVersion) -> Self {
+    pub(crate) fn capture(
+        gl: &'a Context,
+        gl_version: GlVersion,
+        separate_polygon_modes: bool,
+        supports_sampler_objects: bool,
+    ) -> Self {
         let mut backup = GlStateBackup::default();
-        backup.backup(gl, gl_version);
+        backup.backup(
+            gl,
+            gl_version,
+            separate_polygon_modes,
+            supports_sampler_objects,
+        );
         Self {
             gl,
             gl_version,
+            separate_polygon_modes,
+            supports_sampler_objects,
             backup,
         }
     }
@@ -330,7 +448,12 @@ impl<'a> GlStateGuard<'a> {
 
 impl Drop for GlStateGuard<'_> {
     fn drop(&mut self) {
-        self.backup.restore(self.gl, self.gl_version);
+        self.backup.restore(
+            self.gl,
+            self.gl_version,
+            self.separate_polygon_modes,
+            self.supports_sampler_objects,
+        );
     }
 }
 
@@ -341,8 +464,17 @@ mod tests {
 
     use glow::HasContext;
 
-    use super::{FramebufferSrgbScope, FramebufferSrgbTransition, GlStateGuard};
+    use dear_imgui_rs::{Context as ImGuiContext, render::RendererRenderStateGuard, sys};
+    use static_assertions::assert_not_impl_any;
+
+    use super::{
+        FramebufferSrgbScope, GlStateGuard, GlowRenderState, GlowRenderStateAccessError,
+        GlowRenderStateStorage, GlowSamplerStrategy,
+    };
     use crate::GlVersion;
+
+    assert_not_impl_any!(GlowRenderState<'static>: Send, Sync);
+    assert_not_impl_any!(crate::GlowRenderer: Send, Sync);
 
     thread_local! {
         static FRAMEBUFFER_SRGB_ENABLED: Cell<bool> = const { Cell::new(false) };
@@ -408,49 +540,6 @@ mod tests {
     }
 
     #[test]
-    fn framebuffer_srgb_transition_only_reverts_state_changed_by_the_scope() {
-        for (requested, was_enabled, expected) in [
-            (
-                false,
-                false,
-                FramebufferSrgbTransition {
-                    enable_on_enter: false,
-                    disable_on_exit: false,
-                },
-            ),
-            (
-                false,
-                true,
-                FramebufferSrgbTransition {
-                    enable_on_enter: false,
-                    disable_on_exit: false,
-                },
-            ),
-            (
-                true,
-                false,
-                FramebufferSrgbTransition {
-                    enable_on_enter: true,
-                    disable_on_exit: true,
-                },
-            ),
-            (
-                true,
-                true,
-                FramebufferSrgbTransition {
-                    enable_on_enter: false,
-                    disable_on_exit: false,
-                },
-            ),
-        ] {
-            assert_eq!(
-                FramebufferSrgbTransition::new(requested, was_enabled),
-                expected
-            );
-        }
-    }
-
-    #[test]
     fn framebuffer_srgb_scope_enables_before_work_and_restores_afterward() {
         reset_gl_state(false);
         let gl = fake_gl();
@@ -464,7 +553,7 @@ mod tests {
         assert!(!FRAMEBUFFER_SRGB_ENABLED.with(Cell::get));
         assert_eq!(
             take_gl_events(),
-            ["query", "enable", "clear-and-draw", "disable"]
+            ["query", "enable", "clear-and-draw", "query", "disable"]
         );
     }
 
@@ -479,7 +568,28 @@ mod tests {
         }
 
         assert!(FRAMEBUFFER_SRGB_ENABLED.with(Cell::get));
-        assert_eq!(take_gl_events(), ["query", "clear-and-draw"]);
+        assert_eq!(take_gl_events(), ["query", "clear-and-draw", "query"]);
+    }
+
+    #[test]
+    fn framebuffer_srgb_scope_reapplies_configuration_after_callback_mutation() {
+        reset_gl_state(false);
+        let gl = fake_gl();
+
+        {
+            let scope = FramebufferSrgbScope::enter(&gl, true);
+            unsafe { gl.disable(glow::FRAMEBUFFER_SRGB) };
+            scope.reapply();
+            assert!(FRAMEBUFFER_SRGB_ENABLED.with(Cell::get));
+        }
+
+        assert!(!FRAMEBUFFER_SRGB_ENABLED.with(Cell::get));
+        assert_eq!(
+            take_gl_events(),
+            [
+                "query", "enable", "disable", "query", "enable", "query", "disable"
+            ]
+        );
     }
 
     #[derive(Clone, Copy, Debug, PartialEq)]
@@ -651,14 +761,13 @@ mod tests {
         };
 
         let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let _guard = GlStateGuard::capture(&gl, version);
+            let _guard = GlStateGuard::capture(&gl, version, false, true);
             unsafe {
                 gl.active_texture(glow::TEXTURE0);
                 gl.bind_texture(
                     glow::TEXTURE_2D,
                     Some(glow::NativeTexture(std::num::NonZeroU32::new(99).unwrap())),
                 );
-                #[cfg(feature = "bind_sampler_support")]
                 gl.bind_sampler(0, None);
                 gl.disable(glow::SCISSOR_TEST);
                 gl.scissor(0, 0, 1, 1);
@@ -670,5 +779,40 @@ mod tests {
 
         assert!(panic.is_err());
         assert_eq!(*STATEFUL_GL.lock().unwrap(), StatefulGl::ORIGINAL);
+    }
+
+    #[test]
+    fn glow_render_state_is_callback_scoped_and_rejects_recursive_borrow() {
+        let context = ImGuiContext::create();
+        let binding = context.binding();
+        let gl = fake_gl();
+
+        binding.with_bound_context(|| {
+            let platform_io = unsafe { sys::igGetPlatformIO_Nil() };
+            let mut storage = GlowRenderStateStorage::new(&gl, GlowSamplerStrategy::SamplerObjects);
+            let guard =
+                unsafe { RendererRenderStateGuard::install(platform_io, &mut storage) }.unwrap();
+
+            unsafe {
+                GlowRenderState::with_current(|state| {
+                    assert!(std::ptr::eq(state.gl(), &gl));
+                    assert_eq!(
+                        state.sampler_strategy(),
+                        GlowSamplerStrategy::SamplerObjects
+                    );
+                    assert!(matches!(
+                        GlowRenderState::with_current(|_| ()),
+                        Err(GlowRenderStateAccessError::AlreadyBorrowed)
+                    ));
+                })
+                .unwrap();
+            }
+
+            guard.finish().unwrap();
+            assert!(matches!(
+                unsafe { GlowRenderState::with_current(|_| ()) },
+                Err(GlowRenderStateAccessError::Inactive)
+            ));
+        });
     }
 }

@@ -15,6 +15,10 @@ pub enum InitError {
     #[error("Failed to create texture: {0}")]
     CreateTexture(String),
 
+    /// Failed to create an OpenGL sampler object
+    #[error("Failed to create sampler object: {0}")]
+    CreateSampler(String),
+
     /// Failed to create OpenGL shader
     #[error("Failed to create shader: {0}")]
     CreateShader(String),
@@ -123,9 +127,51 @@ pub enum RenderError {
     #[error("OpenGL error: {0}")]
     OpenGLError(String),
 
-    /// Invalid texture ID
-    #[error("Invalid texture: {0}")]
-    InvalidTexture(String),
+    /// A draw command references a texture that is not registered with this renderer.
+    #[error("texture ID is not registered: {0:?}")]
+    UnknownTextureId(dear_imgui_rs::TextureId),
+
+    /// A managed texture update arrived without its matching GPU allocation.
+    #[error("managed texture {0:?} received an update before creation")]
+    ManagedTextureMissing(dear_imgui_rs::render::SnapshotTextureId),
+
+    /// Draw data produced a non-finite framebuffer or projection value.
+    #[error("draw data field `{field}` is not finite: {value}")]
+    NonFiniteDrawValue { field: &'static str, value: f32 },
+
+    /// A positive framebuffer dimension does not fit OpenGL's signed viewport parameters.
+    #[error("framebuffer {dimension} is out of range for OpenGL: {value}")]
+    FramebufferDimensionOutOfRange { dimension: &'static str, value: f64 },
+
+    /// A draw command contains a non-finite clip rectangle.
+    #[error("draw command contains a non-finite clip rectangle: {0:?}")]
+    NonFiniteClipRect([f32; 4]),
+
+    /// A draw count or offset does not fit OpenGL's signed draw parameters.
+    #[error("{field} exceeds OpenGL draw parameter limits: {value}")]
+    DrawParameterOutOfRange { field: &'static str, value: usize },
+
+    /// A draw command's index range overflows or exceeds its parent draw list.
+    #[error("draw command index range {start}..{end} exceeds index buffer length {len}")]
+    DrawCommandIndexRangeOutOfBounds {
+        start: usize,
+        end: usize,
+        len: usize,
+    },
+
+    /// A draw command references a vertex outside its parent draw list.
+    #[error("draw command references vertex {index}, but vertex buffer length is {len}")]
+    DrawCommandVertexOutOfBounds { index: usize, len: usize },
+
+    /// A command requested a base vertex on a context that cannot draw with one.
+    #[error(
+        "draw command uses vertex offset {offset}, but this OpenGL context does not support it"
+    )]
+    VertexOffsetUnsupported { offset: usize },
+
+    /// Desktop `GL_FRAMEBUFFER_SRGB` control was requested on OpenGL ES or WebGL.
+    #[error("GL_FRAMEBUFFER_SRGB control is unavailable on OpenGL ES and WebGL contexts")]
+    FramebufferSrgbUnsupported,
 
     /// Renderer was destroyed
     #[error("Renderer was destroyed")]
@@ -180,6 +226,10 @@ pub enum RenderError {
     /// A Context-owned renderer state slot changed after Glow published it.
     #[error("Glow renderer state slot `{field}` drifted while attached")]
     RendererStateDrift { field: &'static str },
+
+    /// The current Dear ImGui Context has no PlatformIO for transient callback state.
+    #[error("the bound Dear ImGui Context has no PlatformIO")]
+    MissingPlatformIo,
 
     /// A renderer callback owned by Glow was replaced while attached.
     #[error("Glow renderer callback `{callback}` was replaced while attached")]

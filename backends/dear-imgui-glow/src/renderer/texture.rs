@@ -197,11 +197,11 @@ impl GlowRenderer {
         height: u32,
         rects: &[TextureUploadRect],
     ) -> RenderResult<TextureId> {
-        let binding = self.managed_textures.get(&key).copied().ok_or_else(|| {
-            RenderError::InvalidTexture(format!(
-                "managed texture {key:?} received an update before creation"
-            ))
-        })?;
+        let binding = self
+            .managed_textures
+            .get(&key)
+            .copied()
+            .ok_or(RenderError::ManagedTextureMissing(key))?;
 
         for upload in rects {
             validate_update_rect(upload, width, height).map_err(RenderError::DeviceObjectInit)?;
@@ -356,6 +356,7 @@ impl GlowRenderer {
             TextureFormat::RGBA32 => create_texture_from_rgba(gl, width, height, data)?,
             TextureFormat::Alpha8 => create_texture_from_alpha(gl, width, height, data)?,
         };
+        self.track_owned_texture(gl_texture);
         let texture_id = match self
             .texture_map_mut()
             .register_texture(gl_texture, width, height, format)
@@ -363,10 +364,10 @@ impl GlowRenderer {
             Ok(texture_id) => texture_id,
             Err(error) => {
                 unsafe { gl.delete_texture(gl_texture) };
+                self.forget_owned_texture(gl_texture);
                 return Err(error);
             }
         };
-        self.track_owned_texture(gl_texture);
         Ok(texture_id)
     }
 
@@ -545,6 +546,7 @@ mod tests {
         unpack_row_length: i32,
         unpack_skip_pixels: i32,
         unpack_skip_rows: i32,
+        pixel_unpack_buffer_binding: u32,
     }
 
     impl FakeUploadState {
@@ -555,6 +557,7 @@ mod tests {
             unpack_row_length: 0,
             unpack_skip_pixels: 0,
             unpack_skip_rows: 0,
+            pixel_unpack_buffer_binding: 0,
         };
 
         fn active_unit_index(self) -> usize {
@@ -563,6 +566,45 @@ mod tests {
     }
 
     static FAKE_UPLOAD_STATE: Mutex<FakeUploadState> = Mutex::new(FakeUploadState::DEFAULT);
+
+    struct PanicRegisterTextureMap;
+
+    impl TextureMap for PanicRegisterTextureMap {
+        fn get(&self, _texture_id: TextureId) -> Option<GlTexture> {
+            None
+        }
+
+        fn set(&mut self, _texture_id: TextureId, _gl_texture: GlTexture) {}
+
+        fn remove(&mut self, _texture_id: TextureId) -> Option<GlTexture> {
+            None
+        }
+
+        fn clear(&mut self) {}
+
+        fn register_texture(
+            &mut self,
+            _gl_texture: GlTexture,
+            _width: u32,
+            _height: u32,
+            _format: TextureFormat,
+        ) -> InitResult<TextureId> {
+            panic!("injected TextureMap::register_texture panic");
+        }
+
+        fn update_texture(
+            &mut self,
+            _texture_id: TextureId,
+            _gl_texture: GlTexture,
+            _width: u32,
+            _height: u32,
+        ) {
+        }
+
+        fn texture_format(&self, _texture_id: TextureId) -> Option<TextureFormat> {
+            None
+        }
+    }
 
     fn make_test_renderer() -> GlowRenderer {
         GlowRenderer {
@@ -578,14 +620,15 @@ mod tests {
             vbo_handle: None,
             ebo_handle: None,
             owned_textures: Vec::new(),
-            #[cfg(feature = "bind_vertex_array_support")]
-            vertex_array_object: None,
+            samplers: None,
             gl_version: GlVersion {
                 major: 3,
                 minor: 3,
                 is_es: false,
             },
             has_clip_origin_support: false,
+            has_separate_polygon_modes: false,
+            has_sampler_object_support: true,
             is_destroyed: false,
             gl_context: None,
             context_binding: None,
@@ -637,6 +680,7 @@ mod tests {
                 glow::UNPACK_ROW_LENGTH => state.unpack_row_length,
                 glow::UNPACK_SKIP_PIXELS => state.unpack_skip_pixels,
                 glow::UNPACK_SKIP_ROWS => state.unpack_skip_rows,
+                glow::PIXEL_UNPACK_BUFFER_BINDING => state.pixel_unpack_buffer_binding as i32,
                 _ => 0,
             };
             unsafe { *data = value };
@@ -669,6 +713,13 @@ mod tests {
                 glow::UNPACK_SKIP_ROWS => state.unpack_skip_rows = param,
                 _ => {}
             }
+        }
+        unsafe extern "system" fn fake_gl_bind_buffer(target: u32, buffer: u32) {
+            assert_eq!(target, glow::PIXEL_UNPACK_BUFFER);
+            FAKE_UPLOAD_STATE
+                .lock()
+                .unwrap()
+                .pixel_unpack_buffer_binding = buffer;
         }
         unsafe extern "system" fn fake_gl_tex_parameter_i(_target: u32, _pname: u32, _param: i32) {}
         unsafe extern "system" fn fake_gl_tex_image_2d(
@@ -709,6 +760,7 @@ mod tests {
                     "glDeleteTextures" => fake_gl_delete_textures as *const (),
                     "glBindTexture" => fake_gl_bind_texture as *const (),
                     "glPixelStorei" => fake_gl_pixel_store_i as *const (),
+                    "glBindBuffer" => fake_gl_bind_buffer as *const (),
                     "glTexParameteri" => fake_gl_tex_parameter_i as *const (),
                     "glTexImage2D" => fake_gl_tex_image_2d as *const (),
                     "glTexSubImage2D" => fake_gl_tex_sub_image_2d as *const (),
@@ -727,6 +779,7 @@ mod tests {
         assert_eq!(state.unpack_row_length, 0);
         assert_eq!(state.unpack_skip_pixels, 0);
         assert_eq!(state.unpack_skip_rows, 0);
+        assert_eq!(state.pixel_unpack_buffer_binding, 0);
     }
 
     fn set_fake_upload_state(state: FakeUploadState) {
@@ -799,6 +852,7 @@ mod tests {
             unpack_row_length: 7,
             unpack_skip_pixels: 2,
             unpack_skip_rows: 3,
+            pixel_unpack_buffer_binding: 91,
         };
 
         set_fake_upload_state(original);
@@ -826,6 +880,58 @@ mod tests {
             gl.delete_texture(rgba);
             gl.delete_texture(alpha);
         }
+    }
+
+    #[test]
+    fn texture_upload_state_restores_pixel_unpack_buffer_during_unwind() {
+        let _guard = GL_TEST_LOCK.lock().unwrap();
+        let gl = make_fake_gl();
+        let original = FakeUploadState {
+            active_texture: glow::TEXTURE0 + 3,
+            texture_bindings: [11, 0, 0, 33],
+            unpack_alignment: 8,
+            unpack_row_length: 7,
+            unpack_skip_pixels: 2,
+            unpack_skip_rows: 3,
+            pixel_unpack_buffer_binding: 91,
+        };
+        set_fake_upload_state(original);
+
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _state = crate::texture::texture_upload_state_guard_for_test(&gl);
+            assert_normalized_upload_state();
+            panic!("injected upload panic");
+        }));
+
+        assert!(panic.is_err());
+        assert_eq!(fake_upload_state(), original);
+    }
+
+    #[test]
+    fn legacy_texture_register_panic_keeps_the_gl_texture_owned_until_teardown() {
+        let _guard = GL_TEST_LOCK.lock().unwrap();
+        DELETED_TEXTURES.store(0, Ordering::SeqCst);
+        let gl = make_fake_gl();
+        let mut renderer = make_test_renderer();
+        renderer.texture_map = Some(Box::new(PanicRegisterTextureMap));
+
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = renderer.register_texture_with_context(
+                &gl,
+                1,
+                1,
+                TextureFormat::RGBA32,
+                &[255, 255, 255, 255],
+            );
+        }));
+
+        assert!(panic.is_err());
+        assert_eq!(renderer.owned_textures.len(), 1);
+        assert_eq!(DELETED_TEXTURES.load(Ordering::SeqCst), 0);
+
+        renderer.destroy_gpu_resources_only(&gl).unwrap();
+        assert!(renderer.owned_textures.is_empty());
+        assert_eq!(DELETED_TEXTURES.load(Ordering::SeqCst), 1);
     }
 
     #[test]

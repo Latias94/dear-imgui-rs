@@ -60,6 +60,7 @@ See the [compatibility guide](docs/COMPATIBILITY.md), [custom backend guide](doc
 | `RunnerError<E>`, `RunnerCallbackStage`, or direct matching on the old callback variants | Use the phase-specific `RunnerError<UiError, RenderError, PresentError, CaptureError>` and inspect `FrameDriverError::phase`; presentation ordering now belongs to `TestFrameDriver`. |
 | Public `RunReport` fields | Use `outcome()`, `frames()`, `mode()`, and `summary()` accessors. `RunMode` distinguishes graphical, graphical-with-capture, and headless runs without invalid mode combinations. |
 | `TestEngine::set_capture_enabled(bool)` | Enable the `capture` feature and select `CaptureOutput::Save` or `CaptureOutput::Discard`; builds without capture support report it explicitly. |
+| Glow capability Cargo features, mutable renderer GPU handles, or permissive GL 2/ES 2/WebGL 1 setup | Remove the old Glow capability features, use OpenGL 3.0+/ES 3.0+/WebGL 2, and query live support with `supports_sampler_objects()` / `supports_framebuffer_srgb_control()`. Standard linear/nearest callbacks now preserve application texture filters; `set_framebuffer_srgb_enabled(true)` returns `RenderResult<()>` and is unsupported on ES/WebGL. |
 
 For the common Bevy path, the setup becomes:
 

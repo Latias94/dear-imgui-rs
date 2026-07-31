@@ -2648,6 +2648,7 @@ dependencies = [
  "env_logger",
  "glow 0.17.0",
  "pollster",
+ "static_assertions",
  "thiserror 2.0.18",
  "winit",
 ]

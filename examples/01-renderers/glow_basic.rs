@@ -102,7 +102,7 @@ impl AppWindow {
 
         let mut renderer = GlowRenderer::new(gl, &mut imgui_context)?;
         // Use sRGB framebuffer: enable FRAMEBUFFER_SRGB during ImGui rendering
-        renderer.set_framebuffer_srgb_enabled(true);
+        renderer.set_framebuffer_srgb_enabled(true)?;
         renderer.new_frame()?;
 
         let imgui = ImguiState {

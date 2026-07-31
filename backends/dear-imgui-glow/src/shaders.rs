@@ -290,6 +290,7 @@ pub(crate) mod test_support {
         ProgramCreate,
         MissingAttribute,
         BufferCreate(u32),
+        SamplerCreate(u32),
     }
 
     #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -298,6 +299,8 @@ pub(crate) mod test_support {
         pub(crate) deleted_programs: u32,
         pub(crate) deleted_buffers: u32,
         pub(crate) generated_buffers: u32,
+        pub(crate) deleted_samplers: u32,
+        pub(crate) generated_samplers: u32,
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -305,6 +308,7 @@ pub(crate) mod test_support {
         failure: FakeFailure,
         created_shaders: u32,
         buffer_calls: u32,
+        sampler_calls: u32,
         snapshot: FakeSnapshot,
     }
 
@@ -313,11 +317,14 @@ pub(crate) mod test_support {
             failure: FakeFailure::None,
             created_shaders: 0,
             buffer_calls: 0,
+            sampler_calls: 0,
             snapshot: FakeSnapshot {
                 deleted_shaders: 0,
                 deleted_programs: 0,
                 deleted_buffers: 0,
                 generated_buffers: 0,
+                deleted_samplers: 0,
+                generated_samplers: 0,
             },
         };
     }
@@ -449,6 +456,28 @@ pub(crate) mod test_support {
         FAKE_STATE.lock().unwrap().snapshot.deleted_buffers += count.max(0) as u32;
     }
 
+    unsafe extern "system" fn gen_samplers(count: i32, samplers: *mut u32) {
+        let mut state = FAKE_STATE.lock().unwrap();
+        for index in 0..count.max(0) as usize {
+            state.sampler_calls += 1;
+            let failed = matches!(
+                state.failure,
+                FakeFailure::SamplerCreate(call) if call == state.sampler_calls
+            );
+            let sampler = if failed { 0 } else { 30 + state.sampler_calls };
+            if sampler != 0 {
+                state.snapshot.generated_samplers += 1;
+            }
+            unsafe { *samplers.add(index) = sampler };
+        }
+    }
+
+    unsafe extern "system" fn delete_samplers(count: i32, _samplers: *const u32) {
+        FAKE_STATE.lock().unwrap().snapshot.deleted_samplers += count.max(0) as u32;
+    }
+
+    unsafe extern "system" fn sampler_parameter_i(_sampler: u32, _parameter: u32, _value: i32) {}
+
     pub(crate) fn fake_gl() -> glow::Context {
         unsafe {
             glow::Context::from_loader_function(|name| {
@@ -471,6 +500,9 @@ pub(crate) mod test_support {
                     "glGetAttribLocation" => get_attrib_location as *const (),
                     "glGenBuffers" => gen_buffers as *const (),
                     "glDeleteBuffers" => delete_buffers as *const (),
+                    "glGenSamplers" => gen_samplers as *const (),
+                    "glDeleteSamplers" => delete_samplers as *const (),
+                    "glSamplerParameteri" => sampler_parameter_i as *const (),
                     _ => std::ptr::null(),
                 }
                 .cast()

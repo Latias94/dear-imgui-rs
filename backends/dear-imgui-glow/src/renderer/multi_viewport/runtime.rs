@@ -897,10 +897,8 @@ impl GlowViewportRuntime {
 
     /// Enables or disables framebuffer sRGB during Glow rendering.
     pub fn set_framebuffer_srgb_enabled(&self, enabled: bool) -> Result<(), GlowViewportError> {
-        self.control.with_renderer_mut(|renderer| {
-            renderer.set_framebuffer_srgb_enabled(enabled);
-            Ok(())
-        })
+        self.control
+            .with_renderer_mut(|renderer| Ok(renderer.set_framebuffer_srgb_enabled(enabled)?))
     }
 
     /// Overrides the vertex-color gamma used by the renderer.

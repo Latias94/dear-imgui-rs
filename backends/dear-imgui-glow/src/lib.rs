@@ -8,7 +8,10 @@
 //! - **Basic rendering**: Render Dear ImGui draw data using OpenGL
 //! - **Texture support**: Handle font textures and user textures
 //! - **Multi-viewport support**: Stable owning renderer runtime (feature-gated)
-//! - **OpenGL compatibility**: Support for OpenGL 2.1+ and OpenGL ES 2.0+
+//! - **OpenGL compatibility**: Support for OpenGL 3.0+, OpenGL ES 3.0+, and WebGL 2
+//! - **Runtime capabilities**: Select sampler objects and state paths from the live context
+//! - **External texture ownership**: Preserve application-owned texture filtering and GL state
+//! - **Raw callback state**: Expose scoped [`GlowRenderState`] access while callbacks execute
 //!
 //! # Example
 //!
@@ -47,6 +50,7 @@ mod versions;
 
 pub use error::*;
 pub use renderer::*;
+pub use state::{GlowRenderState, GlowRenderStateAccessError, GlowSamplerStrategy};
 pub use texture::*;
 pub use versions::*;
 
@@ -58,6 +62,7 @@ pub type GlBuffer = <Context as HasContext>::Buffer;
 pub type GlTexture = <Context as HasContext>::Texture;
 pub type GlVertexArray = <Context as HasContext>::VertexArray;
 pub type GlProgram = <Context as HasContext>::Program;
+pub type GlSampler = <Context as HasContext>::Sampler;
 pub type GlShader = <Context as HasContext>::Shader;
 pub type GlUniformLocation = <Context as HasContext>::UniformLocation;
 
@@ -79,23 +84,4 @@ fn draw_verts_as_bytes(slice: &[dear_imgui_rs::render::DrawVert]) -> &[u8] {
 fn draw_indices_as_bytes(slice: &[dear_imgui_rs::render::DrawIdx]) -> &[u8] {
     const _: [(); 2] = [(); std::mem::size_of::<dear_imgui_rs::render::DrawIdx>()];
     unsafe { std::slice::from_raw_parts(slice.as_ptr().cast::<u8>(), std::mem::size_of_val(slice)) }
-}
-
-/// Debug message helper for OpenGL debugging
-#[cfg(feature = "debug_message_insert_support")]
-fn gl_debug_message(gl: &Context, message: &str) {
-    unsafe {
-        gl.debug_message_insert(
-            glow::DEBUG_SOURCE_APPLICATION,
-            glow::DEBUG_TYPE_MARKER,
-            0,
-            glow::DEBUG_SEVERITY_NOTIFICATION,
-            message,
-        );
-    }
-}
-
-#[cfg(not(feature = "debug_message_insert_support"))]
-fn gl_debug_message(_gl: &Context, _message: &str) {
-    // No-op when debug messages are not supported
 }

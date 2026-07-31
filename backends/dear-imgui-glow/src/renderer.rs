@@ -5,6 +5,7 @@ mod core;
 mod device;
 mod draw;
 mod init;
+mod sampler;
 mod texture;
 
 #[cfg(feature = "multi-viewport")]

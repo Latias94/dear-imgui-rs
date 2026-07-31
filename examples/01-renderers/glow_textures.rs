@@ -377,7 +377,7 @@ impl AppWindow {
 
         let mut renderer = GlowRenderer::new(gl, &mut imgui_context)?;
         // Use linear framebuffer (no sRGB conversion for ImGui rendering)
-        renderer.set_framebuffer_srgb_enabled(false);
+        renderer.set_framebuffer_srgb_enabled(false)?;
         renderer.new_frame()?;
 
         // Initialize texture demo

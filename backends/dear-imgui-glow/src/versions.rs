@@ -24,22 +24,24 @@ impl GlVersion {
         // "OpenGL ES 3.0 (OpenGL ES GLSL ES 3.00)"
         // "WebGL 2.0 (OpenGL ES 3.0 Chromium)"
 
-        let is_es = version_string.contains("OpenGL ES") || version_string.contains("WebGL");
+        let is_webgl = version_string.contains("WebGL");
+        let is_es = version_string.contains("OpenGL ES") || is_webgl;
 
         // Extract version numbers
-        let (major, minor) = if is_es {
-            if version_string.contains("WebGL 2.0") || version_string.contains("OpenGL ES 3.") {
+        let (major, minor) = if is_webgl {
+            if version_string.contains("WebGL 2.0") {
                 (3, 0)
-            } else if version_string.contains("WebGL 1.0")
-                || version_string.contains("OpenGL ES 2.")
-            {
+            } else if version_string.contains("WebGL 1.0") {
                 (2, 0)
             } else {
-                // Try to parse manually
                 Self::parse_version_numbers(version_string).unwrap_or((2, 0))
             }
         } else {
-            Self::parse_version_numbers(version_string).unwrap_or((2, 1))
+            Self::parse_version_numbers(version_string).unwrap_or(if is_es {
+                (2, 0)
+            } else {
+                (2, 1)
+            })
         };
 
         Self {
@@ -73,13 +75,13 @@ impl GlVersion {
         None
     }
 
-    /// Check if this version supports vertex array objects
-    pub fn bind_vertex_array_support(self) -> bool {
-        self.major >= 3 // OpenGL 3.0+ or OpenGL ES 3.0+
+    /// Returns whether this context meets the backend's state-restoration contract.
+    pub fn is_supported(self) -> bool {
+        self.major >= 3
     }
 
-    /// Check if this version supports glDrawElementsBaseVertex
-    pub fn vertex_offset_support(self) -> bool {
+    /// Returns whether this version supports `glDrawElementsBaseVertex`.
+    pub fn supports_vertex_offset(self) -> bool {
         if self.is_es {
             false // Not supported in OpenGL ES
         } else {
@@ -87,8 +89,8 @@ impl GlVersion {
         }
     }
 
-    /// Check if this version supports GL_CLIP_ORIGIN
-    pub fn clip_origin_support(self) -> bool {
+    /// Returns whether this version supports `GL_CLIP_ORIGIN` in core.
+    pub fn supports_clip_origin(self) -> bool {
         if self.is_es {
             false // Not supported in OpenGL ES
         } else {
@@ -96,8 +98,8 @@ impl GlVersion {
         }
     }
 
-    /// Check if this version supports glBindSampler
-    pub fn bind_sampler_support(self) -> bool {
+    /// Returns whether the context supports independent sampler objects.
+    pub fn supports_sampler_objects(self) -> bool {
         if self.is_es {
             self.major >= 3 // OpenGL ES 3.0+
         } else {
@@ -105,18 +107,20 @@ impl GlVersion {
         }
     }
 
-    /// Check if this version supports glPolygonMode
-    pub fn polygon_mode_support(self) -> bool {
+    /// Returns whether this version supports `glPolygonMode`.
+    pub fn supports_polygon_mode(self) -> bool {
         !self.is_es // Not supported in OpenGL ES
     }
 
-    /// Check if this version supports GL_PRIMITIVE_RESTART
-    pub fn primitive_restart_support(self) -> bool {
-        if self.is_es {
-            self.major >= 3 // OpenGL ES 3.0+
-        } else {
-            self.major > 3 || (self.major == 3 && self.minor >= 1) // OpenGL 3.1+
-        }
+    /// Returns whether this version uses desktop `GL_PRIMITIVE_RESTART` state.
+    pub fn supports_primitive_restart(self) -> bool {
+        !self.is_es && (self.major > 3 || (self.major == 3 && self.minor >= 1))
+    }
+
+    /// Returns whether front and back polygon modes must be restored independently.
+    pub(crate) fn uses_separate_polygon_modes(self, compatibility_profile: bool) -> bool {
+        self.supports_polygon_mode()
+            && ((self.major == 3 && self.minor <= 1) || compatibility_profile)
     }
 }
 
@@ -160,5 +164,124 @@ impl GlslVersion {
     /// Get the version string
     pub fn as_str(&self) -> &str {
         &self.version_string
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GlVersion;
+
+    #[test]
+    fn supported_contexts_have_vertex_array_objects() {
+        for version in [
+            GlVersion {
+                major: 3,
+                minor: 0,
+                is_es: false,
+            },
+            GlVersion {
+                major: 3,
+                minor: 0,
+                is_es: true,
+            },
+            GlVersion::parse("WebGL 2.0 (OpenGL ES 3.0 Chromium)"),
+        ] {
+            assert!(version.is_supported());
+        }
+
+        for version in [
+            GlVersion {
+                major: 2,
+                minor: 1,
+                is_es: false,
+            },
+            GlVersion {
+                major: 2,
+                minor: 0,
+                is_es: true,
+            },
+            GlVersion::parse("WebGL 1.0 (OpenGL ES 2.0 Chromium)"),
+        ] {
+            assert!(!version.is_supported());
+        }
+    }
+
+    #[test]
+    fn sampler_objects_follow_the_live_api_version() {
+        let desktop_32 = GlVersion {
+            major: 3,
+            minor: 2,
+            is_es: false,
+        };
+        let desktop_33 = GlVersion {
+            major: 3,
+            minor: 3,
+            is_es: false,
+        };
+        let es_30 = GlVersion {
+            major: 3,
+            minor: 0,
+            is_es: true,
+        };
+
+        assert!(!desktop_32.supports_sampler_objects());
+        assert!(desktop_33.supports_sampler_objects());
+        assert!(es_30.supports_sampler_objects());
+    }
+
+    #[test]
+    fn parses_real_es_minor_versions_without_using_embedded_webgl_versions() {
+        assert_eq!(
+            GlVersion::parse("OpenGL ES 3.1 Mesa 25.1"),
+            GlVersion {
+                major: 3,
+                minor: 1,
+                is_es: true,
+            }
+        );
+        assert_eq!(
+            GlVersion::parse("OpenGL ES 3.2 NVIDIA 610.47"),
+            GlVersion {
+                major: 3,
+                minor: 2,
+                is_es: true,
+            }
+        );
+        assert_eq!(
+            GlVersion::parse("WebGL 2.0 (OpenGL ES 3.2 Chromium)"),
+            GlVersion {
+                major: 3,
+                minor: 0,
+                is_es: true,
+            }
+        );
+    }
+
+    #[test]
+    fn vertex_offset_and_primitive_restart_are_not_claimed_on_es() {
+        let es_32 = GlVersion {
+            major: 3,
+            minor: 2,
+            is_es: true,
+        };
+        assert!(!es_32.supports_vertex_offset());
+        assert!(!es_32.supports_primitive_restart());
+    }
+
+    #[test]
+    fn polygon_restore_matches_desktop_profile_rules() {
+        let desktop_31 = GlVersion {
+            major: 3,
+            minor: 1,
+            is_es: false,
+        };
+        let desktop_32 = GlVersion {
+            major: 3,
+            minor: 2,
+            is_es: false,
+        };
+        assert!(desktop_31.uses_separate_polygon_modes(false));
+        assert!(!desktop_32.uses_separate_polygon_modes(false));
+        assert!(desktop_32.uses_separate_polygon_modes(true));
     }
 }

@@ -935,6 +935,8 @@ class PrepublishTests(unittest.TestCase):
                         "-p",
                         "dear-imgui-rs",
                         "-p",
+                        "dear-imgui-glow",
+                        "-p",
                         "dear-implot",
                         "-p",
                         "dear-implot3d",
@@ -945,7 +947,7 @@ class PrepublishTests(unittest.TestCase):
                         "-p",
                         "dear-imguizmo-quat",
                         "--features",
-                        "dear-imgui-rs/wasm,dear-implot/wasm,"
+                        "dear-imgui-rs/wasm,dear-imgui-glow/wasm,dear-implot/wasm,"
                         "dear-implot3d/wasm,dear-imnodes/wasm,"
                         "dear-imguizmo/wasm,dear-imguizmo-quat/wasm",
                     ],

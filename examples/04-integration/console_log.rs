@@ -245,7 +245,7 @@ impl AppWindow {
             })
         };
         let mut renderer = GlowRenderer::new(gl, &mut imgui_context)?;
-        renderer.set_framebuffer_srgb_enabled(false);
+        renderer.set_framebuffer_srgb_enabled(false)?;
         renderer.new_frame()?;
 
         Ok(Self {

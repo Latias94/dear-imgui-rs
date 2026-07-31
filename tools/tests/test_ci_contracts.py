@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import tomllib
 import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
@@ -828,9 +829,16 @@ class RuntimeGateTests(unittest.TestCase):
         self.assertEqual(
             sdl3_glow_errors,
             [
-                "schema_version expected 3, got 0",
+                "schema_version expected 5, got 0",
                 "merge_observed expected True, got False",
                 "main_present_bracketed_by_test_engine expected True, got False",
+                "external_texture_filters_preserved expected True, got None",
+                "sampler_pixels_prove_isolation expected True, got None",
+                "raw_callback_typed_state_observed expected True, got None",
+                "reset_render_state_recovered expected True, got None",
+                "render_state_cleared_after_callback expected True, got None",
+                "application_gl_state_restored expected True, got None",
+                "sampler_strategy must be sampler_objects or texture_parameters, got None",
                 "secondary_context_ready_before_main_present_viewport_ids must be a nonempty u32 array",
                 "secondary_draw_issued_before_main_present_viewport_ids must be a nonempty u32 array",
                 "secondary_swap_succeeded_before_main_present_viewport_ids must be a nonempty u32 array",
@@ -840,7 +848,7 @@ class RuntimeGateTests(unittest.TestCase):
 
     def test_sdl3_glow_success_requires_llvmpipe_rendering_and_full_lifecycle(self):
         valid = {
-            "schema_version": 3,
+            "schema_version": 5,
             "renderer": {
                 "backend": "OpenGL",
                 "vendor": "Mesa",
@@ -852,6 +860,13 @@ class RuntimeGateTests(unittest.TestCase):
             "secondary_draw_issued_before_main_present_viewport_ids": [7, 9],
             "secondary_swap_succeeded_before_main_present_viewport_ids": [7, 10],
             "main_present_bracketed_by_test_engine": True,
+            "external_texture_filters_preserved": True,
+            "sampler_pixels_prove_isolation": True,
+            "raw_callback_typed_state_observed": True,
+            "reset_render_state_recovered": True,
+            "render_state_cleared_after_callback": True,
+            "application_gl_state_restored": True,
+            "sampler_strategy": "sampler_objects",
         }
 
         self.assertEqual(RUNTIME._validate_sdl3_glow_viewport_payload(valid), [])
@@ -1017,26 +1032,59 @@ class RuntimeGateTests(unittest.TestCase):
                         "_NET_SUPPORTING_WM_CHECK(WINDOW): window id # 0x200001\n",
                         encoding="utf-8",
                     )
-                elif result.stdout_log.name == "viewport.stdout.log":
+                elif result.stdout_log.name in (
+                    "viewport-texture-parameters.stdout.log",
+                    "viewport-sampler-objects.stdout.log",
+                ):
                     self.assertEqual(
                         kwargs["env"]["LD_LIBRARY_PATH"].split(os.pathsep)[0],
                         str(sdl3_library.parent.resolve()),
                     )
-                    (evidence / "viewport-result.json").write_text(
+                    fallback = (
+                        result.stdout_log.name
+                        == "viewport-texture-parameters.stdout.log"
+                    )
+                    expected_strategy = (
+                        "texture_parameters" if fallback else "sampler_objects"
+                    )
+                    self.assertEqual(
+                        kwargs["env"]["MESA_GL_VERSION_OVERRIDE"],
+                        "3.2" if fallback else "3.3",
+                    )
+                    if fallback:
+                        self.assertEqual(
+                            kwargs["env"]["MESA_EXTENSION_OVERRIDE"],
+                            "-GL_ARB_sampler_objects",
+                        )
+                    else:
+                        self.assertNotIn("MESA_EXTENSION_OVERRIDE", kwargs["env"])
+                    result_path = Path(
+                        kwargs["env"]["DEAR_IMGUI_VIEWPORT_SMOKE_JSON"]
+                    )
+                    result_path.write_text(
                         json.dumps(
                             {
-                                "schema_version": 3,
+                                "schema_version": 5,
                                 "renderer": {
                                     "backend": "OpenGL",
                                     "vendor": "Mesa",
                                     "name": "llvmpipe (LLVM 20)",
-                                    "version": "4.5 Mesa 25",
+                                    "version": "3.2 Mesa 25"
+                                    if fallback
+                                    else "3.3 Mesa 25",
                                 },
+                                "sampler_strategy": expected_strategy,
                                 "merge_observed": True,
                                 "secondary_context_ready_before_main_present_viewport_ids": [7],
                                 "secondary_draw_issued_before_main_present_viewport_ids": [7],
                                 "secondary_swap_succeeded_before_main_present_viewport_ids": [7],
                                 "main_present_bracketed_by_test_engine": True,
+                                "external_texture_filters_preserved": True,
+                                "sampler_pixels_prove_isolation": True,
+                                "raw_callback_typed_state_observed": True,
+                                "reset_render_state_recovered": True,
+                                "render_state_cleared_after_callback": True,
+                                "application_gl_state_restored": True,
                             }
                         ),
                         encoding="utf-8",
@@ -1062,7 +1110,12 @@ class RuntimeGateTests(unittest.TestCase):
             self.assertTrue(result.success)
             self.assertEqual(result.category, RUNTIME.GateCategory.PASSED)
             self.assertIn("renderer.stdout.log", result.evidence)
-            self.assertIn("viewport-result.json", result.evidence)
+            self.assertIn("viewport-texture-parameters-result.json", result.evidence)
+            self.assertIn("viewport-sampler-objects-result.json", result.evidence)
+            self.assertEqual(
+                set(result.details["results"]),
+                {"texture-parameters", "sampler-objects"},
+            )
             self.assertEqual(
                 result.details["environment"]["sdl3_library_dirs"],
                 [str(sdl3_library.parent.resolve())],
@@ -1210,6 +1263,42 @@ class WorkflowPortabilityTests(unittest.TestCase):
             self.assertIn("--no-default-features", command)
         self.assertNotIn("--features capture", default_command)
         self.assertIn("--features capture", capture_command)
+
+    def test_glow_runtime_contracts_have_native_and_wasm_ci_coverage(self):
+        jobs = self._ci_jobs()
+        native = str(
+            named_step(jobs["build"], "Run Glow renderer acceptance tests").get("run", "")
+        )
+        self.assertIn("cargo nextest run", native)
+        self.assertIn("-p dear-imgui-glow", native)
+        self.assertIn("--features multi-viewport", native)
+
+        wasm = str(
+            named_step(jobs["wasm-check"], "Check Glow renderer WASM provider").get(
+                "run", ""
+            )
+        )
+        self.assertIn("cargo check", wasm)
+        self.assertIn("-p dear-imgui-glow", wasm)
+        self.assertIn("--target wasm32-unknown-unknown", wasm)
+        self.assertIn("--no-default-features", wasm)
+        self.assertIn("--features wasm", wasm)
+
+
+class GlowFeatureManifestTests(unittest.TestCase):
+    def test_glow_manifest_exposes_only_runtime_truthful_capability_routes(self):
+        manifest = tomllib.loads(
+            (REPO_ROOT / "backends" / "dear-imgui-glow" / "Cargo.toml").read_text(
+                encoding="utf-8"
+            )
+        )
+        features = manifest["features"]
+        self.assertEqual(set(features), {"default", "wasm", "multi-viewport"})
+        self.assertEqual(features["default"], [])
+        self.assertEqual(features["wasm"], ["dear-imgui-rs/wasm"])
+        self.assertEqual(
+            features["multi-viewport"], ["dear-imgui-rs/multi-viewport"]
+        )
 
 
 if __name__ == "__main__":

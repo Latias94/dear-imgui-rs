@@ -322,7 +322,7 @@ impl AppWindow {
             })
         };
         let mut renderer = GlowRenderer::new(gl, &mut context_imgui)?;
-        renderer.set_framebuffer_srgb_enabled(false);
+        renderer.set_framebuffer_srgb_enabled(false)?;
         let checker = checker_pixels(false);
         let checker_rect = context_imgui
             .font_atlas()

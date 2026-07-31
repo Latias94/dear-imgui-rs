@@ -174,14 +174,15 @@ fn test_renderer(
             .then(|| glow::NativeTexture(NonZeroU32::new(91).unwrap()))
             .into_iter()
             .collect(),
-        #[cfg(feature = "bind_vertex_array_support")]
-        vertex_array_object: None,
+        samplers: None,
         gl_version: GlVersion {
             major: 3,
             minor: 3,
             is_es: false,
         },
         has_clip_origin_support: false,
+        has_separate_polygon_modes: false,
+        has_sampler_object_support: true,
         is_destroyed: false,
         gl_context: gl,
         context_binding: None,
@@ -767,7 +768,8 @@ fn moving_the_wrapper_keeps_runtime_owned_renderer_storage_stable() {
     let mut context = Context::create();
     let _platform = attach_test_platform(&mut context);
     let gl = fake_gl();
-    let renderer = test_renderer(&mut context, Some(Rc::clone(&gl)), false);
+    let mut renderer = test_renderer(&mut context, Some(Rc::clone(&gl)), false);
+    publish_test_renderer_core(&mut context, &mut renderer);
     let runtime = unsafe { GlowViewportRuntime::attach(&mut context, renderer) }.unwrap();
     let renderer_address = runtime.renderer_address_for_test();
 
