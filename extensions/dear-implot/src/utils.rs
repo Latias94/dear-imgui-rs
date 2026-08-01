@@ -2,7 +2,15 @@
 
 use crate::{Axis, PlotUi, XAxis, YAxis, sys};
 use dear_imgui_rs::with_scratch_txt;
-use std::fmt;
+use std::{borrow::Cow, fmt};
+
+fn literal_printf_format(text: &str) -> Cow<'_, str> {
+    if text.contains('%') {
+        Cow::Owned(text.replace('%', "%%"))
+    } else {
+        Cow::Borrowed(text)
+    }
+}
 
 fn assert_finite_f64(caller: &str, name: &str, value: f64) {
     assert!(value.is_finite(), "{caller} {name} must be finite");
@@ -233,10 +241,10 @@ impl PlotUi<'_> {
         })
     }
 
-    /// Draw a text annotation at (x,y) using the non-variadic `ImPlot_Annotation_Str0` API.
+    /// Draw a literal text annotation at (x,y).
     ///
-    /// This avoids calling the C variadic (`...`) entrypoint, which is not supported on some targets
-    /// (e.g. wasm32 via import-style bindings).
+    /// The underlying non-variadic C entrypoint still accepts a `printf` format
+    /// string, so percent signs are escaped before crossing the FFI boundary.
     pub fn annotation_text(
         &self,
         x: f64,
@@ -261,8 +269,9 @@ impl PlotUi<'_> {
             y: pixel_offset[1],
         };
         assert!(!text.contains('\0'), "text contained NUL");
+        let text = literal_printf_format(text);
         self.with_bound_context(|| {
-            with_scratch_txt(text, |ptr| unsafe {
+            with_scratch_txt(text.as_ref(), |ptr| unsafe {
                 sys::ImPlot_Annotation_Str0(x, y, col, off, clamp, ptr)
             })
         })
@@ -281,7 +290,7 @@ impl PlotUi<'_> {
         self.with_bound_context(|| unsafe { sys::ImPlot_TagX_Bool(x, col, round) })
     }
 
-    /// Tag the X axis at position x with a text label using the non-variadic `ImPlot_TagX_Str0` API.
+    /// Tag the X axis at position x with a literal text label.
     pub fn tag_x_text(&self, x: f64, color: [f32; 4], text: &str) {
         assert_finite_f64("PlotUi::tag_x_text()", "x", x);
         assert_finite_color("PlotUi::tag_x_text()", "color", color);
@@ -292,8 +301,11 @@ impl PlotUi<'_> {
             w: color[3],
         };
         assert!(!text.contains('\0'), "text contained NUL");
+        let text = literal_printf_format(text);
         self.with_bound_context(|| {
-            with_scratch_txt(text, |ptr| unsafe { sys::ImPlot_TagX_Str0(x, col, ptr) })
+            with_scratch_txt(text.as_ref(), |ptr| unsafe {
+                sys::ImPlot_TagX_Str0(x, col, ptr)
+            })
         })
     }
 
@@ -310,7 +322,7 @@ impl PlotUi<'_> {
         self.with_bound_context(|| unsafe { sys::ImPlot_TagY_Bool(y, col, round) })
     }
 
-    /// Tag the Y axis at position y with a text label using the non-variadic `ImPlot_TagY_Str0` API.
+    /// Tag the Y axis at position y with a literal text label.
     pub fn tag_y_text(&self, y: f64, color: [f32; 4], text: &str) {
         assert_finite_f64("PlotUi::tag_y_text()", "y", y);
         assert_finite_color("PlotUi::tag_y_text()", "color", color);
@@ -321,8 +333,11 @@ impl PlotUi<'_> {
             w: color[3],
         };
         assert!(!text.contains('\0'), "text contained NUL");
+        let text = literal_printf_format(text);
         self.with_bound_context(|| {
-            with_scratch_txt(text, |ptr| unsafe { sys::ImPlot_TagY_Str0(y, col, ptr) })
+            with_scratch_txt(text.as_ref(), |ptr| unsafe {
+                sys::ImPlot_TagY_Str0(y, col, ptr)
+            })
         })
     }
 
@@ -582,7 +597,23 @@ impl PlotUi<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::DragToolId;
+    use super::{DragToolId, literal_printf_format};
+    use std::borrow::Cow;
+
+    #[test]
+    fn literal_plot_text_borrows_strings_without_percent_signs() {
+        let text = literal_printf_format("ordinary label");
+
+        assert!(matches!(text, Cow::Borrowed("ordinary label")));
+    }
+
+    #[test]
+    fn literal_plot_text_escapes_every_printf_directive() {
+        let text = literal_printf_format("100% complete: %s %n %%");
+
+        assert_eq!(text, "100%% complete: %%s %%n %%%%");
+        assert!(matches!(text, Cow::Owned(_)));
+    }
 
     #[test]
     fn drag_tool_id_round_trips_raw_values() {
