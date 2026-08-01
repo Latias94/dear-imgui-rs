@@ -1,5 +1,5 @@
 {
-  "schema": "dear-imgui-maintained-sources-v1",
+  "schema": "dear-imgui-maintained-sources-v2",
   "wasm_import_module": "imgui-sys-v0",
   "sources": [
     {
@@ -7,6 +7,7 @@
       "crate_name": "dear-imgui-sys",
       "crate_root": "dear-imgui-sys",
       "source_root": "third-party/cimgui",
+      "api_contract": { "kind": "cimgui-generator", "locations": ["imgui", "imgui_freetype"] },
       "files": [
         { "id": "cimgui-wrapper", "canonical": "third-party/cimgui/cimgui.cpp", "alternates": [], "provider_transform": "direct" },
         { "id": "imgui-core", "canonical": "third-party/cimgui/imgui/imgui.cpp", "alternates": [], "provider_transform": "patch-imgui-core" },
@@ -40,6 +41,7 @@
       "crate_name": "dear-imgui-test-engine-sys",
       "crate_root": "extensions/dear-imgui-test-engine-sys",
       "source_root": "third-party/imgui_test_engine",
+      "api_contract": { "kind": "rust-bindings", "path": "src/bindings_pregenerated.rs" },
       "files": [
         { "id": "capture-tool", "canonical": "third-party/imgui_test_engine/imgui_test_engine/imgui_capture_tool.cpp", "alternates": [], "provider_transform": null },
         { "id": "context", "canonical": "third-party/imgui_test_engine/imgui_test_engine/imgui_te_context.cpp", "alternates": [], "provider_transform": null },
@@ -63,6 +65,7 @@
       "crate_name": "dear-implot-sys",
       "crate_root": "extensions/dear-implot-sys",
       "source_root": "third-party/cimplot",
+      "api_contract": { "kind": "cimgui-generator", "locations": ["implot"] },
       "files": [
         { "id": "wrapper", "canonical": "third-party/cimplot/cimplot.cpp", "alternates": [], "provider_transform": "direct" },
         { "id": "core", "canonical": "third-party/cimplot/implot/implot.cpp", "alternates": [], "provider_transform": "direct" },
@@ -84,6 +87,7 @@
       "crate_name": "dear-implot3d-sys",
       "crate_root": "extensions/dear-implot3d-sys",
       "source_root": "third-party/cimplot3d",
+      "api_contract": { "kind": "cimgui-generator", "locations": ["implot3d"] },
       "files": [
         { "id": "wrapper", "canonical": "third-party/cimplot3d/cimplot3d.cpp", "alternates": [], "provider_transform": "direct" },
         { "id": "core", "canonical": "third-party/cimplot3d/implot3d/implot3d.cpp", "alternates": [], "provider_transform": "direct" },
@@ -106,6 +110,7 @@
       "crate_name": "dear-imnodes-sys",
       "crate_root": "extensions/dear-imnodes-sys",
       "source_root": "third-party/cimnodes",
+      "api_contract": { "kind": "cimgui-generator", "locations": ["imnodes"] },
       "files": [
         { "id": "wrapper", "canonical": "third-party/cimnodes/cimnodes.cpp", "alternates": [], "provider_transform": "direct" },
         { "id": "core", "canonical": "third-party/cimnodes/imnodes/imnodes.cpp", "alternates": [], "provider_transform": "direct" },
@@ -126,6 +131,7 @@
       "crate_name": "dear-node-editor-sys",
       "crate_root": "extensions/dear-node-editor-sys",
       "source_root": "third-party/cimnodes_editor",
+      "api_contract": { "kind": "cimgui-generator", "locations": ["imgui_node_editor"] },
       "files": [
         { "id": "wrapper", "canonical": "third-party/cimnodes_editor/cimnodes_editor.cpp", "alternates": [], "provider_transform": null },
         { "id": "core", "canonical": "third-party/cimnodes_editor/imgui-node-editor/imgui_node_editor.cpp", "alternates": [], "provider_transform": null },
@@ -143,6 +149,7 @@
       "crate_name": "dear-imguizmo-sys",
       "crate_root": "extensions/dear-imguizmo-sys",
       "source_root": "third-party/cimguizmo",
+      "api_contract": { "kind": "cimgui-generator", "locations": ["ImGuizmo"] },
       "files": [
         { "id": "wrapper", "canonical": "third-party/cimguizmo/cimguizmo.cpp", "alternates": [], "provider_transform": "direct" },
         { "id": "implementation", "canonical": "third-party/cimguizmo/ImGuizmo/src/ImGuizmo.cpp", "alternates": ["third-party/cimguizmo/ImGuizmo/ImGuizmo.cpp"], "provider_transform": "direct" }
@@ -162,6 +169,7 @@
       "crate_name": "dear-imguizmo-quat-sys",
       "crate_root": "extensions/dear-imguizmo-quat-sys",
       "source_root": "third-party/cimguizmo_quat",
+      "api_contract": { "kind": "cimgui-generator", "locations": ["imGuIZMOquat"] },
       "files": [
         { "id": "wrapper", "canonical": "third-party/cimguizmo_quat/cimguizmo_quat.cpp", "alternates": [], "provider_transform": "direct" },
         { "id": "core", "canonical": "third-party/cimguizmo_quat/imGuIZMO.quat/imguizmo_quat/imguizmo_quat.cpp", "alternates": [], "provider_transform": "direct" },

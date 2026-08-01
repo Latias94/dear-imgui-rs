@@ -66,6 +66,9 @@ bindgen = ["dep:bindgen"]
 # Enable Dear ImGui test engine hooks (requires linking dear-imgui-test-engine-sys).
 # Test engine hooks alter the native core artifact and therefore require a source build.
 test-engine = ["build-from-source"]
+# Internal CI-only C++/Rust aggregate layout probe. This source-only feature is
+# intentionally not needed by normal or prebuilt consumers.
+abi-probe = ["build-from-source"]
 # Enable freetype font rasterizer
 freetype = ["pkg-config", "vcpkg"]
 pkg-config = ["build-support/pkg-config"]

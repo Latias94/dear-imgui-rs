@@ -76,7 +76,34 @@ python3 tools/tasks.py release-prepare 0.16.0-alpha.1
 python3 tools/tasks.py release-check
 ```
 
-### 2. `xtask release-version` - Unified Version Update
+### 2. `upstream_contract.py` - Reviewed Upstream Delta Contract
+
+Every maintained Dear ImGui or extension source update must classify the complete generated API and
+ABI delta separately from the generated facts. Start from the current pinned source tree with:
+
+```bash
+python tools/upstream_contract.py --write-review-template
+```
+
+Review every entry in `tools/upstream_contract_decisions.json`, attach the required compile and
+runtime evidence, then accept and verify the candidate:
+
+```bash
+python tools/upstream_contract.py --update-snapshot
+python tools/upstream_contract.py --check
+python tools/api_surface_report.py --check
+```
+
+The baseline and candidate snapshots are generated evidence; the decisions file is the reviewed
+approval record. The check fails on unclassified or stale deltas, missing evidence, source-pin drift,
+and public declaration, enum, field, layout, or typedef changes. Every maintained source must select
+an API-contract provider: cimgui-style generator metadata includes bitfield/array width and unlocated
+typedef facts, while Dear ImGui Test Engine is audited from its final checked-in Rust raw binding and
+rejects unknown public syntax. Native aggregate layout checks run
+only in compiler-equipped source CI through the `abi-probe` feature, so prebuilt consumers retain the
+no-compiler contract.
+
+### 3. `xtask release-version` - Unified Version Update
 
 The workspace root is the single version source. Publishable manifests use `version.workspace = true`, and internal dependencies inherit their root workspace declarations. `[workspace.metadata.dear-imgui-release]` is the shared policy for the core package and private package paths/versions; Rust and Python release validators derive package counts from the actual workspace members. Update the release train with:
 
@@ -86,7 +113,7 @@ cargo run -p xtask -- release-version 0.16.0-alpha.1 --allow-prerelease-relabel
 
 The command updates the root release version and inherited internal dependency requirements as one validated workspace operation. It never offers partial crate selection. Documentation remains an explicit review step.
 
-### 3. `publish.py` - Publishing Script
+### 4. `publish.py` - Publishing Script
 
 Publishes all crates in the correct dependency order.
 
@@ -130,7 +157,7 @@ every Cargo publish command.
 6. `dear-imgui-bevy` after its optional ecosystem dependencies
 7. `dear-app`
 
-### 4. `pre_publish_check.py` - Validation
+### 5. `pre_publish_check.py` - Validation
 
 Runs pre-publish validation checks.
 
@@ -156,7 +183,7 @@ python3 tools/pre_publish_check.py \
 - Native source and explicit WASM-safe feature routes pass without using workspace `--all-features`
 - Targeted Rust tests pass
 
-### 5. `update_submodule_and_bindings.py` - Bindings Generation
+### 6. `update_submodule_and_bindings.py` - Bindings Generation
 
 Updates third-party submodules and regenerates pregenerated bindings for `-sys` crates (including optional WASM pregenerated bindings).
 
@@ -195,7 +222,7 @@ python3 tools/update_submodule_and_bindings.py \
   --wasm-ext implot,implot3d,imnodes,imguizmo,imguizmo-quat
 ```
 
-### 6. CI Package and Submodule Helpers
+### 7. CI Package and Submodule Helpers
 
 Repository-maintained CI helpers are Python entry points and run on Windows,
 macOS, and Linux without Bash.
@@ -238,7 +265,7 @@ The no-argument form remains equivalent to `full`. The legacy
 accepted for existing automation, but new callers should use the `prebuilt`
 command.
 
-### 7. Release Evidence
+### 8. Release Evidence
 
 `.github/workflows/release-gate.yml` is the authoritative cross-platform gate.
 It checks out one explicit 40-hex candidate SHA and requires exactly these 14

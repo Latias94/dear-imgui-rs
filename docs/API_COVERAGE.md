@@ -29,7 +29,7 @@ python tools/api_surface_report.py --check
 
 The tool has two deliberately different coverage layers.
 
-### Generator contract snapshot: all namespaces
+### Generator function snapshot: all namespaces
 
 `tools/api_surface_snapshot.json` records every public function declaration emitted by cimgui's
 generator across all namespaces. The canonical record includes the symbol, namespace, signature,
@@ -43,9 +43,35 @@ a safe Rust wrapper. After reviewing an intentional upstream change, refresh it 
 python tools/api_surface_report.py --update-snapshot
 ```
 
-The snapshot currently covers function declarations. Enum values, flag bits, and public struct
-fields still require their existing upgrade audit and are not independently snapshotted by this
-tool.
+This snapshot is the focused function-declaration layer. The comprehensive upstream contract below
+separately covers constants, enums and variants, fields, layouts, typedefs, and source revisions.
+
+### Comprehensive upstream contract: every maintained source
+
+`tools/upstream_contract_baseline.json` records the last accepted generated facts, while
+`tools/upstream_contract_snapshot.json` records the candidate facts for the currently pinned source
+tree. `tools/upstream_contract_decisions.json` is the human-reviewed approval layer: every delta must
+be classified exactly once as a safe alias, safe wrapper, raw-only operation, rejected operation, or
+internal detail. Safe classifications must name compile evidence, and runtime-shaped functions,
+fields, or layouts must also name runtime evidence.
+
+Every entry in `tools/build-support/maintained_sources.json` declares an `api_contract` provider. Cimgui-style sources are audited from generator output, including field width/bitfield metadata and typedefs that lack location records. Dear ImGui Test Engine is audited from its final checked-in Rust binding; unknown public Rust syntax fails closed, while `xtask verify-bindings` separately proves that file's source/spec/output provenance.
+
+Use the explicit review workflow after changing maintained source revisions or regenerated bindings:
+
+```bash
+python tools/upstream_contract.py --write-review-template
+# Classify every generated delta and attach the required evidence paths.
+python tools/upstream_contract.py --update-snapshot
+python tools/upstream_contract.py --check
+```
+
+`tools/api_surface_report.py --check` runs this comprehensive audit in addition to the focused
+function and removed-surface checks. It fails closed on missing or stale decisions, duplicate or
+unsorted generated facts, missing evidence markers, source-pin drift, and changes to public sizes,
+alignments, or selected field offsets. The source-build-only `abi-probe` feature provides an
+independent native C++/Rust layout comparison for selected runtime-sensitive aggregates; prebuilt
+consumers remain compiler-free.
 
 ### Safe semantic audit: top-level `ImGui` functions
 
@@ -58,17 +84,18 @@ function must have an explicit decision in `tools/api_surface_policy.json`:
   global/raw ownership contracts.
 - `deferred-design`: a safe wrapper is desirable but needs a documented lifetime or type design.
 
-`--check` fails on generator drift, unclassified top-level functions, and stale policy entries. CI
-runs it after checking the vendored source revisions, so a cimgui/Dear ImGui update cannot silently
-add an unreviewed top-level safe API gap.
+`--check` fails on generator drift, unclassified top-level functions, stale policy entries, or an
+unreviewed comprehensive upstream delta. CI runs it after checking the vendored source revisions,
+so a maintained source update cannot silently add an unreviewed safe API or ABI gap.
 
 Notes:
 - A policy decision is not permanent. Replace it with a rustdoc alias when a direct safe wrapper is
   added, or update its rationale when the high-level design changes.
 - Direct `sys::ig*` usage is reported only as information. It is not proof of safe API coverage,
   because an internal call may expose only a small subset of the public operation.
-- Namespaced APIs such as `ImFontAtlas`, `ImFontBaked`, `ImDrawList`, and `ImTextureData` are guarded
-  against generator drift but still need a manual safe-layer audit during upgrades.
+- Namespaced APIs such as `ImFontAtlas`, `ImFontBaked`, `ImDrawList`, and `ImTextureData` are included
+  in the comprehensive delta inventory. Their decision records still require a human-reviewed safe
+  ownership/lifetime classification rather than treating generated availability as safe coverage.
 
 ### Removed safe surface and FFI ownership
 

@@ -24,6 +24,8 @@ import tomllib
 from dataclasses import dataclass
 from typing import Any, Iterable, Sequence
 
+import upstream_contract
+
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 DEFS_JSON = (
@@ -40,6 +42,9 @@ MANIFEST_TOML = REPO_ROOT / "dear-imgui-sys" / "Cargo.toml"
 POLICY_JSON = REPO_ROOT / "tools" / "api_surface_policy.json"
 SNAPSHOT_JSON = REPO_ROOT / "tools" / "api_surface_snapshot.json"
 REPOSITORY_MANIFEST = REPO_ROOT / "Cargo.toml"
+UPSTREAM_CONTRACT_BASELINE = REPO_ROOT / "tools" / "upstream_contract_baseline.json"
+UPSTREAM_CONTRACT_SNAPSHOT = REPO_ROOT / "tools" / "upstream_contract_snapshot.json"
+UPSTREAM_CONTRACT_DECISIONS = REPO_ROOT / "tools" / "upstream_contract_decisions.json"
 
 POLICY_CLASSIFICATIONS = frozenset(
     {"intentional-sys-only", "unsafe-wrapper", "deferred-design"}
@@ -1588,6 +1593,8 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv)
+    upstream_contract_error: str | None = None
+    upstream_contract_audit: upstream_contract.ContractAudit | None = None
     try:
         declarations = _load_public_declarations(args.definitions)
         revisions = _load_source_revisions(args.manifest)
@@ -1613,6 +1620,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         repository_root, packages, source_violations = _audit_source_policy(
             args.repository_manifest
         )
+        uses_repository_contract = (
+            args.check
+            and args.definitions.resolve() == DEFS_JSON.resolve()
+            and args.snapshot.resolve() == SNAPSHOT_JSON.resolve()
+            and args.repository_manifest.resolve() == REPOSITORY_MANIFEST.resolve()
+        )
+        if uses_repository_contract:
+            try:
+                upstream_contract_audit = upstream_contract.audit_repository_contract(
+                    repo_root=REPO_ROOT,
+                    baseline_path=UPSTREAM_CONTRACT_BASELINE,
+                    snapshot_path=UPSTREAM_CONTRACT_SNAPSHOT,
+                    decisions_path=UPSTREAM_CONTRACT_DECISIONS,
+                )
+            except upstream_contract.ContractInputError as error:
+                upstream_contract_error = str(error)
     except InputError as error:
         print(f"API surface input error: {error}", file=sys.stderr)
         return 2
@@ -1627,6 +1650,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Classified via explicit policy: {len(audit.policy_decided)}")
         print(f"Maintained Cargo packages checked: {len(packages)}")
         print(f"Removed source contract violations: {len(source_violations)}")
+        if upstream_contract_audit is not None:
+            print(
+                "Reviewed comprehensive upstream deltas: "
+                f"{upstream_contract_audit.reviewed_items}"
+            )
         if drift.has_drift():
             _print_snapshot_drift(drift)
         if audit.unexpected:
@@ -1638,14 +1666,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             for name in sorted(audit.stale_policy):
                 print(f"- {name}", file=sys.stderr)
         _print_source_policy_violations(repository_root, source_violations)
+        if upstream_contract_error is not None:
+            print(
+                f"Comprehensive upstream contract violation: {upstream_contract_error}",
+                file=sys.stderr,
+            )
         if (
             drift.has_drift()
             or audit.unexpected
             or audit.stale_policy
             or source_violations
+            or upstream_contract_error is not None
         ):
             return 1
-        print("API surface, generator snapshot, and removed source checks passed.")
+        print(
+            "API surface, reviewed upstream contract, generator snapshot, and "
+            "removed source checks passed."
+        )
         return 0
 
     if args.format == "md":

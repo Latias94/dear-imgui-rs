@@ -214,9 +214,19 @@ fn main() {
             "dear-imgui-sys: feature `test-engine` is source-only and cannot be packaged as a prebuilt core artifact"
         );
     }
+    if cfg!(all(feature = "package-bin", feature = "abi-probe")) {
+        panic!(
+            "dear-imgui-sys: feature `abi-probe` is CI-only and cannot be packaged as a prebuilt core artifact"
+        );
+    }
     validate_wasm_feature_contract(&cfg.target_triple, cfg!(feature = "wasm"))
         .unwrap_or_else(|error| panic!("dear-imgui-sys: {error}"));
     let skip_cc = env::var("IMGUI_SYS_SKIP_CC").is_ok();
+    if cfg!(feature = "abi-probe") && (cfg.is_core_wasm_target() || skip_cc) {
+        panic!(
+            "dear-imgui-sys: feature `abi-probe` requires a native source build and cannot be combined with WASM or IMGUI_SYS_SKIP_CC"
+        );
+    }
     let mut has_platform_io_hooks = false;
     let artifact_profile = cfg.artifact_profile();
     let build_request = cfg.build_request();
@@ -678,6 +688,9 @@ fn build_with_cc_cfg(
                 .file("test-engine-hooks")
                 .unwrap_or_else(|error| panic!("dear-imgui-sys: {error}")),
         );
+    }
+    if cfg!(feature = "abi-probe") {
+        build.define("DEAR_IMGUI_RS_ABI_PROBE", Some("1"));
     }
     #[cfg(feature = "freetype")]
     {

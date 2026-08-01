@@ -49,6 +49,24 @@ Verify that every generated file carries the expected source revision and determ
 cargo run -p xtask -- verify-bindings --allow-dirty
 ```
 
+Then make upstream change review explicit. This is deliberately separate from
+binding generation: facts describe what changed, while decisions describe why a
+safe Rust surface is valid.
+
+```powershell
+# After moving source pins and regenerating bindings:
+python tools/upstream_contract.py --write-review-template
+
+# Review each generated group, classify it, add evidence for every safe item,
+# then accept the reviewed facts and prove the checked-in state is clean:
+python tools/upstream_contract.py --update-snapshot
+python tools/upstream_contract.py --check
+```
+
+The snapshot includes maintained extension APIs and recursive submodule pins.
+Never replace the decision manifest with unreviewed generated output or treat a
+binding hash as approval for an ABI, ownership, or safe-API change.
+
 ### Bump unified release version
 
 ```powershell
@@ -82,12 +100,14 @@ Run that in each standalone example workspace that carries its own `Cargo.lock`.
    - Prefer transparent wrappers over handwritten native structure mirrors. If a mirror is required, validate field offsets and a semantic sentinel that distinguishes count, frame, ID, and pointer fields; size/alignment assertions alone cannot catch same-sized substitutions.
    - Trace hidden queue, ownership, and lifecycle fields through upstream implementation code. Check native auto-transitions against Rust sidecars, renderer feedback, abandoned work, retries, and teardown.
    - If the new sys surface makes the old safe shape awkward, refactor the safe layer instead of layering compatibility hacks.
+   - Run `python tools/upstream_contract.py --check` before and after the upgrade. For live drift, generate a review template, classify each declaration/constant/enum/field/layout/typedef/source-pin delta exactly once, and require compile evidence plus runtime evidence for every runtime-shaped safe change. Confirm every maintained source has an `api_contract` provider, generator field facts retain bitfield/array widths, unlocated typedefs remain visible, and Test Engine's final Rust binding parser still fails closed on unknown public syntax.
 
 2. Backend and platform impact
    - Audit `dear-imgui-sys/src/backend_shim/**` and `dear-imgui-sys/build.rs`.
    - Re-check the stack layout patch path in `dear-imgui-sys/build.rs`, `dear-imgui-sys/src/stack_layout_shim.cpp`, and `dear-imgui-sys/src/stack_layout_imgui_*.cpp.inc`. The marker patch must still match the new upstream `imgui.cpp`, and inactive `ItemSize()` / `ItemAdd()` hot paths should remain fast.
    - Check `dear-imgui-sdl3`, `dear-imgui-wgpu`, `dear-imgui-winit`, `dear-imgui-glow`, `dear-imgui-ash`.
    - If backend exposure changed, adapt public APIs and repository-local examples, including iOS / Android smoke examples when relevant.
+   - When core public aggregate layouts changed, run the `abi-probe` source-build profile. Check C++ size, alignment, and field offsets against Rust; keep that compiler-dependent proof out of normal prebuilt consumer builds.
 
 3. Test engine
    - Update `extensions/dear-imgui-test-engine-sys/third-party/imgui_test_engine`.
@@ -121,9 +141,19 @@ $env:CARGO_BUILD_JOBS = '1'
 cargo run -p xtask -- verify-bindings --allow-dirty
 cargo fmt --all -- --check
 cargo check --workspace
+python tools/upstream_contract.py --check
 python tools/api_surface_report.py --check
 python tools/pre_publish_check.py
 python tools/publish.py --dry-run
+```
+
+For a core ABI or handwritten-public-mirror change, additionally run the native
+source-build probe (serially):
+
+```powershell
+cargo nextest run -j 1 -p dear-imgui-rs --features multi-viewport,abi-probe `
+  cpp_public_aggregate_layout_probe_matches_rust `
+  public_aggregate_layout_probe_rejects_an_abi_mismatch
 ```
 
 ### Recommended targeted tests

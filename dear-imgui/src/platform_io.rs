@@ -21,6 +21,8 @@ mod core;
 mod trampolines;
 mod viewport;
 
+#[cfg(all(test, feature = "abi-probe"))]
+mod abi_probe_tests;
 #[cfg(feature = "multi-viewport")]
 mod accessors;
 #[cfg(feature = "multi-viewport")]

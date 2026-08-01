@@ -35,6 +35,8 @@ test-engine = ["dear-imgui-sys/test-engine"]
 prebuilt = ["dear-imgui-sys/prebuilt"]
 # Force dear-imgui-sys to compile the native Dear ImGui artifact from source.
 build-from-source = ["dear-imgui-sys/build-from-source"]
+# Internal CI-only C++/Rust public aggregate layout probe.
+abi-probe = ["dear-imgui-sys/abi-probe"]
 serde = ["dep:serde"]
 # Enable for WASM targets (import-style provider)
 wasm = ["dear-imgui-sys/wasm"]

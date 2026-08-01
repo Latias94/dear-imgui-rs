@@ -139,6 +139,16 @@ jobs:
       - name: Run dear-imgui-rs multi-viewport acceptance tests
         run: cargo nextest run -p dear-imgui-rs --features multi-viewport
 
+      - name: Compare public C++ aggregate layouts on non-Windows ABI
+        if: runner.os != 'Windows'
+        run: >-
+          cargo nextest run -j 1 -p dear-imgui-rs
+          --features multi-viewport,abi-probe
+          cpp_public_aggregate_layout_probe_matches_rust
+          public_aggregate_layout_probe_rejects_an_abi_mismatch
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+
       - name: Run Glow renderer acceptance tests
         run: cargo nextest run -p dear-imgui-glow --features multi-viewport
 
@@ -1061,6 +1071,12 @@ jobs:
           IMGUI_SYS_FORCE_BUILD: "1"
           RUSTFLAGS: ${{ matrix.rustflags }}
 
+      - name: Compare public C++ aggregate layouts with Rust
+        run: cargo +stable nextest run -j 1 -p dear-imgui-rs --features multi-viewport,abi-probe cpp_public_aggregate_layout_probe_matches_rust public_aggregate_layout_probe_rejects_an_abi_mismatch
+        env:
+          IMGUI_SYS_FORCE_BUILD: "1"
+          RUSTFLAGS: ${{ matrix.rustflags }}
+
       - name: Run exact aggregate callback lifecycle sentinel
         run: cargo +stable nextest run -p dear-imgui-rs --features multi-viewport context_drop_clears_aggregate_callback_storage
         env:
@@ -1140,6 +1156,22 @@ jobs:
           --contains 'regenerating bindings requires the `bindgen` feature'
           --contains='--features bindgen'
           -- cargo check -p dear-imgui-sys
+
+      - name: Reject packaging the source-only ABI probe
+        run: >-
+          python3 tools/ci/run_contract.py expect-failure
+          --label package-bin-abi-probe
+          --contains 'feature `abi-probe` is CI-only and cannot be packaged as a prebuilt core artifact'
+          -- cargo check -p dear-imgui-sys --no-default-features --features package-bin,abi-probe
+
+      - name: Reject the ABI probe when native compilation is disabled
+        env:
+          IMGUI_SYS_SKIP_CC: "1"
+        run: >-
+          python3 tools/ci/run_contract.py expect-failure
+          --label abi-probe-without-native-build
+          --contains 'feature `abi-probe` requires a native source build and cannot be combined with WASM or IMGUI_SYS_SKIP_CC'
+          -- cargo check -p dear-imgui-sys --no-default-features --features abi-probe
 
   windows-vcpkg-native-deps:
     name: Windows vcpkg native dependency discovery
@@ -1471,6 +1503,14 @@ jobs:
           --contains 'feature `test-engine` is native source-only and cannot be combined with WASM'
           -- cargo check -p dear-imgui-rs --target wasm32-unknown-unknown
           --no-default-features --features wasm,test-engine
+
+      - name: Reject the native ABI probe on WASM
+        run: >-
+          python3 tools/ci/run_contract.py expect-failure
+          --label wasm-abi-probe
+          --contains 'feature `abi-probe` requires a native source build and cannot be combined with WASM or IMGUI_SYS_SKIP_CC'
+          -- cargo check -p dear-imgui-sys --target wasm32-unknown-unknown
+          --no-default-features --features wasm,abi-probe
 
       - name: Reject native prebuilt artifacts on WASM
         run: >-
