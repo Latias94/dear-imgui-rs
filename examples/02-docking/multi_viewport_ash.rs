@@ -70,7 +70,7 @@ const SMOKE_FRAME_BUDGET: u32 = 600;
 const VALIDATION_LAYER: &CStr = c"VK_LAYER_KHRONOS_validation";
 
 static RAW_CALLBACK_OBSERVED: AtomicBool = AtomicBool::new(false);
-static RAW_CALLBACK_FAILED: AtomicBool = AtomicBool::new(false);
+static CALLBACK_CONTRACT_FAILED: AtomicBool = AtomicBool::new(false);
 static CALLBACK_ONLY_OBSERVED: AtomicBool = AtomicBool::new(false);
 static NEAREST_SAMPLER_SET: AtomicU64 = AtomicU64::new(0);
 static LINEAR_SAMPLER_SET: AtomicU64 = AtomicU64::new(0);
@@ -194,7 +194,7 @@ unsafe extern "C" fn smoke_raw_callback(
     .unwrap_or(false);
     RAW_CALLBACK_OBSERVED.fetch_or(valid, Ordering::AcqRel);
     if !valid {
-        RAW_CALLBACK_FAILED.store(true, Ordering::Release);
+        CALLBACK_CONTRACT_FAILED.store(true, Ordering::Release);
     }
 }
 
@@ -212,7 +212,7 @@ unsafe extern "C" fn smoke_callback_only_probe(
     CALLBACK_ONLY_OBSERVED.fetch_or(valid, Ordering::AcqRel);
     RAW_CALLBACK_OBSERVED.fetch_or(valid, Ordering::AcqRel);
     if !valid {
-        RAW_CALLBACK_FAILED.store(true, Ordering::Release);
+        CALLBACK_CONTRACT_FAILED.store(true, Ordering::Release);
     }
 }
 
@@ -224,7 +224,7 @@ unsafe extern "C" fn smoke_nearest_sampler_probe(
         unsafe { AshRenderState::with_current(|state| state.sampler_descriptor_set().as_raw()) }
             .unwrap_or(0);
     if observed == 0 {
-        RAW_CALLBACK_FAILED.store(true, Ordering::Release);
+        CALLBACK_CONTRACT_FAILED.store(true, Ordering::Release);
     } else {
         NEAREST_SAMPLER_SET.store(observed, Ordering::Release);
     }
@@ -238,7 +238,7 @@ unsafe extern "C" fn smoke_linear_sampler_probe(
         unsafe { AshRenderState::with_current(|state| state.sampler_descriptor_set().as_raw()) }
             .unwrap_or(0);
     if observed == 0 {
-        RAW_CALLBACK_FAILED.store(true, Ordering::Release);
+        CALLBACK_CONTRACT_FAILED.store(true, Ordering::Release);
     } else {
         LINEAR_SAMPLER_SET.store(observed, Ordering::Release);
     }
@@ -249,18 +249,21 @@ unsafe extern "C" fn smoke_reset_probe(
     _command: *const sys::ImDrawCmd,
 ) {
     let expected_linear = LINEAR_SAMPLER_SET.load(Ordering::Acquire);
-    let valid = unsafe {
+    let (state_valid, draw_recovered) = unsafe {
         AshRenderState::with_current(|state| {
-            expected_linear != 0
+            let state_valid = expected_linear != 0
                 && state.sampler_descriptor_set().as_raw() == expected_linear
-                && state.reset_count() > 0
-                && state.draw_commands_since_reset() > 0
+                && state.reset_count() > 0;
+            (
+                state_valid,
+                state_valid && state.draw_commands_since_reset() > 0,
+            )
         })
     }
-    .unwrap_or(false);
-    RESET_AFTER_DRAW_OBSERVED.fetch_or(valid, Ordering::AcqRel);
-    if !valid {
-        RAW_CALLBACK_FAILED.store(true, Ordering::Release);
+    .unwrap_or((false, false));
+    RESET_AFTER_DRAW_OBSERVED.fetch_or(draw_recovered, Ordering::AcqRel);
+    if !state_valid {
+        CALLBACK_CONTRACT_FAILED.store(true, Ordering::Release);
     }
 }
 
@@ -947,7 +950,7 @@ impl AppWindow {
                 ctx.adapter.driver_info,
             );
             RAW_CALLBACK_OBSERVED.store(false, Ordering::Release);
-            RAW_CALLBACK_FAILED.store(false, Ordering::Release);
+            CALLBACK_CONTRACT_FAILED.store(false, Ordering::Release);
             CALLBACK_ONLY_OBSERVED.store(false, Ordering::Release);
             NEAREST_SAMPLER_SET.store(0, Ordering::Release);
             LINEAR_SAMPLER_SET.store(0, Ordering::Release);
@@ -1936,14 +1939,17 @@ impl ViewportSmokeState {
             return Err(format!(
                 "Ash validation smoke exceeded {SMOKE_FRAME_BUDGET} frames in phase {:?}; \
                  callback_only={}, raw_callback={}, nearest_sampler={}, linear_sampler={}, \
-                 distinct_samplers={}, render_state_cleared={}",
+                 distinct_samplers={}, reset_after_draw={}, render_state_cleared={}, \
+                 callback_contract_failed={}",
                 self.phase,
                 self.callback_only_frame_executed,
                 self.raw_callback_typed_state_observed,
                 self.nearest_sampler_descriptor_set_observed,
                 self.linear_sampler_descriptor_set_observed,
                 self.sampler_descriptor_sets_distinct,
+                self.reset_render_state_recovered,
                 self.render_state_cleared_after_callback,
+                CALLBACK_CONTRACT_FAILED.load(Ordering::Acquire),
             )
             .into());
         }
@@ -2006,7 +2012,7 @@ impl ViewportSmokeState {
         callback_only_zero_geometry: bool,
         render_state_cleared: bool,
     ) {
-        let callback_failed = RAW_CALLBACK_FAILED.load(Ordering::Acquire);
+        let callback_failed = CALLBACK_CONTRACT_FAILED.load(Ordering::Acquire);
         self.raw_callback_typed_state_observed =
             RAW_CALLBACK_OBSERVED.load(Ordering::Acquire) && !callback_failed;
         self.callback_only_frame_executed |= callback_only_zero_geometry
