@@ -119,6 +119,24 @@ struct NativeCaptureRequest {
 }
 
 #[cfg(feature = "capture")]
+fn dispose_panic_payload_without_unwinding(mut payload: Box<dyn std::any::Any + Send>) {
+    const MAX_DROP_ATTEMPTS: usize = 8;
+
+    for _ in 0..MAX_DROP_ATTEMPTS {
+        match catch_unwind(AssertUnwindSafe(|| drop(payload))) {
+            Ok(()) => return,
+            Err(next_payload) => payload = next_payload,
+        }
+    }
+
+    // An adversarial Drop implementation can keep creating another panicking payload forever.
+    // Retaining only the final payload is the bounded fallback that preserves the C ABI boundary
+    // without aborting the host process. Ordinary payloads and finite destructor-panic chains are
+    // reclaimed by the loop above.
+    std::mem::forget(payload);
+}
+
+#[cfg(feature = "capture")]
 impl<'driver, Driver> CaptureDriverSlot<'driver, Driver>
 where
     Driver: CapturingTestFrameDriver,
@@ -187,8 +205,7 @@ where
                 false
             }
             Err(payload) => {
-                // A panic payload may itself panic when dropped. It must not escape this C ABI.
-                std::mem::forget(payload);
+                dispose_panic_payload_without_unwinding(payload);
                 self.record_failure(CaptureProviderError::Panicked);
                 false
             }

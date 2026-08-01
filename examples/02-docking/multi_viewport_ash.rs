@@ -1269,31 +1269,41 @@ impl AppWindow {
                     observed_viewport_id = viewport.id();
                     observed_viewport_size = viewport.size();
                     ui.text("Ash dynamic rendering validation surface");
-                    let draw_list = ui.get_window_draw_list();
-                    unsafe {
-                        draw_list.add_callback(sampler_nearest, std::ptr::null_mut(), 0);
-                        draw_list.add_callback(
-                            smoke_nearest_sampler_probe,
-                            std::ptr::null_mut(),
-                            0,
-                        );
+                    {
+                        let draw_list = ui.get_window_draw_list();
+                        unsafe {
+                            draw_list.add_callback(sampler_nearest, std::ptr::null_mut(), 0);
+                            draw_list.add_callback(
+                                smoke_nearest_sampler_probe,
+                                std::ptr::null_mut(),
+                                0,
+                            );
+                        }
                     }
                     if let Some(texture) = managed_texture {
                         ui.image(texture, [64.0, 64.0]);
                     } else {
                         ui.image(font_texture, [64.0, 64.0]);
                     }
-                    let draw_list = ui.get_window_draw_list();
-                    unsafe {
-                        draw_list.add_callback(sampler_linear, std::ptr::null_mut(), 0);
-                        draw_list.add_callback(smoke_linear_sampler_probe, std::ptr::null_mut(), 0);
-                        draw_list.add_callback(smoke_raw_callback, std::ptr::null_mut(), 0);
-                        draw_list.add_callback(reset_render_state, std::ptr::null_mut(), 0);
+                    {
+                        let draw_list = ui.get_window_draw_list();
+                        unsafe {
+                            draw_list.add_callback(sampler_linear, std::ptr::null_mut(), 0);
+                            draw_list.add_callback(
+                                smoke_linear_sampler_probe,
+                                std::ptr::null_mut(),
+                                0,
+                            );
+                            draw_list.add_callback(smoke_raw_callback, std::ptr::null_mut(), 0);
+                            draw_list.add_callback(reset_render_state, std::ptr::null_mut(), 0);
+                        }
                     }
                     ui.text("Draw after reset-render-state callback");
-                    let draw_list = ui.get_window_draw_list();
-                    unsafe {
-                        draw_list.add_callback(smoke_reset_probe, std::ptr::null_mut(), 0);
+                    {
+                        let draw_list = ui.get_window_draw_list();
+                        unsafe {
+                            draw_list.add_callback(smoke_reset_probe, std::ptr::null_mut(), 0);
+                        }
                     }
                 });
             if let Some(smoke) = self.viewport_smoke.as_mut() {

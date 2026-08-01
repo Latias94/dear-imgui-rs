@@ -179,10 +179,7 @@ class ReleaseGateWorkflowTests(unittest.TestCase):
         self.assertEqual(setup.get("uses"), "emscripten-core/setup-emsdk@v16")
         self.assertEqual(str(setup_inputs.get("version")), "5.0.1")
         self.assertEqual(str(setup_inputs.get("emsdk-version")), "5.0.5")
-        self.assertEqual(
-            setup_inputs.get("actions-cache-folder"),
-            "${{ runner.temp }}/emsdk-cache",
-        )
+        self.assertNotIn("actions-cache-folder", setup_inputs)
 
         capture = named_step(job, "Capture WASM route and provider contract")
         self.assertEqual(capture.get("if"), "matrix.cell_id == 'linux-wasm'")

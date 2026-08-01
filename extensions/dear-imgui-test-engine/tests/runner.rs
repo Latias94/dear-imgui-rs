@@ -8,6 +8,8 @@ use std::num::NonZeroU64;
 #[cfg(feature = "capture")]
 use std::panic::panic_any;
 use std::rc::Rc;
+#[cfg(feature = "capture")]
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use dear_imgui_rs::{
@@ -289,8 +291,12 @@ enum CaptureFault {
 struct PanickingPayload;
 
 #[cfg(feature = "capture")]
+static PANICKING_PAYLOAD_DROP_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(feature = "capture")]
 impl Drop for PanickingPayload {
     fn drop(&mut self) {
+        PANICKING_PAYLOAD_DROP_COUNT.fetch_add(1, Ordering::AcqRel);
         panic!("panic payload drop");
     }
 }
@@ -1059,6 +1065,7 @@ fn graphical_capture_provider_is_run_scoped_and_reports_region_metadata() {
 #[test]
 fn capture_provider_errors_and_panics_do_not_cross_the_ffi_boundary() {
     let _guard = test_lock();
+    PANICKING_PAYLOAD_DROP_COUNT.store(0, Ordering::Release);
     for fault in [
         CaptureFault::Error,
         CaptureFault::Panic,
@@ -1108,6 +1115,7 @@ fn capture_provider_errors_and_panics_do_not_cross_the_ffi_boundary() {
         );
         engine.shutdown().expect("shutdown after capture failure");
     }
+    assert_eq!(PANICKING_PAYLOAD_DROP_COUNT.load(Ordering::Acquire), 1);
 }
 
 #[cfg(feature = "capture")]

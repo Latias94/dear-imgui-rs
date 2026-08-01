@@ -411,7 +411,6 @@ jobs:
         with:
           version: 5.0.1
           emsdk-version: 5.0.5
-          actions-cache-folder: ${{ runner.temp }}/emsdk-cache
 
       - name: Install macOS dependencies
         if: matrix.cell_id == 'macos-build'
