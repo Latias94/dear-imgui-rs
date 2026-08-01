@@ -1,21 +1,21 @@
 {
   "schema": "dear-imgui-upstream-contract-snapshot-v2",
   "source_revisions": {
-    "nested:dear-imgui-sys/third-party/cimgui/imgui": "b61e56346a92cfcaf1f43a545ca37b0b32239654",
+    "nested:dear-imgui-sys/third-party/cimgui/imgui": "b334d19b667958ed970000073644d911fae17e57",
     "nested:extensions/dear-imguizmo-quat-sys/third-party/cimguizmo_quat/imGuIZMO.quat": "df0927ea22031b82f073304e15509fc2a868f228",
     "nested:extensions/dear-imguizmo-quat-sys/third-party/cimguizmo_quat/imGuIZMO.quat/libs/imgui": "5f371da49a4f530c2f16c279b7613ba1d39b1581",
-    "nested:extensions/dear-imguizmo-sys/third-party/cimguizmo/ImGuizmo": "867101c4efd597deb9246d408c068978ec21712b",
+    "nested:extensions/dear-imguizmo-sys/third-party/cimguizmo/ImGuizmo": "dc25afb98bc3ebe00dfc9a23ba7235fead2ccb1d",
     "nested:extensions/dear-imnodes-sys/third-party/cimnodes/imnodes": "c9bb8e9bf12e9caad07e59545fefab08b8c2e56f",
     "nested:extensions/dear-implot-sys/third-party/cimplot/implot": "1351ab2c46d7a05a60f3533047bfba8a953520a1",
     "nested:extensions/dear-implot3d-sys/third-party/cimplot3d/implot3d": "41ae3e447c0de20ecab95d38a4b4dc0835a3efc2",
     "nested:extensions/dear-node-editor-sys/third-party/cimnodes_editor/imgui-node-editor": "55a7dbf4b517b5e809b372ba39153fe20bad39ad",
-    "source:core": "1261b231939fc210032f30c4ee8a8f0440372237",
-    "source:imguizmo": "f1eb553091e9e512ec811c4c17561fd2a13a3701",
-    "source:imguizmo-quat": "705e700c0f011f91df3b72a521a040906cbdfe25",
-    "source:imnodes": "8598e740617eefca14948a592e1976ebef5c8362",
-    "source:implot": "9768a1d229a660748fb6aaf7ffb42b730755290f",
-    "source:implot3d": "8c1c16e98fdddc4b3ee78bf0f89e0dd708be79e0",
-    "source:node-editor": "552cc280792e3cde4d7012ff31b4c85cf083ada8",
+    "source:core": "b705b2465a17428a3ab6b19c893b452a70dcbb14",
+    "source:imguizmo": "a90e95ad984c1653a65efd378dbf6da0e07d7ce8",
+    "source:imguizmo-quat": "1239151198b7a5c6fb22dd68bc49648fb7125c0c",
+    "source:imnodes": "5611a9f2950a829e4f2b76ffc88ec6e8b1fd59d3",
+    "source:implot": "8213880419a5d72f2c898ef90a73df6c16507f27",
+    "source:implot3d": "cf75f8a32a6f090c60a903461694007f8c1b41ca",
+    "source:node-editor": "42ba899443aa52fdc07c4f8554c64ccb954a20d4",
     "source:test-engine": "508a8fc8dacac2f346d353fed31b9bc90ed29adc"
   },
   "facts": [
@@ -125,6 +125,13 @@
       "value": "do { if (g.DebugLogFlags & ImGuiDebugLogFlags_EventSelection) IMGUI_DEBUG_LOG(__VA_ARGS__); } while (0)"
     },
     {
+      "id": "core:constant:IMGUI_DEBUG_LOG_TABLE(...)",
+      "source": "core",
+      "kind": "constant",
+      "name": "IMGUI_DEBUG_LOG_TABLE(...)",
+      "value": "do { if (g.DebugLogFlags & ImGuiDebugLogFlags_EventTable) IMGUI_DEBUG_LOG(__VA_ARGS__); } while (0)"
+    },
+    {
       "id": "core:constant:IMGUI_DEBUG_LOG_VIEWPORT(...)",
       "source": "core",
       "kind": "constant",
@@ -199,14 +206,14 @@
       "source": "core",
       "kind": "constant",
       "name": "IMGUI_VERSION",
-      "value": "\"1.92.8\""
+      "value": "\"1.92.9\""
     },
     {
       "id": "core:constant:IMGUI_VERSION_NUM",
       "source": "core",
       "kind": "constant",
       "name": "IMGUI_VERSION_NUM",
-      "value": "19280"
+      "value": "19290"
     },
     {
       "id": "core:constant:IMGUI_WINDOW_HARD_MIN_SIZE",
@@ -882,8 +889,8 @@
       "kind": "enum-variant",
       "name": "ImDrawFlags_::ImDrawFlags_InvalidMask_",
       "value": {
-        "value": "(ImDrawFlags)0x8000000F",
-        "calculated_value": 2147483663
+        "value": "~0x7FFFFFF0",
+        "calculated_value": -2147483633
       }
     },
     {
@@ -1064,6 +1071,16 @@
       "value": {
         "value": "0",
         "calculated_value": 0
+      }
+    },
+    {
+      "id": "core:enum-variant:ImDrawListFlags_::ImDrawListFlags_TextNoPixelSnap",
+      "source": "core",
+      "kind": "enum-variant",
+      "name": "ImDrawListFlags_::ImDrawListFlags_TextNoPixelSnap",
+      "value": {
+        "value": "1 << 4",
+        "calculated_value": 16
       }
     },
     {
@@ -2133,7 +2150,7 @@
       "name": "ImGuiColorEditFlags_::ImGuiColorEditFlags_DefaultOptions_",
       "value": {
         "value": "ImGuiColorEditFlags_Uint8 | ImGuiColorEditFlags_DisplayRGB | ImGuiColorEditFlags_InputRGB | ImGuiColorEditFlags_PickerHueBar",
-        "calculated_value": 177209344
+        "calculated_value": 311427072
       }
     },
     {
@@ -2202,8 +2219,8 @@
       "kind": "enum-variant",
       "name": "ImGuiColorEditFlags_::ImGuiColorEditFlags_InputHSV",
       "value": {
-        "value": "1 << 28",
-        "calculated_value": 268435456
+        "value": "1 << 29",
+        "calculated_value": 536870912
       }
     },
     {
@@ -2213,7 +2230,7 @@
       "name": "ImGuiColorEditFlags_::ImGuiColorEditFlags_InputMask_",
       "value": {
         "value": "ImGuiColorEditFlags_InputRGB | ImGuiColorEditFlags_InputHSV",
-        "calculated_value": 402653184
+        "calculated_value": 805306368
       }
     },
     {
@@ -2222,8 +2239,8 @@
       "kind": "enum-variant",
       "name": "ImGuiColorEditFlags_::ImGuiColorEditFlags_InputRGB",
       "value": {
-        "value": "1 << 27",
-        "calculated_value": 134217728
+        "value": "1 << 28",
+        "calculated_value": 268435456
       }
     },
     {
@@ -2374,6 +2391,16 @@
       "value": {
         "value": "ImGuiColorEditFlags_PickerHueWheel | ImGuiColorEditFlags_PickerHueBar",
         "calculated_value": 100663296
+      }
+    },
+    {
+      "id": "core:enum-variant:ImGuiColorEditFlags_::ImGuiColorEditFlags_PickerNoRotate",
+      "source": "core",
+      "kind": "enum-variant",
+      "name": "ImGuiColorEditFlags_::ImGuiColorEditFlags_PickerNoRotate",
+      "value": {
+        "value": "1 << 27",
+        "calculated_value": 134217728
       }
     },
     {
@@ -3834,6 +3861,36 @@
       "value": {
         "value": "1 << 6",
         "calculated_value": 64
+      }
+    },
+    {
+      "id": "core:enum-variant:ImGuiItemFlags_::ImGuiItemFlags_LiveEditOnInput",
+      "source": "core",
+      "kind": "enum-variant",
+      "name": "ImGuiItemFlags_::ImGuiItemFlags_LiveEditOnInput",
+      "value": {
+        "value": "ImGuiItemFlags_LiveEditOnInputText | ImGuiItemFlags_LiveEditOnInputScalar",
+        "calculated_value": 384
+      }
+    },
+    {
+      "id": "core:enum-variant:ImGuiItemFlags_::ImGuiItemFlags_LiveEditOnInputScalar",
+      "source": "core",
+      "kind": "enum-variant",
+      "name": "ImGuiItemFlags_::ImGuiItemFlags_LiveEditOnInputScalar",
+      "value": {
+        "value": "1 << 8",
+        "calculated_value": 256
+      }
+    },
+    {
+      "id": "core:enum-variant:ImGuiItemFlags_::ImGuiItemFlags_LiveEditOnInputText",
+      "source": "core",
+      "kind": "enum-variant",
+      "name": "ImGuiItemFlags_::ImGuiItemFlags_LiveEditOnInputText",
+      "value": {
+        "value": "1 << 7",
+        "calculated_value": 128
       }
     },
     {
@@ -5787,6 +5844,16 @@
       }
     },
     {
+      "id": "core:enum-variant:ImGuiMultiSelectFlags_::ImGuiMultiSelectFlags_CheckboxMode_",
+      "source": "core",
+      "kind": "enum-variant",
+      "name": "ImGuiMultiSelectFlags_::ImGuiMultiSelectFlags_CheckboxMode_",
+      "value": {
+        "value": "1 << 20",
+        "calculated_value": 1048576
+      }
+    },
+    {
       "id": "core:enum-variant:ImGuiMultiSelectFlags_::ImGuiMultiSelectFlags_ClearOnClickVoid",
       "source": "core",
       "kind": "enum-variant",
@@ -6352,8 +6419,8 @@
       "kind": "enum-variant",
       "name": "ImGuiStyleVar_::ImGuiStyleVar_ButtonTextAlign",
       "value": {
-        "value": "36",
-        "calculated_value": 36
+        "value": "38",
+        "calculated_value": 38
       }
     },
     {
@@ -6362,8 +6429,8 @@
       "kind": "enum-variant",
       "name": "ImGuiStyleVar_::ImGuiStyleVar_COUNT",
       "value": {
-        "value": "43",
-        "calculated_value": 43
+        "value": "45",
+        "calculated_value": 45
       }
     },
     {
@@ -6412,8 +6479,8 @@
       "kind": "enum-variant",
       "name": "ImGuiStyleVar_::ImGuiStyleVar_DockingSeparatorSize",
       "value": {
-        "value": "42",
-        "calculated_value": 42
+        "value": "44",
+        "calculated_value": 44
       }
     },
     {
@@ -6422,8 +6489,8 @@
       "kind": "enum-variant",
       "name": "ImGuiStyleVar_::ImGuiStyleVar_DragDropTargetRounding",
       "value": {
-        "value": "35",
-        "calculated_value": 35
+        "value": "37",
+        "calculated_value": 37
       }
     },
     {
@@ -6527,6 +6594,16 @@
       }
     },
     {
+      "id": "core:enum-variant:ImGuiStyleVar_::ImGuiStyleVar_MenuItemRounding",
+      "source": "core",
+      "kind": "enum-variant",
+      "name": "ImGuiStyleVar_::ImGuiStyleVar_MenuItemRounding",
+      "value": {
+        "value": "35",
+        "calculated_value": 35
+      }
+    },
+    {
       "id": "core:enum-variant:ImGuiStyleVar_::ImGuiStyleVar_PopupBorderSize",
       "source": "core",
       "kind": "enum-variant",
@@ -6577,13 +6654,23 @@
       }
     },
     {
+      "id": "core:enum-variant:ImGuiStyleVar_::ImGuiStyleVar_SelectableRounding",
+      "source": "core",
+      "kind": "enum-variant",
+      "name": "ImGuiStyleVar_::ImGuiStyleVar_SelectableRounding",
+      "value": {
+        "value": "36",
+        "calculated_value": 36
+      }
+    },
+    {
       "id": "core:enum-variant:ImGuiStyleVar_::ImGuiStyleVar_SelectableTextAlign",
       "source": "core",
       "kind": "enum-variant",
       "name": "ImGuiStyleVar_::ImGuiStyleVar_SelectableTextAlign",
       "value": {
-        "value": "37",
-        "calculated_value": 37
+        "value": "39",
+        "calculated_value": 39
       }
     },
     {
@@ -6592,8 +6679,8 @@
       "kind": "enum-variant",
       "name": "ImGuiStyleVar_::ImGuiStyleVar_SeparatorSize",
       "value": {
-        "value": "38",
-        "calculated_value": 38
+        "value": "40",
+        "calculated_value": 40
       }
     },
     {
@@ -6602,8 +6689,8 @@
       "kind": "enum-variant",
       "name": "ImGuiStyleVar_::ImGuiStyleVar_SeparatorTextAlign",
       "value": {
-        "value": "40",
-        "calculated_value": 40
+        "value": "42",
+        "calculated_value": 42
       }
     },
     {
@@ -6612,8 +6699,8 @@
       "kind": "enum-variant",
       "name": "ImGuiStyleVar_::ImGuiStyleVar_SeparatorTextBorderSize",
       "value": {
-        "value": "39",
-        "calculated_value": 39
+        "value": "41",
+        "calculated_value": 41
       }
     },
     {
@@ -6622,8 +6709,8 @@
       "kind": "enum-variant",
       "name": "ImGuiStyleVar_::ImGuiStyleVar_SeparatorTextPadding",
       "value": {
-        "value": "41",
-        "calculated_value": 41
+        "value": "43",
+        "calculated_value": 43
       }
     },
     {
@@ -9054,18 +9141,6 @@
       }
     },
     {
-      "id": "core:field:ImDrawData::CmdListsCount",
-      "source": "core",
-      "kind": "field",
-      "name": "ImDrawData::CmdListsCount",
-      "value": {
-        "type": "int",
-        "template_type": null,
-        "size": null,
-        "bitfield": null
-      }
-    },
-    {
       "id": "core:field:ImDrawData::DisplayPos",
       "source": "core",
       "kind": "field",
@@ -9084,6 +9159,18 @@
       "name": "ImDrawData::DisplaySize",
       "value": {
         "type": "ImVec2",
+        "template_type": null,
+        "size": null,
+        "bitfield": null
+      }
+    },
+    {
+      "id": "core:field:ImDrawData::FrameCount",
+      "source": "core",
+      "kind": "field",
+      "name": "ImDrawData::FrameCount",
+      "value": {
+        "type": "int",
         "template_type": null,
         "size": null,
         "bitfield": null
@@ -10782,6 +10869,18 @@
       }
     },
     {
+      "id": "core:field:ImGuiIO::ConfigColorEditFlags",
+      "source": "core",
+      "kind": "field",
+      "name": "ImGuiIO::ConfigColorEditFlags",
+      "value": {
+        "type": "ImGuiColorEditFlags",
+        "template_type": null,
+        "size": null,
+        "bitfield": null
+      }
+    },
+    {
       "id": "core:field:ImGuiIO::ConfigDebugBeginReturnValueLoop",
       "source": "core",
       "kind": "field",
@@ -11016,6 +11115,30 @@
       "name": "ImGuiIO::ConfigFlags",
       "value": {
         "type": "ImGuiConfigFlags",
+        "template_type": null,
+        "size": null,
+        "bitfield": null
+      }
+    },
+    {
+      "id": "core:field:ImGuiIO::ConfigIniSettingsAutoDiscardMonths",
+      "source": "core",
+      "kind": "field",
+      "name": "ImGuiIO::ConfigIniSettingsAutoDiscardMonths",
+      "value": {
+        "type": "int",
+        "template_type": null,
+        "size": null,
+        "bitfield": null
+      }
+    },
+    {
+      "id": "core:field:ImGuiIO::ConfigIniSettingsSaveLastUsedDate",
+      "source": "core",
+      "kind": "field",
+      "name": "ImGuiIO::ConfigIniSettingsSaveLastUsedDate",
+      "value": {
+        "type": "bool",
         "template_type": null,
         "size": null,
         "bitfield": null
@@ -11858,6 +11981,18 @@
         "type": "bool",
         "template_type": null,
         "size": 5,
+        "bitfield": null
+      }
+    },
+    {
+      "id": "core:field:ImGuiIO::MouseSingleClickDelay",
+      "source": "core",
+      "kind": "field",
+      "name": "ImGuiIO::MouseSingleClickDelay",
+      "value": {
+        "type": "float",
+        "template_type": null,
+        "size": null,
         "bitfield": null
       }
     },
@@ -12816,6 +12951,18 @@
       "name": "ImGuiPlatformIO::Platform_RenderWindow",
       "value": {
         "type": "void(*)(ImGuiViewport* vp,void* render_arg)",
+        "template_type": null,
+        "size": null,
+        "bitfield": null
+      }
+    },
+    {
+      "id": "core:field:ImGuiPlatformIO::Platform_SessionDate",
+      "source": "core",
+      "kind": "field",
+      "name": "ImGuiPlatformIO::Platform_SessionDate",
+      "value": {
+        "type": "int",
         "template_type": null,
         "size": null,
         "bitfield": null
@@ -13890,6 +14037,18 @@
       }
     },
     {
+      "id": "core:field:ImGuiStyle::InputTextCursorSize",
+      "source": "core",
+      "kind": "field",
+      "name": "ImGuiStyle::InputTextCursorSize",
+      "value": {
+        "type": "float",
+        "template_type": null,
+        "size": null,
+        "bitfield": null
+      }
+    },
+    {
       "id": "core:field:ImGuiStyle::ItemInnerSpacing",
       "source": "core",
       "kind": "field",
@@ -13918,6 +14077,18 @@
       "source": "core",
       "kind": "field",
       "name": "ImGuiStyle::LogSliderDeadzone",
+      "value": {
+        "type": "float",
+        "template_type": null,
+        "size": null,
+        "bitfield": null
+      }
+    },
+    {
+      "id": "core:field:ImGuiStyle::MenuItemRounding",
+      "source": "core",
+      "kind": "field",
+      "name": "ImGuiStyle::MenuItemRounding",
       "value": {
         "type": "float",
         "template_type": null,
@@ -13990,6 +14161,18 @@
       "source": "core",
       "kind": "field",
       "name": "ImGuiStyle::ScrollbarSize",
+      "value": {
+        "type": "float",
+        "template_type": null,
+        "size": null,
+        "bitfield": null
+      }
+    },
+    {
+      "id": "core:field:ImGuiStyle::SelectableRounding",
+      "source": "core",
+      "kind": "field",
+      "name": "ImGuiStyle::SelectableRounding",
       "value": {
         "type": "float",
         "template_type": null,
@@ -14904,6 +15087,18 @@
       "name": "ImTextureData::Pixels",
       "value": {
         "type": "unsigned char*",
+        "template_type": null,
+        "size": null,
+        "bitfield": null
+      }
+    },
+    {
+      "id": "core:field:ImTextureData::QueueUserData",
+      "source": "core",
+      "kind": "field",
+      "name": "ImTextureData::QueueUserData",
+      "value": {
+        "type": "void*",
         "template_type": null,
         "size": null,
         "bitfield": null
@@ -28135,6 +28330,35 @@
       }
     },
     {
+      "id": "core:function:igGetItemClickedCountWithSingleClickDelay",
+      "source": "core",
+      "kind": "function",
+      "name": "igGetItemClickedCountWithSingleClickDelay",
+      "value": {
+        "cimgui_name": "igGetItemClickedCountWithSingleClickDelay",
+        "function": "GetItemClickedCountWithSingleClickDelay",
+        "namespace": "ImGui",
+        "struct": "",
+        "return_type": "int",
+        "arguments": [
+          {
+            "name": "mouse_button",
+            "type": "ImGuiMouseButton"
+          },
+          {
+            "name": "delay",
+            "type": "float"
+          }
+        ],
+        "signature": "(ImGuiMouseButton,float)",
+        "defaults": {
+          "delay": "-1.0f",
+          "mouse_button": "0"
+        },
+        "traits": {}
+      }
+    },
+    {
       "id": "core:function:igGetItemFlags",
       "source": "core",
       "kind": "function",
@@ -30133,7 +30357,9 @@
           }
         ],
         "signature": "(ImGuiMouseButton,float)",
-        "defaults": {},
+        "defaults": {
+          "delay": "-1.f"
+        },
         "traits": {}
       }
     },
@@ -30876,7 +31102,7 @@
         "function": "OpenPopupOnItemClick",
         "namespace": "ImGui",
         "struct": "",
-        "return_type": "void",
+        "return_type": "bool",
         "arguments": [
           {
             "name": "str_id",
@@ -30905,7 +31131,7 @@
         "function": "OpenPopup",
         "namespace": "ImGui",
         "struct": "",
-        "return_type": "void",
+        "return_type": "bool",
         "arguments": [
           {
             "name": "id",
@@ -30933,7 +31159,7 @@
         "function": "OpenPopup",
         "namespace": "ImGui",
         "struct": "",
-        "return_type": "void",
+        "return_type": "bool",
         "arguments": [
           {
             "name": "str_id",
@@ -32121,28 +32347,6 @@
           }
         ],
         "signature": "(const char*)",
-        "defaults": {},
-        "traits": {}
-      }
-    },
-    {
-      "id": "core:function:igSetColorEditOptions",
-      "source": "core",
-      "kind": "function",
-      "name": "igSetColorEditOptions",
-      "value": {
-        "cimgui_name": "igSetColorEditOptions",
-        "function": "SetColorEditOptions",
-        "namespace": "ImGui",
-        "struct": "",
-        "return_type": "void",
-        "arguments": [
-          {
-            "name": "flags",
-            "type": "ImGuiColorEditFlags"
-          }
-        ],
-        "signature": "(ImGuiColorEditFlags)",
         "defaults": {},
         "traits": {}
       }
@@ -34656,7 +34860,7 @@
             "type": "float"
           },
           {
-            "name": "user_id",
+            "name": "user_data",
             "type": "ImGuiID"
           }
         ],
@@ -34664,7 +34868,7 @@
         "defaults": {
           "flags": "0",
           "init_width_or_weight": "0.0f",
-          "user_id": "0"
+          "user_data": "0"
         },
         "traits": {}
       }
@@ -35847,7 +36051,7 @@
           "bitfield": null
         },
         {
-          "name": "CmdListsCount",
+          "name": "FrameCount",
           "type": "int",
           "template_type": null,
           "size": null,
@@ -37104,13 +37308,6 @@
           "bitfield": null
         },
         {
-          "name": "MouseDrawCursor",
-          "type": "bool",
-          "template_type": null,
-          "size": null,
-          "bitfield": null
-        },
-        {
           "name": "ConfigMacOSXBehaviors",
           "type": "bool",
           "template_type": null,
@@ -37134,6 +37331,13 @@
         {
           "name": "ConfigInputTextEnterKeepActive",
           "type": "bool",
+          "template_type": null,
+          "size": null,
+          "bitfield": null
+        },
+        {
+          "name": "ConfigColorEditFlags",
+          "type": "ImGuiColorEditFlags",
           "template_type": null,
           "size": null,
           "bitfield": null
@@ -37174,6 +37378,34 @@
           "bitfield": null
         },
         {
+          "name": "ConfigIniSettingsSaveLastUsedDate",
+          "type": "bool",
+          "template_type": null,
+          "size": null,
+          "bitfield": null
+        },
+        {
+          "name": "ConfigIniSettingsAutoDiscardMonths",
+          "type": "int",
+          "template_type": null,
+          "size": null,
+          "bitfield": null
+        },
+        {
+          "name": "ConfigDebugIniSettings",
+          "type": "bool",
+          "template_type": null,
+          "size": null,
+          "bitfield": null
+        },
+        {
+          "name": "MouseDrawCursor",
+          "type": "bool",
+          "template_type": null,
+          "size": null,
+          "bitfield": null
+        },
+        {
           "name": "ConfigMemoryCompactTimer",
           "type": "float",
           "template_type": null,
@@ -37189,6 +37421,13 @@
         },
         {
           "name": "MouseDoubleClickMaxDist",
+          "type": "float",
+          "template_type": null,
+          "size": null,
+          "bitfield": null
+        },
+        {
+          "name": "MouseSingleClickDelay",
           "type": "float",
           "template_type": null,
           "size": null,
@@ -37280,13 +37519,6 @@
         },
         {
           "name": "ConfigDebugIgnoreFocusLoss",
-          "type": "bool",
-          "template_type": null,
-          "size": null,
-          "bitfield": null
-        },
-        {
-          "name": "ConfigDebugIniSettings",
           "type": "bool",
           "template_type": null,
           "size": null,
@@ -38086,6 +38318,13 @@
         {
           "name": "Platform_LocaleDecimalPoint",
           "type": "ImWchar",
+          "template_type": null,
+          "size": null,
+          "bitfield": null
+        },
+        {
+          "name": "Platform_SessionDate",
+          "type": "int",
           "template_type": null,
           "size": null,
           "bitfield": null
@@ -38940,6 +39179,20 @@
           "bitfield": null
         },
         {
+          "name": "MenuItemRounding",
+          "type": "float",
+          "template_type": null,
+          "size": null,
+          "bitfield": null
+        },
+        {
+          "name": "SelectableRounding",
+          "type": "float",
+          "template_type": null,
+          "size": null,
+          "bitfield": null
+        },
+        {
           "name": "DragDropTargetRounding",
           "type": "float",
           "template_type": null,
@@ -38984,6 +39237,13 @@
         {
           "name": "SelectableTextAlign",
           "type": "ImVec2",
+          "template_type": null,
+          "size": null,
+          "bitfield": null
+        },
+        {
+          "name": "InputTextCursorSize",
+          "type": "float",
           "template_type": null,
           "size": null,
           "bitfield": null
@@ -39523,6 +39783,13 @@
         },
         {
           "name": "BackendUserData",
+          "type": "void*",
+          "template_type": null,
+          "size": null,
+          "bitfield": null
+        },
+        {
+          "name": "QueueUserData",
           "type": "void*",
           "template_type": null,
           "size": null,
@@ -40085,7 +40352,7 @@
       "source": "core",
       "kind": "typedef",
       "name": "ImGuiDataAuthority",
-      "value": "int"
+      "value": "unsigned int"
     },
     {
       "id": "core:typedef:ImGuiDataType",
@@ -40634,6 +40901,13 @@
       "value": "struct ImGuiOnceUponAFrame"
     },
     {
+      "id": "core:typedef:ImGuiPackedDate",
+      "source": "core",
+      "kind": "typedef",
+      "name": "ImGuiPackedDate",
+      "value": "struct ImGuiPackedDate"
+    },
+    {
       "id": "core:typedef:ImGuiPayload",
       "source": "core",
       "kind": "typedef",
@@ -40730,6 +41004,13 @@
       "kind": "typedef",
       "name": "ImGuiSeparatorFlags",
       "value": "int"
+    },
+    {
+      "id": "core:typedef:ImGuiSettingsCleanupArgs",
+      "source": "core",
+      "kind": "typedef",
+      "name": "ImGuiSettingsCleanupArgs",
+      "value": "struct ImGuiSettingsCleanupArgs"
     },
     {
       "id": "core:typedef:ImGuiSettingsHandler",
@@ -40933,6 +41214,13 @@
       "kind": "typedef",
       "name": "ImGuiTableInstanceData",
       "value": "struct ImGuiTableInstanceData"
+    },
+    {
+      "id": "core:typedef:ImGuiTableReconcileColumnData",
+      "source": "core",
+      "kind": "typedef",
+      "name": "ImGuiTableReconcileColumnData",
+      "value": "struct ImGuiTableReconcileColumnData"
     },
     {
       "id": "core:typedef:ImGuiTableRowFlags",
@@ -44329,6 +44617,52 @@
         "return_type": "void",
         "arguments": [],
         "signature": "()",
+        "defaults": {},
+        "traits": {}
+      }
+    },
+    {
+      "id": "imguizmo:function:ImGuizmo_ComputeMouseRay",
+      "source": "imguizmo",
+      "kind": "function",
+      "name": "ImGuizmo_ComputeMouseRay",
+      "value": {
+        "cimgui_name": "ImGuizmo_ComputeMouseRay",
+        "function": "ComputeMouseRay",
+        "namespace": "ImGuizmo",
+        "struct": "",
+        "return_type": "void",
+        "arguments": [
+          {
+            "name": "view",
+            "type": "const float*"
+          },
+          {
+            "name": "projection",
+            "type": "const float*"
+          },
+          {
+            "name": "mousePosition",
+            "type": "const ImVec2"
+          },
+          {
+            "name": "rectPosition",
+            "type": "const ImVec2"
+          },
+          {
+            "name": "rectSize",
+            "type": "const ImVec2"
+          },
+          {
+            "name": "rayOrigin",
+            "type": "float*"
+          },
+          {
+            "name": "rayDirection",
+            "type": "float*"
+          }
+        ],
+        "signature": "(const float*,const float*,const ImVec2,const ImVec2,const ImVec2,float*,float*)",
         "defaults": {},
         "traits": {}
       }
@@ -81391,7 +81725,7 @@
         "arguments": [
           {
             "name": "nodeId",
-            "type": "NodeId"
+            "type": "NodeId*"
           }
         ],
         "signature": "(NodeId)",
@@ -81413,7 +81747,7 @@
         "arguments": [
           {
             "name": "id",
-            "type": "NodeId"
+            "type": "NodeId*"
           }
         ],
         "signature": "(NodeId)",
@@ -81435,7 +81769,7 @@
         "arguments": [
           {
             "name": "id",
-            "type": "PinId"
+            "type": "PinId*"
           },
           {
             "name": "kind",
@@ -81478,7 +81812,7 @@
         "arguments": [
           {
             "name": "nodeId",
-            "type": "NodeId"
+            "type": "NodeId*"
           }
         ],
         "signature": "(NodeId)",
@@ -81500,7 +81834,7 @@
         "arguments": [
           {
             "name": "pinId",
-            "type": "PinId"
+            "type": "PinId*"
           }
         ],
         "signature": "(PinId)",
@@ -81547,7 +81881,7 @@
         "arguments": [
           {
             "name": "nodeId",
-            "type": "NodeId"
+            "type": "NodeId*"
           }
         ],
         "signature": "(NodeId)",
@@ -81629,7 +81963,7 @@
         "arguments": [
           {
             "name": "linkId",
-            "type": "LinkId"
+            "type": "LinkId*"
           }
         ],
         "signature": "(LinkId)",
@@ -81651,7 +81985,7 @@
         "arguments": [
           {
             "name": "nodeId",
-            "type": "NodeId"
+            "type": "NodeId*"
           }
         ],
         "signature": "(NodeId)",
@@ -81673,7 +82007,7 @@
         "arguments": [
           {
             "name": "linkId",
-            "type": "LinkId"
+            "type": "LinkId*"
           }
         ],
         "signature": "(LinkId)",
@@ -81695,7 +82029,7 @@
         "arguments": [
           {
             "name": "nodeId",
-            "type": "NodeId"
+            "type": "NodeId*"
           }
         ],
         "signature": "(NodeId)",
@@ -81974,7 +82308,7 @@
         "arguments": [
           {
             "name": "linkId",
-            "type": "LinkId"
+            "type": "LinkId*"
           },
           {
             "name": "direction",
@@ -82353,7 +82687,7 @@
         "arguments": [
           {
             "name": "linkId",
-            "type": "LinkId"
+            "type": "LinkId*"
           },
           {
             "name": "startPinId",
@@ -82383,7 +82717,7 @@
         "arguments": [
           {
             "name": "nodeId",
-            "type": "NodeId"
+            "type": "NodeId*"
           }
         ],
         "signature": "(NodeId)",
@@ -82422,7 +82756,7 @@
         "arguments": [
           {
             "name": "nodeId",
-            "type": "NodeId"
+            "type": "NodeId*"
           }
         ],
         "signature": "(NodeId)",
@@ -82447,7 +82781,7 @@
         "arguments": [
           {
             "name": "nodeId",
-            "type": "NodeId"
+            "type": "NodeId*"
           }
         ],
         "signature": "(NodeId)",
@@ -82472,7 +82806,7 @@
         "arguments": [
           {
             "name": "nodeId",
-            "type": "NodeId"
+            "type": "NodeId*"
           }
         ],
         "signature": "(NodeId)",
@@ -82672,7 +83006,7 @@
         "arguments": [
           {
             "name": "nodeId",
-            "type": "NodeId"
+            "type": "NodeId*"
           }
         ],
         "signature": "(NodeId)",
@@ -82694,7 +83028,7 @@
         "arguments": [
           {
             "name": "pinId",
-            "type": "PinId"
+            "type": "PinId*"
           }
         ],
         "signature": "(PinId)",
@@ -82784,7 +83118,7 @@
         "arguments": [
           {
             "name": "linkId",
-            "type": "LinkId"
+            "type": "LinkId*"
           }
         ],
         "signature": "(LinkId)",
@@ -82806,7 +83140,7 @@
         "arguments": [
           {
             "name": "nodeId",
-            "type": "NodeId"
+            "type": "NodeId*"
           }
         ],
         "signature": "(NodeId)",
@@ -82845,15 +83179,15 @@
         "arguments": [
           {
             "name": "id",
-            "type": "LinkId"
+            "type": "LinkId*"
           },
           {
             "name": "startPinId",
-            "type": "PinId"
+            "type": "PinId*"
           },
           {
             "name": "endPinId",
-            "type": "PinId"
+            "type": "PinId*"
           },
           {
             "name": "color",
@@ -82939,7 +83273,7 @@
         "arguments": [
           {
             "name": "pinId",
-            "type": "PinId"
+            "type": "PinId*"
           }
         ],
         "signature": "(PinId)",
@@ -83464,7 +83798,7 @@
         "arguments": [
           {
             "name": "nodeId",
-            "type": "NodeId"
+            "type": "NodeId*"
           }
         ],
         "signature": "(NodeId)",
@@ -83528,7 +83862,7 @@
         "arguments": [
           {
             "name": "linkId",
-            "type": "LinkId"
+            "type": "LinkId*"
           },
           {
             "name": "append",
@@ -83556,7 +83890,7 @@
         "arguments": [
           {
             "name": "nodeId",
-            "type": "NodeId"
+            "type": "NodeId*"
           },
           {
             "name": "append",
@@ -83606,7 +83940,7 @@
         "arguments": [
           {
             "name": "nodeId",
-            "type": "NodeId"
+            "type": "NodeId*"
           },
           {
             "name": "size",
@@ -83632,7 +83966,7 @@
         "arguments": [
           {
             "name": "nodeId",
-            "type": "NodeId"
+            "type": "NodeId*"
           },
           {
             "name": "editorPosition",
@@ -83658,7 +83992,7 @@
         "arguments": [
           {
             "name": "nodeId",
-            "type": "NodeId"
+            "type": "NodeId*"
           },
           {
             "name": "z",

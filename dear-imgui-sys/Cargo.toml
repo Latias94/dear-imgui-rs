@@ -2,7 +2,7 @@
 name = "dear-imgui-sys"
 version.workspace = true
 edition.workspace = true
-description = "Low-level FFI bindings to Dear ImGui v1.92.9 (docking branch) via cimgui (C API)"
+description = "Low-level FFI bindings to Dear ImGui v1.92.9b (docking branch) via cimgui (C API)"
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -31,8 +31,8 @@ exclude = [
 ]
 
 [package.metadata.dear-imgui-sources]
-cimgui-revision = "b705b2465a17428a3ab6b19c893b452a70dcbb14"
-imgui-revision = "b334d19b667958ed970000073644d911fae17e57"
+cimgui-revision = "bf9b984ef74470996fc6c9a6963d9e988e310101"
+imgui-revision = "b48d1afbe8ee8b238e2961dc363a949dd7304e23"
 
 # docs.rs configuration for offline builds
 [package.metadata.docs.rs]

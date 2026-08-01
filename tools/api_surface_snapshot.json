@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "source_revisions": {
-    "cimgui": "b705b2465a17428a3ab6b19c893b452a70dcbb14",
-    "imgui": "b334d19b667958ed970000073644d911fae17e57"
+    "cimgui": "bf9b984ef74470996fc6c9a6963d9e988e310101",
+    "imgui": "b48d1afbe8ee8b238e2961dc363a949dd7304e23"
   },
   "declarations": [
     {

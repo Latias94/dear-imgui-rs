@@ -4,13 +4,13 @@ Low-level Rust bindings for Dear ImGui via cimgui (C API) and checked-in pregene
 
 ## Overview
 
-This crate provides unsafe Rust bindings to Dear ImGui v1.92.9 (docking branch) using the [cimgui](https://github.com/cimgui/cimgui) C API. The core `ig*` API crosses a C ABI boundary. C++ backend integration and callback-bearing platform APIs use explicit repository-owned shims because their compiler ABI still matters, especially on MSVC.
+This crate provides unsafe Rust bindings to Dear ImGui v1.92.9b (docking branch) using the [cimgui](https://github.com/cimgui/cimgui) C API. The core `ig*` API crosses a C ABI boundary. C++ backend integration and callback-bearing platform APIs use explicit repository-owned shims because their compiler ABI still matters, especially on MSVC.
 
 ## Key Features
 
 - **cimgui C API**: A deliberate C boundary for the core `ig*` API
 - **Docking Support**: Full docking support; PlatformIO primitives for backend-specific native multi-viewport routes
-- **Modern Dear ImGui**: Based on Dear ImGui v1.92.9 docking branch
+- **Modern Dear ImGui**: Based on Dear ImGui v1.92.9b docking branch
 - **Cross-platform**: Consistent builds on Windows (MSVC/MinGW), Linux, macOS, and WebAssembly
 - **Prebuilt Binaries**: Optional prebuilt static libraries for faster builds
 - **Offline-friendly**: Pregenerated bindings for normal builds, docs.rs, and offline environments
@@ -419,8 +419,8 @@ require both source submodules to be clean and to match the recorded revisions.
 
 ### Version Information
 
-- **Dear ImGui Version**: v1.92.9 (docking branch)
-- **cimgui Version**: Pinned to a revision generated against Dear ImGui v1.92.9
+- **Dear ImGui Version**: v1.92.9b (docking branch)
+- **cimgui Version**: Pinned to a revision generated against Dear ImGui v1.92.9b
 - **Supported Features**: Docking, FreeType font rendering, and low-level PlatformIO/multi-viewport primitives; end-to-end status is documented per backend route
 
 ### Environment Variables

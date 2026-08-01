@@ -170,11 +170,6 @@ pub struct ImGuiTableColumnsSettings {
 }
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
-pub struct STB_TexteditState {
-    _unused: [u8; 0],
-}
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
 pub struct stbrp_node {
     _unused: [u8; 0],
 }
@@ -7735,6 +7730,60 @@ pub struct ImFontAtlasBuilder {
     pub PackIdLinesTexData: ImFontAtlasRectId,
 }
 impl Default for ImFontAtlasBuilder {
+    fn default() -> Self {
+        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            s.assume_init()
+        }
+    }
+}
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct StbUndoRecord {
+    pub where_: ::std::os::raw::c_int,
+    pub insert_length: ::std::os::raw::c_int,
+    pub delete_length: ::std::os::raw::c_int,
+    pub char_storage: ::std::os::raw::c_int,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct StbUndoState {
+    pub undo_rec: [StbUndoRecord; 99usize],
+    pub undo_char: [::std::os::raw::c_char; 999usize],
+    pub undo_point: ::std::os::raw::c_short,
+    pub redo_point: ::std::os::raw::c_short,
+    pub undo_char_point: ::std::os::raw::c_int,
+    pub redo_char_point: ::std::os::raw::c_int,
+}
+impl Default for StbUndoState {
+    fn default() -> Self {
+        let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
+        unsafe {
+            ::std::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
+            s.assume_init()
+        }
+    }
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub struct STB_TexteditState {
+    pub cursor: ::std::os::raw::c_int,
+    pub select_start: ::std::os::raw::c_int,
+    pub select_end: ::std::os::raw::c_int,
+    pub insert_mode: ::std::os::raw::c_uchar,
+    pub row_count_per_page: ::std::os::raw::c_int,
+    pub cursor_at_end_of_line: ::std::os::raw::c_uchar,
+    pub initialized: ::std::os::raw::c_uchar,
+    pub has_preferred_x: ::std::os::raw::c_uchar,
+    pub single_line: ::std::os::raw::c_uchar,
+    pub padding1: ::std::os::raw::c_uchar,
+    pub padding2: ::std::os::raw::c_uchar,
+    pub padding3: ::std::os::raw::c_uchar,
+    pub preferred_x: f32,
+    pub undostate: StbUndoState,
+}
+impl Default for STB_TexteditState {
     fn default() -> Self {
         let mut s = ::std::mem::MaybeUninit::<Self>::uninit();
         unsafe {
