@@ -193,4 +193,6 @@ let centered = post.center_on_submitted_node(node);
  post.save_state_to_ini_file("nodes.ini");
  ```
 
+The string-based save/load methods are available on every supported target. Direct file methods are native-only; on `wasm32`, persist the returned INI string through the browser or application storage layer instead.
+
 See crate docs for the full API surface and patterns.

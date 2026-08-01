@@ -241,6 +241,7 @@ impl<'ui> PostEditor<'ui> {
     }
 
     /// Save/Load current editor state to/from INI file
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn save_state_to_ini_file(&self, file_name: &str) {
         let file_name = if file_name.contains('\0') {
             ""
@@ -255,6 +256,7 @@ impl<'ui> PostEditor<'ui> {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load_state_from_ini_file(&self, file_name: &str) {
         let file_name = if file_name.contains('\0') {
             ""

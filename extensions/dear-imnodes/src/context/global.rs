@@ -74,6 +74,7 @@ impl<'a> BoundEditor<'a> {
     }
 
     /// Save this editor's state directly to an INI file.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn save_state_to_ini_file(&self, file_name: &str) {
         let file_name = if file_name.contains('\0') {
             ""
@@ -88,6 +89,7 @@ impl<'a> BoundEditor<'a> {
     }
 
     /// Load this editor's state from an INI file.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn load_state_from_ini_file(&self, file_name: &str) {
         let file_name = if file_name.contains('\0') {
             ""
