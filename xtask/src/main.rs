@@ -1587,7 +1587,13 @@ mod tests {
             inputs
                 .source_files
                 .iter()
-                .any(|path| path.ends_with("imGuIZMOquat.cpp"))
+                .any(|path| path.ends_with("imguizmo_quat.cpp"))
+        );
+        assert!(
+            inputs
+                .source_files
+                .iter()
+                .all(|path| !path.ends_with("imGuIZMOquat.cpp"))
         );
     }
 

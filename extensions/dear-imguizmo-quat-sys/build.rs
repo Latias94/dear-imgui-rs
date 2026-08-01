@@ -435,15 +435,12 @@ fn build_with_cc(
             .file("wrapper")
             .unwrap_or_else(|error| panic!("dear-imguizmo-quat-sys: {error}")),
     );
-    // upstream core sources
+    // The upstream forwarding translation unit includes imGuIZMOquat.cpp itself.
+    // Compiling that implementation separately violates the one-definition rule and fails
+    // deterministic provider links even when native archive extraction happens to mask it.
     build.file(
         sources
             .file("core")
-            .unwrap_or_else(|error| panic!("dear-imguizmo-quat-sys: {error}")),
-    );
-    build.file(
-        sources
-            .file("quat")
             .unwrap_or_else(|error| panic!("dear-imguizmo-quat-sys: {error}")),
     );
 

@@ -1235,8 +1235,10 @@ impl AppWindow {
                     std::ptr::null_mut(),
                     0,
                 );
+                draw_list.add_callback(smoke_nearest_sampler_probe, std::ptr::null_mut(), 0);
                 draw_list.add_callback(smoke_callback_only_probe, std::ptr::null_mut(), 0);
                 draw_list.add_callback(self.imgui.sampler_linear_callback, std::ptr::null_mut(), 0);
+                draw_list.add_callback(smoke_linear_sampler_probe, std::ptr::null_mut(), 0);
             }
         } else if let Some(phase) = smoke_phase {
             let main_viewport_id = ui.main_viewport().id();
@@ -1922,8 +1924,16 @@ impl ViewportSmokeState {
             .ok_or("Ash validation smoke frame counter overflowed")?;
         if self.frame_count > SMOKE_FRAME_BUDGET {
             return Err(format!(
-                "Ash validation smoke exceeded {SMOKE_FRAME_BUDGET} frames in phase {:?}",
-                self.phase
+                "Ash validation smoke exceeded {SMOKE_FRAME_BUDGET} frames in phase {:?}; \
+                 callback_only={}, raw_callback={}, nearest_sampler={}, linear_sampler={}, \
+                 distinct_samplers={}, render_state_cleared={}",
+                self.phase,
+                self.callback_only_frame_executed,
+                self.raw_callback_typed_state_observed,
+                self.nearest_sampler_descriptor_set_observed,
+                self.linear_sampler_descriptor_set_observed,
+                self.sampler_descriptor_sets_distinct,
+                self.render_state_cleared_after_callback,
             )
             .into());
         }

@@ -1398,7 +1398,7 @@ jobs:
         with:
           version: 5.0.1
           emsdk-version: 5.0.5
-          actions-cache-folder: emsdk-cache
+          actions-cache-folder: ${{ runner.temp }}/emsdk-cache
 
       - name: Refresh Linux package metadata
         run: sudo apt-get update
@@ -1467,7 +1467,7 @@ jobs:
         with:
           version: 5.0.1
           emsdk-version: 5.0.5
-          actions-cache-folder: emsdk-cache
+          actions-cache-folder: ${{ runner.temp }}/emsdk-cache
 
       - name: Reject WASI and Emscripten in the pure target resolver
         run: cargo nextest run -p dear-imgui-build-support --features binding-spec wasm_target_requires_the_explicit_provider_feature

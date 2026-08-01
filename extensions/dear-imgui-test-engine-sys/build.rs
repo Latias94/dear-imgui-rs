@@ -220,11 +220,27 @@ fn build_with_cc(
     build.include(test_engine_root.join("thirdparty"));
     build.include(cfg.manifest_dir.join("shim"));
 
-    build.file(
-        sources
-            .file("capture-tool")
-            .unwrap_or_else(|error| panic!("dear-imgui-test-engine-sys: {error}")),
-    );
+    let capture_source = sources
+        .file("capture-tool")
+        .unwrap_or_else(|error| panic!("dear-imgui-test-engine-sys: {error}"));
+    let patched_capture_source = cfg.out_dir.join("imgui_capture_tool_defined_geometry.cpp");
+    let source = std::fs::read_to_string(&capture_source).unwrap_or_else(|error| {
+        panic!(
+            "failed to read Test Engine capture source {}: {error}",
+            capture_source.display()
+        )
+    });
+    let patched = build_support::patch_test_engine_capture_cpp_for_defined_geometry(&source)
+        .unwrap_or_else(|error| {
+            panic!("failed to apply Test Engine capture geometry overlay: {error}")
+        });
+    std::fs::write(&patched_capture_source, patched).unwrap_or_else(|error| {
+        panic!(
+            "failed to write Test Engine capture geometry overlay {}: {error}",
+            patched_capture_source.display()
+        )
+    });
+    build.file(patched_capture_source);
     let context_source = sources
         .file("context")
         .unwrap_or_else(|error| panic!("dear-imgui-test-engine-sys: {error}"));

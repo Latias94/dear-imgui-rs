@@ -173,7 +173,7 @@
       "files": [
         { "id": "wrapper", "canonical": "third-party/cimguizmo_quat/cimguizmo_quat.cpp", "alternates": [], "provider_transform": "direct" },
         { "id": "core", "canonical": "third-party/cimguizmo_quat/imGuIZMO.quat/imguizmo_quat/imguizmo_quat.cpp", "alternates": [], "provider_transform": "direct" },
-        { "id": "quat", "canonical": "third-party/cimguizmo_quat/imGuIZMO.quat/imguizmo_quat/imGuIZMOquat.cpp", "alternates": [], "provider_transform": "direct" }
+        { "id": "quat", "canonical": "third-party/cimguizmo_quat/imGuIZMO.quat/imguizmo_quat/imGuIZMOquat.cpp", "alternates": [], "provider_transform": null }
       ],
       "native_required_files": ["wrapper", "core", "quat"],
       "archive_sentinels": ["wrapper", "core"],
@@ -182,7 +182,7 @@
         "symbol_prefixes": ["imguiGizmo_", "iggizmo3D_", "mat4_", "quat_"],
         "required_exports": [],
         "include_dirs": ["third-party/cimguizmo_quat", "third-party/cimguizmo_quat/imGuIZMO.quat/imguizmo_quat"],
-        "source_files": ["wrapper", "core", "quat"]
+        "source_files": ["wrapper", "core"]
       }
     }
   ],

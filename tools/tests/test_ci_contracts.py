@@ -1385,7 +1385,10 @@ class WorkflowPortabilityTests(unittest.TestCase):
                 self.assertEqual(setup.get("uses"), "emscripten-core/setup-emsdk@v16")
                 self.assertEqual(str(inputs.get("version")), "5.0.1")
                 self.assertEqual(str(inputs.get("emsdk-version")), "5.0.5")
-                self.assertEqual(inputs.get("actions-cache-folder"), "emsdk-cache")
+                self.assertEqual(
+                    inputs.get("actions-cache-folder"),
+                    "${{ runner.temp }}/emsdk-cache",
+                )
 
         checkout_provider = str(
             named_step(

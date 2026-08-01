@@ -309,6 +309,28 @@ pub fn patch_test_engine_cpp_for_presentation_abort(source: &str) -> Result<Stri
     Ok(restore_cpp_newlines(patched, newline))
 }
 
+/// Patch Test Engine capture geometry so sentinel rectangles are never converted to integers.
+pub fn patch_test_engine_capture_cpp_for_defined_geometry(source: &str) -> Result<String, String> {
+    let (mut patched, newline) = normalize_cpp_source(source);
+
+    patched = replace_cpp_source_once(
+        &patched,
+        "    const ImRect clip_rect = viewport_rect;",
+        concat!(
+            "    if (!instant_capture && _FrameNo < 2)\n",
+            "    {\n",
+            "        _FrameNo++;\n",
+            "        return ImGuiCaptureStatus_InProgress;\n",
+            "    }\n",
+            "\n",
+            "    const ImRect clip_rect = viewport_rect;"
+        ),
+        "Test Engine capture geometry readiness transition",
+    )?;
+
+    Ok(restore_cpp_newlines(patched, newline))
+}
+
 /// Patch Test Engine Context capture configuration so cancellation restores it synchronously.
 pub fn patch_test_engine_context_cpp_for_presentation_abort(
     source: &str,
@@ -6591,6 +6613,32 @@ mod tests {
         assert!(patched.contains("DearImGuiRsCaptureWaitGuard capture_wait(engine)"));
         assert!(
             patched.contains("if (ctx && !dear_imgui_rs_test_engine_capture_should_abort(engine))")
+        );
+    }
+
+    #[test]
+    fn test_engine_capture_patch_defers_integer_conversion_until_geometry_is_ready() {
+        let source = include_str!(concat!(
+            "../../../extensions/dear-imgui-test-engine-sys/third-party/",
+            "imgui_test_engine/imgui_test_engine/imgui_capture_tool.cpp"
+        ));
+        let patched = patch_test_engine_capture_cpp_for_defined_geometry(source).unwrap();
+
+        assert!(patched.contains("if (!instant_capture && _FrameNo < 2)"));
+        assert!(patched.contains("_FrameNo++;\n        return ImGuiCaptureStatus_InProgress;"));
+        assert_eq!(
+            patched
+                .matches(
+                    "const int capture_height = ImMin((int)io.DisplaySize.y, (int)_CaptureRect.GetHeight());"
+                )
+                .count(),
+            1
+        );
+        assert_eq!(
+            patched
+                .matches("if (!instant_capture && _FrameNo < 2)")
+                .count(),
+            1
         );
     }
 
