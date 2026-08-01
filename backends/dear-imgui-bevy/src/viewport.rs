@@ -4,6 +4,8 @@
 //! drain that queue and mutate ECS-owned [`Window`] entities outside the C ABI callback boundary.
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+mod geometry;
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 pub(crate) mod native_window;
 
 use bevy_app::App;
@@ -47,8 +49,7 @@ use bevy_window::WindowRef;
 use bevy_window::{CompositeAlphaMode, PresentMode, Window, WindowTheme};
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 use bevy_window::{
-    CursorOptions, ExitSystems, Monitor, PrimaryWindow, WindowCloseRequested, WindowMoved,
-    WindowOccluded, WindowResized,
+    CursorOptions, ExitSystems, Monitor, PrimaryWindow, WindowCloseRequested, WindowOccluded,
 };
 #[cfg(any(test, all(feature = "multi-viewport", not(target_arch = "wasm32"))))]
 use bevy_window::{WindowLevel, WindowPosition, WindowResolution};
@@ -643,6 +644,7 @@ impl ImguiViewportBridgeShared {
         state.viewport_feedback.clear();
         state.viewport_flags.clear();
         state.pending_client_placements.clear();
+        state.viewport_geometry.clear();
         state.commands.clear();
         state.focus_next_frame.clear();
         state.focus_ready.clear();
@@ -685,6 +687,7 @@ impl ImguiViewportBridgeShared {
         state.viewport_feedback.clear();
         state.viewport_flags.clear();
         state.pending_client_placements.clear();
+        state.viewport_geometry.clear();
         state.focus_next_frame.clear();
         state.focus_ready.clear();
         drop(state);
@@ -731,6 +734,7 @@ impl ImguiViewportBridgeShared {
         state.viewport_windows.clear();
         state.viewport_cameras.clear();
         state.pending_client_placements.clear();
+        state.viewport_geometry.clear();
         state.pending_ecs_despawns.clone()
     }
 
@@ -1115,6 +1119,7 @@ pub(crate) struct ImguiViewportBridgeState {
     viewport_feedback: HashMap<ImguiViewportId, ImguiViewportFeedback>,
     viewport_flags: HashMap<ImguiViewportId, imgui::ViewportFlags>,
     pending_client_placements: HashMap<ImguiViewportId, PendingClientPlacement>,
+    viewport_geometry: HashMap<ImguiViewportId, geometry::ViewportGeometryReconciler>,
     viewport_handles: HashMap<ImguiViewportId, Box<ImguiViewportPlatformHandle>>,
     retired_viewport_handles: HashMap<ImguiViewportId, Box<ImguiViewportPlatformHandle>>,
     focus_next_frame: HashSet<ImguiViewportId>,
@@ -1593,15 +1598,6 @@ impl ImguiViewportBridgeContext {
             .copied()
     }
 
-    fn pending_client_position(&self, viewport_id: ImguiViewportId) -> Option<[f32; 2]> {
-        self.inner
-            .state
-            .borrow()
-            .pending_client_placements
-            .get(&viewport_id)
-            .map(|placement| placement.pos)
-    }
-
     fn set_viewport_feedback(&self, viewport_id: ImguiViewportId, feedback: ImguiViewportFeedback) {
         self.inner
             .state
@@ -1610,12 +1606,102 @@ impl ImguiViewportBridgeContext {
             .insert(viewport_id, feedback);
     }
 
-    fn remove_viewport_feedback(&self, viewport_id: ImguiViewportId) {
+    fn observe_viewport_feedback(
+        &self,
+        viewport_id: ImguiViewportId,
+        feedback: ImguiViewportFeedback,
+    ) -> geometry::ViewportGeometryReconciliation {
+        let mut state = self.inner.state.borrow_mut();
+        let previous = state
+            .viewport_feedback
+            .get(&viewport_id)
+            .copied()
+            .unwrap_or(feedback);
+        let reconciliation = state
+            .viewport_geometry
+            .remove(&viewport_id)
+            .unwrap_or_default()
+            .reconcile(previous, feedback);
+        state.viewport_feedback.insert(viewport_id, feedback);
+        reconciliation
+    }
+
+    fn record_position_request(&self, viewport_id: ImguiViewportId, pos: [f32; 2], dpi_scale: f32) {
+        let pos = finite_desktop_pos(pos);
+        let dpi_scale = positive_finite_or(dpi_scale, 1.0);
+        let mut state = self.inner.state.borrow_mut();
+        if let Some(placement) = state.pending_client_placements.get_mut(&viewport_id) {
+            placement.pos = pos;
+            placement.dpi_scale = dpi_scale;
+            let remove_geometry =
+                state
+                    .viewport_geometry
+                    .get_mut(&viewport_id)
+                    .is_some_and(|geometry| {
+                        geometry.clear_position();
+                        geometry.is_empty()
+                    });
+            if remove_geometry {
+                state.viewport_geometry.remove(&viewport_id);
+            }
+            return;
+        }
+        state
+            .viewport_geometry
+            .entry(viewport_id)
+            .or_default()
+            .record_position(pos, dpi_scale);
+    }
+
+    fn record_size_request(&self, viewport_id: ImguiViewportId, size: [f32; 2], dpi_scale: f32) {
         self.inner
             .state
             .borrow_mut()
-            .viewport_feedback
+            .viewport_geometry
+            .entry(viewport_id)
+            .or_default()
+            .record_size(finite_desktop_size(size), dpi_scale);
+    }
+
+    fn remove_viewport_feedback(&self, viewport_id: ImguiViewportId) {
+        let mut state = self.inner.state.borrow_mut();
+        state.viewport_feedback.remove(&viewport_id);
+        state.viewport_geometry.remove(&viewport_id);
+    }
+
+    fn client_placement_is_pending(&self, viewport_id: ImguiViewportId) -> bool {
+        self.inner
+            .state
+            .borrow()
+            .pending_client_placements
+            .contains_key(&viewport_id)
+    }
+
+    fn remove_pending_client_placement(&self, viewport_id: ImguiViewportId) {
+        self.inner
+            .state
+            .borrow_mut()
+            .pending_client_placements
             .remove(&viewport_id);
+    }
+
+    fn refresh_viewport_non_geometry_feedback(
+        &self,
+        viewport_id: ImguiViewportId,
+        feedback: ImguiViewportFeedback,
+    ) {
+        let mut state = self.inner.state.borrow_mut();
+        if let Some(cached) = state.viewport_feedback.get_mut(&viewport_id) {
+            let pos = cached.pos;
+            let size = cached.size;
+            *cached = ImguiViewportFeedback {
+                pos,
+                size,
+                ..feedback
+            };
+        } else {
+            state.viewport_feedback.insert(viewport_id, feedback);
+        }
     }
 
     fn remove_viewport_flags(&self, viewport_id: ImguiViewportId) {
@@ -1691,13 +1777,11 @@ pub(crate) fn install_viewport_bridge(app: &mut App) {
         if app.world().get_non_send::<ImguiViewportBridge>().is_none() {
             app.insert_non_send(ImguiViewportBridge::default());
         }
-        app.add_message::<WindowMoved>();
-        app.add_message::<WindowResized>();
         app.add_message::<WindowCloseRequested>();
         app.add_message::<WindowOccluded>();
         app.add_systems(
             PreUpdate,
-            sync_os_viewport_window_events.before(crate::input::ImguiInputSystems),
+            sync_os_viewport_lifecycle_events.before(crate::input::ImguiInputSystems),
         );
         app.add_systems(
             crate::schedule::ImguiContextDriver,
@@ -2908,86 +2992,38 @@ fn feedback_for_viewport(viewport: *mut imgui::Viewport) -> Option<Option<ImguiV
 #[derive(SystemParam)]
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
 struct OsViewportWindowEvents<'w, 's> {
-    moved: MessageReader<'w, 's, WindowMoved>,
-    resized: MessageReader<'w, 's, WindowResized>,
     close_requests: MessageReader<'w, 's, WindowCloseRequested>,
     occluded: MessageReader<'w, 's, WindowOccluded>,
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-fn sync_os_viewport_window_events(
+fn sync_os_viewport_lifecycle_events(
     mut events: OsViewportWindowEvents,
-    windows: Query<&Window>,
-    viewport_windows: Query<(Entity, &ImguiViewportWindow, &ImguiViewportOwner)>,
+    viewport_windows: Query<(&ImguiViewportWindow, &ImguiViewportOwner)>,
     contexts: Option<NonSendMut<crate::ImguiContexts>>,
     bridge: NonSend<ImguiViewportBridge>,
 ) {
+    if events.close_requests.is_empty() && events.occluded.is_empty() {
+        return;
+    }
     let Some(mut contexts) = contexts else {
-        events.moved.read().for_each(drop);
-        events.resized.read().for_each(drop);
         events.close_requests.read().for_each(drop);
         events.occluded.read().for_each(drop);
         return;
     };
-    let window_to_viewport = viewport_windows
-        .iter()
-        .filter_map(|(entity, marker, owner)| {
-            if !owner.matches_window(marker)
-                || bridge.viewport_window(marker.context_id, marker.viewport_id) != Some(entity)
-            {
-                return None;
-            }
-            Some((entity, (marker.context_id, marker.viewport_id)))
-        })
-        .collect::<HashMap<_, _>>();
-    let mut moved_viewports = HashMap::<imgui::ContextId, HashSet<ImguiViewportId>>::new();
-    let mut resized_viewports = HashMap::<imgui::ContextId, HashSet<ImguiViewportId>>::new();
+    let mapped_viewport = |window| {
+        let (marker, owner) = viewport_windows.get(window).ok()?;
+        if !owner.matches_window(marker)
+            || bridge.viewport_window(marker.context_id, marker.viewport_id) != Some(window)
+        {
+            return None;
+        }
+        Some((marker.context_id, marker.viewport_id))
+    };
     let mut closed_viewports = HashMap::<imgui::ContextId, HashSet<ImguiViewportId>>::new();
 
-    for event in events.moved.read() {
-        if let Some((context_id, viewport_id)) = window_to_viewport.get(&event.window).copied() {
-            moved_viewports
-                .entry(context_id)
-                .or_default()
-                .insert(viewport_id);
-            if let Ok(window) = windows.get(event.window) {
-                let Some(context_bridge) = bridge.context(context_id) else {
-                    continue;
-                };
-                let previous = context_bridge.viewport_feedback(viewport_id);
-                let mut feedback =
-                    feedback_from_window_for_entity(event.window, window, previous, None);
-                if let Some(pos) = context_bridge.pending_client_position(viewport_id) {
-                    feedback.pos = pos;
-                }
-                context_bridge.set_viewport_feedback(viewport_id, feedback);
-            }
-        }
-    }
-
-    for event in events.resized.read() {
-        if let Some((context_id, viewport_id)) = window_to_viewport.get(&event.window).copied() {
-            resized_viewports
-                .entry(context_id)
-                .or_default()
-                .insert(viewport_id);
-            if let Ok(window) = windows.get(event.window) {
-                let Some(context_bridge) = bridge.context(context_id) else {
-                    continue;
-                };
-                let previous = context_bridge.viewport_feedback(viewport_id);
-                let mut feedback =
-                    feedback_from_window_for_entity(event.window, window, previous, None);
-                if let Some(pos) = context_bridge.pending_client_position(viewport_id) {
-                    feedback.pos = pos;
-                }
-                context_bridge.set_viewport_feedback(viewport_id, feedback);
-            }
-        }
-    }
-
     for event in events.close_requests.read() {
-        if let Some((context_id, viewport_id)) = window_to_viewport.get(&event.window).copied() {
+        if let Some((context_id, viewport_id)) = mapped_viewport(event.window) {
             closed_viewports
                 .entry(context_id)
                 .or_default()
@@ -2996,46 +3032,36 @@ fn sync_os_viewport_window_events(
     }
 
     for event in events.occluded.read() {
-        if let Some((context_id, viewport_id)) = window_to_viewport.get(&event.window).copied()
-            && let Ok(window) = windows.get(event.window)
-        {
+        if let Some((context_id, viewport_id)) = mapped_viewport(event.window) {
             let Some(context_bridge) = bridge.context(context_id) else {
                 continue;
             };
-            let previous = context_bridge.viewport_feedback(viewport_id);
-            context_bridge.set_viewport_feedback(
-                viewport_id,
-                feedback_from_window_for_entity(
-                    event.window,
-                    window,
-                    previous,
-                    Some(event.occluded),
-                ),
-            );
+            if let Some(mut feedback) = context_bridge.viewport_feedback(viewport_id) {
+                feedback.minimized = event.occluded;
+                context_bridge.set_viewport_feedback(viewport_id, feedback);
+            }
         }
     }
 
-    let mut context_ids = moved_viewports.keys().copied().collect::<HashSet<_>>();
-    context_ids.extend(resized_viewports.keys().copied());
-    context_ids.extend(closed_viewports.keys().copied());
-    let mut context_ids = context_ids.into_iter().collect::<Vec<_>>();
+    let mut context_ids = closed_viewports.keys().copied().collect::<Vec<_>>();
     context_ids.sort_by_key(|context_id| context_id.get().get());
     for context_id in context_ids {
         let result = contexts.configure(context_id, |context| {
             mark_platform_viewport_requests(
                 context,
-                moved_viewports
-                    .get(&context_id)
-                    .into_iter()
-                    .flat_map(|ids| ids.iter().copied()),
-                resized_viewports
-                    .get(&context_id)
-                    .into_iter()
-                    .flat_map(|ids| ids.iter().copied()),
                 closed_viewports
                     .get(&context_id)
                     .into_iter()
-                    .flat_map(|ids| ids.iter().copied()),
+                    .flat_map(|ids| ids.iter().copied())
+                    .map(|viewport_id| {
+                        (
+                            viewport_id,
+                            PlatformViewportRequests {
+                                close_requested: true,
+                                ..Default::default()
+                            },
+                        )
+                    }),
             );
         });
         match result {
@@ -3052,28 +3078,36 @@ fn sync_os_viewport_window_events(
 }
 
 #[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
-fn mark_platform_viewport_requests(
-    context: &mut imgui::Context,
-    moved_viewports: impl IntoIterator<Item = ImguiViewportId>,
-    resized_viewports: impl IntoIterator<Item = ImguiViewportId>,
-    closed_viewports: impl IntoIterator<Item = ImguiViewportId>,
-) {
-    let moved = moved_viewports.into_iter().collect::<HashSet<_>>();
-    let resized = resized_viewports.into_iter().collect::<HashSet<_>>();
-    let closed = closed_viewports.into_iter().collect::<HashSet<_>>();
-    if moved.is_empty() && resized.is_empty() && closed.is_empty() {
-        return;
+#[derive(Clone, Copy, Debug, Default)]
+struct PlatformViewportRequests {
+    move_requested: bool,
+    resize_requested: bool,
+    close_requested: bool,
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+impl PlatformViewportRequests {
+    const fn from_geometry(reconciliation: geometry::ViewportGeometryReconciliation) -> Self {
+        Self {
+            move_requested: reconciliation.request_move,
+            resize_requested: reconciliation.request_resize,
+            close_requested: false,
+        }
     }
 
-    let viewport_ids = moved
-        .iter()
-        .chain(resized.iter())
-        .chain(closed.iter())
-        .copied()
-        .collect::<HashSet<_>>();
+    const fn is_empty(self) -> bool {
+        !self.move_requested && !self.resize_requested && !self.close_requested
+    }
+}
+
+#[cfg(all(feature = "multi-viewport", not(target_arch = "wasm32")))]
+fn mark_platform_viewport_requests(
+    context: &mut imgui::Context,
+    requests: impl IntoIterator<Item = (ImguiViewportId, PlatformViewportRequests)>,
+) {
     let binding = context.binding();
     binding.with_bound_context(|| {
-        for id in viewport_ids {
+        for (id, requests) in requests {
             // Dear ImGui filters hidden, inactive, and zero-sized viewports out of the public
             // list. Window events still belong to their live internal viewport.
             let viewport = unsafe { sys::igFindViewportByID(id.raw()) };
@@ -3082,13 +3116,13 @@ fn mark_platform_viewport_requests(
             }
             // SAFETY: the current Context owns the viewport returned by Dear ImGui's lookup.
             let viewport = unsafe { imgui::Viewport::from_raw_mut(viewport) };
-            if moved.contains(&id) {
+            if requests.move_requested {
                 viewport.set_platform_request_move(true);
             }
-            if resized.contains(&id) {
+            if requests.resize_requested {
                 viewport.set_platform_request_resize(true);
             }
-            if closed.contains(&id) {
+            if requests.close_requested {
                 viewport.set_platform_request_close(true);
             }
         }
@@ -3274,6 +3308,8 @@ fn apply_viewport_commands_for_context(
                     entity
                 };
                 context.set_viewport_feedback(snapshot.id, feedback_from_snapshot(&snapshot));
+                context.record_position_request(snapshot.id, snapshot.pos, snapshot.dpi_scale);
+                context.record_size_request(snapshot.id, snapshot.size, snapshot.dpi_scale);
                 #[cfg(feature = "render")]
                 ensure_viewport_camera(
                     ecs_commands,
@@ -3433,16 +3469,9 @@ fn apply_viewport_commands_for_context(
                 }
             }
             ImguiViewportCommand::SetPos { id, pos, dpi_scale } => {
-                if let Some(placement) = context
-                    .inner
-                    .state
-                    .borrow_mut()
-                    .pending_client_placements
-                    .get_mut(&id)
-                {
-                    placement.pos = finite_desktop_pos(pos);
-                    placement.dpi_scale = positive_finite_or(dpi_scale, 1.0);
-                }
+                let pos = finite_desktop_pos(pos);
+                let dpi_scale = positive_finite_or(dpi_scale, 1.0);
+                context.record_position_request(id, pos, dpi_scale);
                 if let Some(window) = pending_windows.get_mut(&id) {
                     window.position = WindowPosition::At(physical_pos_from_desktop(pos, dpi_scale));
                 } else {
@@ -3454,26 +3483,21 @@ fn apply_viewport_commands_for_context(
                         ));
                     }
                 }
-                if let Some(mut feedback) = context.viewport_feedback(id) {
-                    feedback.pos = finite_desktop_pos(pos);
-                    context.set_viewport_feedback(id, feedback);
-                }
             }
             ImguiViewportCommand::SetSize {
                 id,
                 size,
                 dpi_scale,
             } => {
+                let size = finite_desktop_size(size);
+                let dpi_scale = positive_finite_or(dpi_scale, 1.0);
+                context.record_size_request(id, size, dpi_scale);
                 if let Some(window) = pending_windows.get_mut(&id) {
                     set_window_desktop_size(window, size, dpi_scale);
                 } else {
                     with_window_mut(windows, context, id, |window| {
                         set_window_desktop_size(window, size, dpi_scale);
                     });
-                }
-                if let Some(mut feedback) = context.viewport_feedback(id) {
-                    feedback.size = finite_desktop_size(size);
-                    context.set_viewport_feedback(id, feedback);
                 }
             }
             ImguiViewportCommand::SetFocus { id } => {
@@ -3639,11 +3663,10 @@ fn settle_pending_client_placements(
         .iter()
         .map(|(&viewport_id, &placement)| (viewport_id, placement))
         .collect::<Vec<_>>();
-    let mut settled = Vec::new();
 
     for (viewport_id, placement) in pending {
         let Some(entity) = bridge.viewport_window(viewport_id) else {
-            settled.push(viewport_id);
+            bridge.remove_pending_client_placement(viewport_id);
             continue;
         };
         let Some(offset) = decoration_offset(entity) else {
@@ -3656,24 +3679,14 @@ fn settle_pending_client_placements(
             [placement.pos[0] - offset[0], placement.pos[1] - offset[1]],
             placement.dpi_scale,
         ));
+        bridge.remove_pending_client_placement(viewport_id);
+        bridge.record_position_request(viewport_id, placement.pos, placement.dpi_scale);
         if placement.show_requested {
             window.visible = true;
         }
         if placement.focus_requested {
             window.focused = false;
             bridge.request_focus_next_frame(viewport_id);
-        }
-        if let Some(mut feedback) = bridge.viewport_feedback(viewport_id) {
-            feedback.pos = placement.pos;
-            bridge.set_viewport_feedback(viewport_id, feedback);
-        }
-        settled.push(viewport_id);
-    }
-
-    if !settled.is_empty() {
-        let mut state = bridge.inner.state.borrow_mut();
-        for viewport_id in settled {
-            state.pending_client_placements.remove(&viewport_id);
         }
     }
 }
@@ -3938,11 +3951,31 @@ pub(crate) fn prepare_platform_viewports_for_frame(
     );
     live_feedback.insert(main_viewport_id);
 
+    let mut platform_requests = Vec::new();
     for (entity, viewport_id, feedback) in viewport_windows {
         bridge.set_viewport_window(viewport_id, entity);
-        bridge.set_viewport_feedback(viewport_id, feedback);
         live_feedback.insert(viewport_id);
+        if bridge.client_placement_is_pending(viewport_id) || feedback.minimized {
+            // A decorated window initially reports its outer-window origin. Until the deferred
+            // client-origin placement has settled, feeding that transient decoration offset back
+            // to Dear ImGui would turn it into a persistent docking-coordinate error. Minimized
+            // windows may likewise expose unavailable or transient native geometry; retain their
+            // latest request until a restored frame can observe an authoritative client rectangle.
+            bridge.refresh_viewport_non_geometry_feedback(viewport_id, feedback);
+            continue;
+        }
+        let reconciliation = bridge.observe_viewport_feedback(viewport_id, feedback);
+        let requests = PlatformViewportRequests::from_geometry(reconciliation);
+        if !requests.is_empty() {
+            platform_requests.push((viewport_id, requests));
+        }
     }
+
+    // Reconcile geometry at the exact NewFrame boundary instead of depending on Bevy window
+    // messages. Some window managers coalesce acknowledgements or emit no move event when a
+    // requested position is clamped at a screen edge. Dear ImGui must still receive the native
+    // client geometry as authoritative before it builds docking previews for this frame.
+    mark_platform_viewport_requests(context, platform_requests);
 
     clear_stale_imgui_viewport_platform_handles(context, bridge, &live_feedback);
 
@@ -3959,6 +3992,9 @@ pub(crate) fn prepare_platform_viewports_for_frame(
             .retain(|viewport_id, _| live_feedback.contains(viewport_id));
         state
             .viewport_flags
+            .retain(|viewport_id, _| live_feedback.contains(viewport_id));
+        state
+            .viewport_geometry
             .retain(|viewport_id, _| live_feedback.contains(viewport_id));
         state
             .focus_next_frame
@@ -4655,6 +4691,61 @@ mod tests {
         std::sync::atomic::AtomicU32::new(0);
 
     #[test]
+    fn removing_viewport_feedback_discards_geometry_before_id_reuse() {
+        let bridge = ImguiViewportBridge::default();
+        let context_bridge = ImguiViewportBridgeContext {
+            context_id: test_context_id(),
+            inner: bridge.keepalive(),
+        };
+        let viewport_id = ImguiViewportId::from(0xC1A0_u32);
+        let first = ImguiViewportFeedback {
+            pos: [32.0, 48.0],
+            size: [320.0, 180.0],
+            framebuffer_scale: [1.0, 1.0],
+            dpi_scale: 1.0,
+            focused: true,
+            minimized: false,
+        };
+        let replacement = ImguiViewportFeedback {
+            pos: [640.0, 480.0],
+            ..first
+        };
+
+        context_bridge.set_viewport_feedback(viewport_id, first);
+        context_bridge.record_position_request(viewport_id, [-96.0, -64.0], 1.0);
+        context_bridge.remove_viewport_feedback(viewport_id);
+        assert!(
+            !context_bridge
+                .inner
+                .state
+                .borrow()
+                .viewport_geometry
+                .contains_key(&viewport_id),
+            "destroying a viewport must remove unresolved geometry before Dear ImGui reuses its id"
+        );
+
+        context_bridge.set_viewport_feedback(viewport_id, replacement);
+        let reconciliation = context_bridge.observe_viewport_feedback(viewport_id, replacement);
+        assert!(
+            !reconciliation.request_move && !reconciliation.request_resize,
+            "a reused viewport id must not inherit an old request as if it belonged to the new window"
+        );
+        assert_eq!(
+            context_bridge.viewport_feedback(viewport_id),
+            Some(replacement)
+        );
+        assert!(
+            !context_bridge
+                .inner
+                .state
+                .borrow()
+                .viewport_geometry
+                .contains_key(&viewport_id),
+            "acknowledged geometry intent must not leave an empty per-frame map entry"
+        );
+    }
+
+    #[test]
     fn mixed_dpi_client_and_desktop_positions_round_trip() {
         let entity = Entity::from_raw_u32(1).expect("test entity index should be valid");
         let window_position = WindowPosition::At(IVec2::new(1920, -200));
@@ -4930,6 +5021,13 @@ mod tests {
                 .expect("settlement should preserve platform feedback")
                 .pos,
             [100.0, 200.0]
+        );
+        assert!(
+            state
+                .viewport_geometry
+                .get(&viewport_id)
+                .is_some_and(geometry::ViewportGeometryReconciler::has_requested_position),
+            "settlement must record the client-origin request for frame-boundary reconciliation"
         );
     }
 
@@ -6174,6 +6272,8 @@ mod tests {
                 id: live_viewport,
                 address: 0,
             });
+        context_bridge.set_viewport_feedback(stale_viewport, feedback());
+        context_bridge.record_position_request(stale_viewport, [-96.0, -64.0], 1.0);
 
         prepare_platform_viewports_for_frame(
             &mut context,
@@ -6194,7 +6294,26 @@ mod tests {
             !state.viewport_handles.contains_key(&stale_viewport),
             "platform handles must not outlive viewports that disappeared from the Bevy mapping"
         );
+        assert!(
+            !state.viewport_feedback.contains_key(&stale_viewport),
+            "native feedback must not outlive a viewport omitted from the current frame"
+        );
+        assert!(
+            !state.viewport_geometry.contains_key(&stale_viewport),
+            "geometry intent must not outlive a viewport omitted from the current frame"
+        );
         drop(state);
+
+        let replacement = ImguiViewportFeedback {
+            pos: [640.0, 480.0],
+            ..feedback()
+        };
+        context_bridge.set_viewport_feedback(stale_viewport, replacement);
+        assert_eq!(
+            context_bridge.observe_viewport_feedback(stale_viewport, replacement),
+            geometry::ViewportGeometryReconciliation::default(),
+            "a reused viewport id must not inherit geometry pruned with its previous window"
+        );
 
         detach_owned_bridge(&mut context, &keepalive).unwrap();
     }

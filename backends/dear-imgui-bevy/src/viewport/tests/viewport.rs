@@ -32,14 +32,10 @@ use bevy_window::Monitor;
 use bevy_window::WindowCloseRequested;
 use bevy_window::WindowLevel;
 #[cfg(feature = "multi-viewport")]
-use bevy_window::WindowMoved;
-#[cfg(feature = "multi-viewport")]
 use bevy_window::WindowOccluded;
 use bevy_window::WindowPosition;
 #[cfg(all(feature = "multi-viewport", feature = "render"))]
 use bevy_window::WindowRef;
-#[cfg(feature = "multi-viewport")]
-use bevy_window::WindowResized;
 #[cfg(feature = "multi-viewport")]
 use bevy_window::{PrimaryWindow, Window};
 #[cfg(feature = "multi-viewport")]
@@ -60,6 +56,10 @@ use dear_imgui_rs as imgui;
 use imgui::sys;
 #[cfg(feature = "multi-viewport")]
 use std::{cell::Cell, rc::Rc};
+
+#[cfg(feature = "multi-viewport")]
+#[path = "geometry.rs"]
+mod geometry_tests;
 
 #[cfg(feature = "multi-viewport")]
 static FOREIGN_DESTROY_SAW_BEVY_BACKEND_USER_DATA: std::sync::atomic::AtomicBool =
@@ -1242,6 +1242,26 @@ fn native_viewport_bridge_isolates_equal_ids_across_two_contexts() {
                 .viewport_feedback(primary_id, viewport_id)
                 .expect("primary feedback should remain Context-local")
                 .pos,
+            [32.0, 48.0],
+            "a native position request must not masquerade as observed platform feedback"
+        );
+        let mut observed = bridge
+            .viewport_feedback(primary_id, viewport_id)
+            .expect("primary feedback should remain Context-local");
+        observed.pos = [240.0, 160.0];
+        let reconciliation = bridge
+            .context(primary_id)
+            .expect("primary Context bridge should remain registered")
+            .observe_viewport_feedback(viewport_id, observed);
+        assert!(
+            !reconciliation.request_move && !reconciliation.request_resize,
+            "the matching native observation should acknowledge only the primary Context request"
+        );
+        assert_eq!(
+            bridge
+                .viewport_feedback(primary_id, viewport_id)
+                .expect("primary feedback should remain Context-local")
+                .pos,
             [240.0, 160.0]
         );
         assert_eq!(
@@ -2238,79 +2258,6 @@ fn viewport_platform_feedback_queries_return_mapped_bevy_window_state() {
     assert_eq!(dpi_scale, 1.5);
     assert!(!focused);
     assert!(!minimized);
-    destroy_live_secondary_viewport(&mut app, id);
-}
-
-#[cfg(feature = "multi-viewport")]
-#[test]
-fn viewport_os_move_and_resize_events_request_imgui_platform_sync() {
-    let _guard = imgui_context_guard();
-    let mut app = app_with_multi_viewport_bridge();
-    app.world_mut().spawn((Window::default(), PrimaryWindow));
-    let context_id = primary_context_id(&app);
-    let (id, entity) = create_live_secondary_viewport(&mut app);
-    {
-        let mut window = app
-            .world_mut()
-            .get_mut::<Window>(entity)
-            .expect("spawned entity should contain Window");
-        window.position = WindowPosition::At(IVec2::new(420, 630));
-        window.resolution.set_scale_factor(1.5);
-        window.resolution.set(420.0, 240.0);
-    }
-    let synthetic_feedback = crate::viewport::viewport_feedback_from_window(
-        entity,
-        app.world()
-            .get::<Window>(entity)
-            .expect("the synthetic viewport Window must remain live"),
-        None,
-    );
-    app.world()
-        .non_send::<ImguiViewportBridge>()
-        .set_viewport_feedback_for_test(context_id, id, synthetic_feedback);
-
-    app.world_mut()
-        .resource_mut::<Messages<WindowMoved>>()
-        .write(WindowMoved {
-            window: entity,
-            position: IVec2::new(420, 630),
-        });
-    app.world_mut()
-        .resource_mut::<Messages<WindowResized>>()
-        .write(WindowResized {
-            window: entity,
-            width: 420.0,
-            height: 240.0,
-        });
-
-    app.world_mut().run_schedule(bevy_app::PreUpdate);
-
-    let feedback = app
-        .world()
-        .get_non_send::<ImguiViewportBridge>()
-        .expect("bridge should still exist")
-        .viewport_feedback(context_id, id)
-        .expect("OS move/resize events should refresh viewport feedback");
-    #[cfg(not(target_os = "macos"))]
-    assert_eq!(feedback.pos, [420.0, 630.0]);
-    #[cfg(target_os = "macos")]
-    assert_eq!(feedback.pos, [280.0, 420.0]);
-    #[cfg(not(target_os = "macos"))]
-    assert_eq!(feedback.size, [630.0, 360.0]);
-    #[cfg(target_os = "macos")]
-    assert_eq!(feedback.size, [420.0, 240.0]);
-
-    let raw_viewport = resolve_live_viewport(&mut app, id);
-    unsafe {
-        assert!(
-            (*raw_viewport).PlatformRequestMove,
-            "OS window moves must tell Dear ImGui to pull the platform position instead of fighting the drag"
-        );
-        assert!(
-            (*raw_viewport).PlatformRequestResize,
-            "OS window resizes must tell Dear ImGui to pull the platform size instead of fighting the resize"
-        );
-    }
     destroy_live_secondary_viewport(&mut app, id);
 }
 
