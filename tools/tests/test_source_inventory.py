@@ -27,7 +27,7 @@ class SourceInventoryTests(unittest.TestCase):
         inventory = load_inventory(REPO_ROOT)
 
         self.assertEqual(inventory.schema, "dear-imgui-maintained-sources-v2")
-        self.assertEqual(inventory.wasm_import_module, "imgui-sys-v0")
+        self.assertEqual(inventory.wasm_import_module, "imgui-sys-v1")
         self.assertEqual(len(inventory.sources), 8)
         self.assertIn(
             "third-party/cimguizmo/ImGuizmo/src/ImGuizmo.cpp",
@@ -78,6 +78,26 @@ class SourceInventoryTests(unittest.TestCase):
             root = Path(directory)
             self.write_inventory(root, json.dumps(raw))
             with self.assertRaisesRegex(SourceInventoryError, "portable C symbol"):
+                load_inventory(root)
+
+    def test_package_order_must_be_contiguous_from_zero(self):
+        raw = json.loads(
+            (REPO_ROOT / INVENTORY_RELATIVE_PATH).read_text(encoding="utf-8")
+        )
+        packaged = [
+            submodule
+            for submodule in raw["nested_submodules"]
+            if submodule["package"]
+        ]
+        last = max(packaged, key=lambda submodule: submodule["package_order"])
+        last["package_order"] += 1
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.write_inventory(root, json.dumps(raw))
+            with self.assertRaisesRegex(
+                SourceInventoryError, "package_order values must be contiguous from zero"
+            ):
                 load_inventory(root)
 
     def test_api_contract_is_mandatory_and_strict(self):

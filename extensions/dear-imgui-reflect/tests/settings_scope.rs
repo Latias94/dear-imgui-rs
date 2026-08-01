@@ -7,20 +7,20 @@ use common::test_guard;
 #[test]
 fn reflect_sessions_isolate_settings() {
     let _guard = test_guard();
-    use reflect::{NumericRange, NumericTypeSettings, NumericWidgetKind};
+    use reflect::{I32NumericSettings, NumericRange, NumericWidgetKind};
 
     let mut left = reflect::ReflectSession::new();
     let right = reflect::ReflectSession::new();
 
     {
         let s = left.settings_mut();
-        *s.numerics_i32_mut() = NumericTypeSettings {
+        *s.numerics_i32_mut() = I32NumericSettings {
             widget: NumericWidgetKind::Slider,
             range: NumericRange::Explicit {
                 min: 0.0,
                 max: 100.0,
             },
-            ..NumericTypeSettings::default()
+            ..I32NumericSettings::default()
         };
     }
 

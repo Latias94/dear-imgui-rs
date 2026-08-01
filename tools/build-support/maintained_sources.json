@@ -1,6 +1,6 @@
 {
   "schema": "dear-imgui-maintained-sources-v2",
-  "wasm_import_module": "imgui-sys-v0",
+  "wasm_import_module": "imgui-sys-v1",
   "sources": [
     {
       "id": "core",
@@ -12,7 +12,7 @@
         { "id": "cimgui-wrapper", "canonical": "third-party/cimgui/cimgui.cpp", "alternates": [], "provider_transform": "direct" },
         { "id": "imgui-core", "canonical": "third-party/cimgui/imgui/imgui.cpp", "alternates": [], "provider_transform": "patch-imgui-core" },
         { "id": "imgui-draw", "canonical": "third-party/cimgui/imgui/imgui_draw.cpp", "alternates": [], "provider_transform": "direct" },
-        { "id": "imgui-widgets", "canonical": "third-party/cimgui/imgui/imgui_widgets.cpp", "alternates": [], "provider_transform": "direct" },
+        { "id": "imgui-widgets", "canonical": "third-party/cimgui/imgui/imgui_widgets.cpp", "alternates": [], "provider_transform": "patch-imgui-widgets-numeric-conversions" },
         { "id": "imgui-tables", "canonical": "third-party/cimgui/imgui/imgui_tables.cpp", "alternates": [], "provider_transform": "direct" },
         { "id": "imgui-demo", "canonical": "third-party/cimgui/imgui/imgui_demo.cpp", "alternates": [], "provider_transform": "patch-imgui-demo" },
         { "id": "demo-window-shim", "canonical": "src/demo_window_shim.cpp", "alternates": [], "provider_transform": "direct" },

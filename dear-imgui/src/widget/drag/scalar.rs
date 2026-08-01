@@ -1,9 +1,10 @@
+use std::borrow::Cow;
 use std::os::raw::c_void;
 use std::ptr;
 
-use crate::Ui;
 use crate::internal::{DataTypeKind, component_count_i32};
 use crate::sys;
+use crate::{NumericFormat, NumericFormatError, Ui};
 
 use super::DragFlags;
 use super::validation::validate_drag_flags;
@@ -51,8 +52,11 @@ impl<L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> Drag<T, L, F> {
         self
     }
 
-    /// Sets the display format using *a C-style printf string*
-    pub fn display_format<F2: AsRef<str>>(self, display_format: F2) -> Drag<T, L, F2> {
+    /// Sets the validated display format.
+    pub fn display_format<'fmt>(
+        self,
+        display_format: NumericFormat<'fmt, T>,
+    ) -> Drag<T, L, NumericFormat<'fmt, T>> {
         Drag {
             label: self.label,
             speed: self.speed,
@@ -61,6 +65,14 @@ impl<L: AsRef<str>, T: DataTypeKind, F: AsRef<str>> Drag<T, L, F> {
             display_format: Some(display_format),
             flags: self.flags,
         }
+    }
+
+    /// Validates and sets a C-style display format.
+    pub fn try_display_format<'fmt>(
+        self,
+        display_format: impl Into<Cow<'fmt, str>>,
+    ) -> Result<Drag<T, L, NumericFormat<'fmt, T>>, NumericFormatError> {
+        Ok(self.display_format(NumericFormat::new(display_format)?))
     }
 
     /// Replaces all current settings with the given flags

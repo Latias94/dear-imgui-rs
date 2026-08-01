@@ -180,7 +180,7 @@ fn generate_bindings(
     cimgui_root: &Path,
 ) {
     // For wasm32 targets, rely on pregenerated import-style bindings that
-    // import symbols from the shared imgui-sys-v0 provider instead of running
+    // import symbols from the shared imgui-sys-v1 provider instead of running
     // bindgen here (which requires a native C/C++ sysroot).
     if cfg.target_arch == "wasm32" {
         if !cfg!(feature = "wasm") {

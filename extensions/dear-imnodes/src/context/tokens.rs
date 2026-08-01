@@ -1,5 +1,6 @@
 use crate::sys;
 use std::cell::{Cell, RefCell};
+use std::collections::BTreeSet;
 
 use super::{EditorScope, ImNodesScope};
 
@@ -7,7 +8,7 @@ use super::{EditorScope, ImNodesScope};
 pub struct NodeToken<'a> {
     pub(crate) scope: ImNodesScope,
     pub(crate) state: &'a Cell<EditorScope>,
-    pub(crate) submitted_pins: &'a RefCell<Vec<crate::PinId>>,
+    pub(crate) submitted_pins: &'a RefCell<BTreeSet<crate::PinId>>,
     pub(crate) ended: bool,
 }
 
@@ -47,7 +48,7 @@ impl NodeToken<'_> {
     ) -> AttributeToken<'_> {
         require_scope(self.state, EditorScope::Node, kind.begin_caller());
         assert!(
-            !self.submitted_pins.borrow().contains(&id),
+            self.submitted_pins.borrow_mut().insert(id),
             "dear-imnodes: pin {id} was submitted more than once in one editor frame"
         );
 
@@ -64,7 +65,6 @@ impl NodeToken<'_> {
                 AttrKind::Static => sys::imnodes_BeginStaticAttribute(id.raw()),
             }
         });
-        self.submitted_pins.borrow_mut().push(id);
         self.state.set(kind.scope());
         AttributeToken {
             kind,

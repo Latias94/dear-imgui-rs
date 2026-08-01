@@ -84,7 +84,7 @@ fn panic_wasm_unsupported() -> ! {
     panic!(
         "dear-node-editor-sys is native-only in this integration phase. \
          wasm32 support needs a complete cimnodes_editor/imgui-node-editor integration for \
-         this workspace's import-style imgui-sys-v0 WASM provider: pregenerated wasm bindings, \
+         this workspace's import-style imgui-sys-v1 WASM provider: pregenerated wasm bindings, \
          provider exports, Emscripten source wiring, and web demo/smoke coverage. \
          Use dear-imnodes for the current wasm node-editor path."
     );

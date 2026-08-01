@@ -43,7 +43,7 @@ wasm = ["dear-imgui-sys/wasm"]
 # Enable the native patched Dear ImGui artifact used by blueprint-style stack layouts.
 stack-layout = ["dear-imgui-sys/stack-layout"]
 # Experimental: enable direct font atlas access on wasm. Requires the shared
-# memory provider (imgui-sys-v0) built via xtask; API and behaviour may change.
+# memory provider (imgui-sys-v1) built via xtask; API and behaviour may change.
 wasm-font-atlas-experimental = []
 # Optional math interop: enable glam support in the sys crate so draw/list APIs
 # taking Into<sys::ImVec2>/ImVec4 can accept glam vectors directly.

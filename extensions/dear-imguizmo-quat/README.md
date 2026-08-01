@@ -30,9 +30,9 @@ See also: docs/COMPATIBILITY.md in the workspace for the full matrix.
 This crate has **experimental** support for `wasm32-unknown-unknown` targets via the same import-style design used by the core ImGui bindings:
 
 - `dear-imguizmo-quat` + `dear-imguizmo-quat-sys` expose a `wasm` feature which:
-  - Enables import-style FFI that links against the shared `imgui-sys-v0` provider module.
+  - Enables import-style FFI that links against the shared `imgui-sys-v1` provider module.
   - Avoids compiling C/C++ during the Rust build for wasm.
-- The provider module (`imgui-sys-v0`) is built once using Emscripten and contains:
+- The provider module (`imgui-sys-v1`) is built once using Emscripten and contains:
   - Dear ImGui + cimgui (from `dear-imgui-sys`)
   - ImGuizmo + cimguizmo (from `dear-imguizmo-sys`)
   - ImGuIZMO.quat + cimguizmo_quat (from `dear-imguizmo-quat-sys`)
@@ -47,7 +47,7 @@ cargo run -p xtask -- wasm-bindgen-imguizmo-quat
 # 2) Build the main wasm + JS (includes an "ImGuIZMO.quat (Web)" window)
 cargo run -p xtask -- web-demo imguizmo-quat
 
-# 3) Build the provider (Emscripten imgui-sys-v0 with ImGui + ImGuIZMO.quat)
+# 3) Build the provider (Emscripten imgui-sys-v1 with ImGui + ImGuIZMO.quat)
 cargo run -p xtask -- build-cimgui-provider
 
 # 4) Serve and open in a browser

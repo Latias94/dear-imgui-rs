@@ -272,9 +272,10 @@ class MetadataTests(unittest.TestCase):
         extension = package_dir / "dear-implot-prebuilt-test.tar.gz"
         self._write_archive(
             core,
-            "dear-imgui-sys prebuilt\n"
+            "dear-imgui prebuilt\n"
             f"candidate_sha={SHA}\n"
             "binding_spec_hash=fnv1a64:1111111111111111\n"
+            "source_contract_hash=fnv1a64:4444444444444444\n"
             f"cimgui_revision={'b' * 40}\n"
             f"imgui_revision={'c' * 40}\n",
         )
@@ -321,6 +322,18 @@ class MetadataTests(unittest.TestCase):
             [item["archive"] for item in manifests["archives"]],
             [core.name, extension.name],
         )
+        bindings = json.loads(
+            (self.cell / "metadata/binding-hashes.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        core_binding = next(
+            item for item in bindings["archives"] if item["archive"] == core.name
+        )
+        self.assertEqual(
+            core_binding["source_contract_hash"],
+            "fnv1a64:4444444444444444",
+        )
         for name in (
             "build.stdout.log",
             "build.stderr.log",
@@ -360,6 +373,22 @@ class MetadataTests(unittest.TestCase):
 
         self.assertEqual(record["conclusion"], "success")
         self.assertEqual(len(record["logs"]), 4)
+
+        binding_path = self.cell / "metadata/binding-hashes.json"
+        tampered = json.loads(binding_path.read_text(encoding="utf-8"))
+        core_entry = next(
+            item for item in tampered["archives"] if item["archive"] == core.name
+        )
+        del core_entry["source_contract_hash"]
+        write_json(binding_path, tampered)
+        with self.assertRaisesRegex(
+            release_cell.ReleaseCellError,
+            "does not match the package manifest",
+        ):
+            release_cell._validate_prebuilt_package_inventory(
+                self.cell,
+                tuple((self.cell / "packages").iterdir()),
+            )
 
     @staticmethod
     def _write_archive(path: Path, manifest: str) -> None:

@@ -13,7 +13,7 @@ impl<'ui> NodeEditor<'ui> {
             "dear-imnodes: NodeEditor::node() cannot run after minimap finalization"
         );
         assert!(
-            !self.submitted_nodes.borrow().contains(&id),
+            self.submitted_nodes.borrow_mut().insert(id),
             "dear-imnodes: node {id} was submitted more than once in one editor frame"
         );
 
@@ -45,7 +45,6 @@ impl<'ui> NodeEditor<'ui> {
             sys::imnodes_BeginNode(id.raw());
         });
 
-        self.submitted_nodes.borrow_mut().push(id);
         self.state.set(EditorScope::Node);
         NodeToken {
             scope: self.scope(),
@@ -73,14 +72,13 @@ impl<'ui> NodeEditor<'ui> {
         );
         drop(submitted_pins);
         assert!(
-            !self.submitted_links.borrow().contains(&id),
+            self.submitted_links.borrow_mut().insert(id),
             "dear-imnodes: link {id} was submitted more than once in one editor frame"
         );
 
         self.with_bound_context(|| unsafe {
             sys::imnodes_Link(id.raw(), start_attr.raw(), end_attr.raw())
         });
-        self.submitted_links.borrow_mut().push(id);
     }
 }
 

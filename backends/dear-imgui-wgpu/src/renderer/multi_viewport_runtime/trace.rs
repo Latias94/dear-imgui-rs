@@ -22,22 +22,11 @@ impl WgpuViewportFrameTraceReport {
     pub fn present_submitted_viewport_ids(&self) -> &[Id] {
         &self.present_submitted_viewport_ids
     }
-}
 
-#[derive(Debug, Default)]
-struct ActiveFrameTrace {
-    render_submitted_viewport_ids: Vec<Id>,
-    present_submitted_viewport_ids: Vec<Id>,
-}
-
-impl ActiveFrameTrace {
-    fn finish(mut self) -> WgpuViewportFrameTraceReport {
+    fn finish(mut self) -> Self {
         normalize_ids(&mut self.render_submitted_viewport_ids);
         normalize_ids(&mut self.present_submitted_viewport_ids);
-        WgpuViewportFrameTraceReport {
-            render_submitted_viewport_ids: self.render_submitted_viewport_ids,
-            present_submitted_viewport_ids: self.present_submitted_viewport_ids,
-        }
+        self
     }
 }
 
@@ -48,7 +37,7 @@ fn normalize_ids(ids: &mut Vec<Id>) {
 
 #[derive(Debug, Default)]
 pub(super) struct FrameTraceState {
-    active: Option<ActiveFrameTrace>,
+    active: Option<WgpuViewportFrameTraceReport>,
 }
 
 impl FrameTraceState {
@@ -56,7 +45,7 @@ impl FrameTraceState {
         if self.active.is_some() {
             return false;
         }
-        self.active = Some(ActiveFrameTrace::default());
+        self.active = Some(WgpuViewportFrameTraceReport::default());
         true
     }
 

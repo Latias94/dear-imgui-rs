@@ -516,6 +516,7 @@ def _prebuilt_outputs(
     archives: list[dict[str, object]] = []
     bindings: list[dict[str, object]] = []
     copied: list[Path] = []
+    core_sources = set(core.values())
     for source in sorted(selected, key=lambda path: path.name):
         try:
             fields = _prebuilt._read_prebuilt_manifest(source)
@@ -530,19 +531,26 @@ def _prebuilt_outputs(
         archives.append(
             {"archive": source.name, "sha256": digest, "manifest": dict(fields)}
         )
-        binding_fields = {
-            key: fields[key]
-            for key in (
+        binding_keys = (
+            (
                 "binding_spec_hash",
                 "cimgui_revision",
                 "imgui_revision",
+                "source_contract_hash",
+            )
+            if source in core_sources
+            else (
                 "extension_binding_identity",
                 "core_artifact_identity",
             )
-            if key in fields
-        }
-        if not binding_fields:
-            raise ReleaseCellError(f"prebuilt manifest lacks binding identity: {source.name}")
+        )
+        missing_binding_fields = [key for key in binding_keys if key not in fields]
+        if missing_binding_fields:
+            raise ReleaseCellError(
+                f"prebuilt manifest lacks binding identity fields in {source.name}: "
+                f"{missing_binding_fields!r}"
+            )
+        binding_fields = {key: fields[key] for key in binding_keys}
         bindings.append(
             {"archive": source.name, "archive_sha256": digest, **binding_fields}
         )
@@ -836,6 +844,7 @@ def _validate_prebuilt_package_inventory(
     if not isinstance(manifests, list) or not manifests:
         raise ReleaseCellError("prebuilt manifest metadata must list archives")
     expected: dict[str, str] = {}
+    manifest_by_name: dict[str, dict[str, object]] = {}
     for index, entry in enumerate(manifests):
         if not isinstance(entry, dict) or set(entry) != {
             "archive",
@@ -862,6 +871,7 @@ def _validate_prebuilt_package_inventory(
         if name in expected:
             raise ReleaseCellError(f"prebuilt manifest metadata repeats {name!r}")
         expected[name] = digest
+        manifest_by_name[name] = manifest
     packages = {
         path.name: path
         for path in artifacts
@@ -895,6 +905,28 @@ def _validate_prebuilt_package_inventory(
             or digest != expected[name]
         ):
             raise ReleaseCellError("prebuilt binding metadata archive is invalid")
+        manifest = manifest_by_name[name]
+        binding_keys = (
+            (
+                "binding_spec_hash",
+                "cimgui_revision",
+                "imgui_revision",
+                "source_contract_hash",
+            )
+            if manifest.get("crate_name") == "dear-imgui"
+            else ("extension_binding_identity", "core_artifact_identity")
+        )
+        expected_entry = {
+            "archive": name,
+            "archive_sha256": digest,
+            **{key: manifest.get(key) for key in binding_keys},
+        }
+        if any(not isinstance(expected_entry[key], str) for key in binding_keys):
+            raise ReleaseCellError("prebuilt manifest metadata lacks binding identity")
+        if entry != expected_entry:
+            raise ReleaseCellError(
+                "prebuilt binding metadata does not match the package manifest"
+            )
         binding_names.append(name)
     if len(binding_names) != len(set(binding_names)) or set(binding_names) != set(
         expected

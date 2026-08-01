@@ -106,7 +106,7 @@ pub use ffi::*;
 
 #[cfg_attr(
     dear_imgui_rs_wasm_import_target,
-    link(wasm_import_module = "imgui-sys-v0")
+    link(wasm_import_module = "imgui-sys-v1")
 )]
 unsafe extern "C" {
     pub fn dear_imgui_rs_show_demo_window_without_font_atlas(p_open: *mut bool);

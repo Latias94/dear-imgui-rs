@@ -34,9 +34,9 @@ This crate has **experimental** support for `wasm32-unknown-unknown` targets via
 import-style design used by the core ImGui bindings and other extensions:
 
 - `dear-implot3d` and `dear-implot3d-sys` expose a `wasm` feature which:
-  - Enables import-style FFI that links against the shared `imgui-sys-v0` provider module.
+  - Enables import-style FFI that links against the shared `imgui-sys-v1` provider module.
   - Avoids compiling C/C++ during the Rust build for wasm.
-- The provider module (`imgui-sys-v0`) is built once using Emscripten and contains:
+- The provider module (`imgui-sys-v1`) is built once using Emscripten and contains:
   - Dear ImGui + cimgui (from `dear-imgui-sys`)
   - ImPlot3D + cimplot3d (from `dear-implot3d-sys`)
 
@@ -50,7 +50,7 @@ cargo run -p xtask -- wasm-bindgen-implot3d
 # 2) Build the main wasm + JS (includes ImPlot3D demo window)
 cargo run -p xtask -- web-demo implot3d
 
-# 3) Build the provider (Emscripten imgui-sys-v0 with ImGui + ImPlot3D)
+# 3) Build the provider (Emscripten imgui-sys-v1 with ImGui + ImPlot3D)
 cargo run -p xtask -- build-cimgui-provider
 
 # 4) Serve and open in a browser

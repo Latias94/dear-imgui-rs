@@ -172,15 +172,27 @@ struct AdvancedNumericAndBool {
 
     /// Integer displayed in hexadecimal form.
     #[imgui(as_input, hex)]
-    hex_counter: i32,
+    hex_counter: u32,
+
+    /// Wide signed integer using its exact `long long` carrier format.
+    #[imgui(as_input, prefix = "wide=")]
+    wide_counter: i64,
+
+    /// Wide unsigned integer displayed with a matching hexadecimal format.
+    #[imgui(as_input, hex)]
+    wide_mask: u64,
 
     /// Floating-point value displayed as a percentage.
     #[imgui(as_drag, percentage, speed = 0.5)]
     percent_value: f32,
 
     /// Floating-point value with prefix/suffix formatting.
-    #[imgui(as_input, prefix = "v=", suffix = " ms")]
+    #[imgui(as_input, prefix = "load 100%: ", suffix = " ms")]
     timed_value: f32,
+
+    /// A format-only override selects an input widget instead of being ignored.
+    #[imgui(format = "%.1f")]
+    formatted_default: f32,
 
     /// Read-only display-only text, rendered without an input box.
     #[imgui(display_only)]

@@ -379,7 +379,8 @@ impl AppWindow {
                                 HeatmapPlot::new("Temperature", &heatmap_data, 10, 10)
                                     .with_scale(-1.0, 1.0)
                                     .with_bounds(0.0, 0.0, 1.0, 1.0)
-                                    .with_label_format(Some("%.2f"))
+                                    .try_label_format("%.2f")
+                                    .expect("static numeric format is valid")
                                     .plot(&plot_ui);
                                 token.end();
                             }

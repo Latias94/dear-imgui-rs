@@ -36,6 +36,34 @@ pub enum NumericTypeTag {
     F64,
 }
 
+/// C variadic carrier class used to validate numeric display formats.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum NumericFormatType {
+    Signed32,
+    Unsigned32,
+    Signed64,
+    Unsigned64,
+    Float,
+    PointerSized,
+}
+
+/// Classifies a primitive numeric type by its C variadic format carrier.
+pub fn classify_numeric_format_type(ty: &Type) -> Option<NumericFormatType> {
+    let Type::Path(path) = ty else {
+        return None;
+    };
+    let segment = path.path.segments.last()?;
+    match segment.ident.to_string().as_str() {
+        "i8" | "i16" | "i32" => Some(NumericFormatType::Signed32),
+        "u8" | "u16" | "u32" => Some(NumericFormatType::Unsigned32),
+        "i64" => Some(NumericFormatType::Signed64),
+        "u64" => Some(NumericFormatType::Unsigned64),
+        "f32" | "f64" => Some(NumericFormatType::Float),
+        "isize" | "usize" => Some(NumericFormatType::PointerSized),
+        _ => None,
+    }
+}
+
 /// Classifies a Rust type as one of the primitive numeric types we support.
 pub fn classify_numeric_type(ty: &Type) -> Option<NumericTypeTag> {
     if let Type::Path(tp) = ty {

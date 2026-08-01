@@ -139,9 +139,13 @@ all participate in the binding-spec hash.
 
 WebAssembly support for Dear ImGui in this workspace follows the same **import-style** design used by the high-level `dear-imgui-rs` crate:
 
-- Rust code links against a WASM import module named `imgui-sys-v0` that provides the cimgui (C API) implementation.
+- Rust code links against a WASM import module named `imgui-sys-v1` that provides the cimgui (C API) implementation.
 - The main application (Rust + winit + wgpu) targets `wasm32-unknown-unknown` and uses `wasm-bindgen`.
-- A separate provider module (`imgui-sys-v0`) is built once (currently via Emscripten) and contains Dear ImGui + cimgui and, optionally, selected extensions.
+- A separate provider module (`imgui-sys-v1`) is built once (currently via Emscripten) and contains Dear ImGui + cimgui and, optionally, selected extensions.
+
+Provider ABI v1 includes the repository's checked numeric formatting and
+parsing source transform. Older v0 providers are not compatible and must be
+rebuilt; renaming or remapping a v0 artifact does not upgrade its semantics.
 
 The `wasm` feature is mandatory for `wasm32-unknown-unknown`, the only supported
 WASM target. WASI (`wasip1`/`wasip2`) and Emscripten targets are rejected even
@@ -409,7 +413,7 @@ that published the crate:
 - `bindings_pregenerated.rs` for supported Linux, Android, macOS, and iOS ABIs
 
 WASM uses `wasm_bindings_pregenerated.rs` and imports the fixed
-`imgui-sys-v0` provider. `ImGuiDockNode` is intentionally opaque and pointer-only;
+`imgui-sys-v1` provider. `ImGuiDockNode` is intentionally opaque and pointer-only;
 C/C++ `va_list` APIs are omitted because neither has one portable Rust layout.
 
 The packaged Cargo manifest records exact cimgui and nested Dear ImGui revisions

@@ -95,7 +95,12 @@ def compare_snapshots(baseline: ApiSnapshot, candidate: ApiSnapshot) -> tuple[Ap
         after = candidate.source_revisions.get(key)
         if before == after:
             continue
-        operation = "added" if before is None else "removed" if after is None else "changed"
+        if before is None:
+            operation = "added"
+        elif after is None:
+            operation = "removed"
+        else:
+            operation = "changed"
         deltas.append(
             ApiDelta(operation, f"revision:{key}", key, "source-pin", key, before, after)
         )

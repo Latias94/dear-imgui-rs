@@ -1,7 +1,7 @@
 use crate::sys;
 use dear_imgui_rs::{ContextBinding, Ui};
 use std::cell::{Cell, RefCell};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::{Rc, Weak};
 
 mod editor;
@@ -213,9 +213,9 @@ pub struct NodeEditor<'ui> {
     ended: bool,
     state: Cell<EditorScope>,
     pending_node_options: RefCell<BTreeMap<crate::NodeId, crate::NodeOptions>>,
-    submitted_nodes: RefCell<Vec<crate::NodeId>>,
-    submitted_pins: RefCell<Vec<crate::PinId>>,
-    submitted_links: RefCell<Vec<crate::LinkId>>,
+    submitted_nodes: RefCell<BTreeSet<crate::NodeId>>,
+    submitted_pins: RefCell<BTreeSet<crate::PinId>>,
+    submitted_links: RefCell<BTreeSet<crate::LinkId>>,
     finalizing: Cell<bool>,
     frame_active: &'ui Cell<bool>,
     // Each callback address is handed to native code until EndNodeEditor; boxing keeps it stable

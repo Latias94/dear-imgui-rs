@@ -1,6 +1,8 @@
-use crate::Ui;
+use std::borrow::Cow;
+
 use crate::internal::DataTypeKind;
 use crate::sys;
+use crate::{NumericFormat, NumericFormatError, Ui};
 
 use super::DragFlags;
 use super::validation::validate_drag_flags;
@@ -56,8 +58,11 @@ where
         self
     }
 
-    /// Sets the display format using *a C-style printf string*
-    pub fn display_format<F2: AsRef<str>>(self, display_format: F2) -> DragRange<T, L, F2, M> {
+    /// Sets the validated display format.
+    pub fn display_format<'fmt>(
+        self,
+        display_format: NumericFormat<'fmt, T>,
+    ) -> DragRange<T, L, NumericFormat<'fmt, T>, M> {
         DragRange {
             label: self.label,
             speed: self.speed,
@@ -69,11 +74,19 @@ where
         }
     }
 
-    /// Sets the display format for the max value using *a C-style printf string*
-    pub fn max_display_format<M2: AsRef<str>>(
+    /// Validates and sets a C-style display format.
+    pub fn try_display_format<'fmt>(
         self,
-        max_display_format: M2,
-    ) -> DragRange<T, L, F, M2> {
+        display_format: impl Into<Cow<'fmt, str>>,
+    ) -> Result<DragRange<T, L, NumericFormat<'fmt, T>, M>, NumericFormatError> {
+        Ok(self.display_format(NumericFormat::new(display_format)?))
+    }
+
+    /// Sets the validated display format for the maximum value.
+    pub fn max_display_format<'fmt>(
+        self,
+        max_display_format: NumericFormat<'fmt, T>,
+    ) -> DragRange<T, L, F, NumericFormat<'fmt, T>> {
         DragRange {
             label: self.label,
             speed: self.speed,
@@ -83,6 +96,14 @@ where
             max_display_format: Some(max_display_format),
             flags: self.flags,
         }
+    }
+
+    /// Validates and sets a C-style display format for the maximum value.
+    pub fn try_max_display_format<'fmt>(
+        self,
+        max_display_format: impl Into<Cow<'fmt, str>>,
+    ) -> Result<DragRange<T, L, F, NumericFormat<'fmt, T>>, NumericFormatError> {
+        Ok(self.max_display_format(NumericFormat::new(max_display_format)?))
     }
 
     /// Replaces all current settings with the given flags

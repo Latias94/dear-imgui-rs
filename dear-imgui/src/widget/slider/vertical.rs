@@ -1,8 +1,9 @@
+use std::borrow::Cow;
 use std::ffi::c_void;
 
-use crate::Ui;
 use crate::internal::DataTypeKind;
 use crate::sys;
+use crate::{NumericFormat, NumericFormatError, Ui};
 
 use super::SliderFlags;
 use super::validation::validate_slider_preconditions;
@@ -78,12 +79,12 @@ where
         self
     }
 
-    /// Sets the display format using *a C-style printf string*
+    /// Sets the validated display format.
     #[inline]
-    pub fn display_format<Format2: AsRef<str>>(
+    pub fn display_format<'fmt>(
         self,
-        display_format: Format2,
-    ) -> VerticalSlider<Label, Data, Format2> {
+        display_format: NumericFormat<'fmt, Data>,
+    ) -> VerticalSlider<Label, Data, NumericFormat<'fmt, Data>> {
         VerticalSlider {
             label: self.label,
             size: self.size,
@@ -92,6 +93,14 @@ where
             display_format: Some(display_format),
             flags: self.flags,
         }
+    }
+
+    /// Validates and sets a C-style display format.
+    pub fn try_display_format<'fmt>(
+        self,
+        display_format: impl Into<Cow<'fmt, str>>,
+    ) -> Result<VerticalSlider<Label, Data, NumericFormat<'fmt, Data>>, NumericFormatError> {
+        Ok(self.display_format(NumericFormat::new(display_format)?))
     }
 
     /// Replaces all current settings with the given flags

@@ -4,23 +4,24 @@ use super::{
     Plot, PlotDataLayout, PlotError, PlotItemStyle, plot_spec_with_style,
     with_plot_str_slice_with_opt,
 };
-use crate::{ItemFlags, PieChartFlags, sys};
+use crate::{FloatFormat, FloatFormatError, ItemFlags, PieChartFlags, sys};
+use std::borrow::Cow;
 
 /// Builder for pie chart plots
-pub struct PieChartPlot<'a> {
+pub struct PieChartPlot<'a, F = &'static str> {
     label_ids: Vec<&'a str>,
     values: &'a [f64],
     style: PlotItemStyle,
     center_x: f64,
     center_y: f64,
     radius: f64,
-    label_fmt: Option<&'a str>,
+    label_fmt: Option<F>,
     angle0: f64,
     flags: PieChartFlags,
     item_flags: ItemFlags,
 }
 
-impl<'a> super::PlotItemStyled for PieChartPlot<'a> {
+impl<F> super::PlotItemStyled for PieChartPlot<'_, F> {
     fn style_mut(&mut self) -> &mut PlotItemStyle {
         &mut self.style
     }
@@ -55,11 +56,39 @@ impl<'a> PieChartPlot<'a> {
             item_flags: ItemFlags::NONE,
         }
     }
+}
 
-    /// Set the label format for slice values (e.g., "%.1f", "%.0f%%")
-    /// Set to None to disable labels
-    pub fn with_label_format(mut self, fmt: Option<&'a str>) -> Self {
-        self.label_fmt = fmt;
+impl<'a, F: AsRef<str>> PieChartPlot<'a, F> {
+    /// Set the validated label format for slice values.
+    pub fn with_label_format<'fmt>(
+        self,
+        format: FloatFormat<'fmt>,
+    ) -> PieChartPlot<'a, FloatFormat<'fmt>> {
+        PieChartPlot {
+            label_ids: self.label_ids,
+            values: self.values,
+            style: self.style,
+            center_x: self.center_x,
+            center_y: self.center_y,
+            radius: self.radius,
+            label_fmt: Some(format),
+            angle0: self.angle0,
+            flags: self.flags,
+            item_flags: self.item_flags,
+        }
+    }
+
+    /// Validate and set a C-style label format for slice values.
+    pub fn try_label_format<'fmt>(
+        self,
+        format: impl Into<Cow<'fmt, str>>,
+    ) -> Result<PieChartPlot<'a, FloatFormat<'fmt>>, FloatFormatError> {
+        Ok(self.with_label_format(FloatFormat::new(format)?))
+    }
+
+    /// Disable per-slice value labels.
+    pub fn without_value_labels(mut self) -> Self {
+        self.label_fmt = None;
         self
     }
 
@@ -135,7 +164,7 @@ impl<'a> PieChartPlot<'a> {
     }
 }
 
-impl<'a> Plot for PieChartPlot<'a> {
+impl<F: AsRef<str>> Plot for PieChartPlot<'_, F> {
     fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
         if self.validate().is_err() {
             return;
@@ -146,7 +175,7 @@ impl<'a> Plot for PieChartPlot<'a> {
         plot_ui.with_bound_context(|| {
             with_plot_str_slice_with_opt(
                 &self.label_ids,
-                self.label_fmt,
+                self.label_fmt.as_ref().map(AsRef::as_ref),
                 |label_ptrs, label_fmt_ptr| unsafe {
                     let spec = plot_spec_with_style(
                         self.style,
@@ -175,20 +204,20 @@ impl<'a> Plot for PieChartPlot<'a> {
 }
 
 /// Float version of pie chart for better performance with f32 data
-pub struct PieChartPlotF32<'a> {
+pub struct PieChartPlotF32<'a, F = &'static str> {
     label_ids: Vec<&'a str>,
     values: &'a [f32],
     style: PlotItemStyle,
     center_x: f64,
     center_y: f64,
     radius: f64,
-    label_fmt: Option<&'a str>,
+    label_fmt: Option<F>,
     angle0: f64,
     flags: PieChartFlags,
     item_flags: ItemFlags,
 }
 
-impl<'a> super::PlotItemStyled for PieChartPlotF32<'a> {
+impl<F> super::PlotItemStyled for PieChartPlotF32<'_, F> {
     fn style_mut(&mut self) -> &mut PlotItemStyle {
         &mut self.style
     }
@@ -216,10 +245,39 @@ impl<'a> PieChartPlotF32<'a> {
             item_flags: ItemFlags::NONE,
         }
     }
+}
 
-    /// Set the label format for slice values
-    pub fn with_label_format(mut self, fmt: Option<&'a str>) -> Self {
-        self.label_fmt = fmt;
+impl<'a, F: AsRef<str>> PieChartPlotF32<'a, F> {
+    /// Set the validated label format for slice values.
+    pub fn with_label_format<'fmt>(
+        self,
+        format: FloatFormat<'fmt>,
+    ) -> PieChartPlotF32<'a, FloatFormat<'fmt>> {
+        PieChartPlotF32 {
+            label_ids: self.label_ids,
+            values: self.values,
+            style: self.style,
+            center_x: self.center_x,
+            center_y: self.center_y,
+            radius: self.radius,
+            label_fmt: Some(format),
+            angle0: self.angle0,
+            flags: self.flags,
+            item_flags: self.item_flags,
+        }
+    }
+
+    /// Validate and set a C-style label format for slice values.
+    pub fn try_label_format<'fmt>(
+        self,
+        format: impl Into<Cow<'fmt, str>>,
+    ) -> Result<PieChartPlotF32<'a, FloatFormat<'fmt>>, FloatFormatError> {
+        Ok(self.with_label_format(FloatFormat::new(format)?))
+    }
+
+    /// Disable per-slice value labels.
+    pub fn without_value_labels(mut self) -> Self {
+        self.label_fmt = None;
         self
     }
 
@@ -294,7 +352,7 @@ impl<'a> PieChartPlotF32<'a> {
     }
 }
 
-impl<'a> Plot for PieChartPlotF32<'a> {
+impl<F: AsRef<str>> Plot for PieChartPlotF32<'_, F> {
     fn plot(&self, plot_ui: &crate::PlotUi<'_>) {
         if self.validate().is_err() {
             return;
@@ -305,7 +363,7 @@ impl<'a> Plot for PieChartPlotF32<'a> {
         plot_ui.with_bound_context(|| {
             with_plot_str_slice_with_opt(
                 &self.label_ids,
-                self.label_fmt,
+                self.label_fmt.as_ref().map(AsRef::as_ref),
                 |label_ptrs, label_fmt_ptr| unsafe {
                     let spec = plot_spec_with_style(
                         self.style,

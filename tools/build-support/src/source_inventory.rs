@@ -99,6 +99,7 @@ pub enum ProviderTransform {
     Direct,
     PatchImguiCore,
     PatchImguiDemo,
+    PatchImguiWidgetsNumericConversions,
     PatchImnodesFileIo,
 }
 
@@ -240,6 +241,16 @@ impl SourceInventory {
                     )));
                 }
             }
+        }
+        if package_orders
+            .iter()
+            .copied()
+            .zip(0_u32..)
+            .any(|(actual, expected)| actual != expected)
+        {
+            return Err(SourceInventoryError::new(
+                "nested submodule package_order values must be contiguous from zero",
+            ));
         }
         Ok(())
     }
@@ -930,6 +941,26 @@ mod tests {
     }
 
     #[test]
+    fn package_order_must_be_contiguous_from_zero() {
+        let mut inventory = SourceInventory::embedded().clone();
+        let last = inventory
+            .nested_submodules
+            .iter_mut()
+            .filter(|submodule| submodule.package)
+            .max_by_key(|submodule| submodule.package_order)
+            .expect("embedded inventory should package nested submodules");
+        last.package_order = last.package_order.map(|order| order + 1);
+
+        assert!(
+            inventory
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("package_order values must be contiguous from zero")
+        );
+    }
+
+    #[test]
     fn every_native_source_resolves_from_the_checked_in_inventory() {
         let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         for source in &SourceInventory::embedded().sources {
@@ -1004,7 +1035,7 @@ unsafe extern "C" {
     pub fn igTest();
 }
 "#;
-        let error = parse_wasm_imports(source, "imgui-sys-v0").unwrap_err();
+        let error = parse_wasm_imports(source, "imgui-sys-v1").unwrap_err();
         assert!(
             error
                 .to_string()
@@ -1015,13 +1046,13 @@ unsafe extern "C" {
     #[test]
     fn parse_wasm_imports_rejects_non_c_export_names() {
         let source = r#"
-#[link(wasm_import_module = "imgui-sys-v0")]
+#[link(wasm_import_module = "imgui-sys-v1")]
 unsafe extern "C" {
     #[link_name = "igTest\";globalThis.injected=true;//"]
     pub fn igTest();
 }
 "#;
-        let error = parse_wasm_imports(source, "imgui-sys-v0").unwrap_err();
+        let error = parse_wasm_imports(source, "imgui-sys-v1").unwrap_err();
         assert!(error.to_string().contains("portable C symbol"));
     }
 

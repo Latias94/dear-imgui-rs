@@ -83,7 +83,7 @@ target.
 | Native core build strategy | Source is the default. Enable `dear-imgui-rs/prebuilt` for verified release archives or `dear-imgui-rs/build-from-source` to force source; source wins when both are unified. |
 | Native test engine | `test-engine` is source-only, implies `build-from-source`, and is excluded from prebuilt package profiles. |
 | Native blueprint stack layout | Enable `dear-imgui-rs/stack-layout` directly or `dear-node-editor/blueprints`; this selects a distinct patched native artifact. |
-| WASM core | Only `wasm32-unknown-unknown` is supported; it must explicitly enable `dear-imgui-rs/wasm` and use the `imgui-sys-v0` provider. WASI and Emscripten targets are rejected. |
+| WASM core | Only `wasm32-unknown-unknown` is supported; it must explicitly enable `dear-imgui-rs/wasm` and use the `imgui-sys-v1` provider. WASI and Emscripten targets are rejected. |
 | WASM stack layout / blueprints | Unsupported; `stack-layout` and `wasm` are rejected together. Use `dear-imnodes` for the WASM node-editor route. |
 | WASM test engine / prebuilt | Unsupported; `test-engine` needs native source hooks and `prebuilt` contains native static libraries. |
 | WGPU renderer | WGPU 30 is the default; 29, 28, and 27 are separate mutually exclusive features. Native Winit and SDL3 multi-viewport adapters are also mutually exclusive. |

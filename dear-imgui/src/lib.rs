@@ -376,6 +376,7 @@ pub mod input;
 pub mod internal;
 mod io;
 mod list_clipper;
+mod numeric_format;
 pub mod platform_io;
 pub mod render;
 mod state_storage;
@@ -426,6 +427,7 @@ pub use draw::{
 };
 pub use error::*;
 pub use ini_settings::*;
+pub use numeric_format::{NumericFormat, NumericFormatError};
 // Note: draw types are now in render module, no need to export draw::*
 pub use render::*;
 pub use texture::*;

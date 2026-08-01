@@ -3,10 +3,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use build_support::binding::{
-    ArtifactProfile, BindingSpec, BuildRequest, BuildRequestInput, CORE_BUILD_ENV_VARS,
-    CoreArtifactIdentity, CrateBindingDefine, NativeAbiProfile, RELEASE_CANDIDATE_SHA_ENV,
-    SourceRevisions, TargetFacts, bindgen_rerun_env_vars, is_supported_wasm_target,
-    validate_wasm_feature_contract,
+    ArtifactProfile, ArtifactProfileInput, BindingSpec, BuildRequest, BuildRequestInput,
+    CORE_BUILD_ENV_VARS, CoreArtifactIdentity, CrateBindingDefine, NativeAbiProfile,
+    RELEASE_CANDIDATE_SHA_ENV, SourceRevisions, TargetFacts, bindgen_rerun_env_vars,
+    core_source_contract_hash, is_supported_wasm_target, validate_wasm_feature_contract,
 };
 
 fn core_wasm_import_module() -> &'static str {
@@ -147,16 +147,17 @@ impl BuildConfig {
         }
     }
     fn artifact_profile(&self) -> ArtifactProfile {
-        ArtifactProfile::new(
-            "dear-imgui",
-            env!("CARGO_PKG_VERSION"),
-            &self.target_triple,
-            "static",
-            self.crt_profile(),
-            self.artifact_features(),
-            self.source_revisions(),
-            self.binding_spec().deterministic_hash(),
-        )
+        ArtifactProfile::new(ArtifactProfileInput {
+            crate_name: "dear-imgui",
+            version: env!("CARGO_PKG_VERSION"),
+            target: &self.target_triple,
+            link_type: "static",
+            crt: self.crt_profile(),
+            features: self.artifact_features(),
+            source_revisions: self.source_revisions(),
+            binding_spec_hash: self.binding_spec().deterministic_hash(),
+            source_contract_hash: core_source_contract_hash(),
+        })
     }
     fn build_request(&self) -> BuildRequest {
         let artifact_features = self.artifact_features();
@@ -654,9 +655,14 @@ fn build_with_cc_cfg(
         imgui_core
     };
     build.file(write_safe_demo_patched_imgui_cpp(cfg, &imgui_cpp));
+    build.file(write_numeric_patched_imgui_widgets_cpp(
+        cfg,
+        &sources
+            .file("imgui-widgets")
+            .unwrap_or_else(|error| panic!("dear-imgui-sys: {error}")),
+    ));
     for file_id in [
         "imgui-draw",
-        "imgui-widgets",
         "imgui-tables",
         "demo-window-shim",
         "platform-io-hooks",
@@ -740,6 +746,22 @@ fn write_safe_demo_patched_imgui_demo_cpp(cfg: &BuildConfig, imgui_demo_cpp: &Pa
             )
         });
     let out = cfg.out_dir.join("imgui_demo_safe_demo_patched.cpp");
+    std::fs::write(&out, patched)
+        .unwrap_or_else(|error| panic!("failed to write {}: {error}", out.display()));
+    out
+}
+
+fn write_numeric_patched_imgui_widgets_cpp(cfg: &BuildConfig, imgui_widgets_cpp: &Path) -> PathBuf {
+    let source = std::fs::read_to_string(imgui_widgets_cpp)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", imgui_widgets_cpp.display()));
+    let patched = build_support::patch_imgui_widgets_cpp_for_defined_numeric_conversions(&source)
+        .unwrap_or_else(|error| {
+            panic!(
+                "failed to patch {} for defined numeric conversions: {error}",
+                imgui_widgets_cpp.display()
+            )
+        });
+    let out = cfg.out_dir.join("imgui_widgets_numeric_patched.cpp");
     std::fs::write(&out, patched)
         .unwrap_or_else(|error| panic!("failed to write {}: {error}", out.display()));
     out

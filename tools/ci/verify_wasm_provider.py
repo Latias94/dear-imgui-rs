@@ -50,6 +50,7 @@ PROVIDER_COMMAND = (
     "--",
     "build-cimgui-provider",
 )
+LEGACY_PROVIDER_MODULES = ("imgui-sys-v0",)
 
 
 class WasmProviderVerificationError(RuntimeError):
@@ -117,9 +118,22 @@ def verify_wasm_provider(
     )
     missing = [path for path in artifacts if not path.is_file() or path.stat().st_size == 0]
     if missing:
+        legacy_artifacts = tuple(
+            output_dir / f"{legacy_module}{suffix}"
+            for legacy_module in LEGACY_PROVIDER_MODULES
+            for suffix in (".js", ".wasm", "-wrapper.js")
+        )
+        legacy_present = [path for path in legacy_artifacts if path.is_file()]
+        legacy_detail = (
+            "; legacy provider artifacts are incompatible with "
+            f"{module_name}: " + ", ".join(str(path) for path in legacy_present)
+            if legacy_present
+            else ""
+        )
         raise WasmProviderVerificationError(
             "provider build did not produce non-empty artifacts: "
             + ", ".join(str(path) for path in missing)
+            + legacy_detail
         )
     print(
         f"Verified Emscripten provider {module_name} with "

@@ -119,7 +119,7 @@ fn apply_bindgen_defines(mut builder: bindgen::Builder) -> bindgen::Builder {
 #[cfg(feature = "bindgen")]
 fn generate_bindings(cfg: &BuildConfig, cimplot_root: &Path, imgui_src: &Path, cimgui_root: &Path) {
     // For wasm32 targets, we rely on pregenerated import-style bindings that
-    // import symbols from the shared imgui-sys-v0 provider instead of running
+    // import symbols from the shared imgui-sys-v1 provider instead of running
     // bindgen in the build script (which requires a native C/C++ sysroot).
     if cfg.target_arch == "wasm32" {
         if !cfg!(feature = "wasm") {

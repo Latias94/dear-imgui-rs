@@ -2,11 +2,16 @@
 
 Dear ImGui uses an import-provider architecture on WebAssembly. The Rust
 application targets `wasm32-unknown-unknown`; all cimgui functions are imported
-from one Emscripten-built provider named `imgui-sys-v0`.
+from one Emscripten-built provider named `imgui-sys-v1`.
 
 The provider name is part of the ABI. It is not configurable. Core and
 extension binding commands reject provider arguments so a locally generated
 artifact cannot silently use a different module name.
+
+`imgui-sys-v1` is the first provider ABI that guarantees the checked numeric
+formatting and parsing contract used by the safe Rust API. An
+`imgui-sys-v0` provider is incompatible: rebuild it from the same repository
+revision instead of renaming its files or remapping it under the v1 module name.
 
 ## Feature contract
 
@@ -168,7 +173,7 @@ python3 -m http.server -d target/web-demo 8080
 ```
 
 Open `http://127.0.0.1:8080`. The provider command emits
-`imgui-sys-v0.wasm`, its JavaScript loader, a shared-memory wrapper, and the
+`imgui-sys-v1.wasm`, its JavaScript loader, a shared-memory wrapper, and the
 import map used by the web demo.
 
 ## Runtime model
@@ -180,7 +185,7 @@ The Rust and C++ modules share one `WebAssembly.Memory`:
    `env.memory`.
 3. `xtask build-cimgui-provider` builds cimgui with imported memory and passes
    the same object to the Emscripten module.
-4. The browser resolves all generated cimgui imports through `imgui-sys-v0`.
+4. The browser resolves all generated cimgui imports through `imgui-sys-v1`.
 
 This is why the provider cannot be replaced by arbitrary Rust-side imports or
 by compiling native C++ through Cargo on a WASM target. A custom single-module
@@ -195,8 +200,8 @@ contract; it is not a supported fallback.
 - `unsupported Dear ImGui WASM target`: switch to `wasm32-unknown-unknown`.
   WASI and Emscripten targets require different imports/runtime contracts and
   are intentionally not aliases for this provider ABI.
-- `Failed to resolve import imgui-sys-v0`: build the provider and verify the
-  generated import map points to `imgui-sys-v0-wrapper.js`.
+- `Failed to resolve import imgui-sys-v1`: build the provider and verify the
+  generated import map points to `imgui-sys-v1-wrapper.js`.
 - `env.memory` or callable import errors: install `wasm-tools`, rebuild the web
   demo, then rebuild the provider so both artifacts use the same memory wiring.
 - Browser module MIME errors: serve `.js` as JavaScript and `.wasm` as

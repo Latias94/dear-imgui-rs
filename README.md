@@ -488,7 +488,7 @@ The supported Rust target is exactly `wasm32-unknown-unknown`. Every dependency 
 dear-imgui-rs = { git = "https://github.com/Latias94/dear-imgui-rs", branch = "main", features = ["wasm"] }
 ```
 
-The Rust module imports cimgui from the fixed provider name `imgui-sys-v0`, and both modules share one `WebAssembly.Memory`. The provider name is part of the ABI and is not configurable. Builds for WASI, Rust Emscripten targets, missing `wasm` feature forwarding, `wasm + stack-layout`, `wasm + prebuilt`, or `wasm + test-engine` fail rather than falling back to another binding profile.
+The Rust module imports cimgui from the fixed provider name `imgui-sys-v1`, and both modules share one `WebAssembly.Memory`. The provider name is part of the ABI and is not configurable. Provider ABI v1 includes the checked numeric formatting and parsing contract; v0 artifacts must be rebuilt rather than renamed or remapped. Builds for WASI, Rust Emscripten targets, missing `wasm` feature forwarding, `wasm + stack-layout`, `wasm + prebuilt`, or `wasm + test-engine` fail rather than falling back to another binding profile.
 
 Quick start:
 

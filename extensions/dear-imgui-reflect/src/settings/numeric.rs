@@ -94,9 +94,12 @@ pub enum NumericRange {
     DefaultSlider,
 }
 
-/// Type-level settings controlling how a particular numeric primitive type is rendered.
+/// Type-level settings controlling how a numeric primitive type is rendered.
+///
+/// `T` is also carried by the optional display format. This prevents a format
+/// validated for one C variadic carrier type from being reused with another.
 #[derive(Clone, Debug)]
-pub struct NumericTypeSettings {
+pub struct NumericTypeSettings<T> {
     /// Default widget kind for this numeric type.
     pub widget: NumericWidgetKind,
     /// Default range behavior for this numeric type.
@@ -107,8 +110,8 @@ pub struct NumericTypeSettings {
     pub step: Option<f64>,
     /// Default fast step size (for input widgets), stored as `f64`.
     pub step_fast: Option<f64>,
-    /// Default printf-style numeric format, if any.
-    pub format: Option<String>,
+    /// Validated display format for exactly `T`, if any.
+    pub format: Option<dear_imgui_rs::NumericFormat<'static, T>>,
     /// Logarithmic scale flag for slider/drag widgets.
     pub log: bool,
     /// Post-edit manual clamp (our own helper, distinct from ImGui flags).
@@ -129,7 +132,7 @@ pub struct NumericTypeSettings {
     pub no_speed_tweaks: bool,
 }
 
-impl Default for NumericTypeSettings {
+impl<T> Default for NumericTypeSettings<T> {
     fn default() -> Self {
         Self {
             widget: NumericWidgetKind::Input,
@@ -151,7 +154,7 @@ impl Default for NumericTypeSettings {
     }
 }
 
-impl NumericTypeSettings {
+impl<T> NumericTypeSettings<T> {
     /// Build the Dear ImGui flags supported by slider widgets.
     ///
     /// `wrap_around` is intentionally excluded because Dear ImGui only
@@ -216,12 +219,9 @@ impl NumericTypeSettings {
         flags
     }
 
-    /// Set an explicit printf-style format string for this numeric type.
-    ///
-    /// This is a convenience helper for configuring the underlying ImGui
-    /// scalar/slider/drag widgets, equivalent to assigning `format` directly.
-    pub fn with_format<S: Into<String>>(mut self, fmt: S) -> Self {
-        self.format = Some(fmt.into());
+    /// Sets a validated display format for exactly `T`.
+    pub fn with_format(mut self, format: dear_imgui_rs::NumericFormat<'static, T>) -> Self {
+        self.format = Some(format);
         self
     }
 
@@ -230,118 +230,172 @@ impl NumericTypeSettings {
         self.format = None;
         self
     }
+}
 
-    /// Decimal integer format (`%d`).
-    ///
-    /// Intended for signed integer types such as `i32`.
+macro_rules! validated_owned_format {
+    ($ty:ty, $format:expr) => {{
+        dear_imgui_rs::NumericFormat::<$ty>::new($format)
+            .expect("internally generated numeric format must remain valid")
+            .into_owned()
+    }};
+}
+
+impl NumericTypeSettings<i32> {
+    /// Validates and stores an owned signed 32-bit integer format.
+    pub fn try_with_format(
+        self,
+        format: impl Into<String>,
+    ) -> Result<Self, dear_imgui_rs::NumericFormatError> {
+        Ok(self.with_format(dear_imgui_rs::NumericFormat::<i32>::new(format.into())?))
+    }
+
+    /// Signed decimal integer format (`%d`).
     pub fn with_decimal(self) -> Self {
-        self.with_format("%d")
+        self.with_format(validated_owned_format!(i32, "%d"))
+    }
+
+    /// Validates and stores a zero-padded signed decimal format such as `%04d`.
+    pub fn try_with_zero_padded_decimal(
+        self,
+        width: u32,
+    ) -> Result<Self, dear_imgui_rs::NumericFormatError> {
+        self.try_with_format(format!("%0{width}d"))
+    }
+}
+
+impl NumericTypeSettings<u32> {
+    /// Validates and stores an owned unsigned 32-bit integer format.
+    pub fn try_with_format(
+        self,
+        format: impl Into<String>,
+    ) -> Result<Self, dear_imgui_rs::NumericFormatError> {
+        Ok(self.with_format(dear_imgui_rs::NumericFormat::<u32>::new(format.into())?))
     }
 
     /// Unsigned decimal integer format (`%u`).
-    ///
-    /// Intended for unsigned integer types such as `u32`.
-    pub fn with_unsigned(self) -> Self {
-        self.with_format("%u")
+    pub fn with_unsigned_decimal(self) -> Self {
+        self.with_format(validated_owned_format!(u32, "%u"))
     }
 
     /// Hexadecimal integer format (`%x` or `%X`).
     pub fn with_hex(self, uppercase: bool) -> Self {
-        if uppercase {
-            self.with_format("%X")
-        } else {
-            self.with_format("%x")
-        }
+        let format = if uppercase { "%X" } else { "%x" };
+        self.with_format(validated_owned_format!(u32, format))
     }
 
     /// Octal integer format (`%o`).
     pub fn with_octal(self) -> Self {
-        self.with_format("%o")
+        self.with_format(validated_owned_format!(u32, "%o"))
     }
 
-    /// Padded decimal integer format, e.g. width=4, pad_char='0' -> `%04d`.
-    ///
-    /// This is a small convenience for typical zero-padded integer displays;
-    /// callers should ensure the format matches the underlying numeric type.
-    pub fn with_int_padded(self, width: u32, pad_char: char) -> Self {
-        // Only the first character of `pad_char` is used; multi-codepoint
-        // characters will be truncated as in standard fmt! behavior.
-        self.with_format(format!("%{}{}", pad_char, width) + "d")
-    }
-
-    /// Character format (`%c`), useful for small integer types interpreted as chars.
-    pub fn with_char(self) -> Self {
-        self.with_format("%c")
-    }
-
-    /// Floating-point format `%.Nf`, e.g. precision=3 -> `%.3f`.
-    pub fn with_float(self, precision: u32) -> Self {
-        self.with_format(format!("%.{}f", precision))
-    }
-
-    /// Double format `%.Nlf`, primarily for parity with ImReflect's helpers.
-    pub fn with_double(self, precision: u32) -> Self {
-        self.with_format(format!("%.{}lf", precision))
-    }
-
-    /// Scientific notation `%.Ne` / `%.NE`.
-    pub fn with_scientific(self, precision: u32, uppercase: bool) -> Self {
-        let spec = if uppercase { 'E' } else { 'e' };
-        self.with_format(format!("%.{}{}", precision, spec))
-    }
-
-    /// Percentage format `%.Nf%%` (e.g. `12.3%`).
-    pub fn with_percentage(self, precision: u32) -> Self {
-        self.with_format(format!("%.{}f%%", precision))
-    }
-
-    /// Convenience preset: slider in the range [0, 1] with clamping and a
-    /// floating-point display format `%.Nf`.
-    ///
-    /// This is primarily intended for floating-point types (`f32` / `f64`).
-    pub fn slider_0_to_1(mut self, precision: u32) -> Self {
-        self.widget = NumericWidgetKind::Slider;
-        self.range = NumericRange::Explicit { min: 0.0, max: 1.0 };
-        self.clamp = true;
-        self.always_clamp = true;
-        self.with_float(precision)
-    }
-
-    /// Convenience preset: slider in the range [-1, 1] with clamping and a
-    /// floating-point display format `%.Nf`.
-    ///
-    /// This is primarily intended for floating-point types (`f32` / `f64`).
-    pub fn slider_minus1_to_1(mut self, precision: u32) -> Self {
-        self.widget = NumericWidgetKind::Slider;
-        self.range = NumericRange::Explicit {
-            min: -1.0,
-            max: 1.0,
-        };
-        self.clamp = true;
-        self.always_clamp = true;
-        self.with_float(precision)
-    }
-
-    /// Convenience preset: drag widget with a given speed and floating-point
-    /// display format `%.Nf`.
-    ///
-    /// This is primarily intended for floating-point types.
-    pub fn drag_with_speed(mut self, speed: f64, precision: u32) -> Self {
-        self.widget = NumericWidgetKind::Drag;
-        self.range = NumericRange::None;
-        self.speed = Some(speed);
-        self.with_float(precision)
-    }
-
-    /// Convenience preset: slider in [0, 1] displayed as a percentage
-    /// `%.Nf%%` with clamping.
-    ///
-    /// This expects the underlying numeric value to live in the 0..1 range.
-    pub fn percentage_slider_0_to_1(mut self, precision: u32) -> Self {
-        self.widget = NumericWidgetKind::Slider;
-        self.range = NumericRange::Explicit { min: 0.0, max: 1.0 };
-        self.clamp = true;
-        self.always_clamp = true;
-        self.with_percentage(precision)
+    /// Validates and stores a zero-padded unsigned decimal format such as `%04u`.
+    pub fn try_with_zero_padded_decimal(
+        self,
+        width: u32,
+    ) -> Result<Self, dear_imgui_rs::NumericFormatError> {
+        self.try_with_format(format!("%0{width}u"))
     }
 }
+
+macro_rules! impl_float_numeric_settings {
+    ($ty:ty) => {
+        impl NumericTypeSettings<$ty> {
+            /// Validates and stores an owned floating-point format.
+            pub fn try_with_format(
+                self,
+                format: impl Into<String>,
+            ) -> Result<Self, dear_imgui_rs::NumericFormatError> {
+                Ok(self.with_format(dear_imgui_rs::NumericFormat::<$ty>::new(format.into())?))
+            }
+
+            /// Validates and stores a fixed-point format `%.Nf`.
+            pub fn try_with_fixed(
+                self,
+                precision: u32,
+            ) -> Result<Self, dear_imgui_rs::NumericFormatError> {
+                self.try_with_format(format!("%.{precision}f"))
+            }
+
+            /// Validates and stores scientific notation `%.Ne` or `%.NE`.
+            pub fn try_with_scientific(
+                self,
+                precision: u32,
+                uppercase: bool,
+            ) -> Result<Self, dear_imgui_rs::NumericFormatError> {
+                let conversion = if uppercase { 'E' } else { 'e' };
+                self.try_with_format(format!("%.{precision}{conversion}"))
+            }
+
+            /// Validates and stores percentage format `%.Nf%%` (for example, `12.3%`).
+            pub fn try_with_percentage(
+                self,
+                precision: u32,
+            ) -> Result<Self, dear_imgui_rs::NumericFormatError> {
+                self.try_with_format(format!("%.{precision}f%%"))
+            }
+
+            /// Configures a clamped slider in the range [0, 1].
+            pub fn try_slider_0_to_1(
+                mut self,
+                precision: u32,
+            ) -> Result<Self, dear_imgui_rs::NumericFormatError> {
+                self.widget = NumericWidgetKind::Slider;
+                self.range = NumericRange::Explicit { min: 0.0, max: 1.0 };
+                self.clamp = true;
+                self.always_clamp = true;
+                self.try_with_fixed(precision)
+            }
+
+            /// Configures a clamped slider in the range [-1, 1].
+            pub fn try_slider_minus1_to_1(
+                mut self,
+                precision: u32,
+            ) -> Result<Self, dear_imgui_rs::NumericFormatError> {
+                self.widget = NumericWidgetKind::Slider;
+                self.range = NumericRange::Explicit {
+                    min: -1.0,
+                    max: 1.0,
+                };
+                self.clamp = true;
+                self.always_clamp = true;
+                self.try_with_fixed(precision)
+            }
+
+            /// Configures a drag widget with fixed-point display formatting.
+            pub fn try_drag_with_speed(
+                mut self,
+                speed: f64,
+                precision: u32,
+            ) -> Result<Self, dear_imgui_rs::NumericFormatError> {
+                self.widget = NumericWidgetKind::Drag;
+                self.range = NumericRange::None;
+                self.speed = Some(speed);
+                self.try_with_fixed(precision)
+            }
+
+            /// Configures a clamped [0, 1] slider displayed as a percentage.
+            pub fn try_percentage_slider_0_to_1(
+                mut self,
+                precision: u32,
+            ) -> Result<Self, dear_imgui_rs::NumericFormatError> {
+                self.widget = NumericWidgetKind::Slider;
+                self.range = NumericRange::Explicit { min: 0.0, max: 1.0 };
+                self.clamp = true;
+                self.always_clamp = true;
+                self.try_with_percentage(precision)
+            }
+        }
+    };
+}
+
+impl_float_numeric_settings!(f32);
+impl_float_numeric_settings!(f64);
+
+/// Numeric settings for signed 32-bit integer fields.
+pub type I32NumericSettings = NumericTypeSettings<i32>;
+/// Numeric settings for unsigned 32-bit integer fields.
+pub type U32NumericSettings = NumericTypeSettings<u32>;
+/// Numeric settings for 32-bit floating-point fields.
+pub type F32NumericSettings = NumericTypeSettings<f32>;
+/// Numeric settings for 64-bit floating-point fields.
+pub type F64NumericSettings = NumericTypeSettings<f64>;

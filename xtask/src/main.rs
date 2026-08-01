@@ -817,14 +817,14 @@ fn build_web_demo(features: Option<&str>) -> Result<()> {
     let root = project_root();
     let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".into());
 
-    // Ensure pregenerated wasm bindings exist for import-style linking (imgui-sys-v0)
+    // Ensure pregenerated wasm bindings exist for import-style linking (imgui-sys-v1)
     // If missing, generate them now so dear-imgui-sys does not attempt to bindgen for wasm.
     {
         let preg = maintained_crate_root(&root, "dear-imgui-sys")?
             .join("src")
             .join("wasm_bindings_pregenerated.rs");
         if !preg.exists() {
-            eprintln!("Generating pregenerated wasm bindings (import module: imgui-sys-v0)...");
+            eprintln!("Generating pregenerated wasm bindings (import module: imgui-sys-v1)...");
             gen_wasm_bindings()?;
         }
     }
@@ -902,7 +902,7 @@ fn build_web_demo(features: Option<&str>) -> Result<()> {
     }
 
     // 2b) Rewrite the generated wasm to import memory from `env` so we can share memory
-    // with the Emscripten-built provider (imgui-sys-v0). wasm-bindgen 0.2.104 no longer
+    // with the Emscripten-built provider (imgui-sys-v1). wasm-bindgen 0.2.104 no longer
     // exposes `--import-memory`, so we do a small WAT roundtrip:
     //   - Insert `(import "env" "memory" (memory ...))` right after `(module` (imports must be first)
     //   - Insert `(export "memory" (memory 0))`
@@ -1054,7 +1054,7 @@ fn build_web_demo(features: Option<&str>) -> Result<()> {
 
             if let Some(pos) = insert_at {
                 let inject = r#"
-        // Inject shared memory for import-style provider (imgui-sys-v0)
+        // Inject shared memory for import-style provider (imgui-sys-v1)
         const __shared_mem = globalThis.__imgui_shared_memory || new WebAssembly.Memory({ initial: 256, maximum: 4096 });
         if (!imports.env) imports.env = {};
         if (!imports.env.memory) imports.env.memory = __shared_mem;
@@ -1288,6 +1288,7 @@ fn prepare_wasm_provider_inputs(
                 ProviderTransform::Direct => source_files.push(provider_source.path),
                 ProviderTransform::PatchImguiCore
                 | ProviderTransform::PatchImguiDemo
+                | ProviderTransform::PatchImguiWidgetsNumericConversions
                 | ProviderTransform::PatchImnodesFileIo => {
                     let contents =
                         fs::read_to_string(&provider_source.path).with_context(|| {
@@ -1299,6 +1300,11 @@ fn prepare_wasm_provider_inputs(
                         }
                         ProviderTransform::PatchImguiDemo => {
                             build_support::patch_imgui_demo_cpp_for_safe_demo(&contents)
+                        }
+                        ProviderTransform::PatchImguiWidgetsNumericConversions => {
+                            build_support::patch_imgui_widgets_cpp_for_defined_numeric_conversions(
+                                &contents,
+                            )
                         }
                         ProviderTransform::PatchImnodesFileIo => {
                             build_support::patch_imnodes_cpp_for_file_handle(&contents)
@@ -1413,7 +1419,7 @@ fn build_cimgui_provider(options: BuildProviderOptions) -> Result<()> {
     let exports_path = out_dir.join("imgui_exports.json");
     fs::write(&exports_path, &exports_json)?;
 
-    // 2b) Compose em++ command to build imgui-sys-v0.wasm (shared imported memory) with explicit exports
+    // 2b) Compose em++ command to build imgui-sys-v1.wasm (shared imported memory) with explicit exports
 
     let mut cmd = Command::new(&empp);
     cmd.arg("-std=c++17")
@@ -1637,7 +1643,7 @@ mod tests {
             output.path(),
         )
         .unwrap();
-        assert_eq!(inputs.module_name, "imgui-sys-v0");
+        assert_eq!(inputs.module_name, "imgui-sys-v1");
         assert!(inputs.exports.contains("ImGuizmo_ComputeMouseRay"));
         assert!(
             inputs

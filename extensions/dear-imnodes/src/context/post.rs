@@ -40,8 +40,8 @@ impl<'ui> NodeEditor<'ui> {
     /// Explicitly end the node editor and return post-editor query handle
     pub fn end(mut self) -> PostEditor<'ui> {
         self.finish_native();
-        let submitted_nodes = self.submitted_nodes.borrow().iter().copied().collect();
-        let submitted_links = self.submitted_links.borrow().iter().copied().collect();
+        let submitted_nodes = std::mem::take(self.submitted_nodes.get_mut());
+        let submitted_links = std::mem::take(self.submitted_links.get_mut());
         let scope = self.scope.clone();
         let (
             editor_hovered,

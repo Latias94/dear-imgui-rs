@@ -177,7 +177,7 @@ fn sanitize_bindings_string(content: &str) -> String {
 #[cfg(feature = "bindgen")]
 fn generate_bindings(cfg: &BuildConfig, quat_root: &Path, imgui_src: &Path, cimgui_root: &Path) {
     // For wasm32 targets, rely on pregenerated import-style bindings that import
-    // from the shared imgui-sys-v0 provider instead of running bindgen here.
+    // from the shared imgui-sys-v1 provider instead of running bindgen here.
     if cfg.target_arch == "wasm32" {
         if !cfg!(feature = "wasm") {
             panic!(
