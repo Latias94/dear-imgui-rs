@@ -143,6 +143,10 @@ def main() -> int:
         )
         for source in source_metadata.SOURCE_INVENTORY.sources
     }
+    crate_roots = {
+        source.crate_name: repo_root / Path(source.crate_root.as_posix())
+        for source in source_metadata.SOURCE_INVENTORY.sources
+    }
 
     # Parse crates list
     if args.crates.strip().lower() == "all":
@@ -232,10 +236,11 @@ def main() -> int:
     # Optionally compile-check the explicit core WASM provider contract.
     if args.wasm:
         wasm_preg = crate_roots["dear-imgui-sys"] / "src" / "wasm_bindings_pregenerated.rs"
-        if not wasm_preg.exists():
+        if not args.dry_run and not wasm_preg.exists():
             print(f"WASM pregenerated bindings not found: {wasm_preg}", file=sys.stderr)
             return 5
-        print(f"WASM pregenerated bindings ready: {wasm_preg}")
+        state = "would be generated at" if args.dry_run else "ready"
+        print(f"WASM pregenerated bindings {state}: {wasm_preg}")
 
         print("Running cargo check for the explicit wasm32 provider feature...")
         rc = run([

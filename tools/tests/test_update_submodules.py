@@ -179,6 +179,32 @@ class RepositoryScriptContractTests(unittest.TestCase):
         self.assertIn('"--cimguizmo-quat-branch"', content)
         self.assertIn("args.cimguizmo_quat_branch", content)
 
+    def test_binding_updater_previews_wasm_generation_without_running_cargo(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "tools/update_submodule_and_bindings.py",
+                "--crates",
+                "dear-imgui-sys",
+                "--submodules",
+                "skip",
+                "--skip-core-bindings",
+                "--wasm",
+                "--dry-run",
+            ],
+            cwd=REPO_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("WASM pregenerated bindings would be generated at", result.stdout)
+        self.assertIn(
+            "cargo check -p dear-imgui-rs -F wasm --target wasm32-unknown-unknown",
+            result.stdout,
+        )
+
     def test_repository_has_no_tracked_non_python_script_entry_points(self):
         result = subprocess.run(
             [
