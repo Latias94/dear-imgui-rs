@@ -1476,6 +1476,9 @@ jobs:
       - name: Check Glow renderer WASM provider
         run: cargo check -p dear-imgui-glow --target wasm32-unknown-unknown --no-default-features --features wasm
 
+      - name: Check ImNodes WASM safe API tests
+        run: cargo check -p dear-imnodes --tests --target wasm32-unknown-unknown --no-default-features --features wasm
+
       - name: Check file browser WASM scan policy branches
         run: cargo check -p dear-file-browser --target wasm32-unknown-unknown --tests --no-default-features --features "imgui,dear-imgui-rs/wasm"
 
