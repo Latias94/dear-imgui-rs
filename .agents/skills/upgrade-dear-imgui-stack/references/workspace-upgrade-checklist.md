@@ -110,6 +110,7 @@ Run that in each standalone example workspace that carries its own `Cargo.lock`.
    - If backend exposure changed, adapt public APIs and repository-local examples, including iOS / Android smoke examples when relevant.
    - When core public aggregate layouts changed, run the `abi-probe` source-build profile. Check C++ size, alignment, and field offsets against Rust; keep that compiler-dependent proof out of normal prebuilt consumer builds.
    - Build and inspect the real Emscripten provider after binding regeneration. Derive provider definitions from the canonical core/extension binding profiles, fail on conflicting definitions, and require any source adaptation to be a named inventory transform with an exact upstream-drift test.
+   - Treat `tools/build-support/maintained_sources.json` as the canonical source inventory shared by the Rust and Python resolvers; do not duplicate source-selection policy in a one-off script.
 
 3. Test engine
    - Update `extensions/dear-imgui-test-engine-sys/third-party/imgui_test_engine`.
@@ -145,9 +146,14 @@ cargo fmt --all -- --check
 cargo check --workspace
 python tools/upstream_contract.py --check
 python tools/api_surface_report.py --check
+python tools/ci/verify_wasm_provider.py --check-rust-route
 python tools/pre_publish_check.py
 python tools/publish.py --dry-run
 ```
+
+The WASM provider gate requires a working Emscripten SDK (`EMSDK`) with `em++` available. It builds
+the real C/C++ provider and checks its exports plus the Rust import route; a Rust-only target check
+does not replace it.
 
 For a core ABI or handwritten-public-mirror change, additionally run the native
 source-build probe (serially):

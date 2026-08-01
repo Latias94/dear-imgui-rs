@@ -81,14 +81,15 @@ python3 tools/tasks.py release-check
 Every maintained Dear ImGui or extension source update must classify the complete generated API and
 ABI delta separately from the generated facts. Start from the current pinned source tree with:
 
-```bash
+```powershell
 python tools/upstream_contract.py --write-review-template
 ```
 
-Review every entry in `tools/upstream_contract_decisions.json`, attach the required compile and
-runtime evidence, then accept and verify the candidate:
+This writes `tools/upstream_contract_decisions.pending.json` and refuses to overwrite existing
+review work. Review every entry in that pending file and attach the required compile and runtime
+evidence. The update command validates it before promoting it to the canonical decisions file:
 
-```bash
+```powershell
 python tools/upstream_contract.py --update-snapshot
 python tools/upstream_contract.py --check
 python tools/api_surface_report.py --check

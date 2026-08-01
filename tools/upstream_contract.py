@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import pathlib
+import shutil
 import sys
 from typing import Sequence
 
@@ -22,6 +23,7 @@ INVENTORY_JSON = REPO_ROOT / "tools" / "build-support" / "maintained_sources.jso
 BASELINE_JSON = REPO_ROOT / "tools" / "upstream_contract_baseline.json"
 SNAPSHOT_JSON = REPO_ROOT / "tools" / "upstream_contract_snapshot.json"
 DECISIONS_JSON = REPO_ROOT / "tools" / "upstream_contract_decisions.json"
+PENDING_DECISIONS_JSON = REPO_ROOT / "tools" / "upstream_contract_decisions.pending.json"
 
 from upstream_contract_model import (  # noqa: E402
     CLASSIFICATIONS,
@@ -126,6 +128,15 @@ def _reference_snapshot(snapshot_path: pathlib.Path, baseline_path: pathlib.Path
     return load_snapshot(snapshot_path if snapshot_path.is_file() else baseline_path)
 
 
+def _prepare_review_template_output(path: pathlib.Path) -> None:
+    if path.exists():
+        raise ContractInputError(
+            f"refusing to overwrite existing review work at {path}; "
+            "move or remove it explicitly after preserving any decisions"
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
@@ -145,6 +156,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--baseline", type=pathlib.Path, default=BASELINE_JSON)
     parser.add_argument("--snapshot", type=pathlib.Path, default=SNAPSHOT_JSON)
     parser.add_argument("--decisions", type=pathlib.Path, default=DECISIONS_JSON)
+    parser.add_argument(
+        "--review-template",
+        type=pathlib.Path,
+        default=PENDING_DECISIONS_JSON,
+        help="pending review file written by --write-review-template and accepted by --update-snapshot",
+    )
     return parser
 
 
@@ -170,21 +187,28 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.write_review_template:
             from upstream_contract_model import write_json
 
-            write_json(args.decisions, review_template(reference, live))
+            _prepare_review_template_output(args.review_template)
+            write_json(args.review_template, review_template(reference, live))
             print(
                 f"wrote {len(compare_snapshots(reference, live))} pending decisions "
-                f"to {args.decisions}"
+                f"to {args.review_template}"
             )
             return 0
 
-        manifest = load_review_manifest(args.decisions)
+        review_path = (
+            args.review_template if args.review_template.is_file() else args.decisions
+        )
+        manifest = load_review_manifest(review_path)
         audit_review_manifest(reference, live, manifest, repo_root=args.repo_root)
         if args.snapshot.is_file() and compare_snapshots(reference, live):
             write_snapshot(args.baseline, reference)
         write_snapshot(args.snapshot, live)
+        if review_path.resolve() != args.decisions.resolve():
+            args.decisions.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(review_path, args.decisions)
         print(
             f"accepted {len(compare_snapshots(reference, live))} reviewed deltas "
-            f"into {args.snapshot}"
+            f"into {args.snapshot} and promoted {review_path} to {args.decisions}"
         )
         return 0
     except ContractInputError as error:

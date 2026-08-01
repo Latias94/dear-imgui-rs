@@ -850,6 +850,7 @@ impl Context {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::context::snapshot_hub::SnapshotHub;
     use crate::texture::{TextureFormat, TextureId};
 
     fn texture() -> OwnedTextureData {
@@ -903,6 +904,90 @@ mod tests {
             context_a.with_texture(first_id, |_| ()),
             Err(ManagedTextureError::StaleGeneration(first_id))
         );
+    }
+
+    #[test]
+    fn managed_queue_marker_is_idempotent_and_cleared_by_destroy_feedback() {
+        let mut context = Context::create();
+        let id = context.register_texture(texture());
+        let native = context
+            .texture_registry
+            .borrow()
+            .active_entry(id)
+            .expect("registered texture")
+            .texture
+            .as_raw()
+            .cast_mut();
+        let atlas = FontAtlasSnapshotTarget::new(std::ptr::null_mut(), context.id(), Vec::new());
+        let create = Arc::new(TextureOp::Create {
+            format: TextureFormat::RGBA32,
+            width: 1,
+            height: 1,
+            row_pitch: 4,
+            pixels: vec![1, 2, 3, 4],
+        });
+        let mut pending = vec![PendingTextureRequest {
+            texture: SnapshotTextureId::User(id),
+            revision: 0,
+            op: create,
+        }];
+
+        {
+            let mut registry = context.texture_registry.borrow_mut();
+            registry
+                .track_snapshot_operations(&mut pending, &atlas)
+                .expect("create request should claim the managed queue");
+            let first_revision = pending[0].revision;
+            registry
+                .track_snapshot_operations(&mut pending, &atlas)
+                .expect("claiming the same managed queue must be idempotent");
+            assert_eq!(pending[0].revision, first_revision);
+        }
+        unsafe {
+            assert_eq!((*native).QueueUserData, native.cast());
+        }
+
+        {
+            let mut registry = context.texture_registry.borrow_mut();
+            let entry = registry.active_entry_mut(id).expect("active texture");
+            unsafe {
+                entry.texture.set_tex_id(TextureId::new(73));
+                entry.texture.set_status(TextureStatus::OK);
+            }
+            registry.remove(id, 0).expect("bound texture should retire");
+        }
+
+        let mut destroy = vec![PendingTextureRequest {
+            texture: SnapshotTextureId::User(id),
+            revision: 0,
+            op: Arc::new(TextureOp::Destroy),
+        }];
+        context
+            .texture_registry
+            .borrow_mut()
+            .track_snapshot_operations(&mut destroy, &atlas)
+            .expect("destroy request should remain queue-owned");
+
+        let mut hub = SnapshotHub::new(context.id());
+        let generation = hub
+            .validate_consumer_admission()
+            .expect("fresh snapshot hub should admit a renderer");
+        let _consumer = hub.commit_consumer_admission(generation);
+        let (epoch, requests) = hub
+            .begin_synchronous(destroy, &atlas)
+            .expect("destroy request should enter a synchronous epoch");
+        let feedback = requests[0]
+            .destroyed()
+            .expect("destroy request should produce matching feedback");
+        context
+            .texture_registry
+            .borrow_mut()
+            .apply_snapshot_feedback(&[feedback], &atlas, epoch.sequence())
+            .expect("matching destroy feedback should reconcile");
+
+        unsafe {
+            assert!((*native).QueueUserData.is_null());
+        }
     }
 
     #[test]

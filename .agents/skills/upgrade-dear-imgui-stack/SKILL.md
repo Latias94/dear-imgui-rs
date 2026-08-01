@@ -12,7 +12,7 @@ Read `references/workspace-upgrade-checklist.md` before making changes.
 ## Quick start
 
 1. Confirm the requested upstream targets and whether this is just an integration bump or a release cut.
-2. Confirm the repository's canonical binding generator, libclang major version, target profiles, and current clean verification hashes before moving any submodule. Run `python tools/upstream_contract.py --check` and preserve the accepted facts/decision manifests as the review baseline. A different libclang version may produce a valid but non-canonical binding diff.
+2. Confirm the repository's canonical binding generator, libclang major version, target profiles, and current clean verification hashes before moving any submodule. `tools/build-support/maintained_sources.json` is the canonical source inventory consumed by both Rust and Python tooling. Run `python tools/upstream_contract.py --check` and preserve the accepted facts/decision manifests as the review baseline. A different libclang version may produce a valid but non-canonical binding diff.
 3. Use primary sources for upstream changes: Dear ImGui release notes / changelog, `cimgui`, `cimplot`, `cimplot3d`, and `imgui_test_engine` commits or changelogs.
 4. Prefer the repository scripts for submodule refresh, bindings generation, version bumps, pre-publish checks, and publishing.
 
@@ -28,9 +28,10 @@ Read `references/workspace-upgrade-checklist.md` before making changes.
    - Prefer `tools/update_submodule_and_bindings.py` over manual per-crate binding steps.
    - Regenerate both native pregenerated bindings and WASM pregenerated bindings when ABI or public header shape changes.
    - Build the actual WASM provider after regeneration. Its compile definitions must come from the same canonical binding profiles as the Rust imports; import/export agreement alone does not prove that every provider translation unit is compatible with those definitions.
+   - Set `EMSDK` to a working Emscripten SDK and ensure `em++` is available, then run `python tools/ci/verify_wasm_provider.py --check-rust-route`. A Rust-only `cargo check --target wasm32-unknown-unknown` is not provider evidence.
    - When one maintained source is incompatible with a required provider definition, preserve the canonical definition and model the source adaptation explicitly in the source inventory with an upstream-drift test. Do not silently drop the definition or add an untracked one-off patch.
    - Keep `imgui_test_engine` in sync when the new Dear ImGui version changes internal hooks or test-engine integration points.
-   - After regeneration, use `python tools/upstream_contract.py --write-review-template` to enumerate every live declaration, enum, field (including bitfield/array width), typedef (including declarations without generator locations), layout, and nested-source-pin delta. The inventory must give every source an API-contract provider; Test Engine is audited from its final checked-in Rust binding and unknown public syntax is a hard failure. Do not update the accepted snapshot until every item has a reviewed classification and safe items name compile/runtime evidence; then use `--update-snapshot` followed by `--check`.
+   - After regeneration, use `python tools/upstream_contract.py --write-review-template` to enumerate every live declaration, enum, field (including bitfield/array width), typedef (including declarations without generator locations), layout, and nested-source-pin delta. The command writes `tools/upstream_contract_decisions.pending.json` and refuses to overwrite existing review work. The inventory must give every source an API-contract provider; Test Engine is audited from its final checked-in Rust binding and unknown public syntax is a hard failure. Do not update the accepted snapshot until every item has a reviewed classification and safe items name compile/runtime evidence; then use `--update-snapshot` to validate and promote the pending review, followed by `--check`.
 
 3. Audit the sys layer and safe layer together.
    - Compare upstream release notes and generated binding diffs against current safe wrappers.
@@ -57,6 +58,7 @@ Read `references/workspace-upgrade-checklist.md` before making changes.
 6. Validate.
    - Serialize Cargo builds and nextest execution on shared development machines, reusing the workspace target directory.
    - Verify regenerated binding hashes before formatting and workspace checks.
+   - Run `python tools/ci/verify_wasm_provider.py --check-rust-route` with a working Emscripten SDK whenever the maintained WASM provider or its source inventory changes.
    - Require a clean upstream-contract audit after the reviewed snapshot update; binding hashes alone cannot approve a changed API or ownership contract.
    - Run the native aggregate ABI probe whenever core declarations or handwritten public mirrors changed.
    - Run the repository pre-publish checks.

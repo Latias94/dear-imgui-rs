@@ -35,6 +35,19 @@ def manifest(
 
 
 class UpstreamContractTests(unittest.TestCase):
+    def test_review_template_output_never_overwrites_existing_work(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "review.pending.json"
+            upstream_contract._prepare_review_template_output(output)
+            self.assertTrue(output.parent.is_dir())
+
+            output.write_text("review in progress\n", encoding="utf-8")
+            with self.assertRaisesRegex(
+                upstream_contract.ContractInputError,
+                "refusing to overwrite existing review work",
+            ):
+                upstream_contract._prepare_review_template_output(output)
+
     def test_generator_collection_covers_every_required_fact_kind(self):
         root = Path("fixture-output")
         values = {

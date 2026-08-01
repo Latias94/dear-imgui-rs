@@ -18,6 +18,9 @@ impl Ui {
     /// - [`modal_popup`](Self::modal_popup)
     ///
     /// The confusing aspect to popups is that ImGui holds control over the popup itself.
+    ///
+    /// Returns `true` when this request toggles the popup toward its open state. Existing callers
+    /// that do not need to initialize popup-local state may ignore the result.
     #[doc(alias = "OpenPopup")]
     pub fn open_popup(&self, str_id: impl AsRef<str>) -> bool {
         let str_id_ptr = self.scratch_txt(str_id);
@@ -27,6 +30,8 @@ impl Ui {
     }
 
     /// Instructs ImGui that a popup is open with flags.
+    ///
+    /// Returns `true` when this request toggles the popup toward its open state.
     #[doc(alias = "OpenPopup")]
     pub fn open_popup_with_flags(&self, str_id: impl AsRef<str>, flags: PopupOpenFlags) -> bool {
         validate_popup_open_flags("Ui::open_popup_with_flags()", flags);
@@ -58,12 +63,15 @@ impl Ui {
     /// Opens a popup when the last item is clicked (typically right-click).
     ///
     /// If `str_id` is `None`, the popup is associated with the last item ID.
+    /// Returns `true` only when the click opens the popup.
     #[doc(alias = "OpenPopupOnItemClick")]
     pub fn open_popup_on_item_click(&self, str_id: Option<&str>) -> bool {
         self.open_popup_on_item_click_with_flags(str_id, PopupContextOptions::new())
     }
 
     /// Opens a popup when the last item is clicked, with explicit flags.
+    ///
+    /// Returns `true` only when the configured click opens the popup.
     #[doc(alias = "OpenPopupOnItemClick")]
     pub fn open_popup_on_item_click_with_flags(
         &self,
