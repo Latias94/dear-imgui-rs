@@ -6644,12 +6644,13 @@ mod tests {
 
     #[test]
     fn imnodes_file_patch_preserves_crlf_inputs() {
-        let source = include_str!(concat!(
+        let checked_in_source = include_str!(concat!(
             "../../../extensions/dear-imnodes-sys/third-party/",
             "cimnodes/imnodes/imnodes.cpp"
-        ))
-        .replace('\n', "\r\n");
-        let patched = patch_imnodes_cpp_for_file_handle(&source).unwrap();
+        ));
+        let source_lf = checked_in_source.replace("\r\n", "\n");
+        let source_crlf = source_lf.replace('\n', "\r\n");
+        let patched = patch_imnodes_cpp_for_file_handle(&source_crlf).unwrap();
 
         assert!(patched.contains(
             "ImFileWrite(data, sizeof(char), data_size, file);\r\n    ImFileClose(file);"
