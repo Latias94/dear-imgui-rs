@@ -6623,9 +6623,22 @@ mod tests {
             "imgui_test_engine/imgui_test_engine/imgui_capture_tool.cpp"
         ));
         let patched = patch_test_engine_capture_cpp_for_defined_geometry(source).unwrap();
+        let expected_guard = [
+            "if (!instant_capture && _FrameNo < 2)",
+            "{",
+            "_FrameNo++;",
+            "return ImGuiCaptureStatus_InProgress;",
+            "}",
+            "",
+            "const ImRect clip_rect = viewport_rect;",
+        ];
+        let logical_lines = patched.lines().map(str::trim).collect::<Vec<_>>();
 
-        assert!(patched.contains("if (!instant_capture && _FrameNo < 2)"));
-        assert!(patched.contains("_FrameNo++;\n        return ImGuiCaptureStatus_InProgress;"));
+        assert!(
+            logical_lines
+                .windows(expected_guard.len())
+                .any(|lines| { lines == expected_guard.as_slice() })
+        );
         assert_eq!(
             patched
                 .matches(
