@@ -7267,7 +7267,7 @@ mod tests {
             let decoded = decode_decoration(format_suffix);
             let mut candidate = input.as_bytes();
             loop {
-                if let Some(prefix) = candidate.strip_suffix(&decoded) {
+                if let Some(prefix) = candidate.strip_suffix(decoded.as_slice()) {
                     return std::str::from_utf8(prefix).ok();
                 }
                 match candidate.last() {

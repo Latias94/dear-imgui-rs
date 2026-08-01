@@ -1,4 +1,4 @@
-#![cfg(not(target_arch = "wasm32"))]
+#![cfg(all(not(target_arch = "wasm32"), dear_imgui_rs_native_symbols))]
 
 use std::ffi::{CStr, CString, c_void};
 

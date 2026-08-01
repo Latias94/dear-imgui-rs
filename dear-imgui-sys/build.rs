@@ -238,6 +238,7 @@ fn main() {
     // Re-run triggers
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=Cargo.toml");
+    println!("cargo:rustc-check-cfg=cfg(dear_imgui_rs_native_symbols)");
     println!("cargo:rustc-check-cfg=cfg(dear_imgui_rs_platform_io_hooks)");
     println!("cargo:rustc-check-cfg=cfg(dear_imgui_rs_wasm_import_target)");
     if cfg.is_core_wasm_target() {
@@ -387,6 +388,10 @@ fn main() {
              aggregate callback installation \
              will panic if used."
         );
+    }
+
+    if linked_prebuilt || (!skip_cc && !cfg.is_core_wasm_target()) {
+        println!("cargo:rustc-cfg=dear_imgui_rs_native_symbols");
     }
 
     // ImGui core includes default platform handlers on Windows (clipboard, IME, open-in-shell)
