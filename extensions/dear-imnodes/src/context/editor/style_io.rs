@@ -1,9 +1,9 @@
-use super::super::NodeEditor;
+use super::super::NodeEditorSetup;
 use crate::sys;
 use dear_imgui_rs::MouseButton;
 use dear_imgui_rs::sys as imgui_sys;
 
-impl<'ui> NodeEditor<'ui> {
+impl<'ui> NodeEditorSetup<'ui> {
     fn with_style<R>(&self, f: impl FnOnce(&mut sys::ImNodesStyle) -> R) -> R {
         self.with_bound_context(|| {
             let style = unsafe { sys::imnodes_GetStyle() };
@@ -113,23 +113,15 @@ impl<'ui> NodeEditor<'ui> {
 
     // state save/load moved to PostEditor
 
-    /// Node positions in grid space
+    /// Queue a grid-space position for the matching node submission.
+    ///
+    /// The native setter is not called until [`NodeEditor::node`](crate::NodeEditor::node)
+    /// submits the same ID. If that node is not submitted this frame, the queued value is ignored.
     pub fn set_node_pos_grid(&self, node_id: crate::NodeId, pos: [f32; 2]) {
-        self.with_bound_context(|| unsafe {
-            sys::imnodes_SetNodeGridSpacePos(
-                node_id.raw(),
-                sys::ImVec2_c {
-                    x: pos[0],
-                    y: pos[1],
-                },
-            )
+        assert_finite_position("set_node_pos_grid", pos);
+        self.update_node_options(node_id, |options| {
+            options.position = Some(crate::NodePosition::Grid(pos));
         });
-    }
-
-    pub fn get_node_pos_grid(&self, node_id: crate::NodeId) -> [f32; 2] {
-        let out =
-            self.with_bound_context(|| unsafe { sys::imnodes_GetNodeGridSpacePos(node_id.raw()) });
-        [out.x, out.y]
     }
 
     /// Persistent style setters
@@ -205,52 +197,39 @@ impl<'ui> NodeEditor<'ui> {
         crate::style::abgr_u32_to_rgba(col)
     }
 
-    /// Node positions in screen/editor space
+    /// Set a node's position in screen space before submitting that node this frame.
+    ///
+    /// Follow the same call-order requirement as [`Self::set_node_pos_grid`].
     pub fn set_node_pos_screen(&self, node_id: crate::NodeId, pos: [f32; 2]) {
-        self.with_bound_context(|| unsafe {
-            sys::imnodes_SetNodeScreenSpacePos(
-                node_id.raw(),
-                sys::ImVec2_c {
-                    x: pos[0],
-                    y: pos[1],
-                },
-            )
+        assert_finite_position("set_node_pos_screen", pos);
+        self.update_node_options(node_id, |options| {
+            options.position = Some(crate::NodePosition::Screen(pos));
         });
     }
+    /// Set a node's position in editor space before submitting that node this frame.
+    ///
+    /// Follow the same call-order requirement as [`Self::set_node_pos_grid`].
     pub fn set_node_pos_editor(&self, node_id: crate::NodeId, pos: [f32; 2]) {
-        self.with_bound_context(|| unsafe {
-            sys::imnodes_SetNodeEditorSpacePos(
-                node_id.raw(),
-                sys::ImVec2_c {
-                    x: pos[0],
-                    y: pos[1],
-                },
-            )
+        assert_finite_position("set_node_pos_editor", pos);
+        self.update_node_options(node_id, |options| {
+            options.position = Some(crate::NodePosition::Editor(pos));
         });
-    }
-    pub fn get_node_pos_screen(&self, node_id: crate::NodeId) -> [f32; 2] {
-        let out = self
-            .with_bound_context(|| unsafe { sys::imnodes_GetNodeScreenSpacePos(node_id.raw()) });
-        [out.x, out.y]
-    }
-    pub fn get_node_pos_editor(&self, node_id: crate::NodeId) -> [f32; 2] {
-        let out = self
-            .with_bound_context(|| unsafe { sys::imnodes_GetNodeEditorSpacePos(node_id.raw()) });
-        [out.x, out.y]
     }
 
-    /// Node drag/size helpers
+    /// Queue whether a node is draggable when it is submitted this frame.
     pub fn set_node_draggable(&self, node_id: crate::NodeId, draggable: bool) {
-        self.with_bound_context(|| unsafe {
-            sys::imnodes_SetNodeDraggable(node_id.raw(), draggable)
-        })
+        self.update_node_options(node_id, |options| options.draggable = Some(draggable));
     }
+
+    /// Queue grid snapping immediately before the matching node is submitted.
     pub fn snap_node_to_grid(&self, node_id: crate::NodeId) {
-        self.with_bound_context(|| unsafe { sys::imnodes_SnapNodeToGrid(node_id.raw()) })
+        self.update_node_options(node_id, |options| options.snap_to_grid = true);
     }
-    pub fn get_node_dimensions(&self, node_id: crate::NodeId) -> [f32; 2] {
-        let out =
-            self.with_bound_context(|| unsafe { sys::imnodes_GetNodeDimensions(node_id.raw()) });
-        [out.x, out.y]
-    }
+}
+
+fn assert_finite_position(caller: &str, position: [f32; 2]) {
+    assert!(
+        position.into_iter().all(f32::is_finite),
+        "dear-imnodes: {caller} requires finite coordinates"
+    );
 }

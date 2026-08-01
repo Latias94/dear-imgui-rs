@@ -1,4 +1,4 @@
-use super::{Context, EditorContext, NodeEditor, NodesUi};
+use super::{Context, EditorContext, NodeEditorSetup, NodesUi};
 use dear_imgui_rs::Ui;
 
 impl<'ui> NodesUi<'ui> {
@@ -14,23 +14,7 @@ impl<'ui> NodesUi<'ui> {
     }
 
     /// Begin a node editor with an optional EditorContext
-    pub fn editor(&self, editor: Option<&'ui EditorContext>) -> NodeEditor<'ui> {
-        if let Some(editor) = editor {
-            let owner = self._ctx.alive_token();
-            assert!(
-                editor.bound_ctx_alive.is_alive() && editor.bound_ctx_alive.same_context(&owner),
-                "dear-imnodes: EditorContext is bound to a different or destroyed ImNodes context"
-            );
-            assert_eq!(
-                editor.bound_ctx_raw, self._ctx.raw,
-                "dear-imnodes: EditorContext is bound to a different ImNodes context"
-            );
-            assert_eq!(
-                editor.imgui_binding.id(),
-                self._ctx.imgui_binding.id(),
-                "dear-imnodes: EditorContext is bound to a different ImGui context"
-            );
-        }
-        NodeEditor::begin(self._ui, self._ctx, editor)
+    pub fn editor(&self, editor: Option<&EditorContext>) -> NodeEditorSetup<'ui> {
+        NodeEditorSetup::begin(self._ui, self._ctx, editor)
     }
 }

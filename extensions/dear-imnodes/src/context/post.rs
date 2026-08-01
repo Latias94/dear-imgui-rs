@@ -1,6 +1,7 @@
-use super::{Context, ImNodesScope, NodeEditor};
+use super::{Context, ImNodesScope, NodeEditor, NodeEditorSetup};
 use crate::sys;
 use dear_imgui_rs::Ui;
+use std::collections::BTreeSet;
 use std::marker::PhantomData;
 use std::os::raw::c_char;
 use std::rc::Rc;
@@ -23,12 +24,24 @@ pub struct PostEditor<'ui> {
     pub(super) link_started: Option<crate::PinId>,
     pub(super) link_dropped_excluding_detached: Option<crate::PinId>,
     pub(super) link_dropped_including_detached: Option<crate::PinId>,
+    pub(super) submitted_nodes: BTreeSet<crate::NodeId>,
+    pub(super) submitted_links: BTreeSet<crate::LinkId>,
     pub(super) _not_send_sync: PhantomData<Rc<()>>,
+}
+
+impl<'ui> NodeEditorSetup<'ui> {
+    /// End an editor without entering the node-submission phase.
+    pub fn end(self) -> PostEditor<'ui> {
+        self.begin_nodes().end()
+    }
 }
 
 impl<'ui> NodeEditor<'ui> {
     /// Explicitly end the node editor and return post-editor query handle
     pub fn end(mut self) -> PostEditor<'ui> {
+        self.finish_native();
+        let submitted_nodes = self.submitted_nodes.borrow().iter().copied().collect();
+        let submitted_links = self.submitted_links.borrow().iter().copied().collect();
         let scope = self.scope.clone();
         let (
             editor_hovered,
@@ -43,11 +56,6 @@ impl<'ui> NodeEditor<'ui> {
             link_dropped_excluding_detached,
             link_dropped_including_detached,
         ) = scope.with_bound_context(|| {
-            if !self.ended {
-                unsafe { sys::imnodes_EndNodeEditor() };
-                self.ended = true;
-            }
-
             // Capture hover state immediately after EndNodeEditor while the current ImGui window
             // is still the editor host window. This avoids calling ImNodes hover queries later
             // from a different window (e.g. a popup), which can lead to inconsistent behavior.
@@ -185,6 +193,8 @@ impl<'ui> NodeEditor<'ui> {
             link_started,
             link_dropped_excluding_detached,
             link_dropped_including_detached,
+            submitted_nodes,
+            submitted_links,
             _not_send_sync: PhantomData,
         }
     }
@@ -193,6 +203,7 @@ impl<'ui> NodeEditor<'ui> {
 impl<'ui> PostEditor<'ui> {
     #[inline]
     fn with_bound_context<R>(&self, f: impl FnOnce() -> R) -> R {
+        self._ctx.assert_no_active_frame("PostEditor operation");
         self.scope.with_bound_context(f)
     }
 
@@ -259,27 +270,49 @@ impl<'ui> PostEditor<'ui> {
     }
 
     /// Selection helpers per id
-    pub fn select_node(&self, node_id: crate::NodeId) {
-        self.with_bound_context(|| unsafe { sys::imnodes_SelectNode(node_id.raw()) })
+    pub fn select_node(&self, node_id: crate::NodeId) -> bool {
+        if !self.submitted_nodes.contains(&node_id) {
+            return false;
+        }
+        self.with_bound_context(|| unsafe { sys::imnodes_SelectNode(node_id.raw()) });
+        true
     }
 
-    pub fn clear_node_selection_of(&self, node_id: crate::NodeId) {
-        self.with_bound_context(|| unsafe { sys::imnodes_ClearNodeSelection_Int(node_id.raw()) })
+    pub fn clear_node_selection_of(&self, node_id: crate::NodeId) -> bool {
+        if !self.submitted_nodes.contains(&node_id) {
+            return false;
+        }
+        self.with_bound_context(|| unsafe { sys::imnodes_ClearNodeSelection_Int(node_id.raw()) });
+        true
     }
 
     pub fn is_node_selected(&self, node_id: crate::NodeId) -> bool {
+        if !self.submitted_nodes.contains(&node_id) {
+            return false;
+        }
         self.with_bound_context(|| unsafe { sys::imnodes_IsNodeSelected(node_id.raw()) })
     }
 
-    pub fn select_link(&self, link_id: crate::LinkId) {
-        self.with_bound_context(|| unsafe { sys::imnodes_SelectLink(link_id.raw()) })
+    pub fn select_link(&self, link_id: crate::LinkId) -> bool {
+        if !self.submitted_links.contains(&link_id) {
+            return false;
+        }
+        self.with_bound_context(|| unsafe { sys::imnodes_SelectLink(link_id.raw()) });
+        true
     }
 
-    pub fn clear_link_selection_of(&self, link_id: crate::LinkId) {
-        self.with_bound_context(|| unsafe { sys::imnodes_ClearLinkSelection_Int(link_id.raw()) })
+    pub fn clear_link_selection_of(&self, link_id: crate::LinkId) -> bool {
+        if !self.submitted_links.contains(&link_id) {
+            return false;
+        }
+        self.with_bound_context(|| unsafe { sys::imnodes_ClearLinkSelection_Int(link_id.raw()) });
+        true
     }
 
     pub fn is_link_selected(&self, link_id: crate::LinkId) -> bool {
+        if !self.submitted_links.contains(&link_id) {
+            return false;
+        }
         self.with_bound_context(|| unsafe { sys::imnodes_IsLinkSelected(link_id.raw()) })
     }
 
@@ -318,6 +351,18 @@ impl<'ui> PostEditor<'ui> {
         });
     }
 
+    /// Center this editor on a node submitted in the frame that produced this snapshot.
+    ///
+    /// The panning change affects the next editor frame. `false` means `node_id` was not
+    /// submitted by this frame, so no native ImNodes call was made.
+    pub fn center_on_submitted_node(&self, node_id: crate::NodeId) -> bool {
+        if !self.submitted_nodes.contains(&node_id) {
+            return false;
+        }
+        self.with_bound_context(|| unsafe { sys::imnodes_EditorContextMoveToNode(node_id.raw()) });
+        true
+    }
+
     pub fn is_link_created(&self) -> Option<crate::LinkCreated> {
         self.link_created
     }
@@ -344,32 +389,6 @@ impl<'ui> PostEditor<'ui> {
 
     pub fn hovered_pin(&self) -> Option<crate::PinId> {
         self.hovered_pin
-    }
-
-    /// Set a node's position in screen space for the current editor context.
-    pub fn set_node_pos_screen(&self, node_id: crate::NodeId, pos: [f32; 2]) {
-        self.with_bound_context(|| unsafe {
-            sys::imnodes_SetNodeScreenSpacePos(
-                node_id.raw(),
-                sys::ImVec2_c {
-                    x: pos[0],
-                    y: pos[1],
-                },
-            )
-        });
-    }
-
-    /// Set a node's position in grid space for the current editor context.
-    pub fn set_node_pos_grid(&self, node_id: crate::NodeId, pos: [f32; 2]) {
-        self.with_bound_context(|| unsafe {
-            sys::imnodes_SetNodeGridSpacePos(
-                node_id.raw(),
-                sys::ImVec2_c {
-                    x: pos[0],
-                    y: pos[1],
-                },
-            )
-        });
     }
 
     pub fn is_attribute_active(&self) -> bool {

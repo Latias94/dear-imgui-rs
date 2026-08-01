@@ -51,6 +51,25 @@ id_type!(NodeId);
 id_type!(PinId);
 id_type!(LinkId);
 
+/// Deferred node configuration applied immediately before the matching node is submitted.
+///
+/// `NodeEditorSetup` stores these values without touching native ImNodes state. Upstream treats
+/// position and draggable setters as node submissions for bookkeeping purposes, so invoking them
+/// for a node that is not rendered in the same frame is invalid.
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
+pub(crate) struct NodeOptions {
+    pub(crate) position: Option<NodePosition>,
+    pub(crate) draggable: Option<bool>,
+    pub(crate) snap_to_grid: bool,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub(crate) enum NodePosition {
+    Grid([f32; 2]),
+    Editor([f32; 2]),
+    Screen([f32; 2]),
+}
+
 /// ImNodes calls input/output/static endpoints "attributes"; in this crate they share `PinId`.
 pub type AttributeId = PinId;
 

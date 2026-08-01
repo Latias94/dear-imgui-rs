@@ -7,7 +7,9 @@ Safe, idiomatic Rust bindings for [ImNodes](https://github.com/Nelarius/imnodes)
 
 - Ui extension: `ui.imnodes(&ctx)` returns a `NodesUi` for the current frame
 - Contexts: `Context` (global) and `EditorContext` (per-editor) with `Drop`
-- RAII tokens: `editor()`, `node(id)`, `input_attr(id)`, `output_attr(id)`, `static_attr(id)`
+- Typestate editor phases: configure through `NodeEditorSetup`, then consume it with
+  `begin_nodes()` before submitting nodes
+- RAII tokens: `node(id)`, then node-owned `input_attr(id)`, `output_attr(id)`, and `static_attr(id)` scopes
 - Strongly-typed enums/bitflags for style and attributes
 - Helpers: links, selection, node positions, minimap, IO setup
 
@@ -49,7 +51,11 @@ use dear_imnodes as imnodes;
 // Per-frame draw
  fn draw(ui: &Ui, nodes_ctx: &imnodes::Context, editor_ctx: &imnodes::EditorContext) {
     let nodes = ui.imnodes(nodes_ctx);
-    let editor = nodes.editor(Some(editor_ctx));
+    let setup = nodes.editor(Some(editor_ctx));
+
+    // Native node-record mutations must happen before node submission starts.
+    setup.set_node_pos_grid(imnodes::NodeId::new(1), [100.0, 120.0]);
+    let editor = setup.begin_nodes();
 
     // A simple node with input/output pins
     let node = imnodes::NodeId::new(1);
@@ -59,10 +65,10 @@ use dear_imnodes as imnodes;
 
     let node_token = editor.node(node);
     node_token.title_bar(|| ui.text("My Node"));
-    let _in = editor.input_attr(input, imnodes::PinShape::CircleFilled);
+    let _in = node_token.input_attr(input, imnodes::PinShape::CircleFilled);
     ui.text("In");
     _in.end();
-    let _out = editor.output_attr(output, imnodes::PinShape::QuadFilled);
+    let _out = node_token.output_attr(output, imnodes::PinShape::QuadFilled);
     ui.text("Out");
     _out.end();
     node_token.end();
@@ -83,17 +89,17 @@ use dear_imnodes as imnodes;
 
 ### IO and Interaction
 
-Bind common shortcuts to ImNodes IO (call while the editor is active):
+Bind common shortcuts to ImNodes IO during the setup phase:
 
 ```rust
 // Ctrl to detach links; multi-select via Shift; emulate 3-button mouse with Alt
-editor.enable_link_detach_with_ctrl();
-editor.enable_multiple_select_with_shift();
-editor.emulate_three_button_mouse_with_alt();
+setup.enable_link_detach_with_ctrl();
+setup.enable_multiple_select_with_shift();
+setup.emulate_three_button_mouse_with_alt();
 
 // Misc IO tweaks
-editor.set_alt_mouse_button(MouseButton::Right);
-editor.set_auto_panning_speed(200.0);
+setup.set_alt_mouse_button(MouseButton::Right);
+setup.set_auto_panning_speed(200.0);
 ```
 
 ### Styling
@@ -101,10 +107,16 @@ editor.set_auto_panning_speed(200.0);
 Use presets or fine-tune values. You can push scoped styles/colors (RAII) or set persistent style:
 
 ```rust
-// Presets
-editor.style_colors_dark();
+// Persistent configuration belongs to the setup phase.
+setup.style_colors_dark();
+setup.set_grid_spacing(32.0);
+setup.set_node_corner_rounding(6.0);
+let link_rgba = setup.get_color(imnodes::ColorElement::Link);
+setup.set_color(imnodes::ColorElement::GridLinePrimary, [0.6, 0.6, 0.8, 1.0]);
 
-// Push a color for this scope
+let editor = setup.begin_nodes();
+
+// Scoped styles belong to the node-submission phase.
 let _color = editor.push_color(imnodes::ColorElement::Link, [0.9, 0.3, 0.3, 1.0]);
 
 // Push a style var for this scope
@@ -113,29 +125,30 @@ let _sv = editor.push_style_var(
     imnodes::style::StyleVarValue::Float(3.0),
 );
 
-// Persistent style
-editor.set_grid_spacing(32.0);
-editor.set_node_corner_rounding(6.0);
-
-// Read/Write a style color (persistent)
-let link_rgba = editor.get_color(imnodes::ColorElement::Link);
-editor.set_color(imnodes::ColorElement::GridLinePrimary, [0.6, 0.6, 0.8, 1.0]);
 ```
 
 ### Node Positions and Queries
 
- ```rust
- // Position nodes (grid/editor/screen space helpers available)
- let node = imnodes::NodeId::new(1);
- editor.set_node_pos_grid(node, [100.0, 120.0]);
- let size = editor.get_node_dimensions(node); // [w, h]
+```rust
+// Position nodes before submitting them (grid/editor/screen space helpers available)
+let node = imnodes::NodeId::new(1);
+setup.set_node_pos_grid(node, [100.0, 120.0]);
+let editor = setup.begin_nodes();
 
- // End the editor before running post-editor queries
- let post = editor.end();
- if post.is_editor_hovered() { /* ... */ }
- if let Some(node_id) = post.hovered_node() { /* ... */ }
- if post.is_attribute_active() { /* ... */ }
- ```
+// The queued position is applied only when this matching ID is submitted.
+let node_token = editor.node(node);
+// ... submit its title and pins ...
+node_token.end();
+
+// End the editor before running post-editor queries
+let post = editor.end();
+if post.is_editor_hovered() { /* ... */ }
+if let Some(node_id) = post.hovered_node() { /* ... */ }
+if post.is_attribute_active() { /* ... */ }
+
+// Panning changes apply to the next frame and only accept IDs submitted by this frame.
+let centered = post.center_on_submitted_node(node);
+```
 
 ### Selection and Link Lifecycle
 
@@ -146,6 +159,10 @@ editor.set_color(imnodes::ColorElement::GridLinePrimary, [0.6, 0.6, 0.8, 1.0]);
  let selected_nodes = post.selected_nodes();
  let selected_links = post.selected_links();
 
+ // ID-specific operations return false without calling native code when that ID was not
+ // submitted by the frame that produced this PostEditor snapshot.
+ let selected = post.select_node(node_id);
+
  // Link lifecycle
  if let Some(created) = post.is_link_created_with_nodes() {
      // created.start_node, created.start_attr, created.end_node, created.end_attr, created.from_snap
@@ -154,6 +171,8 @@ editor.set_color(imnodes::ColorElement::GridLinePrimary, [0.6, 0.6, 0.8, 1.0]);
      // handle removal
  }
  ```
+
+`NodeEditorSetup`, `NodeEditor`, `PostEditor`, and `BoundEditor` retain an internal lease on an explicit `EditorContext`. Dropping the public editor handle after creating one of these scopes is safe; the native editor is released after its final Rust scope ends.
 
 ### Saving/Loading Editor State
 

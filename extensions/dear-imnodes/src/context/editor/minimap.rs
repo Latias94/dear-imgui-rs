@@ -1,10 +1,13 @@
-use super::super::{MiniMapCallbackHolder, NodeEditor};
+use super::super::{EditorScope, MiniMapCallbackHolder, NodeEditor};
 use crate::sys;
 use std::os::raw::c_void;
 
 impl<'ui> NodeEditor<'ui> {
     /// Draw a minimap in the editor
     pub fn minimap(&self, size_fraction: f32, location: crate::MiniMapLocation) {
+        self.require_scope(EditorScope::Editor, "NodeEditor::minimap()");
+        validate_size_fraction(size_fraction);
+        self.finalizing.set(true);
         self.with_bound_context(|| unsafe {
             sys::imnodes_MiniMap(
                 size_fraction,
@@ -24,6 +27,9 @@ impl<'ui> NodeEditor<'ui> {
     ) where
         F: FnMut(crate::NodeId) + 'ui,
     {
+        self.require_scope(EditorScope::Editor, "NodeEditor::minimap_with_callback()");
+        validate_size_fraction(size_fraction);
+        self.finalizing.set(true);
         unsafe extern "C" fn trampoline(node_id: i32, user: *mut c_void) {
             if user.is_null() {
                 return;
@@ -57,4 +63,11 @@ impl<'ui> NodeEditor<'ui> {
             )
         });
     }
+}
+
+fn validate_size_fraction(size_fraction: f32) {
+    assert!(
+        size_fraction.is_finite() && size_fraction > 0.0 && size_fraction <= 1.0,
+        "dear-imnodes: minimap size fraction must be finite and in (0, 1]"
+    );
 }

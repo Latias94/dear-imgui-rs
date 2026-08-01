@@ -24,7 +24,11 @@ fn basic_editor_smoke_test() {
     let frame = imgui.begin_frame();
 
     // Begin an editor scope and end it explicitly
-    let editor_ui = frame.ui().imnodes(&imnodes_ctx).editor(Some(&editor));
+    let editor_ui = frame
+        .ui()
+        .imnodes(&imnodes_ctx)
+        .editor(Some(&editor))
+        .begin_nodes();
 
     // Create a trivial node (no actual widgets, just exercise Begin/End)
     let node_id = imnodes::NodeId::new(1);
