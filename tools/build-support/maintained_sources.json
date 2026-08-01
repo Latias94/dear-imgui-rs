@@ -113,7 +113,7 @@
       "api_contract": { "kind": "cimgui-generator", "locations": ["imnodes"] },
       "files": [
         { "id": "wrapper", "canonical": "third-party/cimnodes/cimnodes.cpp", "alternates": [], "provider_transform": "direct" },
-        { "id": "core", "canonical": "third-party/cimnodes/imnodes/imnodes.cpp", "alternates": [], "provider_transform": "direct" },
+        { "id": "core", "canonical": "third-party/cimnodes/imnodes/imnodes.cpp", "alternates": [], "provider_transform": "patch-imnodes-file-io" },
         { "id": "shim", "canonical": "shim/imnodes_extra.cpp", "alternates": [], "provider_transform": "direct" }
       ],
       "native_required_files": ["wrapper", "core", "shim"],

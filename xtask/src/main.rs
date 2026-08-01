@@ -1286,7 +1286,9 @@ fn prepare_wasm_provider_inputs(
         for provider_source in source.provider_sources(&crate_root)? {
             match provider_source.transform {
                 ProviderTransform::Direct => source_files.push(provider_source.path),
-                ProviderTransform::PatchImguiCore | ProviderTransform::PatchImguiDemo => {
+                ProviderTransform::PatchImguiCore
+                | ProviderTransform::PatchImguiDemo
+                | ProviderTransform::PatchImnodesFileIo => {
                     let contents =
                         fs::read_to_string(&provider_source.path).with_context(|| {
                             format!("read provider source {}", provider_source.path.display())
@@ -1297,6 +1299,9 @@ fn prepare_wasm_provider_inputs(
                         }
                         ProviderTransform::PatchImguiDemo => {
                             build_support::patch_imgui_demo_cpp_for_safe_demo(&contents)
+                        }
+                        ProviderTransform::PatchImnodesFileIo => {
+                            build_support::patch_imnodes_cpp_for_file_handle(&contents)
                         }
                         ProviderTransform::Direct => unreachable!(),
                     }
@@ -1683,6 +1688,18 @@ mod tests {
                 .iter()
                 .all(|path| !path.ends_with("imGuIZMOquat.cpp"))
         );
+        let imnodes_source = inputs
+            .source_files
+            .iter()
+            .find(|path| {
+                path.file_name()
+                    .is_some_and(|name| name == "provider-imnodes-core-patched.cpp")
+            })
+            .expect("missing patched ImNodes provider source");
+        let imnodes_source = std::fs::read_to_string(imnodes_source).unwrap();
+        assert!(imnodes_source.contains("ImFileHandle file = ImFileOpen"));
+        assert!(imnodes_source.contains("ImFileWrite(data, sizeof(char), data_size, file);"));
+        assert!(imnodes_source.contains("ImFileClose(file);"));
     }
 
     #[test]

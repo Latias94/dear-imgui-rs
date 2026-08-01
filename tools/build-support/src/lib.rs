@@ -621,6 +621,45 @@ pub fn patch_imgui_demo_cpp_for_safe_demo(source: &str) -> Result<String, String
     Ok(restore_cpp_newlines(patched, newline))
 }
 
+/// Patch ImNodes persistence to use Dear ImGui's file-handle abstraction.
+///
+/// Upstream ImNodes currently assigns `ImFileOpen()` to `FILE*` and calls the
+/// C runtime directly. That is incompatible with `IMGUI_DISABLE_FILE_FUNCTIONS`,
+/// where Dear ImGui intentionally defines `ImFileHandle` as an opaque pointer
+/// and provides fail-closed inline file helpers.
+pub fn patch_imnodes_cpp_for_file_handle(source: &str) -> Result<String, String> {
+    let (mut patched, newline) = normalize_cpp_source(source);
+
+    patched = replace_cpp_source_once(
+        &patched,
+        concat!(
+            "    size_t      data_size = 0u;\n",
+            "    const char* data = SaveEditorStateToIniString(editor, &data_size);\n",
+            "    FILE*       file = ImFileOpen(file_name, \"wt\");"
+        ),
+        concat!(
+            "    size_t       data_size = 0u;\n",
+            "    const char*  data = SaveEditorStateToIniString(editor, &data_size);\n",
+            "    ImFileHandle file = ImFileOpen(file_name, \"wt\");"
+        ),
+        "ImNodes save-state file handle",
+    )?;
+    patched = replace_cpp_source_once(
+        &patched,
+        concat!(
+            "    fwrite(data, sizeof(char), data_size, file);\n",
+            "    fclose(file);"
+        ),
+        concat!(
+            "    ImFileWrite(data, sizeof(char), data_size, file);\n",
+            "    ImFileClose(file);"
+        ),
+        "ImNodes save-state file operations",
+    )?;
+
+    Ok(restore_cpp_newlines(patched, newline))
+}
+
 fn normalize_cpp_source(source: &str) -> (String, &'static str) {
     let newline = if source.contains("\r\n") {
         "\r\n"
@@ -6585,6 +6624,37 @@ mod tests {
         assert!(
             patched.contains("void DearImGuiRsShowStyleEditorWithoutFontAtlas(ImGuiStyle* ref)")
         );
+    }
+
+    #[test]
+    fn imnodes_file_patch_uses_imgui_file_handles_when_file_functions_are_disabled() {
+        let source = include_str!(concat!(
+            "../../../extensions/dear-imnodes-sys/third-party/",
+            "cimnodes/imnodes/imnodes.cpp"
+        ));
+        let patched = patch_imnodes_cpp_for_file_handle(source).unwrap();
+
+        assert!(patched.contains("ImFileHandle file = ImFileOpen(file_name, \"wt\");"));
+        assert!(patched.contains("ImFileWrite(data, sizeof(char), data_size, file);"));
+        assert!(patched.contains("ImFileClose(file);"));
+        assert!(!patched.contains("FILE*       file = ImFileOpen(file_name, \"wt\");"));
+        assert!(!patched.contains("fwrite(data, sizeof(char), data_size, file);"));
+        assert!(!patched.contains("fclose(file);"));
+    }
+
+    #[test]
+    fn imnodes_file_patch_preserves_crlf_inputs() {
+        let source = include_str!(concat!(
+            "../../../extensions/dear-imnodes-sys/third-party/",
+            "cimnodes/imnodes/imnodes.cpp"
+        ))
+        .replace('\n', "\r\n");
+        let patched = patch_imnodes_cpp_for_file_handle(&source).unwrap();
+
+        assert!(patched.contains(
+            "ImFileWrite(data, sizeof(char), data_size, file);\r\n    ImFileClose(file);"
+        ));
+        assert!(!patched.replace("\r\n", "").contains('\n'));
     }
 
     #[test]

@@ -99,6 +99,7 @@ pub enum ProviderTransform {
     Direct,
     PatchImguiCore,
     PatchImguiDemo,
+    PatchImnodesFileIo,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]

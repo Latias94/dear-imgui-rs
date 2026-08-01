@@ -289,7 +289,12 @@ def _parse_source_file(raw: Any, source_context: str, index: int) -> MaintainedS
     transform = data["provider_transform"]
     if transform is not None:
         transform = _string(transform, f"{context}.provider_transform")
-        if transform not in {"direct", "patch-imgui-core", "patch-imgui-demo"}:
+        if transform not in {
+            "direct",
+            "patch-imgui-core",
+            "patch-imgui-demo",
+            "patch-imnodes-file-io",
+        }:
             raise SourceInventoryError(
                 f"{context}.provider_transform has unsupported value {transform!r}"
             )
