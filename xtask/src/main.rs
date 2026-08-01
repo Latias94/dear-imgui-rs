@@ -2,13 +2,13 @@ use anyhow::{Context, Result};
 use build_support::binding::{
     BindingFormatter, BindingOwner, BindingRustEdition, BindingSpec, BindingTarget,
     CANONICAL_BINDING_LIBCLANG_VERSION, CANONICAL_BINDING_RUSTC_VERSION,
-    CANONICAL_BINDING_RUSTFMT_VERSION, CrateBindingIncludeRoot, CrateBindingLanguage,
-    CrateBindingSpec, CrateBindingTarget, ExtensionBinding, NativeAbiProfile,
+    CANONICAL_BINDING_RUSTFMT_VERSION, CrateBindingDefine, CrateBindingIncludeRoot,
+    CrateBindingLanguage, CrateBindingSpec, CrateBindingTarget, ExtensionBinding, NativeAbiProfile,
     validate_bindgen_environment,
 };
 use std::{
     borrow::Cow,
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::{Path, PathBuf},
 };
@@ -1121,8 +1121,30 @@ fn find_emsdk_tools() -> Result<(std::path::PathBuf, std::path::PathBuf, std::pa
 struct WasmProviderInputs {
     module_name: String,
     exports: BTreeSet<String>,
+    compile_defines: Vec<String>,
     include_dirs: Vec<PathBuf>,
     source_files: Vec<PathBuf>,
+}
+
+fn insert_provider_compile_define(
+    defines: &mut BTreeMap<String, Option<String>>,
+    define: CrateBindingDefine<'_>,
+    source: &str,
+) -> Result<()> {
+    let value = define.value.map(str::to_owned);
+    if let Some(existing) = defines.get(define.name) {
+        if existing != &value {
+            anyhow::bail!(
+                "WebAssembly provider define {} conflicts between maintained profiles: {:?} vs {:?} from {source}",
+                define.name,
+                existing,
+                value
+            );
+        }
+        return Ok(());
+    }
+    defines.insert(define.name.to_owned(), value);
+    Ok(())
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1173,8 +1195,31 @@ fn prepare_wasm_provider_inputs(
     use build_support::source_inventory::{ProviderTransform, parse_wasm_imports};
 
     let mut exports = BTreeSet::new();
+    let mut compile_defines = BTreeMap::new();
     let mut include_dirs = Vec::new();
     let mut source_files = Vec::new();
+
+    let core_spec = BindingSpec::core_wasm(inventory.wasm_import_module.clone());
+    for define in core_spec
+        .clang_defines
+        .iter()
+        .filter_map(|definition| CrateBindingDefine::from_definition(definition))
+        .filter(|define| define.applies_to_native_compilation())
+    {
+        insert_provider_compile_define(&mut compile_defines, define, "dear-imgui-sys")?;
+    }
+    for define in [
+        CrateBindingDefine {
+            name: "IMGUI_DEFINE_MATH_OPERATORS",
+            value: Some("1"),
+        },
+        CrateBindingDefine {
+            name: "IMNODES_NAMESPACE",
+            value: Some("imnodes"),
+        },
+    ] {
+        insert_provider_compile_define(&mut compile_defines, define, "provider runtime")?;
+    }
 
     for source in inventory
         .sources
@@ -1184,6 +1229,19 @@ fn prepare_wasm_provider_inputs(
         let provider = source.provider.as_ref().expect("filtered provider source");
         let crate_root = root.join(&source.crate_root);
         source.resolve_source_root(&crate_root)?;
+
+        if source.crate_name != "dear-imgui-sys" {
+            let spec = CrateBindingSpec::for_crate_and_target(&source.crate_name, "wasm")
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "{} declares a WebAssembly provider without a canonical wasm binding spec",
+                        source.crate_name
+                    )
+                })?;
+            for define in spec.native_binding_defines() {
+                insert_provider_compile_define(&mut compile_defines, define, &source.crate_name)?;
+            }
+        }
 
         let bindings_path = crate_root.join(&provider.wasm_bindings);
         let bindings = fs::read_to_string(&bindings_path)
@@ -1262,6 +1320,13 @@ fn prepare_wasm_provider_inputs(
     Ok(WasmProviderInputs {
         module_name: inventory.wasm_import_module.clone(),
         exports,
+        compile_defines: compile_defines
+            .into_iter()
+            .map(|(name, value)| match value {
+                Some(value) => format!("-D{name}={value}"),
+                None => format!("-D{name}"),
+            })
+            .collect(),
         include_dirs,
         source_files,
     })
@@ -1321,6 +1386,7 @@ fn build_cimgui_provider(options: BuildProviderOptions) -> Result<()> {
     let WasmProviderInputs {
         module_name,
         exports: names,
+        compile_defines,
         include_dirs,
         source_files,
     } = prepare_wasm_provider_inputs(inventory, &source_root, &out_dir)?;
@@ -1381,13 +1447,10 @@ fn build_cimgui_provider(options: BuildProviderOptions) -> Result<()> {
                 .replace('\\', "/") // emscripten on Windows accepts fwd slashes
         ))
         .arg("-fno-exceptions")
-        .arg("-fno-rtti")
-        .arg("-DIMGUI_DISABLE_OBSOLETE_FUNCTIONS")
-        .arg("-DIMGUI_DISABLE_OSX_FUNCTIONS")
-        .arg("-DIMGUI_DISABLE_WIN32_FUNCTIONS")
-        .arg("-DIMNODES_NAMESPACE=imnodes")
-        .arg("-DIMGUI_DEFINE_MATH_OPERATORS=1")
-        .arg("-DIMGUI_USE_WCHAR32");
+        .arg("-fno-rtti");
+    for define in &compile_defines {
+        cmd.arg(define);
+    }
     for include_dir in &include_dirs {
         cmd.arg("-I").arg(include_dir);
     }
@@ -1577,6 +1640,31 @@ mod tests {
                 .contains("EmulateThreeButtonMouse_EmulateThreeButtonMouse")
         );
         assert!(inputs.exports.contains("Style_Style"));
+        for symbol in [
+            "ImPlot_Annotation_Str0",
+            "ImPlot_TagX_Str0",
+            "ImPlot_TagY_Str0",
+        ] {
+            assert!(inputs.exports.contains(symbol), "missing export {symbol}");
+        }
+        assert!(
+            inputs
+                .compile_defines
+                .iter()
+                .any(|define| define == "-DCIMGUI_VARGS0")
+        );
+        assert!(
+            inputs
+                .compile_defines
+                .iter()
+                .any(|define| define == "-DIMGUI_DISABLE_FILE_FUNCTIONS")
+        );
+        assert!(
+            !inputs
+                .compile_defines
+                .iter()
+                .any(|define| define == "-DCIMGUI_DEFINE_ENUMS_AND_STRUCTS")
+        );
         assert!(
             inputs
                 .source_files
