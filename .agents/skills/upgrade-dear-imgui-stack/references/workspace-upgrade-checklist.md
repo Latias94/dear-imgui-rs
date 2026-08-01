@@ -97,6 +97,7 @@ Run that in each standalone example workspace that carries its own `Cargo.lock`.
    - For `dear-node-editor`, audit the local `dne_*` C ABI shim first; do not expose upstream `NodeId*` / `PinId*` / `LinkId*` helper-pointer APIs directly.
    - Audit new enums, flags, struct fields, style/spec arrays, callback setters, and renamed upstream items.
    - Audit removed functions and changed return types as source-breaking changes; generated code compiling does not prove the old safe wrapper still models upstream behavior.
+   - Inspect every zero-argument/non-variadic text wrapper before passing user strings to it. Names such as `Str0` describe the C ABI, not necessarily literal-text semantics; reject raw format strings in safe Rust unless every directive is escaped or a first-party `%s` shim is used.
    - Prefer transparent wrappers over handwritten native structure mirrors. If a mirror is required, validate field offsets and a semantic sentinel that distinguishes count, frame, ID, and pointer fields; size/alignment assertions alone cannot catch same-sized substitutions.
    - Trace hidden queue, ownership, and lifecycle fields through upstream implementation code. Check native auto-transitions against Rust sidecars, renderer feedback, abandoned work, retries, and teardown.
    - If the new sys surface makes the old safe shape awkward, refactor the safe layer instead of layering compatibility hacks.
@@ -108,6 +109,7 @@ Run that in each standalone example workspace that carries its own `Cargo.lock`.
    - Check `dear-imgui-sdl3`, `dear-imgui-wgpu`, `dear-imgui-winit`, `dear-imgui-glow`, `dear-imgui-ash`.
    - If backend exposure changed, adapt public APIs and repository-local examples, including iOS / Android smoke examples when relevant.
    - When core public aggregate layouts changed, run the `abi-probe` source-build profile. Check C++ size, alignment, and field offsets against Rust; keep that compiler-dependent proof out of normal prebuilt consumer builds.
+   - Build and inspect the real Emscripten provider after binding regeneration. Derive provider definitions from the canonical core/extension binding profiles, fail on conflicting definitions, and require any source adaptation to be a named inventory transform with an exact upstream-drift test.
 
 3. Test engine
    - Update `extensions/dear-imgui-test-engine-sys/third-party/imgui_test_engine`.
