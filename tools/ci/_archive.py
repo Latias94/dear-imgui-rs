@@ -28,7 +28,6 @@ REQUIRED_CORE_BINDINGS = (
     "src/wasm_bindings_pregenerated.rs",
 )
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SYS_SENTINELS = load_inventory(REPO_ROOT).archive_sentinels(REPO_ROOT)
 
 
 def _normalized_archive_path(name: str, archive: Path) -> PurePosixPath:
@@ -175,10 +174,12 @@ def verify_source_archives(
     archive_dir: Path,
     packages: Sequence[PackageRecord],
     *,
-    sys_sentinels: Mapping[str, Sequence[str]] = SYS_SENTINELS,
+    sys_sentinels: Mapping[str, Sequence[str]] | None = None,
     known_archive_members: Mapping[Path, set[str]] | None = None,
 ) -> None:
     """Audit every source archive and all native-source sentinel contracts."""
+    if sys_sentinels is None:
+        sys_sentinels = load_inventory(REPO_ROOT).archive_sentinels(REPO_ROOT)
     expected_sys_packages = {
         package.name for package in packages if package.name.endswith("-sys")
     }

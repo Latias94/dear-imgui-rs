@@ -1,5 +1,6 @@
 import io
 import json
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -24,6 +25,30 @@ def write_json(path: Path, value: object) -> None:
     path.write_bytes(
         (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
     )
+
+
+class ImportTests(unittest.TestCase):
+    def test_runtime_finalizer_import_does_not_require_native_submodules(self):
+        script = f"""
+import sys
+sys.path.insert(0, {str(CI_DIR)!r})
+import _source_inventory
+
+def reject_inventory_access(*_args, **_kwargs):
+    raise AssertionError("release_cell import resolved native source inventory")
+
+_source_inventory.load_inventory = reject_inventory_access
+import release_cell
+"""
+        result = subprocess.run(
+            (sys.executable, "-c", script),
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 class CaptureTests(unittest.TestCase):
