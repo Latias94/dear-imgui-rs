@@ -800,13 +800,16 @@ class RuntimeFinalizeTests(unittest.TestCase):
     def test_sdl3_glow_viewport_cell_uses_its_exact_stable_evidence_contract(self):
         files = (
             "runtime-environment.json",
-            "viewport-result.json",
+            "viewport-sampler-objects-result.json",
+            "viewport-texture-parameters-result.json",
             "display.stdout.log",
             "display.stderr.log",
             "renderer.stdout.log",
             "renderer.stderr.log",
-            "viewport.stdout.log",
-            "viewport.stderr.log",
+            "viewport-sampler-objects.stdout.log",
+            "viewport-sampler-objects.stderr.log",
+            "viewport-texture-parameters.stdout.log",
+            "viewport-texture-parameters.stderr.log",
         )
         first = self.write_attempt(
             "sdl3-glow-viewport-attempt",
@@ -834,7 +837,12 @@ class RuntimeFinalizeTests(unittest.TestCase):
             record["cell_id"], "linux-sdl3-glow-multi-viewport-smoke"
         )
         self.assertEqual(record["conclusion"], "success")
-        self.assertTrue((self.cell / "runtime/viewport-result.json").is_file())
+        self.assertTrue(
+            (self.cell / "runtime/viewport-sampler-objects-result.json").is_file()
+        )
+        self.assertTrue(
+            (self.cell / "runtime/viewport-texture-parameters-result.json").is_file()
+        )
 
     def test_ash_vulkan_cell_uses_its_exact_stable_evidence_contract(self):
         files = (

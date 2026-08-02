@@ -580,7 +580,19 @@ class AggregateTests(unittest.TestCase):
             requirements["linux-ash-vulkan-validation-smoke"],
         )
         self.assertIn(
-            ("logs", "runtime/renderer.stdout.log"),
+            ("artifacts", "runtime/viewport-sampler-objects-result.json"),
+            requirements["linux-sdl3-glow-multi-viewport-smoke"],
+        )
+        self.assertIn(
+            ("artifacts", "runtime/viewport-texture-parameters-result.json"),
+            requirements["linux-sdl3-glow-multi-viewport-smoke"],
+        )
+        self.assertIn(
+            ("logs", "runtime/viewport-sampler-objects.stdout.log"),
+            requirements["linux-sdl3-glow-multi-viewport-smoke"],
+        )
+        self.assertIn(
+            ("logs", "runtime/viewport-texture-parameters.stdout.log"),
             requirements["linux-sdl3-glow-multi-viewport-smoke"],
         )
         self.assertIn(
