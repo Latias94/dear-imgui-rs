@@ -11,7 +11,7 @@ The workspace uses a **unified release train** model. All 27 publishable package
 ### Prepare a New Release
 
 ```bash
-# Generate the complete 0.16.0-alpha.1 release diff.
+# Generate the complete release diff.
 python3 tools/tasks.py release-prepare 0.16.0-alpha.1
 
 # Review and commit versions, bindings, lockfile, changelog, and docs.
@@ -22,29 +22,13 @@ git commit -m "chore: prepare release v0.16.0-alpha.1"
 # Validate the committed clean release candidate.
 python3 tools/tasks.py release-check
 
-# Record this exact 40-hex commit and dispatch release-gate.yml with it as
-# candidate_sha. Do not substitute a branch or tag that can move.
-git rev-parse HEAD
-gh workflow run release-gate.yml -f candidate_sha=FULL_40_HEX_SHA
+# After merging to main and normal CI passes, run the complete release.
+gh workflow run release.yml --ref main -f tag=v0.16.0-alpha.1
 ```
 
 `release-prepare` intentionally leaves changes in the working tree. `release-check` runs the strict clean-tree, changelog, locked dependency graph, reproducible binding, package/offline, documentation, and test gates. Keeping these phases separate prevents release preparation from failing its own clean-tree check.
 
-Local success is necessary but not sufficient for release. The remote release
-gate must return `Go` for the same candidate SHA across all 14 required cells.
-Download that run's authoritative `gate-result.json`; crates.io upload and the
-GitHub Release both verify its exact SHA and complete inventory.
-
-### Publish to crates.io
-
-```bash
-# Dry run first (recommended)
-python3 tools/tasks.py publish --dry-run
-
-# Actual upload requires the same-SHA remote aggregate.
-python3 tools/tasks.py publish \
-  --release-gate-result artifacts/release-gate/gate-result.json
-```
+Local success is necessary but not sufficient. `release.yml` binds the tag to the exact `main` commit, runs all 16 release cells, publishes the complete 27-crate train through Trusted Publishing, verifies every exact registry version, and only then creates the tag and GitHub Release.
 
 ## Available Scripts
 
@@ -116,38 +100,25 @@ The command updates the root release version and inherited internal dependency r
 
 ### 4. `publish.py` - Publishing Script
 
-Publishes all crates in the correct dependency order.
+`release.yml` is the normal publishing entry point. `publish.py` provides previews, exact registry verification, and a manual recovery path for the complete dependency train.
 
 ```bash
 # Dry run (show what would be published)
 python3 tools/publish.py --dry-run
 
-# Publish all crates after authoritative evidence verification
-python3 tools/publish.py \
-  --release-gate-result artifacts/release-gate/gate-result.json
+# Cargo package dry-run for a selected crate
+python3 tools/publish.py --cargo-dry-run --crates dear-imgui-sys
 
-# Publish specific crates
+# Manual full-train upload after authoritative evidence verification
 python3 tools/publish.py \
   --release-gate-result artifacts/release-gate/gate-result.json \
-  --crates dear-imgui-sys,dear-imgui-rs
+  --yes
 
-# Resume from a specific crate
-python3 tools/publish.py \
-  --release-gate-result artifacts/release-gate/gate-result.json \
-  --start-from dear-implot-sys
-
-# Adjust wait time between publishes
-python3 tools/publish.py \
-  --release-gate-result artifacts/release-gate/gate-result.json \
-  --wait 60
+# Confirm every exact workspace version is available
+python3 tools/publish.py --verify-published
 ```
 
-Print-only `--dry-run` validates metadata and shows commands without running the
-expensive release gate. `--cargo-dry-run` reruns the local clean-tree preflight.
-Real uploads additionally require `--release-gate-result`, verify its exact
-`HEAD` and 14-cell `Go` decision before any network command, explicitly target
-the `crates-io` registry, and verify the validated Git fingerprint again before
-every Cargo publish command.
+Print-only `--dry-run` validates metadata without running the expensive gate. `--cargo-dry-run` runs the strict local preflight. Real uploads require the complete same-SHA 16-cell `Go` result, reject partial crate selection, target `crates-io` explicitly, recheck the clean Git fingerprint before every upload, and automatically skip an exact version only when the published Cargo archive records the same clean candidate commit. `--journal PATH` writes resumable machine-readable state.
 
 **Publishing Order:**
 1. Build tooling: `dear-imgui-build-support`
@@ -300,106 +271,23 @@ a smaller list.
 
 ## Typical Release Workflow
 
-### Option 1: Recommended Two-Phase Workflow
-
 ```bash
 # 1. Generate versions, bindings, provenance, and lockfile changes.
 python3 tools/tasks.py release-prepare 0.16.0-alpha.1
 
-# 2. Review generated and hand-written release changes.
+# 2. Review CHANGELOG.md, compatibility docs, generated files, and Cargo.lock.
 git diff
-# - Edit CHANGELOG.md
-#   - Keep changelog prose soft-wrapped; do not hard-wrap bullet text to a fixed column.
-# - Update README.md compatibility table
-# - Update docs/COMPATIBILITY.md
 
-# 3. Commit the release candidate.
+# 3. Commit and validate the exact candidate.
 git add -A
 git commit -m "chore: prepare release v0.16.0-alpha.1"
-
-# 4. Run strict checks against the clean committed tree.
 python3 tools/tasks.py release-check
 
-# 5. Dispatch .github/workflows/release-gate.yml for the exact SHA printed here.
-git rev-parse HEAD
-gh workflow run release-gate.yml -f candidate_sha=FULL_40_HEX_SHA
-# Wait for its complete 14-cell Go result, then download the aggregate.
-gh run download RELEASE_GATE_RUN_ID \
-  --name release-gate-FULL_40_HEX_SHA \
-  --dir artifacts/release-gate
-
-# 6. Publish (dry run first).
-python3 tools/tasks.py publish --dry-run
-python3 tools/tasks.py publish \
-  --release-gate-result artifacts/release-gate/gate-result.json
-
-# 7. Tag and push the already-verified commit.
-git tag -a v0.16.0-alpha.1 -m "Release v0.16.0-alpha.1"
-git push origin main
-git push origin v0.16.0-alpha.1
-
-# 8. Create the GitHub Release only through the verified workflow.
-gh workflow run release.yml \
-  -f tag=v0.16.0-alpha.1 \
-  -f candidate_sha=FULL_40_HEX_SHA \
-  -f gate_run_id=RELEASE_GATE_RUN_ID
+# 4. Merge to main, require normal CI to pass, then run the complete release.
+gh workflow run release.yml --ref main -f tag=v0.16.0-alpha.1
 ```
 
-### Option 2: Step-by-Step
-
-```bash
-# 1. Update the single workspace release version
-cargo run -p xtask -- release-version 0.16.0-alpha.1 --allow-prerelease-relabel
-
-# 2. Regenerate bindings without moving third-party submodules
-python3 tools/tasks.py bindings
-
-# 3. Verify the version command left a locked dependency graph
-cargo metadata --locked --format-version 1 --no-deps > /dev/null
-
-# 4. Run the repository's feature-safe test matrix
-python3 tools/tasks.py test
-
-# 5. Verify core binding drift
-cargo run -p xtask -- verify-bindings
-
-# 6. Update documentation
-# - CHANGELOG.md
-#   - Keep prose soft-wrapped
-# - README.md
-# - docs/COMPATIBILITY.md
-
-# 7. Commit changes
-git add -A
-git commit -m "chore: prepare release v0.16.0-alpha.1"
-
-# 8. Run the strict clean-tree release gate
-python3 tools/tasks.py release-check
-
-# 9. Run the remote release gate for this exact committed HEAD and download its
-# complete Go gate-result.json.
-git rev-parse HEAD
-gh workflow run release-gate.yml -f candidate_sha=FULL_40_HEX_SHA
-gh run download RELEASE_GATE_RUN_ID \
-  --name release-gate-FULL_40_HEX_SHA \
-  --dir artifacts/release-gate
-
-# 10. Publish
-python3 tools/publish.py --dry-run  # Dry run first
-python3 tools/publish.py \
-  --release-gate-result artifacts/release-gate/gate-result.json
-
-# 11. Tag and push
-git tag -a v0.16.0-alpha.1 -m "Release v0.16.0-alpha.1"
-git push origin main
-git push origin v0.16.0-alpha.1
-
-# 12. Dispatch release.yml with all three required inputs.
-gh workflow run release.yml \
-  -f tag=v0.16.0-alpha.1 \
-  -f candidate_sha=FULL_40_HEX_SHA \
-  -f gate_run_id=RELEASE_GATE_RUN_ID
-```
+The release workflow runs the fixed 16-cell gate in the same workflow run, acquires a short-lived crates.io token only after package verification, resumes exact already-published versions automatically, and creates the tag and GitHub Release only after all 27 crates are available.
 
 ## Common Tasks
 
@@ -447,22 +335,18 @@ DOCS_RS=1 cargo check -p dear-imgui-test-engine-sys
 
 ### Resume Publishing After Failure
 
-If publishing fails partway through:
+Re-run failed jobs in the same release workflow. The publisher queries every exact version and skips crates that already succeeded:
 
 ```bash
-# Resume from the failed crate
-python3 tools/publish.py \
-  --release-gate-result artifacts/release-gate/gate-result.json \
-  --start-from dear-implot-sys
+gh run rerun RUN_ID --failed
 ```
 
-### Publish Only Specific Crates
+Starting a new `release.yml` run is safe but repeats all 16 release cells. Real uploads intentionally do not support `--start-from` or a partial `--crates` list because the release train is one contract.
+
+### Preview Specific Crates
 
 ```bash
-# Publish only backend crates
-python3 tools/publish.py \
-  --release-gate-result artifacts/release-gate/gate-result.json \
-  --crates dear-imgui-winit,dear-imgui-wgpu,dear-imgui-glow,dear-imgui-ash,dear-imgui-sdl3,dear-imgui-bevy
+python3 tools/publish.py --cargo-dry-run --crates dear-imgui-winit,dear-imgui-wgpu
 ```
 
 ## Requirements
@@ -471,7 +355,8 @@ All scripts require:
 - **Python 3.11+**
 - **cargo** in PATH
 - **git** in PATH (for submodule management)
-- **Logged in to crates.io**: `cargo login <token>`
+
+CI publishing additionally requires the protected `release` environment and crates.io Trusted Publisher entries described in [`docs/PUBLISHING.md`](../docs/PUBLISHING.md). A manual fallback requires `CARGO_REGISTRY_TOKEN`; normal CI does not store a registry token.
 
 ## Troubleshooting
 
@@ -489,18 +374,15 @@ Make scripts executable:
 chmod +x tools/*.py
 ```
 
-### Publishing Fails with "already published"
+### Publishing Stops Partway Through
 
-Published versions cannot be overwritten. The script can skip an already
-published crate; if the release is defective, prepare and publish a new version:
+Published versions cannot be overwritten. Re-run the failed workflow jobs to complete the same version; exact versions already present are idempotent successes. If the release itself is defective, prepare a new version and optionally yank affected versions:
 ```bash
 cargo yank --registry crates-io --vers <published-version> dear-imgui-sys
 python3 tools/tasks.py release-prepare <next-version>
-# Review and commit, then run the strict gate from the clean tree.
+# Review, commit, and merge the candidate, then run the complete release workflow.
 python3 tools/tasks.py release-check
-# Run the new patch candidate through release-gate.yml, download its Go result, then:
-python3 tools/publish.py \
-  --release-gate-result artifacts/release-gate/gate-result.json
+gh workflow run release.yml --ref main -f tag=v<next-version>
 ```
 
 ### docs.rs Build Failures

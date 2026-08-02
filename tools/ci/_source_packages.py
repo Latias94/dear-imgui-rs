@@ -300,8 +300,12 @@ def host_target() -> str:
     return hosts[0]
 
 
-def verify_packaged_core(workspace_root: Path = WORKSPACE_ROOT) -> None:
-    """Run the complete source-package and host-prebuilt release gate."""
+def verify_source_packages(
+    workspace_root: Path = WORKSPACE_ROOT,
+    *,
+    include_host_prebuilt: bool = False,
+) -> None:
+    """Verify every publishable source archive from an isolated checkout."""
     workspace_root = workspace_root.resolve()
     _require_clean_source_checkout(workspace_root)
     candidate_result = run(
@@ -484,20 +488,24 @@ def verify_packaged_core(workspace_root: Path = WORKSPACE_ROOT) -> None:
                 cwd=package_workspace,
                 env=environment({"CARGO_TARGET_DIR": target_dir}),
             )
-        native_package_dir = work_dir / "native-packages"
-        native_package_dir.mkdir()
-        native_crt = build_host_prebuilt_packages(
-            package_workspace, target_dir, native_package_dir, candidate_sha
-        )
-        verify_prebuilt_packages(
-            native_package_dir,
-            host_target(),
-            candidate_sha,
-            crt=native_crt,
-            source_root=package_workspace,
-            profile_scope="base",
-        )
-    print(
-        "Verified packaged core consumers and "
-        f"{len(packages)} publishable source archives."
-    )
+        if include_host_prebuilt:
+            native_package_dir = work_dir / "native-packages"
+            native_package_dir.mkdir()
+            native_crt = build_host_prebuilt_packages(
+                package_workspace, target_dir, native_package_dir, candidate_sha
+            )
+            verify_prebuilt_packages(
+                native_package_dir,
+                host_target(),
+                candidate_sha,
+                crt=native_crt,
+                source_root=package_workspace,
+                profile_scope="base",
+            )
+    suffix = " and host prebuilt consumers" if include_host_prebuilt else ""
+    print(f"Verified {len(packages)} publishable source archives{suffix}.")
+
+
+def verify_packaged_core(workspace_root: Path = WORKSPACE_ROOT) -> None:
+    """Run the complete source-package and host-prebuilt release gate."""
+    verify_source_packages(workspace_root, include_host_prebuilt=True)

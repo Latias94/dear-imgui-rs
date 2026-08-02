@@ -1,90 +1,248 @@
-name: GitHub Release
+name: Release
+run-name: Release ${{ inputs.tag }} from ${{ github.sha }}
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag, for example v0.16.0-alpha.1
-        required: true
-        type: string
-      candidate_sha:
-        description: Full 40-character release candidate SHA
-        required: true
-        type: string
-      gate_run_id:
-        description: Successful Release Gate workflow run ID for this candidate
+        description: Release tag matching the workspace version
         required: true
         type: string
 
-permissions:
-  actions: read
-  contents: write
+env:
+  RELEASE_TAG_INPUT: ${{ inputs.tag }}
+  RELEASE_CANDIDATE_SHA: ${{ github.sha }}
+
+concurrency:
+  group: dear-imgui-release
+  cancel-in-progress: false
+
+permissions: {}
 
 jobs:
-  release:
-    name: Verify candidate and create GitHub release
+  validate:
+    name: Validate release identity
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
+    permissions:
+      contents: read
     steps:
-      - name: Checkout release tag
-        uses: actions/checkout@v6
+      - name: Checkout exact candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ github.sha }}
+          fetch-depth: 0
 
-      - name: Download authoritative gate result
-        uses: actions/download-artifact@v8
-        with:
-          name: release-gate-${{ inputs.candidate_sha }}
-          path: target/release-gate
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          run-id: ${{ inputs.gate_run_id }}
-
-      - name: Download retained release cells
-        uses: actions/download-artifact@v8
-        with:
-          pattern: release-cell-*-${{ inputs.candidate_sha }}
-          path: target/release-cells
-          merge-multiple: true
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          run-id: ${{ inputs.gate_run_id }}
-
-      - name: Verify authoritative same-SHA Go result
+      - name: Bind tag, main, and candidate
         run: >-
-          python3 tools/ci/release_evidence.py verify
-          --repo-root "${{ github.workspace }}"
-          --candidate-sha "${{ inputs.candidate_sha }}"
-          --gate-result target/release-gate/gate-result.json
+          python3 -B tools/ci/run_contract.py release-identity
+          --tag "$RELEASE_TAG_INPUT"
+          --candidate-sha "$RELEASE_CANDIDATE_SHA"
+          --actual-ref "$GITHUB_REF"
 
-      - name: Recompute decision from retained cell payloads
-        run: >-
-          python3 tools/ci/release_cell.py aggregate
-          --repo-root "${{ github.workspace }}"
-          --candidate-sha "${{ inputs.candidate_sha }}"
-          --evidence-root target/release-cells
-          --output recomputed-gate-result.json
-
-      - name: Verify recomputed same-SHA Go result
-        run: >-
-          python3 tools/ci/release_evidence.py verify
-          --repo-root "${{ github.workspace }}"
-          --candidate-sha "${{ inputs.candidate_sha }}"
-          --gate-result target/release-cells/recomputed-gate-result.json
-
-      - name: Validate tag and extract release notes
-        id: tag
+      - name: Validate changelog release notes
         env:
           RELEASE_TAG: ${{ inputs.tag }}
-        run: python3 tools/ci/run_contract.py release-notes
+        run: python3 -B tools/ci/run_contract.py release-notes --output release-notes.md
 
-      - name: Create or update release
-        uses: softprops/action-gh-release@v3
+  gate:
+    needs: validate
+    uses: ./.github/workflows/release-gate.yml
+    permissions:
+      contents: read
+    with:
+      candidate_sha: ${{ github.sha }}
+
+  prepare:
+    name: Prepare checksummed release bundle
+    needs: gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          tag_name: ${{ steps.tag.outputs.tag }}
-          name: ${{ steps.tag.outputs.tag }}
-          body_path: release-notes.md
-          files: target/release-cells/prebuilt-*/packages/*.tar.gz
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Download authoritative gate result
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-gate-${{ github.sha }}
+          path: target/release-gate
+
+      - name: Download retained release cells
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: release-cell-*-${{ github.sha }}
+          path: target/release-cells
+          merge-multiple: true
+
+      - name: Revalidate release identity
+        run: >-
+          python3 -B tools/ci/run_contract.py release-identity
+          --tag "$RELEASE_TAG_INPUT"
+          --candidate-sha "$RELEASE_CANDIDATE_SHA"
+          --actual-ref "$GITHUB_REF"
+
+      - name: Extract release notes
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: python3 -B tools/ci/run_contract.py release-notes --output release-notes.md
+
+      - name: Prepare exact release bundle
+        run: >-
+          python3 -B tools/ci/release_cell.py prepare-release
+          --repo-root "$GITHUB_WORKSPACE"
+          --candidate-sha "$RELEASE_CANDIDATE_SHA"
+          --tag "$RELEASE_TAG_INPUT"
+          --evidence-root target/release-cells
+          --gate-result target/release-gate/gate-result.json
+          --release-notes release-notes.md
+          --output-root "$RUNNER_TEMP/release-ready"
+
+      - name: Retain exact release bundle
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-ready-${{ github.sha }}
+          path: ${{ runner.temp }}/release-ready
+          if-no-files-found: error
+          retention-days: 30
+          overwrite: true
+
+  publish-crates:
+    name: Publish crates.io release train
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: release
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          submodules: true
+
+      - name: Initialize required nested submodules
+        run: python3 -B tools/ci/update_submodules.py
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+
+      - name: Download exact release bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-ready-${{ github.sha }}
+          path: ${{ runner.temp }}/release-ready
+
+      - name: Revalidate release identity
+        run: >-
+          python3 -B tools/ci/run_contract.py release-identity
+          --tag "$RELEASE_TAG_INPUT"
+          --candidate-sha "$RELEASE_CANDIDATE_SHA"
+          --actual-ref "$GITHUB_REF"
+
+      - name: Acquire short-lived crates.io token
+        id: crates-io
+        uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
+
+      - name: Publish complete crates.io release train
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-io.outputs.token }}
+        run: >-
+          python3 -B tools/publish.py
+          --release-gate-result "$RUNNER_TEMP/release-ready/gate-result.json"
+          --yes
+          --no-verify
+          --publish-timeout 300
+          --journal "$RUNNER_TEMP/publication-journal.json"
+
+      - name: Retain publication journal
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: publication-journal-${{ github.sha }}
+          path: ${{ runner.temp }}/publication-journal.json
+          if-no-files-found: warn
+          retention-days: 30
+          overwrite: true
+
+  github-release:
+    name: Create GitHub release
+    needs: publish-crates
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+
+      - name: Download exact release bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-ready-${{ github.sha }}
+          path: ${{ runner.temp }}/release-ready
+
+      - name: Revalidate release identity
+        run: >-
+          python3 -B tools/ci/run_contract.py release-identity
+          --tag "$RELEASE_TAG_INPUT"
+          --candidate-sha "$RELEASE_CANDIDATE_SHA"
+          --actual-ref "$GITHUB_REF"
+
+      - name: Verify all exact crate versions are published
+        run: >-
+          python3 -B tools/publish.py
+          --verify-published
+          --index-timeout 300
+          --poll-interval 2
+
+      - name: Reject unexpected assets on an existing release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python3 -B tools/ci/verify_github_release.py
+          --manifest "$RUNNER_TEMP/release-ready/release-manifest.json"
+          --repository "$GITHUB_REPOSITORY"
+          --tag "$RELEASE_TAG_INPUT"
+          --candidate-sha "$RELEASE_CANDIDATE_SHA"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        with:
+          tag_name: ${{ inputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ inputs.tag }}
+          body_path: ${{ runner.temp }}/release-ready/release-notes.md
+          files: ${{ runner.temp }}/release-ready/assets/*
           fail_on_unmatched_files: true
-          prerelease: ${{ contains(steps.tag.outputs.version, '-') }}
-          make_latest: ${{ contains(steps.tag.outputs.version, '-') && 'false' || 'true' }}
+          overwrite_files: true
+          prerelease: ${{ contains(inputs.tag, '-') }}
+          make_latest: ${{ contains(inputs.tag, '-') && 'false' || 'true' }}
+
+      - name: Verify exact GitHub release asset inventory
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          python3 -B tools/ci/verify_github_release.py
+          --manifest "$RUNNER_TEMP/release-ready/release-manifest.json"
+          --repository "$GITHUB_REPOSITORY"
+          --tag "$RELEASE_TAG_INPUT"
+          --candidate-sha "$RELEASE_CANDIDATE_SHA"
+          --require-exact

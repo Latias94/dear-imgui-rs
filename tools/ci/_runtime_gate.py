@@ -202,6 +202,33 @@ def _prepare_evidence(
     )
 
 
+def record_runtime_preparation_failure(
+    *,
+    gate: str,
+    attempt: int,
+    evidence_dir: Path,
+    summary: str,
+) -> GateResult:
+    """Record a gate skipped because its runner preparation failed."""
+    _prepare_evidence(
+        evidence_dir=evidence_dir,
+        gate=gate,
+        attempt=attempt,
+        owned_files=(),
+    )
+    return _finalize(
+        GateResult(
+            gate,
+            False,
+            GateCategory.INFRASTRUCTURE_UNAVAILABLE,
+            summary,
+            attempt,
+            details={"phase": "preparation"},
+        ),
+        evidence_dir,
+    )
+
+
 def _reject_excess_attempt(
     *,
     gate: str,

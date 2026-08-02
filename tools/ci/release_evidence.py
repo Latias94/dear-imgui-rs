@@ -180,6 +180,14 @@ DEFAULT_EXPECTED_CELL_INVENTORY = (
         ),
     ),
     ExpectedCell(
+        "linux-source-packages",
+        "x86_64-unknown-linux-gnu",
+        requirements=_requirements(
+            artifacts=("metadata/target.json", "metadata/manifests.json"),
+            logs=_STANDARD_LOG_REQUIREMENTS,
+        ),
+    ),
+    ExpectedCell(
         "windows-vcpkg",
         "x86_64-pc-windows-msvc",
         "md",

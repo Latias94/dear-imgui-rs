@@ -1236,18 +1236,12 @@ class PrebuiltWorkflowTests(unittest.TestCase):
 
         self.assertIn("verify_packaged_core.py build-prebuilt", workflow)
         self.assertIn("verify_packaged_core.py prebuilt", workflow)
-        self.assertIn("timeout-minutes: 90", workflow)
+        self.assertIn("timeout-minutes: 160", workflow)
         self.assertIn("run_contract.py windows-vcpkg", workflow)
         self.assertIn('--target "${{ matrix.target }}"', workflow)
         self.assertIn('--crt "${{ matrix.crt }}"', workflow)
         self.assertIn("--package freetype", workflow)
-        self.assertEqual(
-            workflow.count(
-                '          "${{ inputs.candidate_sha }}"\n'
-                '          "${{ matrix.crt }}"'
-            ),
-            2,
-        )
+        self.assertEqual(workflow.count("${{ matrix.candidate_arg }}"), 3)
         self.assertNotIn("cargo run -p", workflow)
         self.assertNotIn("configure_prebuilt_windows.py", workflow)
         self.assertNotIn("DEAR_IMGUI_CORE_ARTIFACT_PROFILE_HASH", workflow)
@@ -1394,6 +1388,16 @@ class CliTests(unittest.TestCase):
             self.assertEqual(CLI.main(["full"]), 0)
 
         self.assertEqual(verify.call_count, 2)
+
+    def test_source_command_runs_only_the_source_package_gate(self):
+        with (
+            patch.object(CLI, "verify_source_packages") as verify_source,
+            patch.object(CLI, "verify_packaged_core") as verify_full,
+        ):
+            self.assertEqual(CLI.main(["source"]), 0)
+
+        verify_source.assert_called_once_with()
+        verify_full.assert_not_called()
 
     def test_prebuilt_command_routes_named_arguments(self):
         with patch.object(CLI, "verify_prebuilt_packages") as verify:

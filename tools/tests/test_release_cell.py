@@ -912,7 +912,7 @@ class AggregateTests(unittest.TestCase):
             result["summary"]["expected_cells"],
             len(release_evidence.DEFAULT_EXPECTED_CELL_INVENTORY),
         )
-        self.assertEqual(len(result["checks"]), 15)
+        self.assertEqual(len(result["checks"]), 16)
         self.assertTrue(self.output.is_file())
 
     def test_discovery_is_stable_and_excludes_the_output_itself(self):
@@ -946,6 +946,152 @@ class AggregateTests(unittest.TestCase):
             aggregate.call_args.kwargs["expected_cells"],
             release_evidence.DEFAULT_EXPECTED_CELL_INVENTORY,
         )
+
+
+class ReleaseBundleTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.repo = self.root / "repo"
+        self.repo.mkdir()
+        self.evidence = self.root / "evidence"
+        self.evidence.mkdir()
+        self.gate_result = self.root / "gate-result.json"
+        self.gate_result.write_text("{}\n", encoding="utf-8")
+        self.notes = self.root / "release-notes.md"
+        self.notes.write_text("Release notes.\n", encoding="utf-8")
+        self.output = self.root / "ready"
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def write_prebuilt_cell(
+        self, cell_id: str, filename: str, payload: bytes
+    ) -> tuple[dict[str, object], Path]:
+        cell = self.evidence / cell_id
+        archive = cell / "packages" / filename
+        archive.parent.mkdir(parents=True)
+        archive.write_bytes(payload)
+        record = release_evidence.write_cell_evidence(
+            cell / "cell.json",
+            cell_id=cell_id,
+            candidate_sha=SHA,
+            conclusion="success",
+            artifacts=(archive,),
+            evidence_root=cell,
+        )
+        check = {
+            "cell_id": cell_id,
+            "conclusion": "success",
+            "evidence_paths": [f"{cell_id}/cell.json"],
+            "errors": [],
+            "status": "success",
+        }
+        self.assertEqual(record["cell_id"], cell_id)
+        return check, archive
+
+    def prepare(
+        self,
+        gate: dict[str, object],
+        *,
+        authoritative: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        def aggregate(**kwargs):
+            output = self.evidence / kwargs["output_path"]
+            release_evidence.atomic_write_json(output, gate)
+            return gate
+
+        with (
+            patch.object(
+                release_cell.release_evidence,
+                "resolve_candidate_sha",
+                return_value=SHA,
+            ),
+            patch.object(
+                release_cell.release_evidence,
+                "verify_gate_result",
+                side_effect=[gate if authoritative is None else authoritative, gate],
+            ),
+            patch.object(release_cell, "aggregate_cells", side_effect=aggregate),
+        ):
+            return release_cell.prepare_release_bundle(
+                repo_root=self.repo,
+                candidate_sha=SHA,
+                tag="v0.16.0-alpha.1",
+                evidence_root=self.evidence,
+                gate_result=self.gate_result,
+                release_notes=self.notes,
+                output_root=self.output,
+            )
+
+    def test_stages_only_recorded_prebuilt_archives_with_checksums(self):
+        check, archive = self.write_prebuilt_cell(
+            "prebuilt-linux", "dear-imgui-linux.tar.gz", b"owned"
+        )
+        (archive.parent / "rogue.tar.gz").write_bytes(b"not recorded")
+        gate = {"candidate_sha": SHA, "checks": [check]}
+
+        manifest = self.prepare(gate)
+
+        self.assertEqual(
+            sorted(path.name for path in (self.output / "assets").iterdir()),
+            ["SHA256SUMS", "dear-imgui-linux.tar.gz"],
+        )
+        self.assertEqual(
+            manifest["assets"],
+            [
+                {
+                    "name": "dear-imgui-linux.tar.gz",
+                    "sha256": release_evidence.sha256_file(archive),
+                }
+            ],
+        )
+        self.assertIn(
+            "  dear-imgui-linux.tar.gz\n",
+            (self.output / "assets/SHA256SUMS").read_text(encoding="utf-8"),
+        )
+        self.assertEqual(
+            (self.output / "release-notes.md").read_text(encoding="utf-8"),
+            "Release notes.\n",
+        )
+
+    def test_rejects_an_archive_changed_after_cell_finalization(self):
+        check, archive = self.write_prebuilt_cell(
+            "prebuilt-linux", "dear-imgui-linux.tar.gz", b"owned"
+        )
+        archive.write_bytes(b"tampered")
+
+        with self.assertRaisesRegex(
+            release_cell.ReleaseCellError, "checksum mismatch"
+        ):
+            self.prepare({"candidate_sha": SHA, "checks": [check]})
+
+    def test_rejects_duplicate_release_asset_names_across_cells(self):
+        first, _archive = self.write_prebuilt_cell(
+            "prebuilt-linux", "dear-imgui.tar.gz", b"linux"
+        )
+        second, _archive = self.write_prebuilt_cell(
+            "prebuilt-macos", "dear-imgui.tar.gz", b"macos"
+        )
+
+        with self.assertRaisesRegex(
+            release_cell.ReleaseCellError, "duplicate release asset"
+        ):
+            self.prepare({"candidate_sha": SHA, "checks": [first, second]})
+
+    def test_rejects_disagreement_with_the_authoritative_gate(self):
+        check, _archive = self.write_prebuilt_cell(
+            "prebuilt-linux", "dear-imgui-linux.tar.gz", b"owned"
+        )
+        recomputed = {"candidate_sha": SHA, "checks": [check]}
+        authoritative = {"candidate_sha": SHA, "checks": []}
+
+        with self.assertRaisesRegex(
+            release_cell.ReleaseCellError, "recomputed release gate"
+        ):
+            self.prepare(recomputed, authoritative=authoritative)
+
+        self.assertFalse(self.output.exists())
 
 
 if __name__ == "__main__":

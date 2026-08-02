@@ -22,7 +22,7 @@ from _prebuilt import (  # noqa: E402
     verify_prebuilt_packages,
 )
 from _process import CommandError, run  # noqa: E402
-from _source_packages import verify_packaged_core  # noqa: E402
+from _source_packages import verify_packaged_core, verify_source_packages  # noqa: E402
 from _verification import VerificationError  # noqa: E402
 from release_metadata import MetadataError  # noqa: E402
 from source_metadata import SourceMetadataError  # noqa: E402
@@ -47,6 +47,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     commands = parser.add_subparsers(dest="command", title="commands")
     commands.add_parser("full", help="Run the complete source-package gate")
+    commands.add_parser(
+        "source", help="Verify all publishable source packages without prebuilt output"
+    )
     prebuilt = commands.add_parser(
         "prebuilt", help="Consume all prebuilt profiles for one target"
     )
@@ -119,6 +122,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 _resolve_candidate_sha(args.candidate_sha),
                 crt=args.crt,
             )
+        elif args.command == "source":
+            verify_source_packages()
         elif prebuilt_arguments is None:
             verify_packaged_core()
         else:

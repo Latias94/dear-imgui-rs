@@ -1311,6 +1311,173 @@ def aggregate_cells(
     )
 
 
+def _recorded_release_assets(
+    gate: Mapping[str, Any], evidence_root: Path, candidate_sha: str
+) -> list[tuple[str, Path, str]]:
+    checks = gate.get("checks")
+    if not isinstance(checks, list):
+        raise ReleaseCellError("release gate checks must be a JSON array")
+    assets: dict[str, tuple[Path, str]] = {}
+    for check in checks:
+        if not isinstance(check, dict):
+            raise ReleaseCellError("release gate check must be a JSON object")
+        cell_id = check.get("cell_id")
+        if not isinstance(cell_id, str) or not cell_id.startswith("prebuilt-"):
+            continue
+        evidence_paths = check.get("evidence_paths")
+        if not isinstance(evidence_paths, list) or len(evidence_paths) != 1:
+            raise ReleaseCellError(
+                f"prebuilt cell {cell_id} must name exactly one cell record"
+            )
+        relative_cell = _safe_relative(
+            evidence_paths[0], f"{cell_id} cell record"
+        )
+        cell_path = _resolve_under(
+            evidence_root,
+            Path(*relative_cell.parts),
+            f"{cell_id} cell record",
+        )
+        record = _read_json_object(cell_path, f"{cell_id} cell record")
+        if record.get("cell_id") != cell_id:
+            raise ReleaseCellError(f"prebuilt cell record identity mismatch: {cell_id}")
+        if record.get("candidate_sha") != candidate_sha:
+            raise ReleaseCellError(f"prebuilt cell candidate mismatch: {cell_id}")
+        if record.get("conclusion") != "success":
+            raise ReleaseCellError(f"prebuilt cell is not successful: {cell_id}")
+        entries = record.get("artifacts")
+        if not isinstance(entries, list):
+            raise ReleaseCellError(f"prebuilt cell artifacts are invalid: {cell_id}")
+        for index, entry in enumerate(entries):
+            if not isinstance(entry, dict) or set(entry) != {"path", "sha256"}:
+                raise ReleaseCellError(
+                    f"prebuilt cell artifact {cell_id}[{index}] has an invalid schema"
+                )
+            relative = _safe_relative(
+                entry["path"], f"{cell_id} artifact {index}"
+            )
+            if (
+                len(relative.parts) != 2
+                or relative.parts[0] != "packages"
+                or not relative.name.endswith(".tar.gz")
+            ):
+                continue
+            digest = entry["sha256"]
+            if not isinstance(digest, str) or _SHA256.fullmatch(digest) is None:
+                raise ReleaseCellError(
+                    f"prebuilt cell artifact checksum is invalid: {cell_id} {relative}"
+                )
+            source = _resolve_under(
+                cell_path.parent,
+                Path(*relative.parts),
+                f"{cell_id} release asset",
+            )
+            if source.is_symlink() or not source.is_file():
+                raise ReleaseCellError(f"release asset is not a regular file: {source}")
+            actual = release_evidence.sha256_file(source)
+            if actual != digest:
+                raise ReleaseCellError(
+                    f"release asset checksum mismatch for {source.name}: "
+                    f"expected {digest}, found {actual}"
+                )
+            if source.name in assets:
+                raise ReleaseCellError(f"duplicate release asset name: {source.name}")
+            assets[source.name] = (source, digest)
+    if not assets:
+        raise ReleaseCellError("release gate did not record any prebuilt archives")
+    return [
+        (name, *assets[name])
+        for name in sorted(assets)
+    ]
+
+
+def prepare_release_bundle(
+    *,
+    repo_root: Path,
+    candidate_sha: str,
+    tag: str,
+    evidence_root: Path,
+    gate_result: Path,
+    release_notes: Path,
+    output_root: Path,
+) -> dict[str, Any]:
+    """Recompute the gate and stage only its checksummed release assets."""
+    repo_root = Path(repo_root).resolve()
+    candidate_sha = release_evidence.resolve_candidate_sha(repo_root, candidate_sha)
+    if re.fullmatch(r"v[0-9A-Za-z][0-9A-Za-z.+-]*", tag) is None:
+        raise ReleaseCellError(f"invalid release tag: {tag!r}")
+    evidence_root = Path(evidence_root).resolve()
+    if not evidence_root.is_dir():
+        raise ReleaseCellError(f"evidence root is missing: {evidence_root}")
+    gate_result = Path(gate_result).resolve()
+    release_notes = Path(release_notes).resolve()
+    if release_notes.is_symlink() or not release_notes.is_file():
+        raise ReleaseCellError(f"release notes are not a regular file: {release_notes}")
+
+    authoritative = release_evidence.verify_gate_result(
+        gate_result, expected_candidate_sha=candidate_sha
+    )
+    recomputed_path = evidence_root / "recomputed-gate-result.json"
+    recomputed = aggregate_cells(
+        repo_root=repo_root,
+        candidate_sha=candidate_sha,
+        evidence_root=evidence_root,
+        output_path=Path(recomputed_path.name),
+    )
+    release_evidence.verify_gate_result(
+        recomputed_path, expected_candidate_sha=candidate_sha
+    )
+    if recomputed != authoritative:
+        raise ReleaseCellError(
+            "recomputed release gate does not match the authoritative decision"
+        )
+
+    recorded_assets = _recorded_release_assets(
+        recomputed, evidence_root, candidate_sha
+    )
+    output_root = Path(output_root).resolve()
+    if output_root.exists():
+        raise ReleaseCellError(f"release bundle output already exists: {output_root}")
+    output_root.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(
+        tempfile.mkdtemp(prefix=f".{output_root.name}.", dir=output_root.parent)
+    )
+    try:
+        assets_root = staging / "assets"
+        assets_root.mkdir()
+        manifest_assets: list[dict[str, str]] = []
+        checksum_lines: list[str] = []
+        for name, source, digest in recorded_assets:
+            destination = assets_root / name
+            _copy_regular_file(source, destination)
+            copied_digest = release_evidence.sha256_file(destination)
+            if copied_digest != digest:
+                raise ReleaseCellError(
+                    f"release asset changed while staging: {name}"
+                )
+            manifest_assets.append({"name": name, "sha256": digest})
+            checksum_lines.append(f"{digest}  {name}\n")
+        _atomic_write_bytes(
+            assets_root / "SHA256SUMS", "".join(checksum_lines).encode("ascii")
+        )
+        manifest = {
+            "version": SCHEMA_VERSION,
+            "tag": tag,
+            "candidate_sha": candidate_sha,
+            "assets": manifest_assets,
+        }
+        release_evidence.atomic_write_json(staging / "release-manifest.json", manifest)
+        _copy_regular_file(gate_result, staging / "gate-result.json")
+        _copy_regular_file(
+            recomputed_path, staging / "recomputed-gate-result.json"
+        )
+        _copy_regular_file(release_notes, staging / "release-notes.md")
+        os.replace(staging, output_root)
+    finally:
+        if staging.exists():
+            shutil.rmtree(staging)
+    return manifest
+
+
 def _positive_float(value: str) -> float:
     parsed = float(value)
     if parsed <= 0:
@@ -1382,6 +1549,17 @@ def _build_parser() -> argparse.ArgumentParser:
     aggregate.add_argument("--candidate-sha", required=True)
     aggregate.add_argument("--evidence-root", required=True, type=Path)
     aggregate.add_argument("--output", required=True, type=Path)
+
+    prepare = commands.add_parser(
+        "prepare-release", help="stage a checksummed release bundle from verified cells"
+    )
+    prepare.add_argument("--repo-root", type=Path, default=WORKSPACE_ROOT)
+    prepare.add_argument("--candidate-sha", required=True)
+    prepare.add_argument("--tag", required=True)
+    prepare.add_argument("--evidence-root", required=True, type=Path)
+    prepare.add_argument("--gate-result", required=True, type=Path)
+    prepare.add_argument("--release-notes", required=True, type=Path)
+    prepare.add_argument("--output-root", required=True, type=Path)
     return parser
 
 
@@ -1443,6 +1621,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 attempt1_dir=arguments.attempt1,
                 attempt2_dir=arguments.attempt2,
                 output_path=arguments.output,
+            )
+            return 0
+        if arguments.command_name == "prepare-release":
+            prepare_release_bundle(
+                repo_root=arguments.repo_root,
+                candidate_sha=arguments.candidate_sha,
+                tag=arguments.tag,
+                evidence_root=arguments.evidence_root,
+                gate_result=arguments.gate_result,
+                release_notes=arguments.release_notes,
+                output_root=arguments.output_root,
             )
             return 0
         result = aggregate_cells(
